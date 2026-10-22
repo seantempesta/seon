@@ -1,6 +1,6 @@
 #!/bin/zsh
 # bin/check [N] — the platform's end-to-end checks on target/seon (bin/build seon), each a
-# mode of seon.check: dragons, contracts, census, fx, config, system, mcp, threads, admit, record,
+# mode of seon.check: laws, contracts, mg-check, fx, config, system, mcp, threads, instrument, record,
 # problems, smoke, robust, lifecycle, backpressure, hotreload, drain, idle, orphan,
 # durable, window, e2e tasks and scenarios, swarm (20 tasks over 5 shared vars, max-running 8),
 # resume, scale N (default N = 100).
@@ -14,7 +14,7 @@
 # One store, many branches, as in production (owner, 2026-10-21 and 2026-10-22: "The
 # branches are supposed to be light. I'm guessing making a new store every time isn't"): a
 # run takes the one store it is given: the checks' own, target/check-store (SEON_STORE names
-# another), never the checkout's runs/store, which is its standing or lane root's, made
+# another), never the checkout's runs/store, which is its standing or worktree root's, made
 # without the example program the steps work on (steps failed falsely on it). It is seeded
 # only when missing, by a full run's seed step and before a single mode, and every root a step boots
 # works on a branch of it, the step's own main check-<step> (SEON_MAIN), never the store's
@@ -28,7 +28,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 if [[ -z ${SEON_CHECK_NICED:-} && ( -z ${1:-} || ${1} =~ ^[0-9]+$ ) ]]; then
   SEON_CHECK_NICED=1 exec nice -n 15 "$0" "$@"
 fi
-# the run is niced once (above, or by its caller): its background steps (the census shards)
+# the run is niced once (above, or by its caller): its background steps (the mg-check shards)
 # keep that priority. zsh's BG_NICE renices each by 5 more, which at the ceiling (a niced
 # caller of the re-exec: 15 + 15) prints "nice(5) failed: operation not permitted"
 unsetopt BG_NICE
@@ -78,10 +78,10 @@ step() {
 echo "== seed (the one store every step branches from: made when missing)"; step seed "" run seed 2000
 read -r STORE KB0 BR0 <<< "$(run store)"
 # the steps' own mains: what a failed earlier run left is deleted before this run's step
-STEPS=(seed fx config system mcp threads admit record problems smoke robust lifecycle backpressure hotreload drain idle
+STEPS=(seed fx config system mcp threads instrument record problems smoke robust lifecycle backpressure hotreload drain idle
        orphan durable window lease e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns e2e-sibling swarm e2e-loop e2e-stuck resume scale)
 run drop ${STEPS/#/check-} > "$OUT/drop-before.log" 2>&1 || FAILED+=("drop-before ($OUT/drop-before.log)")
-echo "== dragons (the law census: catch, clocks, measures, resolution)"; step dragons "OK \\(|FAILED" "$ROOT/bin/dragons"
+echo "== laws (every law's sites: catch, clocks, measures, resolution)"; step laws "OK \(|FAILED" "$ROOT/bin/laws"
 # lmdb-kill runs below Datahike, on an LMDB env of its own: a raw put has no branch to take,
 # and the store's env is konserve's key space (a raw key or a named sub-db there is a key
 # konserve reads). Its env is deleted when the step is green.
@@ -89,22 +89,22 @@ echo "== lmdb-kill (a writer SIGKILLed inside a txn while this process holds the
 step lmdb-kill "" "$ROOT/target/lmdb-kill" "$OUT/lmdb-kill.mdb"
 [[ ${GREEN[-1]} == check-lmdb-kill ]] && rm -f "$OUT/lmdb-kill.mdb" "$OUT/lmdb-kill.mdb-lock"
 echo "== contracts"; step contracts ":contracted|:uncontracted|^CONTRACTS " run contracts
-echo "== census (no [:fn] without :gen; mg/check on every pure contract, in the release binary)"
-# in K shards at once, each a process checking every Kth contracted var (seon.check/census);
-# each shard's exit status counts. K = 4 until the config file holds it (lane CONFIG).
+echo "== mg-check (no [:fn] without :gen; mg/check on every pure contract, in the release binary)"
+# in K shards at once, each a process checking every Kth contracted var (seon.check/mg-check);
+# each shard's exit status counts. K = 4 until the config file holds it (session CONFIG).
 K=4; CP=()
-for i in $(seq 0 $((K-1))); do run census $i/$K > "$OUT/census-$i.log" 2>&1 & CP+=($!); done
+for i in $(seq 0 $((K-1))); do run mg-check $i/$K > "$OUT/mg-check-$i.log" 2>&1 & CP+=($!); done
 for i in $(seq 0 $((K-1))); do
   wait ${CP[$((i+1))]}; st=$?
-  grep -E ":generated|^CENSUS " "$OUT/census-$i.log"
-  (( st == 0 )) || { FAILED+=("census-$i (exit $st, expected 0, $OUT/census-$i.log)"); echo "FAILED census-$i (exit $st, expected 0)"; }
+  grep -E ":generated|^MG-CHECK " "$OUT/mg-check-$i.log"
+  (( st == 0 )) || { FAILED+=("mg-check-$i (exit $st, expected 0, $OUT/mg-check-$i.log)"); echo "FAILED mg-check-$i (exit $st, expected 0)"; }
 done
 echo "== fx (an effect from an agent through its owner proc)"; step fx ":unknown|:test-fork|^FX " run fx 200
 echo "== config (the config in force as facts on main; an agent reads them from its branch)"; step config "" run config
 echo "== system (root's procs from resources/seon/system.edn; apply! touches only what changed)"; step system "" run system
 echo "== mcp (an outside MCP client evals in an agent and as root; both recorded :outside)"; step mcp "" run mcp-proof
 echo "== threads (the fork server, an agent and its clone stay single-threaded: no GC sweepers where we fork)"; step threads "" run threads
-echo "== admit"; step admit "" run admit
+echo "== instrument"; step instrument "" run instrument
 echo "== record"; step record "" run record
 echo "== problems (each class provoked, then read back from main by my.root/problems)"; step problems "" run problems
 echo "== smoke"; step smoke "^merge|^killed|spawned|ready|^SMOKE " run smoke

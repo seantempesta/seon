@@ -1,6 +1,6 @@
 #!/bin/zsh
 # bin/mcp [PORT]   the MCP server (stdio JSON-RPC) for outside agents: a relay of each line to the
-# root's server on 127.0.0.1:PORT, which answers MCP itself (seon.entrance/mcp-reply). Without
+# root's server on 127.0.0.1:PORT, which answers MCP itself (seon.server/mcp-reply). Without
 # PORT, the port this checkout's root was started on: runs/root.port, which bin/root writes from
 # bin/ports' resolution while the root runs, read at each message, so a root restarted on
 # another port is followed. Tools: seon_agents, seon_eval (an agent's own REPL, recorded
@@ -11,7 +11,7 @@
 # a root restarted between calls (bin/root next) costs the session nothing. A message with an id
 # that root does not answer (none running, not listening, it died mid-request) is answered the
 # JSON-RPC error saying why: the client never hangs on it. A line that is not JSON is relayed as
-# it is, and root answers its defect (docs/DRAGONS.md).
+# it is, and root answers its defect (docs/failure-points.md).
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 exec perl -MIO::Socket::INET -MJSON::PP -e '
   $| = 1; my ($port, $portf) = @ARGV;

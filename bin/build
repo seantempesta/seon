@@ -9,7 +9,7 @@
 #   BUILD_FORCE=1 bin/build     every stamp removed first: each step rebuilds, once
 #
 # Everything is written under target/; nothing is installed outside it. Dependency
-# downloads (Maven jars, git deps) land in target/home, because HOME points there
+# downloads (Maven jars, git deps) go into target/home, because HOME points there
 # for the Jolt steps. The submodules are never written: each source tree is copied
 # into target/src first (an APFS clone on macOS, so the copy is cheap).
 #
@@ -111,7 +111,7 @@ build_native() {
 # LMDB from reference-code/lmdb (the official repository as a submodule on mdb.master3, the branch konserve.jolt.lmdb-ffi binds), built
 # with MDB_USE_ROBUST: on macOS LMDB otherwise locks with POSIX semaphores, and a process
 # SIGKILLed inside a write txn leaves the writer lock held for every process that has the env
-# open (measured 2026-10-21; docs/DRAGONS.md#lmdb-robust-locks). Robust, it uses SysV
+# open (measured 2026-10-21; docs/failure-points.md#lmdb-robust-locks). Robust, it uses SysV
 # semaphores with SEM_UNDO: the kernel releases a dead holder's lock. target/lmdb-kill
 # (native/lmdb_kill.c) is its proof, a bin/check step.
 LMDB_SRC=$RC/lmdb/libraries/liblmdb

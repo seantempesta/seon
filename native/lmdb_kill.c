@@ -1,4 +1,4 @@
-/* lmdb-kill STORE: the robust-lock proof (docs/DRAGONS.md#lmdb-robust-locks). This process
+/* lmdb-kill STORE: the robust-lock proof (docs/failure-points.md#lmdb-robust-locks). This process
  * holds STORE's env open; a child SIGKILLs itself inside a write txn; then a new process and
  * this one each write. With LMDB's POSIX-semaphore locks (macOS's default) both writes block
  * forever on the dead child's writer lock, and this check shows as running, never ending;

@@ -6,7 +6,7 @@
   no green result at their reach digest (seon.program/reach-digests over src and test
   imported as program facts), reusing the rest, and stores each result it runs in the
   results directory every checkout and worktree shares (:seon.config.source/test-results-dir),
-  one <digest>.edn per result. A landing runs it: what the change reaches, minus what is
+  one <digest>.edn per result. A merge runs it: what the change reaches, minus what is
   green at its digest."
   (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
             [clojure.test :as t] [datahike.api :as d] [seon.config :as config] [seon.db :as pdb]

@@ -1,5 +1,5 @@
 (ns seon.render-test
-  "Renders (lane W2): selection (override key, schema-declared, printer), root's AI face,
+  "Renders (session W2): selection (override key, schema-declared, printer), root's AI face,
   and the render proc's step as a plain function: inputs before render, bytes before
   send, a new agent appended, a retired one removed, keyframes composed from what was
   retained. Run: bin/test seon.render-test"
@@ -36,7 +36,7 @@
             :a2 {:status :dead}
             :a3 {:status :killed :tests {:pass 0 :fail 3 :error 0}}}
    :health {:api {:defects 0} :render {:defects 1 :newest "boom"}}
-   :writer {:tx-count 4 :tx-per-s 2.0} :server {:status :up :pid 7} :main {:t 9 :datoms 100}
+   :writer {:tx-count 4 :tx-per-s 2.0} :fork-server {:status :up :pid 7} :main {:t 9 :datoms 100}
    :tasks {} :attempts {} :events [] :root-errors [{:pid :render :message "boom"}] :now-ms 0
    ;; what main recorded (seon.problems/report): root records an agent's death and a red run
    :recorded {:classes {:agent {:n 3 :rows [{:signature "s1" :count 2 :message "tests red: agent.a1/c"}
@@ -67,7 +67,7 @@
 
 (def ^:private view0
   {:agents {:a1 {:branch :agent-1 :status :idle :task "t1" :evals []}}
-   :writer {:tx-count 1 :recent []} :server {:status :up} :stats {} :store {} :boot {}})
+   :writer {:tx-count 1 :recent []} :fork-server {:status :up} :stats {} :store {} :boot {}})
 
 (defn- fresh-state []
   {:rid 1 :pending {} :watch #{:root} :waiting {} :kf-wanted #{} :new-events [] :events [] :event-rows []
@@ -92,7 +92,7 @@
         (is (contains? ids "cb-a1"))
         (is (contains? ids "t-agents"))
         (is (not (contains? ids "t-writer")))
-        (is (not (contains? ids "t-server")))))
+        (is (not (contains? ids "t-fork-server")))))
     (testing "a new agent: its whole card appended to the grid, its body inside"
       (let [view2 (assoc-in view0 [:agents :a2] {:branch :agent-2 :status :spawning :task "t2" :evals []})
             [st3 out] (answer st1 view2)
@@ -328,12 +328,12 @@
     (is (str/includes? (h/html (:seon.render/html (ui/tile-errors {:root-errors [] :boot {:program {:loaded 360}} :store {}} {}))) "360 defs"))
     (is (str/includes? (h/html (:seon.render/html (ui/tile-agents {:cells [] :off 3 :retire-ms 90000} {}))) "+3 ended over 90 s ago, off it"))))
 
-(deftest an-ended-agent-reads-ended-and-offers-no-live-verbs
+(deftest an-ended-agent-reads-ended-and-offers-no-live-buttons
   (testing "root's own word for an agent it stopped because its attempt ended"
     (is (= :ended (ui/shown-status {:status :ended})))
     (is (str/includes? (h/html (:seon.render/html (ui/event-row {:type :ended :agent :a6 :at-ms 0 :ended-as :merged} {})))
                        "stopped by root: its attempt ended merged")))
-  (testing "its live verbs and REPL box are marked live, which an ended card hides; history stays"
+  (testing "its live buttons and REPL box are marked live, which an ended card hides; history stays"
     (let [shell (h/html (ui/card-shell :a6))]
       (is (= 6 (count (re-seq #"class=\"act live" shell))) "tests, merge, main, clone, interrupt, kill")
       (is (str/includes? shell "class=\"repl live\""))
@@ -391,7 +391,7 @@
 (deftest the-load-tiles-are-data-the-context-reads
   (let [tiles (ui/load-tiles {:tx-count 4} {:status :down :pid 7} {:datoms 100} {})
         text (r/ai sys {:seon.render/schema :seon.render/system :seon.render/budget 2000})]
-    (is (= ["t-writer" "t-server" "t-main"] (mapv :id tiles)))
+    (is (= ["t-writer" "t-fork-server" "t-main"] (mapv :id tiles)))
     (is (str/includes? (h/html (:seon.render/html (ui/metric-tile (second tiles) {}))) "pill srv s-down"))
     (testing "root's context prints the page's own tiles, one line each"
       (is (some #(str/starts-with? % "- writer 4 txs, batch") (str/split-lines text)))

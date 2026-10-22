@@ -1,5 +1,5 @@
 (ns seon.web.html
-  "Hiccup to HTML: the web's one serializer (proto/web proto.web.html, lane L2). Attributes
+  "Hiccup to HTML: the web's one serializer (proto/web proto.web.html, session L2). Attributes
   are written in sorted order so the same value always gives the same bytes (the render
   step compares bytes to decide what changed). Strings are escaped; `raw` opts out; nil and
   false render nothing; seqs splice; `true` attributes render bare; a map :style becomes

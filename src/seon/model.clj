@@ -59,7 +59,7 @@
   "POST body (a JSON string) to url with headers and read the reply until the server ends
   it: {:status :body :headers} (body text). No clock bounds the connect or the reply (a
   reasoning model streams for minutes): the OS's own connect failure or the socket's death
-  ends it. The interop edge, the named dragon seon.model/http-post: a connect or socket
+  ends it. The interop edge, the named failure point seon.model/http-post: a connect or socket
   failure is :seon.model/transport."
   {:malli/schema [:=> [:cat :string [:vector [:tuple :string :string]] :string]
                   [:or [:map [:status :int] [:body :string] [:headers :any]] :seon.model/failure]]}

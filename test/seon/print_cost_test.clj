@@ -48,7 +48,7 @@
 
 (def ^:private fixed
   "What does not grow with the entries: about sixty small maps per print (the context and its
-  dials, the options, the root's row and node, its sizings, the tree's and the emitter's maps
+  config keys, the options, the root's row and node, its sizings, the tree's and the emitter's maps
   and the answer). A map of at most :sort-bound (64) keys is shown sorted, which adds per-entry
   work below 65 entries: the sizes start above it."
   (round (priced {:map/assoc! 60})))
@@ -72,7 +72,7 @@
 (deftest armed-printing-adds-only-its-contracted-calls
   ;; as root runs it: every contracted printer function armed. Calls are exact; bytes are the
   ;; own work's plus one :fn/armed-call per call. Wall time is judged unarmed above: armed, it
-  ;; is the armed call's (lane J3), and the printer's contracts, which check maps, cost ~5x the
+  ;; is the armed call's (session J3), and the printer's contracts, which check maps, cost ~5x the
   ;; table's one-int contract per call (~340 ns against 60).
   (contract/instrument! '[seon.print seon.print.select seon.print.emit])
   (let [armed (fn [own calls] (round (assoc own :bytes (+ (:bytes own) (:bytes (priced {:fn/armed-call calls})))
