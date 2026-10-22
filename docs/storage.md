@@ -2,6 +2,10 @@
 
 One durable store holds every branch as Datahike index trees in konserve, one content-addressed node per key, on LMDB. A commit costs the nodes it rewrites, so what it writes depends on how values are laid out, whether history is kept, and how nodes are encoded. The store is opened in `seon.db` (`seon.db/open!`, ```seon.db/store-cfg```). Its failure points are in [DRAGONS](DRAGONS.md), and its dials (`:seon.config.store/*`) in [config](config.md).
 
+## Identity
+
+A store is named by the id it records, never by where it lies, so a kept run opens wherever it is copied, moved or archived. ```seon.db/store-cfg``` reads the id from the store's `:db` head (```seon.db/stored-id```, Datahike's own read path, 0.8 ms) and mints `(hasch/uuid path)` only for a store it is about to make; Datahike's connect refuses a config whose id differs from the stored one (`:store-identity-mismatch`). A copy keeps its original's id, as a Datahike replica does, so one process opens one of them. With the `:sync` writer, `(:config @conn)` still names the path a store was made at (`datahike.connector/deref-conn` reads the stored config; task `seon.db/deref-keeps-the-connections-config`): use the `:cfg` that ```seon.db/open!``` answers. Proof: `seon.db-test/a-moved-store-opens`.
+
 ## The proof: what a commit costs
 
 `seon.db-test/a-commit-costs-what-it-writes` says a turn committed by itself costs what the same turn costs in one big commit, plus one root-to-leaf path per index (32 KB at most). Its turns are realistic: each reply is real prose (the checkout's `docs/`), and each evaluated value is real source (its `src/`). A repeated letter compresses about 3× better than real turn text, which once made LZ4 look like the fix. Sample data must look like production data, or the numbers lie. Twenty turns, LMDB, branching factor 64:
