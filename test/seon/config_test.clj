@@ -72,11 +72,15 @@
 ;; ---- the shipped file and its schemas ----------------------------------------------------
 
 (deftest the-shipped-file-validates-under-every-profile
-  (doseq [p [:default :deepseek]]
+  ;; the scripted stand-in's script is stated only under :scripted (checks and tests)
+  (doseq [p [:default :scripted :deepseek]]
     (let [c (read-file (config/path (config/checkout)) p (config/checkout))]
-      (is (= (set (keys c)) (set (remove #{:seon.config.ai/reasoning-effort :seon.config.source/root} (config/keys-declared)))) p)))
-  (is (= :scripted (:seon.config.ai/provider (read-file (config/path (config/checkout)) :default (config/checkout)))))
-  (is (= :openai-compat (:seon.config.ai/provider (read-file (config/path (config/checkout)) :deepseek (config/checkout))))))
+      (is (= (set (keys c)) (set (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.source/root} (not= :scripted p) (conj :seon.config.ai/script))
+                                         (config/keys-declared)))) p)))
+  (let [shipped #(read-file (config/path (config/checkout)) % (config/checkout))]
+    (is (= {:kind :none} (config/provider (shipped :default))) "no profile: no provider, never the stand-in")
+    (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider (shipped :scripted))))
+    (is (= :openai-compat (:seon.config.ai/provider (shipped :deepseek))))))
 
 (deftest every-key-is-documented-by-its-schema
   (doseq [k (config/keys-declared)
@@ -116,6 +120,7 @@
   (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.nope/x))))))
 
 (deftest the-provider-is-the-config-s
+  ;; bin/test runs under SEON_PROFILE=scripted
   (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider config/config)))
   (let [p (config/provider (assoc config/config :seon.config.ai/provider :openai-compat :seon.config.ai/thinking :disabled))]
     (is (= {:kind :openai-compat :base-url "https://api.deepseek.com" :model "deepseek-flash" :api-key-env "DEEPSEEK_API_KEY"

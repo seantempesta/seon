@@ -85,7 +85,7 @@
   (let [a (or (some-> name str) (str path (when anchor (str "#" anchor))))]
     (or (some-> (if name
                   (ref/namespace-view db name depth)
-                  (or (when anchor (docs/view db a depth)) (ref/file-view (cfg/checkout) path anchor depth)))
+                  (or (when anchor (docs/view db a depth)) (ref/file-view db (cfg/checkout) path anchor depth)))
                 (assoc :seon.ref/depth depth))
         {:seon.ref/address a :unresolved true :problem (:unresolved ref/problem-messages)})))
 

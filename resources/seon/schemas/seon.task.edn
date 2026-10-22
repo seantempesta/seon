@@ -141,6 +141,7 @@
  :seon.model/message [:map [:role [:enum "system" "user" "assistant" "tool"]] [:content :string]
                       [:tool-calls {:optional true} [:vector :seon.model/tool-call]] [:tool-call-id {:optional true} :string]]
  :seon.model/provider [:multi {:dispatch :kind}
+                       [:none [:map [:kind [:= :none]]]]
                        [:scripted [:map [:kind [:= :scripted]] [:script :qualified-symbol]]]
                        [:openai-compat [:map [:kind [:= :openai-compat]] [:base-url :string] [:model :string]
                                         [:api-key-env :string]

@@ -9,7 +9,7 @@
             [datahike.api :as d]
             [seon.step :as step] [seon.db :as pdb] [seon.sock :as sock]
             [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.fork-server :as server]
-            [seon.agent :as agent] [seon.agent-proc :as ap] [seon.root :as root] [seon.repl :as repl] [seon.render.proc] [seon.web]
+            [seon.agent :as agent] [seon.agent-proc :as ap] [seon.fx] [seon.root :as root] [seon.repl :as repl] [seon.render.proc] [seon.web]
             [taoensso.trove :as trove]))
 
 (trove/set-log-fn! nil)
@@ -112,6 +112,30 @@
     (is (= (d/commit-id @conn) (:commit fork)) "main's commit")
     (is (= (:max-tx @conn) (:t fork)) "main's t")
     (is (= (:commit fork) (d/commit-id (pdb/head conn b))) "which the agent's branch starts at")))))
+
+(deftest a-value-the-store-cannot-encode-is-refused-to-its-asker
+  ;; land6 re-proof (e2e loop): a sorted map on root's source fact reached the store's codec at
+  ;; commit (konserve.jolt.fasl has no encoding for it) and threw out of the writer as a proc
+  ;; defect, unanswered. The commit refusing is the asker's error: the transaction that carried
+  ;; it is answered :seon.writer/refused, the others in its batch commit, and the writer goes on.
+  ;; A store on disk of this test's own, the last resort: the in-memory test store has no codec
+  (let [path (str (System/getProperty "user.dir") "/target/procs-test-" (random-uuid))
+        {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)]
+   (try (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        source (fn [pins] {:seon.root/id :root :seon.root/source {:root "tree" :files 0 :forms 0 :ms 0.0 :pins pins}})]
+    (a/>!! in {:op :tx :branch :db :tx-data [{:note/text "after"}] :dest {:rid 2}})
+    (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [(source (into (sorted-map) (for [i (range 40)] [(str "reference-code/m" i) (apply str (repeat 40 "a"))])))] :dest {:rid 1}})
+          answers (into {} (keep (fn [x] (when-let [r (get-in x [:dest :rid])] [r (:r x)]))) (:to-api outs))]
+      (is (= :seon.writer/refused (:seon.error/type (answers 1))) (pr-str (answers 1)))
+      (is (true? (:ok (answers 2))) "the batch's other transaction commits")
+      (testing "the writer goes on, and a plain map of pins (what the source read answers) reads back"
+        (let [pins (:pins (seon.fx/read-source {:req {:root (System/getProperty "user.dir") :dirs ["src"]}}))
+              [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [(source pins)] :dest {:rid 3}})]
+          (is (true? (:ok (:r (first (:to-api outs))))))
+          (is (seq pins))
+          (is (= pins (get-in (d/pull @conn [:seon.root/source] [:seon.root/id :root]) [:seon.root/source :pins])))))))
+     (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest the-flush-is-continuous-group-commit
   ;; owner 2026-10-21 (notes/DECISIONS.md, "Durability is batched everywhere", superseded

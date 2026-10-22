@@ -39,6 +39,11 @@ export SEON_STORE=${SEON_STORE:-$ROOT/target/check-store}
 # step's root that found it free took it (the owner's browser then showed a throwaway check
 # root). A run that wants one names its port: SEON_WEB_PORT=7790 bin/root
 export SEON_WEB_PORT=${SEON_WEB_PORT:-0}
+# idle watches a tab on its root's dashboard, so its root serves one: on this run's own port, in a
+# full run and a single mode alike
+IDLE_WEB_PORT=$((20000 + $$ % 20000))
+# agents' turns are the scripted provider's (a test fixture; a root with no profile has no model provider)
+export SEON_PROFILE=${SEON_PROFILE:-scripted}
 S=$ROOT/target/seon
 [[ -x $S ]] || { echo "check: no target/seon; run bin/build seon" >&2; exit 1 }
 run() { (cd "$ROOT/target" && ./seon "$@" 2>&1) }
@@ -47,7 +52,7 @@ if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then
   M=check-$1
   [[ $1 == seed ]] || run seed 2000 > /dev/null || exit 1
   run drop $M > /dev/null || exit 1
-  SEON_MAIN=$M run "$@"; st=$?
+  if [[ $1 == idle ]]; then SEON_WEB_PORT=$IDLE_WEB_PORT SEON_MAIN=$M run "$@"; else SEON_MAIN=$M run "$@"; fi; st=$?
   (( st == 0 )) && { run drop $M > /dev/null || exit 1 }
   exit $st
 fi
@@ -112,7 +117,7 @@ echo "== backpressure"; step backpressure "" run backpressure 200
 echo "== hotreload"; step hotreload "" run hotreload
 echo "== drain"; step drain "" run drain 32
 echo "== idle (no beat: an idle root with a tab open steps nothing; a spawn and a commit still reach the tab)"
-step idle ":steps-at-idle|:bytes-at-idle|reached-tab|^IDLE " env SEON_WEB_PORT=$((20000 + $$ % 20000)) zsh -c "cd '$ROOT/target' && ./seon idle 5000"
+step idle ":steps-at-idle|:bytes-at-idle|reached-tab|^IDLE " env SEON_WEB_PORT=$IDLE_WEB_PORT zsh -c "cd '$ROOT/target' && ./seon idle 5000"
 
 echo "== orphan (root dies under busy agents, a clone and a test child)"
 SEON_MAIN=check-orphan run orphan > "$OUT/orphan.log" 2>&1
