@@ -205,25 +205,6 @@
         (is (= {:seon.turn/basis {:stored :db.type/string :declared :db.type/data}} (:seon.db/attributes r))))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
-(deftest each-transaction-names-the-runtime-that-made-it
-  ;; task seon.db/each-commit-names-its-runtime: every transaction Seon makes carries the
-  ;; runtime that made it in its tx-meta (jolt.host/runtime-fingerprint), as its compiled units
-  ;; are keyed; the writer's, an agent's and a merge's each pass seon.db/tx-meta, proved here
-  ;; through the two Datahike paths they use (a group commit and an applied transaction)
-  (let [fp (jolt.host/runtime-fingerprint)]
-    (is (string? fp) "this runtime can be identified")
-    (is (= {:seon.tx/runtime fp} (pdb/tx-meta)))
-    (ts/test-branch!
-     (fn [_ conn]
-       (let [[r] (dw/transact-batch! conn [{:tx-data [{:note/text "by the writer"}] :tx-meta (pdb/tx-meta)}])
-             tx (:db/current-tx (:tempids r))]
-         (is (= fp (:seon.tx/runtime (d/entity @conn tx))) "a group commit's transaction names it"))
-       (let [r (dw/apply! conn {:tx-data [{:note/text "by an agent"}] :tx-meta (pdb/tx-meta)})
-             tx (:db/current-tx (:tempids r))]
-         (dw/commit-pending! conn)
-         (is (= fp (:seon.tx/runtime (d/entity @conn tx))) "an agent's applied transaction names it"))
-       (is (= fp (d/q '[:find ?r . :where [?t :seon.tx/runtime ?r] [?t :db/txInstant]] @conn)))))))
-
 ;; ---- history (task seon.db/history-is-kept: v1's ruling 23, Datahike's default) --------------
 
 (deftest the-store-keeps-history

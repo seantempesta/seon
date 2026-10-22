@@ -8,7 +8,7 @@
   Run: bin/test seon.agent-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
-            [datahike.api :as d] [seon.db :as pdb] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock] [seon.test-store :as ts]))
+            [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]))
 
 (defn in-agent
   "A root on the checkout's src (its source root), one agent on a task of its own, each of
@@ -187,7 +187,10 @@
        (try
          (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :db @store-conn :base forked})
          (is (empty? (program/changed-vars (:base @agent/state) (agent/db))) "the agent has changed nothing")
-         (is (some #{[:var 'app.m0/f1]} (:applied (agent/merge-main! #{}))) "main's change merges in")
+         (let [r (agent/merge-main! #{})]
+           (is (some #{[:var 'app.m0/f1]} (:applied r)) "main's change merges in")
+           (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity (agent/db) (:t r))))
+               "in a merge commit that names its runtime (task seon.db/each-commit-names-its-runtime)"))
          (is (empty? (program/changed-vars (:base @agent/state) (agent/db)))
              "and is main's, not the agent's: its base is the merge base")
          (is (= {} (program/divergence (:base @agent/state) (agent/db)))
