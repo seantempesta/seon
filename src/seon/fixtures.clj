@@ -177,7 +177,7 @@
                          {:name "b" :ns 'app.m :proofs #{'app.proofs/b-test}
                           :proof "(deftest b-test (is (= [11 12 13 14] [(app.m/f1 10) (app.m/f2 10) (app.m/f3 10) (app.m/f4 10)])))"}]
                         (for [k [2 3 4]] {:var (str "f" k) :ns 'app.m :stub (defn1 (str "f" k) "0")}))
-           :after {"b-merge" "a-merge"} :held {"b-merge" "too many"}
+           :after {"b-merge" "a-merge"} :held {"b-merge" ":seon.config.merge/max-conflicts"}
            :check "(mapv #(% 10) [app.m/f1 app.m/f2 app.m/f3 app.m/f4])" :expect ["[11 12 13 14]"]
            :replies {"a" [(fenced "Each fK adds K." (str "(in-ns 'app.m)\n" (str/join "\n" (for [k [1 2 3 4]] (defn1 (str "f" k) (str "(+ x " k ")"))))))]
                      "b" [(fenced "Each fK adds K, other way round." (str "(in-ns 'app.m)\n" (str/join "\n" (for [k [1 2 3 4]] (defn1 (str "f" k) (str "(+ " k " x)"))))))]}}})
