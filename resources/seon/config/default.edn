@@ -354,6 +354,21 @@
  ;; turn (owner: "wtf"); 32000 keeps the last several whole turns (a turn is a reply of ~1-3k
  ;; plus its evaluations up to the evals budget), so a turn sends ~20-55k with the block.
  :seon.config.render/history-budget 32000
+ ;; Unit: items. A list shown in part (seon.print/bounded) shows this many, then `+N more:
+ ;; where` (docs/render.md#bounded-lists). Provenance: the literals each list carried before
+ ;; (render.ui and render.ai, 2026-10-22), kept as they were.
+ ;; rows: running and newest attempts, root's context's newest events.
+ :seon.config.render.list/rows 8
+ ;; newest: a tile's or card's newest (root's defects on the page, a card's evaluations).
+ :seon.config.render.list/newest 6
+ ;; brief: a secondary list in root's context (ended attempts, costliest functions).
+ :seon.config.render.list/brief 5
+ ;; top: root's context's defects, the evaluations its costliest functions come from, a
+ ;; card's top functions.
+ :seon.config.render.list/top 3
+ ;; Unit: bytes. An evaluation that allocated more is flagged on its card and row
+ ;; (seon.render.ui/alloc-span). Provenance: render.ui's BIG-ALLOC literal (10 MiB).
+ :seon.config.render/big-alloc 10485760
 
  ;; ==== the web, the guarantees, the native probe ==============================================
 

@@ -6,7 +6,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.render.proc :as p]
-            [seon.web.html :as h] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [datahike.api :as d]))
+            [seon.web.html :as h] [seon.config] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [datahike.api :as d]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -338,7 +338,7 @@
     (is (re-find #"…\+\d+ chars · the whole value: result/h0 at its REPL" row))))
 
 (deftest the-writer-tile-counts-per-commit-and-per-flush
-  (let [html (h/html (:seon.render/html (ui/tile-writer {:writer {:tx-per-commit 1.0 :commits 40 :tx-count 40 :flushes 10} :series {}} {})))]
+  (let [html (h/html (:seon.render/html (ui/metric-tile (first (ui/load-tiles {:tx-per-commit 1.0 :commits 40 :tx-count 40 :flushes 10} {} {} {})) {})))]
     (is (str/includes? html ">tx/commit<"))
     (is (str/includes? html "<dd>1.00</dd>"))
     (is (str/includes? html ">commits/flush</dt><dd>4.0<") "40 commits over 10 flushes")
@@ -367,3 +367,24 @@
       (is (= {:defects 2 :newest "b"} (get h :render)))
       (is (= {:defects 0} (get h :api)))
       (is (= 3 (count h))))))
+
+;; ---- one bounded list: its bound is config, its cut says what it left -----------------------
+
+(deftest a-bounded-list-is-one-call-with-its-bound-in-config
+  (let [n (seon.config/value :seon.config.render.list/top)
+        [shown more] (seon.print/bounded (range 10) :seon.config.render.list/top "in (range 10)")]
+    (is (= (range n) shown) "the first n, n from the config key")
+    (is (= (str "+" (- 10 n) " more: in (range 10)") more)))
+  (testing "a total beyond the items (a view that keeps fewer than were recorded) counts the whole"
+    (is (= "+17 more: older" (second (seon.print/bounded [1 2 3] :seon.config.render.list/top "older" 20)))))
+  (testing "nothing left, nothing said"
+    (is (nil? (second (seon.print/bounded [1] :seon.config.render.list/top "x"))))))
+
+(deftest the-load-tiles-are-data-the-context-reads
+  (let [tiles (ui/load-tiles {:tx-count 4} {:status :down :pid 7} {:datoms 100} {})
+        text (r/ai sys {:seon.render/schema :seon.render/system :seon.render/budget 2000})]
+    (is (= ["t-writer" "t-server" "t-main"] (mapv :id tiles)))
+    (is (str/includes? (h/html (:seon.render/html (ui/metric-tile (second tiles) {}))) "pill srv s-down"))
+    (testing "root's context prints the page's own tiles, one line each"
+      (is (some #(str/starts-with? % "- writer 4 txs, batch") (str/split-lines text)))
+      (is (some #(str/starts-with? % "- fork server up – ms fork p50, forked –") (str/split-lines text))))))

@@ -11,4 +11,9 @@
  :seon.config.render/form-budget [:int {:min 1 :seon.config/unit "tokens" :description "A form echoed back."}]
  :seon.config.render/context-budget [:int {:min 1 :seon.config/unit "tokens" :description "The whole context block the model reads."}]
  :seon.config.render/evals-budget [:int {:min 1 :seon.config/unit "tokens" :description "One turn's evaluations as the model reads them, shared equally."}]
- :seon.config.render/history-budget [:int {:min 0 :seon.config/unit "tokens" :description "Earlier turns the model reads, whole, newest kept first."}]}
+ :seon.config.render/history-budget [:int {:min 0 :seon.config/unit "tokens" :description "Earlier turns the model reads, whole, newest kept first."}]
+ :seon.config.render.list/rows [:int {:min 1 :seon.config/unit "items" :description "A long list's rows shown: running and newest attempts, root's context's newest events."}]
+ :seon.config.render.list/newest [:int {:min 1 :seon.config/unit "items" :description "A tile's or card's newest shown: root's defects on the page, a card's evaluations."}]
+ :seon.config.render.list/brief [:int {:min 1 :seon.config/unit "items" :description "A secondary list in root's context: ended attempts, costliest functions."}]
+ :seon.config.render.list/top [:int {:min 1 :seon.config/unit "items" :description "The few shown first: root's context's defects, the evaluations its costliest functions come from, a card's top functions."}]
+ :seon.config.render/big-alloc [:int {:min 1 :seon.config/unit "bytes" :description "An evaluation that allocated more is flagged on the page."}]}
