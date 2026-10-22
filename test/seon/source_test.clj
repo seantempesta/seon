@@ -111,12 +111,23 @@
 (deftest an-agent-runs-its-branchs-change-to-imported-source
   (let [main (main-with-file)
         branch (pt/record main 'app.pt-src "(defn twice [x] (* 2 x))")]
+    ;; the process holds the imported namespace, as a binary built from that source does
     (remove-ns 'app.pt-src)
+    (create-ns 'app.pt-src)
     (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! main))
-        "main's imported text is the binary's: never evaluated (the example program is)")
+        "main's imported text whose namespace this process holds is the binary's: never evaluated (the example program is)")
     (is (= [] (program/load-diff! main branch)))
     (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
     (is (nil? (resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again")))
+
+(deftest an-imported-namespace-the-process-does-not-hold-is-loaded
+  ;; task seon.agent/an-agent-holds-mains-tests: test/ is imported but not built into the
+  ;; binary; its forms load where main's program runs (root, the fork server, so every agent)
+  (let [main (main-with-file)]
+    (remove-ns 'app.pt-src)
+    (is (= {:loaded (+ 4 (count (program/live-forms (empty-db)))) :errors []} (program/load-all! main))
+        "the imported namespace's four forms load beside the example program")
+    (is (= 6 ((resolve 'app.pt-src/twice) 3)) "and run")))
 
 (defn- git [dir & args]
   (let [r (apply sh/sh "git" "-C" dir args)]
