@@ -56,7 +56,7 @@
   ([proofs]
    (let [run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks) proofs)
          results (proofs/results run)]
-     {:selected (count results) :ran (:ran run 0) :reused (:reused run 0) :ms (:ms run)
+     {:selected (count results) :ran (:ran run) :reused (:reused run) :ms (:ms run)
       :results results :red (proofs/red-reports run (set (keys results)))})))
 
 (defn grep

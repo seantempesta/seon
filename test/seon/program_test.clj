@@ -158,11 +158,18 @@
     (is (= {:test 2 :pass 2 :fail 0 :error 0}
            (select-keys (binding [clojure.test/*test-out* (java.io.StringWriter.)] (clojure.test/test-ns 'app.pt-calc-test)) [:test :pass :fail :error])))))
 
+(defn- selected
+  "What a change from db to db' selects, as every run selects it: seon.proofs/plan's :selected
+  over the two dbs' reach digests."
+  [db db']
+  (let [in {:env "e" :tree "t"}]
+    (set (:selected (proofs/plan (program/reach-digests db in) (program/reach-digests db' in) {} #{})))))
+
 (deftest a-test-reaches-what-it-calls
   (let [db (apply record (empty-db) calc-srcs)]
-    (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/sum3-test} (program/reaching-tests db '#{app.pt-calc/add}))
+    (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/sum3-test} (selected db (record db 'app.pt-calc "(defn add [a b] (+ b a))")))
         "add-test calls add through its :refer; sum3-test reaches add through sum3")
-    (is (= '#{} (program/reaching-tests db '#{app.pt-calc/neg})))))
+    (is (= '#{} (selected db (record db 'app.pt-calc "(defn neg [x] (- 0 x))"))) "no test reaches neg")))
 
 (deftest a-file-analyzed-gives-the-repl-facts
   (let [text "(ns app.pt-file\n  (:require [clojure.string :as s]))\n\n;; doubles\n(defn twice [x] (* 2 x))\n\n(comment (twice 2))\n(defmulti m :k)\n(defmethod m :a [_] (s/join [\"a\"]))\n"
@@ -244,7 +251,7 @@
         after (select-keys (program/reach-digests db' {:env "e" :tree "t"}) calc-tests)]
     (is (= calc-tests (set (keys before))) "every test has a digest")
     (is (= 3 (count (set (vals before)))) "each test its own")
-    (is (= (program/reaching-tests db' '#{app.pt-calc/add})
+    (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/sum3-test}
            (set (for [[t d] after :when (not= d (before t))] t)))
         "add changed: exactly the tests reaching it moved (sum3-test through sum3), neg-test kept its digest")
     (is (not= before (select-keys (program/reach-digests db {:env "e2" :tree "t"}) calc-tests))
@@ -327,7 +334,7 @@
         after (select-keys (program/reach-digests db' {:env "e" :tree "t"}) ts)]
     (is (not= (before 'app.pt-qr-test/q-test) (after 'app.pt-qr-test/q-test)) "g changed: the test resolving it by name moved")
     (is (= (before 'app.pt-qr-test/other-test) (after 'app.pt-qr-test/other-test)) "the test not reaching g kept its digest")
-    (is (contains? (program/reaching-tests db' '#{app.pt-qr/g}) 'app.pt-qr-test/q-test) "and an agent's selection finds it")))
+    (is (= '#{app.pt-qr-test/q-test} (selected db db')) "and every run's selection finds it")))
 
 (deftest a-changed-macro-moves-the-digest-of-each-test-that-expands-it
   (let [db (record (empty-db) 'user "(ns app.pt-mac)" 'app.pt-mac "(defmacro m [x] `(inc ~x))"
@@ -340,7 +347,7 @@
         after (select-keys (program/reach-digests db' {:env "e" :tree "t"}) ts)]
     (is (not= (before 'app.pt-mac-test/m-test) (after 'app.pt-mac-test/m-test)) "the macro's body changed: the test expanding it moved (no stale green)")
     (is (= (before 'app.pt-mac-test/plain-test) (after 'app.pt-mac-test/plain-test)) "a test not expanding it kept its digest")
-    (is (= '#{app.pt-mac-test/m-test} (program/reaching-tests db' '#{app.pt-mac/m})) "and an agent's selection finds exactly it")))
+    (is (= '#{app.pt-mac-test/m-test} (selected db db')) "and every run's selection finds exactly it")))
 
 (deftest a-changed-contract-schema-moves-the-digest-of-tests-reaching-the-contracted-var
   (let [schema (fn [db k form] (d/db-with db [{:schema/key k :schema/form form}]))
@@ -449,4 +456,4 @@
         after (program/reach-digests db' {:env "e" :tree "t"})]
     (is (not= (before 'app.pt-calc-test/add-test) (after 'app.pt-calc-test/add-test)) "the named test reaches add: it moves")
     (is (= (before k) (after k)) "the test only naming it keeps its digest")
-    (is (not (contains? (program/reaching-tests db' '#{app.pt-calc/add}) k)) "and an agent's selection leaves it out")))
+    (is (not (contains? (selected db db') k)) "and every run's selection leaves it out")))

@@ -323,36 +323,36 @@
         (assoc :digests cd))))
 
 (defn- run-tests-here
-  "clojure.test over vars (the test vars a test-plan runs), with the branch's schemas in effect (malli's
-  dynamic registry bound to seon.program/schema-registry, as the agent's REPL binds it), the
-  whole run within ticks engine ticks of work: answers report data. Each test var is written
-  to w as it starts ({:seon.test/started v}), so the agent can name the test a death interrupted; a run
-  past its ticks stops with the typed :seon.test/ticks-spent naming the test that was running."
-  {:malli/schema [:=> [:cat :int pos-int? [:sequential :seon.host/var]] :seon.test/result]}
-  [w ticks vars]
+  "The tests a test-plan runs (var symbols), by the one runner (seon.proofs/run-tests!, nothing
+  stored: the parent holds the greens), with the branch's schemas in effect (malli's dynamic
+  registry bound to seon.program/schema-registry, as the agent's REPL binds it), the whole run
+  within ticks engine ticks of work: answers report data. Each test var is written to w as it
+  starts ({:seon.test/started v}), so the agent can name the test a death interrupted; a run
+  past its ticks stops with the typed :seon.test/ticks-spent naming the test that was running;
+  a test its namespace's throw kept from reporting is an :error report carrying that throw."
+  {:malli/schema [:=> [:cat :int pos-int? [:sequential :qualified-symbol]] :seon.test/result]}
+  [w ticks tests]
   (let [reports (atom [])
         started (atom nil)
-        orig t/report
-        r (try (binding [t/report (fn [m]
-                                    (when (= :begin-test-var (:type m))
-                                      (reset! started (str (:var m)))
-                                      (sock/write-line! w (pr-str {:seon.test/started @started})))
-                                    (when (#{:pass :fail :error} (:type m))
-                                      (swap! reports conj (test-report m (some-> (first t/*testing-vars*) str))))
-                                    (orig m))
-                         t/*test-out* (java.io.StringWriter.)
-                         mr/*registry* (program/schema-registry (program/schema-changes (db)))]
-                 ;; exactly the selected vars, each namespace's fixtures around them
-                 (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-vars vars) ticks)
-                 nil)
-               (catch Throwable e
-                 (if-let [n (:jolt/ticks-spent (ex-data e))]
-                   (contract/error :seon.test/ticks-spent 'seon.agent/run-tests-forked
-                                   (str "the test run spent its budget of " ticks " engine ticks (work done, not time)"
-                                        (when @started (str " in " @started)) ": a test that never ends, or more work than the run allows")
-                                   (cond-> {:ticks n :budget ticks} @started (assoc :test @started)))
-                   (throw e))))
-        reports (cond-> @reports
+        note! (fn [x]
+                (cond (:seon.test/started x) (do (reset! started (str "#'" (:seon.test/started x)))
+                                                 (sock/write-line! w (pr-str {:seon.test/started @started})))
+                      (:seon.test/report x) (swap! reports conj (test-report (:seon.test/report x) (str "#'" (:test x))))
+                      :else nil))
+        [ran r] (try [(binding [mr/*registry* (program/schema-registry (program/schema-changes (db)))]
+                        (jolt.host/run-interruptible (jolt.host/make-interrupt)
+                                                     #(proofs/run-tests! tests (zipmap tests (repeat nil)) nil note!) ticks))
+                      nil]
+                     (catch Throwable e
+                       (if-let [n (:jolt/ticks-spent (ex-data e))]
+                         [{} (contract/error :seon.test/ticks-spent 'seon.agent/run-tests-forked
+                                             (str "the test run spent its budget of " ticks " engine ticks (work done, not time)"
+                                                  (when @started (str " in " @started)) ": a test that never ends, or more work than the run allows")
+                                             (cond-> {:ticks n :budget ticks} @started (assoc :test @started)))]
+                         (throw e))))
+        reported (set (keep :var @reports))
+        reports (cond-> (into @reports (for [[t res] ran :let [v (str "#'" t)] :when (and (:message res) (not (reported v)))]
+                                         {:type :error :var v :message (:message res)}))
                   r (conj (cond-> {:type :error :message (:seon.error/message r) :seon.error/type (:seon.error/type r)
                                    :ticks (:ticks r) :budget ticks}
                             @started (assoc :var @started))))
@@ -388,7 +388,7 @@
   ([ticks proofs] (run-tests-forked ticks proofs (fn [_] nil)))
   ([ticks proofs forked]
   (let [{:keys [selected run reused digests]} (test-plan (db) (:base @state) proofs)
-        vars (keep #(some-> (find-ns (symbol (namespace %))) (ns-resolve (symbol (name %)))) run)
+        vars (filterv #(some-> (find-ns (symbol (namespace %))) (ns-resolve (symbol (name %)))) run)
         reused-reports (vec (for [t selected :when (reused t)] {:type :pass :var (str "#'" t) :reused true}))
         [r w] (lib/pipe) t0 (profile/now-ns)
         res (lib/fork!

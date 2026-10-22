@@ -86,7 +86,7 @@
   (let [proof 'seon.reader-test/prose-without-a-fence-is-a-comment
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
         run "(let [r @(seon.root/run-tests! sys :a1)] [(seon.proofs/results r) (:ran r) (:reused r)])"
-        [_ first-run second-run verb]
+        [_ first-run second-run prove-run]
         (in-agent ["(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent.a1)"
                    {:op :eval :agent "root" :code run}
                    {:op :eval :agent "root" :code run}
@@ -94,7 +94,7 @@
                   {:dirs ["src" "test"] :proofs #{proof}})]
     (is (= [{proof :pass reached :pass} 2 0] (edn/read-string (:printed first-run))) "the first run runs the proof and the reached test")
     (is (= [{proof :pass reached :pass} 0 2] (edn/read-string (:printed second-run))) "the second runs nothing: both reused, the same results")
-    (is (= {:results {proof :pass reached :pass} :ran 0 :reused 2} (edn/read-string (:printed verb))) "and the agent's own verb, (prove), answers the same")))
+    (is (= {:results {proof :pass reached :pass} :ran 0 :reused 2} (edn/read-string (:printed prove-run))) "and the agent's own function, (prove), answers the same")))
 
 (deftest a-forked-agent-knows-its-task
   ;; task seon.template/a-request-is-one-linked-transaction: root forks the agent for its

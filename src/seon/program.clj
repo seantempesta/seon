@@ -745,28 +745,6 @@
   [db-from db-to]
   (into #{} cat (vals (dissoc (divergence db-from db-to) :schemas))))
 
-(defn reaching-tests
-  "The program's tests on db that reach one of syms (fully qualified var names): from each
-  var, the forms that reference it (one AVET seek), their definitions, and on. Cost: the
-  reached definitions, never the rest of the program. An agent asks it at its REPL
-  (seon.fixtures' newns scenario); a run selects by reach-digests (seon.proofs/plan)."
-  {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-symbol]] [:set :qualified-symbol]]}
-  [db syms]
-  (loop [front (vec syms) seen (set syms) tests #{}]
-    (if-let [[x & more] (seq front)]
-      (let [callers (for [dt (d/datoms db :avet :form/refs x)
-                          :when (live? db (:e dt))
-                          dv (:form/defines (d/entity db (:e dt)))
-                          :let [v (:var/name dv)]
-                          :when (and v (= (:e dt) (:db/id (:var/form dv))))]
-                      [v (:var/kind dv)])
-            new (remove (comp seen first) callers)]
-        ;; a test is reached, never walked on from: a form naming a test (its name quoted as
-        ;; data, a proof list) does not run it
-        (recur (into (vec more) (comp (remove #(= :test (second %))) (map first)) new) (into seen (map first) new)
-               (into tests (comp (filter #(= :test (second %))) (map first)) callers)))
-      tests)))
-
 (def tree-readers
   "The host vars that read files: a test whose reached forms reference one reads the
   checkout's tree, so its reach digest covers the whole tree (reach-digests), unless the

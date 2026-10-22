@@ -165,46 +165,51 @@
                                 (vec (repeat (max 1 (min jobs (count by-ns))) [])) by-ns)))))
 
 (defn run-tests!
-  "Run tests (var symbols, their namespaces required) here, each namespace's by
-  clojure.test/test-vars so its fixtures run around them; each test's result {:test :digest
-  :pass :fail :error :ms} stored at its digest in dir (store!) as it ends, and (note! x) told
-  each test as it starts ({:seon.test/started test}) and each result. A result whose write
-  failed is an :error result naming the write's error (never read as stored). A red
-  namespace's clojure.test output is printed. Answers {test result}; a test that never
-  reported, because its namespace's run threw (a fixture), is an :error result carrying that
-  throw's message and data. The per-namespace counts are volatiles local to its run: clojure.test
-  reports through a callback, one thread, no proc."
-  {:malli/schema [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol :string] :string :seon.host/fn]
+  "The one clojure.test runner (bin/test's shards, an agent's test fork): run tests (var
+  symbols, their namespaces loaded) here, each namespace's by clojure.test/test-vars so its
+  fixtures run around them, and tell (note! x) as it goes: {:seon.test/started test} as each
+  starts, {:seon.test/report m :test test} for each assertion (clojure.test's report map),
+  each result {:test :digest :pass :fail :error :ms} as it ends, and {:seon.test/output text
+  :ns n} for a red namespace's clojure.test output. With dir, each result with a digest is
+  stored there (store!) as it ends, and a result whose write failed is an :error result naming
+  the write's error (never read as stored). Answers {test result}; a test that never reported,
+  because its namespace's run threw (a fixture), is an :error result carrying that throw's
+  message and data. A run's work budget (Jolt's ticks, :jolt/ticks-spent) ends the whole run:
+  that throw is the caller's. The per-namespace counts are volatiles local to its run:
+  clojure.test reports through a callback, one thread, no proc."
+  {:malli/schema [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] [:maybe :string] :seon.host/fn]
                   [:map-of :qualified-symbol :map]]}
   [tests digests dir note!]
-  (into {} (for [[n ts] (group-by (comp symbol namespace) tests)
-                 :let [counts (volatile! {}) ran (volatile! {}) out (java.io.StringWriter.) t0 (volatile! nil)
-                       done! (fn [v] (let [r (assoc (merge {:pass 0 :fail 0 :error 0} (@counts v)) :test v :digest (digests v)
-                                                    :ms (quot (- (profile/now-ns) @t0) 1000000))
-                                           w (store! dir r)
-                                           r (if (:seon.error/type w)
-                                               (-> r (update :error inc) (assoc :message (str "result not stored: " (:seon.error/message w))))
-                                               r)]
-                                       (vswap! ran assoc v r)
-                                       (note! r)))
-                       thrown (binding [t/*test-out* out
-                                        t/report (fn [m]
-                                                   ;; a test running tests of its own (test-ns inside a deftest) reports
-                                                   ;; them too: only this run's tests are counted
-                                                   (let [v (some-> (or (:var m) (first t/*testing-vars*)) str test-symbol)
-                                                         v (when (digests v) v)]
-                                                     (case (when v (:type m))
-                                                       :begin-test-var (do (vreset! t0 (profile/now-ns)) (note! {:seon.test/started v}))
-                                                       :end-test-var (done! v)
-                                                       (:pass :fail :error) (vswap! counts update-in [v (:type m)] (fnil inc 0))
-                                                       nil))
-                                                   (binding [t/*test-out* out] (report m)))]
-                                (try (t/test-vars (keep #(ns-resolve n (symbol (name %))) ts)) nil
-                                     (catch Throwable e e)))
-                       _ (when (or thrown (some #(not (green? (@ran %))) ts)) (print (str out)) (flush))]
-                 tst ts]
-             [tst (or (@ran tst)
-                      (cond-> {:test tst :digest (digests tst) :pass 0 :fail 0 :error 1 :ms 0
-                               :message (if thrown (str n "'s run threw before this test reported: " (ex-message thrown))
-                                            (str n "'s run ended before this test reported"))}
-                        (ex-data thrown) (assoc :data (pr-str (ex-data thrown)))))])))
+  (let [tset (set tests)]
+    (into {} (for [[n ts] (group-by (comp symbol namespace) tests)
+                   :let [counts (volatile! {}) ran (volatile! {}) out (java.io.StringWriter.) t0 (volatile! nil)
+                         done! (fn [v] (let [r (assoc (merge {:pass 0 :fail 0 :error 0} (@counts v)) :test v :digest (digests v)
+                                                      :ms (quot (- (profile/now-ns) @t0) 1000000))
+                                             w (when (and dir (:digest r)) (store! dir r))
+                                             r (if (:seon.error/type w)
+                                                 (-> r (update :error inc) (assoc :message (str "result not stored: " (:seon.error/message w))))
+                                                 r)]
+                                         (vswap! ran assoc v r)
+                                         (note! r)))
+                         thrown (binding [t/*test-out* out
+                                          t/report (fn [m]
+                                                     ;; a test running tests of its own (test-ns inside a deftest) reports
+                                                     ;; them too: only this run's tests are counted
+                                                     (let [v (some-> (or (:var m) (first t/*testing-vars*)) str test-symbol)
+                                                           v (when (tset v) v)]
+                                                       (case (when v (:type m))
+                                                         :begin-test-var (do (vreset! t0 (profile/now-ns)) (note! {:seon.test/started v}))
+                                                         :end-test-var (done! v)
+                                                         (:pass :fail :error) (do (vswap! counts update-in [v (:type m)] (fnil inc 0))
+                                                                                  (note! {:seon.test/report m :test v}))
+                                                         nil))
+                                                     (binding [t/*test-out* out] (report m)))]
+                                  (try (t/test-vars (keep #(ns-resolve n (symbol (name %))) ts)) nil
+                                       (catch Throwable e (if (:jolt/ticks-spent (ex-data e)) (throw e) e))))
+                         _ (when (or thrown (some #(not (green? (@ran %))) ts)) (note! {:seon.test/output (str out) :ns n}))]
+                   tst ts]
+               [tst (or (@ran tst)
+                        (cond-> {:test tst :digest (digests tst) :pass 0 :fail 0 :error 1 :ms 0
+                                 :message (if thrown (str n "'s run threw before this test reported: " (ex-message thrown))
+                                              (str n "'s run ended before this test reported"))}
+                          (ex-data thrown) (assoc :data (pr-str (ex-data thrown)))))]))))

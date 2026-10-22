@@ -96,6 +96,8 @@
     (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
     (let [ran (proofs/run-tests! tests digests (config/value :seon.config.source/test-results-dir)
                                  (fn [x] (cond (:seon.test/started x) (println "started" (:seon.test/started x))
+                                               (:seon.test/output x) (print (:seon.test/output x))
+                                               (:seon.test/report x) nil
                                                (not (proofs/green? x)) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))
                                    (flush)))
           red (count (remove proofs/green? (vals ran)))]
