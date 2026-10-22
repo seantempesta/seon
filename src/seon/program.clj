@@ -147,8 +147,9 @@
   exists: a syntax-quoted or quoted name resolved later (`requiring-resolve`, a macro's
   template, a proc or render named in data). A symbol of no namespace is data. By namespace,
   not by var: whether the var exists yet depends on what this process analyzed before (an
-  import of the same files twice gave 43 of 387 tests the same reach digest, worktree session PROVE
-  2026-10-22), while every imported file's namespace exists before any form is analyzed."
+  import of the same files twice gave 43 of 387 tests the same reach digest, so no result was
+  reused across runs or checkouts; worktree session PROVE 2026-10-22), while every imported
+  file's namespace exists before any form is analyzed."
   {:malli/schema [:=> [:cat :any] [:set :qualified-symbol]]}
   [x] (into #{} (filter #(and (qualified-symbol? %) (find-ns (symbol (namespace %))))) (tree-seq coll? seq x)))
 
@@ -760,7 +761,9 @@
                           :when (and v (= (:e dt) (:db/id (:var/form dv))))]
                       [v (:var/kind dv)])
             new (remove (comp seen first) callers)]
-        (recur (into (vec more) (map first) new) (into seen (map first) new)
+        ;; a test is reached, never walked on from: a form naming a test (its name quoted as
+        ;; data, a proof list) does not run it
+        (recur (into (vec more) (comp (remove #(= :test (second %))) (map first)) new) (into seen (map first) new)
                (into tests (comp (filter #(= :test (second %))) (map first)) callers)))
       tests)))
 

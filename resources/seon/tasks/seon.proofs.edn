@@ -8,8 +8,8 @@
                       seon.proofs-test/a-check-step-is-keyed-by-what-its-function-reaches
                       seon.proofs-test/shards-split-by-namespace-and-each-result-is-stored
                       seon.proofs-test/selection-is-proportional-to-what-changed
-                      seon.proofs-test/only-a-test-reading-the-tree-takes-its-digest
-                      seon.proofs-test/the-same-tree-gives-the-same-digests-in-any-checkout-and-any-run
-                      seon.proofs-test/a-test-naming-another-test-does-not-reach-it
+                      seon.program-test/only-a-test-reading-the-tree-takes-its-digest
+                      seon.program-test/the-same-tree-gives-the-same-digests-in-any-checkout-and-any-run
+                      seon.program-test/a-test-naming-another-test-does-not-reach-it
                       seon.proofs-test/a-failed-write-or-a-throwing-fixture-is-recorded-red
                       seon.agent-test/a-wide-reach-reuses-unchanged-results}}]

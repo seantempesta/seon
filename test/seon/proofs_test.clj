@@ -4,9 +4,9 @@
   reaches it (through macros, schemas and the inputs with no program facts), a bin/check step
   is keyed like a test by what its functions reach, and the run is forked shards that store
   each result."
-  (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [clojure.java.shell] [datahike.api :as d]
+  (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d]
             [seon.test-store :as ts] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
-            [seon.program-test :refer [record]] [test-runner :as runner]))
+            [seon.program-test :refer [record]]))
 
 (defn- prog []
   (record (ts/test-db)
@@ -72,18 +72,6 @@
     (is (= (sort-by str ts) (run-of db "e2"))
         "config, deps or a pin changed (:env, the inputs with no program facts): every test runs")))
 
-(deftest a-test-naming-another-test-does-not-reach-it
-  ;; seon.agent-test's tests quote the proofs they ask for ('seon.config-test/...): data, never a
-  ;; call, so a change the named test reaches does not select the naming test (it did, and an
-  ;; agent's run then booted roots inside its fork)
-  (let [db (record (prog) 'user "(ns app.pv-names-test (:require [clojure.test :refer [deftest is]]))"
-                   'app.pv-names-test "(deftest names-a-proof (is (= 'app.pv-neg-test/neg-test 'app.pv-neg-test/neg-test)))")
-        k 'app.pv-names-test/names-a-proof
-        before (program/reach-digests db {:env "e" :tree "t"})
-        after (program/reach-digests (record db 'app.pv-calc "(defn neg [a] (- 0 a))") {:env "e" :tree "t"})]
-    (is (not= (before 'app.pv-neg-test/neg-test) (after 'app.pv-neg-test/neg-test)) "the named test reaches neg: it moves")
-    (is (= (before k) (after k)) "the test only naming it keeps its digest")))
-
 (deftest a-check-step-is-keyed-by-what-its-function-reaches
   (let [db (record (prog) 'user "(ns app.pv-check (:require [app.pv-calc :as c]))"
                    'app.pv-check "(defn smoke [] (c/add 1 2))" 'app.pv-check "(defn idle [] (c/neg 1))")
@@ -125,39 +113,6 @@
     (is (= (count tests) (count (filter :seon.test/started @notes))) "each test named as it starts")
     (is (every? #(.isFile (java.io.File. (proofs/result-path dir %))) (vals dg)) "each result stored at its digest")
     (is (= #{"d-fx" "d-add" "d-twice" "d-neg"} (set (keys (proofs/greens dir (vals dg))))) "only greens are reused: a red runs again")))
-
-(deftest only-a-test-reading-the-tree-takes-its-digest
-  ;; seon.program/env-readers: platform reads of resources/ (the baked schemas every contract
-  ;; expands), deps.edn or web/ are :env inputs already, so reaching them does not make a test
-  ;; rerun on every edit; a reader of src, test, docs or the task files still does
-  (let [db (runner/program-db (System/getProperty "user.dir"))
-        dg (fn [tree] (program/reach-digests db {:env "e" :tree tree}))
-        a (dg "t1") b (dg "t2")
-        moved (set (for [[t d] a :when (not= d (b t))] t))]
-    (is (not (moved 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a reader test reaches only :env reads: the tree is no input")
-    (is (moved 'seon.task-files-test/the-shipped-task-files-load) "a test reading the task files (my.root/task-files, not in :env): the tree is its input")
-    (is (moved 'seon.program-test/a-result-recorded-in-one-checkout-is-reused-in-another) "a test reading files itself (test-runner/inputs): the tree is its input")
-    (is (< (count moved) (quot (count a) 2)) (str (count moved) " of " (count a) " tests take the tree: fewer than half"))))
-
-(deftest the-same-tree-gives-the-same-digests-in-any-checkout-and-any-run
-  ;; root 2026-10-22: every bin/test --reach run reused nothing. One producer cause: a quoted
-  ;; name counted as a ref only when its var existed yet (seon.program/quoted-vars), so the
-  ;; digests depended on what the process had analyzed before (43 of 387 equal on a second
-  ;; import of the same tree). The same commit, imported twice and from a copy at another path,
-  ;; gives the same digest for every test, so a second run runs nothing and two worktrees share
-  (let [here (System/getProperty "user.dir")
-        copy (str here "/target/tmp/prove-copy-" (random-uuid))
-        _ (.mkdirs (java.io.File. copy))
-        _ (clojure.java.shell/sh "zsh" "-c" (str "git -C '" here "' archive HEAD src test | tar -x -C '" copy "'"))
-        in {:env "e" :tree "t"}
-        a (program/reach-digests (runner/program-db here) in)
-        b (program/reach-digests (runner/program-db here) in)
-        c (program/reach-digests (runner/program-db copy) in)]
-    (is (< 300 (count a)) "the whole suite")
-    (is (= a b) "the same tree imported twice in one process: every digest equal")
-    (is (= a c) "the same commit in another checkout: every digest equal, so its results are shared")
-    (is (= [] (:run (proofs/plan nil a (into {} (for [d (vals a)] [d {:pass 1 :fail 0 :error 0}])) #{})))
-        "with each green stored, a second run on the unchanged tree runs nothing")))
 
 (deftest a-failed-write-or-a-throwing-fixture-is-recorded-red
   ;; review 2026-10-22: a write's declared error was dropped (read as stored), and a fixture's

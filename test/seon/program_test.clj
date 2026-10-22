@@ -401,3 +401,52 @@
     (is (not= (e main 'app/g) (e merged 'app/g)) "and so is g")
     (is (= {:added ['app/h]} (program/divergence main merged)) "only h, the branch's own")
     (is (= #{'app/h} (program/changed-vars main merged)) "and the tests it reaches are h's")))
+
+;; ---- digests are the tree's, never the process's (root 2026-10-22: every bin/test --reach run reused nothing)
+
+(deftest the-same-tree-gives-the-same-digests-in-any-checkout-and-any-run
+  ;; a quoted name counted as a ref only when its var existed yet (seon.program/quoted-vars), so
+  ;; the digests followed what the process had analyzed before: 43 of 387 equal on a second
+  ;; import of the same tree. The same commit, imported twice and from a copy at another path,
+  ;; gives the same digest for every test: a second run reruns nothing, two worktrees share
+  (let [here (System/getProperty "user.dir")
+        copy (scratch-dir "copy")
+        _ (sh/sh "zsh" "-c" (str "git -C '" here "' archive HEAD src test | tar -x -C '" copy "'"))
+        in {:env "e" :tree "t"}
+        a (program/reach-digests (runner/program-db here) in)
+        b (program/reach-digests (runner/program-db here) in)
+        c (program/reach-digests (runner/program-db copy) in)]
+    (is (< 300 (count a)) "the whole suite")
+    (is (= a b) "the same tree imported twice in one process: every digest equal")
+    (is (= a c) "the same commit in another checkout: every digest equal, so its results are shared")
+    (is (= [] (:run (run-plan a (let [dir (scratch-dir "same-tree")]
+                                  (doseq [[t dg] a] (proofs/store! dir {:test t :digest dg :pass 1 :fail 0 :error 0}))
+                                  dir))))
+        "with each green stored, a second run on the unchanged tree runs nothing")))
+
+(deftest only-a-test-reading-the-tree-takes-its-digest
+  ;; seon.program/env-readers: platform reads of resources/ (the baked schemas every contract
+  ;; expands), deps.edn or web/ are :env inputs already, so reaching them does not make a test
+  ;; rerun on every edit (327 of 368 did); a reader of src, test, docs or the task files still does
+  (let [db (runner/program-db (System/getProperty "user.dir"))
+        a (program/reach-digests db {:env "e" :tree "t1"})
+        b (program/reach-digests db {:env "e" :tree "t2"})
+        moved (set (for [[t d] a :when (not= d (b t))] t))]
+    (is (not (moved 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a reader test reaches only :env reads: the tree is no input")
+    (is (moved 'seon.task-files-test/the-shipped-task-files-load) "a test reading the task files (my.root/task-files, not in :env): the tree is its input")
+    (is (moved 'seon.program-test/a-result-recorded-in-one-checkout-is-reused-in-another) "a test reading files itself (test-runner/inputs): the tree is its input")
+    (is (< (count moved) (quot (count a) 2)) (str (count moved) " of " (count a) " tests take the tree: fewer than half"))))
+
+(deftest a-test-naming-another-test-does-not-reach-it
+  ;; seon.agent-test's tests quote the proofs they ask for: data, never a call, so a change the
+  ;; named test reaches selects it alone (with quoted names by namespace, the naming tests
+  ;; selected themselves and booted roots in the agent's test fork)
+  (let [db (record (calc-db) 'user "(ns app.pt-names-test (:require [clojure.test :refer [deftest is]]))"
+                   'app.pt-names-test "(deftest names-a-proof (is (= 'app.pt-calc-test/add-test 'app.pt-calc-test/add-test)))")
+        db' (record db 'app.pt-calc "(defn add [a b] (+ b a))")
+        k 'app.pt-names-test/names-a-proof
+        before (program/reach-digests db {:env "e" :tree "t"})
+        after (program/reach-digests db' {:env "e" :tree "t"})]
+    (is (not= (before 'app.pt-calc-test/add-test) (after 'app.pt-calc-test/add-test)) "the named test reaches add: it moves")
+    (is (= (before k) (after k)) "the test only naming it keeps its digest")
+    (is (not (contains? (program/reaching-tests db' '#{app.pt-calc/add}) k)) "and an agent's selection leaves it out")))
