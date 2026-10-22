@@ -21,7 +21,7 @@ The attempt's part:
 - `:task`: its id, kind and instructions, and its plan as it accumulated along its needs, prerequisites first.
 - `:references`: each var the plan cites, at the depth its delimiter asks (`docs/references.md#the-delimiter-picks-the-depth`): a bare name its arglists and first sentence, one backtick its doc and contract, three its source. A source past the cap shows `:left-out` and `:read`, the form that reads it.
 - `:found`: program functions the cited vars and your proofs call that the plan does not name; often the helpers the task needs.
-- `:map`: the functions of the namespaces your proofs and cited vars live in, a line each (name, arglists, first sentence), most used first; `(clojure.repl/dir ns)` lists them all. Before writing a helper, look here for one.
+- `:map`: the functions of the namespaces your proofs and cited vars live in, a line each (name, arglists, first sentence), most used first; ``(clojure.repl/dir the.ns)`` lists them all. Before writing a helper, look here for one.
 - `:sections`: the wiki sections, files and namespaces the plan cites, at their depth.
 - `:evidence`: why an earlier attempt failed (`:problem`) and what it measured: conflicts, red proofs.
 

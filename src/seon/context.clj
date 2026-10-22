@@ -104,7 +104,7 @@
     (vec (for [ns nss
                :let [vs (d/q '[:find [?n ...] :in $ ?ns :where [?e :ns/name ?ns] [?v :var/ns ?e] [?v :var/name ?n] [?v :var/form _]] db ns)
                      lines (map line (sort-by (juxt (comp - uses) str) vs))
-                     shown (reduce (fn [[acc spent] l] (let [s (+ spent (select/estimate (pr-str l)))]
+                     shown (reduce (fn [[acc spent] l] (let [s (+ spent (:tokens (print/print-value l {:budget share}) share))]
                                                          (if (<= s share) [(conj acc l) s] (reduced [acc spent]))))
                                    [[] 0] lines)]
                :when (seq vs)]
