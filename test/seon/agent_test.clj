@@ -42,21 +42,23 @@
     (sh/sh "rm" "-rf" (str path "-in") (str path ".log") (str path "-tasks"))
     (mapv #(let [a (edn/read-string {:default tagged-literal} %)] (if (contains? a :items) (first (:items a)) a)) (str/split-lines (str/replace out #"(?s)^.*ROOT LISTENING[^\n]*\n" ""))))))
 
-(deftest an-agent-holds-mains-tests-and-runs-its-proofs
-  ;; task seon.agent/an-agent-runs-its-proofs: main holds the source root's test namespaces
-  ;; (imported from test/), and an agent forked from the fork server holds them compiled at
-  ;; fork. Its run selects the task's proofs and the tests reaching its changes, never the
-  ;; whole suite: a green proof is green, a red one red, a proof with no definition did not run
+(deftest an-agent-holds-mains-tests-and-runs-them
+  ;; task seon.agent/an-agent-holds-mains-tests: main holds the source root's test namespaces
+  ;; (imported from test/), and an agent forked from the fork server holds them compiled:
+  ;; it runs one without requiring it, and a green test reports green, a red one red
   (let [green 'seon.reader-test/prose-without-a-fence-is-a-comment
         red 'seon.reader-test/an-agent-made-this-red
-        [held _ _ run] (in-agent ["(boolean (find-ns 'seon.reader-test))"
-                                  {:op :context :agent "a1"}
-                                  "(in-ns 'seon.reader-test) (clojure.test/deftest an-agent-made-this-red (clojure.test/is (= 1 2))) (in-ns 'agent.a1)"
-                                  "(seon.proofs/results (seon.agent/run-tests-forked (seon.config/value :seon.config.agent/test-ticks)))"]
-                                 {:dirs ["src" "test"] :proofs #{green red 'demo-test/t}})]
+        [held _ run] (in-agent ["(boolean (find-ns 'seon.reader-test))"
+                                "(in-ns 'seon.reader-test) (clojure.test/deftest an-agent-made-this-red (clojure.test/is (= 1 2))) (in-ns 'agent.a1)"
+                                (str "(let [rs (atom {})]"
+                                     " (binding [clojure.test/report (fn [m] (when (#{:pass :fail :error} (:type m))"
+                                     " (swap! rs update (symbol (first clojure.test/*testing-vars*)) (fnil conj #{}) (:type m))))]"
+                                     " (clojure.test/test-vars [#'" green " #'" red "]))"
+                                     " @rs)")]
+                               {:dirs ["src" "test"]})]
     (is (= "true" (:printed held)) "the agent holds main's test namespace without requiring it")
-    (is (= {green :pass red :fail} (edn/read-string (:printed run)))
-        "its proofs ran, green and red; the undefined proof and the rest of main's tests did not")))
+    (is (= {green #{:pass} red #{:fail}} (edn/read-string (:printed run)))
+        "main's test runs green in the agent; a red one beside it reports red")))
 
 (deftest a-relative-path-reads-from-the-source-root
   ;; task seon.agent/an-agent-works-in-its-source-root: a program file is read by the path

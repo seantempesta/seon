@@ -487,9 +487,9 @@
 ;; ---- loading ---------------------------------------------------------------------------
 ;; A form imported from a source tree (seon.source: :form/source) whose namespace this
 ;; process holds is the running binary's own code, compiled in. An imported namespace the
-;; binary was not built with (test/'s) is loaded at boot like every other form, so root,
-;; the fork server and every agent forked from it hold main's tests compiled. Every other
-;; form of main runs where main's program runs: a merge
+;; binary was not built with (test/'s) is loaded like every other form when its import is
+;; (load-changes!, in root's writer and the fork server), so every agent forked after it
+;; holds main's tests compiled. Every other form of main runs where main's program runs: a merge
 ;; loads in place, in root, the fork server (so every agent forked after it inherits it
 ;; compiled) and an agent that merges main (BUILD plan P4). A binary's own form is
 ;; evaluated again only where a changed macro expanded (`dependents`) or a changed schema
@@ -696,14 +696,6 @@
                   (:schema/key x))))))
 
 ;; ---- reach: which tests a change reaches ----------------------------------------------
-
-(defn changed-vars
-  "The vars db-to defines by another form than db-from does: new, redefined or removed
-  (what a branch changed since the main it forked from)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :qualified-symbol]]}
-  [db-from db-to]
-  (let [a (definitions db-from) b (definitions db-to)]
-    (into #{} (comp (filter #(and (= :var (first %)) (not= (get a %) (get b %)))) (map second)) (concat (keys a) (keys b)))))
 
 (defn reaching-tests
   "The program's tests on db that reach one of syms (fully qualified var names): from each
