@@ -304,6 +304,21 @@
         (is (not (stored?))))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
+(deftest gc-runs-through-the-sync-writer
+  ;; datahike.api/gc-storage through Seon's :sync writer (seon.db/writer-cfg) answers what it
+  ;; swept: the writer applied every op as a transaction and committed its result, so a
+  ;; collection, whose result holds no :db-after, failed in commit! ("Parent cannot be nil").
+  ;; A store on disk of this test's own, the last resort: the in-memory store has no nodes to
+  ;; collect; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-gc-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
+    (try
+      (d/transact conn [{:note/text "kept"}])
+      (let [r @(d/gc-storage conn (java.util.Date. 0))]
+        (is (set? r) (pr-str r))
+        (is (= #{"kept"} (notes @conn)) "the branch reads as before"))
+      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+
 (deftest a-commit-costs-what-it-writes
   ;; task seon.db/the-store-grows-with-what-it-keeps. Estimate, from what a commit must
   ;; write: its own datoms (each value twice, in :eavt and :aevt) and the root-to-leaf path
