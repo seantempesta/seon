@@ -44,7 +44,7 @@ id}`. Order: the task's or agent's own settings (`:seon.task/config`), the model
 (default `:seon.config.ai/model`), that model's provider's, then the config's own key. It
 answers `{:value v :source s}`, where `s` is `[:task]`, `[:model id]`, `[:provider id]` or
 `[:config layer]`. A key set nowhere refuses. `(seon.config/value k ctx)` is its value. Ask it
-at the door: `(seon.config/resolve :seon.config.ai/max-in-flight {:model "deepseek-v4-pro"})`.
+at the server: `(seon.config/resolve :seon.config.ai/max-in-flight {:model "deepseek-v4-pro"})`.
 
 ```seon.config/resolve``` answers `{:value :source}` for a key in a context, through ```seon.config/resolve-in```; ```seon.config/value``` is the read every caller makes.
 

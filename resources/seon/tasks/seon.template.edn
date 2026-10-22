@@ -10,5 +10,5 @@
                       seon.reconcile-test/done-refusals-table
                       seon.agent-test/a-forked-agent-knows-its-task
                       seon.reconcile-test/a-task-marked-failed-is-held-for-root
-                      seon.agent-test/a-failure-marked-through-the-door-holds-the-task
+                      seon.agent-test/a-failure-marked-through-the-server-holds-the-task
                       seon.reconcile-test/a-branch-carries-every-task-it-changed-and-records-a-two-sided-edit}}]

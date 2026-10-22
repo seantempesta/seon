@@ -192,7 +192,7 @@
     (remote/close! end)
     (sock/close! a)))
 
-(deftest api-entrance
+(deftest api-server
   (let [st (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                           :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})]
     (testing "the view is answered to its caller's promise"
@@ -353,7 +353,7 @@
             (is (= (:view rs) (:view rs2)))))))))
 
 (defn- answering-sys
-  "(f sys), sys's entrance answering every request with r (a stand-in for the api), on a
+  "(f sys), sys's server answering every request with r (a stand-in for the api), on a
   branch of the test store deleted when f returns."
   [r f]
   (ts/test-branch! (fn [cfg conn] (let [ext (a/chan 4)]

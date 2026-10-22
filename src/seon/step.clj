@@ -68,7 +68,7 @@
   [st v] (let [rid (inc (:rid st))] [(cond-> (assoc st :rid rid) (some? v) (assoc-in [:pending rid] v)) rid]))
 
 (defn ask
-  "A proc's request to root's api, through the entrance: st with v pending under a new id,
+  "A proc's request to root's api, through the server: st with v pending under a new id,
   and the message for the proc's :to-api port; the api answers {:tag rid :r r} on route
   ([pid in]). Answers [st' message]."
   {:malli/schema [:=> [:cat [:map [:rid :int] [:pending :map]] [:tuple :keyword :keyword] :any :map] [:tuple :map :map]]}

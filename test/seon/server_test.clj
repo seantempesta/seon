@@ -1,10 +1,10 @@
-(ns seon.entrance-test
-  "Root's entrance as an outside agent reaches it (seon.entrance, through the built root:
-  seon.agent-test/in-agent). Run: bin/test seon.entrance-test"
-  (:require [clojure.test :refer [deftest is]] [seon.agent-test :as at] [seon.contract :as contract] [seon.entrance] [clojure.data.json] [clojure.edn] [clojure.string]))
+(ns seon.server-test
+  "Root's server as an outside agent reaches it (seon.server, through the built root:
+  seon.agent-test/in-agent). Run: bin/test seon.server-test"
+  (:require [clojure.test :refer [deftest is]] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]))
 
 (deftest a-root-eval-replies-like-an-agent-eval
-  ;; task seon.entrance/root-evals-through-the-one-repl: an eval as root goes through the
+  ;; task seon.server/root-evals-through-the-one-repl: an eval as root goes through the
   ;; agents' REPL path, so its reply items are an agent's: the one printer, a result
   ;; handle, the error's message, *1 kept between requests
   (let [[a-ret a-err r-ret r-err r-star]
@@ -16,8 +16,8 @@
     (is (= (select-keys a-err [:tag :form :printed]) (select-keys r-err [:tag :form :printed])) "an error replies alike")
     (is (= "1" (:printed r-star)) "`sys` is this root: one agent")))
 
-(deftest an-entrance-refusal-is-the-one-error-map
-  ;; task seon.render/one-owner-per-view-path (B2): the door refuses as root does, with the
+(deftest a-server-refusal-is-the-one-error-map
+  ;; task seon.render/one-owner-per-view-path (B2): the server refuses as root does, with the
   ;; one error map, never a second {:error "text"} shape
   (let [answers (at/in-agent [{:op :nope} {:op :context :agent "a9"} {:op :done :agent "a9"} {:op :attach :task "no/such"}])]
     (is (= 4 (count answers)))
@@ -25,28 +25,28 @@
       (is (contract/error? a) (pr-str a))
       (is (nil? (:error a)) (pr-str a)))))
 
-(deftest a-door-defect-answers-that-request-alone
-  ;; task seon.entrance/a-door-defect-answers-that-request-alone: a request whose op throws
+(deftest a-server-defect-answers-that-request-alone
+  ;; task seon.server/a-server-defect-answers-that-request-alone: a request whose op throws
   ;; (attach! refuses a task id that is not a string: its contract) is answered the typed
-  ;; :seon.entrance/defect naming the line it took, and the door answers the next request
+  ;; :seon.server/defect naming the line it took, and the server answers the next request
   (let [[defect ok] (at/in-agent [{:op :attach :task 5} {:op :eval :agent "root" :code "(+ 1 2)"}])]
-    (is (= :seon.entrance/defect (:seon.error/type defect)))
+    (is (= :seon.server/defect (:seon.error/type defect)))
     (is (= (pr-str {:op :attach :task 5}) (:line defect)))
-    (is (= "3" (:printed ok)) "the door goes on")))
+    (is (= "3" (:printed ok)) "the server goes on")))
 
 (deftest the-server-speaks-mcp
-  ;; task seon.entrance/the-server-answers-mcp-itself: root's server answers MCP's JSON-RPC
+  ;; task seon.server/the-server-answers-mcp-itself: root's server answers MCP's JSON-RPC
   ;; itself (bin/mcp only relays lines): initialize with a version it implements, ping,
   ;; tools/list from the one op table, nothing for a notification, and the JSON-RPC error for
   ;; a method or tool it does not know. tools/call through a real root is
   ;; seon.check/mcp-proof (bin/check mcp-proof), through the relay
-  (let [ask #(seon.entrance/mcp-reply nil %)
+  (let [ask #(seon.server/mcp-reply nil %)
         version #(get-in (ask {"id" 1 "method" "initialize" "params" {"protocolVersion" %}}) ["result" "protocolVersion"])
         tools (get-in (ask {"jsonrpc" "2.0" "id" 2 "method" "tools/list"}) ["result" "tools"])]
     (is (= "2024-11-05" (version "2024-11-05")) "a version it implements is the client's")
-    (is (= (peek seon.entrance/protocol-versions) (version "1999-01-01")) "else the newest it implements, never an echo")
+    (is (= (peek seon.server/protocol-versions) (version "1999-01-01")) "else the newest it implements, never an echo")
     (is (= {} (get (ask {"id" 9 "method" "ping"}) "result")))
-    (is (= (mapv #(str "seon_" (name %)) (keys seon.entrance/ops)) (mapv #(get % "name") tools))
+    (is (= (mapv #(str "seon_" (name %)) (keys seon.server/ops)) (mapv #(get % "name") tools))
         "every op is the tool seon_<op>, in the table's order")
     (is (= ["agent" "code"] (get-in (second tools) ["inputSchema" :required])) "an op's required arguments are its tool's")
     (is (nil? (ask {"jsonrpc" "2.0" "method" "notifications/initialized"})) "a notification is not answered")
@@ -54,17 +54,17 @@
     (is (= -32602 (get-in (ask {"id" 4 "method" "tools/call" "params" {"name" "seon_nope" "arguments" {}}}) ["error" "code"])) "a tool no op names: invalid params")))
 
 (deftest a-line-opening-a-string-key-is-mcps
-  ;; task seon.entrance/the-server-answers-mcp-itself: the protocol rule. A line opening {" is
+  ;; task seon.server/the-server-answers-mcp-itself: the protocol rule. A line opening {" is
   ;; JSON-RPC, so an EDN request with a string key is refused naming the rule (-32700), never
   ;; misread; a keyword-keyed EDN line still reads as EDN
-  (let [respond #'seon.entrance/respond
+  (let [respond #'seon.server/respond
         bad (clojure.data.json/read-str (respond nil "{\"op\" \"agents\"}"))]
     (is (= -32700 (get-in bad ["error" "code"])))
     (is (clojure.string/includes? (get-in bad ["error" "message"]) "keyword-keyed map"))
     (is (contract/error? (clojure.edn/read-string (respond nil "{:op :nope}"))) "a keyword-keyed line is EDN in, EDN out")))
 
 (deftest a-refused-attach-writes-nothing
-  ;; task seon.entrance/attach-writes-nothing-when-it-is-refused: attach spawns first and
+  ;; task seon.server/attach-writes-nothing-when-it-is-refused: attach spawns first and
   ;; writes the env, the release and the attempt in one transaction only once its agent
   ;; exists, so a refused spawn leaves the task as it was, and the reconciler never sees a
   ;; release with no attempt (it would spawn a second agent for it). demo/u shares demo/t's

@@ -3,7 +3,7 @@
   proto.control's api, reader, boot and API). Boots the database
   (Datahike, E4a index), forks the single-threaded fork server before any thread exists,
   then runs ONE root graph of four procs:
-    :api          :io     the entrance: owns the callers' reply promises and the agents'
+    :api          :io     where requests come in: owns the callers' reply promises and the agents'
                           graphs; routes every request and answer as data
     :writer       :mixed  the only d/transact, d/branch! and merge caller, with group
                           commit (drain the in-port, one commit per branch, one flush)
@@ -15,7 +15,7 @@
   agent's own loop (seon.step/run-loop), which runs the same step-fn contract.
 
   Ordering is dataflow: every proc starts and parks on its inputs. Shutdown flows too:
-  the entrance closes, agents drain and exit, the writer's in-port closes, the writer
+  the api closes, agents drain and exit, the writer's in-port closes, the writer
   drains and flushes last, the fork server is reaped, then flow/stop.
 
   Agents transact facts on their own branch; root reacts: the writer applies them, and
@@ -32,7 +32,7 @@
 
 
 ;; ====================================================================================
-;; The api: the entrance
+;; The api: where requests come in
 ;; ====================================================================================
 
 ;; ---- problems root observes (lane D2): recorded as seon.error facts on main -----------
@@ -406,7 +406,7 @@
               (view! st update-in [:stats (:k m)] lib/push-window (:v m) 100000))
       :message (let [msg {:op :message :from (:from m) :body (:body m) :ns (profile/now-ns)}]
                  (reduce #(to-agent %1 %2 {:op :write :msg msg}) st (:to m)))
-      ;; a proc's request (the reconciler's, the web's, MCP's): an ordinary entrance request
+      ;; a proc's request (the reconciler's, the web's, MCP's): an ordinary api request
       ;; whose answer goes back to the proc as data
       :request (ext-op st o (assoc (:req m) :p {:route (:route m) :tag (:tag m)}))
       :clone-failed (to-agent st (:agent m) {:op :failed :error (:error m)})
@@ -455,7 +455,7 @@
 (defn- answer-taken
   "st with the caller of x, a message proc pid's throwing step took, answered the defect e
   (task `seon.root/a-proc-answers-every-request-it-took`): the answer its :dest names
-  (`seon.root/back-op`), its promise or reply route when it came in at the entrance or as a
+  (`seon.root/back-op`), its promise or reply route when it came in at the api or as a
   proc's request, the request pending under its :rid, or, for an answer the proc took
   ({:tag :r}), that answer again on the proc's :answers route. An answer that was already an
   error is not answered again: the proc had its one answer, and a step that throws on an
@@ -477,7 +477,7 @@
   (some->> m (vswap! (::taken st) conj))
   (cond
     (and (= in :ext) (nil? m))
-    ;; the entrance closed: agents drain and exit; then the writer's in-port closes
+    ;; the api closed: agents drain and exit; then the writer's in-port closes
     (let [st (assoc st :closing true)]
       (reduce (fn [st aid] (let [[st rid] (step/pend st nil)] (to-agent st aid {:op :drain :rid rid}))) st (keys (:agents st))))
     (= in :ext) (ext-op st o m)
@@ -485,7 +485,7 @@
     :else (back-op st o m)))
 
 (defn api-proc
-  "The entrance. In :ext (the API's callers, each request with its reply promise: the
+  "The api. In :ext (the API's callers, each request with its reply promise: the
   promises live only here), :back (the agents' stand-ins and the error reader),
   :from-writer and :from-fs (answers and events). Out :to-writer, :to-fs, :events, and
   [agent :in] for each agent (routed by the resolver).
@@ -517,7 +517,7 @@
          ;; answered when the api's defect arrives at :error
          st (if-let [lost (seq @(::taken st))] (update st ::lost (fnil into []) lost) st)
          _ (vreset! (::taken st) [])
-         ;; this message, then whatever else is already queued at the entrance and the back door
+         ;; this message, then whatever else is already queued at the api and on :back
          st (loop [st (api-one st o in m) k 1]
               (if (< k (cfg/value :seon.config.root/api-batch))
                 (if-let [[ch c-in] (some (fn [[ch c-in]] (when-let [x (a/poll! ch)] [x c-in]))
@@ -538,7 +538,7 @@
               (do (flow/update! @(:graph st) {:procs (merge (get-in st [:system :procs]) (:agent-procs st)) :conns (get-in st [:system :conns])})
                   (dissoc st ::update))
               st)]
-     ;; the writer's in-port closes once the entrance is closed and every agent has ended
+     ;; the writer's in-port closes once the api is closed and every agent has ended
      (when (and (:closing st) (empty? (:agents st)) (not (:writer-closed st)))
        (a/close! (:to-writer st)))
      (doseq [[id msg] (::to-agents st)] (step/out! o [id :in] msg))
@@ -546,7 +546,7 @@
      (vreset! (::taken st) [])
      [(cond-> (dissoc st ::to-agents ::replies)
         (and (:closing st) (empty? (:agents st))) (assoc :writer-closed true)
-        ;; at the bound of writer requests in flight: read answers only, not the entrance
+        ;; at the bound of writer requests in flight: read answers only, not the api
         true (assoc ::flow/input-filter (if (>= (count (:writes st)) (cfg/value :seon.config.root/api-writes)) #(not= :ext %) identity)))
       @o])))
 
@@ -704,7 +704,7 @@
         events-mult (a/mult events-in)
         chans {:ext (a/chan 1024) :back (a/chan 4096) :to-writer (a/chan (cfg/value :seon.config.root/writer-buf))
                :server-ev (a/chan 4096)
-               ;; outside agents' attempts handed back for judgement (seon.entrance)
+               ;; outside agents' attempts handed back for judgement (seon.server)
                :judge (a/chan 64)}
         view {:agents {} :writer {:tx-count 0} :stats {}
               :server {:agents-forked 0 :pid pid :status :up :restarts 0}
@@ -769,8 +769,8 @@
 ;; ====================================================================================
 
 (defn- call!
-  "Put m (with a fresh reply promise) on the entrance; a promise. After stop! the
-  entrance is closed and the promise answers {:ok false :error \"root stopped\"}."
+  "Put m (with a fresh reply promise) on the api; a promise. After stop! the
+  api is closed and the promise answers {:ok false :error \"root stopped\"}."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.root/request] :seon.host/promise]}
   [sys m]
   (let [p (promise)]
@@ -988,7 +988,7 @@
   [sys msg] @(call! sys {:op :fs :req msg}))
 
 (defn stop!
-  "Stop root by letting the flow drain: the entrance closes (later calls answer \"root
+  "Stop root by letting the flow drain: the api closes (later calls answer \"root
   stopped\"); every agent is sent :stop and exits after the requests before it (SIGKILL
   past seon.agent-proc/stop-bound-ms); the writer's in-port closes, it commits and flushes what it
   took; the fork server is killed and reaped; then flow/stop (every proc exited), the

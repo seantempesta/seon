@@ -165,7 +165,7 @@ Each checkout runs its own standing root with `bin/root start` (also `status`, `
 - It runs detached, on the checkout's ports (`bin/ports`; the owner's main tree uses 7888, with the dashboard on 7777).
 - Its store is kept under `runs/`.
 
-Reach it through the `seon` MCP server (`bin/mcp`, a stdio relay to the entrance, which answers MCP itself):
+Reach it through the `seon` MCP server (`bin/mcp`, a stdio relay to the server, which answers MCP itself):
 - `seon_agents`;
 - `seon_eval` (an agent's own REPL, recorded `:outside`, or `root`);
 - `seon_context` (what the model reads now);

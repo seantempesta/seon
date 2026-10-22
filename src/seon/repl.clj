@@ -389,7 +389,7 @@
   "Evaluate code through the one REPL path: the handler and its middleware, its answers
   folded into reply items and recorded (an agent's, on its branch). From inside an agent,
   the turn loop's forms (origin :model); req adds to the request (root's evaluations,
-  seon.entrance: their namespace, origin, budget and eval fn)."
+  seon.server: their namespace, origin, budget and eval fn)."
   {:malli/schema [:function [:=> [:cat :string] :seon.agent/items] [:=> [:cat :string :map] :seon.agent/items]]}
   ([code] (eval-string code {:origin :model}))
   ([code req]

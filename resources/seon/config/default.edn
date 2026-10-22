@@ -30,7 +30,7 @@
  :seon.config.root/max-agents 1024
 
  ;; Unit: writer requests from the api in flight. Provenance: f2-final. At the bound the api
- ;; stops reading its entrance (Flow's input filter) and reads only answers, so callers are
+ ;; stops reading its server (Flow's input filter) and reads only answers, so callers are
  ;; pushed back and the writer's answers always have room: the api <-> writer cycle cannot wedge.
  :seon.config.root/api-writes 512
  ;; Unit: messages one api step takes before it applies its graph change (spawns and ends
@@ -429,7 +429,7 @@
  ;; and bin/test set SEON_WEB_PORT=0, which local.edn honours, so check steps listen on nothing.
  ;; A taken port leaves the web proc {:listening false} on the health line and boot goes on.
  :seon.config.web/port #long #or [#env SEON_WEB_PORT 0]
- ;; Unit: TCP port on 127.0.0.1: root's entrance (seon.entrance), which bin/mcp and outside
+ ;; Unit: TCP port on 127.0.0.1: root's server (seon.server), which bin/mcp and outside
  ;; agents reach. 0 (the shipped value): `seon root` refuses to serve. config/local.edn names
  ;; the checkout's own (main 7888, worktree k 7900+10k).
  ;; bin/root PORT WEB, bin/mcp PORT and the mcp check set SEON_ENTRANCE_PORT, which local.edn

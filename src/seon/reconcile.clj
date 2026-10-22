@@ -641,7 +641,7 @@
                                                                   (:plan (task/accumulate (get-in st [:idx :tasks]) (:task act)))))
                                     (assoc :seon.attempt/status :refused :seon.attempt/end-ms now
                                            :seon.attempt/reason (:seon.error/message r) :seon.attempt/error (error-text r))))])))
-      ;; an outside agent works this attempt (seon.entrance): no turn loop; it hands it back
+      ;; an outside agent works this attempt (seon.server): no turn loop; it hands it back
       :started (if (= "outside" (get-in act [:env :model]))
                  (done st)
                  (one (request st aid :worked

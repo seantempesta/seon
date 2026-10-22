@@ -143,7 +143,7 @@
 
 (defn context-read?
   "Is evaluation e a context read: an outside agent reading its current-state block through
-  root's entrance (origin :context; seon.entrance)? Its output is the block itself."
+  root's server (origin :context; seon.server)? Its output is the block itself."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [e] (and (map? e) (= :context (:origin e))))
 
@@ -342,7 +342,7 @@
    [:tr {:class (str "at s-" (kname status) (when outcome (str " o-" (kname outcome))))}
     [:td [:code id]]
     [:td (if agent [:a {:href (str "/agent/" (dom-id agent))} (kname agent)] "–")
-     (when (= "outside" (:model env)) [:span {:class "muted" :title "worked from outside (a lane through root's entrance): no turn loop, its turns and tokens are not counted here"} " · outside"])]
+     (when (= "outside" (:model env)) [:span {:class "muted" :title "worked from outside (a lane through root's server): no turn loop, its turns and tokens are not counted here"} " · outside"])]
     [:td [:span {:class (str "pill s-" (kname status))} (kname status)]]
     [:td (str (or turns "–"))] [:td (group3 tokens)]
     [:td {:title (str reason)} (kname outcome)]
@@ -936,9 +936,9 @@
   {:seon.render/html
    [:section {:id "z-context" :class "box"}
     (kicker "context" (if text (str "≈" tokens " tokens · its model's current-state block"
-                                    (when-not (= :door from) ", rebuilt now from main's facts and its last test run")
+                                    (when-not (= :server from) ", rebuilt now from main's facts and its last test run")
                                     (case from
-                                      :door " · the text it last read through root's entrance, as is"
+                                      :server " · the text it last read through root's server, as is"
                                       :main-gone " · read on main (its branch is gone)"
                                       :main " · read on main (its branch has no commit this page has read)"
                                       nil))

@@ -1,7 +1,7 @@
 #!/bin/zsh
 # bin/lane-check [NAME]   prove the lane workflow end to end with this checkout's tools: a throwaway
 # worktree (bin/worktree NAME, default lane-check), its build, its own root on its own ports, an eval
-# through its entrance and through its MCP door (./bin/mcp), the standing root (7888) untouched,
+# through its server and through its MCP server (./bin/mcp), the standing root (7888) untouched,
 # `bin/check smoke` on a store of the checks' own, the root stopped, nothing left running, the
 # worktree and its branch removed. Run it from the main tree. Every step's exit status is printed;
 # the last line is LANE-CHECK OK or LANE-CHECK FAILED, and so is the exit status.
@@ -16,7 +16,7 @@ step ".mcp.json committed and unmodified" zsh -c "cd $WT && git diff --quiet -- 
 step "build seon" zsh -c "cd $WT && nice -n 15 bin/build seon > target/lane-check-build.log 2>&1"
 step "root start" zsh -c "cd $WT && bin/root start"
 P=$(cd $WT && bin/ports | awk '{print $1}')
-step "entrance eval" zsh -c "printf '%s\n' '{:op :eval :agent \"root\" :code \"(+ 1 2)\"}' | nc -w 20 127.0.0.1 $P | grep -q ':printed \"3\"'"
+step "server eval" zsh -c "printf '%s\n' '{:op :eval :agent \"root\" :code \"(+ 1 2)\"}' | nc -w 20 127.0.0.1 $P | grep -q ':printed \"3\"'"
 step "main built from the lane's own source" zsh -c "printf '%s\n' '{:op :eval :agent \"root\" :code \"(count (seon.source/source-files @(:conn sys)))\"}' | nc -w 20 127.0.0.1 $P | grep -qE ':printed \"[1-9][0-9]+\"'"
 step "mcp door eval" zsh -c "cd $WT && printf '%s\n%s\n%s\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"lane-check\",\"version\":\"0\"}}}' '{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}' '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"seon_eval\",\"arguments\":{\"agent\":\"root\",\"code\":\"(* 6 7)\"}}}' | ./bin/mcp 2>/dev/null | grep -q '42'"
 step "standing root untouched" zsh -c "! nc -z 127.0.0.1 7888 || printf '%s\n' '{:op :eval :agent \"root\" :code \"(+ 1 1)\"}' | nc -w 20 127.0.0.1 7888 | grep -q ':printed \"2\"'"

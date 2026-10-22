@@ -28,9 +28,9 @@
                                                      [:commit :uuid] [:t :int] [:branch-commit [:maybe :uuid]] [:image-t :int]]]
  :seon.root/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/proc-defect]] [:pid {:optional true} [:maybe :keyword]]]]
  :seon.root/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/refused]]]]
- ;; a defect answering one outside request at root's server (seon.entrance/respond): the
- ;; line it took, and the cause's ex-data printed; the door goes on serving
- :seon.entrance/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.entrance/defect]] [:line :string] [:data {:optional true} :string]]]
+ ;; a defect answering one outside request at root's server (seon.server/respond): the
+ ;; line it took, and the cause's ex-data printed; the server goes on serving
+ :seon.server/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/defect]] [:line :string] [:data {:optional true} :string]]]
  :seon.writer/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.writer/refused]] [:ok false?]]]
  :seon.merge/uncontracted [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/uncontracted]]
                                                   [:merged? false?] [:uncontracted [:vector :qualified-symbol]]]]

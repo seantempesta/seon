@@ -214,7 +214,7 @@
 ;; ---- reading a setting: the one resolver ------------------------------------------------------
 ;; Owner, 2026-10-21: settings are per model, per provider and per task; "a pillar and not just
 ;; a hack": every reader resolves through `resolve-in` (task -> model -> its provider -> the
-;; config's own key), and the door shows each value with where it came from.
+;; config's own key), and the server shows each value with where it came from.
 
 (defn resolve-in
   "Setting k in config c (its layer sources srcs) for ctx {:task m :model id}: the task's or

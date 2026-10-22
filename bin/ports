@@ -1,11 +1,11 @@
 #!/bin/zsh
-# bin/ports   this checkout's own ports, "ENTRANCE WEB", as its config resolves them
+# bin/ports   this checkout's own ports, "SERVER WEB", as its config resolves them
 # (:seon.config.root/entrance-port, :seon.config.web/port; `seon ports`).
 #
 # The ports live in the checkout's own config layer, config/local.edn (gitignored), which this
 # writes once when it is missing: the main tree (next/) gets 7888 7777, the owner's; each
 # worktree (next-NAME) its own block K from ../worktree-ports (one line per worktree, "NAME K";
-# entrance 7900+10K, web 7901+10K), allocated once under a lock and freed by
+# server 7900+10K, web 7901+10K), allocated once under a lock and freed by
 # bin/worktree --remove. No two checkouts share a port, so every lane can run its own root
 # beside the owner's. Edit local.edn to move them; this reads what the config resolves.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -30,7 +30,7 @@ if [[ ! -f $LOCAL ]]; then
 ;; This checkout's own config layer (gitignored), over resources/seon/config/default.edn and
 ;; under the command line's --config and --set (seon.config). Written by bin/ports from
 ;; ../worktree-ports ($NAME); edit it to move this checkout's ports.
-{;; root's entrance (bin/root, bin/mcp)
+{;; root's server (bin/root, bin/mcp)
  :seon.config.root/entrance-port #long #or [#env SEON_ENTRANCE_PORT $E]
  ;; the dashboard; bin/check and bin/test set SEON_WEB_PORT=0, so their roots serve none
  :seon.config.web/port #long #or [#env SEON_WEB_PORT $W]}

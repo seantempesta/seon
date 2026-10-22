@@ -55,7 +55,7 @@
 
 (defn- root-answers
   "The output of a built root on the store at path (extra --set args), asked each request
-  in turn on its entrance: one answer line per request, then EXIT and its log. The root's
+  in turn on its server: one answer line per request, then EXIT and its log. The root's
   stdin is a fifo held open until every answer is in; its listening line (or its death)
   ends the wait, as bin/root's start does. env: variables the root starts with (\"K=v \")."
   ([path args requests] (root-answers path args requests ""))
