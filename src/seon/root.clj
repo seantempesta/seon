@@ -110,7 +110,7 @@
 (defn- exit-text {:malli/schema [:=> [:cat [:maybe :seon.lib/exit-status]] :string]}
   [x] (cond (:signal x) (str ": signal " (:signal x)) x (str ": exit " (:exit x)) :else ""))
 
-(declare deliver-rid)
+(declare deliver-rid answer-taken)
 
 (defn- record-death
   "Agent aid's death, folded, and answered to the requests it died in (inflight): its died
@@ -405,12 +405,16 @@
       ;; the end of the flow: the writer has drained; the fork server goes last
       :drained (do (step/out! o :to-fs {:op :shutdown}) st)
       :fs-down (do (some-> (:shutdown-p st) (deliver {:drained true :fork-server (:pid m)})) st)
-      ;; a defect in a root proc: recorded as data (its error map when it carries one)
+      ;; a defect in a root proc: recorded as data (its error map when it carries one), and
+      ;; the message the step took answered with it (Flow's catch dropped the step's outputs):
+      ;; the api's own throw answers every message its step took (::lost)
       :error (let [e (if (contract/error? (:data m))
                        (:data m)
-                       (contract/error :seon.root/proc-defect (proc-sym st (:pid m)) (or (:message m) "a defect with no message") {:pid (:pid m)}))]
+                       (contract/error :seon.root/proc-defect (proc-sym st (:pid m)) (or (:message m) "a defect with no message") {:pid (:pid m)}))
+                   taken (distinct (cond-> (if (= :api (:pid m)) (::lost st) []) (:msg m) (conj (:msg m))))]
                ;; the view keeps the newest 20 and counts them all (renders say how many it left)
-               (-> (view! st update :root-errors (fnil #(vec (take-last 20 (conj % %2))) []) (merge {:pid (:pid m) :message (:message m)} (:data m)))
+               (-> (reduce (fn [st x] (answer-taken st o (:pid m) x e)) (cond-> st (= :api (:pid m)) (dissoc ::lost)) taken)
+                   (view! update :root-errors (fnil #(vec (take-last 20 (conj % %2))) []) (merge {:pid (:pid m) :message (:message m)} (:data m)))
                    (view! update :root-errors-total (fnil inc 0))
                    (problem (err/occurrence e :platform {} (System/currentTimeMillis)))))
       ;; an agent's eval errors since its last commit (seon.error/note), counted across agents
@@ -430,8 +434,29 @@
       :kill-all (reduce (fn [st aid] (-> st (set-agent aid {:status :killed}) (to-agent aid {:op :kill}))) st (keys (:agents st)))
       st)))
 
+(defn- answer-taken
+  "st with the caller of x, a message proc pid's throwing step took, answered the defect e
+  (task `seon.root/a-proc-answers-every-request-it-took`): the answer its :dest names
+  (`seon.root/back-op`), its promise or reply route when it came in at the entrance or as a
+  proc's request, the request pending under its :rid, or, for an answer the proc took
+  ({:tag :r}), that answer again on the proc's :answers route. An answer that was already an
+  error is not answered again: the proc had its one answer, and a step that throws on an
+  error would throw on the next."
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :keyword :any :seon.error/base] :seon.root/api-state]}
+  [st o pid x e]
+  (cond
+    (not (map? x)) st
+    (:dest x) (back-op st o {:dest (:dest x) :r e})
+    (:p x) (reply! st (:p x) e)
+    (= :request (:op x)) (reply! st {:route (:route x) :tag (:tag x)} e)
+    (int? (:rid x)) (deliver-rid st (:rid x) e)
+    (and (contains? x :tag) (contains? x :r) (not (contract/error? (:r x))))
+    (reply! st {:route [pid :answers] :tag (:tag x)} e)
+    :else st))
+
 (defn- api-one {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :keyword [:maybe :map]] :seon.root/api-state]}
   [st o in m]
+  (some->> m (vswap! (::taken st) conj))
   (cond
     (and (= in :ext) (nil? m))
     ;; the entrance closed: agents drain and exit; then the writer's in-port closes
@@ -458,6 +483,9 @@
   ;; seon.root/apply!; agents' procs join them at each update!
   ([args] (assoc (dissoc args :system) :agents {} :agent-procs {} :pending {} :rid 0 :next-id 0
                  :system @(:system args)
+                 ;; what this step took, kept across Flow's catch (which keeps the state from
+                 ;; before the step): a host object of this proc's own
+                 ::taken (volatile! [])
                  ::flow/in-ports {:ext (:ext args) :back (:back args)}
                  ::flow/out-ports {:to-writer (:to-writer args) :events (:events args)}))
   ([st tr]
@@ -467,6 +495,10 @@
    st)
   ([st in m]
    (let [o (volatile! {})
+         ;; a step that threw left what it took (Flow names only the first): lost, each
+         ;; answered when the api's defect arrives at :error
+         st (if-let [lost (seq @(::taken st))] (update st ::lost (fnil into []) lost) st)
+         _ (vreset! (::taken st) [])
          ;; this message, then whatever else is already queued at the entrance and the back door
          st (loop [st (api-one st o in m) k 1]
               (if (< k (cfg/value :seon.config.root/api-batch))
@@ -493,6 +525,7 @@
        (a/close! (:to-writer st)))
      (doseq [[id msg] (::to-agents st)] (step/out! o [id :in] msg))
      (doseq [[route msg] (::replies st)] (step/out! o route msg))
+     (vreset! (::taken st) [])
      [(cond-> (dissoc st ::to-agents ::replies)
         (and (:closing st) (empty? (:agents st))) (assoc :writer-closed true)
         ;; at the bound of writer requests in flight: read answers only, not the entrance
@@ -646,7 +679,8 @@
         _ (deliver graph-p g)
         {root-errors :error-chan} (flow/start g)
         ;; an edge reader: Flow's error channel (every proc's, agents included), each
-        ;; defect fed to the api as data
+        ;; defect fed to the api as data, with the message the step took (:msg), which the
+        ;; api answers (task `seon.root/a-proc-answers-every-request-it-took`)
         errors (doto (Thread. ^Runnable (fn []
                                 (let [rd (fn [] (a/alts!! [root-errors]))]
                                   (loop []
@@ -655,7 +689,8 @@
                                         nil
                                         (do (a/>!! (:back chans) {:op :error :pid (::flow/pid e)
                                                                   :message (or (some-> (::flow/ex e) ex-message) (str e))
-                                                                  :data (some-> (::flow/ex e) ex-data)})
+                                                                  :data (some-> (::flow/ex e) ex-data)
+                                                                  :msg (::flow/msg e)})
                                             (recur)))))))
                               "seon-flow-errors")
                  (.setDaemon true) (.start))
@@ -694,29 +729,32 @@
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys [:maybe :map]] :map]]}
   ([sys] (state sys nil))
   ([sys {:keys [datoms]}]
-  (let [v (deref (call! sys {:op :state}) 5000 {})
+  (let [v @(call! sys {:op :state})
         now (lib/now-ns)
         recent (reduce + 0 (keep (fn [[t n]] (when (< (- now t) 1000000000) n)) (get-in v [:writer :recent])))
         db @(:conn sys)
         {:keys [batches commits batched-tx lag-ms fork-ms]} (:stats v)]
-    (-> v
-        (update :writer #(-> % (dissoc :recent :batch-ms) (assoc :tx-per-s (double recent) :batch-p50-ms (lib/p50 (:batch-ms %)))))
-        (assoc :main (cond-> {:t (:max-tx db)} datoms (assoc :datoms (count (d/datoms db :eavt)))))
-        (update :server assoc :lag-ms (lib/p50 lag-ms) :fork-ms-p50 (lib/p50 fork-ms))
-        (update :store merge (pdb/map-use (:cfg sys))
-                (when batches (cond-> {:batches batches :commits commits}
-                                ;; main's transactions per group commit (>= 1)
-                                (and commits (pos? commits)) (assoc :tx-per-commit (lib/r2 (/ (double (or batched-tx 0)) commits))))))))))
+    ;; the api's answer passes through as itself: a defect is not decorated as a view
+    (if (contract/error? v)
+      v
+      (-> v
+          (update :writer #(-> % (dissoc :recent :batch-ms) (assoc :tx-per-s (double recent) :batch-p50-ms (lib/p50 (:batch-ms %)))))
+          (assoc :main (cond-> {:t (:max-tx db)} datoms (assoc :datoms (count (d/datoms db :eavt)))))
+          (update :server assoc :lag-ms (lib/p50 lag-ms) :fork-ms-p50 (lib/p50 fork-ms))
+          (update :store merge (pdb/map-use (:cfg sys))
+                  (when batches (cond-> {:batches batches :commits commits}
+                                  ;; main's transactions per group commit (>= 1)
+                                  (and commits (pos? commits)) (assoc :tx-per-commit (lib/r2 (/ (double (or batched-tx 0)) commits)))))))))))
 
 (defn stats "The raw counters and windows." {:malli/schema [:=> [:cat :seon.root/sys] [:maybe :map]]}
-  [sys] (:stats (deref (call! sys {:op :state}) 5000 {})))
+  [sys] (:stats @(call! sys {:op :state})))
 
 (defn errors
   "The api's fold of the errors it saw (seon.error/fold): the true counts, including repeats
   of written signatures that main does not hold; the api's defect when it could not answer
   (task `seon.root/a-proc-answers-every-request-it-took`)."
   {:malli/schema [:=> [:cat :seon.root/sys] [:or :seon.error/fold :seon.error/base]]}
-  [sys] (deref (call! sys {:op :errors}) 5000 {}))
+  [sys] @(call! sys {:op :errors}))
 
 (defn events
   "A fresh tap of every event {:type :spawned|:ready|:reply|:tx|:merged|:tests|:killed|:ended|:dead ...}."
@@ -741,7 +779,7 @@
   ([sys agent-id opts] (call! sys {:op :clone :parent agent-id :opts opts})))
 
 (defn- agent-entry {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] [:maybe :map]]}
-  [sys id] (get-in (deref (call! sys {:op :state}) 5000 {}) [:agents id]))
+  [sys id] (get-in @(call! sys {:op :state}) [:agents id]))
 
 (defn submit!
   "Send forms (a string) to the agent; a promise of the reply vector, one map per form.

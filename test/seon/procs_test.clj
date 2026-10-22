@@ -224,7 +224,29 @@
             sent (first (:to-writer outs))]
         (step #'root/api-proc st :back {:op :error :pid :writer :message "boom" :msg sent})
         (is (= :seon.root/proc-defect (:seon.error/type (answer p))))
-        (is (= "boom" (:seon.error/message (answer p))))))))
+        (is (= "boom" (:seon.error/message (answer p))))))
+    (testing "the api's step threw on a later message of its batch (Flow names only the first): each message it took is answered"
+      (let [first-msg {:op :state :p (promise)}]
+        (a/>!! (:back st) {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data []}} :route [:reconciler :answers] :tag 3})
+        (a/>!! (:back st) {:op :status :agent "not-an-id" :set {}})
+        (is (thrown? Exception (#'root/api-proc st :ext first-msg)) "the third message throws: Flow keeps st, drops the outputs")
+        (let [[_ outs] (step #'root/api-proc st :back {:op :error :pid :api :message "boom" :msg first-msg})
+              again (get outs [:reconciler :answers])]
+          (is (= [3] (map :tag again)) "the second message, a proc's write request, is answered on its route")
+          (is (= :seon.root/proc-defect (:seon.error/type (:r (first again))))))))
+    (testing "a proc threw on the answer it took: the api answers it again on the proc's :answers route, once"
+      (let [[_ outs] (step #'root/api-proc st :back {:op :error :pid :render :message "boom" :msg {:tag 7 :r {:agents {}}}})
+            again (get outs [:render :answers])]
+        (is (= [7] (map :tag again)))
+        (is (= :seon.root/proc-defect (:seon.error/type (:r (first again)))))
+        (testing "and a step that throws on that defect is not answered again"
+          (let [[_ outs] (step #'root/api-proc st :back {:op :error :pid :render :message "boom" :msg (first again)})]
+            (is (empty? (get outs [:render :answers])))))
+        (testing "the render proc takes the defect: its view request answered, the view as it was"
+          (let [rs {:rid 7 :pending {7 :state} :view {:agents {:a1 {}}}}
+                [rs2 _] (#'seon.render.proc/render-proc rs :answers (first again))]
+            (is (empty? (:pending rs2)))
+            (is (= (:view rs) (:view rs2)))))))))
 
 (defn- answering-sys
   "(f sys), sys's entrance answering every request with r (a stand-in for the api), on a

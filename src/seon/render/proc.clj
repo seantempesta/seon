@@ -428,6 +428,9 @@
   {:malli/schema [:=> [:cat :map :seon.host/volatile :any :any] :map]}
   [st o kind r]
   (cond
+    ;; the view's request answered an error (a defect, for a request a step lost): taken,
+    ;; and the view stays as it was; the next event asks again
+    (and (= :state kind) (seon.contract/error? r)) st
     (= :state kind)
     (let [st (assoc st :view r)
           tx (get-in r [:writer :tx-count])
