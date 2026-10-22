@@ -487,8 +487,15 @@
     ;; every agent's eval and its test passed; the 10 merges went in
     ;; and root's threads exactly as declared once agents run (at boot Jolt's io poller has not
     ;; started yet: it starts at the first socket wait, an agent's)
-    (let [ok (and ready? (every? :ok results) (every? :merged? merged) killed?
-                  (every? empty? [th-ready th-work th-end]))]
+    ;; the target machine (a 16 GB M1, owner 2026-10-22): root, the fork server and the default
+    ;; number of agents at once fit :seon.config.machine/memory-mb, each agent charged what the
+    ;; system's free memory dropped per agent (its own pages, its page tables, the kernel's share)
+    (let [per-agent (/ (- (:free-mb mem0) (:free-mb mem1)) n)
+          need (+ (lib/real-mb) (:mem-mb fs) (* (seon.config/value :seon.config.agent/max-running) per-agent))
+          budget (seon.config/value :seon.config.machine/memory-mb)
+          _ (out! "memory at " (seon.config/value :seon.config.agent/max-running) " agents: " (lib/r2 need) " MB of " budget " MB (" (lib/r2 per-agent) " MB per agent)")
+          ok (and ready? (every? :ok results) (every? :merged? merged) killed?
+                  (every? empty? [th-ready th-work th-end]) (<= need budget))]
       (out! (if ok "SCALE OK" "SCALE FAILED"))
       (lib/c-exit (if ok 0 1)))))
 
@@ -566,6 +573,12 @@
 
 (defn- dir-bytes [path] (reduce + (map #(.length %) (filter #(.isFile %) (file-seq (java.io.File. path))))))
 
+(defn- main-data-datoms
+  "Main's datoms but root's own facts (:seon.root/*: its quiescence report, its collection
+  record), which a restarted root writes anew: what a restart must give back exactly."
+  [sys]
+  (count (remove #(= "seon.root" (namespace (:a %))) (d/datoms @(:conn sys) :eavt))))
+
 (defn durable-write
   "Phase 1 (a process of its own): boot on main branch nm of the one store (made from its
   seed), then
@@ -597,7 +610,7 @@
         _ (loop [] (let [e (clojure.core.async/<!! ev)] (when-not (and (= :commit (:type e)) (= (:id cl) (:agent e))) (recur))))
         _ @(c/transact-main! sys [] {:flush? true})
         st (c/state sys {:datoms true})
-        expect {:main-datoms (get-in st [:main :datoms]) :main-t (get-in st [:main :t])}]
+        expect {:main-datoms (main-data-datoms sys) :main-t (get-in st [:main :t])}]
     (spit (str path ".expect.edn") (pr-str expect))
     (out! "phase 1 done: " expect "; store " (dir-bytes (:store-path sys)) " bytes; killing root (no stop!)")
     (lib/c-kill (lib/c-getpid) 9)))
@@ -612,7 +625,7 @@
         boot-ms (lib/r2 (lib/ms-since t0))
         st (c/state sys {:datoms true})
         _ (out! "recovered in " boot-ms " ms: " (:store st) " main " (:main st))
-        main-ok (= (:main-datoms expect) (get-in st [:main :datoms]))
+        main-ok (= (:main-datoms expect) (main-data-datoms sys))
         n (c/spawn! sys {:task "born after the restart"})
         _ (await-status sys [n] #{:idle} 5000)
         p1 (fn [id forms] (mapv (juxt :printed :recorded) @(c/submit! sys id forms)))

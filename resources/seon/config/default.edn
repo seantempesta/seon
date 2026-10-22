@@ -121,6 +121,12 @@
 
  ;; ==== agents =================================================================================
 
+ ;; Unit: MB. The memory Seon itself may use on the machine it targets: a 16 GB MacBook M1
+ ;; (owner, 2026-10-22: "run well on a 16GB Macbook M1"), a quarter of it, leaving the rest to
+ ;; the OS, the user's work and what agents run (builds, tests). At the bound: seon.check/scale
+ ;; fails when root, the fork server and :seon.config.agent/max-running agents would exceed it
+ ;; (each agent charged the system's measured free-memory drop per agent).
+ :seon.config.machine/memory-mb 4096
  ;; Unit: attempts running at once (v1's :seon.config.agent/max-running, same value and
  ;; reason): four agents beside the user's work fit a 16 GB machine. A ready task beyond it
  ;; waits for an end; 0 starts nothing new while running work finishes. root's start! may
