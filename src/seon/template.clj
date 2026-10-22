@@ -93,7 +93,8 @@
   (cond-> {:seon.task/ns (:seon.task/ns d) :seon.task/name nm
            :seon.task/kind :merge :seon.task/plan (merge-plan wid)
            :seon.task/instructions (instructions :merge)
-           :seon.task/needs #{wid} :seon.task/branch (:seon.task/branch d)}
+           :seon.task/needs #{wid}}
+    (:seon.task/branch d) (assoc :seon.task/branch (:seon.task/branch d))
     (:seon.task/model d) (assoc :seon.task/model (:seon.task/model d))
     (:seon.task/config d) (assoc :seon.task/config (:seon.task/config d))))
 
