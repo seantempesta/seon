@@ -79,9 +79,13 @@
  ;; The durable store's konserve backend: LMDB (one env sync per commit) or the POSIX filestore.
  :seon.config.store/backend :lmdb
  ;; Unit: entity ids per agent. Each agent process mints ids on its own branch from a block
- ;; of this many past the store's highest id at boot (session L1's lease): ids stay unique
- ;; store-wide with no shared counter. At the bound: the agent's ids would run into the next
- ;; agent's block. Not measured against the largest branch.
+ ;; of this many, reserved for it from root's one counter of the store (the one main's writes
+ ;; mint from) when the writer branches it or its clone (seon.db/lease-block!): agents' ids
+ ;; and main's never meet (docs/storage.md#leases). At the bound the agent's next write is
+ ;; refused :seon.db/lease-spent, nothing applied. Each spawn, resume or clone takes a block:
+ ;; ids stay below tx0 (2^29, about 5.4e8), so a kept store holds about 5,400 blocks of
+ ;; 100,000 (task seon.db/the-id-space-holds-the-blocks-a-store-keeps). Not measured
+ ;; against the largest branch.
  :seon.config.store/eid-lease 100000
  ;; Unit: bytes. LMDB's map size, the store's largest size. At the bound LMDB refuses the
  ;; write (MDB_MAP_FULL, a :seon.writer/refused answer). Provenance: the store's first
