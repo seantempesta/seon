@@ -223,11 +223,16 @@
         p1 'seon.reader-test/prose-without-a-fence-is-a-comment
         p2 'seon.reader-test/a-fenced-reply-reads-only-its-code
         digests (program/reach-digests (runner/program-db here) (fx/inputs here))
-        _ (proofs/store-greens! #(fx/write-file {:req %}) dir (proofs/run-tests! [p1] (select-keys digests [p1]) (fn [_])))
+        _ (.mkdirs (java.io.File. ^String dir))
+        ;; the checkout's green for p1, as bin/test stores one (a run nested in this test's run
+        ;; would report through it)
+        unstored (proofs/store-greens! #(fx/write-file {:req %}) dir {p1 {:test p1 :digest (digests p1) :pass 1 :fail 0 :error 0}})
+        stored (proofs/greens dir [(digests p1)])
         [r] (in-agent ["(select-keys (prove) [:results :ran :reused])"]
                       {:dirs ["src" "test"] :proofs #{p1 p2} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})
         checkout (proofs/plan nil (select-keys digests [p2]) (proofs/greens dir [(digests p2)]) #{})]
     (sh/sh "rm" "-rf" dir)
+    (is (and (empty? unstored) (seq stored)) "the checkout stored its green for p1")
     (is (= {:results {p1 :pass p2 :pass} :ran 1 :reused 1} (edn/read-string (:printed r))) "the agent reuses the checkout's p1 and runs p2")
     (is (= [] (:run checkout)) "the checkout reuses the agent's p2")))
 
