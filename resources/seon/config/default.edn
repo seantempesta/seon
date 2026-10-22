@@ -219,7 +219,7 @@
  ;; own :seon.config.merge/max-merge-turns wins.
  :seon.config.merge/max-merge-turns 2
  ;; Unit: refinement chains a task's failures may attach when it declares no :seon.task/budget.
- ;; At the bound the task is budget-spent (a fact naming its cause and what it blocks).
+ ;; At the bound the task is stuck (a fact naming its cause and what it blocks).
  :seon.config.task/budget 2
 
  ;; ==== Seon's own source ======================================================================

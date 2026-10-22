@@ -96,7 +96,7 @@
 (def ^:private task-shown
   "The keys `task`'s lines show; every other key of the task is printed after them."
   [:seon.task/id :seon.task/kind :seon.task/execution :seon.task/needs :seon.task/branch :seon.task/model :seon.task/problem
-   :seon.task/failure :seon.task/budget-spent :seon.task/accumulated :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/evidence])
+   :seon.task/failure :seon.task/stuck :seon.task/accumulated :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/evidence])
 
 (defn task
   "A task as an agent or root reads it: its id, kind, desired execution, needs, branch and
@@ -111,7 +111,7 @@
         plan (or (:plan acc) (:seon.task/plan t))
         proofs (sort-by str (or (:proofs acc) (:seon.task/proofs t)))
         {:keys [reason counterexample]} (:seon.task/failure t)
-        {:keys [cause blocks]} (:seon.task/budget-spent t)
+        {:keys [cause blocks]} (:seon.task/stuck t)
         own (apply dissoc t task-shown)
         line #(prose-part %1 (line-budget) %2 true)]
     (out "\n"
@@ -121,8 +121,8 @@
        (when (:seon.task/problem t) (cat-parts [["problem: " false] (line (:seon.task/problem t) (read-of env :seon.task/problem))]))
        (when reason (cat-parts [["failed: " false] (line reason (read-of env [:seon.task/failure :reason]))
                                 (when counterexample (cat-parts [[" · counterexample " false] (line counterexample (read-of env [:seon.task/failure :counterexample]))]))]))
-       (when cause (cat-parts [["budget spent: " false] (line cause (read-of env [:seon.task/budget-spent :cause]))
-                               (when (seq blocks) (cat-parts [[" · blocks " false] (names-part (sort blocks) :seon.config.render.list/rows (read-of env [:seon.task/budget-spent :blocks]))]))]))
+       (when cause (cat-parts [["budget spent: " false] (line cause (read-of env [:seon.task/stuck :cause]))
+                               (when (seq blocks) (cat-parts [[" · blocks " false] (names-part (sort blocks) :seon.config.render.list/rows (read-of env [:seon.task/stuck :blocks]))]))]))
        (when plan (cat-parts [["plan: " false] (prose-part plan (or (:seon.render/budget env) (part-budget))
                                                            (read-of env (if acc [:seon.task/accumulated :plan] :seon.task/plan)) false)]))
        (when (:seon.task/instructions t) (cat-parts [["instructions: " false] (line (:seon.task/instructions t) (read-of env :seon.task/instructions))]))
@@ -151,10 +151,10 @@
        (n :seon.attempt/uncontracted "without a contract")])))
 
 (defn- class-word
-  "A problem class as its line says it: :budget-spent reads as budget spent (root's ruling,
-  2026-10-22; :blocked is a task waiting on its needs)."
+  "A problem class as its line says it: the stored class :stuck reads as budget spent (owner's
+  ruling, 2026-10-22; :blocked is a task waiting on its needs)."
   {:malli/schema [:=> [:cat [:maybe :keyword]] :string]}
-  [c] (if (= :budget-spent c) "budget spent" (ui/kname c)))
+  [c] (if (= :stuck c) "budget spent" (ui/kname c)))
 
 (defn problem-row
   "One problem row (seon.problems/report), :class (and its class's open count :n) assoc'd by

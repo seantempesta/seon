@@ -3,9 +3,9 @@
   is a row of data that one runner works (run-scenario): its specs, its boot, what a fresh
   agent must print on main afterwards and what else it asserts. The rows: the six-task graph
   with a cancel, a root restart in two phases, the merge scenarios (seon.fixtures/scenarios),
-  a swarm over shared definitions, a real model's run, and a task that always fails ending with
-  its budget spent; a new run is one row. bin/check runs them as modes of target/seon:
-    calc | resume DIR | resume2 DIR | scenario conflict|semantic|hairy|newns|sibling [model] | swarm N M (verdict SWARM) | model add|calc | budget-spent
+  a swarm over shared definitions, a real model's run, and a task that always fails ending
+  stuck; a new run is one row. bin/check runs them as modes of target/seon:
+    calc | resume DIR | resume2 DIR | scenario conflict|semantic|hairy|newns|sibling [model] | swarm N M (verdict SWARM) | model add|calc | stuck
     | loop DIR (the self-improvement loop's first turn, on a clone of this repository under DIR)
   Each run ends on what the system observes (the reconciler's quiescence report, an event,
   or a fact on main), never on a deadline. Prints one EDN line per phase; the last line is
@@ -288,7 +288,7 @@
 (defn- swarm
   "n tasks over 5 shared definitions, max-running m (more than 5, so tasks on one var run
   at once and their merges conflict): conflicts arose, each was resolved by a merge agent
-  or ended in attached tasks, every task is done, nothing has spent its budget, and a fresh agent on
+  or ended in attached tasks, every task is done, nothing is stuck, and a fresh agent on
   main gets every proof's value (s_k-test asserts (v_j 100) = 100+j). Verdict SWARM."
   [n m]
   {:boot {:max-running (parse-long (or m "8"))} :specs (fx/swarm-specs (parse-long (or n "20"))) :tns 'sw :label "SWARM"
@@ -307,9 +307,9 @@
      :check (if add? "(app.calc/add 1 2)" "[(app.calc/add 1 2) (app.calc/sum-sq 3 4) (app.calc/abs -5)]")
      :ok (fn [{:keys [d]}] (all-done d))}))
 
-(defn- budget-spent
-  "A task that always fails ends with its budget spent: add (always wrong) attaches refinement
-  chains until its budget is spent, then the reconciler records the budget-spent fact (cause and
+(defn- stuck
+  "A task that always fails ends observed stuck: add (always wrong) attaches refinement
+  chains until its budget is spent, then the reconciler records the stuck fact (cause and
   what it blocks: twice, needing add) and reports quiescence; this run returns on that
   report, with no deadline. Verdict: one root cause, the last chain's design (the
   always-wrong model never improves the plan, so it is refused :no-design), blocking the
@@ -323,7 +323,7 @@
                      (not-any? #(= :held (:seon.task/execution %)) (vals (task/tasks d))))
             :root-causes (:root-causes q)
             :quiet-after-last-end-ms (- (now) (apply max 0 (keep :seon.attempt/end-ms (vals (task/attempts d)))))
-            :problems-budget-spent (count (get-in (root/problems sys) [:classes :budget-spent :rows]))}))})
+            :problems-stuck (count (get-in (root/problems sys) [:classes :stuck :rows]))}))})
 
 (defn run
   "One e2e mode; answers whether it passed. No mode, or an unknown one: its usage, then
@@ -331,7 +331,7 @@
   [mode [x y]]
   (case mode
     "loop" (loop-run x)
-    ("calc" "resume" "resume2" "scenario" "swarm" "model" "budget-spent")
+    ("calc" "resume" "resume2" "scenario" "swarm" "model" "stuck")
     (run-scenario (case mode
                     "calc" (calc x)
                     "resume" (restart false x)
@@ -339,7 +339,7 @@
                     "scenario" (scenario x y)
                     "swarm" (swarm x y)
                     "model" (model-run x)
-                    "budget-spent" (budget-spent)))
-    (do (println (str "e2e: no mode " mode "; usage: seon e2e loop|calc|resume|resume2|scenario|swarm|model|budget-spent [ARGS]"))
+                    "stuck" (stuck)))
+    (do (println (str "e2e: no mode " mode "; usage: seon e2e loop|calc|resume|resume2|scenario|swarm|model|stuck [ARGS]"))
         (println "E2E FAILED")
         false)))

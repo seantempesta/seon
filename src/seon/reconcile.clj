@@ -152,7 +152,7 @@
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
   [idx id]
   (let [t (get-in idx [:tasks id])]
-    (boolean (and t (= :running (:seon.task/execution t)) (not (idx-done? idx id)) (nil? (:seon.task/budget-spent t))
+    (boolean (and t (= :running (:seon.task/execution t)) (not (idx-done? idx id)) (nil? (:seon.task/stuck t))
                   (every? #(idx-done? idx %) (:seon.task/needs t))
                   (not-any? #(let [a (get-in idx [:attempts %])] (or (live-in? idx a) (judged (:seon.attempt/status a))))
                             (get-in idx [:by-task id]))))))
@@ -399,7 +399,7 @@
       (vec (sort (filter #(and (= :running (get-in idx [:tasks % :seon.task/execution])) (not (idx-done? idx %))) seen))))))
 
 (defn root-causes
-  "Why released work is not done, as root causes: each task whose budget-spent fact holds (its
+  "Why released work is not done, as root causes: each task whose stuck fact holds (its
   budget spent), each task whose latest attempt root refused to spawn (its reason: the
   branch is held, or too many live agents), and each task not released (cancelled, held)
   that released work needs, with the released tasks it blocks. Read once at quiescence: one
@@ -408,7 +408,7 @@
   [idx]
   (vec (for [[id t] (sort-by key (:tasks idx))
              :when (not (idx-done? idx id))
-             :let [s (:seon.task/budget-spent t)
+             :let [s (:seon.task/stuck t)
                    ex (:seon.task/execution t)
                    ;; attempts are numbered in order (actions' spawns), so the latest is the count's
                    latest (get-in idx [:attempts (str id "#" (count (get-in idx [:by-task id])))])
@@ -419,13 +419,13 @@
            s (assoc :attempt (:attempt s))
            (and refused (not s)) (assoc :attempt (:seon.attempt/id refused))))))
 
-(defn budget-spent-tx
+(defn stuck-tx
   "Task id's budget is spent: attempt aid failed with its budget spent. The problem and the derived
   fact (the cause and what it blocks); the task stays released, its execution the owner's."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.attempt/id :seon.task/id :string] [:vector :map]]}
   [idx aid id problem]
   [{:seon.task/id id :seon.task/problem problem
-    :seon.task/budget-spent {:attempt aid :cause problem :blocks (blocks idx id)}}])
+    :seon.task/stuck {:attempt aid :cause problem :blocks (blocks idx id)}}])
 
 (defn quiescent
   "Main's last quiescence report on db ({:t :root-causes}, written by the reconciler proc), or nil."
@@ -548,7 +548,7 @@
               [st [o1 o2]])
       ;; budget spent: its budget is spent, observed; its release stays the owner's
       :bail (one (write st attempt :done (into (cas-tx attempt (:seon.attempt/status a) :bailed {})
-                                               (budget-spent-tx (:idx st) attempt (:task act) (:problem act)))))
+                                               (stuck-tx (:idx st) attempt (:task act) (:problem act)))))
       ;; a merge task's branch into main: clean by construction when the branch holds main's
       ;; program head; behind: its task runs again, a new agent
       ;; an octopus merge: every member's branch into main in one commit (each holds main's
@@ -689,7 +689,7 @@
                                               (conj (tpl/attach-tx (:db st) {:attempt attempt :task task :problem problem})
                                                     {:seon.attempt/id attempt :seon.attempt/error (error-text r)})
                                               :else (into (cas-tx attempt :ended :bailed {:seon.attempt/error (error-text r)})
-                                                          (budget-spent-tx (:idx st) attempt task problem)))))
+                                                          (stuck-tx (:idx st) attempt task problem)))))
                                         (:members act) (:results r))))))
       :write-back (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)

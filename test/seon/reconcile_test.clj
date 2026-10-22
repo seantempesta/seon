@@ -141,7 +141,7 @@
     ;; its agent died
     (attempt "a" 1 :dead)
     [{:op :attach :attempt "demo/a#1" :task "demo/a" :problem "its agent died"}]
-    ;; budget spent (declared 0): bail, which makes the task budget-spent
+    ;; budget spent (declared 0): bail, which makes the task stuck
     (concat (attempt "a" 1 :ended :outcome :cap :results {(t "a") :fail}) [{:seon.task/id "demo/a" :seon.task/budget 0}])
     [{:op :bail :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended cap: proof-red demo-test/a-test"}]))
 
@@ -422,18 +422,18 @@
         [act :as acts] (r/actions idx)]
     (is (= [{:op :bail :attempt "demo/add#1" :task "demo/add" :problem "attempt demo/add#1 ended cap: proof-red demo-test/add-test"}] acts))
     (let [db' (d/db-with db (concat (task/status-tx db "demo/add#1" :ended :bailed {})
-                                    (r/budget-spent-tx idx "demo/add#1" "demo/add" (:problem act))))
+                                    (r/stuck-tx idx "demo/add#1" "demo/add" (:problem act))))
           idx' (r/index db')
           blocked ["demo/add-merge" "demo/twice" "demo/twice-merge"]]
-      (testing "the release stays the owner's; the budget-spent fact names the cause and what it blocks"
+      (testing "the release stays the owner's; the stuck fact names the cause and what it blocks"
         (is (= :running (:seon.task/execution (task/task db' "demo/add"))))
-        (is (= {:attempt "demo/add#1" :cause (:problem act) :blocks blocked} (:seon.task/budget-spent (task/task db' "demo/add")))))
+        (is (= {:attempt "demo/add#1" :cause (:problem act) :blocks blocked} (:seon.task/stuck (task/task db' "demo/add")))))
       (testing "nothing is relaunched, nothing waits unexplained"
         (is (= [] (r/actions idx')))
         (is (= [{:task "demo/add" :cause (:problem act) :attempt "demo/add#1" :blocks blocked}] (r/root-causes idx'))))
       (testing "the problems read lists it, open, with its evidence"
         (is (= [{:task "demo/add" :attempt "demo/add#1" :open? true :blocks blocked}]
-               (mapv #(select-keys % [:task :attempt :open? :blocks]) (get-in (problems/report db') [:classes :budget-spent :rows]))))))))
+               (mapv #(select-keys % [:task :attempt :open? :blocks]) (get-in (problems/report db') [:classes :stuck :rows]))))))))
 
 (deftest root-causes-name-cancelled-and-held-tasks
   (let [db (db-of diamond :extra (concat (merged "a") (task/execution-tx ["demo/b"] :cancelled) (task/execution-tx ["demo/c"] :held)))]
@@ -459,7 +459,7 @@
   (let [db (mdb [(decl "add") (decl "twice" :needs ["add"])]
                 :extra (concat [{:seon.task/id "demo/add" :seon.task/generation 2}]
                                (attempt "add" 1 :bailed)
-                               (r/budget-spent-tx (r/index (mdb [(decl "add") (decl "twice" :needs ["add"])])) "demo/add#1" "demo/add" "capped")))
+                               (r/stuck-tx (r/index (mdb [(decl "add") (decl "twice" :needs ["add"])])) "demo/add#1" "demo/add" "capped")))
         commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
         step (fn [st db ops] (let [[st outs] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (profile/now-ns)})] [st (:to-api outs)]))
         report-in (fn [outs] (some #(get-in % [:req :req :tx-data 0 :seon.root/quiescent]) outs))
@@ -482,8 +482,8 @@
               [_ outs3] (step st2 db3 ops3)]
           (is (= (:max-tx db3) (:t (report-in outs3))))))
       (testing "work to start is not quiet: unsticking add starts it, and no report goes out"
-        (let [[db4 ops4] (commit db2 [[:db/retract [:seon.task/id "demo/add"] :seon.task/budget-spent
-                                       (:seon.task/budget-spent (d/pull db2 [:seon.task/budget-spent] [:seon.task/id "demo/add"]))]])
+        (let [[db4 ops4] (commit db2 [[:db/retract [:seon.task/id "demo/add"] :seon.task/stuck
+                                       (:seon.task/stuck (d/pull db2 [:seon.task/stuck] [:seon.task/id "demo/add"]))]])
               [st4 outs4] (step st2 db4 ops4)]
           (is (= ["demo/add"] (keep #(get-in % [:req :opts :task]) outs4)))
           (is (not (:quiet st4)))

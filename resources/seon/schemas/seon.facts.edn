@@ -146,7 +146,7 @@
  :seon.task/budget [:int {:min 0}]
  ;; derived by the reconciler when a failure finds the budget spent: the attempt, the root cause
  ;; and the tasks it blocks (the task stays released; it is not ready while this holds)
- :seon.task/budget-spent [:map {:seon.db/data true} [:attempt :seon.attempt/id] [:cause :string] [:blocks [:vector :seon.task/id]]]
+ :seon.task/stuck [:map {:seon.db/data true} [:attempt :seon.attempt/id] [:cause :string] [:blocks [:vector :seon.task/id]]]
  ;; the task marked failed (my.task/fail!, or root, or a check): why, the value that shows it,
  ;; and the attempt that marked it; root's judge carries an attempt's own onto main and holds
  ;; the task (state :failed), where it stays as a record after a release
@@ -164,7 +164,7 @@
                           [:seon.task/model {:optional true} :seon.task/model] [:seon.task/problem {:optional true} :seon.task/problem]
                           [:seon.task/evidence {:optional true} :seon.task/evidence]
                           [:seon.task/generation {:optional true} :seon.task/generation]
-                          [:seon.task/budget {:optional true} :seon.task/budget] [:seon.task/budget-spent {:optional true} :seon.task/budget-spent]
+                          [:seon.task/budget {:optional true} :seon.task/budget] [:seon.task/stuck {:optional true} :seon.task/stuck]
                           [:seon.task/failure {:optional true} :seon.task/failure]
                           [:seon.task/declared {:optional true} :seon.task/declared]
                           [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
@@ -236,7 +236,7 @@
  ;; judge, nothing is ready; :root-causes names each released task not done, with its root cause and
  ;; what it blocks (seon.reconcile/root-causes)
  :seon.root/quiescent [:map {:seon.db/data true} [:t :int] [:root-causes [:vector :seon.reconcile/root-cause]]]
- ;; Seon's own source imported at boot as main's program (seon.source): the tree, its HEAD
+ ;; Seon's own source imported at boot as main's program (seon.source), one fact per boot: the tree, its HEAD
  ;; commit (none when it is no repository), the revision it pins each reference-code submodule
  ;; at (its gitlink, what a cited reference-code file shows: seon.ref/file-view), the digest of
  ;; the files and pins read (a boot whose tree

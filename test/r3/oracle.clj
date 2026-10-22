@@ -124,7 +124,7 @@
   [v t]
   (let [id (:seon.task/id t) as (get-in v [:attempts id])]
     (and (= :running (:seon.task/execution t))
-         (nil? (:seon.task/budget-spent t))
+         (nil? (:seon.task/stuck t))
          (not (done-in? v id))
          (empty? (blocked-in v id))
          (not-any? #(or (live? v %) (#{:ended :dead} (:seon.attempt/status %))) as))))
