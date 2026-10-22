@@ -31,7 +31,7 @@ A landing runs what the change reaches, not every check (owner, 2026-10-21: "I w
 
 The full runs are explicit: `bin/test --all` and `bin/check 100`. They run once a day in the background, and before a change to boot, the writer, the reconciler or the build; a red there becomes a task, not a blocked landing.
 
-Measured 2026-10-22 (lane PROVE): see the numbers in the task's landing commit; selecting over 357 tests and 33 steps takes the import (~9 s) plus well under a second.
+Measured 2026-10-22 (lane PROVE, `jolt/prove` on main `fcac0df`, 369 tests and 34 steps, the shared machine niced): selecting takes the import plus the digests, 7-11 s. An unchanged tree reuses every green: `bin/prove --checks` answers 34 of 34 steps reused in 8.5 s (the full `bin/check 100` takes ~6 min), and `bin/prove` ran only the one red test (402 of 403 reused, 1:05 with the build its run needs). A one-defn change on the agent's turn path (`seon.reader/forgive`'s docstring) ran 71 tests and 33 steps, 10:41; a change only seon.proofs reaches reran 6 of `seon.proofs-test`'s 8 tests and reused the others. The cold run (nothing green at its digests: every test in 4 shards and every step) took 18:39, of which the steps 6 min and three shards 10-122 s; the fourth was held by `seon.source-test/a-restart-catches-up-and-a-new-generation-resumes`, red on main and waiting on an `nc` that never times out, until its root was killed. Before, `bin/test --reach` with nothing reusable ran 354 tests serially in 12:41, and a landing ran the full `bin/check 100` beside it, since no step was selected.
 
 ## Ready branches land in batches
 
