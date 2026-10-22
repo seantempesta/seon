@@ -71,7 +71,7 @@ read -r STORE KB0 BR0 <<< "$(run store)"
 STEPS=(seed fx config system mcp threads admit record problems smoke robust lifecycle backpressure hotreload drain idle
        orphan durable window lease e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns e2e-sibling e2e-swarm e2e-loop e2e-stuck resume scale)
 run drop ${STEPS/#/check-} > "$OUT/drop-before.log" 2>&1 || FAILED+=("drop-before ($OUT/drop-before.log)")
-echo "== dragons"; step dragons "" "$ROOT/bin/dragons"
+echo "== dragons (the law census: catch, clocks, measures, resolution)"; step dragons "OK \\(|FAILED" "$ROOT/bin/dragons"
 # lmdb-kill runs below Datahike, on an LMDB env of its own: a raw put has no branch to take,
 # and the store's env is konserve's key space (a raw key or a named sub-db there is a key
 # konserve reads). Its env is deleted when the step is green.

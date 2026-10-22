@@ -7,9 +7,9 @@ dragons are and name them explicitly when dealing with them."
 A **dragon** is a place where the world outside our code can fail us. Each one is met by
 exactly one function, its **edge**. The edge either answers a declared variant, which is
 plain data its callers handle as an ordinary branch, or it is an **entrant boundary**, which
-turns a defect into a recorded error map. Nothing else catches. `bin/dragons` (run by
+turns a defect into a recorded error map. Nothing else catches. `bin/dragons catch` (run by
 `bin/check`) lists every `catch` in `src/` and fails when one is not named below by its
-function.
+function. The same census judges the other laws: [clocks](clocks.md) and [resolution](resolution.md).
 
 ## Edges that catch (each names its one variant)
 

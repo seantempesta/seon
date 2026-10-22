@@ -958,13 +958,6 @@
      {:status (::flow/status m) :count (::flow/count m) :state (::flow/state m)}
      :unknown)))
 
-(defn agent-ping
-  "A ping answered by the agent's own process loop (it answers after its form in flight):
-  {:status :count :held :state}, or :unknown within ms."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.root/health] [:=> [:cat :seon.root/sys :seon.agent/id :int] :seon.root/health]]}
-  ([sys agent-id] (agent-ping sys agent-id 1000))
-  ([sys agent-id ms] (let [r (deref (call! sys {:op :ping :id agent-id}) ms :unknown)] (if (and (map? r) (:status r)) r :unknown))))
-
 (defn fs-call! "Ask the fork server for {:op :stats} or {:op :static}." {:malli/schema [:=> [:cat :seon.root/sys :seon.root/request] :any]}
   [sys msg] @(call! sys {:op :fs :req msg}))
 
