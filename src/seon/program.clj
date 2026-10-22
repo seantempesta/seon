@@ -810,7 +810,10 @@
         methods (by-def :method) impls (by-def :impl)
         by-id (into {} (map (juxt :id identity)) forms)
         digest (into {} (for [f forms] [(:id f) (error/digest (str (:ns f) "\n" (:src f)))]))
-        edges (fn [f] (concat (keep var-form (:refs f)) (:schema f)
+        ;; a test's form is reached only as the root it is: another form naming a test (its
+        ;; name quoted as data, a proof list) never runs it, clojure.test does
+        test-ids (set (for [dt (d/datoms db :aevt :var/kind) :when (= :test (:v dt)) :let [id (var-form (:var/name (d/entity db (:e dt))))] :when id] id))
+        edges (fn [f] (concat (remove test-ids (keep var-form (:refs f))) (:schema f)
                               (for [[k s] (:defines f) :when (= :var k) id (concat (methods s) (impls s) (contract s))] id)))
         plain (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) live))
         ;; the digest of key k reaching from the forms ids, with their namespaces' plain forms

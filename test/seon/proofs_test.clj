@@ -72,6 +72,18 @@
     (is (= (sort-by str ts) (run-of db "e2"))
         "config, deps or a pin changed (:env, the inputs with no program facts): every test runs")))
 
+(deftest a-test-naming-another-test-does-not-reach-it
+  ;; seon.agent-test's tests quote the proofs they ask for ('seon.config-test/...): data, never a
+  ;; call, so a change the named test reaches does not select the naming test (it did, and an
+  ;; agent's run then booted roots inside its fork)
+  (let [db (record (prog) 'user "(ns app.pv-names-test (:require [clojure.test :refer [deftest is]]))"
+                   'app.pv-names-test "(deftest names-a-proof (is (= 'app.pv-neg-test/neg-test 'app.pv-neg-test/neg-test)))")
+        k 'app.pv-names-test/names-a-proof
+        before (program/reach-digests db {:env "e" :tree "t"})
+        after (program/reach-digests (record db 'app.pv-calc "(defn neg [a] (- 0 a))") {:env "e" :tree "t"})]
+    (is (not= (before 'app.pv-neg-test/neg-test) (after 'app.pv-neg-test/neg-test)) "the named test reaches neg: it moves")
+    (is (= (before k) (after k)) "the test only naming it keeps its digest")))
+
 (deftest a-check-step-is-keyed-by-what-its-function-reaches
   (let [db (record (prog) 'user "(ns app.pv-check (:require [app.pv-calc :as c]))"
                    'app.pv-check "(defn smoke [] (c/add 1 2))" 'app.pv-check "(defn idle [] (c/neg 1))")
