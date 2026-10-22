@@ -21,6 +21,9 @@
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 . "$ROOT/bin/env"
 export SEON_RUNS=${SEON_RUNS:-$ROOT/runs}
+# a root started here builds main from this checkout's source when its store is new (and follows it
+# after): :seon.config.source/root's default; config/local.edn or --set names another tree
+export SEON_SOURCE_ROOT=${SEON_SOURCE_ROOT:-$ROOT}
 if [[ ${1:-} == run ]]; then
   # the tree's own build, config and caches (bin/env, read from that tree); the ports over the
   # config's (local.edn honours these)

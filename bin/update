@@ -1,0 +1,36 @@
+#!/bin/zsh
+# bin/update   bring the standing root up to date with main, from the main tree, in one go:
+#   1. merge Seon's own merges (jolt/merges: what the standing root's merges committed in
+#      ../next-merges) into main;
+#   2. fast-forward jolt/merges to main, so the standing root's source tree is main's;
+#   3. move both trees' submodules to main's pins (bin/worktree --sync merges for ../next-merges);
+#   4. build (bin/build: each step skips what is up to date);
+#   5. restart the standing root on its store (bin/root stop, start): it boots on main's build and
+#      imports its source tree (docs/source.md).
+# Lanes land first (root merges their branches into main, docs/landing.md); then bin/update.
+# Every step's exit status counts; the last line is UPDATE OK or UPDATE FAILED.
+setopt pipefail
+MAIN=$(cd "$(dirname "$0")/.." && pwd); MERGES=${MAIN:h}/next-merges
+fail() { print -u2 "update: $*"; print "UPDATE FAILED"; exit 1 }
+cd "$MAIN" || fail "no main tree"
+[[ $(git branch --show-current) == main ]] || fail "the main tree is not on main"
+git diff --quiet && git diff --cached --quiet || fail "the main tree has uncommitted changes"
+if git rev-parse -q --verify jolt/merges >/dev/null; then
+  n=$(git rev-list --count main..jolt/merges)
+  if (( n > 0 )); then
+    git merge --no-ff -q jolt/merges -m "Merge jolt/merges: the standing root's merges ($n commits)" || fail "merging jolt/merges into main"
+    print "merged $n commits of jolt/merges into main"
+  fi
+  if [[ -d $MERGES ]]; then
+    git -C "$MERGES" diff --quiet || fail "$MERGES has uncommitted changes"
+    git -C "$MERGES" merge --ff-only -q main || fail "fast-forwarding jolt/merges to main"
+    "$MAIN/bin/worktree" --sync merges >/dev/null || fail "syncing $MERGES's submodules"
+    print "jolt/merges at $(git -C "$MERGES" log --oneline -1 | cut -c1-60)"
+  fi
+fi
+git -c protocol.file.allow=always submodule update --init -q || fail "main's submodules"
+nice -n 15 bin/build > target/update-build.log 2>&1 || { tail -5 target/update-build.log >&2; fail "build (target/update-build.log)" }
+print "built $(ls -l target/seon | awk '{print $6, $7, $8}')"
+bin/root stop >/dev/null 2>&1
+bin/root start | tail -1 || fail "the standing root did not start (runs/root.log)"
+print "UPDATE OK"
