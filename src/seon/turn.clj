@@ -74,7 +74,7 @@
   {:malli/schema [:=> [:cat :seon.task/id :seon.task/plan] :map]}
   [id plan-before]
   (let [t0 (profile/now-ns)
-        run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks) (:proofs (:seon.task/accumulated (task/task (agent/db) id))))
+        run (agent/run-tests-forked (cfg/value :seon.config.agent/turn-test-ticks) (:proofs (:seon.task/accumulated (task/task (agent/db) id))) :turn)
         tests-ms (long (profile/ms-since t0))
         results (if (contract/error? run) {} (proofs/results run))
         db (agent/db)
@@ -82,7 +82,12 @@
         unmerged (branch/unmerged)]
     {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :task (task/task db id)
      :will-merge (program/divergence (:base @agent/state) db)
-     :deferred (agent/deferred-tests db (:base @agent/state) (:proofs (:seon.task/accumulated (task/task db id))))
+     ;; root's ruling (a): what this turn ran, what the judge will run, what the merge runs
+     :tests (when-not (contract/error? run)
+              (let [results (proofs/results run)
+                    unfinished (count (remove #(contains? results %) (:selected run)))]
+                (cond-> {:this-turn (count (:selected run)) :at-judge (:at-judge run) :at-merge (count (:deferred run))}
+                  (pos? unfinished) (assoc :unfinished unfinished))))
      :refusals (r/done-refusals (r/done-input (r/index db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before))}))
 
 (defn- end!
@@ -116,13 +121,13 @@
   done rule, the failing assertions of each test it names, the run's own errors, and what the
   branch's merge will carry to main."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{:keys [run refusals task results will-merge deferred]}]
+  [{:keys [run refusals task results will-merge tests]}]
   (let [proofs (:proofs (:seon.task/accumulated task))
         named (into (set proofs) (keep :symbol) refusals)]
     {:results results :refusals refusals
      :reds (if (contract/error? run) [] (proofs/red-reports run named))
      :run-errors (if (contract/error? run) [(:seon.error/message run)] (proofs/run-errors run))
-     :will-merge will-merge :deferred deferred}))
+     :will-merge will-merge :tests tests}))
 
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its

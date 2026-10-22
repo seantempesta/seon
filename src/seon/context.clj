@@ -266,7 +266,7 @@
   branch's unmerged entries (base, ours, theirs); what its merge will carry to main; what
   happened to the last reply; the last evaluations; turns left."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds last-items turn max-turns unmerged truncated? refusals run-errors source repairs will-merge deferred]}]
+  [db t {:keys [results reds last-items turn max-turns unmerged truncated? refusals run-errors source repairs will-merge tests]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
         refs (filterv (comp qualified-symbol? :seon.ref/name) cites)
@@ -310,8 +310,13 @@
       ;; owner D4 (2026-10-22): every change the branch's merge carries to main, every turn
       ;; measured and empty ({}) says so; absent only when not measured (a basis before D4)
       (some? will-merge) (assoc :will-merge will-merge)
-      ;; root's ruling (2026-10-22): process tests the change reaches run at the merge
-      (seq deferred) (assoc :deferred-to-merge {:n (count deferred) :list '(my.agent/deferred)})
+      ;; root's ruling (a), 2026-10-22: the tests this turn ran (the proofs and the tests the
+      ;; branch changed), those the judge runs at the attempt's end, those the merge runs; a
+      ;; run its bound ended leaves the rest unknown, never red
+      tests (assoc :tests (cond-> tests
+                            (:unfinished tests) (assoc :unfinished-run '(my.agent/prove))
+                            (pos? (:at-judge tests 0)) (assoc :judge-runs '(my.agent/prove))
+                            (pos? (:at-merge tests 0)) (assoc :merge-runs '(my.agent/deferred))))
       (seq last-items) (assoc :last-evals (transcript (fold-evals last-items))))))
 
 (defn evaluations-text

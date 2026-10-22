@@ -453,10 +453,9 @@
                   "(deftest pure (is (= 2 (p/twice 1))))\n")
         db (d/db-with (empty-db) (source/import-tx (empty-db) {"src/app/proc.clj" "(ns app.proc)\n\n(defn twice [x] (* 2 x))\n"
                                                                "test/app/proc_test.clj" text}))]
-    (is (= #{'app.proc-test/via-shell} (set (filter #(= "app.proc-test" (namespace %)) (program/process-tests db)))))
-    (is (= {:run ['app.proc-test/pure] :deferred ['app.proc-test/via-shell]}
-           (program/test-split db #{'app.proc/twice} #{}))
-        "a change to twice runs the pure test and defers the one that reaches a shell")
-    (is (= {:run ['app.proc-test/pure 'app.proc-test/via-shell] :deferred []}
-           (program/test-split db #{'app.proc/twice} #{'app.proc-test/via-shell}))
-        "a proof always runs: it is the task's own")))
+    (is (= #{'app.proc-test/via-shell} (set (filter #(= "app.proc-test" (namespace %)) (program/process-tests db {:env "" :tree ""})))))
+    (is (= {'app.proc-test/via-shell true 'app.proc-test/pure false}
+           (into {} (for [[t {:keys [process?]}] (program/reach-index db {:env "" :tree ""}) :when (= "app.proc-test" (namespace t))] [t process?])))
+        "the one walk says it beside each test's digest")
+    (is (= (program/reach-digests db {:env "" :tree ""}) (update-vals (program/reach-index db {:env "" :tree ""}) :digest))
+        "and the digests are reach-digests' own")))

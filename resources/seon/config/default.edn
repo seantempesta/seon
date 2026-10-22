@@ -202,6 +202,14 @@
  ;; than a form's: cost proofs measure large sizes. At the bound the run stops with
  ;; :seon.test/ticks-spent naming the test that was running. 0: none.
  :seon.config.agent/test-ticks 200000000000
+ ;; Unit: engine ticks a turn's own test run may do: the task's proofs and the tests the
+ ;; branch changed or added (root's ruling (a), 2026-10-22; the reached in-process set is the
+ ;; judge's, at the attempt's end, under test-ticks). Provenance: step E's run 7, where a change
+ ;; to seon.problems/report put 294 reached tests in every turn's run and one ran for 2.5 h;
+ ;; the same budget as one form's (~5-25 s of work). At the bound the run stops with
+ ;; :seon.test/ticks-spent; the tests it did not finish are unknown, never red, and the turn
+ ;; says how many and how to run them (my.agent/prove). 0: none.
+ :seon.config.agent/turn-test-ticks 20000000000
 
  ;; ==== merges and refinement ==================================================================
 
@@ -233,6 +241,14 @@
  ;; boots): absent, no source is imported and nothing is written. config/local.edn or --set names
  ;; another tree: the main tree's names ../next-merges, so write-back never edits main's files.
  :seon.config.source/root #env SEON_SOURCE_ROOT
+ ;; Unit: path. The checkout the merge gate runs a merge's deferred process tests on
+ ;; (seon.fx/run-tests: a worktree of it at the merges head, the candidate's files over it,
+ ;; prove's entry there). Provenance: root's ruling (a), 2026-10-23, from step E's dry run (a test
+ ;; root importing test/ could not host a checkout, and its gated merges were all refused).
+ ;; Absent (as here; the standing root's config/local.edn names its merges tree): a merge that
+ ;; reaches process tests merges with them recorded unrun on its attempt, an open problem
+ ;; ("merged with N process tests unrun") until they run; root's git merge runs them (bin/prove).
+ :seon.config.source/gate-checkout #env SEON_GATE_CHECKOUT
  ;; Unit: paths under the root, read in this order. Their .clj files are namespaces; the .edn
  ;; files under resources/seon/schemas are schema resources (schemas are program: an agent
  ;; changes one with my.schema/register!, and the merge writes it back; owner 2026-10-21).

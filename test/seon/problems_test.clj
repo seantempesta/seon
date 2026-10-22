@@ -405,3 +405,19 @@
         rows (get-in (problems/report db) [:classes :dead :rows])]
     (is (= :lost (:status (first (filter #(= "t/l#1" (:attempt %)) rows)))))
     (is (not-any? #(= "t/l#1" (:attempt %)) (get-in (problems/report db) [:classes :error :rows])))))
+
+(deftest a-merge-with-its-process-tests-unrun-is-an-open-problem
+  ;; root's ruling (a), 2026-10-23: a root that declares no gate checkout merges a change that
+  ;; reaches process tests with them unrun; unknown stays visible, an open :unrun row, until a
+  ;; run gives them results
+  (let [att (fn [extra] (:db-after (d/with (seeded 1 5)
+                                           [{:seon.task/id "t/u" :seon.task/ns 't :seon.task/name "u" :seon.task/plan "p" :seon.task/execution :running
+                                             :seon.task/branch :u :seon.task/kind :merge}
+                                            (merge {:seon.attempt/id "t/u#1" :seon.attempt/task [:seon.task/id "t/u"] :seon.attempt/boot "b" :seon.attempt/agent :a9
+                                                    :seon.attempt/start-ms 1 :seon.attempt/end-ms 9 :seon.attempt/branch :u :seon.attempt/max-turns 2
+                                                    :seon.attempt/status :merged :seon.attempt/deferred ['seon.root-test/boots 'seon.check-test/clean]}
+                                                   extra)])))
+        rows #(get-in (problems/report %) [:classes :unrun :rows])]
+    (is (= [["t/u#1" "merged with 2 process tests unrun" true]] (mapv (juxt :attempt :reason :open?) (rows (att {})))))
+    (is (= [] (rows (att {:seon.attempt/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :pass}]})))
+        "once they ran, the row closes (a red among them is the gate's refusal)")))

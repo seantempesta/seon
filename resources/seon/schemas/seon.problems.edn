@@ -147,7 +147,7 @@
                          [:seon.fx/cache-hit-tokens {:optional true} :seon.fx/cache-hit-tokens]]
 
  ;; ---- the one read: seon.problems/report ----
- :seon.problems/class [:enum :platform :eval :agent :effect :red :cost :merge :dead :error :waste :stuck :failed :task-conflict]
+ :seon.problems/class [:enum :platform :eval :agent :effect :red :cost :merge :dead :error :waste :stuck :failed :task-conflict :unrun]
  :seon.problems/row [:map {:seon.render/ai seon.render.ai/problem-row}
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]

@@ -9,7 +9,7 @@
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm] [seon.source :as source]
             [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
-            [seon.config :as cfg] [seon.program :as program]))
+            [seon.config :as cfg]))
 
 (defn refine?
   "Has task t budget left for one more refinement chain (its generation below its budget)?"
@@ -339,7 +339,9 @@
                        (and (empty? rs) merge?)
                        (let [deferred (sort-by str (:seon.attempt/deferred a #{})) dres (:seon.attempt/deferred-results a)
                              red (for [t deferred :let [s (get dres t)] :when (not= :pass s)] [t (or s :unknown)])]
-                         (cond (empty? deferred) {:op :ready-to-merge :attempt aid :task id}
+                         ;; root's ruling (a), 2026-10-23: the gate runs where a checkout is
+                         ;; declared; without one the merge goes on, its deferred tests unrun
+                         (cond (or (empty? deferred) (nil? (get-in idx [:root :gate-checkout]))) {:op :ready-to-merge :attempt aid :task id}
                                (nil? dres) {:op :gate :attempt aid :task id :tests (vec deferred)}
                                (empty? red) {:op :ready-to-merge :attempt aid :task id}
                                :else (failed aid id t (str "attempt " aid "'s deferred tests, run on a checkout at its merge, are not green: "
@@ -558,7 +560,7 @@
   the attempt for root (seon.task/carry-tx); and a failure it marked (my.task/fail!)
   carried with the task held."
   {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db]] [:map [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:vector :any]]}
-  [st {:keys [act run-problems worked-error]} results {:keys [db base base-t]} diff]
+  [st {:keys [act run-problems worked-error deferred]} results {:keys [db base base-t]} diff]
   (let [main (:db st)
         aid (:attempt act) id (:task act)
         end (pull-end db aid)
@@ -572,8 +574,7 @@
                                                        :conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
                                                        :unmerged (mapv sedn/encode (:unmerged diff))
                                                        :changed (into #{} (map sedn/encode) (:ours diff))
-                                                       :deferred (:deferred (program/test-split db (program/changed-vars base db)
-                                                                                                (:proofs (:seon.task/accumulated (task/task main id)))))})
+                                                       :deferred (vec deferred)})
                                         (:reason end) (assoc :reason (:reason end))
                                         (not (:outcome end)) (assoc :reason (if worked-error
                                                                              (str "seon.turn/work! threw: " (:seon.error/message worked-error))
@@ -654,6 +655,7 @@
       :tested (if (contract/error? r)
                 (dead st r)
                 (one (request (-> st (assoc-in [:flights aid :results] (proofs/results r))
+                                  (assoc-in [:flights aid :deferred] (:deferred r))
                                   (assoc-in [:flights aid :run-problems] {:failures (proofs/failures r) :costs (proofs/costs r)}))
                               aid :read {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}})))
       ;; what the branch changed since its merge base (three-way's :ours), measured for the octopus merge
@@ -697,7 +699,7 @@
                                                   :when (#{:var :form} kind)]
                                               (symbol (first (str/split (str x) #"/" 2))))))
                        files (source/files (:db r) (vec (keep #(:ns/file (d/entity (:db r) [:ns/name %])) nss)))]
-                   (one (request st aid :gated {:op :fx :kind :tests :req {:repo (:root (:source st)) :branch (:branch (:source st))
+                   (one (request st aid :gated {:op :fx :kind :tests :req {:repo (get-in st [:idx :root :gate-checkout]) :branch (:branch (:source st))
                                                                           :files files :tests (:tests act)}})))
       ;; each deferred test's status on the attempt; the next judgment lands it or refuses it
       :gated (let [rs (if (contract/error? r) (zipmap (:tests act) (repeat :error)) (get-in r [:value :results]))]

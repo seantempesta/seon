@@ -46,15 +46,15 @@
                    sym))))
 
 (defn prove
-  "Run what judges this branch, as root's judge and the turn loop run it (seon.agent/run-tests-forked,
-  in a fork of this agent): the task's proofs (or the given ones) and every test reaching what the
-  branch changed since the main it forked from, each test green at its reach digest reused, not
-  run. Answers that run ({:pass :fail :error :reports :ran :reused :ms ...}) with :results
+  "Run what root's judge will run on this branch (seon.agent/run-tests-forked :judge, in a fork
+  of this agent): the task's proofs (or the given ones) and every in-process test reaching what
+  the branch changed since the main it forked from, each test green at its reach digest reused,
+  not run; the process tests it reaches are the merge's (:deferred). Answers that run ({:pass :fail :error :reports :ran :reused :ms ...}) with :results
   {test :pass|:fail|:error}."
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :qualified-symbol]] :map]]}
   ([] (prove (or (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})))
   ([proofs]
-   (let [run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks) proofs)]
+   (let [run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks) proofs :judge)]
      (assoc run :results (proofs/results run)))))
 
 (defn grep
@@ -106,10 +106,12 @@
 
 (defn deferred
   "The process tests this branch's change reaches, which its merge runs on a checkout and an
-  agent's turn does not (seon.agent/deferred-tests): names."
+  agent's turn and root's judge do not (seon.agent/test-plan's :process among what it
+  selects; a proof is never deferred): names."
   {:malli/schema [:=> [:cat] [:vector :qualified-symbol]]}
-  [] (agent/deferred-tests (agent/db) (:base @agent/state)
-                           (or (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})))
+  [] (let [proofs (or (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})
+           plan (agent/test-plan (agent/db) (:base @agent/state) proofs)]
+       (vec (filter #(and ((:process plan) %) (not (proofs %))) (:selected plan)))))
 
 (defn pst
   "Print the exception e (*e by default) as clojure.repl/pst does: its message, then each cause's

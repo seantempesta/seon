@@ -299,12 +299,15 @@
   (some-> (d/pull db attempt-pull [:seon.attempt/id aid]) attempt-value))
 
 (defn root
-  "Root's boot and config keys on db: {:boot :max-running :max-merging}, nil before the first boot."
-  {:malli/schema [:=> [:cat :seon.host/db] [:maybe [:map [:boot :string] [:max-running :int] [:max-merging {:optional true} :int]]]]}
+  "Root's boot and config keys on db: {:boot :max-running :max-merging :gate-checkout}, nil
+  before the first boot."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe [:map [:boot :string] [:max-running :int] [:max-merging {:optional true} :int]
+                                                     [:gate-checkout {:optional true} :string]]]]}
   [db]
-  (when-let [r (d/pull db [:seon.root/boot :seon.config.agent/max-running :seon.config.merge/max-running] [:seon.root/id :root])]
+  (when-let [r (d/pull db [:seon.root/boot :seon.config.agent/max-running :seon.config.merge/max-running :seon.config.source/gate-checkout] [:seon.root/id :root])]
     (cond-> {:boot (:seon.root/boot r) :max-running (:seon.config.agent/max-running r)}
-      (:seon.config.merge/max-running r) (assoc :max-merging (:seon.config.merge/max-running r)))))
+      (:seon.config.merge/max-running r) (assoc :max-merging (:seon.config.merge/max-running r))
+      (:seon.config.source/gate-checkout r) (assoc :gate-checkout (:seon.config.source/gate-checkout r)))))
 
 (defn entity-value
   "The task, attempt or root that entity e of db is now, as the reconciler's index holds it:

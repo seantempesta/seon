@@ -233,24 +233,23 @@
         (step "bin/build seon" ["nice" "-n" "15" (str dir "/bin/build") "seon"])
         {:value {:commit commit :checkout dir :binary (str dir "/target/seon") :ms (profile/ms-since t0)}})))
 (defn test-command
-  "The runner the :tests effect calls in a checkout, as argv, for namespaces nss: bin/test runs
-  the named namespaces' tests. Prove's one entry replaces it when it lands (root, 2026-10-22),
-  a change to this definition alone."
+  "The runner the :tests effect calls in a checkout, as argv, for namespaces nss: prove's one
+  entry (land12, root 2026-10-22), each named namespace's tests with no green at their reach
+  digest run, the rest reused."
   {:malli/schema [:=> [:cat [:sequential :symbol]] [:vector :string]]}
-  [nss] (into ["nice" "-n" "15" "bin/test"] (map str nss)))
+  [nss] (into ["nice" "-n" "15" "bin/prove" "--tests"] (map str nss)))
 
 (defn test-results
-  "Each of tests' status from the runner's output out (clojure.test's report lines: FAIL in
-  (name), ERROR in (name)) and its exit status: :fail or :error where a line names it, :pass
-  when the run reported its namespace and named it in no failure, :error for all when the run
-  ended with no report of tests (it could not run them)."
+  "Each of tests' status from prove's output out and its exit status: :fail or :error where a
+  RED line names it (its counts say which), :pass when the run reached its tests and named it
+  in no RED line (it ran green, or was green at its digest), :error for every one when the run
+  never reached its tests (its plan or its build failed)."
   {:malli/schema [:=> [:cat :string :int [:sequential :qualified-symbol]] [:map-of :qualified-symbol [:enum :pass :fail :error]]]}
   [out exit tests]
-  (let [named (fn [kind] (set (map second (re-seq (re-pattern (str "(?m)^" kind " in \\(([^)\\s]+)\\)")) out))))
-        failed (named "FAIL") errored (named "ERROR")
-        ran? (boolean (re-find #"(?m)^Ran \d+ tests" out))]
-    (into {} (for [t tests :let [n (name t)]]
-               [t (cond (errored n) :error (failed n) :fail (and ran? (or (zero? exit) (not (contains? (into failed errored) n)))) :pass :else :error)]))))
+  (let [red (into {} (for [[_ t counts] (re-seq #"(?m)^RED (\S+) (\{[^\n]*\})" out)]
+                       [(symbol t) (if (pos? (or (:error (edn/read-string counts)) 0)) :error :fail)]))
+        reached? (boolean (re-find #"(?m)^(SHARD |PROVE OK|prove: .* 0 to run)" out))]
+    (into {} (for [t tests] [t (or (red t) (if reached? :pass :error))]))))
 
 (defn run-tests
   "The :tests effect: tests (qualified names) run on a checkout of the merge candidate: a

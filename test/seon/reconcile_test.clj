@@ -345,17 +345,23 @@
   )
 
 (deftest a-merge-with-deferred-tests-is-gated-first
-  ;; root's ruling (2026-10-22): the process tests a branch's change reaches run at its merge, on
-  ;; a worktree of the merge candidate, and gate it like proofs: unrun, the member is gated
-  ;; first (alone); all passing, it rides the train; a red is refused as a red proof is
-  (let [land (fn [& kv] (r/reconcile (mdb [(decl "a")] :extra (concat (attempt "a" 1 :done)
-                                                                     (apply attempt "a-merge" 1 :ended :outcome :green :results {(t "a") :pass}
-                                                                            :deferred ['seon.root-test/boots] kv)))))]
-    (is (= [{:op :gate :attempt "demo/a-merge#1" :task "demo/a-merge" :tests ['seon.root-test/boots]}] (land)))
-    (is (= [{:op :octopus-merge :attempt "demo/a-merge#1" :members [{:attempt "demo/a-merge#1" :task "demo/a-merge"}]}]
-           (land :deferred-results {'seon.root-test/boots :pass})))
-    (is (= [:attach] (map :op (land :deferred-results {'seon.root-test/boots :fail}))))
-    (is (str/includes? (:problem (first (land :deferred-results {'seon.root-test/boots :fail}))) "seon.root-test/boots"))))
+  ;; root's rulings (2026-10-22/23): the process tests a branch's change reaches run at its merge,
+  ;; on a worktree of the root's declared gate checkout, and gate it like proofs: unrun, the
+  ;; member is gated first (alone); all passing, it merges; a red, or a run that could not run
+  ;; them (:error), is refused as a red proof is, never hidden. A root that declares no gate
+  ;; checkout merges with them unrun (an open problem until they run)
+  (let [gate {:seon.root/id :root :seon.config.source/gate-checkout "/the/merges/tree"}
+        land (fn [root & kv] (r/reconcile (mdb [(decl "a")] :extra (concat (attempt "a" 1 :done)
+                                                                          (apply attempt "a-merge" 1 :ended :outcome :green :results {(t "a") :pass}
+                                                                                 :deferred ['seon.root-test/boots] kv)
+                                                                          (when root [root])))))
+        octopus [{:op :octopus-merge :attempt "demo/a-merge#1" :members [{:attempt "demo/a-merge#1" :task "demo/a-merge"}]}]]
+    (is (= [{:op :gate :attempt "demo/a-merge#1" :task "demo/a-merge" :tests ['seon.root-test/boots]}] (land gate)))
+    (is (= octopus (land gate :deferred-results {'seon.root-test/boots :pass})))
+    (is (= [:attach] (map :op (land gate :deferred-results {'seon.root-test/boots :fail}))))
+    (is (= [:attach] (map :op (land gate :deferred-results {'seon.root-test/boots :error}))) "a run that could not run them is no pass")
+    (is (str/includes? (:problem (first (land gate :deferred-results {'seon.root-test/boots :fail}))) "seon.root-test/boots"))
+    (is (= octopus (land nil)) "no gate checkout declared: it merges, the deferred tests unrun")))
 
 (deftest merges-run-one-at-a-time
   ;; git's merge queue: a merge agent's last merge-main and root's merge see the same main,

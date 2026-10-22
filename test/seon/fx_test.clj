@@ -90,12 +90,18 @@
     (is (contains? (set (map :coord (:unresolved r))) 'nowhere/nothing))))
 
 (deftest a-merges-deferred-tests-read-from-the-runners-report
-  ;; the merge gate (root's ruling, 2026-10-22): each deferred test's status from clojure.test's
-  ;; report lines, and :error for all when the run reported no tests (it could not run them)
+  ;; the merge gate (root's ruling, 2026-10-22) runs them through prove's one entry (land12):
+  ;; a test it names RED is red (:error when it errored), one it does not name passed or was
+  ;; green at its digest, and a run that never reached its tests (the plan or the build
+  ;; failed) leaves every one :error, never a pass
   (let [tests ['seon.root-test/boots 'seon.root-test/threads 'seon.check-test/clean]
-        out (str "Testing seon.root-test\n\nFAIL in (threads) (root_test.clj:30)\nexpected: 1\n\n"
-                 "Testing seon.check-test\n\nERROR in (clean) (check_test.clj:72)\n\nRan 3 tests. 4 assertions passed, 1 failures, 1 errors.\n")]
+        out (str "prove: 3 keys (3 tests, 0 check steps), 2 to run\n"
+                 "RED seon.root-test/threads {:pass 3, :fail 1, :error 0}\n"
+                 "RED seon.check-test/clean {:pass 0, :fail 0, :error 1}\n"
+                 "SHARD 2 tests, 0 green, 2 red, in 4123 ms\nTEST FAILED (logs: target/prove)\nPROVE FAILED\n")]
     (is (= {'seon.root-test/boots :pass 'seon.root-test/threads :fail 'seon.check-test/clean :error} (fx/test-results out 1 tests)))
-    (is (= {'seon.root-test/boots :pass} (fx/test-results "Ran 1 tests. 2 assertions passed, 0 failures, 0 errors.\n" 0 ['seon.root-test/boots])))
-    (is (= {'seon.root-test/boots :error} (fx/test-results "bin/test: no runtime\n" 1 ['seon.root-test/boots])) "a run that reported nothing is no green")
-    (is (= ["nice" "-n" "15" "bin/test" "seon.check-test" "seon.root-test"] (fx/test-command ['seon.check-test 'seon.root-test])))))
+    (is (= {'seon.root-test/boots :pass} (fx/test-results "prove: 1 keys (1 tests, 0 check steps), 0 to run\nPROVE OK\n" 0 ['seon.root-test/boots]))
+        "reused green at its digest")
+    (is (= {'seon.root-test/boots :error} (fx/test-results "TEST FAILED (bin/build seon: target/prove/build.log)\nPROVE FAILED\n" 1 ['seon.root-test/boots]))
+        "a run that never reached its tests is no green")
+    (is (= ["nice" "-n" "15" "bin/prove" "--tests" "seon.check-test" "seon.root-test"] (fx/test-command ['seon.check-test 'seon.root-test])))))

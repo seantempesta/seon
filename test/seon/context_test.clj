@@ -535,13 +535,17 @@
     (is (re-find #"deftest f-test" (pr-str (:do r))) (pr-str r))
     (is (re-find #"run-test" (pr-str (:do r))) (pr-str r))))
 
-(deftest deferred-tests-say-how-many-and-how-to-list-them
-  ;; root's ruling (2026-10-22): process tests the change reaches run at the merge, on a
-  ;; checkout; the turn says how many and the form that lists them, never runs them in the fork
+(deftest a-turn-says-what-it-ran-what-the-judge-and-the-merge-run
+  ;; root's ruling (a), 2026-10-22: a turn runs the proofs and the tests the branch changed;
+  ;; the judge runs the reached in-process set at the attempt's end; the merge runs the
+  ;; process tests. The turn says each, and what runs the rest
   (let [db (db-with-program)
-        b (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4 :deferred ['seon.root-test/a 'seon.root-test/b]})]
-    (is (= {:n 2 :list '(my.agent/deferred)} (:deferred-to-merge b)))
-    (is (nil? (:deferred-to-merge (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4 :deferred []}))) "none: nothing said")))
+        b (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4
+                                                  :tests {:this-turn 2 :at-judge 40 :at-merge 3 :unfinished 1}})]
+    (is (= {:this-turn 2 :at-judge 40 :at-merge 3 :unfinished 1
+            :unfinished-run '(my.agent/prove) :judge-runs '(my.agent/prove) :merge-runs '(my.agent/deferred)}
+           (:tests b)))
+    (is (nil? (:tests (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4}))) "not measured: nothing said")))
 
 (deftest the-map-names-each-cited-namespaces-functions
   ;; root's research, lever 1 (aider's ranked repo map; v1 R4: naming the helpers took 7/32
