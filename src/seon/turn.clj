@@ -16,9 +16,9 @@
   Root starts it by evaluating (seon.turn/work! '{...}) in the agent; the attempt's end is
   a fact on the branch (:seon.end/*), which root's judge reads."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.intr :as intr] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.set :as set]
+  (:require [seon.profile :as profile] [seon.intr :as intr] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
-            [seon.proofs :as proofs] [seon.context :as context] [seon.program :as program]
+            [seon.proofs :as proofs] [seon.context :as context] [seon.program :as program] [seon.merge :as pm]
             [seon.harvest :as harvest] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
             [datahike.api :as d]))
 
@@ -33,7 +33,6 @@
 
 (defn- begin!
   "This process works task as attempt: the turn state, begun once per attempt with the
-  program's contract gaps as they stood (the attempt answers only for gaps it adds) and the
   task's accumulated plan as the branch held it (a design step answers for improving it).
   The turn loop and an outside agent's context read begin it the same way."
   {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id] :map]}
@@ -41,7 +40,7 @@
   (if (= attempt (get-in @agent/state [:turn :attempt]))
     (:turn @agent/state)
     (let [db (agent/db)]
-      (:turn (swap! agent/state assoc :turn {:attempt attempt :gaps-before (harvest/uncontracted db)
+      (:turn (swap! agent/state assoc :turn {:attempt attempt
                                              :plan-before (:plan (:seon.task/accumulated (task/task db task)))})))))
 
 (defn last-evals
@@ -60,18 +59,26 @@
   [outcome reason]
   (:turn (swap! agent/state assoc-in [:turn :stop] (cond-> {:outcome outcome} reason (assoc :reason reason)))))
 
+(defn- added-gaps
+  "The functions branch db defines without a contract since its merge base base (the
+  branch's own changes, seon.merge/uncontracted): what root's judge and the merge gate ask."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :qualified-symbol]]}
+  [base db] (set (pm/uncontracted (pm/changes (pm/program base #{}) (pm/program db #{})))))
+
 (defn- observe
-  "What a turn starts from, measured now: the proofs run in a fork of this agent, the
-  branch's new contract gaps and unmerged entries, the done rule over them, and the task as
-  the branch holds it (its plan may have improved)."
-  {:malli/schema [:=> [:cat :seon.task/id [:set :qualified-symbol] :seon.task/plan] :map]}
-  [id gaps-before plan-before]
+  "What a turn starts from, measured now: the proofs run in a fork of this agent (a run it
+  could not fork ran no proof: every proof is unknown, and the refusal is the run's error),
+  the contract gaps the branch adds since its merge base (seon.merge/uncontracted, as root's
+  judge and the merge gate ask it) and its unmerged entries, the done rule over them, and
+  the task as the branch holds it (its plan may have improved)."
+  {:malli/schema [:=> [:cat :seon.task/id :seon.task/plan] :map]}
+  [id plan-before]
   (let [t0 (profile/now-ns)
         run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks) (:proofs (:seon.task/accumulated (task/task (agent/db) id))))
         tests-ms (long (profile/ms-since t0))
-        results (proofs/results run)
+        results (if (contract/error? run) {} (proofs/results run))
         db (agent/db)
-        unc (set/difference (harvest/uncontracted db) gaps-before)
+        unc (added-gaps (:base @agent/state) db)
         unmerged (branch/unmerged)]
     {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :task (task/task db id)
      :will-merge (program/divergence (:base @agent/state) db)
@@ -111,7 +118,9 @@
   [{:keys [run refusals task results will-merge]}]
   (let [proofs (:proofs (:seon.task/accumulated task))
         named (into (set proofs) (keep :symbol) refusals)]
-    {:results results :refusals refusals :reds (proofs/red-reports run named) :run-errors (proofs/run-errors run)
+    {:results results :refusals refusals
+     :reds (if (contract/error? run) [] (proofs/red-reports run named))
+     :run-errors (if (contract/error? run) [(:seon.error/message run)] (proofs/run-errors run))
      :will-merge will-merge}))
 
 (defn- basis!
@@ -196,8 +205,8 @@
   on it."
   {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id] :string]}
   [task attempt]
-  (let [{:keys [gaps-before plan-before]} (begin! task attempt)
-        {:keys [tests-ms] :as obs} (observe task gaps-before plan-before)
+  (let [{:keys [plan-before]} (begin! task attempt)
+        {:keys [tests-ms] :as obs} (observe task plan-before)
         n (get-in (swap! agent/state update-in [:turn :reads] (fnil inc 0)) [:turn :reads])
         t0 (profile/now-ns)
         basis (basis! task attempt n 1 :outside (assoc (observed obs) :merge? true))
@@ -217,14 +226,14 @@
                              [:max-turns pos-int?]]]
                   :seon.turn/end]}
   [{:keys [task attempt model max-turns]}]
-  (let [{:keys [gaps-before plan-before]} (begin! task attempt)
+  (let [{:keys [plan-before]} (begin! task attempt)
         t0-task (task/task (agent/db) task)
         merge? (= :merge (:seon.task/kind t0-task))
         dials (r/dials t0-task)]
     (when merge? (branch/merge-main!))
     (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (profile/now-ns) :attempt attempt
-               :max-turns max-turns :merge? merge? :gaps-before gaps-before}]
-      (let [{:keys [refusals unmerged] :as obs} (observe task (:gaps-before st) plan-before)
+               :max-turns max-turns :merge? merge?}]
+      (let [{:keys [refusals unmerged] :as obs} (observe task plan-before)
             stop (get-in @agent/state [:turn :stop])
             hairy (when merge? (r/hairy (merge dials {:conflicts unmerged :task (:task obs) :merge-turns (:merge-turns st)})))]
         (cond

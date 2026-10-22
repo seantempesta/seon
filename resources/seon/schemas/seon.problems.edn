@@ -37,6 +37,8 @@
  ;; a form or a test run stopped by the work it did: its engine ticks reached the budget
  ;; (procedure calls and loop back-edges; never elapsed time): runtime-fixable, the agent's to read
  :seon.repl/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.repl/ticks-spent]] [:ticks :int] [:budget :int]]]
+ ;; the agent could not fork its test run (threads were active): no proof ran
+ :seon.test/fork-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/fork-refused]] [:active-threads :int]]]
  :seon.test/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int]
                                                 [:test {:optional true} :string]]]
  :seon.fx/io-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/io-error]]]]

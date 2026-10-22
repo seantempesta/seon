@@ -8,19 +8,7 @@
   a delete). Nothing the agent evaluated is ever evaluated again. Scratch namespaces, the
   eval history and the agent's turn facts never become program."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [seon.agent :as agent]))
-
-(defn- program-nss
-  "The program namespaces of db (those with an :ns/name) loaded in this runtime."
-  {:malli/schema [:=> [:cat :seon.host/db] [:sequential :symbol]]}
-  [db]
-  (sort (filter find-ns (d/q '[:find [?n ...] :where [_ :ns/name ?n]] db))))
-
-(defn uncontracted
-  "The functions of the program namespaces that declare no contract (seon.contract/uncontracted;
-  main's own gaps included, callers subtract what was there before the attempt)."
-  {:malli/schema [:=> [:cat :seon.host/db] [:set :qualified-symbol]]}
-  [db] (set (contract/uncontracted (program-nss db))))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.agent :as agent]))
 
 (defn stage-tx
   "tx-data making branch db's definitions match this live runtime: each var recorded with a

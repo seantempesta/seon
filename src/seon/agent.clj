@@ -363,15 +363,15 @@
   each test var as it starts and then one EDN line of its result on a pipe. The agent reads
   the pipe to its end: no clock; the child ends by finishing, by its budget, or by dying
   (then the last test it started is named). (forked pid) runs here once the child exists."
-  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol]] :seon.test/result]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] :seon.host/fn] :seon.test/result]]}
+  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol]] [:or :seon.test/result :seon.test/fork-refused]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]]}
   ([ticks proofs] (run-tests-forked ticks proofs (fn [_] nil)))
   ([ticks proofs forked]
   (let [[r w] (lib/pipe) t0 (profile/now-ns)]
     (lib/fork!
       {:refused (fn [n] (lib/c-close r) (lib/c-close w)
-                  {:pass 0 :fail 0 :error 1 :ms (profile/ms-since t0)
-                   :reports [{:type :error :message (str "cannot fork the tests: " n " Chez threads active (a running future?)")}]})
+                  (contract/error :seon.test/fork-refused 'seon.agent/run-tests-forked
+                                  (str "cannot fork the tests: " n " Chez threads active (a running future?)") {:active-threads n}))
        :child (fn []
                 (lib/c-close r)
                 ;; the run ends by its budget; if the agent dies first, the next write to the

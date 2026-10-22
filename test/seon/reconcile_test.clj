@@ -8,7 +8,8 @@
             [seon.task :as task]
             [seon.reconcile :as r]
             [seon.template :as tpl] [seon.problems :as problems] [seon.merge :as pm] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
-            [clojure.string :as str] [clojure.set] [seon.config :as cfg]))
+            [clojure.string :as str] [clojure.set] [seon.config :as cfg]
+            [seon.program :as program] [seon.writer :as writer] [seon.turn :as turn] [clojure.core.async :as a]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -154,15 +155,44 @@
     (is (= :no-end (:seon.attempt/outcome ended)))
     (is (= #{} (set (filter #{:seon.attempt/turns :seon.attempt/model-calls :seon.attempt/tokens :seon.attempt/ms} (keys ended)))))))
 
+(defn- fn-tx
+  "A recorded definition of fn app.gaps/nm (as seon.program/record-tx writes it), with its
+  contract c or none."
+  [db nm c]
+  (program/record-tx db {:id (str "app.gaps/" nm (when c "-contracted")) :src (str "(defn " nm (when c (str " {:malli/schema " c "}")) " [x] x)")
+                         :ns 'app.gaps :ns-form? false :defs [(cond-> {:var (symbol "app.gaps" nm) :kind :fn} c (assoc :contract c))]
+                         :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}}))
+
 (deftest the-judge-and-the-merge-gate-agree-on-contract-gaps
-  ;; root's judge records the gaps the writer's diff of the branch names (seon.merge/uncontracted
-  ;; over its :ours), not a second derivation over the whole program against main
-  (let [db (db-of diamond :extra (attempt "a" 1 :running))
-        tx (#'r/judge-tx {:db db :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {}
-                         {:db db :base db} {:ours [[:var 'app/g]] :uncontracted '[app/g] :unmerged []})
-        ended (first (filter #(and (map? %) (= "demo/a#1" (:seon.attempt/id %)) (:seon.attempt/outcome %)) tx))]
-    (is (= '[app/g] (:seon.attempt/uncontracted ended)))
-    (is (= ["[:var app/g]"] (:seon.attempt/changed ended)))))
+  ;; one question, asked by the agent's done check (seon.turn), the writer's diff that root's
+  ;; judge reads, and the merge gate: which functions the BRANCH adds without a contract. A
+  ;; branch behind a main that fixed its own gap after the fork still holds main's old
+  ;; uncontracted g; that gap is main's, not the branch's (the judge used to refuse it while
+  ;; the gate took the branch). With contracts off (seon.contract/on? false, a process
+  ;; setting) all three answer none: they ask the one function, seon.merge/uncontracted.
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [c "[:=> [:cat :int] :int]"
+           _ (d/transact conn (fn-tx @conn "g" nil))
+           ab (pdb/on-main (:branch cfg) :gaps)
+           _ (d/branch! conn (:branch cfg) ab)
+           base @conn
+           _ (d/transact conn (fn-tx @conn "g" c))
+           bc (d/connect (assoc cfg :branch ab))]
+       (try
+         (d/transact bc (fn-tx @bc "u" nil))
+         (let [w (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 4) :events (a/chan 4)})
+               ask (fn [req] (:r (first (:to-api (second (#'writer/writer-proc w :in (assoc req :dest {:rid 1})))))))
+               diff (ask {:op :branch-diff :branch ab})
+               gate (ask {:op :merge :branch ab})
+               judged (first (filter #(and (map? %) (:seon.attempt/outcome %))
+                                     (#'r/judge-tx {:db @conn :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {}
+                                                   {:db @bc :base base} diff)))]
+           (is (= #{'app.gaps/u} (#'turn/added-gaps base @bc)) "the agent's done check")
+           (is (= '[app.gaps/u] (:uncontracted diff)) "the writer's diff")
+           (is (= '#{app.gaps/u} (set (:seon.attempt/uncontracted judged))) "root's judge: g is main's gap, fixed on main")
+           (is (= :seon.merge/behind (:seon.error/type gate)) "the gate: behind first, its gaps judged once main merges in"))
+         (finally (d/release bc)))))))
 
 (deftest an-attempt-without-an-end-reads-nil
   ;; no end written (a silent death) is nothing to read, not an empty end
@@ -206,13 +236,17 @@
 
 (deftest a-refused-diff-ends-the-attempt-with-its-cause
   ;; the writer refuses to diff the branch: the attempt is not judged on facts nobody
-  ;; measured (no changed keys, no gaps); its agent is stopped and the refusal is its cause
+  ;; measured (no changed keys, no gaps); its agent is stopped and the attempt ends with the
+  ;; refusal as its error, the read not asked again
   (let [no (contract/error :seon.writer/refused 'seon.writer/writer-proc "no branch :demo/a" {})
         st {:db (db-of [(decl "a")]) :boot "boot-1" :rid 0 :pending {}
             :flights {"demo/a#1" {:act {:attempt "demo/a#1" :task "demo/a" :env {:branch :demo/a}} :agent :a1 :step :diffed}}}
         [st' outs] (#'r/advance st "demo/a#1" :diffed no)]
-    (is (= no (get-in st' [:flights "demo/a#1" :died])))
-    (is (= [{:op :kill :id :a1 :ended true} {:op :write :req {:op :branch-db :branch :demo/a}}] (mapv :req outs)))))
+    (is (= {:op :kill :id :a1 :ended true} (:req (first outs))))
+    (is (= [[:db/cas [:seon.attempt/id "demo/a#1"] :seon.attempt/status :running :ended]
+            {:seon.attempt/id "demo/a#1" :seon.attempt/reason "no branch :demo/a" :seon.attempt/error no}]
+           (update (get-in (second outs) [:req :req :tx-data]) 1 dissoc :seon.attempt/end-ms)))
+    (is (= :done (get-in st' [:pending (:tag (second outs)) 1])) "its flight ends with the write")))
 
 (deftest an-ended-attempt-of-a-cancelled-task-is-closed
   (is (= [{:op :close :attempt "demo/a#1"}]

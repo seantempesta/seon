@@ -597,10 +597,11 @@
         ;; on its branch before it exited, read from the branch
         dead (fn [st e] (one (request (assoc-in st [:flights aid :died] e) aid :dead-read
                                       {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}})))
-        ;; the writer refused to read or diff its branch: its agent is stopped, and the attempt
-        ;; ends with the refusal as its cause, not judged on facts nobody measured
+        ;; the writer refused to read or diff its branch: its agent is stopped and the attempt
+        ;; ends with the refusal as its error, not judged on facts nobody measured
         refused (fn [st e] (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
-                                 [st [o2]] (dead st e)]
+                                 [st o2] (write st aid :done (cas-tx aid :running :ended {:seon.attempt/end-ms (System/currentTimeMillis)
+                                                                                          :seon.attempt/reason (:seon.error/message e) :seon.attempt/error e}))]
                              [st [o1 o2]]))]
     (case step
       :ignored [st []]
