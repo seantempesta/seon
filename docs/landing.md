@@ -2,6 +2,16 @@
 
 How a branch lands on main: what it runs, how batches are proven, and how conflicts are resolved. Who lands and why is [AGENTS.md §3](../AGENTS.md); the machine the proofs run on is [machine](machine.md).
 
+## A lane works in a worktree of its own
+
+A lane is a separate instance of the whole system: `bin/worktree NAME` (run from the main tree) makes `../next-NAME` on branch `jolt/NAME` from main, with its own submodule checkouts at their pins, an APFS clone of `target/` (so `nice -n 15 bin/build seon` is the only build), its own ports (`config/local.edn`, `bin/ports`) and its own stores under its `runs/`. In it:
+- `bin/root start | status | stop` runs that worktree's own root, never the standing one (7888); a Claude session started in the worktree reaches it through the committed `.mcp.json` (`./bin/mcp` asks this checkout's root);
+- `bin/test` and single check modes iterate; a full check runs on a store of its own, `SEON_STORE=$PWD/target/check-store bin/check 100`: `runs/store` is the worktree root's, made without the example program the checks seed, so reusing it fails steps falsely;
+- after each landing on main: `git merge main` in the worktree, then `bin/worktree --sync NAME` from the main tree (never `git submodule` in a worktree);
+- a submodule the lane adds (`reference-code/X`) is written as a `.gitmodules` entry and a gitlink, with its checkout cloned from a local copy; root initializes it in the main tree when it lands (`git submodule update --init reference-code/X`), so later worktrees get it.
+
+Leave nothing running: `bin/root stop` before you report. Root removes the worktree after the landing (`bin/worktree --remove NAME`).
+
 ## A lane's part
 
 A lane merges main into its branch, proves the merged result, and reports. Branches live hours: merge main into yours after every landing. While iterating, run only what your change reaches: single check modes and the tests that touch it, never a full check per edit. To land, report the commits, proofs red → green, numbers against estimates, what you deleted, the check's `target/check/<time>/` path, and that nothing of yours is running. A lane stops at its own single-namespace tests and its red-to-green proofs, reports, and lets root run the full proof in the batch.
