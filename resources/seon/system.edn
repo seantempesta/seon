@@ -23,7 +23,7 @@
   :fork-server {:proc seon.fork-server/fork-server-proc
                 :args {:conn :bind/conn :pid :bind/fork-server-pid :fd :bind/fork-server-fd :server-ev :bind/server-ev}}
   :flusher {:proc seon.writer/flusher-proc
-            :args {:to-writer :bind/to-writer :flush-ms :bind/flush-ms}}
+            :args {:to-writer :bind/to-writer :cfg :bind/store-cfg}}
   ;; the incremental reconciler reads every commit's datoms (k8s's watch): a bounded
   ;; buffer, back-pressure on the writer if it lags
   :reconciler {:proc seon.reconcile/reconciler-proc

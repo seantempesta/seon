@@ -50,7 +50,7 @@
   []
   (if-let [m (peek (:pending @state))]
     (do (swap! state update :pending pop) m)
-    (if (:dirty-at @state)
+    (if (:dirty? @state)
       (let [m (sock/next-frame! (:conn @state))]
         (case m
           :none (do (commit!) (recv-raw!))
@@ -95,7 +95,7 @@
   {:malli/schema [:=> [:cat] :any]}
   []
   (when-let [c (dw/commit-pending! (:store-conn @state))]
-    (swap! state #(-> % (assoc :db (:db c)) (dissoc :dirty-at)))
+    (swap! state #(-> % (assoc :db (:db c)) (dissoc :dirty?)))
     ;; the eval errors folded since the last commit ride it (seon.error/note): root counts
     ;; them across agents
     (let [errs (:errors @state)]
@@ -104,8 +104,8 @@
 
 (defn transact!
   "Write tx-data to this agent's branch: applied at once to the value ahead of the
-  committed one (its answer does not wait for a commit), committed when the agent is idle,
-  at a turn's end or within the flush window (owner, 2026-10-20: the agent-owned run-ahead
+  committed one (its answer does not wait for a commit), committed when the agent is idle
+  or at a turn's end, never because time passed (owner, 2026-10-20: the agent-owned run-ahead
   writer). Answers {:t :datoms :tempids}. Inside a test (a fork of the agent) it applies to
   the fork's db only. A refused transaction throws its message into the caller's eval."
   {:malli/schema [:=> [:cat :seon.db/tx-data] :seon.agent/tx-result]}
@@ -118,11 +118,9 @@
       ;; past this process's block of entity ids: the typed refusal, nothing applied
       (when-let [e (and (not (map? r)) (pdb/lease-spent r (:lease @state)))] (throw (ex-info (:seon.error/message e) e)))
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
-      (let [now (lib/now-ns)
-            since (:dirty-at (swap! state #(-> % (assoc :db (:db-after r)) (update :dirty-at (fn [t] (or t now))))))]
-        (when (>= (- now since) (* 1000000 pdb/flush-ms)) (commit!))
-        (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
-          (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r))))))))
+      (swap! state assoc :db (:db-after r) :dirty? true)
+      (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
+        (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r)))))))
 
 ;; ---- effects (seon.fx, lane FX1): root's owner procs, through the stand-in -------------
 

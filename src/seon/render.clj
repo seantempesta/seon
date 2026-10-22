@@ -16,16 +16,9 @@
     3. the one value printer (seon.print/print-value): text for :ai, hiccup for :html.
   A nested value renders by calling `render` on it; the printer never re-dispatches."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print :as print]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.config :as config]))
 
 (def faces "Each face's key." {:html :seon.render/html :ai :seon.render/ai})
-
-(defn properties
-  "The properties map of named schema k's form, or nil."
-  {:malli/schema [:=> [:cat :any] [:maybe :map]]}
-  [k]
-  (let [form (get contract/forms k)]
-    (when (and (vector? form) (map? (second form))) (second form))))
 
 (defn parents
   "The named schemas k's form extends ([:and p ...] or [:merge p ...])."
@@ -41,13 +34,13 @@
   {:malli/schema [:=> [:cat [:maybe :qualified-keyword] :seon.render/face] [:maybe :symbol]]}
   [k face]
   (when k
-    (or (get (properties k) (faces face))
+    (or (get (contract/properties k) (faces face))
         (some #(declared % face) (parents k)))))
 
 (defn- identity-attr?
   "Is attribute a an upsert key ([:and {:seon.db/identity true} ...])?"
   {:malli/schema [:=> [:cat :any] :boolean]}
-  [a] (boolean (:seon.db/identity (properties a))))
+  [a] (boolean (:seon.db/identity (contract/properties a))))
 
 (defn- map-keys
   "The keys a schema's [:map ...] form names (inline, or in its [:and ...] members)."
@@ -77,7 +70,7 @@
   {:malli/schema [:=> [:cat :seon.render/face :any :seon.render/env] :seon.render/out]}
   [face v env]
   ;; without a handle a cut names no form: no result would answer it
-  (let [opts {:budget (or (:seon.render/budget env) 600) :handle (:seon.render/handle env)}]
+  (let [opts {:budget (or (:seon.render/budget env) (config/value :seon.config.render/value-budget)) :handle (:seon.render/handle env)}]
     (if (= face :html)
       (let [r (print/print-value v (assoc opts :outputs #{:hiccup}))]
         {:seon.render/html (or (:html r) [:span {:class "seon-print-refused"} (str (:seon.error/message r))])})
@@ -112,4 +105,4 @@
   {:malli/schema [:=> [:cat :any :seon.render/env] :string]}
   [v env]
   (let [x (:seon.render/ai (render-face :ai v env))]
-    (if (string? x) x (print/text x (or (:seon.render/budget env) 600)))))
+    (if (string? x) x (print/text x (or (:seon.render/budget env) (config/value :seon.config.render/value-budget))))))
