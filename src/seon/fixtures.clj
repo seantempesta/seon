@@ -104,7 +104,7 @@
     function, quoted data and a dynamic var, and app.newns-test whose deftest uses a
     :refer'd fn; a def in `user` stays scratch. Main must run all of it as written.
   - :hairy: a and b both rewrite f1..f4: four conflicts (:seon.config.merge/max-conflicts 3), so b's merge fails and
-    design -> implement -> test -> merge attach; on main's code b's proofs pass."
+    is held for root (:held), with its reason; a's code is on main, where b's proofs pass too."
   {:conflict {:specs [{:name "a" :ns 'app.m :var "f" :stub (defn1 "f" "0")
                        :plan "Make `app.m/f` pass its proof `app.proofs/a-test`. Write its body as (+ x 1)." :proof "(deftest a-test (is (= 2 (app.m/f 1))))"}
                       {:name "b" :ns 'app.m :proofs #{'app.proofs/b-test} :proof "(deftest b-test (is (= 11 (app.m/f 10))))"
@@ -177,7 +177,7 @@
                          {:name "b" :ns 'app.m :proofs #{'app.proofs/b-test}
                           :proof "(deftest b-test (is (= [11 12 13 14] [(app.m/f1 10) (app.m/f2 10) (app.m/f3 10) (app.m/f4 10)])))"}]
                         (for [k [2 3 4]] {:var (str "f" k) :ns 'app.m :stub (defn1 (str "f" k) "0")}))
-           :after {"b-merge" "a-merge"}
+           :after {"b-merge" "a-merge"} :held {"b-merge" "too many"}
            :check "(mapv #(% 10) [app.m/f1 app.m/f2 app.m/f3 app.m/f4])" :expect ["[11 12 13 14]"]
            :replies {"a" [(fenced "Each fK adds K." (str "(in-ns 'app.m)\n" (str/join "\n" (for [k [1 2 3 4]] (defn1 (str "f" k) (str "(+ x " k ")"))))))]
                      "b" [(fenced "Each fK adds K, other way round." (str "(in-ns 'app.m)\n" (str/join "\n" (for [k [1 2 3 4]] (defn1 (str "f" k) (str "(+ " k " x)"))))))]}}})
