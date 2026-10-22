@@ -347,13 +347,13 @@
 
 (def ^:private pure-fns
   "Pure functions in namespaces that are otherwise host code (seon.lib binds libc: never
-  generate its arguments; seon.proofs runs git and writes files)."
+  generate its arguments; seon.proofs reads and writes results)."
   '#{seon.lib/percentile seon.lib/r2 seon.lib/summ seon.lib/push-window seon.lib/p50
      seon.cost/work seon.cost/exponent seon.cost/per-unit seon.cost/expected seon.cost/judge seon.profile/top
-     ;; seon.proofs reads and writes results and runs git (inputs, greens, store!, run-tests!): its pure part
+     ;; seon.proofs reads and writes results (greens, store-greens!, run-tests!): its pure part
      seon.proofs/test-symbol seon.proofs/red? seon.proofs/results seon.proofs/red-reports seon.proofs/run-errors
      seon.proofs/failures seon.proofs/costs seon.proofs/green? seon.proofs/result-path seon.proofs/result-file
-     seon.proofs/plan seon.proofs/shards seon.proofs/config-input})
+     seon.proofs/plan})
 
 (defn- fn-without-gen
   "The [:fn ...] schemas without a :gen property in form f, anywhere in it."
@@ -960,7 +960,7 @@
     (let [;; the procs that answered a graph ping within :seon.config.check/ping-ms (an expected one that did not is blocked or absent)
           pids (fn [] (set (keys (flow/ping (:graph sys) :timeout-ms (seon.config/value :seon.config.check/ping-ms)))))
         booted (pids)
-        expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/source :fx.source/0 :fx/git :fx.git/0 :fx/deps :fx.deps/0 :fx/build :fx.build/0 :fx/proof-inputs :fx.proof-inputs/0 :fx/model}
+        expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/source :fx.source/0 :fx/git :fx.git/0 :fx/deps :fx.deps/0 :fx/build :fx.build/0 :fx/model}
                      (for [i (range (seon.config/value :seon.config.ai/max-in-flight))] (keyword "fx.model" (str i))))
         dir (str (:agents-dir (:store (c/state sys))) "/system") ; this root's own run dir
         _ (.mkdirs (java.io.File. dir))

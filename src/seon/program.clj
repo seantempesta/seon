@@ -762,8 +762,7 @@
   tests took the tree, so any edit anywhere reran them."
   '#{seon.config/baked-schema-forms ;; resources/seon/schemas, in :env
      seon.fork-server/dev-classpath! ;; deps.edn, in :env
-     seon.system/declared-refs ;; resources/seon/system.edn, in :env
-     seon.proofs/inputs ;; digests the tree into a key (root's boot fact): a test reaching it depends on no file's content
+     seon.fx/declared-refs ;; resources/seon/system.edn, in :env
      seon.web/handler ;; web/public, in :env
      seon.proofs/greens}) ;; the results directory, outside the tree, by digest
 
@@ -782,8 +781,8 @@
   closure. With roots ({key [var ...]}, a bin/check step's mode functions: seon.proofs/
   check-steps), the same digest of each key: what its vars' forms and their namespaces'
   plain forms reach; a key one of whose vars has no form here has none."
-  {:malli/schema [:function [:=> [:cat :seon.host/db [:map [:env :string] [:tree :string] [:data-refs {:optional true} [:map-of :qualified-symbol [:set :qualified-symbol]]]]] [:map-of :qualified-symbol :string]]
-                  [:=> [:cat :seon.host/db [:map [:env :string] [:tree :string] [:data-refs {:optional true} [:map-of :qualified-symbol [:set :qualified-symbol]]]] [:map-of :string [:sequential :qualified-symbol]]] [:map-of :string :string]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol :string]]
+                  [:=> [:cat :seon.host/db :seon.program/inputs [:map-of :string [:sequential :qualified-symbol]]] [:map-of :string :string]]]}
   ([db inputs] (reach-digests db inputs nil))
   ([db {:keys [env tree data-refs]} roots]
   (let [schemas (into {} (for [dt (d/datoms db :aevt :schema/key)] [(:v dt) (:schema/form (d/entity db (:e dt)))]))

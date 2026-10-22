@@ -23,6 +23,7 @@ case ${1:-} in
   --prove) WHAT=$2 OUT=$3; shift 3 ;;
   *) WHAT=tests OUT=$ROOT/target/prove/tests ;;
 esac
+mkdir -p "$OUT"; rm -f $OUT/shard-*(N)
 runner --plan $WHAT "$OUT" "$@" || { echo "TEST FAILED (the plan)"; exit 1 }
 # a test that starts ./seon (a root, an agent) runs the binary, which its digest does not
 # cover: whatever is about to run, runs on target/seon built from this tree (a no-op build

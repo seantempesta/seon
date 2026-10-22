@@ -8,8 +8,7 @@
   run-tests-forked answer): one status per test var, read the same way by the agent's turn
   loop and root's judge."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.profile :as profile]
-            [seon.config :as config] [seon.system :as system] [clojure.java.shell :as sh]
+  (:require [seon.contract :refer [defn defn-]] [seon.edn :as sedn] [seon.error :as error] [seon.profile :as profile]
             [clojure.edn :as edn] [clojure.string :as str] [clojure.test :as t]))
 
 (defn test-symbol
@@ -76,58 +75,6 @@
   [run]
   (into {} (for [{:keys [var cost]} (:reports run) :let [t (test-symbol var)] :when (and t cost)] [t cost])))
 
-;; ---- the inputs with no program facts --------------------------------------------------
-
-(defn- git {:malli/schema [:=> [:cat :string [:* :string]] :string]}
-  [root & args] (:out (apply sh/sh "git" "-C" root args)))
-
-(defn- env-input?
-  "Is the file at relative path p an input of every test: everything git tracks or would
-  track but the source program facts carry (.clj under src and test), task files (data
-  root loads, no test's code) and prose (.md)?"
-  {:malli/schema [:=> [:cat :string] :boolean]}
-  [p]
-  (not (or (str/ends-with? p ".md")
-           (str/starts-with? p "resources/seon/tasks/")
-           (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))))))
-
-(defn config-input
-  "The config in force as a test reads it, cfg (seon.config/config: the shipped file, this
-  checkout's config/local.edn, the #env values, the profile), as text: the checkout's own path
-  written as <checkout>, and the TCP ports left out (each checkout's own by design, bin/ports;
-  a test's root takes its own). What a result depends on that git does not see."
-  {:malli/schema [:=> [:cat :map :string] :string]}
-  [cfg checkout]
-  (str/replace (sedn/encode (into (sorted-map) (remove (fn [[k]] (= "TCP port" (get-in config/schema-forms [k 1 :seon.config/unit])))) cfg))
-               checkout "<checkout>"))
-
-(defn inputs
-  "The one producer of the checkout at root's inputs that have no program facts, for bin/test
-  and for root (which records them at boot for its agents, seon.root/record-proof-inputs!):
-  {:env (every test's: env-input? files, every submodule's pin, Jolt's included, and the config
-  in force, config-input) :tree (a test reading files: every file and pin) :data-refs
-  (seon.system/declared-refs of its system.edn)}, digests of relative paths and content, so the
-  same content at another path is the same inputs."
-  {:malli/schema [:function [:=> [:cat :string] :map] [:=> [:cat :string :map :string] :map]]}
-  ([root] (inputs root config/config (config/checkout)))
-  ([root cfg checkout]
-   (let [pins (filter #(str/starts-with? % "160000 ") (str/split-lines (git root "ls-files" "-s")))
-         files (for [p (sort (str/split (git root "ls-files" "--cached" "--others" "--exclude-standard" "-z") #"\u0000"))
-                     :let [f (java.io.File. ^String root ^String p)] :when (.isFile f)]
-                 [p (str p " " (error/digest (slurp f)))])
-         digest #(error/digest (str/join "\n" %))]
-     {:env (digest (concat pins (keep (fn [[p line]] (when (env-input? p) line)) files) [(config-input cfg checkout)]))
-      :tree (digest (concat pins (map second files)))
-      :data-refs (system/declared-refs (str root "/resources/seon/system.edn"))})))
-
-(defn perform-inputs
-  "The :proof-inputs effect's performer (resources/seon/system.edn): inputs of the checkout at
-  the request's :root, its :env and :tree, read on an effect worker (git and every file read:
-  never on root's own thread, which stays fit to fork). Answers {:value {:env :tree}}."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [root]} :req}]
-  {:value (select-keys (inputs root) [:env :tree])})
-
 ;; ---- prove: run what a change reaches, reuse every green by digest ------------------------
 
 (def check-steps
@@ -168,9 +115,8 @@
   [dir digest] (str dir "/" digest ".edn"))
 
 (defn greens
-  "{digest result} of the results stored green at digests in dir (one <digest>.edn each); none
-  for no digests (a branch holding no test: (vals {}) is nil)."
-  {:malli/schema [:=> [:cat :string [:maybe [:sequential :string]]] [:map-of :string :map]]}
+  "{digest result} of the results stored green at digests in dir (one <digest>.edn each)."
+  {:malli/schema [:=> [:cat :string [:sequential :string]] [:map-of :string :map]]}
   [dir digests]
   (into {} (for [dg (distinct digests) :let [f (java.io.File. ^String (result-path dir dg))] :when (.isFile f)
                  :let [r (edn/read-string (slurp f))] :when (green? r)]
@@ -178,18 +124,20 @@
 
 (defn result-file
   "The write that stores result r ({:test or :step, :digest, :pass :fail :error :ms}) in dir:
-  seon.fx/write-file's request {:path :text}, the one encoding greens reads back."
+  seon.fx/write-file's request {:path :text}, the one encoding greens reads back (store-greens!)."
   {:malli/schema [:=> [:cat :string [:map [:digest :string]]] [:map [:path :string] [:text :string]]]}
   [dir r] {:path (result-path dir (:digest r)) :text (sedn/encode r)})
 
-(defn store!
-  "Result r written at its digest in dir through the effect owner's file write
-  (seon.fx/write-file: temp then rename), in a process with no root (bin/test); an agent asks
-  root's :file owner for the same request (result-file). Answers the write's outcome:
-  {:value ...}, or its declared :seon.fx/io-error, which the caller records."
-  {:malli/schema [:=> [:cat :string [:map [:digest :string]]] :map]}
-  [dir r]
-  (fx/write-file {:req (result-file dir r)}))
+(defn store-greens!
+  "Each green result of ran ({key result}) that has a :digest written at it in dir by (write!
+  request), request being seon.fx/write-file's (result-file): bin/test's shards and steps
+  write through seon.fx/write-file itself, an agent through root's :file owner. Answers the
+  writes refused, [{:key :message}], each read: that key's green is not stored and it runs again."
+  {:malli/schema [:=> [:cat :seon.host/fn :string [:map-of :any :map]] [:vector [:map [:key :any] [:message [:maybe :string]]]]]}
+  [write! dir ran]
+  (vec (for [[k r] ran :when (and (green? r) (:digest r))
+             :let [w (write! (result-file dir r))] :when (:seon.error/type w)]
+         {:key k :message (:seon.error/message w)})))
 
 (defn plan
   "What a change runs: of cand ({key digest}, the candidate's), base (the base's {key digest},
@@ -216,40 +164,26 @@
   a test's run reports through it, never through the enclosing run's binding."
   t/report)
 
-(defn shards
-  "tests (var symbols) dealt into at most jobs shards, a namespace's tests (and so its fixtures)
-  in one, the largest namespace first into the smallest shard; no empty shard."
-  {:malli/schema [:=> [:cat [:sequential :qualified-symbol] pos-int?] [:vector [:vector :qualified-symbol]]]}
-  [tests jobs]
-  (let [by-ns (sort-by (juxt (comp - count val) (comp str key)) (group-by (comp symbol namespace) tests))]
-    (vec (remove empty? (reduce (fn [sh [_ ts]] (update sh (apply min-key #(count (sh %)) (range (count sh))) into ts))
-                                (vec (repeat (max 1 (min jobs (count by-ns))) [])) by-ns)))))
-
 (defn run-tests!
   "The one clojure.test runner (bin/test's shards, an agent's test fork): run tests (var
   symbols, their namespaces loaded) here, each namespace's by clojure.test/test-vars so its
   fixtures run around them, and tell (note! x) as it goes: {:seon.test/started test} as each
   starts, {:seon.test/report m :test test} for each assertion (clojure.test's report map),
   each result {:test :digest :pass :fail :error :ms} as it ends, and {:seon.test/output text
-  :ns n} for a red namespace's clojure.test output. With dir, each result with a digest is
-  stored there (store!) as it ends, and a result whose write failed is an :error result naming
-  the write's error (never read as stored). Answers {test result}; a test that never reported,
-  because its namespace's run threw (a fixture), is an :error result carrying that throw's
+  :ns n} for a red namespace's clojure.test output. It only runs: its caller stores the greens
+  (store-greens!). Answers {test result}; a test that never reported, because its namespace's
+  run threw (a fixture), is an :error result and an :error report carrying that throw's
   message and data. A run's work budget (Jolt's ticks, :jolt/ticks-spent) ends the whole run:
   that throw is the caller's. The per-namespace counts are volatiles local to its run:
   clojure.test reports through a callback, one thread, no proc."
-  {:malli/schema [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] [:maybe :string] :seon.host/fn]
+  {:malli/schema [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn]
                   [:map-of :qualified-symbol :map]]}
-  [tests digests dir note!]
+  [tests digests note!]
   (let [tset (set tests)]
     (into {} (for [[n ts] (group-by (comp symbol namespace) tests)
                    :let [counts (volatile! {}) ran (volatile! {}) out (java.io.StringWriter.) t0 (volatile! nil)
                          done! (fn [v] (let [r (assoc (merge {:pass 0 :fail 0 :error 0} (@counts v)) :test v :digest (digests v)
-                                                      :ms (quot (- (profile/now-ns) @t0) 1000000))
-                                             w (when (and dir (:digest r)) (store! dir r))
-                                             r (if (:seon.error/type w)
-                                                 (-> r (update :error inc) (assoc :message (str "result not stored: " (:seon.error/message w))))
-                                                 r)]
+                                                      :ms (quot (- (profile/now-ns) @t0) 1000000))]
                                          (vswap! ran assoc v r)
                                          (note! r)))
                          thrown (binding [t/*test-out* out
@@ -267,10 +201,13 @@
                                                      (binding [t/*test-out* out] (report m)))]
                                   (try (t/test-vars (keep #(ns-resolve n (symbol (name %))) ts)) nil
                                        (catch Throwable e (if (:jolt/ticks-spent (ex-data e)) (throw e) e))))
-                         _ (when (or thrown (some #(not (green? (@ran %))) ts)) (note! {:seon.test/output (str out) :ns n}))]
+                         unreported (for [tst ts :when (not (@ran tst))]
+                                      (let [msg (if thrown (str n "'s run threw before this test reported: " (ex-message thrown))
+                                                    (str n "'s run ended before this test reported"))]
+                                        (note! {:seon.test/report {:type :error :message msg} :test tst})
+                                        [tst (cond-> {:test tst :digest (digests tst) :pass 0 :fail 0 :error 1 :ms 0 :message msg}
+                                               (ex-data thrown) (assoc :data (sedn/encode (ex-data thrown))))]))
+                         result (into @ran unreported)
+                         _ (when (or thrown (some #(not (green? (result %))) ts)) (note! {:seon.test/output (str out) :ns n}))]
                    tst ts]
-               [tst (or (@ran tst)
-                        (cond-> {:test tst :digest (digests tst) :pass 0 :fail 0 :error 1 :ms 0
-                                 :message (if thrown (str n "'s run threw before this test reported: " (ex-message thrown))
-                                              (str n "'s run ended before this test reported"))}
-                          (ex-data thrown) (assoc :data (sedn/encode (ex-data thrown)))))]))))
+               [tst (result tst)]))))

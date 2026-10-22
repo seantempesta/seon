@@ -13,6 +13,7 @@
             [seon.db :as pdb]
             [seon.program :as program]
             [seon.proofs :as proofs]
+            [seon.fx :as fx]
             [seon.merge :as pm]
             [seon.source :as source]
             [clojure.java.shell :as sh]
@@ -261,9 +262,9 @@
   (let [db (calc-db)
         dir (scratch-dir "results")
         digests (select-keys (program/reach-digests db {:env "e" :tree "t"}) calc-tests)
-        plan #(proofs/plan nil digests (proofs/greens dir (vals digests)) #{})
+        plan #(proofs/plan nil digests (proofs/greens dir (vec (vals digests))) #{})
         first-plan (plan)
-        ran (binding [*out* (java.io.StringWriter.)] (proofs/run-tests! (:run first-plan) digests dir (fn [_])))
+        ran (doto (proofs/run-tests! (:run first-plan) digests (fn [_])) (->> (proofs/store-greens! #(fx/write-file {:req %}) dir)))
         second-plan (plan)]
     (is (= calc-tests (set (:run first-plan))) "nothing recorded: every test runs")
     (is (= {:pass 1 :fail 0 :error 0} (select-keys (ran 'app.pt-calc-test/add-test) [:pass :fail :error])))
@@ -272,7 +273,7 @@
     (is (= (digests 'app.pt-calc-test/neg-test) (:digest ((:reused second-plan) 'app.pt-calc-test/neg-test))))))
 
 (defn- run-plan "bin/test's plan of digests against the results in dir." [digests dir]
-  (proofs/plan nil digests (proofs/greens dir (vals digests)) #{}))
+  (proofs/plan nil digests (proofs/greens dir (vec (vals digests))) #{}))
 
 (defn- checkout!
   "A git checkout at a new directory holding files ({relative path text}), all added."
@@ -289,16 +290,16 @@
         b (checkout! "b" files)
         dir (scratch-dir "shared")
         db (calc-db)
-        in-a (proofs/inputs a)
+        in-a (fx/inputs a)
         da (select-keys (program/reach-digests db in-a) calc-tests)]
-    (is (= in-a (proofs/inputs b)) "the same content at another path: the same inputs")
-    (binding [*out* (java.io.StringWriter.)] (proofs/run-tests! (:run (run-plan da dir)) da dir (fn [_])))
-    (is (= [] (:run (run-plan (select-keys (program/reach-digests db (proofs/inputs b)) calc-tests) dir)))
+    (is (= in-a (fx/inputs b)) "the same content at another path: the same inputs")
+    (proofs/store-greens! #(fx/write-file {:req %}) dir (proofs/run-tests! (:run (run-plan da dir)) da (fn [_])))
+    (is (= [] (:run (run-plan (select-keys (program/reach-digests db (fx/inputs b)) calc-tests) dir)))
         "checkout b reuses every result checkout a recorded")
     (spit (str b "/docs/a.md") "# a, edited")
-    (is (= (:env in-a) (:env (proofs/inputs b))) "prose is no input of a test that reads no files")
+    (is (= (:env in-a) (:env (fx/inputs b))) "prose is no input of a test that reads no files")
     (spit (str b "/resources/seon/schemas/x.edn") "{:x :string}")
-    (is (= calc-tests (set (:run (run-plan (select-keys (program/reach-digests db (proofs/inputs b)) calc-tests) dir))))
+    (is (= calc-tests (set (:run (run-plan (select-keys (program/reach-digests db (fx/inputs b)) calc-tests) dir))))
         "a changed schema resource is an input of every test")))
 
 ;; ---- refs the expansion and the quote leave (task seon.program/refs-name-quoted-symbols-and-macro-uses)
@@ -427,7 +428,7 @@
     (is (= a b) "the same tree imported twice in one process: every digest equal")
     (is (= a c) "the same commit in another checkout: every digest equal, so its results are shared")
     (is (= [] (:run (run-plan a (let [dir (scratch-dir "same-tree")]
-                                  (doseq [[t dg] a] (proofs/store! dir {:test t :digest dg :pass 1 :fail 0 :error 0}))
+                                  (proofs/store-greens! #(fx/write-file {:req %}) dir (into {} (for [[t dg] a] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
                                   dir))))
         "with each green stored, a second run on the unchanged tree runs nothing")))
 
@@ -441,7 +442,7 @@
         moved (set (for [[t d] a :when (not= d (b t))] t))]
     (is (not (moved 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a reader test reaches only :env reads: the tree is no input")
     (is (moved 'seon.task-files-test/the-shipped-task-files-load) "a test reading the task files (my.root/task-files, not in :env): the tree is its input")
-    (is (moved 'seon.program-test/a-result-recorded-in-one-checkout-is-reused-in-another) "a test reading files itself (test-proofs/inputs): the tree is its input")
+    (is (moved 'seon.program-test/a-result-recorded-in-one-checkout-is-reused-in-another) "a test reading files itself (test-fx/inputs): the tree is its input")
     (is (< (count moved) (quot (count a) 2)) (str (count moved) " of " (count a) " tests take the tree: fewer than half"))))
 
 (deftest a-test-naming-another-test-does-not-reach-it
@@ -471,7 +472,7 @@
         in {:env "e" :tree "t" :data-refs '{app.pt-sys/read-decl #{app.pt-procs/writer-proc}}}
         k 'app.pt-sys-test/boot-test]
     (is (not= ((program/reach-digests db in) k) ((program/reach-digests db' in) k)) "the proc changed: the test booting through the declaration moves")
-    (is (contains? (get (seon.system/declared-refs (str (System/getProperty "user.dir") "/resources/seon/system.edn")) 'seon.system/read-decl) 'seon.writer/writer-proc)
+    (is (contains? (get (fx/declared-refs (str (System/getProperty "user.dir") "/resources/seon/system.edn")) 'seon.system/read-decl) 'seon.writer/writer-proc)
         "the shipped declaration's procs are the reader's data refs")))
 
 (deftest a-test-running-the-binary-takes-the-tree
@@ -490,9 +491,9 @@
   ;; checkout's config was reused in another's
   (let [here (System/getProperty "user.dir")
         cfg {:seon.config.ai/model "a" :seon.config.root/runs-dir (str here "/runs") :seon.config.web/port 8451}
-        env #(:env (proofs/inputs here % here))]
+        env #(:env (fx/inputs here % here))]
     (is (not= (env cfg) (env (assoc cfg :seon.config.ai/model "b"))) "another value in force: another :env, every test reruns")
     (is (= (env cfg) (env (assoc cfg :seon.config.web/port 9999))) "a checkout's own TCP port is no input")
-    (is (= (:env (proofs/inputs here cfg here))
-           (:env (proofs/inputs here (assoc cfg :seon.config.root/runs-dir "/elsewhere/runs") "/elsewhere")))
+    (is (= (:env (fx/inputs here cfg here))
+           (:env (fx/inputs here (assoc cfg :seon.config.root/runs-dir "/elsewhere/runs") "/elsewhere")))
         "a path under the checkout is the same input in any checkout")))

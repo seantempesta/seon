@@ -49,15 +49,13 @@
   "Run what judges this branch, as root's judge and the turn loop run it (seon.agent/run-tests-forked,
   in a fork of this agent): the task's proofs (or the given ones) and every test reaching what the
   branch changed since the main it forked from, each test green at its reach digest reused, not
-  run. Answers {:selected n :ran n :reused n :ms n :results {test :pass|:fail|:error} :red [{:test
-  :type :message :expected :actual}]}."
+  run. Answers that run ({:pass :fail :error :reports :ran :reused :ms ...}) with :results
+  {test :pass|:fail|:error}."
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :qualified-symbol]] :map]]}
   ([] (prove (or (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})))
   ([proofs]
-   (let [run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks) proofs)
-         results (proofs/results run)]
-     {:selected (count results) :ran (:ran run) :reused (:reused run) :ms (:ms run)
-      :results results :red (proofs/red-reports run (set (keys results)))})))
+   (let [run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks) proofs)]
+     (assoc run :results (proofs/results run)))))
 
 (defn grep
   "The program vars whose recorded definition's text (:form/src on this branch) holds the

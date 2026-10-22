@@ -2,11 +2,11 @@
   "prove (task seon.proofs/prove-runs-what-a-change-reaches): a key runs exactly when no green
   result is stored at its reach digest, so an unchanged tree runs nothing, a change runs what
   reaches it (through macros, schemas and the inputs with no program facts), a bin/check step
-  is keyed like a test by what its functions reach, and the run is forked shards that store
-  each result."
+  is keyed like a test by what its functions reach, and the run is shards whose greens are
+  stored."
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d]
             [seon.test-store :as ts] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
-            [seon.program-test :refer [record]]))
+            [seon.program-test :refer [record]] [seon.fx :as fx] [seon.config] [test-runner :as runner]))
 
 (defn- prog []
   (record (ts/test-db)
@@ -35,8 +35,10 @@
   "What bin/test does for the candidate db: plan against base digests, run the rest."
   [base db env dir]
   (let [cand (digests db env)
-        p (proofs/plan base cand (proofs/greens dir (vals cand)) #{})]
-    (assoc p :cand cand :ran (proofs/run-tests! (:run p) cand dir (fn [_])))))
+        p (proofs/plan base cand (proofs/greens dir (vec (vals cand))) #{})
+        ran (proofs/run-tests! (:run p) cand (fn [_]))]
+    (proofs/store-greens! #(fx/write-file {:req %}) dir ran)
+    (assoc p :cand cand :ran ran)))
 
 (deftest an-unchanged-tree-runs-nothing-and-reuses-everything
   (let [db (schema (prog) :app.pv-calc/n "int?") dir (scratch-dir)
@@ -47,7 +49,7 @@
     (is (= [] (:run second-run)) "the same tree again: nothing runs")
     (is (= ts (set (keys (:reused second-run)))) "every result is reused from its digest")
     (is (= (:cand first-run) (:cand second-run)) "the digests are the tree's, not the run's")
-    (is (= {} (proofs/greens dir (vals {}))) "a branch holding no test reads no greens (an agent died on this)")))
+    (is (= {} (proofs/greens dir (vec (vals {})))) "a branch holding no test reads no greens (an agent died on (vals {}), nil)")))
 
 (deftest a-one-defn-change-runs-only-what-reaches-it
   (let [db (schema (prog) :app.pv-calc/n "int?") dir (scratch-dir)
@@ -58,14 +60,14 @@
     (is (= '[app.pv-neg-test/neg-test] (:selected r)) "and only it is selected against the base")
     (is (proofs/green? (get (:ran r) 'app.pv-neg-test/neg-test)))
     (testing "a proof always judges: selected, and reused when green at its digest"
-      (let [p (proofs/plan base (:cand r) (proofs/greens dir (vals (:cand r))) '#{app.pv-calc-test/add-test})]
+      (let [p (proofs/plan base (:cand r) (proofs/greens dir (vec (vals (:cand r)))) '#{app.pv-calc-test/add-test})]
         (is (= '[app.pv-calc-test/add-test app.pv-neg-test/neg-test] (:selected p)))
         (is (= [] (:run p)) "both are green at their digests now")))))
 
 (deftest a-macro-schema-or-config-change-widens-the-selection
   (let [db (schema (prog) :app.pv-calc/n "int?") dir (scratch-dir)
         base (:cand (prove! nil db "e" dir))
-        run-of (fn [db env] (:run (proofs/plan base (digests db env) (proofs/greens dir (vals (digests db env))) #{})))]
+        run-of (fn [db env] (:run (proofs/plan base (digests db env) (proofs/greens dir (vec (vals (digests db env)))) #{})))]
     (is (= '[app.pv-calc-test/twice-test] (run-of (record db 'app.pv-calc "(defmacro twice [x] `(+ ~x ~x))") "e"))
         "a macro's body changed: the test expanding it runs, not the others in its namespace")
     (is (= '[app.pv-neg-test/half-test] (run-of (schema db :app.pv-calc/n "pos-int?") "e"))
@@ -104,16 +106,18 @@
         tests '[app.pv-red-test/red-test app.pv-red-test/fixture-test app.pv-calc-test/add-test app.pv-calc-test/twice-test app.pv-neg-test/neg-test]
         dg (zipmap tests ["d-red" "d-fx" "d-add" "d-twice" "d-neg"])
         notes (atom [])
-        ran (binding [*out* (java.io.StringWriter.)] (proofs/run-tests! tests dg dir #(swap! notes conj %)))]
+        ran (proofs/run-tests! tests dg #(swap! notes conj %))
+        unstored (proofs/store-greens! #(fx/write-file {:req %}) dir ran)]
     (is (= [["app.pv-calc-test/add-test" "app.pv-calc-test/twice-test"] ["app.pv-neg-test/neg-test"] ["app.pv-red-test/red-test" "app.pv-red-test/fixture-test"]]
-           (sort-by first (map #(mapv str %) (proofs/shards tests 3)))) "a namespace's tests stay in one shard")
-    (is (= 2 (count (proofs/shards tests 2))) "never more shards than jobs")
+           (sort-by first (map #(mapv str %) (runner/shards tests 3)))) "a namespace's tests stay in one shard")
+    (is (= 2 (count (runner/shards tests 2))) "never more shards than jobs")
+    (is (= [] unstored) "every green written")
     (is (= (set tests) (set (keys ran))) "every test has a result")
     (is (= {:pass 0 :fail 1 :error 0} (select-keys (ran 'app.pv-red-test/red-test) [:pass :fail :error])))
     (is (proofs/green? (ran 'app.pv-red-test/fixture-test)) "its namespace's fixtures ran around it")
     (is (= (count tests) (count (filter :seon.test/started @notes))) "each test named as it starts")
-    (is (every? #(.isFile (java.io.File. (proofs/result-path dir %))) (vals dg)) "each result stored at its digest")
-    (is (= #{"d-fx" "d-add" "d-twice" "d-neg"} (set (keys (proofs/greens dir (vals dg))))) "only greens are reused: a red runs again")))
+    (is (every? #(.isFile (java.io.File. (proofs/result-path dir (dg %)))) (remove #{'app.pv-red-test/red-test} tests)) "each green stored at its digest")
+    (is (= #{"d-fx" "d-add" "d-twice" "d-neg"} (set (keys (proofs/greens dir (vec (vals dg)))))) "only greens are stored and reused: a red runs again")))
 
 (deftest a-failed-write-or-a-throwing-fixture-is-recorded-red
   ;; review 2026-10-22: a write's declared error was dropped (read as stored), and a fixture's
@@ -122,17 +126,31 @@
   (record (ts/test-db) 'user "(ns app.pv-fx-test (:require [clojure.test :refer [deftest is use-fixtures]]))"
           'app.pv-fx-test "(use-fixtures :once (fn [f] (throw (ex-info \"the fixture's store is gone\" {:store :gone}))))"
           'app.pv-fx-test "(deftest never-runs (is true))")
-  (let [quiet #(binding [*out* (java.io.StringWriter.)] (%))
-        unwritable (quiet #(proofs/run-tests! '[app.pv-calc-test/add-test] '{app.pv-calc-test/add-test "d-add"} "/dev/null/results" (fn [_])))
-        thrown (quiet #(proofs/run-tests! '[app.pv-fx-test/never-runs] '{app.pv-fx-test/never-runs "d-never"} (scratch-dir) (fn [_])))
-        r (unwritable 'app.pv-calc-test/add-test)
+  (let [ran (proofs/run-tests! '[app.pv-calc-test/add-test] '{app.pv-calc-test/add-test "d-add"} (fn [_]))
+        unstored (proofs/store-greens! #(fx/write-file {:req %}) "/dev/null/results" ran)
+        notes (atom [])
+        thrown (proofs/run-tests! '[app.pv-fx-test/never-runs] '{app.pv-fx-test/never-runs "d-never"} #(swap! notes conj %))
         t (thrown 'app.pv-fx-test/never-runs)]
-    (is (= [1 1] [(:pass r) (:error r)]) "the test passed, and the failed write of its result is an error of the run")
-    (is (re-find #"result not stored" (:message r)) (:message r))
-    (is (not (proofs/green? r)) "so it is never read as stored")
+    (is (proofs/green? (ran 'app.pv-calc-test/add-test)) "the test passed")
+    (is (= ['app.pv-calc-test/add-test] (map :key unstored)) "and the failed write of its result is answered, never read as stored")
+    (is (re-find #"Not a directory|io|staging" (str (:message (first unstored)))) (str unstored))
     (is (= 1 (:error t)))
+    (is (some #(and (= 'app.pv-fx-test/never-runs (:test %)) (= :error (:type (:seon.test/report %)))) @notes) "the unreported test is reported, as an error")
     (is (re-find #"the fixture's store is gone" (:message t)) "the throw's own message, not a guess")
     (is (= "{:store :gone}" (:data t)) "and its data")))
+
+(deftest a-tree-changed-since-the-plan-stores-nothing
+  ;; re-review 2026-10-22: a shard requires its namespaces from disk seconds or minutes after the
+  ;; plan took its digests; an edit in between ran code the digests do not name, so a green
+  ;; proven on it is never stored under them
+  (prog)
+  (let [here (System/getProperty "user.dir")
+        shard (fn [tree] (let [f (str (scratch-dir) "/shard-0.edn") dg (str "proof-tree-" (random-uuid))]
+                           (spit f (pr-str {:tests '[app.pv-calc-test/add-test] :digests {'app.pv-calc-test/add-test dg} :tree tree}))
+                           (binding [*out* (java.io.StringWriter.)] (#'runner/shard! f))
+                           (.isFile (java.io.File. (proofs/result-path (seon.config/value :seon.config.source/test-results-dir) dg)))))]
+    (is (shard (fx/tree-id here)) "the tree the plan named: the green is stored")
+    (is (not (shard "a-tree-before-an-edit")) "another tree: nothing stored")))
 
 (defn plan-input
   "The input of size n: n keys with stored greens, one in a hundred moved since."
