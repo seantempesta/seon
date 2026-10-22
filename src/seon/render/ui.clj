@@ -231,7 +231,7 @@
       :pill [(str "srv " (if (= st :up) "s-up" "s-down")) (kname st)]
       :big (fmt2 (:fork-ms-p50 fork-server)) :unit "ms fork p50" :series (:fork series) :tone "tone-info"
       :rows [["forked" (group3 (:agents-forked fork-server))]
-             ["lag" (ms-str (:lag-ms server)) "commit applied in the fork server after main took it, p50"]
+             ["lag" (ms-str (:lag-ms fork-server)) "commit applied in the fork server after main took it, p50"]
              ["pid" (str (or (:pid fork-server) "–"))]
              ["restarts" (str (:restarts fork-server 0)) nil (when (pos? (:restarts fork-server 0)) "hot")]]}
      {:id "t-main" :class (str "pulse-" (mod (or (:merges main) 0) 2)) :kicker "main" :sub "every write to main moves t"
