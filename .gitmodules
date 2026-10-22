@@ -41,3 +41,8 @@
 	path = reference-code/zstd
 	url = https://github.com/facebook/zstd.git
 	ignore = dirty
+[submodule "reference-code/lmdb"]
+	path = reference-code/lmdb
+	url = https://github.com/LMDB/lmdb.git
+	ignore = dirty
+	branch = mdb.master3

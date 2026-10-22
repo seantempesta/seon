@@ -99,15 +99,15 @@ build_native() {
   cc -O2 -shared -o "$T/lib/libprobe.dylib" "$ROOT/native/probe.c" || die "native build failed"
 }
 
-# LMDB from ../vendor-c/lmdb (mdb.master3, the branch konserve.jolt.lmdb-ffi binds), built
+# LMDB from reference-code/lmdb (the official repository as a submodule on mdb.master3, the branch konserve.jolt.lmdb-ffi binds), built
 # with MDB_USE_ROBUST: on macOS LMDB otherwise locks with POSIX semaphores, and a process
 # SIGKILLed inside a write txn leaves the writer lock held for every process that has the env
 # open (measured 2026-10-21; docs/DRAGONS.md#lmdb-robust-locks). Robust, it uses SysV
 # semaphores with SEM_UNDO: the kernel releases a dead holder's lock. target/lmdb-kill
 # (native/lmdb_kill.c) is its proof, a bin/check step.
-LMDB_SRC=$ROOT/../vendor-c/lmdb/libraries/liblmdb
+LMDB_SRC=$RC/lmdb/libraries/liblmdb
 build_lmdb() {
-  [ -f "$LMDB_SRC/mdb.c" ] || die "missing LMDB source at $LMDB_SRC (git clone https://github.com/LMDB/lmdb -b mdb.master3)"
+  [ -f "$LMDB_SRC/mdb.c" ] || die "missing LMDB source at $LMDB_SRC (the reference-code/lmdb submodule)"
   pin="$(git -C "$LMDB_SRC" rev-parse HEAD) robust"
   if fresh lmdb "$pin" && [ -f "$T/lib/liblmdb.dylib" ]; then say "lmdb up to date ($pin)"; return; fi
   mkdir -p "$T/lib"
