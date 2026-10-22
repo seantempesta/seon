@@ -82,8 +82,7 @@
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-docs! sys "docs"))
   ([sys dir]
-   (let [pages (docs/pages (config/checkout) dir)]
-     (write-declared! sys (docs/load-tx @(:conn sys) dir pages) {:pages (count pages)} nil))))
+   (write-declared! sys (docs/load-dir-tx @(:conn sys) (config/checkout) dir) {:pages (count (docs/pages (config/checkout) dir))} nil)))
 
 (defn problems
   "Every problem recorded on main, by class (seon.problems/report): recorded errors counted

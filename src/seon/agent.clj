@@ -122,7 +122,7 @@
       (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
         (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r)))))))
 
-;; ---- effects (seon.fx, lane FX1): root's owner procs, through the stand-in -------------
+;; ---- effects (seon.fx, worktree session FX1): root's owner procs, through the agent's proc ---
 
 (def ^:dynamic *fx-stub*
   "Inside a test (a fork of this agent) no effect leaves the process: a test that needs
