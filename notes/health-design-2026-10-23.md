@@ -57,23 +57,29 @@ A listener would only matter for a check that must transact something on each wr
 
 Per AGENTS §4 ("Get out of an agent's way"), evals and transacts are never blocked. A problem is recorded, which for derived ones means it is simply true in the db. The agent sees it in its context. Only `seon_done` and the merge are refused while the agent owns an open problem. An agent may break a citation in one eval and fix it three evals later. Nothing stops it in between.
 
-### 5. External Claude sessions: through the existing server, no new `:op`
+### 5. Triggers: root watches the checkout (owner, 2026-10-23: "seon code detecting and updating, not external scripts")
 
-External sessions reach the same facts only by writing through Seon. When a Claude session edits a file on disk, the file is not yet a fact, so the store must load it:
+Superseded: the `bin/seon-changed` Claude Code hook. Root detects changes itself, so every writer is covered by one mechanism: Claude sessions, Seon agents, the owner's editor, and git.
 
-- **A checked-in Claude Code hook:** `.claude/settings.json`, `PostToolUse`, matcher `Edit|Write|MultiEdit`. Neither checkout has one today.
-- The hook runs `bin/seon-changed`, about 10 lines of shell. It reads the hook's JSON from stdin, takes `tool_input.file_path`, and sends one line to this checkout's root (`bin/ports`) over the **existing `:eval` op**: `{:op :eval :agent "root" :code "(my.root/load-paths! sys [\"…\"])"}`.
-- `my.root/load-paths!` is the one new function. It dispatches each path to its existing loader:
-  - `docs/**.md` → `seon.docs/load-tx`;
-  - `src/**.clj` → the program load;
-  - `resources/seon/tasks/*.edn` → `load-tasks!`.
-- Its answer (the db's `caused` for this checkout) goes back as the hook's output, which Claude Code shows the session. So an external session sees "you broke `docs/x.md#y` → `seon.foo/bar`" right after the edit that did it.
-- **A commit or merge on main** needs nothing new: the merge is a Seon write (`merge!` → writer), and its facts are the db the dashboard reads next.
+**The event source (measured 2026-10-23).** No watcher is installed (`fswatch` and `watchman` are absent), and the rule is to install nothing system-wide. Two event sources can be reached:
+- **FSEvents**, through a ~25-line C program built by `bin/build` beside `native/probe.c` (`native/watch.c`, linking CoreServices).
+  - It watches the checkout and its git common dir (`git rev-parse --git-common-dir`, so a commit or merge on any branch or worktree moves `refs/`).
+  - It prints each changed path, one per line, as FSEvents reports it: latency 0.0, `kFSEventStreamCreateFlagFileEvents | NoDefer`, on a dispatch queue. There is no timer and no poll.
+  - Proven in the scratchpad: a create, a rename and an append under a watched tree were each reported as their path.
+  - It exits when root exits: a GCD process source on its parent (`DISPATCH_PROC_EXIT`, kqueue `EVFILT_PROC`), not stdin (AGENTS §9: stdin as a lifecycle).
+- **kqueue `EVFILT_VNODE`** through Jolt's FFI on a declared thread. It needs one open fd per watched file and per directory, so ~200 files plus every branch ref, and it must re-open after each atomic save (write-then-rename). Rejected: more code, and fds that grow with the tree.
 
-Each trigger, and its one event:
-- an agent's eval or transact, or a merge: the writer's commit (a new main or branch t);
-- an external edit: `:eval` of `load-paths!`, which becomes a commit;
-- the `:build` effect: its exit is a fact (already true).
+**The mechanism.**
+1. Root starts the watcher as an OS child: the one effect that spawns, and its output lines are facts, as the build's are.
+2. One proc, `:watch`, reads the child's stdout on its declared edge reader. That is the one blocking-read exception (§5). On Jolt a process stream read parks a fiber.
+3. It drops paths no loader reads (`.git/objects`, `target/`, `runs/`, `notes/`) and sends each batch of changed paths to `my.root/load-paths!` through root's api.
+4. `load-paths!` loads each kind once (the wiki, the task files, Seon's source via `seon.root/import-source!`).
+5. The commit it makes moves main's t, which every reader already reacts to.
+6. A path under the git dir's `refs/` is a commit or merge: it re-imports the source.
+
+The failure point: the watcher cannot start (not built, FSEvents refused), or it dies. It is named in `docs/failure-points.md`, and its edge is the `:watch` proc. Its answer is a recorded `:platform` error that shows on the banner: root goes on without watching, and nothing falls back to a poll.
+
+Open for root: **the batching.** FSEvents coalesces nothing at latency 0, so one editor save can be 2–3 lines. The `:watch` proc loads what arrived while the previous load ran, by its workload (a batch is what the channel holds), so no clock decides.
 
 ### 6. The first classes: inputs, cost and owner
 
@@ -113,7 +119,7 @@ The page-units path updates it: the unit's input is `report`'s value, and only a
    - About +90 lines of src.
 3. **Gates:** `:open-problems` in `done-refusals` and `merge-refusal`. About +12 lines.
 4. **Context:** the agent's context render shows `caused` first. About +10 lines.
-5. **External sessions:** `my.root/load-paths!` (about +20), `bin/seon-changed` (about 10 lines of shell), `.claude/settings.json` (the hook).
+5. **Every writer:** `my.root/load-paths!` (about +20, built), then the `:watch` proc and `native/watch.c` (§5, after root's go on the event source).
 6. **Reported-problem closing:** an optional `:seon.error/subject` plus v1's changed-subject rule in `error-row`. About +15 lines.
 7. **Deletes:**
    - wiki-live's `docs-check` (about 40 lines, uncommitted on its worktree) becomes `report` on its imported db, filtered to `:docs`;

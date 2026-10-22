@@ -991,7 +991,8 @@
 (defn root-serve
   "A root with its server on 127.0.0.1:(:seon.config.root/entrance-port) (seon.server),
   until stdin closes (bin/root stop) or SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks):
-  what an outside agent's MCP relay (bin/mcp) talks to. Its end is a fact on main
+  what an outside agent's MCP relay (bin/mcp) talks to. It watches its checkout
+  (my.root/watch!: every writer's changes loaded as they happen). Its end is a fact on main
   naming that cause (seon.root/stop!). A checkout whose config names no server port (0)
   serves none, and says so."
   []
@@ -1007,6 +1008,9 @@
                  @stopped)]
       (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (end! :signal))))
       (seon.server/serve! sys port)
+      ;; the watcher ends with this process (target/watch exits on its parent's exit)
+      (let [w (my.root/watch! sys)]
+        (out! "ROOT WATCHING " (if (contract/error? w) (str "nothing: " (:seon.error/message w)) "the checkout and its refs")))
       (out! "ROOT LISTENING " port)
       (loop [] (when (read-line) (recur)))
       (end! :stdin-eof))

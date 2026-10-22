@@ -153,9 +153,20 @@
 
 (deftest problems-tile
   (is (str/includes? (h/html (:seon.render/html (ui/tile-problems [] {}))) "no problems"))
-  (let [html (h/html (:seon.render/html (ui/tile-problems ["proc writer UNKNOWN"] {})))]
-    (is (str/includes? html "1 problem"))
+  (let [html (h/html (:seon.render/html (ui/tile-problems [[:root ["proc writer UNKNOWN"]]] {})))]
+    (is (str/includes? html "1 kind of problem open"))
     (is (str/includes? html "proc writer UNKNOWN")))
+  (testing "grouped by the area each class declares (:seon.problems/class): a dead citation under docs"
+    (let [areas (ai/problem-areas (assoc sys :root-errors []
+                                         :recorded {:classes {:dead-citation {:n 1 :rows [{:signature "s" :message "docs/x.md#y cites app/f, which names nothing"
+                                                                                           :open? true :producer nil :owner-ns 'app :proofs [] :evidence {} :answered-by [] :at-ms nil}]}
+                                                              :agent {:n 1 :rows [{:signature "s1" :count 1 :message "agent a2 died"}]}}}))
+          html (h/html (:seon.render/html (ui/tile-problems areas {})))]
+      (is (= [:docs :errors] (mapv first areas)))
+      (is (str/includes? (first (second (first areas))) "derived dead-citation 1: docs/x.md#y cites app/f, which names nothing"))
+      (is (str/includes? html "area-docs"))
+      (is (= 2 (count (ai/problems (assoc sys :root-errors [] :recorded {:classes {:dead-citation {:n 1 :rows [{:signature "s" :message "m" :open? true}]}
+                                                                                      :agent {:n 1 :rows [{:signature "s1" :count 1 :message "a"}]}}})))))))
   (testing "a dead agent whose attempt finished is not a problem"
     (is (empty? (ai/problems (assoc sys :agents {:a2 {:status :dead}} :health {} :root-errors [] :recorded {}
                                     :agent-attempt {:a2 {:seon.attempt/status :done}}))))))

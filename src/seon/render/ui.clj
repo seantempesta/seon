@@ -698,16 +698,22 @@
     (if (and x (gone (or (:status x) (:type x))) (finished st)) (assoc x :ended-as st) x)))
 
 (defn tile-problems
-  "What is wrong now, at the top of the page: the same lines root's context leads with."
+  "What is wrong now, at the top of the page, by area (docs, tests, merges, tasks, agents,
+  errors: :seon.problems/class declares each class's): the same lines root's context leads
+  with (seon.render.ai/problem-areas)."
   {:malli/schema [:=> [:cat :seon.render/problems-banner :seon.render/env] :seon.render/out]}
-  [lines _]
-  {:seon.render/html
-   (if (empty? lines)
-     [:section {:id "problems" :class "problems ok"} [:span {:class "dot s-running"}] [:b "no problems"]
-      [:span {:class "muted"} " no proc defect · no problem recorded on main · no red live agent · no agent died"]]
-     [:section {:id "problems" :class "problems bad"}
-      (kicker (str (count lines) " problem" (when (not= 1 (count lines)) "s")) "most urgent first · the same lines root's context leads with")
-      [:ul (for [l lines] [:li l])]])})
+  [areas _]
+  (let [n (reduce + 0 (map (comp count second) areas))]
+    {:seon.render/html
+     (if (zero? n)
+       [:section {:id "problems" :class "problems ok"} [:span {:class "dot s-running"}] [:b "no problems"]
+        [:span {:class "muted"} " no proc defect · no open problem on main (recorded or derived) · no red live agent · no agent died"]]
+       [:section {:id "problems" :class "problems bad"}
+        (kicker (str n (if (= 1 n) " kind" " kinds") " of problem open") "by area, most urgent first, one line per kind with its count · the same lines root's context leads with")
+        (for [[area lines] areas]
+          [:div {:class (str "area area-" (kname area))}
+           [:span {:class "kicker"} (kname area)]
+           [:ul (for [l lines] [:li l])]])])}))
 
 (defn- topbar {:malli/schema [:=> [:cat :any] :any]}
   [back?]
@@ -779,7 +785,7 @@
          (slot "events")]]]]
      :seon.render/units
      (vec (concat
-           [(u "problems" (:problems sys []) :seon.render/problems-banner)
+           [(u "problems" (:problem-areas sys []) :seon.render/problems-banner)
             (u "t-agents" {:cells (mapv (fn [id] (let [a (get agents id)] [id (shown-status (ended-as a id agent-attempt)) (count (:evals a))])) order)
                            :off (- (count agents) (count order)) :retire-ms (:retire-ms sys)} :seon.render/swarm)]
            (for [t (load-tiles writer fork-server main series)] (u (:id t) t :seon.render/tile))
