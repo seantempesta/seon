@@ -65,13 +65,24 @@
 (defn source-fn
   "The source of the var sym names, or nil: clojure.repl/source-fn. The text its last definition
   in this process kept (seon.repl), else what this branch records for it, else the form at its
-  :file and :line (a library's)."
+  :file and :line (a library's). A namespace's name answers its ns form as this branch records
+  it (its requires and aliases), which clojure.repl's does not."
   {:malli/schema [:=> [:cat :symbol] [:maybe :string]]}
   [sym]
-  (when-let [v (resolve sym)]
+  (if-let [v (resolve sym)]
     (or (:source (meta v))
         (context/source-of (agent/db) (symbol (str (ns-name (:ns (meta v)))) (str (:name (meta v)))))
-        (file-source v))))
+        (file-source v))
+    (when-not (namespace sym)
+      (d/q '[:find ?src . :in $ ?s :where [?n :ns/name ?s] [?f :form/defines ?n] [?f :form/src ?src]] (agent/db) sym))))
+
+(defn not-found
+  "What source prints for sym when it names nothing: Clojure's words, and, when its namespace
+  part names a namespace, the form that shows that namespace's ns form."
+  {:malli/schema [:=> [:cat :symbol] :string]}
+  [sym]
+  (cond-> (str "Source not found for " sym)
+    (some-> (namespace sym) symbol find-ns) (str "; its namespace's ns form: (source " (namespace sym) ")")))
 
 (defn pst
   "Print the exception e (*e by default) as clojure.repl/pst does: its message, then each cause's
@@ -85,7 +96,7 @@
 
 (defmacro source
   "Print the recorded source of the definition named by sym (as clojure.repl/source does)."
-  [sym] `(println (or (source-fn '~sym) (str "Source not found for " '~sym))))
+  [sym] `(println (or (source-fn '~sym) (not-found '~sym))))
 
 (defn help
   "The help page every agent reads first (seon.context/help-page), as this branch holds it

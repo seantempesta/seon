@@ -38,6 +38,10 @@
               ["(pst)" :out "Divide by zero"]
               ["(in-ns 'seon.reconcile)" :printed "seon.reconcile"]
               ["(clojure.repl/source stuck)" :out "(defn stuck"]
+              ;; a namespace's ns form, its requires and aliases (step E's run 3: the real design
+              ;; asked for seon.problems-test/ns 18 turns running, to write its deftest)
+              ["(clojure.repl/source seon.reconcile)" :out "(ns seon.reconcile"]
+              ["(clojure.repl/source seon.reconcile/ns)" :out "(source seon.reconcile)"]
               ;; clojure.test reports to *test-out*: the step E dry run's agent ran a red
               ;; proof and saw nothing (2026-10-22)
               ["(do (in-ns 'user) (clojure.test/deftest red (clojure.test/is (= 1 2))) (clojure.test/run-tests))" :out "FAIL in (red)"]]
