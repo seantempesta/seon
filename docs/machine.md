@@ -2,6 +2,10 @@
 
 The machine Seon is built on and for, and the rules that keep builds, disk and processes bounded. The short form, with the git rules, is [AGENTS.md §8](../AGENTS.md); how a branch lands is [landing](landing.md).
 
+## Seeing what runs
+
+`bin/lanes` shows everything running across every checkout at once: each worktree's branch and how far it is from main, its root, the processes under it (count, CPU, memory, threads), its stores' size; then seon processes no checkout claims (orphans: a parent of 1, or a checkout that is gone), the heaviest processes on the machine, and its load and free memory. `bin/lanes -w` repeats it every 5 s. Root reads it when lanes run in parallel and before a session ends; a lane reads it before it reports that nothing of its own is running.
+
 ## The target: a 16 GB MacBook M1
 
 The target is a 16 GB MacBook M1 (owner, 2026-10-22: "I want this system to run well on a 16GB Macbook M1"). Seon itself stays within `:seon.config.machine/memory-mb` (4096: root, the fork server and the default number of agents), and `bin/check scale` fails past it. A cost that grows with something other than the work (a probe walking a 64 GiB address-space reservation took 100 agents from 0.6 s to 18 s) is found by a cost proof sized by what it walks. Like every bound, the key lives in `resources/seon/config/default.edn` ([config](config.md)).

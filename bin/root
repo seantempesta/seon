@@ -21,11 +21,15 @@
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 . "$ROOT/bin/env"
 export SEON_RUNS=${SEON_RUNS:-$ROOT/runs}
+# a root started here builds main from this checkout's source when its store is new (and follows it
+# after): :seon.config.source/root's default; config/local.edn or --set names another tree
+export SEON_SOURCE_ROOT=${SEON_SOURCE_ROOT:-$ROOT}
 if [[ ${1:-} == run ]]; then
   # the tree's own build, config and caches (bin/env, read from that tree); the ports over the
   # config's (local.edn honours these)
   G=$2; P=$3; W=$4; shift 4
   cd "$G/target" && SEON_CHECKOUT=$G HOME=$G/target/home JOLT_LMDB_LIB=$G/target/lib/liblmdb.dylib \
+    JOLT_LZ4_LIB=$G/target/lib/liblz4.dylib JOLT_ZSTD_LIB=$G/target/lib/libzstd.dylib \
     SEON_ENTRANCE_PORT=$P SEON_WEB_PORT=$W exec ./seon root "$@"
 fi
 mkdir -p "$SEON_RUNS"
@@ -36,11 +40,19 @@ running() { [[ -f $PIDS ]] && read T R < "$PIDS" && kill -0 $R 2>/dev/null }
 launch() {
   : > "$LOG"
   rm -f "$PIDS"
+  # the holder (perl, below) owns the write end of the root's stdin and waits on the root. stop
+  # kills the holder, so the pipe closes and the root stops cleanly; a root that dies any other
+  # way ends the wait and the holder exits with it (a `tail -f /dev/null | root` holder outlived
+  # every root that crashed or was killed: its shell waited on a tail that never ends)
   perl -MPOSIX -e 'exit 0 if fork; POSIX::setsid(); exit 0 if fork;
     open STDIN,"<","/dev/null"; open STDOUT,">>",$ARGV[0]; open STDERR,">&STDOUT";
     my ($log, $pids, @cmd) = @ARGV;
-    exec "/bin/sh","-c",q{P=$1; shift; tail -f /dev/null | "$@" & R=$!; T=$(pgrep -P $$ -x tail); echo "$T $R" > "$P"; wait $R},
-      "sh", $pids, @cmd' "$LOG" "$PIDS" "$ROOT/bin/root" run "$1" "$PORT" "$WEB" "${@:2}"
+    pipe(my $r, my $w) or die "pipe: $!";
+    my $root = fork // die "fork: $!";
+    if ($root == 0) { close $w; open STDIN, "<&", $r or die; exec @cmd; die "exec: $!" }
+    close $r;
+    open my $f, ">", $pids or die; print $f "$$ $root\n"; close $f;
+    waitpid($root, 0); exit 0' "$LOG" "$PIDS" "$ROOT/bin/root" run "$1" "$PORT" "$WEB" "${@:2}"
   # the root's own facts end the wait: its listening line, or its death
   until [[ -f $PIDS ]]; do sleep 0.1; done
   read T R < "$PIDS"
@@ -50,7 +62,7 @@ launch() {
 }
 stop() {
   read T R < "$PIDS"
-  kill $T                                    # its stdin closes: root stops cleanly
+  kill $T                                    # the holder: its pipe closes, the root stops cleanly
   while kill -0 $R 2>/dev/null; do sleep 0.2; done
   rm -f "$PIDS"; print "root $R stopped"
 }
