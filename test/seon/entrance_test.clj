@@ -1,7 +1,7 @@
 (ns seon.entrance-test
   "Root's entrance as an outside agent reaches it (seon.entrance, through the built root:
   seon.agent-test/in-agent). Run: bin/test seon.entrance-test"
-  (:require [clojure.test :refer [deftest is]] [seon.agent-test :as at]))
+  (:require [clojure.test :refer [deftest is]] [seon.agent-test :as at] [seon.entrance]))
 
 (deftest a-root-eval-replies-like-an-agent-eval
   ;; task seon.entrance/root-evals-through-the-one-repl: an eval as root goes through the
@@ -24,3 +24,18 @@
     (is (= :seon.entrance/defect (:seon.error/type defect)))
     (is (= (pr-str {:op :attach :task 5}) (:line defect)))
     (is (= "3" (:printed ok)) "the door goes on")))
+
+(deftest the-door-speaks-mcp
+  ;; task seon.entrance/the-door-answers-mcp-itself: the entrance answers MCP's JSON-RPC
+  ;; itself (bin/mcp only relays lines): initialize, tools/list from the one verb table,
+  ;; nothing for a notification, an unknown tool named in its text. tools/call through a
+  ;; real root is seon.check/mcp-proof (bin/check mcp), through the relay
+  (let [ask #(seon.entrance/mcp-reply nil %)
+        tools (get-in (ask {"jsonrpc" "2.0" "id" 2 "method" "tools/list"}) ["result" "tools"])]
+    (is (= "2025-06-18" (get-in (ask {"id" 1 "method" "initialize" "params" {"protocolVersion" "2025-06-18"}}) ["result" "protocolVersion"]))
+        "initialize answers the client's protocol version")
+    (is (= (mapv #(str "seon_" (name %)) (keys seon.entrance/verbs)) (mapv #(get % "name") tools))
+        "every verb is the tool seon_<op>, in the table's order")
+    (is (= ["agent" "code"] (get-in (second tools) ["inputSchema" :required])) "a verb's required arguments are its tool's")
+    (is (nil? (ask {"jsonrpc" "2.0" "method" "notifications/initialized"})) "a notification is not answered")
+    (is (= "no tool seon_nope" (get-in (ask {"id" 3 "method" "tools/call" "params" {"name" "seon_nope" "arguments" {}}}) ["result" "content" 0 "text"])))))
