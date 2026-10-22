@@ -1114,13 +1114,27 @@
                 :used-under-the-lease (< (get-in stats [:ids :used] 0) 50)
                 :b's-ids-past-a's-lease (>= b-min (+ (get-in stats [:ids :from]) 50))}}))))
 
+(defn- fork-server-caught-up
+  "A FIFO barrier through the fork server: {:op :stats} goes to the server process on the
+  socket that carries main's commits (seon.fork-server/fork-server-proc), the process takes
+  that socket in order and answers in order (seon.fork-server/main), and its answers come back
+  through the :fork-server proc and the api in order. So this answers after every earlier
+  commit's :applied has passed through both. Checked, not assumed: :caught-up only when the
+  server's :t has reached main's t read before the request; an ordering that changed fails here."
+  [sys]
+  (let [main-t (:max-tx @(:conn sys))
+        fs (c/fs-call! sys {:op :stats})]
+    {:t (:t fs) :main-t main-t :mismatch (:mismatch fs) :caught-up (boolean (and (:t fs) (>= (:t fs) main-t)))}))
+
 (defn idle
   "An idle root steps nothing (owner, 2026-10-21: no beat; health is what flows): root
   boots and settles (the reconciler's quiescence), a tab opens on its dashboard (an SSE
   feed on SEON_WEB_PORT) and receives its page; then every root proc's Flow step count is
   read at the two ends of a window of window-ms with nothing happening, and must not move:
   from the feed's first settled mark after its keyframe (seon.web: the render proc has
-  nothing in flight, so the tab's own opening has run its course).
+  nothing in flight, so the tab's own opening has run its course) and the fork server's
+  answer to a request behind main's commits (fork-server-caught-up: their late :applied
+  answers stepped the fork server and the api inside the window under load).
   Then a change reaches the tab: an agent spawned and a commit to main each grow what the
   tab received. The window is the measurement (that nothing happens), not a dependency."
   [window-ms]
@@ -1153,6 +1167,8 @@
         ;; the tab's opening ran its course: its keyframe (the feed's first patch: a new tab is
         ;; stale until it), then a settled mark (the render proc has nothing in flight)
         settled (await-ref feed :settled)
+        ;; main's commits applied in the fork server, their answers through its proc and the api
+        fs (fork-server-caught-up sys)
         ;; root's declared procs and its effect owners (their lanes step only when given work)
         decl (seon.system/read-decl (seon.config/value :seon.config.root/system-path))
         pids (sort-by str (concat (keys (:procs decl)) (for [k (keys (:fx decl))] (keyword "fx" (name k)))))
@@ -1168,8 +1184,8 @@
         _ @(c/transact-main! sys [{:db/id "n" :ns/name 'idle.check}])
         committed (await-ref received #(> % n-commit))]
       (.close sock)
-      {:report {:window-ms window-ms :procs (count pids) :steps-at-idle moved :bytes-at-idle (- b1 b0) :agent a}
-       :checks {:tab-opened opened :tab-settled settled :no-step-at-idle (empty? moved) :no-byte-at-idle (= b0 b1)
+      {:report {:window-ms window-ms :procs (count pids) :steps-at-idle moved :bytes-at-idle (- b1 b0) :agent a :fork-server fs}
+       :checks {:tab-opened opened :tab-settled settled :fork-server-caught-up (:caught-up fs) :no-step-at-idle (empty? moved) :no-byte-at-idle (= b0 b1)
                 :no-proc-blocked (not-any? #{:blocked} (concat (vals c0) (vals c1)))
                 :spawn-reached-tab spawned :commit-reached-tab committed}}))))
 
