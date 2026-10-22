@@ -240,7 +240,7 @@
        :ins {:in "requests from the api, and the writer's answers it routes"} :outs {}
        ;; socket writes are short; a full socket blocks only this agent's proc
        :workload :io
-       :ping-map-fn (fn [st] {:id (:id st) :pid (:pid st) :dead? (boolean (:dead? st)) :inflight (count (:inflight st))})})
+       :ping-map-fn (fn [st] {:id (:id st) :pid (:pid st) :dead? (boolean (:dead? st)) :inflight (count (:inflight st)) :noise (:noise st 0)})})
   ([args] (assoc (select-keys args [:id :end :branch :pid])
                  :inflight {} :pings clojure.lang.PersistentQueue/EMPTY :fx-kinds (:fx-kinds args)
                  ::flow/in-ports {:from (:in (:end args))}

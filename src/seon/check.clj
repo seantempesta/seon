@@ -783,7 +783,9 @@
 (defn backpressure
   "1. Across the ring: an agent floods root with 20,000 messages while its proc is paused.
      Its channel fills, the poller leaves the frames in the ring, the ring fills, and the
-     agent's own send waits: few messages arrive while paused, the agent is still busy,
+     agent's own send waits: its proc takes nothing while paused (its count when the pause
+     landed, read by the ping after it, is its count after the window), the flood is not
+     through, the agent is still busy,
      and after resume all 20,000 arrive, in order, then its reply.
   2. A saturated writer: the writer proc is paused while n agents transact (their own
      branches: all answered) and root writes main n times (held). The writer's
@@ -800,8 +802,10 @@
         ;; the flood began (the agent said so); then what arrives while paused is the measurement
         _ (await-event ev (started a flood))
         _ (c/pause-agent! sys a)
+        ;; what its proc had taken when the pause landed (the ping after it is FIFO), and after the window
+        n0 (get-in (ping sys a) [:state :noise])
         _ (Thread/sleep hold-ms)
-        while-paused (:noise (c/stats sys) 0)
+        n1 (get-in (ping sys a) [:state :noise])
         busy (get-in (c/state sys) [:agents a :status])
         t0 (profile/now-ns)
         _ (c/resume-agent! sys a)
@@ -824,11 +828,11 @@
         rs (mapv deref mains)
         resume-ms (profile/ms-since t1)
         ok (count (filter :ok rs))]
-      {:report {:flood {:arrived (:noise st) :ordered (:noise-ordered st) :reply (:printed (second r)) :arrived-while-paused while-paused :status-while-paused busy :drain-ms (lib/r2 drain-ms)}
+      {:report {:flood {:arrived (:noise st) :ordered (:noise-ordered st) :reply (:printed (second r)) :taken-before-the-pause n0 :taken-while-paused (some-> n1 (- n0)) :status-while-paused busy :drain-ms (lib/r2 drain-ms)}
                 :writer {:agents n :writer-buf (seon.config/value :seon.config.root/writer-buf) :answered-while-paused answered-while-paused
                          :root-real-mb {:before mb0 :writer-saturated mb1} :resume->all-done-ms (lib/r2 resume-ms) :ok ok
                          :agents-ok agents-ok :not-ok (frequencies (remove :ok rs))}}
-       :checks {:ring-pushes-back (and (< while-paused 2000) (= :busy busy))
+       :checks {:ring-pushes-back (and (= n0 n1) (< n0 20000) (= :busy busy))
                 :flood-all-arrive-in-order (and (= 20000 (:noise st)) (true? (:noise-ordered st)) (= ":flooded" (:printed (second r))))
                 :agents-write-past-a-paused-writer (= n agents-ok)
                 :writer-paused-holds-all (zero? answered-while-paused)
