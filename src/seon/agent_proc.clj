@@ -6,7 +6,7 @@
   agent's process and passes Flow's pause, resume and stop on to the agent's own loop.
   From proto/flow f2-final proto.control (session F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.sock :as sock] [seon.step :as step]
+  (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.sock :as sock] [seon.step :as step]
             [jolt.async.remote :as remote] [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
 
 (defn- to-proc!
@@ -139,7 +139,7 @@
                  (when-let [x (:misaligned m)]
                    (step/out! o :to-api {:op :problem :class :agent :agent id
                                          :error (contract/error :seon.agent/fork-misaligned 'seon.agent/init!
-                                                                (str "its branch or image is not at the commit it was branched at: " (pr-str x)) x)}))
+                                                                (str "its branch or image is not at the commit it was branched at: " (sedn/encode x)) x)}))
                  (step/out! o :events (step/event {:type :ready :agent id :start-ms (:start-ms m)}))
                  (cond-> st (:cloned-from m) (assoc :pid (:pid m))))
       ;; its eval's record could not be written on its branch (its entity ids are spent):

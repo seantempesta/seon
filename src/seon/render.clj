@@ -11,12 +11,14 @@
     2. the render its schema declares: a schema's properties {:seon.render/html sym
        :seon.render/ai sym} in resources/seon/schemas/*.edn (seon.contract/forms), the
        schema then its parents ([:and p ...], [:merge p ...]). The value's schema is never
-       guessed: the producer names it (env :seon.render/schema), or, for a pulled entity,
-       it is the schema with a declared render holding the entity's identity attribute;
+       guessed: the producer names it (env :seon.render/schema, or the value's metadata
+       :seon.render/schema), an error map's is its :seon.error/type (else :seon.error/base),
+       and a pulled entity's is the schema with a declared render holding its identity
+       attribute;
     3. the one value printer (seon.print/print-value): text for :ai, hiccup for :html.
   A nested value renders by calling `render` on it; the printer never re-dispatches."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.config :as config]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]))
 
 (def faces "Each face's key." {:html :seon.render/html :ai :seon.render/ai})
 
@@ -60,10 +62,16 @@
              [a k])))
 
 (defn schema-of
-  "The named schema of v: hint (its producer's), or the schema its identity attribute names."
+  "The named schema of v: hint (its producer's), the one its metadata names, an error map's
+  variant (its registered :seon.error/type, else :seon.error/base), or the schema its
+  identity attribute names."
   {:malli/schema [:=> [:cat :any [:maybe :qualified-keyword]] [:maybe :qualified-keyword]]}
   [v hint]
-  (or hint (when (map? v) (some by-identity (keys v)))))
+  (or hint (:seon.render/schema (meta v))
+      (when (map? v)
+        (if-let [t (:seon.error/type v)]
+          (if (contains? contract/forms t) t :seon.error/base)
+          (some by-identity (keys v))))))
 
 (defn print-out
   "The one value printer's output for face: hiccup for :html, text for :ai."
@@ -74,7 +82,7 @@
     (if (= face :html)
       (let [r (print/print-value v (assoc opts :outputs #{:hiccup}))]
         {:seon.render/html (or (:html r) [:span {:class "seon-print-refused"} (str (:seon.error/message r))])})
-      {:seon.render/ai (print/text v (:budget opts))})))
+      {:seon.render/ai (let [r (print/print-value v opts)] (or (:text r) (:seon.error/message r)))})))
 
 (defn- own-key
   "v's own override for face: in the map, else in its metadata."
@@ -106,3 +114,26 @@
   [v env]
   (let [x (:seon.render/ai (render-face :ai v env))]
     (if (string? x) x (print/text x (or (:seon.render/budget env) (config/value :seon.config.render/value-budget))))))
+
+(defn rendered?
+  "Does v's producer name an AI render for it (the value's own key, or its metadata's
+  :seon.render/schema)? A key present in a map names nothing: a partial pull or tx data is
+  data. The REPL (`printed`) and the model's context (seon.context) ask this one question."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [v] (boolean (or (symbol? (own-key v :seon.render/ai)) (declared (:seon.render/schema (meta v)) :ai))))
+
+(defn printed
+  "v as a REPL answers it, cuts reading through handle (result/h3, or a form that reads v):
+  its producer's AI render when it is `rendered?`, else the one value printer's result under
+  the reply budget. A render's text ends with the form that shows the whole value as data,
+  (with-meta result/h3 nil), and says whether it cut anything (:seon.render/truncated?, the
+  render's own fact). Answers the printer's result, or a render's {:text :tokens :truncated?}."
+  {:malli/schema [:=> [:cat :any :any] [:or :seon.print/result [:map [:text :string] [:tokens nat-int?] [:truncated? :boolean]]]]}
+  [v handle]
+  (if (rendered? v)
+    (let [env {:seon.render/handle handle :seon.render/budget print/default-budget}
+          out (render-face :ai v env)
+          x (:seon.render/ai out)
+          t (if (string? x) x (print/text x print/default-budget))]
+      {:text t :tokens (select/estimate t) :truncated? (boolean (:seon.render/truncated? out))})
+    (print/print-value v {:handle handle})))

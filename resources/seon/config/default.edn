@@ -434,6 +434,22 @@
  ;; Unit: tokens each evaluation's value shows in an agent's history on its page (the render
  ;; proc renders each row once). Provenance: the render proc's literal 400.
  :seon.config.render/history-row-budget 400
+ ;; Unit: tokens of a message or reason shown in one line (root's context, a tile's or card's
+ ;; line, a declared AI render's line); past it the line's cut names the form that reads the
+ ;; rest. Provenance: the literals 40-60 render.ui and render.ai carried (2026-10-22), as one.
+ :seon.config.render/line-budget 50
+ ;; Unit: tokens of a table cell or a stream row's field (a form, a value, a reason); past it the
+ ;; cut says what it omitted and links the page that shows it whole. Provenance: the literals
+ ;; 12-30 render.ui carried (2026-10-22), as one.
+ :seon.config.render/cell-budget 25
+ ;; Unit: events the dashboard's stream keeps (the render proc), newest first; its header says
+ ;; how many older ones it did not keep. Provenance: the render proc's EVENT-CAP 60.
+ :seon.config.render.list/stream 60
+ ;; Unit: points a sparkline keeps, the newest changes. Provenance: the render proc's SERIES-CAP 60.
+ :seon.config.render.list/series 60
+ ;; Unit: evaluations an agent's page shows, newest first (seon.print/bounded names the rest
+ ;; on its branch). Provenance: the render proc's HISTORY-CAP 100.
+ :seon.config.render.list/history 100
 
  ;; ==== the web, instrumentation, the native probe ==============================================
 

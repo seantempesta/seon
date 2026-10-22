@@ -25,4 +25,8 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.agent-test/after-merge-main-the-agent-judges-against-the-new-base
                       seon.procs-test/a-fork-names-the-commit-its-agent-starts-at
-                      seon.procs-test/a-fork-at-another-commit-is-recorded-misaligned}}]
+                      seon.procs-test/a-fork-at-another-commit-is-recorded-misaligned}}
+ {:seon.task/name "an-eval-error-carries-its-data"
+  :seon.task/plan "Found by worktree session renders (2026-10-22, task seon.render/one-printer-and-declared-renders). seon.agent/error-map keeps an eval error's ex-data as printed text (:data, cut at the part budget), which the error's render then prints again as a quoted string. Correct: the data travels as data (EDN by seon.edn/encode on the wire), printed once by the error's render."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.agent-test/an-eval-errors-data-is-printed-once}}]

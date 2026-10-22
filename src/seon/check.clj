@@ -7,11 +7,15 @@
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
   reference (await-ref, seon.e2e/await-db), never a poll or a deadline."
-  (:require [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [clojure.data.json] [seon.cost] [seon.problems]))
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [clojure.data.json] [seon.cost] [seon.problems]))
 
 (defn- out! [& xs] (println (apply str xs)) (flush))
 
 ;; ---- the harness: one frame, one verdict, one way to wait ------------------------------
+
+(defn- shown
+  "A value a person reads on the console, whole, by the one printer (its layout, no budget)."
+  [v] (print/text (vary-meta v assoc :seon.print/full true)))
 
 (defn- verdict!
   "The one verdict: NAME OK or NAME FAILED as the last line, and the exit status, 0 only
@@ -31,7 +35,7 @@
   (let [sys (when opts (c/start! opts))
         {:keys [checks report then]} (body sys)
         checks (into (sorted-map) (for [[k v] checks] [k (boolean v)]))]
-    (pprint (assoc report :checks checks))
+    (out! (shown (assoc report :checks checks)))
     (if (= :kill then)
       (do (out! nm (if (every? val checks) " OK" " FAILED")) (lib/c-kill (lib/c-getpid) 9))
       (do (some-> sys c/stop!) (verdict! nm checks)))))
@@ -446,7 +450,7 @@
                 "an agent past its heap bound gets OutOfMemoryError as an :err item and lives" (and (= :err (:tag (first r9))) (= "10" (:printed (second r9))))
                 ;; nREPL's model (owner's choice): an interrupt stops the request; the agent goes on
                 "root's interrupt! stops the running request; the agent's next request runs"
-                (and (= "interrupted by root" (:printed (first r12))) (= 1 (count r12)) (= ":next" (:printed (first r12b))))
+                (and (clojure.string/starts-with? (str (:printed (first r12))) "interrupted by root\n") (= 1 (count r12)) (= ":next" (:printed (first r12b))))
                 "a form past its tick budget is stopped, a typed error naming its ticks; the agent keeps its state and goes on"
                 (and (= :seon.repl/ticks-spent (get-in (second r11) [:err :seon.error/type]))
                      (<= 1000000000 (get-in (second r11) [:err :ticks])) (= "8" (:printed (nth r11 2))))
@@ -555,7 +559,7 @@
         pids (keep #(get-in (c/state sys) [:agents % :pid]) [a b (:id cl)])]
     (out! "PIDS " (clojure.string/join " " (concat pids [(get-in (c/state sys) [:fork-server :pid])] (when test-child [test-child]))))
     ;; without a running test child there is nothing to prove about it
-    (when-not test-child (out! "NO TEST CHILD " (pr-str forked)))
+    (when-not test-child (out! "NO TEST CHILD " (shown forked)))
     (lib/c-exit (if test-child 0 1))))
 
 ;; ---- durability: the whole system restarts and recovers ------------------------------
@@ -597,7 +601,7 @@
         _ @(c/transact-main! sys [] {:flush? true})
         st (c/state sys {:datoms true})
         expect {:main-datoms (main-data-datoms sys) :main-t (get-in st [:main :t])}]
-      (spit (str path ".expect.edn") (pr-str expect))
+      (spit (str path ".expect.edn") (sedn/encode expect))
       {:report {:store (:store st) :a ra :merge (dissoc m :ops) :b rb :clone [(:id cl) rc] :expect expect :store-bytes (dir-bytes (:store-path sys))}
        :checks {:merged (:merged? m)} :then :kill}))))
 
@@ -731,7 +735,7 @@
   that seon.root-test/root-threads-are-what-root-declares reads."
   [n]
   (let [rows (cycles n)]
-    (out! (pr-str {:running (mapv :running rows) :stopped (mapv :stopped rows)}))
+    (out! (sedn/encode {:running (mapv :running rows) :stopped (mapv :stopped rows)}))
     (lib/c-exit (if (every? exact? rows) 0 1))))
 
 ;; ---- delivery (session F2): main's commits to the reconciler, messages to agents ------
@@ -957,7 +961,7 @@
         dir (str (:agents-dir (:store (c/state sys))) "/system") ; this root's own run dir
         _ (.mkdirs (java.io.File. dir))
         decl (clojure.edn/read-string (slurp (seon.config/value :seon.config.root/system-path)))
-        write! (fn [nm d] (let [f (str dir "/" nm ".edn")] (spit f (pr-str d)) f))
+        write! (fn [nm d] (let [f (str dir "/" nm ".edn")] (spit f (sedn/encode d)) f))
         probe (fn [tag] {:proc 'seon.check/probe-proc :args {:tag tag :events :bind/events}})
         r1 @(c/apply! sys (write! "add" (assoc-in decl [:procs :probe] (probe "one"))))
         ;; the probe paused, three messages queued on its :in, then another proc added
@@ -995,7 +999,7 @@
     ;; the first cause stops root, once; a signal's hook waits for that stop, then Jolt exits
     (let [cause (promise) stopped (promise)
           end! (fn [why] (deliver cause why)
-                 (when (= why @cause) (out! "ROOT STOPPED " (pr-str (select-keys (c/stop! sys why) [:cause :ms :stop-fact-refused]))) (deliver stopped true))
+                 (when (= why @cause) (out! "ROOT STOPPED " (shown (select-keys (c/stop! sys why) [:cause :ms :stop-fact-refused]))) (deliver stopped true))
                  @stopped)]
       (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (end! :signal))))
       (seon.server/serve! sys port)
