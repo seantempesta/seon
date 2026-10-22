@@ -157,7 +157,7 @@
                          [:tool-calls {:optional true} [:vector :seon.model/tool-call]]
                          [:truncated? {:optional true} :boolean]
                          ;; what the call cost beyond them, when the provider says (lane D2)
-                         [:reasoning-tokens {:optional true} :int] [:cache-hit-tokens {:optional true} :int]
+                         [:reasoning-tokens {:optional true} :int] [:cache-hit-tokens {:optional true} :int] [:cache-miss-tokens {:optional true} :int]
                          ;; how the reply stopped (the provider's finish_reason), the model that made it, its reasoning
                          [:finish-reason {:optional true} :string] [:model {:optional true} :string] [:reasoning {:optional true} :string]]
  :seon.model/provider-error [:map [:seon.error/type [:= :seon.model/provider-error]]

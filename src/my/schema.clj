@@ -1,5 +1,5 @@
 (ns my.schema
-  "The agent's schema verb (v1's seon.schema/register!): change a schema of the program at
+  "The agent's schema function (v1's seon.schema/register!): change a schema of the program at
   the REPL, on this agent's branch, as `defn` changes a function. The change is judged
   against the whole population and refused as data; once written, the code this agent
   evaluates next compiles against it (seon.repl binds the branch's registry), the merge

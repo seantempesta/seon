@@ -9,7 +9,7 @@
             [datahike.api :as d]
             [seon.step :as step] [seon.db :as pdb] [seon.sock :as sock]
             [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.fork-server :as server]
-            [seon.agent :as agent] [seon.agent-proc :as ap] [seon.root :as root] [seon.repl :as repl] [seon.render.proc]
+            [seon.agent :as agent] [seon.agent-proc :as ap] [seon.root :as root] [seon.repl :as repl] [seon.render.proc] [seon.web]
             [taoensso.trove :as trove]))
 
 (trove/set-log-fn! nil)
@@ -246,6 +246,50 @@
         (is (= {1 :state} (:pending st)))))
     (testing "an id never asked finds nothing"
       (is (nil? (second (step/answered st 99)))))))
+
+(defn- agent-proc-on
+  "An agent's proc over a socketpair, with request 7 in flight; f takes it, then both ends close."
+  [f]
+  (let [[r a] (sock/socketpair)
+        end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
+        st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})]
+    (try (f (assoc st :pid 42))
+         (finally (remote/close! end) (sock/close! a)))))
+
+(deftest an-eval-says-it-started
+  ;; task seon.check/every-wait-is-the-event-it-means: the agent's {:op :started} is root's
+  ;; :started event, with the eval's text (what a kill or an interrupt meant for it awaits)
+  (agent-proc-on
+   (fn [st]
+     (let [[st _] (step #'ap/agent-proc st :in {:op :req :rid 7 :kind :eval :msg {:op :eval :forms "(loop [] (recur))"}})
+           [_ outs] (step #'ap/agent-proc st :from {:op :started :id 7})]
+       (is (= [{:type :started :agent :a1 :rid 7 :form "(loop [] (recur))"}] (mapv #(dissoc % :at-ms) (:events outs))))))))
+
+(deftest a-test-run-says-its-child-forked
+  ;; the agent sends the test child's pid once it is forked: root's :tests-started event
+  (agent-proc-on
+   (fn [st]
+     (let [[_ outs] (step #'ap/agent-proc st :from {:op :tests-started :id 7 :pid 4242})]
+       (is (= [{:type :tests-started :agent :a1 :rid 7 :pid 4242}] (mapv #(dissoc % :at-ms) (:events outs))))))))
+
+(deftest a-tab-hears-its-view-settled
+  ;; the render proc says when nothing it asked is in flight any more (after an answer, or
+  ;; after what it sent the tabs), never while a request is out; the web proc puts a
+  ;; settled comment on every feed
+  (let [st {:events-ch (a/chan 8) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events []
+            :event-rows [] :views {} :zoom {} :merges 0 :main {:t 1}}
+        settled? (fn [outs] (some #(= :settled (:op %)) (:to-web outs)))
+        [st o1] (#'seon.render.proc/render-proc st :events {:type :spawned :agent :a1 :at-ms 1})
+        tag (:tag (first (filter #(= {:op :state} (:req %)) (:to-api o1))))
+        [st o2] (#'seon.render.proc/render-proc st :answers {:tag tag :r {:agents {} :writer {:tx-count nil :recent []} :server {:status :up} :stats {} :store {} :boot {}}})]
+    (is (not (settled? o1)) "its ask is in flight")
+    (is (settled? o2) "the answer emptied what was in flight")
+    (is (empty? (:pending st))))
+  (let [ch (a/chan 4)
+        st {:tabs {1 {:ch ch :view :root}} :stale #{} :bytes 0}
+        [st _] (#'seon.web/web-proc st :from-render {:op :settled})]
+    (is (= ": settled\n\n" (a/poll! ch)))
+    (is (= (count ": settled\n\n") (:bytes st)))))
 
 (deftest the-render-proc-asks-for-root-s-view-once-per-round-trip
   ;; the coalescing window is the request in flight, not a clock (ASK-BOUND-MS is gone)

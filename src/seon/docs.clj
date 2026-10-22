@@ -116,6 +116,11 @@
         (:seon.section/references s) (update :seon.section/references
                                              #(into #{} (map (fn [r] (or (:seon.section/address r) (:var/name r)))) %))))))
 
+(defn- children
+  "The sections whose parent is section entity e on db, in the order the wiki was written."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:vector :int]]}
+  [db e] (vec (sort (d/q '[:find [?c ...] :in $ ?p :where [?c :seon.section/parent ?p]] db e))))
+
 (defn view
   "Section address as the store holds it, shown at depth by the one rule (seon.ref/shown): its
   lead is the stored lead, the sections below are those whose parent it is (in the order the
@@ -124,13 +129,38 @@
   [db address depth]
   (when-let [e (pdb/eid db :seon.section/address address)]
     (let [{:seon.section/keys [heading lead text]} (d/pull db [:seon.section/heading :seon.section/lead :seon.section/text] e)
-          below (for [c (sort (d/q '[:find [?c ...] :in $ ?p :where [?c :seon.section/parent ?p]] db e))
+          below (for [c (children db e)
                       :let [s (d/pull db [:seon.section/address :seon.section/heading] c)]]
                   {:seon.ref/address (:seon.section/address s) :seon.ref/heading (:seon.section/heading s)})]
       (ref/shown (cond-> {:seon.ref/address address :seon.ref/heading heading :seon.ref/below (vec below)}
                    lead (assoc :seon.ref/lead lead)
                    (and text (= :code depth)) (assoc :seon.ref/text text))
                  depth))))
+
+(defn page
+  "The page at path as db holds it, its sections in the order the wiki was written (as view
+  shows the sections below): each its address, heading, level (1 for the page's own), lead
+  and own text; nil when db holds no section of it."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe [:vector [:map [:address :string] [:heading :string] [:level pos-int?]]]]]}
+  [db path]
+  (when-let [top (d/q '[:find ?e . :in $ ?pre :where [?e :seon.section/address ?a] [(clojure.string/starts-with? ?a ?pre)]
+                        (not [?e :seon.section/parent _])]
+                      db (str path "#"))]
+    (letfn [(walk [e level]
+              (let [{:seon.section/keys [address heading lead text]}
+                    (d/pull db [:seon.section/address :seon.section/heading :seon.section/lead :seon.section/text] e)]
+                (into [(cond-> {:address address :heading heading :level level} lead (assoc :lead lead) text (assoc :text text))]
+                      (mapcat #(walk % (inc level))) (children db e))))]
+      (walk top 1))))
+
+(defn page-text
+  "The page at path as db holds it, made from its sections (page): each one's heading at its
+  level, then its own text; nil when db holds none of it."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]]}
+  [db path]
+  (some->> (page db path)
+           (map (fn [{:keys [heading level text]}] (cond-> (str (apply str (repeat level "#")) " " heading) text (str "\n\n" text))))
+           (str/join "\n\n")))
 
 (defn pages
   "The wiki pages under dir of the checkout (docs by default), read: {path text}, each path
@@ -141,3 +171,10 @@
         (for [f (sort-by #(.getName %) (or (seq (.listFiles (io/file checkout dir))) []))
               :let [n (.getName f)] :when (.endsWith n ".md")]
           [(str dir "/" n) (slurp f)])))
+
+(defn load-dir-tx
+  "The one load of the wiki under dir of the checkout onto db: load-tx over its pages (an
+  unchanged wiki answers [], a link to no section the :seon.docs/refused error). Root's boot
+  and my.root/load-docs! both write it."
+  {:malli/schema [:=> [:cat :seon.host/db :string :string] [:or [:vector :any] :seon.docs/refused]]}
+  [db checkout dir] (load-tx db dir (pages checkout dir)))

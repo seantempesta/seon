@@ -363,9 +363,13 @@
   ([st _ m]
    (if (= :eval (:op m))
      ;; the agent's entrant boundary: a defect answers its error as the reply's item
-     (let [items (try (eval-string (:forms m) (select-keys m [:ticks :origin]))
-                      (catch Throwable e [{:tag :err :err-text (nrepl/err->msg e)}]))]
-       [st {:sock [{:op :reply :id (:id m) :items items :t (:max-tx (agent/db)) :mem-mb (agent/mem-mb)}]}])
+     (do
+       ;; root hears that this request began (its proc's :started event): what an
+       ;; interrupt or a kill meant for a running eval waits on, never a sleep
+       (agent/send! {:op :started :id (:id m)})
+       (let [items (try (eval-string (:forms m) (select-keys m [:ticks :origin]))
+                        (catch Throwable e [{:tag :err :err-text (nrepl/err->msg e)}]))]
+         [st {:sock [{:op :reply :id (:id m) :items items :t (:max-tx (agent/db)) :mem-mb (agent/mem-mb)}]}]))
      [st (when-let [ms (agent/handle! m)] {:sock ms})])))
 
 (defn serve!

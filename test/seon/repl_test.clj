@@ -2,7 +2,8 @@
   "An agent's REPL answers: asked of an agent in a root of its own (seon.agent-test/in-agent), and a form bounded by the work it does, never by a clock (seon.intr/run under a tick budget)."
   (:require [clojure.test :refer [deftest is]] [clojure.string :as str] [seon.agent-test :as at]
             [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]
-            [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl]))
+            [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.docs :as docs]
+            [seon.config :as cfg] [seon.test-store :as ts] [datahike.api :as d]))
 
 (deftest source-answers-a-platform-var-from-the-program
   ;; task seon.repl/source-reads-the-program: clojure.repl's source and source-fn, as at any
@@ -71,10 +72,10 @@
          code)))
 
 (deftest the-template-instructions-run
-  ;; owner, 2026-10-22: every stage gets detailed instructions on moving around the system;
-  ;; each form an instruction tells an agent to run must work in a real agent. One agent,
-  ;; reading its context first (as a model's turn does, which makes the my.* verbs act on
-  ;; its task), runs every kind's forms in order; the ending verbs come last
+  ;; each form an instruction tells an agent to run must work in a real agent (how every
+  ;; agent moves around the system is the help page's: the-help-page-runs). One agent,
+  ;; reading its context first (as a model's turn does, which makes the my.* functions act on
+  ;; its task), runs every kind's forms in order; the ending functions come last
   (let [forms (into [] (comp (mapcat (comp runnable val)) (distinct)) (sort-by key template/instructions))
         ends #{"(my.turn/wait)"}
         forms (concat (remove #(or (ends %) (str/starts-with? % "(my.task/fail!")) forms)
@@ -83,18 +84,50 @@
         cited "(seon.task/citation-problems (my.db/db) (vec (for [[k v] seon.template/instructions] {:seon.task/ns 'demo :seon.task/name (name k) :seon.task/plan \"\" :seon.task/instructions v})))"
         [problems & items] (rest (at/in-agent (into [{:op :context :agent "a1"} cited] forms)))]
     (is (= "[]" (:printed problems)) (str "every name the instructions cite resolves in the program: " (pr-str problems)))
-    (is (< 20 (count forms)) "the instructions show the agent how to move around")
+    (is (some #{"(my.branch/unmerged)"} forms) "merge's own: the entries it resolves")
+    (doseq [[form item] (map vector forms items)]
+      (is (not= :err (:tag item)) (str form " -> " (pr-str item))))
+    (is (= (count forms) (count items)) "every form answered")))
+
+(deftest the-help-page-runs
+  ;; task seon.context/help-is-a-checked-docs-page (v1's help was tested data, its most-proven
+  ;; turn saver): every form the help page tells an agent to run works in a real agent, in
+  ;; order, the ending functions last, and every name it cites resolves in the program
+  (let [forms (runnable (docs/page-text (let [db0 (ts/test-db)] (d/db-with db0 (docs/load-tx db0 "docs" (docs/pages (cfg/checkout) "docs"))))
+                                       context/help-page))
+        end? #(or (= "(my.turn/wait)" %) (str/starts-with? % "(my.task/fail!"))
+        forms (concat (remove end? forms) (sort-by #(= "(my.turn/wait)" %) (filter end? forms)))
+        cited (str "(seon.task/citation-problems (my.db/db) [{:seon.task/ns 'demo :seon.task/name \"help\" :seon.task/plan (seon.context/help-text (my.db/db))}])")
+        [problems & items] (rest (at/in-agent (into [{:op :context :agent "a1"} cited] forms)))]
+    (is (= "[]" (:printed problems)) (str "every name the help page cites resolves in the program: " (pr-str problems)))
+    (is (< 20 (count forms)) "the page shows the agent how to work")
     (doseq [[form item] (map vector forms items)]
       (is (not= :err (:tag item)) (str form " -> " (pr-str item))))
     (is (= (count forms) (count items)) "every form answered")
     (let [by (zipmap forms items)
           printed #(str (:printed (by %)))]
-      ;; the navigation verbs answer from the program facts the branch records
+      ;; the navigation functions answer from the program facts the branch records
       (is (str/includes? (printed "(my.agent/callers 'seon.task/accumulate)") "seon.task/tasks") "callers, from :form/refs")
       (is (str/includes? (printed "(my.agent/callees 'seon.task/accumulate)") "clojure.core/reduce") "callees, from its form's :form/refs")
       (is (str/includes? (printed "(my.agent/grep \"accumulated\")") "seon.task/accumulate") "grep, over :form/src")
       (is (str/includes? (printed "(get (my.schema/forms) :seon.task/task)") ":seon.task/own") "a schema's form")
-      (is (str/includes? (printed "(my.schema/register! :app.workout/set [:map [:reps :int] [:kg :double]])") ":app.workout/set") "a new schema registers"))))
+      (is (str/includes? (printed "(my.schema/register! :app.workout/set [:map [:reps :int] [:kg :double]])") ":app.workout/set") "a new schema registers")
+      (is (str/includes? (printed "(my.agent/help)") "docs/agent.md#done") "help lists the page's sections, from the branch's db")
+      (is (str/includes? (printed "(my.agent/help \"done\")") "The judge counts exactly") "and one section's text"))))
+
+(deftest help-answers-a-section
+  ;; the help page is read from the wiki's sections main holds (root's boot loads them), at
+  ;; the commit a turn read, through seon.docs's one reader
+  (let [db0 (ts/test-db)
+        db (d/db-with db0 (docs/load-tx db0 "docs" (docs/pages (cfg/checkout) "docs")))
+        toc (docs/page db context/help-page)]
+    (is (= ["docs/agent.md#the-agent" 1] ((juxt :address :level) (first toc))) "the page's sections, the first its title")
+    (is (every? :lead toc) "each section leads with a sentence that stands alone")
+    (is (some #(= "docs/agent.md#done" (:address %)) toc))
+    (is (str/includes? (:seon.ref/text (docs/view db "docs/agent.md#done" :code)) "The judge counts exactly") "one section, whole")
+    (is (nil? (docs/view db "docs/agent.md#nowhere" :code)) "no such section")
+    (is (str/starts-with? (context/help-text db) "# The agent\n\nYou are a Seon agent") "the page, made from its sections")
+    (is (nil? (docs/page db0 context/help-page)) "a db without the wiki holds no help page")))
 
 (defn- outcome [ticks thunk]
   (try {:value (intr/run ticks thunk)} (catch Throwable e {:error e})))

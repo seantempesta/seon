@@ -2,7 +2,7 @@
 
 The words this repo uses, and the namespace that owns each. Library words first (Clojure,
 core.async.flow, Datahike, Malli, nREPL, git); a word below is ours only where no library
-owns the concept. A new concept gets its word here before it appears in code.
+owns the concept. A new concept gets its word here before it appears in code. The words that replace house words (a function, not a verb; a merge, not a landing; the server, not the door) are `AGENTS.md` §7a's table; a stored keyword keeps its old spelling until it is migrated.
 
 ## Processes (core.async.flow's words)
 
@@ -12,7 +12,7 @@ owns the concept. A new concept gets its word here before it appears in code.
 | **step-fn** | the four-arity function a proc runs; the one process abstraction | `seon.step/step-schema` |
 | **root** | the control process: one Flow graph of four procs plus one proc per agent | `seon.root` |
 | **root graph** | that one Flow graph, changed in place by `flow/update!` | `seon.root/start!` |
-| **api** | root's entrance proc: callers' reply promises, routing by request id | `seon.root/api-proc` |
+| **api** | root's request server proc: callers' reply promises, routing by request id | `seon.root/api-proc` |
 | **writer** | root's writes to main (group commit), `d/branch!`, and every merge into main | `seon.writer/writer-proc` |
 | **run-ahead write** | an agent's own write on its own branch: applied at once, committed when idle or at a turn's end, and synced by the next group commit | `seon.agent/transact!`, `seon.agent/commit!`, `datahike.writer/apply!` |
 | **lease** | the block of entity ids an agent process mints on its branch | `:seon.config.store/eid-lease`, `seon.db/after-fork!` |
@@ -23,10 +23,10 @@ owns the concept. A new concept gets its word here before it appears in code.
 | **standby** | a fork of the fork server, promoted when the server dies (root never forks after boot) | `seon.fork-server/promote` |
 | **reconciler** | the proc that sees main's commits through a sliding buffer of one | `seon.reconcile` |
 | **agent** | a process forked from the fork server, holding one branch, running a REPL | `seon.agent` |
-| **stand-in** | an agent's proc in root: owns root's end of its socket and its process | `seon.agent-proc/agent-proc` |
+| **agent proc** (was stand-in) | an agent's proc in root: owns root's end of its socket and its process | `seon.agent-proc/agent-proc` |
 | **edge reader** | a thread doing one blocking read and feeding one proc's in-port (physics) | `seon.root/start-reader!` |
 | **run-loop** | the step-fn contract run on one thread, lifecycle as messages | `seon.step/run-loop` |
-| **dial** | a config key: one documented value in `resources/seon/config/default.edn` (unit, provenance, bound), validated by its `seon.config.*` schema, read once at boot and written as facts on main | `seon.config`, `seon.config/from-db` |
+| **config key** (was dial) | a config key: one documented value in `resources/seon/config/default.edn` (unit, provenance, bound), validated by its `seon.config.*` schema, read once at boot and written as facts on main | `seon.config`, `seon.config/from-db` |
 
 ## The REPL (nREPL's words)
 
@@ -45,9 +45,9 @@ owns the concept. A new concept gets its word here before it appears in code.
 |---|---|---|
 | **contract** | a function's `:malli/schema`, checked from its definition on (inputs, arity, output) | `seon.contract/defn` |
 | **registry** | the named schemas, data in `resources/seon/schemas/*.edn` | `seon.contract/registry` |
-| **refusal** | a contract's failure, thrown as the one error map (`:seon.error/type`) | `seon.contract/refusal` |
-| **admit** | an agent's def armed by its contract, or warned (the uncontracted set grows) | `seon.repl/wrap-admit` |
-| **guarantees** | `:seon.config.contract/guarantees` (`SEON_GUARANTEES`): `:on`, `:contracts` (no recording), `:off` | `seon.contract/on?`, `record?` |
+| **invalid** (was refusal) | a contract's failure, explained (`m/explain`), thrown as the one error map (`:seon.error/type`) | `seon.contract/refusal` |
+| **instrument** (was admit) | an agent's def armed by its contract, or warned (the uncontracted set grows) | `seon.repl/wrap-admit` |
+| **instrument mode** (was guarantees) | `:seon.config.contract/guarantees` (`SEON_GUARANTEES`): `:on`, `:contracts` (no recording), `:off` | `seon.contract/on?`, `record?` |
 
 ## Data (Datahike's and git's words)
 
@@ -61,7 +61,7 @@ owns the concept. A new concept gets its word here before it appears in code.
 | **observation** | data on the branch that observed it (evaluations, answered t), never carried by a merge | `seon.db/observation-attrs` |
 | **generation** | a build of Seon's own source: the running binary is one, and the next is the merges commit built by the `:build` effect, recorded on main (`:seon.root/generation`) and started on the same store by `bin/root next` ([source](source.md#the-next-generation)) | `seon.fx/build`, `my.root/next-generation` |
 
-## Tasks (TASK-CHAIN's words; lanes R1 and M1)
+## Tasks (TASK-CHAIN's words; worktree sessions R1 and M1)
 
 | word | meaning | owner |
 |---|---|---|
@@ -80,20 +80,20 @@ owns the concept. A new concept gets its word here before it appears in code.
 | **turn loop** | inside an agent: observe, then end or act (context to the model, forms through the REPL path) | `seon.turn/work!` |
 | **three-way** | git's merge of program maps (base, ours, theirs) keyed `[:var sym]`, `[:form id]`, `[:schema k]` (a schema entry) | `seon.merge/three-way` |
 | **unmerged entry** | a conflict kept on the branch (base, ours, theirs) until re-defn or `resolve!` | `seon.merge/unmerged` |
-| **harvest** | staging the live runtime onto the branch (unmaps, plain defs as values, aliases) | `seon.harvest/harvest!` |
-| **dragon** | a place where the outside world can fail us, met by one named edge | `docs/DRAGONS.md` |
+| **stage** (was harvest) | staging the live runtime onto the branch (unmaps, plain defs as values, aliases) | `seon.harvest/harvest!` |
+| **failure point** (was dragon) | a place where the outside world can fail us, met by one named edge function | `docs/DRAGONS.md` |
 | **section** | one heading of a wiki page as an entity on main: address `path#anchor`, heading, lead, own text, parent, and references (what its own text cites); its backlinks are who cites it | `seon.docs/load-tx` |
 
-## Agent-facing verbs (`my.*`)
+## Agent-facing functions (`my.*`)
 
-| ns | verbs |
+| ns | functions |
 |---|---|
 | `my.db` | `db`, `q`, `pull`, `transact!` (on the agent's own branch) |
-| `my.agent` | `$`, `whoami`, `messages`, `send-message` |
+| `my.agent` | `$`, `whoami`, `messages`, `send-message`, `help`, `callers`, `callees`, `grep`, `source` |
 | `my.task` | `current`, `update!`, `fail!` |
 | `my.turn` | `wait` |
 | `my.branch` | `merge-main!`, `unmerged`, `resolve!` |
-| `my.root` (root's verbs) | `create!`, `run!`, `cancel!` |
+| `my.root` (root's functions) | `create!`, `run!`, `cancel!` |
 
 ## Renamed from the prototypes
 
