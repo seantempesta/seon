@@ -798,9 +798,10 @@
         _ (await-event ev (started a flood))
         _ (c/pause-agent! sys a)
         ;; what its proc had taken when the pause landed (the ping after it is FIFO), and after the window
-        n0 (get-in (ping sys a) [:state :noise])
+        p0 (ping sys a)
         _ (Thread/sleep (seon.config/value :seon.config.check/hold-ms))
-        n1 (get-in (ping sys a) [:state :noise])
+        p1 (ping sys a)
+        [n0 n1] (map #(get-in % [:state :noise]) [p0 p1])
         busy (get-in (c/state sys) [:agents a :status])
         t0 (profile/now-ns)
         _ (c/resume-agent! sys a)
@@ -823,11 +824,13 @@
         rs (mapv deref mains)
         resume-ms (profile/ms-since t1)
         ok (count (filter :ok rs))]
-      {:report {:flood {:arrived (:noise st) :ordered (:noise-ordered st) :reply (:printed (second r)) :taken-before-the-pause n0 :taken-while-paused (some-> n1 (- n0)) :status-while-paused busy :drain-ms (lib/r2 drain-ms)}
+      {:report {:flood {:arrived (:noise st) :ordered (:noise-ordered st) :reply (:printed (second r)) :taken-before-the-pause n0 :taken-while-paused (when (and n0 n1) (- n1 n0)) :status-while-paused busy
+                        :blocked (filterv :blocked [p0 p1]) :drain-ms (lib/r2 drain-ms)}
                 :writer {:agents n :writer-buf (seon.config/value :seon.config.root/writer-buf) :answered-while-paused answered-while-paused
                          :root-real-mb {:before mb0 :writer-saturated mb1} :resume->all-done-ms (lib/r2 resume-ms) :ok ok
                          :agents-ok agents-ok :not-ok (frequencies (remove :ok rs))}}
-       :checks {:ring-pushes-back (and (= n0 n1) (< n0 20000) (= :busy busy))
+       :checks {:its-proc-answered (not-any? :blocked [p0 p1])
+                :ring-pushes-back (and n0 n1 (= n0 n1) (< n0 20000) (= :busy busy))
                 :flood-all-arrive-in-order (and (= 20000 (:noise st)) (true? (:noise-ordered st)) (= ":flooded" (:printed (second r))))
                 :agents-write-past-a-paused-writer (= n agents-ok)
                 :writer-paused-holds-all (zero? answered-while-paused)
