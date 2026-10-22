@@ -17,9 +17,14 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
-            [seon.render :as render] [seon.print :as print] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.proofs :as proofs]))
+            [seon.render :as render] [seon.print :as print] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.proofs :as proofs] [seon.cost :as cost]))
 
 ;;; --- small formatting helpers -------------------------------------------------
+
+(def ^:private cell "Tokens of a table cell or a stream row's field." (config/value :seon.config.render/cell-budget))
+(def ^:private one-line "Tokens of a message or reason in one line." (config/value :seon.config.render/line-budget))
+(def ^:private part "Tokens of a value shown inside another." (config/value :seon.config.render/part-budget))
+(def ^:private form-budget "Tokens of a form echoed back." (config/value :seon.config.render/form-budget))
 
 (defn dom-id
   "A DOM-safe id for an id keyword or string: :a12 -> \"a12\", :fx/model -> \"fx_model\"."
@@ -61,7 +66,7 @@
   {:malli/schema [:function [:=> [:cat :any pos-int?] :any] [:=> [:cat :any pos-int? :map] :any]]}
   ([s budget] (prose s budget {}))
   ([s budget {:keys [href one-line? whole]}]
-   (let [s (if (string? s) s (str s))
+   (let [s (if (string? s) s (print/text s budget))
          {:keys [shown truncated? omitted lines]} (print/prose s budget {:one-line? (boolean one-line?)})]
      (if-not truncated?
        shown
@@ -122,7 +127,7 @@
   it shows whole)."
   {:malli/schema [:=> [:cat [:maybe :string] pos-int? [:maybe :keyword] :map] :any]}
   [txt budget handle opts]
-  (let [plain? (and (some? txt) (< (count txt) 4000) (not (str/includes? txt "…"))
+  (let [plain? (and (some? txt) (not (str/includes? txt "…"))
                     (contains? #{\{ \[ \( \:} (first txt)))
         ;; through the one reader edge: text that does not read is an answer (nil), not a catch here
         v (when plain? (let [fs (reader/read-text txt 'user)] (when (= 1 (count fs)) (first fs))))]
@@ -239,7 +244,7 @@
      [:li {:class (str "ph" (when bad? " abnormal s-failed"))}
       [:i {:class (str "dot " (if bad? "s-failed" "s-running"))}] [:code (kname pid)]
       (if bad?
-        (list [:b (str defects " defect" (when (> defects 1) "s"))] " " [:span {:class "bad"} (prose newest 30 {:one-line? true})])
+        (list [:b (str defects " defect" (when (> defects 1) "s"))] " " [:span {:class "bad"} (prose newest cell {:one-line? true})])
         [:span {:class "muted"} "no defect recorded"])]}))
 
 (defn tile-health
@@ -349,7 +354,7 @@
     (metric-tile
       {:id "t-errors" :class (when (seq root-errors) "hot") :kicker "root" :sub (str total " defects in root's own procs (agents' problems: the banner)")
        :body (if (seq root-errors)
-               [:ul {:class "errs"} (for [e shown] [:li [:code (kname (:pid e))] " " (prose (:message e) 50)]) (when more [:li {:class "more muted"} more])]
+               [:ul {:class "errs"} (for [e shown] [:li [:code (kname (:pid e))] " " (prose (:message e) one-line)]) (when more [:li {:class "more muted"} more])]
                [:p {:class "muted"} "no proc has thrown"])
        :rows [["boot" (ms-str (:load-ms boot)) "boot: open the store, load main's program, arm contracts, fork the fork server"]
               ["program" (str (get-in boot [:program :loaded] "–") " defs") "definitions of main's program loaded at boot (seon.program/load-all!: :var/name facts with source)"]
@@ -379,7 +384,7 @@
           (for [[k v] kvs]
             [:div {:title (str (prop k :description))}
              [:dt (name k)]
-             [:dd [:code (pr-str v)] (when-let [u (prop k :seon.config/unit)] [:span {:class "muted"} " " u])]])])]]}))
+             [:dd [:code (print/text v (config/value :seon.config.render/part-budget))] (when-let [u (prop k :seon.config/unit)] [:span {:class "muted"} " " u])]])])]]}))
 
 ;;; --- agent cards --------------------------------------------------------------
 
@@ -400,7 +405,7 @@
        [:span {:class "dots"}
         (if (seq reports)
           (for [r (sort-by #(if (= :pass (:type %)) 1 0) reports)]
-            [:i {:class (str "t-" (kname (:type r))) :title (str (:var r) (when (:message r) (str " · " (:text (print/prose (:message r) 60)))))}])
+            [:i {:class (str "t-" (kname (:type r))) :title (str (:var r) (when (:message r) (str " · " (:text (print/prose (:message r) one-line)))))}])
           (concat (repeat (or pass 0) [:i {:class "t-pass"}]) (repeat (- total (or pass 0)) [:i {:class "t-fail"}])))]
        [:span {:class "score"} (str pass "/" total)]
        (when (:ms tests) [:span {:class "muted"} (ms-str (:ms tests))])])))
@@ -482,7 +487,9 @@
    [:span (ms-str (:ms e))] (alloc-span (:alloc-bytes e))
    [:span {:class "origin"} (kname (or (:origin e) :agent))]
    (when (:recorded e) [:span {:class "rec" :title "recorded as a program fact on this branch"} (str "＋" (:recorded e))])
-   (when-let [w (first (:warnings e))] [:span {:class "warn" :title (str (:seon.repl/fix w))} (str "⚠ " (kname (:seon.repl/finding w)))])
+   (let [[ws more] (print/bounded (:warnings e) :seon.config.render.list/top "on its page")]
+     (list (for [w ws] [:span {:class "warn" :title (str (:seon.repl/fix w))} (str "⚠ " (kname (:seon.repl/finding w)))])
+           (when more [:span {:class "muted"} more])))
    (when (:handle e) [:span {:class "handle"} (kname (:handle e))])])
 
 (defn- eval-out
@@ -506,8 +513,8 @@
   {:malli/schema [:=> [:cat :map :boolean :string] :any]}
   [e newest? href]
   [:li {:class (str "ev tag-" (kname (or (:tag e) :ret)))}
-   (when-not (str/blank? (:form e)) [:code {:class "form"} (prose (:form e) 28 {:one-line? true :href href})])
-   [:div {:class "out"} (eval-out e 120 50 href newest?)]
+   (when-not (str/blank? (:form e)) [:code {:class "form"} (prose (:form e) cell {:one-line? true :href href})])
+   [:div {:class "out"} (eval-out e part one-line href newest?)]
    (eval-meta e)
    (when newest? (fns-line (:fns e)))])
 
@@ -533,10 +540,10 @@
          (let [[k why] (merge-words m)]
            [:span {:class (str "pill s-" (name k)) :title why} ({:merged "⇡ merged" :conflict "⚔ conflict" :refused "✕ refused"} k)]))
        (status-pill ag st)]
-      [:p {:class "task"} (prose (or (:task ag) "") 40 {:href href})]
+      [:p {:class "task"} (prose (or (:task ag) "") one-line {:href href})]
       (agent-stats ag total nil)
-      (when (:error ag) [:p {:class "err"} (prose (:error ag) 60)])
-      (when running [:p {:class "running" :title "evaluating now"} "▶ " [:code (prose (:form running) 40 {:one-line? true :href href})]])
+      (when (:error ag) [:p {:class "err"} (prose (:error ag) one-line)])
+      (when running [:p {:class "running" :title "evaluating now"} "▶ " [:code (prose (:form running) cell {:one-line? true :href href})]])
       (if last-e
         (let [[shown more] (print/bounded (rseq (vec evals)) :seon.config.render.list/newest "earlier evaluations on its page" total)]
           [:ol {:class "evals"} (map-indexed (fn [i e] (eval-row e (zero? i) href)) shown)
@@ -591,15 +598,15 @@
                (str "read its current-state block · ≈" (select/estimate (or (:out r) "")) " tokens")
              (str (when (> (count items) 1) (str (count items) " forms · "))
                   (let [n (count (filter #(= :err (:tag %)) items))] (when (pos? n) (str n " error" (when (> n 1) "s") " · ")))
-                  (when-not (str/blank? (:form r)) (str (print/line (:form r) 12) " ⇒ "))
-                  (print/line (:printed r) 22)
+                  (when-not (str/blank? (:form r)) (str (print/line (:form r) cell) " ⇒ "))
+                  (print/line (:printed r) cell)
                   (when (:ms r) (str " · " (ms-str (:ms r)))))))
     :commit (str (kname (:branch ev)) " t " (:t ev) (when (:txs ev) (str " · " (:txs ev) " tx")))
-    :merged (let [[k why] (merge-words (:result ev))] (if (= :merged k) why (str (str/upper-case (name k)) " · " (print/line why 25))))
+    :merged (let [[k why] (merge-words (:result ev))] (if (= :merged k) why (str (str/upper-case (name k)) " · " (print/line why cell))))
     :tests (str (run-words ev) (when (:ms ev) (str " · " (ms-str (:ms ev)))))
     :merged-main (let [r (:result ev)]
                    (if (:ok r) (str "main → branch · " (count (:applied r)) " applied · " (count (:conflicts r)) " conflicts")
-                       (str "refused: " (print/line (:seon.error/message r) 20))))
+                       (str "refused: " (print/line (:seon.error/message r) cell))))
     :server-down (str "fork server pid " (:pid ev) " is gone · agents keep running")
     :server-up (str "root forked a new fork server · pid " (:pid ev))
     :spawned (if (:cloned-from ev)
@@ -609,8 +616,8 @@
     :killed (if (:ended-as ev) (str "stopped by root after its attempt ended " (kname (:ended-as ev))) "KILLED")
     :ended (str "stopped by root: its attempt ended" (when (:ended-as ev) (str " " (kname (:ended-as ev)))))
     :dead (if (:ended-as ev) (str "exited after its attempt ended " (kname (:ended-as ev))) "its process died")
-    :ui (str (:call ev) (when (:detail ev) (str " · " (print/line (str (:detail ev)) 20))))
-    (print/text (dissoc ev :type :at-ms :agent) 25)))
+    :ui (str (:call ev) (when (:detail ev) (str " · " (print/line (:detail ev) cell))))
+    (print/text (dissoc ev :type :at-ms :agent) cell)))
 
 (defn- bad-event? {:malli/schema [:=> [:cat :map] :boolean]}
   [ev]
@@ -806,23 +813,12 @@
       (when-let [ev (:seon.task/evidence t)]
         [:div {:class "muted"} "evidence " (:seon.render/html (render/print-out :html ev {:seon.render/budget (config/value :seon.config.render/part-budget)}))])]}))
 
-(defn verdict-lines
-  "A cost verdict as [class words] lines, red first: within or over its estimate, each size
-  over it, each dimension grown steeper than the work needs, then loose estimates and
-  unmeasured dimensions as findings. The page's verdict box and root's cost report."
-  {:malli/schema [:=> [:cat :seon.cost/verdict] [:sequential [:tuple :string :string]]]}
-  [{:keys [ok? over steeper under unmeasured]}]
-  (concat [[(if ok? "ok" "bad") (if ok? "within estimate" "OVER ESTIMATE")]]
-          (for [{:keys [dim n ratio]} over] ["bad" (str "over " (name dim) " at n=" (group3 n) " " (fmt2 ratio) "×")])
-          (for [{:keys [dim exponent allowed]} steeper] ["bad" (str "steeper " (name dim) " n^" (fmt2 exponent) " > n^" (fmt2 allowed))])
-          (for [{:keys [dim n ratio]} under] ["muted" (str "loose " (name dim) " at n=" (group3 n) " " (fmt2 ratio) "×")])
-          (for [d unmeasured] ["muted" (str "unmeasured " (name d))])))
-
 (defn verdict-box
-  "A cost verdict (`verdict-lines`): red when a size is over its estimate or grew steeper."
+  "A cost verdict (seon.cost/verdict-lines, the agent's words too): red when a size is over
+  its estimate or grew steeper."
   {:malli/schema [:=> [:cat :seon.cost/verdict :seon.render/env] :seon.render/out]}
   [v _]
-  (let [[[_ head] & more] (verdict-lines v)]
+  (let [[[_ head] & more] (cost/verdict-lines v nil)]
     {:seon.render/html [:div {:class (str "verdict " (if (:ok? v) "ok" "red"))} [:b head] (for [[c w] more] [:span {:class c} (str " " w)])]}))
 
 (defn cost-report
@@ -862,14 +858,14 @@
     [:li {:class (str "pr t-" (kname (:type r)))}
      [:i {:class (str "sq t-" (kname (:type r)))}] " " [:code (str (:var r))]
      (when (and (not pass?) (or own (seq owners))) [:span " " (red-label (:var r) own owners)])
-     (when (:message r)
+     (when (and (:message r) (not cost))
        (if pass?
-         [:span {:class "muted"} " " (prose (:message r) 50 {:one-line? true})]
-         ;; a red report's message: for a cost proof, its estimate against what was measured
-         [:pre {:class "msg"} (prose (:message r) 600)]))
+         [:span {:class "muted"} " " (prose (:message r) (config/value :seon.config.render/line-budget) {:one-line? true})]
+         [:pre {:class "msg"} (prose (:message r) (config/value :seon.config.render/form-budget))]))
      (cond cost (render/html cost (assoc env :seon.render/schema :seon.render/cost-report))
-           (not= :pass (:type r)) [:div {:class "fail"} [:div [:em "expected "] [:code (print/text (:expected r) 120)]]
-                                   [:div [:em "actual "] [:code (print/text (:actual r) 120)]]])]))
+           ;; :expected and :actual are the test child's printed text: shown as it is
+           (not= :pass (:type r)) [:div {:class "fail"} [:div [:em "expected "] [:code (prose (:expected r) (config/value :seon.config.render/part-budget))]]
+                                   [:div [:em "actual "] [:code (prose (:actual r) (config/value :seon.config.render/part-budget))]]])]))
 
 (defn proofs-box
   "The agent's last test run: every report, the red ones first, cost proofs with their
@@ -895,9 +891,9 @@
   [e env]
   {:seon.render/html
      [:li {:class (str "hr tag-" (kname (or (:tag e) :ret)))}
-      [:div {:class "hf"} [:code (prose (:form e) 400)]]
-      [:div {:class "hv"} (eval-out e (or (:seon.render/budget env) (config/value :seon.config.render/value-budget)) 200 nil true)]
-      (when (and (seq (:out e)) (not (context-read? e))) [:pre {:class "out"} (prose (:out e) 200)])
+      [:div {:class "hf"} [:code (prose (:form e) form-budget)]]
+      [:div {:class "hv"} (eval-out e (or (:seon.render/budget env) (config/value :seon.config.render/value-budget)) part nil true)]
+      (when (and (seq (:out e)) (not (context-read? e))) [:pre {:class "out"} (prose (:out e) part)])
       (eval-meta e)
       (when (seq (:fns e))
         [:table {:class "fnt"}
@@ -924,7 +920,7 @@
       [:h1 [:span {:class (str "dot s-" st)}] (kname id) " " (status-pill ag st)
        [:span {:class "branch"} (str " branch " (kname (:branch ag)))]]
       [:p {:class "task"} (str (:task ag))]
-      (agent-stats ag (count (:evals ag)) (when (:running ag) [:span {:class "running"} "▶ " [:code (prose (:form (:running ag)) 60)]]))]}))
+      (agent-stats ag (count (:evals ag)) (when (:running ag) [:span {:class "running"} "▶ " [:code (prose (:form (:running ag)) one-line)]]))]}))
 
 (defn zoom-work
   "The zoomed agent's work on main: its attempt (status, turns, tokens, outcome) and its

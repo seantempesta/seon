@@ -10,8 +10,6 @@
   newest evaluations spent most in), then the newest events. Sections are added in that
   order until the token budget is spent; what did not fit is named, never silently cut.
 
-  `cost-report` puts a cost proof's red dimension first, with the sizes that broke it.
-
   The values agents and root read at the REPL (seon.render/printed) render here too, each a
   few lines that cite what they show and the form that reads the rest (env
   :seon.render/handle, the value's result handle or a form that reads it): an error map
@@ -238,14 +236,3 @@
                                   [text (conj left title)])))
                             [head []] (remove (comp empty? second) sections))]
     {:seon.render/ai (cond-> text (seq left) (str "\n(not shown, over the budget: " (str/join ", " left) ")"))}))
-
-(defn cost-report
-  "A cost proof's report, its red dimension first (ui/verdict-lines, as the page says it),
-  then the rows."
-  {:malli/schema [:=> [:cat :seon.render/cost-report :seon.render/env] :seon.render/out]}
-  [{:keys [rows verdict]} _]
-  {:seon.render/ai
-   (str/join "\n"
-     (concat (map second (ui/verdict-lines verdict))
-             (for [{:keys [n measured expected]} rows]
-               (str "n=" n " " (str/join " " (for [[d x] expected] (str (name d) " " (get measured d) "/" x)))))))})

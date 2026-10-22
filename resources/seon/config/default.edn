@@ -404,7 +404,7 @@
  ;; on its branch). Provenance: the render proc's HISTORY-CAP 100.
  :seon.config.render.list/history 100
  ;; Unit: functions. An evaluation's record keeps its this many costliest contracted functions
- ;; (seon.repl/wrap-cost) and how many it touched. Provenance: seon.repl's top-fns 10.
+ ;; (seon.repl/wrap-cost). Provenance: seon.repl's top-fns 10.
  :seon.config.render.list/fns 10
 
  ;; ==== the web, the guarantees, the native probe ==============================================

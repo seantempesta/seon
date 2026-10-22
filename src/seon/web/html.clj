@@ -8,7 +8,7 @@
   Datastar post to the one stateless `/call` route, its payload the call itself; a form
   posts its own fields with it."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str]))
+  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.print :as print]))
 
 (defn raw
   "s as already-serialized HTML (written as is): a tagged map, never mistaken for attrs."
@@ -97,7 +97,8 @@
         (doseq [c children] (write! sb c))
         (.append sb "</") (.append sb tag) (.append sb ">")))
     (seq? node) (doseq [c node] (write! sb c))
-    :else (.append sb (escape node))))
+    ;; a value that is not text is shown by the one value printer
+    :else (.append sb (escape (if (or (string? node) (number? node) (char? node)) node (print/text node))))))
 
 (defn html
   "node (hiccup) as its HTML text."

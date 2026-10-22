@@ -221,7 +221,6 @@ input:focus { border-color: var(--signal); box-shadow: 0 0 0 3px var(--glow); }
 .dense .grid { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 6px; }
 .dense .task, .dense .stats, .dense .ev .meta, .dense .actions, .dense .branch { display: none; }
 .dense .cb { padding: 7px 9px 5px 11px; gap: 4px; }
-.dense .ev .printed { max-height: 1.45em; white-space: nowrap; overflow: auto hidden; }
 .dense .ev .form { font-size: 10px; }
 .dense .repl { display: none; }
 .dense .card:hover .repl, .dense .card:focus-within .repl { display: flex; }

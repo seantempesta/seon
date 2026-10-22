@@ -135,12 +135,13 @@
            cont (assoc :continuation cont)))))))
 
 (defn line
-  "Text in one line under budget tokens: `prose` with every whitespace run as one space;
+  "Text in one line under budget tokens (a value that is not text printed first): `prose`
+  with every whitespace run as one space;
   its cut says what it omitted and, with source (a form that answers the whole text), the
   form that reads the rest. Root's context and the page's one-line rows (the stream)."
   {:malli/schema [:function [:=> [:cat :any pos-int?] :string] [:=> [:cat :any pos-int? :any] :string]]}
   ([s budget] (line s budget nil))
-  ([s budget source] (:text (prose (some-> s str) budget (cond-> {:one-line? true} source (assoc :source source))))))
+  ([s budget source] (:text (prose (cond-> s (and (some? s) (not (string? s))) (text budget)) budget (cond-> {:one-line? true} source (assoc :source source))))))
 
 (defn more
   "What a bounded list leaves: nil when its shown members are all of total, else `+N more`

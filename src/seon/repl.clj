@@ -191,9 +191,9 @@
                    m))))))
 
 (def top-fns
-  "How many of a form's costliest contracted functions its record keeps (Seon's
-  :seon.config.test.cost/top)."
-  10)
+  "How many of a form's costliest contracted functions its record keeps
+  (:seon.config.render.list/fns)."
+  (cfg/value :seon.config.render.list/fns))
 
 (defn wrap-cost
   "Per-form wall µs, allocated bytes and the form's costliest contracted functions (each

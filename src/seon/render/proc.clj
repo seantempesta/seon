@@ -29,10 +29,10 @@
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.context :as context] [seon.print :as print]
             [seon.config :as config] [seon.step :as step]))
 
-(def EVENT-CAP "Events the stream keeps." 60)
-(def SERIES-CAP "Points a sparkline keeps: the newest changes (a writer batch, a fork, a main commit)." 60)
+(def EVENT-CAP "Events the stream keeps (:seon.config.render.list/stream)." (config/value :seon.config.render.list/stream))
+(def SERIES-CAP "Points a sparkline keeps, the newest changes (:seon.config.render.list/series)." (config/value :seon.config.render.list/series))
 (def RETIRE-MS "An ended agent leaves the grid this long after it ended." 90000)
-(def HISTORY-CAP "Evaluations an agent's page shows." 100)
+(def HISTORY-CAP "Evaluations an agent's page shows (:seon.config.render.list/history)." (config/value :seon.config.render.list/history))
 
 ;;; --- requests -------------------------------------------------------------------------
 
@@ -463,9 +463,9 @@
                            ;; the stream; root's verb (its form) recorded on main with this answer
                            (and (vector? (:tag m)) (= :web (first (:tag m))))
                            (let [[_ v agent form] (:tag m)
-                                 detail (cond err (str "error: " err) (map? r) (print/text (dissoc r :reports) 40))]
+                                 detail (cond err (str "error: " err) (map? r) (print/text (dissoc r :reports) (config/value :seon.config.render/line-budget)))]
                              (when form
-                               (let [it (cond-> {:id 0 :tag (if err :err :ret) :form form :origin :ui :printed (or detail (print/text r 40))} err (assoc :err r))]
+                               (let [it (cond-> {:id 0 :tag (if err :err :ret) :form form :origin :ui :printed (or detail (print/text r (config/value :seon.config.render/line-budget)))} err (assoc :err r))]
                                  (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx :root (str "root-ui-" (profile/now-ns)) [it] nil)}}
                                                        :route [:render :answers] :tag [:web-record]})))
                              (ask-state (on-event st {:type :ui :call (str v) :agent agent :at-ms (System/currentTimeMillis) :error err :detail detail}) o))

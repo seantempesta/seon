@@ -132,7 +132,7 @@
                           [k {:stored stored :declared t}]))
         _ (when (seq differ)
             (let [e (contract/error :seon.db/types-differ 'seon.db/open!
-                                    (str "the store holds " (count differ) " attributes as another value type than the schema declares: " (pr-str (keys differ)))
+                                    (str "the store holds " (count differ) " attributes as another value type than the schema declares (each in :seon.db/attributes)")
                                     {:seon.db/attributes differ
                                      :seon.error/fix "An attribute's value type is fixed once installed: open a store made with this schema (a fresh one), or keep running the build that made this store."})]
               (throw (ex-info (:seon.error/message e) e))))
