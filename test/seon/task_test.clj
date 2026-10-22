@@ -43,3 +43,21 @@
     (is (= #{'demo/f} (:seon.task/references t)))
     (is (not-any? #{:db/id :seon.task/declared} (keys t)) "the stored declaration is load-tx's, not the reader's")
     (is (= t (get (task/tasks db) "demo/t")))))
+
+(deftest a-continued-branch-takes-its-refinements-tasks-from-main
+  ;; root's ruling (2026-10-22): a refinement continues the failed branch, which was forked
+  ;; before main held the refinement's tasks; the step E dry run's r1 design read its task on
+  ;; its branch as nil and threw (seon.reconcile/dials). onto-tx puts the task and what it
+  ;; needs there, as main holds them, and leaves what the branch already holds
+  (let [db0 (ts/test-db)
+        branch (d/db-with db0 (task/create-tx db0 [{:seon.task/ns 'demo :seon.task/name "a" :seon.task/plan "Branch's own a."}]))
+        main (d/db-with branch (task/create-tx branch [{:seon.task/ns 'demo :seon.task/name "r1-design" :seon.task/plan "Refine." :seon.task/needs #{"demo/a"}}
+                                                       {:seon.task/ns 'demo :seon.task/name "r1-implement" :seon.task/plan "" :seon.task/needs #{"demo/r1-design"}}]))
+        main (d/db-with main [{:seon.task/id "demo/a" :seon.task/plan "Main's a."}])
+        tx (task/onto-tx main branch "demo/r1-implement")
+        after (d/db-with branch tx)]
+    (is (= #{"demo/r1-design" "demo/r1-implement"} (set (map :seon.task/id tx))) "the task and what it needs that the branch lacks")
+    (is (= "Refine." (:seon.task/plan (task/task after "demo/r1-design"))))
+    (is (= #{"demo/r1-design"} (:seon.task/needs (task/task after "demo/r1-implement"))) "its needs resolve on the branch")
+    (is (= "Branch's own a." (:seon.task/plan (task/task after "demo/a"))) "a task the branch holds is left as the branch has it")
+    (is (= [] (task/onto-tx main after "demo/r1-implement")) "nothing when the branch holds them")))
