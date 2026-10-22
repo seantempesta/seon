@@ -731,8 +731,21 @@
 
 (def tree-readers
   "The host vars that read files: a test whose reached forms reference one reads the
-  checkout's tree, so its reach digest covers the whole tree (reach-digests)."
+  checkout's tree, so its reach digest covers the whole tree (reach-digests), unless the
+  form referencing it defines one of env-readers."
   '#{clojure.core/slurp clojure.core/file-seq})
+
+(def env-readers
+  "The platform vars whose file reads are of inputs every digest already holds (:env:
+  resources/, deps.edn, web/) or of no checkout file at all, so reaching them does not make a
+  test read the tree. A reader not named here counts as reading the tree (conservative: a
+  missed name reruns more, never reuses a stale green). Measured 2026-10-22 (lane PROVE): with
+  seon.config/baked-schema-forms (a macro every contracted form expands) counted, 327 of 368
+  tests took the tree, so any edit anywhere reran them."
+  '#{seon.config/baked-schema-forms ;; resources/seon/schemas, in :env
+     seon.fork-server/dev-classpath! ;; deps.edn, in :env
+     seon.web/handler ;; web/public, in :env
+     seon.proofs/greens}) ;; the results directory, outside the tree, by digest
 
 (defn reach-digests
   "{test var -> reach digest} of db's tests (task seon.program/tests-run-by-reach): the
@@ -771,7 +784,10 @@
                                     (if-let [[id & more] (seq front)]
                                       (if (seen id) (recur more seen) (recur (into (vec more) (edges (by-id id))) (conj seen id)))
                                       seen))
-                          reads? (some #(some tree-readers (:refs (by-id %))) reached)]
+                          reads? (some #(let [f (by-id %)]
+                                          (and (some tree-readers (:refs f))
+                                               (not (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f))))))
+                                       reached)]
                       (error/digest (apply str k "\n" env "\n" (when reads? tree) (sort (map digest reached))))))]
     (if roots
       (into {} (for [[k vars] roots] [k (digest-of k (keep var-form vars))]))

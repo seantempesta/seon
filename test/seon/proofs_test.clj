@@ -6,7 +6,7 @@
   each result."
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d]
             [seon.test-store :as ts] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
-            [seon.program-test :refer [record]]))
+            [seon.program-test :refer [record]] [test-runner :as runner]))
 
 (defn- prog []
   (record (ts/test-db)
@@ -117,6 +117,19 @@
     (is (= (count tests) (count (filter :seon.test/started @notes))) "each test named as it starts")
     (is (every? #(.isFile (java.io.File. (proofs/result-path dir %))) (vals dg)) "each result stored at its digest")
     (is (= #{"d-fx" "d-add" "d-twice" "d-neg"} (set (keys (proofs/greens dir (vals dg))))) "only greens are reused: a red runs again")))
+
+(deftest only-a-test-reading-the-tree-takes-its-digest
+  ;; seon.program/env-readers: platform reads of resources/ (the baked schemas every contract
+  ;; expands), deps.edn or web/ are :env inputs already, so reaching them does not make a test
+  ;; rerun on every edit; a reader of src, test, docs or the task files still does
+  (let [db (runner/program-db (System/getProperty "user.dir"))
+        dg (fn [tree] (program/reach-digests db {:env "e" :tree tree}))
+        a (dg "t1") b (dg "t2")
+        moved (set (for [[t d] a :when (not= d (b t))] t))]
+    (is (not (moved 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a reader test reaches only :env reads: the tree is no input")
+    (is (moved 'seon.task-files-test/the-shipped-task-files-load) "a test reading the task files (my.root/task-files, not in :env): the tree is its input")
+    (is (moved 'seon.program-test/a-result-recorded-in-one-checkout-is-reused-in-another) "a test reading files itself (test-runner/inputs): the tree is its input")
+    (is (< (count moved) (quot (count a) 2)) (str (count moved) " of " (count a) " tests take the tree: fewer than half"))))
 
 (defn plan-input
   "The input of size n: n keys with stored greens, one in a hundred moved since."

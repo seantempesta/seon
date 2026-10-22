@@ -6,6 +6,8 @@
                       seon.proofs-test/a-one-defn-change-runs-only-what-reaches-it
                       seon.proofs-test/a-macro-schema-or-config-change-widens-the-selection
                       seon.proofs-test/a-check-step-is-keyed-by-what-its-function-reaches
-                      seon.proofs-test/shards-run-in-forks-and-store-each-result
+                      seon.proofs-test/shards-split-by-namespace-and-each-result-is-stored
                       seon.proofs-test/selection-is-proportional-to-what-changed
+                      seon.proofs-test/only-a-test-reading-the-tree-takes-its-digest
+                      seon.proofs-test/every-bin-check-step-is-keyed
                       seon.agent-test/a-wide-reach-reuses-unchanged-results}}]
