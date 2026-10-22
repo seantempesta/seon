@@ -78,7 +78,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **reconciler** | the pure function of main's db to actions, and the proc that carries them out | `seon.reconcile/reconcile`, `reconciler-proc` |
 | **flight** | one action carried out as a chain of requests and answers in the reconciler proc | `seon.reconcile/advance` |
 | **turn loop** | inside an agent: observe, then end or act (context to the model, forms through the REPL path) | `seon.turn/work!` |
-| **three-way** | git's merge of program maps (base, ours, theirs) keyed `[:var sym]`, `[:form id]`, `[:schema k]` (a schema entry) | `seon.merge/three-way` |
+| **three-way** | git's merge of program maps (base, ours, theirs) keyed `[:var sym]`, `[:form id]`, `[:schema k]` (a schema entry), read only where the dbs differ ([storage](storage.md#merges-read-what-changed)) | `seon.merge/three-way`, `seon.merge/delta-three-way` |
 | **unmerged entry** | a conflict kept on the branch (base, ours, theirs) until re-defn or `resolve!` | `seon.merge/unmerged` |
 | **stage** (was harvest) | staging the live runtime onto the branch (unmaps, plain defs as values, aliases) | `seon.stage/stage!` |
 | **failure point** (was dragon) | a place where the outside world can fail us, met by one named edge function | `docs/failure-points.md` |

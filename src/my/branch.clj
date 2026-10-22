@@ -15,14 +15,14 @@
   (stage/stage!)
   (let [r (agent/merge-main! #{})
         db (agent/db)]
-    (assoc r :unmerged (pm/unmerged db (pm/program db #{})))))
+    (assoc r :unmerged (pm/unmerged db))))
 
 (defn unmerged
   "The entries of this branch still unmerged: the conflicts no re-defn or resolve! has
   settled yet, each with its base, ours and theirs."
   {:malli/schema [:=> [:cat] [:vector :seon.merge/entry-value]]}
   []
-  (let [db (agent/db)] (pm/unmerged db (pm/program db #{}))))
+  (pm/unmerged (agent/db)))
 
 (defn resolve!
   "Settle the unmerged entry of var sym (git add). With no side the branch keeps what it

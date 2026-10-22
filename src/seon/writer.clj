@@ -27,7 +27,7 @@
   {:malli/schema [:=> [:cat :seon.writer/state :seon.db/branch :seon.merge/data-attrs] [:tuple :seon.host/db :seon.merge/result]]}
   [{:keys [conn]} b data-attrs]
   (let [head (pdb/head conn b)]
-    [head (pm/three-way (pm/program (pdb/branch-base conn (pdb/conn-main conn) b) data-attrs) (pm/program head data-attrs) (pm/program @conn data-attrs))]))
+    [head (pm/delta-three-way (pdb/branch-base conn (pdb/conn-main conn) b) head @conn data-attrs)]))
 
 (defn- refused
   "The writer refusing a request, as the one error map (:seon.writer/refused); members
@@ -45,7 +45,7 @@
   admitted)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/result] [:maybe :map]]}
   [main head r]
-  (let [unmerged (pm/unmerged head (pm/program head #{}))
+  (let [unmerged (pm/unmerged head)
         uncontracted (pm/uncontracted (:ours r))]
     (cond
       (seq (:theirs r))
@@ -185,7 +185,7 @@
                                (let [[head r] (branch-merge st (:branch m) (:data-attrs m #{}))]
                                  {:ok true :ours (vec (sort-by str (keys (:ours r)))) :theirs (count (:theirs r))
                                   :conflicts (count (:conflicts r))
-                                  :unmerged (mapv :key (pm/unmerged head (pm/program head #{}))) :uncontracted (pm/uncontracted (:ours r))
+                                  :unmerged (mapv :key (pm/unmerged head)) :uncontracted (pm/uncontracted (:ours r))
                                   :vars (into (sorted-set) (keep (fn [[k s]] (when (= :var k) s))) (keys (:ours r)))})
                                (refused (str "no branch " (:branch m)) {})))
       ;; root's read of a branch (or main): its committed value from the store; :base is the

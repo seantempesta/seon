@@ -197,10 +197,10 @@
         main-b (pdb/main-branch (:cfg @state))
         main (pdb/head conn main-b)
         head @conn
-        r (pm/three-way (pm/program (:base @state) data-attrs) (pm/program head data-attrs) (pm/program main data-attrs))]
+        r (pm/delta-three-way (:base @state) head main data-attrs)]
     (if (empty? (:theirs r))
       {:ok true :applied [] :conflicts [] :t (:max-tx head)}
-      (let [theirs (pm/program main data-attrs)
+      (let [theirs (pm/program-of main (:apply r) data-attrs)
             rep (d/merge-db conn #{main-b} (into (pm/apply-tx head (into {} (for [k (:apply r)] [k (get theirs k)])))
                                               (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
                              (pdb/tx-meta))

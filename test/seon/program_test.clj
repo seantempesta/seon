@@ -204,7 +204,7 @@
               [:var app.pt-mm/Circle] [:var app.pt-mm/->Circle] [:var app.pt-mm/map->Circle]}
            (set (remove #(= :form (first %)) (keys (:ours r)))))
         "each definition is its own merge key: methods [multi dispatch], extensions [protocol type]")
-    (is (= [] (pm/unmerged main (pm/program main #{}))))
+    (is (= [] (pm/unmerged main)))
     (remove-ns 'app.pt-mm)
     (is (= [] (:errors (program/load-all! main))) "main loads the merged forms from nothing")
     (is (= [16 27] [((resolve 'app.pt-mm/area) {:shape :square :s 4}) ((resolve 'app.pt-mm/area) {:shape :circle :r 3})]))

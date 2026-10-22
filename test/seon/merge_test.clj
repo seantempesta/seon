@@ -39,7 +39,13 @@
   (fn [db] (let [e (:db/id (d/entity db [:var/name (symbol "app" nm)]))]
              [[:db/retract e :var/form (:db/id (:var/form (d/entity db e)))]])))
 
-(defn- tw [o t] (pm/three-way (pm/program (base) #{}) (pm/program o #{}) (pm/program t #{})))
+(defn- tw
+  "The three-way of base, o and t; every case also proves delta-three-way, read only where
+  the dbs differ, answers the same."
+  [o t]
+  (let [b (base) full (pm/three-way (pm/program b #{}) (pm/program o #{}) (pm/program t #{}))]
+    (is (= full (pm/delta-three-way b o t #{})) "delta-three-way answers what three-way does")
+    full))
 (defn- vk [nm] [:var (symbol "app" nm)])
 (defn- defs-of "The definition keys among ks (a form's own key follows its definition)." [ks] (filterv #(not= :form (first %)) ks))
 
@@ -135,7 +141,7 @@
         t (with (base) (var-tx "f" "(dec x)"))
         cs (:conflicts (tw o t))
         b1 (d/db-with o (pm/unmerged-tx o cs 42))
-        unmerged (fn [db] (mapv :key (pm/unmerged db (pm/program db #{}))))]
+        unmerged (fn [db] (mapv :key (pm/unmerged db)))]
     (are [db expected] (= expected (unmerged db))
       ;; written, ours unchanged: unmerged
       b1 [(vk "f")]
@@ -218,3 +224,18 @@
         (is (= [facts-path] (source/changed-files main2 (:ours r))))
         (is (= {facts-path (str/replace text status-line (str/replace status-line ":closed :refused]]" ":closed :refused :paused]]"))}
                (source/files main2 (source/changed-files main2 (:ours r)))))))))
+
+(deftest the-delta-three-way-reads-data-and-schema-entries-as-the-program-does
+  ;; declared data (card one and many) and schema entries, besides forms and definitions:
+  ;; delta-three-way, read only where the dbs differ, answers what three-way does
+  (let [b (base)
+        task (d/q '[:find ?e . :where [?e :task/name :app.m0/tidy]] b)
+        ref (:db/id (first (:task/refs (d/entity b task))))
+        o (with b [{:note/text "ours"} [:db/add task :task/status :done]]
+                [{:schema/key :x/y :schema/form "[:int]" :schema/file "x.edn"}])
+        t (with b [[:db/retract task :task/refs ref] [:db/add task :task/plan "theirs"]] (var-tx "g" "(dec x)"))]
+    (doseq [da [#{} :all #{:task/status :task/refs}]]
+      (let [full (pm/three-way (pm/program b da) (pm/program o da) (pm/program t da))]
+        (is (= full (pm/delta-three-way b o t da)) (pr-str da))
+        (is (seq (:ours full)))))
+    (is (= (pm/changes (pm/program b :all) (pm/program o :all)) (pm/delta-changes b o :all)))))
