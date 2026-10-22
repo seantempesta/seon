@@ -193,6 +193,8 @@
                "in a merge commit that names its runtime (task seon.db/each-commit-names-its-runtime)"))
          (is (empty? (program/changed-vars (:base @agent/state) (agent/db)))
              "and is main's, not the agent's: its base is the merge base")
+         (is (= {} (program/divergence (:base @agent/state) (agent/db)))
+             "so the agent's :will-merge carries none of main's changes")
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest an-agents-transactions-name-their-runtime
@@ -212,3 +214,17 @@
            (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @store-conn t)))))
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
+
+(deftest a-root-with-no-provider-ends-the-attempt-on-its-typed-error
+  ;; root's ruling 2026-10-22: a root with no model provider (no SEON_PROFILE) answers the
+  ;; first turn with :seon.model/no-provider; the error reaches whoever can act on it: the
+  ;; attempt's record on main and my.root/problems' :error rows
+  (let [q "[:find (pull ?e [:seon.attempt/outcome :seon.attempt/error]) . :where [?e :seon.attempt/task ?t] [?t :seon.task/id \"demo/m\"] [?e :seon.attempt/error]]"
+        [r] (in-agent [{:op :eval :agent "root"
+                        :code (str "(do (my.root/run! sys [\"demo/m\"])"
+                                   " (let [a (datahike.api/q '" q " (seon.e2e/await-db sys #(datahike.api/q '" q " %)))]"
+                                   " [(:seon.attempt/outcome a) (:seon.error/type (:seon.attempt/error a))"
+                                   " (mapv #(get-in % [:error :seon.error/type]) (get-in (my.root/problems sys) [:classes :error :rows]))]))")}]
+                      {:sets [":seon.config.ai/provider=:none"]
+                       :decls [{:seon.task/name "m" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
+    (is (= [:error :seon.model/no-provider [:seon.model/no-provider]] (edn/read-string (:printed r))) (pr-str r))))

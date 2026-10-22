@@ -10,34 +10,22 @@
 
 ;; ---- one page, parsed into sections ----------------------------------------------------
 
-(defn- own-text
-  "Lines from (exclusive) to (exclusive) of lines, joined and trimmed; nil when blank."
-  {:malli/schema [:=> [:cat [:vector :string] :int :int] [:maybe :string]]}
-  [lines from to]
-  (let [s (str/trim (str/join "\n" (subvec lines (min from (count lines)) (min (max from (dec to)) (count lines)))))]
-    (when-not (str/blank? s) s)))
-
 (defn page-sections
-  "The sections of the page at path, read once: each its address, heading, lead, own text
-  (the lines after its heading up to the next heading of any level), its parent's address
-  and the citations its own text makes, each once at its strongest depth (seon.ref/cited)."
+  "The sections of the page at path, read once (seon.ref/parse): each its address, heading,
+  lead, own text, its parent's address and the citations its own text makes, each once at its
+  strongest depth (seon.ref/cited)."
   {:malli/schema [:=> [:cat :string :string] [:vector :seon.section/parsed]]}
   [path text]
   (let [{:seon.ref/keys [sections citations]} (ref/parse path text)
-        lines (str/split-lines text)
         starts (mapv :seon.ref/line sections)
-        n (count sections)
         ;; the index of the last section whose heading is at or before line l, or nil
         owner (fn [l] (let [i (dec (count (take-while #(<= % l) starts)))] (when-not (neg? i) i)))
         by-section (group-by #(owner (:seon.ref/line %)) citations)]
-    (vec (for [i (range n)
-               :let [{:seon.ref/keys [address heading lead parent line]} (nth sections i)
-                     next-line (if (< (inc i) n) (nth starts (inc i)) (inc (count lines)))
-                     body (own-text lines line next-line)]]
+    (vec (for [[i {:seon.ref/keys [address heading lead parent text]}] (map-indexed vector sections)]
            (cond-> {:seon.section/address address :seon.section/heading heading
                     :seon.ref/citations (ref/cited (vec (get by-section i [])))}
              lead (assoc :seon.section/lead lead)
-             body (assoc :seon.section/text body)
+             text (assoc :seon.section/text text)
              parent (assoc :seon.ref/parent parent))))))
 
 ;; ---- resolving a section's citations ----------------------------------------------------
@@ -128,6 +116,11 @@
         (:seon.section/references s) (update :seon.section/references
                                              #(into #{} (map (fn [r] (or (:seon.section/address r) (:var/name r)))) %))))))
 
+(defn- children
+  "The sections whose parent is section entity e on db, in the order the wiki was written."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:vector :int]]}
+  [db e] (vec (sort (d/q '[:find [?c ...] :in $ ?p :where [?c :seon.section/parent ?p]] db e))))
+
 (defn view
   "Section address as the store holds it, shown at depth by the one rule (seon.ref/shown): its
   lead is the stored lead, the sections below are those whose parent it is (in the order the
@@ -136,13 +129,38 @@
   [db address depth]
   (when-let [e (pdb/eid db :seon.section/address address)]
     (let [{:seon.section/keys [heading lead text]} (d/pull db [:seon.section/heading :seon.section/lead :seon.section/text] e)
-          below (for [c (sort (d/q '[:find [?c ...] :in $ ?p :where [?c :seon.section/parent ?p]] db e))
+          below (for [c (children db e)
                       :let [s (d/pull db [:seon.section/address :seon.section/heading] c)]]
                   {:seon.ref/address (:seon.section/address s) :seon.ref/heading (:seon.section/heading s)})]
       (ref/shown (cond-> {:seon.ref/address address :seon.ref/heading heading :seon.ref/below (vec below)}
                    lead (assoc :seon.ref/lead lead)
                    (and text (= :code depth)) (assoc :seon.ref/text text))
                  depth))))
+
+(defn page
+  "The page at path as db holds it, its sections in the order the wiki was written (as view
+  shows the sections below): each its address, heading, level (1 for the page's own), lead
+  and own text; nil when db holds no section of it."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe [:vector [:map [:address :string] [:heading :string] [:level pos-int?]]]]]}
+  [db path]
+  (when-let [top (d/q '[:find ?e . :in $ ?pre :where [?e :seon.section/address ?a] [(clojure.string/starts-with? ?a ?pre)]
+                        (not [?e :seon.section/parent _])]
+                      db (str path "#"))]
+    (letfn [(walk [e level]
+              (let [{:seon.section/keys [address heading lead text]}
+                    (d/pull db [:seon.section/address :seon.section/heading :seon.section/lead :seon.section/text] e)]
+                (into [(cond-> {:address address :heading heading :level level} lead (assoc :lead lead) text (assoc :text text))]
+                      (mapcat #(walk % (inc level))) (children db e))))]
+      (walk top 1))))
+
+(defn page-text
+  "The page at path as db holds it, made from its sections (page): each one's heading at its
+  level, then its own text; nil when db holds none of it."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]]}
+  [db path]
+  (some->> (page db path)
+           (map (fn [{:keys [heading level text]}] (cond-> (str (apply str (repeat level "#")) " " heading) text (str "\n\n" text))))
+           (str/join "\n\n")))
 
 (defn pages
   "The wiki pages under dir of the checkout (docs by default), read: {path text}, each path
@@ -153,3 +171,10 @@
         (for [f (sort-by #(.getName %) (or (seq (.listFiles (io/file checkout dir))) []))
               :let [n (.getName f)] :when (.endsWith n ".md")]
           [(str dir "/" n) (slurp f)])))
+
+(defn load-dir-tx
+  "The one load of the wiki under dir of the checkout onto db: load-tx over its pages (an
+  unchanged wiki answers [], a link to no section the :seon.docs/refused error). Root's boot
+  and my.root/load-docs! both write it."
+  {:malli/schema [:=> [:cat :seon.host/db :string :string] [:or [:vector :any] :seon.docs/refused]]}
+  [db checkout dir] (load-tx db dir (pages checkout dir)))

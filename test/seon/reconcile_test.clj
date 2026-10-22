@@ -30,7 +30,7 @@
           [(cond-> {:seon.attempt/id aid :seon.attempt/status status}
              results (assoc :seon.attempt/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s})))
              outcome (assoc :seon.attempt/outcome outcome)
-             conflicts (assoc :seon.attempt/conflicts (task/conflict-members conflicts))
+             conflicts (assoc :seon.attempt/conflicts (mapv pm/conflict-tx conflicts))
              unmerged (assoc :seon.attempt/unmerged unmerged)
              changed (assoc :seon.attempt/changed changed))])))
 

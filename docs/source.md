@@ -4,6 +4,8 @@ The self-improvement loop (owner, 2026-10-21): agents change Seon's own function
 
 ## Import: the running generation's source as main's program
 
+A root started without `SEON_PROFILE` has no model provider (root's ruling, 2026-10-22): an attempt it releases ends at its first turn on `:seon.model/no-provider`, which names what to set (`SEON_PROFILE=deepseek` for the paid model; `bin/check` and `bin/test` run under `scripted`, a test fixture). That is the configuration, not a regression.
+
 The defaults (owner, 2026-10-22): `bin/root start` with no store makes one and builds main from the checkout's own source (`:seon.config.source/root` defaults to `SEON_SOURCE_ROOT`, which `bin/root` sets to its checkout); with a store it resumes it; `--set` or `config/local.edn` override either (the main tree's names `../next-merges`, the tree its merges write back into, so main's working copy stays the owner's). `bin/test`, `bin/check` and the roots tests boot import nothing unless they state a source. `bin/update` brings the standing root up to date with main: it merges `jolt/merges` into main, fast-forwards `jolt/merges`, syncs submodules, builds, and restarts the root.
 
 With `:source {:root dir :dirs ["src"] :branch "jolt/seon-merges"}` (or the config's `:seon.config.source/root`, with `:seon.config.source/dirs` and `:seon.config.source/branch`; a run states it with `--set :seon.config.source/root=\"dir\"`), root reads the tree through the `:source` effect at every boot: its files and its HEAD commit. Each file is read form by form with its exact text, the whitespace and comments before each form (`:form/lead`) and the text after the last (`:ns/tail`). Each form is analyzed by Jolt's compiler without running it, giving the same account an agent's REPL records. What happened is root's `:seon.root/source` fact (the tree's commit, the digest of the files read, files, forms, the program entities retracted, ms, or the error).
@@ -56,7 +58,7 @@ The agent's REPL binds malli's dynamic registry to its branch's population befor
 
 The merge carries an entry per key, `[:schema k]` -> `{:form text :file path}`, like a var (v1's `[:seon.schema/key k]` identity): two branches changing different keys of one resource merge clean, one key changed two ways conflicts at its key, and a scratch entry (no resource) is never program. Applied to main, the entry is main's (its `:schema/source` retracted), and the Datahike declarations its population needs come in the same transaction (`seon.program/schema-declarations`). The changed resource is then written back like a namespace's file (`changed-files` names it). Reading 457 entries adds 8 ms to `seon.merge/program` (80 ms to 88 ms on the test store) (`seon.merge-test/a-schema-entry-merges-per-key`).
 
-```my.schema/register!``` is the verb and ```my.schema/registration``` judges it; ```seon.program/schema-changes``` and ```seon.program/schema-registry``` derive the branch's population; ```seon.contract/registry-of``` compiles one.
+```my.schema/register!``` is the function and ```my.schema/registration``` judges it; ```seon.program/schema-changes``` and ```seon.program/schema-registry``` derive the branch's population; ```seon.contract/registry-of``` compiles one.
 
 ## Write-back: main's files, byte for byte
 

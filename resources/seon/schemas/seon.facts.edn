@@ -237,10 +237,13 @@
  ;; what it blocks (seon.reconcile/stuck)
  :seon.root/quiescent [:map {:seon.db/data true} [:t :int] [:stuck [:vector :seon.reconcile/stuck-row]]]
  ;; Seon's own source imported at boot as main's program (seon.source): the tree, its HEAD
- ;; commit (none when it is no repository) and the digest of the files read (a boot whose tree
+ ;; commit (none when it is no repository), the revision it pins each reference-code submodule
+ ;; at (its gitlink, what a cited reference-code file shows: seon.ref/file-view), the digest of
+ ;; the files and pins read (a boot whose tree
  ;; reads the same imports nothing), its files and forms, the program entities the import
  ;; retracted, how long reading, analysing and transacting took, or why it was refused
- :seon.root/source [:map {:seon.db/data true} [:root :string] [:commit {:optional true} :string] [:digest {:optional true} :string]
+ :seon.root/source [:map {:seon.db/data true} [:root :string] [:commit {:optional true} :string]
+                    [:pins {:optional true} [:map-of :string :string]] [:digest {:optional true} :string]
                     [:files :int] [:forms :int] [:retracted {:optional true} :int] [:ms number?]
                     [:error {:optional true} :string]]
  ;; the next generation (docs/source.md#the-next-generation): the merges commit the :build effect
@@ -285,6 +288,10 @@
  :seon.turn/red :int
  :seon.turn/ms :int
  :seon.turn/tokens :int
+ ;; the prompt tokens the provider served from its prefix cache, and those it did not, as its
+ ;; usage reported them (absent when it did not: nobody measured them)
+ :seon.turn/cache-hit-tokens :int
+ :seon.turn/cache-miss-tokens :int
  ;; the model's reply stopped at max-tokens: its text was cut
  :seon.turn/truncated :boolean
  ;; who read the context: the agent's model, or an outside agent through the entrance (a read is a turn)
@@ -317,6 +324,8 @@
                           [:seon.turn/id :seon.turn/id] [:seon.turn/attempt :seon.turn/attempt] [:seon.turn/n :seon.turn/n]
                           [:seon.turn/reply :seon.turn/reply] [:seon.turn/forms :seon.turn/forms] [:seon.turn/errors :seon.turn/errors]
                           [:seon.turn/red :seon.turn/red] [:seon.turn/ms :seon.turn/ms] [:seon.turn/tokens {:optional true} :seon.turn/tokens]
+                          [:seon.turn/cache-hit-tokens {:optional true} :seon.turn/cache-hit-tokens]
+                          [:seon.turn/cache-miss-tokens {:optional true} :seon.turn/cache-miss-tokens]
                           [:seon.turn/truncated {:optional true} :seon.turn/truncated]
                           [:seon.turn/origin {:optional true} :seon.turn/origin] [:seon.turn/basis {:optional true} :seon.turn/basis]
                           [:seon.turn/calls {:optional true} :seon.turn/calls]

@@ -7,7 +7,7 @@
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
   reference (await-ref, seon.e2e/await-db), never a poll or a deadline."
-  (:require [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.entrance] [seon.mcp] [clojure.data.json] [seon.cost] [seon.problems]))
+  (:require [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.entrance] [clojure.data.json] [seon.cost] [seon.problems]))
 
 (defn- out! [& xs] (println (apply str xs)) (flush))
 
@@ -983,7 +983,7 @@
 (defn root-serve
   "A root with its entrance on 127.0.0.1:(:seon.config.root/entrance-port) (seon.entrance),
   until stdin closes (bin/root stop) or SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks):
-  what an outside agent's MCP server (target/seon mcp) talks to. Its end is a fact on main
+  what an outside agent's MCP relay (bin/mcp) talks to. Its end is a fact on main
   naming that cause (seon.root/stop!). A checkout whose config names no entrance port (0)
   serves none, and says so."
   []
@@ -1017,9 +1017,12 @@
   (loop [] (let [r (read)] (if (enough? r) r (do (await-event ev #(and (= :commit (:type %)) (= a (:agent %)))) (recur))))))
 
 (defn mcp-proof
-  "The MCP phase's proof: an outside client (a separate process: target/seon mcp PORT, fed
-  JSON-RPC on stdin) lists agents, evaluates in a running agent and as root, and both
-  evaluations are recorded with origin :outside (the agent's on its branch, root's on main)."
+  "The MCP phase's proof: an outside client (a separate process: bin/mcp PORT, the stdio
+  relay, fed JSON-RPC on stdin) lists agents, evaluates in a running agent and as root, and
+  both evaluations are recorded with origin :outside (the agent's on its branch, root's on
+  main). The relay's peak footprint stays within :seon.config.machine/relay-mb, so a relay
+  that boots Seon again is red; one against a port nobody listens on answers each request
+  the JSON-RPC error, and exits."
   []
   (run-check "MCP" {:datoms 2000}
    (fn [sys]
@@ -1034,15 +1037,20 @@
               {"jsonrpc" "2.0" "id" 5 "method" "tools/call" "params" {"name" "seon_eval" "arguments" {"agent" "root" "code" "(count (:agents (c/state sys)))"}}}]
         ;; the client's stdin is a file, so its EOF is a fact of the file: a pipe's write end
         ;; held open anywhere (bin/check mcp hung two hours on one) leaves the client waiting
-        in (str (:agents-dir (:store (c/state sys))) "/mcp-in.jsonl") ; this root's own run dir
+        dir (:agents-dir (:store (c/state sys))) ; this root's own run dir
+        in (str dir "/mcp-in.jsonl")
         _ (spit in (apply str (map #(str (clojure.data.json/write-str %) "\n") msgs)))
+        relay (fn [p] (clojure.java.shell/sh "sh" "-c" (str "exec /usr/bin/time -l '" (seon.config/checkout) "/bin/mcp' " p " < '" in "'")))
         ev (c/events sys)
         t0 (profile/now-ns)
-        r (clojure.java.shell/sh "sh" "-c" (str "exec ./seon mcp --set :seon.config.root/entrance-port=" port " < '" in "'"))
+        r (relay port)
         ms (profile/ms-since t0)
+        ;; a port nobody listens on: the one we listened on, closed
+        down (relay (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s)))))
         _ (clojure.java.shell/sh "rm" "-f" in)
-        answers (into {} (for [l (clojure.string/split-lines (:out r)) :when (clojure.string/starts-with? l "{")
-                               :let [j (clojure.data.json/read-str l)]] [(get j "id") j]))
+        peak-mb (fn [r] (some-> (re-find #"(\d+)\s+peak memory footprint" (:err r)) second parse-long (/ 1048576.0)))
+        lines (fn [r] (for [l (clojure.string/split-lines (:out r)) :when (clojure.string/starts-with? l "{")] (clojure.data.json/read-str l)))
+        answers (into {} (for [j (lines r)] [(get j "id") j]))
         text (fn [id] (get-in answers [id "result" "content" 0 "text"]))
         ;; the agent's record is on its branch at its commit (await-records); answers 2 when
         ;; recorded, else waits on the next commit (the eval failed: its text check says so)
@@ -1050,15 +1058,22 @@
                (await-records ev a #(filter (fn [r] (= :outside (:origin r))) (eval-records (:db @(c/branch-db sys :mcp1)) a)) #(= 2 (count %)))
                [])
         _ (a/untap (:events-mult sys) ev)
-        roots (filter #(= :outside (:origin %)) (eval-records @(:conn sys) :root))]
+        roots (filter #(= :outside (:origin %)) (eval-records @(:conn sys) :root))
+        bound (seon.config/value :seon.config.machine/relay-mb)]
       {:report {:tools (count (get-in answers [2 "result" "tools"]))
                 :agents-text (text 3) :agent-eval (text 4) :root-eval (text 5)
                 :agent-records (mapv #(select-keys % [:form :shown :origin]) mine)
                 :root-records (mapv #(select-keys % [:form :shown :origin]) roots)
-                :client-ms (lib/r2 ms) :exit (:exit r) :err (some-> (:err r) clojure.string/trim not-empty)}
+                :client-ms (lib/r2 ms) :exit (:exit r)
+                :relay-peak-mb (some-> (peak-mb r) lib/r2) :relay-mb-bound bound
+                :root-down (mapv #(get-in % ["error" "message"]) (lines down)) :root-down-exit (:exit down)}
        :checks {:five-tools (= 5 (count (get-in answers [2 "result" "tools"])))
+                :notification-unanswered (= #{1 2 3 4 5} (set (keys answers)))
                 :both-recorded-outside (and (= 2 (count mine)) (= 1 (count roots)))
-                :agent-eval (clojure.string/includes? (str (text 4)) "42") :root-eval (clojure.string/includes? (str (text 5)) "1")}}))))
+                :agent-eval (clojure.string/includes? (str (text 4)) "42") :root-eval (clojure.string/includes? (str (text 5)) "1")
+                :relay-within-bound (boolean (some-> (peak-mb r) (<= bound)))
+                :root-down-answers-every-request (and (zero? (:exit down)) (= [1 2 3 4 5] (mapv #(get % "id") (lines down)))
+                                                      (every? #(get-in % ["error" "message"]) (lines down)))}}))))
 
 (defn- os-threads
   "The OS threads of process pid (ps -M lists one line per thread after its header)."
@@ -1267,7 +1282,6 @@
     "root" (root-serve)
     ;; this checkout's ports as the config resolves them, "ENTRANCE WEB" (bin/ports)
     "ports" (do (println (seon.config/value :seon.config.root/entrance-port) (seon.config/value :seon.config.web/port)) (lib/c-exit 0))
-    "mcp" (do (seon.mcp/serve! (seon.config/value :seon.config.root/entrance-port)) (lib/c-exit 0))
     "mcp-proof" (mcp-proof)
     "hotreload" (hotreload)
     "idle" (idle (n-or "5000"))

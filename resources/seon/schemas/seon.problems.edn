@@ -28,7 +28,7 @@
                                                      [:commit :uuid] [:t :int] [:branch-commit [:maybe :uuid]] [:image-t :int]]]
  :seon.root/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/proc-defect]] [:pid {:optional true} [:maybe :keyword]]]]
  :seon.root/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/refused]]]]
- ;; a defect answering one outside request at the door (seon.entrance/serve-connection!): the
+ ;; a defect answering one outside request at root's server (seon.entrance/respond): the
  ;; line it took, and the cause's ex-data printed; the door goes on serving
  :seon.entrance/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.entrance/defect]] [:line :string] [:data {:optional true} :string]]]
  :seon.writer/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.writer/refused]] [:ok false?]]]
@@ -54,7 +54,9 @@
  :seon.model/reasoning-ate-reply [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/reasoning-ate-reply]]
                                                          [:reasoning-tokens {:optional true} :int] [:completion-tokens {:optional true} :int]
                                                          [:max-tokens {:optional true} :int] [:reasoning-chars :int]]]
- :seon.model/failure [:or :seon.model/provider-error :seon.model/rate-limited :seon.model/transport :seon.model/reasoning-ate-reply]
+ ;; the config names no model provider (no profile): the turn ends on it, naming what to set
+ :seon.model/no-provider [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/no-provider]]]]
+ :seon.model/failure [:or :seon.model/no-provider :seon.model/provider-error :seon.model/rate-limited :seon.model/transport :seon.model/reasoning-ate-reply]
 
  ;; ---- recorded errors: one entity per signature (main), counted across agents ----
  ;; who observed it: a root proc's defect, an agent's eval, an agent's death or stall, an effect's outcome

@@ -18,7 +18,7 @@
             [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
-;; :id :branch :task :attempt (the task and attempt root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
+;; :id :branch :task :attempt (the task and attempt root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 (defonce state (atom nil))
 
@@ -122,7 +122,7 @@
       (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
         (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r)))))))
 
-;; ---- effects (seon.fx, lane FX1): root's owner procs, through the stand-in -------------
+;; ---- effects (seon.fx, worktree session FX1): root's owner procs, through the agent's proc ---
 
 (def ^:dynamic *fx-stub*
   "Inside a test (a fork of this agent) no effect leaves the process: a test that needs
@@ -203,7 +203,7 @@
         main-b (pdb/main-branch (:cfg @state))
         main (pdb/head conn main-b)
         head @conn
-        r (pm/three-way (pm/program (pdb/branch-base conn main-b (:branch @state)) data-attrs) (pm/program head data-attrs) (pm/program main data-attrs))]
+        r (pm/three-way (pm/program (:base @state) data-attrs) (pm/program head data-attrs) (pm/program main data-attrs))]
     (if (empty? (:theirs r))
       {:ok true :applied [] :conflicts [] :t (:max-tx head)}
       (let [theirs (pm/program main data-attrs)
@@ -559,7 +559,11 @@
           misaligned (when-not resumed (misaligned commit t @store-conn db0))]
      ;; a resumed branch whose program does not load runs main's for what failed: its errors
      ;; go to root with its hello (recorded problems), never dropped (T5b: a stub ran silently)
-     (reset! state {:id id :branch branch :task task :attempt attempt :fd fd :conn c :db @store-conn :base db0 :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
+     ;; :base is the branch's merge base with main: a new branch's is the image (main as it
+     ;; forked); a resumed one's is older than main, and comparing against main's head would
+     ;; read main's later changes as the branch's (seon.program/divergence, changed-vars)
+     (reset! state {:id id :branch branch :task task :attempt attempt :fd fd :conn c :db @store-conn
+                   :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
-                   :ns nsx :nss #{(ns-name nsx)} :interrupt-ok intr-ok :serve serve}))))
+                   :ns nsx :interrupt-ok intr-ok :serve serve}))))

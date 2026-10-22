@@ -1,5 +1,5 @@
 (ns my.agent
-  "An agent's own verbs (from proto/flow f2-final proto.agent's agent API). Referred into
+  "An agent's own functions (from proto/flow f2-final proto.agent's agent API). Referred into
   every agent namespace.
     ($ handle)                the live value of an earlier result (also result/h3)
     (whoami)                  {:id :branch :pid}
@@ -8,10 +8,11 @@
     (callers 'ns/f)           the program vars whose recorded definition names ns/f
     (callees 'ns/f)           the vars ns/f's recorded definition names
     (grep "text")             the program vars whose recorded definition's text holds it
+    (help)                    the help page's sections (docs/agent.md); (help "done") one whole
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context]
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
             [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "The live value of an earlier result, by handle (:h3)." {:malli/schema [:=> [:cat :keyword] :any]}
@@ -85,3 +86,12 @@
 (defmacro source
   "Print the recorded source of the definition named by sym (as clojure.repl/source does)."
   [sym] `(println (or (source-fn '~sym) (str "Source not found for " '~sym))))
+
+(defn help
+  "The help page every agent reads first (seon.context/help-page), as this branch holds it
+  (seon.docs/page): its sections, each its address, heading and lead's first sentence; with
+  an anchor, that section's own text."
+  {:malli/schema [:function [:=> [:cat] [:vector :map]] [:=> [:cat :string] [:maybe :string]]]}
+  ([] (mapv (fn [{:keys [address heading lead]}] (cond-> {:address address :heading heading} lead (assoc :lead (ref/lead-sentence lead))))
+            (docs/page (agent/db) context/help-page)))
+  ([anchor] (:seon.ref/text (docs/view (agent/db) (str context/help-page "#" anchor) :code))))
