@@ -6,7 +6,8 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.docs :as docs] [seon.ref]))
+            [seon.docs :as docs] [seon.ref]
+            [seon.config :as config]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -85,3 +86,49 @@
       (is (= text (:seon.ref/text (docs/view db a :code))) (str "docs: " a)))
     (is (= ["demo/flow.md#idioms" "demo/flow.md#quiet"] (mapv :seon.ref/address (:seon.ref/below (docs/view db "demo/flow.md#flow" :code))))
         "the sections below by address, not inline")))
+
+;; ---- names are Clojure's words (task seon.docs/names-are-clojures-words) ----------------
+
+(def ^:private kept
+  "Names that keep a word of AGENTS.md section 7a's table in another sense, each with its reason."
+  {'seon.fx/admit "admission by workload (a token bucket and free workers: AGENTS.md section 4), not a contract"
+   'seon.fx-admit-test "the same admission (the namespace and its vars)"
+   'seon.fx-test/owner-admits-by-workers-and-priority "the same admission"
+   'seon.reader-test/prose-without-a-fence-is-a-comment "a Markdown code fence"
+   "test/seon/fx_admit_test.clj" "the same admission"
+   'seon.reader/fence "a Markdown code fence, CommonMark's word"
+   'seon.fixtures/fenced "a reply in a Markdown code fence"})
+
+(defn- old-words
+  "The old house words of AGENTS.md section 7a's table, hyphenated (\"merge train\" ->
+  \"merge-train\"), leaving out the rows still stored under their old names (\"until
+  migrated\": the stored attributes' task, seon.db/stored-attributes-take-the-new-words)."
+  [agents]
+  (let [table (->> (str/split-lines agents)
+                   (drop-while #(not (str/starts-with? % "| Old house word")))
+                   (drop 2)
+                   (take-while #(str/starts-with? % "|")))]
+    (set (for [row table :when (not (str/includes? row "until migrated"))
+               w (str/split (second (str/split row #"\|")) #",")]
+           (str/replace (str/trim w) " " "-")))))
+
+(defn- uses?
+  "Does name n hold old word w as whole words (a plural too)?"
+  [w n]
+  (some? (re-find (re-pattern (str "(^|[^a-z])" w "s?([^a-z]|$)")) (str/lower-case n))))
+
+(deftest no-name-uses-an-old-word
+  (let [root (config/checkout)
+        words (old-words (slurp (str root "/AGENTS.md")))
+        files (fn [dir] (for [f (file-seq (java.io.File. (str root "/" dir))) :when (.isFile ^java.io.File f)]
+                          (subs (.getPath ^java.io.File f) (inc (count root)))))
+        _ (doseq [f (files "src") :when (str/ends-with? f ".clj")]
+            (require (symbol (-> f (subs 4 (- (count f) 4)) (str/replace "/" ".") (str/replace "_" "-")))))
+        names (concat (files "bin") (files "docs") (files "src") (files "test")
+                      (for [n (all-ns) :when (re-find #"^(seon|my)\." (str (ns-name n)))
+                            x (cons (ns-name n) (map #(symbol (str (ns-name n)) (str %)) (keys (ns-interns n))))]
+                        x))]
+    (is (contains? words "lane") "the table is read")
+    (is (not (contains? words "stuck")) "a row still stored under its old name waits for its migration")
+    (is (empty? (for [n names w words :when (and (uses? w (str n)) (not (kept n)) (not (and (qualified-symbol? n) (kept (symbol (namespace n))))))] [w n]))
+        "every name uses Clojure's, a library's or Jolt's word")))

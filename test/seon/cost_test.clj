@@ -171,7 +171,7 @@
                    :f (fn [s] (edn/read-string s)) :per-char true}
    :pr-str/char {:what "pr-str, per character printed (a vector of integers)" :setup #(vector (vec (range (quot % 6))))
                  :f (fn [v] (pr-str v)) :per-char true}
-   ;; a pull from a branch of the in-memory test store (lane D2: every read of facts is pulls)
+   ;; a pull from a branch of the in-memory test store (session D2: every read of facts is pulls)
    :db/pull {:what "d/pull of one attribute of an entity, by entity id (per pull)"
              :setup (fn [n] (ts/test-branch! (fn [_ conn]
                               (d/transact conn (vec (for [i (range n)] {:note/text (str "n" i) :note/agent :u})))

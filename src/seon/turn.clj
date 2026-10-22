@@ -1,5 +1,5 @@
 (ns seon.turn
-  "The agent's turn loop, inside its own process (lanes R1 and M1's proto.agents.turn). A
+  "The agent's turn loop, inside its own process (sessions R1 and M1's proto.agents.turn). A
   turn observes the branch (the proofs run in a fork of this agent, the done rule), and
   either ends the attempt or acts: the context goes to the model (one interop edge), each of
   the reply's calls of the one tool, eval, goes through the one REPL path
@@ -11,7 +11,7 @@
   A merge task's agent first merges main into the branch (no model call) and merges main
   again each time all is green, until a merge brings nothing new; it stops early when the
   merge is too hairy (seon.reconcile/hairy). Either way the live runtime is staged onto the
-  branch at the end (seon.harvest/harvest!), so the next agent on the branch holds it.
+  branch at the end (seon.stage/stage!), so the next agent on the branch holds it.
 
   Root starts it by evaluating (seon.turn/work! '{...}) in the agent; the attempt's end is
   a fact on the branch (:seon.end/*), which root's judge reads."
@@ -19,7 +19,7 @@
   (:require [seon.profile :as profile] [seon.intr :as intr] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.set :as set]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context] [seon.program :as program]
-            [seon.harvest :as harvest] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
+            [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
             [datahike.api :as d]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: the attempt it
@@ -41,7 +41,7 @@
   (if (= attempt (get-in @agent/state [:turn :attempt]))
     (:turn @agent/state)
     (let [db (agent/db)]
-      (:turn (swap! agent/state assoc :turn {:attempt attempt :gaps-before (harvest/uncontracted db)
+      (:turn (swap! agent/state assoc :turn {:attempt attempt :gaps-before (stage/uncontracted db)
                                              :plan-before (:plan (:seon.task/accumulated (task/task db task)))})))))
 
 (defn last-evals
@@ -71,7 +71,7 @@
         tests-ms (long (profile/ms-since t0))
         results (proofs/results run)
         db (agent/db)
-        unc (set/difference (harvest/uncontracted db) gaps-before)
+        unc (set/difference (stage/uncontracted db) gaps-before)
         unmerged (branch/unmerged)]
     {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :task (task/task db id)
      :will-merge (program/divergence (:base @agent/state) db)
@@ -79,11 +79,11 @@
 
 (defn- end!
   "The attempt's end: the live runtime staged onto the branch, the end written there (with
-  the error that ended it and the turns' waste, as data: lane D2), and the branch committed
+  the error that ended it and the turns' waste, as data: session D2), and the branch committed
   (a turn's end commits the agent's run-ahead writes)."
   {:malli/schema [:=> [:cat :map :seon.attempt/outcome [:maybe :string] [:maybe :map]] :seon.turn/end]}
   [{:keys [turn tokens t0 attempt log]} outcome reason error]
-  (harvest/harvest!)
+  (stage/stage!)
   (agent/write-end! attempt {:outcome outcome :turns turn :tokens tokens :reason reason :error error
                              :waste (learn/summary (learn/waste (or log []) (learn/final-symbols (or log []))))})
   (cond-> {:outcome outcome :turns turn :model-calls turn :results {} :uncontracted #{}
@@ -132,7 +132,7 @@
 (defn- act!
   "One model turn: the context of what was observed to the model, the reply's eval calls
   through the one REPL path, each answered as its own result, the turn's facts on the branch. Answers the loop state after it, or the
-  provider error. The model call is an effect (my.fx :model, lane FX1): root's model owner
+  provider error. The model call is an effect (my.fx :model, session FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
   {:malli/schema [:=> [:cat :map :map [:maybe :string]] [:or :map :map]]}
   [{:keys [turn tokens max-turns merge? attempt] :as st} {:keys [results tests-ms] :as obs} model-name]
@@ -220,13 +220,13 @@
   (let [{:keys [gaps-before plan-before]} (begin! task attempt)
         t0-task (task/task (agent/db) task)
         merge? (= :merge (:seon.task/kind t0-task))
-        dials (r/dials t0-task)]
+        merge-cfg (r/merge-limits t0-task)]
     (when merge? (branch/merge-main!))
     (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (profile/now-ns) :attempt attempt
                :max-turns max-turns :merge? merge? :gaps-before gaps-before}]
       (let [{:keys [refusals unmerged] :as obs} (observe task (:gaps-before st) plan-before)
             stop (get-in @agent/state [:turn :stop])
-            hairy (when merge? (r/hairy (merge dials {:conflicts unmerged :task (:task obs) :merge-turns (:merge-turns st)})))]
+            hairy (when merge? (r/hairy (merge merge-cfg {:conflicts unmerged :task (:task obs) :merge-turns (:merge-turns st)})))]
         (cond
           ;; git's CI after the merge: green on the combined program; merge main again until
           ;; it brings nothing new

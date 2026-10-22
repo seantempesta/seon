@@ -1,7 +1,7 @@
 (ns seon.sock
-  "The single-threaded side of the transport (lane F2, from lane T1's t1.sock): the fork
+  "The single-threaded side of the transport (session F2, from session T1's t1.sock): the fork
   server's socket to root and each agent's, read and written by the one thread that owns
-  them, with no pumps. Root's side of an agent's socket is a jolt.async.remote end (lane
+  them, with no pumps. Root's side of an agent's socket is a jolt.async.remote end (session
   RC1), which speaks the same frames:
   - Frames are [u32 len][body], the body jfasl (konserve.jolt.fasl); a length word of
     0xFFFFFFFF is the end frame (the peer closed its writer), read as EOF.
@@ -11,7 +11,7 @@
     children and clones), and a process that forks must never have started Chez's
     parallel-collector sweeper threads, which start at the first collection that finds
     another thread (RC1: a child of such a process hangs in its first multi-threaded
-    collection). docs/DRAGONS.md, \"Physics\".
+    collection). docs/failure-points.md, \"Physics\".
   - The socket's buffer is the bounded channel: a full buffer makes the sender wait."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [jolt.ffi :as ffi] [seon.lib :as lib] [konserve.jolt.fasl :as codec] [seon.config :as config]))

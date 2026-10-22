@@ -422,3 +422,16 @@
             (str n " per-turn commits wrote " per-turn " bytes; the same turns in one commit wrote " once
                  ", so the bound is " bound " (" (format "%.1f" (/ (double per-turn) bound)) "x over)")))
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest root-mints-in-its-own-block-after-a-merge
+  ;; task seon.db/root-mints-in-a-block-of-its-own: an agent's block is reserved from the one
+  ;; counter root's own writes mint from (seon.db/lease-block!), so after a merge brings an
+  ;; entity from inside that block onto main, root's next id still lies past the block
+  (ts/test-branch! (fn [_ conn]
+    (let [lease (pdb/lease-block! @conn)
+          end (+ lease (cfg/value :seon.config.store/eid-lease))
+          merged (d/transact conn [[:db/add (+ lease 5) :note/text "the agent's, merged"]])
+          root (d/transact conn [{:note/text "root's"}])
+          e (d/q '[:find ?e . :where [?e :note/text "root's"]] (:db-after root))]
+      (is (= (+ lease 5) (:max-eid (:db-after merged))) "main holds an id inside the agent's block")
+      (is (>= e end) (str "root's id " e " lies past the block ending at " end))))))
