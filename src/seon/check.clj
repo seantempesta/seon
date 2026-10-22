@@ -52,7 +52,7 @@
       ids
       (let [e (await-event ev #(left (:agent %)))]
         (cond (types (:type e)) (recur (disj left (:agent e)))
-              (#{:dead :killed :ended} (:type e)) (throw (ex-info (str "agent " (:agent e) " " (name (:type e)) " first") e))
+              (c/gone-statuses (:type e)) (throw (ex-info (str "agent " (:agent e) " " (name (:type e)) " first") e))
               :else (recur left))))))
 
 (defn- ready!
@@ -964,6 +964,13 @@
   [db id]
   (vec (d/q '[:find [?r ...] :in $ ?id :where [?a :seon.agent/id ?id] [?e :seon.cluster.eval/agent ?a] [?e :seon.cluster.eval/record ?r]] db id)))
 
+(defn await-records
+  "What (read) answers once (enough? it) holds, read again at each :commit event of agent a
+  on ev (a tap taken before what writes them): an agent's records are applied ahead of its
+  commit (seon.agent/transact!), so its branch shows them at its commit, not before."
+  [ev a read enough?]
+  (loop [] (let [r (read)] (if (enough? r) r (do (await-event ev #(and (= :commit (:type %)) (= a (:agent %)))) (recur))))))
+
 (defn mcp-proof
   "The MCP phase's proof: an outside client (a separate process: target/seon mcp PORT, fed
   JSON-RPC on stdin) lists agents, evaluates in a running agent and as root, and both
@@ -984,6 +991,7 @@
         ;; held open anywhere (bin/check mcp hung two hours on one) leaves the client waiting
         in (str (:agents-dir (:store (c/state sys))) "/mcp-in.jsonl") ; this root's own run dir
         _ (spit in (apply str (map #(str (clojure.data.json/write-str %) "\n") msgs)))
+        ev (c/events sys)
         t0 (lib/now-ns)
         r (clojure.java.shell/sh "sh" "-c" (str "exec ./seon mcp --set :seon.config.root/entrance-port=" port " < '" in "'"))
         ms (lib/ms-since t0)
@@ -991,7 +999,12 @@
         answers (into {} (for [l (clojure.string/split-lines (:out r)) :when (clojure.string/starts-with? l "{")
                                :let [j (clojure.data.json/read-str l)]] [(get j "id") j]))
         text (fn [id] (get-in answers [id "result" "content" 0 "text"]))
-        mine (filter #(= :outside (:origin %)) (eval-records (:db @(c/branch-db sys :mcp1)) a))
+        ;; the agent's record is on its branch at its commit (await-records); answers 2 when
+        ;; recorded, else waits on the next commit (the eval failed: its text check says so)
+        mine (if (clojure.string/includes? (str (text 4)) "42")
+               (await-records ev a #(filter (fn [r] (= :outside (:origin r))) (eval-records (:db @(c/branch-db sys :mcp1)) a)) #(= 2 (count %)))
+               [])
+        _ (a/untap (:events-mult sys) ev)
         roots (filter #(= :outside (:origin %)) (eval-records @(:conn sys) :root))]
       {:report {:tools (count (get-in answers [2 "result" "tools"]))
                 :agents-text (text 3) :agent-eval (text 4) :root-eval (text 5)
