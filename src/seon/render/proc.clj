@@ -160,15 +160,16 @@
 ;;; --- units, rendered incrementally ---------------------------------------------------------
 
 (defn- render-unit
-  "A unit's HTML: its render applied to its input (an agent's card takes the entry with its
-  id), or the input's schema-declared render."
+  "A unit's HTML: its input rendered (an agent's card takes the entry with its id), by its
+  render when it names one, else by the render its schema declares, shown as the unit says
+  (:as)."
   {:malli/schema [:=> [:cat :map] :string]}
-  [{:keys [input render schema agent]}]
+  [{:keys [input render schema agent as]}]
   (let [v (if agent (assoc input :id agent) input)
-        env {:seon.render/schema schema}]
+        opts (cond-> {:schema schema} as (assoc :as as))]
     (h/html (if render
-              (:seon.render/html ((requiring-resolve render) v env))
-              (render/html v env)))))
+              ((requiring-resolve render) v opts)
+              (render/html v opts)))))
 
 (defn- step-units
   "Run a layout's units against what the view retained: a unit whose input is unchanged is
@@ -250,7 +251,7 @@
         rows (reduce (fn [rows [eid r]]
                        (if (contains? rows eid)
                          rows
-                         (assoc rows eid (h/html (:seon.render/html (ui/history-row r {:seon.render/budget (config/value :seon.config.render/history-row-budget)}))))))
+                         (assoc rows eid (h/html (ui/history-row r {:budget (config/value :seon.config.render/history-row-budget)})))))
                      (select-keys (:rows z {}) (map first records)) records)
         ctx-key [(:t z) (:seon.attempt/id attempt) (:seon.attempt/turns attempt) (:tests ag)]
         ;; a new context read is a new evaluation of the agent's
@@ -277,7 +278,7 @@
   (let [[st value schema] (if (= :root view-id)
                             [st sys :seon.render/system]
                             (let [[st v] (zoom-value st view-id)] [st v :seon.render/agent-page]))
-        out (render/render-face :html value {:seon.render/schema schema})
+        out (render/html value {:schema schema})
         units (:seon.render/units out)
         skeleton (h/html (:seon.render/html out))
         [view patch n] (step-units (get-in st [:views view-id]) units)
@@ -317,7 +318,7 @@
           ;; new rows and removes the ones past the cap (not the whole list)
           seq0 (:ev-seq st 0)
           evs (map-indexed (fn [i e] (assoc e :seq (+ seq0 i 1))) evs)
-          new-rows (map (fn [e] [(:seq e) (h/html (:seon.render/html (ui/event-row e {})))]) evs)
+          new-rows (map (fn [e] [(:seq e) (h/html (ui/event-row e {}))]) evs)
           rows (vec (concat (reverse new-rows) (:event-rows st)))
           st (cond-> st
                (seq evs) (assoc :events (vec (take (event-cap) (concat (reverse evs) (:events st))))
@@ -331,7 +332,7 @@
                  [i e])
           st (reduce (fn [st [i e]]
                        (-> st (assoc-in [:events i] e)
-                           (update :event-rows (fn [rows] (mapv #(if (= (first %) (:seq e)) [(:seq e) (h/html (:seon.render/html (ui/event-row e {})))] %) rows)))))
+                           (update :event-rows (fn [rows] (mapv #(if (= (first %) (:seq e)) [(:seq e) (h/html (ui/event-row e {}))] %) rows)))))
                      st late)
           late-frags (vec (for [[_ e] late :let [r (some #(when (= (first %) (:seq e)) (second %)) (:event-rows st))] :when r] [(str "ev-" (:seq e)) r]))
           ev-patch (when (or (seq new-rows) (seq late-frags))
@@ -341,7 +342,7 @@
           st (ordered st now-ms)
           sys (system-value st t0 now-ms)
           ;; root's context: the system's AI face, also a unit of root's layout
-          ctx (render/ai sys {:seon.render/schema :seon.render/system})
+          ctx (render/ai sys {:schema :seon.render/system})
           sys (assoc sys :context {:text ctx :tokens (select/estimate ctx)} :problems (ai/problems sys))
           st (assoc st :context ctx)
           views (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st)))

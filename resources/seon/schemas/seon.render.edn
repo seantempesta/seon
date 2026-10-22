@@ -1,20 +1,27 @@
 ;; Renders (seon.render, session W2; W1's render contract, notes/option3-W1-render.md §1): a
-;; render takes a value and an env and answers one or both faces. A schema declares its
+;; render is a function of a value and its opts (props) answering its result for one face. A schema declares its
 ;; renders in its own properties ({:seon.render/html sym :seon.render/ai sym}); selection is
 ;; the value's own override key, else the declared render (the schema, then its parents),
 ;; else the one value printer (seon.print). The values below are what root's web renders.
 {:seon.render/hiccup [:vector :any]
  :seon.render/face [:enum :ai :html]
- :seon.render/env [:map
-                   ;; the producer's declared schema of the value, when known
-                   [:seon.render/schema {:optional true} [:maybe :qualified-keyword]]
-                   ;; tokens for the printer (the AI face's budget, and the HTML face's)
-                   [:seon.render/budget {:optional true} pos-int?]
-                   ;; what a cut reads the value through: its result handle (result/h3) or a form
-                   [:seon.render/handle {:optional true} :any]]
- :seon.render/out [:map [:seon.render/html {:optional true} :any] [:seon.render/ai {:optional true} :any]
-                   ;; the render cut something (each cut names what it left and how to read it)
-                   [:seon.render/truncated? {:optional true} :boolean]]
+ :seon.render/as [:enum :inline :block :tile]
+ ;; a render's props (its second argument), every one optional: like React's, a render that
+ ;; does not care about one ignores it
+ :seon.render/opts [:map
+                    ;; the face (:html, the default, or :ai), when rendering through seon.render/render
+                    [:face {:optional true} :seon.render/face]
+                    ;; the room it is shown in: one line (a chat stream, a table cell), a full panel
+                    ;; (the default), a compact live tile
+                    [:as {:optional true} :seon.render/as]
+                    ;; tokens for the printer (the AI face's budget, and the HTML face's)
+                    [:budget {:optional true} pos-int?]
+                    ;; what a cut reads the value through: its result handle (result/h3) or a form
+                    [:handle {:optional true} :any]
+                    ;; the producer's declared schema of the value, when known
+                    [:schema {:optional true} [:maybe :qualified-keyword]]]
+ ;; an :ai render's result: its text, and whether it cut (each cut names what it left and how to read it)
+ :seon.render/text [:map [:text :string] [:truncated? {:optional true} :boolean]]
 
  ;; ---- what root's dashboard shows: the whole system as one value ----
  ;; the api's view (agents, writer, fork server, store, boot, root errors) joined with every

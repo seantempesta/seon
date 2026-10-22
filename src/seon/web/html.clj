@@ -6,7 +6,8 @@
   CSS. A callback is data (DECISIONS, \"callbacks are data naming a var\"): an element with
   `:seon/call 'ns/fn` (and optionally `:seon/args {...}` and `:seon/agent id`) becomes a
   Datastar post to the one stateless `/call` route, its payload the call itself; a form
-  posts its own fields with it."
+  posts its own fields with it. A vector headed by a function (or its var) is a call, as in
+  Reagent: its result is written in its place, expanded the same way."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.print :as print]))
 
@@ -85,6 +86,9 @@
     (nil? node) nil
     (false? node) nil
     (raw? node) (.append sb ^String (::raw node))
+    ;; a vector headed by a function (or its var) is a call, as in Reagent: [task-row task
+    ;; {:as :inline}] writes what (task-row task {:as :inline}) answers, itself expanded
+    (and (vector? node) (or (fn? (first node)) (var? (first node)))) (write! sb (apply (first node) (rest node)))
     (vector? node)
     (let [[tag & more] node
           tag (name tag)
