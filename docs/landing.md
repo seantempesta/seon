@@ -10,7 +10,7 @@ A lane is a separate instance of the whole system: `bin/worktree NAME` (run from
 - after each landing on main: `git merge main` in the worktree, then `bin/worktree --sync NAME` from the main tree (never `git submodule` in a worktree);
 - a submodule the lane adds (`reference-code/X`) is written as a `.gitmodules` entry and a gitlink, with its checkout cloned from a local copy; root initializes it in the main tree when it lands (`git submodule update --init reference-code/X`), so later worktrees get it.
 
-Leave nothing running: `bin/root stop` before you report. Root removes the worktree after the landing (`bin/worktree --remove NAME`).
+`bin/lane-check` (run from the main tree) proves this whole workflow end to end with a throwaway lane and removes it; run it after a change to `bin/worktree`, `bin/root`, `bin/mcp` or the build. Leave nothing running: `bin/root stop` before you report. Root removes the worktree after the landing (`bin/worktree --remove NAME`).
 
 ## A lane's part
 
