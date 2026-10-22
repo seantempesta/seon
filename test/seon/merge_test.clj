@@ -9,7 +9,7 @@
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.merge :as pm]
-            [seon.program :as program]
+            [seon.program :as program] [seon.context :as context]
             [seon.edn :as sedn]
             [my.schema :as schema]
             [seon.source :as source]
@@ -81,7 +81,7 @@
         r (tw ours (base))
         main' (d/db-with (base) (pm/apply-tx (base) (into {} (for [[k [_ o]] (:ours r)] [k o]))))]
     (is (= #{(vk "g") [:form (fid "g" "x")]} (set (keys (:ours r)))) "the definition, and the form it leaves dead")
-    (is (nil? (program/source-of main' 'app/g)))
+    (is (nil? (context/source-of main' 'app/g)))
     (is (nil? (d/entity main' [:form/id (fid "g" "x")])) "the form is retracted on main")
     (is (= [:deleted-by-us] (map :kind (filter #(= :var (first (:key %))) (:conflicts (tw ours (with (base) (var-tx "g" "(dec x)"))))))))))
 
@@ -111,7 +111,7 @@
         db' (d/db-with (base) (pm/apply-tx (base) (select-keys p [(vk "f") (vk "n") [:form (fid "f" "(dec x)")] [:form (fid "n" "1")]])))
         db'' (d/db-with db' (pm/apply-tx db' {(vk "h") nil}))]
     (is (= (select-keys p [(vk "f") (vk "n")]) (select-keys (pm/program db' #{}) [(vk "f") (vk "n")])))
-    (is (= "(defn n {:malli/schema [:=> [:cat :int] :int]} [x] 1)" (program/source-of db' 'app/n))
+    (is (= "(defn n {:malli/schema [:=> [:cat :int] :int]} [x] 1)" (context/source-of db' 'app/n))
         "a definition and its form set together")
     (is (not (contains? (pm/program db'' #{}) (vk "h"))))))
 

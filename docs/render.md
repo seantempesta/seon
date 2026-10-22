@@ -9,7 +9,7 @@ A cut never drops silently. It says what it omitted and how to read the rest. St
 
 ## Prose
 
-`seon.print/prose` shows text as itself (unquoted) under a token budget, sized as the printer sizes (3.2 characters a token). It fits: the text. It does not: the longest prefix the budget holds, ended after a line break or else a space, then the cut, `…+N chars in M more lines`. Given a source form that answers the whole text, the cut names `(subs source offset)`, which reads exactly the rest (with `:one-line?`, the offset is still the source's). On the page, `seon.render.ui/prose` links the cut to the page that shows the whole, or carries the whole in the cut's title; a printed value's cut names its result handle (`result/h3 at its REPL`).
+`seon.print/prose` shows text as itself (unquoted) under a token budget, sized as the printer sizes (3.2 characters a token, `seon.print.select/estimate`, the one sizer: the history budget and the scripted model's usage count with it too). It fits: the text. It does not: the longest prefix the budget holds, ended after a line break or else a space, then the cut, `…+N chars in M more lines`. Given a source form that answers the whole text, the cut names `(subs source offset)`, which reads exactly the rest (with `:one-line?`, the offset is still the source's). On the page, `seon.render.ui/prose` links the cut to the page that shows the whole, or carries the whole in the cut's title; a printed value's cut names its result handle (`result/h3 at its REPL`).
 
 
 ## Bounded lists
