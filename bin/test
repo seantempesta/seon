@@ -4,7 +4,8 @@
 # checkout shares (bin/prove's tests; seon.proofs/plan). --all runs every one, green or not (the
 # full run). The selected tests are dealt, a namespace at a time, into :seon.config.proofs/jobs
 # shards, each run at once in a process of its own (logs and shard files in target/prove/);
-# each result is stored at its digest. Ends on TEST OK / TEST FAILED and its exit status.
+# each result is stored at its digest, after target/seon is built from this tree when anything
+# runs. Ends on TEST OK / TEST FAILED and its exit status.
 # bin/test --plan|--shard|--store-steps ... are test/test_runner.clj's parts (bin/prove's).
 # On the runtime bin/build made (target/jolt/jolt), with dependencies cached in target/home.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -21,9 +22,16 @@ case ${1:-} in
   *) WHAT=tests OUT=$ROOT/target/prove/tests ;;
 esac
 runner --plan $WHAT "$OUT" "$@" || { echo "TEST FAILED (the plan)"; exit 1 }
-st=0 P=() F=($OUT/shard-*.edn(N))
+# a test that starts ./seon (a root, an agent) runs the binary, which its digest does not
+# cover: whatever is about to run, runs on target/seon built from this tree (a no-op build
+# costs ~30 s, so only when something runs)
+F=($OUT/shard-*.edn(N))
+if (( ${#F} )) || [[ -s $OUT/steps ]]; then
+  nice -n 15 "$ROOT/bin/build" seon > "$OUT/build.log" 2>&1 || { tail -5 "$OUT/build.log"; echo "TEST FAILED (bin/build seon: $OUT/build.log)"; exit 1 }
+fi
+st=0 P=()
 for f in $F; do runner --shard "$f" > "${f%.edn}.log" 2>&1 & P+=($!); done
-for i in {1..${#F}}; do
+for (( i = 1; i <= ${#F}; i++ )); do
   f=$F[$i] log=${F[$i]%.edn}.log
   wait $P[$i]; s=$?
   grep -E "^RED|^SHARD" "$log"
