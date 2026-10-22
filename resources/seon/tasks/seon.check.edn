@@ -17,4 +17,8 @@
  {:seon.task/name "in-agent-never-orphans-its-root"
   :seon.task/plan "Found 2026-10-22 by lane SELECT: `seon.agent-test/in-agent` leaves its root process running when a reply times out (two roots orphaned and killed by hand). Correct: the helper's root ends when the helper does, however its forms answer."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.agent-test/in-agent-ends-its-root}}]
+  :seon.task/proofs #{seon.agent-test/in-agent-ends-its-root}}
+ {:seon.task/name "mcp-reads-the-agents-records-once-committed"
+  :seon.task/plan "Found by lane store-native, 2026-10-22: `bin/check 100`'s mcp step failed once under the full run's load (target/check/20261022T192710/mcp.log: :agent-records [], :both-recorded-outside false) and passed 3 of 3 run alone. `seon.check/mcp-proof` reads the agent's branch (`c/branch-db`) as soon as the MCP client's eval answers, but the agent commits its run-ahead writes when idle or within the flush window (`seon.agent/transact!`, `commit!`), so the eval record may not be committed yet: a read racing a commit. Correct: the step waits for the agent's commit that covers the eval (root's :committed event for that agent, t at or past the eval's), the dependency, never a sleep; the proof is the step itself, green under bin/check 100's load."
+  :seon.task/kind :work}]
+
