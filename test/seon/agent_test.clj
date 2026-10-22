@@ -105,6 +105,45 @@
     (is (= #{:a1 :a2} (set (keys agents))) (pr-str agents))
     (is (empty? left) (str "agents still alive: " left))))
 
+(deftest a-blocked-agent-ends-on-its-socket-eof
+  ;; task seon.intr/a-signal-wakes-a-blocked-wait: an agent blocked in a channel take, its fork
+  ;; server gone first, ends on its own socket's EOF (SIGIO wakes its condition-wait)
+  (let [{:keys [agents left]} (root-ended "(clojure.core.async/<!! (clojure.core.async/chan))" true)]
+    (is (= #{:a1 :a2} (set (keys agents))) (pr-str agents))
+    (is (empty? left) (str "agents still alive: " left))))
+
+(deftest root-interrupts-a-blocked-take
+  ;; task seon.intr/a-signal-wakes-a-blocked-wait: root's interrupt! stops an eval blocked in a
+  ;; channel take, and the agent answers its next request
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        main (str "blocked-take-" (random-uuid))
+        store (str checkout "/target/runs/test-store")
+        path (str checkout "/target/runs/" main)
+        port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
+        ask (fn [m] (str "printf '%s\\n' " (pr-str (pr-str m)) " | nc -w 20 127.0.0.1 " port))
+        root-eval (fn [code] (ask {:op :eval :agent "root" :code code}))
+        script (str "mkfifo '" path "-in'; ./seon root"
+                    " --set ':seon.config.root/store-path=" (pr-str store) "' --set ':seon.config.root/main=" (pr-str main) "'"
+                    " --set ':seon.config.root/entrance-port=" port "' --set ':seon.config.web/port=0'"
+                    " < '" path "-in' > '" path ".log' 2>&1 & R=$!; exec 3>'" path "-in';"
+                    " until grep -q 'ROOT LISTENING' '" path ".log' || ! kill -0 $R 2>/dev/null; do sleep 0.1; done;"
+                    (root-eval "(c/spawn! sys {})") " >/dev/null;"
+                    " for i in {1..300}; do " (ask {:op :agents}) " | grep -q ':status :idle' && break; sleep 0.2; done;"
+                    (root-eval "(do (def blocked (c/submit! sys :a1 \"(clojure.core.async/<!! (clojure.core.async/chan))\")) :sent)") " >/dev/null;"
+                    " for i in {1..300}; do " (ask {:op :agents}) " | grep -q ':status :busy' && break; sleep 0.2; done;"
+                    (root-eval "(c/interrupt! sys :a1)") " >/dev/null;"
+                    (root-eval "(def stopped (:printed (first (deref blocked 10000 [{:printed \"still blocked\"}]))))") " >/dev/null;"
+                    " echo \"STOPPED $(" (root-eval "(clojure.string/starts-with? stopped \"interrupted by root\")") ")\";"
+                    " echo \"NEXT $(" (ask {:op :eval :agent "a1" :code "(+ 2 2)"}) ")\";"
+                    " exec 3>&-; wait $R")
+        {:keys [out]} (sh/sh "zsh" "-c" script :dir "target")
+        line (fn [k] (some #(when (str/starts-with? % k) (subs % (count k))) (str/split-lines out)))
+        printed (fn [k] (some-> (line k) not-empty edn/read-string :items first :printed))]
+    (sh/sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
+    (sh/sh "rm" "-rf" (str path "-in") (str path ".log"))
+    (is (= "true" (printed "STOPPED ")) (str "the blocked eval answers interrupted by root: " (line "STOPPED ")))
+    (is (= "4" (printed "NEXT ")) (pr-str (line "NEXT ")))))
+
 (deftest an-agent-holds-mains-tests-and-runs-them
   ;; task seon.agent/an-agent-holds-mains-tests: main holds the source root's test namespaces
   ;; (imported from test/), and an agent forked from the fork server holds them compiled:
