@@ -5,16 +5,18 @@
 {:seon.profile/fn-cost [:map {:closed true} [:var :qualified-symbol] [:calls nat-int?] [:ms [:double {:min 0.0}]]]
  ;; how the least work grows with N: W(n) = 1, log2 n, n, n log2 n, n², n³
  :seon.cost/growth [:enum :constant :log :linear :n-log-n :quadratic :cubic]
- ;; the measured dimensions: wall ns (min over repeats), allocated bytes, calls of contracted functions
+ ;; the measured dimensions: engine ticks (the work done, counted), this thread's CPU ns (min over
+ ;; repeats; shown, never red), allocated bytes, calls of contracted functions
  ;; an estimate may state whole numbers; measurements are doubles
  :seon.cost/amount [:or nat-int? [:double {:min 0.0}]]
  :seon.cost/dims [:map {:closed true}
+                  [:ticks {:optional true} :seon.cost/amount]
                   [:ns {:optional true} :seon.cost/amount]
                   [:bytes {:optional true} :seon.cost/amount]
                   [:calls {:optional true} :seon.cost/amount]]
- :seon.cost/dim [:enum :ns :bytes :calls]
+ :seon.cost/dim [:enum :ticks :ns :bytes :calls]
  ;; one unit operation of the unit table (seon.cost/units): its measured cost on this runtime
- :seon.cost/unit [:map {:closed true} [:ns [:double {:min 0.0}]] [:bytes [:double {:min 0.0}]] [:what :string]]
+ :seon.cost/unit [:map {:closed true} [:ticks {:optional true} [:double {:min 0.0}]] [:ns [:double {:min 0.0}]] [:bytes [:double {:min 0.0}]] [:what :string]]
  :seon.cost/estimate [:map {:closed true}
                       ;; the function measured, and the function of n answering its argument vector
                       [:of :qualified-symbol]

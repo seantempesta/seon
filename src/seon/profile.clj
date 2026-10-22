@@ -89,13 +89,25 @@
      ;; CLOCK_THREAD_CPUTIME_ID is 16 on macOS: the calling thread's CPU time
      (define seon-profile-cpu
        (let ([clock (foreign-procedure \"clock_gettime_nsec_np\" (int) unsigned-64)]) (lambda () (clock 16))))
+     ;; the engine ticks thunk spends on the calling thread: Chez's timer, decremented at
+     ;; procedure entries and loop back-edges of compiled code, so a count of the work done,
+     ;; the same at any load (pure-tests 2026-10-23: identical over 30 runs x 6 processes at
+     ;; load 21 and 47; a collection adds ~11). An enclosing timer (a tick budget, a fiber's
+     ;; quantum) is restored after, without these ticks: measure outside one
+     (define (seon-profile-ticks-of thunk)
+       (let* ([big (expt 2 59)] [prev (set-timer big)])
+         (thunk)
+         (let ([left (set-timer 0)])
+           (when (> prev 0) (set-timer prev))
+           (- big left))))
+     (define (seon-profile-collections) (collections))
      (define (seon-profile-calls)
        (let loop ([cs seon-profile-touched] [n 0])
          (if (null? cs) n (loop (cdr cs) (+ n (vector-ref (car cs) 0))))))"))
 
 (def ^:private procs
   "The Scheme procedures above, by name (host procedures, resolved once)."
-  (into {} (for [k [:cell :counted :begin! :fold :calls :now :alloc :cpu]]
+  (into {} (for [k [:cell :counted :begin! :fold :calls :now :alloc :cpu :ticks-of :collections]]
              [k (scm/proc (str "seon-profile-" (name k)))])))
 
 (defn now-ns
@@ -116,6 +128,20 @@
   events: that is now-ns."
   {:malli/schema [:=> [:cat] :int]}
   [] ((:cpu procs)))
+
+(defn ticks-of
+  "The engine ticks f (no arguments) spends on the calling thread: the work it does, counted
+  by Chez's timer at compiled code's procedure entries and loop back-edges, the same on any
+  machine at any load (a cost proof's time, docs/cost.md). Work done in C (a bulk copy, a
+  foreign call) and waiting cost next to none: bytes see the copies. Measure outside a tick
+  budget or a fiber, whose timer it restores without these ticks."
+  {:malli/schema [:=> [:cat :seon.host/fn] :int]}
+  [f] ((:ticks-of procs) f))
+
+(defn collections
+  "The collections Chez has run in this process (each adds ~11 ticks to a measured call)."
+  {:malli/schema [:=> [:cat] :int]}
+  [] ((:collections procs)))
 
 (defn alloc-bytes
   "Bytes the calling thread has allocated since it started (Chez jolt/thread-bytes: its

@@ -33,12 +33,10 @@
       (branch 50)
       (let [by (into {} (map (juxt :var :ms)) (profile/touched))]
         (is (pos? (by 'seon.profile-test/branch)))
-        (is (every? #(>= % 0.0) (vals by)) "a call shorter than a clock read reads as 0, never negative")))
-    (testing "the estimate (one call in 64 timed) is within 2x of the exact time in a loop (probe: 12-30% high)"
-      (profile/begin!)
-      (let [t0 (profile/now-ns) _ (dotimes [i 64000] (leaf i)) exact (/ (- (profile/now-ns) t0) 1e6)
-            est (:ms (first (profile/touched)))]
-        (is (<= (/ exact 2) est (* exact 2)) (str "exact " exact " ms, estimated " est " ms"))))))
+        (is (every? #(>= % 0.0) (vals by)) "a call shorter than a clock read reads as 0, never negative")))))
+;; (the sampled estimate held within 2x of the wall clock over a loop went: it was red under load,
+;; an 11.7 ms estimate against 2.5 ms measured, and a time is shown, never a verdict:
+;; seon.cost/exact, pure-tests 2026-10-23)
 
 (deftest top-orders-by-time-then-calls
   (is (= '[c a b] (mapv :var (profile/top [{:var 'a :calls 9 :ms 1.0} {:var 'b :calls 1 :ms 1.0} {:var 'c :calls 1 :ms 2.0}] 3))))
@@ -124,3 +122,22 @@
         measured (:ns (seon.cost/measure f []))]
     (is (>= wall 20000000) (str "wall " wall " ns: the wait is real"))
     (is (< measured 2000000) (str "measured " measured " ns: what the call did, not its wait"))))
+
+(defn- spin
+  "Sum 0..n-1 in a loop of fixnums: work that allocates nothing, so no collection can run on
+  this thread while it is measured."
+  [n] (loop [i 0 s 0] (if (< i n) (recur (inc i) (+ s i)) s)))
+
+(deftest ticks-count-the-work-not-the-time
+  ;; pure-tests 2026-10-23 (owner: "Work done, not scheduled time slices"): a cost proof's time
+  ;; is engine ticks, the same count at any load; CPU time moved 36-860% over the same runs
+  (let [a (profile/ticks-of #(spin 100000))
+        b (profile/ticks-of #(spin 100000))
+        busy (busy-threads 4 #(spin 1000))
+        beside (try (profile/ticks-of #(spin 100000)) (finally (end-threads! busy)))
+        twice (profile/ticks-of #(spin 200000))]
+    (is (pos? a))
+    (is (= a b) "the same work counts the same ticks")
+    (is (= a beside) "and the same beside four busy threads")
+    (is (< 1.99 (/ (double twice) a) 2.01) (str "twice the work, twice the ticks: " a " then " twice))
+    (is (< (profile/ticks-of (fn [] (Thread/sleep 20))) 10000) "a wait is no work")))
