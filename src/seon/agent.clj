@@ -566,4 +566,8 @@
                    :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
-                   :ns nsx :interrupt-ok intr-ok :serve serve}))))
+                   :ns nsx :interrupt-ok intr-ok :serve serve})
+     ;; a kept branch forked before main held this attempt's task (a refinement continuing a
+     ;; failed branch, seon.template/attach-tx) takes it, and the tasks it needs, from main
+     (when-let [tx (when resumed (not-empty (task/onto-tx db0 @store-conn task)))]
+       (transact! tx)))))

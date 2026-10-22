@@ -239,3 +239,4 @@
         end (edn/read-string {:default tagged-literal} (:printed end))]
     (is (= [:no-progress 2] [(:outcome end) (:model-calls end)]) (pr-str end))
     (is (str/includes? (str (:reason end)) "(+ 1 1)") "the reason names the repeated code")))
+

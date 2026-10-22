@@ -184,6 +184,28 @@
             {:tx [] :conflicts []}
             (sort (for [k (into (set (keys b)) (keys o)) :when (not= (b k) (o k))] k)))))
 
+(defn onto-tx
+  "The facts that put task id, and every task it needs (transitively) that branch does not
+  hold, onto branch as main holds them: a refinement continuing a branch that was forked before
+  main held its tasks (seon.template/attach-tx) starts with them. A task the branch holds is
+  left as the branch has it (its edits carry back at the attempt's end, carry-tx). Empty
+  when the branch holds them all. Cost: the closure's tasks, pulled once each."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.task/id] [:vector :map]]}
+  [main branch id]
+  (let [held? #(pdb/eid branch :seon.task/id %)
+        closure (loop [todo [id] seen #{}]
+                  (if-let [[x & more] (seq todo)]
+                    (if (or (seen x) (held? x))
+                      (recur more seen)
+                      (recur (into (vec more) (map :seon.task/id (:seon.task/needs (d/pull main '[{:seon.task/needs [:seon.task/id]}] [:seon.task/id x]))))
+                             (conj seen x)))
+                    seen))]
+    (vec (for [x (sort closure)
+               :let [t (d/pull main '[* {:seon.task/needs [:seon.task/id]}] [:seon.task/id x])]]
+           (cond-> (-> t (dissoc :db/id :seon.task/needs) (assoc :db/id x))
+             (seq (:seon.task/needs t))
+             (assoc :seon.task/needs (mapv (fn [{n :seon.task/id}] (if (closure n) n [:seon.task/id n])) (:seon.task/needs t))))))))
+
 ;; ---- the reader ------------------------------------------------------------------
 
 (def ^:private task-pull '[* {:seon.task/needs [:seon.task/id]}])
