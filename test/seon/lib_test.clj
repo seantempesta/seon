@@ -1,12 +1,12 @@
 (ns seon.lib-test
   "The native probes (native/probe.c through seon.lib): what they answer and what they cost."
-  (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell] [seon.lib :as lib]
+  (:require [seon.profile :as profile] [clojure.test :refer [deftest is testing]] [clojure.java.shell] [seon.lib :as lib]
             [konserve.jolt.lmdb-ffi :as lmdb]))
 
 (defn- probe-ms
   "The median time of 9 calls of lib/mp-probe, ms."
   []
-  (let [ts (sort (for [_ (range 9)] (let [t0 (System/nanoTime)] (lib/mp-probe) (/ (- (System/nanoTime) t0) 1e6))))]
+  (let [ts (sort (for [_ (range 9)] (let [t0 (profile/now-ns)] (lib/mp-probe) (profile/ms-since t0))))]
     (nth ts 4)))
 
 (deftest the-memory-probe-costs-what-the-process-holds-not-what-it-maps

@@ -2,13 +2,13 @@
   "The wiki as data in the store (task seon.docs/docs-are-data-in-the-store): a section entity
   per heading, written only where a section changed; its references are what its own text
   cites, so its backlinks are who cites it."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.docs :as docs]))
 
-(defn- empty-db [] (pdb/test-db))
+(defn- empty-db [] (ts/test-db))
 
 (def ^:private flow
   "# Flow\n\nFlow runs procs.\n\n## Idioms\n\nPark on a channel, as ```app.m0/f0``` does.\n\n## Quiet\n\nCount messages, with `app.m0/f1`.\n")

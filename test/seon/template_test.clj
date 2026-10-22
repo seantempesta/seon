@@ -4,14 +4,14 @@
   first agent only from a main that holds all of it (task
   seon.template/a-request-is-one-linked-transaction).
   Run: bin/test seon.template-test"
-  (:require [clojure.test :refer [deftest is]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [seon.db :as pdb] [seon.task :as task] [seon.reconcile :as r] [seon.template :as tpl]))
 
 (def req {:seon.task/ns 'demo :seon.task/name "workouts" :seon.task/plan "store my workouts"
           :seon.task/proofs #{'demo-test/workouts-test}})
 
-(defn- main [] (d/db-with (pdb/test-db) (task/boot-tx "boot-1" 4)))
+(defn- main [] (d/db-with (ts/test-db) (task/boot-tx "boot-1" 4)))
 
 (defn- spawns [db] (filter #(= :spawn (:op %)) (r/reconcile db)))
 

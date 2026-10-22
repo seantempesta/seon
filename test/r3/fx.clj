@@ -2,7 +2,7 @@
   "R3's synthetic main: n work tasks, each with its merge task (seon.template/with-merge),
   attempts spread over the lifecycle the way a busy swarm holds them. Pure tx builders plus
   one loader; nothing here is product code."
-  (:require [seon.task :as task] [seon.template :as tpl] [seon.db :as pdb] [datahike.api :as d] [seon.config]))
+  (:require [seon.test-store :as ts] [seon.task :as task] [seon.template :as tpl] [seon.db :as pdb] [datahike.api :as d] [seon.config]))
 
 (def boot "r3-boot")
 
@@ -38,7 +38,7 @@
   "(f conn) on a branch of the test store holding n work tasks (2n tasks) and their
   attempts; the branch is deleted when f returns."
   [n max-running f]
-  (pdb/test-branch! (fn [_ conn] (let [ds (decls n)]
+  (ts/test-branch! (fn [_ conn] (let [ds (decls n)]
     (d/transact conn {:tx-data (task/boot-tx boot max-running)})
     (doseq [part (partition-all 400 ds)]
       (d/transact conn {:tx-data (task/create-tx @conn (vec part))}))

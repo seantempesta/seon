@@ -21,7 +21,7 @@
   Agents transact facts on their own branch; root reacts: the writer applies them, and
   only root's merge! advances main."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
+  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
@@ -279,7 +279,7 @@
                  (>= (count (:agents st)) (cfg/value :seon.config.root/max-agents)) (reply! st p (refused 'seon.root/spawn! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)}))
                  :else (let [[st aid fd] (start-agent st opts)
                              {:keys [branch lease]} (get-in st [:agents aid])]
-                         (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :attempt (:attempt opts) :lease lease :ns (lib/now-ns) :fd fd :dest {:spawn aid}})
+                         (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :attempt (:attempt opts) :lease lease :ns (profile/now-ns) :fd fd :dest {:spawn aid}})
                          (reply! st p {:id aid}))))
       :clone (let [parent (:parent m)]
                (if (or (nil? (get-in st [:agents parent])) (>= (count (:agents st)) (cfg/value :seon.config.root/max-agents)))
@@ -317,7 +317,7 @@
                       (-> st (set-agent id {:status (if (:ended m) :ended :killed)}) (to-agent id {:op :kill}))
                       st)
               p (reply! p {:killed id}))
-      :message (let [msg {:op :message :from (:from m :root) :body (:body m) :ns (sock/now-ns)}]
+      :message (let [msg {:op :message :from (:from m :root) :body (:body m) :ns (profile/now-ns)}]
                  (reduce #(to-agent %1 %2 {:op :write :msg msg}) st (:to m)))
       ;; an effect asked by root itself or a root proc (the reconciler's write-back): to its
       ;; kind's owner, answered by rid like the writer's answers
@@ -404,7 +404,7 @@
       :stat (case (:k m)
               :noise (view! st update :stats assoc :noise (:v m) :noise-ordered (:ordered m) :noise-first-bad (:bad m))
               (view! st update-in [:stats (:k m)] lib/push-window (:v m) 100000))
-      :message (let [msg {:op :message :from (:from m) :body (:body m) :ns (sock/now-ns)}]
+      :message (let [msg {:op :message :from (:from m) :body (:body m) :ns (profile/now-ns)}]
                  (reduce #(to-agent %1 %2 {:op :write :msg msg}) st (:to m)))
       ;; a proc's request (the reconciler's, the web's, MCP's): an ordinary entrance request
       ;; whose answer goes back to the proc as data
@@ -416,7 +416,7 @@
       :writer (view! st (fn [v] (-> v (assoc-in [:writer :tx-count] (:tx-count m))
                                     (assoc-in [:writer :flushes] (:flushes m 0))
                                     (update-in [:writer :batch-ms] lib/push-window (:batch-ms m) 200)
-                                    (update-in [:writer :recent] #(lib/push-window % [(lib/now-ns) (:n-tx m)] 2000))
+                                    (update-in [:writer :recent] #(lib/push-window % [(profile/now-ns) (:n-tx m)] 2000))
                                     (update-in [:stats :batches] (fnil inc 0))
                                     (update-in [:stats :commits] (fnil + 0) (:commits m))
                                     (update-in [:stats :batched-tx] (fnil + 0) (:n-tx m)))))
@@ -600,7 +600,7 @@
   Answers the fact in force."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [sys {:keys [root dirs]}]
-  (let [t0 (lib/now-ns)
+  (let [t0 (profile/now-ns)
         r @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs}})
         files (:value r)
         digest (when files (err/digest (pr-str files)))
@@ -609,7 +609,7 @@
       held
       (let [tx (when files (source/replace-tx @(:conn sys) files))
             w (when tx @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}}))
-            fact (cond-> {:root root :files (count files) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (lib/ms-since t0)}
+            fact (cond-> {:root root :files (count files) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (profile/ms-since t0)}
                    (:commit r) (assoc :commit (:commit r))
                    (:ok w) (assoc :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))
                    (contract/error? r) (assoc :error (:seon.error/message r))
@@ -647,7 +647,7 @@
   [{:keys [datoms log? path main backend max-running provider stall-ms source] :or {datoms 0}}]
   (lib/ignore-sigpipe!)
   (when-not log? (trove/set-log-fn! nil))
-  (let [t0 (lib/now-ns)
+  (let [t0 (profile/now-ns)
         ;; agents write their own branches, so the store is shared: the one durable store
         ;; (the kept runs store, bin/check's, a test's). This root resumes its main, a branch
         ;; of the store's seed, and names its agents' branches under it; a run's record is
@@ -660,13 +660,13 @@
         ;; each agent's stderr goes to a file here (seon.agent/stderr-path), read at its death
         agents-dir (pdb/agents-dir store-cfg)
         _ (.mkdirs (java.io.File. agents-dir))
-        open-ms (lib/ms-since t0)
-        t-pre (lib/now-ns)
+        open-ms (profile/ms-since t0)
+        t-pre (profile/now-ns)
         _ (pdb/preload! @conn)
-        preload-ms (lib/ms-since t-pre)
+        preload-ms (profile/ms-since t-pre)
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
-        load-ms (lib/ms-since t0)
-        t1 (lib/now-ns)
+        load-ms (profile/ms-since t0)
+        t1 (profile/now-ns)
         ;; this root's boot id (attempts of an earlier boot are reaped); its fact is written
         ;; through the writer once the graph runs, and that commit is the reconciler's first pass
         boot (str (random-uuid))
@@ -676,7 +676,7 @@
         ;; the config in force, written on main's root entity with the boot fact
         config (-> (cfg/with-provider cfg/config provider) (assoc :seon.config.agent/max-running max-running))
         program (program/load-all! @conn)
-        program-ms (lib/ms-since t1)
+        program-ms (profile/ms-since t1)
         contracts (contract/instrument! '[seon.edn seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])
         _ (warm! conn)
         _ (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
@@ -786,7 +786,7 @@
   ([sys] (state sys nil))
   ([sys {:keys [datoms]}]
   (let [v @(call! sys {:op :state})
-        now (lib/now-ns)
+        now (profile/now-ns)
         recent (reduce + 0 (keep (fn [[t n]] (when (< (- now t) 1000000000) n)) (get-in v [:writer :recent])))
         db @(:conn sys)]
     ;; the api's answer passes through as itself: a defect is not decorated as a view
@@ -988,7 +988,7 @@
   ([sys cause]
   (let [fact @(transact-main! sys [{:seon.root/id :root :seon.root/stopped {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)}}]
                               {:flush? true})
-        t0 (lib/now-ns)
+        t0 (profile/now-ns)
         p (promise)]
     (a/>!! (:ext sys) {:op :shutdown :p p})
     (a/close! (:ext sys))
@@ -1001,7 +1001,7 @@
       ;; the store is released and kept, whoever gave its path
       (d/release (:conn sys))
       (when (= :lmdb (:backend (:store (:cfg sys)))) (klmdb/close-env! (:store-path sys)))
-      (cond-> {:stopped true :cause cause :drained drained :graph graph :agents-left 0 :ms (lib/r2 (lib/ms-since t0))}
+      (cond-> {:stopped true :cause cause :drained drained :graph graph :agents-left 0 :ms (lib/r2 (profile/ms-since t0))}
         (not (:ok fact)) (assoc :stop-fact-refused fact))))))
 
 ;; ====================================================================================

@@ -2,7 +2,7 @@
   "Merge-train rules of seon.reconcile/actions, over a small main: disjoint merges run and land
   together; overlapping ones serialize; unknown changes run alone; a train closes when its
   first member ends; it lands only once no merge attempt is running."
-  (:require [clojure.test :refer [deftest is testing]] [seon.reconcile :as r] [seon.task :as task]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [seon.reconcile :as r] [seon.task :as task]
             [seon.template :as tpl] [seon.db :as pdb] [datahike.api :as d]))
 
 (def boot "b")
@@ -11,7 +11,7 @@
   "(f conn) on a branch of the test store holding work tasks (names) each done with the
   changed keys given, their merges released; the branch is deleted when f returns."
   [changes f]
-  (pdb/test-branch! (fn [_ conn] (let [ds (tpl/with-merge (vec (for [[nm _] changes] {:seon.task/ns 't :seon.task/name nm :seon.task/plan "p"
+  (ts/test-branch! (fn [_ conn] (let [ds (tpl/with-merge (vec (for [[nm _] changes] {:seon.task/ns 't :seon.task/name nm :seon.task/plan "p"
                                                          :seon.task/proofs #{(symbol "t" (str nm "-test"))}})))]
     (d/transact conn {:tx-data (into (task/boot-tx boot 16) [{:seon.root/id :root :seon.config.merge/max-running 8}])})
     (d/transact conn {:tx-data (task/create-tx @conn ds)})

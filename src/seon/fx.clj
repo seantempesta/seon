@@ -12,7 +12,7 @@
   data) and is the entrant boundary for a defect in it. Nothing here writes a branch: the
   asker records the outcome in its own recording transaction."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
+  (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.java.shell :as sh] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]))
 
 (defn- error
@@ -141,7 +141,7 @@
   :ms}}, or :seon.fx/io-error naming the step and its log (<checkout>.build.log)."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [repo commit]} :req}]
-  (let [t0 (lib/now-ns)
+  (let [t0 (profile/now-ns)
         from (cfg/checkout)
         dir (str (cfg/value :seon.config.source/generations-dir) "/" commit)
         log (str dir ".build.log")
@@ -155,7 +155,7 @@
     (or (when-not (.exists (java.io.File. dir))
           (step "bin/worktree --at" [(str from "/bin/worktree") "--at" dir commit repo]))
         (step "bin/build seon" ["nice" "-n" "15" (str dir "/bin/build") "seon"])
-        {:value {:commit commit :checkout dir :binary (str dir "/target/seon") :ms (lib/ms-since t0)}})))
+        {:value {:commit commit :checkout dir :binary (str dir "/target/seon") :ms (profile/ms-since t0)}})))
 ;; ---- the owner -----------------------------------------------------------------------
 
 (defn refill
@@ -223,11 +223,11 @@
   [st o]
   (loop [st st]
     (if-let [[qk m] (first (:queue st))]
-      (let [now (quot (lib/now-ns) 1000000)
+      (let [now (quot (profile/now-ns) 1000000)
             d (admit st m now)]
         (cond
           (= :wait d) (wake-later st m now)
-          (= :run d) (do (step/out! o :to-lanes (assoc m :taken-ns (lib/now-ns) ::qk qk))
+          (= :run d) (do (step/out! o :to-lanes (assoc m :taken-ns (profile/now-ns) ::qk qk))
                          (recur (cond-> (-> st (update :queue dissoc qk) (update :busy inc))
                                   (:bucket st) (update :bucket #(update (refill % now) :tokens - (or (:est m) 0))))))
           :else (do (reply! o (:dest m) (assoc d :seon.fx/kind (:kind st)))
@@ -255,7 +255,7 @@
        :ping-map-fn (fn [st] (-> (select-keys st [:kind :lanes :busy :done]) (assoc :queued (count (:queue st)) :spent (:spent st))))})
   ([args] (assoc (select-keys args [:kind :lanes]) :busy 0 :done 0 :seq 0 :queue (sorted-map) :spent {}
                  :bucket (when-let [r (:rate args)]
-                           {:tokens (double r) :cap (double r) :per-ms (/ r 1000.0) :rate-ms (/ r 1000.0) :at (quot (lib/now-ns) 1000000)})
+                           {:tokens (double r) :cap (double r) :per-ms (/ r 1000.0) :rate-ms (/ r 1000.0) :at (quot (profile/now-ns) 1000000)})
                  :tick (:tick args)
                  ::flow/in-ports (if (:tick args) {:tick (:tick args)} {})
                  ::flow/out-ports {:to-lanes (:work args) :out (:back args)}))
@@ -266,7 +266,7 @@
        [st nil]
        (case in
          :in (let [n (inc (:seq st))]
-               [(bound (dispatch (-> st (assoc :seq n) (assoc-in [:queue [(- (:prio m 0)) n]] (assoc m :in-ns (lib/now-ns)))) o)) @o])
+               [(bound (dispatch (-> st (assoc :seq n) (assoc-in [:queue [(- (:prio m 0)) n]] (assoc m :in-ns (profile/now-ns)))) o)) @o])
          :done (let [limited? (= :seon.model/rate-limited (:seon.error/type (:outcome m)))]
                  (when-not limited? (reply! o (:dest m) (:outcome m)))
                    ;; root counts every failed effect across agents (seon.error, class :effect);
@@ -305,10 +305,10 @@
   ([st _ m]
    (if (nil? m)
      [st nil]
-     (let [t0 (lib/now-ns)
+     (let [t0 (profile/now-ns)
            r (try ((:perform st) (assoc m :ctx (:ctx st)))
                   (catch Throwable e (error :seon.fx/defect (or (ex-message e) (str (type e))) {})))
-           t1 (lib/now-ns)
+           t1 (profile/now-ns)
            outcome (assoc r :seon.fx/kind (:kind st) :seon.fx/queue-us (quot (- (:taken-ns m) (:in-ns m)) 1000)
                           :seon.fx/us (quot (- t1 t0) 1000))]
        [(update st :n inc) {[(:owner st) :done] [(cond-> {:dest (:dest m) :request m :outcome outcome :budget-key (:budget-key m) :est (:est m 0)}
