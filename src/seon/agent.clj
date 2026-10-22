@@ -13,7 +13,7 @@
   breaks its forks; docs/failure-points.md, "Physics". Agent code calls the functions of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.system :as system] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
             [malli.registry :as mr]))
 
@@ -343,7 +343,7 @@
         started (atom nil)
         note! (fn [x]
                 (cond (:seon.test/started x) (do (reset! started (str "#'" (:seon.test/started x)))
-                                                 (sock/write-line! w (pr-str {:seon.test/started @started})))
+                                                 (sock/write-line! w (sedn/encode {:seon.test/started @started})))
                       (:seon.test/report x) (swap! reports conj (test-report (:seon.test/report x) (str "#'" (:test x))))
                       :else nil))
         [ran r] (try [(binding [mr/*registry* (program/schema-registry (program/schema-changes (db)))]
@@ -414,7 +414,7 @@
                         (swap! state assoc :mode :test :evaluating false)
                         (let [res (try (run-tests-here w ticks vars)
                                        (catch Throwable e {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]}))]
-                          (sock/write-line! w (pr-str res))))
+                          (sock/write-line! w (sedn/encode res))))
                :parent (fn [pid]
                          (lib/c-close w)
                          (forked pid)
