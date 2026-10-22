@@ -98,7 +98,7 @@
   a test's root takes its own). What a result depends on that git does not see."
   {:malli/schema [:=> [:cat :map :string] :string]}
   [cfg checkout]
-  (str/replace (pr-str (into (sorted-map) (remove (fn [[k]] (= "TCP port" (get-in config/schema-forms [k 1 :seon.config/unit])))) cfg))
+  (str/replace (sedn/encode (into (sorted-map) (remove (fn [[k]] (= "TCP port" (get-in config/schema-forms [k 1 :seon.config/unit])))) cfg))
                checkout "<checkout>"))
 
 (defn inputs
@@ -273,4 +273,4 @@
                         (cond-> {:test tst :digest (digests tst) :pass 0 :fail 0 :error 1 :ms 0
                                  :message (if thrown (str n "'s run threw before this test reported: " (ex-message thrown))
                                               (str n "'s run ended before this test reported"))}
-                          (ex-data thrown) (assoc :data (pr-str (ex-data thrown)))))]))))
+                          (ex-data thrown) (assoc :data (sedn/encode (ex-data thrown)))))]))))
