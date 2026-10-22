@@ -573,20 +573,31 @@
 (declare call!)
 
 (defn- import-source!
-  "Main's program gets Seon's own source (seon.source): root's dirs read through the
-  :source effect, every form analyzed (the running generation's namespaces, never run), one
-  transaction on main; what happened is root's :seon.root/source fact. Answers it."
+  "Main's program follows Seon's own source (seon.source): root's dirs read through the
+  :source effect (their files and the tree's HEAD commit). When what they read differs from
+  what main last imported (the digest on root's :seon.root/source fact, or none recorded),
+  main's program becomes theirs in one transaction (seon.source/replace-tx: each form
+  analyzed in the running generation's namespaces, never run; data untouched), and what
+  happened is root's new :seon.root/source fact; a tree that reads the same writes nothing.
+  Answers the fact in force."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [sys {:keys [root dirs]}]
   (let [t0 (lib/now-ns)
         r @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs}})
-        w (when-let [files (:value r)]
-            @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (source/import-tx @(:conn sys) files)}}))
-        fact (cond-> {:root root :files (count (:value r)) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (lib/ms-since t0)}
-               (contract/error? r) (assoc :error (:seon.error/message r))
-               (and w (not (:ok w))) (assoc :error (:seon.error/message w)))]
-    @(call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/source fact}]}})
-    fact))
+        files (:value r)
+        digest (when files (err/digest (pr-str files)))
+        held (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))]
+    (if (and digest (= digest (:digest held)))
+      held
+      (let [tx (when files (source/replace-tx @(:conn sys) files))
+            w (when tx @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}}))
+            fact (cond-> {:root root :files (count files) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (lib/ms-since t0)}
+                   (:commit r) (assoc :commit (:commit r))
+                   (:ok w) (assoc :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))
+                   (contract/error? r) (assoc :error (:seon.error/message r))
+                   (and w (not (:ok w))) (assoc :error (:seon.error/message w)))]
+        @(call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/source fact}]}})
+        fact))))
 
 (defn start!
   "Boot the control process, the fork server and the root graph on its main, a branch of
@@ -597,8 +608,9 @@
    :backend :lmdb|:file :log? true :max-running n (parallel attempts) :provider p (the
    attempts' model) :flush-ms and :stall-ms (fences, seon.db/flush-ms and
    seon.agent-proc/stall-ms, for the checks that move them) :source s}. s: Seon's own source
-   is the program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: main imports root's
-   dirs at boot when it holds none of them (seon.source), and each merge that changes them
+   is the program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: main's program follows
+   root's dirs at boot (import-source!: replaced when they read otherwise than main's last
+   import), and each merge that changes them
    is committed on branch (the reconciler's write-back); absent, the config's
    :seon.config.source/* (no :seon.config.source/root: no source). What opts leave out is the config's: :seon.config.root/store-path,
   :seon.config.root/main (resumed; made from :db when the store has none), :seon.config.store/backend, :seon.config.agent/max-running and the provider of
@@ -704,8 +716,7 @@
     ;; whose boot fact was refused cannot start anything, so its refusal ends the boot
     (let [r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (into (task/boot-tx boot max-running) (cfg/facts config cfg/sources))}})]
       (when-not (:ok r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r (:error r))) r))))
-    (when (and source (empty? (source/source-files @conn)))
-      (import-source! sys source))
+    (when source (import-source! sys source))
     sys))
 
 ;; ====================================================================================

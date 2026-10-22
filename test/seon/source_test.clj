@@ -108,6 +108,32 @@
         (is (= (str pt-text "\n(defn thrice [x] (* 3 x))\n")
                (get (source/files main2 (source/changed-files main2 ours)) "src/app/pt_src.clj")))))))
 
+(deftest a-moved-tree-replaces-mains-program
+  ;; task seon.root/main-follows-its-source-tree: main imported the file, then merged a new
+  ;; form; the tree moves on (one function changed, one removed, the merged form in it)
+  (let [[main _] (merged (main-with-file) 'app.pt-src "(defn thrice [x] (* 3 x))")
+        b (-> (source/file-text main 'app.pt-src)
+              (str/replace "(defn twice\n  [x]\n  (add x x))" "(defn twice [x] (* 2 x))")
+              (str/replace "\n\n(def limit 3)" ""))
+        tx (source/replace-tx main {"src/app/pt_src.clj" b})
+        main2 (d/db-with main tx)
+        form (fn [db src] (d/q '[:find (pull ?f [:form/source]) . :in $ ?s :where [?f :form/src ?s]] db src))
+        others (fn [db] (remove #(= 'app.pt-src (:ns %)) (program/live-forms db)))]
+    (is (= b (source/file-text main2 'app.pt-src)) "main's file is the tree's, byte for byte")
+    (is (empty? (d/datoms main2 :avet :var/name 'app.pt-src/limit)) "the removed function's var is gone")
+    (is (nil? (form main2 "(defn twice\n  [x]\n  (add x x))")) "the changed function's old form is gone")
+    (is (= {:form/source true} (form main2 "(defn twice [x] (* 2 x))")) "its new form is the binary's")
+    (is (nil? (:form/source (form main2 "(defn thrice [x] (* 3 x))"))) "the merged form keeps no :form/source")
+    (is (= (others main) (others main2)) "the program no file holds is untouched")
+    (is (= (d/q '[:find ?n ?p :where [?t :task/name ?n] [?t :task/plan ?p]] main)
+           (d/q '[:find ?n ?p :where [?t :task/name ?n] [?t :task/plan ?p]] main2)) "data is untouched")
+    (is (= 3 (count (filter #(= :db/retractEntity (first %)) (filter vector? tx)))) "retracted: twice's old form, limit's form and var")
+    (is (empty? (filter vector? (source/replace-tx main2 {"src/app/pt_src.clj" b}))) "the same tree retracts nothing")
+    (let [db (empty-db)]
+      (is (= (source/file-text (d/db-with db (source/import-tx db {"src/app/pt_src.clj" pt-text})) 'app.pt-src)
+             (source/file-text (d/db-with db (source/replace-tx db {"src/app/pt_src.clj" pt-text})) 'app.pt-src))
+          "on a db holding no import it is the import"))))
+
 (deftest an-agent-runs-its-branchs-change-to-imported-source
   (let [main (main-with-file)
         branch (pt/record main 'app.pt-src "(defn twice [x] (* 2 x))")]
