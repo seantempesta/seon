@@ -16,7 +16,7 @@
   Root starts it by evaluating (seon.turn/work! '{...}) in the agent; the attempt's end is
   a fact on the branch (:seon.end/*), which root's judge reads."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.intr :as intr] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.set :as set]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.intr :as intr] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.set :as set]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context] [seon.program :as program]
             [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
@@ -76,7 +76,7 @@
     {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :task (task/task db id)
      :will-merge (program/divergence (:base @agent/state) db)
      :deferred (agent/deferred-tests db (:base @agent/state) (:proofs (:seon.task/accumulated (task/task db id))))
-     :refusals (r/done-refusals (r/done-input (r/index db) id results unc (mapv #(pr-str (:key %)) unmerged) nil plan-before))}))
+     :refusals (r/done-refusals (r/done-input (r/index db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before))}))
 
 (defn- end!
   "The attempt's end: the live runtime staged onto the branch, the end written there (with

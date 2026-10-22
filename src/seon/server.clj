@@ -14,7 +14,7 @@
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.reconcile :as r]
-            [seon.lib :as lib] [seon.repl :as repl] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str]))
+            [seon.lib :as lib] [seon.edn :as sedn] [seon.repl :as repl] [seon.print :as print] [seon.render :as render] [seon.render.ai :as rai] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str]))
 
 (defn- refused
   "The server refusing a request, as root's API does: the one error map."
@@ -113,7 +113,7 @@
              :args {:agent {:type "string"}} :required ["agent"]
              :answer (fn [sys ag _]
                        (if-let [{:keys [task attempt]} (attempt-of sys ag)]
-                         (let [it (last @(c/submit! sys ag (pr-str (list 'print (list 'seon.turn/context-block task attempt))) {:origin :context}))]
+                         (let [it (last @(c/submit! sys ag (sedn/encode (list 'print (list 'seon.turn/context-block task attempt))) {:origin :context}))]
                            (if (= :err (:tag it)) (:err it) {:context (:out it)}))
                          (refused (str ag " works no task: attach one first"))))}
    :attach {:doc "Work a task as a Seon agent: root starts an agent on the task's branch (model outside) and answers its id."
@@ -170,9 +170,13 @@
                        (if-not (ops op)
                          (rpc-error id -32602 (str "no tool " n ": the tools are " (str/join ", " (map #(str "seon_" (name %)) (keys ops)))))
                          (let [a (answer sys (into {:op op} (for [[k v] (get params "arguments")] [(keyword k) v])))]
-                           (result {"content" [{"type" "text" "text" (if (and (= :context op) (:context a))
-                                                                       (:context a)
-                                                                       (binding [*print-length* nil *print-level* nil] (pr-str a)))}]}))))
+                           ;; what the model reads: the block itself, an evaluation's items as the
+                           ;; REPL's own text, an error by its render, anything else whole by the
+                           ;; printer (the whole answer to an outside caller: nothing could re-ask it)
+                           (result {"content" [{"type" "text" "text" (cond (and (= :context op) (:context a)) (:context a)
+                                                                           (:items a) (rai/items (:items a))
+                                                                           (contract/error? a) (render/ai a {})
+                                                                           :else (print/text (vary-meta a assoc :seon.print/full true)))}]}))))
         (rpc-error id -32601 (str "no method " method ": this server answers initialize, ping, tools/list and tools/call"))))))
 
 (defn- respond
@@ -188,15 +192,15 @@
         msg (volatile! nil)]
     (try (if mcp?
            (some-> (mcp-reply sys (vreset! msg (json/read-str line))) json/write-str)
-           (binding [*print-length* nil *print-level* nil] (pr-str (answer sys (edn/read-string line)))))
+           (sedn/encode (answer sys (edn/read-string line))))
          (catch Throwable e
            (let [cause (or (ex-message e) (str (type e)))
                  d (contract/error :seon.server/defect 'seon.server/answer
                                    (if (and mcp? (nil? @msg)) (str "a line opening {\" is MCP's JSON-RPC, and an EDN request a keyword-keyed map; this one is not JSON: " cause) cause)
-                                   (cond-> {:line line} (ex-data e) (assoc :data (pr-str (ex-data e)))))]
+                                   (cond-> {:line line} (ex-data e) (assoc :data (sedn/encode (ex-data e)))))]
              (if mcp?
-               (json/write-str (rpc-error (get @msg "id") (if @msg -32603 -32700) (pr-str d)))
-               (pr-str d)))))))
+               (json/write-str (rpc-error (get @msg "id") (if @msg -32603 -32700) (render/ai d {})))
+               (sedn/encode d)))))))
 
 (defn- serve-connection!
   "Answer one connection's request lines (respond), line by line, until it closes; a

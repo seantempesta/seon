@@ -45,7 +45,7 @@
   ;; this process takes a lease on a test branch as a forked agent does (seon.db/after-fork!
   ;; -> lease!), mints all but two of its ids, then asks for five more
   (ts/test-branch! (fn [c conn] (let [sid (get-in c [:store :id])
-        lease (pdb/lease-base conn)
+        lease (pdb/lease-block! @conn)
         ceiling (+ lease (cfg/value :seon.config.store/eid-lease))
         notes (fn [n tag] (vec (for [i (range n)] {:note/text (str tag i)})))]
     (try
@@ -90,7 +90,7 @@
   ;; main merged into the branch brings entities minted in a later agent's block (ids past
   ;; this lease's ceiling): this process still mints inside its own block, never above them
   (ts/test-branch! (fn [c conn] (let [sid (get-in c [:store :id])
-        lease (pdb/lease-base conn)
+        lease (pdb/lease-block! @conn)
         ceiling (+ lease (cfg/value :seon.config.store/eid-lease))
         theirs (+ ceiling 10)
         new-id (fn [r] (d/q '[:find ?e . :in $ ?t :where [?e :note/text ?t]] (:db-after r) "mine"))]
@@ -422,3 +422,16 @@
             (str n " per-turn commits wrote " per-turn " bytes; the same turns in one commit wrote " once
                  ", so the bound is " bound " (" (format "%.1f" (/ (double per-turn) bound)) "x over)")))
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest root-mints-past-every-reserved-block-after-a-merge
+  ;; task seon.db/root-mints-in-a-block-of-its-own: an agent's block is reserved from the one
+  ;; counter root's own writes mint from (seon.db/lease-block!), so after a merge brings an
+  ;; entity from inside that block onto main, root's next id still lies past the block
+  (ts/test-branch! (fn [_ conn]
+    (let [lease (pdb/lease-block! @conn)
+          end (+ lease (cfg/value :seon.config.store/eid-lease))
+          merged (d/transact conn [[:db/add (+ lease 5) :note/text "the agent's, merged"]])
+          root (d/transact conn [{:note/text "root's"}])
+          e (d/q '[:find ?e . :where [?e :note/text "root's"]] (:db-after root))]
+      (is (= (+ lease 5) (:max-eid (:db-after merged))) "main holds an id inside the agent's block")
+      (is (>= e end) (str "root's id " e " lies past the block ending at " end))))))

@@ -2,7 +2,7 @@
   "Root's functions on tasks (from proto.agents.root): write desired state on main;
   the reconciler proc does the rest. Each takes root's system (seon.root/start!)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [seon.config :as config]
+  (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [seon.config :as config]
             [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl]))
 
 (defn- write-declared!
@@ -106,7 +106,7 @@
   {:malli/schema [:function [:=> [:cat :seon.root/sys] [:vector :string]] [:=> [:cat :seon.root/sys [:maybe :string]] [:vector :string]]]}
   ([sys] (resume-args sys (get-in sys [:bindings :source :root])))
   ([sys source-root]
-   (into [] (mapcat (fn [[k v]] ["--set" (str k "=" (pr-str v))]))
+   (into [] (mapcat (fn [[k v]] ["--set" (str k "=" (sedn/encode v))]))
          (cond-> [[:seon.config.root/store-path (:store-path sys)]
                   [:seon.config.root/main (name (pdb/conn-main (:conn sys)))]
                   [:seon.config.source/dirs (config/value :seon.config.source/dirs)]

@@ -6,7 +6,7 @@
   a turn records its basis (the commit it read and the observations not in the db), and
   `render` makes the text from it, for the model and again for anyone who reads it later."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d]
+  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
             [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg]))
 
@@ -174,15 +174,18 @@
 
 (defn- shown-eval
   "One evaluation as the transcript shows it: its form, its live value (else its printed
-  answer), its output; an error keeps :tag :err and shows its error map (:err: a contract's
-  problems and fix, an exception's class and causes) in place of its message. A sub-map of
-  the item, so every cut's path reads the item itself."
+  answer: a value whose producer named its render shows that render's text, as the REPL
+  answered it), its output; an error keeps :tag :err and shows its error map (:err: a
+  contract's problems and fix, an exception's class and causes) in place of its message. A
+  sub-map of the item, so every cut's path reads the item itself."
   {:malli/schema [:=> [:cat :map] :map]}
   [item]
-  (cond-> (select-keys item [:form :tag :value :printed :out :err])
-    (contains? item :value) (dissoc :printed)
-    (contains? item :err) (dissoc :printed)
-    (= :ret (:tag item)) (dissoc :tag)))
+  (let [rendered? (and (contains? item :value) (render/rendered? (:value item)))]
+    (cond-> (select-keys item [:form :tag :value :printed :out :err])
+      rendered? (dissoc :value)
+      (and (contains? item :value) (not rendered?)) (dissoc :printed)
+      (contains? item :err) (dissoc :printed)
+      (= :ret (:tag item)) (dissoc :tag))))
 
 (defn shown-evals
   "The last evaluations (folded) as the model reads them: each folded item printed by the
