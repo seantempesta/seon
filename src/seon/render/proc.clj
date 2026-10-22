@@ -418,12 +418,12 @@
                            st)))
                      st (filter keyword? (:watch st)))]
       (pass st o))
-    (= :main kind) (if (:ok r) (pass (main-info st (:db r)) o) st)
+    (= :main kind) (if (seon.contract/error? r) st (pass (main-info st (:db r)) o))
     ;; an agent's branch db; a branch that is gone (merged and removed) is recorded as such
     (and (vector? kind) (= :branch (first kind)))
     (let [z [:zoom (second kind)]
-          st (assoc-in st (conj z :db-error) (when-not (:ok r) (:seon.error/message r)))]
-      (pass (if (:ok r) (assoc-in st (conj z :db) (:db r)) st) o))
+          st (assoc-in st (conj z :db-error) (:seon.error/message r))]
+      (pass (if (seon.contract/error? r) st (assoc-in st (conj z :db) (:db r))) o))
     :else st))
 
 (defn render-proc

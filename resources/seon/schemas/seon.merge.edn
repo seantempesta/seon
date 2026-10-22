@@ -35,9 +35,12 @@
                       [:apply [:vector :seon.merge/program-key]] [:conflicts [:vector :seon.merge/conflict]]]
  ;; a branch whose program calls intern, alter-var-root, eval or load-string, or defines inside a
  ;; function body (seon.merge/mutations), refused at merge
- :seon.merge/mutation [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/mutation]] [:merged? false?]
+ :seon.merge/mutation [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/mutation]]
                                                [:mutations [:vector [:map [:form :string] [:ns :symbol] [:defines [:vector :any]]]]]]]
  :seon.merge/behind [:and :seon.error/base [:map [:seon.error/type [:enum :seon.merge/behind]]
-                                             [:merged? false?] [:behind pos-int?]]]
+                                             [:behind pos-int?]]]
  :seon.merge/unmerged [:and :seon.error/base [:map [:seon.error/type [:enum :seon.merge/unmerged]]
-                                               [:merged? false?] [:unmerged [:vector :any]]]]}
+                                               [:unmerged [:vector :any]]]]
+ ;; a gated merge whose proofs ran red in the agent's fork (seon.root/merge!): not merged
+ :seon.merge/red [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/red]]
+                                         [:tests :map] [:reports [:vector :any]]]]}

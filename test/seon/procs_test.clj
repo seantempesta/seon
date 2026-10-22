@@ -44,7 +44,7 @@
                 answers (into {} (keep (fn [x] (when-let [r (get-in x [:dest :rid])] [r (:r x)]))) (:to-api outs))]
             (is (= 1 (- (:commits st2) (:commits st))))
             (is (every? :ok (map answers [2 3])))
-            (is (false? (:ok (answers 4))) "a refused transaction answers its error, the others commit")))))
+            (is (seon.contract/error? (answers 4)) "a refused transaction answers its error, the others commit")))))
     (testing "a closed in-port: drained"
       (let [[_ outs] (step #'writer/writer-proc st :in nil)]
         (is (= :drained (:op (first (:to-api outs)))))))
@@ -202,13 +202,39 @@
     (testing "a request for no live agent answers at once"
       (let [p (promise)]
         (step #'root/api-proc st :ext {:op :eval :id :nope :forms "1" :p p})
-        (is (re-find #"no live agent" (:printed (first @p))))))
+        (is (re-find #"no live agent" (:seon.error/message @p)))))
     (testing "a writer request carries its rid and is answered by it"
       (let [p (promise)
             [st outs] (step #'root/api-proc st :ext {:op :write :req {:op :tx :branch :db :tx-data []} :p p})
             rid (get-in (first (:to-writer outs)) [:dest :rid])
             [_ _] (step #'root/api-proc st :from-writer {:dest {:rid rid} :r {:ok true}})]
         (is (= {:ok true} @p))))))
+
+(def ^:private fake-members
+  "Protocol members a refusal must not carry: an eval item's, a test count's, a merge's."
+  #{:id :tag :ok :merged? :pass :fail :error :reports :applied :conflicts})
+
+(deftest a-refusal-is-the-one-error-map
+  ;; a request no live agent can take, a verb root refuses, and a write the writer refuses
+  ;; each answer the one error map (seon.contract/error) and nothing beside it: no eval item
+  ;; with id -1, no test count, no :ok or :merged? false
+  (let [st (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                             :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
+        bare? (fn [r] (and (map? r) (seon.contract/error? r) (empty? (filter fake-members (keys r)))))]
+    (doseq [op [:eval :tests :merge-tests :merge-main :stats]]
+      (let [p (promise)]
+        (step #'root/api-proc st :ext {:op op :id :nope :forms "1" :p p})
+        (is (bare? @p) (str op " to no live agent: " (pr-str @p)))))
+    (let [p (promise)]
+      (step #'root/api-proc st :ext {:op :clone :parent :nope :p p})
+      (is (bare? @p) (pr-str @p)))
+    (doseq [[verb a] [['merge-main! nil] ['merge! nil] ['merge! {:branch :b :status :dead}] ['nope! nil]]]
+      (is (bare? (root/request verb :a1 nil a)) (str verb))))
+  (ts/test-branch! (fn [cfg conn]
+    (let [st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 4) :events (a/chan 4)})
+          [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:no/such 1}] :dest {:rid 1}})
+          r (:r (first (:to-api outs)))]
+      (is (and (seon.contract/error? r) (not (contains? r :ok))) (pr-str r))))))
 
 (deftest a-collection-waits-until-no-agent-is-live
   ;; root collects the store only as its only writer (owner, 2026-10-22, simplest first;

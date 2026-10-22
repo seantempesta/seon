@@ -197,7 +197,7 @@
   (let [err (long-text 400)
         form (str "(defn f [x] " (long-text 200) ")")
         evals (vec (for [i (range 10)] {:id i :tag :ret :form "(+ 1 2)" :printed "3"}))
-        html (h/html (:seon.render/html (ui/agent-card {:id :a1 :status :busy :error err :running {:form form} :evals evals} {})))
+        html (h/html (:seon.render/html (ui/agent-card {:id :a1 :status :busy :error (seon.contract/error :seon.agent/failed (quote seon.root/spawn!) err {:agent :a1}) :running {:form form} :evals evals} {})))
         omitted (fn [s] (some-> (re-find #"…\+(\d+) chars" s) second parse-long))]
     (testing "a long error is elided: its beginning, then how many characters it left, the whole on hover"
       (is (str/includes? html "word0 word1"))
@@ -411,9 +411,9 @@
 (deftest a-refused-merge-says-why-once
   ;; task seon.render/one-owner-per-view-path (B2, A14): a refusal is the one error map; the
   ;; card's pill and the stream's row read its message, once
-  (let [r (seon.contract/error :seon.root/refused 'seon.root/merge! "2 functions have no contract" {:merged? false})
+  (let [r (seon.contract/error :seon.root/refused 'seon.root/merge! "2 functions have no contract" {:agent :a1})
         card (h/html (:seon.render/html (ui/agent-card {:id :a1 :status :idle :evals [] :merged r} {})))
         row (ui/event-detail {:type :merged :agent :a1 :result r})]
     (is (str/includes? card "2 functions have no contract") "the pill's title says why, not that its tests were red")
     (is (= 1 (count (re-seq #"no contract" row))) row)
-    (is (str/includes? (ui/event-detail {:type :merged-main :result (assoc r :ok false)}) "no contract"))))
+    (is (str/includes? (ui/event-detail {:type :merged-main :result r}) "no contract"))))

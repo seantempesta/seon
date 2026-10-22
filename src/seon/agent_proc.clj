@@ -154,8 +154,7 @@
       (let [{:keys [new pass-fd]} (get-in st [:inflight (:k m)])
             ;; the clone's socket end: the parent has it (or failed), root's copy closes now
             _ (some-> pass-fd sock/close!)
-            st (answer-rid st o (:k m) (if (= :cloned (:op m)) {:ok true :id new}
-                                           (contract/error :seon.root/refused 'seon.root/clone! (str "clone failed: " (:error m)) {:ok false})))]
+            st (answer-rid st o (:k m) (if (= :cloned (:op m)) {:ok true :id new} (:error m)))]
         (when (= :clone-failed (:op m)) (step/out! o :to-api {:op :clone-failed :agent new :error (:error m)}))
         (step/out! o :to-api (status st {:status (busy st)}))
         st)
@@ -189,7 +188,8 @@
                         (do (step/out! o :to-writer {:op :merge :branch merge-branch :data-attrs (or data-attrs :all) :dest {:merged id :rid (:id m) :tests summary}})
                             (update st :inflight dissoc (:id m)))
                         (answer-rid st o (:id m) (if (= kind :merge-tests)
-                                                   {:merged? false :tests summary :reports (vec (remove #(= :pass (:type %)) (:reports result)))}
+                                                   (contract/error :seon.merge/red 'seon.root/merge! (str "tests red: " (:fail result 0) " fail, " (:error result 0) " error")
+                                                                   {:tests summary :reports (vec (remove #(= :pass (:type %)) (:reports result)))})
                                                    result)))]
                (step/out! o :to-api (status st {:tests result :mem-mb (:mem-mb m) :status (busy st)}))
                (step/out! o :events (step/event {:type :tests :agent id :ms (:ms result) :pass (:pass result) :fail (:fail result) :error (:error result)}))

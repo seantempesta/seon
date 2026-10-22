@@ -179,6 +179,17 @@
         (is (= "seon.turn/work! threw: boom" (:seon.attempt/reason (row tx))))
         (is (= "boom" (:seon.error/message (err tx))))))))
 
+(deftest an-agent-dead-in-its-turn-loop-records-its-cause
+  ;; root answers the turn loop's eval with the death itself (the one error map, no eval
+  ;; item): the flight reads the branch's end next and keeps the death, exit and stderr,
+  ;; rather than asking the dead agent for tests and recording "no live agent"
+  (let [died (contract/error :seon.agent/died 'seon.root/api-proc "agent a1 died: exit 70" {:agent :a1 :exit {:exit 70}})
+        st {:db (db-of [(decl "a")]) :boot "boot-1" :rid 0 :pending {}
+            :flights {"demo/a#1" {:act {:attempt "demo/a#1" :task "demo/a" :env {:branch :demo/a}} :agent :a1 :step :worked}}}
+        [st' outs] (#'r/advance st "demo/a#1" :worked died)]
+    (is (= died (get-in st' [:flights "demo/a#1" :died])) "the death is the flight's cause")
+    (is (= [{:op :write :req {:op :branch-db :branch :demo/a}}] (mapv :req outs)) "its end is read from the branch next")))
+
 (deftest an-ended-attempt-of-a-cancelled-task-is-closed
   (is (= [{:op :close :attempt "demo/a#1"}]
          (r/reconcile (db-of diamond :extra (concat (attempt "a" 1 :ended :outcome :green :results {(t "a") :pass})

@@ -104,8 +104,8 @@
           :args {:agent {:type "string" :description "an agent id (a3) or root"} :code {:type "string" :description "Clojure forms"}}
           :required ["agent" "code"]
           :answer (fn [sys ag req]
-                    {:items (mapv #(select-keys % [:tag :form :printed :out :recorded :handle])
-                                  (if (= :root ag) (root-eval sys (:code req)) @(c/submit! sys ag (:code req) {:origin :outside})))})}
+                    (let [r (if (= :root ag) (root-eval sys (:code req)) @(c/submit! sys ag (:code req) {:origin :outside}))]
+                      (if (contract/error? r) r {:items (mapv #(select-keys % [:tag :form :printed :out :recorded :handle]) r)})))}
    ;; the block's text as the model reads it: printed to the agent's output, not as a
    ;; value (a value comes back as a string literal, escaped, under the reply's budget);
    ;; recorded with origin :context, a context read, which renders refer to, not repeat
@@ -113,8 +113,8 @@
              :args {:agent {:type "string"}} :required ["agent"]
              :answer (fn [sys ag _]
                        (if-let [{:keys [task attempt]} (attempt-of sys ag)]
-                         (let [it (last @(c/submit! sys ag (pr-str (list 'print (list 'seon.turn/context-block task attempt))) {:origin :context}))]
-                           (if (= :err (:tag it)) (:err it) {:context (:out it)}))
+                         (let [r @(c/submit! sys ag (pr-str (list 'print (list 'seon.turn/context-block task attempt))) {:origin :context})]
+                           (cond (contract/error? r) r (= :err (:tag (last r))) (:err (last r)) :else {:context (:out (last r))}))
                          (refused (str ag " works no task: attach one first"))))}
    :attach {:doc "Work a task as a Seon agent: root starts an agent on the task's branch (model outside) and answers its id."
             :args {:task {:type "string" :description "ns/name"}} :required ["task"]

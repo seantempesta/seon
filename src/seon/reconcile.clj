@@ -493,12 +493,6 @@
                                 [:seon.end/attempt aid])]
               [(keyword (name k)) v])))
 
-(defn- error-text
-  "Error map e as an attempt's stored error (:seon.attempt/error): the one error map, its
-  protocol members (a test count, :ok, :merged?) left out."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [e] (dissoc e :pass :fail :error :reports :merged? :ok :tx :applied :conflicts))
-
 ;; ---- the reconciler proc: actions carried out as requests, every answer as data ----------
 ;; Root's executor (R1's proto.agents.root, a thread per attempt) as one step-fn: main's
 ;; commits arrive through a sliding buffer of one (a reconciler reads main's latest db, so a
@@ -594,7 +588,7 @@
                     (cond-> {}
                       (seq (:failures run-problems)) (assoc :seon.attempt/failures (:failures run-problems))
                       (seq (:costs run-problems)) (assoc :seon.attempt/costs (:costs run-problems))
-                      (or (:error end) worked-error) (assoc :seon.attempt/error (error-text (or (:error end) worked-error)))
+                      (or (:error end) worked-error) (assoc :seon.attempt/error (or (:error end) worked-error))
                       (seq (:waste end)) (assoc :seon.attempt/waste (:waste end))
                       (seq (:conflicts carried)) (assoc :seon.attempt/task-conflicts (:conflicts carried)))))
             (concat (:tx carried)
@@ -610,7 +604,7 @@
   [aid e end]
   (cas-tx aid :running :dead {:seon.attempt/end-ms (System/currentTimeMillis)
                               :seon.attempt/reason (if (:reason end) (str (:reason end) " (" (:seon.error/message e) ")") (:seon.error/message e))
-                              :seon.attempt/error (error-text (cond-> e (:error end) (assoc :cause (:error end))))}))
+                              :seon.attempt/error (cond-> e (:error end) (assoc :cause (:error end)))}))
 
 (defn- advance
   "Attempt aid's flight takes answer r of its step. Answers [st outputs]."
@@ -640,7 +634,7 @@
                                 (-> (first (task/attempt-start-tx aid (:task act) (:boot st) nil (:env act) now
                                                                   (:plan (task/accumulate (get-in st [:idx :tasks]) (:task act)))))
                                     (assoc :seon.attempt/status :refused :seon.attempt/end-ms now
-                                           :seon.attempt/reason (:seon.error/message r) :seon.attempt/error (error-text r))))])))
+                                           :seon.attempt/reason (:seon.error/message r) :seon.attempt/error r)))])))
       ;; an outside agent works this attempt (seon.entrance): no turn loop; it hands it back
       :started (if (= "outside" (get-in act [:env :model]))
                  (done st)
@@ -651,8 +645,8 @@
       ;; the turn loop answered: died (no live agent), or judge it from measured facts
       ;; work! that threw was answered by the agent's REPL (the process lives): its error
       ;; names the attempt's end when the loop wrote none
-      :worked (if (= -1 (:id (first r)))
-                (dead st (:err (first r)))
+      :worked (if (contract/error? r)
+                (dead st r)
                 (one (request (cond-> st (= :err (:tag (first r))) (assoc-in [:flights aid :worked-error] (:err (first r))))
                               aid :tested {:op :tests :id agent})))
       :tested (if (contract/error? r)
@@ -684,11 +678,11 @@
                                             (cond
                                               (:merged? r) (cas-tx attempt :ended :merged {:seon.attempt/merged-t (long (:tx r))})
                                               (= :seon.merge/behind (:seon.error/type r)) (cas-tx attempt :ended :behind {:seon.attempt/reason (:seon.error/message r)
-                                                                                                                          :seon.attempt/error (error-text r)})
+                                                                                                                          :seon.attempt/error r})
                                               (refine? (get-in st [:idx :tasks task]))
                                               (conj (tpl/attach-tx (:db st) {:attempt attempt :task task :problem problem})
-                                                    {:seon.attempt/id attempt :seon.attempt/error (error-text r)})
-                                              :else (into (cas-tx attempt :ended :bailed {:seon.attempt/error (error-text r)})
+                                                    {:seon.attempt/id attempt :seon.attempt/error r})
+                                              :else (into (cas-tx attempt :ended :bailed {:seon.attempt/error r})
                                                           (stuck-tx (:idx st) attempt task problem)))))
                                         (:members act) (:results r))))))
       :landed (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))

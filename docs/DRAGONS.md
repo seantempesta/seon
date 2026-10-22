@@ -7,7 +7,7 @@ dragons are and name them explicitly when dealing with them."
 A **dragon** is a place where the world outside our code can fail us. Each one is met by
 exactly one function, its **edge**. The edge either answers a declared variant, which is
 plain data its callers handle as an ordinary branch, or it is an **entrant boundary**, which
-turns a defect into a recorded error map. Nothing else catches. `bin/dragons catch` (run by
+turns a defect into a recorded error map. A refusal or a death answers its asker with that error map alone, never a stand-in shaped like a success (an eval item, a test count, `:ok false`, `:merged? false`): every asker branches on `seon.contract/error?`. Nothing else catches. `bin/dragons catch` (run by
 `bin/check`) lists every `catch` in `src/` and fails when one is not named below by its
 function. The same census judges the other laws: [clocks](clocks.md) and [resolution](resolution.md).
 
@@ -15,7 +15,7 @@ function. The same census judges the other laws: [clocks](clocks.md) and [resolu
 
 | dragon | edge (`ns/fn`) | declared variant | handled by, as data |
 |---|---|---|---|
-| Datahike or the store refuses a write (a bad transaction, LMDB full or failing) | `seon.writer/writer-one` | `:seon.writer/refused` (the one error map, with `:ok false`) | the caller of the write: an agent's `transact!` throws it into its own eval (an `:err` item); root's callers read `:ok` and `:seon.error/message` |
+| Datahike or the store refuses a write (a bad transaction, LMDB full or failing) | `seon.writer/writer-one` | `:seon.writer/refused` (the one error map, nothing beside it) | the caller of the write: an agent's `transact!` throws it into its own eval (an `:err` item); root's callers branch on `seon.contract/error?` and read `:seon.error/message` |
 | The model's HTTP call (connect, TLS, the socket dying mid-stream), made by root's `:model` effect lanes; streamed over SSE with no clock (a reasoning reply streams for minutes) | `seon.model/http-post` | `:seon.model/transport` (the connection failed or dropped); a non-200 is `:seon.model/provider-error` with the whole body, or `:seon.model/rate-limited` for HTTP 429 with its Retry-After (`seon.model/complete`) | the `:model` owner answers it to the asking agent (a 429 is kept and retried after its wait); `seon.turn/act!` returns it; `seon.turn/work!` ends the attempt `:error` with its message |
 | A model's eval call carries arguments that are not JSON with code text (a reply cut mid-call at its token limit) | `seon.model/call-code` | none: the arguments as they came are the call's code | `seon.turn/act!` evaluates them like any code; the reader repairs what it can and the call's result shows what they held |
 | An agent's authored contract does not compile | `seon.contract/arm!` | `:seon.contract/invalid` | `seon.repl/admit` puts it on the reply item (`:contract-error`); `seon.program/load-form!` reports it as a load error |

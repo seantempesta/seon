@@ -504,11 +504,11 @@
     (commit!)
     (send! {:op :branch-me :k k})
     (let [r (await-op! :branched k)]
-      (if-not (:ok r)
+      (if (:error r)
         (do (sock/close! fd) (send! {:op :clone-failed :k k :error (:error r)}))
         (lib/fork!
           {:fd fd :double? true
-           :refused (fn [n] (send! {:op :clone-failed :k k :error (str "cannot fork: " n " Chez threads active (a running future?)")}))
+           :refused (fn [n] (send! {:op :clone-failed :k k :error (contract/error :seon.agent/failed 'seon.agent/clone! (str "cannot fork: " n " Chez threads active (a running future?)") {:agent (:agent m)})}))
            :parent (fn [_] (send! {:op :cloned :k k :clone (:agent m)}))
            :child (fn []
                     (let [parent (:id @state)]
