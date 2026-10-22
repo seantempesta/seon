@@ -42,7 +42,10 @@
   ;; with its branches when the root has stopped.
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         main (str "root-test-" (random-uuid))
+        ;; a kernel-assigned port, never the checkout's: its standing root may hold that one
+        port (let [sock (java.net.ServerSocket. 0)] (try (.getLocalPort sock) (finally (.close sock))))
         {:keys [exit out err]} (sh/sh "env" "SEON_WEB_PORT=0" "./seon" "root"
+                                      "--set" (str ":seon.config.root/entrance-port=" port)
                                       "--set" (str ":seon.config.source/root=" (pr-str checkout))
                                       "--set" ":seon.config.source/dirs=[\"src\" \"test\"]"
                                       "--set" (str ":seon.config.root/store-path=" (pr-str (test-store)))

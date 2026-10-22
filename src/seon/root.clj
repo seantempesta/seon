@@ -21,7 +21,7 @@
   Agents transact facts on their own branch; root reacts: the writer applies them, and
   only root's merge! advances main."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.docs :as docs] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
@@ -603,7 +603,7 @@
   (let [t0 (profile/now-ns)
         r @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs}})
         files (:value r)
-        digest (when files (err/digest (pr-str [files (:pins r)])))
+        digest (when files (err/digest (sedn/encode [files (:pins r)])))
         held (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))]
     (if (and digest (= digest (:digest held)))
       held

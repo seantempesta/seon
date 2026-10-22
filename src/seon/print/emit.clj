@@ -14,8 +14,7 @@
 (def default-options
   "Seon's shipped print options (the `:seon.print/default` properties of `:seon.print/options`
   in the packaged schemas, read once there; a constant here)."
-  {:seon.print/length 32 :seon.print/level 8 :seon.print/width 72
-   :seon.print/namespace-maps? true :seon.print/table? :derived})
+  {:seon.print/width 72 :seon.print/namespace-maps? true})
 
 (defn literal
   "`value` as readable EDN under fixed print bindings."
@@ -92,28 +91,24 @@
   [{:seon.print/keys [requery-id requery-refusal omitted elision-unit prefix bound-by]
     supplied :seon.print/continuation profile-id :seon.render.profile/id path :seon.render.data/path
     next-offset :seon.render.data/next-offset total :seon.render.data/total}]
-  (let [requery-form (when (or (symbol? requery-id) (seq? requery-id))
-                       (let [form (path-form requery-id (vec (or path [])))]
-                         (if (seq? form) form (list 'get-in form []))))]
-    (cond-> {:seon.print/face :seon.print/elided}
-      (some? omitted) (assoc :seon.print/omitted (max 1 (long omitted)))
-      (some? elision-unit) (assoc :seon.print/elision-unit elision-unit)
-      (some? path) (assoc :seon.render.data/path (vec path))
-      (some? next-offset) (assoc :seon.render.data/next-offset (long next-offset))
-      (some? profile-id) (assoc :seon.render.profile/id profile-id)
-      (some? total) (assoc :seon.render.data/total (long total))
-      (some? prefix) (assoc :seon.print/prefix prefix)
-      (some? bound-by) (assoc :seon.print/bound-by bound-by)
-      (some? requery-id) (assoc :seon.print/requery-id requery-id)
-      requery-form (assoc :seon.print/requery-form requery-form)
-      (some? supplied) (assoc :seon.print/continuation supplied)
-      (and (nil? supplied) (or (symbol? requery-id) (seq? requery-id)))
-      (assoc :seon.print/continuation (continuation {:seon.print/requery-id requery-id :seon.print/elision-unit elision-unit
-                                                     :seon.render.data/path (or path [])
-                                                     :seon.render.data/next-offset next-offset}))
-      (and (nil? requery-id) (some? requery-refusal)) (assoc :seon.print/requery-refusal requery-refusal)
-      (and (nil? requery-id) (nil? requery-refusal))
-      (assoc :seon.print/requery-refusal "the source has no stable requery identity"))))
+  (cond-> {:seon.print/face :seon.print/elided}
+    (some? omitted) (assoc :seon.print/omitted (max 1 (long omitted)))
+    (some? elision-unit) (assoc :seon.print/elision-unit elision-unit)
+    (some? path) (assoc :seon.render.data/path (vec path))
+    (some? next-offset) (assoc :seon.render.data/next-offset (long next-offset))
+    (some? profile-id) (assoc :seon.render.profile/id profile-id)
+    (some? total) (assoc :seon.render.data/total (long total))
+    (some? prefix) (assoc :seon.print/prefix prefix)
+    (some? bound-by) (assoc :seon.print/bound-by bound-by)
+    (some? requery-id) (assoc :seon.print/requery-id requery-id)
+    (some? supplied) (assoc :seon.print/continuation supplied)
+    (and (nil? supplied) (or (symbol? requery-id) (seq? requery-id)))
+    (assoc :seon.print/continuation (continuation {:seon.print/requery-id requery-id :seon.print/elision-unit elision-unit
+                                                   :seon.render.data/path (or path [])
+                                                   :seon.render.data/next-offset next-offset}))
+    (and (nil? requery-id) (some? requery-refusal)) (assoc :seon.print/requery-refusal requery-refusal)
+    (and (nil? requery-id) (nil? requery-refusal))
+    (assoc :seon.print/requery-refusal "the source has no stable requery identity")))
 
 ;;; Emission: one walk appends a node tree's fipp-style operation maps to one vector; text is
 ;;; the layout of that stream, hiccup a fold over the same stream.
@@ -375,7 +370,8 @@
   "One collection's `<details>`: its summary and its `children`' hiccup."
   {:malli/schema [:=> [:cat :map [:sequential :any]] :seon.print/hiccup]}
   [node children]
-  [:details {:class (str "seon-print-node " (css-class (:seon.print/face node)))
+  ;; open: a closed <details> hides its content however it is styled
+  [:details {:class (str "seon-print-node " (css-class (:seon.print/face node))) :open true
              :data-seon-path (literal (:seon.print/path node))}
    [:summary {:class "seon-print-summary"} (summary node (:seon.print/path node))]
    (into [:span {:class "seon-print-content"}] children)])
@@ -387,7 +383,7 @@
         (concat scalar-kinds [:seon.print/tag :seon.print/separator :seon.print/delimiter :seon.print/elision])))
 
 (defn- ops-hiccup
-  "The same operations as structural hiccup: a `<details>` per collection, the root one open.
+  "The same operations as structural hiccup: a `<details>` per collection, every one open.
   One pass: `stack` holds each open collection's hiccup so far, its node first."
   {:malli/schema [:=> [:cat [:vector :seon.print/op]] :seon.print/hiccup]}
   [ops]
@@ -411,19 +407,11 @@
                     (cond (nil? child) (recur (inc i) stack roots)
                           (seq stack) (recur (inc i) (conj (rest stack) (conj! (first stack) child)) roots)
                           :else (recur (inc i) stack (conj! roots child))))
-                  (persistent! roots)))
-        hiccup (case (count roots)
-                 0 [:span {:class "seon-print-empty"} ""]
-                 1 (nth roots 0)
-                 (into [:span {:class "seon-print-root"}] roots))]
-    (cond-> hiccup (and (vector? hiccup) (= :details (nth hiccup 0))) (assoc-in [1 :open] true))))
-
-(defn emit-text
-  "One node as text laid out to its width."
-  {:malli/schema [:=> [:cat :seon.print/node :map] :string]}
-  [node options]
-  (let [options (merge default-options options)]
-    (ops-text (node-ops node options) (:seon.print/width options))))
+                  (persistent! roots)))]
+    (case (count roots)
+      0 [:span {:class "seon-print-empty"} ""]
+      1 (nth roots 0)
+      (into [:span {:class "seon-print-root"}] roots))))
 
 (defn emit-both
   "One node as text, and as hiccup when `hiccup?`, from one operation stream."
