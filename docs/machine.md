@@ -16,7 +16,7 @@ Seon has one clock: `seon.profile/now-ns`, the machine's monotonic CLOCK_UPTIME_
 
 ## Builds and checks
 
-Builds run as `nice -n 15 bin/build`, in parallel, with no lock (owner, 2026-10-21: "WTF is there a build lock?"; one machine-wide lock queued every lane's build single-file on an 18-core, 128 GB machine where a build peaks under ~2 GB; each worktree builds into its own `target/`, so builds share no mutable state). Every process on a store must use the same LMDB build (`target/lib/liblmdb.dylib`, robust locks); stop a store's processes before a build that changes it.
+Builds run as `nice -n 15 bin/build`, in parallel, with no lock (owner, 2026-10-21: "WTF is there a build lock?"; one machine-wide lock queued every lane's build single-file on an 18-core, 128 GB machine where a build peaks under ~2 GB; each worktree builds into its own `target/`, so builds share no mutable state). Every process on a store must use the same LMDB build (`target/lib/liblmdb.dylib`, robust locks); stop a store's processes before a build that changes it. Every step decides by its stamp (`target/NAME.stamp`, the pin of the sources it was built from: a submodule's commit, `native/probe.c`'s git hash), never by its output existing, and each step calls the ones it needs: after a sync to a new Jolt pin, `bin/build seon` rebuilds Jolt first (a target/jolt left from the old pin made every root-booting test fail on a var the new source needs), and with no pin moved every step says "up to date".
 
 Full checks run one at a time, niced (there is no lock: the owner removed it). Iterate with single modes.
 

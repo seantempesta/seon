@@ -304,14 +304,18 @@
 
 (deftest a-cited-namespace-and-a-reference-code-file-show-what-they-are
   ;; task seon.ref/files-namespaces-and-symbols-are-plain-markdown: a namespace shows its
-  ;; docstring and publics, a reference-code file the revision it is pinned at
-  (let [db (d/db-with (db-with-program) [{:db/id "ns" :ns/name 'demo.calc :ns/doc "Adds. More."} {:var/name 'demo.calc/add :var/ns "ns"}])
+  ;; docstring and publics, a reference-code file the revision main's source pins it at (the
+  ;; gitlink root's import recorded: a fact, never git run per render)
+  (let [pinned (apply str (repeat 40 "a"))
+        db (d/db-with (db-with-program) [{:db/id "ns" :ns/name 'demo.calc :ns/doc "Adds. More."} {:var/name 'demo.calc/add :var/ns "ns"}
+                                         {:seon.root/id :root :seon.root/source {:root "tree" :files 0 :forms 0 :ms 0.0 :pins {"reference-code/malli" pinned}}}])
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n"
                                                :seon.task/plan "Read `demo.calc` then `reference-code/malli/README.md` and `docs/nowhere.md`."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
         block (context/current-state db (task/task db "demo/n") {:results {} :reds [] :turn 0 :max-turns 4})
         by (into {} (map (juxt :seon.ref/address identity)) (:sections block))]
-    (is (= 40 (count (:seon.ref/pin (first (filter #(clojure.string/starts-with? (:seon.ref/address %) "reference-code/malli/README.md") (:sections block)))))) "the pinned revision, looked up")
+    (is (= pinned (:seon.ref/pin (first (filter #(clojure.string/starts-with? (:seon.ref/address %) "reference-code/malli/README.md") (:sections block)))))
+        "the pin main's source fact records")
     (is (= {:seon.ref/address "demo.calc" :seon.ref/heading "demo.calc" :seon.ref/lead "Adds. More."
             :seon.ref/below [{:seon.ref/address "demo.calc/add" :seon.ref/heading "add"}] :seon.ref/depth :doc}
            (by "demo.calc")) "a namespace: its docstring and publics")

@@ -5,7 +5,8 @@
   (`eval-tool`), so the model sees each evaluation's answer before its next call.
 
   Providers (`:seon.model/provider`, dispatched on :kind):
-  - :scripted, a deterministic stand-in: the function named by :script answers the reply
+  - :none, no provider configured: every request answers the typed :seon.model/no-provider;
+  - :scripted, a test fixture: the function named by :script answers the reply
     text for a request (it sees the task id, turn and messages, as a test double may), sent
     as one eval call, its prose read as comments (seon.reader/forgive);
   - :openai-compat, an OpenAI-compatible chat API (DeepSeek's: base URL plus
@@ -226,5 +227,7 @@
                   [:or :seon.model/completion :seon.model/failure]]}
   [provider request]
   (case (:kind provider)
+    :none (contract/error :seon.model/no-provider 'seon.model/complete
+                          "no model provider is configured: set SEON_PROFILE=deepseek (a paid model) or SEON_PROFILE=scripted (a test fixture), or :seon.config.ai/provider" {})
     :scripted (scripted provider request)
     :openai-compat (openai-compat provider request)))

@@ -72,6 +72,19 @@
                       :else (some #(visit (conj seen id) %) (get graph id))))]
     (some #(visit #{} %) (keys graph))))
 
+(defn- invalid
+  {:malli/schema [:=> [:cat :symbol :string] :map]}
+  [op m] {:seon.error/type :seon.task/refused :seon.error/operation op :seon.error/message m})
+
+(defn- needs-problem
+  "Why graph (task id -> needs) cannot be written: a need known? does not hold, or a cycle;
+  nil when neither."
+  {:malli/schema [:=> [:cat [:map-of :seon.task/id :seon.task/needs] ifn?] [:maybe :string]]}
+  [graph known?]
+  (if-let [missing (seq (for [[_ ns] graph n ns :when (not (known? n))] n))]
+    (str "needs name no task: " (str/join ", " missing))
+    (some->> (cycle-in graph) (str "needs form a cycle through "))))
+
 (defn create-tx
   "The transaction writing decls (task declarations) as held tasks: each gets its id and
   its branch; needs refer by id, to a task of this write or one already on db. A cycle
@@ -80,21 +93,14 @@
                   [:or [:vector :map] [:map [:seon.error/type [:= :seon.task/refused]] [:seon.error/message :string]]]]}
   [db decls]
   (let [ids (mapv #(task-id (:seon.task/ns %) (:seon.task/name %)) decls)
-        new (set ids)
-        graph (zipmap ids (map #(set (:seon.task/needs % #{})) decls))
-        missing (seq (for [[_ ns] graph n ns :when (and (not (new n)) (nil? (pdb/eid db :seon.task/id n)))] n))
-        cyc (cycle-in graph)
-        refused (fn [m] {:seon.error/type :seon.task/refused :seon.error/operation 'seon.task/create-tx
-                         :seon.error/message m})]
-    (cond
-      missing (refused (str "needs name no task: " (str/join ", " missing)))
-      cyc (refused (str "needs form a cycle through " cyc))
-      :else
+        graph (zipmap ids (map #(set (:seon.task/needs %)) decls))]
+    (if-let [p (needs-problem graph #(or (graph %) (pdb/eid db :seon.task/id %)))]
+      (invalid 'seon.task/create-tx p)
       (mapv (fn [id {:seon.task/keys [config needs evidence] :as decl}]
               (cond-> (-> decl (dissoc :seon.task/config :seon.task/needs :seon.task/evidence)
                           (assoc :db/id id :seon.task/id id :seon.task/execution :held)
                           (update :seon.task/branch #(or % (default-branch id))))
-                (seq needs) (assoc :seon.task/needs (mapv #(if (new %) % [:seon.task/id %]) needs))
+                (seq needs) (assoc :seon.task/needs (mapv #(if (graph %) % [:seon.task/id %]) needs))
                 evidence (assoc :seon.task/evidence evidence)
                 (seq config) (merge config)
                 true (merge (references-of decl))))
@@ -143,11 +149,6 @@
     (into [[:db/cas e :seon.attempt/status from to]]
           (when (seq m) [(assoc m :db/id e)]))))
 
-(defn conflict-members
-  "Conflicts (:seon.merge/conflict values) as the attempt's component members."
-  {:malli/schema [:=> [:cat [:sequential :seon.merge/conflict]] [:vector :map]]}
-  [conflicts] (mapv pm/conflict-tx conflicts))
-
 (defn end-members
   "The observed members of an attempt's end (proto.agents/end), as attributes: a count
   nobody measured (no end written, a reply without usage) is absent, never 0."
@@ -159,7 +160,7 @@
     model-calls (assoc :seon.attempt/model-calls model-calls)
     tokens (assoc :seon.attempt/tokens tokens)
     (seq uncontracted) (assoc :seon.attempt/uncontracted (vec uncontracted))
-    (seq conflicts) (assoc :seon.attempt/conflicts (conflict-members conflicts))
+    (seq conflicts) (assoc :seon.attempt/conflicts (mapv pm/conflict-tx conflicts))
     (seq unmerged) (assoc :seon.attempt/unmerged (vec unmerged))
     (seq changed) (assoc :seon.attempt/changed (vec changed))
     reason (assoc :seon.attempt/reason reason)))
@@ -185,20 +186,18 @@
 
 ;; ---- the reader ------------------------------------------------------------------
 
-(def ^:private task-pull
-  [:seon.task/id :seon.task/ns :seon.task/name :seon.task/plan :seon.task/instructions :seon.task/proofs
-   :seon.task/branch :seon.task/model :seon.task/execution :seon.task/problem
-   :seon.task/kind :seon.task/evidence :seon.task/generation :seon.task/budget :seon.task/stuck :seon.task/failure
-   :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns
-   {:seon.task/needs [:seon.task/id]}])
+(def ^:private task-pull '[* {:seon.task/needs [:seon.task/id]}])
 
 (defn- task-value
-  "A pulled task's own members (needs as a set of ids, proofs a set)."
+  "A pulled task's own members (needs as a set of ids, proofs and references sets), without
+  the declaration its file stated (load-tx's to compare)."
   {:malli/schema [:=> [:cat :seon.task/pulled] :seon.task/own]}
   [t]
-  (cond-> (-> t (update :seon.task/needs #(set (map :seon.task/id %)))
+  (cond-> (-> t (dissoc :db/id :seon.task/declared)
+              (update :seon.task/needs #(set (map :seon.task/id %)))
               (update :seon.task/proofs set)
-              (update :seon.task/kind #(or % :work)))))
+              (update :seon.task/kind #(or % :work)))
+    (:seon.task/references t) (update :seon.task/references set)))
 
 (defn accumulate
   "Task id's accumulated plan and proofs over its needs (owner, 2026-10-20: a task
@@ -235,12 +234,8 @@
     (some-> (own id) (assoc :seon.task/accumulated (accumulate own id)) (vary-meta assoc :seon.render/schema :seon.task/task))))
 
 (def ^:private attempt-pull
-  [:seon.attempt/id {:seon.attempt/task [:seon.task/id]} :seon.attempt/status :seon.attempt/boot :seon.attempt/agent
-   :seon.attempt/pid :seon.attempt/start-ms :seon.attempt/end-ms :seon.attempt/branch :seon.attempt/model
-   :seon.attempt/max-turns :seon.attempt/outcome :seon.attempt/reason :seon.attempt/turns :seon.attempt/model-calls
-   :seon.attempt/tokens :seon.attempt/merged-t :seon.attempt/basis-t :seon.attempt/plan :seon.attempt/uncontracted
-   :seon.attempt/unmerged :seon.attempt/changed
-   {:seon.attempt/results [:seon.proof/test :seon.proof/status]}
+  '[* {:seon.attempt/task [:seon.task/id]}
+    {:seon.attempt/results [:seon.proof/test :seon.proof/status]}
    {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
 (defn- attempt-value
@@ -248,7 +243,7 @@
   {:malli/schema [:=> [:cat :seon.attempt/pulled] :seon.attempt/attempt]}
   [a]
   (let [{:seon.attempt/keys [branch model max-turns results uncontracted conflicts unmerged]} a]
-    (cond-> (-> a (dissoc :seon.attempt/branch :seon.attempt/model :seon.attempt/max-turns :seon.attempt/results
+    (cond-> (-> a (dissoc :db/id :seon.attempt/branch :seon.attempt/model :seon.attempt/max-turns :seon.attempt/results
                           :seon.attempt/uncontracted :seon.attempt/conflicts :seon.attempt/unmerged)
                 (update :seon.attempt/task :seon.task/id)
                 (assoc :seon.attempt/env {:branch branch :model model :max-turns max-turns}))
@@ -317,9 +312,7 @@
 
 (defn- file-refusal
   {:malli/schema [:=> [:cat :symbol :string] :map]}
-  [ns-sym m]
-  {:seon.error/type :seon.task/refused :seon.error/operation 'seon.task/file-declarations
-   :seon.error/message (str "task file " ns-sym ".edn: " m)})
+  [ns-sym m] (invalid 'seon.task/file-declarations (str "task file " ns-sym ".edn: " m)))
 
 (defn file-declarations
   "The declarations of task file text, owned by namespace ns-sym (the file's name), each
@@ -354,14 +347,11 @@
           new (vec (for [[id d] decls :when (not (all id))] d))
           changed (vec (for [[id d] decls :when (and (all id) (not= d (some-> (stored id) sedn/decode)))] [id d]))
           removed (vec (for [[id _] stored :when (and (not (decls id)) (owners (:seon.task/ns (all id))))] id))
-          missing (seq (for [[_ d] decls n (:seon.task/needs d) :when (not (or (decls n) (all n)))] n))
           graph (merge (into {} (for [[id t] all] [id (:seon.task/needs t)]))
                        (into {} (for [[id d] decls] [id (set (:seon.task/needs d))])))
           declared (fn [id d] {:seon.task/id id :seon.task/declared (sedn/encode d)})]
-      (cond
-        missing (file-refusal (first owners) (str "needs name no task: " (str/join ", " missing)))
-        (cycle-in graph) (file-refusal (first owners) (str "needs form a cycle through " (cycle-in graph)))
-        :else
+      (if-let [p (needs-problem graph graph)]
+        (file-refusal (first owners) p)
         (vec (concat
                (when (seq new) (create-tx db new))
                (for [d new] (declared (task-id (:seon.task/ns d) (:seon.task/name d)) d))
