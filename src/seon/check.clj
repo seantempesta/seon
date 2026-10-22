@@ -367,8 +367,11 @@
   contracted vars at positions I, I+K, ... of the platform's contracted vars sorted by
   symbol (the registry's own forms in shard 0), so K shards in K processes check exactly
   what one run does. By var, not namespace: seon.reconcile alone holds 36 of the 82
-  checked contracts, so a namespace split cannot go below its share."
-  [& [shard]]
+  checked contracts, so a namespace split cannot go below its share. Each contract draws from
+  its own seed, (seon.proofs/seed var base), base the step's reach digest (bin/check's, or the
+  binary's tree in a run that stores nothing): the same digest checks the same cases, and a
+  failure names its seed and the form that reproduces it."
+  [& [shard base]]
   (run-check "MG-CHECK" nil
    (fn [_]
     (let [[i k] (if shard (mapv #(Long/parseLong %) (clojure.string/split shard #"/")) [0 1])
@@ -385,9 +388,10 @@
         ;; its contract accepts any map as state
         pure (filter #(and (or (pure-nss (ns-name (:ns (meta %)))) (pure-fns (symbol %)))
                            (not= :seon.step/step-fn (contract/contract %)) (generates? %)) vs)
+        seed-of #(seon.proofs/seed (symbol %) base)
         checked (for [v pure
                       :let [t0 (profile/now-ns)
-                            r (try (mg/check (m/deref (contract/schema (contract/contract v))) @v {:registry contract/registry :num-tests 100 :seed 42})
+                            r (try (mg/check (m/deref (contract/schema (contract/contract v))) @v {:registry contract/registry ::mg/=>seed (seed-of v)})
                                (catch Throwable e {:smallest :threw :seed (ex-message e)}))]]
                   [(symbol v) r (lib/r2 (profile/ms-since t0))])
         ;; malli could not generate an [:and ...] argument (such-that): not generated, not failed
@@ -396,7 +400,9 @@
         failed (vec (for [[sym r] checked :when (some? r)]
                       [sym (if (= :threw (:smallest r)) r
                              (let [c (:check (first (:errors r)))]
-                               {:smallest (:smallest c) :problem (some-> (:malli.core/result c) ex-message)}))]))]
+                               {:smallest (:smallest c) :problem (some-> (:malli.core/result c) ex-message) :seed (::mg/seed c)
+                                :reproduce (list 'malli.generator/check (list 'm/deref (list 'seon.contract/schema (list 'seon.contract/contract (list 'var sym))))
+                                                 sym {:registry 'seon.contract/registry ::mg/=>seed (::mg/seed c)})}))]))]
       {:report {:shard [i k] :contracts (count vs) :fn-without-gen no-gen
                 :generated-and-checked (count checked) :failed failed
                 :checked (vec (sort (map first checked))) :ms (into (sorted-map) (map (juxt first #(nth % 2))) checked) :such-that (vec (sort such-that))
@@ -1294,7 +1300,7 @@
      "drain" (fn [n more] (drain (n-or n "32")))
      "backpressure" (fn [n more] (backpressure (n-or n "200")))
      "contracts" (fn [n more] (contracts))
-     "mg-check" (fn [n more] (mg-check n))
+     "mg-check" (fn [n more] (mg-check n (first more)))
      "e2e" (fn [n more] (lib/c-exit (if (seon.e2e/run n more) 0 1)))
      ;; swarm N M: seon.e2e's swarm row (N tasks over 5 shared vars, max-running M), SWARM OK/FAILED
      "swarm" (fn [n more] (lib/c-exit (if (seon.e2e/run "swarm" [(or n "20") (or (first more) "8")]) 0 1)))

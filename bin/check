@@ -68,6 +68,7 @@ if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then
   exit $st
 fi
 N=${1:-100}
+TIMEFMT='real %E user %U sys %S'
 OUT=$ROOT/target/check/$(date +%Y%m%dT%H%M%S)
 mkdir -p "$OUT"
 FAILED=() GREEN=()
@@ -86,7 +87,8 @@ step() {
   local name=$1 filter=$2; shift 2
   local log=$OUT/$name.log expect=${EXPECT:-0}
   [[ $name == seed ]] || want ${${name%-write}%-read} || return 0
-  SEON_MAIN=check-$name "$@" > "$log" 2>&1
+  # its wall and CPU seconds kept beside its log (NAME.time: zsh's time, which keeps the exit status)
+  { time (SEON_MAIN=check-$name "$@" > "$log" 2>&1) } 2> "$OUT/$name.time"
   local st=$?
   if [[ -n $filter ]]; then grep -E "$filter" "$log"; else tail -1 "$log"; fi
   if (( st != expect )); then FAILED+=("$name (exit $st, expected $expect, $log)"); echo "FAILED $name (exit $st, expected $expect)"
@@ -112,7 +114,10 @@ echo "== mg-check (no [:fn] without :gen; mg/check on every pure contract, in th
 # in K shards at once, each a process checking every Kth contracted var (seon.check/mg-check);
 # each shard's exit status counts. K = 4 until the config file holds it (session CONFIG).
 K=4; CP=(); CF=${#FAILED}
-want mg-check && for i in $(seq 0 $((K-1))); do run mg-check $i/$K > "$OUT/mg-check-$i.log" 2>&1 & CP+=($!); done
+# each contract's seed is derived from the step's reach digest (bin/prove's plan), or, in a run
+# that stores no result, from the binary's tree (seon.check/mg-check)
+MG_BASE=$( [[ -n $SEL ]] && sed -n 's/.*"mg-check" "\([0-9a-f]*\)".*/\1/p' "$SEL/steps.edn" ); MG_BASE=${MG_BASE:-$(cat "$ROOT/target/seon.tree")}
+want mg-check && for i in $(seq 0 $((K-1))); do { time (run mg-check $i/$K $MG_BASE > "$OUT/mg-check-$i.log" 2>&1) } 2> "$OUT/mg-check-$i.time" & CP+=($!); done
 want mg-check && for i in $(seq 0 $((K-1))); do
   wait ${CP[$((i+1))]}; st=$?
   grep -E ":generated|^MG-CHECK " "$OUT/mg-check-$i.log"
