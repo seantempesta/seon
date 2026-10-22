@@ -4,7 +4,7 @@
   account and its exact text, written back byte for byte, a merged change rewriting only
   its form, and the written files committed on the merges branch through the :git effect's
   performer. Never the live tree: write-back and commits go to a copy under target/."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell :as sh]
             [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
             [datahike.api :as d]
@@ -15,7 +15,7 @@
             [seon.source :as source]
             [seon.program-test :as pt]))
 
-(defn- empty-db [] (pdb/test-db))
+(defn- empty-db [] (ts/test-db))
 
 (def ^:private here (System/getProperty "user.dir"))
 
@@ -214,6 +214,25 @@
     (is (contains? (set (d/q '[:find [?r ...] :where [?v :var/name x.unloaded-test/q-test] [?v :var/form ?f] [?f :form/refs ?r]] db))
                    'x.z-support/k)
         "a namespace required from a later file is analyzed first, and its alias reads ::z/k")))
+
+(deftest a-changed-ns-form-applies-its-requires-before-its-forms
+  ;; task seon.source/an-import-reads-a-changed-ns-form-before-its-forms: a restarted root
+  ;; loads main's program first (seon.program/load-all!), which runs a test namespace's old
+  ;; ns form and so marks it loaded; the import of its changed file must still apply the
+  ;; new ns form (a new require and alias) before analyzing the forms that use it. Seen
+  ;; 2026-10-22: the owner's root died on `No such namespace: ts` once test files required
+  ;; seon.test-store :as ts.
+  ;; main's program as load-all! runs it: the namespace's old ns form, then another test
+  ;; namespace's that requires it, which marks it loaded
+  (binding [*ns* (the-ns 'user)] (eval '(ns x.reloaded-test)) (eval '(ns x.reloaded-user (:require [x.reloaded-test]))))
+  (is (contains? (loaded-libs) 'x.reloaded-test) "the setup: main's program marked it loaded")
+  (let [files {"test/x/reloaded_test.clj"
+               "(ns x.reloaded-test (:require [x.reloaded-support :as rs]))\n\n(defn g [] (rs/k))\n"
+               "test/x/reloaded_support.clj" "(ns x.reloaded-support)\n\n(defn k [] 1)\n"}
+        db (d/db-with (empty-db) (source/import-tx (empty-db) files))]
+    (is (contains? (set (d/q '[:find [?r ...] :where [?v :var/name x.reloaded-test/g] [?v :var/form ?f] [?f :form/refs ?r]] db))
+                   'x.reloaded-support/k)
+        "the alias the changed ns form adds resolves in the form after it")))
 
 (deftest a-restart-catches-up-and-a-new-generation-resumes
   ;; BUILD plan P5 (task seon.source/the-next-generation-runs-from-the-merges-commit),

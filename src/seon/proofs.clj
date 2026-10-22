@@ -8,7 +8,7 @@
   run-tests-forked answer): one status per test var, read the same way by the agent's turn
   loop and root's judge."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.lib :as lib]
+  (:require [seon.contract :refer [defn defn-]] [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.profile :as profile]
             [clojure.edn :as edn] [clojure.string :as str] [clojure.test :as t]))
 
 (defn test-symbol
@@ -173,7 +173,7 @@
   (into {} (for [[n ts] (group-by (comp symbol namespace) tests)
                  :let [counts (atom {}) ran (atom {}) out (java.io.StringWriter.) t0 (atom nil)
                        done! (fn [v] (let [r (assoc (merge {:pass 0 :fail 0 :error 0} (@counts v)) :test v :digest (digests v)
-                                                    :ms (quot (- (lib/now-ns) @t0) 1000000))]
+                                                    :ms (quot (- (profile/now-ns) @t0) 1000000))]
                                        (swap! ran assoc v (store! dir r))
                                        (note! r)))
                        _ (binding [t/*test-out* out
@@ -183,7 +183,7 @@
                                               (let [v (some-> (or (:var m) (first t/*testing-vars*)) str test-symbol)
                                                     v (when (digests v) v)]
                                                 (case (when v (:type m))
-                                                  :begin-test-var (do (reset! t0 (lib/now-ns)) (note! {:seon.test/started v}))
+                                                  :begin-test-var (do (reset! t0 (profile/now-ns)) (note! {:seon.test/started v}))
                                                   :end-test-var (done! v)
                                                   (:pass :fail :error) (when v (swap! counts update-in [v (:type m)] (fnil inc 0)))
                                                   nil))

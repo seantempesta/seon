@@ -2,7 +2,7 @@
   "(reconcile db) answers exactly the expected actions for a table of task graphs: needs
   DAGs, max-running, held and cancelled tasks, environment changes, a previous root's
   attempts, ended attempts judged by the done rule, dead agents."
-  (:require [clojure.test :refer [deftest is are testing]]
+  (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is are testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.task :as task]
@@ -10,7 +10,7 @@
             [seon.template :as tpl] [seon.problems :as problems] [seon.merge :as pm] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
             [clojure.string :as str] [clojure.set] [seon.config :as cfg]))
 
-(defn- empty-db [] (pdb/test-db))
+(defn- empty-db [] (ts/test-db))
 
 (defn- decl [nm & {:keys [needs proofs model]}]
   (cond-> {:seon.task/ns 'demo :seon.task/name nm :seon.task/plan (str "Make " nm " true.")
@@ -461,7 +461,7 @@
                                (attempt "add" 1 :bailed)
                                (r/stuck-tx (r/index (mdb [(decl "add") (decl "twice" :needs ["add"])])) "demo/add#1" "demo/add" "capped")))
         commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
-        step (fn [st db ops] (let [[st outs] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (sock/now-ns)})] [st (:to-api outs)]))
+        step (fn [st db ops] (let [[st outs] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (profile/now-ns)})] [st (:to-api outs)]))
         report-in (fn [outs] (some #(get-in % [:req :req :tx-data 0 :seon.root/quiescent]) outs))
         [st outs] (step (r/reconciler-proc {:boot "boot-1"}) db [])
         report (report-in outs)
@@ -495,7 +495,7 @@
   ;; root refuses the spawn (the branch is held, or too many live agents): the refusal is
   ;; the attempt, written on main, and the next pass starts the task again
   (let [db (db-of [(decl "a")])
-        [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1"}) :main {:t (:max-tx db) :ops [] :db db :ns (sock/now-ns)})
+        [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1"}) :main {:t (:max-tx db) :ops [] :db db :ns (profile/now-ns)})
         asked (first (filter #(= :spawn (get-in % [:req :op])) (:to-api outs)))
         refusal (contract/error :seon.root/refused 'seon.root/spawn! held-why {:branch :demo/a :agent :a9})
         [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r refusal})
@@ -510,7 +510,7 @@
   ;; if nothing has changed, asking again is refused again: neither the refusal's answer nor
   ;; its own commit starts the task; other work on main lets it ask again, as its next attempt
   (let [commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
-        main (fn [st db ops] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (sock/now-ns)}))
+        main (fn [st db ops] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (profile/now-ns)}))
         spawns (fn [outs] (vec (keep #(when (= :spawn (get-in % [:req :op])) (get-in % [:req :opts :task])) (:to-api outs))))
         db (db-of [(decl "a")])
         [st outs] (main (r/reconciler-proc {:boot "boot-1"}) db [])

@@ -2,7 +2,7 @@
   "Lane D2: every class of problem lands as a typed fact written by its observer, and
   seon.problems/report lists them by class at a cost that follows the problems, not the
   program. Run: bin/test seon.problems-test"
-  (:require [clojure.test :refer [deftest is testing]] [clojure.edn :as edn]
+  (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is testing]] [clojure.edn :as edn]
             [datahike.api :as d] [clojure.core.async :as a]
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
             [seon.repl :as repl] [seon.proofs :as proofs] [seon.root :as root] [seon.agent-proc :as ap]
@@ -28,7 +28,7 @@
 (defn- occ [e agent ms] (err/occurrence e :eval {:agent agent :task "t/a" :form "(f 1)"} ms))
 
 (deftest a-storm-is-one-write-per-window
-  (pdb/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (concat (for [i (range 1000)] (occ (refusal 'app/f i) (if (even? i) :a1 :a2) (+ 1000 i)))
+  (ts/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (concat (for [i (range 1000)] (occ (refusal 'app/f i) (if (even? i) :a1 :a2) (+ 1000 i)))
                                      (for [i (range 10)] (occ (refusal 'app/g i) :a3 (+ 5000 i)))))
         [f tx] (err/flush-tx f @conn)
         s (err/signature (refusal 'app/f 0))]
@@ -60,7 +60,7 @@
   ;; the window's write is one entity per signature that CHANGED (a-storm-is-one-write-per-window);
   ;; a signature already on main whose only change is one more occurrence is the same fact,
   ;; counted in the observer's fold: transacting its count is what made 41,709 commits in 70 s
-  (pdb/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (for [i (range 3)] (occ (refusal 'app/f i) :a1 (+ 1000 i))))
+  (ts/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (for [i (range 3)] (occ (refusal 'app/f i) :a1 (+ 1000 i))))
         [f tx] (err/flush-tx f @conn)]
     (is (= 1 (count tx)) "the first occurrence writes the signature")
     (d/transact conn {:tx-data tx})
@@ -77,12 +77,12 @@
   ;; it to main as one commit, and that commit is the reconciler's next input. A step that
   ;; throws leaves the proc's state as it was, so it fails on every commit it is handed.
   ;; Main's commits over ten rounds are the first record, and no more.
-  (pdb/test-branch! (fn [_ conn] (let [_ (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t 1 :stuck []}}]})
+  (ts/test-branch! (fn [_ conn] (let [_ (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t 1 :stuck []}}]})
         t0 (:max-tx @conn)
         st (rec/reconciler-proc {:boot "boot-1"})
         round (fn [f i]
                 (let [db @conn
-                      e (try (rec/reconciler-proc st :main {:t (:max-tx db) :ops [] :db db :ns (sock/now-ns)}) nil
+                      e (try (rec/reconciler-proc st :main {:t (:max-tx db) :ops [] :db db :ns (profile/now-ns)}) nil
                              (catch Throwable e e))
                       f (err/fold f (err/occurrence (agent/error-map e) :platform {} (+ 5000 i)))
                       [f tx] (err/flush-tx f db)]
@@ -162,7 +162,7 @@
     (is (= [] (writes o3)) "the answered write is followed by nothing: 500 repeats of a written signature are counted in the fold")))
 
 (deftest an-agent-death-is-recorded-with-its-cause
-  (let [dir (str (System/getProperty "java.io.tmpdir") "/d2-death-" (System/nanoTime))
+  (let [dir (str (System/getProperty "java.io.tmpdir") "/d2-death-" (profile/now-ns))
         _ (.mkdirs (java.io.File. (str dir "-agents")))
         _ (spit (str dir "-agents/a1.err") (str (apply str (repeat 3000 "x")) "\nChez: out of memory\n"))
         p (promise)
@@ -246,7 +246,7 @@
   "A main db with n recorded errors, n red attempts and n dead attempts over a task each,
   plus k clean tasks with green attempts (the program the read must not cost)."
   [n k]
-  (pdb/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (for [i (range n)] (err/occurrence {:seon.error/type :seon.agent/eval-error :seon.error/operation 'seon.repl/eval-code
+  (ts/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (for [i (range n)] (err/occurrence {:seon.error/type :seon.agent/eval-error :seon.error/operation 'seon.repl/eval-code
                                                                   :seon.error/message (str "Unable to resolve symbol: s" (char (+ 97 (mod i 26))) i) :class "x"}
                                                                  :eval {:agent :a1 :task "t/x0"} 100)))
         [_ tx] (err/flush-tx f @conn)
@@ -301,7 +301,7 @@
         (is (= [{:key [:var 'app/f] :kind :both-modified}] (get-in m [:evidence :conflicts])))
         (is (= :seon.merge/behind (get-in m [:error :seon.error/type])))))
     (testing "a task whose evidence names a problem answers it: mining files no duplicate"
-      (pdb/test-branch! (fn [_ c] (let [_ (d/transact c (vec (d/datoms db :eavt)))
+      (ts/test-branch! (fn [_ c] (let [_ (d/transact c (vec (d/datoms db :eavt)))
             db2 db
             sig (:signature (first (get-in r [:classes :eval :rows])))
             db3 (:db-after (d/with db2 [{:seon.task/id "fix/e" :seon.task/ns 'fix :seon.task/name "e" :seon.task/plan "p" :seon.task/execution :held
@@ -382,7 +382,7 @@
 (deftest another-tasks-unfinished-proof-is-not-a-problem
   ;; T5's real run: one attempt's run reports every program test, so 210 rows named other
   ;; tasks' proofs not done yet (allowed reds); only the task's own proofs are its problems
-  (pdb/test-branch! (fn [_ conn]
+  (ts/test-branch! (fn [_ conn]
     (d/transact conn [{:seon.task/id "t/a" :seon.task/ns 't :seon.task/name "a" :seon.task/plan "p" :seon.task/execution :running
                        :seon.task/branch :b :seon.task/kind :work :seon.task/proofs #{'app.t/a-test}}])
     (d/transact conn [{:seon.attempt/id "t/a#1" :seon.attempt/task [:seon.task/id "t/a"] :seon.attempt/boot "b" :seon.attempt/agent :a1

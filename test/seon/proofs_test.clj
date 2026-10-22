@@ -5,11 +5,11 @@
   is keyed like a test by what its functions reach, and the run is forked shards that store
   each result."
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d]
-            [seon.db :as pdb] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
+            [seon.test-store :as ts] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
             [seon.program-test :refer [record]]))
 
 (defn- prog []
-  (record (pdb/test-db)
+  (record (ts/test-db)
           'user "(ns app.pv-calc)"
           'app.pv-calc "(defn add [a b] (+ a b))"
           'app.pv-calc "(defn neg [a] (- a))"
@@ -97,7 +97,7 @@
         "every function a step names is a var")))
 
 (deftest shards-split-by-namespace-and-each-result-is-stored
-  (record (pdb/test-db) 'user "(ns app.pv-red-test (:require [clojure.test :refer [deftest is use-fixtures]]))"
+  (record (ts/test-db) 'user "(ns app.pv-red-test (:require [clojure.test :refer [deftest is use-fixtures]]))"
           'app.pv-red-test "(def ^:dynamic *fx* nil)"
           'app.pv-red-test "(use-fixtures :each (fn [f] (binding [*fx* :on] (f))))"
           'app.pv-red-test "(deftest red-test (is (= 1 2)))"

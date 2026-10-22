@@ -9,7 +9,7 @@
     --store-steps OUT                 the steps bin/check ran green stored at their digests
   bin/test runs each shard in a process of its own, at once (a fork of this runtime cannot
   connect to a store: Datahike's connection state does not survive fork)."
-  (:require [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
+  (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
             [datahike.api :as d] [seon.config :as config] [seon.db :as pdb]
             [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.source :as source]))
 
@@ -54,7 +54,7 @@
   (seon.source/import-tx: analyzed, not run)."
   [root]
   (let [files (into {} (filter #(str/ends-with? (key %) ".clj")) (:value (fx/read-source {:req {:root root :dirs ["src" "test"]}})))
-        db (pdb/test-db)]
+        db (ts/test-db)]
     (d/db-with db (source/import-tx db files))))
 
 (defn- tests-of
@@ -85,7 +85,7 @@
   each red one printed (RED), then SHARD n green m red. Answers the exit status."
   [file]
   (let [{:keys [tests digests]} (edn/read-string (slurp file))
-        t0 (System/nanoTime)]
+        t0 (profile/now-ns)]
     (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
     (let [ran (proofs/run-tests! tests digests (config/value :seon.config.source/test-results-dir)
                                  (fn [x] (cond (:seon.test/started x) (println "started" (:seon.test/started x))
@@ -93,7 +93,7 @@
                                    (flush)))
           red (count (remove proofs/green? (vals ran)))]
       (println (str "SHARD " (count ran) " tests, " (- (count ran) red) " green, " red " red, in "
-                    (quot (- (System/nanoTime) t0) 1000000) " ms"))
+                    (quot (- (profile/now-ns) t0) 1000000) " ms"))
       (if (zero? red) 0 1))))
 
 (defn- prove!
@@ -103,7 +103,7 @@
   (names, one line) and out/steps.edn ({step digest}) for bin/prove to run."
   [what all? out names]
   (let [root (System/getProperty "user.dir")
-        t0 (System/nanoTime)
+        t0 (profile/now-ns)
         {:keys [db inputs digests]} (tests-of root names)
         dir (config/value :seon.config.source/test-results-dir)
         tests? (not= what "checks") checks? (not= what "tests")
@@ -114,7 +114,7 @@
         n (write-shards! out (vec run-tests) digests)]
     (println (str "prove: " (count cand) " keys (" (if tests? (count digests) 0) " tests, " (count steps) " check steps), "
                   (count reused) " green at their digest (reused), " (count run-tests) " tests to run in " (if (seq run-tests) n 0)
-                  " shards, " (count run-steps) " steps to run; selected in " (quot (- (System/nanoTime) t0) 1000000) " ms; results " dir))
+                  " shards, " (count run-steps) " steps to run; selected in " (quot (- (profile/now-ns) t0) 1000000) " ms; results " dir))
     (when checks?
       (fx/write-file {:req {:path (str out "/steps") :text (str (str/join " " run-steps) (when (seq run-steps) "\n"))}})
       (fx/write-file {:req {:path (str out "/steps.edn") :text (sedn/encode (select-keys steps run-steps))}})

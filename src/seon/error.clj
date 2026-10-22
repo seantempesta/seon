@@ -94,8 +94,7 @@
   "The recorded error with signature s on db, or nil."
   {:malli/schema [:=> [:cat :seon.host/db :seon.error/signature] [:maybe :map]]}
   [db s]
-  (when-let [e (d/q '[:find ?e . :in $ ?s :where [?e :seon.error/signature ?s]] db s)]
-    (dissoc (d/pull db '[*] e) :db/id)))
+  (some-> (d/pull db '[*] [:seon.error/signature s]) (dissoc :db/id)))
 
 (defn flush-tx
   "The window's write: one entity per signature not yet written by this observer, its count

@@ -6,6 +6,14 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [edamame.core :as e] [clojure.string :as str]))
 
+(defn line-starts
+  "The offset in text where each line starts: 0, then one past each newline."
+  {:malli/schema [:=> [:cat :string] [:vector :int]]}
+  [^String text]
+  (loop [acc [0] i 0]
+    (let [j (.indexOf text "\n" (int i))]
+      (if (neg? j) acc (recur (conj acc (inc j)) (inc j))))))
+
 (defn opts
   "edamame's options for reading source written in namespace nsym: every Clojure syntax
   (`#()`, regex, var, syntax-quote, `#=` as data), `::kw` resolved against nsym (an alias
