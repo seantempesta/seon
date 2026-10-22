@@ -6,7 +6,7 @@ How a branch lands on main: what it runs, how batches are proven, and how confli
 
 A lane is a separate instance of the whole system: `bin/worktree NAME` (run from the main tree) makes `../next-NAME` on branch `jolt/NAME` from main, with its own submodule checkouts at their pins, an APFS clone of `target/` (so `nice -n 15 bin/build seon` is the only build), its own ports (`config/local.edn`, `bin/ports`) and its own stores under its `runs/`. In it:
 - `bin/root start | status | stop` runs that worktree's own root, never the standing one (7888); a Claude session started in the worktree reaches it through the committed `.mcp.json` (`./bin/mcp` asks this checkout's root);
-- `bin/test` and single check modes iterate; `bin/check` (one mode or the full run) works on a store of the checks' own, `target/check-store`, seeded when missing (`SEON_STORE` names another): `runs/store` is the worktree root's, made without the example program the checks seed, so reusing it fails steps falsely;
+- `bin/prove` iterates and lands (it is `bin/test` and `bin/check` without arguments, together): what the change reaches, nothing else; a single check mode (`bin/check MODE`) runs one; `bin/check` (one mode or a run) works on a store of the checks' own, `target/check-store`, seeded when missing (`SEON_STORE` names another): `runs/store` is the worktree root's, made without the example program the checks seed, so reusing it fails steps falsely;
 - after each landing on main: `git merge main` in the worktree, then `bin/worktree --sync NAME` from the main tree (never `git submodule` in a worktree);
 - a submodule the lane adds (`reference-code/X`) is written as a `.gitmodules` entry and a gitlink, with its checkout cloned from a local copy; root initializes it in the main tree when it lands (`git submodule update --init reference-code/X`), so later worktrees get it.
 
@@ -14,7 +14,7 @@ A lane is a separate instance of the whole system: `bin/worktree NAME` (run from
 
 ## A lane's part
 
-A lane merges main into its branch, proves the merged result, and reports. Branches live hours: merge main into yours after every landing. While iterating, run only what your change reaches: single check modes and the tests that touch it, never a full check per edit. To land, report the commits, proofs red → green, numbers against estimates, what you deleted, the check's `target/check/<time>/` path, and that nothing of yours is running. A lane stops at its own single-namespace tests and its red-to-green proofs, reports, and lets root run the full proof in the batch.
+A lane merges main into its branch, proves the merged result with `bin/prove`, and reports. Branches live hours: merge main into yours after every landing. While iterating, `bin/prove` (or `bin/test NS` for one namespace) runs only what your change reaches, never a full check per edit. To land, report the commits, proofs red → green, numbers against estimates, what you deleted, `bin/prove`'s last lines (and the check's `target/check/<time>/` path when steps ran), and that nothing of yours is running.
 
 ## Root merges, and reads the verdict
 
@@ -24,11 +24,18 @@ Root lands by merging the branch, never by copying files over newer changes, and
 
 ## A landing runs what the change reaches
 
-A landing runs what the change reaches, not every check (owner, 2026-10-21: "I want faster iteration not a matrix with every run permutation"). The landing proof is: `bin/dragons` (every law census, no build), the tests of the changed namespaces and of their callers (found with the compiler's facts, or grep until reach selection lands), the `bin/check` steps whose code changed, and `bin/check smoke`. The full `bin/check 100` and `bin/test` run once a day in the background, and before a change to boot, the writer, the reconciler or the build; a red there becomes a task, not a blocked landing. Target: tests selected by reach digest and results reused (v1's `seon.test.cache`), so an unchanged test never runs again.
+A landing runs what the change reaches, not every check (owner, 2026-10-21: "I want faster iteration not a matrix with every run permutation"; 2026-10-22: "why don't we have a comprehensive policy where we are only running tests that have changed?"). The landing proof is `bin/prove` on the merged tree, then `bin/check smoke`; `bin/dragons` runs inside it as a step keyed by the whole tree. One rule selects for everyone (task `seon.proofs/prove-runs-what-a-change-reaches`): a key runs exactly when no green result is stored at its reach digest (```seon.proofs/plan```), in the one results directory every checkout shares (`:seon.config.source/test-results-dir`), so an unchanged tree runs nothing and a result proven in any checkout is reused in every other.
+- **Tests.** A test's key is its reach digest (```seon.program/reach-digests```: the forms it reaches through refs, macros, quoted names, methods, fixtures and schemas, plus the checkout's inputs with no program facts; [source](source.md#tests-run-by-reach)). `bin/test [NS ...]` imports src and test once, selects, and deals what runs, a namespace at a time, into `:seon.config.proofs/jobs` shards (```seon.proofs/shards```), each a process of its own started at once and reaped by the shell (```seon.proofs/run-tests!```): a fork of the runner cannot connect to a store, since Datahike's connection state does not survive fork (measured 2026-10-22: the child's first `d/connect` never returns). Each result is stored as it ends (```seon.proofs/store!```, through ```seon.fx/write-file```); only greens are reused, so a red runs again.
+- **Check steps.** Each `bin/check` step is keyed the same way by the `seon.check` mode functions its body runs (```seon.proofs/check-steps```, digested with ```seon.proofs/step-digests```): a change to `seon.check/smoke` or what it calls reruns smoke; a change to bin/, native/, resources/ or a pin (the binary's other inputs, `:env`) reruns every step. `bin/prove` builds `target/seon` from the tree before it runs a step (a step's result is keyed by the source, so it must run the binary built from it), runs the steps to run through `bin/check`'s own bodies (`SEON_CHECK_STEPS`, the green ones written to `SEON_CHECK_GREEN`), and stores the greens at their digests.
+- **Agents.** A Seon agent's run (the turn's observe, the judge's `:tests`, the merge gate, and `(my.agent/prove)`) uses the same `plan` against the main it forked from (```seon.agent/test-plan```): the proofs and the tests whose digest moved, each green one held at its digest reused (```seon.agent/run-tests-forked```).
+
+The full runs are explicit: `bin/test --all` and `bin/check 100`. They run once a day in the background, and before a change to boot, the writer, the reconciler or the build; a red there becomes a task, not a blocked landing.
+
+Measured 2026-10-22 (lane PROVE): see the numbers in the task's landing commit; selecting over 357 tests and 33 steps takes the import (~9 s) plus well under a second.
 
 ## Ready branches land in batches
 
-Root lands ready branches in batches (owner, 2026-10-21: "this is taking forever"; three branches landed one at a time cost ~40 minutes of serial full checks, each ~10 min, plus re-proving after every main move). Branches that are ready and file-disjoint (or whose overlaps are both-sides additions) merge onto one integration branch from main and are proven together by one `bin/check 100` and one `bin/test`; then each lands.
+Root lands ready branches in batches (owner, 2026-10-21: "this is taking forever"; three branches landed one at a time cost ~40 minutes of serial full checks, each ~10 min, plus re-proving after every main move). Branches that are ready and file-disjoint (or whose overlaps are both-sides additions) merge onto one integration branch from main and are proven together by one `bin/prove` there (each branch's own greens are reused; only what the combination moved runs); then each lands.
 
 ## Every landing's `src` diff stat is read
 
@@ -40,4 +47,4 @@ A conflict is resolved by copying each side's lines, never retyping; the lines a
 
 ## Where this is going
 
-A landing queue on the one root that merges main into each candidate, runs what it reaches on the merged result, and batches disjoint candidates. All builds, tests and checks become tasks on that root, admitted by workload, with results reused by digest. Seon's own merges get the same gate, and `:behind` fires only when main's change touches what the branch changes or reaches.
+A landing queue on the one root that merges main into each candidate, runs `prove` on the merged result, and batches disjoint candidates. All builds, tests and checks become tasks on that root, admitted by workload, with results reused by digest (as `prove` does today). Seon's own merges get the same gate, and `:behind` fires only when main's change touches what the branch changes or reaches.

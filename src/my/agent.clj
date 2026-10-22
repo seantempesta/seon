@@ -8,10 +8,13 @@
     (callers 'ns/f)           the program vars whose recorded definition names ns/f
     (callees 'ns/f)           the vars ns/f's recorded definition names
     (grep "text")             the program vars whose recorded definition's text holds it
+    (prove)                   run what judges this branch: the task's proofs and the tests reaching
+                              what it changed since main, each green one at its digest reused
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context]
+            [seon.config :as cfg] [seon.proofs :as proofs] [seon.task :as task]
             [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "The live value of an earlier result, by handle (:h3)." {:malli/schema [:=> [:cat :keyword] :any]}
@@ -40,6 +43,20 @@
   (vec (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]]
                              (agent/db) sym))
                    sym))))
+
+(defn prove
+  "Run what judges this branch, as root's judge and the turn loop run it (seon.agent/run-tests-forked,
+  in a fork of this agent): the task's proofs (or the given ones) and every test reaching what the
+  branch changed since the main it forked from, each test green at its reach digest reused, not
+  run. Answers {:selected n :ran n :reused n :ms n :results {test :pass|:fail|:error} :red [{:test
+  :type :message :expected :actual}]}."
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :qualified-symbol]] :map]]}
+  ([] (prove (or (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})))
+  ([proofs]
+   (let [run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks) proofs)
+         results (proofs/results run)]
+     {:selected (count results) :ran (:ran run 0) :reused (:reused run 0) :ms (:ms run)
+      :results results :red (proofs/red-reports run (set (keys results)))})))
 
 (defn grep
   "The program vars whose recorded definition's text (:form/src on this branch) holds the

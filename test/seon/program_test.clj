@@ -12,6 +12,7 @@
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.program :as program]
+            [seon.proofs :as proofs]
             [seon.merge :as pm]
             [seon.source :as source]
             [clojure.java.shell :as sh]
@@ -253,14 +254,18 @@
   (let [db (calc-db)
         dir (scratch-dir "results")
         digests (select-keys (program/reach-digests db {:env "e" :tree "t"}) calc-tests)
-        first-plan (runner/plan digests dir)
-        ran (binding [clojure.test/*test-out* (java.io.StringWriter.)] (runner/run-vars! (:run first-plan) digests dir))
-        second-plan (runner/plan digests dir)]
+        plan #(proofs/plan nil digests (proofs/greens dir (vals digests)) #{})
+        first-plan (plan)
+        ran (binding [*out* (java.io.StringWriter.)] (proofs/run-tests! (:run first-plan) digests dir (fn [_])))
+        second-plan (plan)]
     (is (= calc-tests (set (:run first-plan))) "nothing recorded: every test runs")
     (is (= {:pass 1 :fail 0 :error 0} (select-keys (ran 'app.pt-calc-test/add-test) [:pass :fail :error])))
     (is (= [] (:run second-plan)) "the second run runs nothing")
     (is (= calc-tests (set (keys (:reused second-plan)))) "and reports every result reused")
     (is (= (digests 'app.pt-calc-test/neg-test) (:digest ((:reused second-plan) 'app.pt-calc-test/neg-test))))))
+
+(defn- run-plan "bin/test's plan of digests against the results in dir." [digests dir]
+  (proofs/plan nil digests (proofs/greens dir (vals digests)) #{}))
 
 (defn- checkout!
   "A git checkout at a new directory holding files ({relative path text}), all added."
@@ -280,13 +285,13 @@
         in-a (runner/inputs a)
         da (select-keys (program/reach-digests db in-a) calc-tests)]
     (is (= in-a (runner/inputs b)) "the same content at another path: the same inputs")
-    (binding [clojure.test/*test-out* (java.io.StringWriter.)] (runner/run-vars! (:run (runner/plan da dir)) da dir))
-    (is (= [] (:run (runner/plan (select-keys (program/reach-digests db (runner/inputs b)) calc-tests) dir)))
+    (binding [*out* (java.io.StringWriter.)] (proofs/run-tests! (:run (run-plan da dir)) da dir (fn [_])))
+    (is (= [] (:run (run-plan (select-keys (program/reach-digests db (runner/inputs b)) calc-tests) dir)))
         "checkout b reuses every result checkout a recorded")
     (spit (str b "/docs/a.md") "# a, edited")
     (is (= (:env in-a) (:env (runner/inputs b))) "prose is no input of a test that reads no files")
     (spit (str b "/resources/seon/schemas/x.edn") "{:x :string}")
-    (is (= calc-tests (set (:run (runner/plan (select-keys (program/reach-digests db (runner/inputs b)) calc-tests) dir))))
+    (is (= calc-tests (set (:run (run-plan (select-keys (program/reach-digests db (runner/inputs b)) calc-tests) dir))))
         "a changed schema resource is an input of every test")))
 
 ;; ---- refs the expansion and the quote leave (task seon.program/refs-name-quoted-symbols-and-macro-uses)

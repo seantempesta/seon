@@ -755,9 +755,13 @@
   its form names), with inputs' :tree when a reached form references a tree-reader. A
   test's digest moves exactly when a form or schema entry it reaches does. Cost: the live
   forms, contracts and schema entries read once and digested once, then per test its
-  closure."
-  {:malli/schema [:=> [:cat :seon.host/db [:map [:env :string] [:tree :string]]] [:map-of :qualified-symbol :string]]}
-  [db {:keys [env tree]}]
+  closure. With roots ({key [var ...]}, a bin/check step's mode functions: seon.proofs/
+  check-steps), the same digest of each key: what its vars' forms and their namespaces'
+  plain forms reach."
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:map [:env :string] [:tree :string]]] [:map-of :qualified-symbol :string]]
+                  [:=> [:cat :seon.host/db [:map [:env :string] [:tree :string]] [:map-of :string [:sequential :qualified-symbol]]] [:map-of :string :string]]]}
+  ([db inputs] (reach-digests db inputs nil))
+  ([db {:keys [env tree]} roots]
   (let [schemas (into {} (for [dt (d/datoms db :aevt :schema/key)] [(:v dt) (:schema/form (d/entity db (:e dt)))]))
         sid #(str "schema " %)
         named (fn [text] (keep #(when (contains? schemas %) (sid %)) (names (edn/read-string text))))
@@ -771,11 +775,16 @@
         digest (into {} (for [f forms] [(:id f) (error/digest (str (:ns f) "\n" (:src f)))]))
         edges (fn [f] (concat (keep var-form (:refs f)) (:schema f)
                               (for [[k s] (:defines f) :when (= :var k) id (concat (methods s) (impls s) (contract s))] id)))
-        plain (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) live))]
-    (into {} (for [f forms [k t] (:defines f) :when (and (= :var k) (= :test (:var/kind (d/entity db [:var/name t]))))
-                   :let [reached (loop [front (into [(:id f)] (map :id) (plain (:ns f))) seen #{}]
-                                   (if-let [[id & more] (seq front)]
-                                     (if (seen id) (recur more seen) (recur (into (vec more) (edges (by-id id))) (conj seen id)))
-                                     seen))
-                         reads? (some #(some tree-readers (:refs (by-id %))) reached)]]
-               [t (error/digest (apply str t "\n" env "\n" (when reads? tree) (sort (map digest reached))))]))))
+        plain (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) live))
+        ;; the digest of key k reaching from the forms ids, with their namespaces' plain forms
+        digest-of (fn [k ids]
+                    (let [reached (loop [front (into (vec ids) (comp (mapcat #(plain (:ns (by-id %)))) (map :id)) ids) seen #{}]
+                                    (if-let [[id & more] (seq front)]
+                                      (if (seen id) (recur more seen) (recur (into (vec more) (edges (by-id id))) (conj seen id)))
+                                      seen))
+                          reads? (some #(some tree-readers (:refs (by-id %))) reached)]
+                      (error/digest (apply str k "\n" env "\n" (when reads? tree) (sort (map digest reached))))))]
+    (if roots
+      (into {} (for [[k vars] roots] [k (digest-of k (keep var-form vars))]))
+      (into {} (for [f forms [k t] (:defines f) :when (and (= :var k) (= :test (:var/kind (d/entity db [:var/name t]))))]
+                 [t (digest-of t [(:id f)])]))))))

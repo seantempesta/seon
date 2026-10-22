@@ -14,12 +14,13 @@
   referred into its namespace. From proto/flow f2-final proto.agent (lane F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [seon.program :as program] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
+            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
             [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task :attempt (the task and attempt root forked it for, or nil) :fd :conn :db :base (main as this agent forked holding it) :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
+;; :proved {digest result} (the tests this agent's runs proved green, by reach digest) :base-digests [base {test digest}] (test-plan)
 (defonce state (atom nil))
 
 
@@ -294,30 +295,37 @@
       (assoc :got (print/text (second (:actual m)) (:part print/budgets)))
       (contract/valid? :seon.cost/report cost) (assoc :cost cost))))
 
-(defn test-vars
-  "The tests that judge branch db, as this process holds them: proofs, and every test that
-  reaches a var the branch changed since base (the main it forked from), the changed tests
-  among them (seon.reconcile/done-refusals reads only these). A proof with no var here does
-  not run; scratch namespaces (user, ^:scratch) never merge, so their tests never judge."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]] [:sequential :seon.host/var]]}
+(defn test-plan
+  "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
+  (seon.program/reach-digests) against base's (the main it forked from, digested once per base),
+  the greens this agent's earlier runs proved at those digests (:proved, {digest result}) and
+  proofs. A test is selected when it is a proof or reaches what the branch changed since base (a
+  var, method, fixture, ns form, macro or schema entry), and runs when no green is held at its
+  digest (seon.reconcile/done-refusals reads the selected). Scratch namespaces' tests (user,
+  ^:scratch) never merge, so they never judge; a proof with no test var here does not run.
+  Answers the plan with :digests {test digest}."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]] [:map [:selected :any] [:run :any] [:reused :any] [:digests :any]]]}
   [db base proofs]
-  (let [changed (program/changed-vars base db)]
-    (filter #(and (:test (meta %)) (not (program/scratch-ns? (:ns (meta %)))))
-            (keep #(some-> (find-ns (symbol (namespace %))) (ns-resolve (symbol (name %))))
-                  (sort-by str (into (into proofs changed) (program/reaching-tests db changed)))))))
+  (let [in {:env "" :tree ""}
+        judges? (fn [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
+                          (and (:test m) (not (program/scratch-ns? (:ns m))))))
+        bd (let [[b ds] (:base-digests @state)]
+             (if (identical? b base) ds (let [ds (program/reach-digests base in)] (swap! state assoc :base-digests [base ds]) ds)))
+        cd (into {} (filter (comp judges? key)) (program/reach-digests db in))]
+    (assoc (proofs/plan bd cd (into {} (keep #(some->> (get (:proved @state) %) (vector %))) (vals cd)) proofs)
+           :digests cd)))
 
 (defn- run-tests-here
-  "clojure.test over the branch's test-vars for the task's proofs, with the branch's schemas in effect (malli's
+  "clojure.test over vars (the test vars a test-plan runs), with the branch's schemas in effect (malli's
   dynamic registry bound to seon.program/schema-registry, as the agent's REPL binds it), the
   whole run within ticks engine ticks of work: answers report data. Each test var is written
   to w as it starts ({:seon.test/started v}), so the agent can name the test a death interrupted; a run
   past its ticks stops with the typed :seon.test/ticks-spent naming the test that was running."
-  {:malli/schema [:=> [:cat :int pos-int? [:set :qualified-symbol]] :seon.test/result]}
-  [w ticks proofs]
+  {:malli/schema [:=> [:cat :int pos-int? [:sequential :seon.host/var]] :seon.test/result]}
+  [w ticks vars]
   (let [reports (atom [])
         started (atom nil)
         orig t/report
-        vars (test-vars (db) (:base @state) proofs)
         r (try (binding [t/report (fn [m]
                                     (when (= :begin-test-var (:type m))
                                       (reset! started (str (:var m)))
@@ -361,35 +369,46 @@
                    var (assoc :var var))]})))
 
 (defn run-tests-forked
-  "Fork this agent; the child runs the test-vars of proofs within ticks engine ticks of work, writing
-  each test var as it starts and then one EDN line of its result on a pipe. The agent reads
-  the pipe to its end: no clock; the child ends by finishing, by its budget, or by dying
-  (then the last test it started is named)."
+  "Fork this agent; the child runs what test-plan runs for proofs (the selected tests with no
+  green held at their digest) within ticks engine ticks of work, writing each test var as it
+  starts and then one EDN line of its result on a pipe. The agent reads the pipe to its end: no
+  clock; the child ends by finishing, by its budget, or by dying (then the last test it started
+  is named). Each selected test green at its digest is reused: one :pass report marked :reused.
+  Each test that ran green is held at its digest (:proved) for the next run."
   {:malli/schema [:=> [:cat pos-int? [:set :qualified-symbol]] :seon.test/result]}
   [ticks proofs]
-  (let [[r w] (lib/pipe) t0 (lib/now-ns)]
-    (lib/fork!
-      {:refused (fn [n] (lib/c-close r) (lib/c-close w)
-                  {:pass 0 :fail 0 :error 1 :ms (lib/ms-since t0)
-                   :reports [{:type :error :message (str "cannot fork the tests: " n " Chez threads active (a running future?)")}]})
-       :child (fn []
-                (lib/c-close r)
-                ;; the run ends by its budget; if the agent dies first, the next write to the
-                ;; pipe ends this child (EPIPE). The agent's socket is FD_CLOFORK: not held here.
-                (lib/set-trip! (* 16 1048576))
-                (swap! state assoc :mode :test :evaluating false)
-                (let [res (try (run-tests-here w ticks proofs)
-                               (catch Throwable e {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]}))]
-                  (lib/write-line! w (pr-str res))))
-       :parent (fn [pid]
-                 (lib/c-close w)
-                 (let [rd (lib/line-reader r)
-                       line (loop [line nil]
-                              (let [ls (rd -1)]
-                                (if (= ls :eof) line (recur (or (peek ls) line)))))
-                       st (lib/wait-status pid)]
-                   (lib/c-close r)
-                   (assoc (run-answer line st) :ms (lib/ms-since t0) :pid pid :exit st)))})))
+  (let [{:keys [selected run reused digests]} (test-plan (db) (:base @state) proofs)
+        vars (keep #(some-> (find-ns (symbol (namespace %))) (ns-resolve (symbol (name %)))) run)
+        reused-reports (vec (for [t selected :when (and (reused t) (not (some #{t} run)))] {:type :pass :var (str "#'" t) :reused true}))
+        [r w] (lib/pipe) t0 (lib/now-ns)
+        res (lib/fork!
+              {:refused (fn [n] (lib/c-close r) (lib/c-close w)
+                          {:pass 0 :fail 0 :error 1 :ms (lib/ms-since t0)
+                           :reports [{:type :error :message (str "cannot fork the tests: " n " Chez threads active (a running future?)")}]})
+               :child (fn []
+                        (lib/c-close r)
+                        ;; the run ends by its budget; if the agent dies first, the next write to the
+                        ;; pipe ends this child (EPIPE). The agent's socket is FD_CLOFORK: not held here.
+                        (lib/set-trip! (* 16 1048576))
+                        (swap! state assoc :mode :test :evaluating false)
+                        (let [res (try (run-tests-here w ticks vars)
+                                       (catch Throwable e {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]}))]
+                          (lib/write-line! w (pr-str res))))
+               :parent (fn [pid]
+                         (lib/c-close w)
+                         (let [rd (lib/line-reader r)
+                               line (loop [line nil]
+                                      (let [ls (rd -1)]
+                                        (if (= ls :eof) line (recur (or (peek ls) line)))))
+                               st (lib/wait-status pid)]
+                           (lib/c-close r)
+                           (assoc (run-answer line st) :ms (lib/ms-since t0) :pid pid :exit st)))})
+        green (for [[t status] (proofs/results res) :when (and (= :pass status) (digests t))] [(digests t) {:test t :pass 1 :fail 0 :error 0}])]
+    (swap! state update :proved (fnil into {}) green)
+    (-> res
+        (update :reports (fnil into []) reused-reports)
+        (update :pass (fnil + 0) (count reused-reports))
+        (assoc :reused (count reused-reports) :ran (count vars)))))
 
 ;; ---- the loop ----------------------------------------------------------------------
 
