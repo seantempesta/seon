@@ -542,3 +542,17 @@
         b (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4 :deferred ['seon.root-test/a 'seon.root-test/b]})]
     (is (= {:n 2 :list '(my.agent/deferred)} (:deferred-to-merge b)))
     (is (nil? (:deferred-to-merge (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4 :deferred []}))) "none: nothing said")))
+
+(deftest the-map-names-each-cited-namespaces-functions
+  ;; root's research, lever 1 (aider's ranked repo map; v1 R4: naming the helpers took 7/32
+  ;; green to 22/24): the attempt shows the functions of the namespaces its proofs and cited
+  ;; vars live in, each a line (arglists, first sentence), most referenced first, within its
+  ;; token budget, and the form that lists the rest. Step E's runs 1-5: designs spent 15-25
+  ;; turns reading sources one pair at a time before writing anything
+  (let [db (db-with-program)
+        m (context/ns-map db '[demo/f demo-test/f-test])]
+    (is (= '[demo demo-test] (mapv :ns m)))
+    (is (= '[demo/f] (mapv :symbol (:vars (first m)))))
+    (is (= "Doubles." (:summary (first (:vars (first m))))))
+    (is (= '(clojure.repl/dir demo) (:all (first m))))
+    (is (= '#{demo-test/f-test demo-test/g-test} (set (map :symbol (:vars (second m))))))))

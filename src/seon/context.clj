@@ -76,6 +76,40 @@
         [shown more] (print/bounded hits :seon.config.render/found "(my.agent/callees 'ns/f) of each cited var")]
     (cond-> (mapv #(resolve-ref db % :doc) shown) more (conj more))))
 
+(defn- summary-of
+  "Var sym's first doc sentence: its runtime doc, else the docstring of its recorded form;
+  nil when it has none."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :string]]}
+  [db sym]
+  (some-> (or (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))) meta :doc)
+              (let [f (binding [*read-eval* false] (read-string (or (source-of db sym) "nil")))]
+                (when (and (seq? f) (string? (nth f 2 nil))) (nth f 2))))
+          ref/lead-sentence))
+
+(defn ns-map
+  "The map of the namespaces syms live in (the proofs and the vars the plan cites): each
+  namespace's functions as a line (name, arglists, first doc sentence), most referenced by the
+  program first, within an equal share of :seon.config.render/map-tokens, and the form that
+  lists them all (root's research, lever 1: aider's ranked map; v1 R4's helper naming)."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :qualified-symbol]] [:vector :map]]}
+  [db syms]
+  (let [nss (vec (distinct (map (comp symbol namespace) syms)))
+        share (quot (cfg/value :seon.config.render/map-tokens) (max 1 (count nss)))
+        uses #(count (d/datoms db :avet :form/refs %))
+        line (fn [s] (let [m (some-> (find-ns (symbol (namespace s))) ns-interns (get (symbol (name s))) meta)
+                           sm (summary-of db s)]
+                       (cond-> {:symbol s}
+                         (:arglists m) (assoc :arglists (:arglists m))
+                         sm (assoc :summary sm))))]
+    (vec (for [ns nss
+               :let [vs (d/q '[:find [?n ...] :in $ ?ns :where [?e :ns/name ?ns] [?v :var/ns ?e] [?v :var/name ?n] [?v :var/form _]] db ns)
+                     lines (map line (sort-by (juxt (comp - uses) str) vs))
+                     shown (reduce (fn [[acc spent] l] (let [s (+ spent (select/estimate (pr-str l)))]
+                                                         (if (<= s share) [(conj acc l) s] (reduced [acc spent]))))
+                                   [[] 0] lines)]
+               :when (seq vs)]
+           {:ns ns :vars (first shown) :all (list 'clojure.repl/dir ns)}))))
+
 (defn- cited-view
   "What citation c asks to see, at its depth: a wiki section from main's sections, else a file of
   the checkout read now (never stored), else a namespace; a citation that reaches nothing says
@@ -235,6 +269,7 @@
         refs (filterv (comp qualified-symbol? :seon.ref/name) cites)
         named (into (set proofs) (map :seon.ref/name) refs)
         helpers (found db named (into (mapv :seon.ref/name refs) (sort-by str proofs)))
+        nsmap (ns-map db (into (vec (sort-by str proofs)) (map :seon.ref/name) refs))
         sections (into [] (comp (filter #(or (simple-symbol? (:seon.ref/name %)) (and (:seon.ref/path %) (not (:seon.ref/problem-kind %)))))
                                 (map #(cited-view db %)))
                        cites)]
@@ -263,6 +298,7 @@
       max-turns (assoc :turn (str (inc turn) " of " max-turns))
       (seq sections) (assoc :sections sections)
       (seq helpers) (assoc :found helpers)
+      (seq nsmap) (assoc :map nsmap)
       (seq (refused (vec refusals) (vec reds))) (assoc :refused (refused (vec refusals) (vec reds)))
       (seq run-errors) (assoc :test-run {:failed (vec run-errors)})
       (last-reply truncated? source (vec repairs)) (assoc :your-last-reply (last-reply truncated? source (vec repairs)))
@@ -313,7 +349,7 @@
 (def attempt-keys
   "The block's attempt sections: what the task is and what it cites, the same each turn of an
   attempt (made from its first turn's basis), so they are sent once, in the cached prefix."
-  [:task :references :found :sections :evidence])
+  [:task :references :found :map :sections :evidence])
 
 (defn- attempt-message
   "The attempt sections of block, printed by the one printer under the context's budget."

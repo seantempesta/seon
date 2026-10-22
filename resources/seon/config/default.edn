@@ -413,6 +413,11 @@
  ;; the plan's cited vars and the proofs call. 0 shows none. Provenance: R4's k = 5
  ;; (notes/option3-R4-learning.md 5: 14 of 16 needed helpers in the top 5).
  :seon.config.render/found 5
+ ;; Unit: tokens (seon.print.select/estimate). The attempt's map of the namespaces its proofs and
+ ;; cited vars live in (seon.context/ns-map): each namespace's functions, most referenced first,
+ ;; within an equal share. Provenance: root's research (2026-10-22, lever 1), aider's default
+ ;; --map-tokens 1k. At the bound a namespace's rest is (clojure.repl/dir ns).
+ :seon.config.render/map-tokens 1000
  ;; Unit: items. A list shown in part (seon.print/bounded) shows this many, then `+N more:
  ;; where` (docs/render.md#bounded-lists). Provenance: the literals each list carried before
  ;; (render.ui and render.ai, 2026-10-22), kept as they were.

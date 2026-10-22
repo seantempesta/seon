@@ -91,6 +91,7 @@
   [:seon.config.render/history-budget :seon.config.render/history-budget]
   [:seon.config.render/reference-tokens :seon.config.render/reference-tokens]
   [:seon.config.render/found :seon.config.render/found]
+  [:seon.config.render/map-tokens :seon.config.render/map-tokens]
   [:seon.config.render.list/rows :seon.config.render.list/rows]
   [:seon.config.render.list/newest :seon.config.render.list/newest]
   [:seon.config.render.list/brief :seon.config.render.list/brief]
