@@ -77,6 +77,27 @@
     (is (= {proof :pass reached :pass} (edn/read-string (:printed run)))
         "the proof and the one test reaching the change ran, green; nothing else ran")))
 
+(deftest a-forked-agent-knows-its-task
+  ;; task seon.template/a-request-is-one-linked-transaction: root forks the agent for its
+  ;; task, so my.task/current answers it at the agent's first form, before any turn loop
+  ;; or context read begins (it was nil: root kept the task in its view only)
+  (let [[id] (in-agent ["(:seon.task/id (my.task/current))"])]
+    (is (= (pr-str "demo/t") (:printed id)))))
+
+(deftest a-failure-marked-through-the-door-holds-the-task
+  ;; owner, 2026-10-22: a failure is task data and root reacts to it. The agent marks its
+  ;; task failed on its branch, hands the attempt back (seon_done), and root, at the
+  ;; attempt's end, holds the task as :failed and reports it among the problems
+  (let [[f _ seen] (in-agent ["(:reason (my.task/fail! \"the premise is refuted\" '(= 1 2)))"
+                              {:op :done :agent "a1"}
+                              {:op :eval :agent "root"
+                               :code (str "(let [t (:max-tx @(:conn sys))] (require 'seon.e2e) (seon.e2e/await-quiet sys (inc t))"
+                                          " [(seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) \"demo/t\")"
+                                          " (select-keys (first (get-in (my.root/problems sys) [:classes :failed :rows])) [:task :reason :counterexample :open?])])")}])]
+    (is (= (pr-str "the premise is refuted") (:printed f)))
+    (is (= [:failed {:task "demo/t" :reason "the premise is refuted" :counterexample "(= 1 2)" :open? true}]
+           (edn/read-string (:printed seen))))))
+
 (deftest an-agent-finds-no-repository
   ;; owner, 2026-10-22: no git in agents, and no source-file editing as the way to develop
   ;; Seon; an agent works in a scratch dir with no repository above it

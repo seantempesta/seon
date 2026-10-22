@@ -34,6 +34,7 @@ References and their depths: [references](references.md).
 
 ## How work moves
 
+- [tasks](tasks.md): all work is tasks linked by `:needs`; a request becomes design → implement → merge on one branch, in one transaction, before any agent forks.
 - [landing](landing.md): how a branch lands on main: what it runs, how batches are proven, how conflicts are resolved.
 - [machine](machine.md): the machine Seon is built on and for, and the rules that keep builds, disk and processes bounded.
 - Who does what, delegation and briefs: [AGENTS.md §2](../AGENTS.md).

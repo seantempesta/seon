@@ -117,7 +117,11 @@
  :seon.end/waste :seon.learn/waste
  :seon.end/error [:map {:seon.db/data true}]
  :seon.fx/error-type :qualified-keyword
+ ;; task content a branch and main both changed since the branch's base, differently: root's
+ ;; to resolve (seon.task/carry-tx; owner, 2026-10-22, D4)
+ :seon.attempt/task-conflicts [:vector {:seon.db/data true} [:map [:task :seon.task/id] [:attr :keyword] [:base :any] [:ours :any] [:theirs :any]]]
  :seon.problems/attempt-fact [:map {:seon.db/attributes true}
+                              [:seon.attempt/task-conflicts {:optional true} :seon.attempt/task-conflicts]
                               [:seon.attempt/error {:optional true} :seon.attempt/error]
                               [:seon.attempt/failures {:optional true} :seon.attempt/failures]
                               [:seon.attempt/costs {:optional true} :seon.attempt/costs]
@@ -136,7 +140,7 @@
                          [:seon.fx/cache-hit-tokens {:optional true} :seon.fx/cache-hit-tokens]]
 
  ;; ---- the one read: seon.problems/report ----
- :seon.problems/class [:enum :platform :eval :agent :effect :red :cost :merge :dead :error :waste :stuck]
+ :seon.problems/class [:enum :platform :eval :agent :effect :red :cost :merge :dead :error :waste :stuck :failed :task-conflict]
  :seon.problems/row [:map
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]

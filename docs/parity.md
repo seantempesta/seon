@@ -31,7 +31,7 @@ The door's verbs are one table, `seon.entrance/verbs`: MCP lists each as the too
 
 | v1 | next | Status |
 |---|---|---|
-| `my.task/current`, `update!`, `send-back!`; `my.turn/wait` | the same names | present (`my.task/current` answers nil in released agents: RESUME's plan, A) |
+| `my.task/current`, `update!`, `send-back!`; `my.turn/wait` | `current`, `update!`, `fail!` (send-back replaced: a failure is task data, held for root: [tasks](tasks.md#a-failed-task-is-held-for-root)); `my.turn/wait` | present (an agent holds its task from the fork: [tasks](tasks.md#the-agent-knows-its-task)) |
 | `my.program/callers`, `source`, `tests-reaching` | `my.agent/callers`, `callees`, `grep`, `source`; `seon.program/reach-digests` | present |
 | `my.program/history` | none yet; the store keeps history now ([storage](storage.md#history)), the verb is not built | missing |
 | `my.program/search`, `similar` (embeddings) | none; decided (DECISIONS, "Embeddings join the context"), not built | missing |
@@ -49,7 +49,7 @@ The door's verbs are one table, `seon.entrance/verbs`: MCP lists each as the too
 |---|---|---|
 | tasks as data, `:needs`, one reconciler, green at start ends with no model call | `seon.task`, `seon.reconcile` | present |
 | `chain!` and `:seon.task/next` | `:needs` only | dropped |
-| step templates (design, prove, implement, merge) | `seon.template` (being redesigned: `../notes/DESIGN-tasks.md`) | present |
+| step templates (design, prove, implement, merge) | `seon.template/request`: design → implement → merge on one branch, one transaction ([tasks](tasks.md#a-request-is-one-transaction)) | present |
 | three-way program merge, conflicts as entries, forward merge | `seon.merge`, `my.branch/merge-main!` | present |
 | many agents merging onto shared definitions at once (v1's swarm) | `bin/check swarm` (`seon.e2e`'s swarm row: 20 tasks over 5 shared vars, 8 agents at once; red unless conflicts arose and every one was resolved, every task done, and a fresh agent on main gets every proof's value) | present |
 | main wins a conflict (MERGE-STEP 5a) | ours is kept | missing |

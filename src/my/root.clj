@@ -15,6 +15,19 @@
       (let [ps (task/citation-problems @(:conn sys) decls)]
         (cond-> @(root/transact-main! sys tx) (seq ps) (assoc :problems ps))))))
 
+(defn request!
+  "Work request decl (seon.template/request: design -> implement -> merge on one branch):
+  the linked set written released in one transaction on main (seon.template/request-tx),
+  so no agent forks before every task of it is set. Answers the writer's answer with the
+  set's ids, or the refusal."
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.task/declaration] :map]}
+  [sys decl]
+  (let [tx (tpl/request-tx @(:conn sys) decl)]
+    (if (:seon.error/type tx)
+      tx
+      (assoc @(root/transact-main! sys tx)
+             :tasks (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) (tpl/request decl))))))
+
 (defn run!
   "Release tasks ids: the one release (nothing autoruns)."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
