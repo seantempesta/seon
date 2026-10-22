@@ -157,11 +157,11 @@
         st)
       :synced (do (step/out! o :to-api (status st {:t (:t m) :load-errors (:load-errors m)})) st)
       ;; the back-pressure check's flood: counted, in order
-      :noise (let [ok (= (:i m) (:noise st 0))
+      :noise (let [ok (= (:i m) (:noise st))
                    ordered (and (:noise-ordered st true) ok)
-                   bad (or (:noise-bad st) (when-not ok [(:i m) (:noise st 0)]))]
-               (step/out! o :to-api {:op :stat :k :noise :v (inc (:noise st 0)) :ordered ordered :bad bad})
-               (assoc st :noise (inc (:noise st 0)) :noise-ordered ordered :noise-bad bad))
+                   bad (or (:noise-bad st) (when-not ok [(:i m) (:noise st)]))]
+               (step/out! o :to-api {:op :stat :k :noise :v (inc (:noise st)) :ordered ordered :bad bad})
+               (assoc st :noise (inc (:noise st)) :noise-ordered ordered :noise-bad bad))
       :received (do (step/out! o :to-api {:op :stat :k :msg-us :v (/ (- (:recv-ns m) (:sent-ns m)) 1000.0)}) st)
       :send (do (step/out! o :to-api {:op :message :from id :to (:to m) :body (:body m)}) st)
       :pong (if-let [rid (peek (:pings st))]
@@ -240,9 +240,9 @@
        :ins {:in "requests from the api, and the writer's answers it routes"} :outs {}
        ;; socket writes are short; a full socket blocks only this agent's proc
        :workload :io
-       :ping-map-fn (fn [st] {:id (:id st) :pid (:pid st) :dead? (boolean (:dead? st)) :inflight (count (:inflight st)) :noise (:noise st 0)})})
+       :ping-map-fn (fn [st] {:id (:id st) :pid (:pid st) :dead? (boolean (:dead? st)) :inflight (count (:inflight st)) :noise (:noise st)})})
   ([args] (assoc (select-keys args [:id :end :branch :pid])
-                 :inflight {} :pings clojure.lang.PersistentQueue/EMPTY :fx-kinds (:fx-kinds args)
+                 :inflight {} :noise 0 :pings clojure.lang.PersistentQueue/EMPTY :fx-kinds (:fx-kinds args)
                  ::flow/in-ports {:from (:in (:end args))}
                  ::flow/out-ports {:to-writer (:to-writer args) :to-api (:back args) :events (:events args)}))
   ([st tr]

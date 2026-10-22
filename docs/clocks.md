@@ -24,8 +24,8 @@ way in [DRAGONS](DRAGONS.md).
 ## Time decides (a check's measurement, and a check's ping)
 
 `bin/dragons clocks` reads the check harness too (`seon.check`, `seon.e2e`): a wait there that stands for an event is the event instead ([machine](machine.md#builds-and-checks)).
-- `seon.check/lifecycle`, `seon.check/backpressure`, `seon.check/scale`, `seon.check/idle`: the window over which a check measures that something does not happen or what it costs (`seon.check/hold-ms`: a paused agent's request unanswered, a paused proc's flood and a paused writer's commits held; `seon.check/pages-ms`: memory the kernel returns after the kill; idle's window, bin/check's argument). The measurement, never a dependency: load only makes what it measures likelier.
-- `seon.check/ping`, `seon.check/system-check`: Flow's ping takes a bound (`seon.check/ping-ms`); a proc that has not taken its control message by then is mid-step that long, and the check records it `:blocked` (an expected proc missing from a graph ping is reported under `:no-answer`), never reads it as nil.
+- `seon.check/lifecycle`, `seon.check/backpressure`, `seon.check/scale`, `seon.check/idle`: the window over which a check measures that something does not happen or what it costs (`:seon.config.check/hold-ms`: a paused agent's request unanswered, a paused proc's flood and a paused writer's commits held; `:seon.config.check/pages-ms`: memory the kernel returns after the kill; idle's window, bin/check's argument). The measurement, never a dependency: load only makes what it measures likelier.
+- `seon.check/ping`, `seon.check/system-check`: Flow's ping takes a bound (`:seon.config.check/ping-ms`); a proc that has not taken its control message by then is mid-step that long, and the check records it `:blocked` (an expected proc missing from a graph ping is reported under `:no-answer`), never reads it as nil.
 
 ## Time decides, owed its owner's fix
 

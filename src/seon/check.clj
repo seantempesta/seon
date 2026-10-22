@@ -58,19 +58,14 @@
   lands on a running eval; the form tells it from an earlier one's."
   [id form] #(and (= :started (:type %)) (= id (:agent %)) (= form (:form %))))
 
-(def ping-ms
-  "A Flow ping's bound: a proc that took no control message (it takes one between steps) for
-  this long is blocked mid-step, recorded so (seon.check/ping). docs/clocks.md names it."
-  10000)
-
-(def hold-ms "A window over which a check measures that something does not happen (docs/clocks.md)." 500)
-
-(def pages-ms "The window over which scale measures the memory the kernel returns after the kill." 500)
-
-(defn- ping "Flow's ping of proc pid: {:status :count :state}, or {:blocked pid :ping-ms ping-ms}." [sys pid]
-  (if-let [m (flow/ping-proc (:graph sys) pid :timeout-ms ping-ms)]
-    {:status (::flow/status m) :count (::flow/count m) :state (::flow/state m)}
-    {:blocked pid :ping-ms ping-ms}))
+(defn- ping
+  "Flow's ping of proc pid: {:status :count :state}, or {:blocked pid :ping-ms ms} when it took
+  no control message within :seon.config.check/ping-ms."
+  [sys pid]
+  (let [ms (seon.config/value :seon.config.check/ping-ms)]
+    (if-let [m (flow/ping-proc (:graph sys) pid :timeout-ms ms)]
+      {:status (::flow/status m) :count (::flow/count m) :state (::flow/state m)}
+      {:blocked pid :ping-ms ms})))
 
 (defn- await-agents
   "ids, once each has sent an event whose :type is in types on ev (await-event); an agent
@@ -512,7 +507,7 @@
         ev (c/events sys)
         _ (doseq [id ids] (c/kill! sys id))
         _ (await-agents ev ids #{:killed})
-        mem2 (do (Thread/sleep pages-ms) (lib/sysmem))
+        mem2 (do (Thread/sleep (seon.config/value :seon.config.check/pages-ms)) (lib/sysmem))
         th-end (thread-diff (c/declared-threads sys) (c/threads))
         ;; the target machine (a 16 GB M1, owner 2026-10-22): root, the fork server and the default
         ;; number of agents at once fit :seon.config.machine/memory-mb, each agent charged what the
@@ -717,7 +712,7 @@
             p1 (c/submit! sys a "(def x 1) x")
             p2 (c/submit! sys a "(inc x)")
             ;; the measurement: no answer within the window while paused
-            held (deref p1 hold-ms :held)
+            held (deref p1 (seon.config/value :seon.config.check/hold-ms) :held)
             held-state (= :paused (:status (ping sys a)))
             _ (c/resume-agent! sys a)
             r1 @p1 r2 @p2]
@@ -804,7 +799,7 @@
         _ (c/pause-agent! sys a)
         ;; what its proc had taken when the pause landed (the ping after it is FIFO), and after the window
         n0 (get-in (ping sys a) [:state :noise])
-        _ (Thread/sleep hold-ms)
+        _ (Thread/sleep (seon.config/value :seon.config.check/hold-ms))
         n1 (get-in (ping sys a) [:state :noise])
         busy (get-in (c/state sys) [:agents a :status])
         t0 (profile/now-ns)
@@ -820,7 +815,7 @@
                                  (mapv #(deref (c/submit! sys % "(transact! [{:note/text \"bp\" :note/agent :bp}]) :ok")) ids)))
         ;; root's own writes to main wait for it
         mains (mapv #(c/transact-main! sys [{:note/text (str "bp" %) :note/agent :root}]) (range n))
-        _ (Thread/sleep hold-ms)
+        _ (Thread/sleep (seon.config/value :seon.config.check/hold-ms))
         answered-while-paused (count (filter realized? mains))
         mb1 (lib/r2 (lib/real-mb))
         t1 (profile/now-ns)
@@ -951,8 +946,8 @@
   []
   (run-check "SYSTEM" {:datoms 2000}
    (fn [sys]
-    (let [;; the procs that answered a graph ping within ping-ms (an expected one that did not is blocked or absent)
-          pids (fn [] (set (keys (flow/ping (:graph sys) :timeout-ms ping-ms))))
+    (let [;; the procs that answered a graph ping within :seon.config.check/ping-ms (an expected one that did not is blocked or absent)
+          pids (fn [] (set (keys (flow/ping (:graph sys) :timeout-ms (seon.config/value :seon.config.check/ping-ms)))))
         booted (pids)
         expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/source :fx.source/0 :fx/git :fx.git/0 :fx/deps :fx.deps/0 :fx/build :fx.build/0 :fx/model}
                      (for [i (range (seon.config/value :seon.config.ai/max-in-flight))] (keyword "fx.model" (str i))))
@@ -1131,22 +1126,30 @@
     (let [port (seon.config/value :seon.config.web/port)
         _ (seon.e2e/await-quiet sys 0)
         received (atom 0)
-        feed (atom "")
+        ;; what the wait needs of the feed's text: its keyframe seen, then a settled mark after it
+        ;; (a mark split across two reads is found in the carry of the last read's end)
+        feed (atom {:carry "" :keyframe false :settled false})
+        see (fn [{:keys [carry keyframe settled]} s]
+              (let [t (str carry s)
+                    k (when-not keyframe (clojure.string/index-of t "event: datastar-patch-elements"))
+                    after (cond k (subs t k) keyframe t)]
+                {:keyframe (boolean (or keyframe k))
+                 :settled (boolean (or settled (and after (clojure.string/index-of after ": settled"))))
+                 :carry (let [r (or after t)] (subs r (max 0 (- (count r) 40))))}))
         sock (java.net.Socket. "127.0.0.1" (int port))
         _ (doto (.getOutputStream sock)
             (.write (.getBytes (str "GET /feed?view=root HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: text/event-stream\r\n\r\n") "UTF-8"))
             (.flush))
-        ;; the tab: an edge reader counting the bytes its feed sends, and keeping its text
+        ;; the tab: an edge reader counting the bytes its feed sends, and watching its text
         in (.getInputStream sock)
         _ (doto (Thread. (fn [] (let [buf (byte-array 8192)]
                                   (loop [] (let [n (try (.read in buf) (catch Exception _ -1))]
-                                             (when (pos? n) (swap! feed str (String. buf 0 (int n) "UTF-8")) (swap! received + n) (recur)))))))
+                                             (when (pos? n) (swap! feed see (String. buf 0 (int n) "UTF-8")) (swap! received + n) (recur)))))))
             (.setDaemon true) (.start))
         opened (await-ref received pos?)
         ;; the tab's opening ran its course: its keyframe (the feed's first patch: a new tab is
         ;; stale until it), then a settled mark (the render proc has nothing in flight)
-        settled (await-ref feed #(when-let [k (clojure.string/index-of % "event: datastar-patch-elements")]
-                                   (clojure.string/index-of % ": settled" k)))
+        settled (await-ref feed :settled)
         ;; root's declared procs and its effect owners (their lanes step only when given work)
         decl (seon.system/read-decl (seon.config/value :seon.config.root/system-path))
         pids (sort-by str (concat (keys (:procs decl)) (for [k (keys (:fx decl))] (keyword "fx" (name k)))))
