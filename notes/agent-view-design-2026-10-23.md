@@ -2,7 +2,7 @@
 
 Worktree session agent-view. Owner, 2026-10-23: "Lets get the web UI working better so I can get a debug view into any agent." Then: "just do exploratory research for now." This note is the research and the design. No `src` change is proposed for merging yet.
 
-**Evidence.** The prototype's full test run (`bin/test`, 448 tests) was 446 green; the two reds were the digest-stability tests (`seon.program-test/the-same-tree-gives-the-same-digests-in-any-checkout-and-any-run`, `seon.agent-test/a-wide-reach-reuses-unchanged-results`), not investigated (files were committed during the run). Before the redirect, this session built a working prototype and ran it on its own root, with the scripted model working calc/add, square, twice and neg. A browser subagent then compared the pages against `seon_eval` facts. The prototype is kept on branch `jolt/agent-view-prototype` (commits `42a9d44`, `1bcf80f`, `f083e7e`, `56a9650`; +346 net `src` lines) as evidence only. Root decides whether any of it becomes tasks. Its numbers and the verifier's findings are below.
+**Evidence.** The prototype's full test run (`bin/test`, 448 tests) was 446 green; the two reds were the digest-stability tests (`seon.program-test/the-same-tree-gives-the-same-digests-in-any-checkout-and-any-run`, `seon.agent-test/a-wide-reach-reuses-unchanged-results`), not investigated (files were committed during the run). Before the redirect, this session built a working prototype and ran it on its own root, with the scripted model working calc/add, square, twice and neg. A browser subagent then compared the pages against `seon_eval` facts. The prototype is kept on branch `jolt/agent-view-prototype` (commits `42a9d44`, `1bcf80f`, `f083e7e`, `56a9650`; +346 net `src` lines) as evidence only. Its pieces are reused in the build (§8). Its numbers and the verifier's findings are below.
 
 ## 1. What `/agent/{id}` shows today, and what v1 showed
 
@@ -104,63 +104,62 @@ Every one of them stores the prompt. Seon's basis-and-remake is unusual. It is c
 7. Fork from turn N's basis rather than replay.
 8. Show a tool result once, under its call.
 
-## 4. The design
+## 4. The design (revised to the owner's shape, 2026-10-23)
 
-**Keys.**
-- A page per attempt is stable across boots: `/attempt/{attempt-id}`.
-- `/agent/{id}` redirects to the agent's newest attempt, or shows a hand-spawned agent with no attempt as today.
-- A whole turn is served at `/attempt/{aid}/turn/{n}` as text: the request the model read, plus its answer.
+The owner, condensed: "show useful data, not all the data"; everything is a render of the live system. Root's page renders all agents. Clicking one opens its window: the URL becomes the agent's (bookmarkable, back works) and its render tree runs. The agent window is chat-style: a large main pane with the input at the bottom, and a right column of live tiles for everything rendered, newest change at the top. Compact agent views are tiles on root's dashboard. Representations belong to the data.
 
-**One value, one layout.** The value is `:seon.render/agent-page`, the declared `:seon.render/html` `seon.render.ui/agent-page`. Its units, each reading exactly its input:
+### 4.1 Does a render nest other values' renders by reference, as reagent does? Today: no
 
-| Unit | Facts | Render |
-|---|---|---|
-| head | root's view entry (while live), the attempt, the task, totals over turns | `ui/zoom-head`. Why it is as it is, one line each (`ui/why`): status and running form; attempt outcome and reason; task held with its failure. Model, start and end (with the zone), turns, tokens, cost (`seon.model/cost`: off-peak configured prices; a turn whose provider gives no cache split is "not priced", never 0) |
-| actions | live?, held task | `ui/zoom-actions`: eval box, message bar ("read at its next turn"), interrupt, release; each says when it acts |
-| turns | the attempt's `:seon.turn/*` on its branch | `:seon.turn/turn-fact`'s declared html, `ui/turn-row`, rendered once per turn while its facts are equal (detailed below) |
-| evaluations | `:seon.cluster.eval/record`s not in any turn (UI, outside, root) | `ui/history-row` as today, under its own heading |
-| task | main | `:seon.task/task`'s declared render, showing **done** beside execution |
-| proofs | the newest turn's `:results`; the judge's `:seon.attempt/results`; the last run if root holds it | `proofs-box`, each report "reused" or "run"; the merge-deferred set once it is on main |
-| branch | the newest turn's `:will-merge`; the attempt's conflicts and unmerged keys | `branch-box`, with `:will-merge` printed by the printer as the model reads it (one line per key, not the nested panel noise) |
-| problems | `seon.problems/report` rows naming this agent, attempt or task | the row's AI render text (`seon.render.ai/problem-row`, the words root's context uses), with its evidence |
+From the code (main `b39cef5`):
+- A render nests another value only by **calling** `seon.render/html` on it eagerly: `zoom-work` calls `(render/html task ...)`, `tile-health` calls it per proc, `cost-report` per verdict. The hiccup it answers holds the result, not a reference.
+- The printer **never re-dispatches**. `seon.render`'s namespace doc says so: "A nested value renders by calling `render` on it; the printer never re-dispatches". A task map inside a printed vector prints as a map, not through `:seon.task/task`'s render.
+- The serializer `seon.web.html/write!` (html.clj:82) prints any non-hiccup leaf with `print/text`, as text, never through its schema's render.
+- Env (`:seon.render/env`) carries schema, budget and handle. It carries no context: one render per face, whether the value is a table cell, a panel or a tile.
+- What is already reagent-like is the page's **units**: a layout names parts by id with their exact input, and the render proc re-renders a part only when its input changed. That is reagent's "re-render a component when its args change", one level deep.
 
-**A turn row reads thought → form → result.** The row has two parts.
+### 4.2 The design: one dispatch, recursive, by context
 
-The header:
-- turn N or read N, and pending while in flight;
-- tokens, % cached, cost, finish, model;
-- the split (tests, context, model, evals, record) with units.
+**One dispatch.** `seon.render/render [v face env] -> :seon.render/out`. It replaces `render-face`, and `html`/`ai` stay as its two faces. env gains `:seon.render/as`, one of:
+- `:inline`: one line, in a chat stream, table cell or event row;
+- `:block`: a full panel;
+- `:tile`: compact and live, on the dashboard or the agent window's right column.
 
-The body, in order:
-1. **New since the last turn:** the proofs that changed status, the refusals, the messages it took, and the run errors.
-2. **Reasoning**, collapsed, until per-call thinking exists (§5).
-3. **Per call, then per form:**
-   - `;;` thought (the form's lead);
-   - the form;
-   - ⇒ its result or ✕ its error, through the declared renders (the error map's render; a value's schema render) and the record's ms and allocation;
-   - the call's answer as the model read it, collapsed.
-4. **The context it read**, collapsed:
-   - the token table per part and key (`seon.context/sections`);
-   - a diff against the previous turn's context;
-   - the text under `:seon.config.render/turn-text-budget`, its cut linking the whole request.
+The default is `:block`. The budget is in env as today.
 
-**Live, by event, no polling.**
-- An agent's `:commit` event for a watched agent re-reads its branch (`ask-branches` in the prototype).
-- Proposed: a `:turn-start` event at `basis!` (pending row) and the `:commit` at its end.
-- An ended agent's branch is read once.
-- The writer's `:branch-db` reads a branch as a task names it, under its main (`seon.db/on-main`).
+**Representations belong to the data.** A schema declares its renders per face and, when it needs to, per context:
+- `{:seon.render/html sym}`: sym for every context (every existing declaration stays valid);
+- `{:seon.render/html {:block b :tile t :inline i}}`: one per context.
 
-**Acting.** Each action is a UI call of root's request table (`seon.root/request`), which the server's ops also send. There is no second path.
-- **eval**: `submit!`, origin `:ui`.
-- **message**: `message!`, using root's existing delivery (`deliver-message`), shared with the server's new `:message` op.
-- **interrupt**: the web proc's SIGUSR1, as today.
-- **release**: `release!`, which is `my.root/run!`'s one transaction.
+A context the schema doesn't name falls back: inline → tile → block → the printer. `seon.render/declared` reads this, the one reader, still following parents.
 
-The agent takes a delivery into its inbox wherever it reads its socket, and its next turn takes the inbox into its basis (`:messages`). The prototype proved both through the server and through the page, live.
+**The printer is the default for every context.** `print-out` becomes context-aware:
+- `:inline`: `print/line` under the line budget, its cut naming the handle;
+- `:block`: the structural hiccup, as today;
+- `:tile`: the structural hiccup under the tile budget (`:seon.config.render/tile-budget`, new), collapsed past depth 1.
 
-**Deferred:**
-- fork-from-turn-N (lesson 7);
-- `/ns/{ns}` and `/data` (filed as `seon.render/ns-and-data-pages`; not cheap, because next has no namespace-to-agent assignment).
+The AI face takes the same contexts (`:inline` is one line for a list, `:block` the whole text). There are no per-page special cases.
+
+**Nesting by reference.**
+- A hiccup node `[:seon/render v opts]` (opts: `:as`, `:schema`, `:budget`) is a reference.
+- `seon.render/expand` walks a render's hiccup and replaces each reference with `v`'s render under the child env: the parent's env with the node's opts, and the budget a share of the parent's when the node names none. It recurses into what that render answers.
+- The printer's HTML does the same for a nested value whose schema it can name (metadata `:seon.render/schema`, an error map, a pulled entity's identity attribute: `seon.render/schema-of`, the one namer). It emits `[:seon/render v {:as :inline}]` instead of printing the map, so a task inside an attempt inside a problem row reads as the task's inline render everywhere.
+
+Expansion happens before serialization, in `render-unit`, so the serializer stays dumb. A reference is a pure function of `(v, env)`, so a unit's input still decides whether anything renders.
+
+**Units remain the reactive edge.** A unit is now `{:id :input :schema :as}`: health's commit 1 moves tiles from `:render` symbols to `:schema`, and this adds `:as`. The render proc's input diffing and byte diffing are unchanged.
+
+### 4.3 The pages
+
+**Root's dashboard (`/`).** As today, plus each agent's card becomes the `:tile` render of `:seon.render/agent`: a compact live view of status, why, its turn, its newest form and result. Clicking a card opens the agent window.
+
+**The agent window (`/agent/{id}`, and `/attempt/{aid}` for an attempt of an earlier boot).**
+- Clicking a card does `history.pushState` to `/agent/{id}`. The page's feed switches to that view (the web proc's `:views` message, as a tab's view is today), so back and forward work.
+- The window is its own view, `:seon.render/agent-window`, rendered by units:
+  - **Main pane (most of the screen): the chat.** The attempt's turns as a conversation, oldest first, and evaluations from the page or outside interleaved by time. Each turn is the `:block` render of `:seon.turn/turn-fact`: per form, its `;;` thought (the form's `:lead`, §5), the form, then ⇒ its result through the value's own render (`[:seon/render value {:as :block}]`, or the error map's), with ms and allocation inline. A turn opens with what was new since the last one (proofs that changed, messages it took), and ends with its usage line (tokens, % cached, cost). The context it read is behind one disclosure: the token table per part, a diff against the previous turn's context, the text, and the whole request.
+  - **Input at the bottom.** One box: a line that reads as Clojure evaluates in the agent's REPL (`submit!`, origin `:ui`); a line starting `>` is a message to the agent (`message!`, "read at its next turn"). Interrupt and release are buttons beside it. All of them go through root's request table, which the server's ops also use.
+  - **Right column: live tiles**, the `:tile` render of each value the window shows, newest change at the top: why, the attempt and cost, the task, proofs, branch (`:will-merge`), problems, the process. Each tile is a unit, ordered by its input's last change: the render proc stamps a unit's change seq, and the column's order is a unit too.
+
+**Live, by event, no polling.** As in the prototype: an agent's `:commit` event re-reads its branch. Added: a turn-start event at `basis!` gives a pending row.
 
 ## 5. Thought next to the forms (owner direction, 2026-10-23)
 
@@ -182,39 +181,30 @@ The debug view then needs no parsing of `:code`. It reads `:lead`, `:form` and t
 
 ## 6. Size and what it replaces
 
-The prototype measured +346 net `src` lines for parts 1-2 of §4, minus the turn diff, the digest, the attempt keying and §5. Its pieces:
+**Measured:** the prototype is +346 net `src` lines (on `jolt/agent-view-prototype`).
 
-| Piece | Lines |
-|---|---|
-| `ui` (head, why, actions, turn-row, turns-list, branch, problems) | +200 |
-| `render.proc` (turn rows, problems, ask-branches, turn-text) | +60 |
-| `context` (`remade`, `sections`, `request-text`) | +40 |
-| `root`, `server`, `web` (message!, release!, the `:message` op, the turn route) | +45 |
-| `agent` and `turn` (inbox on read, messages into the basis) | +25 |
-| `model/cost` | +18 |
-| `writer`'s on-main read | +5 |
-
-**Estimate for the full design:**
+**Estimate** (net `src`, built on health's commit 1 and printer-eval's units):
 
 | Part | Lines |
 |---|---|
-| Prototype, refined against the verifier's findings | ~350 |
-| Attempt-keyed routes | +30 |
-| Context diff against the previous turn (one `clojure.data/diff` or a line diff through the printer) | +40 |
-| Context digest per turn, and its mismatch mark | +20 |
-| Pending turn row and `:turn-start` event | +30 |
-| §5 (lead per form, items per call, `thinking`) | +30 |
-| **Total** | **~500** |
+| One dispatch by context: `render` with `:as`, `declared` per context, the printer's three contexts, `expand` and `[:seon/render]` references, the printer emitting references for named values | +90 |
+| Tile renders for the agent window's values (why, attempt, task, proofs, branch, problems, process) | +80 |
+| Agent card as a tile | +20 |
+| The agent window (layout, chat, input, tile column, its order) | +150 |
+| The turn's `:block` render with the per-form chat, context table, diff and whole request | +120 |
+| pushState navigation (one script line) | +10 |
+| Turn-start pending row | +30 |
+| Message and release (the prototype's) | +70 |
+| §5 thinking beside forms | +30 |
+| **Gross** | **≈600** |
 
-The total is about 5% of the 10k-line budget. I expect it within 2x.
+**Deletes (≈ −200):**
+- `zoom-head`, `zoom-work` (its attempts table), `zoom-context`, `history-list`'s separate pane, `render.proc/context-of` and `seon.context/recorded`;
+- the hand-written inline cells that become `[:seon/render ... {:as :inline}]`: `attempt-row`'s link cell, `error-box`'s nested printing, `tile-tasks`' per-row attempt;
+- the agent card's own eval rows (`eval-row`, `eval-meta`'s second copy) once the card is a tile;
+- task `seon.render/a-turn-is-a-row-on-the-agent-page`.
 
-**It replaces or deletes:**
-- `zoom-context` (the one-read panel);
-- `render.proc/context-of`;
-- `seon.context/recorded` (its one reader goes);
-- the page's attempts table;
-- task `seon.render/a-turn-is-a-row-on-the-agent-page` (its proof included);
-- parity rows "`/agent/{id}/debug`" and "`/agent/{id}/message`" (missing → present).
+**Net ≈ +400**, which I expect within 2x. That is about 4% of the 10k budget.
 
 ## 7. What the prototype's verifier found (fix list for whoever builds it)
 
@@ -245,11 +235,13 @@ The total is about 5% of the 10k-line budget. I expect it within 2x.
 - the judge's proofs and `:will-merge`;
 - on the live a1: the eval box (`(* 6 7)` showed 42 live, and `*1` agreed), and the message bar (the message showed in `seon_context` and live in a new read row).
 
-## 8. Proposed tasks (for root to write, if it accepts the design)
+## 8. Build order (owner: build it; root's go 2026-10-23)
 
-1. **`seon.render/a-debug-view-of-any-agent`**: §4 without §5, from the prototype branch, with the fix list in §7.
-2. **`seon.repl/a-forms-lead-is-recorded-with-its-eval`**: §5 items 1-2, plus the help page text (item 4).
-3. **`seon.model/the-eval-tool-takes-thinking`**: §5 item 3.
-4. **`seon.turn/a-turn-records-what-it-sent`**: the context digest, and the pending row with its `:turn-start` event.
-5. **A ruling on messages as facts on main.** v1 did this; the prototype records messages in the basis only.
-6. **`seon.agent/an-agent-reports-its-threads`** and **`seon.render/ns-and-data-pages`**, already drafted on the prototype branch.
+1. **Now:** §5's recording (the eval's `:lead`, items per call, the eval tool's `thinking`) and the reusable browser-tester brief (`notes/browser-tester.md`).
+2. After health's commit 1 is merged in: the one dispatch by context and references (§4.2), with tests on production-shaped values.
+3. The agent window (§4.3), built from the prototype's pieces with §7's fix list.
+4. Browser testers (Haiku and Sonnet subagents on the brief), iterated until no mismatch; then one full run.
+
+Merge printer-eval once it is on main.
+
+**Still for root:** a ruling on messages as facts on main (today the basis records them); `/ns/{ns}` and `/data` (task `seon.render/ns-and-data-pages`); and threads in the agent's stats.
