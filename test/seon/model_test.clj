@@ -5,7 +5,7 @@
   The model edge as data: a provider's reply body read into the completion (task
   seon.model/budgets-are-data-and-spend-is-measured). Run: bin/test seon.model-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [clojure.data.json :as json]
-            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.turn :as turn]))
+            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.turn :as turn] [seon.contract]))
 
 (defn- chunk-line [m] (str "data: " (json/write-str m) "\n\n"))
 
@@ -108,3 +108,12 @@
          (turn/usage (usage-of {:prompt_tokens 120 :completion_tokens 3 :prompt_cache_hit_tokens 64 :prompt_cache_miss_tokens 56}))))
   (is (= {} (turn/usage (usage-of {}))) "a reply without usage records no count"))
 
+
+(deftest no-provider-answers-a-typed-error-never-a-reply
+  ;; root's ruling, 2026-10-22 (brief 1, item 1): a root whose config names no model provider
+  ;; ran the scripted stand-in (a test fixture) as if it were a model; it answers the first
+  ;; turn with the typed :seon.model/no-provider, which ends the attempt naming what to set
+  (let [r (model/complete {:kind :none} {:messages [{:role "user" :content "x"}] :task "demo/t" :turn 0})]
+    (is (= :seon.model/no-provider (:seon.error/type r)))
+    (is (seon.contract/valid? :seon.model/failure r))
+    (is (not (contains? r :tool-calls)) "no reply, scripted or otherwise")))

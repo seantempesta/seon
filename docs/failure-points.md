@@ -16,6 +16,7 @@ function. The same sites check judges the other laws: [clocks](clocks.md) and [r
 | failure point | edge (`ns/fn`) | declared variant | handled by, as data |
 |---|---|---|---|
 | Datahike or the store refuses a write (a bad transaction, LMDB full or failing) | `seon.writer/writer-one` | `:seon.writer/refused` (the one error map, with `:ok false`) | the caller of the write: an agent's `transact!` throws it into its own eval (an `:err` item); root's callers read `:ok` and `:seon.error/message` |
+| The store refuses a commit: its codec (konserve.jolt.fasl) has no encoding for a value a transaction carries (a sorted map, a host object) | `seon.writer/commit-batch` | `:seon.writer/refused` to the transaction that carried it (the batch is retried one transaction at a time; main is as it was, Datahike moves it only after the write) | the asker; the writer goes on |
 | The model's HTTP call (connect, TLS, the socket dying mid-stream), made by root's `:model` effect workers; streamed over SSE with no clock (a reasoning reply streams for minutes) | `seon.model/http-post` | `:seon.model/transport` (the connection failed or dropped); a non-200 is `:seon.model/provider-error` with the whole body, or `:seon.model/rate-limited` for HTTP 429 with its Retry-After (`seon.model/complete`) | the `:model` owner answers it to the asking agent (a 429 is kept and retried after its wait); `seon.turn/act!` returns it; `seon.turn/work!` ends the attempt `:error` with its message |
 | A model's eval call carries arguments that are not JSON with code text (a reply cut mid-call at its token limit) | `seon.model/call-code` | none: the arguments as they came are the call's code | `seon.turn/act!` evaluates them like any code; the reader repairs what it can and the call's result shows what they held |
 | An agent's authored contract does not compile | `seon.contract/arm!` | `:seon.contract/invalid` | `seon.repl/instrument` puts it on the reply item (`:contract-error`); `seon.program/load-form!` reports it as a load error |
@@ -38,7 +39,7 @@ function. The same sites check judges the other laws: [clocks](clocks.md) and [r
 | boundary | (`ns/fn`) | what it records |
 |---|---|---|
 | the agent's REPL: reading and evaluating an agent's form | `seon.repl/eval-code` | the form's error as an `:err` reply item (the one error map itself, under `:err`) |
-| the agent's request handler | `seon.repl/agent-step` | `err` + `done` on the request |
+| a request's evaluation | `seon.repl/eval-string` | the answers so far plus one `:err` item (its error map and id), recorded with them |
 | the agent process's loop: a defect no request's boundary caught (the agent redefined a function its own loop calls; a failing commit of its record) | `seon.repl/serve!` | the cause on stderr, then the attempt's end on its branch (`seon.agent/died!`: outcome `:error`, the one error map with its cause chain); exit 70, which names the death; root's judge carries the end to the attempt's reason and error |
 | a test run, in the test child of an agent | `seon.agent/run-tests-forked` | an `:error` report in the run |
 | an effect worktree session performing a request (session FX1) | `seon.fx/worker-proc` | `:seon.fx/defect` as the outcome: its asker is always answered |

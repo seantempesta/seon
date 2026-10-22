@@ -326,10 +326,12 @@
             :problems-stuck (count (get-in (root/problems sys) [:classes :stuck :rows]))}))})
 
 (defn run
-  "One e2e mode; answers whether it passed."
+  "One e2e mode; answers whether it passed. No mode, or an unknown one: its usage, then
+  E2E FAILED (false)."
   [mode [x y]]
   (case mode
     "loop" (loop-run x)
+    ("calc" "resume" "resume2" "scenario" "swarm" "model" "stuck")
     (run-scenario (case mode
                     "calc" (calc x)
                     "resume" (restart false x)
@@ -337,4 +339,7 @@
                     "scenario" (scenario x y)
                     "swarm" (swarm x y)
                     "model" (model-run x)
-                    "stuck" (stuck)))))
+                    "stuck" (stuck)))
+    (do (println (str "e2e: no mode " (pr-str mode) "; usage: seon e2e loop|calc|resume|resume2|scenario|swarm|model|stuck [ARGS]"))
+        (println "E2E FAILED")
+        false)))

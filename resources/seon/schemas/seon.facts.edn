@@ -237,10 +237,13 @@
  ;; what it blocks (seon.reconcile/stuck)
  :seon.root/quiescent [:map {:seon.db/data true} [:t :int] [:stuck [:vector :seon.reconcile/stuck-row]]]
  ;; Seon's own source imported at boot as main's program (seon.source): the tree, its HEAD
- ;; commit (none when it is no repository) and the digest of the files read (a boot whose tree
+ ;; commit (none when it is no repository), the revision it pins each reference-code submodule
+ ;; at (its gitlink, what a cited reference-code file shows: seon.ref/file-view), the digest of
+ ;; the files and pins read (a boot whose tree
  ;; reads the same imports nothing), its files and forms, the program entities the import
  ;; retracted, how long reading, analysing and transacting took, or why it was refused
- :seon.root/source [:map {:seon.db/data true} [:root :string] [:commit {:optional true} :string] [:digest {:optional true} :string]
+ :seon.root/source [:map {:seon.db/data true} [:root :string] [:commit {:optional true} :string]
+                    [:pins {:optional true} [:map-of :string :string]] [:digest {:optional true} :string]
                     [:files :int] [:forms :int] [:retracted {:optional true} :int] [:ms number?]
                     [:error {:optional true} :string]]
  ;; the next generation (docs/source.md#the-next-generation): the merges commit the :build effect
