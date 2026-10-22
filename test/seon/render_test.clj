@@ -52,7 +52,9 @@
       (is (not (re-find #"\d\d:\d\d:\d\d" (first lines))) "no clock: an unchanged system gives the same text")
       (is (not-any? #(str/includes? % "UNKNOWN") lines) "no ping, so no unanswered ping")
       (is (some #(str/includes? % "defect in render: boom") lines))
-      (is (some #(str/includes? % "recorded agent 3: tests red: agent.a1/c") lines)))
+      (is (some #(str/includes? % "recorded agent 3: tests red: agent.a1/c") lines))
+      (testing "a class's other open rows are named, with where they all are"
+        (is (some #(str/includes? % "tests red: agent.a1/c · +1 more: open, all in (get-in (my.root/problems sys) [:classes :agent :rows])") lines))))
     (testing "the live view is not a second producer: an agent's own entry makes no problem line"
       (is (not-any? #(re-find #"^- a\d" %) lines)))
     (testing "over the budget: later sections are named, not silently cut"

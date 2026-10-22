@@ -384,7 +384,7 @@
           (for [[k v] kvs]
             [:div {:title (str (prop k :description))}
              [:dt (name k)]
-             [:dd [:code (print/text v (config/value :seon.config.render/part-budget))] (when-let [u (prop k :seon.config/unit)] [:span {:class "muted"} " " u])]])])]]}))
+             [:dd (render/html v {:seon.render/budget part}) (when-let [u (prop k :seon.config/unit)] [:span {:class "muted"} " " u])]])])]]}))
 
 ;;; --- agent cards --------------------------------------------------------------
 
@@ -456,7 +456,7 @@
       (when (:seon.error/fix e) [:p {:class "fix"} "fix: " (prose (:seon.error/fix e) budget)])
       (for [{:keys [in expected value]} (:seon.error/problems e)]
         [:p {:class "muted"} "at " [:code (print/text in budget)] " expected " [:code (print/text expected budget)] ", got " [:code value]])
-      (when (seq own) (:seon.render/html (render/print-out :html own {:seon.render/budget budget})))]}))
+      (when (seq own) [:code {:class "muted"} " " (print/text own budget)])]}))
 
 (defn- status-pill
   "How an agent is, as its pill: its status word, or how it ended once its attempt did."
@@ -809,7 +809,7 @@
       (when-let [{:keys [cause blocks]} (:seon.task/stuck t)]
         [:p {:class "warn"} "stuck: " cause (when (seq blocks) (str " · blocks " (str/join ", " (sort blocks))))])
       (when (seq (:seon.task/needs t)) [:p {:class "muted"} "needs " (str/join ", " (sort (:seon.task/needs t)))])
-      [:p {:class "muted"} (str (count proofs) " proofs: ") (str/join " " (map str (sort-by str proofs)))]
+      [:p {:class "muted"} (str (count proofs) (if (= 1 (count proofs)) " proof: " " proofs: ")) (str/join " " (map str (sort-by str proofs)))]
       (when-let [ev (:seon.task/evidence t)]
         [:div {:class "muted"} "evidence " (:seon.render/html (render/print-out :html ev {:seon.render/budget (config/value :seon.config.render/part-budget)}))])]}))
 

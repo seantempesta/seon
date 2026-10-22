@@ -79,7 +79,7 @@
           (str "plan: " (:text (print/prose plan (or (:seon.render/budget env) (config/value :seon.config.render/part-budget))
                                             {:source (if acc (some-> (:seon.render/handle env) (#(list 'get-in % [:seon.task/accumulated :plan]))) (read-of env :seon.task/plan))})))
           (when (:seon.task/instructions t) (str "instructions: " (print/line (:seon.task/instructions t) (line-budget) (read-of env :seon.task/instructions))))
-          (str (count (or (:proofs acc) (:seon.task/proofs t))) " proofs: " (str/join " " proofs) (when more (str " · " more)))
+          (let [n (count (or (:proofs acc) (:seon.task/proofs t)))] (str n (if (= 1 n) " proof: " " proofs: ") (str/join " " proofs) (when more (str " · " more))))
           (when (:seon.task/evidence t) (str "evidence: " (part (:seon.task/evidence t))))
           (whole env)]))}))
 
@@ -157,9 +157,11 @@
         rec (for [[c {:keys [n rows]}] (sort-by (comp str key) (:classes recorded))
                   :let [i (first (keep-indexed (fn [i r] (when-not (false? (:open? r)) i)) rows))]
                   :when i
-                  :let [open (count (remove #(false? (:open? %)) rows))]]
+                  :let [open (count (remove #(false? (:open? %)) rows))
+                        where (list 'get-in '(my.root/problems sys) [:classes c :rows])]]
               (str "recorded " (:seon.render/ai (problem-row (assoc (nth rows i) :class c :n (if (:signature (nth rows i)) n open))
-                                                             {:seon.render/handle (list 'get-in '(my.root/problems sys) [:classes c :rows i])}))))]
+                                                             {:seon.render/handle (list 'get-in '(my.root/problems sys) [:classes c :rows i])}))
+                   (some->> (print/more open 1 (str "open, all in " (form where))) (str " · "))))]
     (vec (concat errs rec))))
 
 (defn- section-work {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
