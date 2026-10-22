@@ -145,7 +145,7 @@ PORTS=$("$WT/bin/ports")
 
 print "worktree $WT on $BR (from $BASE)"
 print "  build:  cd $WT && nice -n 15 bin/build seon"
-print "  test:   bin/test; SEON_STORE=$WT/target/check-store bin/check (a store of the checks' own: runs/store is this root's)"
+print "  test:   bin/prove (the tests and check steps the change reaches; bin/test --all, bin/check 100: the full runs)"
 print "  root:   bin/root (start | status | stop), on this worktree's own ports: $PORTS"
 print "  merge:  report to root, which merges the branch (docs/merging.md)"
 print "  remove: $MAIN/bin/worktree --remove $NAME"
