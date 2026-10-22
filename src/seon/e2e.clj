@@ -3,9 +3,9 @@
   is a row of data that one runner works (run-scenario): its specs, its boot, what a fresh
   agent must print on main afterwards and what else it asserts. The rows: the six-task graph
   with a cancel, a root restart in two phases, the merge scenarios (seon.fixtures/scenarios),
-  a swarm over shared definitions, a real model's run, and a task that always fails ending
-  stuck; a new run is one row. bin/check runs them as modes of target/seon:
-    calc | resume DIR | resume2 DIR | scenario conflict|semantic|hairy|newns|sibling [model] | swarm N M (verdict SWARM) | model add|calc | stuck
+  a swarm over shared definitions, a real model's run, and a task that always fails ending with
+  its budget spent; a new run is one row. bin/check runs them as modes of target/seon:
+    calc | resume DIR | resume2 DIR | scenario conflict|semantic|hairy|newns|sibling [model] | swarm N M (verdict SWARM) | model add|calc | budget-spent
     | loop DIR (the self-improvement loop's first turn, on a clone of this repository under DIR)
   Each run ends on what the system observes (the reconciler's quiescence report, an event,
   or a fact on main), never on a deadline. Prints one EDN line per phase; the last line is
@@ -35,7 +35,7 @@
         (filter #(= :platform (:v %)) (d/datoms db :aevt :seon.error/class))))
 
 (defn await-quiet
-  "The reconciler's quiescence report ({:t :stuck}) for main at or after t: nothing runs,
+  "The reconciler's quiescence report ({:t :root-causes}) for main at or after t: nothing runs,
   nothing is left to judge, nothing is ready. Waits as long as work goes on, or until a
   root proc's defect is recorded on main after t ({:ended :defect :problem p}): a step
   that threw dropped its outputs, so the flight it carried never ends and quiescence never
@@ -270,7 +270,7 @@
                                   (str/includes? (second (second sq-turns)) ":got \"(= 9 0)\"")
                                   (every? #(every? (set (keys (nth % 2))) [:tests-ms :context-ms :model-ms :eval-ms :record-ms]) sq-turns))]
            (cond-> {:ok (and done? (= #{"calc/neg-merge"} blocked) read-failure?
-                             (= [{:task "calc/neg" :cause "cancelled" :blocks ["calc/abs" "calc/abs-merge" "calc/neg-merge"]}] (:stuck q)))
+                             (= [{:task "calc/neg" :cause "cancelled" :blocks ["calc/abs" "calc/abs-merge" "calc/neg-merge"]}] (:root-causes q)))
                     :done-all? done? :abs-blocked-by blocked :square-turns (count sq-turns) :square-read-its-failure? read-failure?
                     :square-splits (mapv #(nth % 2) sq-turns)}
              (not read-failure?) (assoc :square-second-context (second (second sq-turns))))))})
@@ -288,14 +288,14 @@
 (defn- swarm
   "n tasks over 5 shared definitions, max-running m (more than 5, so tasks on one var run
   at once and their merges conflict): conflicts arose, each was resolved by a merge agent
-  or ended in attached tasks, every task is done, nothing is stuck, and a fresh agent on
+  or ended in attached tasks, every task is done, nothing has spent its budget, and a fresh agent on
   main gets every proof's value (s_k-test asserts (v_j 100) = 100+j). Verdict SWARM."
   [n m]
   {:boot {:max-running (parse-long (or m "8"))} :specs (fx/swarm-specs (parse-long (or n "20"))) :tns 'sw :label "SWARM"
    :check "(mapv #(% 100) [app.sw/v0 app.sw/v1 app.sw/v2 app.sw/v3 app.sw/v4])" :expect ["[100 101 102 103 104]"]
    :ok (fn [{:keys [q d]}]
          (let [c (:conflicts-measured (merge-counts d))]
-           (-> (all-done d) (assoc :conflicts c) (update :ok #(and % (empty? (:stuck q)) (pos? c))))))})
+           (-> (all-done d) (assoc :conflicts c) (update :ok #(and % (empty? (:root-causes q)) (pos? c))))))})
 
 (defn- model-run
   "Tasks of the calc graph worked by the config's OpenAI-compatible endpoint
@@ -307,23 +307,23 @@
      :check (if add? "(app.calc/add 1 2)" "[(app.calc/add 1 2) (app.calc/sum-sq 3 4) (app.calc/abs -5)]")
      :ok (fn [{:keys [d]}] (all-done d))}))
 
-(defn- stuck
-  "A task that always fails ends observed stuck: add (always wrong) attaches refinement
-  chains until its budget is spent, then the reconciler records the stuck fact (cause and
+(defn- budget-spent
+  "A task that always fails ends with its budget spent: add (always wrong) attaches refinement
+  chains until its budget is spent, then the reconciler records the budget-spent fact (cause and
   what it blocks: twice, needing add) and reports quiescence; this run returns on that
-  report, with no deadline. Verdict: one stuck root, the last chain's design (the
+  report, with no deadline. Verdict: one root cause, the last chain's design (the
   always-wrong model never improves the plan, so it is refused :no-design), blocking the
   rest of its chain, twice and its merge; nothing held."
   []
   {:boot {:max-running 2 :provider {:kind :scripted :script 'seon.e2e/always-wrong}} :specs (vec (take 2 fx/calc)) :tns 'calc :max-turns 2
    :ok (fn [{:keys [sys q d]}]
-         (let [[row & more] (:stuck q)]
+         (let [[row & more] (:root-causes q)]
            {:ok (and (nil? more) (= "calc/add-r2-design" (:task row))
                      (= ["calc/add-r2-implement" "calc/add-r2-merge" "calc/add-r2-test" "calc/twice" "calc/twice-merge"] (:blocks row))
                      (not-any? #(= :held (:seon.task/execution %)) (vals (task/tasks d))))
-            :stuck (:stuck q)
+            :root-causes (:root-causes q)
             :quiet-after-last-end-ms (- (now) (apply max 0 (keep :seon.attempt/end-ms (vals (task/attempts d)))))
-            :problems-stuck (count (get-in (root/problems sys) [:classes :stuck :rows]))}))})
+            :problems-budget-spent (count (get-in (root/problems sys) [:classes :budget-spent :rows]))}))})
 
 (defn run
   "One e2e mode; answers whether it passed."
@@ -337,4 +337,4 @@
                     "scenario" (scenario x y)
                     "swarm" (swarm x y)
                     "model" (model-run x)
-                    "stuck" (stuck)))))
+                    "budget-spent" (budget-spent)))))

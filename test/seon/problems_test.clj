@@ -77,7 +77,7 @@
   ;; it to main as one commit, and that commit is the reconciler's next input. A step that
   ;; throws leaves the proc's state as it was, so it fails on every commit it is handed.
   ;; Main's commits over ten rounds are the first record, and no more.
-  (ts/test-branch! (fn [_ conn] (let [_ (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t 1 :stuck []}}]})
+  (ts/test-branch! (fn [_ conn] (let [_ (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t 1 :root-causes []}}]})
         t0 (:max-tx @conn)
         st (rec/reconciler-proc {:boot "boot-1"})
         round (fn [f i]

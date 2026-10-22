@@ -16,8 +16,8 @@
     :dead                           an attempt whose agent died or was lost
     :error                          an attempt the turn loop ended on an error (the model)
     :waste                          forms charged to the producer of what was shown
-    :stuck                          a task whose failures spent its budget: its root cause and
-                                    the released tasks it blocks (seon.reconcile/stuck-tx)
+    :budget-spent                   a task whose failures spent its budget: its root cause and
+                                    the released tasks it blocks (seon.reconcile/budget-spent-tx)
     :task-conflict                  task content a branch and main both changed, differently,
                                     recorded at its attempt's end (seon.task/carry-tx)
     :failed                         a task marked failed (my.task/fail!, root or a check): its
@@ -85,7 +85,7 @@
   (boolean (some #(reconcile/finished (:seon.attempt/status (d/pull db [:seon.attempt/status] (:e %))))
                  (d/datoms db :avet :seon.attempt/task te))))
 
-;; ---- stuck and failed tasks ------------------------------------------------------------
+;; ---- budget-spent and failed tasks ------------------------------------------------------------
 
 (defn- failed-row
   "Task entity e, which carries a failure, as a row: open while the task is held for root."
@@ -99,16 +99,16 @@
             :owner-ns (:seon.task/ns t) :producer nil :proofs (vec (sort-by str (:seon.task/proofs t)))
             :evidence (assoc f :kind :failed) :answered-by (get-in ans [:from attempt] []) :at-ms end-ms})))
 
-(defn- stuck-row
-  "Task entity e, which carries a stuck fact, as a row: open while it is not done."
+(defn- budget-spent-row
+  "Task entity e, which carries a budget-spent fact, as a row: open while it is not done."
   {:malli/schema [:=> [:cat :seon.host/db :map :int] :seon.problems/row]}
   [db ans e]
-  (let [t (d/pull db [:seon.task/id :seon.task/ns :seon.task/stuck :seon.task/proofs] e)
-        {:keys [attempt cause blocks] :as s} (:seon.task/stuck t)
+  (let [t (d/pull db [:seon.task/id :seon.task/ns :seon.task/budget-spent :seon.task/proofs] e)
+        {:keys [attempt cause blocks] :as s} (:seon.task/budget-spent t)
         end-ms (some-> attempt (as-> a (d/pull db [:seon.attempt/end-ms] [:seon.attempt/id a])) :seon.attempt/end-ms)]
     {:task (:seon.task/id t) :attempt attempt :cause cause :blocks blocks :open? (not (task-done? db e))
      :owner-ns (:seon.task/ns t) :producer nil :proofs (vec (sort-by str (:seon.task/proofs t)))
-     :evidence (assoc s :kind :stuck) :answered-by (get-in ans [:from attempt] []) :at-ms end-ms}))
+     :evidence (assoc s :kind :budget-spent) :answered-by (get-in ans [:from attempt] []) :at-ms end-ms}))
 
 (defn- attempt-rows
   "The rows of attempt entity e, by class."
@@ -178,12 +178,12 @@
                                                    :seon.attempt/conflicts :seon.attempt/unmerged :seon.attempt/task-conflicts])
                                (mapcat (fn [s] (map :e (d/datoms db :avet :seon.attempt/status s))) (conj death-statuses :behind))))
         by-class (apply merge-with into (map #(attempt-rows db ans %) attempts))
-        stuck (mapv #(stuck-row db ans %) (es db :seon.task/stuck))
+        spent (mapv #(budget-spent-row db ans %) (es db :seon.task/budget-spent))
         failed (mapv #(failed-row db ans %) (es db :seon.task/failure))]
     {:t (:max-tx db)
      :classes (merge (into {} (for [c counted-classes :let [rows (vec (sort-by (comp - :count) (get errors c)))]]
                                 [c {:n (reduce + 0 (map :count rows)) :rows rows}]))
                      (into {} (for [c attempt-classes :let [rows (vec (sort-by #(- (or (:end-ms %) 0)) (get by-class c)))]]
                                 [c {:n (count rows) :rows rows}]))
-                     {:stuck {:n (count stuck) :rows (vec (sort-by #(- (or (:at-ms %) 0)) stuck))}
+                     {:budget-spent {:n (count spent) :rows (vec (sort-by #(- (or (:at-ms %) 0)) spent))}
                       :failed {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))}})})))

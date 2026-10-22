@@ -209,7 +209,7 @@
 
 (defn- old-store!
   "A store at path made before the rename: the schema with every renamed attribute under its
-  old name (seon.db/renamed), holding a config value and an attempt's overrun under the old
+  old name (seon.db/renamed), holding a config value and a task's spent budget under the old
   names. A store on disk of the test's own, the last resort: what is proved is a root's open
   of a kept store."
   [path]
@@ -218,7 +218,7 @@
         c0 (do (d/create-database made) (d/connect made))]
     (d/transact c0 {:tx-data (mapv #(update % :db/ident (fn [k] (was k k))) pdb/schema)})
     (d/transact c0 {:tx-data [{:seon.root/id :root :seon.config.contract/guarantees :contracts}
-                              {:seon.attempt/id "t/a#1" :seon.attempt/waste {'app/f {:forms 2 :turns 1}}}]})
+                              {:seon.task/id "t/a" :seon.task/stuck {:attempt "t/a#1" :cause "capped" :blocks ["t/b"]}}]})
     (d/release c0)))
 
 (deftest a-store-made-before-the-rename-reads-its-facts-under-the-new-names
@@ -228,9 +228,9 @@
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db) db @conn]
         (is (= :contracts (:seon.config.contract/instrument (d/pull db [:seon.config.contract/instrument] [:seon.root/id :root])))
             "a config value reads under its new name")
-        (is (= {'app/f {:forms 2 :turns 1}} (:seon.attempt/overrun (d/pull db [:seon.attempt/overrun] [:seon.attempt/id "t/a#1"])))
+        (is (= {:attempt "t/a#1" :cause "capped" :blocks ["t/b"]} (:seon.task/budget-spent (d/pull db [:seon.task/budget-spent] [:seon.task/id "t/a"])))
             "a plain-data value too, as it was")
-        (is (empty? (d/datoms db :aevt :seon.attempt/waste)) "and no longer under its old name")
+        (is (empty? (d/datoms db :aevt :seon.task/stuck)) "and no longer under its old name")
         (d/release conn))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 

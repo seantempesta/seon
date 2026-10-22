@@ -68,7 +68,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **task** | an entity of desired state: plan, instructions, proofs, `:needs`, environment, execution | `seon.task` |
 | **needs** | a task's prerequisites (refs); the only dependency edge, no chain entity | `seon.task/create-tx` |
 | **accumulated** | a task's plan and proofs with its prerequisites', derived along `:needs` | `seon.task/tasks` |
-| **attempt** | observed state: one agent working one task once (`task#n`); a spawn root refused is an attempt too (`:refused`, no agent, root's reason), named by `seon.reconcile/stuck` at quiescence and asked again only once main moves for another reason. Its turns, model calls and tokens are what its end measured: absent when unknown (no end is outcome `:no-end`), never 0 | `seon.task/attempt-start-tx` |
+| **attempt** | observed state: one agent working one task once (`task#n`); a spawn root refused is an attempt too (`:refused`, no agent, root's reason), named by `seon.reconcile/root-causes` at quiescence and asked again only once main moves for another reason. Its turns, model calls and tokens are what its end measured: absent when unknown (no end is outcome `:no-end`), never 0 | `seon.task/attempt-start-tx` |
 | **template** | a task kind's defaults: work, design, implement, test, merge | `seon.template` |
 | **merge task** | an ordinary task (kind `:merge`) whose new agent merges main into the branch and goes green | `seon.template/with-merge` |
 | **request** | what someone asked, as design → implement → merge tasks on one branch, written in one transaction | `seon.template/request` |

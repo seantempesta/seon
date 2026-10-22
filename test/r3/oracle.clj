@@ -124,7 +124,7 @@
   [v t]
   (let [id (:seon.task/id t) as (get-in v [:attempts id])]
     (and (= :running (:seon.task/execution t))
-         (nil? (:seon.task/stuck t))
+         (nil? (:seon.task/budget-spent t))
          (not (done-in? v id))
          (empty? (blocked-in v id))
          (not-any? #(or (live? v %) (#{:ended :dead} (:seon.attempt/status %))) as))))
@@ -184,7 +184,7 @@
                        (and (empty? rs) merge?) {:op :merge :attempt aid :task id}
                        (empty? rs) {:op :accept :attempt aid :task id}
                        ;; a failed attempt: new tasks attach through :needs, each a new agent, while
-                       ;; the budget lasts; spent, the task is stuck (bail)
+                       ;; the budget lasts; spent, its budget is spent (bail)
                        :else
                        {:op (if (< (:seon.task/generation t 0) (:seon.task/budget t default-budget)) :attach :bail) :attempt aid :task id
                         :problem (str "attempt " aid " ended " (name (:seon.attempt/outcome a :error))

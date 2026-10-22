@@ -74,7 +74,7 @@ echo "== seed (the one store every step branches from: made when missing)"; step
 read -r STORE KB0 BR0 <<< "$(run store)"
 # the steps' own mains: what a failed earlier run left is deleted before this run's step
 STEPS=(seed fx config system mcp threads instrument record problems smoke robust lifecycle backpressure hotreload drain idle
-       orphan durable window lease e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns e2e-sibling swarm e2e-loop e2e-stuck resume scale)
+       orphan durable window lease e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns e2e-sibling swarm e2e-loop e2e-budget-spent resume scale)
 run drop ${STEPS/#/check-} > "$OUT/drop-before.log" 2>&1 || FAILED+=("drop-before ($OUT/drop-before.log)")
 echo "== laws (every law's sites: catch, clocks, measures, resolution)"; step laws "OK \(|FAILED" "$ROOT/bin/laws"
 # lmdb-kill runs below Datahike, on an LMDB env of its own: a raw put has no branch to take,
@@ -146,7 +146,7 @@ for k in conflict semantic hairy newns sibling; do step e2e-$k "" run e2e scenar
 step swarm ":merges|:checks|^SWARM " run swarm 20 8
 echo "== loop (Seon's own source is main's program: a task changes seon.fixtures/generation, its merge is written back, committed on a clone's jolt/seon-merges, and live in root and in an agent forked after it, nothing built)"
 step e2e-loop ":source|:commits|:live|LOOP" run e2e loop "$OUT/loop"
-echo "== stuck (add always wrong: refinement chains until its budget is spent, then a stuck fact naming what it blocks; the run ends on quiescence)"; step e2e-stuck ":stuck|quiet-after" run e2e stuck
+echo "== budget-spent (add always wrong: refinement chains until its budget is spent, then a budget-spent fact naming what it blocks; the run ends on quiescence)"; step e2e-budget-spent ":root-causes|quiet-after" run e2e budget-spent
 echo "== resume (root SIGKILLed mid-graph; a new root finishes it)"
 run e2e resume check-resume > "$OUT/resume1.log" 2>&1; step resume "" run e2e resume2 check-resume
 echo "== scale $N"; step scale ":all-ok|:spawn->all|:end-to-end|:control-real-mb|:all-killed|^SCALE " run scale $N

@@ -141,7 +141,7 @@
     ;; its agent died
     (attempt "a" 1 :dead)
     [{:op :attach :attempt "demo/a#1" :task "demo/a" :problem "its agent died"}]
-    ;; budget spent (declared 0): bail, which makes the task stuck
+    ;; budget spent (declared 0): bail, which makes the task budget-spent
     (concat (attempt "a" 1 :ended :outcome :cap :results {(t "a") :fail}) [{:seon.task/id "demo/a" :seon.task/budget 0}])
     [{:op :bail :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended cap: proof-red demo-test/a-test"}]))
 
@@ -414,7 +414,7 @@
                (map #(:seon.task/execution (task/task db3 %)) ["demo/add-r1-implement" "demo/add-r1-test" "demo/add-r1-merge"])))
         (is (= 2 (:seon.task/generation (task/task db3 "demo/add-r2-design"))))))))
 
-(deftest a-spent-budget-is-a-stuck-fact-naming-what-it-blocks
+(deftest a-spent-budget-is-a-fact-naming-what-it-blocks
   (let [db (mdb [(decl "add") (decl "twice" :needs ["add"])]
                 :extra (concat [{:seon.task/id "demo/add" :seon.task/generation 2}]
                                (attempt "add" 1 :ended :outcome :cap :results {(t "add") :fail})))
@@ -422,23 +422,23 @@
         [act :as acts] (r/actions idx)]
     (is (= [{:op :bail :attempt "demo/add#1" :task "demo/add" :problem "attempt demo/add#1 ended cap: proof-red demo-test/add-test"}] acts))
     (let [db' (d/db-with db (concat (task/status-tx db "demo/add#1" :ended :bailed {})
-                                    (r/stuck-tx idx "demo/add#1" "demo/add" (:problem act))))
+                                    (r/budget-spent-tx idx "demo/add#1" "demo/add" (:problem act))))
           idx' (r/index db')
           blocked ["demo/add-merge" "demo/twice" "demo/twice-merge"]]
-      (testing "the release stays the owner's; the stuck fact names the cause and what it blocks"
+      (testing "the release stays the owner's; the budget-spent fact names the cause and what it blocks"
         (is (= :running (:seon.task/execution (task/task db' "demo/add"))))
-        (is (= {:attempt "demo/add#1" :cause (:problem act) :blocks blocked} (:seon.task/stuck (task/task db' "demo/add")))))
+        (is (= {:attempt "demo/add#1" :cause (:problem act) :blocks blocked} (:seon.task/budget-spent (task/task db' "demo/add")))))
       (testing "nothing is relaunched, nothing waits unexplained"
         (is (= [] (r/actions idx')))
-        (is (= [{:task "demo/add" :cause (:problem act) :attempt "demo/add#1" :blocks blocked}] (r/stuck idx'))))
+        (is (= [{:task "demo/add" :cause (:problem act) :attempt "demo/add#1" :blocks blocked}] (r/root-causes idx'))))
       (testing "the problems read lists it, open, with its evidence"
         (is (= [{:task "demo/add" :attempt "demo/add#1" :open? true :blocks blocked}]
-               (mapv #(select-keys % [:task :attempt :open? :blocks]) (get-in (problems/report db') [:classes :stuck :rows]))))))))
+               (mapv #(select-keys % [:task :attempt :open? :blocks]) (get-in (problems/report db') [:classes :budget-spent :rows]))))))))
 
-(deftest stuck-names-cancelled-and-held-roots
+(deftest root-causes-name-cancelled-and-held-tasks
   (let [db (db-of diamond :extra (concat (merged "a") (task/execution-tx ["demo/b"] :cancelled) (task/execution-tx ["demo/c"] :held)))]
     (is (= [{:task "demo/b" :cause "cancelled" :blocks ["demo/d"]} {:task "demo/c" :cause "held" :blocks ["demo/d"]}]
-           (r/stuck (r/index db))))))
+           (r/root-causes (r/index db))))))
 
 (deftest hairy-rule
   (let [t {:seon.task/accumulated {:plan "Use `app/g` and `app/f`." :proofs #{'app.proofs/a-test}}}
@@ -455,20 +455,20 @@
       [(c 'app/f :both-modified)] 3 :merge-turns)))
 
 (deftest quiescence-is-reported-when-nothing-can-move
-  ;; the reconciler proc's own steps over real commits: a stuck task and its dependents, nothing live
+  ;; the reconciler proc's own steps over real commits: a task whose budget is spent and its dependents, nothing live
   (let [db (mdb [(decl "add") (decl "twice" :needs ["add"])]
                 :extra (concat [{:seon.task/id "demo/add" :seon.task/generation 2}]
                                (attempt "add" 1 :bailed)
-                               (r/stuck-tx (r/index (mdb [(decl "add") (decl "twice" :needs ["add"])])) "demo/add#1" "demo/add" "capped")))
+                               (r/budget-spent-tx (r/index (mdb [(decl "add") (decl "twice" :needs ["add"])])) "demo/add#1" "demo/add" "capped")))
         commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
         step (fn [st db ops] (let [[st outs] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (profile/now-ns)})] [st (:to-api outs)]))
         report-in (fn [outs] (some #(get-in % [:req :req :tx-data 0 :seon.root/quiescent]) outs))
         [st outs] (step (r/reconciler-proc {:boot "boot-1"}) db [])
         report (report-in outs)
         blocked ["demo/add-merge" "demo/twice" "demo/twice-merge"]]
-    (testing "nothing to start, nothing in flight: one positive report, naming the stuck root and what it blocks"
+    (testing "nothing to start, nothing in flight: one positive report, naming the root cause and what it blocks"
       (is (empty? (:flights st)))
-      (is (= {:t (:max-tx db) :stuck [{:task "demo/add" :cause "capped" :attempt "demo/add#1" :blocks blocked}]} report))
+      (is (= {:t (:max-tx db) :root-causes [{:task "demo/add" :cause "capped" :attempt "demo/add#1" :blocks blocked}]} report))
       (is (some #(= {:op :collect} (get-in % [:req :req])) outs) "and asks the writer to collect the store, once a spell")
       (is (:quiet st)))
     (let [[db2 ops2] (commit db [{:seon.root/id :root :seon.root/quiescent report}])
@@ -482,8 +482,8 @@
               [_ outs3] (step st2 db3 ops3)]
           (is (= (:max-tx db3) (:t (report-in outs3))))))
       (testing "work to start is not quiet: unsticking add starts it, and no report goes out"
-        (let [[db4 ops4] (commit db2 [[:db/retract [:seon.task/id "demo/add"] :seon.task/stuck
-                                       (:seon.task/stuck (d/pull db2 [:seon.task/stuck] [:seon.task/id "demo/add"]))]])
+        (let [[db4 ops4] (commit db2 [[:db/retract [:seon.task/id "demo/add"] :seon.task/budget-spent
+                                       (:seon.task/budget-spent (d/pull db2 [:seon.task/budget-spent] [:seon.task/id "demo/add"]))]])
               [st4 outs4] (step st2 db4 ops4)]
           (is (= ["demo/add"] (keep #(get-in % [:req :opts :task]) outs4)))
           (is (not (:quiet st4)))
@@ -525,14 +525,14 @@
     (is (= ["demo/a"] (spawns outs)))
     (is (= [] (spawns outs3)) "the write's answer starts nothing")
     (is (= [] (spawns outs4)) "nor does the refused answer's own commit")
-    (is (= [{:task "demo/a" :cause held-why :attempt "demo/a#1" :blocks []}] (get-in st [:quiescent :stuck])) "quiet, naming it")
+    (is (= [{:task "demo/a" :cause held-why :attempt "demo/a#1" :blocks []}] (get-in st [:quiescent :root-causes])) "quiet, naming it")
     (is (= ["demo/a"] (spawns outs5)) "other work on main: it asks again")))
 
 (deftest quiescence-names-a-task-that-cannot-start
   ;; a refused attempt is a root cause at quiescence, naming what it blocks
   (let [db (db-of [(decl "a") (decl "b" :needs ["a"])]
                   :extra (concat (attempt "a" 1 :refused) [{:seon.attempt/id "demo/a#1" :seon.attempt/reason held-why}]))]
-    (is (= [{:task "demo/a" :cause held-why :attempt "demo/a#1" :blocks ["demo/b"]}] (r/stuck (r/index db))))))
+    (is (= [{:task "demo/a" :cause held-why :attempt "demo/a#1" :blocks ["demo/b"]}] (r/root-causes (r/index db))))))
 
 (deftest a-task-marked-failed-is-held-for-root
   ;; owner, 2026-10-22: a failure is task data and root reacts to it; D2(a): held for root,

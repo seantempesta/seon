@@ -46,7 +46,7 @@
                  [:seon.task/generation {:optional true} :seon.task/generation]
                  [:seon.task/budget {:optional true} :seon.task/budget]
                  [:seon.task/references {:optional true} :seon.task/references]
-                 [:seon.task/stuck {:optional true} :seon.task/stuck]
+                 [:seon.task/budget-spent {:optional true} :seon.task/budget-spent]
                  [:seon.task/failure {:optional true} :seon.task/failure]]
  ;; its plan and proofs accumulated along :needs (derived by the reader)
  :seon.task/task [:and {:seon.render/html seon.render.ui/task-box} :seon.task/own [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
@@ -75,9 +75,9 @@
                         [:seon.attempt/changed {:optional true} [:set :string]]]
  ;; ---- the done rule and the reconciler's answer ----
  :seon.reconcile/merge-limits [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?]]
- ;; a released task not done at quiescence: a root cause (its stuck fact, or cancelled or held)
+ ;; a released task not done at quiescence: a root cause (its budget-spent fact, or cancelled or held)
  ;; and the released tasks it blocks, transitively
- :seon.reconcile/stuck-row [:map {:closed true} [:task :seon.task/id] [:cause :string]
+ :seon.reconcile/root-cause [:map {:closed true} [:task :seon.task/id] [:cause :string]
                             [:attempt {:optional true} :seon.attempt/id] [:blocks [:vector :seon.task/id]]]
  ;; the reconciler proc's state, and the steps of a flight
  :seon.reconcile/state [:map [:db :seon.host/db] [:boot :string]

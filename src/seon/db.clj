@@ -148,8 +148,7 @@
   name aliases it (datahike.schema/find-invalid-schema-updates), so open! moves each current
   fact to its new name (rename-tx) and the old attribute stays installed: history keeps what
   was written, under the name it was written with."
-  {:seon.attempt/waste :seon.attempt/overrun
-   :seon.end/waste :seon.end/overrun
+  {:seon.task/stuck :seon.task/budget-spent
    :seon.config.contract/guarantees :seon.config.contract/instrument
    :seon.ai.model/thinking-dials :seon.ai.model/thinking-modes})
 

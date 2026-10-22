@@ -10,11 +10,11 @@
   ;; Clojure REPL, answer the text of the form that defined a var the binary holds compiled
   ;; and, as Clojure's does, a library var's form read from its :file and :line (a live agent
   ;; spent all 8 turns on (source datahike.connector/connect), 2026-10-21)
-  (let [[fn-item src-item lib-item] (at/in-agent ["(clojure.repl/source-fn 'seon.reconcile/stuck)"
-                                                  "(do (require '[clojure.repl :refer [source]]) (source seon.reconcile/stuck))"
+  (let [[fn-item src-item lib-item] (at/in-agent ["(clojure.repl/source-fn 'seon.reconcile/root-causes)"
+                                                  "(do (require '[clojure.repl :refer [source]]) (source seon.reconcile/root-causes))"
                                                   "(do (require 'datahike.connector) (clojure.repl/source-fn 'datahike.connector/connect))"])]
-    (is (str/includes? (:printed fn-item) "(defn stuck") (:printed fn-item))
-    (is (str/includes? (str (:out src-item)) "(defn stuck") (str src-item))
+    (is (str/includes? (:printed fn-item) "(defn root-causes") (:printed fn-item))
+    (is (str/includes? (str (:out src-item)) "(defn root-causes") (str src-item))
     (is (str/includes? (:printed lib-item) "(defn connect") (:printed lib-item))))
 
 (deftest an-agent-repl-answers-what-a-clojure-repl-answers
@@ -23,7 +23,7 @@
   ;; user types at clojure.main's REPL (clojure.main/repl-requires refers source, apropos,
   ;; dir, pst, doc, find-doc, pp, pprint) and what it answers, in an agent's own namespace;
   ;; the improvements: source reads the agent's own redefinitions and Seon's program.
-  (let [rows [["(source seon.reconcile/stuck)" :out "(defn stuck"]
+  (let [rows [["(source seon.reconcile/root-causes)" :out "(defn root-causes"]
               ["(do (require 'datahike.connector) (source datahike.connector/connect))" :out "(defn connect"]
               ["(defn twice [x] (* 2 x))" :printed "twice"]
               ["(source twice)" :out "(defn twice [x] (* 2 x))"]
@@ -37,7 +37,7 @@
               ["(some? *e)" :printed "true"]
               ["(pst)" :out "Divide by zero"]
               ["(in-ns 'seon.reconcile)" :printed "seon.reconcile"]
-              ["(clojure.repl/source stuck)" :out "(defn stuck"]]
+              ["(clojure.repl/source root-causes)" :out "(defn root-causes"]]
         items (at/in-agent (mapv first rows))]
     (doseq [[[form k expected] item] (map vector rows items)]
       (is (str/includes? (str (get item k)) expected) (str form " -> " (pr-str item))))))

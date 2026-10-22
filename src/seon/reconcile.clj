@@ -152,7 +152,7 @@
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
   [idx id]
   (let [t (get-in idx [:tasks id])]
-    (boolean (and t (= :running (:seon.task/execution t)) (not (idx-done? idx id)) (nil? (:seon.task/stuck t))
+    (boolean (and t (= :running (:seon.task/execution t)) (not (idx-done? idx id)) (nil? (:seon.task/budget-spent t))
                   (every? #(idx-done? idx %) (:seon.task/needs t))
                   (not-any? #(let [a (get-in idx [:attempts %])] (or (live-in? idx a) (judged (:seon.attempt/status a))))
                             (get-in idx [:by-task id]))))))
@@ -336,7 +336,7 @@
         reaps (for [aid (sort (:reap idx))] {:op :reap :attempt aid})
         kills (for [[aid r] (sort-by key (:kill idx))] {:op :kill :attempt aid :reason r})
         ;; a failed attempt (refused by the done rule, or its agent died) attaches a
-        ;; refinement chain while its task has budget; spent, the task is stuck (bail)
+        ;; refinement chain while its task has budget; spent, its budget is spent (bail)
         failed (fn [aid id t problem] {:op (if (refine? t) :attach :bail) :attempt aid :task id :problem problem})
         judged (for [aid (sort (:judge idx))
                      :let [a (att aid) id (:seon.attempt/task a) t (get-in idx [:tasks id])
@@ -386,7 +386,7 @@
                   :attempt (str id "#" (inc (count (get-in idx [:by-task id]))))})]
     (vec (concat reaps kills judged octopus spawns))))
 
-;; ---- stuck: observed, never held ------------------------------------------------------
+;; ---- root causes: observed, never held ------------------------------------------------------
 
 (defn blocks
   "The released tasks not done that need task id, transitively, sorted."
@@ -398,17 +398,17 @@
         (recur (into (vec more) ns) (into seen ns)))
       (vec (sort (filter #(and (= :running (get-in idx [:tasks % :seon.task/execution])) (not (idx-done? idx %))) seen))))))
 
-(defn stuck
-  "Why released work is not done, as root causes: each task whose stuck fact holds (its
+(defn root-causes
+  "Why released work is not done, as root causes: each task whose budget-spent fact holds (its
   budget spent), each task whose latest attempt root refused to spawn (its reason: the
   branch is held, or too many live agents), and each task not released (cancelled, held)
   that released work needs, with the released tasks it blocks. Read once at quiescence: one
   pass over the tasks."
-  {:malli/schema [:=> [:cat :seon.reconcile/index] [:vector :seon.reconcile/stuck-row]]}
+  {:malli/schema [:=> [:cat :seon.reconcile/index] [:vector :seon.reconcile/root-cause]]}
   [idx]
   (vec (for [[id t] (sort-by key (:tasks idx))
              :when (not (idx-done? idx id))
-             :let [s (:seon.task/stuck t)
+             :let [s (:seon.task/budget-spent t)
                    ex (:seon.task/execution t)
                    ;; attempts are numbered in order (actions' spawns), so the latest is the count's
                    latest (get-in idx [:attempts (str id "#" (count (get-in idx [:by-task id])))])
@@ -419,16 +419,16 @@
            s (assoc :attempt (:attempt s))
            (and refused (not s)) (assoc :attempt (:seon.attempt/id refused))))))
 
-(defn stuck-tx
-  "Task id is stuck: attempt aid failed with its budget spent. The problem and the derived
+(defn budget-spent-tx
+  "Task id's budget is spent: attempt aid failed with its budget spent. The problem and the derived
   fact (the cause and what it blocks); the task stays released, its execution the owner's."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.attempt/id :seon.task/id :string] [:vector :map]]}
   [idx aid id problem]
   [{:seon.task/id id :seon.task/problem problem
-    :seon.task/stuck {:attempt aid :cause problem :blocks (blocks idx id)}}])
+    :seon.task/budget-spent {:attempt aid :cause problem :blocks (blocks idx id)}}])
 
 (defn quiescent
-  "Main's last quiescence report on db ({:t :stuck}, written by the reconciler proc), or nil."
+  "Main's last quiescence report on db ({:t :root-causes}, written by the reconciler proc), or nil."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.root/quiescent]]}
   [db]
   (:seon.root/quiescent (d/pull db [:seon.root/quiescent] [:seon.root/id :root])))
@@ -546,9 +546,9 @@
                   [st o2] (write st attempt (if killing? :ignored :done) (cas-tx attempt :running :killed {:seon.attempt/end-ms (System/currentTimeMillis)
                                                                                     :seon.attempt/reason (name (:reason act))}))]
               [st [o1 o2]])
-      ;; budget spent: the task is stuck, observed; its release stays the owner's
+      ;; budget spent: its budget is spent, observed; its release stays the owner's
       :bail (one (write st attempt :done (into (cas-tx attempt (:seon.attempt/status a) :bailed {})
-                                               (stuck-tx (:idx st) attempt (:task act) (:problem act)))))
+                                               (budget-spent-tx (:idx st) attempt (:task act) (:problem act)))))
       ;; a merge task's branch into main: clean by construction when the branch holds main's
       ;; program head; behind: its task runs again, a new agent
       ;; an octopus merge: every member's branch into main in one commit (each holds main's
@@ -670,7 +670,7 @@
                 [st [o1 o2]])
       ;; each member's answer, as one write: merged at the octopus merge's t, behind (its merge task
       ;; runs again, a new agent), or refused: a failed attempt like any other (a refinement
-      ;; chain while the budget lasts, else stuck)
+      ;; chain while the budget lasts, else its budget is spent)
       ;; the merged members' namespaces that are Seon's own source are written back: main's
       ;; files after the octopus merge, committed on the merges branch (:git), the sha recorded on
       ;; each merged attempt (the self-improvement loop: the next generation builds it)
@@ -689,7 +689,7 @@
                                               (conj (tpl/attach-tx (:db st) {:attempt attempt :task task :problem problem})
                                                     {:seon.attempt/id attempt :seon.attempt/error (error-text r)})
                                               :else (into (cas-tx attempt :ended :bailed {:seon.attempt/error (error-text r)})
-                                                          (stuck-tx (:idx st) attempt task problem)))))
+                                                          (budget-spent-tx (:idx st) attempt task problem)))))
                                         (:members act) (:results r))))))
       :write-back (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)
@@ -711,7 +711,7 @@
 (defn- quiet
   "Report quiescence positively, once per quiet spell: when no flight is in the air and no
   attempt is live after a pass that started nothing, write main's :seon.root/quiescent (the
-  t judged, and the stuck rows), and ask the writer to collect the store (:collect: it sweeps
+  t judged, and the root causes), and ask the writer to collect the store (:collect: it sweeps
   only when a branch is gone, and root refuses it while an agent is live). Their answers are
   not awaited (no flight), and the commits they make touch only root, which does not end the
   spell. Answers [st outputs]."
@@ -719,7 +719,7 @@
   [st outs]
   (if (or (:quiet st) (seq outs) (seq (:flights st)) (seq (:live (:idx st))))
     [st outs]
-    (let [fact {:t (:t st) :stuck (stuck (:idx st))}
+    (let [fact {:t (:t st) :root-causes (root-causes (:idx st))}
           [st q] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/quiescent fact}]}})
           [st c] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :collect}})]
       [(assoc st :quiet true :quiescent fact) [q c]])))
@@ -750,7 +750,7 @@
        :ins {:main "main's commits" :answers "the api's answers"} :outs {:to-api "requests"}
        :workload :io
        :ping-map-fn (fn [st] {:seen (:seen st 0) :lists (:lists st 0) :t (:t st) :flights (count (:flights st)) :pending (count (:pending st))
-                              :quiet (boolean (:quiet st)) :stuck (count (:stuck (:quiescent st)))})})
+                              :quiet (boolean (:quiet st)) :root-causes (count (:root-causes (:quiescent st)))})})
   ([args] (assoc (dissoc args :judge) :seen 0 :rid 0 :flights {} :pending {} ::flow/in-ports {:judge (:judge args)}))
   ([st _] st)
   ([st in m]

@@ -90,7 +90,7 @@
         _ (doseq [tx (pdb/seed-tx 110)] (d/transact c {:tx-data tx}))
         _ (d/branch! c :db :old-run)
         c2 (d/connect (assoc cfg :branch :old-run))
-        _ (d/transact c2 {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t 536870914 :stuck []}}]})
+        _ (d/transact c2 {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t 536870914 :root-causes []}}]})
         _ (pdb/sync! cfg)
         _ (do (d/release c2) (d/release c))
         out (root-answers path ["--set ':seon.config.root/main=\"old-run\"'"]

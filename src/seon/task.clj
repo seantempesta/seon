@@ -188,7 +188,7 @@
 (def ^:private task-pull
   [:seon.task/id :seon.task/ns :seon.task/name :seon.task/plan :seon.task/instructions :seon.task/proofs
    :seon.task/branch :seon.task/model :seon.task/execution :seon.task/problem
-   :seon.task/kind :seon.task/evidence :seon.task/generation :seon.task/budget :seon.task/stuck :seon.task/failure
+   :seon.task/kind :seon.task/evidence :seon.task/generation :seon.task/budget :seon.task/budget-spent :seon.task/failure
    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns
    {:seon.task/needs [:seon.task/id]}])
 
