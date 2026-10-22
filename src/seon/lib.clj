@@ -1,6 +1,6 @@
 (ns seon.lib
   "Host pieces shared by root, the fork server and agents: libc FFI, pipes, a
-  poll-driven line reader, Chez introspection and GC controls, qfork, the Mach memory
+  poll-driven line reader, Chez introspection and GC controls, fork!, the Mach memory
   probe (native/probe.c, built by bin/build), small stats. From proto/flow f2-final
   proto.lib (itself e13.lib, trimmed)."
   (:refer-clojure :exclude [defn defn-])
@@ -144,37 +144,17 @@
          (define (proto-bytes-in-heap) (bytes-allocated))
          (define (proto-static!) (collect (collect-maximum-generation) 'static))
          (define (proto-set-trip! n) (collect-trip-bytes n))
-         (define proto-qfork
+         ;; fork only while this is the one active Chez thread, checked once under the thread
+         ;; mutex; -2 when another is active (an agent's second thread is a defect, never waited out)
+         (define proto-fork-alone
            (let ([fork (foreign-procedure \"fork\" () int)])
              (lambda ()
-               (let loop ([n 0])
-                 (disable-interrupts)
-                 (mutex-acquire #%$tc-mutex)
-                 (if (= (#%$top-level-value '$active-threads) 1)
-                     (let ([pid (fork)])
-                       (mutex-release #%$tc-mutex)
-                       (enable-interrupts)
-                       pid)
-                     (begin (mutex-release #%$tc-mutex) (enable-interrupts)
-                            (sleep (make-time 'time-duration 50000 0))
-                            (loop (+ n 1))))))))
-         ;; qfork with a bound: -2 when another Chez thread stayed active for max-tries x 50 us
-         (define proto-qfork-bounded
-           (let ([fork (foreign-procedure \"fork\" () int)])
-             (lambda (max-tries)
-               (let loop ([n 0])
-                 (disable-interrupts)
-                 (mutex-acquire #%$tc-mutex)
-                 (if (= (#%$top-level-value '$active-threads) 1)
-                     (let ([pid (fork)])
-                       (mutex-release #%$tc-mutex)
-                       (enable-interrupts)
-                       pid)
-                     (begin (mutex-release #%$tc-mutex) (enable-interrupts)
-                            (if (>= n max-tries)
-                                -2
-                                (begin (sleep (make-time 'time-duration 50000 0))
-                                       (loop (+ n 1))))))))))")
+               (disable-interrupts)
+               (mutex-acquire #%$tc-mutex)
+               (let ([pid (if (= (#%$top-level-value '$active-threads) 1) (fork) -2)])
+                 (mutex-release #%$tc-mutex)
+                 (enable-interrupts)
+                 pid))))")
       true))
 
 (defn heap-cap!
@@ -237,13 +217,27 @@
 (defchecked bytes-in-heap [:=> [:cat] :int] (scm/proc "proto-bytes-in-heap"))
 (defchecked static! [:=> [:cat] :any] (scm/proc "proto-static!"))
 (defchecked set-trip! [:=> [:cat :int] :any] (scm/proc "proto-set-trip!"))
-(defchecked qfork [:=> [:cat] :seon.lib/pid] (scm/proc "proto-qfork"))
-(defchecked qfork-bounded* [:=> [:cat :int] :seon.lib/pid] (scm/proc "proto-qfork-bounded"))
-(defn safe-fork
-  "fork() only while this is the one active Chez thread (a fork beside a running thread
-  breaks the child, E11/E13); waits up to ms, then answers -2."
-  {:malli/schema [:=> [:cat :int] :seon.lib/pid]}
-  [ms] (qfork-bounded* (* 20 ms)))
+(defchecked ^:private fork-alone* [:=> [:cat] :seon.lib/pid] (scm/proc "proto-fork-alone"))
+
+(defn wait-status
+  "Reap child pid (blocking waitpid): its decoded exit status."
+  {:malli/schema [:=> [:cat :seon.lib/pid] :seon.lib/exit-status]}
+  [pid] (let [b (ffi/alloc 4)] (c-waitpid pid b 0) (decode-status (ffi/read b :int))))
+
+(defn fork!
+  "The one spawning skeleton (AGENTS section 2): fork only while this is the one active Chez
+  thread (E11/E13: a fork beside a running thread breaks the child), checked once. Then
+  (child) in the child, exiting 0 if it returns; (refused n) here, n the active threads (1:
+  the OS refused); or (parent pid) here, whose answer is this fn's. fd, the child's own, is
+  closed here. double? forks the child again and reaps the middle: a clone is nobody's child."
+  {:malli/schema [:=> [:cat [:map [:child :seon.host/fn] [:refused :seon.host/fn] [:parent :seon.host/fn]
+                             [:fd {:optional true} :seon.lib/fd] [:double? {:optional true} :boolean]]] :any]}
+  [{:keys [child refused parent fd double?]}]
+  (let [pid (fork-alone*)]
+    (if (zero? pid)
+      (do (when (or (not double?) (zero? (c-fork))) (child)) (c-exit 0))
+      (do (some-> fd c-close)
+          (if (neg? pid) (refused (active-threads)) (do (when double? (wait-status pid)) (parent pid)))))))
 
 ;; ---- stats ----
 (defn percentile {:malli/schema [:=> [:cat [:maybe [:sequential number?]] [:double {:min 0.0 :max 1.0}]] [:maybe number?]]}

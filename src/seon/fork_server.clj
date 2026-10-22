@@ -27,6 +27,15 @@
 
 (declare main)
 
+(defn- fork-carrying!
+  "lib/fork! of a request whose socket came with it (SCM_RIGHTS): the child closes this
+  server's descriptors and runs (child fd)."
+  {:malli/schema [:=> [:cat :map :seon.host/fn :seon.host/fn :seon.host/fn] :any]}
+  [st child refused parent]
+  (let [{:keys [conn]} st fd (sock/take-fd! conn)]
+    (lib/fork! {:fd fd :refused refused :parent parent
+                :child #(do (sock/close! (:fd conn)) (sock/close-pending-fds! conn) (child fd))})))
+
 (defn server-step
   "The fork server's step-fn. In :cmd ({:op :tx|:fork|:stats|:static}, and :tick when the
   pipe is idle, to reap); out :ev (events for root). The fork is this process's own
@@ -51,17 +60,12 @@
              [st {:ev (cond-> [] errs (conj {:ev :load-errors :t (:t m) :errors (vec errs)})
                         true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (lib/ms-since t0)
                                     :lag-ms (/ (- (lib/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}]))
-     :fork (let [fd (sock/take-fd! (:conn st))
-                 act (lib/active-threads)
-                 t0 (lib/now-ns)
-                 pid (if (= 1 act) (lib/c-fork) -1)]
-             (cond
-               (zero? pid) (do (sock/close! (:fd (:conn st))) (sock/close-pending-fds! (:conn st))
-                               (repl/run! fd m (:db st) (:ns m)))
-               (neg? pid) (do (sock/close! fd) [st {:ev [{:ev :fork-failed :agent (:agent m) :active-threads act}]}])
-               :else [(do (sock/close! fd) st) {:ev (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
-                                      :fork-ms (lib/ms-since t0) :t (:max-tx (:db st))}]
-                                    (reap st))}]))
+     :fork (let [t0 (lib/now-ns)]
+             (fork-carrying! st #(repl/run! % m (:db st) (:ns m))
+                             (fn [n] [st {:ev [{:ev :fork-failed :agent (:agent m) :active-threads n}]}])
+                             (fn [pid] [st {:ev (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
+                                                        :fork-ms (lib/ms-since t0) :t (:max-tx (:db st))}]
+                                                      (reap st))}])))
      :stats [st {:ev [{:ev :stats :t (:max-tx (:db st)) :datoms (count (d/datoms (:db st) :eavt))
                        :mismatch (:mismatch st) :mem-mb (lib/r2 (lib/real-mb)) :os-threads (lib/nthreads)
                        :active-threads (lib/active-threads)}]}]
@@ -69,17 +73,11 @@
      ;; a standby (lane F2): a fork of this server, idle on its own named pipes until root
      ;; promotes it, so that no fork after boot ever comes from root (multithreaded).
      ;; The previous standby is killed: one standby at a time.
-     :standby (let [fd (sock/take-fd! (:conn st))
-                    act (lib/active-threads)
-                    pid (if (= 1 act) (lib/c-fork) -1)]
-                (cond
-                  (zero? pid) (do (sock/close! (:fd (:conn st))) (sock/close-pending-fds! (:conn st))
-                                  (main (:db st) fd false))
-                  (neg? pid) (do (sock/close! fd) [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads act}]}])
-                  :else (do (sock/close! fd)
-                            (when-let [old (:standby-pid st)] (lib/c-kill old 9))
-                            [(assoc st :standby-pid pid)
-                             {:ev (into [{:ev :standby :gen (:gen m) :pid pid :t (:max-tx (:db st))}] (reap st))}])))
+     :standby (fork-carrying! st #(main (:db st) % false)
+                              (fn [n] [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads n}]}])
+                              (fn [pid] (when-let [old (:standby-pid st)] (lib/c-kill old 9))
+                                [(assoc st :standby-pid pid)
+                                 {:ev (into [{:ev :standby :gen (:gen m) :pid pid :t (:max-tx (:db st))}] (reap st))}]))
      [st nil])))
 
 (defn- dev-classpath!
@@ -133,15 +131,15 @@
     (.setDaemon true) (.start)))
 
 (defn fork-server
-  "Fork the boot fork server holding db (qfork: only while this process has one active
-  thread, which at boot it has). In the child it never returns; here answers {:pid :fd}."
+  "Fork the boot fork server holding db (lib/fork!: boot has one active thread; another is
+  a defect, thrown). In the child it never returns; here answers {:pid :fd}."
   {:malli/schema [:=> [:cat :seon.host/db] :seon.fork-server/forked]}
   [db]
-  (let [[r s] (sock/socketpair)
-        pid (lib/qfork)]
-    (if (zero? pid)
-      (do (sock/close! r) (main db s true))
-      (do (sock/close! s) {:pid pid :fd r}))))
+  (let [[r s] (sock/socketpair)]
+    (lib/fork! {:fd s :child #(do (sock/close! r) (main db s true))
+                :refused #(throw (ex-info "the fork server cannot fork: root boots with more than one thread"
+                                          {:seon.error/type ::not-single-threaded :active-threads %}))
+                :parent (fn [pid] {:pid pid :fd r})})))
 
 (defn- request-standby
   "Ask the current server to fork a standby; its socket to root goes with the request
