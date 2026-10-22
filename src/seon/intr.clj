@@ -76,10 +76,11 @@
   typed :seon.repl/ticks-spent {:ticks n} when its budget ran out."
   {:malli/schema [:=> [:cat [:maybe pos-int?] :seon.host/fn] :any]}
   [ticks thunk]
+  ;; an enclosing eval already stopped, or root's interrupt is pending: this one does not start
+  (when (or @pending (some #(deref (:cause %)) @stack))
+    (throw (ex-info "interrupted by root" {:interrupted true})))
   (let [tok (jolt.host/make-interrupt)
         e {:token tok :cause (volatile! nil)}]
-    ;; an enclosing eval already stopped: this one starts stopped too
-    (when-let [c (or (some #(deref (:cause %)) @stack) (when @pending :interrupted))] (set-token! e c))
     (swap! stack conj e)
     (try (if ticks (jolt.host/run-interruptible tok thunk ticks) (jolt.host/run-interruptible tok thunk))
          (catch Throwable ex
