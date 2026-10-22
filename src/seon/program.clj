@@ -718,7 +718,7 @@
   [db-from db-to]
   (let [forms (fn [db] (into {} (map (juxt :e :v)) (d/datoms db :aevt :var/form)))
         a (forms db-from) b (forms db-to)
-        form-id (fn [db v] (some->> (eid db :var/name v) (d/entity db) :var/form :form/id))]
+        form-id (fn [db v] (some->> (pdb/eid db :var/name v) (d/entity db) :var/form :form/id))]
     (into #{} (keep #(when (not= (a %) (b %))
                        (let [v (:var/name (d/entity (if (b %) db-to db-from) %))]
                          (when (not= (form-id db-from v) (form-id db-to v)) v))))
