@@ -12,7 +12,9 @@
                    [:seon.render/budget {:optional true} pos-int?]
                    ;; what a cut reads the value through: its result handle (result/h3) or a form
                    [:seon.render/handle {:optional true} :any]]
- :seon.render/out [:map [:seon.render/html {:optional true} :any] [:seon.render/ai {:optional true} :any]]
+ :seon.render/out [:map [:seon.render/html {:optional true} :any] [:seon.render/ai {:optional true} :any]
+                   ;; the render cut something (each cut names what it left and how to read it)
+                   [:seon.render/truncated? {:optional true} :boolean]]
 
  ;; ---- what root's dashboard shows: the whole system as one value ----
  ;; the api's view (agents, writer, fork server, store, boot, root errors) joined with every

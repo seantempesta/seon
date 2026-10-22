@@ -19,127 +19,184 @@
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.config :as config] [seon.print :as print] [seon.print.select :as select] [seon.render.ui :as ui]))
 
 (defn- line-budget {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render/line-budget))
-(defn- part {:malli/schema [:=> [:cat :any] :string]} [v] (print/text v (config/value :seon.config.render/part-budget)))
+(defn- part-budget {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render/part-budget))
 
 (defn- read-of
-  "The form that reads part k of the value env shows (k applied to its handle), nil without one."
+  "The form that reads part k of the value env shows (k applied to its handle, or get-in with
+  a path), nil without one."
   {:malli/schema [:=> [:cat :seon.render/env :any] :any]}
-  [env k] (some->> (:seon.render/handle env) (list k)))
+  [env k] (when-let [h (:seon.render/handle env)] (if (vector? k) (list 'get-in h k) (list k h))))
 
 (defn- form
   "A form the reader evaluates to read more, printed by the one printer."
   {:malli/schema [:=> [:cat :any] [:maybe :string]]}
   [f] (some-> f (print/text (config/value :seon.config.render/form-budget))))
 
+;; A render's parts are [text cut?]: the text, and whether it cut (its cut names the form that
+;; reads the rest when the render has a handle). `out` joins them and says whether any cut.
+
+(defn- prose-part
+  "Text s as prose (one line when one-line?) under budget, its cut reading through source."
+  {:malli/schema [:=> [:cat [:maybe :string] pos-int? :any :boolean] [:tuple :string :boolean]]}
+  [s budget source one-line?]
+  (let [r (print/prose s budget (cond-> {:one-line? one-line?} source (assoc :source source)))] [(:text r) (:truncated? r)]))
+
+(defn- value-part
+  "Value v by the one printer under budget, its cuts reading through handle (a form that reads v)."
+  {:malli/schema [:=> [:cat :any pos-int? :any] [:tuple :string :boolean]]}
+  [v budget handle]
+  (let [r (print/print-value v {:handle handle :budget budget})] [(or (:text r) (:seon.error/message r)) (boolean (:truncated? r))]))
+
 (defn- whole
-  "The closing line, when env names a handle: the form that shows the whole value as data
+  "The closing part, when env names a handle: the form that shows the whole value as data
   (without the metadata that names its render, the printer prints it)."
-  {:malli/schema [:=> [:cat :seon.render/env] [:maybe :string]]}
-  [env] (when-let [h (:seon.render/handle env)] (str "the whole value as data: " (form (list 'with-meta h nil)))))
+  {:malli/schema [:=> [:cat :seon.render/env] [:maybe [:tuple :string :boolean]]]}
+  [env] (when-let [h (:seon.render/handle env)] [(str "the whole value as data: " (form (list 'with-meta h nil))) false]))
+
+(defn- out
+  "The render's parts (nil ones dropped) joined by sep, and whether any cut."
+  {:malli/schema [:=> [:cat :string [:sequential :any]] :seon.render/out]}
+  [sep parts]
+  (let [ps (remove nil? parts)] {:seon.render/ai (str/join sep (map first ps)) :seon.render/truncated? (boolean (some second ps))}))
+
+(defn- cat-parts
+  "Parts as one part: their texts joined, cut when any cut."
+  {:malli/schema [:=> [:cat [:sequential :any]] [:tuple :string :boolean]]}
+  [parts] (let [ps (remove nil? parts)] [(str/join (map first ps)) (boolean (some second ps))]))
+
+(defn- names-part
+  "A list of names shown in part (seon.print/bounded under bound k), the rest named with the
+  form that holds them all."
+  {:malli/schema [:=> [:cat [:maybe [:sequential :any]] :keyword :any] [:tuple :string :boolean]]}
+  [xs k where]
+  (let [[shown more] (print/bounded (vec xs) k (form where))] [(str (str/join ", " shown) (some->> more (str " · "))) (some? more)]))
 
 (defn error
   "An error map (:seon.error/base and every variant): its message first, as a REPL answers,
   the fix when it carries one, each refused part (malli's path, what it expected, the
-  value), then its type, where it was raised and its variant's own keys printed, and the
-  form that reads the whole."
+  value), then its type, where it was raised and every other key it carries, and the form
+  that reads the whole."
   {:malli/schema [:=> [:cat :seon.error/base :seon.render/env] :seon.render/out]}
   [e env]
-  (let [[ps more] (print/bounded (:seon.error/problems e) :seon.config.render.list/top
-                                 (form (read-of env :seon.error/problems)))
-        own (dissoc e :seon.error/type :seon.error/operation :seon.error/message :seon.error/fix :seon.error/problems)]
-    {:seon.render/ai
-     (str/join "\n" (concat [(:text (print/prose (:seon.error/message e) (config/value :seon.config.render/part-budget)
-                                                  {:source (read-of env :seon.error/message)}))]
-                             (when (:seon.error/fix e) [(str "fix: " (:seon.error/fix e))])
-                             (for [{:keys [in expected value]} ps] (str "at " (part in) " expected " (part expected) ", got " value))
-                             (some-> more vector)
-                             [(str "(" (ui/kname (:seon.error/type e)) " in " (:seon.error/operation e) (when (seq own) (str " " (part own))) ")")]
-                             (some-> (whole env) vector)))}))
+  (let [h (:seon.render/handle env)
+        [ps more] (print/bounded (:seon.error/problems e) :seon.config.render.list/top (form (read-of env :seon.error/problems)))
+        own (apply dissoc e ui/error-shown)]
+    (out "\n"
+      (concat [(prose-part (:seon.error/message e) (part-budget) (read-of env :seon.error/message) false)]
+              (when (:seon.error/fix e) [[(str "fix: " (:seon.error/fix e)) false]])
+              (for [[i {:keys [in expected value]}] (map-indexed vector ps)]
+                (cat-parts [["at " false] (value-part in (part-budget) nil) [" expected " false]
+                            (value-part expected (part-budget) (read-of env [:seon.error/problems i :expected])) [(str ", got " value) false]]))
+              (when more [[more true]])
+              [(cat-parts [[(str "(" (ui/kname (:seon.error/type e)) " in " (:seon.error/operation e)) false]
+                           (when (seq own) (cat-parts [[" " false] (value-part own (part-budget) h)]))
+                           [")" false]])]
+              [(whole env)]))))
+
+(def ^:private task-shown
+  "The keys `task`'s lines show; every other key of the task is printed after them."
+  [:seon.task/id :seon.task/kind :seon.task/execution :seon.task/needs :seon.task/branch :seon.task/model :seon.task/problem
+   :seon.task/failure :seon.task/stuck :seon.task/accumulated :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/evidence])
 
 (defn task
-  "A task as an agent or root reads it: its id, kind, desired execution and needs, what is
-  wrong with it (its problem, failure and the stuck fact), its plan (accumulated along its
-  needs) as prose whose cut names the form that reads the rest, its proofs, its evidence,
-  and the form that reads the whole."
+  "A task as an agent or root reads it: its id, kind, desired execution, needs, branch and
+  model, what is wrong with it (its problem, failure and blocked fact), its plan
+  (accumulated along its needs) as prose whose cut names the form that reads the rest, its
+  instructions, proofs and evidence, every other key it carries, and the form that reads
+  the whole."
   {:malli/schema [:=> [:cat :map :seon.render/env] :seon.render/out]}
   [t env]
-  (let [acc (:seon.task/accumulated t)
+  (let [h (:seon.render/handle env)
+        acc (:seon.task/accumulated t)
         plan (or (:plan acc) (:seon.task/plan t))
-        [proofs more] (print/bounded (sort-by str (or (:proofs acc) (:seon.task/proofs t))) :seon.config.render.list/rows
-                                     (form (read-of env :seon.task/proofs)))
+        proofs (sort-by str (or (:proofs acc) (:seon.task/proofs t)))
         {:keys [reason counterexample]} (:seon.task/failure t)
-        {:keys [cause blocks]} (:seon.task/stuck t)]
-    {:seon.render/ai
-     (str/join "\n"
-       (remove nil?
-         [(str "task " (:seon.task/id t) " · " (ui/kname (:seon.task/kind t)) " · " (ui/kname (:seon.task/execution t))
-               (when (seq (:seon.task/needs t)) (str " · needs " (str/join ", " (sort (:seon.task/needs t)))))
-               (some->> (:seon.task/branch t) ui/kname (str " · branch ")) (some->> (:seon.task/model t) (str " · model ")))
-          (when (:seon.task/problem t) (str "problem: " (print/line (:seon.task/problem t) (line-budget) (read-of env :seon.task/problem))))
-          (when reason (str "failed: " (print/line reason (line-budget)) (when counterexample (str " · counterexample " (print/line counterexample (line-budget))))))
-          (when cause (str "blocked: " (print/line cause (line-budget)) (when (seq blocks) (str " · blocks " (str/join ", " (sort blocks))))))
-          (when plan (str "plan: " (:text (print/prose plan (or (:seon.render/budget env) (config/value :seon.config.render/part-budget))
-                                            {:source (if acc (some-> (:seon.render/handle env) (#(list 'get-in % [:seon.task/accumulated :plan]))) (read-of env :seon.task/plan))}))))
-          (when (:seon.task/instructions t) (str "instructions: " (print/line (:seon.task/instructions t) (line-budget) (read-of env :seon.task/instructions))))
-          (let [n (count (or (:proofs acc) (:seon.task/proofs t)))] (when (pos? n) (str n (if (= 1 n) " proof: " " proofs: ") (str/join " " proofs) (when more (str " · " more)))))
-          (when (:seon.task/evidence t) (str "evidence: " (part (:seon.task/evidence t))))
-          (whole env)]))}))
+        {:keys [cause blocks]} (:seon.task/stuck t)
+        own (apply dissoc t task-shown)
+        line #(prose-part %1 (line-budget) %2 true)]
+    (out "\n"
+      [[(str "task " (:seon.task/id t) " · " (ui/kname (:seon.task/kind t)) " · " (ui/kname (:seon.task/execution t))
+             (when (seq (:seon.task/needs t)) (str " · needs " (str/join ", " (sort (:seon.task/needs t)))))
+             (some->> (:seon.task/branch t) ui/kname (str " · branch ")) (some->> (:seon.task/model t) (str " · model "))) false]
+       (when (:seon.task/problem t) (cat-parts [["problem: " false] (line (:seon.task/problem t) (read-of env :seon.task/problem))]))
+       (when reason (cat-parts [["failed: " false] (line reason (read-of env [:seon.task/failure :reason]))
+                                (when counterexample (cat-parts [[" · counterexample " false] (line counterexample (read-of env [:seon.task/failure :counterexample]))]))]))
+       (when cause (cat-parts [["blocked: " false] (line cause (read-of env [:seon.task/stuck :cause]))
+                               (when (seq blocks) (cat-parts [[" · blocks " false] (names-part (sort blocks) :seon.config.render.list/rows (read-of env [:seon.task/stuck :blocks]))]))]))
+       (when plan (cat-parts [["plan: " false] (prose-part plan (or (:seon.render/budget env) (part-budget))
+                                                           (read-of env (if acc [:seon.task/accumulated :plan] :seon.task/plan)) false)]))
+       (when (:seon.task/instructions t) (cat-parts [["instructions: " false] (line (:seon.task/instructions t) (read-of env :seon.task/instructions))]))
+       (when (seq proofs) (cat-parts [[(str (count proofs) (if (= 1 (count proofs)) " proof: " " proofs: ")) false]
+                                      (names-part proofs :seon.config.render.list/rows (read-of env (if acc [:seon.task/accumulated :proofs] :seon.task/proofs)))]))
+       (when (:seon.task/evidence t) (cat-parts [["evidence: " false] (value-part (:seon.task/evidence t) (part-budget) (read-of env :seon.task/evidence))]))
+       (when (seq own) (cat-parts [["also: " false] (value-part own (part-budget) h)]))
+       (whole env)])))
 
 (defn attempt
   "An attempt in one line: running (its agent, turn and tokens) or ended (its outcome and
-  reason, whose cut names the form that reads it), and what its end carried: conflicts,
-  unmerged entries, what it changed, contract gaps. Root's context's work lines and the REPL."
+  reason, whose cut names the form that reads it), and how many of each its end carried
+  (conflicts, unmerged entries, what it changed, contract gaps) with the form that reads
+  them. Root's context's work lines and the REPL."
   {:malli/schema [:=> [:cat :map :seon.render/env] :seon.render/out]}
   [a env]
-  (let [{:seon.attempt/keys [id agent status outcome reason turns tokens conflicts unmerged changed uncontracted]} a
-        n (fn [xs word] (when (seq xs) (str " · " (count xs) " " word)))]
-    {:seon.render/ai
-     (str (if outcome
-            (str "ended " id " " (ui/kname outcome)
-                 (when reason (str ": " (print/line reason (line-budget) (read-of env :seon.attempt/reason)))))
-            (str (ui/kname status) " " id (some->> agent ui/kname (str " on ")) (some->> turns (str ", turn ")) (some-> tokens (str " tokens") (->> (str ", ")))))
-          (n conflicts "conflicts") (n unmerged "unmerged") (n changed "changed") (n uncontracted "without a contract"))}))
+  (let [{:seon.attempt/keys [id agent status outcome reason turns tokens]} a
+        n (fn [k word] (when-let [xs (seq (get a k))]
+                         [(str " · " (count xs) " " word (some->> (read-of env k) form (str " in "))) true]))]
+    (out ""
+      [(if outcome
+         (cat-parts [[(str "ended " id " " (ui/kname outcome)) false]
+                     (when reason (cat-parts [[": " false] (prose-part reason (line-budget) (read-of env :seon.attempt/reason) true)]))])
+         [(str (ui/kname status) " " id (some->> agent ui/kname (str " on ")) (some->> turns (str ", turn ")) (some-> tokens (str " tokens") (->> (str ", ")))) false])
+       (n :seon.attempt/conflicts "conflicts") (n :seon.attempt/unmerged "unmerged") (n :seon.attempt/changed "changed")
+       (n :seon.attempt/uncontracted "without a contract")])))
+
+(defn- class-word
+  "A problem class as its line says it: the stored class :stuck reads as blocked (AGENTS §7a)."
+  {:malli/schema [:=> [:cat [:maybe :keyword]] :string]}
+  [c] (if (= :stuck c) "blocked" (ui/kname c)))
 
 (defn problem-row
   "One problem row (seon.problems/report), :class (and its class's open count :n) assoc'd by
-  its reader, as one line: what it is about (task, attempt, test, attribute), then why: the recorded message, the error's
-  message, the failure's reason, the stuck cause, or a task conflict's two sides; a merge
-  row's conflicts and unmerged keys; its outcome; and what answered it."
+  its reader, as one line: what it is about (task, attempt, test, attribute), then why: the
+  recorded message, the error's message, the failure's reason, the blocked cause, or a task
+  conflict's three sides; a merge row's conflicts and unmerged keys; the tasks it blocks;
+  its outcome; and what answered it. Each cut reads its rest through env's handle."
   {:malli/schema [:=> [:cat :map :seon.render/env] :seon.render/out]}
   [r env]
   (let [ev (:evidence r)
-        [k why] (some (fn [[k v]] (when v [k v]))
-                      [[:message (:message r)] [[:error :seon.error/message] (get-in r [:error :seon.error/message])]
-                       [:reason (:reason r)] [:cause (:cause r)]
-                       [nil (when (= :task-conflict (:class r))
-                              (:text (print/print-value (select-keys ev [:ours :theirs]) {:handle (read-of env :evidence) :budget (line-budget)})))]
-                       [nil (some-> (:outcome r) ui/kname)]])
+        why (some (fn [[k v]] (when v (prose-part v (line-budget) (read-of env k) true)))
+                  [[:message (:message r)] [[:error :seon.error/message] (get-in r [:error :seon.error/message])]
+                   [:reason (:reason r)] [:cause (:cause r)]])
+        why (or why
+                (when (= :task-conflict (:class r)) (value-part (select-keys ev [:base :ours :theirs]) (line-budget) (read-of env :evidence)))
+                (some-> (:outcome r) ui/kname (vector false)))
         what (remove nil? [(:task r) (:attempt r) (some-> (:test r) str) (some-> (:attr r) ui/kname)])]
-    {:seon.render/ai
-     (str (ui/kname (:class r)) (if-let [n (:n r)] (str " " n) (some->> (:count r) (str " ×"))) (when (seq what) (str " " (str/join " " what)))
-          (when why (str ": " (if k (print/line why (line-budget) (some->> (:seon.render/handle env) (#(if (vector? k) (list 'get-in % k) (list k %))))) why)))
-          (when (pos? (or (:conflicts r) 0)) (str " · " (:conflicts r) " conflicts"))
-          (when (seq (:unmerged r)) (str " · unmerged " (str/join ", " (:unmerged r))))
-          (when (seq (:blocks r)) (str " · blocks " (count (:blocks r))))
-          (when-let [ts (seq (:answered-by r))] (str " (answered by " (str/join ", " ts) ")")))}))
+    (out ""
+      [[(str (class-word (:class r)) (if-let [n (:n r)] (str " " n) (some->> (:count r) (str " ×"))) (when (seq what) (str " " (str/join " " what)))) false]
+       (when why (cat-parts [[": " false] why]))
+       (when (some-> (:conflicts r) pos?) [(str " · " (:conflicts r) " conflicts" (some->> (read-of env [:evidence :conflicts]) form (str " in "))) true])
+       (when (seq (:unmerged r)) [(str " · unmerged " (str/join ", " (:unmerged r))) false])
+       (when (seq (:blocks r)) (cat-parts [[" · blocks " false] (names-part (sort (:blocks r)) :seon.config.render.list/top (read-of env :blocks))]))
+       (when-let [ts (seq (:answered-by r))] [(str " (answered by " (str/join ", " ts) ")") false])])))
 
 (defn report
   "Every problem main recorded (seon.problems/report), by class: each class's count and its
   rows, open first, each by `problem-row`, a long class bounded with the form that reads the
-  rest."
+  rest, and the form that reads the whole."
   {:malli/schema [:=> [:cat :seon.problems/report :seon.render/env] :seon.render/out]}
   [{:keys [t classes]} env]
-  {:seon.render/ai
-   (str/join "\n"
-     (cons (str "problems recorded on main at t " t (when (every? (comp empty? :rows val) classes) ": none"))
-           (for [[c {:keys [n rows]}] (sort-by (comp str key) classes) :when (seq rows)
-                 :let [h (:seon.render/handle env)
-                       [shown more] (print/bounded (sort-by #(if (false? (:open? (second %))) 1 0) (map-indexed vector rows)) :seon.config.render.list/rows
-                                                   (form (some-> h (#(list 'get-in % [:classes c :rows])))))]]
-             (str/join "\n" (concat [(str "# " (ui/kname c) " " n)]
-                                     (for [[i r] shown] (str "- " (:seon.render/ai (problem-row (assoc r :class c) {:seon.render/handle (some-> h (#(list 'get-in % [:classes c :rows i])))}))
-                                                             (when (false? (:open? r)) " (closed)")))
-                                     (some-> more vector))))))})
+  (out "\n"
+    (concat
+      [[(str "problems recorded on main at t " t (when (every? (comp empty? :rows val) classes) ": none")) false]]
+      (for [[c {:keys [n rows]}] (sort-by (comp str key) classes) :when (seq rows)
+            :let [[shown more] (print/bounded (sort-by #(if (false? (:open? (second %))) 1 0) (map-indexed vector rows)) :seon.config.render.list/rows
+                                              (form (read-of env [:classes c :rows])))
+                  lines (for [[i r] shown]
+                          (let [o (problem-row (assoc r :class c) {:seon.render/handle (read-of env [:classes c :rows i])})]
+                            [(str "- " (:seon.render/ai o) (when (false? (:open? r)) " (closed)")) (:seon.render/truncated? o)]))]]
+        [(str/join "\n" (concat [(str "# " (class-word c) " " n)] (map first lines) (some-> more vector)))
+         (boolean (or more (some second lines)))])
+      [(whole env)])))
 
 (defn items
   "An evaluation's reply items as the REPL's own text, what an outside model reads from

@@ -82,7 +82,7 @@
     (if (= face :html)
       (let [r (print/print-value v (assoc opts :outputs #{:hiccup}))]
         {:seon.render/html (or (:html r) [:span {:class "seon-print-refused"} (str (:seon.error/message r))])})
-      {:seon.render/ai (print/text v (:budget opts))})))
+      {:seon.render/ai (let [r (print/print-value v opts)] (or (:text r) (:seon.error/message r)))})))
 
 (defn- own-key
   "v's own override for face: in the map, else in its metadata."
@@ -115,16 +115,25 @@
   (let [x (:seon.render/ai (render-face :ai v env))]
     (if (string? x) x (print/text x (or (:seon.render/budget env) (config/value :seon.config.render/value-budget))))))
 
+(defn rendered?
+  "Does v's producer name an AI render for it (the value's own key, or its metadata's
+  :seon.render/schema)? A key present in a map names nothing: a partial pull or tx data is
+  data. The REPL (`printed`) and the model's context (seon.context) ask this one question."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [v] (boolean (or (symbol? (own-key v :seon.render/ai)) (declared (:seon.render/schema (meta v)) :ai))))
+
 (defn printed
   "v as a REPL answers it, cuts reading through handle (result/h3, or a form that reads v):
-  the AI render its producer named (the value's own key, or its metadata's
-  :seon.render/schema: a key present in a map names nothing here, so a partial pull or tx
-  data prints as the data it is), else the one value printer's result under the reply
-  budget. A render's text ends with the form that shows the whole value as data,
-  (with-meta result/h3 nil). Answers the printer's result, or {:text :tokens} of a render."
-  {:malli/schema [:=> [:cat :any :any] [:or :seon.print/result [:map [:text :string] [:tokens nat-int?]]]]}
+  its producer's AI render when it is `rendered?`, else the one value printer's result under
+  the reply budget. A render's text ends with the form that shows the whole value as data,
+  (with-meta result/h3 nil), and says whether it cut anything (:seon.render/truncated?, the
+  render's own fact). Answers the printer's result, or a render's {:text :tokens :truncated?}."
+  {:malli/schema [:=> [:cat :any :any] [:or :seon.print/result [:map [:text :string] [:tokens nat-int?] [:truncated? :boolean]]]]}
   [v handle]
-  (if (or (symbol? (own-key v :seon.render/ai)) (declared (:seon.render/schema (meta v)) :ai))
-    (let [t (ai v {:seon.render/handle handle :seon.render/budget print/default-budget})]
-      {:text t :tokens (select/estimate t)})
+  (if (rendered? v)
+    (let [env {:seon.render/handle handle :seon.render/budget print/default-budget}
+          out (render-face :ai v env)
+          x (:seon.render/ai out)
+          t (if (string? x) x (print/text x print/default-budget))]
+      {:text t :tokens (select/estimate t) :truncated? (boolean (:seon.render/truncated? out))})
     (print/print-value v {:handle handle})))

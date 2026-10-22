@@ -8,7 +8,7 @@
   Datastar post to the one stateless `/call` route, its payload the call itself; a form
   posts its own fields with it."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.print :as print]))
+  (:require [seon.edn :as sedn] [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.print :as print]))
 
 (defn raw
   "s as already-serialized HTML (written as is): a tagged map, never mistaken for attrs."
@@ -50,7 +50,7 @@
   [agent f args]
   (str "/call?fn=" (url-enc (str f))
        (when agent (str "&agent=" (url-enc (name agent))))
-       (when (seq args) (str "&args=" (url-enc (pr-str args))))))
+       (when (seq args) (str "&args=" (url-enc (sedn/encode args))))))
 
 (defn- callback
   "attrs with its :seon/call data turned into the Datastar action posting it (a form posts

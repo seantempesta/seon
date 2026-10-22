@@ -197,7 +197,7 @@
           (for [{:keys [dim n ratio]} over]
             ["bad" (str "OVER: " (name dim) " at n=" n " is " (format "%.2f" ratio) "x its estimate (allowed " (slack dim) "x).")])
           (for [{:keys [dim exponent allowed]} steeper]
-            ["bad" (str "STEEPER: " (name dim) " grew as n^" (format "%.2f" exponent) "; " (some-> (:growth e) name (str " ")) "allows n^"
+            ["bad" (str "STEEPER: " (name dim) " grew as n^" (format "%.2f" exponent) "; " (if-let [g (:growth e)] (str (name g) " allows") "the estimate allows") " n^"
                         (format "%.2f" allowed) ". Something does more passes over the data than the work needs.")])
           (for [{:keys [dim n ratio]} under] ["muted" (str "LOOSE: " (name dim) " at n=" n " is " (format "%.2f" ratio) "x its estimate: tighten the estimate.")])
           (for [d unmeasured] ["muted" (str "NOT MEASURED: " (name d) ".")])

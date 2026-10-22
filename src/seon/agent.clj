@@ -13,7 +13,7 @@
   breaks its forks; docs/DRAGONS.md, "Physics". Agent code calls the verbs of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (lane F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
             [malli.registry :as mr]))
 
@@ -323,7 +323,7 @@
         r (try (binding [t/report (fn [m]
                                     (when (= :begin-test-var (:type m))
                                       (reset! started (str (:var m)))
-                                      (sock/write-line! w (pr-str {:seon.test/started @started})))
+                                      (sock/write-line! w (sedn/encode {:seon.test/started @started})))
                                     (when (#{:pass :fail :error} (:type m))
                                       (swap! reports conj (test-report m (some-> (first t/*testing-vars*) str))))
                                     (orig m))
@@ -384,7 +384,7 @@
                 (swap! state assoc :mode :test :evaluating false)
                 (let [res (try (run-tests-here w ticks proofs)
                                (catch Throwable e {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]}))]
-                  (sock/write-line! w (pr-str res))))
+                  (sock/write-line! w (sedn/encode res))))
        :parent (fn [pid]
                  (lib/c-close w)
                  (forked pid)

@@ -13,7 +13,7 @@
     commit; root folds those as occurrences of class :eval.
   Nothing here files tasks or resolves errors: they are mined by hand (root, owner)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d]))
+  (:require [seon.edn :as sedn] [seon.contract :refer [defn defn-]] [datahike.api :as d]))
 
 ;; ---- the signature ----------------------------------------------------------------------
 
@@ -51,7 +51,7 @@
 (defn signature
   "The signature of error map e: the digest of its cause."
   {:malli/schema [:=> [:cat :map] :seon.error/signature]}
-  [e] (digest (pr-str (cause e))))
+  [e] (digest (sedn/encode (cause e))))
 
 (defn occurrence
   "n occurrences (1 unless an agent folded them) of error e of class, seen first at
@@ -76,7 +76,7 @@
     (cond-> (-> r (update :count + n) (assoc :last-ms (max ms (:last-ms r))) (assoc (if (:base r) :pending? :dirty?) true))
       agent (-> (update :agents conj agent) (assoc :last-agent agent))
       task (assoc :last-task task))
-    {:signature (digest (pr-str cause)) :class class :count n :agents (if agent #{agent} #{}) :first-ms first-ms :last-ms ms
+    {:signature (digest (sedn/encode cause)) :class class :count n :agents (if agent #{agent} #{}) :first-ms first-ms :last-ms ms
      :example error :form form :last-agent agent :last-task task :dirty? true}))
 
 (defn fold

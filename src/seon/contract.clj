@@ -136,7 +136,7 @@
                                      (str "Call " fn-sym " with arguments its contract declares."))}
             (= arm :input) (assoc :seon.error/problems (problems (:input data) (:args data)))
             (= arm :output) (assoc :seon.error/problems (problems (:output data) (:value data)))
-            (= arm :arity) (assoc :seon.error/expected (print/text (m/form (:schema data)) (:part print/budgets)))
+            (= arm :arity) (assoc :seon.error/expected (m/form (:schema data)))
             (= arm :schema) (assoc :seon.error/message (str fn-sym ": its contract could not be checked: "
                                                             (ex-message (:exception data)))))]
     (throw (ex-info (:seon.error/message e) e))))

@@ -6,7 +6,7 @@
   stop). `reconciler-proc` is the root proc that runs it on main's commits and carries the
   actions out as requests to the api, each action's facts written by the writer."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm] [seon.source :as source]
             [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
             [seon.config :as cfg]))
@@ -582,7 +582,7 @@
                     (merge (task/end-members (cond-> (merge (select-keys end [:turns :model-calls :tokens])
                                                       {:outcome (:outcome end :no-end) :results results :uncontracted unc
                                                        :conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
-                                                       :unmerged (mapv #(pr-str (:key %)) (pm/unmerged db (pm/program db #{})))
+                                                       :unmerged (mapv #(sedn/encode (:key %)) (pm/unmerged db (pm/program db #{})))
                                                        :changed changed})
                                         (:reason end) (assoc :reason (:reason end))
                                         (not (:outcome end)) (assoc :reason (if worked-error
@@ -646,7 +646,7 @@
                  (done st)
                  (one (request st aid :worked
                                {:op :eval :id agent
-                                :forms (pr-str (list 'seon.turn/work! (list 'quote (cond-> {:task (:task act) :attempt aid :max-turns (get-in act [:env :max-turns])}
+                                :forms (sedn/encode (list 'seon.turn/work! (list 'quote (cond-> {:task (:task act) :attempt aid :max-turns (get-in act [:env :max-turns])}
                                                                                        (get-in act [:env :model]) (assoc :model (get-in act [:env :model]))))))})))
       ;; the turn loop answered: died (no live agent), or judge it from measured facts
       ;; work! that threw was answered by the agent's REPL (the process lives): its error
@@ -666,7 +666,7 @@
       ;; every attempt is a new agent: none is reused
       ;; root stops it because its attempt ended: its view says :ended, not :killed
       :diffed (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
-                    [st o2] (write st aid :done (judge-tx st f (:results f) (:branch-db f) (into #{} (map pr-str) (:ours r))))]
+                    [st o2] (write st aid :done (judge-tx st f (:results f) (:branch-db f) (into #{} (map sedn/encode) (:ours r))))]
                 [st [o1 o2]])
       ;; each member's answer, as one write: merged at the train's t, behind (its merge task
       ;; runs again, a new agent), or refused: a failed attempt like any other (a refinement

@@ -115,8 +115,8 @@
   "The value as its render shows it (seon.render/printed: its schema's declared AI render,
   else the one value printer), its cuts reading the rest through the value's result
   handle: `value`, with the printer's tokens, truncation and elision count. A value whose
-  first part does not fit the budget answers the printer's refusal message, with the
-  refusal beside it."
+  first part does not fit the budget answers the printer's error (insufficient budget) by
+  its render, the error beside it."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
@@ -127,7 +127,7 @@
                (if-let [text (:text pv)]
                  (cond-> (assoc m :printed text :tokens (:tokens pv))
                    (:truncated? pv) (assoc :truncated? true)
-                   (pos? (:elisions pv 0)) (assoc :elisions (:elisions pv)))
+                   (some-> (:elisions pv) pos?) (assoc :elisions (:elisions pv)))
                  (assoc m :printed (render/ai pv {}) :printer-error pv)))
              m))))))
 

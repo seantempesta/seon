@@ -20,7 +20,7 @@
   runs in the agent as an eval of (seon.web/ui-call 'fn args), origin :ui, refused as data
   unless the var is marked ^:seon/callable."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [ring-chez.adapter :as adapter]
             [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render.ui :as ui] [seon.web.html :as h] [seon.step :as step] [seon.root :as c]))
 
@@ -84,7 +84,7 @@
       ;; seon.root/interrupt! is no request: an effect on a process, performed by this proc
       (if (= "seon.root" (namespace f))
         (one (symbol (name f)) agent args)
-        (one 'submit! agent {:origin :ui :forms (pr-str (list 'seon.web/ui-call (list 'quote f) (merge args (dissoc (:fields args) :forms))))})))))
+        (one 'submit! agent {:origin :ui :forms (sedn/encode (list 'seon.web/ui-call (list 'quote f) (merge args (dissoc (:fields args) :forms))))})))))
 
 ;;; --- HTTP edge ----------------------------------------------------------------------------
 
@@ -136,7 +136,7 @@
           (and (= m :get) (= uri "/render.edn"))
           {:status 200 :headers {"Content-Type" "application/edn" "Cache-Control" "no-store"} :body (str (ask! ch {:op :render-stats}))}
           (and (= m :get) (= uri "/web.edn"))
-          {:status 200 :headers {"Content-Type" "application/edn"} :body (pr-str (ask! ch {:op :stats}))}
+          {:status 200 :headers {"Content-Type" "application/edn"} :body (sedn/encode (ask! ch {:op :stats}))}
           (and (= m :post) (= uri "/call"))
           (let [fields (into {} (for [[k v] (form-params (some-> (:body req) slurp))] [(keyword k) v]))
                 args (some-> (get q "args") edn/read-string)
@@ -231,7 +231,7 @@
             (doseq [[req target] reqs
                     :let [{f :var :keys [agent args forms]} c
                           form (when (= "seon.root" (namespace f))
-                                 (pr-str (cond-> (list f) agent (concat [agent]) (seq args) (concat [args]) forms (concat [forms]))))]]
+                                 (sedn/encode (cond-> (list f) agent (concat [agent]) (seq args) (concat [args]) forms (concat [forms]))))]]
               (step/out! o :to-api {:op :request :req req :route [:render :answers] :tag (cond-> [:web f target] form (conj form))}))
             (update st :calls (fnil inc 0)))
     st))

@@ -130,7 +130,7 @@
       (is (< (str/index-of html "id=\"ev-2\"") (str/index-of html "id=\"ev-1\"")))
       (is (not-any? #(= "events" (first %)) (:frags patch))))
     (testing "past the cap, the oldest rows are removed by id"
-      (let [st (assoc st2 :new-events (vec (for [i (range p/EVENT-CAP)] {:type :ready :agent :a1 :at-ms i})))
+      (let [st (assoc st2 :new-events (vec (for [i (range (seon.config/value :seon.config.render.list/stream))] {:type :ready :agent :a1 :at-ms i})))
             [_ out] (answer st view0)
             patch (first (filter #(= :patch (:op %)) (:to-web out)))]
         (is (= #{"ev-1" "ev-2"} (set (filter #(str/starts-with? % "ev-") (:removes patch)))))))))
@@ -469,9 +469,9 @@
         (is (re-find #"…\+\d+ chars in \d+ more lines \(subs \(get-in result/h2 \[:seon.task/accumulated :plan\]\) \d+\)" (r/ai failed-task {:seon.render/handle 'result/h2}))))
       (testing "the proofs are a bounded list: how many more and where"
         (is (str/includes? text "12 proofs: app.proofs/add-0-test"))
-        (is (str/includes? text "+4 more: (:seon.task/proofs result/h2)")))
+        (is (str/includes? text "+4 more: (get-in result/h2 [:seon.task/accumulated :proofs])")))
       (is (str/includes? text "evidence: {:from \"calc/add#2\""))))
-  (testing "the page's task box shows the failure and the stuck fact too"
+  (testing "the page's task box shows the failure and the blocked fact too"
     (let [html (h/html (r/html failed-task {:seon.render/schema :seon.task/task}))]
       (is (str/includes? html "failed in calc/add#2: add cannot be total over longs"))
       (is (str/includes? html "blocked: failed: held for root · blocks calc/div, calc/mul")))))
@@ -485,7 +485,7 @@
                     :seon.attempt/unmerged ["var app.calc/add"]}
                    {:seon.render/handle '(get atts "calc/add#2")})]
     (is (str/starts-with? line "ended calc/add#2 merge-failed: merge refused: main changed 3 key(s)"))
-    (is (str/includes? line " · 1 conflicts · 1 unmerged"))))
+    (is (str/includes? line " · 1 conflicts in (:seon.attempt/conflicts (get atts \"calc/add#2\")) · 1 unmerged in (:seon.attempt/unmerged (get atts \"calc/add#2\"))"))))
 
 (defn- row
   "A problem row as seon.problems/report makes it: every row's members, then its class's."
@@ -494,10 +494,10 @@
 (deftest every-problem-class-reads-what-it-is-about-and-why
   ;; rows as seon.problems/report makes them, one per class that had no line of its own
   (let [line #(r/ai (row (assoc %2 :class %1)) {:seon.render/schema :seon.problems/row})]
-    (is (= "task-conflict calc/add calc/add#3 plan: {:ours \"Make add total.\", :theirs \"Make add pass.\"}"
+    (is (= "task-conflict calc/add calc/add#3 plan: {:base \"Make add.\", :ours \"Make add total.\", :theirs \"Make add pass.\"}"
            (line :task-conflict {:task "calc/add" :attempt "calc/add#3" :attr :plan :open? true
                                  :evidence {:task "calc/add" :attr :plan :base "Make add." :ours "Make add total." :theirs "Make add pass." :from "calc/add#3"}})))
-    (is (= "stuck calc/add calc/add#2: failed: held for root · blocks 2"
+    (is (= "blocked calc/add calc/add#2: failed: held for root · blocks calc/div, calc/mul"
            (line :stuck {:task "calc/add" :attempt "calc/add#2" :cause "failed: held for root" :blocks ["calc/div" "calc/mul"]})))
     (is (= "failed calc/add calc/add#2: add cannot be total over longs"
            (line :failed {:task "calc/add" :attempt "calc/add#2" :reason "add cannot be total over longs" :counterexample "(add Long/MAX_VALUE 1)"})))
@@ -513,7 +513,8 @@
                                           :red {:n 0 :rows []}}}
                 {:seon.render/schema :seon.problems/report})
           text (:text (r/printed rep 'result/h1))]
-      (is (= ["problems recorded on main at t 90" "# failed 1" "- failed calc/add: not total" "# stuck 1" "- stuck calc/sub: held (closed)"]
+      (is (= ["problems recorded on main at t 90" "# failed 1" "- failed calc/add: not total" "# blocked 1" "- blocked calc/sub: held (closed)"
+              "the whole value as data: (with-meta result/h1 nil)"]
              (str/split-lines text))))))
 
 
@@ -522,7 +523,12 @@
 (def ^:private printer-vars
   "The vars that turn a value into text beside the one printer."
   '#{clojure.core/pr-str clojure.core/prn-str clojure.core/print-str clojure.core/with-out-str
-     clojure.core/pr clojure.core/prn clojure.pprint/pprint clojure.pprint/pp})
+     clojure.core/pr clojure.core/prn clojure.core/printf clojure.pprint/pprint clojure.pprint/pp
+     clojure.pprint/write clojure.pprint/cl-format})
+
+(def ^:private budgeted-vars
+  "The printer's calls that cut to a budget: a cut where a value is made, outside a render."
+  '#{seon.print/text seon.print/line seon.print/prose})
 
 (def ^:private cut-vars
   "The vars that shorten what is shown, where output is made for a person or a model."
@@ -555,15 +561,19 @@
         ;; a site is named by a list item, before its reason (`- `ns/f`, `ns/g`: why`)
         named (set (for [[_ head] (re-seq #"(?m)^- (.*?): " doc) [_ n] (re-seq #"`([a-z][\w.\-]*/[^`\s]+)`" head)] (symbol n)))
         printer? #(not (str/starts-with? (str %) "seon.print"))
-        display? #(re-find #"^seon\.(render|web|context|mcp|entrance)" (str %))]
+        display? #(re-find #"^(my\.|seon\.(render|web|context|mcp|entrance|cost|repl|agent|problems)($|\.))" (str %))]
     (testing "src is imported: the check reads facts, not nothing"
       (is (< 1000 (count forms))))
     (testing "every var printing beside the one printer is named with its reason"
       (is (= [] (remove named (sites forms printer-vars printer?)))))
     (testing "every var cutting in a display namespace is named with its reason"
       (is (= [] (remove named (sites forms cut-vars display?)))))
+    (testing "every var cutting to a budget where a value is made, outside a display namespace, is named"
+      (is (= [] (remove named (sites forms budgeted-vars #(and (printer? %) (not (display? %))))))))
     (testing "a site named that no longer prints or cuts is gone from the page too"
-      (is (= [] (remove (set (concat (sites forms printer-vars printer?) (sites forms cut-vars display?))) (sort named)))))))
+      (is (= [] (remove (set (concat (sites forms printer-vars printer?) (sites forms cut-vars display?)
+                                     (sites forms budgeted-vars #(and (printer? %) (not (display? %))))))
+                        (sort named)))))))
 
 (deftest an-outside-model-reads-an-evaluation-as-the-repl-says-it
   ;; seon_eval's tool text (seon.entrance/mcp-reply): reply items as a REPL shows them, never
@@ -584,5 +594,8 @@
         [shown plain] (seon.context/shown-evals [{:k 0 :times 1 :item {:tag :ret :form "(my.task/current)" :value t :printed (:text (r/printed t '(nth (my.turn/evals) 0)))}}
                                                  {:k 1 :times 1 :item {:tag :ret :form "{:n 1}" :value {:n 1} :printed "{:n 1}"}}])]
     (is (str/includes? (:text shown) "task calc/add · work · held"))
+    (testing "the render's text as text, its lines real lines, never an escaped string literal"
+      (is (str/includes? (:text shown) "\nfailed: add cannot be total"))
+      (is (not (str/includes? (:text shown) "\\n"))))
     (is (not (str/includes? (:text shown) ":seon.task/accumulated")))
     (is (str/includes? (:text plain) ":value {:n 1}"))))

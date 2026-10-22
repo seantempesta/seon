@@ -145,7 +145,7 @@
   path reads the item itself."
   {:malli/schema [:=> [:cat :map] :map]}
   [item]
-  (let [rendered? (some? (some-> (:value item) meta :seon.render/schema (render/declared :ai)))]
+  (let [rendered? (and (contains? item :value) (render/rendered? (:value item)))]
     (cond-> (select-keys item [:form :tag :value :printed :out])
       rendered? (dissoc :value)
       (and (contains? item :value) (not rendered?)) (dissoc :printed)
