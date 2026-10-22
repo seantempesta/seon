@@ -140,7 +140,8 @@
                                      :seon.error/fix "An attribute's value type is fixed once installed: open a store made with this schema (a fresh one), or keep running the build that made this store."})]
               (throw (ex-info (:seon.error/message e) e))))
         missing (vec (remove #(contains? have (:db/ident %)) schema))]
-    (when (seq missing) (d/transact conn {:tx-data missing :tx-meta (tx-meta)}))
+    ;; the transaction that installs :seon.tx/runtime cannot carry it (as seed!'s schema one)
+    (when (seq missing) (d/transact conn (cond-> {:tx-data missing} (get have :seon.tx/runtime) (assoc :tx-meta (tx-meta)))))
     (count missing)))
 
 ;; ---- one store, many branches, as in production (owner, 2026-10-21) ------------
