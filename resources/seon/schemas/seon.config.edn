@@ -62,6 +62,7 @@
   [:seon.config.source/committer-email :seon.config.source/committer-email]
   [:seon.config.source/generations-dir :seon.config.source/generations-dir]
   [:seon.config.source/test-results-dir :seon.config.source/test-results-dir]
+  [:seon.config.proofs/jobs :seon.config.proofs/jobs]
   ;; effects and the model
   [:seon.config.fx/buf :seon.config.fx/buf]
   [:seon.config.ai/provider :seon.config.ai/provider]

@@ -54,7 +54,7 @@ The server's ops are one table, `seon.server/ops`: MCP lists each as the tool `s
 | many agents merging onto shared definitions at once (v1's swarm) | `bin/check swarm` (`seon.e2e`'s swarm row: 20 tasks over 5 shared vars, 8 agents at once; red unless conflicts arose and every one was resolved, every task done, and a fresh agent on main gets every proof's value) | present |
 | main wins a conflict (MERGE-STEP 5a) | ours is kept | missing |
 | one done rule shared with merge | `seon.reconcile/done-explain` (a proof that never ran counts red, not unknown) | partial |
-| tests selected by reach; results reused by reach digest | `seon.program/reach-digests`; `bin/test --reach` reuses green results in `../test-results` | present for `bin/test`; agents' proof runs don't reuse |
+| tests selected by reach; results reused by reach digest | `seon.proofs/plan` over `seon.program/reach-digests`: `bin/prove`, `bin/test` and `bin/check` reuse greens in `../test-results` (check steps keyed too); agents' runs select and reuse by the same plan (`seon.agent/test-plan`) | present; agents' greens are per agent, not shared |
 | contracts armed at definition; cost proofs; per-function profile | `seon.contract`, `seon.cost`, `seon.profile` | present |
 | turns-to-green report (median, p90) | `seon.learn` charges waste per attempt | partial |
 | scheduled work (`seon.schedule`) | none (AGENTS names a cron proc; `system.edn` has none) | missing |

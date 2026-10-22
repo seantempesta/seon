@@ -7,7 +7,7 @@
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
   reference (await-ref, seon.e2e/await-db), never a poll or a deadline."
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [clojure.data.json] [seon.cost] [seon.problems]))
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs]))
 
 (defn- out! [& xs] (println (apply str xs)) (flush))
 
@@ -343,13 +343,17 @@
   calls them with generated arguments. Every other function touches a host object (a
   socket, a process, the store) and is never called with random arguments: a generated pid
   handed to kill(2) is a real signal."
-  '#{seon.merge seon.reconcile seon.template seon.proofs seon.task seon.step seon.ref})
+  '#{seon.merge seon.reconcile seon.template seon.task seon.step seon.ref})
 
 (def ^:private pure-fns
   "Pure functions in namespaces that are otherwise host code (seon.lib binds libc: never
-  generate its arguments)."
+  generate its arguments; seon.proofs reads and writes results)."
   '#{seon.lib/percentile seon.lib/r2 seon.lib/summ seon.lib/push-window seon.lib/p50
-     seon.cost/work seon.cost/exponent seon.cost/per-unit seon.cost/expected seon.cost/judge seon.profile/top})
+     seon.cost/work seon.cost/exponent seon.cost/per-unit seon.cost/expected seon.cost/judge seon.profile/top
+     ;; seon.proofs reads and writes results (greens, store-greens!, run-tests!): its pure part
+     seon.proofs/test-symbol seon.proofs/red? seon.proofs/results seon.proofs/red-reports seon.proofs/run-errors
+     seon.proofs/failures seon.proofs/costs seon.proofs/green? seon.proofs/result-path seon.proofs/result-file
+     seon.proofs/plan})
 
 (defn- fn-without-gen
   "The [:fn ...] schemas without a :gen property in form f, anywhere in it."
@@ -1147,13 +1151,25 @@
         fs (c/fs-call! sys {:op :stats})]
     {:t (:t fs) :main-t main-t :mismatch (:mismatch fs) :caught-up (boolean (and (:t fs) (>= (:t fs) main-t)))}))
 
+(defn- writer-flushed
+  "The writer's answer once its store is clean (seon.root/store-clean!): the flush covering
+  main's last commit has synced and its notice reached the api before the answer. Checked,
+  not assumed: :covered only when the answer's commit count has reached the count the writer
+  held before the request."
+  [sys]
+  (let [before (get-in (ping sys :writer) [:state :commits])
+        r @(c/store-clean! sys)]
+    (assoc (select-keys r [:commits :flushes :durable?]) :before before
+           :covered (boolean (and (:ok r) before (>= (:commits r) before))))))
+
 (defn idle
   "An idle root steps nothing (owner, 2026-10-21: no beat; health is what flows): root
   boots and settles (the reconciler's quiescence), a tab opens on its dashboard (an SSE
   feed on SEON_WEB_PORT) and receives its page; then every root proc's Flow step count is
   read at the two ends of a window of window-ms with nothing happening, and must not move:
   from the feed's first settled mark after its keyframe (seon.web: the render proc has
-  nothing in flight, so the tab's own opening has run its course) and the fork server's
+  nothing in flight, so the tab's own opening has run its course), the writer's answer once
+  its store is clean (writer-flushed: a late sync stepped the flusher and the api), and the fork server's
   answer to a request behind main's commits (fork-server-caught-up: their late :applied
   answers stepped the fork server and the api inside the window under load).
   Then a change reaches the tab: an agent spawned and a commit to main each grow what the
@@ -1193,7 +1209,9 @@
         ;; the tab's opening ran its course: its keyframe (the feed's first patch: a new tab is
         ;; stale until it), then a settled mark (the render proc has nothing in flight)
         settled (await-ref feed :settled)
-        ;; main's commits applied in the fork server, their answers through its proc and the api
+        ;; main's last commit synced (the flusher's answer), then main's commits applied in the
+        ;; fork server, each one's answers through its proc and the api
+        flushed (writer-flushed sys)
         fs (fork-server-caught-up sys)
         ;; root's declared procs and its effect owners (their workers step only when given work)
         decl (seon.system/read-decl (seon.config/value :seon.config.root/system-path))
@@ -1210,8 +1228,8 @@
         _ @(c/transact-main! sys [{:db/id "n" :ns/name 'idle.check}])
         committed (await-ref received #(> % n-commit))]
       (.close sock)
-      {:report {:window-ms window-ms :procs (count pids) :steps-at-idle moved :bytes-at-idle (- b1 b0) :agent a :fork-server fs}
-       :checks {:tab-opened opened :tab-settled settled :fork-server-caught-up (:caught-up fs) :no-step-at-idle (empty? moved) :no-byte-at-idle (= b0 b1)
+      {:report {:window-ms window-ms :procs (count pids) :steps-at-idle moved :bytes-at-idle (- b1 b0) :agent a :flushed flushed :fork-server fs}
+       :checks {:tab-opened opened :tab-settled settled :flush-covered-main (:covered flushed) :fork-server-caught-up (:caught-up fs) :no-step-at-idle (empty? moved) :no-byte-at-idle (= b0 b1)
                 :no-proc-blocked (not-any? #{:blocked} (concat (vals c0) (vals c1)))
                 :spawn-reached-tab spawned :commit-reached-tab committed}}))))))
 
@@ -1254,46 +1272,58 @@
     (out! "DROP OK")
     (lib/c-exit 0)))
 
+(def ^:private modes
+  "Every mode -main runs, by name: (f n more), n the first argument after it. The one list:
+  an unknown mode prints these names (bin/check passes its mode here)."
+  (let [n-or (fn [n d] (Long/parseLong (or n d)))]
+    (sorted-map
+     "seed" (fn [n more] (seed (n-or n "2000")))
+     "drop" (fn [n more] (drop-mains (remove nil? (cons n more))))
+     ;; the store bin/check is given, its size and branch count: "PATH KB BRANCHES"
+     "store" (fn [n more] (let [path (seon.config/value :seon.config.root/store-path)
+                  c (d/connect (seon.db/store-cfg :lmdb path))]
+              (println path (quot (dir-bytes path) 1024) (count (d/branches c))) (d/release c) (lib/c-exit 0)))
+     "durable-write" (fn [n more] (durable-write n))
+     "durable-read" (fn [n more] (durable-read n))
+     "window-write" (fn [n more] (window-write n))
+     "window-read" (fn [n more] (window-read n))
+     "scale" (fn [n more] (scale (n-or n "100")))
+     "robust" (fn [n more] (robust))
+     "lifecycle" (fn [n more] (lifecycle (n-or n "10")))
+     "threads-declared" (fn [n more] (threads-declared (n-or n "3")))
+     "drain" (fn [n more] (drain (n-or n "32")))
+     "backpressure" (fn [n more] (backpressure (n-or n "200")))
+     "contracts" (fn [n more] (contracts))
+     "mg-check" (fn [n more] (mg-check n))
+     "e2e" (fn [n more] (lib/c-exit (if (seon.e2e/run n more) 0 1)))
+     ;; swarm N M: seon.e2e's swarm row (N tasks over 5 shared vars, max-running M), SWARM OK/FAILED
+     "swarm" (fn [n more] (lib/c-exit (if (seon.e2e/run "swarm" [(or n "20") (or (first more) "8")]) 0 1)))
+     "instrument" (fn [n more] (instrument))
+     "record" (fn [n more] (record))
+     "orphan" (fn [n more] (orphan))
+     "lease" (fn [n more] (lease))
+     "fx" (fn [n more] (fx (n-or n "1000")))
+     "system" (fn [n more] (system-check))
+     "config" (fn [n more] (config-check))
+     "problems" (fn [n more] (problems-check))
+     "threads" (fn [n more] (threads-check))
+     "root" (fn [n more] (root-serve))
+     ;; this checkout's ports as the config resolves them, "SERVER WEB" (bin/ports)
+     ;; bin/check's step names, the one list (seon.proofs/check-steps), space separated
+     "steps" (fn [n more] (do (println (clojure.string/join " " (sort (keys seon.proofs/check-steps)))) (lib/c-exit 0)))
+     "ports" (fn [n more] (do (println (seon.config/value :seon.config.root/server-port) (seon.config/value :seon.config.web/port)) (lib/c-exit 0)))
+     "mcp-proof" (fn [n more] (mcp-proof))
+     "hotreload" (fn [n more] (hotreload))
+     "idle" (fn [n more] (idle (n-or n "5000")))
+     "smoke" (fn [_ _] (smoke)))))
+
 (defn -main [& args]
   ;; --config FILE and --set :k=v are the config's (seon.config reads them from the command
   ;; line); the mode reads the rest
-  (let [[mode n & more] (seon.config/without-overrides args)
-        n-or (fn [d] (Long/parseLong (or n d)))]
-  (case mode
-    "seed" (seed (n-or "2000"))
-    "drop" (drop-mains (remove nil? (cons n more)))
-    ;; the store bin/check is given, its size and branch count: "PATH KB BRANCHES"
-    "store" (let [path (seon.config/value :seon.config.root/store-path)
-                  c (d/connect (seon.db/store-cfg :lmdb path))]
-              (println path (quot (dir-bytes path) 1024) (count (d/branches c))) (d/release c) (lib/c-exit 0))
-    "durable-write" (durable-write n)
-    "durable-read" (durable-read n)
-    "window-write" (window-write n)
-    "window-read" (window-read n)
-    "scale" (scale (n-or "100"))
-    "robust" (robust)
-    "lifecycle" (lifecycle (n-or "10"))
-    "threads-declared" (threads-declared (n-or "3"))
-    "drain" (drain (n-or "32"))
-    "backpressure" (backpressure (n-or "200"))
-    "contracts" (contracts)
-    "mg-check" (mg-check n)
-    "e2e" (lib/c-exit (if (seon.e2e/run n more) 0 1))
-    ;; swarm N M: seon.e2e's swarm row (N tasks over 5 shared vars, max-running M), SWARM OK/FAILED
-    "swarm" (lib/c-exit (if (seon.e2e/run "swarm" [(or n "20") (or (first more) "8")]) 0 1))
-    "instrument" (instrument)
-    "record" (record)
-    "orphan" (orphan)
-    "lease" (lease)
-    "fx" (fx (n-or "1000"))
-    "system" (system-check)
-    "config" (config-check)
-    "problems" (problems-check)
-    "threads" (threads-check)
-    "root" (root-serve)
-    ;; this checkout's ports as the config resolves them, "SERVER WEB" (bin/ports)
-    "ports" (do (println (seon.config/value :seon.config.root/server-port) (seon.config/value :seon.config.web/port)) (lib/c-exit 0))
-    "mcp-proof" (mcp-proof)
-    "hotreload" (hotreload)
-    "idle" (idle (n-or "5000"))
-    (smoke))))
+  (let [[mode n & more] (seon.config/without-overrides args)]
+    (if-let [f (get modes mode)]
+      (f n more)
+      ;; a mode that is not one: its verdict, never another mode's
+      (do (out! "no mode " (or mode "given") "; the modes: " (clojure.string/join " " (keys modes)))
+          (out! (if mode (clojure.string/upper-case mode) "MODE") " FAILED")
+          (lib/c-exit 1)))))

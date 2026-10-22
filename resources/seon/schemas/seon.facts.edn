@@ -245,7 +245,12 @@
  :seon.root/source [:map {:seon.db/data true} [:root :string] [:commit {:optional true} :string]
                     [:pins {:optional true} [:map-of :string :string]] [:digest {:optional true} :string]
                     [:files :int] [:forms :int] [:retracted {:optional true} :int] [:ms number?]
-                    [:error {:optional true} :string]]
+                    [:error {:optional true} :string]
+                    ;; this boot's, and the tree's inputs with no program facts (seon.fx/inputs) when the running
+                    ;; binary is built from this very tree: what its agents key their test results by;
+                    ;; otherwise why not (:unshared)
+                    [:boot {:optional true} :string] [:inputs {:optional true} :seon.program/inputs]
+                    [:unshared {:optional true} :string]]
  ;; the next generation (docs/source.md#the-next-generation): the merges commit the :build effect
  ;; built (seon.fx/build), its worktree and binary and how long the build took, or why it was
  ;; refused; recorded by its asker, the reconciler; bin/root next starts the binary on this store

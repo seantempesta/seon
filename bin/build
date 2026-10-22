@@ -174,11 +174,21 @@ build_seon() {
   # the shared compile caches (bin/env): a schema file seon.contract reads, or one added to the
   # directory it lists, moves the key of every namespace compiled against it
   . "$ROOT/bin/env"
+  # the tree this build reads, as git names it (seon.fx/tree-id computes the same): HEAD's tree
+  # with every changed and untracked unignored file added, in an index of its own. Written
+  # beside the binary once it is built, so a root records its source's inputs for its agents
+  # only when its binary is built from that very tree (seon.root/import-source!)
+  idx=$(mktemp -u)
+  if git -C "$ROOT" rev-parse --verify --quiet HEAD > /dev/null; then GIT_INDEX_FILE=$idx git -C "$ROOT" read-tree HEAD; fi
+  GIT_INDEX_FILE=$idx git -C "$ROOT" add -A && tree=$(GIT_INDEX_FILE=$idx git -C "$ROOT" write-tree) || tree=
+  rm -f "$idx"
+  rm -f "$T/seon.tree"
   say "seon: jolt build -m seon.check -> target/seon"
   ( cd "$ROOT"
     HOME=$T/home JOLT_PWD=$ROOT "$JOLT" build -m seon.check -o "$T/seon" ) > "$T/seon-build.log" 2>&1 ||
     { tail -30 "$T/seon-build.log" >&2; die "seon build failed; see target/seon-build.log"; }
-  say "seon: built target/seon"
+  [ -n "$tree" ] && echo "$tree" > "$T/seon.tree"
+  say "seon: built target/seon (tree ${tree:-unknown})"
 }
 
 case $STEP in
