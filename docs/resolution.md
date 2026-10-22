@@ -22,7 +22,7 @@ is judged from the compiler's facts at merge (`seon.program/banned`), not by thi
 - `seon.cost/run`: a cost estimate names its function and its input as symbols in data.
 - `seon.agent/test-plan`, `seon.proofs/run-tests!`: a task's proofs and the tests a plan selects are symbols in data (reach digests' keys), resolved to their Vars to run.
 - `seon.program/account`, `seon.program/macro-uses`, `seon.context/callees`, `seon.source/head-var`, `seon.source/analyze-form`, `seon.repl/ns-form?`: the compiler's facts, what a form's head or a method's multi names in its namespace; read, never defined.
-- `seon.repl/eval-code`: each result's handle (`result/hN`), the agent REPL's own `*1`, defined by the REPL as it answers.
+- `seon.repl/eval-code`: each result's handle (``result/hN``), the agent REPL's own `*1`, defined by the REPL as it answers.
 
 ## Owed its owner's fix
 

@@ -38,7 +38,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **request**, **response**, **session**, `eval`, `done`, `interrupt` | nREPL's message model on the agent's socket | `seon.repl` |
 | **middleware** | `(fn [handler] (fn [request] ...))` over the base handler | `seon.repl/middleware` |
 | **reply item** | one form's folded answer at root: printed value or error, handle, cost | `seon.repl/fold` |
-| **handle** | a live value kept in the agent, named `result/hN` | `seon.repl` |
+| **handle** | a live value kept in the agent, named ``result/hN`` | `seon.repl` |
 | **value printer** | the one function that turns a value into text ([render](render.md#one-printer)) | `seon.print/print-value` |
 | **render** | a view of a value declared on its schema, over the one printer; the model's context is one ([render](render.md)) | `seon.render` |
 | **interrupt** | SIGUSR1 to an agent, escaping the running form at a safe point | `seon.intr` |
