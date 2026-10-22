@@ -143,11 +143,15 @@
           :else (conj acc {:class "*" :answers (answers d)}))))
 
 (defn- quoted-vars
-  "The qualified symbols in a quoted datum (walked: a collection's too) that name a var now:
-  a syntax-quoted or quoted name resolved later (`requiring-resolve`, a macro's template, a
-  proc or render named in data). A symbol naming no var is data."
+  "The qualified symbols in a quoted datum (walked: a collection's too) whose namespace
+  exists: a syntax-quoted or quoted name resolved later (`requiring-resolve`, a macro's
+  template, a proc or render named in data). A symbol of no namespace is data. By namespace,
+  not by var: whether the var exists yet depends on what this process analyzed before (an
+  import of the same files twice gave 43 of 387 tests the same reach digest, so no result was
+  reused across runs or checkouts; worktree session PROVE 2026-10-22), while every imported
+  file's namespace exists before any form is analyzed."
   {:malli/schema [:=> [:cat :any] [:set :qualified-symbol]]}
-  [x] (into #{} (filter #(and (qualified-symbol? %) (find-var %))) (tree-seq coll? seq x)))
+  [x] (into #{} (filter #(and (qualified-symbol? %) (find-ns (symbol (namespace %))))) (tree-seq coll? seq x)))
 
 (defn unit-account
   "What the compiler says one analyzed top-level node does, from its IR by resolved var
@@ -709,38 +713,58 @@
 
 ;; ---- reach: which tests a change reaches ----------------------------------------------
 
+(defn divergence
+  "What branch db-to changed since db-from (its merge base), the changes its merge carries to
+  main: the vars it added, redefined and removed, and the schema keys it registered or
+  changed; each sorted, an empty kind left out ({}: nothing). Compared by content: a var's
+  form by its :form/id (its text), a schema by its form's text, because entity ids are a
+  branch's own and a merge applies main's forms by content under the branch's ids. Cost:
+  each db's :var/form and :schema/form datoms, and two seeks per entry whose ids differ."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db]
+                  [:map-of [:enum :added :changed :removed :schemas] [:vector [:or :qualified-symbol :qualified-keyword]]]]}
+  [db-from db-to]
+  (let [by (fn [db a] (into {} (map (juxt :e :v)) (d/datoms db :aevt a)))
+        ;; the entries whose ids differ, by name, then compared by content
+        differ (fn [attr name-attr content]
+                 (let [a (by db-from attr) b (by db-to attr)]
+                   (into #{} (for [e (into (set (keys a)) (keys b)) :when (not= (a e) (b e))
+                                   :let [n (name-attr (d/entity (if (b e) db-to db-from) e))
+                                         x (content db-from n) y (content db-to n)]
+                                   :when (not= x y)]
+                               [(cond (nil? x) :added (nil? y) :removed :else :changed) n]))))
+        form-id (fn [db v] (some->> (pdb/eid db :var/name v) (d/entity db) :var/form :form/id))
+        schema (fn [db k] (some->> (pdb/eid db :schema/key k) (d/entity db) :schema/form))
+        vars (differ :var/form :var/name form-id)
+        schemas (for [[_ k] (differ :schema/form :schema/key schema)] [:schemas k])]
+    (into {} (for [[k xs] (group-by first (concat vars schemas))] [k (vec (sort-by str (map second xs)))]))))
+
 (defn changed-vars
-  "The vars db-to points to another form than db-from does (new, redefined or removed):
-  what a branch changed since the main it forked from. Cost: each db's :var/form datoms."
+  "The vars db-to points to another form than db-from does (new, redefined or removed), by
+  content: what a branch changed since its base (divergence's vars)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :qualified-symbol]]}
   [db-from db-to]
-  (let [forms (fn [db] (into {} (map (juxt :e :v)) (d/datoms db :aevt :var/form)))
-        a (forms db-from) b (forms db-to)]
-    (into #{} (keep #(when (not= (a %) (b %)) (:var/name (d/entity db-to %)))) (into (set (keys a)) (keys b)))))
-
-(defn reaching-tests
-  "The program's tests on db that reach one of syms (fully qualified var names): from each
-  var, the forms that reference it (one AVET seek), their definitions, and on. Cost: the
-  reached definitions, never the rest of the program."
-  {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-symbol]] [:set :qualified-symbol]]}
-  [db syms]
-  (loop [front (vec syms) seen (set syms) tests #{}]
-    (if-let [[x & more] (seq front)]
-      (let [callers (for [dt (d/datoms db :avet :form/refs x)
-                          :when (live? db (:e dt))
-                          dv (:form/defines (d/entity db (:e dt)))
-                          :let [v (:var/name dv)]
-                          :when (and v (= (:e dt) (:db/id (:var/form dv))))]
-                      [v (:var/kind dv)])
-            new (remove (comp seen first) callers)]
-        (recur (into (vec more) (map first) new) (into seen (map first) new)
-               (into tests (comp (filter #(= :test (second %))) (map first)) callers)))
-      tests)))
+  (into #{} cat (vals (dissoc (divergence db-from db-to) :schemas))))
 
 (def tree-readers
-  "The host vars that read files: a test whose reached forms reference one reads the
-  checkout's tree, so its reach digest covers the whole tree (reach-digests)."
-  '#{clojure.core/slurp clojure.core/file-seq})
+  "The vars that read the checkout's files or run the binary built from them: a test whose
+  reached forms reference one has the whole tree as an input, so its reach digest covers it
+  (reach-digests), unless the form referencing it defines one of env-readers. The host's file
+  readers, and seon.test-store/binary-sh, the one way a test runs target/seon, bin/root or
+  bin/check: what such a test proves is the whole program the binary is built from."
+  '#{clojure.core/slurp clojure.core/file-seq seon.test-store/binary-sh})
+
+(def env-readers
+  "The platform vars whose file reads are of inputs every digest already holds (:env:
+  resources/, deps.edn, web/) or of no checkout file at all, so reaching them does not make a
+  test read the tree. A reader not named here counts as reading the tree (conservative: a
+  missed name reruns more, never reuses a stale green). Measured 2026-10-22 (worktree session PROVE): with
+  seon.config/baked-schema-forms (a macro every contracted form expands) counted, 327 of 368
+  tests took the tree, so any edit anywhere reran them."
+  '#{seon.config/baked-schema-forms ;; resources/seon/schemas, in :env
+     seon.fork-server/dev-classpath! ;; deps.edn, in :env
+     seon.fx/declared-refs ;; resources/seon/system.edn, in :env
+     seon.web/handler ;; web/public, in :env
+     seon.proofs/greens}) ;; the results directory, outside the tree, by digest
 
 (defn reach-digests
   "{test var -> reach digest} of db's tests (task seon.program/tests-run-by-reach): the
@@ -749,12 +773,18 @@
   references reach (a var to the form that last defined it, macros and quoted names among
   them (unit-account); a defined multimethod's methods and protocol's extensions; a
   contracted var's form to the schema entries its contract names, and each entry to those
-  its form names), with inputs' :tree when a reached form references a tree-reader. A
+  its form names; a var named in data its form reads, inputs' :data-refs: system.edn's procs,
+  which root resolves by name), with inputs' :tree when a reached form references a
+  tree-reader. A
   test's digest moves exactly when a form or schema entry it reaches does. Cost: the live
   forms, contracts and schema entries read once and digested once, then per test its
-  closure."
-  {:malli/schema [:=> [:cat :seon.host/db [:map [:env :string] [:tree :string]]] [:map-of :qualified-symbol :string]]}
-  [db {:keys [env tree]}]
+  closure. With roots ({key [var ...]}, a bin/check step's mode functions: seon.proofs/
+  check-steps), the same digest of each key: what its vars' forms and their namespaces'
+  plain forms reach; a key one of whose vars has no form here has none."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol :string]]
+                  [:=> [:cat :seon.host/db :seon.program/inputs [:map-of :string [:sequential :qualified-symbol]]] [:map-of :string :string]]]}
+  ([db inputs] (reach-digests db inputs nil))
+  ([db {:keys [env tree data-refs]} roots]
   (let [schemas (into {} (for [dt (d/datoms db :aevt :schema/key)] [(:v dt) (:schema/form (d/entity db (:e dt)))]))
         sid #(str "schema " %)
         named (fn [text] (keep #(when (contains? schemas %) (sid %)) (names (edn/read-string text))))
@@ -766,13 +796,28 @@
         methods (by-def :method) impls (by-def :impl)
         by-id (into {} (map (juxt :id identity)) forms)
         digest (into {} (for [f forms] [(:id f) (error/digest (str (:ns f) "\n" (:src f)))]))
-        edges (fn [f] (concat (keep var-form (:refs f)) (:schema f)
-                              (for [[k s] (:defines f) :when (= :var k) id (concat (methods s) (impls s) (contract s))] id)))
-        plain (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) live))]
-    (into {} (for [f forms [k t] (:defines f) :when (and (= :var k) (= :test (:var/kind (d/entity db [:var/name t]))))
-                   :let [reached (loop [front (into [(:id f)] (map :id) (plain (:ns f))) seen #{}]
-                                   (if-let [[id & more] (seq front)]
-                                     (if (seen id) (recur more seen) (recur (into (vec more) (edges (by-id id))) (conj seen id)))
-                                     seen))
-                         reads? (some #(some tree-readers (:refs (by-id %))) reached)]]
-               [t (error/digest (apply str t "\n" env "\n" (when reads? tree) (sort (map digest reached))))]))))
+        ;; a test's form is reached only as the root it is: another form naming a test (its
+        ;; name quoted as data, a proof list) never runs it, clojure.test does
+        test-ids (set (for [dt (d/datoms db :aevt :var/kind) :when (= :test (:v dt)) :let [id (var-form (:var/name (d/entity db (:e dt))))] :when id] id))
+        edges (fn [f] (concat (remove test-ids (keep var-form (:refs f))) (:schema f)
+                              (for [[k s] (:defines f) :when (= :var k)
+                                    id (concat (methods s) (impls s) (contract s) (keep var-form (get data-refs s)))]
+                                id)))
+        plain (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) live))
+        ;; the digest of key k reaching from the forms ids, with their namespaces' plain forms
+        digest-of (fn [k ids]
+                    (let [reached (loop [front (into (vec ids) (comp (mapcat #(plain (:ns (by-id %)))) (map :id)) ids) seen #{}]
+                                    (if-let [[id & more] (seq front)]
+                                      (if (seen id) (recur more seen) (recur (into (vec more) (edges (by-id id))) (conj seen id)))
+                                      seen))
+                          reads? (some #(let [f (by-id %)]
+                                          (and (some tree-readers (:refs f))
+                                               (not (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f))))))
+                                       reached)]
+                      (error/digest (apply str k "\n" env "\n" (when reads? tree) (sort (map digest reached))))))]
+    (if roots
+      ;; a root naming a var with no form here (renamed, not imported) gets no digest: its
+      ;; caller names it missing, never a digest of :env alone that a stale green matches
+      (into {} (for [[k vars] roots :when (every? var-form vars)] [k (digest-of k (map var-form vars))]))
+      (into {} (for [f forms [k t] (:defines f) :when (and (= :var k) (= :test (:var/kind (d/entity db [:var/name t]))))]
+                 [t (digest-of t [(:id f)])]))))))

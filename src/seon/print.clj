@@ -2,7 +2,7 @@
   "The one value printer. Every value a person or a model reads goes through `print-value`:
   an agent's reply, a refused value inside a contract error, a test's expected and actual,
   the context block, the dashboard's value panels. It is Seon's printer (seon.render.value
-  and seon.print, through lane P1's proto/seon-min: identical output on L3's 1,617-line
+  and seon.print, through session P1's proto/seon-min: identical output on L3's 1,617-line
   corpus): one token budget allotted breadth before depth, identity keys first, every cut
   carrying the form that reads its rest through the result handle, and text and hiccup
   from one selection.
@@ -16,7 +16,7 @@
   (:require [clojure.string :as str] [seon.print.select :as select] [seon.config :as config]))
 
 (def budgets
-  "Tokens each kind of shown value may spend: a reply's value (Seon's shipped agent dial),
+  "Tokens each kind of shown value may spend: a reply's value (Seon's shipped agent config key),
   a value shown inside another (a refused argument, a test's expected and actual, ex-data),
   a form echoed back, and the whole context block (breadth first, so every section shows
   before any one deepens). The config's :seon.config.render.agent/token-budget and
@@ -135,12 +135,13 @@
            cont (assoc :continuation cont)))))))
 
 (defn line
-  "Text in one line under budget tokens: `prose` with every whitespace run as one space;
+  "Text in one line under budget tokens (a value that is not text printed first): `prose`
+  with every whitespace run as one space;
   its cut says what it omitted and, with source (a form that answers the whole text), the
   form that reads the rest. Root's context and the page's one-line rows (the stream)."
   {:malli/schema [:function [:=> [:cat :any pos-int?] :string] [:=> [:cat :any pos-int? :any] :string]]}
   ([s budget] (line s budget nil))
-  ([s budget source] (:text (prose (some-> s str) budget (cond-> {:one-line? true} source (assoc :source source))))))
+  ([s budget source] (:text (prose (cond-> s (and (some? s) (not (string? s))) (text budget)) budget (cond-> {:one-line? true} source (assoc :source source))))))
 
 (defn more
   "What a bounded list leaves: nil when its shown members are all of total, else `+N more`

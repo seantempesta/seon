@@ -7,7 +7,7 @@ Research and design, read-only (one scratch worktree, `research-fork`, made, pro
 Short answers:
 - **Forking:** the design uses cheap forking well for agents, clones, test children and loading merges in place. It ignores it for every test run that is not an agent's. `bin/test` runs serially in one cold `jolt` process. Each `bin/check` step is a cold binary that boots a root. Seon's agents run the same tests again every turn.
 - **A universal way to test a change:** no. There are two test paths, and they select differently: an agent's `test-vars` and `bin/test --reach`. Only `bin/test` reuses results. Both selections miss changed macros and vars that are named by quoted symbols. The agent path also misses changed methods, fixtures and schemas. On the standing root, the agent path selects nothing from main's suite, because main holds no imported program.
-- **A merge branch tested before main:** Seon's own single merge is already proven on main plus the change, because the writer refuses a branch that is behind main. Its merge *train* is not proven together, and that is why trains are off. Claude lanes have no tested integration branch: root proves batches by hand.
+- **A merge branch tested before main:** Seon's own single merge is already proven on main plus the change, because the writer refuses a branch that is behind main. Its merge *train* is not proven together, and that is why trains are off. Claude worktree sessions have no tested integration branch: root proves batches by hand.
 - **Worktrees:** the isolation model is sound. The gaps are a few small edges, three stale comments, one footgun, and caches with no bound.
 
 The design below is three small pieces built on what exists: one prove verb, one merge-branch gate, and worktree fixes. All three key results by the same reach digest.
@@ -132,7 +132,7 @@ What the table means:
 
 ### The smallest design: one verb, `prove`, one selection, one store of results
 
-**Primitive.** A candidate is a program db value, and so is its base. Seon agents already have both: the branch and the main it forked from. A git lane gets both by import (`seon.source/import-tx`, the facts root and agents record). Everything else is the same code.
+**Primitive.** A candidate is a program db value, and so is its base. Seon agents already have both: the branch and the main it forked from. A git worktree session gets both by import (`seon.source/import-tx`, the facts root and agents record). Everything else is the same code.
 
 ```
 (seon.proofs/prove base cand {:proofs #{...} :env e :ticks n :jobs k})
@@ -154,13 +154,13 @@ What the table means:
    - The turn loop's `observe`, the judge's `:tested` and the gated merge then rerun only what moved since the last green.
    - `:env` for an agent is the binary's source commit's `test-runner/inputs`, computed once by root at boot and recorded as a fact. With no source root, it is the binary's build id: results are then shared only within one generation, which is honest.
 4. **Run in forks, `k` at a time.**
-   - The holder (the agent, or for a lane the `seon` binary with test/ loaded) forks one child per test shard, a namespace with its fixtures, and reads each pipe to EOF: `run-tests-forked`'s child, generalized to a shard.
+   - The holder (the agent, or for a worktree session the `seon` binary with test/ loaded) forks one child per test shard, a namespace with its fixtures, and reads each pipe to EOF: `run-tests-forked`'s child, generalized to a shard.
    - The holder takes no clock and no thread: it forks `k` children and reaps them, exactly as the fork server reaps agents. `k` is `:seon.config.proofs/jobs`, documented config with its unit and its bound.
 5. **Expose it as one verb.**
    - Agents: `(my.agent/prove)`, whose default base is the main the agent forked from.
-   - Lanes: `bin/test --reach` becomes `seon prove [NS...]` on the built binary (no 9.85 s jolt import), with `base` being main's tree.
+   - Worktree sessions: `bin/test --reach` becomes `seon prove [NS...]` on the built binary (no 9.85 s jolt import), with `base` being main's tree.
    - Root: the reconciler's `:tests` request calls the same function.
-6. **Import incrementally, by file digest** (the step `docs/source.md#tests-run-by-reach` already names). A lane's run imports only the files whose digest differs from main's last import. On the merged program db, that turns 9.85 s into the changed files' analysis time.
+6. **Import incrementally, by file digest** (the step `docs/source.md#tests-run-by-reach` already names). A worktree session's run imports only the files whose digest differs from main's last import. On the merged program db, that turns 9.85 s into the changed files' analysis time.
 
 - **Reuses:** `reach-digests`, `test-runner/plan` and `run-vars!`'s storage, `run-tests-forked`'s child and `run-answer`, `seon.fx/write-file`, `import-tx`, `schema-dependents`' `names`.
 - **Replaces:**
@@ -198,7 +198,7 @@ What the table means:
     - the result is proven only as far as the selection reaches;
     - every member's run is serial behind the one writer.
 - **Seon, trains** (`reconcile.clj:352-360`, `writer.clj:76-109`) land disjoint green members in one octopus commit, with no combined run. They are off for that reason (DECISIONS; `default.edn:175-181`).
-- **Claude lanes** (AGENTS §4, `docs/landing.md#ready-branches-land-in-batches`):
+- **Claude worktree sessions** (AGENTS §4, `docs/merging.md#ready-branches-merge-in-batches`):
   - root merges ready, file-disjoint branches onto an integration branch by hand, runs one `bin/check 100` and one `bin/test`, then lands each;
   - nothing makes the integration branch, gates main on it, or reuses its results, beyond `bin/test --reach`'s digests.
 
@@ -216,7 +216,7 @@ What the table means:
    - If the run is red, bisect the batch (bors and Zuul): split it in halves, each its own merge branch, proven concurrently because forks are cheap. A single red member is refused, with its red tests as data on its attempt (`:merge-red`), and the queue moves on.
 4. **Pipeline (Zuul's speculative queue), later.** Given candidates c1 c2 c3, cut m1 = main + c1, m2 = m1 + c2 and m3 = m2 + c3, and prove all three at once. Land the longest green prefix. Each prover costs 0.8 ms and ~20–30 MB, so the depth is bounded by the workload (`:max-merging`), not by cost.
 
-**One mechanism for git lanes.** A Claude lane's branch is a candidate of a second kind.
+**One mechanism for git worktree sessions.** A Claude worktree session's branch is a candidate of a second kind.
 - (a) Root computes the merged tree without a checkout: `git merge-tree --write-tree main jolt/X`, git's own primitive. A conflict there sends the branch back with git's conflict list as data.
 - (b) If the merged tree differs from main only in `.clj` files under the source dirs and in schema resources, root imports those files incrementally onto a branch of main's program, and it becomes `merge/<n>` above. It is proven by the same prover, with no build and no worktree.
   - This needs root to hold the program, which is §2 gap 5 again: the standing root must import src and test.
@@ -225,8 +225,8 @@ What the table means:
   - `nice -n 15 bin/build seon` there (24 s from the shared cache, `docs/source.md#shared-build-caches`);
   - `seon prove` there, and the `bin/check` steps whose code changed plus `smoke`.
 - (d) Land: the merge commit is created (`git commit-tree`, the plumbing `seon.fx/git-commit` already uses) and main moves with `git update-ref refs/heads/main <merge> <old-main>`, compare-and-swap. A moved main refuses and re-cuts.
-  - This is a `:git` effect request, so root's landing *is* the reconciler's merge task. That is AGENTS §4 "Where this is going", not a new runner.
-- Until it is a task, root's manual batch should follow (a)–(d) by hand. `docs/landing.md` should state (a) and the compare-and-swap in (d) as the rule.
+  - This is a `:git` effect request, so root's merge *is* the reconciler's merge task. That is AGENTS §4 "Where this is going", not a new runner.
+- Until it is a task, root's manual batch should follow (a)–(d) by hand. `docs/merging.md` should state (a) and the compare-and-swap in (d) as the rule.
 
 - **Reuses:**
   - `merge-train`'s judging and `apply-tx`;
@@ -252,7 +252,7 @@ What the table means:
   - `seon.reconcile-test/two-key-disjoint-members-whose-tests-meet-are-proven-together`, where B's test calls A's changed fn: red when proven together, green today in a train. That is the case trains miss.
   - `…/a-red-batch-bisects-to-its-red-member`;
   - `seon.check/e2e scenario semantic` extended with a train;
-  - a cost proof: cutting and landing are independent of program size (proportional to the carried keys, DESIGN-tasks §3.7: ~10 ms for ten items once M1 lands).
+  - a cost proof: cutting and merge are independent of program size (proportional to the carried keys, DESIGN-tasks §3.7: ~10 ms for ten items once M1 lands).
 - **Numbers to report:**
   - `swarm 100` wall time, before (269 s) and after;
   - merges per minute with `max-merging` 4;
@@ -274,45 +274,45 @@ What the table means:
   - its own store under `runs/`;
   - its own root, double-forked (`bin/root launch`), reached by the committed `.mcp.json` through `./bin/mcp`.
 - The compile caches are shared and content-keyed with temp-then-rename (`docs/source.md#shared-build-caches`), so concurrent builds are safe. A fresh worktree takes 4.4 s; its build hits the cache.
-- `bin/lane-check` proves the workflow end to end and ends on `LANE-CHECK OK/FAILED`.
-- Many independent lanes at once hold: there is no shared mutable state but the caches and the results directory, and both are content-addressed.
+- `bin/worktree-check` proves the workflow end to end and ends on `WORKTREE-CHECK OK/FAILED`.
+- Many independent worktree sessions at once hold: there is no shared mutable state but the caches and the results directory, and both are content-addressed.
 
 ### Gaps, each one a task
-1. **A submodule a lane adds breaks every worktree made from that lane's branch** until root initializes it in the main tree. `setup` runs `git -C "$MAIN/$sub" worktree add` for each gitlink (`bin/worktree:35-37`, under `set -e`). If the main tree has no repo there, the script dies after `git worktree add`, leaving a worktree with no `target/` and no ports.
-   - Fix: when `$MAIN/$sub` is missing, `setup` skips that gitlink and says so (`print -u2 "worktree: $sub not initialized in the main tree; root initializes it at landing"`).
-   - A lane that needs another lane's new submodule waits on that landing through `:needs`.
-2. **A lane that needs another lane's unmerged work.** `bin/worktree NAME jolt/OTHER` already supports this, but nothing records it.
-   - Fix: record it as `:seon.task/needs` and land in that order. The dependent lane merges main, not OTHER, after OTHER lands. A merge-branch batch (§3) carries both together when both are ready.
-   - Document it in `docs/landing.md#a-lane-works-in-a-worktree-of-its-own`.
+1. **A submodule a worktree session adds breaks every worktree made from that worktree session's branch** until root initializes it in the main tree. `setup` runs `git -C "$MAIN/$sub" worktree add` for each gitlink (`bin/worktree:35-37`, under `set -e`). If the main tree has no repo there, the script dies after `git worktree add`, leaving a worktree with no `target/` and no ports.
+   - Fix: when `$MAIN/$sub` is missing, `setup` skips that gitlink and says so (`print -u2 "worktree: $sub not initialized in the main tree; root initializes it at merge"`).
+   - A worktree session that needs another worktree session's new submodule waits on that merge through `:needs`.
+2. **A worktree session that needs another worktree session's unmerged work.** `bin/worktree NAME jolt/OTHER` already supports this, but nothing records it.
+   - Fix: record it as `:seon.task/needs` and land in that order. The dependent worktree session merges main, not OTHER, after OTHER lands. A merge-branch batch (§3) carries both together when both are ready.
+   - Document it in `docs/merging.md#a-session-works-in-a-worktree-of-its-own`.
 3. **Stale comments in `bin/worktree`'s header**, which contradict AGENTS:
    - `:19`: "taken with `git -C ../next-NAME submodule update`". AGENTS says never run `git submodule` in a worktree; use `--sync`.
    - `:24`: "runs (stores) default to its own target/runs". `bin/root` uses `$ROOT/runs`.
    - `:26`: "cherry-picked (or merged) … by explicit paths". AGENTS says root lands by merging, never by copying.
    - An agent reading the script follows the wrong rule. Fix the three comments.
-4. **Footgun: a single `bin/check MODE` defaults to `runs/store`**, the lane root's store, which lacks the checks' seed, so steps fail falsely (`docs/landing.md`). Every lane has to remember `SEON_STORE=$PWD/target/check-store`.
-   - Fix: `bin/check` defaults `SEON_STORE` to `target/check-store` when it is unset. That is one line, and it removes the warning from the docs and `lane-check`.
+4. **Footgun: a single `bin/check MODE` defaults to `runs/store`**, the worktree root's store, which lacks the checks' seed, so steps fail falsely (`docs/merging.md`). Every worktree has to remember `SEON_STORE=$PWD/target/check-store`.
+   - Fix: `bin/check` defaults `SEON_STORE` to `target/check-store` when it is unset. That is one line, and it removes the warning from the docs and `worktree-check`.
 5. **Unbounded shared state:**
-   - `../test-results` (9,014 files) has no pruning rule, against AGENTS §7 "Disk stays bounded". Fix: root prunes, at each landing, the digests no test of main's last N landings holds; the digests are already computed then.
-   - `../worktree-ports` hands out `max + 1` and never checks that a port is free (block 50 = 8400 today; 9 lanes are registered).
-6. **Disk.** Each lane worktree shows ~2 GB apparent (`du`, mostly shared APFS clone blocks). The main tree is 13 GB, 7.6 GB of it `target/cache`. Seven earlier lane worktrees are still present, and `~/src/seon-jolt` holds ~100 legacy top-level directories and `wt-*.log` files, against §7's "no new top-level directory".
+   - `../test-results` (9,014 files) has no pruning rule, against AGENTS §7 "Disk stays bounded". Fix: root prunes, at each merge, the digests no test of main's last N merges holds; the digests are already computed then.
+   - `../worktree-ports` hands out `max + 1` and never checks that a port is free (block 50 = 8400 today; 9 worktree sessions are registered).
+6. **Disk.** Each worktree shows ~2 GB apparent (`du`, mostly shared APFS clone blocks). The main tree is 13 GB, 7.6 GB of it `target/cache`. Seven earlier worktrees are still present, and `~/src/seon-jolt` holds ~100 legacy top-level directories and `wt-*.log` files, against §7's "no new top-level directory".
    - Reclaiming them is the owner's act. List them for the owner rather than deleting.
 7. **Agents solving problems independently.** Inside a root, a Seon agent has a real REPL, `merge-main!`, a forked test run, `clone!`, and branches that cost one pointer. What it lacks, and these are this report's §2 and §3:
    - a test verb of its own (`my.agent/prove`);
    - reused results;
    - a reach that sees macros, quoted names, methods, fixtures and schemas;
    - on the standing root, any program to reach at all (gap 5 of §2).
-   - Claude lanes are independent in practice, but their tests start at ≥10 s and run serially, and their integration is root's hand work.
+   - Claude worktree sessions are independent in practice, but their tests start at ≥10 s and run serially, and their integration is root's hand work.
 
 ---
 
 ## 5. Order to build
 
-Each item is a task in its owning namespace's file. Plans cite the vars above, proofs are written first and watched red, and each landing rewrites `docs/source.md#tests-run-by-reach` or `docs/landing.md`.
+Each item is a task in its owning namespace's file. Plans cite the vars above, proofs are written first and watched red, and each merge rewrites `docs/source.md#tests-run-by-reach` or `docs/merging.md`.
 
 1. **`seon.program/reach-sees-macros-quotes-and-schemas`** (§2 design step 2). It fixes a correctness bug in the shipped `bin/test --reach` (stale greens after a macro change). About +30 lines; the probe's rows 1–2 are its red proofs. Lands alone.
 2. **`seon.proofs/prove`**, one selection by digest difference, results through the effect owner, `k` forks (§2 steps 1, 3–5). Replaces `test-vars`' selection and `run-vars!`. Proofs: rows 3–4, `a-wide-reach-reuses-unchanged-results`, `a-second-prove-…-runs-nothing`. Then wire it into `seon.turn/observe`, `:tested` and `my.agent/prove`.
 3. **Owner decision, then a task: the standing root imports `src` and `test`** (`:seon.config.source/dirs`). Without it, items 2 and 6 do nothing for Seon's own code on 7888.
-4. **`bin/worktree` and `bin/check` edges** (§4 gaps 1, 3, 4; the prune in gap 5). About 15 lines of shell; rerun `bin/lane-check`.
+4. **`bin/worktree` and `bin/check` edges** (§4 gaps 1, 3, 4; the prune in gap 5). About 15 lines of shell; rerun `bin/worktree-check`.
 5. **`seon.merge/program-cost-follows-what-changed`** (M1's scan, already filed). This comes before any merge-branch work. Profile `swarm 20` first to confirm the 269 s cause.
 6. **`seon.writer/merge-branches-are-proven-before-main`** (§3, Seon candidates): cut, prover, land with compare-and-swap, bisect on red. Then raise `:seon.config.merge/max-running`, which needs the owner's go (DECISIONS).
 7. **`seon.source/import-by-file`**, then **git candidates in the merge branch** (§3 (a), (b), (d)), then the build path (c). Root's manual batch follows (a)–(d) by hand until then.

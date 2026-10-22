@@ -9,7 +9,7 @@
             [datahike.api :as d]
             [seon.step :as step] [seon.db :as pdb] [seon.sock :as sock]
             [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.fork-server :as server]
-            [seon.agent-proc :as ap] [seon.root :as root] [seon.repl :as repl] [seon.render.proc]
+            [seon.agent :as agent] [seon.agent-proc :as ap] [seon.fx] [seon.root :as root] [seon.repl :as repl] [seon.render.proc] [seon.web]
             [taoensso.trove :as trove]))
 
 (trove/set-log-fn! nil)
@@ -51,6 +51,92 @@
     (testing "the stop transition releases the branch connections"
       (is (map? (#'writer/writer-proc st ::flow/stop))))))))
 
+(deftest the-writers-transactions-name-their-runtime
+  ;; task seon.db/each-commit-names-its-runtime: main's transactions through the writer's group
+  ;; commit carry the runtime that made them, and the fork server's replica applies it too
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
+        fp (jolt.host/runtime-fingerprint)]
+    (is (= fp (:seon.tx/runtime (d/entity @conn (:max-tx @conn)))) "main's transaction names it")
+    (is (= fp (get-in (first (:to-fork-server outs)) [:tx-meta :seon.tx/runtime])) "and so does what the replica applies")))))
+
+(deftest a-writers-merge-names-its-runtime
+  ;; task seon.db/each-commit-names-its-runtime: a branch merged into main through the writer
+  ;; (:merge, d/merge-db) is a transaction like any other: it names the runtime that made it
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        b (pdb/on-main (:branch cfg) :a1)
+        _ (d/branch! conn (:branch cfg) b)
+        bc (d/connect (assoc cfg :branch b))
+        [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f2] [?v :var/form ?f] [?f :form/ns ?n]] @bc)
+        _ (d/transact bc [{:db/id "f2'" :form/id "app.m0/f2-redefined" :form/ns nsx :form/order 100 :form/defines [v]
+                           :form/src "(defn f2 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 200))"}
+                          [:db/add v :var/form "f2'"]])
+        _ (d/release bc)
+        t0 (:max-tx @conn)
+        [_ outs] (step #'writer/writer-proc st :in {:op :merge :branch b :dest {:rid 1}})]
+    (is (:merged? (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))) "the branch merges")
+    (is (< t0 (:max-tx @conn)))
+    (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @conn (:max-tx @conn)))) "and its merge names the runtime")))))
+
+(deftest a-fork-at-another-commit-is-recorded-misaligned
+  ;; task seon.agent/an-agents-base-is-its-merge-base: a new agent whose branch is not at the
+  ;; commit :spawn named (or whose image is not at its t) says so in its hello, and root
+  ;; records it as the agent's problem, :seon.agent/fork-misaligned
+  (ts/test-branch! (fn [cfg conn]
+    (let [at (d/commit-id @conn) t (:max-tx @conn)
+          _ (d/transact conn [{:note/text "main moved on"}])]
+      (is (nil? (agent/misaligned (d/commit-id @conn) (:max-tx @conn) @conn @conn)) "aligned: nothing to say")
+      (let [x (agent/misaligned at t @conn @conn)
+            [r a'] (sock/socketpair)
+            end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
+            st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+            [_ outs] (step #'ap/agent-proc st :from {:op :hello :t t :start-ms 1.0 :mem-mb 1.0 :interrupt-ok true :misaligned x})
+            problem (first (filter #(= :problem (:op %)) (:to-api outs)))]
+        (is (= {:commit at :t t :branch-commit (d/commit-id @conn) :image-t (:max-tx @conn)} x) "a branch past the commit it was branched at")
+        (is (= :seon.agent/fork-misaligned (get-in problem [:error :seon.error/type])) "is recorded as the agent's problem")
+        (is (= at (get-in problem [:error :commit])))
+        (remote/close! end) (sock/close! a'))))))
+
+(deftest a-fork-names-the-commit-its-agent-starts-at
+  ;; task seon.agent/an-agents-base-is-its-merge-base: :spawn branches the agent from main's
+  ;; head and asks the fork server, whose image holds main at that head (the FIFO), to fork it;
+  ;; :fork names that commit and t, so the agent checks both (seon.agent/init!)
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
+        b (pdb/on-main (:branch cfg) :a1)
+        [_ outs] (step #'writer/writer-proc st :in {:op :spawn :agent :a1 :branch b :ns 0 :fd 0 :dest {:rid 2}})
+        fork (first (filter #(= :fork (:op %)) (:to-fork-server outs)))]
+    (is (= (d/commit-id @conn) (:commit fork)) "main's commit")
+    (is (= (:max-tx @conn) (:t fork)) "main's t")
+    (is (= (:commit fork) (d/commit-id (pdb/head conn b))) "which the agent's branch starts at")))))
+
+(deftest a-value-the-store-cannot-encode-is-refused-to-its-asker
+  ;; land6 re-proof (e2e loop): a sorted map on root's source fact reached the store's codec at
+  ;; commit (konserve.jolt.fasl has no encoding for it) and threw out of the writer as a proc
+  ;; defect, unanswered. The commit refusing is the asker's error: the transaction that carried
+  ;; it is answered :seon.writer/refused, the others in its batch commit, and the writer goes on.
+  ;; A store on disk of this test's own, the last resort: the in-memory test store has no codec
+  (let [path (str (System/getProperty "user.dir") "/target/procs-test-" (random-uuid))
+        {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)]
+   (try (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        source (fn [pins] {:seon.root/id :root :seon.root/source {:root "tree" :files 0 :forms 0 :ms 0.0 :pins pins}})]
+    (a/>!! in {:op :tx :branch :db :tx-data [{:note/text "after"}] :dest {:rid 2}})
+    (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [(source (into (sorted-map) (for [i (range 40)] [(str "reference-code/m" i) (apply str (repeat 40 "a"))])))] :dest {:rid 1}})
+          answers (into {} (keep (fn [x] (when-let [r (get-in x [:dest :rid])] [r (:r x)]))) (:to-api outs))]
+      (is (= :seon.writer/refused (:seon.error/type (answers 1))) (pr-str (answers 1)))
+      (is (true? (:ok (answers 2))) "the batch's other transaction commits")
+      (testing "the writer goes on, and a plain map of pins (what the source read answers) reads back"
+        (let [pins (:pins (seon.fx/read-source {:req {:root (System/getProperty "user.dir") :dirs ["src"]}}))
+              [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [(source pins)] :dest {:rid 3}})]
+          (is (true? (:ok (:r (first (:to-api outs))))))
+          (is (seq pins))
+          (is (= pins (get-in (d/pull @conn [:seon.root/source] [:seon.root/id :root]) [:seon.root/source :pins])))))))
+     (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+
 (deftest the-flush-is-continuous-group-commit
   ;; owner 2026-10-21 (notes/DECISIONS.md, "Durability is batched everywhere", superseded
   ;; paragraph): no window. A write is answered when committed in memory; the flusher parks
@@ -78,6 +164,26 @@
             (is (true? (:dirty st4)))
             (is (= [{:op :dirty :commits (:commits st3)}] (mapv #(select-keys % [:op :commits]) (:to-flusher outs))))))))))))
 
+(deftest the-writer-answers-clean-once-the-flush-covers-its-commits
+  ;; task seon.check/idle-waits-for-the-flush: a :clean request is held while the store is
+  ;; dirty and answered by the step that takes the covering flush, after that flush's notice
+  ;; to the api; a clean store answers at once
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? true :to-writer in :events (a/chan 16)})
+        [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
+        [st outs] (step #'writer/writer-proc st :in {:op :clean :dest {:rid 2}})]
+    (is (not-any? #(= {:rid 2} (:dest %)) (:to-api outs)) "dirty: held")
+    (let [[st2 outs] (step #'writer/writer-proc st :in {:op :flushed :commits (:commits st)})
+          api (:to-api outs)
+          i-notice (first (keep-indexed #(when (= :writer (:op %2)) %1) api))
+          i-answer (first (keep-indexed #(when (= {:rid 2} (:dest %2)) %1) api))]
+      (is (some? i-answer) "the covering flush answers it")
+      (is (< i-notice i-answer) "after the flush's notice to the api")
+      (is (= (:commits st) (get-in api [i-answer :r :commits])))
+      (is (empty? (:clean-waiters st2)))
+      (let [[_ outs] (step #'writer/writer-proc st2 :in {:op :clean :dest {:rid 3}})]
+        (is (some #(= {:rid 3} (:dest %)) (:to-api outs)) "clean: at once")))))))
+
 (deftest reconciler
   (ts/test-branch! (fn [_ conn] (let [st (#'reconcile/reconciler-proc {:boot "b" :provider {:kind :scripted :script 'seon.fixtures/reply}})]
     (testing "a main commit with no tasks: the reconciler reads it and starts nothing (quiescence: seon.reconcile-test)"
@@ -103,9 +209,9 @@
       (let [[st2 outs] (step #'server/fork-server-proc st :ev {:ev :eof :pid 2})]
         (is (= st st2)) (is (nil? outs))))))
 
-(deftest agent-stand-in
+(deftest agent-proc-steps
   ;; root's end of the agent's socket is a jolt.async.remote end: the agent's frames arrive
-  ;; as values on its :in (the stand-in's :from), and nil there is its close
+  ;; as values on its :in (the agent proc's :from), and nil there is its close
   (let [[r a] (sock/socketpair)
         end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
         st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
@@ -130,7 +236,7 @@
     (remote/close! end)
     (sock/close! a)))
 
-(deftest api-entrance
+(deftest api-server
   (let [st (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                           :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})]
     (testing "the view is answered to its caller's promise"
@@ -185,6 +291,50 @@
     (testing "an id never asked finds nothing"
       (is (nil? (second (step/answered st 99)))))))
 
+(defn- agent-proc-on
+  "An agent's proc over a socketpair, with request 7 in flight; f takes it, then both ends close."
+  [f]
+  (let [[r a] (sock/socketpair)
+        end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
+        st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})]
+    (try (f (assoc st :pid 42))
+         (finally (remote/close! end) (sock/close! a)))))
+
+(deftest an-eval-says-it-started
+  ;; task seon.check/every-wait-is-the-event-it-means: the agent's {:op :started} is root's
+  ;; :started event, with the eval's text (what a kill or an interrupt meant for it awaits)
+  (agent-proc-on
+   (fn [st]
+     (let [[st _] (step #'ap/agent-proc st :in {:op :req :rid 7 :kind :eval :msg {:op :eval :forms "(loop [] (recur))"}})
+           [_ outs] (step #'ap/agent-proc st :from {:op :started :id 7})]
+       (is (= [{:type :started :agent :a1 :rid 7 :form "(loop [] (recur))"}] (mapv #(dissoc % :at-ms) (:events outs))))))))
+
+(deftest a-test-run-says-its-child-forked
+  ;; the agent sends the test child's pid once it is forked: root's :tests-started event
+  (agent-proc-on
+   (fn [st]
+     (let [[_ outs] (step #'ap/agent-proc st :from {:op :tests-started :id 7 :pid 4242})]
+       (is (= [{:type :tests-started :agent :a1 :rid 7 :pid 4242}] (mapv #(dissoc % :at-ms) (:events outs))))))))
+
+(deftest a-tab-hears-its-view-settled
+  ;; the render proc says when nothing it asked is in flight any more (after an answer, or
+  ;; after what it sent the tabs), never while a request is out; the web proc puts a
+  ;; settled comment on every feed
+  (let [st {:events-ch (a/chan 8) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events []
+            :event-rows [] :views {} :zoom {} :merges 0 :main {:t 1}}
+        settled? (fn [outs] (some #(= :settled (:op %)) (:to-web outs)))
+        [st o1] (#'seon.render.proc/render-proc st :events {:type :spawned :agent :a1 :at-ms 1})
+        tag (:tag (first (filter #(= {:op :state} (:req %)) (:to-api o1))))
+        [st o2] (#'seon.render.proc/render-proc st :answers {:tag tag :r {:agents {} :writer {:tx-count nil :recent []} :fork-server {:status :up} :stats {} :store {} :boot {}}})]
+    (is (not (settled? o1)) "its ask is in flight")
+    (is (settled? o2) "the answer emptied what was in flight")
+    (is (empty? (:pending st))))
+  (let [ch (a/chan 4)
+        st {:tabs {1 {:ch ch :view :root}} :stale #{} :bytes 0}
+        [st _] (#'seon.web/web-proc st :from-render {:op :settled})]
+    (is (= ": settled\n\n" (a/poll! ch)))
+    (is (= (count ": settled\n\n") (:bytes st)))))
+
 (deftest the-render-proc-asks-for-root-s-view-once-per-round-trip
   ;; the coalescing window is the request in flight, not a clock (ASK-BOUND-MS is gone)
   (let [events (a/chan 8)
@@ -195,12 +345,12 @@
         [st o2] (#'seon.render.proc/render-proc st :events {:type :ready :agent :a1 :at-ms 2})]
     (is (= 1 (count (asks o1))) "an event asks for the view")
     (is (empty? (asks o2)) "while that request is in flight, more events only queue")
-    (let [[st _] (#'seon.render.proc/render-proc st :answers {:tag (:tag (first (asks o1))) :r {:agents {} :writer {:tx-count 1 :recent []} :server {:status :up} :stats {} :store {} :boot {}}})
+    (let [[st _] (#'seon.render.proc/render-proc st :answers {:tag (:tag (first (asks o1))) :r {:agents {} :writer {:tx-count 1 :recent []} :fork-server {:status :up} :stats {} :store {} :boot {}}})
           [_ o3] (#'seon.render.proc/render-proc st :events {:type :ready :agent :a2 :at-ms 3})]
       (is (not-any? #{:state} (vals (:pending st))) "the answer took its request")
       (is (= 1 (count (asks o3))) "the next event asks again"))))
 
-;; ---- task seon.root/a-proc-answers-every-request-it-took (census #2) ----------------------
+;; ---- task seon.root/a-proc-answers-every-request-it-took (laws audit #2) ----------------------
 
 (defn- api-state []
   (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
@@ -247,7 +397,7 @@
             (is (= (:view rs) (:view rs2)))))))))
 
 (defn- answering-sys
-  "(f sys), sys's entrance answering every request with r (a stand-in for the api), on a
+  "(f sys), sys's server answering every request with r (a stub for the api), on a
   branch of the test store deleted when f returns."
   [r f]
   (ts/test-branch! (fn [cfg conn] (let [ext (a/chan 4)]

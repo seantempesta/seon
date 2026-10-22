@@ -1,32 +1,32 @@
-# Dragons
+# Failure points
 
 Owner, 2026-10-20: "Guards and fences are almost always wrong. We should be doing the right
 thing, not guarding for it or trying to block random shit. We should know where all the
-dragons are and name them explicitly when dealing with them."
+failure points are and name them explicitly when dealing with them."
 
-A **dragon** is a place where the world outside our code can fail us. Each one is met by
+A **failure point** is a place where the world outside our code can fail us. Each one is met by
 exactly one function, its **edge**. The edge either answers a declared variant, which is
 plain data its callers handle as an ordinary branch, or it is an **entrant boundary**, which
-turns a defect into a recorded error map. Nothing else catches. `bin/dragons catch` (run by
+turns a defect into a recorded error map. Nothing else catches. `bin/laws catch` (run by
 `bin/check`) lists every `catch` in `src/` and fails when one is not named below by its
-function. The same census judges the other laws: [clocks](clocks.md) and [resolution](resolution.md).
+function. The same sites check judges the other laws: [clocks](clocks.md) and [resolution](resolution.md).
 
 ## Edges that catch (each names its one variant)
 
-| dragon | edge (`ns/fn`) | declared variant | handled by, as data |
+| failure point | edge (`ns/fn`) | declared variant | handled by, as data |
 |---|---|---|---|
 | Datahike or the store refuses a write (a bad transaction, LMDB full or failing) | `seon.writer/writer-one` | `:seon.writer/refused` (the one error map, with `:ok false`) | the caller of the write: an agent's `transact!` throws it into its own eval (an `:err` item); root's callers read `:ok` and `:seon.error/message` |
-| The model's HTTP call (connect, TLS, the socket dying mid-stream), made by root's `:model` effect lanes; streamed over SSE with no clock (a reasoning reply streams for minutes) | `seon.model/http-post` | `:seon.model/transport` (the connection failed or dropped); a non-200 is `:seon.model/provider-error` with the whole body, or `:seon.model/rate-limited` for HTTP 429 with its Retry-After (`seon.model/complete`) | the `:model` owner answers it to the asking agent (a 429 is kept and retried after its wait); `seon.turn/act!` returns it; `seon.turn/work!` ends the attempt `:error` with its message |
+| The store refuses a commit: its codec (konserve.jolt.fasl) has no encoding for a value a transaction carries (a sorted map, a host object) | `seon.writer/commit-batch` | `:seon.writer/refused` to the transaction that carried it (the batch is retried one transaction at a time; main is as it was, Datahike moves it only after the write) | the asker; the writer goes on |
+| The model's HTTP call (connect, TLS, the socket dying mid-stream), made by root's `:model` effect workers; streamed over SSE with no clock (a reasoning reply streams for minutes) | `seon.model/http-post` | `:seon.model/transport` (the connection failed or dropped); a non-200 is `:seon.model/provider-error` with the whole body, or `:seon.model/rate-limited` for HTTP 429 with its Retry-After (`seon.model/complete`) | the `:model` owner answers it to the asking agent (a 429 is kept and retried after its wait); `seon.turn/act!` returns it; `seon.turn/work!` ends the attempt `:error` with its message |
 | A model's eval call carries arguments that are not JSON with code text (a reply cut mid-call at its token limit) | `seon.model/call-code` | none: the arguments as they came are the call's code | `seon.turn/act!` evaluates them like any code; the reader repairs what it can and the call's result shows what they held |
-| An agent's authored contract does not compile | `seon.contract/arm!` | `:seon.contract/invalid` | `seon.repl/admit` puts it on the reply item (`:contract-error`); `seon.program/load-form!` reports it as a load error |
-| An agent mints past its block of entity ids (its lease, `seon.config/EID-LEASE`; Datahike's `next-eid` refuses at the ceiling `seon.db/lease!` set) | `seon.agent/transact!` (`seon.db/lease-spent`); for the record of its evals, `seon.repl/record!` | `:seon.db/lease-spent` (`:lease :ceiling :entity-id`; nothing applied, and a refused transaction keeps the ids it reserved, so the lease stays spent) | the agent's eval (an `:err` item); a record of its evals it cannot write goes to root (`{:op :unrecorded}`) and is recorded on main as its problem |
+| An agent's authored contract does not compile | `seon.contract/arm!` | `:seon.contract/invalid` | `seon.repl/instrument` puts it on the reply item (`:contract-error`); `seon.program/load-form!` reports it as a load error |
+| An agent mints past its block of entity ids (its lease: `:seon.config.store/eid-lease` ids reserved by `seon.db/lease-block!`; Datahike's `next-eid` refuses at the ceiling `seon.db/lease!` set) | `seon.agent/transact!` (`seon.db/lease-spent`); for the record of its evals, `seon.repl/record!` | `:seon.db/lease-spent` (`:lease :ceiling :entity-id`; nothing applied, and a refused transaction keeps the ids it reserved, so the lease stays spent) | the agent's eval (an `:err` item); a record of its evals it cannot write goes to root (`{:op :unrecorded}`) and is recorded on main as its problem, and the reply's items say `:unrecorded`; blocks and the restart invariant: [storage](storage.md#leases) |
 | Program code from the db does not load (a form that throws: a missing require target, a reference to a var main does not hold) | `seon.program/load-form!` | `:seon.program/error` (`{:ns :message}`) | root and the fork server put load errors in their view and events; an agent's `:load-errors` |
 | The filesystem refuses a write-back (`:file` effect) | `seon.fx/write-file` | `:seon.fx/io-error` | the asker's `my.fx/call` answer, recorded as `:seon.fx/*` on its branch |
 | Seon's own source cannot be read (the tree root's `src` missing, a file unreadable) at boot (`:source` effect) | `seon.fx/read-source` | `:seon.fx/io-error` | `seon.root/import-source!` records it as root's `:seon.root/source` `:error`; main holds no source and nothing is written back |
 | git refuses the merges commit (not a repository, the branch moved meanwhile, no author identity) (`:git` effect) | `seon.fx/git-commit` | `:seon.fx/io-error` | the reconciler records it on each merged attempt as `:seon.attempt/commit-error`; main's merge stands |
 | A dependency does not resolve (a `:mvn/version` in no repository, a `:git/sha` that cannot be fetched, a `:local/root` that does not exist, no network) (`:deps` effect) | `seon.fx/resolve-deps` | `:seon.fx/unresolved` (`{:deps [lib] :unresolved [{:coord :version :detail}]}`, from `jolt.deps`'s own `:unresolved` ex-data) | the asker's `my.fx/call` answer; it records it on its branch and loads nothing |
 | An agent registers a schema form that does not compile (a name resolving to nothing, a malformed form) or that Datahike cannot store (`my.schema/register!`) | `my.schema/judged` | `:seon.schema/registration-refused` (the key, `:invalid` or `:unstorable`, Malli's or the declaration builder's message) | the agent's `register!` answer; nothing is admitted to its branch |
-| Root's entrance is not listening (the MCP server's one request: connect, write, read) | `seon.mcp/request!` | the tool's text: the one error map (`:seon.root/refused`, naming the port) | the outside agent reads it as the tool's answer |
 | Text a model, a plan or an agent wrote, read as data (a reference span, a reply's line, an evaluated form read for waste): it may not read as Clojure, and edamame 1.4.32 on Jolt throws a bare IllegalArgumentException for some (`a^`) rather than its `:edamame/error` | `seon.reader/read-text` | `nil`: the text is not Clojure | `seon.ref/parse` (a span that is not one name is prose), `seon.reader/forgive` (not a literal line), `seon.learn/waste` (a form charged to no rule) |
 | A task file a person wrote does not read as one EDN vector of declarations | `seon.task/file-declarations` | `:seon.task/refused` (the one error map, naming the file) | `seon.task/load-tx` answers the refusal; `my.root/load-tasks!` returns it and writes nothing |
 | A `--set :ns/key=edn` a person typed on the command line does not read as EDN | `seon.config/parse-set` | `:seon.config/refused` (thrown, naming the argument) | boot is refused: the process exits with the refusal before any mode runs |
@@ -39,22 +39,24 @@ function. The same census judges the other laws: [clocks](clocks.md) and [resolu
 | boundary | (`ns/fn`) | what it records |
 |---|---|---|
 | the agent's REPL: reading and evaluating an agent's form | `seon.repl/eval-code` | the form's error as an `:err` reply item (the one error map itself, under `:err`) |
-| the agent's request handler | `seon.repl/agent-step` | `err` + `done` on the request |
+| a request's evaluation | `seon.repl/eval-string` | the answers so far plus one `:err` item (its error map and id), recorded with them |
 | the agent process's loop: a defect no request's boundary caught (the agent redefined a function its own loop calls; a failing commit of its record) | `seon.repl/serve!` | the cause on stderr, then the attempt's end on its branch (`seon.agent/died!`: outcome `:error`, the one error map with its cause chain); exit 70, which names the death; root's judge carries the end to the attempt's reason and error |
 | a test run, in the test child of an agent | `seon.agent/run-tests-forked` | an `:error` report in the run |
-| an effect lane performing a request (lane FX1) | `seon.fx/lane-proc` | `:seon.fx/defect` as the outcome: its asker is always answered |
-| one outside connection's request (seon.entrance, line EDN) | `seon.entrance/serve-connection!` | that request's answer, the typed `:seon.entrance/defect` (the line it took, the cause's ex-data printed); the connection and every other one go on |
+| a namespace's tests in a worktree session's or root's proof run (a fixture that throws) | `seon.proofs/run-tests!` | each of its tests that never reported is an `:error` result of the run carrying the throw's message and data (never stored, so it runs again) |
+| an effect worktree session performing a request (session FX1) | `seon.fx/worker-proc` | `:seon.fx/defect` as the outcome: its asker is always answered |
+| one outside connection's request (seon.server, line EDN or MCP's JSON-RPC) | `seon.server/respond` | that request's answer, the typed `:seon.server/defect` (the line it took, the cause's ex-data printed; for MCP, inside a JSON-RPC error with the request's id, `-32700` for a line opening `{"` that is not JSON, naming the rule that such a line is MCP's and an EDN request a keyword-keyed map); the connection and every other one go on |
 | every root proc | Flow's error channel, read by root's error reader | `:root-errors` in the api's view, with the error map; written once per signature on main, repeats counted in the api's fold (`seon.error/flush-tx`; `my.root/problems` reads both); a repeat of a written signature writes nothing, or the error's own record would be the next commit it fails on |
 
-## Dragons met without a catch (the edge answers data)
+## Failure points met without a catch (the edge answers data)
 
-| dragon | edge | answer |
+| failure point | edge | answer |
 |---|---|---|
-| A peer's socket is gone (EOF, or its end frame) | root: `jolt.async.remote`'s reader pump; agents and the fork server: `seon.sock/fill!`, `seon.sock/recv!` | root: the end's `:in` closes, the stand-in's `:from` reads nil and becomes `{:op :dead}`; elsewhere `:eof` |
+| A peer's socket is gone (EOF, or its end frame) | root: `jolt.async.remote`'s reader pump; agents and the fork server: `seon.sock/fill!`, `seon.sock/recv!` | root: the end's `:in` closes, the agent proc's `:from` reads nil and becomes `{:op :dead}`; elsewhere `:eof` |
 | A write to a dead peer (EPIPE) | `seon.sock/send-frame!` | `:epipe`; the agent exits, root reads EOF |
 | `fork()` refused (another Chez thread active, the OS) | `seon.lib/fork!`, the one spawning skeleton (the fork server's agents and standby, an agent's test child and clone) | its `refused` branch with the active Chez threads, checked once, never waited out: `:fork-failed` / `:standby-failed` with `:active-threads`; the test run's `:error` report; the clone's `:clone-failed` |
-| An outside client half-open at the door (it never sends its line, or never reads its answer) | `seon.entrance/serve-connection!`, on that connection's own edge thread | nothing: that connection's thread parks (no bound can tell slow from gone); every other connection is served. It shows as one more root thread, and ends when the client's socket closes |
-| A process dies (killed, crashed, `System/exit`) | the socket's EOF; `waitpid` in `seon.fork-server/reap` | `:dead` / `:exit` events; the agent's pending replies answer `:seon.agent/died` (its exit status, last op and stderr tail) once the server reaped it (at once for a clone or an orphan of a server that went down, whose status no one reaps), recorded on main (lane D2); a dead attempt's reason is the end it wrote on its branch, if any, beside that death (`seon.reconcile/dead-tx`) |
+| An outside client half-open at root's server (it never sends its line, or never reads its answer) | `seon.server/serve-connection!`, on that connection's own edge thread | nothing: that connection's thread parks (no bound can tell slow from gone); every other connection is served. It shows as one more root thread, and ends when the client's socket closes |
+| Root's server is not running, not listening, or closes without answering (the MCP relay's one connection per message: read the port bin/root recorded, `runs/root.port`; connect, write, read) | `bin/mcp` (stock perl, outside `src`) | a message with an id is answered the JSON-RPC error naming why (`-32000`: "no root running for this checkout", "not listening (Connection refused): bin/root start", or "root answered nothing"); the relay goes on to the next message, so a restarted root answers it. A line that is not JSON has no id the relay can read: it is relayed as it is, and root answers its defect (`seon.server/respond`: the JSON-RPC error `-32700` for a line opening `{"` that is not JSON, the EDN defect for any other line) |
+| A process dies (killed, crashed, `System/exit`) | the socket's EOF; `waitpid` in `seon.fork-server/reap` | `:dead` / `:exit` events; the agent's pending replies answer `:seon.agent/died` (its exit status, last op and stderr tail) once the server reaped it (at once for a clone or an orphan of a server that went down, whose status no one reaps), recorded on main (session D2); a dead attempt's reason is the end it wrote on its branch, if any, beside that death (`seon.reconcile/dead-tx`) |
 | An agent's stderr file cannot be made (a store with no path) | `seon.agent/stderr-to-file!` | stderr stays where it was; a death records no tail |
 | A dead agent's stderr file is gone or empty | `seon.root/stderr-tail` | nil |
 | The fork server dies | `seon.fork-server/fork-server-proc` (EOF of its events) | its standby is promoted (`:server-down`, `:server-up`) |
@@ -66,12 +68,12 @@ function. The same census judges the other laws: [clocks](clocks.md) and [resolu
 
 ## Physics: who may run threads
 
-Two rules of the OS and Chez that no code may "fix" by adding a thread or a check:
+Three rules of the OS and Chez that no code may "fix" by adding a thread or a check:
 
 - **A process that forks must never have started Chez's parallel-collector sweeper
   threads.** Chez starts them at the first collection that finds another thread, and keeps
   them; a child forked from such a process hangs in its first multi-threaded collection
-  (lane RC1, sampled in `S_gc_par_entry` -> `run_sweeper`). The processes that fork are the
+  (session RC1, sampled in `S_gc_par_entry` -> `run_sweeper`). The processes that fork are the
   fork server (it forks agents and its standby) and every agent (its test children,
   `clone!`), each through ```seon.lib/fork!```, which forks only while its caller is the
   one active Chez thread. So both are single-threaded and read and write their sockets themselves
@@ -83,17 +85,32 @@ Two rules of the OS and Chez that no code may "fix" by adding a thread or a chec
   `jolt/gc-sweepers`) fixes them at `seon.config/GC-SWEEPERS`, 0 (measured: sweepers did
   not shorten root's small collections), and no collection starts one.
   Unfixed, Chez kept one per thread a collection found waiting, so root's thread count
-  drifted by load (0, 5, 15 sweepers across identical runs; lane THREADS).
+  drifted by load (0, 5, 15 sweepers across identical runs; session THREADS).
+- **A forked child holds none of its parent's threads, only their bookkeeping.** fork(2)
+  copies the calling thread; Jolt's fiber carriers, its timer and its shutdown watcher are
+  parked when the one active thread forks (a parked thread is not active, so
+  ```seon.lib/fork!``` forks), and root has them all before it forks the fork server (its
+  boot's first Datahike release runs a `go`). So the child resets them first: the fork in
+  `seon.lib`'s `proto-fork-alone` calls Jolt's `jolt-after-fork-child!` (branch
+  `jolt/fork-carriers`), which drops the carrier pool, the timer and its pending deadlines (the
+  parent's waiters), the thread tables and the watcher (emptying the child's mask, the default
+  mask Jolt gives every child), so each starts afresh on first use. It starts no thread: a
+  child that forks again (the fork server's double fork) must still be one thread. Before it,
+  every `go` that parked in an agent never resumed: a design agent hung making a test store,
+  the judge's proof fork would have too, and SIGTERM stayed pending (the step E dry run,
+  2026-10-22; `seon.lib-test/a-forked-child-runs-go-blocks-and-makes-a-store`, Jolt's
+  `test/chez/fork-child-test.clj`). A pool made with `jolt-fiber-pool-make` is not restarted:
+  a forking program makes it after the fork.
 - **On macOS, a descriptor in flight by SCM_RIGHTS can be discarded when other unix
   sockets close**, so the sender keeps its copy until the receiver confirms (the fork
   server's `:in-flight`, a clone's socket kept until `:cloned`). A descriptor rides a frame
   of its own on a socket a pump also writes (`seon.agent-proc/send-fd!`), sent only while
-  that pump is idle: the agent asks for it (`:fd-ready`) and the stand-in holds its other
+  that pump is idle: the agent asks for it (`:fd-ready`) and the agent proc holds its other
   messages until it is sent.
 
 ## Contracts over host objects are proved by deftests, never by generation
 
-The census gate (`bin/check census`) runs `malli.generator/check` only on the pure
+The mg/check gate (`bin/check mg-check`) runs `malli.generator/check` only on the pure
 namespaces' contracts. A contract over a host binding (a pid, a file descriptor, a signal
 number, a socket, a connection) is never handed generated arguments: a generated pid passed
 to `kill(2)` is a real signal to a real process, a generated fd closes someone's socket.

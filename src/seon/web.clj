@@ -1,7 +1,7 @@
 (ns seon.web
   "Root's web proc (:web, an :io step-fn, declared in resources/seon/system.edn): it owns
   the HTTP listener (ring-chez-adapter, 127.0.0.1 only, fibers) and the tabs' SSE
-  channels, and renders nothing (W1 §5.1; proto/web's transport, lane L2). Its parts:
+  channels, and renders nothing (W1 §5.1; proto/web's transport, session L2). Its parts:
 
     in :http        the adapter's handlers (edge fibers) put each request here as data,
                     with a promise when it waits for an answer
@@ -14,13 +14,13 @@
   composed page, morphed by id: inputs and DOM identity survive); a closed one is dropped.
 
   Callbacks are data (DECISIONS): one stateless /call route whose payload is the call
-  (fn, agent, args, a form's fields). Root's verbs (seon.root/spawn!, submit!, run-tests!,
+  (fn, agent, args, a form's fields). Root's functions (seon.root/spawn!, submit!, run-tests!,
   merge!, merge-main!, clone!, interrupt!, kill!) become the requests their fns send
   (seon.root/request), each recorded on main as root's evaluation, origin :ui; any other fn
   runs in the agent as an eval of (seon.web/ui-call 'fn args), origin :ui, refused as data
   unless the var is marked ^:seon/callable."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [ring-chez.adapter :as adapter]
             [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render.ui :as ui] [seon.web.html :as h] [seon.step :as step] [seon.root :as c]))
 
@@ -70,12 +70,12 @@
                       {:seon.render/fn sym}))))
 
 (defn requests
-  "A UI call as root's requests: [[req target-agent] ...]. Root's verb is the request its
-  fn sends (seon.root/request; none when root refuses it); any other fn is an eval of it in
+  "A UI call as root's requests: [[req target-agent] ...]. Root's function is the request it
+  sends (seon.root/request; none when root refuses it); any other fn is an eval of it in
   the agent, through the allowlist (ui-call). index {agent {:pid :branch :status}}."
   {:malli/schema [:=> [:cat :seon.render/call :map] [:vector [:tuple :map [:maybe :keyword]]]]}
   [{f :var :keys [agent args forms]} index]
-  (let [one (fn [verb id args] (let [r (c/request verb id args (get index id))] (if (contract/error? r) [] [[r id]])))]
+  (let [one (fn [op id args] (let [r (c/request op id args (get index id))] (if (contract/error? r) [] [[r id]])))]
     (case f
       seon.root/spawn! (vec (repeat (min 100 (max 1 (or (:n args) 1))) [(c/request 'spawn! nil (cond-> {} (not (str/blank? (:task args))) (assoc :task (:task args))) nil) nil]))
       seon.root/submit! (cond (str/blank? forms) []
@@ -84,7 +84,7 @@
       ;; seon.root/interrupt! is no request: an effect on a process, performed by this proc
       (if (= "seon.root" (namespace f))
         (one (symbol (name f)) agent args)
-        (one 'submit! agent {:origin :ui :forms (pr-str (list 'seon.web/ui-call (list 'quote f) (merge args (dissoc (:fields args) :forms))))})))))
+        (one 'submit! agent {:origin :ui :forms (sedn/encode (list 'seon.web/ui-call (list 'quote f) (merge args (dissoc (:fields args) :forms))))})))))
 
 ;;; --- HTTP edge ----------------------------------------------------------------------------
 
@@ -136,7 +136,7 @@
           (and (= m :get) (= uri "/render.edn"))
           {:status 200 :headers {"Content-Type" "application/edn" "Cache-Control" "no-store"} :body (str (ask! ch {:op :render-stats}))}
           (and (= m :get) (= uri "/web.edn"))
-          {:status 200 :headers {"Content-Type" "application/edn"} :body (pr-str (ask! ch {:op :stats}))}
+          {:status 200 :headers {"Content-Type" "application/edn"} :body (sedn/encode (ask! ch {:op :stats}))}
           (and (= m :post) (= uri "/call"))
           (let [fields (into {} (for [[k v] (form-params (some-> (:body req) slurp))] [(keyword k) v]))
                 args (some-> (get q "args") edn/read-string)
@@ -174,8 +174,7 @@
   [st view html]
   (if-not html
     st
-    (let [body (second (re-find #"(?s)<body[^>]*>(.*)</body>" html))
-          chunk (patch-event (or body html))]
+    (let [chunk (patch-event html)]
       (reduce-kv (fn [st k {:keys [ch] :as tab}]
                    (if (and (= view (:view tab)) (contains? (:stale st) k))
                      (let [ok (a/offer! ch chunk)]
@@ -196,6 +195,13 @@
                            (str "/feed?view=" (if (= :root view) "root" (name view)))
                            (h/raw body))))))
 
+(defn- stats
+  "The web proc's own numbers: its :stats answer and its ping map."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  {:tabs (count (:tabs st)) :stale (count (:stale st)) :sent-bytes (:bytes st 0) :patches (:patches st 0)
+   :chunk-p50-bytes (lib/p50 (:chunk-bytes st)) :listening (:listening st) :port (:port st) :calls (:calls st 0) :error (:error st)})
+
 (defn- http-in
   "A request from the edge."
   {:malli/schema [:=> [:cat :map :seon.host/volatile :map] :map]}
@@ -214,21 +220,18 @@
              (let [[st k] (step/pend st [(:p m) :text])]
                (step/out! o :to-render {:op (if (= :context (:op m)) :context :stats) :k k})
                st)
-    :stats (do (deliver (:p m) {:tabs (count (:tabs st)) :stale (count (:stale st)) :sent-bytes (:bytes st 0)
-                                :patches (:patches st 0) :chunk-p50-bytes (lib/p50 (:chunk-bytes st)) :listening (:listening st)
-                                :port (:port st) :calls (:calls st 0) :error (:error st)})
-               st)
+    :stats (do (deliver (:p m) (stats st)) st)
     :call (let [c (:call m)
                 reqs (requests c (:index st {}))]
             (when (= 'seon.root/interrupt! (:var c))
               (some-> (get-in st [:index (:agent c) :pid]) (lib/c-kill lib/SIGUSR1)))
             ;; answered to the render proc, which shows each in the stream by its tag; root's
-            ;; verb is root's evaluation, its form in the tag: the render proc records it on
+            ;; function is root's evaluation, its form in the tag: the render proc records it on
             ;; main (origin :ui) with what root answered, as root's REPL records one
             (doseq [[req target] reqs
                     :let [{f :var :keys [agent args forms]} c
                           form (when (= "seon.root" (namespace f))
-                                 (pr-str (cond-> (list f) agent (concat [agent]) (seq args) (concat [args]) forms (concat [forms]))))]]
+                                 (sedn/encode (cond-> (list f) agent (concat [agent]) (seq args) (concat [args]) forms (concat [forms]))))]]
               (step/out! o :to-api {:op :request :req req :route [:render :answers] :tag (cond-> [:web f target] form (conj form))}))
             (update st :calls (fnil inc 0)))
     st))
@@ -249,6 +252,10 @@
                (step/out! o :to-render {:op :keyframe :view (:view m)}))
              st)
     :keyframe (keyframe! st (:view m) (:html m))
+    ;; the render proc has nothing in flight: an SSE comment on every feed (Datastar ignores
+    ;; comments), the event a client or a check waits on before reading a current view
+    :settled (reduce (fn [st view] (let [[st sent] (offer-all st view ": settled\n\n")] (update st :bytes + sent)))
+                     st (distinct (map :view (vals (:tabs st)))))
     (:page :text) (let [[st [p view]] (step/answered st (:k m))]
                     (some-> p (deliver (if (= :page (:op m)) (page-doc view (:html m)) (:text m))))
                     st)
@@ -265,9 +272,7 @@
        :outs {:to-render "views open, page and keyframe requests" :to-api "UI calls as root's requests"}
        ;; socket writes and offers only; rendering is the render proc's
        :workload :io
-       :ping-map-fn (fn [st] {:listening (:listening st) :port (:port st) :tabs (count (:tabs st))
-                              :stale (count (:stale st)) :patches (:patches st 0) :calls (:calls st 0)
-                              :bytes (:bytes st 0) :error (:error st)})})
+       :ping-map-fn stats})
   ([args]
    (let [port (:port args)
          http (a/chan 256)

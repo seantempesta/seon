@@ -1,6 +1,6 @@
 # Native storage and compiled code in the store: design and measurements (2026-10-22)
 
-Lane store-native, THE PLAN step A2 ("one store holds the whole system"; `../notes/DECISIONS.md`, "One store holds the whole system"). The owner (2026-10-22): "the better storage system (native storage and see if we can save the compiled code so we can return to any point in time without having to re-run statements (I'm less certain about this, but storing native compiled values seems like a win)".
+Worktree session store-native, THE PLAN step A2 ("one store holds the whole system"; `../notes/DECISIONS.md`, "One store holds the whole system"). The owner (2026-10-22): "the better storage system (native storage and see if we can save the compiled code so we can return to any point in time without having to re-run statements (I'm less certain about this, but storing native compiled values seems like a win)".
 
 **Bottom line.** Compiled code in the store would buy little today, because almost nothing compiles at run time. An agent's fork inherits main's compiled program copy-on-write (0.68 ms p50). A root boot loads the binary, and builds already reuse three content-keyed caches on disk. What does compile is catch-up and point-in-time loading: the forms a binary lacks, at 1.6–5 ms each. A stored unit would replace about 3.6 ms of that with about 0.01–0.05 ms, but contract arming (1–2 ms a form) runs either way. Units cost 3–15× their source in the store, every Jolt or Chez pin bump strands them, and each Jolt unit holds absolute paths today. So: **don't store units now.** Keep the fork server's replica (replay is cheap, and the replica is what keeps the program compiled). Base the agent's `:base` on the store at its merge base, which also fixes a staleness bug. Point in time from definitions already works, and the line of what can't be restored is drawn below. The fingerprint per commit needs one Jolt `def-var!`, which waits for root's go.
 
@@ -35,7 +35,7 @@ Measured in the AOT cache's current generation: Seon's own namespaces have 9,190
 
 So a unit is a plain bytevector, loadable from the store's bytes with no file in between (Jolt already does this for embedded stdlib fasls, loader.ss:2210). It is about 4–6× the source in raw Chez, and 15× (32× for `seon.lib`) in Jolt's AOT units today.
 
-**What compiles at run time, and what it costs** (root's REPL, through the door):
+**What compiles at run time, and what it costs** (root's REPL, through the server):
 
 | measurement | result |
 |---|---|
@@ -94,7 +94,7 @@ Of a real form's 1.6–5 ms, about 3.6 ms is Jolt's analysis and emit plus Chez'
 **Recommendation, simplest first:**
 1. **Keep the replica.**
 2. **Make `:base` the store's value at the merge base,** `seon.db/branch-base` (lazy, 0.7–0.9 ms), read when tests are chosen. This fixes the staleness with no new mechanism.
-3. **Put the replica's commit id on `:fork`,** and have the agent check that its branch's parent is that commit. A mismatch becomes an error fact, not a fence (the writer's FIFO is the dependency).
+3. **Put the replica's commit id on `:fork`,** and have the agent check that its branch's parent is that commit. A mismatch becomes an error fact, not a guard (the writer's FIFO is the dependency).
 4. Replace the replica only if the fork server's memory becomes the bound. Recorded: 60 → 296 MB with test/ loaded.
 
 ## Q3. Point in time without re-running statements
@@ -116,7 +116,7 @@ Of a real form's 1.6–5 ms, about 3.6 ms is Jolt's analysis and emit plus Chez'
 - Compiled values (closures) can't be stored by the runtime: `jolt.image/dump-world!` skips every var whose root is a function, because "code does not travel".
 - A host cell's plain-data contents could be stored as a value, but that is a snapshot of run-time state. It would make "point in time" mean "the process as it was" rather than "the program as defined", which the ruling on definitions over evaluations rejects for main.
 
-**Recommendation:** nothing to build for main or branches; the property holds. The one thing to build, when wanted, is Q2's alignment (a fork at exactly C), plus a `my.*` verb to open a REPL at commit C: commit-as-db, then `load-diff!` in a fork. Agent state beyond definitions stays with `clone!`. The owner's doubt is right as far as what can't be restored goes; no stored artifact closes that gap.
+**Recommendation:** nothing to build for main or branches; the property holds. The one thing to build, when wanted, is Q2's alignment (a fork at exactly C), plus a `my.*` function to open a REPL at commit C: commit-as-db, then `load-diff!` in a fork. Agent state beyond definitions stays with `clone!`. The owner's doubt is right as far as what can't be restored goes; no stored artifact closes that gap.
 
 ## Q4. Each commit's tx-meta names its runtime fingerprint
 
@@ -133,7 +133,7 @@ Of a real form's 1.6–5 ms, about 3.6 ms is Jolt's analysis and emit plus Chez'
 
 I did not land it, because the honest value needs the Jolt `def-var!`. A version string standing in for it would claim to pin a runtime it can't tell apart.
 
-## The store-identity fix (landed on `jolt/store-native`, `31c9bf5`)
+## The store-identity fix (merged on `jolt/store-native`, `31c9bf5`)
 
 - **The fix:** `seon.db/store-cfg` reads the id the store records (`seon.db/stored-id`: the `:db` head's config through Datahike's `read-head`). It mints `(hasch/uuid path)` only for a store it is about to make. Proof `seon.db-test/a-moved-store-opens`: red with "Store identity mismatch" for both a move and a copy; green now; all 15 `seon.db-test` tests green.
 - **Cost:** 0.3–0.6 ms once the process has the env open. A process's first touch of a store pays 20–170 ms cold either way: `d/connect` alone paid 22–170 ms first, and `store-cfg` paid 31–71 ms when it came first.

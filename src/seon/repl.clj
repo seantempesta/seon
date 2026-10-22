@@ -1,14 +1,13 @@
 (ns seon.repl
-  "An agent's REPL speaking nREPL's message model on its one thread (lane F2, after lane
+  "An agent's REPL speaking nREPL's message model on its one thread (session F2, after session
   R2's r2.repl; the owner chose nREPL's model for agents).
 
   The agent's process runs `agent-step` (the step-fn contract) under seon.step/run-loop.
-  A REPL request (`eval`, `load-file`, `describe`, `clone`, `close`, `ls-sessions`,
-  `interrupt`) is handled on this thread by `handler`: a base handler with middleware
-  composed over it, each `(fn [handler] (fn [request] ...))`, as in nREPL. A request
-  carries :reply, a fn of one response map (id and session added). Eval reads the code
-  once, form by form, and answers each form (eval-error or interrupted in its status), with
-  what it printed; then one `done`.
+  A REPL request (nREPL's `eval`, the one op any client sends) is handled on this thread by
+  `handler`: eval-code with middleware composed over it, each `(fn [handler] (fn [request]
+  ...))`, as in nREPL. A request carries :reply, a fn of one response map. Eval reads the
+  code once, form by form, and answers each form (eval-error or interrupted in its status),
+  with what it printed; then one `done`.
 
   Seon's additions are middleware over nREPL's own seams (a plain stack: G1's contract
   admission and arming plug in as one more `wrap-…`):
@@ -24,27 +23,18 @@
   root's request arrives as a value ({:op :eval :id :forms ...}, a frame on the agent's
   socket), and the request's answers go back folded, as one {:op :reply :items ...}.
 
-  Interrupt is out of band: root sends SIGUSR1 (seon.intr), and an `interrupt` message
-  is answered once the eval has stopped. Seon's platform ops (tests, stats, clone,
+  Interrupt is out of band: root sends SIGUSR1 (seon.intr), which stops the request it
+  arrives in and nothing after it. Seon's platform ops (tests, stats, clone,
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
-            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
+            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.render :as render] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi] [seon.config :as cfg]))
 
 (defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
 
 (defn- form-text {:malli/schema [:=> [:cat :any] :string]}
   [form] (print/text form (:form print/budgets)))
-
-(defn- session-ns
-  "The request's namespace: its \"ns\", else its session's, else the agent's own."
-  {:malli/schema [:=> [:cat :seon.wire/msg] :seon.host/namespace]}
-  [req]
-  (let [s @agent/state]
-    (or (some-> (get req "ns") symbol find-ns)
-        (some-> (get-in s [:sessions (get req "session") :ns]) find-ns)
-        (:ns s))))
 
 (defn- form-src
   "The exact text of form in code, from its reader position (:line, :column) to where the
@@ -64,27 +54,26 @@
   (when (and (var? v) src) (alter-meta! v assoc :source src)))
 
 (defn- eval-code
-  "Read code once, form by form, and evaluate each with (:repl/eval-fn req) under
-  seon.intr/run. Answers each form, with its exact text (:repl/src); an interrupt stops the
-  request; then done."
-  {:malli/schema [:=> [:cat :seon.wire/msg :string] :any]}
-  [{:keys [reply] :as req} code]
-  (let [r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. code))
+  "Read the request's code once, form by form, and evaluate each with (:repl/eval-fn req)
+  under seon.intr/run, in the request's \"ns\", else the agent's own. Answers each form,
+  with its exact text (:repl/src); an interrupt stops the request (one pending since its
+  asker cleared it included: agent-step, the turn loop); then done."
+  {:malli/schema [:=> [:cat :seon.wire/msg] :any]}
+  [{:keys [reply] :as req}]
+  (let [code (get req "code")
+        r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. code))
         starts (delay (reader/line-starts code))
         eval-fn (:repl/eval-fn req eval)
-        ;; the form's budget of work (engine ticks): the request's, else the dial for an
+        ;; the form's budget of work (engine ticks): the request's, else the config key for an
         ;; agent's model and an outside agent; root's own platform requests run unbounded
         ticks (let [t (or (:ticks req)
                           (when (#{:model :outside :ui} (:origin req)) (cfg/value :seon.config.agent/form-ticks)))]
-                (when (and t (pos? t)) t))
-        sid (get req "session")]
-    (loop [ns (session-ns req)]
+                (when (and t (pos? t)) t))]
+    (loop [ns (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state))]
       (let [form (try (binding [*ns* ns] (read {:eof ::eof} r)) (catch Throwable e e))]
         (cond
           (= ::eof form)
-          (do (if sid
-                (swap! agent/state assoc-in [:sessions sid :ns] (ns-name ns))
-                (swap! agent/state assoc :ns ns))
+          (do (swap! agent/state assoc :ns ns)
               (reply {"status" ["done"]}))
 
           (instance? Throwable form)
@@ -97,16 +86,14 @@
           (let [n (dec (:n (swap! agent/state update :n (fnil inc 0))))
                 out (java.io.StringWriter.)
                 err (java.io.StringWriter.)
-                ;; *1 *2 *3 *e as clojure.main/repl and nREPL's session keep them, per session
-                rk [:repl-vars (or sid :default)]
-                {v1 :v1 v2 :v2 v3 :v3 e1 :e} (get-in @agent/state rk)
+                ;; *1 *2 *3 *e as clojure.main/repl keeps them
+                {v1 :v1 v2 :v2 v3 :v3 e1 :e} (:repl-vars @agent/state)
                 [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err *1 v1 *2 v2 *3 v3 *e e1]
                                          (let [v (intr/run ticks #(eval-fn form))] [:ret v *ns*]))
                                        (catch Throwable e [:err e ns (outer-frames)]))
                 common {:id n :out (not-empty (str out)) :form (form-text form) :repl/form form
                         :repl/src (form-src code @starts form (.getLineNumber r) (.getColumnNumber r))}]
-            (swap! agent/state update :nss conj (ns-name ns'))
-            (swap! agent/state assoc-in rk (if (= tag :ret) {:v1 v :v2 v1 :v3 v2 :e e1} {:v1 v1 :v2 v2 :v3 v3 :e v}))
+            (swap! agent/state assoc :repl-vars (if (= tag :ret) {:v1 v :v2 v1 :v3 v2 :e e1} {:v1 v1 :v2 v2 :v3 v3 :e v}))
             (when (= tag :ret) (keep-source! v (:repl/src common)))
             (if (= tag :ret)
               (let [h (symbol "result" (str "h" n))]
@@ -117,38 +104,7 @@
               (let [stopped? (:interrupted (ex-data v))]
                 (reply (merge common {:repl/ex v :tag :err :err-text (str err (nrepl/err->msg v {:outer outer}))
                                       "status" (if stopped? ["interrupted"] ["eval-error"])}))
-                (if stopped?
-                  (do (swap! agent/state assoc :interrupted (get req "id"))
-                      (reply {"status" ["done"]}))
-                  (recur ns))))))))))
-
-(defn- describe {:malli/schema [:=> [:cat :any] :seon.wire/msg]}
-  [_]
-  {"status" ["done"]
-   "versions" {"jolt" {"version-string" (jolt.host/jolt-version)} "seon-agent" {"version-string" "f2"}}
-   "ops" (zipmap ["describe" "clone" "close" "ls-sessions" "eval" "load-file" "interrupt"] (repeat {}))})
-
-(defn base-handler
-  "nREPL's ops, answered on this thread."
-  {:malli/schema [:=> [:cat :seon.wire/msg] :any]}
-  [{:keys [reply] :as req}]
-  (case (get req "op")
-    "describe" (reply (describe req))
-    "clone" (let [id (nrepl/new-session)
-                  from (get-in @agent/state [:sessions (get req "session") :ns] (ns-name (:ns @agent/state)))]
-              (swap! agent/state assoc-in [:sessions id] {:ns from})
-              (reply {"new-session" id "status" ["done"]}))
-    "close" (do (swap! agent/state update :sessions dissoc (get req "session"))
-                (reply {"status" ["session-closed" "done"]}))
-    "ls-sessions" (reply {"sessions" (vec (keys (:sessions @agent/state))) "status" ["done"]})
-    "eval" (eval-code req (get req "code"))
-    "load-file" (eval-code req (get req "file"))
-    ;; root signalled this process before sending this: the eval it meant has stopped
-    "interrupt" (let [hit (:interrupted @agent/state)]
-                  (swap! agent/state dissoc :interrupted)
-                  (intr/clear-pending!)
-                  (reply {"status" (if hit ["done"] ["session-idle" "done"])}))
-    (reply {"status" ["done" "unknown-op"]})))
+                (if stopped? (reply {"status" ["done"]}) (recur ns))))))))))
 
 ;; ---- middleware -------------------------------------------------------------------
 
@@ -156,26 +112,28 @@
   [req f] (assoc req :reply (let [r (:reply req)] (fn [m] (r (f m))))))
 
 (defn wrap-print
-  "The value through the one value printer (seon.print), its cuts reading the rest through
-  the value's result handle: `value`, with the printer's tokens, truncation and elision
-  count. A value whose first part does not fit the budget answers the printer's refusal
-  message, with the refusal beside it."
+  "The value as its render shows it (seon.render/printed: its schema's declared AI render,
+  else the one value printer), its cuts reading the rest through the value's result
+  handle: `value`, with the printer's tokens, truncation and elision count. A value whose
+  first part does not fit the budget answers the printer's error (insufficient budget) by
+  its render, the error beside it."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
     (h (around-reply req
          (fn [m]
            (if (contains? m :repl/value)
-             (let [pv (print/print-value (:repl/value m) {:handle (some->> (:handle m) name (symbol "result"))})]
+             (let [pv (render/printed (:repl/value m) (some->> (:handle m) name (symbol "result")))]
                (if-let [text (:text pv)]
                  (cond-> (assoc m :printed text :tokens (:tokens pv))
                    (:truncated? pv) (assoc :truncated? true)
-                   (pos? (:elisions pv)) (assoc :elisions (:elisions pv)))
-                 (assoc m :printed (:seon.error/message pv) :printer-error pv)))
+                   (some-> (:elisions pv) pos?) (assoc :elisions (:elisions pv)))
+                 (assoc m :printed (render/ai pv {}) :printer-error pv)))
              m))))))
 
 (defn wrap-caught
-  "An eval error also as the one error map (seon.agent/error-map, the item's :err), and
+  "An eval error also as the one error map (seon.agent/error-map, the item's :err, its
+  text the error's render: message and fix), and
   noted in this agent's error fold (seon.error/note): its next commit carries the fold to
   root, which counts each signature across agents."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
@@ -185,13 +143,8 @@
          (fn [m] (if-let [e (:repl/ex m)]
                    (let [em (cond-> (agent/error-map e) (:repl/phase m) (assoc :phase :read))]
                      (swap! agent/state update :errors err/note em (:form m) (System/currentTimeMillis))
-                     (assoc m :err em :printed (:seon.error/message em)))
+                     (assoc m :err em :printed (render/ai em {})))
                    m))))))
-
-(def top-fns
-  "How many of a form's costliest contracted functions its record keeps (Seon's
-  :seon.config.test.cost/top)."
-  10)
 
 (defn wrap-cost
   "Per-form wall µs, allocated bytes and the form's costliest contracted functions (each
@@ -207,7 +160,7 @@
                                     (let [a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/now-ns)]
                                       (try (ef form)
                                            (finally (let [t1 (profile/now-ns) a1 (profile/alloc-bytes)]
-                                                      (vreset! last [(/ (quot (- t1 t0) 1000) 1000.0) (- a1 a0) (profile/top (profile/touched) top-fns)])))))))
+                                                      (vreset! last [(/ (quot (- t1 t0) 1000) 1000.0) (- a1 a0) (profile/top (profile/touched) (cfg/value :seon.config.agent/form-top-fns))])))))))
              (around-reply (fn [m]
                              (if-let [[ms a fns] (when (or (contains? m :repl/value) (contains? m :repl/ex)) @last)]
                                (do (vreset! last nil)
@@ -286,8 +239,8 @@
     (let [ef (:repl/eval-fn req eval)]
       (h (assoc req :repl/eval-fn (fn [form] (binding [mr/*registry* (branch-registry)] (ef form))))))))
 
-(defn- admit
-  "Admit a definition by its contract (G1's proto.agent/admit!, Seon's rule): a function var
+(defn- instrument
+  "Instrument a definition by its contract (G1's proto.agent/admit!, Seon's rule): a function var
   with :malli/schema is armed and leaves the agent's uncontracted set; one without joins
   it, and the response carries the warning naming every uncontracted definition so far.
   Answers the response's additions (its reply item's keys)."
@@ -307,9 +260,9 @@
                                                          "A branch carrying an uncontracted function is refused at merge.")
                                      :uncontracted (vec (sort-by str u)) :count (count u)}]})))))
 
-(defn wrap-admit
-  "Each var a form defined (wrap-record's :repl/defined) is admitted by its contract
-  (admit): armed, or a growing warning."
+(defn wrap-instrument
+  "Each var a form defined (wrap-record's :repl/defined) is instrumented by its contract
+  (instrument): armed, or a growing warning."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
@@ -317,22 +270,19 @@
          (fn [m]
            ;; arming compiles the contract: against the branch's population, as its eval did
            (binding [mr/*registry* (if (seq (:repl/defined m)) (branch-registry) {})]
-             (reduce (fn [m s] (if-let [v (find-var s)] (merge m (admit v)) m)) m (:repl/defined m))))))))
+             (reduce (fn [m s] (if-let [v (find-var s)] (merge m (instrument v)) m)) m (:repl/defined m))))))))
 
 (def middleware
-  "Outermost first. Answers pass innermost first: record, cost, admit, caught, print. The
+  "Outermost first. Answers pass innermost first: record, cost, instrument, caught, print. The
   eval fn is the registry's binding around record's around cost's around eval, so an eval's
   cost is the eval's (with the compiler's tap in it, as part of compiling); keying the
   branch's registry, read before each form, is not the form's (0.7 ms measured)."
-  [wrap-print wrap-caught wrap-admit wrap-cost wrap-record wrap-registry])
+  [wrap-print wrap-caught wrap-instrument wrap-cost wrap-record wrap-registry])
 
 (defn handler
-  "The base handler (base-handler, else base) with the middleware mw composed over it, outermost first."
-  {:malli/schema [:function [:=> [:cat] :seon.host/fn] [:=> [:cat [:sequential :seon.host/fn]] :seon.host/fn]
-                  [:=> [:cat [:sequential :seon.host/fn] :seon.host/fn] :seon.host/fn]]}
-  ([] (handler middleware))
-  ([mw] (handler mw base-handler))
-  ([mw base] (reduce (fn [h m] (m h)) base (reverse mw))))
+  "eval-code with the middleware composed over it, outermost first."
+  {:malli/schema [:=> [:cat] :seon.host/fn]}
+  [] (reduce (fn [h m] (m h)) eval-code (reverse middleware)))
 
 (def ^:private the-handler (delay (handler)))
 
@@ -369,57 +319,46 @@
   "Record items (with the defs their forms recorded) on this branch through the agent's
   write path (each item's :origin says who asked, when not the agent itself). Answers items.
   When the agent's entity ids are spent (:seon.db/lease-spent) the record cannot be written
-  on its branch: root is told ({:op :unrecorded}) and records it as a problem on main."
+  on its branch: root is told ({:op :unrecorded}) and records it as a problem on main, and
+  each item says :unrecorded, so its asker knows that fact is coming."
   {:malli/schema [:=> [:cat :seon.agent/items] :seon.agent/items]}
   [items]
   ;; the effects asked during the request (seon.agent/fx-record!) join its recording
   (let [defs (into [] (mapcat val) (:defs @agent/state))]
     (swap! agent/state dissoc :defs)
-    (when (and contract/record? (= :agent (:mode @agent/state)) (seq items))
+    (if (and contract/record? (= :agent (:mode @agent/state)) (seq items))
       (try
         (agent/transact! (into defs (record-tx (:id @agent/state) (str (name (:id @agent/state)) "-" (lib/c-getpid) "-" (profile/now-ns))
                                                items (:max-tx (agent/db)))))
+        items
         (catch clojure.lang.ExceptionInfo e
           (if (= :seon.db/lease-spent (:seon.error/type (ex-data e)))
-            (agent/send! {:op :unrecorded :error (ex-data e) :forms (count items)})
-            (throw e)))))
-    items))
+            (do (agent/send! {:op :unrecorded :error (ex-data e) :forms (count items)})
+                (mapv #(assoc % :unrecorded true) items))
+            (throw e))))
+      items)))
 
 (defn eval-string
   "Evaluate code through the one REPL path: the handler and its middleware, its answers
-  folded into reply items and recorded (an agent's, on its branch). From inside an agent,
-  the turn loop's forms (origin :model); req adds to the request (root's evaluations,
-  seon.entrance: their namespace, origin, budget and eval fn)."
+  folded into reply items, each with who asked (:origin, when not the agent's own :model),
+  and recorded (an agent's, on its branch). From inside an agent, the turn loop's forms; req
+  adds to the request (root's: seon.server's namespace, origin, budget and eval fn; root's
+  requests to an agent: agent-step's). The request's entrant boundary: a defect past a
+  form's own (a middleware's, the printer's) ends the request with the answers so far and
+  one :err item, its error map, recorded with them."
   {:malli/schema [:function [:=> [:cat :string] :seon.agent/items] [:=> [:cat :string :map] :seon.agent/items]]}
   ([code] (eval-string code {:origin :model}))
   ([code req]
-   (let [answers (volatile! [])]
-     (@the-handler (assoc req "op" "eval" "code" code :reply #(vswap! answers conj %)))
-     (record! (fold @answers)))))
+   (let [answers (volatile! [])
+         o (:origin req)]
+     (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
+          (catch Throwable e
+            (let [em (agent/error-map e)]
+              (vswap! answers conj {:tag :err :id (dec (:n (swap! agent/state update :n (fnil inc 0))))
+                                    :err em :printed (:seon.error/message em) :err-text (nrepl/err->msg e)}))))
+     (record! (cond->> (fold @answers) (and o (not= :model o)) (mapv #(assoc % :origin o)))))))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
-
-(defn- reply-fn
-  "The request's answers are kept and folded at its done into one reply value for root
-  ({:op :reply :id :items :t :mem-mb}); an eval's items are recorded first (the agent owns
-  its branch's writes)."
-  {:malli/schema [:=> [:cat :seon.wire/msg] :seon.host/fn]}
-  [req]
-  (let [answers (volatile! [])]
-    (fn [m]
-      (vswap! answers conj m)
-      (when (some #{"done"} (get m "status"))
-        ;; who asked travels with the items, to root's view as to the record
-        (let [items (cond->> (fold @answers) (:origin req) (mapv #(assoc % :origin (:origin req))))]
-          (when (= "eval" (get req "op")) (record! items))
-          (agent/send! {:op :reply :id (:id req) :items items :t (:max-tx (agent/db)) :mem-mb (agent/mem-mb)}))))))
-
-(defn- eval-request
-  "Root's eval request as the nREPL request the handler takes."
-  {:malli/schema [:=> [:cat :seon.wire/seon-msg] :seon.wire/msg]}
-  [m]
-  (let [req (assoc (select-keys m [:id :ticks :origin]) "op" "eval" "id" (str (:id m)) "code" (:forms m))]
-    (assoc req :reply (reply-fn req))))
 
 (defn agent-step
   "The agent as a step-fn, run on its one thread by seon.step/run-loop: requests in on
@@ -434,12 +373,14 @@
   ([st _] st)
   ([st _ m]
    (if (= :eval (:op m))
-     (let [req (eval-request m)]
-       ;; the agent's entrant boundary: a defect answers err + done
-       (try (@the-handler req)
-            (catch Throwable e
-              ((:reply req) {:tag :err :err-text (nrepl/err->msg e) "status" ["eval-error" "done"]})))
-       [st nil])
+     (do
+       ;; an interrupt left from before this request is not its; then root hears that it began
+       ;; (its proc's :started event), what an interrupt or a kill meant for a running eval
+       ;; waits on, never a sleep: one arriving from here on stops it
+       (intr/clear-pending!)
+       (agent/send! {:op :started :id (:id m)})
+       [st {:sock [{:op :reply :id (:id m) :items (eval-string (:forms m) (select-keys m [:ticks :origin]))
+                    :t (:max-tx (agent/db)) :mem-mb (agent/mem-mb)}]}])
      [st (when-let [ms (agent/handle! m)] {:sock ms})])))
 
 (defn serve!
@@ -463,5 +404,6 @@
   [fd m db0 t-req-ns]
   (agent/init! fd m db0 serve!)
   (agent/hello! t-req-ns (cond-> {:interrupt-ok (:interrupt-ok @agent/state)}
-                            (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))))
+                            (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))
+                            (:misaligned @agent/state) (assoc :misaligned (:misaligned @agent/state))))
   (serve!))

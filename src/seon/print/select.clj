@@ -26,9 +26,9 @@
   [tokens]
   (long (Math/floor (* tokens chars-per-token))))
 
-;;; Allocation dials (the config's `:seon.config.render.agent/*`, ported from Seon's).
+;;; Allocation config keys (the config's `:seon.config.render.agent/*`, ported from Seon's).
 
-(def ^:private dials
+(def ^:private limits
   {:whole-width (config/value :seon.config.render.agent/whole-width) :max-name (config/value :seon.config.render.agent/max-name)
    :max-number-digits (config/value :seon.config.render.agent/max-number-digits)
    :sort-bound (config/value :seon.config.render.agent/sort-bound)})
@@ -75,16 +75,10 @@
   (+ 2 (long (Math/ceil (* (.bitLength b) (Math/log10 2))))))
 
 (defn- throwable-value
-  "A Throwable as plain data: type, message and ex-data per link, cycles bounded by identity."
+  "A Throwable as plain data: Throwable->map's :via (type, message and ex-data per link), without
+  each link's frame."
   {:malli/schema [:=> [:cat :seon.host/throwable] [:map [:via [:vector :any]]]]}
-  [^Throwable t]
-  (loop [^Throwable link t seen [] via []]
-    (if (or (nil? link) (some #(identical? % link) seen))
-      {:via via}
-      (recur (.getCause link) (conj seen link)
-             (conj via (cond-> {:type (symbol (.getName (class link)))}
-                         (.getMessage link) (assoc :message (.getMessage link))
-                         (identical? (class link) clojure.lang.ExceptionInfo) (assoc :data (ex-data link))))))))
+  [t] {:via (mapv #(cond-> (dissoc % :at) (nil? (:message %)) (dissoc :message)) (:via (Throwable->map t)))})
 
 (defn- seq-cells
   "A seq's first `limit` members, realizing a lazy seq only as far as it prints."
@@ -116,7 +110,7 @@
   (let [v (when (map-entry? member) (val member))]
     (cond (and (coll? v) (counted? v) (<= (count v) 2) (not-any? coll? (if (map? v) (vals v) v))) 0
           (coll? v) 2
-          (and (string? v) (> (count v) (:whole-width dials))) 1
+          (and (string? v) (> (count v) (:whole-width limits))) 1
           :else 0)))
 
 (defn- sorts?
@@ -126,7 +120,7 @@
   [x key-of]
   (boolean
    (and (sortable-classes (class x))
-        (<= (count x) (:sort-bound dials))
+        (<= (count x) (:sort-bound limits))
         (every? #(identical? (class (key-of %)) clojure.lang.Keyword) x))))
 
 (defn- held-order
@@ -155,6 +149,12 @@
   (let [width (count text)]
     {:seon.print/face face :seon.print/value value :seon.print/text text :kind :leaf :flat width :ub width}))
 
+(defn- big-number
+  "A big number's leaf: its text when fits?, else its tag and how many digits it holds."
+  {:malli/schema [:=> [:cat :any :boolean :string :string nat-int?] :map]}
+  [x fits? text tag digits]
+  (scalar :seon.print/number x (if fits? text (str "#" tag "[≈" digits " digits]"))))
+
 (defn- classify
   "One row of the permitted-operation table: exact classes for scalars, maps and sets; seqs and
   other sequentials by interface, stepped to the context's `:max-children`; anything else is its
@@ -176,46 +176,33 @@
       (identical? c Character) (scalar :seon.print/char x (if-let [n (char-name-string x)] (str "\\" n) (str "\\" x)))
       (identical? c String) {:kind :string :value x :total (.length ^String x)}
       ;; a name's node carries its text, which a cut of it replaces
-      (identical? c clojure.lang.Keyword)
-      (let [text (str ":" (when (namespace x) (str (namespace x) "/")) (name x))]
+      (or (identical? c clojure.lang.Keyword) (identical? c clojure.lang.Symbol))
+      (let [face (if (keyword? x) :seon.print/keyword :seon.print/symbol)
+            text (str (when (keyword? x) ":") (when (namespace x) (str (namespace x) "/")) (name x))]
         (if (<= (count text) (:max-name context))
-          (scalar :seon.print/keyword x text)
-          {:kind :name :node {:seon.print/face :seon.print/keyword :seon.print/value x} :text text}))
-      (identical? c clojure.lang.Symbol)
-      (let [text (str (when (namespace x) (str (namespace x) "/")) (name x))]
-        (if (<= (count text) (:max-name context))
-          (scalar :seon.print/symbol x text)
-          {:kind :name :node {:seon.print/face :seon.print/symbol :seon.print/value x} :text text}))
+          (scalar face x text)
+          {:kind :name :node {:seon.print/face face :seon.print/value x} :text text}))
       (identical? c java.util.UUID) (scalar :seon.print/uuid x (str "#uuid \"" x "\""))
       (identical? c java.util.Date) (scalar :seon.print/inst x (str "#inst \"" (.toInstant ^java.util.Date x) "\""))
       ;; Jolt unifies a small BigInteger with Long: a BigInt that fits prints whole
       (identical? c clojure.lang.BigInt)
-      (let [b (biginteger x)]
-        (if (or (< (.bitLength b) 64) (<= (integer-digits b) (:max-number-digits dials)))
-          (scalar :seon.print/number x (str b "N"))
-          (scalar :seon.print/number x (str "#bigint[≈" (integer-digits b) " digits]"))))
+      (let [b (biginteger x)] (big-number x (or (< (.bitLength b) 64) (<= (integer-digits b) (:max-number-digits limits))) (str b "N") "bigint" (integer-digits b)))
       (identical? c clojure.lang.Ratio)
-      (let [n (biginteger (numerator x)) d (biginteger (denominator x))]
-        (if (<= (+ (integer-digits n) (integer-digits d)) (:max-number-digits dials))
-          (scalar :seon.print/number x (str n "/" d))
-          (scalar :seon.print/number x (str "#ratio[≈" (+ (integer-digits n) (integer-digits d)) " digits]"))))
+      (let [d (+ (integer-digits (biginteger (numerator x))) (integer-digits (biginteger (denominator x))))]
+        (big-number x (<= d (:max-number-digits limits)) (str (numerator x) "/" (denominator x)) "ratio" d))
       (identical? c java.math.BigDecimal)
-      (let [u (biginteger (.unscaledValue ^java.math.BigDecimal x))]
-        (if (<= (+ (integer-digits u) (count (str (.scale ^java.math.BigDecimal x)))) (:max-number-digits dials))
-          (scalar :seon.print/number x (str x "M"))
-          (scalar :seon.print/number x (str "#bigdec[≈" (integer-digits u) " digits]"))))
+      (let [u (integer-digits (biginteger (.unscaledValue ^java.math.BigDecimal x)))]
+        (big-number x (<= (+ u (count (str (.scale ^java.math.BigDecimal x)))) (:max-number-digits limits)) (str x "M") "bigdec" u))
       (map-classes c)
       {:kind :map :face :seon.print/map :open "{" :close "}" :total (count x) :indexed? true
        :lookup? (keyword-lookup? x) :sorted? (sorts? x key) :members (held-order x key)}
-      (vector-classes c)
-      {:kind :coll :face :seon.print/vector :open "[" :close "]" :total (count x) :members (seq x)}
       (set-classes c)
       {:kind :coll :face :seon.print/set :open "#{" :close "}" :total (count x) :ordered? true :indexed? true
        :sorted? (sorts? x identity) :members (held-order x identity)}
-      ;; every seq and other Sequential prints as a list, a vector type as a vector
-      (instance? clojure.lang.ISeq x) (list-row x x limit)
-      (instance? clojure.lang.IPersistentVector x)
+      ;; a vector type prints as a vector, every seq and other Sequential as a list
+      (or (vector-classes c) (instance? clojure.lang.IPersistentVector x))
       {:kind :coll :face :seon.print/vector :open "[" :close "]" :total (count x) :members (seq x)}
+      (instance? clojure.lang.ISeq x) (list-row x x limit)
       (instance? clojure.lang.Sequential x) (list-row x (seq x) limit)
       (identical? c clojure.lang.Var)
       {:kind :scalar :node {:seon.print/face :seon.print/var
@@ -230,17 +217,14 @@
                             :seon.print/rep (str "0x" (Integer/toHexString (System/identityHashCode x)))}})))
 
 (defn- leaf-width
-  "The flat width of a leaf node."
+  "The flat width of a var, class or object node (every other scalar is `scalar`'s, its
+  width its text's)."
   {:malli/schema [:=> [:cat :map] :int]}
   [node]
-  (cond
-    (:seon.print/text node) (count (:seon.print/text node))
-    (= :seon.print/var (:seon.print/face node)) (+ 2 (count (:seon.print/name node)))
-    (= :seon.print/class (:seon.print/face node)) (count (:seon.print/name node))
-    (= :seon.print/object (:seon.print/face node))
-    (+ 9 (count (:seon.print/class node)) (if-some [rep (:seon.print/rep node)] (inc (count rep)) 0))
-    :else (count (emit/emit-text node {:seon.print/width 0 :seon.print/length nil :seon.print/level nil
-                                       :seon.print/namespace-maps? false}))))
+  (case (:seon.print/face node)
+    :seon.print/var (+ 2 (count (:seon.print/name node)))
+    :seon.print/class (count (:seon.print/name node))
+    (+ 9 (count (:seon.print/class node)) (if-some [rep (:seon.print/rep node)] (inc (count rep)) 0))))
 
 (defn- node-continuation
   "The form a cut of `node` prints to read its rest; the whole collection for a map or set shown
@@ -483,7 +467,7 @@
   [context node]
   (sized context (case (:kind node)
                    :string (shown-to node 0)
-                   :name (shown-to node (min (:whole-width dials) (:total node)))
+                   :name (shown-to node (min (:whole-width limits) (:total node)))
                    (:map :coll) (assoc node :kids [])
                    node)))
 
@@ -495,7 +479,7 @@
   (if (= :entry (:kind node))
     (sized context (update node :kids (fn [kids] (mapv #(minimal context %) kids))))
     (let [least (collapsed context node)]
-      (or (whole context node (max (:whole-width dials) (:ub least))) least))))
+      (or (whole context node (max (:whole-width limits) (:ub least))) least))))
 
 (declare allot)
 
@@ -722,9 +706,9 @@
         own (when (instance? clojure.lang.IMeta value) (:seon.print/budget (meta value)))
         budget-tokens (if (pos-int? own) own budget)
         full? (and (instance? clojure.lang.IMeta value) (true? (:seon.print/full (meta value))))
-        options (assoc emit/default-options :seon.print/length nil :seon.print/level nil :seon.print/width width)
+        options (assoc emit/default-options :seon.print/width width)
         chars (estimate-chars budget-tokens)
-        context (cond-> (merge dials
+        context (cond-> (merge limits
                                {:breaks? (pos? width) :requery requery :requery-id (:seon.print/requery-id requery)
                                 :width width :budget chars :max-children (inc (quot chars 2)) :max-depth max-depth})
                   full? (assoc :budget Long/MAX_VALUE :max-children Long/MAX_VALUE :max-depth Long/MAX_VALUE

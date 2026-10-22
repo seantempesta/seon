@@ -11,7 +11,7 @@
 
 (def schema
   "The Datahike schema, derived from the registry's entity schemas (resources/seon/schemas,
-  seon.schema.datahike; lane D1): one source of truth with the contracts."
+  seon.schema.datahike; session D1): one source of truth with the contracts."
   (sd/declarations contract/registry))
 
 (defn eid
@@ -43,7 +43,7 @@
                    :task/status :held :task/refs [[:var/name (symbol (str nsym) "f0")] [:var/name (symbol (str nsym) "f1")]]}]]))
             (range nns))))
 
-;; :writer :sync (vendor datahike.writer, lane F1): root's Flow :writer proc is the only
+;; :writer :sync (vendor datahike.writer, session F1): root's Flow :writer proc is the only
 ;; caller of transact, so it is THE serial writer; Datahike runs no queue, commit loop or
 ;; go block of its own (memory: commit p50 0.49 -> 0.39 ms, 639 -> 446 KB/tx, 2 threads
 ;; fewer per connection; src/proto/f1_bench.clj).
@@ -108,16 +108,18 @@
     (lmdb-ffi/sync! (klmdb/open-env! (get-in cfg [:store :path]) nil)))
   nil)
 
-(defn seed!
-  "Seed the empty store under conn: the schema, then (seed-tx n)."
-  {:malli/schema [:=> [:cat :seon.host/conn :int] :any]}
-  [conn n]
-  (d/transact conn {:tx-data schema})
-  (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx})))
+(defn tx-meta
+  "The tx-meta of every transaction Seon makes: the runtime that made it
+  (:seon.tx/runtime, jolt.host/runtime-fingerprint). A runtime Jolt cannot identify (nil)
+  is refused by this contract, never recorded as no runtime."
+  {:malli/schema [:=> [:cat] [:map [:seon.tx/runtime :string]]]}
+  [] {:seon.tx/runtime (jolt.host/runtime-fingerprint)})
 
 (defn- install-missing!
-  "Transact the attributes of `schema` the db under conn lacks, in one transaction, and
-  answer how many (an attribute it holds as another value type is refused, :seon.db/types-differ:
+  "Transact the attributes of `schema` the db under conn lacks and answer how many: first
+  :seon.tx/runtime alone when it is missing (the one transaction that cannot name its
+  runtime, since it installs the attribute), then the rest in one transaction carrying
+  tx-meta (an attribute it holds as another value type is refused, :seon.db/types-differ:
   a value type is fixed once installed): a kept store seeded before an attribute existed gains it when a root
   opens it (Datahike accepts new attribute definitions at any time). Nothing missing
   writes nothing."
@@ -130,13 +132,22 @@
                           [k {:stored stored :declared t}]))
         _ (when (seq differ)
             (let [e (contract/error :seon.db/types-differ 'seon.db/open!
-                                    (str "the store holds " (count differ) " attributes as another value type than the schema declares: " (pr-str (keys differ)))
+                                    (str "the store holds " (count differ) " attributes as another value type than the schema declares (each in :seon.db/attributes)")
                                     {:seon.db/attributes differ
                                      :seon.error/fix "An attribute's value type is fixed once installed: open a store made with this schema (a fresh one), or keep running the build that made this store."})]
               (throw (ex-info (:seon.error/message e) e))))
         missing (vec (remove #(contains? have (:db/ident %)) schema))]
-    (when (seq missing) (d/transact conn {:tx-data missing}))
+    (let [[runtime others] ((juxt filter remove) #(= :seon.tx/runtime (:db/ident %)) missing)]
+      (when (seq runtime) (d/transact conn {:tx-data (vec runtime)}))
+      (when (seq others) (d/transact conn {:tx-data (vec others) :tx-meta (tx-meta)})))
     (count missing)))
+
+(defn seed!
+  "Seed the empty store under conn: the schema (install-missing!), then (seed-tx n)."
+  {:malli/schema [:=> [:cat :seon.host/conn :int] :any]}
+  [conn n]
+  (install-missing! conn)
+  (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx :tx-meta (tx-meta)})))
 
 ;; ---- one store, many branches, as in production (owner, 2026-10-21) ------------
 ;; A store holds one seed on :db. Every root works on a main of its own, a branch of :db
@@ -320,10 +331,14 @@
     {:used-bytes (.length (java.io.File. (str (get-in cfg [:store :path]) "/data.mdb")))
      :map-bytes (get-in cfg [:store :lmdb :map-size])}))
 
-(defn lease-base
-  "The first entity id past every branch head of the store: agents' leases start here."
-  {:malli/schema [:=> [:cat :seon.host/conn] :int]}
-  [conn] (+ (cfg/value :seon.config.store/eid-lease) (max (:max-eid @conn) (#'datahike.writing/roster-max-eid (:store @conn)))))
+(defn lease-block!
+  "Reserve the next block of eid-lease entity ids from this process's one counter for db's
+  store (the counter its own writes mint from, seeded past every branch head): answers the
+  block's lease, its ids lease+1 up to lease+eid-lease (exclusive, lease!). The process's
+  later ids start past it, so a block and the writes to main never meet."
+  {:malli/schema [:=> [:cat :seon.host/db] :int]}
+  [db]
+  (.getAndAdd ^java.util.concurrent.atomic.AtomicLong (datahike.writing/eid-allocator db) (cfg/value :seon.config.store/eid-lease)))
 
 (defn head
   "Branch b's committed value, read from the store (another process may have committed it)."

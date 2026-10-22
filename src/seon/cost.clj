@@ -33,7 +33,7 @@
   finding, not red), unmeasured (a stated dimension with nothing measured)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.profile :as profile]
-            [clojure.test :as t] [clojure.string :as str]))
+            [clojure.test :as t] [clojure.string :as str] [seon.print :as print]))
 
 ;; ---- the judge (pure) -----------------------------------------------------------------
 
@@ -132,13 +132,13 @@
 ;; ---- measuring ----------------------------------------------------------------------------
 
 (defn- once
-  "One call of f on args: its wall ns, allocated bytes and contracted calls (calls only
+  "One call of f on args: its ns of this thread's CPU, the bytes this thread allocated, and contracted calls (calls only
   when the contracts are on: seon.profile counts armed functions)."
   {:malli/schema [:=> [:cat :seon.host/fn [:sequential :any]] :seon.cost/dims]}
   [f args]
-  (let [a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/now-ns)
+  (let [a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/cpu-ns)
         _ (apply f args)
-        t1 (profile/now-ns) c (profile/calls) a1 (profile/alloc-bytes)]
+        t1 (profile/cpu-ns) c (profile/calls) a1 (profile/alloc-bytes)]
     (cond-> {:ns (double (- t1 t0)) :bytes (double (- a1 a0))}
       contract/on? (assoc :calls (double c)))))
 
@@ -185,8 +185,31 @@
         (>= x 1e9) (format "%.2fG" (/ x 1e9)) (>= x 1e6) (format "%.2fM" (/ x 1e6))
         (>= x 1e4) (format "%.1fk" (/ x 1e3)) :else (format "%.0f" (double x))))
 
+(defn verdict-lines
+  "A cost verdict as [class words] lines, red first: within or over its estimate, each size
+  over it (and the slack allowed), each dimension grown steeper than the work needs, loose
+  estimates and unmeasured dimensions as findings, an accepted overrun, and, with its
+  estimate e, a regression past the recorded overrun. The one wording of a verdict: the
+  agent's text (`explain`) and the page's verdict box (seon.render.ui/verdict-box)."
+  {:malli/schema [:=> [:cat :seon.cost/verdict [:maybe :seon.cost/estimate]] [:sequential [:tuple :string :string]]]}
+  [{:keys [ok? over steeper under unmeasured accepted]} e]
+  (concat [[(if ok? "ok" "bad") (if ok? "within estimate" "OVER ESTIMATE")]]
+          (for [{:keys [dim n ratio]} over]
+            ["bad" (str "OVER: " (name dim) " at n=" n " is " (format "%.2f" ratio) "x its estimate (allowed " (slack dim) "x).")])
+          (for [{:keys [dim exponent allowed]} steeper]
+            ["bad" (str "STEEPER: " (name dim) " grew as n^" (format "%.2f" exponent) "; " (if-let [g (:growth e)] (str (name g) " allows") "the estimate allows") " n^"
+                        (format "%.2f" allowed) ". Something does more passes over the data than the work needs.")])
+          (for [{:keys [dim n ratio]} under] ["muted" (str "LOOSE: " (name dim) " at n=" n " is " (format "%.2f" ratio) "x its estimate: tighten the estimate.")])
+          (for [d unmeasured] ["muted" (str "NOT MEASURED: " (name d) ".")])
+          (when-let [{:keys [task]} accepted]
+            [["muted" (str "OVERRUN accepted while task " task " is open (within " ratchet "x of "
+                           (if-let [m (:measured (:overrun e))] (print/text m (:part print/budgets)) "the overrun its task recorded") "): it is that task's work.")]])
+          (when (and (:overrun e) (not ok?))
+            [["bad" (str "REGRESSION: past " ratchet "x of the overrun recorded for task " (:task (:overrun e)) ".")]])))
+
 (defn explain
-  "The estimate, the measurements against it and the verdict, as text an agent reads."
+  "The estimate, the measurements against it and the verdict (`verdict-lines`), as text an
+  agent reads."
   {:malli/schema [:=> [:cat :seon.cost/estimate [:vector :seon.cost/row] :seon.cost/verdict] :string]}
   [e rows v]
   (let [dims (filter (set (mapcat (comp keys :expected) rows)) [:ns :bytes :calls])]
@@ -198,19 +221,7 @@
           (str n ": " (str/join "  " (for [d dims :let [m (get measured d) x (get expected d)]]
                                        (str (num-text m) "/" (num-text x)
                                             (when (and m (pos? x)) (format " (%.2fx)" (/ m x))))))))
-        (for [{:keys [dim n ratio]} (:over v)]
-          (str "OVER: " (name dim) " at n=" n " is " (format "%.2f" ratio) "x its estimate (allowed " (slack dim) "x)."))
-        (for [{:keys [dim exponent allowed]} (:steeper v)]
-          (str "STEEPER: " (name dim) " grew as n^" (format "%.2f" exponent) "; " (name (:growth e))
-               " allows n^" (format "%.2f" allowed) ". Something does more passes over the data than the work needs."))
-        (for [{:keys [dim n ratio]} (:under v)]
-          (str "LOOSE: " (name dim) " at n=" n " is " (format "%.2f" ratio) "x its estimate: tighten the estimate."))
-        (for [d (:unmeasured v)] (str "NOT MEASURED: " (name d) "."))
-        (when-let [{:keys [task]} (:accepted v)]
-          [(str "OVERRUN accepted while task " task " is open (within " ratchet "x of "
-                (pr-str (:measured (:overrun e))) "): it is that task's work.")])
-        (when (and (:overrun e) (not (:ok? v)))
-          [(str "REGRESSION: past " ratchet "x of the overrun recorded for task " (:task (:overrun e)) ".")])))))
+        (map second (verdict-lines v e))))))
 
 (defn proof
   "Assert, inside a deftest, that estimate e holds: one clojure.test report (pass or fail)
@@ -256,9 +267,9 @@
    :map/reduce-kv {:ns 4.7 :bytes 0.0 :what "one step of reduce-kv over a hash map"}
    :edn/read-char {:ns 29.22 :bytes 38.02 :what "clojure.edn/read-string, per character of a vector of integers"}
    :pr-str/char {:ns 61.9 :bytes 25.67 :what "pr-str, per character printed (a vector of integers)"}
-   ;; lane D2, source mode, load 3, 2026-10-20, at 2k: a pull is 21 us and 28 KB, each further
+   ;; session D2, source mode, load 3, 2026-10-20, at 2k: a pull is 21 us and 28 KB, each further
    ;; attribute 9.7 us and 13 KB (a finding: the pull's own allocation, like seon.db/eid's seek)
-   ;; lane STORES, 2026-10-21, load 8, at 10k, three runs: measured on a branch of the seeded test
+   ;; session STORES, 2026-10-21, load 8, at 10k, three runs: measured on a branch of the seeded test
    ;; store (seon.test-store/test-branch!: ~2,000 datoms beside the setup's) instead of an empty store,
    ;; a pull 21 us and 24.6 KB, each further attribute 11.3-15.1 us and 11.6 KB: pull-attr's one
    ;; entity sat in a one-level index before, the seed makes it the two levels real dbs have

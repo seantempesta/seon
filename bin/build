@@ -4,12 +4,12 @@
 # target/lib/libprobe.dylib (native/probe.c), target/lib/liblmdb.dylib (LMDB, robust locks),
 # target/lib/liblz4.dylib and target/lib/libzstd.dylib (the store's compressors) and target/seon (the platform, -main seon.check).
 #
-#   bin/build            every step; chez and jolt are skipped when their output matches their pin
-#   bin/build chez|jolt|hello|native|lmdb|lz4|zstd|seon   one step (and the steps before it when their output is missing)
-#   BUILD_FORCE=1 bin/build     rebuild every step
+#   bin/build            every step; chez, jolt, native, lmdb, lz4 and zstd are skipped when their stamp matches their pin
+#   bin/build chez|jolt|hello|native|lmdb|lz4|zstd|seon   one step, and each step it needs whose stamp is stale
+#   BUILD_FORCE=1 bin/build     every stamp removed first: each step rebuilds, once
 #
 # Everything is written under target/; nothing is installed outside it. Dependency
-# downloads (Maven jars, git deps) land in target/home, because HOME points there
+# downloads (Maven jars, git deps) go into target/home, because HOME points there
 # for the Jolt steps. The submodules are never written: each source tree is copied
 # into target/src first (an APFS clone on macOS, so the copy is cheap).
 #
@@ -44,8 +44,10 @@ copy_tree() {
   find "$2" -name .git -prune -exec rm -rf {} +
 }
 
-# stamp NAME PIN: true when target/NAME.stamp records PIN (and BUILD_FORCE is unset).
-fresh() { [ -z "${BUILD_FORCE:-}" ] && [ -f "$T/$1.stamp" ] && [ "$(cat "$T/$1.stamp")" = "$2" ]; }
+# fresh NAME PIN: true when target/NAME.stamp records PIN. A forced build removes every stamp
+# once, here, so each step rebuilds once however many steps call it.
+fresh() { [ -f "$T/$1.stamp" ] && [ "$(cat "$T/$1.stamp")" = "$2" ]; }
+[ -z "${BUILD_FORCE:-}" ] || rm -f "$T"/chez.stamp "$T"/jolt.stamp "$T"/native.stamp "$T"/lmdb.stamp "$T"/lz4.stamp "$T"/zstd.stamp
 
 CHEZ_PIN=$(git -C "$RC/chez" rev-parse HEAD)
 JOLT_PIN=$(git -C "$RC/jolt" rev-parse HEAD)
@@ -70,7 +72,7 @@ build_chez() {
 }
 
 build_jolt() {
-  [ -x "$CHEZ" ] || build_chez
+  build_chez
   if fresh jolt "$JOLT_PIN" && [ -x "$JOLT" ]; then say "jolt up to date ($JOLT_PIN)"; return; fi
   version=$(cd "$RC/jolt" && sh tools/version.sh)
   say "jolt: copying reference-code/jolt at $JOLT_PIN ($version)"
@@ -85,10 +87,10 @@ build_jolt() {
 }
 
 build_hello() {
-  [ -x "$JOLT" ] || build_jolt
+  build_jolt
   # Datahike's store loads its codecs' libraries (liblz4, libzstd) at load: built first, named by bin/env
-  [ -f "$T/lib/liblz4.dylib" ] || build_lz4
-  [ -f "$T/lib/libzstd.dylib" ] || build_zstd
+  build_lz4
+  build_zstd
   . "$ROOT/bin/env"
   say "hello: jolt build -m build.hello (Datahike from reference-code/) -> target/hello"
   ( cd "$ROOT"
@@ -98,15 +100,18 @@ build_hello() {
 }
 
 build_native() {
+  pin=$(git -C "$ROOT" hash-object native/probe.c)
+  if fresh native "$pin" && [ -f "$T/lib/libprobe.dylib" ]; then say "native up to date ($pin)"; return; fi
   mkdir -p "$T/lib"
   say "native: native/probe.c -> target/lib/libprobe.dylib"
   cc -O2 -shared -o "$T/lib/libprobe.dylib" "$ROOT/native/probe.c" || die "native build failed"
+  echo "$pin" > "$T/native.stamp"
 }
 
 # LMDB from reference-code/lmdb (the official repository as a submodule on mdb.master3, the branch konserve.jolt.lmdb-ffi binds), built
 # with MDB_USE_ROBUST: on macOS LMDB otherwise locks with POSIX semaphores, and a process
 # SIGKILLed inside a write txn leaves the writer lock held for every process that has the env
-# open (measured 2026-10-21; docs/DRAGONS.md#lmdb-robust-locks). Robust, it uses SysV
+# open (measured 2026-10-21; docs/failure-points.md#lmdb-robust-locks). Robust, it uses SysV
 # semaphores with SEM_UNDO: the kernel releases a dead holder's lock. target/lmdb-kill
 # (native/lmdb_kill.c) is its proof, a bin/check step.
 LMDB_SRC=$RC/lmdb/libraries/liblmdb
@@ -157,21 +162,32 @@ build_zstd() {
 }
 
 build_seon() {
-  [ -x "$JOLT" ] || build_jolt
-  [ -f "$T/lib/libprobe.dylib" ] || build_native
-  # as chez and jolt: built when missing (bin/build lmdb rebuilds it on a pin change); a
+  # each step decides by its own stamp (its sources' pin), never by its output existing: a sync
+  # to a new pin rebuilds what moved (task seon.check/a-build-rebuilds-what-its-pin-moved); a
   # generation's worktree (seon.fx/build) holds its checkout's build, not ../vendor-c
-  [ -f "$T/lib/liblmdb.dylib" ] || build_lmdb
-  [ -f "$T/lib/liblz4.dylib" ] || build_lz4
-  [ -f "$T/lib/libzstd.dylib" ] || build_zstd
+  build_jolt
+  build_native
+  build_lmdb
+  build_lz4
+  build_zstd
   # the shared compile caches (bin/env): a schema file seon.contract reads, or one added to the
   # directory it lists, moves the key of every namespace compiled against it
   . "$ROOT/bin/env"
+  # the tree this build reads, as git names it (seon.fx/tree-id computes the same): HEAD's tree
+  # with every changed and untracked unignored file added, in an index of its own. Written
+  # beside the binary once it is built, so a root records its source's inputs for its agents
+  # only when its binary is built from that very tree (seon.root/import-source!)
+  idx=$(mktemp -u)
+  if git -C "$ROOT" rev-parse --verify --quiet HEAD > /dev/null; then GIT_INDEX_FILE=$idx git -C "$ROOT" read-tree HEAD; fi
+  GIT_INDEX_FILE=$idx git -C "$ROOT" add -A && tree=$(GIT_INDEX_FILE=$idx git -C "$ROOT" write-tree) || tree=
+  rm -f "$idx"
+  rm -f "$T/seon.tree"
   say "seon: jolt build -m seon.check -> target/seon"
   ( cd "$ROOT"
     HOME=$T/home JOLT_PWD=$ROOT "$JOLT" build -m seon.check -o "$T/seon" ) > "$T/seon-build.log" 2>&1 ||
     { tail -30 "$T/seon-build.log" >&2; die "seon build failed; see target/seon-build.log"; }
-  say "seon: built target/seon"
+  [ -n "$tree" ] && echo "$tree" > "$T/seon.tree"
+  say "seon: built target/seon (tree ${tree:-unknown})"
 }
 
 case $STEP in

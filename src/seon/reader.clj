@@ -36,7 +36,7 @@
   (prose, an unbalanced span). The text is a model's or a plan's, so not reading is an
   answer, not a failure; nothing is evaluated (no #=), so whatever the read throws means
   that. edamame 1.4.32 on Jolt throws a bare IllegalArgumentException for a meta prefix at
-  the end (\"a^\"), not its :edamame/error (docs/DRAGONS.md)."
+  the end (\"a^\"), not its :edamame/error (docs/failure-points.md)."
   {:malli/schema [:=> [:cat :string :symbol] [:maybe [:vector :any]]]}
   [text nsym]
   (try (read-all text nsym)

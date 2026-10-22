@@ -238,25 +238,38 @@
   ;; BUILD plan P5 (task seon.source/the-next-generation-runs-from-the-merges-commit),
   ;; through the path the owner uses: bin/root starts a root on a clone of this checkout
   ;; (Seon's own source as main's program, its store under this test's directory); through
-  ;; its entrance two loop turns merge seon.fixtures/generation 1 -> 2 and a new
+  ;; its server two loop turns merge seon.fixtures/generation 1 -> 2 and a new
   ;; seon.fixtures/generations, each live in place. Root is SIGKILLed and the same binary,
   ;; older than both merges, started on the same store and main: it catches up at boot
   ;; (seon.program/load-all!). Then the cold-start path: my.root/build! builds main's last
   ;; merges commit (seon.fx/build, bin/build seon in the generation's worktree) and
-  ;; `bin/root next` starts it on the same store and main. Declared long, bound 300 s: two
-  ;; turns (~14 s each), three boots (~3 s each with the import) and one build (~25-60 s).
+  ;; `bin/root next` starts it on the same store and main. The root imports the owner's
+  ;; standing root's dirs (src, test and the schemas: the main tree's config/local.edn, not
+  ;; the default), so a restart re-imports test/ after load-all! has run main's test
+  ;; namespaces, as the owner's does (2026-10-22: the import skipped seon.program-test's ns
+  ;; form and the root died on `No such namespace: ts`). Declared long, bound 300 s: two
+  ;; turns (~14 s each), three boots (~3-9 s each with the import) and one build (~25-60 s).
   (let [dir (scratch-dir "nextgen")
         tree (str dir "/tree")
         port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
-        env ["env" (str "SEON_RUNS=" dir "/runs") (str "SEON_ENTRANCE_PORT=" port) "SEON_WEB_PORT=0"]
-        root! (fn [& args] (apply sh/sh (concat env [(str here "/bin/root")] args)))
-        ask (fn [code] (let [r (sh/sh "nc" "-w" "600" "127.0.0.1" (str port)
-                                      :in (str (pr-str {:op :eval :agent "root" :code code}) "\n"))
-                             a (try (clojure.edn/read-string {:default tagged-literal} (:out r)) (catch Exception _ nil))]
-                         (some-> a :items first :printed clojure.edn/read-string)))
+        ;; its root's own store and main, named: an inherited SEON_STORE or SEON_MAIN (a bin/check
+        ;; run's) otherwise opens a store whose main already holds these merges, made in another
+        ;; run's clone (task seon.source/the-restart-test-runs-its-root-on-its-own-store)
+        env ["env" (str "SEON_RUNS=" dir "/runs") (str "SEON_STORE=" dir "/runs/store") "SEON_MAIN=main"
+             (str "SEON_ENTRANCE_PORT=" port) "SEON_WEB_PORT=0"]
+        root! (fn [& args] (apply ts/binary-sh (concat env [(str here "/bin/root")] args)))
+        ;; one request line, then its one reply line: the read ends on the reply, or on EOF when the
+        ;; root closes the connection or dies (nil, a recorded verdict); nc -w never times out on macOS
+        ask (fn [code] (with-open [s (java.net.Socket. "127.0.0.1" (int port))]
+                         (let [out (.getOutputStream s)
+                               _ (doto out (.write (.getBytes (str (pr-str {:op :eval :agent "root" :code code}) "\n") "UTF-8")) (.flush))
+                               line (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s) "UTF-8")))
+                               a (try (clojure.edn/read-string {:default tagged-literal} line) (catch Exception _ nil))]
+                           (some-> a :items first :printed clojure.edn/read-string))))
         pids (fn [] (str/split (str/trim (slurp (str dir "/runs/root.pids"))) #" "))
         cloned (sh/sh "git" "clone" "-q" "--local" here tree)
-        started (root! "start" "--set" (str ":seon.config.source/root=" (pr-str tree)))]
+        started (root! "start" "--set" (str ":seon.config.source/root=" (pr-str tree))
+                       "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]")]
     (try
       (is (zero? (:exit cloned)) (:err cloned))
       (is (zero? (:exit started)) (str (:out started) (:err started)))
@@ -270,8 +283,17 @@
           (while (zero? (:exit (sh/sh "kill" "-0" pid))) (Thread/sleep 50))
           ;; bin/root's holder of the dead root's stdin
           (sh/sh "kill" holder))
+        ;; the tree changes a test namespace's ns form while root is down (as a merge to test/
+        ;; does): main still holds the old one, which load-all! runs at boot (and another test
+        ;; namespace's require marks it loaded), and the import must still apply the new
+        ;; alias before the form that uses it
+        (let [f (str tree "/test/seon/program_test.clj")]
+          (spit f (str (str/replace-first (slurp f) "(:require " "(:require [clojure.set :as restart-set] ")
+                       "\n(defn restart-probe [] (restart-set/union #{1} #{2}))\n")))
         (let [restarted (apply root! "start" args)]
           (is (zero? (:exit restarted)) (str (:out restarted) (:err restarted)))
+          (is (true? (ask "(some? (seon.db/eid @(:conn sys) :var/name 'seon.program-test/restart-probe))"))
+              "the changed ns form's alias analyzed: the form using it is main's program")
           (is (= [2 [1 2]] (ask "[(seon.fixtures/generation) (seon.fixtures/generations)]"))
               "the binary older than both merges runs both, caught up at boot on the same main"))
         (let [g (ask "(my.root/build! sys)")
@@ -391,3 +413,11 @@
     (is (= [] errs))
     (is (= 6 ((resolve 'app.mm-src/g) 5)) "the new record")
     (is (true? ((resolve 'app.mm-src/box?) ((resolve 'app.mm-src/->Box) 1))) "an instance? test held by the binary sees the redefined record")))
+
+(deftest the-source-read-carries-each-reference-code-pin
+  ;; land6 review, must-fix 4: a cited reference-code file shows the revision main's source
+  ;; pins it at; the :source effect reads each gitlink once, at import, so no render runs git
+  (let [r (fx/read-source {:req {:root here :dirs ["src"]}})
+        head-tree (str/trim (:out (sh/sh "git" "rev-parse" "HEAD:reference-code/malli")))]
+    (is (= head-tree (get (:pins r) "reference-code/malli")) "the gitlink HEAD's tree records for it")
+    (is (every? #(str/starts-with? % "reference-code/") (keys (:pins r))))))

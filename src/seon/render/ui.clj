@@ -1,7 +1,7 @@
 (ns seon.render.ui
   "The HTML renders of root's web: render functions all the way up (DECISIONS, \"Renders,
   the agent UI and context\"; W1's proto.render.ui). Ported from proto/web's
-  proto.web.view (lane L2's dashboard and L4's polish): layout, tiles, swarm grid, cards,
+  proto.web.view (session L2's dashboard and L4's polish): layout, tiles, swarm grid, cards,
   event stream, the REPL box per card, the Phosphor theme's classes (resources/public/app.css).
 
   Two layouts are declared renders: `system-page` (:seon.render/system, root's whole
@@ -16,10 +16,15 @@
   Every number shown is measured by the system and carried in the value; nothing here
   invents one."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [clojure.walk] [seon.config :as config]
-            [seon.render :as render] [seon.print :as print] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.proofs :as proofs]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
+            [seon.render :as render] [seon.print :as print] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.proofs :as proofs] [seon.cost :as cost]))
 
 ;;; --- small formatting helpers -------------------------------------------------
+
+(defn- cell "Tokens of a table cell or a stream row's field." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render/cell-budget))
+(defn- one-line "Tokens of a message or reason in one line." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render/line-budget))
+(defn- part "Tokens of a value shown inside another." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render/part-budget))
+(defn- form-budget "Tokens of a form echoed back." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render/form-budget))
 
 (defn dom-id
   "A DOM-safe id for an id keyword or string: :a12 -> \"a12\", :fx/model -> \"fx_model\"."
@@ -40,14 +45,7 @@
 (defn group3
   "n with thousands separated: 120000 -> \"120,000\"."
   {:malli/schema [:=> [:cat :any] :string]}
-  [n]
-  (if (number? n)
-    (let [s (str (long n))
-          neg? (str/starts-with? s "-")
-          s (if neg? (subs s 1) s)
-          g (->> (reverse s) (partition-all 3) (map (comp str/join reverse)) reverse (str/join ","))]
-      (str (when neg? "-") g))
-    "–"))
+  [n] (if (number? n) (format "%,d" (long n)) "–"))
 
 (defn bytes-str {:malli/schema [:=> [:cat :any] :string]}
   [b]
@@ -68,11 +66,11 @@
   {:malli/schema [:function [:=> [:cat :any pos-int?] :any] [:=> [:cat :any pos-int? :map] :any]]}
   ([s budget] (prose s budget {}))
   ([s budget {:keys [href one-line? whole]}]
-   (let [s (if (string? s) s (str s))
+   (let [s (if (string? s) s (print/text s budget))
          {:keys [shown truncated? omitted lines]} (print/prose s budget {:one-line? (boolean one-line?)})]
      (if-not truncated?
        shown
-       (let [words (str (print/cut-words omitted lines nil) (when whole (str " · the whole value: " (pr-str whole) " at its REPL")))
+       (let [words (str (print/cut-words omitted lines nil) (when whole (str " · the whole value: " (print/text whole (form-budget)) " at its REPL")))
              cut (if href
                    [:a {:class "seon-print-elision" :href href :title "the whole on this page"} words]
                    [:span {:class "seon-print-elision" :title s} words])]
@@ -107,7 +105,7 @@
   {:malli/schema [:=> [:cat [:maybe [:sequential :any]] :string] :any]}
   [xs tone]
   (let [w 160 hgt 34 pad 2
-        ;; the series as the render proc keeps it (seon.render.proc/SERIES-CAP points)
+        ;; the series as the render proc keeps it (:seon.config.render.list/series points)
         xs (filterv number? xs)
         n (count xs)]
     (if (< n 2)
@@ -129,21 +127,17 @@
   it shows whole)."
   {:malli/schema [:=> [:cat [:maybe :string] pos-int? [:maybe :keyword] :map] :any]}
   [txt budget handle opts]
-  (let [plain? (and (some? txt) (< (count txt) 4000) (not (str/includes? txt "…"))
+  (let [plain? (and (some? txt) (not (str/includes? txt "…"))
                     (contains? #{\{ \[ \( \:} (first txt)))
         ;; through the one reader edge: text that does not read is an answer (nil), not a catch here
         v (when plain? (let [fs (reader/read-text txt 'user)] (when (= 1 (count fs)) (first fs))))]
     (if (and plain? (coll? v))
-      (let [hic (:seon.render/html (render/print-out :html v {:seon.render/budget budget :seon.render/handle (some->> handle name (symbol "result"))}))]
-        ;; the printer's panel id is per value, not per part (ids drive Datastar's morph)
-        ;; and every node open: a closed <details> hides its content however it is styled
-        (clojure.walk/postwalk (fn [x] (if (and (vector? x) (= :details (first x)) (map? (second x))) (assoc-in x [1 :open] true) x))
-                               (if (and (vector? hic) (map? (second hic))) (update hic 1 dissoc :id) hic)))
+      (:seon.render/html (render/print-out :html v {:seon.render/budget budget :seon.render/handle (some->> handle name (symbol "result"))}))
       [:code {:class "printed"} (prose txt budget (cond-> opts handle (assoc :whole (symbol "result" (name handle)))))])))
 
 (defn context-read?
   "Is evaluation e a context read: an outside agent reading its current-state block through
-  root's entrance (origin :context; seon.entrance)? Its output is the block itself."
+  root's server (origin :context; seon.server)? Its output is the block itself."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [e] (and (map? e) (= :context (:origin e))))
 
@@ -217,8 +211,8 @@
   owner reports when it changes (the writer when it commits or flushes, the fork server
   when it forks, main when it commits); series: one point per change."
   {:malli/schema [:=> [:cat :map :map :map :map] [:vector :map]]}
-  [{:keys [commits flushes] :as writer} server main series]
-  (let [st (or (:status server) :up)]
+  [{:keys [commits flushes] :as writer} fork-server main series]
+  (let [st (or (:status fork-server) :up)]
     [{:id "t-writer" :kicker "writer" :sub "the only d/transact caller" :big (group3 (:tx-count writer)) :unit "txs"
       :series (:tx series) :tone "tone-signal" :series-title "transactions per writer batch, the newest batches"
       :rows [["batch" (ms-str (:batch-p50-ms writer)) "batch p50: one writer step (a group commit and its flush, when one is due)"]
@@ -227,13 +221,13 @@
               "main's group commits per flush: one flush makes every commit since the last durable"]
              ["flushes" (group3 flushes) "flushes to disk so far"]]
       :explain "a transaction is one write to main; a commit takes every queued transaction at once; a flush makes the commits since the last one durable on disk"}
-     {:id "t-server" :class (str "srv-" (kname st) " restarts-" (:restarts server 0)) :kicker "fork server"
+     {:id "t-fork-server" :class (str "srv-" (kname st) " restarts-" (:restarts fork-server 0)) :kicker "fork server"
       :pill [(str "srv " (if (= st :up) "s-up" "s-down")) (kname st)]
-      :big (fmt2 (:fork-ms-p50 server)) :unit "ms fork p50" :series (:fork series) :tone "tone-info"
-      :rows [["forked" (group3 (:agents-forked server))]
-             ["lag" (ms-str (:lag-ms server)) "commit applied in the fork server after main took it, p50"]
-             ["pid" (str (or (:pid server) "–"))]
-             ["restarts" (str (:restarts server 0)) nil (when (pos? (:restarts server 0)) "hot")]]}
+      :big (fmt2 (:fork-ms-p50 fork-server)) :unit "ms fork p50" :series (:fork series) :tone "tone-info"
+      :rows [["forked" (group3 (:agents-forked fork-server))]
+             ["lag" (ms-str (:lag-ms fork-server)) "commit applied in the fork server after main took it, p50"]
+             ["pid" (str (or (:pid fork-server) "–"))]
+             ["restarts" (str (:restarts fork-server 0)) nil (when (pos? (:restarts fork-server 0)) "hot")]]}
      {:id "t-main" :class (str "pulse-" (mod (or (:merges main) 0) 2)) :kicker "main" :sub "every write to main moves t"
       :big (group3 (:datoms main)) :unit "datoms" :series (:datoms series) :tone "tone-success"
       :rows [["t" (group3 (:t main))] ["merges" (group3 (:merges main 0))]
@@ -250,7 +244,7 @@
      [:li {:class (str "ph" (when bad? " abnormal s-failed"))}
       [:i {:class (str "dot " (if bad? "s-failed" "s-running"))}] [:code (kname pid)]
       (if bad?
-        (list [:b (str defects " defect" (when (> defects 1) "s"))] " " [:span {:class "bad"} (prose newest 30 {:one-line? true})])
+        (list [:b (str defects " defect" (when (> defects 1) "s"))] " " [:span {:class "bad"} (prose newest (cell) {:one-line? true})])
         [:span {:class "muted"} "no defect recorded"])]}))
 
 (defn tile-health
@@ -342,7 +336,7 @@
    [:tr {:class (str "at s-" (kname status) (when outcome (str " o-" (kname outcome))))}
     [:td [:code id]]
     [:td (if agent [:a {:href (str "/agent/" (dom-id agent))} (kname agent)] "–")
-     (when (= "outside" (:model env)) [:span {:class "muted" :title "worked from outside (a lane through root's entrance): no turn loop, its turns and tokens are not counted here"} " · outside"])]
+     (when (= "outside" (:model env)) [:span {:class "muted" :title "worked from outside (an outside agent through root's server): no turn loop, its turns and tokens are not counted here"} " · outside"])]
     [:td [:span {:class (str "pill s-" (kname status))} (kname status)]]
     [:td (str (or turns "–"))] [:td (group3 tokens)]
     [:td {:title (str reason)} (kname outcome)]
@@ -360,7 +354,7 @@
     (metric-tile
       {:id "t-errors" :class (when (seq root-errors) "hot") :kicker "root" :sub (str total " defects in root's own procs (agents' problems: the banner)")
        :body (if (seq root-errors)
-               [:ul {:class "errs"} (for [e shown] [:li [:code (kname (:pid e))] " " (prose (:message e) 50)]) (when more [:li {:class "more muted"} more])]
+               [:ul {:class "errs"} (for [e shown] [:li [:code (kname (:pid e))] " " (prose (:message e) (one-line))]) (when more [:li {:class "more muted"} more])]
                [:p {:class "muted"} "no proc has thrown"])
        :rows [["boot" (ms-str (:load-ms boot)) "boot: open the store, load main's program, arm contracts, fork the fork server"]
               ["program" (str (get-in boot [:program :loaded] "–") " defs") "definitions of main's program loaded at boot (seon.program/load-all!: :var/name facts with source)"]
@@ -390,7 +384,7 @@
           (for [[k v] kvs]
             [:div {:title (str (prop k :description))}
              [:dt (name k)]
-             [:dd [:code (pr-str v)] (when-let [u (prop k :seon.config/unit)] [:span {:class "muted"} " " u])]])])]]}))
+             [:dd (render/html v {:seon.render/budget (part)}) (when-let [u (prop k :seon.config/unit)] [:span {:class "muted"} " " u])]])])]]}))
 
 ;;; --- agent cards --------------------------------------------------------------
 
@@ -411,7 +405,7 @@
        [:span {:class "dots"}
         (if (seq reports)
           (for [r (sort-by #(if (= :pass (:type %)) 1 0) reports)]
-            [:i {:class (str "t-" (kname (:type r))) :title (str (:var r) (when (:message r) (str " · " (:text (print/prose (:message r) 60)))))}])
+            [:i {:class (str "t-" (kname (:type r))) :title (str (:var r) (when (:message r) (str " · " (:text (print/prose (:message r) (one-line))))))}])
           (concat (repeat (or pass 0) [:i {:class "t-pass"}]) (repeat (- total (or pass 0)) [:i {:class "t-fail"}])))]
        [:span {:class "score"} (str pass "/" total)]
        (when (:ms tests) [:span {:class "muted"} (ms-str (:ms tests))])])))
@@ -448,6 +442,28 @@
         (proofs/red? (:tests r)) [:refused (str "tests " (run-words (:tests r)))]
         :else [:refused (or (:seon.error/message r) "refused")]))
 
+(def error-shown
+  "The keys an error's renders show in their own lines (seon.render.ai/error, `error-box`);
+  every other key of the error map is printed after them, so both faces show the same facts."
+  [:seon.error/type :seon.error/operation :seon.error/message :seon.error/fix :seon.error/problems])
+
+(defn error-box
+  "An error map (:seon.error/base, every variant): its message first, then its type and where
+  it was raised, the fix when it carries one, and every other key it carries by the printer
+  (`error-shown`: the AI face's lines and this one's are the same)."
+  {:malli/schema [:=> [:cat :seon.error/base :seon.render/env] :seon.render/out]}
+  [e _]
+  (let [own (apply dissoc e error-shown)
+        budget (config/value :seon.config.render/part-budget)]
+    {:seon.render/html
+     [:div {:class "err"}
+      [:b (prose (:seon.error/message e) budget)]
+      [:span {:class "muted"} (str " · " (kname (:seon.error/type e)) " in " (:seon.error/operation e))]
+      (when (:seon.error/fix e) [:p {:class "fix"} "fix: " (prose (:seon.error/fix e) budget)])
+      (for [{:keys [in expected value]} (:seon.error/problems e)]
+        [:p {:class "muted"} "at " [:code (print/text in budget)] " expected " [:code (print/text expected budget)] ", got " [:code value]])
+      (when (seq own) [:code {:class "muted"} " " (print/text own budget)])]}))
+
 (defn- status-pill
   "How an agent is, as its pill: its status word, or how it ended once its attempt did."
   {:malli/schema [:=> [:cat :map :string] :any]}
@@ -477,7 +493,9 @@
    [:span (ms-str (:ms e))] (alloc-span (:alloc-bytes e))
    [:span {:class "origin"} (kname (or (:origin e) :agent))]
    (when (:recorded e) [:span {:class "rec" :title "recorded as a program fact on this branch"} (str "＋" (:recorded e))])
-   (when-let [w (first (:warnings e))] [:span {:class "warn" :title (str (:seon.repl/fix w))} (str "⚠ " (kname (:seon.repl/finding w)))])
+   (let [[ws more] (print/bounded (:warnings e) :seon.config.render.list/top "on its page")]
+     (list (for [w ws] [:span {:class "warn" :title (str (:seon.repl/fix w))} (str "⚠ " (kname (:seon.repl/finding w)))])
+           (when more [:span {:class "muted"} more])))
    (when (:handle e) [:span {:class "handle"} (kname (:handle e))])])
 
 (defn- eval-out
@@ -490,6 +508,7 @@
   (let [err? (= :err (:tag e)) txt (or (:printed e) (:shown e))]
     (list [:span {:class "arrow"} (if err? "✕" "⇒")]
           (cond (and (context-read? e) (not err?)) (context-ref e href)
+                (map? (:err e)) (render/html (:err e) {})
                 (and structural? (not err?)) [:div {:class "printed seon"} (value-html txt value-budget (:handle e) {:href href})]
                 :else [:code {:class "printed"} (prose txt text-budget {:href href})]))))
 
@@ -500,8 +519,8 @@
   {:malli/schema [:=> [:cat :map :boolean :string] :any]}
   [e newest? href]
   [:li {:class (str "ev tag-" (kname (or (:tag e) :ret)))}
-   (when-not (str/blank? (:form e)) [:code {:class "form"} (prose (:form e) 28 {:one-line? true :href href})])
-   [:div {:class "out"} (eval-out e 120 50 href newest?)]
+   (when-not (str/blank? (:form e)) [:code {:class "form"} (prose (:form e) (cell) {:one-line? true :href href})])
+   [:div {:class "out"} (eval-out e (part) (one-line) href newest?)]
    (eval-meta e)
    (when newest? (fns-line (:fns e)))])
 
@@ -527,10 +546,10 @@
          (let [[k why] (merge-words m)]
            [:span {:class (str "pill s-" (name k)) :title why} ({:merged "⇡ merged" :conflict "⚔ conflict" :refused "✕ refused"} k)]))
        (status-pill ag st)]
-      [:p {:class "task"} (prose (or (:task ag) "") 40 {:href href})]
+      (when-let [t (:task ag)] [:p {:class "task"} (prose t (one-line) {:href href})])
       (agent-stats ag total nil)
-      (when (:error ag) [:p {:class "err"} (prose (:error ag) 60)])
-      (when running [:p {:class "running" :title "evaluating now"} "▶ " [:code (prose (:form running) 40 {:one-line? true :href href})]])
+      (when (:error ag) [:p {:class "err"} (prose (:error ag) (one-line))])
+      (when running [:p {:class "running" :title "evaluating now"} "▶ " [:code (prose (:form running) (cell) {:one-line? true :href href})]])
       (if last-e
         (let [[shown more] (print/bounded (rseq (vec evals)) :seon.config.render.list/newest "earlier evaluations on its page" total)]
           [:ol {:class "evals"} (map-indexed (fn [i e] (eval-row e (zero? i) href)) shown)
@@ -546,13 +565,13 @@
 (defn card-shell
   "One whole agent card around its body's slot: appended to the grid once, when the agent
   first appears. Its REPL box posts the forms as a UI call (an eval recorded with origin
-  :ui); its buttons are UI calls of root's verbs. Its verbs that need a live process (and
+  :ui); its buttons are UI calls of root's functions. Its functions that need a live process (and
   its REPL box) carry the class `live`: an ended agent's card hides them (app.css, by the
   body's state class), keeping only its history."
   {:malli/schema [:=> [:cat :keyword] :any]}
   [id]
   (let [d (dom-id id)
-        verb (fn [f label title & [cls]]
+        button (fn [f label title & [cls]]
                [:button {:class (str "act live" (when cls (str " " cls))) :title title :seon/call f :seon/agent id} label])]
     [:article {:id (str "card-" d) :class "card" (keyword "data-class:open") (str "$sel==='" d "'")}
      (slot (str "cb-" d))
@@ -561,12 +580,12 @@
       [:input {:id (str "ri-" d) :name "forms" :autocomplete "off" :spellcheck "false" :placeholder "(+ 1 2)"}]]
      [:div {:class "actions"}
       [:button {:class "act" :title "show history" (keyword "data-on:click") (str "$sel = $sel==='" d "' ? '' : '" d "'")} "⤢"]
-      (verb 'seon.root/run-tests! "▶ tests" "run its deftests in a fork of it")
-      (verb 'seon.root/merge! "⇡ merge" "root merges this branch into main, gated by its tests")
-      (verb 'seon.root/merge-main! "⇣ main" "git merge main: main's changes into this branch")
-      (verb 'seon.root/clone! "⑂ clone" "fork this live agent, values and all")
-      (verb 'seon.root/interrupt! "⏹" "interrupt the running form; the agent keeps its state")
-      (verb 'seon.root/kill! "✕ kill" "SIGKILL its process" "danger")]]))
+      (button 'seon.root/run-tests! "▶ tests" "run its deftests in a fork of it")
+      (button 'seon.root/merge! "⇡ merge" "root merges this branch into main, gated by its tests")
+      (button 'seon.root/merge-main! "⇣ main" "git merge main: main's changes into this branch")
+      (button 'seon.root/clone! "⑂ clone" "fork this live agent, values and all")
+      (button 'seon.root/interrupt! "⏹" "interrupt the running form; the agent keeps its state")
+      (button 'seon.root/kill! "✕ kill" "SIGKILL its process" "danger")]]))
 
 ;;; --- events ---------------------------------------------------------------------
 
@@ -585,33 +604,35 @@
                (str "read its current-state block · ≈" (select/estimate (or (:out r) "")) " tokens")
              (str (when (> (count items) 1) (str (count items) " forms · "))
                   (let [n (count (filter #(= :err (:tag %)) items))] (when (pos? n) (str n " error" (when (> n 1) "s") " · ")))
-                  (when-not (str/blank? (:form r)) (str (print/line (:form r) 12) " ⇒ "))
-                  (print/line (:printed r) 22)
+                  (when-not (str/blank? (:form r)) (str (print/line (:form r) (cell)) " ⇒ "))
+                  (print/line (:printed r) (cell))
                   (when (:ms r) (str " · " (ms-str (:ms r)))))))
     :commit (str (kname (:branch ev)) " t " (:t ev) (when (:txs ev) (str " · " (:txs ev) " tx")))
-    :merged (let [[k why] (merge-words (:result ev))] (if (= :merged k) why (str (str/upper-case (name k)) " · " (print/line why 25))))
+    :merged (let [[k why] (merge-words (:result ev))] (if (= :merged k) why (str (str/upper-case (name k)) " · " (print/line why (cell)))))
     :tests (str (run-words ev) (when (:ms ev) (str " · " (ms-str (:ms ev)))))
     :merged-main (let [r (:result ev)]
                    (if (:ok r) (str "main → branch · " (count (:applied r)) " applied · " (count (:conflicts r)) " conflicts")
-                       (str "refused: " (print/line (:seon.error/message r) 20))))
-    :server-down (str "fork server pid " (:pid ev) " is gone · agents keep running")
-    :server-up (str "root forked a new fork server · pid " (:pid ev))
+                       (str "refused: " (print/line (:seon.error/message r) (cell)))))
+    :fork-server-down (str "fork server pid " (:pid ev) " is gone · agents keep running")
+    :fork-server-up (str "root forked a new fork server · pid " (:pid ev))
     :spawned (if (:cloned-from ev)
                (str "cloned from " (kname (:cloned-from ev)) " · pid " (:pid ev))
                (str "forked in " (ms-str (:fork-ms ev)) (when (:pid ev) (str " · pid " (:pid ev)))))
     :ready (str "ready" (when (:start-ms ev) (str " in " (ms-str (:start-ms ev)))))
+    :started (str "began " (print/line (or (:form ev) "") 30))
+    :tests-started (str "test child forked · pid " (:pid ev))
     :killed (if (:ended-as ev) (str "stopped by root after its attempt ended " (kname (:ended-as ev))) "KILLED")
     :ended (str "stopped by root: its attempt ended" (when (:ended-as ev) (str " " (kname (:ended-as ev)))))
     :dead (if (:ended-as ev) (str "exited after its attempt ended " (kname (:ended-as ev))) "its process died")
-    :ui (str (:call ev) (when (:detail ev) (str " · " (print/line (str (:detail ev)) 20))))
-    (print/text (dissoc ev :type :at-ms :agent) 25)))
+    :ui (str (:call ev) (when (:detail ev) (str " · " (print/line (:detail ev) (cell)))))
+    (print/text (dissoc ev :type :at-ms :agent) (cell))))
 
 (defn- bad-event? {:malli/schema [:=> [:cat :map] :boolean]}
   [ev]
   (boolean (or (some #(= :err (:tag %)) (:items ev))
                (and (= :tests (:type ev)) (proofs/red? ev))
                (and (= :dead (:type ev)) (not (:ended-as ev)))
-               (#{:server-down :server-lost} (:type ev))
+               (#{:fork-server-down :fork-server-lost} (:type ev))
                (false? (get-in ev [:result :merged?]))
                (and (= :ui (:type ev)) (some? (:error ev))))))
 
@@ -634,7 +655,7 @@
 
 (defn events-count
   "The stream's header: newest first, and how many of the events since root's boot it
-  keeps (seon.render.proc/EVENT-CAP); the older are not kept anywhere."
+  keeps (:seon.config.render.list/stream); the older are not kept anywhere."
   {:malli/schema [:=> [:cat :map :seon.render/env] :seon.render/out]}
   [{:keys [kept seen]} _]
   {:seon.render/html
@@ -736,7 +757,7 @@
   top bar, the metric tiles, the grid of agent cards, the side column (root's context,
   the event stream), each part a unit reading exactly what it shows."
   {:malli/schema [:=> [:cat :seon.render/system :seon.render/env] :seon.render/out]}
-  [{:keys [agents health series writer server main attempts root-errors boot store web agent-attempt] :as sys} _]
+  [{:keys [agents health series writer fork-server main attempts root-errors boot store web agent-attempt] :as sys} _]
   (let [order (:order sys)
         procs (into {} (remove (fn [[pid]] (and (keyword? pid) (str/starts-with? (str (namespace pid)) "fx.")))) health)
         u (fn [id input render] {:id id :input input :render render})]
@@ -746,7 +767,7 @@
       [:main {:class "layout"}
        [:div {:class "left"}
         (slot "problems")
-        [:div {:class "tiles"} (slot "t-agents") (slot "t-writer") (slot "t-server") (slot "t-main")]
+        [:div {:class "tiles"} (slot "t-agents") (slot "t-writer") (slot "t-fork-server") (slot "t-main")]
         [:div {:class "tiles two"} (slot "t-health") (slot "t-tasks")]
         [:div {:class "tiles three"} (slot "t-errors")]
         (slot "t-config")
@@ -761,7 +782,7 @@
            [(u "problems" (:problems sys []) `tile-problems)
             (u "t-agents" {:cells (mapv (fn [id] (let [a (get agents id)] [id (shown-status (ended-as a id agent-attempt)) (count (:evals a))])) order)
                            :off (- (count agents) (count order)) :retire-ms (:retire-ms sys)} `tile-agents)]
-           (for [t (load-tiles writer server main series)] (u (:id t) t `metric-tile))
+           (for [t (load-tiles writer fork-server main series)] (u (:id t) t `metric-tile))
            [(u "t-health" {:health procs} `tile-health)
             (u "t-tasks" {:rows (:task-rows sys) :attempts attempts :main-t (:t main)} `tile-tasks)
             (u "t-errors" {:root-errors root-errors :root-errors-total (:root-errors-total sys) :boot boot :store store} `tile-errors)
@@ -780,8 +801,8 @@
 ;;; --- one agent, zoomed -----------------------------------------------------------------
 
 (defn task-box
-  "A task: its plan (accumulated along its needs), instructions, its proofs, its kind,
-  execution and problem."
+  "A task: its kind and execution, its plan (accumulated along its needs), instructions, what
+  is wrong (its problem, failure, budget-spent fact), its needs and proofs, and its evidence."
   {:malli/schema [:=> [:cat :seon.task/task :seon.render/env] :seon.render/out]}
   [t _]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)]
@@ -791,26 +812,21 @@
       [:pre {:class "plan"} plan]
       (when (:seon.task/instructions t) [:p {:class "muted"} (:seon.task/instructions t)])
       (when (:seon.task/problem t) [:p {:class "err"} (:seon.task/problem t)])
+      (when-let [{:keys [reason counterexample attempt]} (:seon.task/failure t)]
+        [:p {:class "err"} "failed" (when attempt (str " in " attempt)) ": " reason (when counterexample (list " · counterexample " [:code counterexample]))])
+      (when-let [{:keys [cause blocks]} (:seon.task/stuck t)]
+        [:p {:class "warn"} "budget spent: " cause (when (seq blocks) (str " · blocks " (str/join ", " (sort blocks))))])
       (when (seq (:seon.task/needs t)) [:p {:class "muted"} "needs " (str/join ", " (sort (:seon.task/needs t)))])
-      [:p {:class "muted"} (str (count proofs) " proofs: ") (str/join " " (map str (sort-by str proofs)))]]}))
-
-(defn verdict-lines
-  "A cost verdict as [class words] lines, red first: within or over its estimate, each size
-  over it, each dimension grown steeper than the work needs, then loose estimates and
-  unmeasured dimensions as findings. The page's verdict box and root's cost report."
-  {:malli/schema [:=> [:cat :seon.cost/verdict] [:sequential [:tuple :string :string]]]}
-  [{:keys [ok? over steeper under unmeasured]}]
-  (concat [[(if ok? "ok" "bad") (if ok? "within estimate" "OVER ESTIMATE")]]
-          (for [{:keys [dim n ratio]} over] ["bad" (str "over " (name dim) " at n=" (group3 n) " " (fmt2 ratio) "×")])
-          (for [{:keys [dim exponent allowed]} steeper] ["bad" (str "steeper " (name dim) " n^" (fmt2 exponent) " > n^" (fmt2 allowed))])
-          (for [{:keys [dim n ratio]} under] ["muted" (str "loose " (name dim) " at n=" (group3 n) " " (fmt2 ratio) "×")])
-          (for [d unmeasured] ["muted" (str "unmeasured " (name d))])))
+      [:p {:class "muted"} (str (count proofs) (if (= 1 (count proofs)) " proof: " " proofs: ")) (str/join " " (map str (sort-by str proofs)))]
+      (when-let [ev (:seon.task/evidence t)]
+        [:div {:class "muted"} "evidence " (:seon.render/html (render/print-out :html ev {:seon.render/budget (config/value :seon.config.render/part-budget)}))])]}))
 
 (defn verdict-box
-  "A cost verdict (`verdict-lines`): red when a size is over its estimate or grew steeper."
+  "A cost verdict (seon.cost/verdict-lines, the agent's words too): red when a size is over
+  its estimate or grew steeper."
   {:malli/schema [:=> [:cat :seon.cost/verdict :seon.render/env] :seon.render/out]}
   [v _]
-  (let [[[_ head] & more] (verdict-lines v)]
+  (let [[[_ head] & more] (cost/verdict-lines v nil)]
     {:seon.render/html [:div {:class (str "verdict " (if (:ok? v) "ok" "red"))} [:b head] (for [[c w] more] [:span {:class c} (str " " w)])]}))
 
 (defn cost-report
@@ -850,14 +866,14 @@
     [:li {:class (str "pr t-" (kname (:type r)))}
      [:i {:class (str "sq t-" (kname (:type r)))}] " " [:code (str (:var r))]
      (when (and (not pass?) (or own (seq owners))) [:span " " (red-label (:var r) own owners)])
-     (when (:message r)
+     (when (and (:message r) (not cost))
        (if pass?
-         [:span {:class "muted"} " " (prose (:message r) 50 {:one-line? true})]
-         ;; a red report's message: for a cost proof, its estimate against what was measured
-         [:pre {:class "msg"} (prose (:message r) 600)]))
+         [:span {:class "muted"} " " (prose (:message r) (config/value :seon.config.render/line-budget) {:one-line? true})]
+         [:pre {:class "msg"} (prose (:message r) (config/value :seon.config.render/form-budget))]))
      (cond cost (render/html cost (assoc env :seon.render/schema :seon.render/cost-report))
-           (not= :pass (:type r)) [:div {:class "fail"} [:div [:em "expected "] [:code (print/text (:expected r) 120)]]
-                                   [:div [:em "actual "] [:code (print/text (:actual r) 120)]]])]))
+           ;; :expected and :actual are the test child's printed text: shown as it is
+           (not= :pass (:type r)) [:div {:class "fail"} [:div [:em "expected "] [:code (prose (:expected r) (config/value :seon.config.render/part-budget))]]
+                                   [:div [:em "actual "] [:code (prose (:actual r) (config/value :seon.config.render/part-budget))]]])]))
 
 (defn proofs-box
   "The agent's last test run: every report, the red ones first, cost proofs with their
@@ -883,9 +899,9 @@
   [e env]
   {:seon.render/html
      [:li {:class (str "hr tag-" (kname (or (:tag e) :ret)))}
-      [:div {:class "hf"} [:code (prose (:form e) 400)]]
-      [:div {:class "hv"} (eval-out e (or (:seon.render/budget env) (config/value :seon.config.render/value-budget)) 200 nil true)]
-      (when (and (seq (:out e)) (not (context-read? e))) [:pre {:class "out"} (prose (:out e) 200)])
+      [:div {:class "hf"} [:code (prose (:form e) (form-budget))]]
+      [:div {:class "hv"} (eval-out e (or (:seon.render/budget env) (config/value :seon.config.render/value-budget)) (part) nil true)]
+      (when (and (seq (:out e)) (not (context-read? e))) [:pre {:class "out"} (prose (:out e) (part))])
       (eval-meta e)
       (when (seq (:fns e))
         [:table {:class "fnt"}
@@ -895,7 +911,7 @@
 (defn history-list
   "The agent's evaluations, newest first, around rows already serialized (an evaluation is
   written once, so its row is rendered once), and how many older ones its branch records
-  beyond the page's (seon.render.proc/HISTORY-CAP). input {:rows :total}."
+  beyond the page's (:seon.config.render.list/history). input {:rows :total}."
   {:malli/schema [:=> [:cat [:map [:rows [:sequential :string]] [:total nat-int?]] :seon.render/env] :seon.render/out]}
   [{:keys [rows total]} _]
   {:seon.render/html [:ol {:id "z-history" :class "history"}
@@ -912,7 +928,7 @@
       [:h1 [:span {:class (str "dot s-" st)}] (kname id) " " (status-pill ag st)
        [:span {:class "branch"} (str " branch " (kname (:branch ag)))]]
       [:p {:class "task"} (str (:task ag))]
-      (agent-stats ag (count (:evals ag)) (when (:running ag) [:span {:class "running"} "▶ " [:code (prose (:form (:running ag)) 60)]]))]}))
+      (agent-stats ag (count (:evals ag)) (when (:running ag) [:span {:class "running"} "▶ " [:code (prose (:form (:running ag)) (one-line))]]))]}))
 
 (defn zoom-work
   "The zoomed agent's work on main: its attempt (status, turns, tokens, outcome) and its
@@ -934,9 +950,8 @@
   {:seon.render/html
    [:section {:id "z-context" :class "box"}
     (kicker "context" (if text (str "≈" tokens " tokens · its model's current-state block"
-                                    (when-not (= :door from) ", rebuilt now from main's facts and its last test run")
+                                    ", rebuilt now from main's facts and its last test run"
                                     (case from
-                                      :door " · the text it last read through root's entrance, as is"
                                       :main-gone " · read on main (its branch is gone)"
                                       :main " · read on main (its branch has no commit this page has read)"
                                       nil))

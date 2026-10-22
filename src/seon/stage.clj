@@ -1,4 +1,4 @@
-(ns seon.harvest
+(ns seon.stage
   "Stage the LIVE runtime onto the branch (owner, 2026-10-20: REPL semantics, no replay;
   git add -A of the runtime). Each form an agent evaluates is recorded on its branch as it
   runs (seon.repl/wrap-record: the compiler's account of it), so what is left for staging
@@ -39,7 +39,7 @@
                           (not (contains? (methods @v) (read-string (:method/dispatch m)))))]
            [:db/retract (:e dt) :method/form (:v dt)]))))
 
-(defn harvest!
+(defn stage!
   "Stage the live runtime onto this agent's branch (one transaction). Answers the tx-data
   written."
   {:malli/schema [:=> [:cat] :seon.db/tx-data]}

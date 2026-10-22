@@ -3,7 +3,7 @@
   boots its fork server, so it runs in a process of its own rather than in the test
   runner's, whose threads and GC sweepers are the runner's."
   (:require [clojure.test :refer [deftest is]] [clojure.java.shell :as sh] [clojure.edn :as edn]
-            [clojure.string :as str] [seon.db :as pdb] [datahike.api :as d]))
+            [clojure.string :as str] [seon.db :as pdb] [datahike.api :as d] [seon.test-store :as ts]))
 
 (defn- test-store "The one store these tests' roots take a branch of." []
   (str (.getCanonicalPath (java.io.File. ".")) "/target/runs/test-store"))
@@ -12,7 +12,7 @@
   "Delete main and every branch under it from the test store (seon.check/drop-mains), once
   the root that made them has stopped."
   [main]
-  (sh/sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str (test-store))) :dir "target"))
+  (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str (test-store))) :dir "target"))
 
 (deftest root-threads-are-what-root-declares
   ;; three start!/stop! cycles in one process: while running (three agents just
@@ -23,7 +23,7 @@
   ;; web-server-threads-are-joined-at-stop).
   ;; On a main of its own on the test store, deleted at the end.
   (let [main (str "root-test-" (random-uuid))
-        {:keys [exit out err]} (sh/sh "env" "SEON_WEB_PORT=0" (str "SEON_STORE=" (test-store)) (str "SEON_MAIN=" main)
+        {:keys [exit out err]} (ts/binary-sh "env" "SEON_WEB_PORT=0" (str "SEON_STORE=" (test-store)) (str "SEON_MAIN=" main)
                                       "./seon" "threads-declared" "3" :dir "target")
         _ (drop-main! main)
         res (edn/read-string (last (str/split-lines out)))]
@@ -42,7 +42,10 @@
   ;; with its branches when the root has stopped.
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         main (str "root-test-" (random-uuid))
-        {:keys [exit out err]} (sh/sh "env" "SEON_WEB_PORT=0" "./seon" "root"
+        ;; a kernel-assigned port, never the checkout's: its standing root may hold that one
+        port (let [sock (java.net.ServerSocket. 0)] (try (.getLocalPort sock) (finally (.close sock))))
+        {:keys [exit out err]} (ts/binary-sh "env" "SEON_WEB_PORT=0" "./seon" "root"
+                                      "--set" (str ":seon.config.root/entrance-port=" port)
                                       "--set" (str ":seon.config.source/root=" (pr-str checkout))
                                       "--set" ":seon.config.source/dirs=[\"src\" \"test\"]"
                                       "--set" (str ":seon.config.root/store-path=" (pr-str (test-store)))
@@ -55,24 +58,25 @@
 
 (defn- root-answers
   "The output of a built root on the store at path (extra --set args), asked each request
-  in turn on its entrance: one answer line per request, then EXIT and its log. The root's
+  in turn on its server: one answer line per request, then EXIT and its log. The root's
   stdin is a fifo held open until every answer is in; its listening line (or its death)
-  ends the wait, as bin/root's start does."
-  [path args requests]
+  ends the wait, as bin/root's start does. env: variables the root starts with (\"K=v \")."
+  ([path args requests] (root-answers path args requests ""))
+  ([path args requests env]
   (let [port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
         ask (fn [m] (str "printf '%s\\n' " (pr-str (pr-str m)) " | nc -w 30 127.0.0.1 " port ";"))
-        script (str "mkfifo '" path "-in'; ./seon root"
+        script (str "mkfifo '" path "-in'; " env "./seon root"
                     " --set ':seon.config.root/store-path=" (pr-str path) "' " (str/join " " args)
                     " --set ':seon.config.root/entrance-port=" port "' --set ':seon.config.web/port=0'"
                     " < '" path "-in' > '" path ".log' 2>&1 & R=$!; exec 3>'" path "-in';"
                     " until grep -q 'ROOT LISTENING' '" path ".log' || ! kill -0 $R 2>/dev/null; do sleep 0.1; done;"
                     (apply str (map ask requests))
                     " exec 3>&-; wait $R; echo EXIT $?; cat '" path ".log'")]
-    (:out (sh/sh "zsh" "-c" script :dir "target"))))
+    (:out (ts/binary-sh "zsh" "-c" script :dir "target")))))
 
 (deftest a-root-resumes-a-store-an-earlier-build-wrote
   ;; task seon.root/a-root-resumes-a-store-an-earlier-build-wrote: the store as builds of
-  ;; 2026-10-21 before CONFIG landed left it (next/runs/store-full-20261021, read 17:35): its
+  ;; 2026-10-21 before CONFIG merged left it (next/runs/store-full-20261021, read 17:35): its
   ;; schema lacks the attributes added since (the config's, the model manifest's, the source's), and its main's
   ;; root entity holds a quiescent fact and no boot (their boot fact was refused), which
   ;; seon.task/entity-value could not read. The built root resumes that main and answers a
@@ -131,6 +135,27 @@
         (is (= 2 tasks-2) "the second boot still holds both tasks")
         (is (every? attempts-2 attempts-1) "and the first boot's attempt (it reaps it and starts the next)"))
       (finally (sh/sh "rm" "-rf" path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
+
+(deftest a-refused-wiki-is-a-recorded-problem-and-the-boot-goes-on
+  ;; root's boot loads the wiki (seon.root/wiki-tx) in its boot fact's commit; one link to no
+  ;; section in any page used to end the boot (bin/root start and next with it). Now the
+  ;; refusal is a recorded :platform error my.root/problems shows, and the root boots. A
+  ;; checkout of this test's own: this one's files, its docs/ with one broken page more
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        tmp (str checkout "/target/runs/root-test-wiki-" (random-uuid))
+        path (str tmp "-store")
+        _ (.mkdirs (java.io.File. (str tmp "/docs")))
+        _ (doseq [f (.listFiles (java.io.File. checkout)) :let [n (.getName f)] :when (not (#{"docs" ".git"} n))]
+            (sh/sh "ln" "-s" (.getPath f) (str tmp "/" n)))
+        _ (doseq [f (.listFiles (java.io.File. checkout "docs"))] (sh/sh "cp" (.getPath f) (str tmp "/docs/")))
+        _ (spit (str tmp "/docs/zz-broken.md") "# Broken\n\nIt links to [nowhere](agent.md#nowhere).\n")
+        out (root-answers path [] [{:op :eval :agent "root" :code "(boolean (re-find #\"links to docs/agent.md#nowhere\" (pr-str (my.root/problems sys))))"}]
+                          (str "SEON_CHECKOUT='" tmp "' "))
+        printed (:printed (first (:items (try (edn/read-string {:default tagged-literal} (first (str/split-lines out))) (catch Exception _ nil)))))]
+    (try
+      (is (str/includes? out "ROOT LISTENING") (str "the root boots: " out))
+      (is (= "true" printed) "and the refused wiki is a recorded problem")
+      (finally (sh/sh "rm" "-rf" tmp path (str path "-in") (str path ".log") (str path "-agents"))))))
 
 (deftest every-end-of-a-root-is-a-fact
   ;; task seon.root/every-end-of-a-root-is-a-fact: a clean stop is a fact naming its cause
@@ -231,6 +256,9 @@
         (is (= [0 0] [(:removed-forms two) (:removed-var two)]) "no form or var of the removed function")
         (is (= 2 (:tasks two)) "the tasks are intact")
         (is (= 3 (:retracted (:fact two))) "retracted: the changed function's old form, the removed function's form and its var")
-        (is (= (:fact two) (:fact three)) "the same commit imports nothing: the fact is the second boot's")
+        (is (= (dissoc (:fact two) :boot) (dissoc (:fact three) :boot)) "the same commit imports nothing: the fact is the second boot's, but for whose boot it is")
+        (is (not= (:boot (:fact two)) (:boot (:fact three))) "one source fact per boot")
+        (is (and (nil? (:inputs (:fact two))) (re-find #"binary was built from" (str (:unshared (:fact two)))))
+            "the running binary is not built from this tree: no inputs to key agents' results by, and why")
         (is (= b (:text three))))
       (finally (drop-main! main) (sh/sh "rm" "-rf" tree tasks (str path "-in") (str path ".log"))))))

@@ -5,7 +5,7 @@
   The model edge as data: a provider's reply body read into the completion (task
   seon.model/budgets-are-data-and-spend-is-measured). Run: bin/test seon.model-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [clojure.data.json :as json]
-            [ring-chez.adapter :as adapter] [seon.model :as model]))
+            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.turn :as turn] [seon.contract]))
 
 (defn- chunk-line [m] (str "data: " (json/write-str m) "\n\n"))
 
@@ -85,3 +85,35 @@
     (let [c (model/parse-reply "{\"choices\":[{\"message\":{\"content\":null,\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"eval\",\"arguments\":\"{\\\"code\\\":\\\"(+ 1\"}}]},\"finish_reason\":\"length\"}]}" 1.0 64)]
       (is (= "" (:text c)))
       (is (= [{:id "c" :code "{\"code\":\"(+ 1"}] (:tool-calls c))))))
+
+(defn- usage-of
+  "The completion a one-document reply with usage u reads as."
+  [u]
+  (model/parse-reply (json/write-str {:model "m" :choices [{:message {:content "(+ 1 2)"} :finish_reason "stop"}] :usage u}) 1.0 2048))
+
+(deftest a-reply-reports-its-cache-hit-and-miss-tokens
+  ;; task seon.model/a-reply-records-its-cached-tokens: whether an attempt cost ~$0.01 or
+  ;; ~$0.58 is the provider's cache share, so the completion keeps what the provider reported
+  (is (= [64 56] ((juxt :cache-hit-tokens :cache-miss-tokens)
+                  (usage-of {:prompt_tokens 120 :completion_tokens 3 :prompt_cache_hit_tokens 64 :prompt_cache_miss_tokens 56})))
+      "DeepSeek's hit and miss")
+  (is (= {:cache-hit-tokens 64} (select-keys (usage-of {:prompt_tokens 120 :completion_tokens 3 :prompt_tokens_details {:cached_tokens 64}})
+                                             [:cache-hit-tokens :cache-miss-tokens]))
+      "an OpenAI-compatible cached count; a miss it did not report is absent")
+  (is (= {} (select-keys (usage-of {:prompt_tokens 120 :completion_tokens 3}) [:cache-hit-tokens :cache-miss-tokens]))
+      "unreported is absent, never 0"))
+
+(deftest a-turn-records-what-the-provider-reported
+  (is (= {:seon.turn/tokens 123 :seon.turn/cache-hit-tokens 64 :seon.turn/cache-miss-tokens 56}
+         (turn/usage (usage-of {:prompt_tokens 120 :completion_tokens 3 :prompt_cache_hit_tokens 64 :prompt_cache_miss_tokens 56}))))
+  (is (= {} (turn/usage (usage-of {}))) "a reply without usage records no count"))
+
+
+(deftest no-provider-answers-a-typed-error-never-a-reply
+  ;; root's ruling, 2026-10-22 (brief 1, item 1): a root whose config names no model provider
+  ;; ran the scripted stand-in (a test fixture) as if it were a model; it answers the first
+  ;; turn with the typed :seon.model/no-provider, which ends the attempt naming what to set
+  (let [r (model/complete {:kind :none} {:messages [{:role "user" :content "x"}] :task "demo/t" :turn 0})]
+    (is (= :seon.model/no-provider (:seon.error/type r)))
+    (is (seon.contract/valid? :seon.model/failure r))
+    (is (not (contains? r :tool-calls)) "no reply, scripted or otherwise")))

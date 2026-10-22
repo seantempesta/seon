@@ -1,5 +1,5 @@
 (ns seon.intr
-  "Copied from lane R2's r2.intr (notes/option3-R2-nrepl.md), which replaces T1's throwing
+  "Copied from session R2's r2.intr (notes/option3-R2-nrepl.md), which replaces T1's throwing
   handler: T1's never stopped a form that catches Throwable and left a binding behind.
 
   Stopping a running eval in a single-threaded agent with Jolt's own mechanism,
@@ -39,8 +39,8 @@
         (jolt.host/interrupt! (:token e))
         true)))
 
-;; root's interrupt that found no eval running (between two forms of a request): the
-;; next bounded eval starts stopped. Cleared when the agent answers `interrupt`.
+;; root's interrupt that found no eval running: between two forms of a request, the next
+;; bounded eval starts stopped; idle, it is cleared by the next request (seon.repl/eval-code).
 (defonce ^:private pending (atom false))
 (defn clear-pending! {:malli/schema [:=> [:cat] :boolean]}
   [] (reset! pending false))
@@ -57,13 +57,13 @@
     "(lambda (sig f) (register-signal-handler sig (lambda (s) (when (eq? #t (f)) (set-timer 1)))))"))
 
 ;; Outside any run-interruptible the engine timer has Chez's default handler, which
-;; raises; a kick that lands just outside one (a token set between push and entry)
+;; raises; a kick that arrives just outside one (a token set between push and entry)
 ;; must do nothing there. An agent runs no fibers, so no scheduler handler is replaced.
 (defchecked ^:private quiet-timer* [:=> [:cat] :any] (scm/eval-string "(lambda () (timer-interrupt-handler (lambda () (void))))"))
 
 (defn install!
   "Register root's interrupt handler (a forked child inherits it): it arms the engine timer
-  for one tick when a token was newly set, so the stop lands at once."
+  for one tick when a token was newly set, so the stop merges at once."
   {:malli/schema [:=> [:cat] :boolean]}
   []
   (quiet-timer*)
@@ -76,10 +76,11 @@
   typed :seon.repl/ticks-spent {:ticks n} when its budget ran out."
   {:malli/schema [:=> [:cat [:maybe pos-int?] :seon.host/fn] :any]}
   [ticks thunk]
+  ;; an enclosing eval already stopped, or root's interrupt is pending: this one does not start
+  (when (or @pending (some #(deref (:cause %)) @stack))
+    (throw (ex-info "interrupted by root" {:interrupted true})))
   (let [tok (jolt.host/make-interrupt)
         e {:token tok :cause (volatile! nil)}]
-    ;; an enclosing eval already stopped: this one starts stopped too
-    (when-let [c (or (some #(deref (:cause %)) @stack) (when @pending :interrupted))] (set-token! e c))
     (swap! stack conj e)
     (try (if ticks (jolt.host/run-interruptible tok thunk ticks) (jolt.host/run-interruptible tok thunk))
          (catch Throwable ex

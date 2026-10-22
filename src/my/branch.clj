@@ -1,9 +1,9 @@
 (ns my.branch
-  "The merge agent's verbs (git's words): merge main into this branch, see what is still
+  "The merge agent's functions (git's words): merge main into this branch, see what is still
   unmerged, resolve an entry. The writer does the merge (seon.merge/three-way, the one
-  derivation); this branch sees main's changes only through these verbs."
+  derivation); this branch sees main's changes only through these functions."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.repl :as repl] [seon.merge :as pm] [seon.harvest :as harvest]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.repl :as repl] [seon.merge :as pm] [seon.stage :as stage]))
 
 (defn merge-main!
   "git merge main: stage this runtime onto the branch, then merge main's changes since
@@ -12,7 +12,7 @@
   :conflicts :unmerged} (unmerged: every entry still open, earlier ones included)."
   {:malli/schema [:=> [:cat] [:map [:ok :boolean]]]}
   []
-  (harvest/harvest!)
+  (stage/stage!)
   (let [r (agent/merge-main! #{})
         db (agent/db)]
     (assoc r :unmerged (pm/unmerged db (pm/program db #{})))))
@@ -41,6 +41,6 @@
          (let [cur (ns-name *ns*)]
            (repl/eval-string (str "(in-ns '" nsym ")\n" src "\n(in-ns '" cur ")")))
          (do (ns-unmap (find-ns nsym) (symbol (name sym)))
-             (harvest/harvest!))))
+             (stage/stage!))))
      (agent/transact! (pm/resolve-tx (agent/db) k))
      (unmerged))))

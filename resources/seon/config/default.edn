@@ -1,7 +1,7 @@
-;; Seon's config: every limit, bound, dial and default of the platform, one key each
+;; Seon's config: every limit, bound and default of the platform, one key each
 ;; (owner, 2026-10-21: "the only things that should stay are documented config schemas that we
 ;; are porting from seon if they are relevant"). v1's shape (~/src/seon config/default.edn):
-;; beside each key, its unit, its provenance (an owner ruling, a measurement, the lane that set
+;; beside each key, its unit, its provenance (an owner ruling, a measurement, the worktree session that set
 ;; it) and what happens at its bound.
 ;;
 ;; - Read once with aero when seon.config loads (root's boot; agents and the fork server are
@@ -30,7 +30,7 @@
  :seon.config.root/max-agents 1024
 
  ;; Unit: writer requests from the api in flight. Provenance: f2-final. At the bound the api
- ;; stops reading its entrance (Flow's input filter) and reads only answers, so callers are
+ ;; stops reading its server (Flow's input filter) and reads only answers, so callers are
  ;; pushed back and the writer's answers always have room: the api <-> writer cycle cannot wedge.
  :seon.config.root/api-writes 512
  ;; Unit: messages one api step takes before it applies its graph change (spawns and ends
@@ -51,7 +51,7 @@
  :seon.config.root/standby-every 256
  ;; Unit: threads, Chez's parallel-collector sweepers in root, fixed at boot right after the
  ;; fork server is forked (seon.lib/gc-sweepers!). 0: root collects on the thread that triggers
- ;; it. Provenance: lane THREADS, 2026-10-21: unfixed, Chez kept one per thread a collection
+ ;; it. Provenance: session THREADS, 2026-10-21: unfixed, Chez kept one per thread a collection
  ;; found waiting, so root's count drifted with load (0, 5, 15 across identical runs); A/B at
  ;; 0/2/4/8 gave the same GC real time, GC CPU rising with n, threads 37/39/41/45. At the bound: none.
  :seon.config.root/gc-sweepers 0
@@ -79,9 +79,13 @@
  ;; The durable store's konserve backend: LMDB (one env sync per commit) or the POSIX filestore.
  :seon.config.store/backend :lmdb
  ;; Unit: entity ids per agent. Each agent process mints ids on its own branch from a block
- ;; of this many past the store's highest id at boot (lane L1's lease): ids stay unique
- ;; store-wide with no shared counter. At the bound: the agent's ids would run into the next
- ;; agent's block. Not measured against the largest branch.
+ ;; of this many, reserved for it from root's one counter of the store (the one main's writes
+ ;; mint from) when the writer branches it or its clone (seon.db/lease-block!): agents' ids
+ ;; and main's never meet (docs/storage.md#leases). At the bound the agent's next write is
+ ;; refused :seon.db/lease-spent, nothing applied. Each spawn, resume or clone takes a block:
+ ;; ids stay below tx0 (2^29, about 5.4e8), so a kept store holds about 5,400 blocks of
+ ;; 100,000 (task seon.db/the-id-space-holds-the-blocks-a-store-keeps). Not measured
+ ;; against the largest branch.
  :seon.config.store/eid-lease 100000
  ;; Unit: bytes. LMDB's map size, the store's largest size. At the bound LMDB refuses the
  ;; write (MDB_MAP_FULL, a :seon.writer/refused answer). Provenance: the store's first
@@ -127,6 +131,30 @@
  ;; fails when root, the fork server and :seon.config.agent/max-running agents would exceed it
  ;; (each agent charged the system's measured free-memory drop per agent).
  :seon.config.machine/memory-mb 4096
+ ;; Unit: MB. The most physical footprint one MCP relay (bin/mcp, one per Claude session) may
+ ;; reach: stock perl measured 6.3 MB peak (`/usr/bin/time -l`, 2026-10-22) where the Seon binary
+ ;; it replaced was 729 MB. At the bound: seon.check/mcp-proof fails, so a relay that boots Seon
+ ;; again is red.
+ :seon.config.machine/relay-mb 32
+
+ ;; ==== the check harness (seon.check) =========================================================
+
+ ;; Unit: ms a check's Flow ping (seon.check/ping) waits for a proc to take its control message,
+ ;; which a proc takes between two steps. Provenance: task seon.check/every-wait-is-the-event-it-means
+ ;; (2026-10-22); the pings it replaced waited 1000 and 2000 ms and read a miss as nil or
+ ;; :unknown, and a check beside a full bin/test must not mistake a slow step for a missing
+ ;; proc. At the bound: the proc is recorded {:blocked pid :ping-ms ..} in the check's report
+ ;; and the check that read it fails, naming it.
+ :seon.config.check/ping-ms 10000
+ ;; Unit: ms over which a check measures that something does not happen: a paused agent's
+ ;; request unanswered (lifecycle), a paused proc's flood not taken and a paused writer's
+ ;; commits held (backpressure). Provenance: the windows it replaced were 300, 400 and 500 ms.
+ ;; Load only makes what it measures likelier. At the bound: the measurement is read.
+ :seon.config.check/hold-ms 500
+ ;; Unit: ms after scale's agents are killed over which it measures the memory the kernel
+ ;; returns (:system-free-returned-mb-per-agent, reported, not checked). Provenance: the
+ ;; window it replaced. At the bound: the free memory is read.
+ :seon.config.check/pages-ms 500
  ;; Unit: attempts running at once (v1's :seon.config.agent/max-running, same value and
  ;; reason): four agents beside the user's work fit a 16 GB machine. A ready task beyond it
  ;; waits for an end; 0 starts nothing new while running work finishes. root's start! may
@@ -161,10 +189,15 @@
  :seon.config.agent/sock-buf-bytes 1048576
  ;; Unit: engine ticks (procedure calls and loop back-edges: work done, never time) one form
  ;; an agent's model or an outside agent sends may run (Jolt's run-interruptible tick budget).
- ;; Provenance: lane AGENTS, measured on Jolt 2026-10-21: a tight loop ~4e9 ticks/s, an
+ ;; Provenance: session AGENTS, measured on Jolt 2026-10-21: a tight loop ~4e9 ticks/s, an
  ;; allocating one ~7.5e8, so this stops a runaway form after ~5-25 s of work. At the bound
  ;; the form answers the typed :seon.repl/ticks-spent and the request goes on. 0: none.
  :seon.config.agent/form-ticks 20000000000
+ ;; Unit: functions. How many of a form's costliest contracted functions (seon.profile/top)
+ ;; its reply item and evaluation record keep, each with its exact calls and estimated ms.
+ ;; Provenance: worktree session F2's literal 10, made a key (research row top-fns, 2026-10-22). At the
+ ;; bound the rest are left out of the item; the record says nothing of them.
+ :seon.config.agent/form-top-fns 10
  ;; Unit: engine ticks one proof run (every test of the branch, in its fork) may run. Larger
  ;; than a form's: cost proofs measure large sizes. At the bound the run stops with
  ;; :seon.test/ticks-spent naming the test that was running. 0: none.
@@ -173,11 +206,11 @@
  ;; ==== merges and refinement ==================================================================
 
  ;; Unit: merge attempts at once. They run together only when the definitions they change are
- ;; disjoint (a merge train); 1 is git's one-at-a-time merge queue. Provenance: DECISIONS (root's
- ;; calls on R3's questions): merge trains stay off until one combined test run of all train
+ ;; disjoint (an octopus merge); 1 is git's one-at-a-time merge queue. Provenance: DECISIONS (root's
+ ;; calls on R3's questions): octopus merges stay off until one combined test run of all octopus
  ;; members, the par-200 hang and root memory growth with concurrent merges are fixed. The code
  ;; default had become 8 (b7459c3) with nothing writing the fact (FENCES active bug 1); boot now
- ;; writes this. A train is turned on by stating more here (or on main's root entity).
+ ;; writes this. An octopus merge is turned on by stating more here (or on main's root entity).
  :seon.config.merge/max-running 1
  ;; Unit: conflicts. A merge attempt whose merge of main has more is refused
  ;; (:too-many-conflicts); a task's own :seon.config.merge/max-conflicts wins.
@@ -191,7 +224,7 @@
 
  ;; ==== Seon's own source ======================================================================
 
- ;; Unit: path. The repository whose source is the program (lane LOOP, resources/seon/tasks/
+ ;; Unit: path. The repository whose source is the program (session LOOP, resources/seon/tasks/
  ;; seon.source.edn): main imports its dirs at boot when it holds none of them, and each merge
  ;; that changes them is written to their files and committed on :seon.config.source/branch.
  ;; Default: SEON_SOURCE_ROOT, which bin/root sets to its own checkout (owner, 2026-10-22: no
@@ -200,12 +233,14 @@
  ;; boots): absent, no source is imported and nothing is written. config/local.edn or --set names
  ;; another tree: the main tree's names ../next-merges, so write-back never edits main's files.
  :seon.config.source/root #env SEON_SOURCE_ROOT
- ;; Unit: paths under the root, read in this order. Their .clj files are namespaces (test/'s
- ;; too: the tests are program, and every root imports what the owner's standing root does,
- ;; so a check boots the import the owner's root runs); the .edn files under
- ;; resources/seon/schemas are schema resources (schemas are program: an agent changes one
- ;; with my.schema/register!, and the merge writes it back; owner 2026-10-21).
- :seon.config.source/dirs ["src" "test" "resources/seon/schemas"]
+ ;; Unit: paths under the root, read in this order. Their .clj files are namespaces; the .edn
+ ;; files under resources/seon/schemas are schema resources (schemas are program: an agent
+ ;; changes one with my.schema/register!, and the merge writes it back; owner 2026-10-21).
+ ;; test/ is left out by default: a root importing it re-evaluates every test form at each
+ ;; boot (+5 s a restart, measured 2026-10-22; task seon.source/test-namespaces-built-into-the-binary).
+ ;; The owner's standing root adds it (the main tree's config/local.edn), and
+ ;; seon.source-test/a-restart-catches-up-and-a-new-generation-resumes boots with those dirs.
+ :seon.config.source/dirs ["src" "resources/seon/schemas"]
  ;; Unit: branch. Merges are committed here, never on main and never pushed (owner).
  :seon.config.source/branch "jolt/seon-merges"
  ;; Unit: a git identity. Seon authors and commits its merges (the message names the merged
@@ -225,20 +260,32 @@
  ;; from any checkout is valid in every other. A checkout's store (runs/store) is its own, so
  ;; the store cannot hold them. SEON_TEST_RESULTS moves it (a check's own run).
  :seon.config.source/test-results-dir #or [#env SEON_TEST_RESULTS #seon/checkout "../test-results"]
+ ;; Unit: processes. A proof run's selected tests (bin/prove, bin/test) are dealt, a namespace (with
+ ;; its fixtures) at a time, into this many shards, each a runner process of its own that bin/test
+ ;; starts at once (test-runner/shards), its greens stored by digest when it has run. Provenance:
+ ;; worktree session PROVE 2026-10-22 on the 16 GB M1 target (AGENTS section 8): 4 keeps the machine
+ ;; responsive beside a standing root and other worktree sessions (measured in docs/merging.md#a-merge-runs-what-the-change-reaches).
+ ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected.
+ :seon.config.proofs/jobs 4
 
  ;; ==== effects and the model ==================================================================
 
  ;; Unit: requests one effect owner holds queued (its in-port and its priority queue). Each
  ;; agent has at most one synchronous effect in flight, so beyond the live agents only async
- ;; sends queue. At the bound stand-ins park (back-pressure). Lane FX1.
+ ;; sends queue. At the bound agent procs park (back-pressure). Session FX1.
  :seon.config.fx/buf 1024
 
- ;; Who answers agents' turns. :scripted is the stand-in (no paid call); SEON_PROFILE=deepseek
- ;; (or SEON_AI_PROVIDER=openai-compat) uses the endpoint below. Provenance: owner, DeepSeek is
- ;; the default model (AGENTS.md "The machine"); check the context before any paid call.
- :seon.config.ai/provider #keyword #or [#env SEON_AI_PROVIDER #profile {:default "scripted" :deepseek "openai-compat"}]
- ;; The scripted stand-in's reply function (provider :scripted): replies by task.
- :seon.config.ai/script seon.fixtures/reply
+ ;; Who answers agents' turns. With no profile, none: the first turn answers the typed
+ ;; :seon.model/no-provider and the attempt ends on it (root's ruling 2026-10-22: production
+ ;; ran the scripted test fixture as if it were a model). SEON_PROFILE=deepseek (or
+ ;; SEON_AI_PROVIDER=openai-compat) uses the endpoint below; SEON_PROFILE=scripted, the
+ ;; scripted provider (a test fixture) bin/check and bin/test run under, no paid call: it needs
+ ;; that profile, which states its script (SEON_AI_PROVIDER=scripted alone leaves none, and boot
+ ;; refuses the provider's contract). Provenance: owner,
+ ;; DeepSeek is the default model (AGENTS.md "The machine"); check the context before any paid call.
+ :seon.config.ai/provider #keyword #or [#env SEON_AI_PROVIDER #profile {:default "none" :scripted "scripted" :deepseek "openai-compat"}]
+ ;; The scripted provider's reply function (a test fixture): replies by task.
+ :seon.config.ai/script #profile {:scripted seon.fixtures/reply}
  ;; Unit: the provider's own model name. Provenance: v1 owner ruling 2026-09-10, deepseek-flash
  ;; is the default for every agent.
  :seon.config.ai/model #or [#env SEON_AI_MODEL "deepseek-flash"]
@@ -256,7 +303,7 @@
  ;; (task -> model -> provider -> config); effort is :seon.config.ai/reasoning-effort.
  :seon.config.ai/thinking :disabled
  ;; Unit: model calls in flight at once, cluster-wide: our admission cap, the :model owner's
- ;; lanes (lane FX1). At the bound turns queue in the owner, by priority. Our choice, small:
+ ;; workers (session FX1). At the bound turns queue in the owner, by priority. Our choice, small:
  ;; eight is twice the attempts running at once (:seon.config.agent/max-running 4), so a
  ;; merge's or a judge's call never waits behind the work, while a runaway loop spends at most
  ;; eight calls' tokens at a time. The provider's own ceiling, per account across all keys
@@ -309,7 +356,7 @@
    :seon.ai.model/provider-max-in-flight 500
    :seon.ai.model/source "api-docs.deepseek.com/quick_start/pricing and /rate_limit, read 2026-10-21"}}
  ;; Unit: tokens per second the provider admits, cluster-wide: the :model owner's token bucket
- ;; (lane R3; AIMD on a 429). 0: no bucket.
+ ;; (session R3; AIMD on a 429). 0: no bucket.
  :seon.config.ai/rate 0
  ;; Unit: characters per token, the one estimate the printer and the context size with.
  ;; Provenance: v1's :seon.config.ai/chars-per-token-prior, 17 DeepSeek prompt samples
@@ -335,15 +382,15 @@
  ;; Unit: keys. A keyword-keyed map or set of at most this many shows identity attributes and
  ;; short members first, then alphabetically; a larger one its own seq order (v1).
  :seon.config.render.agent/sort-bound 64
- ;; Unit: characters per printed line (lane P1's printer, matching v1's corpus output).
+ ;; Unit: characters per printed line (session P1's printer, matching v1's corpus output).
  :seon.config.render/width 72
  ;; Unit: tokens for a value shown inside another: a refused argument, a test's expected and
- ;; actual, ex-data (lane P1).
+ ;; actual, ex-data (session P1).
  :seon.config.render/part-budget 256
- ;; Unit: tokens for a form echoed back (lane P1).
+ ;; Unit: tokens for a form echoed back (session P1).
  :seon.config.render/form-budget 600
  ;; Unit: tokens for the context block the model reads (the task, its proofs, what it cites),
- ;; breadth first so every section shows before any one deepens (lane P1). The evaluations and
+ ;; breadth first so every section shows before any one deepens (session P1). The evaluations and
  ;; the history have their own budgets below; none is carved out of another.
  :seon.config.render/context-budget 16000
  ;; Unit: tokens one turn's evaluations show the model, each an equal share, every cut naming
@@ -360,6 +407,15 @@
  ;; turn (owner: "wtf"); 32000 keeps the last several whole turns (a turn is a reply of ~1-3k
  ;; plus its evaluations up to the evals budget), so a turn sends ~20-55k with the block.
  :seon.config.render/history-budget 32000
+ ;; Unit: tokens of one cited var's source in the context (cited in three backticks). Past it
+ ;; the var shows at doc depth with how many tokens were left out and the form that reads them,
+ ;; (clojure.repl/source ns/f). Provenance: v1's must-reads per-function cap, reference-tokens
+ ;; 3000 (audit notes/AUDIT-v1-to-next-2026-10-22.md 2.3).
+ :seon.config.render/reference-tokens 3000
+ ;; Unit: vars. The helpers the context names that the plan does not (:found): program functions
+ ;; the plan's cited vars and the proofs call. 0 shows none. Provenance: R4's k = 5
+ ;; (notes/option3-R4-learning.md 5: 14 of 16 needed helpers in the top 5).
+ :seon.config.render/found 5
  ;; Unit: items. A list shown in part (seon.print/bounded) shows this many, then `+N more:
  ;; where` (docs/render.md#bounded-lists). Provenance: the literals each list carried before
  ;; (render.ui and render.ai, 2026-10-22), kept as they were.
@@ -385,16 +441,32 @@
  ;; Unit: tokens each evaluation's value shows in an agent's history on its page (the render
  ;; proc renders each row once). Provenance: the render proc's literal 400.
  :seon.config.render/history-row-budget 400
+ ;; Unit: tokens of a message or reason shown in one line (root's context, a tile's or card's
+ ;; line, a declared AI render's line); past it the line's cut names the form that reads the
+ ;; rest. Provenance: the literals 40-60 render.ui and render.ai carried (2026-10-22), as one.
+ :seon.config.render/line-budget 50
+ ;; Unit: tokens of a table cell or a stream row's field (a form, a value, a reason); past it the
+ ;; cut says what it omitted and links the page that shows it whole. Provenance: the literals
+ ;; 12-30 render.ui carried (2026-10-22), as one.
+ :seon.config.render/cell-budget 25
+ ;; Unit: events the dashboard's stream keeps (the render proc), newest first; its header says
+ ;; how many older ones it did not keep. Provenance: the render proc's EVENT-CAP 60.
+ :seon.config.render.list/stream 60
+ ;; Unit: points a sparkline keeps, the newest changes. Provenance: the render proc's SERIES-CAP 60.
+ :seon.config.render.list/series 60
+ ;; Unit: evaluations an agent's page shows, newest first (seon.print/bounded names the rest
+ ;; on its branch). Provenance: the render proc's HISTORY-CAP 100.
+ :seon.config.render.list/history 100
 
- ;; ==== the web, the guarantees, the native probe ==============================================
+ ;; ==== the web, instrumentation, the native probe ==============================================
 
- ;; Unit: TCP port on 127.0.0.1 (lane W2). 0 (the shipped value): no dashboard. A checkout's
+ ;; Unit: TCP port on 127.0.0.1 (session W2). 0 (the shipped value): no dashboard. A checkout's
  ;; own config/local.edn names its port (bin/ports writes it: the main tree 7777, worktree k
  ;; 7901+10k, from one registry), so no two checkouts share one (owner, 2026-10-21). bin/check
  ;; and bin/test set SEON_WEB_PORT=0, which local.edn honours, so check steps listen on nothing.
  ;; A taken port leaves the web proc {:listening false} on the health line and boot goes on.
  :seon.config.web/port #long #or [#env SEON_WEB_PORT 0]
- ;; Unit: TCP port on 127.0.0.1: root's entrance (seon.entrance), which bin/mcp and outside
+ ;; Unit: TCP port on 127.0.0.1: root's server (seon.server), which bin/mcp and outside
  ;; agents reach. 0 (the shipped value): `seon root` refuses to serve. config/local.edn names
  ;; the checkout's own (main 7888, worktree k 7900+10k).
  ;; bin/root PORT WEB, bin/mcp PORT and the mcp check set SEON_ENTRANCE_PORT, which local.edn
@@ -406,9 +478,9 @@
  ;; Unset: UTC, which the page's clocks then show.
  :seon.config.web/utc-offset #or [#env SEON_UTC_OFFSET "+0000"]
 
- ;; Contracts and their recording (lane G1): :on, :contracts (wrappers, no recording
+ ;; Contracts and their recording (session G1): :on, :contracts (wrappers, no recording
  ;; transaction: the two measured apart), :off (no wrapper, no recording: the same binary
- ;; measured with the guarantees off; test/r3's benches).
+ ;; measured with instrumentation off; test/r3's benches).
  :seon.config.contract/guarantees #keyword #or [#env SEON_GUARANTEES "on"]
 
  ;; native/probe.c's library (bin/build native): Mach memory probes and qfork. T5 points it at

@@ -35,55 +35,28 @@
   (str "Merge the work of task " work-id " (on this branch) into main: merge main into the branch, resolve every conflict "
        "at the REPL, and make the proofs pass on the combined program."))
 
-(def repl
-  "How every step's agent moves around the system at its REPL: the part of each kind's
-  instructions the kinds share. Every single-backticked form here runs in an agent as
-  written (seon.repl-test/the-template-instructions-run); a double-backticked one is a
-  pattern to fill in."
-  (str/join "\n"
-    ["## Moving around"
-     "You work at a Clojure REPL on your own branch: every change is a form you evaluate, never a file you edit, and you never run git or edit Seon's source files (you may read any file)."
-     "- Your task: `(my.task/current)`; its :seon.task/evidence, when present, is what an earlier attempt measured: `(:seon.task/evidence (my.task/current))`. Your last turn's evaluations in full: `(my.turn/evals)`."
-     "- Find a function by name: `(clojure.repl/apropos \"accumulate\")`; by its docstring: `(clojure.repl/find-doc \"accumulated plan\")`; by the text of its definition: `(my.agent/grep \"accumulated\")` (the program as your branch records it; these verbs are `my.agent/callers`, `my.agent/grep` and `my.schema/forms`)."
-     "- A namespace: `(clojure.repl/dir my.task)` lists its publics; every program namespace: `(my.db/q '[:find [?n ...] :where [_ :ns/name ?n]])`."
-     "- A function: `(clojure.repl/doc seon.task/accumulate)`, `(clojure.repl/source seon.task/accumulate)`; who calls it: `(my.agent/callers 'seon.task/accumulate)`; what it calls: `(my.agent/callees 'seon.task/accumulate)`."
-     "- A schema: `(get (my.schema/forms) :seon.task/task)` is its form; search the keys: `(filter #(clojure.string/includes? (str %) \"seon.task/\") (keys (my.schema/forms)))`."
-     "- A task: `(my.db/q '[:find [?id ...] :where [_ :seon.task/id ?id]])`, then `(seon.task/task (my.db/db) \"demo/t\")` for one (its plan, proofs and needs)."
-     "- Inspect a value: an earlier result by its handle, ``(my.agent/$ :h3)``, or `*1`; `(clojure.pprint/pprint {:a 1})`; `(keys (my.task/current))`."
-     "## Trying a change"
-     "- A new namespace and function, with its Malli contract: `(ns app.workout)`, then `(defn total {:malli/schema [:=> [:cat [:vector :int]] :int]} [xs] (reduce + 0 xs))`."
-     "- An existing function: ``(in-ns 'the.ns)`` then ``(defn f ...)`` redefines it on your branch, and its callers see it at once; when you change an arity, redefine it and its callers in one evaluation."
-     "- A schema: `(my.schema/register! :app.workout/set [:map [:reps :int] [:kg :double]])`; it is judged against every schema and refused as data. To change an existing key, start from its form (`(get (my.schema/forms) :seon.attempt/status)`) and keep every value it holds."
-     "- A proof is a deftest in a test namespace: `(ns app.workout-test (:require [clojure.test :refer [deftest is]] [app.workout :as w]))`, `(deftest total-sums (is (= 6 (w/total [1 2 3]))))`, then run it: `(clojure.test/run-tests 'app.workout-test)`. Assert the behaviour the plan asks for, on data."
-     "- Back to your own scratch namespace, where these verbs are referred unqualified: `(in-ns (symbol (str \"agent.\" (name (:id (my.agent/whoami))))))`. Elsewhere, call them qualified as written here."
-     "## Recording and ending"
-     "- Record what you learn in the plan, so the next step starts from it: `(my.task/update! :seon.task/plan str \"\\n\\nFound: seon.task/accumulate owns the plan's accumulation.\")`."
-     "- A task that is broken or impossible is marked failed with your evidence, and root takes it from there: `(my.task/fail! \"the premise is refuted\" '(seon.task/accumulate {} \"x\"))`."
-     "- When your part is done: `(my.turn/wait)`."]))
-
 (def instructions
-  "What each step's agent does, by task kind (its own work: instructions never flow): the
-  kind's own part, then repl."
-  (update-vals
-    {:merge (str "Main has been merged into your branch (`my.branch/merge-main!`). Resolve each unmerged entry: re-defn the var "
-                 "with the content both sides need, or keep one side with `my.branch/resolve!`: ``(my.branch/resolve! 'ns/var :theirs)``; `(my.branch/unmerged)` lists them. "
-                 "Make every proof pass on the combined program. Record what you learn in the plan, then wait.")
-     :design (str "Turn the plan, however rough (it may be one line from a user: \"store my workouts\"), into a plan an implement step can "
-                  "follow without exploring. Explore first: find the owners of what it touches, their callers, the schemas on the data's "
-                  "path and the library functions that already do the work, and try the idea at the REPL. If an earlier attempt failed, "
-                  "start from its evidence. Leave on this branch: (1) the plan rewritten with `my.task/update!`: what must become true, each owner, "
-                  "library function and schema it touches cited as a backticked fully qualified name, and what you found; (2) each new or changed "
-                  "schema registered; (3) each function's defn with its contract and a stub body; (4) the proofs, written and red, asserting "
-                  "the behaviour on data; (5) for every function whose input grows, a cost proof with `seon.cost/proof`: ``(deftest f-is-one-pass (seon.cost/proof "
-                  "{:of 'ns/f :input 'ns-test/input :n \"what N counts\" :work \"the least work the data needs\" :growth :linear "
-                  ":ops {...} :sizes [1000 10000 100000]}))``, its :ops in the units of `seon.cost/units`, derived from what the work must do, never from a run. "
-                  "Do not write the bodies: that is the implement step's. Then wait.")
-     :implement (str "Implement what the plan describes on this branch until the proofs pass, the cost proofs included: do the "
-                     "work their :work states and no more, at the owners the plan cites. Never loosen a contract or a proof to make it pass; "
-                     "if the plan is wrong, send it back with the form that shows it. Record what you learn in the plan, then wait.")
-     :test (str "Run the proofs and the tests of what you changed. For any behaviour the evidence shows broke, add a deftest in the "
-                "proofs namespace. Make everything pass, record what you learn in the plan, then wait.")}
-    #(str % "\n\n" repl)))
+  "What each step's agent does, by task kind (its own work: instructions never flow). How
+  every agent moves around the system is the help page every agent reads first
+  (seon.context/help-page)."
+  {:merge (str "Main has been merged into your branch (`my.branch/merge-main!`). Resolve each unmerged entry: re-defn the var "
+               "with the content both sides need, or keep one side with `my.branch/resolve!`: ``(my.branch/resolve! 'ns/var :theirs)``; `(my.branch/unmerged)` lists them. "
+               "Make every proof pass on the combined program. Record what you learn in the plan, then wait.")
+   :design (str "Turn the plan, however rough (it may be one line from a user: \"store my workouts\"), into a plan an implement step can "
+                "follow without exploring. Explore first: find the owners of what it touches, their callers, the schemas on the data's "
+                "path and the library functions that already do the work, and try the idea at the REPL. If an earlier attempt failed, "
+                "start from its evidence. Leave on this branch: (1) the plan rewritten with `my.task/update!`: what must become true, each owner, "
+                "library function and schema it touches cited as a backticked fully qualified name, and what you found; (2) each new or changed "
+                "schema registered; (3) each function's defn with its contract and a stub body; (4) the proofs, written and red, asserting "
+                "the behaviour on data; (5) for every function whose input grows, a cost proof with `seon.cost/proof`: ``(deftest f-is-one-pass (seon.cost/proof "
+                "{:of 'ns/f :input 'ns-test/input :n \"what N counts\" :work \"the least work the data needs\" :growth :linear "
+                ":ops {...} :sizes [1000 10000 100000]}))``, its :ops in the units of `seon.cost/units`, derived from what the work must do, never from a run. "
+                "Do not write the bodies: that is the implement step's. Then wait.")
+   :implement (str "Implement what the plan describes on this branch until the proofs pass, the cost proofs included: do the "
+                   "work their :work states and no more, at the owners the plan cites. Never loosen a contract or a proof to make it pass; "
+                   "if the plan is wrong, fail the task with the form that shows it (the help page's Ending). Record what you learn in the plan, then wait.")
+   :test (str "Run the proofs and the tests of what you changed. For any behaviour the evidence shows broke, add a deftest in the "
+              "proofs namespace. Make everything pass, record what you learn in the plan, then wait.")})
 
 (defn- merge-decl
   "Merge task nm (merge-name of its work's) of work declaration d (id wid), on d's branch,
@@ -177,7 +150,7 @@
         tid #(task/task-id tns (str base "-" %))
         branch (task/default-branch (task/task-id tns base))
         ev (evidence a problem)
-        dials (select-keys m [:seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
+        task-config (select-keys m [:seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
         all (task/tasks db)
         ;; the failed task's chain on its branch: it and the tasks there that need it, transitively
         chain (loop [cs #{task}]
@@ -197,8 +170,8 @@
                  needs (assoc :seon.task/needs #{needs})
                  (:seon.task/model m) (assoc :seon.task/model (:seon.task/model m))
                  (:seon.task/budget m) (assoc :seon.task/budget (:seon.task/budget m))
-                 ;; the task's dials carry to its refinements
-                 (seq dials) (assoc :seon.task/config dials)))
+                 ;; the task's config keys carry to its refinements
+                 (seq task-config) (assoc :seon.task/config task-config)))
         decls [(step :design nil) (step :implement (tid "design")) (step :test (tid "implement")) (step :merge (tid "test"))]
         new-merge (tid "merge")
         moved (for [[id t] (sort-by key all) :when (not (chain id)) n (sort (filter chain (:seon.task/needs t)))] [id n])]

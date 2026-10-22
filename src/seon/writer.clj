@@ -1,9 +1,9 @@
 (ns seon.writer
   "The writer: the only d/transact, d/branch! and merge caller, with group commit (drain
   the in-port, one Datahike commit per branch, one flush). From proto/flow f2-final
-  proto.control's writer (lane F2; writer design A, notes/option3-F1-flow.md section 4)."
+  proto.control's writer (session F2; writer design A, notes/option3-F1-flow.md section 4)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
             [seon.program :as program] [seon.merge :as pm] [seon.source :as source] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
@@ -23,7 +23,7 @@
   "seon.merge/three-way of branch b against main, from their merge base over Datahike's
   commit graph (the branch point, or the main the branch last merged), the branch read
   from the store (its agent commits it). data-attrs: the data that merges beside the
-  program (lane M1)."
+  program (session M1)."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.db/branch :seon.merge/data-attrs] [:tuple :seon.host/db :seon.merge/result]]}
   [{:keys [conn]} b data-attrs]
   (let [head (pdb/head conn b)]
@@ -36,7 +36,7 @@
   [why members] (contract/error :seon.writer/refused 'seon.writer/writer-proc why (merge {:ok false} members)))
 
 (defn- merge-refusal
-  "Why branch head (its three-way r against main) cannot merge into main now (lane M1), or
+  "Why branch head (its three-way r against main) cannot merge into main now (session M1), or
   nil: main's program (and declared data) changed since the branch's merge base
   (:seon.merge/behind: a merge task merges main first); the branch has unmerged entries
   (:seon.merge/unmerged); its program calls intern, alter-var-root, eval or load-string,
@@ -63,7 +63,7 @@
       (seq (pm/mutations main (:ours r)))
       (let [ms (pm/mutations main (:ours r))]
         (contract/error :seon.merge/mutation 'seon.writer/merge-branch
-                        (str "the branch's program " (str/join "; " (for [m ms] (str (pr-str (:defines m))
+                        (str "the branch's program " (str/join "; " (for [m ms] (str (sedn/encode (:defines m))
                                                                                     (if (:call m) (str " calls " (:call m)) (str " defines " (:inline-def m) " inside a function body"))))))
                         {:merged? false :tx (:max-tx main) :mutations ms
                          :seon.error/fix "Every definition happens once, where it is defined: vary behaviour through arguments or the environment, and define at the top level, not inside a function."}))
@@ -73,9 +73,9 @@
                       {:merged? false :tx (:max-tx main) :uncontracted uncontracted
                        :seon.error/fix "Declare each function's contract ({:malli/schema [:=> [:cat ...] ...]}) and merge again."}))))
 
-(defn- merge-train
-  "Merge branches into main in ONE commit (a merge train, lane R3; git's octopus merge, every
-  member a parent): each member that holds main's program head and is not refused lands, in
+(defn- octopus-merge
+  "Merge branches into main in ONE commit (an octopus merge, session R3, as git's, every
+  member a parent): each member that holds main's program head and is not refused merges, in
   order; a member whose changes meet an earlier member's is behind (it merges main first).
   Members are judged against the same main, so the commit is each one's clean merge.
   Answers [st {:results [answer per branch, in order]}]."
@@ -89,8 +89,8 @@
                                refusal (if have? (merge-refusal main head r) (refused (str "no branch " b) {:merged? false}))
                                refusal (or refusal
                                            (when (some taken (keys (:ours r)))
-                                             (contract/error :seon.merge/behind 'seon.writer/merge-train
-                                                             "another member of the train changes the same definitions: merge main into the branch first"
+                                             (contract/error :seon.merge/behind 'seon.writer/octopus-merge
+                                                             "another member of the octopus merge changes the same definitions: merge main into the branch first"
                                                              {:merged? false :tx (:max-tx main) :behind (count (filter taken (keys (:ours r))))})))]
                            (-> acc (update :members conj {:branch b :r r :refusal refusal})
                                (cond-> (nil? refusal) (update :taken into (keys (:ours r)))))))
@@ -100,7 +100,7 @@
     (if (empty? changed)
       [st {:results (mapv #(or (:refusal %) {:merged? true :tx (:max-tx main) :datoms 0 :keys 0}) (:members judged))}]
       ;; git: each member's head becomes a parent, so its merge base moves to it
-      (let [rep (d/merge-db conn (set (map :branch ok)) (pm/apply-tx main changed))
+      (let [rep (d/merge-db conn (set (map :branch ok)) (pm/apply-tx main changed) (pdb/tx-meta))
             t (:max-tx (:db-after rep))
             ops (pdb/report->tx rep)]
         [(main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep))
@@ -109,11 +109,11 @@
           :results (mapv #(or (:refusal %) {:merged? true :tx t :keys (count (:ours (:r %))) :files (source/changed-files (:db-after rep) (:ours (:r %)))}) (:members judged))}]))))
 
 (defn- merge-branch
-  "Merge the branch into main (git: only a branch that contains main's head; lane M1): a
-  train of one. Answers [st result]."
+  "Merge the branch into main (git: only a branch that contains main's head; session M1): a
+  octopus merge of one. Answers [st result]."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/branch :seon.merge/data-attrs] [:tuple :seon.writer/state :map]]}
   [st o branch data-attrs]
-  (let [[st r] (merge-train st o [branch] data-attrs)
+  (let [[st r] (octopus-merge st o [branch] data-attrs)
         r1 (first (:results r))]
     [st (cond-> r1 (and (:merged? r1) (:datoms r)) (assoc :datoms (:datoms r)))]))
 
@@ -124,18 +124,27 @@
 
 (defn- commit-batch
   "Group commit of root's writes to main: every queued transaction, one Datahike commit
-  (datahike.writer/transact-batch!), in arrival order. Answers st."
+  (datahike.writer/transact-batch!), in arrival order. A commit the store refuses (its codec
+  has no encoding for a value; main stays as it was, Datahike moves it only after the write)
+  is retried one transaction at a time, so only the one that carried the value is answered
+  refused. Answers st."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile] :seon.writer/state]}
   [st o]
   (if-let [ms (seq (:pend st))]
-    (reduce (fn [st [m rep]]
-              (if-not (map? rep)
-                (do (answer o (:dest m) (refused (step/error-msg rep) {})) st)
-                (let [t (:max-tx (:db-after rep)) ops (pdb/report->tx rep)]
-                  (answer o (:dest m) {:ok true :t t :datoms (count ops)})
-                  (main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep)))))
-            (-> st (dissoc :pend) (update :commits inc))
-            (map vector ms (dw/transact-batch! (:conn st) (mapv (fn [m] {:tx-data (:tx-data m)}) ms))))
+    (let [reps (try (dw/transact-batch! (:conn st) (mapv (fn [m] {:tx-data (:tx-data m) :tx-meta (pdb/tx-meta)}) ms))
+                    (catch Throwable e e))]
+      (cond
+        (sequential? reps)
+        (reduce (fn [st [m rep]]
+                  (if-not (map? rep)
+                    (do (answer o (:dest m) (refused (step/error-msg rep) {})) st)
+                    (let [t (:max-tx (:db-after rep)) ops (pdb/report->tx rep)]
+                      (answer o (:dest m) {:ok true :t t :datoms (count ops)})
+                      (main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep)))))
+                (-> st (dissoc :pend) (update :commits inc))
+                (map vector ms reps))
+        (next ms) (reduce (fn [st m] (commit-batch (assoc st :pend [m]) o)) (dissoc st :pend) ms)
+        :else (do (answer o (:dest (first ms)) (refused (step/error-msg reps) {})) (dissoc st :pend))))
     st))
 
 (defn- other-op
@@ -152,20 +161,27 @@
         exists? (fn [b] (pdb/branch? conn b))
         reply (fn [st r] (answer o dest r) st)]
     (case op
+      ;; answered once the store is clean (at the end of this step, or when the flush that covers
+      ;; its commits comes back): the event that ends the last pending sync (seon.check/idle)
+      :clean (update st :clean-waiters (fnil conj []) dest)
       ;; an agent process committed its branch: a commit the next flush covers
       :agent-commit (-> st (assoc :dirty true) (update :commits inc))
       ;; the agent's branch (new: a pointer to main's head), then its fork: the agent opens
       ;; the branch itself and owns its writes (run-ahead, committed by the agent), and holds
       ;; the task and attempt it works from its first form
+      ;; its block of entity ids is reserved here, from the counter main's writes mint from
       :spawn (let [{:keys [agent branch]} m
-                   resumed? (exists? branch)]
+                   resumed? (exists? branch)
+                   lease (pdb/lease-block! @conn)]
                (when-not resumed? (d/branch! conn main branch))
+               ;; main's commit and t, which this branch starts at and the image it forks from holds
                (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :task (:task m) :attempt (:attempt m) :ns (:ns m) :fd (:fd m)
-                                              :cfg (:cfg st) :lease (:lease m) :resumed resumed?})
+                                              :cfg (:cfg st) :lease lease :resumed resumed?
+                                              :commit (d/commit-id @conn) :t (:max-tx @conn)})
                (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
-                        (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st) :lease (:lease m)}))
-      :merge-train (let [[st r] (merge-train st o (vec (:branches m)) (:data-attrs m #{}))] (reply st r))
+                        (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st) :lease (pdb/lease-block! @conn)}))
+      :octopus-merge (let [[st r] (octopus-merge st o (vec (:branches m)) (:data-attrs m #{}))] (reply st r))
       :merge (if (exists? (:branch m))
                (let [[st r] (merge-branch st o (:branch m) (:data-attrs m #{}))] (reply st r))
                (reply st (refused (str "no branch " (:branch m)) {:merged? false})))
@@ -220,7 +236,7 @@
   "The writer: root's own writes to main (group commit), d/branch!, and every merge into
   main. Each agent process writes its own branch (run-ahead, seon.agent) and tells it
   :agent-commit, so the one flush covers it. In :in (every write request, from the :api
-  and the agents' stand-ins). Out :to-fork-server (main's
+  and the agent procs). Out :to-fork-server (main's
   commits and forks, FIFO), :to-api (answers {:dest :r}, after the batch's flush, and
   {:op :writer :tx-count :p50-ms :commits}), :main (main's commits), :events.
   A closed :in is the end of the flow: everything taken is committed and flushed, then
@@ -228,7 +244,8 @@
   leave when their batch is committed in memory; a dirty store with no notice out tells the
   flusher {:op :dirty :commits n}, and its {:op :flushed :commits n} makes the store clean
   when n is still the commit count, else the flusher is told again. A :flush? request (an
-  outside effect follows) is synced before its answer."
+  outside effect follows) is synced before its answer; a :clean request is answered once the
+  store is clean, its flushes' notices before it."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:conn "main's connection" :cfg "the store config" :to-writer "its in-port channel"}
        :outs {:to-fork-server "commits and forks, FIFO" :to-api "answers {:dest :r}" :main "main's commits"
@@ -274,7 +291,12 @@
        (when (or (seq reqs) (not= f0 (:flushes st 0)))
          (step/out! o :to-api {:op :writer :tx-count (:tx-count st) :batch-ms (profile/ms-since t0) :n-tx n-tx :commits commits
                                :flushes (:flushes st 0)}))
-       [st @o]))))
+       ;; a clean store answers who asked (after the flush's notice above, so it reaches the api
+       ;; first); a store with no durability has nothing to sync
+       (if (and (seq (:clean-waiters st)) (not (and (:durable? st) (:dirty st))))
+         (do (doseq [d (:clean-waiters st)] (answer o d {:ok true :commits (:commits st) :flushes (:flushes st 0) :durable? (boolean (:durable? st))}))
+             [(dissoc st :clean-waiters) @o])
+         [st @o])))))
 
 (defn flusher-proc
   "The group flush: parked until the writer says the store is dirty ({:op :dirty :commits

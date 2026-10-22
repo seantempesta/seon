@@ -23,16 +23,16 @@
   out; a tab that opened or fell behind gets a keyframe composed here from the retained
   fragments, rendering nothing."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.context :as context] [seon.print :as print]
             [seon.config :as config] [seon.step :as step]))
 
-(def EVENT-CAP "Events the stream keeps." 60)
-(def SERIES-CAP "Points a sparkline keeps: the newest changes (a writer batch, a fork, a main commit)." 60)
+(defn- event-cap "Events the stream keeps (:seon.config.render.list/stream)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/stream))
+(defn- series-cap "Points a sparkline keeps, the newest changes (:seon.config.render.list/series)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/series))
 (def RETIRE-MS "An ended agent leaves the grid this long after it ended." 90000)
-(def HISTORY-CAP "Evaluations an agent's page shows." 100)
+(defn- history-cap "Evaluations an agent's page shows (:seon.config.render.list/history)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/history))
 
 ;;; --- requests -------------------------------------------------------------------------
 
@@ -73,7 +73,7 @@
 
 (defn- proc-health-of
   "Each declared root proc (the built system's, once it is) with the defects root's view
-  holds of it: {pid {:defects n :newest message}}; the agents' stand-ins are not procs here."
+  holds of it: {pid {:defects n :newest message}}; agent procs are not counted here."
   {:malli/schema [:=> [:cat :map [:sequential :map]] :map]}
   [st root-errors]
   (let [sysp (:system-p st)
@@ -95,7 +95,7 @@
         agents (:agents v {})]
     {:agents agents
      :order (or (:order st) (order agents now-ms))
-     :writer (:writer n) :server (:server n) :store (:store n)
+     :writer (:writer n) :fork-server (:fork-server n) :store (:store n)
      :boot (:boot v) :root-errors (:root-errors v []) :root-errors-total (:root-errors-total v 0)
      ;; health is what flows: each declared proc with the defects root recorded of it (a
      ;; step that threw); no ping, no beat
@@ -107,8 +107,8 @@
      :tasks (:tasks st {}) :attempts (:attempts st {}) :task-rows (:task-rows st {}) :agent-attempt (:agent-attempt st {})
      ;; one point per change, from the data itself: transactions per writer batch, ms per
      ;; fork, datoms per main commit
-     :series {:tx (vec (take-last SERIES-CAP (map second (get-in v [:writer :recent]))))
-              :fork (vec (take-last SERIES-CAP (get-in v [:stats :fork-ms])))
+     :series {:tx (vec (take-last (series-cap) (map second (get-in v [:writer :recent]))))
+              :fork (vec (take-last (series-cap) (get-in v [:stats :fork-ms])))
               :datoms (:datoms-series st [])}
      :events (:events st []) :events-seen (:ev-seq st 0)
      :web {:tabs (:tabs st 0)}
@@ -147,7 +147,7 @@
           n (count (d/datoms db :eavt))]
       (assoc st :main {:t (:max-tx db) :datoms n :vars (count (d/datoms db :aevt :var/name))}
              ;; one point per main commit this proc read
-             :datoms-series (vec (take-last SERIES-CAP (conj (:datoms-series st []) (double n))))
+             :datoms-series (vec (take-last (series-cap) (conj (:datoms-series st []) (double n))))
              :main-db db :tasks tasks :attempts attempts
              ;; the config in force, as root wrote it on main's root entity (one pull)
              :config (config/from-db db)
@@ -213,13 +213,13 @@
 
 (defn- eval-records
   "The evaluations recorded on branch db for agent id: [[eval-id record] ...], oldest
-  first, the newest HISTORY-CAP, with the count of all of them as its metadata (:total)."
+  first, the newest :seon.config.render.list/history, with the count of all of them as its metadata (:total)."
   {:malli/schema [:=> [:cat :seon.host/db :keyword] [:vector :any]]}
   [db id]
   (let [rows (d/q '[:find ?eid ?r :in $ ?id :where [?a :seon.agent/id ?id] [?e :seon.cluster.eval/agent ?a]
                     [?e :seon.cluster.eval/id ?eid] [?e :seon.cluster.eval/record ?r]] db id)
         key (fn [[eid]] (let [[run ord] (str/split eid #"/")] [(or (some-> run (str/split #"-") last parse-long) 0) (or (parse-long (str ord)) 0)]))]
-    (with-meta (vec (take-last HISTORY-CAP (sort-by key rows))) {:total (count rows)})))
+    (with-meta (vec (take-last (history-cap) (sort-by key rows))) {:total (count rows)})))
 
 (defn- context-of
   "The context the agent's reader last got, exactly as recorded on db (seon.context/recorded:
@@ -232,7 +232,7 @@
                                 (when (:task ag) (str " with the description \"" (:task ag) "\""))
                                 ", not for a task, so no model works it and there is no current-state block;"
                                 " its REPL and evaluations are above. A task's agent is started by the reconciler"
-                                " (my.root/run! sys [task-id]) or attached through root's entrance ({:op :attach :task id}).")}
+                                " (my.root/run! sys [task-id]) or attached through root's server ({:op :attach :task id}).")}
       (nil? r) {:why (str "no context read yet in attempt " (:seon.attempt/id attempt))}
       :else {:text (:text r) :tokens (select/estimate (:text r)) :origin (:origin r) :turn (:turn r)})))
 
@@ -259,9 +259,8 @@
         ctx (if (= ctx-key (:ctx-key z)) (:ctx z)
                 (let [c (context-of (or db (:main-db st)) attempt ag)]
                   (cond-> c
-                    ;; on main: its branch is gone (reading it failed), or not read yet; the
-                    ;; text it read through the door is that text, whichever db
-                    (and (nil? db) (:main-db st) (not= :door (:from c))) (assoc :from (if (:db-error z) :main-gone :main)))))]
+                    ;; on main: its branch is gone (reading it failed), or not read yet
+                    (and (nil? db) (:main-db st)) (assoc :from (if (:db-error z) :main-gone :main)))))]
     [(assoc-in st [:zoom id] (assoc z :rows rows :ctx-key ctx-key :ctx ctx))
      {:agent (ui/ended-as ag id (:agent-attempt st {})) :attempt attempt :task (when attempt (get (:tasks st) (:seon.attempt/task attempt)))
       ;; each proof's task, to tell a blocking red from an allowed one
@@ -321,8 +320,8 @@
           new-rows (map (fn [e] [(:seq e) (h/html (:seon.render/html (ui/event-row e {})))]) evs)
           rows (vec (concat (reverse new-rows) (:event-rows st)))
           st (cond-> st
-               (seq evs) (assoc :events (vec (take EVENT-CAP (concat (reverse evs) (:events st))))
-                                :event-rows (vec (take EVENT-CAP rows))
+               (seq evs) (assoc :events (vec (take (event-cap) (concat (reverse evs) (:events st))))
+                                :event-rows (vec (take (event-cap) rows))
                                 :ev-seq (+ seq0 (count evs)))
                true (assoc :new-events []))
           ;; a stop that arrived before main recorded how the attempt ended: its row again,
@@ -338,7 +337,7 @@
           ev-patch (when (or (seq new-rows) (seq late-frags))
                      {:prepends (if (seq new-rows) [["#events" (apply str (map second (reverse new-rows)))]] [])
                       :frags late-frags
-                      :removes (mapv #(str "ev-" (first %)) (drop EVENT-CAP rows))})
+                      :removes (mapv #(str "ev-" (first %)) (drop (event-cap) rows))})
           st (ordered st now-ms)
           sys (system-value st t0 now-ms)
           ;; root's context: the system's AI face, also a unit of root's layout
@@ -436,11 +435,9 @@
        ;; a pass renders what changed; it never waits. :mixed: one thread of its own for
        ;; its life, joined at stop. :compute futurized each pass onto Jolt's cached pool,
        ;; which grows when a pass is submitted before the last worker is idle again
-       ;; (lane THREADS: root's threads are a declared number)
+       ;; (session THREADS: root's threads are a declared number)
        :workload :mixed
-       :ping-map-fn (fn [st] {:passes (:passes st 0) :views (count (:views st)) :watching (count (:watch st))
-                              :pending (count (:pending st)) :rendered (get-in st [:counts :rendered] 0)
-                              :same (get-in st [:counts :same] 0) :pass-p50-ms (lib/p50 (:pass-ms st))})})
+       :ping-map-fn stats})
   ([args]
    ;; no beat: a pass happens on an event, an api answer or a tab's request, never on a clock
    (let [events (a/chan (a/sliding-buffer 4096))]
@@ -454,6 +451,7 @@
    st)
   ([st in m]
    (let [o (volatile! {})
+         busy? (seq (:pending st))
          st (case in
               :events (if (nil? m) st (ask-state (reduce on-event st (drain m (:events-ch st) 2048)) o))
               :answers (let [[st' kind] (step/answered st (:tag m))
@@ -462,12 +460,14 @@
                          (cond
                            kind (answered st' o kind r)
                            ;; the web proc's calls ([:web var agent form?]) are answered here: shown in
-                           ;; the stream; root's verb (its form) recorded on main with this answer
+                           ;; the stream; root's function (its form) recorded on main with this answer
                            (and (vector? (:tag m)) (= :web (first (:tag m))))
                            (let [[_ v agent form] (:tag m)
-                                 detail (cond err (str "error: " err) (map? r) (print/text (dissoc r :reports) 40))]
+                                 ;; its text as the REPL answers it: the error's render, else the answer's
+                                 ;; (the stream's row cuts it to a cell, seon.render.ui/event-detail)
+                                 detail (if err (render/ai r {}) (:text (render/printed r nil)))]
                              (when form
-                               (let [it (cond-> {:id 0 :tag (if err :err :ret) :form form :origin :ui :printed (or detail (print/text r 40))} err (assoc :err r))]
+                               (let [it (cond-> {:id 0 :tag (if err :err :ret) :form form :origin :ui :printed detail} err (assoc :err r))]
                                  (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx :root (str "root-ui-" (profile/now-ns)) [it] nil)}}
                                                        :route [:render :answers] :tag [:web-record]})))
                              (ask-state (on-event st {:type :ui :call (str v) :agent agent :at-ms (System/currentTimeMillis) :error err :detail detail}) o))
@@ -481,7 +481,10 @@
                                       (do (step/out! o :to-web {:op :keyframe :view (:view m) :html (page-html st (:view m))}) st)
                                       (ask-state (update st :kf-wanted conj (:view m)) o))
                           :context (do (step/out! o :to-web {:op :text :k (:k m) :text (:context st "")}) st)
-                          :stats (do (step/out! o :to-web {:op :text :k (:k m) :text (pr-str (stats st))}) st)
+                          :stats (do (step/out! o :to-web {:op :text :k (:k m) :text (sedn/encode (stats st))}) st)
                           st)
               st)]
+     ;; nothing asked is in flight after what was, or after what went to the tabs: their
+     ;; views are current (the web proc says so on each feed; seon.check/idle waits on it)
+     (when (and (empty? (:pending st)) (or busy? (seq (:to-web @o)))) (step/out! o :to-web {:op :settled}))
      [st @o])))

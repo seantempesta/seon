@@ -1,15 +1,15 @@
-;; The model provider and its effect lanes (v1: seon.config.ai.edn; ported: model,
+;; The model provider and its effect workers (v1: seon.config.ai.edn; ported: model,
 ;; api-key-variable, max-tokens, thinking, chars-per-token-prior; base-url replaces
-;; v1's endpoint (next appends /chat/completions); provider, script, lanes, rate are new).
-{:seon.config.ai/provider [:enum {:seon.config/unit "kind" :description "Who answers agents' turns: the scripted stand-in or an OpenAI-compatible endpoint."} :scripted :openai-compat]
- :seon.config.ai/script [:qualified-symbol {:seon.config/unit "function" :description "The scripted stand-in's reply function (provider :scripted)."}]
+;; v1's endpoint (next appends /chat/completions); provider, script, workers, rate are new).
+{:seon.config.ai/provider [:enum {:seon.config/unit "kind" :description "Who answers agents' turns: none (the first turn answers :seon.model/no-provider), the scripted provider (a test fixture) or an OpenAI-compatible endpoint."} :none :scripted :openai-compat]
+ :seon.config.ai/script [:qualified-symbol {:seon.config/unit "function" :description "The scripted provider's reply function (provider :scripted)."}]
  :seon.config.ai/base-url [:string {:min 1 :seon.config/unit "URL" :description "The OpenAI-compatible endpoint's base URL (/chat/completions is appended)."}]
  :seon.config.ai/model [:string {:min 1 :seon.config/unit "model name" :description "The provider's own model name."}]
  :seon.config.ai/api-key-variable [:string {:min 1 :seon.config/unit "env var name" :description "The NAME of the environment variable holding the key; never the key."}]
  :seon.config.ai/max-tokens [:int {:min 1 :seon.config/unit "tokens" :description "A reply's completion budget, reasoning included."}]
  :seon.config.ai/thinking [:enum {:seon.config/unit "mode" :description "DeepSeek's thinking mode; absent: the provider's default."} :enabled :disabled]
  :seon.config.ai/reasoning-effort [:enum {:seon.config/unit "effort" :description "DeepSeek's reasoning effort; absent: the provider's default."} :low :medium :high]
- :seon.config.ai/max-in-flight [:int {:min 1 :seon.config/unit "calls" :description "Model calls in flight at once, cluster-wide: our admission cap (the :model owner's lanes)."}]
+ :seon.config.ai/max-in-flight [:int {:min 1 :seon.config/unit "calls" :description "Model calls in flight at once, cluster-wide: our admission cap (the :model owner's workers)."}]
  :seon.config.ai/rate [:int {:min 0 :seon.config/unit "tokens/s" :description "Tokens per second the provider admits (the :model owner's bucket). 0: no bucket."}]
  ;; ---- the model manifest (v1's seon.ai.model rows; config/default.edn :seon.config.ai/providers,
  ;; :seon.config.ai/models): by id in the file, an entity each on main
@@ -68,4 +68,4 @@
  :seon.config/resolved [:map [:value :any] [:source :seon.config/source]]
  :seon.config/context [:map [:task {:optional true} [:maybe :map]] [:model {:optional true} [:maybe :string]]]
  :seon.config.ai/chars-per-token-prior [:double {:min 0.5 :seon.config/unit "chars/token" :description "Characters per token the printer and context estimate with."}]
- :seon.config.fx/buf [:int {:min 1 :seon.config/unit "requests" :description "Requests one effect owner holds queued; at the bound stand-ins park."}]}
+ :seon.config.fx/buf [:int {:min 1 :seon.config/unit "requests" :description "Requests one effect owner holds queued; at the bound agent procs park."}]}

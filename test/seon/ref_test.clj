@@ -111,15 +111,15 @@
   (are [span expected] (= expected (kinds nil (str "`" span "`")))
     "app.calc/add" [['app.calc/add nil nil nil :doc]]
     ":seon.task/plan" [[:seon.task/plan nil nil nil :doc]]
-    "docs/DRAGONS.md" [[nil "docs/DRAGONS.md" nil nil :doc]]
-    "docs/DRAGONS.md#physics" [[nil "docs/DRAGONS.md" "physics" nil :doc]]
+    "docs/failure-points.md" [[nil "docs/failure-points.md" nil nil :doc]]
+    "docs/failure-points.md#physics" [[nil "docs/failure-points.md" "physics" nil :doc]]
     "src/seon/repl.clj" [[nil "src/seon/repl.clj" nil nil :doc]]
     "(my.task/current)" []
     "add" []
     "a b c" []
     "3" []
     "(unbalanced" [])
-  (is (= '[app.calc/add] (ref/names "`:seon.task/plan` `docs/DRAGONS.md` `(my.task/current)` `app.calc/add`"))
+  (is (= '[app.calc/add] (ref/names "`:seon.task/plan` `docs/failure-points.md` `(my.task/current)` `app.calc/add`"))
       "the review's reproduction: one var, the form is code")
   (is (= '[app.calc/twice] (ref/names "Use `app.calc/twice`.\n```clojure\n(app.calc/add `x` 1)\n```\nnot `prose with/slash`")))
   (is (= [] (ref/names ""))))
@@ -157,8 +157,10 @@
     (is (= "Flow runs procs, e.g. steps. Each proc is a Var.\nSee `seon.step/step`." (:seon.ref/lead flow)) "the lead paragraph, whole")
     (is (= ["docs/flow.md#workloads" "docs/flow.md#the-api" "docs/flow.md#the-api-1"] (mapv :seon.ref/address (:seon.ref/below flow))))
     (is (= ["create-flow" "start"] (mapv :seon.ref/heading (:seon.ref/below api))) "the headings below, one level")
-    (is (= [[1 24] [6 10] [11 21]] (mapv (juxt :seon.ref/line :seon.ref/end-line) (map #(nth (:seon.ref/sections doc) %) [0 1 2])))
-        "a section's lines run to the next heading of its level or above")
+    (is (= [1 6 11] (mapv :seon.ref/line (map #(nth (:seon.ref/sections doc) %) [0 1 2]))))
+    (is (= ["Flow runs procs, e.g. steps. Each proc is a Var.\nSee `seon.step/step`." nil]
+           (mapv :seon.ref/text (map #(nth (:seon.ref/sections doc) %) [0 2])))
+        "a section's own text stops at its first heading below; one opening straight into a heading has none")
     (is (= ["docs/flow.md#the-api" "docs/flow.md#flow"] (mapv :seon.ref/parent (map #(nth (:seon.ref/sections doc) %) [3 2]))))))
 
 (deftest a-section-opening-with-a-list-has-no-lead

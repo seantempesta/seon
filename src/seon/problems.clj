@@ -1,5 +1,5 @@
 (ns seon.problems
-  "The one read of every problem Seon recorded (lane D2, notes/option3-D2-problems.md):
+  "The one read of every problem Seon recorded (session D2, notes/option3-D2-problems.md):
   main's db value in, one report out, by class. Root and the owner mine tasks from it by
   hand: each row carries what a task-file declaration needs (its producer and owning
   namespace, its evidence as data, the proofs that reproduce it) and the tasks that already
@@ -180,6 +180,7 @@
         by-class (apply merge-with into (map #(attempt-rows db ans %) attempts))
         stuck (mapv #(stuck-row db ans %) (es db :seon.task/stuck))
         failed (mapv #(failed-row db ans %) (es db :seon.task/failure))]
+    ^{:seon.render/schema :seon.problems/report}
     {:t (:max-tx db)
      :classes (merge (into {} (for [c counted-classes :let [rows (vec (sort-by (comp - :count) (get errors c)))]]
                                 [c {:n (reduce + 0 (map :count rows)) :rows rows}]))

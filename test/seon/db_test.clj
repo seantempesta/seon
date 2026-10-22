@@ -45,7 +45,7 @@
   ;; this process takes a lease on a test branch as a forked agent does (seon.db/after-fork!
   ;; -> lease!), mints all but two of its ids, then asks for five more
   (ts/test-branch! (fn [c conn] (let [sid (get-in c [:store :id])
-        lease (pdb/lease-base conn)
+        lease (pdb/lease-block! @conn)
         ceiling (+ lease (cfg/value :seon.config.store/eid-lease))
         notes (fn [n tag] (vec (for [i (range n)] {:note/text (str tag i)})))]
     (try
@@ -90,7 +90,7 @@
   ;; main merged into the branch brings entities minted in a later agent's block (ids past
   ;; this lease's ceiling): this process still mints inside its own block, never above them
   (ts/test-branch! (fn [c conn] (let [sid (get-in c [:store :id])
-        lease (pdb/lease-base conn)
+        lease (pdb/lease-block! @conn)
         ceiling (+ lease (cfg/value :seon.config.store/eid-lease))
         theirs (+ ceiling 10)
         new-id (fn [r] (d/q '[:find ?e . :in $ ?t :where [?e :note/text ?t]] (:db-after r) "mine"))]
@@ -146,6 +146,23 @@
         (d/release c2))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
+(deftest a-kept-store-from-before-the-runtime-attribute-opens
+  ;; the transaction that installs :seon.tx/runtime cannot carry it in its tx-meta: a kept
+  ;; store made before the attribute existed (every store before 2026-10-22) failed to open
+  ;; (bin/check seed: "Bad entity attribute :seon.tx/runtime"). A store on disk of this test's
+  ;; own, the last resort: what is proved is a root's open of a kept store; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-runtime-" (random-uuid))
+        made (pdb/made-cfg (pdb/store-cfg :lmdb path))]
+    (try
+      (d/create-database made)
+      (let [c0 (d/connect made)] (d/transact c0 {:tx-data (vec (remove #(= :seon.tx/runtime (:db/ident %)) pdb/schema))}) (d/release c0))
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
+        (is (= :seon.tx/runtime (:db/ident (get (d/schema @conn) :seon.tx/runtime))) "the attribute is installed")
+        (let [r (d/transact conn {:tx-data [{:note/text "after"}] :tx-meta (pdb/tx-meta)})]
+          (is (string? (:seon.tx/runtime (d/entity @conn (:db/current-tx (:tempids r))))) "and the next transaction names its runtime"))
+        (d/release conn))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
 (deftest a-moved-store-opens
   ;; task seon.db/a-store-opens-where-it-lies: a store was named by (hasch/uuid path) of the
   ;; path it was given (seon.db/store-cfg), so a store renamed or copied (kept runs:
@@ -163,6 +180,7 @@
                            (when-let [c (:conn r)]
                              (is (= made (get-in r [:cfg :store :id])) "named by the id it was made with")
                              (is (= path (get-in r [:cfg :store :path])) "its config names where it lies now")
+                             (is (= path (get-in @c [:config :store :path])) "and so does its db (task seon.db/deref-keeps-the-connections-config)")
                              (is (seq (d/datoms @c :eavt)) "and it holds its data")
                              (d/release c))))]
     (try
@@ -404,3 +422,16 @@
             (str n " per-turn commits wrote " per-turn " bytes; the same turns in one commit wrote " once
                  ", so the bound is " bound " (" (format "%.1f" (/ (double per-turn) bound)) "x over)")))
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest root-mints-past-every-reserved-block-after-a-merge
+  ;; task seon.db/root-mints-in-a-block-of-its-own: an agent's block is reserved from the one
+  ;; counter root's own writes mint from (seon.db/lease-block!), so after a merge brings an
+  ;; entity from inside that block onto main, root's next id still lies past the block
+  (ts/test-branch! (fn [_ conn]
+    (let [lease (pdb/lease-block! @conn)
+          end (+ lease (cfg/value :seon.config.store/eid-lease))
+          merged (d/transact conn [[:db/add (+ lease 5) :note/text "the agent's, merged"]])
+          root (d/transact conn [{:note/text "root's"}])
+          e (d/q '[:find ?e . :where [?e :note/text "root's"]] (:db-after root))]
+      (is (= (+ lease 5) (:max-eid (:db-after merged))) "main holds an id inside the agent's block")
+      (is (>= e end) (str "root's id " e " lies past the block ending at " end))))))

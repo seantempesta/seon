@@ -1,16 +1,17 @@
 (ns test-runner
-  "bin/test: loads every *_test namespace under test/ (or the namespaces named on the
-  command line) and runs its deftests; exits 1 when any fails or errors.
-
-  bin/test --reach [NS ...] (task seon.program/tests-run-by-reach): runs only the tests with
-  no green result at their reach digest (seon.program/reach-digests over src and test
-  imported as program facts), reusing the rest, and stores each result it runs in the
-  results directory every checkout and worktree shares (:seon.config.source/test-results-dir),
-  one <digest>.edn per result. A landing runs it: what the change reaches, minus what is
-  green at its digest."
+  "bin/test's and bin/prove's runner (task seon.proofs/prove-runs-what-a-change-reaches):
+  src and test imported as program facts (program-db), each test keyed by its reach digest
+  (seon.program/reach-digests) and each bin/check step by its functions' (seon.proofs/
+  check-steps); seon.proofs/plan selects what has no green result at its digest.
+    --plan WHAT OUT [--all] [NS ...]  the selection: tests dealt into OUT/shard-<i>.edn, steps
+                                      into OUT/steps (WHAT: tests, checks or both)
+    --shard FILE                      one shard's tests run here, each result stored
+    --store-steps OUT                 the steps bin/check ran green stored at their digests
+  bin/test runs each shard in a process of its own, at once (a fork of this runtime cannot
+  connect to a store: Datahike's connection state does not survive fork)."
   (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
-            [clojure.test :as t] [datahike.api :as d] [seon.config :as config] [seon.db :as pdb]
-            [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.program :as program] [seon.source :as source]))
+            [datahike.api :as d] [seon.config :as config] [seon.db :as pdb]
+            [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.source :as source] [seon.system :as system]))
 
 (defn- test-namespaces
   "Namespace symbols of test/**/*_test.clj(c)."
@@ -23,31 +24,6 @@
 
 ;; ---- reach -----------------------------------------------------------------------------
 
-(defn- git [root & args] (:out (apply sh/sh "git" "-C" root args)))
-
-(defn- env-input?
-  "Is the file at relative path p an input of every test: everything git tracks or would
-  track but the source program facts carry (.clj under src and test), task files (data
-  root loads, no test's code) and prose (.md)?"
-  [p]
-  (not (or (str/ends-with? p ".md")
-           (str/starts-with? p "resources/seon/tasks/")
-           (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))))))
-
-(defn inputs
-  "The checkout at root's inputs that have no program facts: {:env (every test's: env-input?
-  files and every submodule's pin, Jolt's included) :tree (a test reading files: every file
-  and pin)}, digests of relative paths and content, so the same content at another path is
-  the same inputs."
-  [root]
-  (let [pins (filter #(str/starts-with? % "160000 ") (str/split-lines (git root "ls-files" "-s")))
-        files (for [p (sort (str/split (git root "ls-files" "--cached" "--others" "--exclude-standard" "-z") #"\u0000"))
-                    :let [f (io/file root p)] :when (.isFile f)]
-                [p (str p " " (error/digest (slurp f)))])
-        digest #(error/digest (str/join "\n" %))]
-    {:env (digest (concat pins (keep (fn [[p line]] (when (env-input? p) line)) files)))
-     :tree (digest (concat pins (map second files)))}))
-
 (defn program-db
   "A test-store branch's db holding src and test of the checkout at root as program facts
   (seon.source/import-tx: analyzed, not run)."
@@ -56,57 +32,124 @@
         db (ts/test-db)]
     (d/db-with db (source/import-tx db files))))
 
-(defn- green? [r] (and (zero? (:fail r)) (zero? (:error r))))
+(defn- tests-of
+  "{test digest} of the named test namespaces (or every one) on the checkout at root: its
+  program db (program-db) and inputs, and the db itself."
+  [root names]
+  (let [nss (set (if (seq names) (map symbol names) (test-namespaces)))
+        db (program-db root)
+        in (fx/inputs root)]
+    {:db db :inputs in
+     :digests (into {} (filter #(nss (symbol (namespace (key %))))) (program/reach-digests db in))}))
 
-(defn- result-path [dir digest] (str dir "/" digest ".edn"))
+(defn- write!
+  "text to path through the effect owner's file write (seon.fx/write-file); its declared
+  error is thrown with its data, so the run ends red naming the path, never as if written."
+  [path text]
+  (let [r (fx/write-file {:req {:path path :text text}})]
+    (when (:seon.error/type r) (throw (ex-info (str "write failed: " (:seon.error/message r)) r)))
+    r))
 
-(defn plan
-  "Of digests ({test digest}): {:reused {test result} (green at its digest in dir) :run [test
-  ...] (the rest, sorted)}."
-  [digests dir]
-  (let [found (into {} (for [[t dg] digests :let [f (io/file (result-path dir dg))] :when (.isFile f)
-                             :let [r (edn/read-string (slurp f))] :when (green? r)]
-                         [t r]))]
-    {:reused found :run (vec (sort (remove found (keys digests))))}))
+(defn shards
+  "tests (var symbols) dealt into at most jobs shards, a namespace's tests (and so its fixtures)
+  in one, the largest namespace first into the smallest shard; no empty shard."
+  [tests jobs]
+  (let [by-ns (sort-by (juxt (comp - count val) (comp str key)) (group-by (comp symbol namespace) tests))]
+    (vec (remove empty? (reduce (fn [sh [_ ts]] (update sh (apply min-key #(count (sh %)) (range (count sh))) into ts))
+                                (vec (repeat (max 1 (min jobs (count by-ns))) [])) by-ns)))))
 
-(defn run-vars!
-  "Run tests (var symbols), each in its namespace (required), and store each result
-  {:test :digest :pass :fail :error :ms} at its digest in dir. Answers {test result}."
-  [tests digests dir]
-  (.mkdirs (io/file dir))
-  (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
-  (into {} (for [tst tests
-                 :let [rc (ref t/*initial-report-counters*)
-                       t0 (profile/now-ns)
-                       _ (binding [t/*report-counters* rc] (t/test-vars [(resolve tst)]))
-                       r (assoc (select-keys @rc [:pass :fail :error]) :test tst :digest (digests tst)
-                                :ms (quot (- (profile/now-ns) t0) 1000000))]]
-             (do (fx/write-file {:req {:path (result-path dir (digests tst)) :text (sedn/encode r)}})
-                 [tst r]))))
+(defn- write-shards!
+  "tests (var symbols) dealt into :seon.config.proofs/jobs shards (shards), each written as
+  out/shard-<i>.edn ({:tests [...] :digests {test digest} :tree t}, t the planned tree's id)
+  for bin/test to run, one process each (bin/test removes the last run's first). Answers the
+  shard count."
+  [out tests digests tree]
+  (let [sh (shards tests (config/value :seon.config.proofs/jobs))]
+    (doseq [[i ts] (map-indexed vector sh)]
+      (write! (str out "/shard-" i ".edn") (sedn/encode {:tests ts :digests (select-keys digests ts) :tree tree})))
+    (count sh)))
 
-(defn- reach-main
-  "bin/test --reach [NS ...]: the named test namespaces' (or all) tests not green at their
-  digest run; exits 1 when one is red."
-  [names]
+(defn- shard!
+  "One shard bin/test runs (out/shard-<i>.edn): its namespaces required, its tests run
+  (seon.proofs/run-tests!), each test named as it starts and each red one printed (RED); then
+  its greens stored at their digests (seon.proofs/store-greens!), unless the tree changed
+  since the plan was made (an edit during the run: what ran is not what the digests name, so
+  nothing is kept, and the run stays as reported). A shard that dies midway stores nothing.
+  Then SHARD n green m red. Answers the exit status."
+  [file]
+  (let [{:keys [tests digests tree]} (edn/read-string (slurp file))
+        t0 (profile/now-ns)]
+    (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
+    (let [same? (= tree (fx/tree-id (System/getProperty "user.dir")))
+          ran (proofs/run-tests! tests digests
+                                 (fn [x] (cond (:seon.test/started x) (println "started" (:seon.test/started x))
+                                               (:seon.test/output x) (print (:seon.test/output x))
+                                               (:seon.test/report x) nil
+                                               (not (proofs/green? x)) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))
+                                   (flush)))
+          unstored (when same? (proofs/store-greens! #(fx/write-file {:req %}) (config/value :seon.config.source/test-results-dir) ran))
+          red (count (remove proofs/green? (vals ran)))]
+      (when-not same? (println "the tree changed since the plan: no result stored"))
+      (doseq [u unstored] (println "UNSTORED" (:key u) (:message u)))
+      (println (str "SHARD " (count ran) " tests, " (- (count ran) red) " green, " red " red, in "
+                    (quot (- (profile/now-ns) t0) 1000000) " ms"))
+      (if (and (zero? red) (empty? unstored)) 0 1))))
+
+(defn- prove!
+  "The planning part of bin/prove and bin/test (what is tests, checks or both): the tests of
+  names (or all) with no green at their digest (seon.proofs/plan; all? every one) are dealt
+  into out's shards (write-shards!), and the bin/check steps with none are written to out/steps
+  (names, one line) and out/steps.edn ({:tree :digests {step digest}}) for bin/prove to run. Answers the exit
+  status: 1 when a check step names a function the program does not define."
+  [what all? out names]
   (let [root (System/getProperty "user.dir")
         t0 (profile/now-ns)
-        nss (set (if (seq names) (map symbol names) (test-namespaces)))
-        db (program-db root)
-        digests (into {} (filter #(nss (symbol (namespace (key %))))) (program/reach-digests db (inputs root)))
+        {:keys [db inputs digests]} (tests-of root names)
         dir (config/value :seon.config.source/test-results-dir)
-        {:keys [reused run]} (plan digests dir)
-        _ (println (str "reach: " (count digests) " tests, " (count reused) " green at their digest (reused), "
-                        (count run) " to run; digests in " (quot (- (profile/now-ns) t0) 1000000) " ms; results " dir))
-        ran (run-vars! run digests dir)
-        red (sort (keep (fn [[tst r]] (when-not (green? r) tst)) ran))]
-    (println (str "reach: ran " (count ran) ", " (- (count ran) (count red)) " green, " (count red) " red"
+        tests? (not= what "checks") checks? (not= what "tests")
+        {steps :digests missing :missing} (when checks? (proofs/step-digests #(program/reach-digests db inputs %) inputs))
+        cand (merge (when tests? digests) steps)
+        {:keys [run reused]} (proofs/plan nil cand (if all? {} (proofs/greens dir (vec (vals cand)))) #{})
+        {run-steps true run-tests false} (group-by string? run)
+        n (write-shards! out (vec run-tests) digests (:tree inputs))]
+    (println (str "prove: " (count cand) " keys (" (if tests? (count digests) 0) " tests, " (count steps) " check steps), "
+                  (count reused) " green at their digest (reused), " (count run-tests) " tests to run in " (if (seq run-tests) n 0)
+                  " shards, " (count run-steps) " steps to run; selected in " (quot (- (profile/now-ns) t0) 1000000) " ms; results " dir))
+    (when checks?
+      (write! (str out "/steps") (str (str/join " " run-steps) (when (seq run-steps) "\n")))
+      (write! (str out "/steps.edn") (sedn/encode {:tree (:tree inputs) :digests (select-keys steps run-steps)}))
+      (when (seq run-steps) (println "prove: check steps to run:" (str/join " " run-steps)))
+      (when (seq missing)
+        (println "prove: check steps naming a function the program does not define (seon.proofs/check-steps):" (str/join " " missing))))
+    (if (seq missing) 1 0)))
+
+(defn- store-steps!
+  "bin/prove's last part: each step of out/steps.edn that bin/check named green in out/green
+  (check-<step>, space separated) stored green at its digest (seon.proofs/store-greens!),
+  unless the binary the steps ran was built from another tree than the plan's
+  (target/seon.tree, bin/build's): an edit between the plan and the build. A red one is not
+  stored, so it runs again. Answers the exit status: 1 when a step ran red or was not stored."
+  [out]
+  (let [dir (config/value :seon.config.source/test-results-dir)
+        {:keys [tree digests]} (edn/read-string (slurp (str out "/steps.edn")))
+        f (io/file out "green")
+        green (set (when (.isFile f) (map #(str/replace % #"^check-" "") (str/split (str/trim (slurp f)) #"\s+"))))
+        red (sort (remove green (keys digests)))
+        built (let [b (io/file "target/seon.tree")] (when (.isFile b) (str/trim (slurp b))))
+        unstored (if (= tree built)
+                   (proofs/store-greens! #(fx/write-file {:req %}) dir (into {} (for [[k dg] digests :when (green k)] [k {:step k :digest dg :pass 1 :fail 0 :error 0}])))
+                   (do (println "prove: the binary was built from another tree than the plan's: no step stored") []))]
+    (doseq [u unstored] (println "UNSTORED" (:key u) (:message u)))
+    (println (str "prove: " (count (filter green (keys digests))) " check steps green, " (count red) " red"
                   (when (seq red) (str ": " (str/join " " red)))))
-    (System/exit (if (empty? red) 0 1))))
+    (if (and (empty? red) (empty? unstored)) 0 1)))
 
 (defn -main [& args]
-  (if (= "--reach" (first args))
-    (reach-main (rest args))
-    (let [nss (if (seq args) (map symbol args) (test-namespaces))]
-      (apply require nss)
-      (let [{:keys [fail error]} (apply t/run-tests nss)]
-        (System/exit (if (zero? (+ fail error)) 0 1))))))
+  (let [[flag & more] args]
+    (System/exit
+      (case flag
+        ;; --plan WHAT OUT [--all] [NS ...]: bin/test's and bin/prove's planning part
+        "--plan" (let [[what out & names] more all? (= "--all" (first names))]
+                   (prove! what all? out (if all? (rest names) names)))
+        "--shard" (shard! (first more))
+        "--store-steps" (store-steps! (first more))))))
