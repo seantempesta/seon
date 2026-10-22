@@ -466,5 +466,6 @@
   [fd m db0 t-req-ns]
   (agent/init! fd m db0 serve!)
   (agent/hello! t-req-ns (cond-> {:interrupt-ok (:interrupt-ok @agent/state)}
-                            (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))))
+                            (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))
+                            (:misaligned @agent/state) (assoc :misaligned (:misaligned @agent/state))))
   (serve!))

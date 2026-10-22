@@ -18,7 +18,7 @@
             [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
-;; :id :branch :task :attempt (the task and attempt root forked it for, or nil) :fd :conn :db :base (main as this agent forked holding it) :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
+;; :id :branch :task :attempt (the task and attempt root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 (defonce state (atom nil))
 
@@ -114,7 +114,7 @@
     (let [r (d/with (db) tx-data)]
       (swap! state assoc :db (:db-after r))
       {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
-    (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data})]
+    (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta)})]
       ;; past this process's block of entity ids: the typed refusal, nothing applied
       (when-let [e (and (not (map? r)) (pdb/lease-spent r (:lease @state)))] (throw (ex-info (:seon.error/message e) e)))
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
@@ -208,10 +208,12 @@
       {:ok true :applied [] :conflicts [] :t (:max-tx head)}
       (let [theirs (pm/program main data-attrs)
             rep (d/merge-db conn #{main-b} (into (pm/apply-tx head (into {} (for [k (:apply r)] [k (get theirs k)])))
-                                              (pm/unmerged-tx head (:conflicts r) (:max-tx main))))
+                                              (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
+                             (pdb/tx-meta))
             ops (pdb/report->tx rep)
             errs (program/load-changes! (:db-after rep) ops)]
-        (swap! state assoc :db @conn)
+        ;; the merge base is now main's head: what main changed is not this branch's change
+        (swap! state assoc :db @conn :base (pdb/branch-base conn main-b (:branch @state)))
         (send! {:op :committed :t (:max-tx @conn) :txs 1})
         (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:max-tx @conn) :datoms (count ops)}
           (seq errs) (assoc :load-errors errs))))))
@@ -296,7 +298,7 @@
 
 (defn test-vars
   "The tests that judge branch db, as this process holds them: proofs, and every test that
-  reaches a var the branch changed since base (the main it forked from), the changed tests
+  reaches a var the branch changed since base (main at its merge base), the changed tests
   among them (seon.reconcile/done-refusals reads only these). A proof with no var here does
   not run; scratch namespaces (user, ^:scratch) never merge, so their tests never judge."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]] [:sequential :seon.host/var]]}
@@ -522,11 +524,20 @@
                       (hello! t0 {:cloned-from parent})
                       ((:serve @state))))})))))
 
+(defn misaligned
+  "Where a new agent's branch or forked image is not at the commit :spawn branched it from
+  (commit and t: main's head then, seon.writer :spawn): the members of its
+  :seon.agent/fork-misaligned problem, or nil when both are there."
+  {:malli/schema [:=> [:cat :uuid :int :seon.host/db :seon.host/db] [:maybe :map]]}
+  [commit t branch image]
+  (when (or (not= commit (d/commit-id branch)) (not= t (:max-tx image)))
+    {:commit commit :t t :branch-commit (d/commit-id branch) :image-t (:max-tx image)}))
+
 (defn init!
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
-  [fd {id :agent branch :branch task :task attempt :attempt cfg :cfg lease :lease resumed :resumed} db0 serve]
+  [fd {id :agent branch :branch task :task attempt :attempt cfg :cfg lease :lease resumed :resumed commit :commit t :t} db0 serve]
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
   (sock/clofork! fd)
@@ -544,10 +555,11 @@
         store-conn (d/connect (assoc cfg :branch branch))]
     (intr/install!)
     ;; a kept branch, resumed: its program is what this process runs (it was forked holding main's)
-    (let [load-errors (when resumed (program/load-diff! db0 @store-conn))]
+    (let [load-errors (when resumed (program/load-diff! db0 @store-conn))
+          misaligned (when-not resumed (misaligned commit t @store-conn db0))]
      ;; a resumed branch whose program does not load runs main's for what failed: its errors
      ;; go to root with its hello (recorded problems), never dropped (T5b: a stub ran silently)
      (reset! state {:id id :branch branch :task task :attempt attempt :fd fd :conn c :db @store-conn :base db0 :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
-                   :load-errors (vec load-errors)
+                   :load-errors (vec load-errors) :misaligned misaligned
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :nss #{(ns-name nsx)} :interrupt-ok intr-ok :serve serve}))))

@@ -136,6 +136,10 @@
                    (step/out! o :to-api {:op :problem :class :agent :agent id
                                          :error (contract/error :seon.agent/load-failed 'seon.agent/init!
                                                                 (str "its branch's program did not load in " ns ": " message) {:ns ns})}))
+                 (when-let [x (:misaligned m)]
+                   (step/out! o :to-api {:op :problem :class :agent :agent id
+                                         :error (contract/error :seon.agent/fork-misaligned 'seon.agent/init!
+                                                                (str "its branch or image is not at the commit it was branched at: " (pr-str x)) x)}))
                  (step/out! o :events (step/event {:type :ready :agent id :start-ms (:start-ms m)}))
                  (cond-> st (:cloned-from m) (assoc :pid (:pid m))))
       ;; its eval's record could not be written on its branch (its entity ids are spent):
