@@ -72,12 +72,16 @@
         (is (= ["demo/async.md#waiting"] (backlinks db "demo/flow.md#idioms")) "the dropped link is retracted")))))
 
 (deftest one-address-shows-one-text-through-ref-and-docs
-  ;; research row 15: the stored section and the file read now are one parse's, so a section
-  ;; with sections below shows the same own text from either, at every depth
+  ;; research row 15: a section's text at code depth is its own text, the lines after its
+  ;; heading up to the next heading of any level, whichever reader shows it: the expected
+  ;; texts are written here from the page above, not read through either
   (let [db (load-pages (empty-db) pages)
-        doc (seon.ref/parse "demo/flow.md" flow)]
-    (doseq [a ["demo/flow.md#flow" "demo/flow.md#quiet"] depth [:summary :doc :code]]
-      (is (= (dissoc (seon.ref/view doc a depth) :seon.ref/anchor :seon.ref/heading-level :seon.ref/line :seon.ref/parent)
-             (docs/view db a depth))
-          (str a " at " depth)))
-    (is (= "Flow runs procs." (:seon.ref/text (docs/view db "demo/flow.md#flow" :code))) "its own text, its sections below by address")))
+        doc (seon.ref/parse "demo/flow.md" flow)
+        own {"demo/flow.md#flow" "Flow runs procs."
+             "demo/flow.md#idioms" "Park on a channel, as ```app.m0/f0``` does."
+             "demo/flow.md#quiet" "Count messages, with `app.m0/f1`."}]
+    (doseq [[a text] own]
+      (is (= text (:seon.ref/text (seon.ref/view doc a :code))) (str "ref: " a))
+      (is (= text (:seon.ref/text (docs/view db a :code))) (str "docs: " a)))
+    (is (= ["demo/flow.md#idioms" "demo/flow.md#quiet"] (mapv :seon.ref/address (:seon.ref/below (docs/view db "demo/flow.md#flow" :code))))
+        "the sections below by address, not inline")))
