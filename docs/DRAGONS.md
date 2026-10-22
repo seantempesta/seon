@@ -90,8 +90,10 @@ Three rules of the OS and Chez that no code may "fix" by adding a thread or a ch
   ```seon.lib/fork!``` forks), and root has them all before it forks the fork server (its
   boot's first Datahike release runs a `go`). So the child resets them first: the fork in
   `seon.lib`'s `proto-fork-alone` calls Jolt's `jolt-after-fork-child!` (branch
-  `jolt/fork-carriers`), which drops the carrier pool, the timer's started flag, the thread
-  tables and re-arms the watcher, so each starts afresh on first use. Before it, every `go`
+  `jolt/fork-carriers`), which drops the carrier pool, the timer and its pending deadlines (the
+  parent's waiters), the thread tables and the watcher (emptying the child's mask, the default
+  mask Jolt gives every child), so each starts afresh on first use. It starts no thread: a
+  child that forks again (the fork server's double fork) must still be one thread. Before it, every `go`
   that parked in an agent never resumed: a design agent hung making a test store, the judge's
   proof fork would have too, and SIGTERM stayed pending (the step E dry run, 2026-10-22;
   `seon.lib-test/a-forked-child-runs-go-blocks-and-makes-a-store`, Jolt's
