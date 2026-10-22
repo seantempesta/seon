@@ -39,8 +39,8 @@
         (jolt.host/interrupt! (:token e))
         true)))
 
-;; root's interrupt that found no eval running (between two forms of a request): the
-;; next bounded eval starts stopped. Cleared when the agent answers `interrupt`.
+;; root's interrupt that found no eval running: between two forms of a request, the next
+;; bounded eval starts stopped; idle, it is cleared by the next request (seon.repl/eval-code).
 (defonce ^:private pending (atom false))
 (defn clear-pending! {:malli/schema [:=> [:cat] :boolean]}
   [] (reset! pending false))
