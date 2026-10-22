@@ -134,6 +134,14 @@
                   :shown shown :truncated? true :omitted omitted :lines lines :offset at}
            cont (assoc :continuation cont)))))))
 
+(defn line
+  "Text in one line under budget tokens: `prose` with every whitespace run as one space;
+  its cut says what it omitted and, with source (a form that answers the whole text), the
+  form that reads the rest. Root's context and the page's one-line rows (the stream)."
+  {:malli/schema [:function [:=> [:cat :any pos-int?] :string] [:=> [:cat :any pos-int? :any] :string]]}
+  ([s budget] (line s budget nil))
+  ([s budget source] (:text (prose (some-> s str) budget (cond-> {:one-line? true} source (assoc :source source))))))
+
 (defn more
   "What a bounded list leaves: nil when its shown members are all of total, else `+N more`
   and, with where (the form or place that has them all), where they are."
@@ -141,3 +149,14 @@
   [total shown where]
   (when (> total shown)
     (str "+" (- total shown) " more" (when where (str ": " where)))))
+
+(defn bounded
+  "A list shown in part: its first n items, n the config key k's bound (a
+  :seon.config.render.list/* key), and the `more` line saying how many of total (default:
+  all of items) it left and where they are, nil when it left none. Answers [shown more]."
+  {:malli/schema [:function [:=> [:cat [:maybe [:sequential :any]] :keyword [:maybe :string]] [:tuple [:sequential :any] [:maybe :string]]]
+                  [:=> [:cat [:maybe [:sequential :any]] :keyword [:maybe :string] nat-int?] [:tuple [:sequential :any] [:maybe :string]]]]}
+  ([items k where] (bounded items k where (count items)))
+  ([items k where total]
+   (let [shown (vec (take (config/value k) items))]
+     [shown (more total (count shown) where)])))
