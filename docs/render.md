@@ -9,12 +9,17 @@ A cut never drops silently. It says what it omitted and how to read the rest. St
 
 ## Prose
 
-`seon.print/prose` shows text as itself (unquoted) under a token budget, sized as the printer sizes (3.2 characters a token). It fits: the text. It does not: the longest prefix the budget holds, ended after a line break or else a space, then the cut, `…+N chars in M more lines`. Given a source form that answers the whole text, the cut names `(subs source offset)`, which reads exactly the rest (with `:one-line?`, the offset is still the source's). On the page, `seon.render.ui/prose` links the cut to the page that shows the whole, or carries the whole in the cut's title; a printed value's cut names its result handle (`result/h3 at its REPL`).
+`seon.print/prose` shows text as itself (unquoted) under a token budget, sized as the printer sizes (3.2 characters a token, `seon.print.select/estimate`, the one sizer: the history budget and the scripted model's usage count with it too). It fits: the text. It does not: the longest prefix the budget holds, ended after a line break or else a space, then the cut, `…+N chars in M more lines`. Given a source form that answers the whole text, the cut names `(subs source offset)`, which reads exactly the rest (with `:one-line?`, the offset is still the source's). On the page, `seon.render.ui/prose` links the cut to the page that shows the whole, or carries the whole in the cut's title; a printed value's cut names its result handle (`result/h3 at its REPL`).
 
 
 ## Bounded lists
 
-A list shown in part ends with `seon.print/more`: `+N more: where`, where being the form or page that holds them all, e.g. `+7 more: ended, all in (seon.task/attempts (deref (:conn sys)))`. Counts are of the whole, not of what a view kept (root's defects count every one; a card's evaluations count by their ids). Root's context groups what repeats: blocked tasks by what blocks them, contract gaps as one list of names.
+A list shown in part is one call, `seon.print/bounded` (items, its bound's config key, where, and optionally the total): it answers the items shown and the line `seon.print/more` writes, `+N more: where`, where being the form or page that holds them all, e.g. `+7 more: ended, all in (seon.task/attempts (deref (:conn sys)))`. Every bound is a `:seon.config.render.list/*` key in `resources/seon/config/default.edn` (rows, newest, brief, top), never a literal. Counts are of the whole, not of what a view kept (root's defects count every one; a card's evaluations count by their ids). Root's context groups what repeats: blocked tasks by what blocks them (`seon.render.ui/waiting-on`, the page's own), contract gaps as one list of names.
+
+
+## Tiles are data; the context reads the page's derivations
+
+Every dashboard tile is `seon.render.ui/metric-tile` over a map (`:kicker`, `:sub` or `:pill`, `:big` and `:unit`, `:series` and `:tone`, a `:body`, `:rows` of `[dt dd title class]`, `:explain`), so a new tile is a map. The writer, fork server and main are `seon.render.ui/load-tiles`, which root's context (`seon.render.ai`) prints as one line each; its newest events are the stream's own words (`seon.render.ui/event-detail`), a cost verdict's lines are the page's (`seon.render.ui/verdict-lines`), and how an agent is reads `seon.render.ui/shown-status` and `seon.render.ui/ended-as`. A proc's defect line is `seon.render.ui/proc-health`, once: the health tile lists every proc by it, the effect owners among them. One-line text in a row or the context is `seon.print/line`.
 
 
 ## Health is what flows

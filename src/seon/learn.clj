@@ -7,25 +7,18 @@
   delivered it. Stored as one map per attempt (:seon.end/waste on the branch, carried to
   :seon.attempt/waste by the judge). R4's template rows and trials are not ported (next)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.error :as err]))
+  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.error :as err]
+            [seon.reader :as reader]))
 
 (def ^:private explore-ops
   "Heads of forms that look for code instead of changing it."
   '#{source doc dir ns-publics ns-interns ns-map meta resolve find-var all-ns apropos find-doc source-fn})
 
-(defn read-forms
-  "The forms of source text s, read as data (never evaluated); [] when it does not read.
-  The edge of a dragon: text an agent wrote that is not Clojure (docs/DRAGONS.md)."
-  {:malli/schema [:=> [:cat :string] [:vector :any]]}
-  [s]
-  (try (binding [*read-eval* false] (vec (read-string (str "[" s "\n]"))))
-       (catch Exception _ [])))
-
 (defn aliases
   "The aliases the forms of an attempt set up with (require '[ns :as a]): a -> ns."
   {:malli/schema [:=> [:cat [:sequential :string]] [:map-of :symbol :symbol]]}
   [forms]
-  (into {} (for [f forms n (mapcat #(tree-seq coll? seq %) (read-forms f))
+  (into {} (for [f forms n (mapcat #(tree-seq coll? seq %) (or (reader/read-text f 'user) []))
                  :when (and (vector? n) (symbol? (first n)) (some #{:as} n))
                  :let [a (second (drop-while #(not= :as %) n))] :when (symbol? a)]
              [a (first n)])))
@@ -35,7 +28,7 @@
   and the qualified symbols and namespaces it names (aliases resolved through as)."
   {:malli/schema [:=> [:cat :string [:map-of :symbol :symbol]] [:map [:explore? :boolean] [:targets [:set :symbol]]]]}
   [s as]
-  (let [nodes (mapcat #(tree-seq coll? seq %) (read-forms s))
+  (let [nodes (mapcat #(tree-seq coll? seq %) (or (reader/read-text s 'user) []))
         expand (fn [sym] (if-let [a (and (namespace sym) (as (symbol (namespace sym))))] (symbol (str a) (name sym)) sym))]
     {:explore? (boolean (some #(and (seq? %) (symbol? (first %)) (explore-ops (symbol (name (first %))))) nodes))
      :targets (into #{} (comp (filter symbol?) (map expand)

@@ -315,9 +315,9 @@
 
 ;; ---- the account as facts ---------------------------------------------------------------
 
-(defn- ns-tid {:malli/schema [:=> [:cat :symbol] :string]} [nsym] (str "ns " nsym))
+(defn ns-tid {:malli/schema [:=> [:cat :symbol] :string]} [nsym] (str "ns " nsym))
 (defn- var-tid {:malli/schema [:=> [:cat :symbol] :string]} [sym] (str "var " sym))
-(defn- form-tid {:malli/schema [:=> [:cat :string] :string]} [id] (str "form " id))
+(defn form-tid {:malli/schema [:=> [:cat :string] :string]} [id] (str "form " id))
 
 (defn method-key
   "A method's identity: [multi dispatch], printed."
@@ -439,12 +439,6 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]]}
   [db]
   (vec (for [dt (d/datoms db :aevt :form/id) :when (live? db (:e dt))] (form-row db (:e dt)))))
-
-(defn source-of
-  "The exact text of the form that last defined var sym on db, or nil."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :string]]}
-  [db sym]
-  (some-> (eid db :var/name sym) (#(d/entity db %)) :var/form :form/src))
 
 ;; ---- load order ----------------------------------------------------------------------
 

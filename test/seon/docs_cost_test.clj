@@ -1,6 +1,6 @@
 (ns seon.docs-cost-test
-  "Cost proof of loading the wiki: an unchanged reload costs one parse and a few seeks and one
-  pull per section, and writes nothing."
+  "Cost proof of loading the wiki: an unchanged reload costs one parse and a few seeks per
+  section, and writes nothing."
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]]
             [datahike.api :as d] [seon.db :as pdb] [seon.docs :as docs] [seon.cost :as cost]))
@@ -24,9 +24,9 @@
     {:of 'seon.docs/load-tx :input 'seon.docs-cost-test/wiki
      :n "sections in the wiki"
      :work (str "per section of ~90 bytes: its parse (seon.ref's estimate, ~270 ns and ~360 B per byte, the read of "
-                "its one name included: ~25 us, ~32 KB); on db, one AVET seek for its var and one pull of its five "
-                "attributes with two ref joins (~5 seeks at ~17 us and ~33 KB each, seon.db/avet-seek-allocates: ~85 us, "
-                "~165 KB); ~17 contracted calls (own-text, cited, two citation-targets, wanted, update-tx and one eid; the parse's ~3 per inline for its two inlines and the read's 3; the stored-section scan and page split amortized). The stored sections are read once, one datom each, so a section's "
+                "its one name included: ~25 us, ~32 KB); on db, one AVET seek for its var and one EAVT seek per "
+                "stated attribute, five (seon.task/entity-tx) (~5 seeks at ~17 us and ~33 KB each, seon.db/avet-seek-allocates: ~85 us, "
+                "~165 KB); ~17 contracted calls (own-text, cited, two citation-targets, wanted, entity-tx and one eid; the parse's ~3 per inline for its two inlines and the read's 3; the stored-section scan and page split amortized). The stored sections are read once, one datom each, so a section's "
                 "parent and link targets are map lookups. Nothing is written: the answer is []")
      :growth :linear
      :per-n {:ns 110000 :bytes 200000 :calls 17}

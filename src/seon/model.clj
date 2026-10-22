@@ -16,12 +16,7 @@
   Root loads the HTTP transport and JSON before it forks anything, so every agent holds them
   compiled."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [seon.reader :as reader] [jolt.http.core :as http] [clojure.data.json :as json] [seon.config :as config]))
-
-(defn estimate-tokens
-  "Tokens of text, estimated at 4 characters a token (the stand-in's usage)."
-  {:malli/schema [:=> [:cat :string] :int]}
-  [s] (long (Math/ceil (/ (count s) 4.0))))
+  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [seon.reader :as reader] [jolt.http.core :as http] [clojure.data.json :as json] [seon.config :as config] [seon.print.select :as select] [seon.lib :as lib]))
 
 (defn- provider-error
   "The declared failure of a model call, as the one error map: the provider's HTTP 429 is
@@ -46,8 +41,8 @@
   (let [t0 (System/nanoTime)
         text ((resolve script) request)]
     {:text "" :tool-calls [{:id (str "call-" (:turn request)) :code (:text (reader/forgive text))}]
-     :prompt-tokens (reduce + (map (comp estimate-tokens :content) (:messages request)))
-     :completion-tokens (estimate-tokens text) :ms (/ (- (System/nanoTime) t0) 1e6)}))
+     :prompt-tokens (reduce + (map (comp select/estimate :content) (:messages request)))
+     :completion-tokens (select/estimate text) :ms (lib/ms-since t0)}))
 
 (defn- body-text
   "A read response's whole body as text: its buffered bytes, or every piece its pull yields
@@ -211,7 +206,7 @@
             r (http-post (str (str/replace base-url #"/+$" "") "/chat/completions")
                          [["Authorization" (str "Bearer " key)] ["Content-Type" "application/json"] ["Accept" "text/event-stream"]]
                          (json/write-str (request-body provider request)))
-            ms (/ (- (System/nanoTime) t0) 1e6)]
+            ms (lib/ms-since t0)]
         (cond
           (:seon.error/type r) r
           (not= 200 (:status r)) (provider-error (str "HTTP " (:status r)) (:status r)

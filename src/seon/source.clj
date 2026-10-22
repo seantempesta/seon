@@ -186,6 +186,44 @@
                                (map :v (d/datoms db :aevt :schema.file/path))
                                (map :v (d/datoms db :aevt :schema/file)))))))
 
+(def ^:private identities
+  "The attributes that name a program entity (seon.facts.edn)."
+  [:form/id :var/name :ns/name :method/key :impl/key :schema/key :schema.file/path])
+
+(defn replace-tx
+  "The facts that make db's program the files' ({relative path text}), extending import-tx:
+  the import read against db without the forms of the namespaces imported before or now (so
+  each form takes its file's order and lead), and every program entity of those namespaces
+  and of the schema resources that the import no longer makes retracted (a removed
+  function's form and var, a removed file's namespace). Data, and the program of a namespace
+  no file holds, are untouched; a form or schema entry db holds already keeps its
+  :form/source or :schema/source as it is (one merged in is not the binary's). On a db
+  holding no import, this is import-tx."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] :seon.db/tx-data]}
+  [db files]
+  (let [nss (into (set (map :e (d/datoms db :aevt :ns/file)))
+                  (for [[p t] files :when (str/ends-with? p ".clj") :let [n (file-ns t)] :when n
+                        :let [e (:e (first (d/datoms db :avet :ns/name n)))] :when e]
+                    e))
+        forms (set (for [e nss dt (d/datoms db :avet :form/ns e)] (:e dt)))
+        of (fn [a s] (for [dt (d/datoms db :aevt a) :when (s (:v dt))] (:e dt)))
+        owned (concat nss forms (of :var/ns nss) (of :method/form forms) (of :impl/form forms)
+                      (map :e (d/datoms db :aevt :schema/file)) (map :e (d/datoms db :aevt :schema.file/path)))
+        bare-forms (set (for [f forms :let [x (d/entity db f)] :when (not (:form/source x))] (str "form " (:form/id x))))
+        bare-schema (into {} (for [dt (d/datoms db :aevt :schema/file) :let [x (d/entity db (:e dt))] :when (not (:schema/source x))]
+                               [(:schema/key x) (:schema/form x)]))
+        new (into [] (keep (fn [op]
+                             (cond (and (map? op) (:form/source op) (bare-forms (:db/id op))) nil
+                                   (and (map? op) (:schema/key op) (= (:schema/form op) (bare-schema (:schema/key op)))) (dissoc op :schema/source)
+                                   :else op)))
+                  (import-tx (d/db-with db (for [f forms] [:db/retractEntity f])) files))
+        made (set (for [op new :when (map? op) a identities :let [v (get op a)] :when (some? v)] [a v]))]
+    (into (vec (for [e (distinct owned)
+                     :let [x (d/entity db e) k (some #(when-some [v (get x %)] [% v]) identities)]
+                     :when (not (made k))]
+                 [:db/retractEntity e]))
+          new)))
+
 (defn file-text
   "Namespace nsym's file as db holds it: its live forms in their order, each after its
   lead (a form recorded at a REPL has none: a blank line, or nothing before the first),

@@ -15,15 +15,6 @@
                       [:tuple [:= :method] :qualified-symbol :string]
                       [:tuple [:= :impl] :qualified-symbol :string]
                       [:tuple [:= :ns] :symbol]]
- ;; a form's content: its namespace, text, place and what the compiler said it does
- :seon.merge/form [:map [:ns :symbol] [:src :string] [:order :int] [:lead {:optional true} :string]
-                   [:defines [:set :any]] [:declares [:set :qualified-symbol]] [:refs [:set :qualified-symbol]]
-                   [:requires [:set :symbol]] [:banned [:set :qualified-symbol]] [:inline-defs [:set :qualified-symbol]]
-                   [:timeouts {:optional true} [:set :qualified-symbol]] [:catches {:optional true} [:set :string]]]
- ;; a definition's content: the form that last made it (its id and text), and a var's kind and contract
- :seon.merge/entry [:map [:form {:optional true} :string] [:kind {:optional true} :keyword]
-                     [:contract {:optional true} :string] [:doc {:optional true} :string] [:file {:optional true} :string]
-                     [:src {:optional true} :string]]
  ;; a schema entry's content: its form as EDN text and the resource it is written back to
  :seon.merge/schema-entry [:map [:form :string] [:file :string]]
  :seon.merge/program [:map-of :seon.merge/program-key :any]
@@ -43,6 +34,4 @@
  :seon.merge/behind [:and :seon.error/base [:map [:seon.error/type [:enum :seon.merge/behind]]
                                              [:merged? false?] [:behind pos-int?]]]
  :seon.merge/unmerged [:and :seon.error/base [:map [:seon.error/type [:enum :seon.merge/unmerged]]
-                                               [:merged? false?] [:unmerged [:vector :any]]]]
- :seon.merge/merge-main-result [:map [:ok :boolean] [:applied [:vector :seon.merge/program-key]]
-                                 [:conflicts [:vector :seon.merge/conflict]] [:t {:optional true} :int]]}
+                                               [:merged? false?] [:unmerged [:vector :any]]]]}

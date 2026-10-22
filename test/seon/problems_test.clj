@@ -106,7 +106,7 @@
       (is (= r e))))
   (testing "the reply item carries the map, and the stored eval record holds it as data"
     (let [em (agent/error-map (ArithmeticException. "Divide by zero"))
-          it (#'repl/fold-item {"status" ["eval-error"] "seon/error" (pr-str em) "seon/ordinal" 0 "seon/form" "(/ 1 0)"} {} identity)
+          it (first (repl/fold [{"status" ["eval-error"] :tag :err :err em :printed (:seon.error/message em) :id 0 :form "(/ 1 0)"}]))
           rec (some :seon.cluster.eval/record (repl/record-tx :a1 "r1" [it] nil))]
       (is (= em (:err it)))
       (is (= "Divide by zero" (:printed it)))

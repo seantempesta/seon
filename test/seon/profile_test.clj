@@ -52,7 +52,7 @@
       (reset! agent/state {:n 0 :ns (the-ns 'user)})
       (try ((repl/handler) {"op" "eval" "code" "(seon.profile-test/branch 300)" :reply #(vswap! answers conj %)})
            (finally (reset! agent/state old)))
-      (let [items (repl/fold @answers identity)
+      (let [items (repl/fold @answers)
             fns (:fns (first items))]
         (is (= "8955050" (:printed (first items))) (pr-str items))
         (is (= {'seon.profile-test/branch 1 'seon.profile-test/leaf 300}

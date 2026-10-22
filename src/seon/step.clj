@@ -57,6 +57,29 @@
   {:malli/schema [:=> [:cat :seon.host/volatile [:or :keyword [:tuple :keyword :keyword]] :any] :nil]}
   [o port m] (vswap! o update port (fnil conj []) m) nil)
 
+;; Request/answer with credit (AGENTS §3: `{:id :reply}`, exactly one answer), the asker's
+;; side, once for every proc: a request id from the state's :rid counter, and what awaits its
+;; answer under :pending. Root's api, the reconciler and the render proc keep their asks so.
+
+(defn pend
+  "st with v awaiting the answer to a new request id (v nil: an id nothing awaits), and the
+  id. Answers [st' rid]."
+  {:malli/schema [:=> [:cat [:map [:rid :int] [:pending :map]] :any] [:tuple :map :int]]}
+  [st v] (let [rid (inc (:rid st))] [(cond-> (assoc st :rid rid) (some? v) (assoc-in [:pending rid] v)) rid]))
+
+(defn ask
+  "A proc's request to root's api, through the entrance: st with v pending under a new id,
+  and the message for the proc's :to-api port; the api answers {:tag rid :r r} on route
+  ([pid in]). Answers [st' message]."
+  {:malli/schema [:=> [:cat [:map [:rid :int] [:pending :map]] [:tuple :keyword :keyword] :any :map] [:tuple :map :map]]}
+  [st route v req] (let [[st rid] (pend st v)] [st {:op :request :req req :route route :tag rid}]))
+
+(defn answered
+  "The answer to request rid taken: st without rid's entry, and what awaited it (nil: nothing,
+  or answered already). Answers [st' v]."
+  {:malli/schema [:=> [:cat [:map [:pending :map]] :any] [:tuple :map :any]]}
+  [st rid] [(update st :pending dissoc rid) (get-in st [:pending rid])])
+
 (defn event "m stamped with the wall-clock ms, for the events channel." {:malli/schema [:=> [:cat :map] :map]} [m] (assoc m :at-ms (System/currentTimeMillis)))
 
 (defn error-msg "An exception's message, or its class." {:malli/schema [:=> [:cat :seon.host/throwable] :string]} [^Throwable e] (or (ex-message e) (str (type e))))

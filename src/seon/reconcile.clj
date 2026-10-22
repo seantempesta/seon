@@ -496,10 +496,7 @@
   "Send req to the api as this proc's request: the answer comes back on :answers tagged by a
   new request id, which then names step of attempt aid's flight. Answers [st output]."
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.attempt/id :seon.reconcile/step :map] [:tuple :seon.reconcile/state :map]]}
-  [st aid step req]
-  (let [rid (inc (:rid st))]
-    [(-> st (assoc :rid rid) (assoc-in [:pending rid] [aid step]))
-     {:op :request :req req :route [:reconciler :answers] :tag rid}]))
+  [st aid step req] (step/ask st [:reconciler :answers] [aid step] req))
 
 (defn- write
   "A write on main through the writer, as step of aid's flight."
@@ -682,12 +679,10 @@
   [st outs]
   (if (or (:quiet st) (seq outs) (seq (:flights st)) (seq (:live (:idx st))))
     [st outs]
-    (let [rid (inc (:rid st))
-          fact {:t (:t st) :stuck (stuck (:idx st))}]
-      [(-> st (assoc :rid (inc rid) :quiet true :quiescent fact) (assoc-in [:pending rid] [nil :ignored]) (assoc-in [:pending (inc rid)] [nil :ignored]))
-       [{:op :request :route [:reconciler :answers] :tag rid
-         :req {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/quiescent fact}]}}}
-        {:op :request :route [:reconciler :answers] :tag (inc rid) :req {:op :write :req {:op :collect}}}]])))
+    (let [fact {:t (:t st) :stuck (stuck (:idx st))}
+          [st q] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/quiescent fact}]}})
+          [st c] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :collect}})]
+      [(assoc st :quiet true :quiescent fact) [q c]])))
 
 (defn- pass
   "Reconcile main's latest db and start each action whose attempt is not in flight; spawns
@@ -732,8 +727,7 @@
                   st (assoc-in st [:flights attempt] {:act {:op :spawn :attempt attempt :task task :env env} :agent agent})
                   [st o] (request st attempt :tested {:op :tests :id agent})]
               [st {:to-api [o]}])
-     :answers (let [[aid step] (get-in st [:pending (:tag m)])
-                    st (update st :pending dissoc (:tag m))
+     :answers (let [[st [aid step]] (step/answered st (:tag m))
                     [st outs] (if aid (advance st aid step (:r m)) [st []])
                     ;; a flight that ended may free its attempt for the next action
                     [st more] (if (and aid (not (get-in st [:flights aid])) (:db st)) (pass st) [st []])]

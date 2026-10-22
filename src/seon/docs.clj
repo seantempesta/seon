@@ -72,29 +72,9 @@
       (:seon.ref/parent s) (assoc :seon.section/parent (ref (:seon.ref/parent s)))
       (seq targets) (assoc :seon.section/references (into #{} (map (fn [[k x]] (if (= :var k) x (ref x)))) targets)))))
 
-(def ^:private section-pull
-  "A stored section's stated attributes, its refs as entity ids."
-  [:seon.section/heading :seon.section/lead :seon.section/text
-   {:seon.section/parent [:db/id]} {:seon.section/references [:db/id]}])
-
-(defn- update-tx
-  "Make stored section e state exactly want: each attribute that differs asserted, or
-  retracted when want drops it; references element by element."
-  {:malli/schema [:=> [:cat :seon.host/db :int :map] [:vector :any]]}
-  [db e want]
-  (let [now (d/pull db section-pull e)
-        now (cond-> (dissoc now :db/id)
-              (:seon.section/parent now) (update :seon.section/parent :db/id)
-              (:seon.section/references now) (update :seon.section/references #(into #{} (map :db/id) %)))
-        refs-now (:seon.section/references now #{})
-        refs-want (:seon.section/references want #{})]
-    (vec (concat
-           (for [a [:seon.section/heading :seon.section/lead :seon.section/text :seon.section/parent]
-                 :let [v (get want a) old (get now a)]
-                 :when (not= v old)]
-             (if (some? v) [:db/add e a v] [:db/retract e a old]))
-           (for [r (remove refs-want refs-now)] [:db/retract e :seon.section/references r])
-           (for [r (remove refs-now refs-want)] [:db/add e :seon.section/references r])))))
+(def ^:private section-attrs
+  "A stored section's stated attributes (seon.task/entity-tx makes them exactly what its text says)."
+  [:seon.section/heading :seon.section/lead :seon.section/text :seon.section/parent :seon.section/references])
 
 ;; ---- the load ---------------------------------------------------------------------------
 
@@ -125,7 +105,7 @@
              (mapcat (fn [s]
                        (let [a (:seon.section/address s) want (wanted stored s (targets a))]
                          (if-let [e (stored a)]
-                           (update-tx db e want)
+                           (task/entity-tx db e section-attrs want)
                            [(assoc want :db/id a :seon.section/address a)])))
                      parsed)
              (for [[a e] stored :when (and (under? dir a) (not (loaded a)))]
