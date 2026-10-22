@@ -30,10 +30,11 @@
   derived classes, which read the program's names once (a set): their cost follows the
   citations (seon.problems-test/dead-citations-follow-the-citations)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [seon.merge :as pm] [seon.reconcile :as reconcile] [seon.ref :as ref]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [seon.merge :as pm] [seon.ref :as ref]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses "Attempt statuses of a death (:seon.attempt/status)." (:seon.status/failed (contract/properties :seon.attempt/status)))
+(def ^:private finished "Attempt statuses that make its task done (:seon.attempt/status, as seon.reconcile/finished)." (:seon.status/finished (contract/properties :seon.attempt/status)))
 (def attempt-classes [:red :cost :merge :dead :error :waste :task-conflict])
 
 (defn- es
@@ -94,6 +95,18 @@
             :producer nil :owner-ns (symbol (namespace v)) :proofs []
             :evidence {:kind :dead-citation :section a :name v} :answered-by (get-in ans [:signature s] []) :at-ms nil}))))
 
+;; ---- caused: what a branch's own work made true -----------------------------------------
+
+(defn caused
+  "The derived problems the branch at head has that base (its merge base) had not, by
+  message: what the branch's own work broke. The done rule refuses while any is open
+  (seon.reconcile/done-refusals :open-problem), and the agent reads them each turn; an
+  evaluation is never refused (AGENTS: get out of an agent's way)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :string]]}
+  [base head]
+  (let [before (into #{} (map :signature) (dead-citations base {}))]
+    (into (sorted-set) (comp (remove (comp before :signature)) (map :message)) (dead-citations head {}))))
+
 ;; ---- attempts ------------------------------------------------------------------------
 
 (def ^:private attempt-pull
@@ -105,10 +118,10 @@
    {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
 (defn- task-done?
-  "Has task te an attempt finished (`seon.reconcile/finished`)? One avet seek, then its attempts."
+  "Has task te an attempt finished (`finished`)? One avet seek, then its attempts."
   {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
   [db te]
-  (boolean (some #(reconcile/finished (:seon.attempt/status (d/pull db [:seon.attempt/status] (:e %))))
+  (boolean (some #(finished (:seon.attempt/status (d/pull db [:seon.attempt/status] (:e %))))
                  (d/datoms db :avet :seon.attempt/task te))))
 
 ;; ---- stuck and failed tasks ------------------------------------------------------------

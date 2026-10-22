@@ -454,3 +454,18 @@
                :per-n {:ns 90000 :bytes 170000 :calls 6}
                :fixed {:ns 2000000 :bytes 3000000 :calls 5}
                :sizes [10 100 1000]}))
+
+(deftest caused-is-what-the-branch-made-true
+  (let [db0 (ts/test-db)
+        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
+        e (fn [db s] (pdb/eid db :var/name s))
+        none (symbol (namespace v) "no-such-var")
+        page (str "# P\n\nIt reads `" v "`, `" w "` and `" none "`.\n")
+        base (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" page}))]
+    (testing "an unchanged branch caused nothing, though base has a dead citation of its own"
+      (is (= #{} (problems/caused base base))))
+    (testing "the branch deleted v: the citation of v is its; the one base had is not"
+      (let [head (d/db-with base [[:db/retractEntity (e base v)]])]
+        (is (= #{(str "demo/p.md#p cites " v ", which names nothing")} (problems/caused base head)))
+        (testing "and fixed it by restoring v: nothing"
+          (is (= #{} (problems/caused base (d/db-with head [{:var/name v}])))))))))
