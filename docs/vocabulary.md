@@ -15,7 +15,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **api** | root's request server proc: callers' reply promises, routing by request id | `seon.root/api-proc` |
 | **writer** | root's writes to main (group commit), `d/branch!`, and every merge into main | `seon.writer/writer-proc` |
 | **run-ahead write** | an agent's own write on its own branch: applied at once, committed when idle or at a turn's end, and synced by the next group commit | `seon.agent/transact!`, `seon.agent/commit!`, `datahike.writer/apply!` |
-| **lease** | the block of entity ids an agent process mints on its branch | `:seon.config.store/eid-lease`, `seon.db/after-fork!` |
+| **lease** | the block of entity ids an agent process mints on its branch, reserved from root's one counter ([storage](storage.md#leases)) | `:seon.config.store/eid-lease`, `seon.db/lease-block!`, `seon.db/after-fork!` |
 | **group commit** | one Datahike commit per branch per writer step | `seon.writer/commit-batch` |
 | **group commit** | every write is answered when committed in memory; the flusher syncs everything unflushed at once, then again, so commits arriving during a sync share the next one; `:flush?` waits for the sync that covers it | `seon.writer/flusher-proc` |
 | **flusher** | the proc that syncs everything unflushed, continuously, with no window | `seon.writer/flusher-proc` |

@@ -20,7 +20,7 @@ function. The same sites check judges the other laws: [clocks](clocks.md) and [r
 | The model's HTTP call (connect, TLS, the socket dying mid-stream), made by root's `:model` effect workers; streamed over SSE with no clock (a reasoning reply streams for minutes) | `seon.model/http-post` | `:seon.model/transport` (the connection failed or dropped); a non-200 is `:seon.model/provider-error` with the whole body, or `:seon.model/rate-limited` for HTTP 429 with its Retry-After (`seon.model/complete`) | the `:model` owner answers it to the asking agent (a 429 is kept and retried after its wait); `seon.turn/act!` returns it; `seon.turn/work!` ends the attempt `:error` with its message |
 | A model's eval call carries arguments that are not JSON with code text (a reply cut mid-call at its token limit) | `seon.model/call-code` | none: the arguments as they came are the call's code | `seon.turn/act!` evaluates them like any code; the reader repairs what it can and the call's result shows what they held |
 | An agent's authored contract does not compile | `seon.contract/arm!` | `:seon.contract/invalid` | `seon.repl/instrument` puts it on the reply item (`:contract-error`); `seon.program/load-form!` reports it as a load error |
-| An agent mints past its block of entity ids (its lease, `seon.config/EID-LEASE`; Datahike's `next-eid` refuses at the ceiling `seon.db/lease!` set) | `seon.agent/transact!` (`seon.db/lease-spent`); for the record of its evals, `seon.repl/record!` | `:seon.db/lease-spent` (`:lease :ceiling :entity-id`; nothing applied, and a refused transaction keeps the ids it reserved, so the lease stays spent) | the agent's eval (an `:err` item); a record of its evals it cannot write goes to root (`{:op :unrecorded}`) and is recorded on main as its problem |
+| An agent mints past its block of entity ids (its lease: `:seon.config.store/eid-lease` ids reserved by `seon.db/lease-block!`; Datahike's `next-eid` refuses at the ceiling `seon.db/lease!` set) | `seon.agent/transact!` (`seon.db/lease-spent`); for the record of its evals, `seon.repl/record!` | `:seon.db/lease-spent` (`:lease :ceiling :entity-id`; nothing applied, and a refused transaction keeps the ids it reserved, so the lease stays spent) | the agent's eval (an `:err` item); a record of its evals it cannot write goes to root (`{:op :unrecorded}`) and is recorded on main as its problem, and the reply's items say `:unrecorded`; blocks and the restart invariant: [storage](storage.md#leases) |
 | Program code from the db does not load (a form that throws: a missing require target, a reference to a var main does not hold) | `seon.program/load-form!` | `:seon.program/error` (`{:ns :message}`) | root and the fork server put load errors in their view and events; an agent's `:load-errors` |
 | The filesystem refuses a write-back (`:file` effect) | `seon.fx/write-file` | `:seon.fx/io-error` | the asker's `my.fx/call` answer, recorded as `:seon.fx/*` on its branch |
 | Seon's own source cannot be read (the tree root's `src` missing, a file unreadable) at boot (`:source` effect) | `seon.fx/read-source` | `:seon.fx/io-error` | `seon.root/import-source!` records it as root's `:seon.root/source` `:error`; main holds no source and nothing is written back |
@@ -69,7 +69,7 @@ function. The same sites check judges the other laws: [clocks](clocks.md) and [r
 
 ## Physics: who may run threads
 
-Two rules of the OS and Chez that no code may "fix" by adding a thread or a check:
+Three rules of the OS and Chez that no code may "fix" by adding a thread or a check:
 
 - **A process that forks must never have started Chez's parallel-collector sweeper
   threads.** Chez starts them at the first collection that finds another thread, and keeps
@@ -87,6 +87,21 @@ Two rules of the OS and Chez that no code may "fix" by adding a thread or a chec
   not shorten root's small collections), and no collection starts one.
   Unfixed, Chez kept one per thread a collection found waiting, so root's thread count
   drifted by load (0, 5, 15 sweepers across identical runs; session THREADS).
+- **A forked child holds none of its parent's threads, only their bookkeeping.** fork(2)
+  copies the calling thread; Jolt's fiber carriers, its timer and its shutdown watcher are
+  parked when the one active thread forks (a parked thread is not active, so
+  ```seon.lib/fork!``` forks), and root has them all before it forks the fork server (its
+  boot's first Datahike release runs a `go`). So the child resets them first: the fork in
+  `seon.lib`'s `proto-fork-alone` calls Jolt's `jolt-after-fork-child!` (branch
+  `jolt/fork-carriers`), which drops the carrier pool, the timer and its pending deadlines (the
+  parent's waiters), the thread tables and the watcher (emptying the child's mask, the default
+  mask Jolt gives every child), so each starts afresh on first use. It starts no thread: a
+  child that forks again (the fork server's double fork) must still be one thread. Before it,
+  every `go` that parked in an agent never resumed: a design agent hung making a test store,
+  the judge's proof fork would have too, and SIGTERM stayed pending (the step E dry run,
+  2026-10-22; `seon.lib-test/a-forked-child-runs-go-blocks-and-makes-a-store`, Jolt's
+  `test/chez/fork-child-test.clj`). A pool made with `jolt-fiber-pool-make` is not restarted:
+  a forking program makes it after the fork.
 - **On macOS, a descriptor in flight by SCM_RIGHTS can be discarded when other unix
   sockets close**, so the sender keeps its copy until the receiver confirms (the fork
   server's `:in-flight`, a clone's socket kept until `:cloned`). A descriptor rides a frame

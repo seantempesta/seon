@@ -6,7 +6,7 @@
   agent's process and passes Flow's pause, resume and stop on to the agent's own loop.
   From proto/flow f2-final proto.control (session F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.sock :as sock] [seon.step :as step]
+  (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.sock :as sock] [seon.step :as step]
             [jolt.async.remote :as remote] [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
 
 (defn- to-proc!
@@ -80,7 +80,7 @@
            (let [st (cond-> (to-proc! st (assoc msg (if (= kind :clone) :k :id) rid))
                       ;; a clone's socket follows in its own frame once the agent asks
                       (= kind :clone) (assoc :holding rid)
-                      true (update :inflight assoc rid (cond-> (select-keys m [:kind :branch :new :merge-branch :data-attrs :pass-fd :lease])
+                      true (update :inflight assoc rid (cond-> (select-keys m [:kind :branch :new :merge-branch :data-attrs :pass-fd])
                                                          ;; an eval's text, for its :started event
                                                          (string? (:forms msg)) (assoc :form (:forms msg))))
                       ;; what root last asked of it, for a stall or a death (seon.agent/last-op)
@@ -141,15 +141,15 @@
                  (when-let [x (:misaligned m)]
                    (step/out! o :to-api {:op :problem :class :agent :agent id
                                          :error (contract/error :seon.agent/fork-misaligned 'seon.agent/init!
-                                                                (str "its branch or image is not at the commit it was branched at: " (pr-str x)) x)}))
+                                                                (str "its branch or image is not at the commit it was branched at: " (sedn/encode x)) x)}))
                  (step/out! o :events (step/event {:type :ready :agent id :start-ms (:start-ms m)}))
                  (cond-> st (:cloned-from m) (assoc :pid (:pid m))))
       ;; its eval's record could not be written on its branch (its entity ids are spent):
       ;; the typed error is recorded on main as its problem
       :unrecorded (do (step/out! o :to-api {:op :problem :class :agent :agent id :error (:error m)}) st)
       :fd-ready (send-fd! st (:k m) (get-in st [:inflight (:k m) :pass-fd]))
-      :branch-me (let [{:keys [branch lease]} (get-in st [:inflight (:k m)])]
-                   (step/out! o :to-writer {:op :clone-branch :from (:branch st) :branch branch :lease lease
+      :branch-me (let [branch (get-in st [:inflight (:k m) :branch])]
+                   (step/out! o :to-writer {:op :clone-branch :from (:branch st) :branch branch
                                        :dest {:agent id :op :branched :k (:k m)}})
                    st)
       (:cloned :clone-failed)

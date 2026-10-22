@@ -63,7 +63,10 @@
                      :spawning :busy :idle :ended :killed :dead]
  :seon.agent/tx-result [:map [:t :int] [:datoms nat-int?]]
  :seon.agent/item [:map {:seon.render/html seon.render.ui/history-row :description "One form's reply at root: the printed value (the live one stays in the agent under :handle) or the error."}
-                   [:tag [:enum :ret :err]] [:printed {:optional true} [:maybe :string]]]
+                   [:tag [:enum :ret :err]] [:printed {:optional true} [:maybe :string]]
+                   ;; its record was refused (the agent's entity ids are spent): root was told, and its
+                   ;; :seon.db/lease-spent problem is on its way to main (seon.repl/record!)
+                   [:unrecorded {:optional true} :boolean]]
  :seon.agent/items [:vector :seon.agent/item]
  :seon.test/result [:map [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]
  ;; root's API
