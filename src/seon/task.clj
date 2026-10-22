@@ -131,12 +131,14 @@
   [{:seon.root/id :root :seon.root/boot boot :seon.config.agent/max-running max-running}])
 
 (defn attempt-start-tx
-  "An attempt begins: root observed it spawn its agent, given the task's accumulated plan."
-  {:malli/schema [:=> [:cat :seon.attempt/id :seon.task/id :string :keyword :seon.task/env :int :seon.task/plan] [:vector :map]]}
+  "An attempt begins: root observed it spawn its agent (nil: root refused the spawn, and no
+  agent exists), given the task's accumulated plan."
+  {:malli/schema [:=> [:cat :seon.attempt/id :seon.task/id :string [:maybe :keyword] :seon.task/env :int :seon.task/plan] [:vector :map]]}
   [aid task boot agent {:keys [branch model max-turns]} start-ms plan]
   [(cond-> {:seon.attempt/id aid :seon.attempt/task [:seon.task/id task] :seon.attempt/status :running
-            :seon.attempt/boot boot :seon.attempt/agent agent :seon.attempt/start-ms start-ms
+            :seon.attempt/boot boot :seon.attempt/start-ms start-ms
             :seon.attempt/branch branch :seon.attempt/max-turns max-turns :seon.attempt/plan plan}
+     agent (assoc :seon.attempt/agent agent)
      model (assoc :seon.attempt/model model))])
 
 (defn status-tx
@@ -154,12 +156,15 @@
   [conflicts] (mapv pm/conflict-tx conflicts))
 
 (defn end-members
-  "The observed members of an attempt's end (proto.agents/end), as attributes."
+  "The observed members of an attempt's end (proto.agents/end), as attributes: a count
+  nobody measured (no end written, a reply without usage) is absent, never 0."
   {:malli/schema [:=> [:cat :seon.turn/end :int :int] :map]}
   [{:keys [outcome turns model-calls tokens results uncontracted reason conflicts unmerged changed]} end-ms basis-t]
-  (cond-> {:seon.attempt/outcome outcome :seon.attempt/basis-t basis-t :seon.attempt/turns turns :seon.attempt/model-calls model-calls
-           :seon.attempt/tokens tokens :seon.attempt/end-ms end-ms
+  (cond-> {:seon.attempt/outcome outcome :seon.attempt/basis-t basis-t :seon.attempt/end-ms end-ms
            :seon.attempt/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s}))}
+    turns (assoc :seon.attempt/turns turns)
+    model-calls (assoc :seon.attempt/model-calls model-calls)
+    tokens (assoc :seon.attempt/tokens tokens)
     (seq uncontracted) (assoc :seon.attempt/uncontracted (vec uncontracted))
     (seq conflicts) (assoc :seon.attempt/conflicts (conflict-members conflicts))
     (seq unmerged) (assoc :seon.attempt/unmerged (vec unmerged))

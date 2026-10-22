@@ -84,8 +84,9 @@
   (harvest/harvest!)
   (agent/write-end! attempt {:outcome outcome :turns turn :tokens tokens :reason reason :error error
                              :waste (learn/summary (learn/waste (or log []) (learn/final-symbols (or log []))))})
-  (cond-> {:outcome outcome :turns turn :model-calls turn :tokens tokens :results {} :uncontracted #{}
+  (cond-> {:outcome outcome :turns turn :model-calls turn :results {} :uncontracted #{}
            :ms (lib/ms-since t0)}
+    tokens (assoc :tokens tokens)
     reason (assoc :reason reason)))
 
 (defn- observed
@@ -141,7 +142,8 @@
             items (into [] (mapcat :items) calls)
             eval-ms (long (lib/ms-since t2))
             _ (swap! agent/state assoc-in [:turn :evals] items)
-            used (+ (:prompt-tokens c) (:completion-tokens c))
+            ;; unknown when the provider sent no usage: absent, never 0
+            used (when (and (:prompt-tokens c) (:completion-tokens c)) (+ (:prompt-tokens c) (:completion-tokens c)))
             t3 (System/nanoTime)]
         ;; what the model read, as its basis (seon.context/render makes the text from it), what
         ;; it answered and how it stopped, what its forms evaluated to as the next turns show it,
@@ -152,7 +154,8 @@
                                    :seon.turn/reply (:text c) :seon.turn/forms (count items)
                                    :seon.turn/errors (count (filter #(= :err (:tag %)) items))
                                    :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))
-                                   :seon.turn/ms (+ model-ms eval-ms) :seon.turn/tokens used}
+                                   :seon.turn/ms (+ model-ms eval-ms)}
+                            used (assoc :seon.turn/tokens used)
                             (:truncated? c) (assoc :seon.turn/truncated true)
                             (:finish-reason c) (assoc :seon.turn/finish (:finish-reason c))
                             (:model c) (assoc :seon.turn/model (:model c))
@@ -161,7 +164,7 @@
                            :seon.turn/split (cond-> {:context-ms context-ms :model-ms model-ms :eval-ms eval-ms
                                                      :record-ms (long (lib/ms-since t3))}
                                               tests-ms (assoc :tests-ms tests-ms))}])
-        (cond-> (-> (assoc st :turn (inc turn) :tokens (+ tokens used))
+        (cond-> (-> (assoc st :turn (inc turn) :tokens (when (and tokens used) (+ tokens used)))
                     ;; what this turn's block showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
                                                  :shown {'seon.context/resolve-ref (set (map :symbol (:references block)))

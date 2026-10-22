@@ -138,7 +138,7 @@
  ;; (2026-10-18); R4's DeepSeek runs p90 6 with good context. 8 cut ordinary attempts below
  ;; v1's median (owner, 2026-10-21: "8 turn cap? wtf? make sensible defaults!"), so the bound
  ;; sits above the measured p90. Tokens are the paid resource; task
- ;; seon.fences/budgets-are-data-and-spend-is-measured makes them the budget.
+ ;; seon.model/budgets-are-data-and-spend-is-measured makes them the budget.
  :seon.config.agent/max-turns 40
  ;; Unit: path, every agent process's working directory, shared, made at the fork server's boot.
  ;; No repository above it: an agent changes code through its REPL, never git (owner, 2026-10-22:

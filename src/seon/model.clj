@@ -42,7 +42,7 @@
         text ((resolve script) request)]
     {:text "" :tool-calls [{:id (str "call-" (:turn request)) :code (:text (reader/forgive text))}]
      :prompt-tokens (reduce + (map (comp select/estimate :content) (:messages request)))
-     :completion-tokens (select/estimate text) :ms (lib/ms-since t0)}))
+     :completion-tokens (select/estimate text) :estimated true :ms (lib/ms-since t0)}))
 
 (defn- body-text
   "A read response's whole body as text: its buffered bytes, or every piece its pull yields
@@ -144,7 +144,10 @@
                         (:completion_tokens u) (assoc :completion-tokens (long (:completion_tokens u)))
                         max-tokens (assoc :max-tokens max-tokens)))
       (string? text)
-      (cond-> {:text text :prompt-tokens (long (:prompt_tokens u 0)) :completion-tokens (long (:completion_tokens u 0)) :ms ms}
+      ;; a count the provider did not send is absent, never 0: nobody measured it
+      (cond-> {:text text :ms ms}
+        (:prompt_tokens u) (assoc :prompt-tokens (long (:prompt_tokens u)))
+        (:completion_tokens u) (assoc :completion-tokens (long (:completion_tokens u)))
         (seq calls) (assoc :tool-calls calls)
         (get-in j [:choices 0 :finish_reason]) (assoc :finish-reason (str (get-in j [:choices 0 :finish_reason])))
         (string? (:model j)) (assoc :model (:model j))

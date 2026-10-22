@@ -43,7 +43,7 @@
  :seon.attempt/attempt [:map {:seon.render/html seon.render.ui/attempt-row}
                         [:seon.attempt/id :seon.attempt/id] [:seon.attempt/task :seon.task/id]
                         [:seon.attempt/status :seon.attempt/status] [:seon.attempt/boot :string]
-                        [:seon.attempt/agent :keyword] [:seon.attempt/start-ms :int]
+                        [:seon.attempt/agent {:optional true} :keyword] [:seon.attempt/start-ms :int]
                         [:seon.attempt/env :seon.task/env]
                         [:seon.attempt/pid {:optional true} :int]
                         [:seon.attempt/end-ms {:optional true} :int]
@@ -68,7 +68,9 @@
                             [:attempt {:optional true} :seon.attempt/id] [:blocks [:vector :seon.task/id]]]
  ;; the reconciler proc's state, and the steps of a flight
  :seon.reconcile/state [:map [:db :seon.host/db] [:boot :string]
-                        [:rid :int] [:flights :map] [:pending :map] [:quiet {:optional true} :boolean]]
+                        [:rid :int] [:flights :map] [:pending :map] [:quiet {:optional true} :boolean]
+                        ;; tasks root refused to spawn, waiting for main to move for another reason
+                        [:refused {:optional true} [:set :seon.task/id]]]
  ;; the incremental reconciler's index of main (lane R3's seon.reconcile/index): desired and
  ;; observed state by id, the derived needs, depths and claims, and the sets the actions read.
  ;; Its parts agree with each other (every id in a set is an attempt it holds), which a
@@ -91,7 +93,7 @@
                     [:seon.task/branch :seon.task/branch]]
  :seon.attempt/pulled [:map [:seon.attempt/id :seon.attempt/id] [:seon.attempt/task [:map [:seon.task/id :seon.task/id]]]
                        [:seon.attempt/status :seon.attempt/status] [:seon.attempt/boot :string]
-                       [:seon.attempt/agent :keyword] [:seon.attempt/start-ms :int]
+                       [:seon.attempt/agent {:optional true} :keyword] [:seon.attempt/start-ms :int]
                        [:seon.attempt/branch :keyword] [:seon.attempt/max-turns pos-int?]]
  :seon.reconcile/done-input [:map {:closed true}
                              [:proofs :seon.task/proofs] [:results :seon.proof/results]
@@ -134,7 +136,9 @@
                                         [:thinking {:optional true} [:enum :enabled :disabled]]
                                         [:reasoning-effort {:optional true} [:enum :low :medium :high]]]]]
  :seon.model/request [:map [:messages [:vector :seon.model/message]] [:task :seon.task/id] [:turn :int]]
- :seon.model/completion [:map [:text :string] [:prompt-tokens :int] [:completion-tokens :int] [:ms number?]
+ :seon.model/completion [:map [:text :string] [:prompt-tokens {:optional true} :int] [:completion-tokens {:optional true} :int] [:ms number?]
+                         ;; the counts are the stand-in's own estimate (seon.print.select/estimate), not a provider's measure
+                         [:estimated {:optional true} :boolean]
                          ;; the reply's calls of the one tool, eval, in order
                          [:tool-calls {:optional true} [:vector :seon.model/tool-call]]
                          [:truncated? {:optional true} :boolean]
@@ -147,9 +151,9 @@
                              [:status {:optional true} :int] [:body {:optional true} :string]]
  ;; ---- the turn loop's end, as the agent writes it on its branch ----
  :seon.turn/end [:map {:closed true}
-                 [:outcome :seon.attempt/outcome] [:turns :int] [:model-calls :int] [:tokens :int]
+                 [:outcome :seon.attempt/outcome] [:turns {:optional true} :int] [:model-calls {:optional true} :int] [:tokens {:optional true} :int]
                  [:results :seon.proof/results] [:uncontracted [:set :qualified-symbol]]
-                 [:reason {:optional true} :string] [:ms number?]
+                 [:reason {:optional true} :string] [:ms {:optional true} number?]
                  [:conflicts {:optional true} [:vector :seon.merge/conflict]]
                  [:unmerged {:optional true} [:vector :string]]
                  [:changed {:optional true} [:set :string]]]}
