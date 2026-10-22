@@ -1,24 +1,11 @@
-[#:seon.task{:name "a-failure-attaches-a-refinement",
-             :plan
-             "Session AGENTS (in flight). inv1: on any failed attempt the reconciler writes :seon.task/execution :held over the owner's release (:bail, reconcile.clj:366-384, :523-524; merge-train refusal :617-619), nothing re-releases it, and its dependents wait forever with no record. DECISIONS: nothing is held for release or relaunched; a failure attaches new tasks worked by new agents from the improved plan and the evidence. Attach a refinement chain until the task's declared budget (:seon.task/budget, replacing :max-attach) is spent.",
-             :kind :work,
-             :proofs
-             #{seon.reconcile-test/a-capped-attempt-attaches-a-refinement-not-a-hold}}
- #:seon.task{:name "stuck-is-observed-data",
-             :plan
-             "When the budget is spent the task is observed stuck: a derived :seon.task/stuck fact names the attempt, its cause and the tasks it blocks; problem class :stuck; the reconciler reports quiescence positively (:seon.root/quiescent). The harness (t5/src/t5/run.clj) and e2e end on quiescence and print the stuck rows: their time limits and settled? polling go (owner: a timeout that ends a run is a guard).",
-             :kind :work,
-             :needs
-             #{"seon.reconcile/a-failure-attaches-a-refinement"},
-             :proofs
-             #{seon.reconcile-test/a-spent-budget-is-a-stuck-fact-naming-what-it-blocks
-               seon.reconcile-test/quiescence-is-reported-when-nothing-can-move}}
- #:seon.task{:name "a-merged-fix-retries-what-it-failed",
-             :plan
-             "Seen (e5_tasks E5.B, e7 E7.2): with an attempt's failure recorded with the program t it ran on, the readiness rule 'never ran, or failed on a program older than main's' re-runs exactly the failed task and what it blocked when a fix merges (E7.2 re-ran :orphan and :pid-check only). Today a stuck task needs a person (seon.reconcile idx-ready? requires (nil? :seon.task/stuck)). Correct: :seon.attempt records main's program t; a stuck task whose program t is older than main's is ready again (its budget counts attempts per program).",
-             :kind :work,
-             :proofs
-             #{seon.reconcile-test/a-merge-after-a-failure-makes-it-ready}}
+[{:seon.task/name "a-refused-attempt-is-held-for-root"
+  :seon.task/plan "Owner, 2026-10-23 (DECISIONS \"No automatic retries\"): \"no automatic retries, send it to root to decide if it should be retried.\" Today a failed attempt (done rule refused it, its agent died, its merge was refused) attaches a refinement chain while the task's budget lasts (`seon.reconcile/refine?`, `seon.template/attach-tx`: design -> implement -> test -> merge on a fresh branch, the failed chain cancelled), and when the budget is spent records `:seon.task/stuck` (`stuck-tx`, problems class `:stuck`, \"budget spent\"). Correct: a refused attempt holds its task exactly as `my.task/fail!` does (D2(a)): `seon.reconcile/hold-tx` writes `:seon.task/failure` {:reason the refusal, :attempt}, the measured `:seon.task/evidence` (red proofs, conflicts, unmerged keys, the problem) and `:seon.task/execution :held`, and closes the attempt, in one write; `seon.reconcile/task-state` reads it `:failed` and `seon.problems/report` lists it in its `:failed` class, open while held. No task is created. Root (or the owner through root) decides: `my.root/run!` releases it, and the next attempt runs on the same branch (a kept branch, resumed), where `seon.task/onto-tx` puts the task as main holds it, its failure and evidence included, so the agent starts from the evidence; or root edits or cancels it. Deletes: `refine?`, `default-budget`, the `:attach` and `:bail` ops, `stuck-tx`, `seon.template/attach-tx` and its `stem`, `:seon.task/stuck`, `:seon.task/generation`, `:seon.task/budget`, `:seon.task/problem`, `:seon.config.task/budget`, the problems class `:stuck`, and the renders of budget spent; the e2e `stuck` scenario becomes `held` (bin/check's `e2e-held`). Replaces the tasks a-failure-attaches-a-refinement and stuck-is-observed-data, and a-merged-fix-retries-what-it-failed (an automatic retry)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.reconcile-test/a-refused-attempt-holds-its-task-and-creates-none
+                      seon.reconcile-test/a-held-task-shows-its-reason-among-the-problems
+                      seon.reconcile-test/roots-release-runs-again-on-the-same-branch-with-the-evidence
+                      seon.reconcile-test/an-idle-system-does-nothing-after-a-refusal
+                      seon.task-test/a-released-branch-takes-its-task-from-main}}
  #:seon.task{:name "a-check-step-is-a-task",
              :plan
              "Seen (e7_one_system): bin/check's steps as task values (:needs, an argv, :exclusive for timed steps), the same pure actions/stuck functions, and one effect owner :fx/proc (E4's child owner: workers are the concurrency limit, an exclusive step runs alone) ran 9 steps in 1.46 s against 1.9 s serial, kept the durable-write -> read chain, never overlapped the exclusive steps, ended on the quiet event, and named the red step with what it blocks. Correct: steps in resources/seon/tasks/seon.check.edn as tasks of kind :check with :seon.task/argv; actions for :check is :run to [:fx/proc :in]; the outcome is the attempt's end facts (exit, signal, output path). One machinery for agents and checks. A first implementation on an older base is jolt/runner b4ea59d (`git show b4ea59d`: :check tasks with :seon.task/argv, an :fx/proc child owner, check-run ending on the quiet fact, deftests seon.reconcile-test/a-red-check-step-blocks-only-its-dependents, a-check-step-passes-by-its-own-expected-exit, seon.fx-admit-test/an-exclusive-child-runs-alone); its first full run found seon.reconcile/a-refused-flight-write-is-not-ignored and seon.db/dead-readers-are-cleared-at-open.",
