@@ -54,7 +54,7 @@
 (deftest the-writers-transactions-name-their-runtime
   ;; task seon.db/each-commit-names-its-runtime: main's transactions through the writer's group
   ;; commit carry the runtime that made them, and the fork server's replica applies it too
-  (pdb/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
         [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
         fp (jolt.host/runtime-fingerprint)]
@@ -65,7 +65,7 @@
   ;; task seon.agent/an-agents-base-is-its-merge-base: :spawn branches the agent from main's
   ;; head and asks the fork server, whose image holds main at that head (the FIFO), to fork it;
   ;; :fork names that commit and t, so the agent checks both (seon.agent/init!)
-  (pdb/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
         [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
         b (pdb/on-main (:branch cfg) :a1)

@@ -213,7 +213,7 @@
   (let [fp (jolt.host/runtime-fingerprint)]
     (is (string? fp) "this runtime can be identified")
     (is (= {:seon.tx/runtime fp} (pdb/tx-meta)))
-    (pdb/test-branch!
+    (ts/test-branch!
      (fn [_ conn]
        (let [[r] (dw/transact-batch! conn [{:tx-data [{:note/text "by the writer"}] :tx-meta (pdb/tx-meta)}])
              tx (:db/current-tx (:tempids r))]
