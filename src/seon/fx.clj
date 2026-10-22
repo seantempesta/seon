@@ -55,18 +55,21 @@
 
 (defn read-source
   "The text of every .clj and .edn file under root's dirs (relative paths, e.g.
-  src/seon/fx.clj, resources/seon/schemas/seon.facts.edn), sorted by path. Answers {:value
-  {path text}} or :seon.fx/io-error."
+  src/seon/fx.clj, resources/seon/schemas/seon.facts.edn), sorted by path, and the commit
+  root's HEAD names (absent when root is no git repository: git rev-parse answers none).
+  Answers {:value {path text} :commit sha} or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [root dirs]} :req}]
   (try
-    (let [base (.getCanonicalPath (java.io.File. ^String root))]
-      {:value (into (sorted-map)
-                    (for [d dirs
-                          f (file-seq (java.io.File. (str base "/" d)))
-                          :let [p (.getCanonicalPath ^java.io.File f)]
-                          :when (and (.isFile ^java.io.File f) (or (.endsWith p ".clj") (.endsWith p ".edn")))]
-                      [(subs p (inc (count base))) (slurp f)]))})
+    (let [base (.getCanonicalPath (java.io.File. ^String root))
+          head (sh/sh "git" "-C" base "rev-parse" "--verify" "--quiet" "HEAD")]
+      (cond-> {:value (into (sorted-map)
+                        (for [d dirs
+                              f (file-seq (java.io.File. (str base "/" d)))
+                              :let [p (.getCanonicalPath ^java.io.File f)]
+                              :when (and (.isFile ^java.io.File f) (or (.endsWith p ".clj") (.endsWith p ".edn")))]
+                          [(subs p (inc (count base))) (slurp f)]))}
+        (zero? (:exit head)) (assoc :commit (str/trim (:out head)))))
     (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path root}))))
 
 (defn- git!

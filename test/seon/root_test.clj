@@ -158,3 +158,58 @@
       (is (= 0 (:exit build)) "the build without whole-program inference succeeds")
       (is (= "[1 2]" (str/trim (:out (sh/sh out)))) "and the binary reads")
       (finally (sh/sh "rm" "-rf" out (str out ".build"))))))
+
+(deftest main-follows-its-source-tree-across-restarts
+  ;; task seon.root/main-follows-its-source-tree: a root resuming its main imports its source
+  ;; tree again when the tree reads otherwise than main's last import, replacing main's
+  ;; program (seon.source/replace-tx), and imports nothing when it reads the same. Three
+  ;; boots on a main of their own on the test store (deleted at the end), the tree a scratch
+  ;; repository under target/: commit A, then commit B with one function changed and one
+  ;; removed, then B again.
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        tree (str checkout "/target/tmp/root-test-follow-" (random-uuid))
+        tasks (str tree "-tasks")
+        git (fn [& args] (apply sh/sh "git" "-C" tree "-c" "user.name=t" "-c" "user.email=t@localhost" args))
+        commit! (fn [text]
+                  (spit (str tree "/src/follow/tree.clj") text)
+                  (git "add" "-A") (git "commit" "-q" "-m" "tree")
+                  (str/trim (:out (git "rev-parse" "HEAD"))))
+        a "(ns follow.tree)\n\n(defn kept [] 1)\n\n(defn changed [] 1)\n\n(defn removed [] 1)\n"
+        b "(ns follow.tree)\n\n(defn kept [] 1)\n\n(defn changed [] 2)\n"
+        path (test-store)
+        main (str "root-test-" (random-uuid))
+        args [(str "--set ':seon.config.root/main=" (pr-str main) "'")
+              (str "--set ':seon.config.source/root=" (pr-str tree) "'")
+              "--set ':seon.config.source/dirs=[\"src\"]'"]
+        probe {:op :eval :agent "root"
+               :code (str "(let [db @(:conn sys)] {:fact (:seon.root/source (datahike.api/pull db [:seon.root/source] [:seon.root/id :root]))"
+                          " :text (seon.source/file-text db 'follow.tree)"
+                          " :removed-forms (count (filter #(clojure.string/includes? % \"removed\") (map :v (datahike.api/datoms db :aevt :form/src))))"
+                          " :removed-var (count (datahike.api/datoms db :avet :var/name 'follow.tree/removed))"
+                          " :tasks (count (seon.task/tasks db))})")}
+        boot! (fn [requests]
+                (let [out (root-answers path args requests)]
+                  (sh/sh "rm" "-f" (str path "-in"))
+                  (mapv (fn [l] (try (edn/read-string (:printed (first (:items (edn/read-string {:default tagged-literal} l)))))
+                                     (catch Exception _ l)))
+                        (take (count requests) (str/split-lines out)))))]
+    (.mkdirs (java.io.File. (str tree "/src/follow")))
+    (.mkdirs (java.io.File. tasks))
+    (.mkdirs (.getParentFile (java.io.File. ^String path)))
+    (spit (str tasks "/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]))
+    (sh/sh "git" "init" "-q" tree)
+    (try
+      (let [sha-a (commit! a)
+            [_ one] (boot! [{:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str tasks) ")")} probe])
+            sha-b (commit! b)
+            [two] (boot! [probe])
+            [three] (boot! [probe])]
+        (is (= [sha-a a 2] [(:commit (:fact one)) (:text one) (:tasks one)]) (pr-str one))
+        (is (= sha-b (:commit (:fact two))) "the second boot imported the tree's new commit")
+        (is (= b (:text two)) "main holds B's text, byte for byte")
+        (is (= [0 0] [(:removed-forms two) (:removed-var two)]) "no form or var of the removed function")
+        (is (= 2 (:tasks two)) "the tasks are intact")
+        (is (= 3 (:retracted (:fact two))) "retracted: the changed function's old form, the removed function's form and its var")
+        (is (= (:fact two) (:fact three)) "the same commit imports nothing: the fact is the second boot's")
+        (is (= b (:text three))))
+      (finally (drop-main! main) (sh/sh "rm" "-rf" tree tasks (str path "-in") (str path ".log"))))))
