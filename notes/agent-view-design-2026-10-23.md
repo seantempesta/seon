@@ -117,36 +117,57 @@ From the code (main `b39cef5`):
 - Env (`:seon.render/env`) carries schema, budget and handle. It carries no context: one render per face, whether the value is a table cell, a panel or a tile.
 - What is already reagent-like is the page's **units**: a layout names parts by id with their exact input, and the render proc re-renders a part only when its input changed. That is reagent's "re-render a component when its args change", one level deep.
 
-### 4.2 The design: one dispatch, recursive, by context
+### 4.2 The design: renders are functions and results (owner's shape, 2026-10-23, built)
 
-**One dispatch.** `seon.render/render [v face env] -> :seon.render/out`. It replaces `render-face`, and `html`/`ai` stay as its two faces. env gains `:seon.render/as`, one of:
-- `:inline`: one line, in a chat stream, table cell or event row;
-- `:block`: a full panel;
-- `:tile`: compact and live, on the dashboard or the agent window's right column.
+The owner's corrections, in order: "should just be a normal render function and we can supply an optional argument. It's all just functions and results"; make it Clojure-like and explainable as React or Reagent. This replaced the per-size declaration map and its fallback chain, which I had proposed first.
 
-The default is `:block`. The budget is in env as today.
+**Where it lives.**
+- `seon.render` holds the dispatch: `render`, `html`, `ai`, `render-of`, `schema-of`, and the printer as the default render (`print-html`, `print-ai`).
+- `seon.web.html` expands calls: it is the one serializer, already the one place hiccup becomes text.
+- The printer's auto-render goes in `seon.print`, once printer-eval's rewrite of `seon.print.emit` is on main.
 
-**Representations belong to the data.** A schema declares its renders per face and, when it needs to, per context:
-- `{:seon.render/html sym}`: sym for every context (every existing declaration stays valid);
-- `{:seon.render/html {:block b :tile t :inline i}}`: one per context.
+**The signatures** (commit `2814928`):
+- A render: `(fn [value opts] result)`. `opts` is `:seon.render/opts`, every key optional:
+  - `:as`: `:inline`, `:block` (the default) or `:tile`;
+  - `:budget`: tokens;
+  - `:handle`: what cuts read through;
+  - `:schema`: the producer's;
+  - `:face`: `:html` (the default) or `:ai`.
 
-A context the schema doesn't name falls back: inline → tile → block → the printer. `seon.render/declared` reads this, the one reader, still following parents.
+  An `:html` render answers hiccup. An `:ai` render answers text or `{:text :truncated?}` (`:seon.render/text`).
+- A schema declares one render per face, as before: `{:seon.render/html sym :seon.render/ai sym}`. There is no new declaration format.
+- `(seon.render/render value opts)` returns the result. It looks up the function its override or schema names (`render-of`). The schema lookup is `schema-of`: the producer's `:schema`, the value's metadata, an error map's type, or an identity attribute through `by-identity`, one map lookup per key and never a validation. With no function found, it uses the printer.
+- In hiccup, `[f value opts & children]` with `f` a function or var is a call. The serializer writes `(apply f value opts children)` in its place, expanded the same way. A keyword head is an element. Jolt answers `fn?` true for a keyword, so the serializer tests for one first.
+- The printer, as the default render, takes the same props: `:inline` is one line (`print/line`), and `:block` or `:tile` is its structural print under the budget.
 
-**The printer is the default for every context.** `print-out` becomes context-aware:
-- `:inline`: `print/line` under the line budget, its cut naming the handle;
-- `:block`: the structural hiccup, as today;
-- `:tile`: the structural hiccup under the tile budget (`:seon.config.render/tile-budget`, new), collapsed past depth 1.
+**Cost proof** (`seon.render-cost-test/render-calls-are-one-pass-over-their-nodes`, armed as at boot): a tree of render calls three wide, each node's budget a third of its parent's.
 
-The AI face takes the same contexts (`:inline` is one line for a list, `:block` the whole text). There are no per-page special cases.
+| Nodes | Per node | Bytes per node | Contracted calls per node |
+|---|---|---|---|
+| 100 | 3.4 µs | 8.5 KB | 11 |
+| 1,000 | 4.0 µs | 8.2 KB | 11 |
+| 10,000 | 4.3 µs | 7.9 KB | 11 |
 
-**Nesting by reference.**
-- A hiccup node `[:seon/render v opts]` (opts: `:as`, `:schema`, `:budget`) is a reference.
-- `seon.render/expand` walks a render's hiccup and replaces each reference with `v`'s render under the child env: the parent's env with the node's opts, and the budget a share of the parent's when the node names none. It recurses into what that render answers.
-- The printer's HTML does the same for a nested value whose schema it can name (metadata `:seon.render/schema`, an error map, a pulled entity's identity attribute: `seon.render/schema-of`, the one namer). It emits `[:seon/render v {:as :inline}]` instead of printing the map, so a task inside an attempt inside a problem row reads as the task's inline render everywhere.
+The unit table prices a node at 7.9 KB, and the call count is exact. Wall time is not judged armed: the armed contracts check maps, as the printer's armed proof also found. The verdict is linear, nothing steeper.
 
-Expansion happens before serialization, in `render-unit`, so the serializer stays dumb. A reference is a pure function of `(v, env)`, so a unit's input still decides whether anything renders.
+**One value, both faces** (an attempt, `:seon.attempt/attempt`, through `seon.render/render`):
 
-**Units remain the reactive edge.** A unit is now `{:id :input :schema :as}`: health's commit 1 moves tiles from `:render` symbols to `:schema`, and this adds `:as`. The render proc's input diffing and byte diffing are unchanged.
+| Face | Output |
+|---|---|
+| `:ai` | `ended calc/square#1 green` |
+| `:html` | `<tr class="at s-done o-green"><td><code>calc/square#1</code></td><td><a href="/agent/a4">a4</a></td><td><span class="pill s-done">done</span></td><td>2</td><td>5,465</td><td title="">green</td><td title="the attempt's wall time…">–</td></tr>` |
+| printer `:html`, `:as :inline`, of `{:k [1 2 3]}` | `<code class="seon-inline">{:k [1 2 3]}</code>` |
+
+**In React terms, for a newcomer:**
+- A render is a component: a plain function of a value and its props (opts: the room it is shown in, its token budget).
+- Children are its remaining arguments.
+- A hiccup vector headed by a function is a component call, as `[task-row task {:as :inline}]` is in Reagent. A keyword head is an HTML tag.
+- The one printer is the default component. Given any data, it lays it out, and wherever a nested value has its own component (its schema declares one), it calls that instead. So anything renderable renders, everywhere, by default.
+- The render proc is React's reconciliation, one level up: a page's parts re-render only when their input changed, and only changed bytes are sent.
+
+This paragraph opens docs/render.md.
+
+**Still to build: the printer's auto-render, both faces.** The printer walks the value, and for a nested value whose schema it can name, it emits that value's render: `[render-fn v {:as :inline :budget share}]` in the hiccup, and that render's `:ai` text in the text. Both happen in the printer's one pass, with no second expander. It is written once jolt/printer-eval (its rewrite of `seon.print.emit` and `select`) is on main. A cost proof will go beside the printer's own.
 
 ### 4.3 The pages
 
