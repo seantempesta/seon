@@ -193,6 +193,8 @@
                "in a merge commit that names its runtime (task seon.db/each-commit-names-its-runtime)"))
          (is (empty? (program/changed-vars (:base @agent/state) (agent/db)))
              "and is main's, not the agent's: its base is the merge base")
+         (is (= {} (program/divergence (:base @agent/state) (agent/db)))
+             "so the agent's :will-merge carries none of main's changes")
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest an-agents-transactions-name-their-runtime

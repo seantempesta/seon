@@ -6,7 +6,7 @@
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.render.proc :as p]
-            [seon.web.html :as h] [seon.config] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
+            [seon.web.html :as h] [seon.config] [seon.docs] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
             [seon.fx] [seon.source] [seon.program]))
 
 (def ^:private task
@@ -297,7 +297,9 @@
     (testing "the agent page's panel is the text it read, as recorded (seon.context/recorded), and one copy of it"
       (let [ctxv (#'p/context-of nil {:seon.attempt/task "t/x"} {:evals [{:tag :ret :form "(+ 1 2)" :printed "3"} read]})]
         (is (= :why (first (keys ctxv))) "no db: why, not a rebuild"))
-      (ts/test-branch! (fn [_ conn] (let [_ (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "p"}]))
+      (ts/test-branch! (fn [_ conn] (let [;; the wiki, as root's boot loads it: the help page every render reads
+                                          _ (d/transact conn (seon.docs/load-tx @conn "docs" (seon.docs/pages (seon.config/checkout) "docs")))
+                                          _ (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "p"}]))
             ;; an outside read whose done rule refused 360 contract gaps: its basis, never its text
             b {:commit (d/commit-id @conn) :task "t/x" :attempt "t/x#1" :turn 1 :max-turns 1 :origin :outside
                :observed {:results {} :reds [] :run-errors []
@@ -306,7 +308,7 @@
                                  :seon.turn/origin :outside :seon.turn/basis b}])
             db @conn
             ctxv (#'p/context-of db {:seon.attempt/id "t/x#1" :seon.attempt/task "t/x"} {:evals [read]})]
-        (is (= {:text (:content (peek (:messages (seon.context/render db b)))) :origin :outside} (select-keys ctxv [:text :origin]))
+        (is (= {:text (seon.context/reader-text (:messages (seon.context/render db b))) :origin :outside} (select-keys ctxv [:text :origin]))
             "the text it read, made again from its basis")
         (is (str/includes? (:text ctxv) "app.m/f0") "what the read showed")
         (is (:why (#'p/context-of db {:seon.attempt/id "t/x#2" :seon.attempt/task "t/x"} {:evals []})) "an attempt that read nothing says why")))))))
@@ -562,3 +564,25 @@
       (is (= [] (remove named (sites forms cut-vars display?)))))
     (testing "a site named that no longer prints or cuts is gone from the page too"
       (is (= [] (remove (set (concat (sites forms printer-vars printer?) (sites forms cut-vars display?))) (sort named)))))))
+
+(deftest an-outside-model-reads-an-evaluation-as-the-repl-says-it
+  ;; seon_eval's tool text (seon.entrance/mcp-reply): reply items as a REPL shows them, never
+  ;; the items' map printed with its strings escaped
+  (let [text (ai/items [{:id 0 :tag :ret :form "(def outside-x 41)" :printed "#'user/outside-x" :handle :h0}
+                        {:id 1 :tag :ret :form "(println \"hi\") (inc outside-x)" :out "hi\n" :printed "42" :handle :h1}
+                        {:id 2 :tag :err :form "(/ 1 0)" :printed "Divide by zero\n(seon.agent/eval-error in seon.repl/eval-code)"}])]
+    (is (= (str "(def outside-x 41)\n=> #'user/outside-x\n;; result/h0\n\n"
+                "(println \"hi\") (inc outside-x)\nhi\n=> 42\n;; result/h1\n\n"
+                "(/ 1 0)\nx Divide by zero\n(seon.agent/eval-error in seon.repl/eval-code)")
+           text))))
+
+(deftest the-model-reads-a-rendered-value-as-its-repl-did
+  ;; the context's last evaluations (seon.context/shown-evals): a value whose producer named
+  ;; its render shows that render's text, as the agent's REPL answered it; other values print
+  ;; structurally from the live value
+  (let [t (with-meta failed-task {:seon.render/schema :seon.task/task})
+        [shown plain] (seon.context/shown-evals [{:k 0 :times 1 :item {:tag :ret :form "(my.task/current)" :value t :printed (:text (r/printed t '(nth (my.turn/evals) 0)))}}
+                                                 {:k 1 :times 1 :item {:tag :ret :form "{:n 1}" :value {:n 1} :printed "{:n 1}"}}])]
+    (is (str/includes? (:text shown) "task calc/add · work · held"))
+    (is (not (str/includes? (:text shown) ":seon.task/accumulated")))
+    (is (str/includes? (:text plain) ":value {:n 1}"))))

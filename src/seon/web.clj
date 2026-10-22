@@ -14,7 +14,7 @@
   composed page, morphed by id: inputs and DOM identity survive); a closed one is dropped.
 
   Callbacks are data (DECISIONS): one stateless /call route whose payload is the call
-  (fn, agent, args, a form's fields). Root's verbs (seon.root/spawn!, submit!, run-tests!,
+  (fn, agent, args, a form's fields). Root's functions (seon.root/spawn!, submit!, run-tests!,
   merge!, merge-main!, clone!, interrupt!, kill!) become the requests their fns send
   (seon.root/request), each recorded on main as root's evaluation, origin :ui; any other fn
   runs in the agent as an eval of (seon.web/ui-call 'fn args), origin :ui, refused as data
@@ -70,12 +70,12 @@
                       {:seon.render/fn sym}))))
 
 (defn requests
-  "A UI call as root's requests: [[req target-agent] ...]. Root's verb is the request its
-  fn sends (seon.root/request; none when root refuses it); any other fn is an eval of it in
+  "A UI call as root's requests: [[req target-agent] ...]. Root's function is the request it
+  sends (seon.root/request; none when root refuses it); any other fn is an eval of it in
   the agent, through the allowlist (ui-call). index {agent {:pid :branch :status}}."
   {:malli/schema [:=> [:cat :seon.render/call :map] [:vector [:tuple :map [:maybe :keyword]]]]}
   [{f :var :keys [agent args forms]} index]
-  (let [one (fn [verb id args] (let [r (c/request verb id args (get index id))] (if (contract/error? r) [] [[r id]])))]
+  (let [one (fn [op id args] (let [r (c/request op id args (get index id))] (if (contract/error? r) [] [[r id]])))]
     (case f
       seon.root/spawn! (vec (repeat (min 100 (max 1 (or (:n args) 1))) [(c/request 'spawn! nil (cond-> {} (not (str/blank? (:task args))) (assoc :task (:task args))) nil) nil]))
       seon.root/submit! (cond (str/blank? forms) []
@@ -226,7 +226,7 @@
             (when (= 'seon.root/interrupt! (:var c))
               (some-> (get-in st [:index (:agent c) :pid]) (lib/c-kill lib/SIGUSR1)))
             ;; answered to the render proc, which shows each in the stream by its tag; root's
-            ;; verb is root's evaluation, its form in the tag: the render proc records it on
+            ;; function is root's evaluation, its form in the tag: the render proc records it on
             ;; main (origin :ui) with what root answered, as root's REPL records one
             (doseq [[req target] reqs
                     :let [{f :var :keys [agent args forms]} c
@@ -252,6 +252,10 @@
                (step/out! o :to-render {:op :keyframe :view (:view m)}))
              st)
     :keyframe (keyframe! st (:view m) (:html m))
+    ;; the render proc has nothing in flight: an SSE comment on every feed (Datastar ignores
+    ;; comments), the event a client or a check waits on before reading a current view
+    :settled (reduce (fn [st view] (let [[st sent] (offer-all st view ": settled\n\n")] (update st :bytes + sent)))
+                     st (distinct (map :view (vals (:tabs st)))))
     (:page :text) (let [[st [p view]] (step/answered st (:k m))]
                     (some-> p (deliver (if (= :page (:op m)) (page-doc view (:html m)) (:text m))))
                     st)

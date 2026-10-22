@@ -1,11 +1,31 @@
 #!/bin/zsh
-# bin/mcp [PORT]   the MCP server (stdio JSON-RPC) for outside agents: each tool is one request to
-# the standing root's entrance on 127.0.0.1:PORT (default: this checkout's config, bin/ports; start it with
-# bin/root). Tools:
-# seon_agents, seon_eval (an agent's own REPL, recorded :outside; or "root"), seon_context,
-# seon_attach, seon_done.
+# bin/mcp [PORT]   the MCP server (stdio JSON-RPC) for outside agents: a relay of each line to the
+# root's server on 127.0.0.1:PORT, which answers MCP itself (seon.entrance/mcp-reply). Without
+# PORT, the port this checkout's root was started on: runs/root.port, which bin/root writes from
+# bin/ports' resolution while the root runs, read at each message, so a root restarted on
+# another port is followed. Tools: seon_agents, seon_eval (an agent's own REPL, recorded
+# :outside; or "root"), seon_context, seon_attach, seon_done.
+#
+# Stock perl, no Seon binary (a `seon mcp` per client was 722 MB each; this is about 6 MB, and
+# seon.check/mcp-proof fails past :seon.config.machine/relay-mb). One connection per message, so
+# a root restarted between calls (bin/root next) costs the session nothing. A message with an id
+# that root does not answer (none running, not listening, it died mid-request) is answered the
+# JSON-RPC error saying why: the client never hangs on it. A line that is not JSON is relayed as
+# it is, and root answers its defect (docs/DRAGONS.md).
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-. "$ROOT/bin/env"
-"$ROOT/bin/ports" > /dev/null   # writes config/local.edn (this checkout's ports) when missing
-[[ -n ${1:-} ]] && export SEON_ENTRANCE_PORT=$1
-cd "$ROOT/target" && exec ./seon mcp
+exec perl -MIO::Socket::INET -MJSON::PP -e '
+  $| = 1; my ($port, $portf) = @ARGV;
+  while (my $line = <STDIN>) {
+    $line .= "\n" unless $line =~ /\n\z/;
+    my $id = eval { decode_json($line)->{id} };   # undef for a line that is not JSON: root answers it
+    my $p = $port;
+    if ($p eq "") { if (open my $f, "<", $portf) { chomp($p = <$f> // ""); close $f } }
+    my ($s, $why) = (undef, "no root running for this checkout ($portf is missing): bin/root start");
+    if ($p ne "") {
+      $s = IO::Socket::INET->new(PeerAddr => "127.0.0.1", PeerPort => $p, Proto => "tcp");
+      $why = $s ? "root answered nothing (it stopped mid-request?)" : "root'"'"'s server on 127.0.0.1:$p is not listening ($!): bin/root start";
+    }
+    my $got = 0;
+    if ($s) { print $s $line; shutdown($s, 1); while (my $a = <$s>) { print $a; $got = 1 } close $s }
+    print encode_json({jsonrpc => "2.0", id => $id, error => {code => -32000, message => $why}}), "\n" if !$got && defined $id;
+  }' "${1:-}" "${SEON_RUNS:-$ROOT/runs}/root.port"

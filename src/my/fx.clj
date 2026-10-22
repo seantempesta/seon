@@ -1,5 +1,5 @@
 (ns my.fx
-  "An agent's effects (lane FX1): every outside effect has one owner proc in root; these
+  "An agent's effects (from worktree session FX1): every outside effect has one owner proc in root; these
   wrappers reach it and record the outcome with this eval request. An agent may still do
   anything in its own process; these are the default path, with admission, budget and
   recording for free.
