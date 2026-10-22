@@ -235,3 +235,21 @@
                           "no model provider is configured: set SEON_PROFILE=deepseek (a paid model) or SEON_PROFILE=scripted (a test fixture), or :seon.config.ai/provider" {})
     :scripted (scripted provider request)
     :openai-compat (openai-compat provider request)))
+
+(defn cost
+  "What a turn's usage cost in USD at model's configured prices (:seon.config.ai/models, the
+  off-peak rates; the provider charges twice at peak): its uncached prompt tokens at the input
+  rate, its cached ones at the cached rate, the rest of its tokens (the completion) at the
+  output rate. nil when unknown: a model with no prices in config, or a usage that does not
+  split its prompt into cache hits and misses (the price depends on it)."
+  {:malli/schema [:=> [:cat [:maybe :string] [:map [:seon.turn/tokens {:optional true} :int]
+                                              [:seon.turn/cache-hit-tokens {:optional true} :int]
+                                              [:seon.turn/cache-miss-tokens {:optional true} :int]]]
+                  [:maybe number?]]}
+  [model {:seon.turn/keys [tokens cache-hit-tokens cache-miss-tokens]}]
+  (let [m (get (config/value :seon.config.ai/models) model)]
+    (when (and m tokens cache-hit-tokens cache-miss-tokens)
+      (/ (+ (* cache-miss-tokens (:seon.ai.model/input-usd-per-mtok m))
+            (* cache-hit-tokens (:seon.ai.model/cached-input-usd-per-mtok m))
+            (* (- tokens cache-hit-tokens cache-miss-tokens) (:seon.ai.model/output-usd-per-mtok m)))
+         1e6))))

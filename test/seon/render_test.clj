@@ -7,7 +7,7 @@
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.render.proc :as p]
             [seon.web.html :as h] [seon.config] [seon.docs] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
-            [seon.fx] [seon.source] [seon.program]))
+            [seon.fx] [seon.source] [seon.program] [seon.web] [seon.turn] [seon.model]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -280,6 +280,14 @@
   (testing "nothing capped, nothing said"
     (is (not (str/includes? (h/html (ui/history-list {:rows ["<li>r</li>"] :total 1} {})) "more")))))
 
+(defn- zoom
+  "The agent page's value for agent id as the render proc makes it: root's view entry ag (nil:
+  not in root's view), its newest attempt on main, its branch db read (nil: not read)."
+  [db id attempt ag]
+  (second (#'p/zoom-value (cond-> {:agent-attempt (if attempt {id attempt} {}) :tasks {} :zoom {id (if db {:db db} {})}}
+                            ag (assoc-in [:view :agents id] ag))
+                          id)))
+
 (deftest a-context-read-is-shown-once
   (let [ctx (str "{:turn \"1 of 8\" :refused [{:refusal :contract-gap :vars [" (str/join " " (for [i (range 360)] (str "app.m/f" i))) "]}]}")
         read {:id 0 :tag :ret :form "(print (seon.turn/context-block \"t/x\" \"t/x#1\"))" :printed "nil" :out ctx :origin :context}
@@ -287,16 +295,14 @@
         row (h/html (ui/history-row read {}))]
     (testing "a card and a history row refer to the block; they never print it again"
       (is (str/includes? card "read its current-state block"))
-      (is (str/includes? card "href=\"/agent/a14#z-context\""))
+      (is (str/includes? card "href=\"/agent/a14#z-turns\""))
       (is (not (str/includes? card "app.m/f359")))
       (is (str/includes? row "read its current-state block"))
       (is (not (str/includes? row "app.m/f359"))))
     (testing "the stream says what happened"
       (is (str/includes? (h/html (ui/event-row {:type :reply :agent :a14 :at-ms 0 :items [read]} {}))
                          "read its current-state block")))
-    (testing "the agent page's panel is the text it read, as recorded (seon.context/recorded), and one copy of it"
-      (let [ctxv (#'p/context-of nil {:seon.attempt/task "t/x"} {:evals [{:tag :ret :form "(+ 1 2)" :printed "3"} read]})]
-        (is (= :why (first (keys ctxv))) "no db: why, not a rebuild"))
+    (testing "the agent page's turn row is the text the read got, made again from its basis, and one copy of it"
       (ts/test-branch! (fn [_ conn] (let [;; the wiki, as root's boot loads it: the help page every render reads
                                           _ (d/transact conn (seon.docs/load-tx @conn "docs" (seon.docs/pages (seon.config/checkout) "docs")))
                                           _ (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "p"}]))
@@ -307,14 +313,17 @@
             _ (d/transact conn [{:seon.turn/id "t/x#1/read-1" :seon.turn/attempt "t/x#1" :seon.turn/n 1
                                  :seon.turn/origin :outside :seon.turn/basis b}])
             db @conn
-            ctxv (#'p/context-of db {:seon.attempt/id "t/x#1" :seon.attempt/task "t/x"} {:evals [read]})]
-        (is (= {:text (seon.context/reader-text (:messages (seon.context/render db b))) :origin :outside} (select-keys ctxv [:text :origin]))
+            page (zoom db :a14 {:seon.attempt/id "t/x#1" :seon.attempt/task "t/x" :seon.attempt/agent :a14 :seon.attempt/status :running}
+                       {:status :idle :evals [read]})
+            html (str/join (:turns page))]
+        (is (= 1 (count (:turns page))))
+        (is (str/includes? html (seon.web.html/escape (subs (seon.context/reader-text (:messages (seon.context/render db b))) 0 200)))
             "the text it read, made again from its basis")
-        (is (str/includes? (:text ctxv) "app.m/f0") "what the read showed")
-        (is (:why (#'p/context-of db {:seon.attempt/id "t/x#2" :seon.attempt/task "t/x"} {:evals []})) "an attempt that read nothing says why")))))))
+        (is (str/includes? html "app.m/f0") "what the read showed")
+        (is (str/includes? html "read 1") "an outside read is a read, not a model turn")))))))
 
 (deftest a-hand-spawned-agent-says-why-it-has-no-context
-  (let [{:keys [why]} (#'p/context-of nil nil {:task "index rows by id (#0)"})]
+  (let [why (:turns-why (zoom nil :a2 nil {:status :idle :task "index rows by id (#0)" :evals []}))]
     (is (str/includes? why "spawned by hand with the description \"index rows by id (#0)\""))
     (is (str/includes? why "(my.root/run! sys [task-id])") "how an agent gets a context")))
 
@@ -609,3 +618,172 @@
           "only the two lists around rows serialized ahead (jolt/printer-eval makes their rows units)")
       (doseq [{:keys [id schema]} (remove :render units)]
         (is (r/declared schema :html) (str id " names " schema ", which declares an HTML render"))))))
+;; ---- the agent's debug view (task seon.render/a-debug-view-of-any-agent) ----------------
+
+(defn- with-turns
+  "(f db) on a branch holding the wiki, a task demo/f and the attempt demo/f#1's two model turns
+  as seon.turn/act! writes them (its facts, then its split; the second turn took an owner's
+  message), the program changing between them."
+  [f]
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [program (fn [src] [{:db/id "f" :var/name 'demo/f :var/ns "ns" :var/form "form"}
+                              {:db/id "form" :form/id (str "demo/f " src) :form/src src :form/ns "ns" :form/order 0 :form/defines ["f"]}
+                              {:db/id "ns" :ns/name 'demo}])
+           _ (d/transact conn (seon.docs/load-tx @conn "docs" (seon.docs/pages (seon.config/checkout) "docs")))
+           _ (d/transact conn (program "(defn f \"Doubles.\" [x] (* 2 x))"))
+           _ (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make `demo/f` triple."
+                                                           :seon.task/proofs #{'demo-test/f-test}}]))
+           observed {:results {'demo-test/f-test :fail} :run-errors []
+                     :reds [{:test 'demo-test/f-test :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))" :got "(= 6 4)"}]
+                     :refusals [{:refusal :proof-red :symbol 'demo-test/f-test}] :will-merge {}}
+           turn! (fn [n obs reply calls usage]
+                   (let [b {:commit (d/commit-id @conn) :task "demo/f" :attempt "demo/f#1" :turn n :max-turns 8 :origin :model :observed obs}]
+                     (d/transact conn [(merge usage {:seon.turn/id (str "demo/f#1/" n) :seon.turn/attempt "demo/f#1" :seon.turn/n n
+                                                     :seon.turn/origin :model :seon.turn/basis b :seon.turn/calls calls :seon.turn/reply reply
+                                                     :seon.turn/forms (count calls) :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 2300
+                                                     :seon.turn/finish "tool_calls" :seon.turn/model "deepseek-v4-flash"})])
+                     (d/transact conn [{:seon.turn/id (str "demo/f#1/" n)
+                                        :seon.turn/split {:tests-ms 410 :context-ms 12 :model-ms 2100 :eval-ms 180 :record-ms 3}}])))
+           u (fn [p c hit] (seon.turn/usage {:prompt-tokens p :completion-tokens c :cache-hit-tokens hit :cache-miss-tokens (- p hit)}))]
+       ;; turn 0's call evaluated two forms, each with its thought, as seon.repl/record-tx records
+       ;; them in the agent's process (pid 77); and the owner evaluated one form from the page
+       (d/transact conn (seon.repl/record-tx :a3 "a3-77-1000" [{:id 4 :tag :ret :form "(in-ns 'demo)" :lead ";; work in demo" :printed "#namespace[demo]" :ms 0.2}
+                                                              {:id 5 :tag :ret :form "(defn f [x] (* 3 x))" :lead ";; triple, as the plan says" :printed "#'demo/f" :ms 1.1}] nil))
+       (d/transact conn (seon.repl/record-tx :a3 "a3-77-2000" [{:id 6 :tag :ret :form "(f 2)" :printed "6" :ms 0.1 :origin :ui}] nil))
+       (turn! 0 observed "I will make f triple."
+              [{:id "call-0" :code ";; work in demo\n(in-ns 'demo)\n;; triple, as the plan says\n(defn f [x] (* 3 x))" :items [4 5] :thinking "redefine f, then the proof runs"
+                :evals (seon.context/evaluations-text [{:id 5 :tag :ret :form "(defn f [x] (* 3 x))" :printed "#'demo/f"}])}]
+              (assoc (u 3900 120 0) :seon.turn/reasoning "The plan says triple; the proof checks (f 2) is 6."))
+       (d/transact conn (program "(defn f \"Triples.\" [x] (* 3 x))"))
+       (turn! 1 (assoc observed :results {'demo-test/f-test :pass} :reds [] :refusals [] :will-merge {:changed ['demo/f]}
+                       :messages [{:from :owner :body "check demo/g too"}])
+              "Done; checking g." [{:id "call-1" :code "(my.turn/wait)" :evals ""}] (u 4400 40 3800))
+       (f @conn)))))
+
+(def ^:private attempt1
+  {:seon.attempt/id "demo/f#1" :seon.attempt/task "demo/f" :seon.attempt/agent :a3 :seon.attempt/status :running
+   :seon.attempt/env {:branch :task-demo-f :model "deepseek-flash" :max-turns 8} :seon.attempt/start-ms 0 :seon.attempt/pid 77})
+
+(deftest each-turn-is-a-row
+  (with-turns
+    (fn [db]
+      (let [page (zoom db :a3 attempt1 {:status :running :branch :task-demo-f :pid 77 :evals [] :running {:form "(seon.turn/work! '{})"}})
+            [t0 t1] (:turns page)]
+        (is (= 2 (count (:turns page))) "every turn, oldest first")
+        (is (str/includes? t0 "turn 0") ) (is (str/includes? t1 "turn 1"))
+        (testing "tokens, the cached share, the cost at the model's prices, where the time went, how it stopped"
+          (is (str/includes? t0 "4,020 tokens"))
+          (is (str/includes? t0 "0% cached"))
+          (is (str/includes? t1 "86% cached") "3,800 of 4,400")
+          (is (str/includes? t1 (format "$%.4f" (seon.model/cost "deepseek-flash" (seon.turn/usage {:prompt-tokens 4400 :completion-tokens 40 :cache-hit-tokens 3800 :cache-miss-tokens 600})))))
+          (is (str/includes? t0 "2100 ms") "its model's ms")
+          (is (str/includes? t0 "tool_calls")))
+        (testing "what it said, thought and did, and what the REPL answered it"
+          (is (str/includes? t0 "I will make f triple."))
+          (is (str/includes? t0 "The plan says triple"))
+          (is (str/includes? t0 "redefine f, then the proof runs") "the call's thinking")
+          (is (re-find #"(?s);; work in demo.*\(in-ns 'demo\).*#namespace\[demo\].*;; triple, as the plan says.*\(defn f \[x\] \(\* 3 x\)\).*#'demo/f" t0)
+              "per form, in order: its thought, the form, its result")
+          (is (str/includes? t0 "what call-0 answered, as the model read it")))
+        (testing "the evaluations outside the turns are the window's own: the owner's (f 2), not the turn's forms"
+          (is (= 1 (:history-total page)))
+          (is (str/includes? (first (:history page)) "(f 2)")))
+        (testing "the proofs it saw and the messages it took"
+          (is (str/includes? t0 "demo-test/f-test</code> fail"))
+          (is (str/includes? t1 "1 ✓"))
+          (is (str/includes? t1 "check demo/g too")))
+        (testing "the head: totals over the turns, priced where the provider split its cache"
+          (is (= {:n 2 :tokens 8460 :unpriced 0} (dissoc (:totals page) :usd)))
+          (is (< 0 (:usd (:totals page)) 0.01)))
+        (testing "the branch box reads the newest turn's :will-merge"
+          (is (= {:changed ['demo/f]} (get-in page [:branch :will-merge])))
+          (is (= "demo/f#1/1" (get-in page [:branch :turn]))))))))
+
+(deftest a-turn-row-shows-the-context-remade-from-its-basis
+  (with-turns
+    (fn [db]
+      (let [page (zoom db :a3 attempt1 nil)
+            e0 (d/q '[:find ?e . :where [?e :seon.turn/id "demo/f#1/0"]] db)
+            e1 (d/q '[:find ?e . :where [?e :seon.turn/id "demo/f#1/1"]] db)
+            r0 (seon.context/remade db e0)
+            [t0 t1] (:turns page)]
+        (is (str/includes? t0 "Doubles.") "turn 0 read the program as it stood at its commit")
+        (is (not (str/includes? t0 "Triples.")))
+        (is (str/includes? t0 (seon.web.html/escape (subs (seon.context/turn-text db e0) 0 300))) "its text is seon.context's, made from the basis")
+        (testing "each part's tokens, as the printer sizes them"
+          (doseq [{:keys [part tokens]} (seon.context/sections r0)]
+            (is (str/includes? t0 (str part " " (ui/group3 tokens))) part))
+          (is (str/includes? t0 "<code>:task</code>") "each section key's own count"))
+        (is (str/includes? t1 "scrollback, 1 earlier turns") "turn 1's request carried turn 0")
+        (is (str/includes? t1 "/agent/a3/turn?id=demo%2Ff%231%2F1") "the whole request's link")
+        (testing "the whole request, served at that link, is every message the model read, in order"
+          (let [txt (p/turn-text {:zoom {:a3 {:db db}}} :a3 "demo/f#1/1")]
+            (is (str/starts-with? txt ";; ---- system"))
+            (is (str/includes? txt ";; ---- tool · answer to call-0"))
+            (is (str/includes? txt "check demo/g too") "the message it took, in its turn sections")
+            (is (= txt (seon.context/request-text (:messages (seon.context/remade db e1)))))))
+        (is (str/includes? (p/turn-text {:zoom {}} :a3 "demo/f#1/1") "open /agent/a3 first") "not read: says how")))))
+
+(deftest the-agent-head-says-why
+  (testing "a live agent evaluating its turn loop"
+    (let [w (ui/why {:id :a3 :status :running :running {:form "(seon.turn/work! '{:task \"demo/f\"})"}} attempt1 nil 2)]
+      (is (some #(str/starts-with? % "evaluating (seon.turn/work!") w))
+      (is (some #(str/includes? % "attempt demo/f#1 running: 2 turns recorded of at most 8; the turn after the last recorded is in flight") w))))
+  (testing "an ended agent, read from the store, and its task held for root"
+    (let [w (ui/why {:id :a3} (assoc attempt1 :seon.attempt/status :ended :seon.attempt/outcome :cap :seon.attempt/reason "turns ran out: demo-test/f-test red")
+                    {:seon.task/id "demo/f" :seon.task/execution :held :seon.task/failure {:reason "refused: demo-test/f-test red" :counterexample ""}} 8)]
+      (is (= ["not in root's view (its process ended, or another boot ran it): read from the store"
+              "attempt demo/f#1 ended, outcome cap: turns ran out: demo-test/f-test red"
+              "its task demo/f is held for root: refused: demo-test/f-test red; release it to run a next attempt"] w))))
+  (testing "nothing known"
+    (is (= ["root holds no agent a9 and main records no attempt it worked"] (ui/why {:id :a9} nil nil 0))))
+  (testing "the head shows the attempt's numbers and cost"
+    (let [html (h/html (ui/zoom-head {:agent {:id :a3 :status :idle :pid 77 :mem-mb 120.5 :evals []} :attempt attempt1
+                                                         :turns {:n 2 :tokens 8460 :usd 0.00123 :unpriced 1}} {}))]
+      (is (str/includes? html "deepseek-flash"))
+      (is (str/includes? html "8,460"))
+      (is (str/includes? html "$0.0012 + 1 turns not priced"))
+      (is (str/includes? html "120.5 MB")))))
+
+(deftest an-ended-agent-page-reads-the-store
+  (testing "root's view holds no a7: its branch is its newest attempt's, asked of the writer"
+    (let [o (volatile! {})
+          st (#'p/ask-branches {:watch #{:a7 :root} :pending {} :rid 0 :agent-attempt {:a7 (assoc attempt1 :seon.attempt/agent :a7 :seon.attempt/status :ended)}} o)]
+      (is (= [{:op :branch-db :branch :task-demo-f}] (mapv #(get-in % [:req :req]) (:to-api @o))))
+      (testing "and not again while nothing moved"
+        (let [o2 (volatile! {})]
+          (#'p/ask-branches (assoc st :pending {}) o2)
+          (is (empty? (:to-api @o2)))))
+      (testing "a commit event of a watched agent moves it: read again"
+        (let [o3 (volatile! {})
+              st (#'p/on-event (assoc st :pending {} :new-events []) {:type :commit :agent :a7 :t 99})]
+          (#'p/ask-branches st o3)
+          (is (= 1 (count (:to-api @o3))))))))
+  (testing "its page from the branch alone: its turns, why it is as it is, nothing live to act on"
+    (with-turns
+      (fn [db]
+        (let [att (assoc attempt1 :seon.attempt/status :ended :seon.attempt/outcome :green)
+              page (zoom db :a3 att nil)
+              actions (h/html (ui/agent-input {:id :a3 :live? false :held nil} {}))]
+          (is (= 2 (count (:turns page))))
+          (is (some #(str/includes? % "read from the store") (ui/why (:agent page) att nil 2)))
+          (is (str/includes? actions "its process has ended"))
+          (is (not (str/includes? actions "seon.root%2Fsubmit")) "no REPL to evaluate in"))))))
+
+(deftest the-agent-page-acts-through-roots-requests
+  (let [idx {:a3 {:pid 77 :branch :task-demo-f :status :idle}}
+        html (h/html (ui/agent-input {:id :a3 :live? true :held "demo/f"} {}))]
+    (testing "the window's input and buttons are UI calls of root's functions"
+      (is (str/includes? html "/call?fn=seon.root%2Fsubmit%21&amp;agent=a3"))
+      (is (str/includes? html "/call?fn=seon.root%2Finterrupt%21&amp;agent=a3"))
+      (is (str/includes? html "/call?fn=seon.root%2Frelease%21&amp;agent=a3&amp;args=")))
+    (testing "each is root's request, the one table the server's ops send too"
+      (is (= [[{:op :eval :id :a3 :forms "(+ 1 2)" :origin :ui} :a3]] (seon.web/requests {:var 'seon.root/submit! :agent :a3 :forms "(+ 1 2)"} idx)))
+      (is (= [[{:op :message :id :a3 :from :owner :body "check g"} :a3]] (seon.web/requests {:var 'seon.root/message! :agent :a3 :args {:body "check g"}} idx)))
+      (is (= [[{:op :message :id :a3 :from :owner :body "check g"} :a3]] (seon.web/requests {:var 'seon.root/submit! :agent :a3 :forms " > check g"} idx))
+          "a line the input sends that starts with > is a message, not a form")
+      (is (= [[{:op :write :req {:op :tx :branch :db :tx-data (seon.task/execution-tx ["demo/f"] :running)}} :a3]]
+             (seon.web/requests {:var 'seon.root/release! :agent :a3 :args {:task "demo/f"}} idx))
+          "my.root/run!'s one transaction")
+      (is (= [] (seon.web/requests {:var 'seon.root/interrupt! :agent :a3} idx)) "an interrupt is the web proc's signal, no request"))))

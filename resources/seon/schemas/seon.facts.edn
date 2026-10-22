@@ -328,7 +328,7 @@
  :seon.end/reason :string
  :seon.end/turns :int
  :seon.end/tokens :int
- :seon.turn/turn-fact [:map {:seon.db/attributes true}
+ :seon.turn/turn-fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/turn-row}
                           [:seon.turn/id :seon.turn/id] [:seon.turn/attempt :seon.turn/attempt] [:seon.turn/n :seon.turn/n]
                           [:seon.turn/reply :seon.turn/reply] [:seon.turn/forms :seon.turn/forms] [:seon.turn/errors :seon.turn/errors]
                           [:seon.turn/red :seon.turn/red] [:seon.turn/ms :seon.turn/ms] [:seon.turn/tokens {:optional true} :seon.turn/tokens]

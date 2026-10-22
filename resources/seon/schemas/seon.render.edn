@@ -60,14 +60,20 @@
  :seon.render/events-count [:map {:seon.render/html seon.render.ui/events-count} [:kept nat-int?] [:seen nat-int?]]
  ;; the web proc's own numbers (tabs open)
  :seon.render/web [:map {:seon.render/html seon.render.ui/web-stats}]
- ;; the zoomed agent's head (its entry as root holds it, its card's numbers)
- :seon.render/zoom-head [:map {:seon.render/html seon.render.ui/zoom-head} [:id :keyword]]
- ;; the zoomed agent's work on main: its attempt and task
- :seon.render/zoom-work [:map {:seon.render/html seon.render.ui/zoom-work}]
- ;; the zoomed agent's last test run, and main's results of its attempt
+ ;; the agent window's head: its view entry, attempt and task, the totals over its turns
+ :seon.render/zoom-head [:map {:seon.render/html seon.render.ui/zoom-head} [:agent :map] [:turns :map]]
+ ;; the attempt's turns, each row serialized ahead by its declared render (seon.render.ui/turn-row)
+ :seon.render/turns [:map {:seon.render/html seon.render.ui/turns-list} [:rows [:sequential :string]]]
+ ;; the input at the bottom of the agent's window
+ :seon.render/agent-input [:map {:seon.render/html seon.render.ui/agent-input} [:id :keyword] [:live? :boolean]]
+ ;; the agent window's live tiles, the last changed first, each serialized ahead
+ :seon.render/tiles [:map {:seon.render/html seon.render.ui/tiles-list} [:tiles [:sequential :string]]]
+ ;; the agent's last test run, and main's results of its attempt
  :seon.render/proofs [:map {:seon.render/html seon.render.ui/proofs-box}]
- ;; the current-state block the zoomed agent's model reads, or why there is none
- :seon.render/zoom-context [:map {:seon.render/html seon.render.ui/zoom-context}]
+ ;; what the agent's branch will carry to main, as its newest turn measured it
+ :seon.render/branch [:map {:seon.render/html seon.render.ui/branch-box}]
+ ;; the problems main recorded of an agent or its task, in root's context's words
+ :seon.render/agent-problems [:map {:seon.render/html seon.render.ui/problems-box} [:rows [:vector :map]]]
  ;; one event of root's stream
  :seon.render/event [:map {:seon.render/html seon.render.ui/event-row} [:type :keyword]]
  ;; a declared proc's health as what flows: the defects root recorded of it (no ping)

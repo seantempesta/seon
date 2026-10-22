@@ -88,7 +88,9 @@
     (raw? node) (.append sb ^String (::raw node))
     ;; a vector headed by a function (or its var) is a call, as in Reagent: [task-row task
     ;; {:as :inline}] writes what (task-row task {:as :inline}) answers, itself expanded
-    (and (vector? node) (or (fn? (first node)) (var? (first node)))) (write! sb (apply (first node) (rest node)))
+    ;; (a keyword or symbol head is an element: Jolt answers fn? true for a keyword)
+    (and (vector? node) (not (keyword? (first node))) (not (symbol? (first node))) (or (fn? (first node)) (var? (first node))))
+    (write! sb (apply (first node) (rest node)))
     (vector? node)
     (let [[tag & more] node
           tag (name tag)

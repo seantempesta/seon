@@ -78,7 +78,10 @@
   (let [one (fn [op id args] [[(c/request op id args (get index id)) id]])]
     (case f
       seon.root/spawn! (vec (repeat (min 100 (max 1 (or (:n args) 1))) [(c/request 'spawn! nil (cond-> {} (not (str/blank? (:task args))) (assoc :task (:task args))) nil) nil]))
+      ;; a line that starts with > is a message to the agent (read at its next turn), not a form
       seon.root/submit! (cond (str/blank? forms) []
+                              (and (not= :all agent) (str/starts-with? (str/triml forms) ">"))
+                              (one 'message! agent {:body (str/trim (str/replace-first (str/triml forms) #"^>" ""))})
                               (= :all agent) (vec (for [[id a] (sort-by (comp str key) index) :when (not (c/gone-statuses (:status a)))] [(c/request 'submit! id {:forms forms :origin :ui} a) id]))
                               :else (one 'submit! agent {:forms forms :origin :ui}))
       ;; seon.root/interrupt! is no request: an effect on a process, performed by this proc
@@ -125,6 +128,10 @@
       (let [uri (:uri req) m (:request-method req) q (form-params (:query-string req))]
         (cond
           (and (= m :get) (= uri "/")) (html-response (ask! ch {:op :page :view :root}))
+          ;; the whole request an agent's turn read, made again from its basis (its page links it)
+          (and (= m :get) (str/starts-with? uri "/agent/") (str/ends-with? uri "/turn"))
+          {:status 200 :headers {"Content-Type" "text/plain; charset=utf-8" "Cache-Control" "no-store"}
+           :body (str (ask! ch {:op :turn-text :agent (keyword (subs uri 7 (- (count uri) 5))) :turn (get q "id")}))}
           (and (= m :get) (str/starts-with? uri "/agent/")) (html-response (ask! ch {:op :page :view (view-of (subs uri 7))}))
           (and (= m :get) (= uri "/feed"))
           (let [out (a/chan 64)]
@@ -217,9 +224,10 @@
     :page (let [[st k] (step/pend st [(:p m) (:view m)])]
             (step/out! o :to-render {:op :page :view (:view m) :k k})
             st)
-    (:context :render-stats)
+    (:context :render-stats :turn-text)
              (let [[st k] (step/pend st [(:p m) :text])]
-               (step/out! o :to-render {:op (if (= :context (:op m)) :context :stats) :k k})
+               (step/out! o :to-render (merge {:op ({:context :context :render-stats :stats :turn-text :turn-text} (:op m)) :k k}
+                                              (select-keys m [:agent :turn])))
                st)
     :stats (do (deliver (:p m) (stats st)) st)
     :call (let [c (:call m)

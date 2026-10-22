@@ -173,6 +173,14 @@
     (update st ::to-agents (fnil conj []) [id m])
     st))
 
+(defn- deliver-message
+  "Send message m ({:from :to [id ...] :body}) to each agent it names: the one delivery, for an
+  agent's send and the owner's message alike."
+  {:malli/schema [:=> [:cat :seon.root/api-state :map] :seon.root/api-state]}
+  [st m]
+  (let [msg {:op :message :from (:from m) :body (:body m) :ns (profile/now-ns)}]
+    (reduce #(to-agent %1 %2 {:op :write :msg msg}) st (:to m))))
+
 (defn- spawn-failed
   "Agent id's spawn or fork refused (why, and its cause when another proc refused it): the
   one error map in its view and sent to its proc, which hangs up."
@@ -295,6 +303,11 @@
                     :stats {:op :stats}
                     :merge-main {:op :merge-main :data-attrs (:data-attrs m)})]
           (to-agent st id {:op :req :rid rid :kind op :msg msg :merge-branch (:merge-branch m) :data-attrs (:data-attrs m)})))
+      ;; a message to a live agent (the owner's, from the page or the server): root's one
+      ;; delivery, as an agent's send is; it lands in the agent's inbox, which its next turn reads
+      :message (if (nil? (get-in st [:agents id]))
+                 (reply! st p (gone id (str "no live agent " id)))
+                 (reply! (deliver-message st {:from (:from m) :to [id] :body (:body m)}) p {:delivered id}))
       ;; requests for the writer: answered by rid; a collection only while no agent is live,
       ;; the store's only writer then being root's writer (seon.db/collect!)
       :write (if (and (= :collect (get-in m [:req :op])) (seq (:agents st)))
@@ -392,8 +405,7 @@
       :stat (case (:k m)
               :noise (view! st update :stats assoc :noise (:v m) :noise-ordered (:ordered m) :noise-first-bad (:bad m))
               (view! st update-in [:stats (:k m)] lib/push-window (:v m) 100000))
-      :message (let [msg {:op :message :from (:from m) :body (:body m) :ns (profile/now-ns)}]
-                 (reduce #(to-agent %1 %2 {:op :write :msg msg}) st (:to m)))
+      :message (deliver-message st m)
       ;; a proc's request (the reconciler's, the web's, MCP's): an ordinary api request
       ;; whose answer goes back to the proc as data
       :request (ext-op st o (assoc (:req m) :p {:route (:route m) :tag (:tag m)}))
@@ -825,7 +837,7 @@
 
 (defn request
   "The op (named as its fn below: spawn! clone! submit! run-tests! kill! merge!
-  merge-main!) on agent id with args, as the api request it is: one table for these fns
+  merge-main! message! release!) on agent id with args, as the api request it is: one table for these fns
   and the dashboard's calls (seon.web). a: the agent's entry in root's view, which merge!
   and merge-main! read; an op the agent cannot take answers its refusal."
   {:malli/schema [:=> [:cat :symbol [:maybe :seon.agent/id] [:maybe :map] [:maybe :map]] :map]}
@@ -838,6 +850,9 @@
       submit! (cond-> {:op :eval :id id :forms (:forms args)} (:ticks args) (assoc :ticks (:ticks args)) (:origin args) (assoc :origin (:origin args)))
       run-tests! (cond-> {:op :tests :id id} (:ticks args) (assoc :ticks (:ticks args)))
       kill! {:op :kill :id id}
+      message! {:op :message :id id :from :owner :body (:body args)}
+      ;; my.root/run!'s one transaction: the held task (:task) released, its next attempt the reconciler's
+      release! {:op :write :req {:op :tx :branch :db :tx-data (task/execution-tx [(:task args)] :running)}}
       merge-main! (if live?
                     {:op :merge-main :id id :data-attrs data-attrs}
                     (gone id (str "no live agent " id)))
@@ -882,6 +897,19 @@
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id :string] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :string [:maybe :map]] :seon.host/promise]]}
   ([sys agent-id forms-string] (submit! sys agent-id forms-string nil))
   ([sys agent-id forms-string opts] (request! sys 'submit! agent-id (assoc opts :forms forms-string))))
+
+(defn message!
+  "Send the owner's message body (a string) to the agent: root's one delivery, into the
+  agent's inbox, which its next turn takes into the block it reads (:messages). A promise of
+  {:delivered id}, or its refusal when no live agent has the id."
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id :string] :seon.host/promise]}
+  [sys agent-id body] (request! sys 'message! agent-id {:body body}))
+
+(defn release!
+  "Release the held task task-id (my.root/run!'s one transaction): the reconciler runs its next
+  attempt. A promise of the writer's answer."
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.task/id] :seon.host/promise]}
+  [sys task-id] (request! sys 'release! nil {:task task-id}))
 
 (defn judge!
   "Hand an outside agent's attempt to the reconciler for judgement, as a turn loop's end

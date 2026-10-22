@@ -223,9 +223,10 @@
   test run that failed as a whole; resolved references, each at its citation's depth; the
   helpers the plan does not name (:found); the measured evidence it starts from; the
   branch's unmerged entries (base, ours, theirs); what its merge will carry to main; what
-  happened to the last reply; the last evaluations; turns left."
+  happened to the last reply; the messages delivered since the last turn (the owner's, root's,
+  other agents'); the last evaluations; turns left."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds last-items turn max-turns unmerged truncated? refusals run-errors source repairs will-merge]}]
+  [db t {:keys [results reds last-items turn max-turns unmerged truncated? refusals run-errors source repairs will-merge messages]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
         refs (filterv (comp qualified-symbol? :seon.ref/name) cites)
@@ -267,6 +268,7 @@
       ;; owner D4 (2026-10-22): every change the branch's merge carries to main, every turn
       ;; measured and empty ({}) says so; absent only when not measured (a basis before D4)
       (some? will-merge) (assoc :will-merge will-merge)
+      (seq messages) (assoc :messages messages)
       (seq last-items) (assoc :last-evals (transcript (fold-evals last-items))))))
 
 (defn evaluations-text
@@ -368,13 +370,46 @@
 
 (declare render)
 
+(defn remade
+  "The request turn entity e on db read, made again from its basis on the commit it read
+  (render): {:basis :block :messages}."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:map [:basis :seon.turn/basis] [:block :map] [:messages [:vector :seon.model/message]]]]}
+  [db e]
+  (let [b (:seon.turn/basis (turn-record db e))]
+    (assoc (render (d/commit-as-db db (:commit b)) b) :basis b)))
+
 (defn turn-text
   "What the reader of turn entity e on db got (reader-text), made again from its basis on the
   commit it read."
   {:malli/schema [:=> [:cat :seon.host/db :int] :string]}
-  [db e]
-  (let [b (:seon.turn/basis (turn-record db e))]
-    (reader-text (:messages (render (d/commit-as-db db (:commit b)) b)))))
+  [db e] (reader-text (:messages (remade db e))))
+
+(defn sections
+  "Where a request's tokens went, as the printer sizes them (seon.print.select/estimate), in
+  the order it sends them: the help page, the attempt sections, the scrollback (its earlier
+  turns), the turn sections; the attempt and turn sections each with the tokens of each key
+  of block printed alone. [{:part :tokens :keys [[k tokens]]}]."
+  {:malli/schema [:=> [:cat [:map [:block :map] [:messages [:vector :seon.model/message]]]]
+                  [:vector [:map [:part :string] [:tokens nat-int?] [:keys {:optional true} [:vector [:tuple :keyword nat-int?]]]]]]}
+  [{:keys [block messages]}]
+  (let [est #(select/estimate (:content %))
+        scroll (subvec messages 2 (dec (count messages)))
+        each (fn [ks] (vec (for [k ks :when (contains? block k)]
+                             [k (select/estimate (print/text {k (get block k)} (:context print/budgets)))])))]
+    [{:part "help page" :tokens (est (first messages))}
+     {:part "attempt sections" :tokens (est (second messages)) :keys (each attempt-keys)}
+     {:part (str "scrollback, " (count (filter #(= "assistant" (:role %)) scroll)) " earlier turns") :tokens (reduce + 0 (map est scroll))}
+     {:part "turn sections" :tokens (est (peek messages)) :keys (each (remove (set attempt-keys) (keys block)))}]))
+
+(defn request-text
+  "The whole request messages, as one text: each message headed by its role (and a tool
+  answer by its call's id, an assistant's eval calls after its reply). What the agent's page
+  links as a turn's whole context."
+  {:malli/schema [:=> [:cat [:vector :seon.model/message]] :string]}
+  [messages]
+  (str/join "\n\n" (for [{:keys [role content tool-calls tool-call-id]} messages]
+                     (str ";; ---- " role (when tool-call-id (str " · answer to " tool-call-id)) "\n" content
+                          (str/join (for [{:keys [id code]} tool-calls] (str "\n;; eval call " id "\n" code)))))))
 
 (defn- attempt-text
   "The attempt sections the first model turn e on db was sent, made again from its basis."

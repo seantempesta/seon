@@ -69,8 +69,9 @@ The server's ops are one table, `seon.server/ops`: MCP lists each as the tool `s
 | one printer with a budget and runnable continuations; renders on schemas | `seon.print`, `seon.render` | present |
 | wiki sections in the context | `seon.docs` | new |
 | Datastar pages: `/`, `/agent/{id}` | `seon.web` | present |
-| `/ns/{ns}` and its debug pages; `/agent/{id}/debug`; `/data` | none | missing |
-| `/agent/{id}/message` (the owner's input bar) | none | missing |
+| `/agent/{id}/debug`: each model call, what it was sent (remade from its basis), its tokens | `/agent/{id}` is the debug view ([render](render.md#the-agents-page-is-its-debug-view)): each turn a row (`seon.render.ui/turn-row`), its context remade by `seon.context/remade` with each part's tokens, the whole request at `/agent/{id}/turn?id=` | present |
+| `/agent/{id}/message` (the owner's input bar) | the page's message bar and the server's `:message` op, both `seon.root/message!`: root's one delivery into the agent's inbox, which its next turn takes into its basis (`:messages` in the block) | present; not a stored fact on main, the turn's basis records it |
+| `/ns/{ns}` and its debug pages; `/data` | none (task `seon.render/ns-and-data-pages`) | missing |
 
 ## Storage, config, errors
 

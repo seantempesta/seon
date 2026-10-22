@@ -130,3 +130,12 @@
   (testing "a recorded call's thinking goes back on the wire with its code"
     (let [m (#'seon.model/wire-message {:role "assistant" :content "" :tool-calls [{:id "c1" :code "(+ 1 2)" :thinking "sum"}]})]
       (is (= {"code" "(+ 1 2)" "thinking" "sum"} (json/read-str (get-in m [:tool_calls 0 :function :arguments])))))))
+(deftest cost-prices-a-turn-at-its-models-rates
+  (testing "a DeepSeek turn as seon.turn/usage records it: 10k prompt (8k cached), 500 completion"
+    (let [u (turn/usage {:prompt-tokens 10000 :completion-tokens 500 :cache-hit-tokens 8000 :cache-miss-tokens 2000})]
+      (is (= (/ (+ (* 2000 0.15) (* 8000 0.003) (* 500 0.6)) 1e6) (model/cost "deepseek-flash" u)))
+      (is (< (model/cost "deepseek-flash" u) (model/cost "deepseek-v4-pro" u)) "the pro model's rates are higher")))
+  (testing "unknown is nil, never 0: no cache split (the scripted fixture's estimate), or no prices"
+    (is (nil? (model/cost "deepseek-flash" (turn/usage {:prompt-tokens 100 :completion-tokens 5}))))
+    (is (nil? (model/cost "no-such-model" {:seon.turn/tokens 10 :seon.turn/cache-hit-tokens 1 :seon.turn/cache-miss-tokens 1})))
+    (is (nil? (model/cost nil {:seon.turn/tokens 10 :seon.turn/cache-hit-tokens 1 :seon.turn/cache-miss-tokens 1})))))

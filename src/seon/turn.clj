@@ -126,15 +126,17 @@
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its
   basis, not its prompt): the commit it reads (the run-ahead writes committed now, as the
-  model call's wait would), the task, attempt and turn, the observations no db holds, and
+  model call's wait would), the task, attempt and turn, the observations no db holds (the
+  messages delivered since the last turn among them, taken: the turn is their reader), and
   the last evaluations' transcript while no earlier turn shows them."
   {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id :int :int :seon.turn/origin :map] :seon.turn/basis]}
   [task attempt turn max-turns origin observed]
   (agent/commit!)
   (let [items (when (or (= :outside origin) (zero? turn)) (last-evals))
-        ev (when (seq items) (context/evaluations-text items))]
+        ev (when (seq items) (context/evaluations-text items))
+        msgs (agent/messages)]
     (cond-> {:commit (d/commit-id (agent/db)) :task task :attempt attempt :turn turn :max-turns max-turns
-             :origin origin :observed (dissoc observed :merge?)}
+             :origin origin :observed (cond-> (dissoc observed :merge?) (seq msgs) (assoc :messages msgs))}
       (:merge? observed) (assoc :merge? true)
       ev (assoc :last-evals ev))))
 

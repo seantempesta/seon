@@ -498,3 +498,16 @@
         refs (:references (context/current-state db (task/task db "demo/u") {:turn 0 :max-turns 4}))]
     (is (= ['demo/f] (keep :symbol refs)) "the resolved name as itself")
     (is (= {:unresolved ['demo/x 'demo/y] :problem (:unresolved seon.ref/problem-messages)} (last refs)) "the others, one problem")))
+
+(deftest an-owners-message-reaches-the-next-turn
+  ;; owner, 2026-10-23 (parity row 73): the page's message bar sends the owner's words through
+  ;; root's delivery; the agent's next turn takes its inbox into its basis (seon.turn/basis!),
+  ;; so the block it reads shows them, in the turn sections, and every later reading of that
+  ;; turn shows them again from the basis
+  (let [db (db-with-program)
+        msgs [{:from :owner :body "use demo/g, not a new helper"}]
+        ms (context/messages "H" (context/current-state db (task-f db) {:turn 1 :max-turns 4 :messages msgs}))]
+    (is (str/includes? (:content (peek ms)) "use demo/g, not a new helper") "in the turn sections")
+    (is (str/includes? (:content (peek ms)) ":from :owner") "who sent it")
+    (is (not (str/includes? (:content (second ms)) "use demo/g")) "not in the cached attempt sections")
+    (is (not (contains? (context/current-state db (task-f db) {:turn 1 :max-turns 4}) :messages)) "none delivered: no section")))

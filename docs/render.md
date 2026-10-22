@@ -37,7 +37,19 @@ Nothing is pinged and nothing runs on a beat (owner, 2026-10-21). A render pass 
 
 ## A context read is shown once
 
-An outside agent reads its current-state block through root's server (`{:op :context}`, recorded with origin `:context`). The agent's page shows the text it last read, made again from that turn's basis (`seon.context/recorded`, `seon.context/render`: a turn records the commit it read and the observations no db holds, never the text); every other view of that read (a card, a history row, the stream) refers to it (`read its current-state block · ≈N tokens`), never repeats it. The agent's own turn and the server print the block the same way (`seon.context/messages`, `seon.context/reader-text`: the attempt sections, then the turn sections, each under 16,000 tokens).
+An outside agent reads its current-state block through root's server (`{:op :context}`, recorded with origin `:context`). The agent's page shows the text each read got, in its turn row, made again from that turn's basis (`seon.context/recorded`, `seon.context/render`: a turn records the commit it read and the observations no db holds, never the text); every other view of that read (a card, a history row, the stream) refers to it (`read its current-state block · ≈N tokens`), never repeats it. The agent's own turn and the server print the block the same way (`seon.context/messages`, `seon.context/reader-text`: the attempt sections, then the turn sections, each under 16,000 tokens).
+
+## The agent's page is its debug view
+
+`/agent/{id}` shows one agent, live or ended, from facts only (owner, 2026-10-23: "a debug view into any agent"); `seon.render.proc`'s zoom builds its value (`:seon.render/agent-page`) from root's view entry while the agent lives, its newest attempt and task on main, and the attempt's branch read from the store (branches are kept, so an ended agent from another boot reads the same way; the writer's `:branch-db` reads a branch named as a task names it, `seon.db/on-main`). The branch is read again when a watched agent's commit event arrives, never on a clock.
+
+- **Head**: why the agent is as it is, one line each (`seon.render.ui/why`: its status and the form it runs, its attempt's outcome and reason, its task held for root), its process, its attempt's model, start and end, turns, tokens and cost (`seon.model/cost`: the model's configured off-peak prices; a turn whose provider did not split cached from uncached prompt tokens is not priced, never priced as 0).
+- **Actions**, each a UI call of root's request table (`seon.root/request`), the one the server's ops send too: the eval box (`submit!`, origin `:ui`), the message bar (`message!`: root's one delivery, `deliver-message`; the agent takes arrived messages into its inbox wherever it reads its socket, `seon.agent/messages`, and its next turn takes them into its basis, so the block shows `:messages` and every later reading of that turn shows them again), interrupt, and release of a held task (`release!`, `my.root/run!`'s one transaction).
+- **Turns**: one row per turn of the attempt, oldest first, the declared HTML render of `:seon.turn/turn-fact` (`seon.render.ui/turn-row`), each rendered once while its facts are the same: tokens, the cached share, cost, the time split, how the reply stopped; the reply and its reasoning; each eval call's code and what the REPL answered as the model read it (the scrollback's own text); the proofs it saw (its basis's results); the messages it took; and the context it read, made again from its basis (`seon.context/remade`) with each part's tokens (`seon.context/sections`: help page, attempt sections, scrollback, turn sections and each key), its text under `:seon.config.render/turn-text-budget`, the cut and a link reading the whole request (`seon.context/request-text`, served at `/agent/{id}/turn?id=`).
+- **Beside them**: the task (its own render), the proofs (the agent's last run, each report reused or run, and the judge's results on main), the branch (`:will-merge` as the newest turn measured it, the attempt's conflicts and unmerged keys) and the problems main recorded of this agent or its task, in root's context's words (`seon.render.ai/problem-row`) with their evidence.
+
+Not shown yet: the agent's thread count (its stats do not report one; task `seon.agent/an-agent-reports-its-threads`), and the judge's merge-deferred proofs (not on main).
+
 
 ## The model's context: a cached prefix, then the turn
 
@@ -81,5 +93,5 @@ An agent's namespace refers `clojure.pprint`'s `pp` and `pprint` (`seon.agent/ma
 - `seon.context/near`: the whole line a repaired delimiter is on, the printer budgets it.
 - `seon.render.proc/main-info`, `seon.render.proc/system-value`: a sparkline's points, the newest `:seon.config.render.list/series`.
 - `seon.render.proc/pass`, `seon.render.proc/finish-patch`: the stream keeps the newest `:seon.config.render.list/stream` events; its header (`seon.render.ui/events-count`) says how many older it did not keep.
-- `seon.render.proc/eval-records`: an agent's page shows its newest `:seon.config.render.list/history` evaluations; `seon.render.ui/history-list` says how many more its branch records.
+- `seon.render.proc/zoom-value`: an agent's window shows its newest `:seon.config.render.list/history` evaluations outside its turns; `seon.render.ui/history-list` says how many more its branch records.
 - `seon.render.ai/section-costly`: the newest `:seon.config.render.list/top` evaluations of each agent its costliest functions are summed from.
