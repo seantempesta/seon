@@ -26,7 +26,7 @@
       (is (nil? (:error a)) (pr-str a)))))
 
 (deftest a-door-defect-answers-that-request-alone
-  ;; task seon.entrance/a-door-defect-answers-that-request-alone: a request whose verb throws
+  ;; task seon.entrance/a-door-defect-answers-that-request-alone: a request whose op throws
   ;; (attach! refuses a task id that is not a string: its contract) is answered the typed
   ;; :seon.entrance/defect naming the line it took, and the door answers the next request
   (let [[defect ok] (at/in-agent [{:op :attach :task 5} {:op :eval :agent "root" :code "(+ 1 2)"}])]
@@ -36,15 +36,15 @@
 
 (deftest the-door-speaks-mcp
   ;; task seon.entrance/the-door-answers-mcp-itself: the entrance answers MCP's JSON-RPC
-  ;; itself (bin/mcp only relays lines): initialize, tools/list from the one verb table,
+  ;; itself (bin/mcp only relays lines): initialize, tools/list from the one op table,
   ;; nothing for a notification, an unknown tool named in its text. tools/call through a
   ;; real root is seon.check/mcp-proof (bin/check mcp), through the relay
   (let [ask #(seon.entrance/mcp-reply nil %)
         tools (get-in (ask {"jsonrpc" "2.0" "id" 2 "method" "tools/list"}) ["result" "tools"])]
     (is (= "2025-06-18" (get-in (ask {"id" 1 "method" "initialize" "params" {"protocolVersion" "2025-06-18"}}) ["result" "protocolVersion"]))
         "initialize answers the client's protocol version")
-    (is (= (mapv #(str "seon_" (name %)) (keys seon.entrance/verbs)) (mapv #(get % "name") tools))
-        "every verb is the tool seon_<op>, in the table's order")
-    (is (= ["agent" "code"] (get-in (second tools) ["inputSchema" :required])) "a verb's required arguments are its tool's")
+    (is (= (mapv #(str "seon_" (name %)) (keys seon.entrance/ops)) (mapv #(get % "name") tools))
+        "every op is the tool seon_<op>, in the table's order")
+    (is (= ["agent" "code"] (get-in (second tools) ["inputSchema" :required])) "an op's required arguments are its tool's")
     (is (nil? (ask {"jsonrpc" "2.0" "method" "notifications/initialized"})) "a notification is not answered")
     (is (= "no tool seon_nope" (get-in (ask {"id" 3 "method" "tools/call" "params" {"name" "seon_nope" "arguments" {}}}) ["result" "content" 0 "text"])))))

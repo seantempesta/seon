@@ -814,10 +814,10 @@
   (let [c (a/chan (a/sliding-buffer 1024))] (a/tap (:events-mult sys) c) c))
 
 (defn request
-  "Root's verb (named as its fn below: spawn! clone! submit! run-tests! kill! merge!
+  "The op (named as its fn below: spawn! clone! submit! run-tests! kill! merge!
   merge-main!) on agent id with args, as the api request it is: one table for these fns
   and the dashboard's calls (seon.web). a: the agent's entry in root's view, which merge!
-  and merge-main! read; a verb the agent cannot take answers its refusal."
+  and merge-main! read; an op the agent cannot take answers its refusal."
   {:malli/schema [:=> [:cat :symbol [:maybe :seon.agent/id] [:maybe :map] [:maybe :map]] :map]}
   [verb id args a]
   (let [live? (boolean (and a (not (gone-statuses (:status a)))))
