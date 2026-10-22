@@ -16,9 +16,10 @@
   main of its own, a branch of the one test store (target/runs/test-store), deleted with
   every branch under it when the root has stopped (seon.check/drop-mains).
   opts: :dirs, the source dirs root imports (default [\"src\"]); :proofs, the task's proofs;
-  :sets, more --set config overrides for the root (e.g. its scripted model)."
+  :sets, more --set config overrides for the root (e.g. its scripted model); :decls, more
+  task declarations in demo's file beside demo/t."
   ([forms] (in-agent forms {}))
-  ([forms {:keys [dirs proofs sets] :or {dirs ["src"] proofs '#{demo-test/t}}}]
+  ([forms {:keys [dirs proofs sets decls] :or {dirs ["src"] proofs '#{demo-test/t}}}]
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         main (str "in-agent-" (random-uuid))
         store (str checkout "/target/runs/test-store")
@@ -26,7 +27,7 @@
         port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
         ask (fn [m] (str "printf '%s\\n' " (pr-str (pr-str m)) " | nc -w 60 127.0.0.1 " port))
         script (str "mkdir -p '" path "-tasks'; mkfifo '" path "-in';"
-                    " echo " (pr-str (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}]))
+                    " echo " (pr-str (pr-str (into [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}] decls)))
                     " > '" path "-tasks/demo.edn'; ./seon root"
                     " --set ':seon.config.source/root=" (pr-str checkout) "' --set ':seon.config.source/dirs=" (pr-str dirs) "'"
                     " --set ':seon.config.root/store-path=" (pr-str store) "' --set ':seon.config.root/main=" (pr-str main) "'"
