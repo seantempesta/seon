@@ -82,10 +82,6 @@
       (cond
         (= m :dead) (lib/c-exit 0)
         (and (= op (:op m)) (= k (:k m))) m
-        ;; Flow's ping reaches a waiting agent too: health while an effect is in flight
-        (= :ping (:op m)) (do (send! {:op :pong :status :waiting :count (:n @state 0) :held 0
-                                      :state {:evals (:n @state) :waiting-for op}})
-                              (recur))
         :else (do (swap! state update :pending conj m) (recur))))))
 
 
@@ -146,11 +142,11 @@
     (swap! state update :fx-pending dissoc k)
     (swap! state assoc-in [:defs [:fx k]]
            [(cond-> (into {:seon.fx/id (str (name (:id @state)) "-" (lib/c-getpid) "-fx" k) :seon.fx/kind kind
-                           :seon.fx/status (if (:seon.error/type r) :error :ok)
+                           :seon.fx/status (if (contract/error? r) :error :ok)
                            :seon.fx/us (long (:seon.fx/us r 0)) :seon.fx/queue-us (long (:seon.fx/queue-us r 0))}
                           (for [[f a] model-cost-attrs :let [v (when (map? c) (get c f))] :when (int? v)] [a (long v)]))
               (:cost r) (assoc :seon.fx/cost (long (:cost r)))
-              (:seon.error/type r) (assoc :seon.fx/error (str (:seon.error/type r) ": " (:seon.error/message r))
+              (contract/error? r) (assoc :seon.fx/error (str (:seon.error/type r) ": " (:seon.error/message r))
                                           :seon.fx/error-type (:seon.error/type r)))])
     kind))
 
@@ -367,15 +363,15 @@
   each test var as it starts and then one EDN line of its result on a pipe. The agent reads
   the pipe to its end: no clock; the child ends by finishing, by its budget, or by dying
   (then the last test it started is named). (forked pid) runs here once the child exists."
-  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol]] :seon.test/result]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] :seon.host/fn] :seon.test/result]]}
+  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol]] [:or :seon.test/result :seon.test/fork-refused]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]]}
   ([ticks proofs] (run-tests-forked ticks proofs (fn [_] nil)))
   ([ticks proofs forked]
   (let [[r w] (lib/pipe) t0 (profile/now-ns)]
     (lib/fork!
       {:refused (fn [n] (lib/c-close r) (lib/c-close w)
-                  {:pass 0 :fail 0 :error 1 :ms (profile/ms-since t0)
-                   :reports [{:type :error :message (str "cannot fork the tests: " n " Chez threads active (a running future?)")}]})
+                  (contract/error :seon.test/fork-refused 'seon.agent/run-tests-forked
+                                  (str "cannot fork the tests: " n " Chez threads active (a running future?)") {:active-threads n}))
        :child (fn []
                 (lib/c-close r)
                 ;; the run ends by its budget; if the agent dies first, the next write to the
@@ -504,11 +500,11 @@
     (commit!)
     (send! {:op :branch-me :k k})
     (let [r (await-op! :branched k)]
-      (if-not (:ok r)
+      (if (:error r)
         (do (sock/close! fd) (send! {:op :clone-failed :k k :error (:error r)}))
         (lib/fork!
           {:fd fd :double? true
-           :refused (fn [n] (send! {:op :clone-failed :k k :error (str "cannot fork: " n " Chez threads active (a running future?)")}))
+           :refused (fn [n] (send! {:op :clone-failed :k k :error (contract/error :seon.agent/failed 'seon.agent/clone! (str "cannot fork: " n " Chez threads active (a running future?)") {:agent (:agent m)})}))
            :parent (fn [_] (send! {:op :cloned :k k :clone (:agent m)}))
            :child (fn []
                     (let [parent (:id @state)]

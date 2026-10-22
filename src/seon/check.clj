@@ -112,7 +112,7 @@
 
 (defn- main-q [sys query & inputs] (apply d/q query @(:conn sys) inputs))
 
-(defn- short-items [items] (mapv #(select-keys % [:tag :printed :ms]) items))
+(defn- short-items [items] (if (contract/error? items) items (mapv #(select-keys % [:tag :printed :ms]) items)))
 
 (defn- p1 "Each reply item of forms evaluated in agent id, as [printed recorded]." [sys id forms]
   (mapv (juxt :printed :recorded) @(c/submit! sys id forms)))
@@ -196,7 +196,7 @@
         st (c/state sys)]
       {:report {:state (-> st (update :agents (fn [ags] (into (sorted-map) (for [[k v] ags] [k (-> v (dissoc :evals) (update :tests #(some-> % (dissoc :reports))))])))))}
        ;; each agent's tests ran and passed; a1 and a3 merged (their tests judging); a2 is refused (its conflict, or the merged doc-test it now fails)
-       :checks {:every-agent's-tests-pass (every? (fn [id] (let [t (tests id)] (and (pos? (:pass t)) (zero? (+ (:fail t) (:error t)))))) ids)
+       :checks {:every-agent's-tests-pass (every? (fn [id] (let [t (tests id)] (and (not (contract/error? t)) (pos? (:pass t)) (zero? (+ (:fail t) (:error t)))))) ids)
                 :a1-merged-gated-by-its-tests (and (:merged? m1) (pos? (get-in m1 [:tests :pass] 0)))
                 :a3-merged-twice (and (:merged? m3) (:merged? m3b))
                 :a2-refused (not (:merged? m2))}}))))
@@ -432,13 +432,13 @@
         r7 @(c/submit! sys b "(+ 3 4)")
         [y] (spawn-ready! sys "after the fork server died")
         r8 @(c/submit! sys y "(count (q '[:find ?v :where [?v :var/name]])) (loop [] (recur)) :after" {:ticks 1000000000})]
-      {:report {:exit [(short-items r1) (select-keys (get-in (c/state sys) [:agents a]) [:status :exit])]
+      {:report {:exit [r1 (select-keys (get-in (c/state sys) [:agents a]) [:status :exit])]
                 :refused (short-items r2) :printed-chars (mapv #(count (:printed %)) r3) :read-error (short-items r4)
                 :spin (select-keys t5 [:error :reports :ms]) :test-exits (select-keys t6 [:error :reports :exit])
                 :oom (short-items r9) :interrupt (short-items r12) :ticks (short-items r11)
-                :out [(:out (first r10)) (:reports t10)] :fork-server [(:fork-server (c/state sys)) (short-items r7) (short-items r8)]}
+                :out [(:out (first r10)) t10] :fork-server [(:fork-server (c/state sys)) (short-items r7) (short-items r8)]}
        :checks {"agent calling System/exit mid-request dies alone, named by its exit status"
-                (and (= :seon.agent/died (:seon.error/type (:err (last r1)))) (= {:exit 3} (:exit (:err (last r1))))
+                (and (= :seon.agent/died (:seon.error/type r1)) (= {:exit 3} (:exit r1))
                      (= :dead (get-in (c/state sys) [:agents a :status])))
                 "a refused transaction is an :err item" (and (= :err (:tag (first r2))) (re-find #"refused" (:printed (first r2))))
                 "huge and infinite values print within the printer's budget" (and (< (count (:printed (first r3))) 25000) (< (count (:printed (second r3))) 25000))
@@ -455,7 +455,7 @@
                 (and (= :seon.repl/ticks-spent (get-in (second r11) [:err :seon.error/type]))
                      (<= 1000000000 (get-in (second r11) [:err :ticks])) (= "8" (:printed (nth r11 2))))
                 "printed output comes back as :out; a busy thread blocks the test fork instead of breaking it"
-                (and (= "hello from :a3\n" (:out (first r10))) (= 1 (:error t10)) (re-find #"Chez threads active" (str (:message (first (:reports t10))))))
+                (and (= "hello from :a3\n" (:out (first r10))) (= :seon.test/fork-refused (:seon.error/type t10)) (re-find #"Chez threads active" (:seon.error/message t10)))
                 "the fork server dies: agents keep working, a new server forks the next agent (whose tick budget works)"
                 (and (= "7" (:printed (first r7))) (= "360" (:printed (first r8)))
                      (= :seon.repl/ticks-spent (get-in (second r8) [:err :seon.error/type])) (= ":after" (:printed (nth r8 2))))}}))))
@@ -633,7 +633,7 @@
                 :branches-recovered (= #{:dur-a :dur-b :dur-c :dur-clone} (set (get-in st [:store :recovered-branches])))
                 :main-runs-the-merged-f1 (= "20" (ffirst r-n))
                 :b-resumes-its-work (and (= "\"b:1\"" (ffirst r-b)) (re-find #"unmerged" (str (second r-b))))
-                :b's-tests-pass (and (zero? (+ (:fail t-b) (:error t-b))) (pos? (:pass t-b)))
+                :b's-tests-pass (and (not (contract/error? t-b)) (zero? (+ (:fail t-b) (:error t-b))) (pos? (:pass t-b)))
                 :the-clone-resumes (re-find #"clone's note" (str r-c))
                 :b-merges-now (and (:merged? mb) (= "\"b:1\"" (ffirst r-n2)) (= "20" (first (nth r-n2 2))))}}))))
 
@@ -710,7 +710,7 @@
     (run-check "LIFECYCLE" {:datoms 2000}
      (fn [sys]
       (let [[a] (spawn-ready! sys "paused")
-            _ (c/pause-agent! sys a)
+            _ (flow/pause-proc (:graph sys) a)
             ;; the proc's control channel is FIFO: this ping is taken after the pause
             paused-health (ping sys a)
             p1 (c/submit! sys a "(def x 1) x")
@@ -718,7 +718,7 @@
             ;; the measurement: no answer within the window while paused
             held (deref p1 (seon.config/value :seon.config.check/hold-ms) :held)
             held-state (= :paused (:status (ping sys a)))
-            _ (c/resume-agent! sys a)
+            _ (flow/resume-proc (:graph sys) a)
             r1 @p1 r2 @p2]
         {:report {:threads {:declared-running (c/declared-threads sys) :declared-stopped (c/declared-threads)}
                   :cycles (mapv #(select-keys % [:cycle :boot-ms :running :stopped :left :health]) rows)
@@ -800,7 +800,7 @@
         p (c/submit! sys a flood)
         ;; the flood began (the agent said so); then what arrives while paused is the measurement
         _ (await-event ev (started a flood))
-        _ (c/pause-agent! sys a)
+        _ (flow/pause-proc (:graph sys) a)
         ;; what its proc had taken when the pause arrived (the ping after it is FIFO), and after the window
         p0 (ping sys a)
         _ (Thread/sleep (seon.config/value :seon.config.check/hold-ms))
@@ -808,10 +808,10 @@
         [n0 n1] (map #(get-in % [:state :noise]) [p0 p1])
         busy (get-in (c/state sys) [:agents a :status])
         t0 (profile/now-ns)
-        _ (c/resume-agent! sys a)
+        _ (flow/resume-proc (:graph sys) a)
         r @p
         drain-ms (profile/ms-since t0)
-        st (c/stats sys)
+        st (:stats (c/state sys))
         ids (ready! sys #(vec (pmap (fn [i] (c/spawn! sys {:task (str "bp " i)})) (range n))))
         mb0 (lib/r2 (lib/real-mb))
         _ (flow/pause-proc (:graph sys) :writer)

@@ -241,8 +241,8 @@
                                  :code (str "(let [a (first (filter #(= :a1 (:seon.attempt/agent %)) (vals (seon.task/attempts @(:conn sys)))))]"
                                             " (seon.reconcile/pull-end (:db @(seon.root/branch-db sys (seon.task/default-branch \"demo/t\"))) (:seon.attempt/id a)))")}])
         end (edn/read-string {:default tagged-literal} (:printed end))]
-    (is (= :err (:tag died)) "the request it died in is answered with its death")
-    (is (str/includes? (str (:printed died)) "exit 70") "named by the exit status root observed")
+    (is (= :seon.agent/died (:seon.error/type died)) "the request it died in is answered with its death, the one error map")
+    (is (= {:exit 70} (:exit died)) "named by the exit status root observed")
     (is (= :error (:outcome end)) "the attempt's end is on its branch")
     (is (= "boom: the loop's own function" (get-in end [:error :seon.error/message])) "with its cause, the one error map")
     (is (= 'seon.repl/serve! (get-in end [:error :seon.error/operation])))))
