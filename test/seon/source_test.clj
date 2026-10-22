@@ -253,7 +253,7 @@
         tree (str dir "/tree")
         port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
         env ["env" (str "SEON_RUNS=" dir "/runs") (str "SEON_ENTRANCE_PORT=" port) "SEON_WEB_PORT=0"]
-        root! (fn [& args] (apply sh/sh (concat env [(str here "/bin/root")] args)))
+        root! (fn [& args] (apply ts/binary-sh (concat env [(str here "/bin/root")] args)))
         ask (fn [code] (let [r (sh/sh "nc" "-w" "600" "127.0.0.1" (str port)
                                       :in (str (pr-str {:op :eval :agent "root" :code code}) "\n"))
                              a (try (clojure.edn/read-string {:default tagged-literal} (:out r)) (catch Exception _ nil))]
