@@ -65,19 +65,23 @@
 
 (defn- attach!
   "Start an outside attempt of task id: its desired model is \"outside\", so the
-  reconciler starts no turn loop for it and does not kill it. Answers {:agent :task :attempt}."
+  reconciler starts no turn loop for it and does not kill it. The agent is spawned first;
+  only once it exists are its env, the release and the attempt written, in one transaction,
+  so a refused spawn writes nothing and the reconciler never sees a release with no attempt
+  (it would spawn a second agent for it). Answers {:agent :task :attempt}."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.task/id] :map]}
   [sys id]
-  (if-not (task/task @(:conn sys) id)
-    (refused (str "no task " id))
-    (do @(c/transact-main! sys (into (task/env-tx id {:model "outside"}) (task/execution-tx [id] :running)))
-        (let [db @(:conn sys)
-              env (r/desired-env (task/task db id))
-              aid (str id "#" (inc (count (filter #(= id (:seon.attempt/task %)) (vals (task/attempts db))))))
-              ag (c/spawn! sys {:branch (:branch env) :task id :attempt aid})]
-          @(c/transact-main! sys (task/attempt-start-tx aid id (:boot sys) ag env (System/currentTimeMillis)
-                                                       (:plan (:seon.task/accumulated (task/task db id)))))
-          {:agent ag :task id :attempt aid}))))
+  (let [db @(:conn sys)
+        t (task/task db id)]
+    (if-not t
+      (refused (str "no task " id))
+      (let [env (assoc (r/desired-env t) :model "outside")
+            aid (str id "#" (inc (count (filter #(= id (:seon.attempt/task %)) (vals (task/attempts db))))))
+            ag (c/spawn! sys {:branch (:branch env) :task id :attempt aid})]
+        @(c/transact-main! sys (vec (concat (task/env-tx id {:model "outside"}) (task/execution-tx [id] :running)
+                                            (task/attempt-start-tx aid id (:boot sys) ag env (System/currentTimeMillis)
+                                                                   (:plan (:seon.task/accumulated t))))))
+        {:agent ag :task id :attempt aid}))))
 
 (defn- attempt-of
   "The live attempt agent ag works, from main: {:attempt :task :env}, or nil."

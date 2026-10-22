@@ -62,3 +62,19 @@
     (is (= -32700 (get-in bad ["error" "code"])))
     (is (clojure.string/includes? (get-in bad ["error" "message"]) "keyword-keyed map"))
     (is (contract/error? (clojure.edn/read-string (respond nil "{:op :nope}"))) "a keyword-keyed line is EDN in, EDN out")))
+
+(deftest a-refused-attach-writes-nothing
+  ;; task seon.entrance/attach-writes-nothing-when-it-is-refused: attach spawns first and
+  ;; writes the env, the release and the attempt in one transaction only once its agent
+  ;; exists, so a refused spawn leaves the task as it was, and the reconciler never sees a
+  ;; release with no attempt (it would spawn a second agent for it). demo/u shares demo/t's
+  ;; branch, which demo/t's attached agent holds
+  (let [[refused seen] (at/in-agent [{:op :attach :task "demo/u"}
+                                     {:op :eval :agent "root"
+                                      :code (str "(let [db @(:conn sys) t (seon.task/task db \"demo/u\")]"
+                                                 " [(:seon.task/execution t) (:seon.task/model t)"
+                                                 " (count (filter #(= \"demo/u\" (:seon.attempt/task %)) (vals (seon.task/attempts db))))])")}]
+                                    {:decls [{:seon.task/name "u" :seon.task/plan "Work too." :seon.task/kind :work
+                                              :seon.task/proofs #{'demo-test/u} :seon.task/branch :task-demo-t}]})]
+    (clojure.test/is (clojure.string/includes? (pr-str refused) "is held by live agent") "the attach is refused: demo/t's agent holds the branch")
+    (clojure.test/is (= "[:held nil 0]" (:printed seen)) "and wrote nothing: demo/u is still held, with no env and no attempt")))
