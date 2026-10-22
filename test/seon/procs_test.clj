@@ -164,6 +164,26 @@
             (is (true? (:dirty st4)))
             (is (= [{:op :dirty :commits (:commits st3)}] (mapv #(select-keys % [:op :commits]) (:to-flusher outs))))))))))))
 
+(deftest the-writer-answers-clean-once-the-flush-covers-its-commits
+  ;; task seon.check/idle-waits-for-the-flush: a :clean request is held while the store is
+  ;; dirty and answered by the step that takes the covering flush, after that flush's notice
+  ;; to the api; a clean store answers at once
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? true :to-writer in :events (a/chan 16)})
+        [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
+        [st outs] (step #'writer/writer-proc st :in {:op :clean :dest {:rid 2}})]
+    (is (not-any? #(= {:rid 2} (:dest %)) (:to-api outs)) "dirty: held")
+    (let [[st2 outs] (step #'writer/writer-proc st :in {:op :flushed :commits (:commits st)})
+          api (:to-api outs)
+          i-notice (first (keep-indexed #(when (= :writer (:op %2)) %1) api))
+          i-answer (first (keep-indexed #(when (= {:rid 2} (:dest %2)) %1) api))]
+      (is (some? i-answer) "the covering flush answers it")
+      (is (< i-notice i-answer) "after the flush's notice to the api")
+      (is (= (:commits st) (get-in api [i-answer :r :commits])))
+      (is (empty? (:clean-waiters st2)))
+      (let [[_ outs] (step #'writer/writer-proc st2 :in {:op :clean :dest {:rid 3}})]
+        (is (some #(= {:rid 3} (:dest %)) (:to-api outs)) "clean: at once")))))))
+
 (deftest reconciler
   (ts/test-branch! (fn [_ conn] (let [st (#'reconcile/reconciler-proc {:boot "b" :provider {:kind :scripted :script 'seon.fixtures/reply}})]
     (testing "a main commit with no tasks: the reconciler reads it and starts nothing (quiescence: seon.reconcile-test)"

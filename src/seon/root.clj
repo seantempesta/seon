@@ -908,6 +908,12 @@
 (defn- write! {:malli/schema [:=> [:cat :seon.root/sys :seon.writer/request] :seon.host/promise]}
   [sys req] (call! sys {:op :write :req req}))
 
+(defn store-clean!
+  "A promise of the writer's answer once its store is clean ({:ok :commits :flushes}): every
+  commit so far synced, the flush's notice to the api before it (seon.writer/writer-proc's :clean)."
+  {:malli/schema [:=> [:cat :seon.root/sys] :seon.host/promise]}
+  [sys] (write! sys {:op :clean}))
+
 (defn apply!
   "Re-read root's system declaration (:seon.config.root/system-path, or the file at p) and change the
   running graph to it: only the procs whose declaration changed are stopped, started or

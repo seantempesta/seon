@@ -1141,13 +1141,25 @@
         fs (c/fs-call! sys {:op :stats})]
     {:t (:t fs) :main-t main-t :mismatch (:mismatch fs) :caught-up (boolean (and (:t fs) (>= (:t fs) main-t)))}))
 
+(defn- writer-flushed
+  "The writer's answer once its store is clean (seon.root/store-clean!): the flush covering
+  main's last commit has synced and its notice reached the api before the answer. Checked,
+  not assumed: :covered only when the answer's commit count has reached the count the writer
+  held before the request."
+  [sys]
+  (let [before (get-in (ping sys :writer) [:state :commits])
+        r @(c/store-clean! sys)]
+    (assoc (select-keys r [:commits :flushes :durable?]) :before before
+           :covered (boolean (and (:ok r) before (>= (:commits r) before))))))
+
 (defn idle
   "An idle root steps nothing (owner, 2026-10-21: no beat; health is what flows): root
   boots and settles (the reconciler's quiescence), a tab opens on its dashboard (an SSE
   feed on SEON_WEB_PORT) and receives its page; then every root proc's Flow step count is
   read at the two ends of a window of window-ms with nothing happening, and must not move:
   from the feed's first settled mark after its keyframe (seon.web: the render proc has
-  nothing in flight, so the tab's own opening has run its course) and the fork server's
+  nothing in flight, so the tab's own opening has run its course), the writer's answer once
+  its store is clean (writer-flushed: a late sync stepped the flusher and the api), and the fork server's
   answer to a request behind main's commits (fork-server-caught-up: their late :applied
   answers stepped the fork server and the api inside the window under load).
   Then a change reaches the tab: an agent spawned and a commit to main each grow what the
@@ -1187,7 +1199,9 @@
         ;; the tab's opening ran its course: its keyframe (the feed's first patch: a new tab is
         ;; stale until it), then a settled mark (the render proc has nothing in flight)
         settled (await-ref feed :settled)
-        ;; main's commits applied in the fork server, their answers through its proc and the api
+        ;; main's last commit synced (the flusher's answer), then main's commits applied in the
+        ;; fork server, each one's answers through its proc and the api
+        flushed (writer-flushed sys)
         fs (fork-server-caught-up sys)
         ;; root's declared procs and its effect owners (their workers step only when given work)
         decl (seon.system/read-decl (seon.config/value :seon.config.root/system-path))
@@ -1204,8 +1218,8 @@
         _ @(c/transact-main! sys [{:db/id "n" :ns/name 'idle.check}])
         committed (await-ref received #(> % n-commit))]
       (.close sock)
-      {:report {:window-ms window-ms :procs (count pids) :steps-at-idle moved :bytes-at-idle (- b1 b0) :agent a :fork-server fs}
-       :checks {:tab-opened opened :tab-settled settled :fork-server-caught-up (:caught-up fs) :no-step-at-idle (empty? moved) :no-byte-at-idle (= b0 b1)
+      {:report {:window-ms window-ms :procs (count pids) :steps-at-idle moved :bytes-at-idle (- b1 b0) :agent a :flushed flushed :fork-server fs}
+       :checks {:tab-opened opened :tab-settled settled :flush-covered-main (:covered flushed) :fork-server-caught-up (:caught-up fs) :no-step-at-idle (empty? moved) :no-byte-at-idle (= b0 b1)
                 :no-proc-blocked (not-any? #{:blocked} (concat (vals c0) (vals c1)))
                 :spawn-reached-tab spawned :commit-reached-tab committed}}))))))
 
