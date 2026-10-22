@@ -161,6 +161,9 @@
         exists? (fn [b] (pdb/branch? conn b))
         reply (fn [st r] (answer o dest r) st)]
     (case op
+      ;; answered once the store is clean (at the end of this step, or when the flush that covers
+      ;; its commits comes back): the event that ends the last pending sync (seon.check/idle)
+      :clean (update st :clean-waiters (fnil conj []) dest)
       ;; an agent process committed its branch: a commit the next flush covers
       :agent-commit (-> st (assoc :dirty true) (update :commits inc))
       ;; the agent's branch (new: a pointer to main's head), then its fork: the agent opens
@@ -241,7 +244,8 @@
   leave when their batch is committed in memory; a dirty store with no notice out tells the
   flusher {:op :dirty :commits n}, and its {:op :flushed :commits n} makes the store clean
   when n is still the commit count, else the flusher is told again. A :flush? request (an
-  outside effect follows) is synced before its answer."
+  outside effect follows) is synced before its answer; a :clean request is answered once the
+  store is clean, its flushes' notices before it."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:conn "main's connection" :cfg "the store config" :to-writer "its in-port channel"}
        :outs {:to-fork-server "commits and forks, FIFO" :to-api "answers {:dest :r}" :main "main's commits"
@@ -287,7 +291,12 @@
        (when (or (seq reqs) (not= f0 (:flushes st 0)))
          (step/out! o :to-api {:op :writer :tx-count (:tx-count st) :batch-ms (profile/ms-since t0) :n-tx n-tx :commits commits
                                :flushes (:flushes st 0)}))
-       [st @o]))))
+       ;; a clean store answers who asked (after the flush's notice above, so it reaches the api
+       ;; first); a store with no durability has nothing to sync
+       (if (and (seq (:clean-waiters st)) (not (and (:durable? st) (:dirty st))))
+         (do (doseq [d (:clean-waiters st)] (answer o d {:ok true :commits (:commits st) :flushes (:flushes st 0) :durable? (boolean (:durable? st))}))
+             [(dissoc st :clean-waiters) @o])
+         [st @o])))))
 
 (defn flusher-proc
   "The group flush: parked until the writer says the store is dirty ({:op :dirty :commits
