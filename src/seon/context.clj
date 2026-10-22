@@ -55,16 +55,22 @@
                        :read (list 'clojure.repl/source sym)))))
 
 (defn found
-  "The helpers the plan does not name (R4's lever, from the call graph): the program vars that
-  sources (the plan's cited vars and the proofs) name in their recorded definitions, one hop,
-  less named, most-called first, each at doc depth; at most the config's
-  :seon.config.render/found, then a line saying how many it left and how to read them."
+  "The helpers the plan does not name (R4's lever, from the call graph): the program functions
+  that sources (the plan's cited vars and the proofs) name in their recorded definitions, one
+  hop, less named and less macros, ranked as a search ranks terms (tf-idf): called by more of
+  the sources, and by fewer forms of the whole program; each at doc depth; at most the
+  config's :seon.config.render/found, then a line saying how many it left and how to read
+  them."
   {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-symbol] [:vector :qualified-symbol]] [:vector :any]]}
   [db named sources]
-  (let [hits (->> (d/q '[:find ?s ?r :in $ [?s ...] :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r] [?v :var/name ?r] [?v :var/form _]]
-                       db sources)
-                  (map second) (remove named) frequencies
-                  (sort-by (fn [[r k]] [(- k) (str r)])) (mapv key))
+  (let [pairs (d/q '[:find ?s ?r :in $ [?s ...] :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r] [?v :var/name ?r] [?v :var/form _]]
+                   db sources)
+        macro? #(= :macro (:var/kind (d/entity db [:var/name %])))
+        ;; tf-idf: called by more of the sources, and by fewer forms of the program (a defn's
+        ;; contract plumbing is named by every contracted form, so it sinks)
+        score (fn [[r k]] (/ k (Math/log (+ 2 (count (d/datoms db :avet :form/refs r))))))
+        hits (->> pairs (map second) (remove #(or (named %) (macro? %))) frequencies
+                  (sort-by (juxt (comp - score) (comp str key))) (mapv key))
         [shown more] (print/bounded hits :seon.config.render/found "(my.agent/callees 'ns/f) of each cited var")]
     (cond-> (mapv #(resolve-ref db % :doc) shown) more (conj more))))
 
@@ -385,7 +391,9 @@
                                      (assoc observed :turn turn :max-turns max-turns :truncated? (:seon.turn/truncated lst)
                                             :source text :repairs (vec repairs)
                                             :unmerged (when merge? (pm/unmerged db (pm/program db #{})))))
-                last-evals (assoc :last-evals last-evals))
+                last-evals (assoc :last-evals last-evals)
+                ;; an outside agent's reads are not model turns: it has no turn count to show
+                (= :outside origin) (dissoc :turn))
         turns (vec (map-indexed (fn [i r] (cond-> {:reply (:seon.turn/reply r) :calls (vec (:seon.turn/calls r))}
                                              (zero? i) (assoc :attempt (attempt-text db (:db/id r)))))
                                 prev))]

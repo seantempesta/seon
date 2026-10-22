@@ -378,7 +378,12 @@
         (is (= (pop r1) (subvec r2 0 (dec (count r1)))) "turn 2 starts with turn 1's request but its turn sections")
         (is (= (context/help-text) (:content (first r0))) "the system message is the help page, the same for every agent")
         (is (str/includes? (:content (second r2)) "Doubles.") "the attempt sections are the first turn's")
-        (is (str/starts-with? (:content (peek r2)) "The current state") "the turn sections come last")))))
+        (is (str/starts-with? (:content (peek r2)) "The current state") "the turn sections come last")
+        (is (str/includes? (:content (peek r2)) ":turn \"3 of 4\"") "a model turn says which of its most it is")
+        (let [db @conn
+              read (:messages (context/render db {:commit (d/commit-id db) :task "demo/f" :attempt "demo/f#1" :turn 2 :max-turns 1
+                                                  :origin :outside :observed observed}))]
+          (is (not (str/includes? (:content (peek read)) ":turn")) "an outside agent's read has no turn count"))))))
 
 (deftest each-section-is-sent-once-per-request
   ;; the old request sent the task, its references and its sections in the first turn's
@@ -432,20 +437,28 @@
 (deftest found-names-the-helpers-the-plan-does-not
   ;; task seon.context/the-context-names-the-helpers-a-task-needs: R4's lever, from the call
   ;; graph: what the cited vars and the proofs call, most-called first, the named left out
-  (let [helpers (for [i (range 7)] (symbol "geo" (str "h" i)))
+  (let [helpers (for [i (range 3)] (symbol "geo" (str "h" i)))
         db (d/db-with (pdb/test-db)
-                      (program-facts (concat [['geo/area "(defn area [r] (* pi (sq r)))" (into '[geo/sq geo/pi clojure.core/*] helpers)]
+                      (program-facts (concat [['geo/area "(defn area [r] (* pi (sq r)))" (into '[geo/sq geo/pi clojure.core/* geo/defg geo/wrap geo/plumb] helpers)]
+                                              ['geo/defg "(defmacro defg [n] `(wrap ~n))" '[geo/wrap]]
+                                              ['geo/wrap "(defn wrap [x] x)" []]
+                                              ['geo/plumb "(defn plumb [f] f)" []]
+                                              ['geo/u1 "(defn u1 [] (plumb 1))" '[geo/plumb]]
+                                              ['geo/u2 "(defn u2 [] (plumb 2))" '[geo/plumb]]
                                               ['geo/vol "(defn vol [r h] (* h (sq r)))" '[geo/sq geo/area]]
                                               ['geo/sq "(defn sq [x] (* x x))" []]
                                               ['geo/pi "(def pi 3.14)" []]
                                               ['geo-test/vol-test "(deftest vol-test (is (= 2 (vol 1 1))))" '[geo/vol geo/pi]]]
                                              (for [h helpers] [h (str "(defn " (name h) " [] 0)") []]))))
+        db (d/db-with db [{:var/name 'geo/defg :var/kind :macro}])
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'geo :seon.task/name "v" :seon.task/plan "Make `geo/vol` right; see `geo/area`."
                                                :seon.task/proofs #{'geo-test/vol-test}}]))
         fs (:found (context/current-state db (task/task db "geo/v") {:turn 0 :max-turns 4}))]
     (is (= ['geo/pi 'geo/sq 'geo/h0 'geo/h1 'geo/h2] (mapv :symbol (butlast fs)))
-        "pi (called by area and the proof) and sq (by area and vol) first, then the rest by name; area and vol are named")
-    (is (= "+4 more: (my.agent/callees 'ns/f) of each cited var" (last fs)) "what it left and how to read it")
+        "pi (called by area and the proof) and sq (by area and vol) first, then the most specific; area and vol are named")
+    (is (= "+2 more: (my.agent/callees 'ns/f) of each cited var" (last fs))
+        "what it left and how to read it: wrap and plumb, called from more of the program, rank after the specific helpers")
+    (is (not-any? #{'geo/defg} (map :symbol (butlast fs))) "a macro is no helper")
     (is (not-any? #{'clojure.core/*} (map :symbol (butlast fs))) "only program functions")))
 
 (deftest the-turn-names-what-the-merge-will-carry
