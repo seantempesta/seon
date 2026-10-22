@@ -46,9 +46,12 @@ export SEON_PROFILE=${SEON_PROFILE:-scripted}
 S=$ROOT/target/seon
 [[ -x $S ]] || { echo "check: no target/seon; run bin/build seon" >&2; exit 1 }
 run() { (cd "$ROOT/target" && ./seon "$@" 2>&1) }
+# a step's own settings, the same alone or in the run: lease's block is small enough to spend
+LEASE_SET=(--set :seon.config.store/eid-lease=50)
 # a single mode: on its own branch check-<mode> of the given store, deleted when it is green
 if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then
   M=check-$1
+  [[ $1 == lease ]] && set -- "$@" $LEASE_SET
   [[ $1 == seed ]] || run seed 2000 > /dev/null || exit 1
   run drop $M > /dev/null || exit 1
   if [[ $1 == idle ]]; then SEON_WEB_PORT=$IDLE_WEB_PORT SEON_MAIN=$M run "$@"; else SEON_MAIN=$M run "$@"; fi; st=$?
@@ -144,7 +147,7 @@ EXPECT=137 step window-write "" run window-write check-window
 step window-read "" run window-read check-window
 [[ ${GREEN[-1]} == check-window-read && ${GREEN[-2]} == check-window-write ]] && GREEN+=(check-window)
 echo "== lease (eid-lease 50: an agent past its block of entity ids is refused, typed; the next agent's ids are never minted)"
-step lease "" run lease --set :seon.config.store/eid-lease=50
+step lease "" run lease $LEASE_SET
 echo "== tasks: calc (6-task graph, cancel), scenarios (conflict, semantic, hairy, newns, sibling), swarm 20 over 5 shared vars"
 step e2e-calc "" run e2e calc
 for k in conflict semantic hairy newns sibling; do step e2e-$k "" run e2e scenario $k; done

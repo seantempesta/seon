@@ -200,15 +200,13 @@
   [st {:keys [branch task cloned-from]}]
   (let [n (inc (:next-id st))
         id (keyword (str "a" n))
-        ;; the entity ids this agent mints on its branch (its own block: L1's lease)
-        lease (+ (:lease-base st) (* n (cfg/value :seon.config.store/eid-lease)))
         ;; named under root's main, so roots sharing a store never share a branch (seon.db/on-main)
         branch (pdb/on-main (pdb/conn-main (:conn st)) (or branch (keyword (str "agent-" n))))
         [r a] (sock/socketpair)
         ;; fiber pumps: an end costs no thread of its own (root may run a thousand agents)
         end (remote/open r {:codec {:encode codec/encode :decode codec/decode} :pump :fiber :buf (cfg/value :seon.config.agent/inbox-size)})]
     [(-> st (assoc :next-id n ::update true)
-         (assoc-in [:agents id] {:branch branch :lease lease})
+         (assoc-in [:agents id] {:branch branch})
          (assoc-in [:agent-procs id] {:proc agent-launcher
                                       :args {:id id :end end :branch branch
                                              :to-writer (:to-writer st) :back (:back st) :events (:events st)
@@ -278,18 +276,18 @@
                                               {:branch (:branch opts) :agent holder}))
                  (>= (count (:agents st)) (cfg/value :seon.config.root/max-agents)) (reply! st p (refused 'seon.root/spawn! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)}))
                  :else (let [[st aid fd] (start-agent st opts)
-                             {:keys [branch lease]} (get-in st [:agents aid])]
-                         (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :attempt (:attempt opts) :lease lease :ns (profile/now-ns) :fd fd :dest {:spawn aid}})
+                             branch (get-in st [:agents aid :branch])]
+                         (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :attempt (:attempt opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}})
                          (reply! st p {:id aid}))))
       :clone (let [parent (:parent m)]
                (if (or (nil? (get-in st [:agents parent])) (>= (count (:agents st)) (cfg/value :seon.config.root/max-agents)))
                  (reply! st p (refused 'seon.root/clone! (str "no live agent " parent) {:ok false}))
                  (let [[st aid fd] (start-agent st (merge {:task (get-in st [:view :agents parent :task])} (:opts m) {:cloned-from parent}))
-                       {:keys [branch lease]} (get-in st [:agents aid])
+                       branch (get-in st [:agents aid :branch])
                        [st rid] (pend st p :clone parent)]
                    ;; the clone's socket goes to its parent with the request
                    (to-agent st parent
-                             {:op :req :rid rid :kind :clone :new aid :branch branch :pass-fd fd :lease lease
+                             {:op :req :rid rid :kind :clone :new aid :branch branch :pass-fd fd
                               :msg {:op :clone :agent aid :branch branch}}))))
       (:eval :tests :merge-tests :stats :ping :merge-main)
       (if (nil? (get-in st [:agents id]))
@@ -718,7 +716,7 @@
         root-procs-p (promise)
         ;; what the declaration (resources/seon/system.edn) names as :bind/<name>
         bindings (merge (select-keys chans [:ext :back :to-writer :fork-server-ev :judge])
-                        {:view view :graph graph-p :lease-base (pdb/lease-base conn)
+                        {:view view :graph graph-p
                          :system root-procs-p :events events-in :events-mult events-mult
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
