@@ -746,10 +746,12 @@
   (into #{} cat (vals (dissoc (divergence db-from db-to) :schemas))))
 
 (def tree-readers
-  "The host vars that read files: a test whose reached forms reference one reads the
-  checkout's tree, so its reach digest covers the whole tree (reach-digests), unless the
-  form referencing it defines one of env-readers."
-  '#{clojure.core/slurp clojure.core/file-seq})
+  "The vars that read the checkout's files or run the binary built from them: a test whose
+  reached forms reference one has the whole tree as an input, so its reach digest covers it
+  (reach-digests), unless the form referencing it defines one of env-readers. The host's file
+  readers, and seon.test-store/binary-sh, the one way a test runs target/seon, bin/root or
+  bin/check: what such a test proves is the whole program the binary is built from."
+  '#{clojure.core/slurp clojure.core/file-seq seon.test-store/binary-sh})
 
 (def env-readers
   "The platform vars whose file reads are of inputs every digest already holds (:env:
@@ -760,6 +762,7 @@
   tests took the tree, so any edit anywhere reran them."
   '#{seon.config/baked-schema-forms ;; resources/seon/schemas, in :env
      seon.fork-server/dev-classpath! ;; deps.edn, in :env
+     seon.system/declared-refs ;; resources/seon/system.edn, in :env
      seon.web/handler ;; web/public, in :env
      seon.proofs/greens}) ;; the results directory, outside the tree, by digest
 
@@ -770,16 +773,18 @@
   references reach (a var to the form that last defined it, macros and quoted names among
   them (unit-account); a defined multimethod's methods and protocol's extensions; a
   contracted var's form to the schema entries its contract names, and each entry to those
-  its form names), with inputs' :tree when a reached form references a tree-reader. A
+  its form names; a var named in data its form reads, inputs' :data-refs: system.edn's procs,
+  which root resolves by name), with inputs' :tree when a reached form references a
+  tree-reader. A
   test's digest moves exactly when a form or schema entry it reaches does. Cost: the live
   forms, contracts and schema entries read once and digested once, then per test its
   closure. With roots ({key [var ...]}, a bin/check step's mode functions: seon.proofs/
   check-steps), the same digest of each key: what its vars' forms and their namespaces'
   plain forms reach; a key one of whose vars has no form here has none."
-  {:malli/schema [:function [:=> [:cat :seon.host/db [:map [:env :string] [:tree :string]]] [:map-of :qualified-symbol :string]]
-                  [:=> [:cat :seon.host/db [:map [:env :string] [:tree :string]] [:map-of :string [:sequential :qualified-symbol]]] [:map-of :string :string]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:map [:env :string] [:tree :string] [:data-refs {:optional true} [:map-of :qualified-symbol [:set :qualified-symbol]]]]] [:map-of :qualified-symbol :string]]
+                  [:=> [:cat :seon.host/db [:map [:env :string] [:tree :string] [:data-refs {:optional true} [:map-of :qualified-symbol [:set :qualified-symbol]]]] [:map-of :string [:sequential :qualified-symbol]]] [:map-of :string :string]]]}
   ([db inputs] (reach-digests db inputs nil))
-  ([db {:keys [env tree]} roots]
+  ([db {:keys [env tree data-refs]} roots]
   (let [schemas (into {} (for [dt (d/datoms db :aevt :schema/key)] [(:v dt) (:schema/form (d/entity db (:e dt)))]))
         sid #(str "schema " %)
         named (fn [text] (keep #(when (contains? schemas %) (sid %)) (names (edn/read-string text))))
@@ -795,7 +800,9 @@
         ;; name quoted as data, a proof list) never runs it, clojure.test does
         test-ids (set (for [dt (d/datoms db :aevt :var/kind) :when (= :test (:v dt)) :let [id (var-form (:var/name (d/entity db (:e dt))))] :when id] id))
         edges (fn [f] (concat (remove test-ids (keep var-form (:refs f))) (:schema f)
-                              (for [[k s] (:defines f) :when (= :var k) id (concat (methods s) (impls s) (contract s))] id)))
+                              (for [[k s] (:defines f) :when (= :var k)
+                                    id (concat (methods s) (impls s) (contract s) (keep var-form (get data-refs s)))]
+                                id)))
         plain (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) live))
         ;; the digest of key k reaching from the forms ids, with their namespaces' plain forms
         digest-of (fn [k ids]

@@ -7,12 +7,24 @@
   :proc, :args and :chan-opts are unchanged, with their queued messages) leaves it running."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [aero.core :as aero] [clojure.walk :as walk]
-            [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.fx :as fx]))
+            [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.fx :as fx] [clojure.edn :as edn]))
 
 (defn read-decl
   "The declaration {:procs :fx :conns}, read with aero from the file at p."
   {:malli/schema [:=> [:cat :string] :seon.system/decl]}
   [p] (aero/read-config p))
+
+(defn declared-refs
+  "{seon.system/read-decl #{symbol}}: every qualified symbol the declaration at p names (its
+  procs' step-fns, its effects' performers), which root resolves by name at boot (step-fn):
+  reach edges of the function that reads the declaration (seon.program/reach-digests'
+  :data-refs), so a test booting root reaches its procs. None when there is no file at p."
+  {:malli/schema [:=> [:cat :string] [:map-of :qualified-symbol [:set :qualified-symbol]]]}
+  [p]
+  (let [f (java.io.File. ^String p)
+        decl (when (.isFile f) (edn/read-string {:default tagged-literal} (slurp f)))]
+    {'seon.system/read-decl (set (filter qualified-symbol? (tree-seq #(or (coll? %) (tagged-literal? %))
+                                                                     #(if (tagged-literal? %) [(:form %)] (seq %)) decl)))}))
 
 (defn- bind
   "Decl with every :bind/<name> keyword replaced by its value in bindings; a name bindings

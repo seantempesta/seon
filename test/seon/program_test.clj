@@ -457,3 +457,42 @@
     (is (not= (before 'app.pt-calc-test/add-test) (after 'app.pt-calc-test/add-test)) "the named test reaches add: it moves")
     (is (= (before k) (after k)) "the test only naming it keeps its digest")
     (is (not (contains? (selected db db') k)) "and every run's selection leaves it out")))
+
+;; ---- inputs the reach digest must hold (review 2026-10-22: each let a stale green be reused)
+
+(deftest a-proc-named-only-in-system-edn-is-reached
+  ;; root's procs are named in resources/seon/system.edn and resolved by name at boot, so no
+  ;; code refers to them: a test booting root reaches them only through the declaration's reader
+  (let [db (record (empty-db) 'user "(ns app.pt-sys)" 'app.pt-sys "(defn read-decl [] :decl)" 'app.pt-sys "(defn start [] (read-decl))"
+                   'user "(ns app.pt-procs)" 'app.pt-procs "(defn writer-proc [] 1)"
+                   'user "(ns app.pt-sys-test (:require [clojure.test :refer [deftest is]] [app.pt-sys :as s]))"
+                   'app.pt-sys-test "(deftest boot-test (is (= :decl (s/start))))")
+        db' (record db 'app.pt-procs "(defn writer-proc [] 2)")
+        in {:env "e" :tree "t" :data-refs '{app.pt-sys/read-decl #{app.pt-procs/writer-proc}}}
+        k 'app.pt-sys-test/boot-test]
+    (is (not= ((program/reach-digests db in) k) ((program/reach-digests db' in) k)) "the proc changed: the test booting through the declaration moves")
+    (is (contains? (get (seon.system/declared-refs (str (System/getProperty "user.dir") "/resources/seon/system.edn")) 'seon.system/read-decl) 'seon.writer/writer-proc)
+        "the shipped declaration's procs are the reader's data refs")))
+
+(deftest a-test-running-the-binary-takes-the-tree
+  ;; seon.root-test runs target/seon (seon.test-store/binary-sh): what it proves is the whole
+  ;; program the binary is built from, so any change to the tree moves its digest
+  (let [db (runner/program-db (System/getProperty "user.dir"))
+        a (program/reach-digests db {:env "e" :tree "t1"})
+        b (program/reach-digests db {:env "e" :tree "t2"})
+        runs-binary '[seon.root-test/root-threads-are-what-root-declares seon.root-test/a-root-binary-requires-a-library-it-did-not-compile
+                      seon.root-test/a-root-resumes-a-store-an-earlier-build-wrote seon.agent-test/an-agent-holds-mains-tests-and-runs-them]]
+    (is (every? #(not= (a %) (b %)) runs-binary) "every test running the binary moves with the tree")
+    (is (= (a 'seon.reader-test/prose-without-a-fence-is-a-comment) (b 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a test that runs no binary does not")))
+
+(deftest the-config-in-force-is-an-input
+  ;; config/local.edn is gitignored and #env values are no files: a result proven under one
+  ;; checkout's config was reused in another's
+  (let [here (System/getProperty "user.dir")
+        cfg {:seon.config.ai/model "a" :seon.config.root/runs-dir (str here "/runs") :seon.config.web/port 8451}
+        env #(:env (runner/inputs here % here))]
+    (is (not= (env cfg) (env (assoc cfg :seon.config.ai/model "b"))) "another value in force: another :env, every test reruns")
+    (is (= (env cfg) (env (assoc cfg :seon.config.web/port 9999))) "a checkout's own TCP port is no input")
+    (is (= (:env (runner/inputs here cfg here))
+           (:env (runner/inputs here (assoc cfg :seon.config.root/runs-dir "/elsewhere/runs") "/elsewhere")))
+        "a path under the checkout is the same input in any checkout")))

@@ -41,8 +41,8 @@
                     " for i in {1..300}; do " (ask {:op :agents}) " | grep -q idle && break; sleep 0.2; done;"
                     (str/join (for [f forms] (str (ask (if (map? f) f {:op :eval :agent "a1" :code f})) ";")))
                     " exec 3>&-; wait $R")
-        {:keys [out]} (sh/sh "zsh" "-c" script :dir "target")]
-    (sh/sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
+        {:keys [out]} (ts/binary-sh "zsh" "-c" script :dir "target")]
+    (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
     (sh/sh "rm" "-rf" (str path "-in") (str path ".log") (str path "-tasks"))
     (mapv #(let [a (edn/read-string {:default tagged-literal} %)] (if (contains? a :items) (first (:items a)) a)) (str/split-lines (str/replace out #"(?s)^.*ROOT LISTENING[^\n]*\n" ""))))))
 
