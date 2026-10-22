@@ -1155,7 +1155,12 @@
   [window-ms]
   (run-check "IDLE" {:datoms 300}
    (fn [sys]
-    (let [port (seon.config/value :seon.config.web/port)
+    (let [web (:state (ping sys :web))]
+     (if-not (:listening web)
+      ;; its root serves no dashboard (:seon.config.web/port 0): a verdict, not a connect to port 0
+      {:report {:web web :needs "a web port: bin/check gives idle one (IDLE_WEB_PORT)"} :checks {:its-root-serves-a-dashboard false}}
+    (let [;; the port its web proc bound
+        port (:port web)
         _ (seon.e2e/await-quiet sys 0)
         received (atom 0)
         ;; what the wait needs of the feed's text: its keyframe seen, then a settled mark after it
@@ -1202,7 +1207,7 @@
       {:report {:window-ms window-ms :procs (count pids) :steps-at-idle moved :bytes-at-idle (- b1 b0) :agent a :fork-server fs}
        :checks {:tab-opened opened :tab-settled settled :fork-server-caught-up (:caught-up fs) :no-step-at-idle (empty? moved) :no-byte-at-idle (= b0 b1)
                 :no-proc-blocked (not-any? #{:blocked} (concat (vals c0) (vals c1)))
-                :spawn-reached-tab spawned :commit-reached-tab committed}}))))
+                :spawn-reached-tab spawned :commit-reached-tab committed}}))))))
 
 ;; ---- the store bin/check is given ----------------------------------------------------------
 
