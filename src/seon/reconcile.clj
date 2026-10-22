@@ -126,6 +126,9 @@
    :attempts {} :by-task {} :done {} :ready (sorted-set) :ready-key {}
    :live #{} :reap #{} :kill {} :judge #{} :merging #{}})
 
+(def finished "Attempt statuses that make its task done (:seon.attempt/status)." (get-in contract/forms [:seon.attempt/status 1 :seon.status/finished]))
+(def ^:private judged (get-in contract/forms [:seon.attempt/status 1 :seon.status/judged]))
+
 (defn- live-in?
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.attempt/attempt] :boolean]}
   [idx a] (and (= :running (:seon.attempt/status a)) (= (:boot (:root idx)) (:seon.attempt/boot a))))
@@ -136,7 +139,7 @@
   [idx id]
   (let [as (map (:attempts idx) (get-in idx [:by-task id]))
         ms (keep #(when (= :merged (:seon.attempt/status %)) (:seon.attempt/merged-t % 0)) as)]
-    {:any? (boolean (some #(#{:merged :done} (:seon.attempt/status %)) as))
+    {:any? (boolean (some #(finished (:seon.attempt/status %)) as))
      :merged-t (when (seq ms) (apply min ms))}))
 
 (defn- idx-done? {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
@@ -148,7 +151,7 @@
   (let [t (get-in idx [:tasks id])]
     (boolean (and t (= :running (:seon.task/execution t)) (not (idx-done? idx id)) (nil? (:seon.task/stuck t))
                   (every? #(idx-done? idx %) (:seon.task/needs t))
-                  (not-any? #(let [a (get-in idx [:attempts %])] (or (live-in? idx a) (#{:ended :dead} (:seon.attempt/status a))))
+                  (not-any? #(let [a (get-in idx [:attempts %])] (or (live-in? idx a) (judged (:seon.attempt/status a))))
                             (get-in idx [:by-task id]))))))
 
 (defn- refresh-done
@@ -235,7 +238,7 @@
         (mark :live live?)
         (mark :reap (and a (= :running st) (not live?)))
         (update :kill #(if kill (assoc % aid kill) (dissoc % aid)))
-        (mark :judge (boolean (#{:ended :dead} st)))
+        (mark :judge (boolean (judged st)))
         (mark :merging (and a (= :merge (:seon.task/kind t)) (or live? (= :ended st)))))))
 
 (defn- settle
@@ -394,18 +397,24 @@
 
 (defn stuck
   "Why released work is not done, as root causes: each task whose stuck fact holds (its
-  budget spent), and each task not released (cancelled, held) that released work needs,
-  with the released tasks it blocks. Read once at quiescence: one pass over the tasks."
+  budget spent), each task whose latest attempt root refused to spawn (its reason: the
+  branch is held, or too many live agents), and each task not released (cancelled, held)
+  that released work needs, with the released tasks it blocks. Read once at quiescence: one
+  pass over the tasks."
   {:malli/schema [:=> [:cat :seon.reconcile/index] [:vector :seon.reconcile/stuck-row]]}
   [idx]
   (vec (for [[id t] (sort-by key (:tasks idx))
              :when (not (idx-done? idx id))
              :let [s (:seon.task/stuck t)
                    ex (:seon.task/execution t)
+                   ;; attempts are numbered in order (actions' spawns), so the latest is the count's
+                   latest (get-in idx [:attempts (str id "#" (count (get-in idx [:by-task id])))])
+                   refused (when (= :refused (:seon.attempt/status latest)) latest)
                    bs (blocks idx id)]
-             :when (if (= :running ex) (some? s) (seq bs))]
-         (cond-> {:task id :cause (if s (:cause s) (name ex)) :blocks bs}
-           s (assoc :attempt (:attempt s))))))
+             :when (if (= :running ex) (or s refused) (seq bs))]
+         (cond-> {:task id :cause (cond s (:cause s) refused (:seon.attempt/reason refused) :else (name ex)) :blocks bs}
+           s (assoc :attempt (:attempt s))
+           (and refused (not s)) (assoc :attempt (:seon.attempt/id refused))))))
 
 (defn stuck-tx
   "Task id is stuck: attempt aid failed with its budget spent. The problem and the derived
@@ -456,6 +465,19 @@
   "The needs of task id that are not done."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:set :seon.task/id]]}
   [idx id] (into #{} (remove #(idx-done? idx %)) (get-in idx [:tasks id :seon.task/needs])))
+
+(defn task-state
+  "What happened to task id (:seon.task/state), from the index; its desired execution stays
+  on the task. The one derivation every task row reads (seon.render.proc/task-rows)."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :seon.task/state]}
+  [idx id]
+  (let [x (get-in idx [:tasks id :seon.task/execution])]
+    (cond (= :cancelled x) :cancelled
+          (idx-done? idx id) (if (get-in idx [:done id :merged-t]) :merged :done)
+          (some #(= :running (get-in idx [:attempts % :seon.attempt/status])) (get-in idx [:by-task id])) :running
+          (seq (blocked-by idx id)) :blocked
+          (= :held x) :held
+          :else :open)))
 
 ;; ---- what an attempt's agent wrote on its branch ----
 
@@ -551,11 +573,13 @@
                         sym))
         plan (:seon.task/plan (task/task db id))]
     (into (cas-tx aid :running :ended
-                    (merge (task/end-members (cond-> {:outcome (:outcome end :error) :turns (:turns end 0) :model-calls (:turns end 0)
-                                               :tokens (:tokens end 0) :ms 0.0 :results results :uncontracted unc
-                                               :conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
-                                               :unmerged (mapv #(pr-str (:key %)) (pm/unmerged db (pm/program db #{})))
-                                               :changed changed}
+                    ;; spend is what the end measured: no end (died, killed, never reached
+                    ;; seon.turn/end!) is outcome :no-end with its turns, calls and tokens absent
+                    (merge (task/end-members (cond-> (merge (select-keys end [:turns :model-calls :tokens])
+                                                      {:outcome (:outcome end :no-end) :results results :uncontracted unc
+                                                       :conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
+                                                       :unmerged (mapv #(pr-str (:key %)) (pm/unmerged db (pm/program db #{})))
+                                                       :changed changed})
                                         (:reason end) (assoc :reason (:reason end))
                                         (not (:outcome end)) (assoc :reason (if worked-error
                                                                              (str "seon.turn/work! threw: " (:seon.error/message worked-error))
@@ -600,7 +624,15 @@
                  (one (write (assoc-in st [:flights aid :agent] ag) aid :started
                              (task/attempt-start-tx aid (:task act) (:boot st) ag (:env act) (System/currentTimeMillis)
                                                    (:plan (task/accumulate (get-in st [:idx :tasks]) (:task act))))))
-                 (done st))
+                 ;; root refused it (the branch is held, or too many live agents): the refusal
+                 ;; is the attempt, written on main with root's reason; the task starts again,
+                 ;; as its next attempt, once main moves for another reason (:refused, pass)
+                 (one (write (update st :refused (fnil conj #{}) (:task act)) aid :done
+                             [(let [now (System/currentTimeMillis)]
+                                (-> (first (task/attempt-start-tx aid (:task act) (:boot st) nil (:env act) now
+                                                                  (:plan (task/accumulate (get-in st [:idx :tasks]) (:task act)))))
+                                    (assoc :seon.attempt/status :refused :seon.attempt/end-ms now
+                                           :seon.attempt/reason (:seon.error/message r) :seon.attempt/error (error-text r))))])))
       ;; an outside agent works this attempt (seon.entrance): no turn loop; it hands it back
       :started (if (= "outside" (get-in act [:env :model]))
                  (done st)
@@ -686,12 +718,17 @@
 
 (defn- pass
   "Reconcile main's latest db and start each action whose attempt is not in flight; spawns
-  wait while earlier spawns have not written their attempt yet (max-running counts facts);
-  then quiescence, when nothing is left to do. Answers [st outputs]."
+  wait while earlier spawns have not written their attempt yet (max-running counts facts),
+  and a task root refused waits for main to move for another reason (if nothing has
+  changed, asking again is refused again); then quiescence, when nothing is left to do.
+  Answers [st outputs]."
   {:malli/schema [:=> [:cat :seon.reconcile/state] [:tuple :seon.reconcile/state [:vector :map]]]}
   [st]
   (let [early (count (filter #(and (= :spawn (get-in % [:act :op])) (not (:agent %))) (vals (:flights st))))
-        acts (remove #(let [f (get-in st [:flights (:attempt %)])] (and f (or (not= :kill (:op %)) (:killing f)))) (actions (:idx st)))
+        acts (remove #(let [f (get-in st [:flights (:attempt %)])]
+                        (or (and f (or (not= :kill (:op %)) (:killing f)))
+                            (and (= :spawn (:op %)) (contains? (:refused st) (:task %)))))
+                     (actions (:idx st)))
         acts (concat (remove #(= :spawn (:op %)) acts) (drop early (filter #(= :spawn (:op %)) acts)))]
     (apply quiet (reduce (fn [[st outs] act] (let [[st o] (start st act)] [st (into outs o)])) [st []] acts))))
 
@@ -718,8 +755,14 @@
                  ;; a commit touching tasks, attempts or dials ends a quiet spell (root's own
                  ;; quiescent fact does not)
                  work? (or (not next?) (some (fn [[_ _ a]] (and (keyword? a) (watched-ns (namespace a)) (not= "seon.root" (namespace a)))) (:ops m)))
+                 ;; a commit holding only refused attempts (the refusals' own writes) changes
+                 ;; nothing that refused them; any other work lets a refused task ask again
+                 refusals? (and next? (every? (fn [[_ e a]] (or (not (and (keyword? a) (watched-ns (namespace a))))
+                                                               (= :refused (get-in idx [:attempts (second (get-in idx [:keys e])) :seon.attempt/status]))))
+                                              (:ops m)))
                  st (assoc st :db db :t t :idx idx :seen (inc (:seen st)) :lists (cond-> (:lists st 0) (not= t (inc (:t st -2))) inc)
-                           :quiet (boolean (and (:quiet st) (not work?))))
+                           :quiet (boolean (and (:quiet st) (not work?)))
+                           :refused (if (and work? (not refusals?)) #{} (:refused st #{})))
                  [st outs] (pass st)]
              [st {:to-api (into [{:op :stat :k :main-seen-us :v (/ (- (sock/now-ns) (:ns m)) 1000.0)}] outs)}])
      ;; an outside agent handed its attempt back: judged as a turn loop's end is

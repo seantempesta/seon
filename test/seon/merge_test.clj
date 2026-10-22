@@ -169,7 +169,7 @@
   ;; changed resource is written back with only its entry changed
   (let [text (slurp facts-path)
         main (let [db (empty-db)] (d/db-with db (source/import-tx db {facts-path text})))
-        status [:and {:seon.db/index true} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed :refused]]
+        status [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ended :dead}} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed :refused :paused]]
         ours (-> main (registered :seon.attempt/status status) (registered :user/qty :int))
         theirs (registered main :seon.attempt/pid [:int {:min 1}])
         prog #(pm/program % #{})
@@ -184,8 +184,8 @@
         (is (= [[:schema :seon.attempt/status] :both-modified] ((juxt :key :kind) (first (:conflicts r2)))))))
     (testing "merged into main: the entry is main's, no longer the binary's, and write-back changes only its bytes"
       (let [main2 (d/db-with main (pm/apply-tx main (into {} (for [[k [_ o]] (:ours r)] [k o]))))
-            status-line " :seon.attempt/status [:and {:seon.db/index true} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed]]"]
+            status-line " :seon.attempt/status [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ended :dead}} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed :refused]]"]
         (is (= #{:seon.attempt/status} (set (keys (program/schema-changes main2)))))
         (is (= [facts-path] (source/changed-files main2 (:ours r))))
-        (is (= {facts-path (str/replace text status-line (str/replace status-line ":closed]]" ":closed :refused]]"))}
+        (is (= {facts-path (str/replace text status-line (str/replace status-line ":closed :refused]]" ":closed :refused :paused]]"))}
                (source/files main2 (source/changed-files main2 (:ours r)))))))))

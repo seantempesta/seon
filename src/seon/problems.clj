@@ -19,7 +19,7 @@
     :stuck                          a task whose failures spent its budget: its root cause and
                                     the released tasks it blocks (seon.reconcile/stuck-tx)"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.merge :as pm]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.merge :as pm] [seon.reconcile :as reconcile]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def attempt-classes [:red :cost :merge :dead :error :waste])
@@ -74,10 +74,10 @@
    {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
 (defn- task-done?
-  "Has task id an attempt merged or accepted (one avet seek, then its attempts)?"
+  "Has task te an attempt finished (`seon.reconcile/finished`)? One avet seek, then its attempts."
   {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
   [db te]
-  (boolean (some #(#{:merged :done} (:seon.attempt/status (d/pull db [:seon.attempt/status] (:e %))))
+  (boolean (some #(reconcile/finished (:seon.attempt/status (d/pull db [:seon.attempt/status] (:e %))))
                  (d/datoms db :avet :seon.attempt/task te))))
 
 ;; ---- stuck tasks ---------------------------------------------------------------------

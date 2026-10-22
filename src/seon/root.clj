@@ -143,19 +143,38 @@
 (defn- view! {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/fn [:* :any]] :seon.root/api-state]}
   [st f & args] (apply update st :view f args))
 
+(def gone-statuses "Agent statuses of a process gone (:seon.agent/status)." (get-in contract/forms [:seon.agent/status 1 :seon.status/gone]))
+(def ^:private stopped-statuses (get-in contract/forms [:seon.agent/status 1 :seon.status/stopped]))
+
+(defn- failed
+  "What went wrong in agent id's view change m (a its entry before), as the one error map,
+  or nil: a spawn or fork refused (:error); a red test run or a refused merge of an agent
+  with no task (a task's attempt records its own at its end, seon.problems/report)."
+  {:malli/schema [:=> [:cat :seon.agent/id :map :map] [:maybe :seon.error/base]]}
+  [id a m]
+  (let [{:keys [fail error reports]} (:tests m) r (:merged m)]
+    (cond
+      (:error m) (contract/error :seon.agent/failed 'seon.root/spawn! (str (:error m)) {:agent id})
+      (:task a) nil
+      (pos? (+ (or fail 0) (or error 0)))
+      (contract/error :seon.agent/failed 'seon.agent/run-tests
+                      (str "tests red" (some->> (first (remove #(= :pass (:type %)) reports)) :var (str ": "))) {:agent id})
+      (and (false? (:merged? r)) (contract/error? r)) r)))
+
 (defn- set-agent
-  "Merge m into agent id's view entry. A stopped agent stays stopped: :killed (a kill) or
-  :ended (root stopped it because its attempt ended)."
+  "Merge m into agent id's view entry, recording what went wrong in it (`failed`). A stopped
+  agent stays stopped: :killed (a kill) or :ended (root stopped it because its attempt ended)."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.agent/id :map] :seon.root/api-state]}
   [st id m]
-  (if (get-in st [:view :agents id])
-    (cond-> (update-in st [:view :agents id]
-               (fn [a] (let [a' (cond-> (merge a (dissoc m :ready :evals-add))
-                                  (and (:ready m) (= :spawning (:status a))) (assoc :status :idle)
-                                  (:evals-add m) (update :evals #(vec (take-last 20 (into (or % []) (:evals-add m))))))]
-                         (if (and (#{:killed :ended} (:status a)) (not (#{:killed :ended :dead} (:status a')))) (assoc a' :status (:status a)) a'))))
-      ;; the agents with an eval in flight: the stall check's set
-      (contains? m :running) (update ::busy (fnil (if (:running m) conj disj) #{}) id))
+  (if-let [a (get-in st [:view :agents id])]
+    (let [a' (cond-> (merge a (dissoc m :ready :evals-add))
+               (and (:ready m) (= :spawning (:status a))) (assoc :status :idle)
+               (:evals-add m) (update :evals #(vec (take-last 20 (into (or % []) (:evals-add m))))))
+          e (failed id a m)]
+      (cond-> (assoc-in st [:view :agents id] (if (and (stopped-statuses (:status a)) (not (gone-statuses (:status a')))) (assoc a' :status (:status a)) a'))
+        e (problem (err/occurrence e :agent {:agent id :task (:task a)} (System/currentTimeMillis)))
+        ;; the agents with an eval in flight: the stall check's set
+        (contains? m :running) (update ::busy (fnil (if (:running m) conj disj) #{}) id)))
     st))
 
 (defn- to-agent
@@ -208,16 +227,15 @@
   (let [{:keys [branch]} (get-in st [:agents agent])
         v (get-in st [:view :agents agent])
         ;; stopped by root: a kill, or the end of its attempt (:ended); else it died
-        stopped (#{:killed :ended} (:status v))
-        killed? (some? stopped)
+        stop (stopped-statuses (:status v))
         ;; neither stopped by root nor killed: a death, with what root saw of it (lane D2)
-        died (when-not (or rid killed?)
+        died (when-not (or rid stop)
                (contract/error :seon.agent/died 'seon.root/api-proc (str "agent " (name agent) " died" (exit-text (:exit v)))
                                {:agent agent :pid (or pid (:pid v)) :exit (:exit v)
                                 :stderr (stderr-tail (agent/stderr-path (get-in st [:view :store :agents-dir]) agent))
                                 :last-op (some-> (:running v) (select-keys [:form :since-ms]) (assoc :kind :eval))}))
         e (or died (gone agent "agent stopped"))]
-    (step/out! o :events (step/event {:type (or stopped :dead) :agent agent}))
+    (step/out! o :events (step/event {:type (or stop :dead) :agent agent}))
     (let [st (cond
                (nil? died) (reduce (fn [st r] (deliver-rid st r (no-agent (get-in st [:pending r :kind]) e))) st inflight)
                ;; the exit status is known (reaped first), or never will be (a clone, an
@@ -228,7 +246,7 @@
                :else (assoc-in st [::dying (or pid (:pid v))] [agent died inflight]))
           st (cond-> st rid (deliver-rid rid {:stopped true :agent agent}))]
       (-> st (update :agents dissoc agent) (update :agent-procs dissoc agent) (assoc ::update true)
-          (set-agent agent {:status (or stopped :dead) :ended-ms (System/currentTimeMillis) :running nil})))))
+          (set-agent agent {:status (or stop :dead) :ended-ms (System/currentTimeMillis) :running nil})))))
 
 (defn- pend
   "st with caller p awaiting the answer to a new request id (seon.step/pend), and the id."
@@ -252,7 +270,7 @@
       :spawn (let [opts (cond-> (:opts m) (:branch (:opts m)) (update :branch #(pdb/on-main (pdb/conn-main (:conn st)) %)))
                    holder (and (:branch opts)
                                (some (fn [[aid a]] (when (and (= (:branch opts) (:branch a)) (not (:ended-ms a))
-                                                              (not (#{:dead :killed :ended} (:status a))))
+                                                              (not (gone-statuses (:status a))))
                                                      aid))
                                      (get-in st [:view :agents])))]
                (cond
@@ -345,7 +363,7 @@
     (:ev m)
     (case (:ev m)
       :forked (do (step/out! o :events (step/event {:type :spawned :agent (:agent m) :pid (:pid m) :fork-ms (:fork-ms m)}))
-                  (when (#{:killed :ended} (get-in st [:view :agents (:agent m) :status])) (lib/c-kill (:pid m) 9))
+                  (when (stopped-statuses (get-in st [:view :agents (:agent m) :status])) (lib/c-kill (:pid m) 9))
                   (-> st (set-agent (:agent m) {:pid (:pid m)})
                       (view! update-in [:server :agents-forked] (fnil inc 0))
                       (view! update-in [:stats :fork-ms] lib/push-window (:fork-ms m) 500)
@@ -773,13 +791,48 @@
   [sys]
   (let [c (a/chan (a/sliding-buffer 1024))] (a/tap (:events-mult sys) c) c))
 
+(defn request
+  "Root's verb (named as its fn below: spawn! clone! submit! run-tests! kill! merge!
+  merge-main!) on agent id with args, as the api request it is: one table for these fns
+  and the dashboard's calls (seon.web). a: the agent's entry in root's view, which merge!
+  and merge-main! read; a verb the agent cannot take answers its refusal."
+  {:malli/schema [:=> [:cat :symbol [:maybe :seon.agent/id] [:maybe :map] [:maybe :map]] :map]}
+  [verb id args a]
+  (let [live? (boolean (and a (not (#{:dead :killed :ended} (:status a)))))
+        data-attrs (:data-attrs args :all)]
+    (case verb
+      spawn! {:op :spawn :opts (or args {})}
+      clone! {:op :clone :parent id :opts (or args {})}
+      submit! (cond-> {:op :eval :id id :forms (:forms args)} (:ticks args) (assoc :ticks (:ticks args)) (:origin args) (assoc :origin (:origin args)))
+      run-tests! (cond-> {:op :tests :id id} (:ticks args) (assoc :ticks (:ticks args)))
+      kill! {:op :kill :id id}
+      merge-main! (if live?
+                    {:op :merge-main :id id :data-attrs data-attrs}
+                    (refused 'seon.root/merge-main! (str "no live agent " id) {:ok false :applied [] :conflicts []}))
+      merge! (cond (not (:branch a)) (refused 'seon.root/merge! (str "no agent " id) {:merged? false})
+                   (false? (:gate? args)) {:op :write :req {:op :merge :branch (:branch a) :agent id :data-attrs data-attrs}}
+                   live? {:op :merge-tests :id id :merge-branch (:branch a) :data-attrs data-attrs}
+                   :else (refused 'seon.root/merge! "agent not running, so its tests cannot run; merge with {:gate? false}" {:merged? false}))
+      (refused 'seon.root/request (str verb " is not one of root's requests") {}))))
+
+(defn- agent-entry {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] [:maybe :map]]}
+  [sys id] (get-in @(call! sys {:op :state}) [:agents id]))
+
+(defn- verb!
+  "Call root's verb on agent id with args (request): a promise of its answer, or of its
+  refusal."
+  {:malli/schema [:=> [:cat :seon.root/sys :symbol [:maybe :seon.agent/id] [:maybe :map]] :seon.host/promise]}
+  [sys verb id args]
+  (let [r (request verb id args (when (#{'merge! 'merge-main!} verb) (agent-entry sys id)))]
+    (if (contract/error? r) (doto (promise) (deliver r)) (call! sys r))))
+
 (defn spawn!
   "Fork an agent from the fork server onto a new branch of main; answers its id at once
   (status :spawning until its hello). opts {:branch kw :task string}; an existing :branch
   is resumed."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.root/spawn-opts] :seon.agent/id]}
   [sys opts]
-  (let [r @(call! sys {:op :spawn :opts opts})]
+  (let [r @(verb! sys 'spawn! nil opts)]
     (if (:id r) (:id r) (throw (ex-info (:seon.error/message r) r)))))
 
 (defn clone!
@@ -787,10 +840,7 @@
   {:ok true :id new-id} or {:ok false :error}."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :map] :seon.host/promise]]}
   ([sys agent-id] (clone! sys agent-id {}))
-  ([sys agent-id opts] (call! sys {:op :clone :parent agent-id :opts opts})))
-
-(defn- agent-entry {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] [:maybe :map]]}
-  [sys id] (get-in @(call! sys {:op :state}) [:agents id]))
+  ([sys agent-id opts] (verb! sys 'clone! agent-id opts)))
 
 (defn submit!
   "Send forms (a string) to the agent; a promise of the reply vector, one map per form.
@@ -799,8 +849,7 @@
   with each evaluation."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id :string] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :string [:maybe :map]] :seon.host/promise]]}
   ([sys agent-id forms-string] (submit! sys agent-id forms-string nil))
-  ([sys agent-id forms-string {:keys [ticks origin]}]
-   (call! sys (cond-> {:op :eval :id agent-id :forms forms-string} ticks (assoc :ticks ticks) origin (assoc :origin origin)))))
+  ([sys agent-id forms-string opts] (verb! sys 'submit! agent-id (assoc opts :forms forms-string))))
 
 (defn judge!
   "Hand an outside agent's attempt to the reconciler for judgement, as a turn loop's end
@@ -813,8 +862,8 @@
   "The agent forks itself and runs its deftests in the child; a promise of
   {:pass :fail :error :reports [...]} (the run is bounded by its work: :seon.config.agent/test-ticks)."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id pos-int?] :seon.host/promise]]}
-  ([sys agent-id] (call! sys {:op :tests :id agent-id}))
-  ([sys agent-id ticks] (call! sys {:op :tests :id agent-id :ticks ticks})))
+  ([sys agent-id] (verb! sys 'run-tests! agent-id nil))
+  ([sys agent-id ticks] (verb! sys 'run-tests! agent-id {:ticks ticks})))
 
 (defn agent-stats! "A promise of the agent's numbers now." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
   [sys agent-id] (call! sys {:op :stats :id agent-id}))
@@ -840,13 +889,7 @@
   observation)."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :map] :seon.host/promise]]}
   ([sys agent-id] (merge! sys agent-id {}))
-  ([sys agent-id {:keys [gate? data-attrs] :or {gate? true data-attrs :all}}]
-   (let [ag (agent-entry sys agent-id)]
-     (cond
-       (not (:branch ag)) (doto (promise) (deliver (refused 'seon.root/merge! (str "no agent " agent-id) {:merged? false})))
-       (not gate?) (write! sys {:op :merge :branch (:branch ag) :agent agent-id :data-attrs data-attrs})
-       (#{:dead :killed :ended} (:status ag)) (doto (promise) (deliver (refused 'seon.root/merge! "agent not running, so its tests cannot run; merge with {:gate? false}" {:merged? false})))
-       :else (call! sys {:op :merge-tests :id agent-id :merge-branch (:branch ag) :data-attrs data-attrs})))))
+  ([sys agent-id opts] (verb! sys 'merge! agent-id opts)))
 
 (defn merge-main!
   "git merge main, on the agent's branch (seon.merge): main's changes since the merge base
@@ -855,13 +898,9 @@
   (default :all)."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]
                   [:=> [:cat :seon.root/sys :seon.agent/id :map] :seon.host/promise]]}
+  ;; the agent owns its branch's writes: it merges main itself
   ([sys agent-id] (merge-main! sys agent-id {}))
-  ([sys agent-id {:keys [data-attrs] :or {data-attrs :all}}]
-   (let [ag (agent-entry sys agent-id)]
-     (if (or (nil? ag) (#{:dead :killed :ended} (:status ag)))
-       (doto (promise) (deliver (refused 'seon.root/merge-main! (str "no live agent " agent-id) {:ok false :applied [] :conflicts []})))
-       ;; the agent owns its branch's writes: it merges main itself
-       (call! sys {:op :merge-main :id agent-id :data-attrs data-attrs})))))
+  ([sys agent-id opts] (verb! sys 'merge-main! agent-id opts)))
 
 (defn branch-db
   "The writer's current db value of branch (:db is main), for root's reads: a promise of
@@ -874,10 +913,6 @@
   (if-let [b (:branch (agent-entry sys agent-id))]
     (write! sys {:op :branch-diff :branch b})
     (doto (promise) (deliver (refused 'seon.root/branch-diff (str "no agent " agent-id) {:ok false})))))
-
-(defn branch-info "The writer's view of an agent's branch: {:datoms :t :log}. A promise." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
-  [sys agent-id]
-  (write! sys {:op :branch-info :branch (:branch (agent-entry sys agent-id))}))
 
 (defn effect!
   "Root's own effect: kind with req through its owner proc. A promise of its outcome."
@@ -892,11 +927,6 @@
   ([sys tx-data] (transact-main! sys tx-data nil))
   ([sys tx-data {:keys [flush?]}] (write! sys (cond-> {:op :tx :branch :db :tx-data tx-data} flush? (assoc :flush? true)))))
 
-(defn send-message!
-  "Deliver body to every agent in tos (encoded once); the agent takes it with (messages)."
-  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.agent/id] :any] :nil]}
-  [sys tos body] (call! sys {:op :message :to (vec tos) :body body}) nil)
-
 (defn interrupt!
   "Interrupt the agent's evaluation in progress: SIGUSR1, run by Chez at the agent's next
   safe point, which also ends a blocking host call (preemption is physics: no message
@@ -907,7 +937,7 @@
   nil)
 
 (defn kill! "SIGKILL the agent's process (through its stand-in). nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
-  [sys agent-id] (call! sys {:op :kill :id agent-id}) nil)
+  [sys agent-id] (verb! sys 'kill! agent-id nil) nil)
 
 (defn pause-agent!
   "Flow's pause of the agent's proc (flow/pause-proc on the root graph), passed on to the

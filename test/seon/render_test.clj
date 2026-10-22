@@ -37,20 +37,23 @@
             :a3 {:status :killed :tests {:pass 0 :fail 3 :error 0}}}
    :health {:api {:defects 0} :render {:defects 1 :newest "boom"}}
    :writer {:tx-count 4 :tx-per-s 2.0} :server {:status :up :pid 7} :main {:t 9 :datoms 100}
-   :tasks {} :attempts {} :events [] :root-errors [{:pid :render :message "boom"}] :now-ms 0})
+   :tasks {} :attempts {} :events [] :root-errors [{:pid :render :message "boom"}] :now-ms 0
+   ;; what main recorded (seon.problems/report): root records an agent's death and a red run
+   :recorded {:classes {:agent {:n 3 :rows [{:signature "s1" :count 2 :message "tests red: agent.a1/c"}
+                                            {:signature "s2" :count 1 :message "agent a2 died: signal 9"}]}
+                        :red {:n 0 :rows []}}}})
 
 (deftest root-context
   (let [text (r/ai sys {:seon.render/schema :seon.render/system :seon.render/budget 700})
         lines (str/split-lines text)]
-    (testing "problems first: root's defect, the live red agent, the dead one; no proc is pinged"
+    (testing "problems first: root's defect, then what main recorded (one producer); no proc is pinged"
       (is (= "# problems" (second lines)))
       (is (not (re-find #"\d\d:\d\d:\d\d" (first lines))) "no clock: an unchanged system gives the same text")
       (is (not-any? #(str/includes? % "UNKNOWN") lines) "no ping, so no unanswered ping")
       (is (some #(str/includes? % "defect in render: boom") lines))
-      (is (some #(str/includes? % "a1 idle: tests 1 pass 1 fail 0 error (agent.a1/c)") lines))
-      (is (some #(str/includes? % "a2 dead: its process died") lines)))
-    (testing "an agent root stopped is not a problem, whatever its last run said"
-      (is (not-any? #(str/starts-with? % "- a3") lines)))
+      (is (some #(str/includes? % "recorded agent 3: tests red: agent.a1/c") lines)))
+    (testing "the live view is not a second producer: an agent's own entry makes no problem line"
+      (is (not-any? #(re-find #"^- a\d" %) lines)))
     (testing "over the budget: later sections are named, not silently cut"
       (let [small (r/ai sys {:seon.render/schema :seon.render/system :seon.render/budget 40})]
         (is (str/includes? small "not shown, over the budget"))
@@ -151,23 +154,27 @@
     (is (str/includes? html "1 problem"))
     (is (str/includes? html "proc writer UNKNOWN")))
   (testing "a dead agent whose attempt finished is not a problem"
-    (is (empty? (ai/problems (assoc sys :agents {:a2 {:status :dead}} :health {} :root-errors []
+    (is (empty? (ai/problems (assoc sys :agents {:a2 {:status :dead}} :health {} :root-errors [] :recorded {}
                                     :agent-attempt {:a2 {:seon.attempt/status :done}}))))))
 
 (deftest observed-task-states
-  (seon.db/test-branch! (fn [_ conn] (let [db @conn
-        tasks {"t/a" {:seon.task/execution :running :seon.task/needs #{} :seon.task/accumulated {:proofs #{'p/x}}} "t/b" {:seon.task/execution :running :seon.task/needs #{"t/a"}}
-               "t/c" {:seon.task/execution :cancelled :seon.task/needs #{}}}
-        attempts {"t/a#1" {:seon.attempt/task "t/a" :seon.attempt/status :running :seon.attempt/start-ms 1 :seon.attempt/tokens 7
-                           :seon.attempt/results {'p/x :pass 'p/y :fail}}}
-        rows (p/task-rows tasks attempts (seon.reconcile/index db))]
+  (let [decl (fn [nm proofs & needs] (cond-> {:seon.task/ns 't :seon.task/name nm :seon.task/plan (str "Make " nm ".") :seon.task/proofs proofs}
+                                       needs (assoc :seon.task/needs (set needs))))
+        db (seon.db/test-db)
+        db (-> db (d/db-with (seon.task/create-tx db [(decl "a" #{'p/x}) (decl "b" #{'p/z} "t/a") (decl "c" #{'p/w})]))
+               (d/db-with (seon.task/execution-tx ["t/a" "t/b"] :running))
+               (d/db-with (seon.task/execution-tx ["t/c"] :cancelled))
+               (d/db-with (conj (seon.task/attempt-start-tx "t/a#1" "t/a" "boot-1" :a1 {:branch :task-t-a :model nil :max-turns 40} 1 "Make a.")
+                                {:seon.attempt/id "t/a#1" :seon.attempt/tokens 7
+                                 :seon.attempt/results [{:seon.proof/test 'p/x :seon.proof/status :pass} {:seon.proof/test 'p/y :seon.proof/status :fail}]})))
+        rows (p/task-rows (seon.reconcile/index db))]
     (testing "what happened, not the desired execution: running, blocked by its need, cancelled"
       (is (= :running (get-in rows ["t/a" :state])))
       (is (= :blocked (get-in rows ["t/b" :state])))
       (is (= #{"t/a"} (get-in rows ["t/b" :blocked-by])))
       (is (= :cancelled (get-in rows ["t/c" :state]))))
     (testing "its own proofs on its newest attempt (another task's red is allowed), attempts so far, tokens"
-      (is (= [1 0 1 1 7] ((juxt :green :red :allowed-red :attempts :tokens) (get rows "t/a")))))))))
+      (is (= [1 0 1 1 7] ((juxt :green :red :allowed-red :attempts :tokens) (get rows "t/a")))))))
 
 (deftest stop-row-says-how-it-ended-once-main-knows
   (let [[st1 _] (answer (fresh-state) view0)

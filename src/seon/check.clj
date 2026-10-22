@@ -426,7 +426,7 @@
                 (and (= :seon.repl/ticks-spent (get-in (second r11) [:err :seon.error/type]))
                      (<= 1000000000 (get-in (second r11) [:err :ticks])) (= "8" (:printed (nth r11 2))))
                 "printed output comes back as :out; a busy thread blocks the test fork instead of breaking it"
-                (and (= "hello from :a3\n" (:out (first r10))) (= 1 (:error t10)) (re-find #"another thread" (str (:message (first (:reports t10))))))
+                (and (= "hello from :a3\n" (:out (first r10))) (= 1 (:error t10)) (re-find #"Chez threads active" (str (:message (first (:reports t10))))))
                 "the fork server dies: agents keep working, a new server forks the next agent (whose tick budget works)"
                 (and (= "7" (:printed (first r7))) (= "360" (:printed (first r8)))
                      (= :seon.repl/ticks-spent (get-in (second r8) [:err :seon.error/type])) (= ":after" (:printed (nth r8 2))))}}))))

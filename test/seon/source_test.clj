@@ -289,7 +289,7 @@
   (let [text (slurp (str here "/" facts-path))
         db (empty-db)
         db (d/db-with db (source/import-tx db {facts-path text}))
-        status-line " :seon.attempt/status [:and {:seon.db/index true} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed]]"
+        status-line " :seon.attempt/status [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ended :dead}} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed :refused]]"
         edit (fn [tx] (get (source/files (d/db-with db tx) [facts-path]) facts-path))]
     (is (str/includes? text status-line) "the fixture line is the file's")
     (testing "every schema resource imported and written back unchanged is the same text"
@@ -301,9 +301,9 @@
         (is (seq files) "the schemas directory holds resources")
         (is (= files (source/files db (source/source-files db))))))
     (testing "a replaced value: only its changed part"
-      (is (= (str/replace text status-line (str/replace status-line ":closed]]" ":closed :refused]]"))
+      (is (= (str/replace text status-line (str/replace status-line ":closed :refused]]" ":closed :refused :paused]]"))
              (edit [{:schema/key :seon.attempt/status
-                     :schema/form "[:and {:seon.db/index true} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed :refused]]"}]))))
+                     :schema/form "[:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ended :dead}} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed :refused :paused]]"}]))))
     (testing "a removed entry takes its line"
       (is (= (str/replace text "\n :seon.attempt/pid :int" "")
              (edit [[:db/retractEntity [:schema/key :seon.attempt/pid]]]))))

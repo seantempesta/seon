@@ -96,13 +96,13 @@
               (reply {"status" ["done"]}))
 
           (instance? Throwable form)
-          (let [n (:n (swap! agent/state update :n inc))]
+          (let [n (:n (swap! agent/state update :n (fnil inc 0)))]
             (reply {:repl/ex form :tag :err "status" ["eval-error"] :repl/phase :read :id (dec n)
                     :err-text (nrepl/err->msg form {:phase :read-source})})
             (reply {"status" ["done"]}))
 
           :else
-          (let [n (dec (:n (swap! agent/state update :n inc)))
+          (let [n (dec (:n (swap! agent/state update :n (fnil inc 0))))
                 out (java.io.StringWriter.)
                 err (java.io.StringWriter.)
                 ;; *1 *2 *3 *e as clojure.main/repl and nREPL's session keep them, per session
@@ -394,13 +394,16 @@
     items))
 
 (defn eval-string
-  "Evaluate code from inside this agent (the turn loop's forms) through the one REPL path:
-  the handler and its middleware, its answers folded into reply items and recorded."
-  {:malli/schema [:=> [:cat :string] :seon.agent/items]}
-  [code]
-  (let [answers (volatile! [])]
-    (@the-handler {"op" "eval" "code" code :origin :model :reply #(vswap! answers conj %)})
-    (record! (fold @answers))))
+  "Evaluate code through the one REPL path: the handler and its middleware, its answers
+  folded into reply items and recorded (an agent's, on its branch). From inside an agent,
+  the turn loop's forms (origin :model); req adds to the request (root's evaluations,
+  seon.entrance: their namespace, origin, budget and eval fn)."
+  {:malli/schema [:function [:=> [:cat :string] :seon.agent/items] [:=> [:cat :string :map] :seon.agent/items]]}
+  ([code] (eval-string code {:origin :model}))
+  ([code req]
+   (let [answers (volatile! [])]
+     (@the-handler (assoc req "op" "eval" "code" code :reply #(vswap! answers conj %)))
+     (record! (fold @answers)))))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 

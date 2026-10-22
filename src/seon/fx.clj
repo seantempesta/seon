@@ -189,8 +189,10 @@
   [st {:keys [budget-key cost est outcome]}]
   (let [limited? (= :seon.model/rate-limited (:seon.error/type outcome))]
     (cond-> (-> st (update :busy dec) (update :done inc))
-      budget-key (update-in [:spent budget-key] (fnil + 0) (or cost 1))
-      (:bucket st) (update :bucket (fn [b] (-> b (update :tokens + (- (or est 0) (or cost 0)))
+      ;; a call that states no cost is not charged: the spend grows only by what was
+      ;; measured, and the bucket keeps the estimate it reserved
+      (and budget-key cost) (update-in [:spent budget-key] (fnil + 0) cost)
+      (:bucket st) (update :bucket (fn [b] (-> (cond-> b cost (update :tokens + (- (or est 0) cost)))
                                                (assoc :per-ms (if limited?
                                                                 (max (/ (:rate-ms b) 64) (/ (:per-ms b) 2))
                                                                 (min (:rate-ms b) (+ (:per-ms b) (/ (:rate-ms b) 20)))))))))))
@@ -320,7 +322,9 @@
   [{:keys [req ctx]}]
   (let [p (cond-> (:provider ctx) (and (:model req) (= :openai-compat (:kind (:provider ctx)))) (assoc :model (:model req)))
         c (model/complete p (dissoc req :model))]
-    (if (:seon.error/type c) c {:value c :cost (+ (:prompt-tokens c) (:completion-tokens c))})))
+    (cond (:seon.error/type c) c
+          (and (:prompt-tokens c) (:completion-tokens c)) {:value c :cost (+ (:prompt-tokens c) (:completion-tokens c))}
+          :else {:value c})))
 
 (defn procs
   "The owner and lane procs of every kind, for the root graph. Any proc reaches an owner

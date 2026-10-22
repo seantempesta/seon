@@ -3,7 +3,7 @@
   chat completion as server-sent events; the call reads until the server ends the stream.
 
   The model edge as data: a provider's reply body read into the completion (task
-  seon.fences/budgets-are-data-and-spend-is-measured). Run: bin/test seon.model-test"
+  seon.model/budgets-are-data-and-spend-is-measured). Run: bin/test seon.model-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [clojure.data.json :as json]
             [ring-chez.adapter :as adapter] [seon.model :as model]))
 

@@ -23,6 +23,8 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 | an outside agent works a task | `seon_attach`, `seon_context`, `seon_done` | new |
 | refusals and defects answered per request | on the unmerged branch `jolt/door` | partial |
 
+The door's verbs are one table, `seon.entrance/verbs`: MCP lists each as the tool `seon_<op>` (`seon.mcp/reply`), so a new verb is one row. An eval as root goes through the agents' REPL path (`seon.repl/eval-string`: the one printer, cost, error maps, `*1` and `*e`), in `root.repl` with `sys` a local, recorded on main by `seon.repl/record-tx` like an agent's evaluation. The dashboard's calls of root's verbs are the requests the API fns send (`seon.root/request`), so the UI and `seon.root/merge!` cannot disagree on a request or a refusal. Not this: a second read/eval loop, a second recorder, or a verb's request map written again in `seon.web`.
+
 `seon_agents` returns every task (230+, mostly cancelled): too much context for an outside agent.
 
 ## The agent's REPL (`my.*`)

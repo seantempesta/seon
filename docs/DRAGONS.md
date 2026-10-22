@@ -52,7 +52,7 @@ function.
 |---|---|---|
 | A peer's socket is gone (EOF, or its end frame) | root: `jolt.async.remote`'s reader pump; agents and the fork server: `seon.sock/fill!`, `seon.sock/recv!` | root: the end's `:in` closes, the stand-in's `:from` reads nil and becomes `{:op :dead}`; elsewhere `:eof` |
 | A write to a dead peer (EPIPE) | `seon.sock/send-frame!` | `:epipe`; the agent exits, root reads EOF |
-| `fork()` refused (another Chez thread active, the OS) | `seon.fork-server/server-step`, `seon.lib/safe-fork` | `:fork-failed`; `-2` from safe-fork (the test run and clone report it) |
+| `fork()` refused (another Chez thread active, the OS) | `seon.lib/fork!`, the one spawning skeleton (the fork server's agents and standby, an agent's test child and clone) | its `refused` branch with the active Chez threads, checked once, never waited out: `:fork-failed` / `:standby-failed` with `:active-threads`; the test run's `:error` report; the clone's `:clone-failed` |
 | A process dies (killed, crashed, `System/exit`) | the socket's EOF; `waitpid` in `seon.fork-server/reap` | `:dead` / `:exit` events; the agent's pending replies answer `:seon.agent/died` (its exit status, last op and stderr tail) once the server reaped it (at once for a clone or an orphan of a server that went down, whose status no one reaps), recorded on main (lane D2); a dead attempt's reason is the end it wrote on its branch, if any, beside that death (`seon.reconcile/dead-tx`) |
 | An agent's stderr file cannot be made (a store with no path) | `seon.agent/stderr-to-file!` | stderr stays where it was; a death records no tail |
 | A dead agent's stderr file is gone or empty | `seon.root/stderr-tail` | nil |
@@ -72,7 +72,8 @@ Two rules of the OS and Chez that no code may "fix" by adding a thread or a chec
   them; a child forked from such a process hangs in its first multi-threaded collection
   (lane RC1, sampled in `S_gc_par_entry` -> `run_sweeper`). The processes that fork are the
   fork server (it forks agents and its standby) and every agent (its test children,
-  `clone!`). So both are single-threaded and read and write their sockets themselves
+  `clone!`), each through ```seon.lib/fork!```, which forks only while its caller is the
+  one active Chez thread. So both are single-threaded and read and write their sockets themselves
   (`seon.sock`), and only root, which never forks after boot, holds `jolt.async.remote`
   ends with pumps. `bin/check threads` counts the OS threads of the fork server and of an
   agent. The real fix is a Chez atfork handler that resets the sweepers (RC1's "next (b)").

@@ -14,7 +14,7 @@
   referred into its namespace. From proto/flow f2-final proto.agent (lane F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [jolt.ffi :as ffi] [seon.program :as program] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
+            [clojure.string :as str] [seon.program :as program] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
             [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
@@ -347,14 +347,6 @@
     {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
      :reports reports}))
 
-(defn- ffi-status
-  "Reap the test child; answers its decoded exit status."
-  {:malli/schema [:=> [:cat :seon.lib/pid] :seon.lib/exit-status]}
-  [pid]
-  (let [b (ffi/alloc 4)]
-    (lib/c-waitpid pid b 0)
-    (lib/decode-status (ffi/read b :int))))
-
 (defn run-answer
   "The run, from the last line the test child wrote on its pipe before EOF (nil: none) and
   its exit status: that line when it is the run's result; else the child died while running
@@ -377,31 +369,29 @@
   (then the last test it started is named)."
   {:malli/schema [:=> [:cat pos-int? [:set :qualified-symbol]] :seon.test/result]}
   [ticks proofs]
-  (let [[r w] (lib/pipe) t0 (lib/now-ns) pid (lib/safe-fork 1000)]
-    (cond
-      (= pid -2)
-      (do (lib/c-close r) (lib/c-close w)
-          {:pass 0 :fail 0 :error 1 :ms (lib/ms-since t0)
-           :reports [{:type :error :message "cannot fork the tests: another thread of this agent stayed busy for 1 s (a running future?)"}]})
-      (zero? pid)
-      (do (lib/c-close r)
-          ;; the run ends by its budget; if the agent dies first, the next write to the
-          ;; pipe ends this child (EPIPE). The agent's socket is FD_CLOFORK: not held here.
-          (lib/set-trip! (* 16 1048576))
-          (swap! state assoc :mode :test :evaluating false)
-          (let [res (try (run-tests-here w ticks proofs)
-                         (catch Throwable e {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]}))]
-            (lib/write-line! w (pr-str res)))
-          (lib/c-exit 0))
-      :else
-      (do (lib/c-close w)
-          (let [rd (lib/line-reader r)
-                line (loop [line nil]
-                       (let [ls (rd -1)]
-                         (if (= ls :eof) line (recur (or (peek ls) line)))))
-                st (ffi-status pid)]
-            (lib/c-close r)
-            (assoc (run-answer line st) :ms (lib/ms-since t0) :pid pid :exit st))))))
+  (let [[r w] (lib/pipe) t0 (lib/now-ns)]
+    (lib/fork!
+      {:refused (fn [n] (lib/c-close r) (lib/c-close w)
+                  {:pass 0 :fail 0 :error 1 :ms (lib/ms-since t0)
+                   :reports [{:type :error :message (str "cannot fork the tests: " n " Chez threads active (a running future?)")}]})
+       :child (fn []
+                (lib/c-close r)
+                ;; the run ends by its budget; if the agent dies first, the next write to the
+                ;; pipe ends this child (EPIPE). The agent's socket is FD_CLOFORK: not held here.
+                (lib/set-trip! (* 16 1048576))
+                (swap! state assoc :mode :test :evaluating false)
+                (let [res (try (run-tests-here w ticks proofs)
+                               (catch Throwable e {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]}))]
+                  (lib/write-line! w (pr-str res))))
+       :parent (fn [pid]
+                 (lib/c-close w)
+                 (let [rd (lib/line-reader r)
+                       line (loop [line nil]
+                              (let [ls (rd -1)]
+                                (if (= ls :eof) line (recur (or (peek ls) line)))))
+                       st (lib/wait-status pid)]
+                   (lib/c-close r)
+                   (assoc (run-answer line st) :ms (lib/ms-since t0) :pid pid :exit st)))})))
 
 ;; ---- the loop ----------------------------------------------------------------------
 
@@ -511,29 +501,23 @@
     (let [r (await-op! :branched k)]
       (if-not (:ok r)
         (do (sock/close! fd) (send! {:op :clone-failed :k k :error (:error r)}))
-        (let [pid1 (lib/safe-fork 1000)]
-          (cond
-            (= pid1 -2) (do (sock/close! fd) (send! {:op :clone-failed :k k :error "cannot fork: another thread of this agent stayed busy for 1 s"}))
-            (zero? pid1)
-            (if (zero? (lib/c-fork))
-              (let [parent (:id @state)]
-                ;; the parent's socket closed on fork (FD_CLOFORK); this clone's came with the request
-                (sock/clofork! fd)
-                (let [c (sock/conn fd)]
-                  ;; the clone opens the store itself, on its own branch, with its own lease
-                  (pdb/after-fork! (:cfg r) (:lease r))
-                  (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
-                  (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn c :mode :agent :tx-seq 0 :lease (:lease r)
-                         :pending clojure.lang.PersistentQueue/EMPTY :mem-at nil :fx-pending {}
-                         :store-conn (d/connect (assoc (:cfg r) :branch (:branch m))))
-                  (swap! state assoc :db @(:store-conn @state)))
-                (hello! t0 {:cloned-from parent})
-                ((:serve @state)))
-              (lib/c-exit 0))
-            :else
-            (do (ffi-status pid1)
-                (sock/close! fd)
-                (send! {:op :cloned :k k :clone (:agent m)}))))))))
+        (lib/fork!
+          {:fd fd :double? true
+           :refused (fn [n] (send! {:op :clone-failed :k k :error (str "cannot fork: " n " Chez threads active (a running future?)")}))
+           :parent (fn [_] (send! {:op :cloned :k k :clone (:agent m)}))
+           :child (fn []
+                    (let [parent (:id @state)]
+                      ;; the parent's socket closed on fork (FD_CLOFORK); this clone's came with the request
+                      (sock/clofork! fd)
+                      ;; the clone opens the store itself, on its own branch, with its own lease
+                      (pdb/after-fork! (:cfg r) (:lease r))
+                      (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
+                      (let [store-conn (d/connect (assoc (:cfg r) :branch (:branch m)))]
+                        (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn (sock/conn fd) :mode :agent :tx-seq 0
+                               :lease (:lease r) :pending clojure.lang.PersistentQueue/EMPTY :mem-at nil :fx-pending {}
+                               :store-conn store-conn :db @store-conn))
+                      (hello! t0 {:cloned-from parent})
+                      ((:serve @state))))})))))
 
 (defn init!
   "Make this process the agent: its socket (fd), its namespace, its state map, its

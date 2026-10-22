@@ -57,8 +57,8 @@
         (is (= {:var/kind :fn :var/contract "[:=> [:cat :int] :int]"
                 :var/form {:form/src "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x]  (s/join [(* 2 x)]))"}}
                (update (var-row db 'app.pt-new/twice) :var/form dissoc :form/order)))
-        (is (= '#{clojure.string/join clojure.core/*} (set (d/q '[:find [?r ...] :where [?v :var/name app.pt-new/twice] [?v :var/form ?f] [?f :form/refs ?r]] db)))
-            "s/join resolved through the alias, * to clojure.core's")))
+        (is (= '#{clojure.string/join clojure.core/* clojure.core/defn} (set (d/q '[:find [?r ...] :where [?v :var/name app.pt-new/twice] [?v :var/form ?f] [?f :form/refs ?r]] db)))
+            "s/join resolved through the alias, * to clojure.core's, and the macro it expanded")))
     (testing "a contract holding a function is recorded as written, so it reads back as data"
       ;; a live agent's (defn ... {:malli/schema [:=> [:cat [:fn pos?]] :int]} ...) was recorded
       ;; from the evaluated value, #object[...], and every later agent on that branch died
@@ -173,7 +173,7 @@
       (is (= 5 (count accounts)) "every form, the comment block a text form")
       (is (= '[{:var app.pt-file/twice :kind :fn}] (:defs (by-src "(defn twice [x] (* 2 x))"))))
       (is (= '[{:multi app.pt-file/m :dispatch ":a"}] (:methods (by-src "(defmethod m :a [_] (s/join [\"a\"]))"))))
-      (is (= '#{clojure.string/join clojure.core/defmethod-setup} (:refs (by-src "(defmethod m :a [_] (s/join [\"a\"]))"))))
+      (is (= '#{clojure.string/join clojure.core/defmethod-setup clojure.core/defmethod} (:refs (by-src "(defmethod m :a [_] (s/join [\"a\"]))"))))
       (is (= (select-keys (eval-account 'app.pt-file "(defn twice [x] (* 2 x))") [:id :defs :refs])
              (select-keys (by-src "(defn twice [x] (* 2 x))") [:id :defs :refs]))
           "the REPL's facts for the same text"))))
@@ -288,3 +288,70 @@
     (spit (str b "/resources/seon/schemas/x.edn") "{:x :string}")
     (is (= calc-tests (set (:run (runner/plan (select-keys (program/reach-digests db (runner/inputs b)) calc-tests) dir))))
         "a changed schema resource is an input of every test")))
+
+;; ---- refs the expansion and the quote leave (task seon.program/refs-name-quoted-symbols-and-macro-uses)
+
+(defn- refs-of [db sym]
+  (set (d/q '[:find [?r ...] :in $ ?s :where [?v :var/name ?s] [?v :var/form ?f] [?f :form/refs ?r]] db sym)))
+
+(deftest a-quoted-or-syntax-quoted-var-is-a-ref
+  (let [db (record (empty-db) 'user "(ns app.pt-q)" 'app.pt-q "(defn g [] 1)"
+                   'app.pt-q "(defn f [] [`g 'app.pt-q/g {:render 'app.pt-q/g}])"
+                   'app.pt-q "(defn k [] ['no.such/var 'g '(a b)])")]
+    (is (contains? (refs-of db 'app.pt-q/f) 'app.pt-q/g) "a syntax-quoted and a quoted qualified symbol naming a var, in a map too")
+    (is (not-any? #{'no.such/var 'g 'a 'b} (refs-of db 'app.pt-q/k)) "a symbol naming no var, or unqualified, is data")))
+
+(deftest a-macro-use-is-a-ref
+  (let [db (record (empty-db) 'user "(ns app.pt-qm)" 'app.pt-qm "(defmacro m [x] x)"
+                   'app.pt-qm "(defn u [] (m 1))"
+                   'app.pt-qm "(defmacro mdo [] `(do (defn ~'w [] 1) (defn ~'w2 [] 2)))"
+                   'app.pt-qm "(mdo)"
+                   'app.pt-qm "(defmacro m2 [x] `(m ~x))")]
+    (is (contains? (refs-of db 'app.pt-qm/u) 'app.pt-qm/m) "the macro a form expanded")
+    (is (contains? (refs-of db 'app.pt-qm/w) 'app.pt-qm/mdo) "a top-level macro call that expands to a do: each unit's form names it")
+    (is (contains? (refs-of db 'app.pt-qm/m2) 'app.pt-qm/m) "a macro whose template names another: the expansion chain is closed")))
+
+(deftest a-test-reaching-a-quoted-function-changes-digest-with-it
+  (let [db (record (empty-db) 'user "(ns app.pt-qr)" 'app.pt-qr "(defn g [] 1)"
+                   'user "(ns app.pt-qr-test (:require [clojure.test :refer [deftest is]]))"
+                   'app.pt-qr-test "(deftest q-test (is (= 1 ((requiring-resolve 'app.pt-qr/g)))))"
+                   'app.pt-qr-test "(deftest other-test (is (= 1 1)))")
+        ts '#{app.pt-qr-test/q-test app.pt-qr-test/other-test}
+        before (select-keys (program/reach-digests db {:env "e" :tree "t"}) ts)
+        db' (record db 'app.pt-qr "(defn g [] 2)")
+        after (select-keys (program/reach-digests db' {:env "e" :tree "t"}) ts)]
+    (is (not= (before 'app.pt-qr-test/q-test) (after 'app.pt-qr-test/q-test)) "g changed: the test resolving it by name moved")
+    (is (= (before 'app.pt-qr-test/other-test) (after 'app.pt-qr-test/other-test)) "the test not reaching g kept its digest")
+    (is (contains? (program/reaching-tests db' '#{app.pt-qr/g}) 'app.pt-qr-test/q-test) "and an agent's selection finds it")))
+
+(deftest a-changed-macro-moves-the-digest-of-each-test-that-expands-it
+  (let [db (record (empty-db) 'user "(ns app.pt-mac)" 'app.pt-mac "(defmacro m [x] `(inc ~x))"
+                   'user "(ns app.pt-mac-test (:require [clojure.test :refer [deftest is]] [app.pt-mac :as a]))"
+                   'app.pt-mac-test "(deftest m-test (is (= 2 (a/m 1))))"
+                   'app.pt-mac-test "(deftest plain-test (is (= 1 1)))")
+        ts '#{app.pt-mac-test/m-test app.pt-mac-test/plain-test}
+        before (select-keys (program/reach-digests db {:env "e" :tree "t"}) ts)
+        db' (record db 'app.pt-mac "(defmacro m [x] `(+ 2 ~x))")
+        after (select-keys (program/reach-digests db' {:env "e" :tree "t"}) ts)]
+    (is (not= (before 'app.pt-mac-test/m-test) (after 'app.pt-mac-test/m-test)) "the macro's body changed: the test expanding it moved (no stale green)")
+    (is (= (before 'app.pt-mac-test/plain-test) (after 'app.pt-mac-test/plain-test)) "a test not expanding it kept its digest")
+    (is (= '#{app.pt-mac-test/m-test} (program/reaching-tests db' '#{app.pt-mac/m})) "and an agent's selection finds exactly it")))
+
+(deftest a-changed-contract-schema-moves-the-digest-of-tests-reaching-the-contracted-var
+  (let [schema (fn [db k form] (d/db-with db [{:schema/key k :schema/form form}]))
+        db (-> (record (empty-db) 'user "(ns app.pt-sc)"
+                       'app.pt-sc "(defn h {:malli/schema [:=> [:cat :app.pt-sc/n] :app.pt-sc/n]} [x] x)"
+                       'user "(ns app.pt-sc-test (:require [clojure.test :refer [deftest is]] [app.pt-sc :as a]))"
+                       'app.pt-sc-test "(deftest h-test (is (= 1 (a/h 1))))"
+                       'app.pt-sc-test "(deftest plain-test (is (= 1 1)))")
+               (schema :app.pt-sc/n "[:and :int :app.pt-sc/base]")
+               (schema :app.pt-sc/base "int?"))
+        ts '#{app.pt-sc-test/h-test app.pt-sc-test/plain-test}
+        dg (fn [db] (select-keys (program/reach-digests db {:env "e" :tree "t"}) ts))
+        before (dg db)
+        after (dg (schema db :app.pt-sc/n "[:and :string :app.pt-sc/base]"))
+        after-base (dg (schema db :app.pt-sc/base "pos-int?"))]
+    (is (not= (before 'app.pt-sc-test/h-test) (after 'app.pt-sc-test/h-test)) "the schema h's contract names changed: the test calling h moved")
+    (is (not= (before 'app.pt-sc-test/h-test) (after-base 'app.pt-sc-test/h-test)) "and a schema that schema names, on")
+    (is (= (before 'app.pt-sc-test/plain-test) (after 'app.pt-sc-test/plain-test) (after-base 'app.pt-sc-test/plain-test))
+        "a test not reaching h kept its digest")))
