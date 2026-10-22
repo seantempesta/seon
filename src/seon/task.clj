@@ -20,6 +20,20 @@
   {:malli/schema [:=> [:cat :seon.host/db :keyword :any] [:maybe :int]]}
   [db a v] (:e (first (d/datoms db :avet a v))))
 
+(defn entity-tx
+  "Make entity e state exactly want on attributes attrs: per attribute, the values e holds
+  that want lacks retracted and the ones it lacks asserted, so an entity that already states
+  want writes nothing. In want a set is a card-many attribute's values, any other value one
+  value, nil none; a ref is an entity id (a tempid or lookup ref is always asserted)."
+  {:malli/schema [:=> [:cat :seon.host/db :int [:sequential :keyword] :map] [:vector :any]]}
+  [db e attrs want]
+  (vec (for [a attrs
+             :let [v (get want a) new (cond (set? v) v (some? v) #{v} :else #{})
+                   old (into #{} (map :v) (d/datoms db :eavt e a))]
+             tx (concat (for [x old :when (not (new x))] [:db/retract e a x])
+                        (for [x new :when (not (old x))] [:db/add e a x]))]
+         tx)))
+
 (defn task-id
   "The task's handle, ns/name: its identity, derived from its namespace and name."
   {:malli/schema [:=> [:cat :seon.task/ns :seon.task/name] :seon.task/id]}
@@ -315,28 +329,6 @@
                 (file-refusal ns-sym (str "an entry is not a :seon.task/declaration: " (print/text bad (:part print/budgets))))
                 ds)))))
 
-(defn- update-tx
-  "Make task id state exactly declaration decl: each stated attribute asserted or, when decl
-  no longer states it, retracted; needs as the declared set."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :seon.task/declaration] [:vector :any]]}
-  [db id decl]
-  (let [e (eid db :seon.task/id id)
-        now (d/pull db (conj stated-attributes {:seon.task/needs [:seon.task/id]}) e)
-        want (cond-> (merge (dissoc decl :seon.task/ns :seon.task/name :seon.task/config :seon.task/needs) (:seon.task/config decl)
-                            (references-of decl))
-               true (update :seon.task/branch #(or % (default-branch id))))
-        old-needs (set (map :seon.task/id (:seon.task/needs now)))
-        new-needs (set (:seon.task/needs decl))]
-    (vec (concat
-           (for [a stated-attributes
-                 :let [v (get want a) old (get now a)]
-                 :when (not= (if (set? v) v v) (if (coll? old) (set old) old))
-                 tx (concat (when (some? old) (if (coll? old) (for [x old] [:db/retract e a x]) [[:db/retract e a old]]))
-                            (when (some? v) (if (set? v) (for [x v] [:db/add e a x]) [[:db/add e a v]])))]
-             tx)
-           (for [n (remove new-needs old-needs)] [:db/retract e :seon.task/needs [:seon.task/id n]])
-           (for [n (remove old-needs new-needs)] [:db/add e :seon.task/needs [:seon.task/id n]])))))
-
 (defn load-tx
   "The transaction reconciling task files into main db. files: {owning-ns declarations or
   refusal}, every file read (a file not given is not judged). Answers the tx-data, or the
@@ -363,10 +355,16 @@
         (vec (concat
                (when (seq new) (create-tx db new))
                (for [d new] (declared (task-id (:seon.task/ns d) (:seon.task/name d)) d))
-               (mapcat (fn [[id d]] (cond-> (conj (update-tx db id d) (declared id d))
-                                      ;; declared again after its removal: revived
-                                      (and (nil? (stored id)) (= :cancelled (:seon.task/execution (all id))))
-                                      (conj {:seon.task/id id :seon.task/execution :held})))
+               (mapcat (fn [[id d]]
+                         ;; what it states now: members, config flattened, references derived, branch
+                         ;; defaulted, needs as entity ids (a task new in this write by its tempid, its id)
+                         (let [want (-> (merge (dissoc d :seon.task/ns :seon.task/name :seon.task/config) (:seon.task/config d) (references-of d))
+                                        (update :seon.task/branch #(or % (default-branch id)))
+                                        (assoc :seon.task/needs (into #{} (map #(or (eid db :seon.task/id %) %)) (:seon.task/needs d))))]
+                           (cond-> (conj (entity-tx db (eid db :seon.task/id id) (conj stated-attributes :seon.task/needs) want) (declared id d))
+                             ;; declared again after its removal: revived
+                             (and (nil? (stored id)) (= :cancelled (:seon.task/execution (all id))))
+                             (conj {:seon.task/id id :seon.task/execution :held}))))
                        changed)
                (mapcat (fn [id] [{:seon.task/id id :seon.task/execution :cancelled}
                                  [:db/retract [:seon.task/id id] :seon.task/declared (stored id)]])

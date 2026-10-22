@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d]
             [seon.task :as task] [seon.merge :as pm]
-            [seon.print :as print] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg]))
+            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg]))
 
 (def system-prompt
   "What every model is told once per turn: how to answer and which verbs exist."
@@ -50,9 +50,10 @@
      "(my.turn/evals) holds your last reply's evaluations in full, and every cut names the form that reads its rest."]))
 
 (defn source-of
-  "The recorded source of var sym on db (the text of the form that last defined it), or nil."
+  "The recorded source of var sym on db (the text of the form that last defined it), or nil:
+  one AVET seek (seon.task/eid), never a query."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :string]]}
-  [db sym] (d/q '[:find ?s . :in $ ?v :where [?e :var/name ?v] [?e :var/form ?f] [?f :form/src ?s]] db sym))
+  [db sym] (some->> (task/eid db :var/name sym) (d/entity db) :var/form :form/src))
 
 (defn resolve-ref
   "A reference resolved: its source (from the db) when it is program, else its doc (from
@@ -253,10 +254,10 @@
 (defn- kept-turns
   "The earlier turns the history budget keeps, whole, in order: the newest always, then older
   ones while they fit. A turn costs its reply's and its calls' code and evaluations' tokens
-  (4 characters a token, as seon.model/estimate-tokens)."
+  (the printer's sizer, seon.print.select/estimate)."
   {:malli/schema [:=> [:cat [:vector [:map [:reply :string] [:calls [:vector :map]]]] :int] [:vector :map]]}
   [turns budget]
-  (let [cost #(quot (reduce + (count (:reply %)) (map (fn [c] (+ (count (:code c)) (count (:evals c)))) (:calls %))) 4)
+  (let [cost #(select/estimate (str/join (cons (:reply %) (mapcat (juxt :code :evals) (:calls %)))))
         [newest & older] (rseq turns)]
     (->> older
          (reduce (fn [[kept spent] t] (let [s (+ spent (cost t))] (if (<= s budget) [(conj kept t) s] (reduced [kept spent]))))

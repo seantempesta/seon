@@ -152,8 +152,6 @@
 
 ;; ---- tx-data: setting keys on a db ---------------------------------------------------
 
-(defn- ns-tid {:malli/schema [:=> [:cat :symbol] :string]} [n] (str "ns " n))
-(defn- form-tid {:malli/schema [:=> [:cat :string] :string]} [id] (str "form " id))
 
 (defn- def-ref
   "The entity map naming definition k on db: its entity when db has it, else an upsert by
@@ -163,10 +161,10 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/def-key] :map]}
   [db [kind a b :as k]]
   (cond-> (case kind
-            :var {:db/id (str "var " a) :var/name a :var/ns (ns-tid (symbol (namespace a)))}
+            :var {:db/id (str "var " a) :var/name a :var/ns (program/ns-tid (symbol (namespace a)))}
             :method (let [k (program/method-key a b)] {:db/id (str "method " k) :method/key k :method/multi a :method/dispatch b})
             :impl (let [k (program/impl-key a b)] {:db/id (str "impl " k) :impl/key k :impl/protocol a :impl/type b})
-            :ns {:db/id (ns-tid a) :ns/name a})
+            :ns {:db/id (program/ns-tid a) :ns/name a})
     (def-entity db k) (assoc :db/id (def-entity db k))))
 
 (def ^:private pointer {:var :var/form :method :method/form :impl :impl/form :ns :ns/form})
@@ -178,8 +176,8 @@
     (if (nil? content)
       (if e [[:db/retractEntity e]] [])
       (let [{:keys [ns src order lead defines declares refs requires banned inline-defs timeouts catches]} content]
-        (into [{:db/id (ns-tid ns) :ns/name ns}
-               (cond-> {:db/id (form-tid id) :form/id id :form/src src :form/ns (ns-tid ns) :form/order order}
+        (into [{:db/id (program/ns-tid ns) :ns/name ns}
+               (cond-> {:db/id (program/form-tid id) :form/id id :form/src src :form/ns (program/ns-tid ns) :form/order order}
                  lead (assoc :form/lead lead)
                  (seq defines) (assoc :form/defines (mapv #(:db/id (def-ref db %)) defines))
                  (seq declares) (assoc :form/declares (mapv #(:db/id (def-ref db [:var %])) declares))
@@ -199,12 +197,12 @@
         x (when e (d/entity db e))
         attrs (case (first k) :var [:var/form :var/kind :var/contract :var/doc] :ns [:ns/form :ns/file] [(pointer (first k))])
         now (when content
-              (cond-> {(pointer (first k)) (form-tid (:form content))}
+              (cond-> {(pointer (first k)) (program/form-tid (:form content))}
                 (:kind content) (assoc :var/kind (:kind content))
                 (:contract content) (assoc :var/contract (:contract content))
                 (:doc content) (assoc :var/doc (:doc content))
                 (:file content) (assoc :ns/file (:file content))))]
-    (into (if content [(merge (def-ref db k) now) {:db/id (form-tid (:form content)) :form/id (:form content)}] [])
+    (into (if content [(merge (def-ref db k) now) {:db/id (program/form-tid (:form content)) :form/id (:form content)}] [])
           (for [a attrs :let [old (get x a)] :when (and (some? old) (not (contains? now a)))]
             [:db/retract e a (if (#{:var/form :ns/form :method/form :impl/form} a) (:db/id old) old)]))))
 

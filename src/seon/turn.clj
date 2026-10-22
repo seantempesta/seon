@@ -19,7 +19,7 @@
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.set :as set]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context]
-            [seon.harvest :as harvest] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg]
+            [seon.harvest :as harvest] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
             [datahike.api :as d]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: the task and
@@ -59,9 +59,6 @@
   [outcome reason]
   (:turn (swap! agent/state assoc-in [:turn :stop] (cond-> {:outcome outcome} reason (assoc :reason reason)))))
 
-(defn- ms-since "Whole milliseconds since t0 (System/nanoTime)." {:malli/schema [:=> [:cat :int] :int]}
-  [t0] (long (/ (- (System/nanoTime) t0) 1e6)))
-
 (defn- observe
   "What a turn starts from, measured now: the proofs run in a fork of this agent, the
   branch's new contract gaps and unmerged entries, the done rule over them, and the task as
@@ -70,7 +67,7 @@
   [id gaps-before plan-before]
   (let [t0 (System/nanoTime)
         run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks) (:proofs (:seon.task/accumulated (task/task (agent/db) id))))
-        tests-ms (ms-since t0)
+        tests-ms (long (lib/ms-since t0))
         results (proofs/results run)
         db (agent/db)
         unc (set/difference (harvest/uncontracted db) gaps-before)
@@ -88,7 +85,7 @@
   (agent/write-end! attempt {:outcome outcome :turns turn :tokens tokens :reason reason :error error
                              :waste (learn/summary (learn/waste (or log []) (learn/final-symbols (or log []))))})
   (cond-> {:outcome outcome :turns turn :model-calls turn :tokens tokens :results {} :uncontracted #{}
-           :ms (/ (- (System/nanoTime) t0) 1e6)}
+           :ms (lib/ms-since t0)}
     reason (assoc :reason reason)))
 
 (defn- observed
@@ -128,12 +125,12 @@
         basis (basis! (:seon.task/id t) attempt turn max-turns :model
                       (cond-> (observed obs) merge? (assoc :merge? true)))
         {:keys [block messages]} (context/render (agent/db) basis)
-        context-ms (ms-since t0)
+        context-ms (long (lib/ms-since t0))
         t1 (System/nanoTime)
         r (agent/fx! :model (cond-> {:messages messages :task (:seon.task/id t) :turn turn}
                               model-name (assoc :model model-name))
                      {})
-        model-ms (ms-since t1)
+        model-ms (long (lib/ms-since t1))
         c (:value r)]
     (if (:seon.error/type r)
       r
@@ -142,7 +139,7 @@
             calls (mapv (fn [{:keys [id code]}] {:id id :code code :items (repl/eval-string (:text (reader/forgive code)))})
                         (:tool-calls c))
             items (into [] (mapcat :items) calls)
-            eval-ms (ms-since t2)
+            eval-ms (long (lib/ms-since t2))
             _ (swap! agent/state assoc-in [:turn :evals] items)
             used (+ (:prompt-tokens c) (:completion-tokens c))
             t3 (System/nanoTime)]
@@ -162,7 +159,7 @@
                             (:reasoning c) (assoc :seon.turn/reasoning (:reasoning c)))])
         (agent/transact! [{:seon.turn/id (str attempt "/" turn)
                            :seon.turn/split (cond-> {:context-ms context-ms :model-ms model-ms :eval-ms eval-ms
-                                                     :record-ms (ms-since t3)}
+                                                     :record-ms (long (lib/ms-since t3))}
                                               tests-ms (assoc :tests-ms tests-ms))}])
         (cond-> (-> (assoc st :turn (inc turn) :tokens (+ tokens used))
                     ;; what this turn's block showed, by producer, and what it evaluated (waste)
@@ -188,7 +185,7 @@
     ;; the read is a turn of this attempt, as a model turn is: what it was built from and what it cost
     (agent/transact! [{:seon.turn/id (str attempt "/read-" n) :seon.turn/attempt attempt :seon.turn/n n
                        :seon.turn/origin :outside :seon.turn/basis basis
-                       :seon.turn/split (cond-> {:context-ms (ms-since t0)} tests-ms (assoc :tests-ms tests-ms))}])
+                       :seon.turn/split (cond-> {:context-ms (long (lib/ms-since t0))} tests-ms (assoc :tests-ms tests-ms))}])
     text))
 
 (defn work!
