@@ -703,7 +703,7 @@
       :gated (let [rs (if (contract/error? r) (zipmap (:tests act) (repeat :error)) (get-in r [:value :results]))]
                (one (write st aid :done (cond-> [{:seon.attempt/id aid
                                                   :seon.attempt/deferred-results (vec (for [[t s] rs] {:seon.proof/test t :seon.proof/status s}))}]
-                                          (contract/error? r) (conj {:seon.attempt/id aid :seon.attempt/error (error-text r)})))))
+                                          (contract/error? r) (conj {:seon.attempt/id aid :seon.attempt/error r})))))
       :write-back (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)
                        files (source/files (:db r) paths)]
