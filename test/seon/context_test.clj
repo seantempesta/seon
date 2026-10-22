@@ -132,14 +132,16 @@
     (eval '(ns ctx-calc-test (:require [clojure.test :refer [deftest is]] [ctx-calc :refer [square]])))
     (eval '(deftest square-test (is (= 9 (square 3))))))
   (let [db (d/db-with (db-with-program)
-                      (vec (mapcat (fn [[v src]]
+                      ;; as the compiler records them: each form's resolved references (:form/refs)
+                      (vec (mapcat (fn [[v src refs]]
                                      [{:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)}
-                                      {:db/id (str "form " v) :form/id (str v) :form/src src :form/ns (str "ns " (namespace v)) :form/order 0
-                                       :form/defines [(str v)]}
+                                      (cond-> {:db/id (str "form " v) :form/id (str v) :form/src src :form/ns (str "ns " (namespace v)) :form/order 0
+                                               :form/defines [(str v)]}
+                                        (seq refs) (assoc :form/refs refs))
                                       {:db/id (str "ns " (namespace v)) :ns/name (symbol (namespace v))}])
-                                   '[[ctx-calc/square "(defn square \"Squares x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))"]
-                                     [ctx-calc-test/square-test "(deftest square-test (is (= 9 (square 3))))"]
-                                     [ctx-calc-test/empty-test "(deftest empty-test (square 3))"]])))
+                                   '[[ctx-calc/square "(defn square \"Squares x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))" [clojure.core/*]]
+                                     [ctx-calc-test/square-test "(deftest square-test (is (= 9 (square 3))))" [clojure.test/is ctx-calc/square]]
+                                     [ctx-calc-test/empty-test "(deftest empty-test (square 3))" [ctx-calc/square]]])))
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'ctx :seon.task/name "sq" :seon.task/plan "p"
                                                :seon.task/proofs #{'ctx-calc-test/square-test 'ctx-calc-test/cube-test 'ctx-calc-test/empty-test}}]))
         ;; the test child's report of the failing assertion, as clojure.test makes it
