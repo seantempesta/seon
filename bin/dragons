@@ -1,6 +1,6 @@
 #!/bin/sh
 # bin/dragons [KIND ...] — the law census: for each law, every site in src/ (the check and
-# e2e drivers left out) where its mark appears, by its function (`ns/fn`), and whether the
+# e2e drivers left out, but for clocks: a harness wait is a clock too) where its mark appears, by its function (`ns/fn`), and whether the
 # law's doc names that function in backticks with the owner's reason. Prints each site;
 # exits 1 when one is not named. Kinds (default: all), each a mark over code with strings
 # and comments stripped, and the doc (and section) that sanctions it:
@@ -22,7 +22,8 @@ fi
 mkdir -p target
 bad=0
 census() { # KIND PATTERN DOC [SECTION]
-  for f in $(find src -name '*.clj' ! -name check.clj ! -name e2e.clj | sort); do
+  if [ "$1" = clocks ]; then files=$(find src -name '*.clj' | sort); else files=$(find src -name '*.clj' ! -name check.clj ! -name e2e.clj | sort); fi
+  for f in $files; do
     ns=$(sed -n 's/^(ns \([^ ]*\).*/\1/p' "$f" | head -1)
     awk -v ns="$ns" -v pat="$2" '
       /^\((defn-?|defchecked|defmacro|def|defonce) /{split($0,a," "); n=a[2]; if (n ~ /^\^/) n=a[3]}

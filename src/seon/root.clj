@@ -970,28 +970,8 @@
 (defn resume-agent! "Flow's resume of the agent's proc. nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
   [sys agent-id] (flow/resume-proc (:graph sys) agent-id) nil)
 
-(defn agent-health
-  "Flow's ping of the agent's proc: {:status :running|:paused :count :state}, or :unknown
-  when it does not answer within ms."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.root/health] [:=> [:cat :seon.root/sys :seon.agent/id :int] :seon.root/health]]}
-  ([sys agent-id] (agent-health sys agent-id 1000))
-  ([sys agent-id ms]
-   (if-let [m (flow/ping-proc (:graph sys) agent-id :timeout-ms ms)]
-     {:status (::flow/status m) :count (::flow/count m) :state (::flow/state m)}
-     :unknown)))
-
 (defn fs-call! "Ask the fork server for {:op :stats} or {:op :static}." {:malli/schema [:=> [:cat :seon.root/sys :seon.root/request] :any]}
   [sys msg] @(call! sys {:op :fs :req msg}))
-
-(defn health
-  "Flow's own observation of every root proc (its ping-map-fn), or :unknown within ms."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys] [:map-of :keyword :seon.root/health]] [:=> [:cat :seon.root/sys :int] [:map-of :keyword :seon.root/health]]]}
-  ([sys] (health sys 1000))
-  ([sys ms]
-   (into {} (for [pid [:api :writer :fork-server :flusher :reconciler]]
-              [pid (if-let [m (flow/ping-proc (:graph sys) pid :timeout-ms ms)]
-                     {:status (::flow/status m) :count (::flow/count m) :state (::flow/state m)}
-                     :unknown)]))))
 
 (defn stop!
   "Stop root by letting the flow drain: the entrance closes (later calls answer \"root

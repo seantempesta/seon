@@ -94,3 +94,14 @@
     (is (= [:r1 :r2] (#'seon.check/await-records ev :a1 read #(= 2 (count %)))))
     (is (= 2 @reads) "once at the start, once at a1's commit")
     (is (= {:type :ready :agent :a3} (a/poll! ev)) "it waited through a1's commit, not a2's or a reply")))
+
+(deftest the-probe-says-what-it-took
+  ;; task seon.check/every-wait-is-the-event-it-means: the system check awaits the probe's
+  ;; own event for its third message, not a window
+  (let [ev (a/chan 4)
+        st (#'seon.check/probe-proc {:tag "one" :events ev})
+        [st o1] (#'seon.check/probe-proc st :in 1)
+        [_ o2] (#'seon.check/probe-proc st :in 2)]
+    (is (= {:events ev} (:clojure.core.async.flow/out-ports st)))
+    (is (= [[{:type :probe :tag "one" :got 1}] [{:type :probe :tag "one" :got 2}]]
+           (map #(mapv (fn [e] (dissoc e :at-ms)) (:events %)) [o1 o2])))))

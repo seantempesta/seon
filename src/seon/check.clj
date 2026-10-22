@@ -43,6 +43,35 @@
   [ev pred]
   (loop [] (let [e (a/<!! ev)] (cond (nil? e) (throw (ex-info "root's events ended" {})) (pred e) e :else (recur)))))
 
+(defn- await-each
+  "The first event on ev (await-event) for each of preds, in preds' order, whatever order
+  they arrive in (one at a time would drop another's event while it waited)."
+  [ev preds]
+  (let [met (fn [got e] (first (filter #(and (not (got %)) ((preds %) e)) (range (count preds)))))]
+    (loop [got {}]
+      (if (= (count got) (count preds))
+        (mapv got (range (count preds)))
+        (let [e (await-event ev #(met got %))] (recur (assoc got (met got e) e)))))))
+
+(defn- started
+  "Agent id's :started event for an eval of form: it began, so a kill, an interrupt or a pause
+  lands on a running eval; the form tells it from an earlier one's."
+  [id form] #(and (= :started (:type %)) (= id (:agent %)) (= form (:form %))))
+
+(def ping-ms
+  "A Flow ping's bound: a proc that took no control message (it takes one between steps) for
+  this long is stuck mid-step, recorded so (seon.check/ping). docs/clocks.md names it."
+  10000)
+
+(def hold-ms "A window over which a check measures that something does not happen (docs/clocks.md)." 500)
+
+(def pages-ms "The window over which scale measures the memory the kernel returns after the kill." 500)
+
+(defn- ping "Flow's ping of proc pid: {:status :count :state}, or {:stuck pid :ping-ms ping-ms}." [sys pid]
+  (if-let [m (flow/ping-proc (:graph sys) pid :timeout-ms ping-ms)]
+    {:status (::flow/status m) :count (::flow/count m) :state (::flow/state m)}
+    {:stuck pid :ping-ms ping-ms}))
+
 (defn- await-agents
   "ids, once each has sent an event whose :type is in types on ev (await-event); an agent
   that ends first (:dead, :killed, :ended) is an error naming it."
@@ -155,9 +184,10 @@
         _ (out! "merge main into " (ids 0) ": " mm " -> it sees "
                 (:printed (first @(c/submit! sys (ids 0) "(sort (q '[:find [?t ...] :where [?n :note/text ?t]]))"))))
         ;; robustness: a1 runs forever; kill it; the others keep working
+        ev (c/events sys)
         hung (c/submit! sys (ids 0) "(loop [] (recur))")
-        ;; a window for the eval to start, so the kill lands mid-eval (no event says it started)
-        _ (Thread/sleep 200)
+        ;; the kill lands mid-eval: the agent said it began
+        _ (await-event ev (started (ids 0) "(loop [] (recur))"))
         _ (out! (ids 0) " running: " (get-in (c/state sys) [:agents (ids 0) :running]))
         _ (c/kill! sys (ids 0))
         _ (out! "killed " (ids 0) " mid-eval; its pending reply: " (short-items @hung))
@@ -391,8 +421,8 @@
         r9 @(c/submit! sys b "(count (vec (range 300000000))) (+ 5 5)")
         r11 @(c/submit! sys b "(def kept 7) (loop [] (recur)) (+ kept 1)" {:ticks 1000000000})
         p12 (c/submit! sys b "(reduce + (range)) :next")
-        ;; a window for the eval to start before the interrupt (no event says it started)
-        _ (Thread/sleep 200)
+        ;; the interrupt lands on the running eval: the agent said it began
+        _ (await-event ev (started b "(reduce + (range)) :next"))
         _ (c/interrupt! sys b)
         r12 @p12
         r12b @(c/submit! sys b ":next")
@@ -482,8 +512,7 @@
         ev (c/events sys)
         _ (doseq [id ids] (c/kill! sys id))
         _ (await-agents ev ids #{:killed})
-        ;; a window for the kernel to return the agents' pages (the measurement, not a dependency)
-        mem2 (do (Thread/sleep 500) (lib/sysmem))
+        mem2 (do (Thread/sleep pages-ms) (lib/sysmem))
         th-end (thread-diff (c/declared-threads sys) (c/threads))
         ;; the target machine (a 16 GB M1, owner 2026-10-22): root, the fork server and the default
         ;; number of agents at once fit :seon.config.machine/memory-mb, each agent charged what the
@@ -518,18 +547,21 @@
   (let [sys (c/start! {:datoms 500})
         [a b] (spawn-ready! sys "loops" "tests forever")
         cl (ready! sys #(deref (c/clone! sys a)))
-        _ (c/submit! sys a "(loop [] (recur))")
-        _ (c/submit! sys (:id cl) "(loop [] (recur))")
+        ev (c/events sys)
+        _ (doseq [id [a (:id cl)]] (c/submit! sys id "(loop [] (recur))"))
         _ @(c/submit! sys b "(ns app.forever (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (deftest forever (loop [] (recur)))")
         ;; bounded by :seon.config.agent/test-ticks: root dies long before the bound
         _ (c/run-tests! sys b)
-        _ (Thread/sleep 300)
-        pids (keep #(get-in (c/state sys) [:agents % :pid]) [a b (:id cl)])
-        test-child (:out (clojure.java.shell/sh "pgrep" "-P" (str (get-in (c/state sys) [:agents b :pid]))))]
-    (out! "PIDS " (clojure.string/join " " (concat pids [(get-in (c/state sys) [:server :pid])] (clojure.string/split-lines test-child))))
+        ;; busy when root dies: each loop began, and the test child is forked (its pid on
+        ;; the event), or the run answered first (no child)
+        [_ _ forked] (await-each ev [(started a "(loop [] (recur))") (started (:id cl) "(loop [] (recur))")
+                                     #(and (= b (:agent %)) (#{:tests-started :tests} (:type %)))])
+        test-child (when (= :tests-started (:type forked)) (:pid forked))
+        pids (keep #(get-in (c/state sys) [:agents % :pid]) [a b (:id cl)])]
+    (out! "PIDS " (clojure.string/join " " (concat pids [(get-in (c/state sys) [:server :pid])] (when test-child [test-child]))))
     ;; without a running test child there is nothing to prove about it
-    (when (clojure.string/blank? test-child) (out! "NO TEST CHILD"))
-    (lib/c-exit (if (clojure.string/blank? test-child) 1 0))))
+    (when-not test-child (out! "NO TEST CHILD " (pr-str forked)))
+    (lib/c-exit (if test-child 0 1))))
 
 ;; ---- durability: the whole system restarts and recovers ------------------------------
 
@@ -616,7 +648,7 @@
   [nm]
   (run-check "WINDOW-WRITE" {:main (keyword nm)}
    (fn [sys]
-    (let [writer #(select-keys (::flow/state (flow/ping-proc (:graph sys) :writer :timeout-ms 1000)) [:flushes :dirty])
+    (let [writer #(let [p (ping sys :writer)] (if (:stuck p) p (select-keys (:state p) [:flushes :dirty])))
           t (fn [p] (let [t0 (lib/now-ns) r @p] [(:ok r) (lib/r2 (lib/ms-since t0))]))
           a (t (c/transact-main! sys [{:note/text "A" :note/agent :window}] {:flush? true}))
           w0 (writer)
@@ -658,12 +690,12 @@
                boot-ms (lib/ms-since t0)
                ids (apply spawn-ready! sys (map #(str "lc " %) (range 3)))
                ok? (every? #(= "4" (:printed (first @(c/submit! sys % "(+ 2 2)")))) ids)
-               health (c/health sys)
+               health (mapv #(let [p (ping sys %)] (:status p p)) [:api :writer :fork-server :flusher :reconciler])
                running (thread-diff (c/declared-threads sys) (c/threads))
                pids (vec (cons (get-in (c/state sys) [:server :pid]) (keep #(get-in (c/state sys) [:agents % :pid]) ids)))
                st (c/stop! sys)]
            {:cycle i :ok ok? :boot-ms (lib/r2 boot-ms) :stop st :left (vec (filter alive? pids))
-            :health (set (map #(if (map? %) (:status %) %) (vals health)))
+            :health (set health)
             :running running :stopped (thread-diff (c/declared-threads) (c/threads))}))))
 
 (defn- exact? [row] (and (empty? (:running row)) (empty? (:stopped row))))
@@ -680,14 +712,13 @@
      (fn [sys]
       (let [[a] (spawn-ready! sys "paused")
             _ (c/pause-agent! sys a)
-            ;; Flow's pause is a control message with no answer: a window for it to land
-            _ (Thread/sleep 50)
-            paused-health (c/agent-health sys a)
+            ;; the proc's control channel is FIFO: this ping is taken after the pause
+            paused-health (ping sys a)
             p1 (c/submit! sys a "(def x 1) x")
             p2 (c/submit! sys a "(inc x)")
             ;; the measurement: no answer within the window while paused
-            held (deref p1 300 :held)
-            held-state (= :paused (:status (c/agent-health sys a)))
+            held (deref p1 hold-ms :held)
+            held-state (= :paused (:status (ping sys a)))
             _ (c/resume-agent! sys a)
             r1 @p1 r2 @p2]
         {:report {:threads {:declared-running (c/declared-threads sys) :declared-stopped (c/declared-threads)}
@@ -722,10 +753,16 @@
         fs-pid (get-in (c/state sys) [:server :pid])
         ;; each agent: one eval writing 50 notes, one transact! at a time
         evals (mapv #(c/submit! sys % (str "(dotimes [i 50] (transact! [{:note/text (str \"d\" i) :note/agent " % "}])) :done")) ids)
-        mains (vec (for [i (range 300)] (do (when (= i 150) (Thread/sleep 20)) (c/transact-main! sys [{:note/text (str "m" i) :note/agent :root}]))))
+        write #(c/transact-main! sys [{:note/text (str "m" %) :note/agent :root}])
+        ;; the first half answered, then the second streams in as stop! is called
+        half (mapv write (range 150))
+        _ @(peek half)
+        mains (into half (map write) (range 150 300))
         st (c/stop! sys)
-        evr (mapv #(deref % 1000 :hang) evals)
-        mr (mapv #(deref % 1000 :hang) mains)
+        ;; answered by the time stop! returns, or never: :hang
+        answer #(if (realized? %) @% :hang)
+        evr (mapv answer evals)
+        mr (mapv answer mains)
         ok-main (count (filter :ok mr))
         refused-main (count (filter #(= "root stopped" (:seon.error/message %)) mr))
         conn (d/connect (:cfg sys))
@@ -757,11 +794,13 @@
   (run-check "BACKPRESSURE" {:datoms 2000}
    (fn [sys]
     (let [[a] (spawn-ready! sys "flood")
-        p (c/submit! sys a "(dotimes [i 20000] (#'seon.agent/send! {:op :noise :i i})) :flooded")
-        ;; windows: the flood starts, then what arrives while paused is the measurement
-        _ (Thread/sleep 5)
+        flood "(dotimes [i 20000] (#'seon.agent/send! {:op :noise :i i})) :flooded"
+        ev (c/events sys)
+        p (c/submit! sys a flood)
+        ;; the flood began (the agent said so); then what arrives while paused is the measurement
+        _ (await-event ev (started a flood))
         _ (c/pause-agent! sys a)
-        _ (Thread/sleep 400)
+        _ (Thread/sleep hold-ms)
         while-paused (:noise (c/stats sys) 0)
         busy (get-in (c/state sys) [:agents a :status])
         t0 (lib/now-ns)
@@ -777,7 +816,7 @@
                                  (mapv #(deref (c/submit! sys % "(transact! [{:note/text \"bp\" :note/agent :bp}]) :ok")) ids)))
         ;; root's own writes to main wait for it
         mains (mapv #(c/transact-main! sys [{:note/text (str "bp" %) :note/agent :root}]) (range n))
-        _ (Thread/sleep 500)
+        _ (Thread/sleep hold-ms)
         answered-while-paused (count (filter realized? mains))
         mb1 (lib/r2 (lib/real-mb))
         t1 (lib/now-ns)
@@ -815,7 +854,7 @@
         _ (dotimes [i 3] @(c/transact-main! sys [{:note/text (str "after" i)}]))
         ;; the redefined step delivers when it runs: no poll
         _ @hit
-        health (:reconciler (c/health sys))
+        health (ping sys :reconciler)
         _ (alter-var-root #'seon.reconcile/reconciler-proc (constantly old))
         ;; seon.edn/encode: a one-arity plain defn, the shape a direct-linked build may
         ;; splice, called by the compiled seon.program/method-key
@@ -863,22 +902,25 @@
         recs (d/q '[:find ?k (count ?e) :where [?e :seon.fx/kind ?k]] bdb)
         q (d/q '[:find [?q ...] :where [?e :seon.fx/kind :echo] [?e :seon.fx/queue-us ?q]] bdb)
         us (d/q '[:find [?q ...] :where [?e :seon.fx/kind :echo] [?e :seon.fx/us ?q]] bdb)
-        ping (flow/ping-proc (:graph sys) :fx/echo :timeout-ms 1000)]
+        echo-ping (ping sys :fx/echo)]
       (clojure.java.shell/sh "rm" "-rf" dir)
       {:report (assoc r :recorded (into {} recs) :echo-queue-us (lib/summ (vec q)) :echo-perform-us (lib/summ (vec us))
-                      :owner-ping ping :load (clojure.string/trim (:out (clojure.java.shell/sh "uptime"))))
+                      :owner-ping echo-ping :load (clojure.string/trim (:out (clojure.java.shell/sh "uptime"))))
        ;; the effect answered, its unknown kind is a typed error, and inside the test fork a
        ;; call is refused unless stubbed (both assertions ran and passed)
        :checks {:unknown-kind-is-typed (= ":seon.fx/unknown-kind" (:unknown r)) :test-fork-refuses-unless-stubbed (= {:pass 2 :fail 0 :error 0} (:test-fork r))}}))))
 
 (defn probe-proc
-  "A declared test proc (the system check): counts what arrives on :in, reports it in ping."
+  "A declared test proc (the system check): counts what arrives on :in, and says each count
+  on root's events ({:type :probe :tag :got}), which the check awaits."
   {:malli/schema :seon.step/step-fn}
-  ([] {:params {:tag "a label"} :ins {:in "anything"} :outs {}
+  ([] {:params {:tag "a label" :events "root's events channel"} :ins {:in "anything"} :outs {}
        :workload :io :ping-map-fn (fn [st] {:got (:got st) :tag (:tag st)})})
-  ([args] (assoc args :got 0))
+  ([args] (assoc (select-keys args [:tag]) :got 0 ::flow/out-ports {:events (:events args)}))
   ([st _] st)
-  ([st _ m] [(cond-> st (some? m) (update :got inc)) nil]))
+  ([st _ m] (if (some? m)
+              (let [st (update st :got inc)] [st {:events [(seon.step/event {:type :probe :tag (:tag st) :got (:got st)})]}])
+              [st nil])))
 
 (defn config-check
   "The config as data on main (lane CONFIG): root's boot writes the config in force on
@@ -905,7 +947,8 @@
   []
   (run-check "SYSTEM" {:datoms 2000}
    (fn [sys]
-    (let [pids (fn [] (set (keys (flow/ping (:graph sys) :timeout-ms 2000))))
+    (let [;; the procs that answered a graph ping within ping-ms (an expected one that did not is stuck or absent)
+          pids (fn [] (set (keys (flow/ping (:graph sys) :timeout-ms ping-ms))))
         booted (pids)
         expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/source :fx.source/0 :fx/git :fx.git/0 :fx/deps :fx.deps/0 :fx/build :fx.build/0 :fx/model}
                      (for [i (range (seon.config/value :seon.config.ai/max-in-flight))] (keyword "fx.model" (str i))))
@@ -913,20 +956,20 @@
         _ (.mkdirs (java.io.File. dir))
         decl (clojure.edn/read-string (slurp (seon.config/value :seon.config.root/system-path)))
         write! (fn [nm d] (let [f (str dir "/" nm ".edn")] (spit f (pr-str d)) f))
-        probe (fn [tag] {:proc 'seon.check/probe-proc :args {:tag tag}})
+        probe (fn [tag] {:proc 'seon.check/probe-proc :args {:tag tag :events :bind/events}})
         r1 @(c/apply! sys (write! "add" (assoc-in decl [:procs :probe] (probe "one"))))
         ;; the probe paused, three messages queued on its :in, then another proc added
         _ (flow/pause-proc (:graph sys) :probe)
         _ @(flow/inject (:graph sys) [:probe :in] [1 2 3])
         r2 @(c/apply! sys (write! "add2" (-> decl (assoc-in [:procs :probe] (probe "one")) (assoc-in [:procs :probe2] (probe "two")))))
+        ev (c/events sys)
         _ (flow/resume-proc (:graph sys) :probe)
-        ;; a window for the resumed probe to take its three (its count is read by ping)
-        _ (Thread/sleep 200)
-        got (get-in (flow/ping-proc (:graph sys) :probe :timeout-ms 1000) [::flow/state :got])
+        ;; the resumed probe took its three: it said so on root's events
+        got (:got (await-event ev #(and (= :probe (:type %)) (= "one" (:tag %)) (= 3 (:got %)))))
         r3 @(c/apply! sys (write! "remove" (assoc-in decl [:procs :probe] (probe "one"))))
         after (pids)]
       (clojure.java.shell/sh "rm" "-rf" dir)
-      {:report {:missing (vec (remove booted expect)) :extra (vec (remove expect booted))
+      {:report {:no-answer (vec (remove booted expect)) :extra (vec (remove expect booted))
                 :add (dissoc r1 :kept) :add2 (dissoc r2 :kept) :queued-kept got :remove (dissoc r3 :kept)}
        :checks {:boot-set (= expect booted)
                 :add-starts-only-it (and (= #{:probe} (set (:started r1))) (empty? (:stopped r1)))
@@ -1073,7 +1116,9 @@
   "An idle root steps nothing (owner, 2026-10-21: no beat; health is what flows): root
   boots and settles (the reconciler's quiescence), a tab opens on its dashboard (an SSE
   feed on SEON_WEB_PORT) and receives its page; then every root proc's Flow step count is
-  read at the two ends of a window of window-ms with nothing happening, and must not move.
+  read at the two ends of a window of window-ms with nothing happening, and must not move:
+  from the feed's first settled mark after its keyframe (seon.web: the render proc has
+  nothing in flight, so the tab's own opening has run its course).
   Then a change reaches the tab: an agent spawned and a commit to main each grow what the
   tab received. The window is the measurement (that nothing happens), not a dependency."
   [window-ms]
@@ -1082,23 +1127,26 @@
     (let [port (seon.config/value :seon.config.web/port)
         _ (seon.e2e/await-quiet sys 0)
         received (atom 0)
+        feed (atom "")
         sock (java.net.Socket. "127.0.0.1" (int port))
         _ (doto (.getOutputStream sock)
             (.write (.getBytes (str "GET /feed?view=root HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: text/event-stream\r\n\r\n") "UTF-8"))
             (.flush))
-        ;; the tab: an edge reader counting the bytes its feed sends
+        ;; the tab: an edge reader counting the bytes its feed sends, and keeping its text
         in (.getInputStream sock)
         _ (doto (Thread. (fn [] (let [buf (byte-array 8192)]
                                   (loop [] (let [n (try (.read in buf) (catch Exception _ -1))]
-                                             (when (pos? n) (swap! received + n) (recur)))))))
+                                             (when (pos? n) (swap! feed str (String. buf 0 (int n) "UTF-8")) (swap! received + n) (recur)))))))
             (.setDaemon true) (.start))
         opened (await-ref received pos?)
-        ;; the page's own first passes (the tab's views, its keyframe) settle first
-        _ (Thread/sleep 1000)
+        ;; the tab's opening ran its course: its keyframe (the feed's first patch: a new tab is
+        ;; stale until it), then a settled mark (the render proc has nothing in flight)
+        settled (await-ref feed #(when-let [k (clojure.string/index-of % "event: datastar-patch-elements")]
+                                   (clojure.string/index-of % ": settled" k)))
         ;; root's declared procs and its effect owners (their lanes step only when given work)
         decl (seon.system/read-decl (seon.config/value :seon.config.root/system-path))
         pids (sort-by str (concat (keys (:procs decl)) (for [k (keys (:fx decl))] (keyword "fx" (name k)))))
-        counts (fn [] (into (sorted-map) (for [pid pids] [pid (some-> (flow/ping-proc (:graph sys) pid :timeout-ms 1000) ::flow/count)])))
+        counts (fn [] (into (sorted-map) (for [pid pids :let [p (ping sys pid)]] [pid (if (:stuck p) :stuck (:count p))])))
         b0 @received c0 (counts)
         _ (Thread/sleep window-ms)
         c1 (counts) b1 @received
@@ -1111,7 +1159,8 @@
         committed (await-ref received #(> % n-commit))]
       (.close sock)
       {:report {:window-ms window-ms :procs (count pids) :steps-at-idle moved :bytes-at-idle (- b1 b0) :agent a}
-       :checks {:tab-opened opened :no-step-at-idle (empty? moved) :no-byte-at-idle (= b0 b1)
+       :checks {:tab-opened opened :tab-settled settled :no-step-at-idle (empty? moved) :no-byte-at-idle (= b0 b1)
+                :no-proc-stuck (not-any? #{:stuck} (concat (vals c0) (vals c1)))
                 :spawn-reached-tab spawned :commit-reached-tab committed}}))))
 
 ;; ---- the store bin/check is given ----------------------------------------------------------

@@ -364,9 +364,11 @@
   "Fork this agent; the child runs the test-vars of proofs within ticks engine ticks of work, writing
   each test var as it starts and then one EDN line of its result on a pipe. The agent reads
   the pipe to its end: no clock; the child ends by finishing, by its budget, or by dying
-  (then the last test it started is named)."
-  {:malli/schema [:=> [:cat pos-int? [:set :qualified-symbol]] :seon.test/result]}
-  [ticks proofs]
+  (then the last test it started is named). (forked pid) runs here once the child exists."
+  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol]] :seon.test/result]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] :seon.host/fn] :seon.test/result]]}
+  ([ticks proofs] (run-tests-forked ticks proofs (fn [_] nil)))
+  ([ticks proofs forked]
   (let [[r w] (lib/pipe) t0 (lib/now-ns)]
     (lib/fork!
       {:refused (fn [n] (lib/c-close r) (lib/c-close w)
@@ -383,13 +385,14 @@
                   (lib/write-line! w (pr-str res))))
        :parent (fn [pid]
                  (lib/c-close w)
+                 (forked pid)
                  (let [rd (lib/line-reader r)
                        line (loop [line nil]
                               (let [ls (rd -1)]
                                 (if (= ls :eof) line (recur (or (peek ls) line)))))
                        st (lib/wait-status pid)]
                    (lib/c-close r)
-                   (assoc (run-answer line st) :ms (lib/ms-since t0) :pid pid :exit st)))})))
+                   (assoc (run-answer line st) :ms (lib/ms-since t0) :pid pid :exit st)))}))))
 
 ;; ---- the loop ----------------------------------------------------------------------
 
@@ -438,8 +441,10 @@
   [m]
   (case (:op m)
     ;; the proofs of the task root names (:task), as this branch holds them
+    ;; root hears the test child's pid once it is forked (its stand-in's :tests-started event)
     :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
-                                                              (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{}))
+                                                              (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
+                                                              #(send! {:op :tests-started :id (:id m) :pid %}))
              :mem-mb (mem-mb)}]
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [r (dissoc m :op :k)]

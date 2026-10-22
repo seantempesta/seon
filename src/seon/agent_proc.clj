@@ -80,7 +80,9 @@
            (let [st (cond-> (to-proc! st (assoc msg (if (= kind :clone) :k :id) rid))
                       ;; a clone's socket follows in its own frame once the agent asks
                       (= kind :clone) (assoc :holding rid)
-                      true (update :inflight assoc rid (select-keys m [:kind :branch :new :merge-branch :data-attrs :pass-fd :lease]))
+                      true (update :inflight assoc rid (cond-> (select-keys m [:kind :branch :new :merge-branch :data-attrs :pass-fd :lease])
+                                                         ;; an eval's text, for its :started event
+                                                         (string? (:forms msg)) (assoc :form (:forms msg))))
                       ;; what root last asked of it, for a stall or a death (seon.agent/last-op)
                       true (assoc :last-op (cond-> {:kind kind :since-ms (System/currentTimeMillis)}
                                              (string? (:forms msg)) (assoc :form (:forms msg))))
@@ -165,6 +167,11 @@
       :pong (if-let [rid (peek (:pings st))]
               (answer-rid (update st :pings pop) o rid (dissoc m :op))
               st)
+      ;; the agent began request rid's eval, or forked rid's test child: root's events say so
+      :started (do (step/out! o :events (step/event (cond-> {:type :started :agent id :rid (:id m)}
+                                                         (get-in st [:inflight (:id m) :form]) (assoc :form (get-in st [:inflight (:id m) :form])))))
+                   st)
+      :tests-started (do (step/out! o :events (step/event {:type :tests-started :agent id :rid (:id m) :pid (:pid m)})) st)
       :reply (let [st (answer-rid st o (:id m) (:items m))]
                (step/out! o :to-api (status st {:evals-add (:items m) :mem-mb (:mem-mb m) :t (:t m) :status (busy st) :running nil}))
                (step/out! o :events (step/event {:type :reply :agent id :items (:items m)}))
