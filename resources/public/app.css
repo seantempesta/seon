@@ -439,7 +439,7 @@ dl.cfg dt { color: var(--text-300); }
 dl.cfg dd { margin: 0; text-align: right; overflow-wrap: anywhere; min-width: 0; }
 dl.cfg dd code { color: var(--text-100); }
 
-/* an ended agent's card: no process to talk to, so no REPL box and no live verbs; ⤢ (its
+/* an ended agent's card: no process to talk to, so no REPL box and no live buttons; ⤢ (its
    history) stays (the body's state class says how it ended: seon.render.ui/shown-status) */
 .card:has(.cb.s-ended) .live, .card:has(.cb.s-killed) .live, .card:has(.cb.s-died) .live,
 .dense .card:has(.cb.s-ended):hover .repl.live, .dense .card:has(.cb.s-killed):hover .repl.live, .dense .card:has(.cb.s-died):hover .repl.live { display: none; }

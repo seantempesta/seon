@@ -546,13 +546,13 @@
 (defn card-shell
   "One whole agent card around its body's slot: appended to the grid once, when the agent
   first appears. Its REPL box posts the forms as a UI call (an eval recorded with origin
-  :ui); its buttons are UI calls of root's verbs. Its verbs that need a live process (and
+  :ui); its buttons are UI calls of root's functions. Its functions that need a live process (and
   its REPL box) carry the class `live`: an ended agent's card hides them (app.css, by the
   body's state class), keeping only its history."
   {:malli/schema [:=> [:cat :keyword] :any]}
   [id]
   (let [d (dom-id id)
-        verb (fn [f label title & [cls]]
+        button (fn [f label title & [cls]]
                [:button {:class (str "act live" (when cls (str " " cls))) :title title :seon/call f :seon/agent id} label])]
     [:article {:id (str "card-" d) :class "card" (keyword "data-class:open") (str "$sel==='" d "'")}
      (slot (str "cb-" d))
@@ -561,12 +561,12 @@
       [:input {:id (str "ri-" d) :name "forms" :autocomplete "off" :spellcheck "false" :placeholder "(+ 1 2)"}]]
      [:div {:class "actions"}
       [:button {:class "act" :title "show history" (keyword "data-on:click") (str "$sel = $sel==='" d "' ? '' : '" d "'")} "⤢"]
-      (verb 'seon.root/run-tests! "▶ tests" "run its deftests in a fork of it")
-      (verb 'seon.root/merge! "⇡ merge" "root merges this branch into main, gated by its tests")
-      (verb 'seon.root/merge-main! "⇣ main" "git merge main: main's changes into this branch")
-      (verb 'seon.root/clone! "⑂ clone" "fork this live agent, values and all")
-      (verb 'seon.root/interrupt! "⏹" "interrupt the running form; the agent keeps its state")
-      (verb 'seon.root/kill! "✕ kill" "SIGKILL its process" "danger")]]))
+      (button 'seon.root/run-tests! "▶ tests" "run its deftests in a fork of it")
+      (button 'seon.root/merge! "⇡ merge" "root merges this branch into main, gated by its tests")
+      (button 'seon.root/merge-main! "⇣ main" "git merge main: main's changes into this branch")
+      (button 'seon.root/clone! "⑂ clone" "fork this live agent, values and all")
+      (button 'seon.root/interrupt! "⏹" "interrupt the running form; the agent keeps its state")
+      (button 'seon.root/kill! "✕ kill" "SIGKILL its process" "danger")]]))
 
 ;;; --- events ---------------------------------------------------------------------
 

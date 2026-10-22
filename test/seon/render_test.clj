@@ -328,12 +328,12 @@
     (is (str/includes? (h/html (:seon.render/html (ui/tile-errors {:root-errors [] :boot {:program {:loaded 360}} :store {}} {}))) "360 defs"))
     (is (str/includes? (h/html (:seon.render/html (ui/tile-agents {:cells [] :off 3 :retire-ms 90000} {}))) "+3 ended over 90 s ago, off it"))))
 
-(deftest an-ended-agent-reads-ended-and-offers-no-live-verbs
+(deftest an-ended-agent-reads-ended-and-offers-no-live-buttons
   (testing "root's own word for an agent it stopped because its attempt ended"
     (is (= :ended (ui/shown-status {:status :ended})))
     (is (str/includes? (h/html (:seon.render/html (ui/event-row {:type :ended :agent :a6 :at-ms 0 :ended-as :merged} {})))
                        "stopped by root: its attempt ended merged")))
-  (testing "its live verbs and REPL box are marked live, which an ended card hides; history stays"
+  (testing "its live buttons and REPL box are marked live, which an ended card hides; history stays"
     (let [shell (h/html (ui/card-shell :a6))]
       (is (= 6 (count (re-seq #"class=\"act live" shell))) "tests, merge, main, clone, interrupt, kill")
       (is (str/includes? shell "class=\"repl live\""))

@@ -1,6 +1,6 @@
 (ns seon.web-test
   "Root's web proc (lane W2) as a plain function: a UI call becomes root's requests (and,
-  for root's verbs, its record on main); a patch is framed once for Datastar and offered to
+  for root's functions, its record on main); a patch is framed once for Datastar and offered to
   every tab of its view; a tab that opened gets the view's keyframe; a callback written as
   data serializes to the stateless /call route. Run: bin/test seon.web-test"
   (:require [clojure.test :refer [deftest is testing]]
@@ -72,13 +72,13 @@
             (is (nil? (a/poll! zoom-tab)))
             (is (= 1 (:patches st)))))))))
 
-(deftest a-root-verb-is-recorded-with-its-answer
-  ;; task seon.render/one-owner-per-view-path (B9): root's verb called from the page is
+(deftest a-root-function-is-recorded-with-its-answer
+  ;; task seon.render/one-owner-per-view-path (B9): root's function called from the page is
   ;; recorded on main with what root answered, when it answers; never a made-up "requested"
   (let [st (#'w/web-proc {:port 0})
         [_ out] (#'w/web-proc (assoc st :index index) :http {:op :call :call {:var 'seon.root/kill! :agent :a1}})
         [req] (:to-api out)]
-    (is (= 1 (count (:to-api out))) "the verb's request only: nothing is recorded before root answers")
+    (is (= 1 (count (:to-api out))) "the function's request only: nothing is recorded before root answers")
     (is (not (str/includes? (pr-str out) "requested")))
     (let [rp {:rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events [] :event-rows [] :views {} :zoom {} :merges 0}
           [_ o] (#'p/render-proc rp :answers {:tag (:tag req) :r {:ok true :killed :a1}})

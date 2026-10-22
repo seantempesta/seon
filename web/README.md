@@ -79,7 +79,7 @@ open http://127.0.0.1:7777/
   | `:seon.render/event` | `event-row` |
 - **Callbacks are data.** `{:seon/call 'ns/fn :seon/args {...} :seon/agent id}` on a form or
   button serializes to `@post('/call?...')`.
-  - Root's verbs (`seon.root/spawn! submit! run-tests! merge! merge-main! clone! interrupt! kill!`)
+  - Root's functions (`seon.root/spawn! submit! run-tests! merge! merge-main! clone! interrupt! kill!`)
     become root's requests. Each is recorded on main as root's evaluation, origin `:ui`.
   - The REPL box is an eval in the agent with origin `:ui`.
   - Any other fn runs in the agent as `(seon.web/ui-call 'fn args)`. It is refused as data

@@ -463,7 +463,7 @@
                          (cond
                            kind (answered st' o kind r)
                            ;; the web proc's calls ([:web var agent form?]) are answered here: shown in
-                           ;; the stream; root's verb (its form) recorded on main with this answer
+                           ;; the stream; root's function (its form) recorded on main with this answer
                            (and (vector? (:tag m)) (= :web (first (:tag m))))
                            (let [[_ v agent form] (:tag m)
                                  detail (cond err (str "error: " err) (map? r) (print/text (dissoc r :reports) 40))]
