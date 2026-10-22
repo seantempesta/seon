@@ -2,7 +2,7 @@
   "Cost proof of loading the wiki: an unchanged reload costs one parse and a few seeks per
   section, and writes nothing."
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]]
             [datahike.api :as d] [seon.db :as pdb] [seon.docs :as docs] [seon.cost :as cost]))
 
 (defn wiki
@@ -10,7 +10,7 @@
   section one sentence citing a var and linking its page's first section), and those pages."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :string [:map-of :string :string]]]}
   [n]
-  (let [db (pdb/test-db)
+  (let [db (ts/test-db)
         pages (into {} (for [p (range (max 1 (quot n 10)))]
                          [(str "demo/p" p ".md")
                           (apply str (str "# Page " p "\n\nPage " p " holds ten sections.\n")

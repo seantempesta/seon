@@ -4,7 +4,7 @@
   invalid or missing key, the config written as facts on main and read back from the db, and
   no environment read anywhere in src but the loader (asked of Jolt's analyzer, by resolved
   host reference, never by text)."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.io :as io] [clojure.string :as str] [clojure.edn :as edn]
             [aero.core :as aero] [datahike.api :as d]
             [jolt.scheme :as scm] [jolt.analyzer :as an] [jolt.ir :as ir]
@@ -128,7 +128,7 @@
 ;; ---- facts on main, read from the db -------------------------------------------------------
 
 (deftest root-writes-the-config-on-main-and-the-db-answers-it
-  (pdb/test-branch! (fn [cfg conn] (let [child (keyword (str (name (:branch cfg)) "-a1"))
+  (ts/test-branch! (fn [cfg conn] (let [child (keyword (str (name (:branch cfg)) "-a1"))
         c (assoc config/config :seon.config.agent/max-running 6)]
     (is (nil? (config/from-db @conn)))
     (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6) (config/facts c {:seon.config.web/port "--set"}))})
@@ -235,7 +235,7 @@
   (is (= #{"deepseek-flash" "deepseek-v4-pro"} (set (keys (:seon.config.ai/models config/config)))))
   (is (= :invalid (:problem (first (:seon.config/problems
                                     (refused #(config/resolved (assoc-in config/config [:seon.config.ai/models "deepseek-flash" :seon.ai.model/input-usd-per-mtok] "cheap"))))))))
-  (pdb/test-branch! (fn [cfg conn]
+  (ts/test-branch! (fn [cfg conn]
     (d/transact conn {:tx-data (config/facts config/config config/sources)})
     (is (= 0.15 (d/q '[:find ?p . :where [?m :seon.ai.model/id "deepseek-flash"] [?m :seon.ai.model/input-usd-per-mtok ?p]] @conn)))
     (is (= "DEEPSEEK_API_KEY" (d/q '[:find ?v . :where [?p :seon.ai.model/provider-id "deepseek"] [?p :seon.config.ai/api-key-variable ?v]] @conn)))

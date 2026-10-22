@@ -99,7 +99,9 @@
     (lmdb-ffi/sync! (klmdb/open-env! (get-in cfg [:store :path]) nil)))
   nil)
 
-(defn- seed! {:malli/schema [:=> [:cat :seon.host/conn :int] :any]}
+(defn seed!
+  "Seed the empty store under conn: the schema, then (seed-tx n)."
+  {:malli/schema [:=> [:cat :seon.host/conn :int] :any]}
   [conn n]
   (d/transact conn {:tx-data schema})
   (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx})))
@@ -169,7 +171,7 @@
   {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch] :boolean]}
   [conn b] (boolean (k/exists? (:store @conn) b {:sync? true})))
 
-(defn- open-main!
+(defn open-main!
   "main on the store of cfg, whose :db exists: made from :db's head when the store has no
   such branch (one pointer write). Answers [conn existed?]."
   {:malli/schema [:=> [:cat :seon.db/cfg :seon.db/branch] [:tuple :seon.host/conn :boolean]]}
@@ -187,15 +189,6 @@
   {:malli/schema [:=> [:cat :seon.db/cfg] [:maybe :string]]}
   [cfg] (when-let [p (get-in cfg [:store :path])] (str p "-agents/" (name (main-branch cfg)))))
 
-(def ^:private test-store
-  "This process's one in-memory store for tests and cost setups, seeded once on :db
-  (bin/test makes it on first use): each test takes a branch of it (test-branch!)."
-  (delay (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write
-                        :writer writer-cfg}]
-           (d/create-database (made-cfg cfg))
-           (let [conn (d/connect cfg)] (seed! conn 2000) (d/release conn))
-           cfg)))
-
 (defn delete-main!
   "Delete main and every branch held under it (of-main) from the store of conn, a connection
   to :db (datahike.api/delete-branch!; a branch's connections are released first): what a
@@ -208,25 +201,6 @@
         bs (cond-> under (branch? conn main) (conj main))]
     (doseq [b bs] (d/delete-branch! conn b))
     bs))
-
-(defn test-db
-  "The test store's seed as a db value (the schema and about 2,000 datoms of the example
-  program), for a test that only reads or uses d/db-with: no branch is made."
-  {:malli/schema [:=> [:cat] :seon.host/db]}
-  []
-  (let [c (d/connect @test-store)] (try @c (finally (d/release c)))))
-
-(defn test-branch!
-  "(f cfg conn) on a fresh branch of the test store (its seed: the schema and about 2,000
-  datoms of the example program), cfg naming the branch; the branch is deleted when f
-  returns or throws (a fixture: a test leaves the test store as it found it). Answers f's value."
-  {:malli/schema [:=> [:cat [:=> [:cat :seon.db/cfg :seon.host/conn] :any]] :any]}
-  [f]
-  (let [b (keyword (str "test-" (random-uuid)))
-        [conn _] (open-main! @test-store b)
-        seed (d/connect @test-store)]
-    (try (f (assoc @test-store :branch b) conn)
-         (finally (d/release conn) (delete-main! seed b) (d/release seed)))))
 
 (defn preload!
   "Read every node of db's indexes, so this process holds the whole db in its heap and

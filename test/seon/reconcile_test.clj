@@ -2,7 +2,7 @@
   "(reconcile db) answers exactly the expected actions for a table of task graphs: needs
   DAGs, max-running, held and cancelled tasks, environment changes, a previous root's
   attempts, ended attempts judged by the done rule, dead agents."
-  (:require [seon.profile :as profile] [clojure.test :refer [deftest is are testing]]
+  (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is are testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.task :as task]
@@ -10,7 +10,7 @@
             [seon.template :as tpl] [seon.problems :as problems] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
             [clojure.string :as str] [clojure.set] [seon.config :as cfg]))
 
-(defn- empty-db [] (pdb/test-db))
+(defn- empty-db [] (ts/test-db))
 
 (defn- decl [nm & {:keys [needs proofs model]}]
   (cond-> {:seon.task/ns 'demo :seon.task/name nm :seon.task/plan (str "Make " nm " true.")

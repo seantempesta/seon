@@ -8,7 +8,7 @@
   results directory every checkout and worktree shares (:seon.config.source/test-results-dir),
   one <digest>.edn per result. A landing runs it: what the change reaches, minus what is
   green at its digest."
-  (:require [seon.profile :as profile] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
+  (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
             [clojure.test :as t] [datahike.api :as d] [seon.config :as config] [seon.db :as pdb]
             [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.program :as program] [seon.source :as source]))
 
@@ -53,7 +53,7 @@
   (seon.source/import-tx: analyzed, not run)."
   [root]
   (let [files (into {} (filter #(str/ends-with? (key %) ".clj")) (:value (fx/read-source {:req {:root root :dirs ["src" "test"]}})))
-        db (pdb/test-db)]
+        db (ts/test-db)]
     (d/db-with db (source/import-tx db files))))
 
 (defn- green? [r] (and (zero? (:fail r)) (zero? (:error r))))

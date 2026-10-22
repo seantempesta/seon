@@ -1,14 +1,14 @@
 (ns seon.task-cost-test
   "Cost proofs of the task reader's hot lookups."
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]]
             [datahike.api :as d] [seon.db :as pdb] [seon.task :as task] [seon.cost :as cost]))
 
 (defn tasks-db
   "The input of size n: a main db holding n tasks, and the id of one of them."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :keyword :string]]}
   [n]
-  (let [db (pdb/test-db)
+  (let [db (ts/test-db)
         decls (vec (for [i (range n)] {:seon.task/ns 'demo :seon.task/name (str "t" i) :seon.task/plan "p"}))]
     [(d/db-with db (task/create-tx db decls)) :seon.task/id (str "demo/t" (quot n 2))]))
 

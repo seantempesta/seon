@@ -5,7 +5,7 @@
   it leaves dead, the latest redefinition winning, scratch data and observations never
   merging, unmerged entries derived from the branch, and behind meaning main's program
   moved."
-  (:require [clojure.test :refer [deftest is are testing]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is are testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.merge :as pm]
@@ -15,7 +15,7 @@
             [seon.source :as source]
             [clojure.string :as str]))
 
-(defn- empty-db [] (pdb/test-db))
+(defn- empty-db [] (ts/test-db))
 
 (defn- defn-src [nm body] (str "(defn " nm " {:malli/schema [:=> [:cat :int] :int]} [x] " body ")"))
 

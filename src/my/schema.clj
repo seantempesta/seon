@@ -6,7 +6,7 @@
   carries it per key, and write-back rewrites only its entry of its resource (seon.source).
   Platform code compiled into the binary keeps the built schemas until the next generation."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.agent :as agent] [seon.program :as program] [seon.db :as pdb]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.agent :as agent] [seon.program :as program] [seon.db :as pdb] [seon.config :as config]
             [datahike.api :as d] [seon.edn :as sedn]))
 
 (defn- refused
@@ -36,7 +36,7 @@
                               f))]
     (if (seq counts)
       (key (first (sort-by (fn [[f n]] [(- n) f]) counts)))
-      (str contract/schemas-dir "/" (namespace k) ".edn"))))
+      (str config/schemas-dir "/" (namespace k) ".edn"))))
 
 (defn registration
   "Register form v as schema k on db's program: {:tx tx-data :registration {:seon.schema/key k
