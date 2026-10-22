@@ -88,10 +88,11 @@
         (vals (task/attempts @(:conn sys)))))
 
 (def ops
-  "The server's ops, the one table, keyed by a request's :op: each op's description, its arguments (JSON Schema
-  properties; :required, the ones it needs) and its answer, a fn of root's system, the
-  agent the request names (:root, an agent's keyword, or nil) and the request. MCP lists
-  each as the tool seon_<op> (mcp-reply)."
+  "The server's ops, the one table, keyed by a request's :op (an EDN request is a
+  keyword-keyed map, {:op :agents}; a line opening `{\"` is MCP's, respond): each op's
+  description, its arguments (JSON Schema properties; :required, the ones it needs) and its
+  answer, a fn of root's system, the agent the request names (:root, an agent's keyword, or
+  nil) and the request. MCP lists each as the tool seon_<op> (mcp-reply)."
   (array-map
    :agents {:doc "Live agents (id, branch, status, task) and every task (execution, done, blocked-by, its attempts as [id status outcome turns tokens], problem)."
             :args {} :answer (fn [sys _ _] (agents-answer sys))}
@@ -130,55 +131,82 @@
     ((:answer v) sys (some-> (:agent req) (#(if (= "root" %) :root (keyword %)))) req)
     (refused (str "unknown op " (:op req)))))
 
+(def protocol-versions
+  "The MCP protocol versions this server answers (modelcontextprotocol.io/specification):
+  initialize, tools/list and tools/call with text content are the same in each. The client's
+  version when it is one of these, else the newest, as the spec's version negotiation says."
+  ["2024-11-05" "2025-03-26" "2025-06-18"])
+
+(defn- rpc-error
+  "A JSON-RPC 2.0 error answer to id: code (the spec's: -32700 parse, -32601 no such method,
+  -32602 bad params, -32603 internal) and message."
+  {:malli/schema [:=> [:cat :any :int :string] :map]}
+  [id code message]
+  {"jsonrpc" "2.0" "id" id "error" {"code" code "message" message}})
+
 (defn mcp-reply
-  "The JSON-RPC answer to one MCP message, or nil for a notification: initialize; tools/list,
-  each op the tool seon_<op>; tools/call, the op's answer as the tool's text (seon_context's,
-  the block's text itself: the model's own view, not an escaped string inside a map)."
+  "The JSON-RPC answer to one MCP message, or nil for a notification: initialize; ping;
+  tools/list, each op the tool seon_<op>; tools/call, the op's answer as the tool's text
+  (seon_context's, the block's text itself: the model's own view, not an escaped string
+  inside a map). A method it does not know, or a tool no op names, is the JSON-RPC error
+  saying so."
   {:malli/schema [:=> [:cat [:maybe :seon.root/sys] :map] [:maybe :map]]}
   [sys {:strs [id method params]}]
-  (when id
-    {"jsonrpc" "2.0" "id" id
-     "result" (case method
-                "initialize" {"protocolVersion" (get params "protocolVersion" "2024-11-05")
-                              "capabilities" {"tools" {}} "serverInfo" {"name" "seon" "version" "next"}}
-                "tools/list" {"tools" (vec (for [[op v] ops]
+  (let [result (fn [r] {"jsonrpc" "2.0" "id" id "result" r})]
+    (when id
+      (case method
+        "initialize" (result {"protocolVersion" (or (some #{(get params "protocolVersion")} protocol-versions) (peek protocol-versions))
+                              "capabilities" {"tools" {}} "serverInfo" {"name" "seon" "version" "next"}})
+        "ping" (result {})
+        "tools/list" (result {"tools" (vec (for [[op v] ops]
                                              {"name" (str "seon_" (name op)) "description" (:doc v)
-                                              "inputSchema" (cond-> {:type "object" :properties (:args v)} (:required v) (assoc :required (:required v)))}))}
-                "tools/call" (let [n (get params "name")
-                                   op (when (str/starts-with? n "seon_") (keyword (subs n 5)))
-                                   a (when (ops op) (answer sys (into {:op op} (for [[k v] (get params "arguments")] [(keyword k) v]))))]
-                               {"content" [{"type" "text" "text" (cond (nil? a) (str "no tool " n)
-                                                                       (and (= :context op) (:context a)) (:context a)
-                                                                       :else (binding [*print-length* nil *print-level* nil] (pr-str a)))}]})
-                {})}))
+                                              "inputSchema" (cond-> {:type "object" :properties (:args v)} (:required v) (assoc :required (:required v)))}))})
+        "tools/call" (let [n (str (get params "name"))
+                           op (when (str/starts-with? n "seon_") (keyword (subs n 5)))]
+                       (if-not (ops op)
+                         (rpc-error id -32602 (str "no tool " n ": the tools are " (str/join ", " (map #(str "seon_" (name %)) (keys ops)))))
+                         (let [a (answer sys (into {:op op} (for [[k v] (get params "arguments")] [(keyword k) v])))]
+                           (result {"content" [{"type" "text" "text" (if (and (= :context op) (:context a))
+                                                                       (:context a)
+                                                                       (binding [*print-length* nil *print-level* nil] (pr-str a)))}]}))))
+        (rpc-error id -32601 (str "no method " method ": this server answers initialize, ping, tools/list and tools/call"))))))
+
+(defn- respond
+  "The answer line to one request line, or nil (an MCP notification). The protocol rule: a
+  line opening `{\"` is MCP's JSON-RPC (mcp-reply, JSON out), every other line is EDN (answer,
+  EDN out), so an EDN request is a keyword-keyed map. The entrant boundary: a defect (a line
+  that does not read, an op that throws) answers that request as the typed
+  :seon.entrance/defect, for MCP inside a JSON-RPC error with the request's id (-32700 for
+  a line that is not JSON, naming the rule)."
+  {:malli/schema [:=> [:cat [:maybe :seon.root/sys] :string] [:maybe :string]]}
+  [sys line]
+  (let [mcp? (str/starts-with? (str/triml line) "{\"")
+        msg (volatile! nil)]
+    (try (if mcp?
+           (some-> (mcp-reply sys (vreset! msg (json/read-str line))) json/write-str)
+           (binding [*print-length* nil *print-level* nil] (pr-str (answer sys (edn/read-string line)))))
+         (catch Throwable e
+           (let [cause (or (ex-message e) (str (type e)))
+                 d (contract/error :seon.entrance/defect 'seon.entrance/answer
+                                   (if (and mcp? (nil? @msg)) (str "a line opening {\" is MCP's JSON-RPC, and an EDN request a keyword-keyed map; this one is not JSON: " cause) cause)
+                                   (cond-> {:line line} (ex-data e) (assoc :data (pr-str (ex-data e)))))]
+             (if mcp?
+               (json/write-str (rpc-error (get @msg "id") (if @msg -32603 -32700) (pr-str d)))
+               (pr-str d)))))))
 
 (defn- serve-connection!
-  "Answer one connection's requests, line by line, until it closes: a line opening `{\"` by
-  mcp-reply (JSON out, nothing for a notification), every other one by answer (EDN out). The
-  entrant boundary: a defect (a line that does not read, an op that throws) answers that
-  request as the typed :seon.entrance/defect (inside a JSON-RPC error for MCP), and the
-  connection goes on; every other connection is its own thread and never sees it."
+  "Answer one connection's request lines (respond), line by line, until it closes; a
+  notification is answered nothing. Every other connection is its own thread."
   {:malli/schema [:=> [:cat :seon.root/sys :any] :any]}
   [sys sock]
   (let [r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream sock)))
         out (.getOutputStream sock)]
     (loop []
       (when-let [line (.readLine r)]
-        (let [mcp? (str/starts-with? (str/triml line) "{\"")
-              msg (volatile! nil)
-              a (try (if mcp?
-                       (some-> (mcp-reply sys (vreset! msg (json/read-str line))) json/write-str)
-                       (binding [*print-length* nil *print-level* nil] (pr-str (answer sys (edn/read-string line)))))
-                     (catch Throwable e
-                       (let [d (contract/error :seon.entrance/defect 'seon.entrance/answer (or (ex-message e) (str (type e)))
-                                               (cond-> {:line line} (ex-data e) (assoc :data (pr-str (ex-data e)))))]
-                         (if mcp?
-                           (json/write-str {"jsonrpc" "2.0" "id" (get @msg "id") "error" {"code" -32603 "message" (pr-str d)}})
-                           (pr-str d)))))]
-          (when a
-            (.write out (.getBytes (str a "\n") "UTF-8"))
-            (.flush out))
-          (recur))))
+        (when-let [a (respond sys line)]
+          (.write out (.getBytes (str a "\n") "UTF-8"))
+          (.flush out))
+        (recur)))
     (.close sock)))
 
 (defn serve!

@@ -5,7 +5,8 @@
 # is re-parented to PID 1, because the tool host kills a background task's whole process tree
 # when the task stops or its agent exits (ISOLATION, 2026-10-21). It runs until `bin/root stop`
 # closes its stdin. ARGS go to the root (`--set :seon.config.source/root=\"DIR\"`, ...). Its
-# output: runs/root.log; its pids: runs/root.pids ("TAIL ROOT").
+# output: runs/root.log; its pids: runs/root.pids ("TAIL ROOT"); the entrance port it was started
+# on (bin/ports' resolution, what bin/mcp relays to): runs/root.port, while it runs.
 # `next` restarts the next generation (owner, 2026-10-21; docs/source.md#the-next-generation):
 # it asks the running root for the generation main records (my.root/next-generation: the tree
 # my.root/build! built from the last merges commit, and the arguments resuming this root's store
@@ -33,13 +34,14 @@ if [[ ${1:-} == run ]]; then
     SEON_ENTRANCE_PORT=$P SEON_WEB_PORT=$W exec ./seon root "$@"
 fi
 mkdir -p "$SEON_RUNS"
-PIDS=$SEON_RUNS/root.pids LOG=$SEON_RUNS/root.log
+PIDS=$SEON_RUNS/root.pids LOG=$SEON_RUNS/root.log PORTF=$SEON_RUNS/root.port
 read PORT WEB <<< "$("$ROOT/bin/ports")"
 running() { [[ -f $PIDS ]] && read T R < "$PIDS" && kill -0 $R 2>/dev/null }
 # launch CHECKOUT [ARGS]: `run` detached (double fork), until its listening line or its death
 launch() {
   : > "$LOG"
   rm -f "$PIDS"
+  print $PORT > "$PORTF"
   # the holder (perl, below) owns the write end of the root's stdin and waits on the root. stop
   # kills the holder, so the pipe closes and the root stops cleanly; a root that dies any other
   # way ends the wait and the holder exits with it (a `tail -f /dev/null | root` holder outlived
@@ -64,7 +66,7 @@ stop() {
   read T R < "$PIDS"
   kill $T                                    # the holder: its pipe closes, the root stops cleanly
   while kill -0 $R 2>/dev/null; do sleep 0.2; done
-  rm -f "$PIDS"; print "root $R stopped"
+  rm -f "$PIDS" "$PORTF"; print "root $R stopped"
 }
 case ${1:-start} in
   status)
