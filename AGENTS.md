@@ -24,6 +24,8 @@ The reasons live elsewhere:
 
 ## 1. What we are building
 
+**Seon does any and all work its user wants** (owner, 2026-10-22: "Do not assume the system is constrained in what it should do for the user"): editing files, running commands in the shell, fetching from the web, working in any repository, as well as improving its own code. Agents get the verbs for that work (files, shell, effects) through their owners, and nothing narrows what a user may ask for. Seon's *own* code changes at the REPL, by `in-ns` and `defn`, so its merges carry definitions; that is how Seon builds itself, not a limit on what it does for users.
+
 **The goal: `next/` becomes the replacement for Seon, and stays tiny and performant** (owner, 2026-10-21). Its code, its docs and wiki, its door (MCP) and everything else improve toward that one system. At its heart is the recursive self-improvement loop: agents work tasks, merges land, and the merged code is written to disk and runs next. One system, never separate agents fighting over the machine.
 
 The first version ran overnight and was a live, measured system by morning. Keep its spirit:
