@@ -123,6 +123,11 @@
   [boot max-running]
   [{:seon.root/id :root :seon.root/boot boot :seon.config.agent/max-running max-running}])
 
+(defn attempt-id
+  "Task id's nth attempt's id: attempts are numbered from 1, in the order they start."
+  {:malli/schema [:=> [:cat :seon.task/id pos-int?] :seon.attempt/id]}
+  [id n] (str id "#" n))
+
 (defn attempt-start-tx
   "An attempt begins: root observed it spawn its agent (nil: root refused the spawn, and no
   agent exists), given the task's accumulated plan."

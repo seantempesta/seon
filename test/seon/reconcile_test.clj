@@ -26,7 +26,7 @@
   [nm n status & {:keys [boot model results outcome conflicts unmerged changed plan] :or {boot "boot-1" plan (str "Make " nm " true.")}}]
   (let [id (str "demo/" nm) aid (str id "#" n)]
     (into (task/attempt-start-tx aid id boot (keyword (str "a-" nm n))
-                                 {:branch (task/default-branch id) :model model :max-turns r/default-max-turns} 1000 plan)
+                                 {:branch (task/default-branch id) :model model :max-turns (cfg/value :seon.config.agent/max-turns)} 1000 plan)
           [(cond-> {:seon.attempt/id aid :seon.attempt/status status}
              results (assoc :seon.attempt/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s})))
              outcome (assoc :seon.attempt/outcome outcome)
@@ -48,7 +48,7 @@
 (defn- merged [nm] (attempt nm 1 :merged))
 (defn- spawn [nm n & {:keys [model]}]
   {:op :spawn :task (str "demo/" nm) :attempt (str "demo/" nm "#" n)
-   :env {:branch (task/default-branch (str "demo/" nm)) :model model :max-turns r/default-max-turns}})
+   :env {:branch (task/default-branch (str "demo/" nm)) :model model :max-turns (cfg/value :seon.config.agent/max-turns)}})
 (defn- t [nm] (symbol "demo-test" (str nm "-test")))
 
 (deftest task-state-is-what-happened
@@ -134,7 +134,7 @@
     (concat (merged "a") (attempt "b" 1 :ended :outcome :green :results {(t "a") :fail (t "b") :pass}))
     [{:op :attach :attempt "demo/b#1" :task "demo/b" :problem "attempt demo/b#1 ended green: proof-red demo-test/a-test"}
      {:op :spawn :task "demo/c" :attempt "demo/c#1"
-      :env {:branch :task-demo-c :model nil :max-turns r/default-max-turns}}]
+      :env {:branch :task-demo-c :model nil :max-turns (cfg/value :seon.config.agent/max-turns)}}]
     ;; a stray red: a red test that is no task's proof
     (attempt "a" 1 :ended :outcome :green :results {(t "a") :pass 'demo-test/other :error})
     [{:op :attach :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended green: stray-red demo-test/other"}]
@@ -262,7 +262,7 @@
     (cond-> db (seq extra) (d/db-with extra))))
 
 (defn- mspawn [nm n] {:op :spawn :task (str "demo/" nm) :attempt (str "demo/" nm "#" n)
-                      :env {:branch (task/default-branch (str "demo/" (str/replace nm #"-merge$" ""))) :model nil :max-turns r/default-max-turns}})
+                      :env {:branch (task/default-branch (str "demo/" (str/replace nm #"-merge$" ""))) :model nil :max-turns (cfg/value :seon.config.agent/max-turns)}})
 
 (deftest plan-and-proofs-accumulate-along-needs
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])])
@@ -318,7 +318,7 @@
   ;; DECISIONS: merge trains stay off (one merge at a time) until the train's combined test run
   ;; and the par-200 hang are fixed; the dial in force is a fact on main a person can read
   (let [db (d/db-with (empty-db) (into (task/boot-tx "boot-1" 4) (cfg/facts cfg/config {})))]
-    (is (= 1 r/default-max-merging))
+    (is (= 1 (cfg/value :seon.config.merge/max-running)))
     (is (= {:boot "boot-1" :max-running 4 :max-merging 1} (task/root db)) "both dials are recorded at boot")))
 
 (deftest two-ready-disjoint-merges-run-one-at-a-time-by-default
@@ -410,7 +410,7 @@
         (is (= #{"demo/a-r1-merge"} (:seon.task/needs (task/task db' "demo/b")))))
       (testing "the next pass starts only the design task, as a new attempt; nothing relaunches the old attempts"
         (is (= [{:op :spawn :task "demo/a-r1-design" :attempt "demo/a-r1-design#1"
-                 :env {:branch (:seon.task/branch (first ts)) :model nil :max-turns r/default-max-turns}}]
+                 :env {:branch (:seon.task/branch (first ts)) :model nil :max-turns (cfg/value :seon.config.agent/max-turns)}}]
                (r/reconcile db')))))))
 
 (deftest a-capped-attempt-attaches-a-refinement-not-a-hold
@@ -426,7 +426,7 @@
     (is (= 1 (:seon.task/generation (task/task db' "demo/add-r1-design"))))
     (is (= "attempt demo/add#1 ended cap: proof-red demo-test/add-test" (:problem (:seon.task/evidence (task/task db' "demo/add-r1-design")))))
     (is (= [{:op :spawn :task "demo/add-r1-design" :attempt "demo/add-r1-design#1"
-             :env {:branch :task-demo-add-r1 :model nil :max-turns r/default-max-turns}}]
+             :env {:branch :task-demo-add-r1 :model nil :max-turns (cfg/value :seon.config.agent/max-turns)}}]
            (r/reconcile db')))
     (testing "a chain task's own failure refines from the same stem, one generation on"
       (let [db2 (d/db-with db' (concat (attempt "add-r1-design" 1 :done)

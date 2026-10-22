@@ -11,38 +11,17 @@
             [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
             [seon.config :as cfg]))
 
-(def default-max-turns
-  "Turns an attempt may take when its task sets no :seon.config.agent/max-turns: the config's."
-  (cfg/value :seon.config.agent/max-turns))
-
-(def default-max-running
-  "Parallel attempts when main's root entity states no :seon.config.agent/max-running: the config's."
-  (cfg/value :seon.config.agent/max-running))
-
-(def default-max-merging
-  "Merge attempts at once when main's root entity states no :seon.config.merge/max-running:
-  the config's (1: merge trains stay off, DECISIONS). They run together only when the
-  definitions they change are disjoint (a merge train); 1 is git's one-at-a-time merge queue."
-  (cfg/value :seon.config.merge/max-running))
-
-(def merge-dials
-  "The merge dials' defaults, when the task sets none (:seon.config.merge/*): the config's."
-  {:max-conflicts (cfg/value :seon.config.merge/max-conflicts) :max-merge-turns (cfg/value :seon.config.merge/max-merge-turns)})
-
-(def default-budget
-  "Refinement chains a task's failures may attach when it declares no :seon.task/budget: the config's."
-  (cfg/value :seon.config.task/budget))
-
 (defn refine?
   "Has task t budget left for one more refinement chain (its generation below its budget)?"
   {:malli/schema [:=> [:cat :seon.task/own] :boolean]}
-  [t] (< (:seon.task/generation t 0) (:seon.task/budget t default-budget)))
+  [t] (< (:seon.task/generation t 0) (:seon.task/budget t (cfg/value :seon.config.task/budget))))
 
 (defn dials
-  "Task t's merge dials: its own :seon.config.merge/* over the defaults."
+  "Task t's merge dials (:seon.config.merge/*), through the one resolver."
   {:malli/schema [:=> [:cat :seon.task/own] :seon.reconcile/merge-dials]}
   [t]
-  (into {} (for [[k v] merge-dials] [k (get t (keyword "seon.config.merge" (name k)) v)])))
+  {:max-conflicts (cfg/value :seon.config.merge/max-conflicts {:task t :model (:seon.task/model t)})
+   :max-merge-turns (cfg/value :seon.config.merge/max-merge-turns {:task t :model (:seon.task/model t)})})
 
 ;; ---- the view: one read of main ---------------------------------------------------
 
@@ -51,7 +30,7 @@
   {:malli/schema [:=> [:cat :seon.task/own] :seon.task/env]}
   [t]
   {:branch (:seon.task/branch t) :model (:seon.task/model t)
-   :max-turns (or (:seon.config.agent/max-turns t) default-max-turns)})
+   :max-turns (cfg/value :seon.config.agent/max-turns {:task t :model (:seon.task/model t)})})
 
 ;; ---- the done rule -----------------------------------------------------------------
 
@@ -207,14 +186,20 @@
         (assoc :attempts (if a (assoc (:attempts idx) aid a) (dissoc (:attempts idx) aid)))
         (update-in [:by-task tid] (fnil (if a conj disj) #{}) aid))))
 
+(defn- downstream
+  "ids and every task that needs one of them, transitively (a walk over :needed-by)."
+  {:malli/schema [:=> [:cat :seon.reconcile/index [:set :seon.task/id]] [:set :seon.task/id]]}
+  [idx ids]
+  (loop [front (vec ids) seen (set ids)]
+    (if-let [[x & more] (seq front)]
+      (let [ns (remove seen (get-in idx [:needed-by x]))] (recur (into (vec more) ns) (into seen ns)))
+      seen)))
+
 (defn- topo
   "ids and every task that needs one of them, transitively, each after its needs among them."
   {:malli/schema [:=> [:cat :seon.reconcile/index [:set :seon.task/id]] [:vector :seon.task/id]]}
   [idx ids]
-  (let [all (loop [front (vec ids) seen (set ids)]
-              (if-let [[x & more] (seq front)]
-                (let [ns (remove seen (get-in idx [:needed-by x]))] (recur (into (vec more) ns) (into seen ns)))
-                seen))
+  (let [all (downstream idx ids)
         deg (into {} (for [x all] [x (count (filter all (get-in idx [:tasks x :seon.task/needs])))]))]
     (loop [q (vec (sort (filter #(zero? (deg %)) all))) deg deg out []]
       (if-let [[x & more] (seq q)]
@@ -331,7 +316,7 @@
   index's sets: its cost is the attempts to reap, kill and judge plus the starts."
   {:malli/schema [:=> [:cat :seon.reconcile/index] :seon.reconcile/actions]}
   [idx]
-  (let [root (or (:root idx) {:boot "" :max-running default-max-running :max-merging default-max-merging})
+  (let [root (merge {:max-running (cfg/value :seon.config.agent/max-running) :max-merging (cfg/value :seon.config.merge/max-running)} (:root idx))
         att (:attempts idx)
         reaps (for [aid (sort (:reap idx))] {:op :reap :attempt aid})
         kills (for [[aid r] (sort-by key (:kill idx))] {:op :kill :attempt aid :reason r})
@@ -365,9 +350,9 @@
         train (when (and (seq lands) (not live-merge?))
                 [{:op :merge-train :attempt (:attempt (first lands)) :members (mapv #(select-keys % [:attempt :task]) lands)}])
         closed? (some #(= :ended (get-in idx [:attempts % :seon.attempt/status])) (:merging idx))
-        room (max 0 (- (:max-running root default-max-running) (- (count (:live idx)) (count (:kill idx)))))
+        room (max 0 (- (:max-running root) (- (count (:live idx)) (count (:kill idx)))))
         merge? (fn [id] (= :merge (get-in idx [:tasks id :seon.task/kind])))
-        merge-room (max 0 (- (:max-merging root default-max-merging) (count (:merging idx))))
+        merge-room (max 0 (- (:max-merging root) (count (:merging idx))))
         ;; a merge joins only when what it changes is disjoint from every merge in flight;
         ;; one whose changes are unknown runs alone; conflicting merges serialize
         flying (map #(merge-keys idx (get-in idx [:attempts % :seon.attempt/task])) (:merging idx))
@@ -383,7 +368,7 @@
                        :else (recur more (inc n) m taken (conj acc id))))
         spawns (for [id starts :let [t (get-in idx [:tasks id])]]
                  {:op :spawn :task id :env (desired-env t)
-                  :attempt (str id "#" (inc (count (get-in idx [:by-task id]))))})]
+                  :attempt (task/attempt-id id (inc (count (get-in idx [:by-task id]))))})]
     (vec (concat reaps kills judged train spawns))))
 
 ;; ---- stuck: observed, never held ------------------------------------------------------
@@ -392,11 +377,8 @@
   "The released tasks not done that need task id, transitively, sorted."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:vector :seon.task/id]]}
   [idx id]
-  (loop [front [id] seen #{}]
-    (if-let [[x & more] (seq front)]
-      (let [ns (remove seen (get-in idx [:needed-by x]))]
-        (recur (into (vec more) ns) (into seen ns)))
-      (vec (sort (filter #(and (= :running (get-in idx [:tasks % :seon.task/execution])) (not (idx-done? idx %))) seen))))))
+  (vec (sort (filter #(and (= :running (get-in idx [:tasks % :seon.task/execution])) (not (idx-done? idx %)))
+                     (disj (downstream idx #{id}) id)))))
 
 (defn stuck
   "Why released work is not done, as root causes: each task whose stuck fact holds (its
@@ -411,7 +393,7 @@
              :let [s (:seon.task/stuck t)
                    ex (:seon.task/execution t)
                    ;; attempts are numbered in order (actions' spawns), so the latest is the count's
-                   latest (get-in idx [:attempts (str id "#" (count (get-in idx [:by-task id])))])
+                   latest (let [n (count (get-in idx [:by-task id]))] (when (pos? n) (get-in idx [:attempts (task/attempt-id id n)])))
                    refused (when (= :refused (:seon.attempt/status latest)) latest)
                    bs (blocks idx id)]
              :when (if (= :running ex) (or s refused) (seq bs))]

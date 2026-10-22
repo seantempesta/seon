@@ -76,7 +76,7 @@
     (if-not t
       (refused (str "no task " id))
       (let [env (assoc (r/desired-env t) :model "outside")
-            aid (str id "#" (inc (count (filter #(= id (:seon.attempt/task %)) (vals (task/attempts db))))))
+            aid (task/attempt-id id (inc (count (filter #(= id (:seon.attempt/task %)) (vals (task/attempts db))))))
             ag (c/spawn! sys {:branch (:branch env) :task id :attempt aid})]
         @(c/transact-main! sys (vec (concat (task/env-tx id {:model "outside"}) (task/execution-tx [id] :running)
                                             (task/attempt-start-tx aid id (:boot sys) ag env (System/currentTimeMillis)
