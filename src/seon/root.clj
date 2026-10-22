@@ -820,15 +820,15 @@
   (let [c (a/chan (a/sliding-buffer 1024))] (a/tap (:events-mult sys) c) c))
 
 (defn request
-  "Root's verb (named as its fn below: spawn! clone! submit! run-tests! kill! merge!
+  "The op (named as its fn below: spawn! clone! submit! run-tests! kill! merge!
   merge-main!) on agent id with args, as the api request it is: one table for these fns
   and the dashboard's calls (seon.web). a: the agent's entry in root's view, which merge!
-  and merge-main! read; a verb the agent cannot take answers its refusal."
+  and merge-main! read; an op the agent cannot take answers its refusal."
   {:malli/schema [:=> [:cat :symbol [:maybe :seon.agent/id] [:maybe :map] [:maybe :map]] :map]}
-  [verb id args a]
+  [op id args a]
   (let [live? (boolean (and a (not (gone-statuses (:status a)))))
         data-attrs (:data-attrs args :all)]
-    (case verb
+    (case op
       spawn! {:op :spawn :opts (or args {})}
       clone! {:op :clone :parent id :opts (or args {})}
       submit! (cond-> {:op :eval :id id :forms (:forms args)} (:ticks args) (assoc :ticks (:ticks args)) (:origin args) (assoc :origin (:origin args)))
@@ -841,17 +841,17 @@
                    (false? (:gate? args)) {:op :write :req {:op :merge :branch (:branch a) :agent id :data-attrs data-attrs}}
                    live? {:op :merge-tests :id id :merge-branch (:branch a) :data-attrs data-attrs}
                    :else (refused 'seon.root/merge! "agent not running, so its tests cannot run; merge with {:gate? false}" {:merged? false}))
-      (refused 'seon.root/request (str verb " is not one of root's requests") {}))))
+      (refused 'seon.root/request (str op " is not one of root's requests") {}))))
 
 (defn- agent-entry {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] [:maybe :map]]}
   [sys id] (get-in @(call! sys {:op :state}) [:agents id]))
 
-(defn- verb!
-  "Call root's verb on agent id with args (request): a promise of its answer, or of its
+(defn- request!
+  "Call root's op on agent id with args (request): a promise of its answer, or of its
   refusal."
   {:malli/schema [:=> [:cat :seon.root/sys :symbol [:maybe :seon.agent/id] [:maybe :map]] :seon.host/promise]}
-  [sys verb id args]
-  (let [r (request verb id args (when (#{'merge! 'merge-main!} verb) (agent-entry sys id)))]
+  [sys op id args]
+  (let [r (request op id args (when (#{'merge! 'merge-main!} op) (agent-entry sys id)))]
     (if (contract/error? r) (doto (promise) (deliver r)) (call! sys r))))
 
 (defn spawn!
@@ -860,7 +860,7 @@
   is resumed."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.root/spawn-opts] :seon.agent/id]}
   [sys opts]
-  (let [r @(verb! sys 'spawn! nil opts)]
+  (let [r @(request! sys 'spawn! nil opts)]
     (if (:id r) (:id r) (throw (ex-info (:seon.error/message r) r)))))
 
 (defn clone!
@@ -868,7 +868,7 @@
   {:ok true :id new-id} or {:ok false :error}."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :map] :seon.host/promise]]}
   ([sys agent-id] (clone! sys agent-id {}))
-  ([sys agent-id opts] (verb! sys 'clone! agent-id opts)))
+  ([sys agent-id opts] (request! sys 'clone! agent-id opts)))
 
 (defn submit!
   "Send forms (a string) to the agent; a promise of the reply vector, one map per form.
@@ -877,7 +877,7 @@
   with each evaluation."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id :string] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :string [:maybe :map]] :seon.host/promise]]}
   ([sys agent-id forms-string] (submit! sys agent-id forms-string nil))
-  ([sys agent-id forms-string opts] (verb! sys 'submit! agent-id (assoc opts :forms forms-string))))
+  ([sys agent-id forms-string opts] (request! sys 'submit! agent-id (assoc opts :forms forms-string))))
 
 (defn judge!
   "Hand an outside agent's attempt to the reconciler for judgement, as a turn loop's end
@@ -890,8 +890,8 @@
   "The agent forks itself and runs its deftests in the child; a promise of
   {:pass :fail :error :reports [...]} (the run is bounded by its work: :seon.config.agent/test-ticks)."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id pos-int?] :seon.host/promise]]}
-  ([sys agent-id] (verb! sys 'run-tests! agent-id nil))
-  ([sys agent-id ticks] (verb! sys 'run-tests! agent-id {:ticks ticks})))
+  ([sys agent-id] (request! sys 'run-tests! agent-id nil))
+  ([sys agent-id ticks] (request! sys 'run-tests! agent-id {:ticks ticks})))
 
 (defn agent-stats! "A promise of the agent's numbers now." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
   [sys agent-id] (call! sys {:op :stats :id agent-id}))
@@ -917,7 +917,7 @@
   observation)."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :map] :seon.host/promise]]}
   ([sys agent-id] (merge! sys agent-id {}))
-  ([sys agent-id opts] (verb! sys 'merge! agent-id opts)))
+  ([sys agent-id opts] (request! sys 'merge! agent-id opts)))
 
 (defn merge-main!
   "git merge main, on the agent's branch (seon.merge): main's changes since the merge base
@@ -928,7 +928,7 @@
                   [:=> [:cat :seon.root/sys :seon.agent/id :map] :seon.host/promise]]}
   ;; the agent owns its branch's writes: it merges main itself
   ([sys agent-id] (merge-main! sys agent-id {}))
-  ([sys agent-id opts] (verb! sys 'merge-main! agent-id opts)))
+  ([sys agent-id opts] (request! sys 'merge-main! agent-id opts)))
 
 (defn branch-db
   "The writer's current db value of branch (:db is main), for root's reads: a promise of
@@ -965,7 +965,7 @@
   nil)
 
 (defn kill! "SIGKILL the agent's process (through its stand-in). nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
-  [sys agent-id] (verb! sys 'kill! agent-id nil) nil)
+  [sys agent-id] (request! sys 'kill! agent-id nil) nil)
 
 (defn pause-agent!
   "Flow's pause of the agent's proc (flow/pause-proc on the root graph), passed on to the

@@ -127,6 +127,11 @@
  ;; fails when root, the fork server and :seon.config.agent/max-running agents would exceed it
  ;; (each agent charged the system's measured free-memory drop per agent).
  :seon.config.machine/memory-mb 4096
+ ;; Unit: MB. The most physical footprint one MCP relay (bin/mcp, one per Claude session) may
+ ;; reach: stock perl measured 6.3 MB peak (`/usr/bin/time -l`, 2026-10-22) where the Seon binary
+ ;; it replaced was 729 MB. At the bound: seon.check/mcp-proof fails, so a relay that boots Seon
+ ;; again is red.
+ :seon.config.machine/relay-mb 32
  ;; Unit: attempts running at once (v1's :seon.config.agent/max-running, same value and
  ;; reason): four agents beside the user's work fit a 16 GB machine. A ready task beyond it
  ;; waits for an end; 0 starts nothing new while running work finishes. root's start! may

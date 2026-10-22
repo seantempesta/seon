@@ -33,6 +33,7 @@
   [:seon.config.store/compressor :seon.config.store/compressor]
   ;; the machine
   [:seon.config.machine/memory-mb :seon.config.machine/memory-mb]
+  [:seon.config.machine/relay-mb :seon.config.machine/relay-mb]
   ;; agents
   [:seon.config.agent/max-running :seon.config.agent/max-running]
   [:seon.config.agent/max-turns :seon.config.agent/max-turns]
