@@ -13,7 +13,7 @@
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
-            [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
+            [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d] [seon.task :as task]))
 
 (defn $ "The live value of an earlier result, by handle (:h3)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
@@ -88,6 +88,13 @@
     (str "Source not found for " sym ": no such var is defined or recorded on this branch. If your plan names it as new, "
          "write it: (in-ns '" (ns-name n) ") (defn " (name sym) " ...). Its namespace's ns form: (source " (ns-name n) ")")
     (str "Source not found for " sym)))
+
+(defn deferred
+  "The process tests this branch's change reaches, which its merge runs on a checkout and an
+  agent's turn does not (seon.agent/deferred-tests): names."
+  {:malli/schema [:=> [:cat] [:vector :qualified-symbol]]}
+  [] (agent/deferred-tests (agent/db) (:base @agent/state)
+                           (or (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})))
 
 (defn pst
   "Print the exception e (*e by default) as clojure.repl/pst does: its message, then each cause's

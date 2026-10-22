@@ -432,3 +432,23 @@
         head-tree (str/trim (:out (sh/sh "git" "rev-parse" "HEAD:reference-code/malli")))]
     (is (= head-tree (get (:pins r) "reference-code/malli")) "the gitlink HEAD's tree records for it")
     (is (every? #(str/starts-with? % "reference-code/") (keys (:pins r))))))
+
+(deftest a-test-that-reaches-a-process-is-deferred-to-the-merge
+  ;; root's ruling (2026-10-22): an agent's turn and root's judge run a branch's proofs and the
+  ;; in-process tests its changes reach; a test that reaches a process (a shell, a fork, a root
+  ;; of its own) is deferred to the merge, by the compiler's facts, never a marker. Step E's
+  ;; run 4: a change to seon.problems/report reached tests that boot a root, and an agent's
+  ;; proof run spun for minutes in its fork
+  (let [text (str "(ns app.proc-test (:require [clojure.java.shell :as sh] [clojure.test :refer [deftest is]] [app.proc :as p]))\n\n"
+                  "(defn- shell-ok? [] (zero? (:exit (sh/sh \"true\"))))\n\n"
+                  "(deftest via-shell (is (shell-ok?)) (is (= 2 (p/twice 1))))\n\n"
+                  "(deftest pure (is (= 2 (p/twice 1))))\n")
+        db (d/db-with (empty-db) (source/import-tx (empty-db) {"src/app/proc.clj" "(ns app.proc)\n\n(defn twice [x] (* 2 x))\n"
+                                                               "test/app/proc_test.clj" text}))]
+    (is (= #{'app.proc-test/via-shell} (set (filter #(= "app.proc-test" (namespace %)) (program/process-tests db)))))
+    (is (= {:run ['app.proc-test/pure] :deferred ['app.proc-test/via-shell]}
+           (program/test-split db #{'app.proc/twice} #{}))
+        "a change to twice runs the pure test and defers the one that reaches a shell")
+    (is (= {:run ['app.proc-test/pure 'app.proc-test/via-shell] :deferred []}
+           (program/test-split db #{'app.proc/twice} #{'app.proc-test/via-shell}))
+        "a proof always runs: it is the task's own")))

@@ -297,16 +297,23 @@
       (contract/valid? :seon.cost/report cost) (assoc :cost cost))))
 
 (defn test-vars
-  "The tests that judge branch db, as this process holds them: proofs, and every test that
-  reaches a var the branch changed since base (main at its merge base), the changed tests
-  among them (seon.reconcile/done-refusals reads only these). A proof with no var here does
-  not run; scratch namespaces (user, ^:scratch) never merge, so their tests never judge."
+  "The tests that judge branch db, as this process holds them: proofs, and every in-process
+  test that reaches a var the branch changed since base (main at its merge base), the changed
+  tests among them (seon.program/test-split; seon.reconcile/done-refusals reads only these).
+  A process test it reaches is deferred to the merge (deferred-tests). A proof with no var
+  here does not run; scratch namespaces (user, ^:scratch) never merge, so their tests never
+  judge."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]] [:sequential :seon.host/var]]}
   [db base proofs]
-  (let [changed (program/changed-vars base db)]
-    (filter #(and (:test (meta %)) (not (program/scratch-ns? (:ns (meta %)))))
-            (keep #(some-> (find-ns (symbol (namespace %))) (ns-resolve (symbol (name %))))
-                  (sort-by str (into (into proofs changed) (program/reaching-tests db changed)))))))
+  (filter #(and (:test (meta %)) (not (program/scratch-ns? (:ns (meta %)))))
+          (keep #(some-> (find-ns (symbol (namespace %))) (ns-resolve (symbol (name %))))
+                (:run (program/test-split db (program/changed-vars base db) proofs)))))
+
+(defn deferred-tests
+  "The process tests branch db's change since base reaches, deferred to the merge, which runs
+  them on a checkout (seon.program/test-split): names, sorted."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]] [:vector :qualified-symbol]]}
+  [db base proofs] (:deferred (program/test-split db (program/changed-vars base db) proofs)))
 
 (defn- run-tests-here
   "clojure.test over the branch's test-vars for the task's proofs, with the branch's schemas in effect (malli's

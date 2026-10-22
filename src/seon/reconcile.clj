@@ -9,7 +9,7 @@
   (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm] [seon.source :as source]
             [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
-            [seon.config :as cfg]))
+            [seon.config :as cfg] [seon.program :as program]))
 
 (def default-max-turns
   "Turns an attempt may take when its task sets no :seon.config.agent/max-turns: the config's."
@@ -583,7 +583,9 @@
                                                       {:outcome (:outcome end :no-end) :results results :uncontracted unc
                                                        :conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
                                                        :unmerged (mapv #(pr-str (:key %)) (pm/unmerged db (pm/program db #{})))
-                                                       :changed changed})
+                                                       :changed changed
+                                                       :deferred (:deferred (program/test-split db (program/changed-vars base db)
+                                                                                                (:proofs (:seon.task/accumulated (task/task main id)))))})
                                         (:reason end) (assoc :reason (:reason end))
                                         (not (:outcome end)) (assoc :reason (if worked-error
                                                                              (str "seon.turn/work! threw: " (:seon.error/message worked-error))

@@ -209,6 +209,9 @@
  ;; measured at the attempt's end from the branch (seon.merge/three-way's :ours): the printed
  ;; program keys the branch changed since its merge base; the merge train admits on them
  :seon.attempt/changed [:set :string]
+ ;; measured at the attempt's end (seon.program/test-split): the process tests its change reaches,
+ ;; which its merge runs on a checkout (root's ruling, 2026-10-22), never an agent's fork
+ :seon.attempt/deferred [:set :qualified-symbol]
  :seon.attempt/attempt-fact [:map {:seon.db/attributes true}
                              [:seon.attempt/id :seon.attempt/id] [:seon.attempt/task :seon.attempt/task]
                              [:seon.attempt/status :seon.attempt/status] [:seon.attempt/boot :seon.attempt/boot]
@@ -226,6 +229,7 @@
                              [:seon.attempt/conflicts {:optional true} :seon.attempt/conflicts]
                              [:seon.attempt/unmerged {:optional true} :seon.attempt/unmerged]
                              [:seon.attempt/changed {:optional true} :seon.attempt/changed]
+                             [:seon.attempt/deferred {:optional true} :seon.attempt/deferred]
                              [:seon.attempt/commit {:optional true} :seon.attempt/commit]
                              [:seon.attempt/commit-error {:optional true} :seon.attempt/commit-error]]
  :seon.proof/proof-fact [:map {:seon.db/attributes true} [:seon.proof/test :seon.proof/test] [:seon.proof/status :seon.proof/status]]

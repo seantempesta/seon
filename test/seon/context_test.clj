@@ -534,3 +534,11 @@
     (is (= 'demo-test/f-test (:test r)))
     (is (re-find #"deftest f-test" (pr-str (:do r))) (pr-str r))
     (is (re-find #"run-test" (pr-str (:do r))) (pr-str r))))
+
+(deftest deferred-tests-say-how-many-and-how-to-list-them
+  ;; root's ruling (2026-10-22): process tests the change reaches run at the merge, on a
+  ;; checkout; the turn says how many and the form that lists them, never runs them in the fork
+  (let [db (db-with-program)
+        b (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4 :deferred ['seon.root-test/a 'seon.root-test/b]})]
+    (is (= {:n 2 :list '(my.agent/deferred)} (:deferred-to-merge b)))
+    (is (nil? (:deferred-to-merge (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4 :deferred []}))) "none: nothing said")))

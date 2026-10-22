@@ -72,7 +72,8 @@
                         [:seon.attempt/results {:optional true} :seon.proof/results]
                         [:seon.attempt/conflicts {:optional true} [:vector :seon.merge/conflict]]
                         [:seon.attempt/unmerged {:optional true} [:vector :string]]
-                        [:seon.attempt/changed {:optional true} [:set :string]]]
+                        [:seon.attempt/changed {:optional true} [:set :string]]
+                        [:seon.attempt/deferred {:optional true} [:set :qualified-symbol]]]
  ;; ---- the done rule and the reconciler's answer ----
  :seon.reconcile/merge-dials [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?]]
  ;; a released task not done at quiescence: a root cause (its stuck fact, or cancelled or held)
@@ -171,4 +172,5 @@
                  [:reason {:optional true} :string] [:ms {:optional true} number?]
                  [:conflicts {:optional true} [:vector :seon.merge/conflict]]
                  [:unmerged {:optional true} [:vector :string]]
-                 [:changed {:optional true} [:set :string]]]}
+                 [:changed {:optional true} [:set :string]]
+                 [:deferred {:optional true} [:vector :qualified-symbol]]]}

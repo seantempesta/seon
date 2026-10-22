@@ -767,6 +767,35 @@
                (into tests (comp (filter #(= :test (second %))) (map first)) callers)))
       tests)))
 
+(def process-vars
+  "The vars through which a test reaches a process of its own (a shell, a fork, a root booted
+  for it, the binary): a test reaching one is a process test (root's ruling, 2026-10-22). An
+  agent's fork holds no checkout and runs as its agent's child, so a process test runs at the
+  merge, on a checkout, never in an agent's turn or root's judge."
+  '#{seon.agent-test/in-agent clojure.java.shell/sh seon.lib/fork! seon.test-store/binary-sh})
+
+(defn process-tests
+  "The tests on db that reach a process (process-vars), by the compiler's facts
+  (reaching-tests): never a marker a test could forget."
+  {:malli/schema [:=> [:cat :seon.host/db] [:set :qualified-symbol]]}
+  [db] (reaching-tests db process-vars))
+
+(defn test-split
+  "The tests that judge a change to vars changed on db, with the task's proofs: :run, the
+  proofs and the in-process tests the change reaches (the changed tests among them), which an
+  agent's turn and root's judge run in a fork of the agent; :deferred, the process tests it
+  reaches, which the merge runs on a checkout. A proof always runs: it is the task's own. Each
+  sorted."
+  {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-symbol] [:set :qualified-symbol]]
+                  [:map [:run [:vector :qualified-symbol]] [:deferred [:vector :qualified-symbol]]]]}
+  [db changed proofs]
+  (let [test? #(= :test (some->> (pdb/eid db :var/name %) (d/entity db) :var/kind))
+        reached (into (set (filter test? changed)) (reaching-tests db changed))
+        proc (if (seq reached) (process-tests db) #{})
+        deferred (into #{} (filter proc) (remove proofs reached))]
+    {:run (vec (sort-by str (remove deferred (into (set proofs) reached))))
+     :deferred (vec (sort-by str deferred))}))
+
 (def tree-readers
   "The host vars that read files: a test whose reached forms reference one reads the
   checkout's tree, so its reach digest covers the whole tree (reach-digests)."

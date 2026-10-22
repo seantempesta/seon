@@ -75,6 +75,7 @@
         unmerged (branch/unmerged)]
     {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :task (task/task db id)
      :will-merge (program/divergence (:base @agent/state) db)
+     :deferred (agent/deferred-tests db (:base @agent/state) (:proofs (:seon.task/accumulated (task/task db id))))
      :refusals (r/done-refusals (r/done-input (r/index db) id results unc (mapv #(pr-str (:key %)) unmerged) nil plan-before))}))
 
 (defn- end!
@@ -108,11 +109,11 @@
   done rule, the failing assertions of each test it names, the run's own errors, and what the
   branch's merge will carry to main."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{:keys [run refusals task results will-merge]}]
+  [{:keys [run refusals task results will-merge deferred]}]
   (let [proofs (:proofs (:seon.task/accumulated task))
         named (into (set proofs) (keep :symbol) refusals)]
     {:results results :refusals refusals :reds (proofs/red-reports run named) :run-errors (proofs/run-errors run)
-     :will-merge will-merge}))
+     :will-merge will-merge :deferred deferred}))
 
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its
