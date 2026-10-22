@@ -1318,6 +1318,6 @@
     (if-let [f (get modes mode)]
       (f n more)
       ;; a mode that is not one: its verdict, never another mode's
-      (do (out! "no mode " (pr-str mode) "; the modes: " (clojure.string/join " " (keys modes)))
+      (do (out! "no mode " (or mode "given") "; the modes: " (clojure.string/join " " (keys modes)))
           (out! (if mode (clojure.string/upper-case mode) "MODE") " FAILED")
           (lib/c-exit 1)))))
