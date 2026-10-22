@@ -24,7 +24,7 @@
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
-            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
+            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.docs :as docs] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
             [seon.turn] [seon.fixtures] [my.fx] [my.task] [my.turn] [my.branch] [clojure.core.async.flow :as flow] [clojure.core.async.flow.spi :as spi] [clojure.test]
@@ -743,8 +743,14 @@
     ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is; a root
     ;; whose boot fact was refused cannot start anything, so its refusal ends the boot
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
+    ;; the wiki (the checkout's docs/) rides the boot fact's commit, so main holds it before
+    ;; any agent forks: the help page every agent reads first is one of its pages
+    ;; (seon.context/help-text). An unchanged wiki writes nothing; a link to no section
+    ;; refuses it, and the boot with it, as a refused boot fact does.
     (let [prev (previous-end db)
-          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (into (task/boot-tx boot max-running) (cfg/facts config cfg/sources))
+          wiki (docs/load-tx db "docs" (docs/pages (cfg/checkout) "docs"))
+          _ (when (contract/error? wiki) (throw (ex-info (str "root's wiki was refused: " (:seon.error/message wiki)) wiki)))
+          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running) (into (cfg/facts config cfg/sources)) (into wiki))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev}))}})]
       (when-not (:ok r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
     (when source (import-source! sys source))

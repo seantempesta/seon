@@ -95,7 +95,7 @@ The server's `:op`s are one table, ``seon.entrance/ops`` (renamed from `seon.ent
 ## The gaps, in order
 
 1. History: kept since 2026-10-22 (A.2); the `my.program/history` function is not built.
-2. Storage: collection beside live agents (docs/storage.md#collection's design); a trained zstd dictionary once a representative corpus exists; log rotation.
+2. Storage: collection beside live agents (the design in [storage](storage.md#collection)); a trained zstd dictionary once a representative corpus exists; log rotation.
 3. The door: health through MCP, a compact `seon_agents`; an outside attempt whose agent dies ends (`seon.reconcile/an-outside-attempts-agent-death-ends-it`); the turns, inspection and restore/replay of `archive/jolt/door` (the tasks in `seon.entrance`).
 4. The owner's view: `/ns` pages and the message input bar, with messages stored as facts.
 5. Main wins a conflict; an unrun proof is unknown, not red.

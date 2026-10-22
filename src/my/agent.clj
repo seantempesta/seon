@@ -12,7 +12,7 @@
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.config :as cfg]
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
             [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "The live value of an earlier result, by handle (:h3)." {:malli/schema [:=> [:cat :keyword] :any]}
@@ -88,9 +88,10 @@
   [sym] `(println (or (source-fn '~sym) (str "Source not found for " '~sym))))
 
 (defn help
-  "The help page every agent reads first (seon.context/help-page): its sections, each its
-  address, heading and lead's first sentence; with an anchor, that section whole, as text."
+  "The help page every agent reads first (seon.context/help-page), as this branch holds it
+  (seon.docs/page): its sections, each its address, heading and lead's first sentence; with
+  an anchor, that section's own text."
   {:malli/schema [:function [:=> [:cat] [:vector :map]] [:=> [:cat :string] [:maybe :string]]]}
-  ([] (vec (for [{:seon.ref/keys [address heading lead]} (:seon.ref/sections (ref/parse context/help-page (context/help-text)))]
-             (cond-> {:address address :heading heading} lead (assoc :lead (ref/lead-sentence lead))))))
-  ([anchor] (:seon.ref/text (ref/file-view (cfg/checkout) context/help-page anchor :code))))
+  ([] (mapv (fn [{:keys [address heading lead]}] (cond-> {:address address :heading heading} lead (assoc :lead (ref/lead-sentence lead))))
+            (docs/page (agent/db) context/help-page)))
+  ([anchor] (:seon.ref/text (docs/view (agent/db) (str context/help-page "#" anchor) :code))))

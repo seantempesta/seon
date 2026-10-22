@@ -30,7 +30,7 @@ The turn's part:
 - `:refused`: what keeps you from done beyond your red proofs: `:regression` (green on main, red here: your change broke it), `:stray-red` (a red test that is no task's proof), `:contract-gap` (a function you defined without a ``:malli/schema``), `:unmerged`, `:no-proofs`.
 - `:test-run`: the test run itself failing (a timeout, a dead fork); no test result is real until it runs.
 - `:unmerged`: on a merge task, the entries to resolve.
-- `:will-merge`: every change your branch's merge will carry to main: the vars you added, changed and removed, and the schemas you registered. Anything listed that the task does not need, put back.
+- `:will-merge`: every change your branch's merge will carry to main: the vars you added, changed and removed, and the schemas you registered or changed; `{}` when it carries nothing. Anything listed that the task does not need, put back.
 - Your last evaluations, when no earlier turn shows them.
 
 ## The REPL

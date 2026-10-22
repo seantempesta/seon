@@ -23,7 +23,7 @@
 
 (deftest a-templates-instructions-are-cited-as-a-plan-is
   ;; owner, 2026-10-22: instructions are cited text; a var a kind's instructions cite reaches
-  ;; the task's references, and so its context, exactly as a plan's does (the navigation verbs
+  ;; the task's references, and so its context, exactly as a plan's does (the navigation functions
   ;; every kind shares are the help page's, docs/agent.md)
   (doseq [kind [:design :implement :test :merge]
           :let [[written] (task/create-tx (db-with-program) [(assoc (decl "") :seon.task/instructions (template/instructions kind))])]]

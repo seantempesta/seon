@@ -8,18 +8,19 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg]
-            [clojure.java.io :as io]))
+            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg]))
 
 (def help-page
   "The help page, docs/agent.md: what every agent reads first (its system message, the same
-  bytes for every agent and turn, so a provider caches it), and what my.agent/help answers."
+  bytes for every agent and turn, so a provider caches it), and what my.agent/help answers.
+  Main holds it as the wiki's sections from root's boot on (seon.root/start!)."
   "docs/agent.md")
 
 (defn help-text
-  "The help page's text, read from the checkout now."
-  {:malli/schema [:=> [:cat] :string]}
-  [] (slurp (io/file (cfg/checkout) help-page)))
+  "The help page as db holds it (seon.docs/page-text): a turn's, at the commit it read. A db
+  without it (no root booted on it) is refused by this contract, never answered empty."
+  {:malli/schema [:=> [:cat :seon.host/db] :string]}
+  [db] (docs/page-text db help-page))
 
 (defn source-of
   "The recorded source of var sym on db (the text of the form that last defined it), or nil:
@@ -233,7 +234,6 @@
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])
                           ;; the plan as it accumulated along :needs (prerequisites first)
                           :seon.task/plan plan)
-             :turn (str (inc turn) " of " max-turns)
              ;; a passing proof is its status; a red or unrun one shows its source, its failures
              ;; and the program functions it calls; one not defined yet says so
              :proofs (vec (for [p (sort-by str proofs)
@@ -253,6 +253,7 @@
                                {gone true there false} (group-by (comp boolean :unresolved) rs)]
                            (cond-> (vec there)
                              gone (conj {:unresolved (mapv :symbol gone) :problem (:unresolved ref/problem-messages)})))}
+      max-turns (assoc :turn (str (inc turn) " of " max-turns))
       (seq sections) (assoc :sections sections)
       (seq helpers) (assoc :found helpers)
       (seq (refused (vec refusals) (vec reds))) (assoc :refused (refused (vec refusals) (vec reds)))
@@ -261,7 +262,8 @@
       (:seon.task/evidence t) (assoc :evidence (:seon.task/evidence t))
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
       ;; owner D4 (2026-10-22): every change the branch's merge carries to main, every turn
-      (seq will-merge) (assoc :will-merge will-merge)
+      ;; measured and empty ({}) says so; absent only when not measured (a basis before D4)
+      (some? will-merge) (assoc :will-merge will-merge)
       (seq last-items) (assoc :last-evals (transcript (fold-evals last-items))))))
 
 (defn evaluations-text
@@ -320,21 +322,24 @@
     (pos? dropped) (str "\n\n;; " dropped " earlier turns are left out here (the history budget); (my.turn/evals) holds the last turn's")))
 
 (defn messages
-  "The model request's messages, its unchanging part first so a provider caches it: the help
-  page (the same for every agent); the attempt sections (the first turn's, when turns are
-  given: :attempt on the first); the conversation so far, as a REPL keeps its scrollback (each
-  earlier turn's reply, its eval calls and each call's answer as a tool message, whole turns
-  within the history budget, the newest kept); then the turn sections of block, each cut naming
-  the form that reads its rest. turns: [{:attempt :reply :calls}] of this attempt, oldest first."
-  {:malli/schema [:function [:=> [:cat :map] [:vector :seon.model/message]]
-                  [:=> [:cat :map [:vector :map]] [:vector :seon.model/message]]]}
-  ([block] (messages block []))
-  ([block turns]
-   (let [kept (when (seq turns) (kept-turns (vec turns) (cfg/value :seon.config.render/history-budget)))]
-     (-> [{:role "system" :content (help-text)}
-          {:role "user" :content (or (:attempt (first turns)) (attempt-message block))}]
+  "The model request's messages, its unchanging part first so a provider caches it: help, the
+  help page (the same for every agent); the attempt sections, made from block when no turns
+  came before, else the first turn's (:attempt, which with turns it must carry: the prefix
+  is never rebuilt from today's block); the conversation so far, as a REPL keeps its
+  scrollback (each earlier turn's reply, its eval calls and each call's answer as a tool
+  message, whole turns within the history budget, the newest kept); then the turn sections
+  of block, each cut naming the form that reads its rest. turns: [{:attempt :reply :calls}]
+  of this attempt, oldest first."
+  {:malli/schema [:function [:=> [:cat :string :map] [:vector :seon.model/message]]
+                  [:=> [:cat :string :map [:schema [:cat [:map [:attempt :string]] [:* :map]]]] [:vector :seon.model/message]]]}
+  ([help block]
+   [{:role "system" :content help} {:role "user" :content (attempt-message block)}
+    {:role "user" :content (turn-message block false 0)}])
+  ([help block turns]
+   (let [kept (kept-turns (vec turns) (cfg/value :seon.config.render/history-budget))]
+     (-> [{:role "system" :content help} {:role "user" :content (:attempt (first turns))}]
          (into (mapcat (fn [[t nxt]] (turn-messages t (nil? nxt))) (partition-all 2 1 kept)))
-         (conj {:role "user" :content (turn-message block (boolean (seq turns)) (- (count turns) (count kept)))})))))
+         (conj {:role "user" :content (turn-message block true (- (count turns) (count kept)))})))))
 
 (defn reader-text
   "What a turn's reader got beyond the help page and the scrollback: its attempt sections and
@@ -388,17 +393,17 @@
   (let [prev (if (= :model origin) (model-turns db attempt turn) [])
         lst (peek prev)
         {:keys [text repairs]} (when lst (reader/forgive (str/join "\n" (map :code (:seon.turn/calls lst)))))
+        ;; an outside agent's reads are not model turns: they have no turn count
         block (cond-> (current-state db (task/task db task)
-                                     (assoc observed :turn turn :max-turns max-turns :truncated? (:seon.turn/truncated lst)
-                                            :source text :repairs (vec repairs)
-                                            :unmerged (when merge? (pm/unmerged db (pm/program db #{})))))
-                last-evals (assoc :last-evals last-evals)
-                ;; an outside agent's reads are not model turns: it has no turn count to show
-                (= :outside origin) (dissoc :turn))
+                                     (cond-> (assoc observed :truncated? (:seon.turn/truncated lst)
+                                                    :source text :repairs (vec repairs)
+                                                    :unmerged (when merge? (pm/unmerged db (pm/program db #{}))))
+                                       (= :model origin) (assoc :turn turn :max-turns max-turns)))
+                last-evals (assoc :last-evals last-evals))
         turns (vec (map-indexed (fn [i r] (cond-> {:reply (:seon.turn/reply r) :calls (vec (:seon.turn/calls r))}
                                              (zero? i) (assoc :attempt (attempt-text db (:db/id r)))))
                                 prev))]
-    {:block block :messages (messages block turns)}))
+    {:block block :messages (if (seq turns) (messages (help-text db) block turns) (messages (help-text db) block))}))
 
 (defn recorded
   "The last context attempt's reader got, made again from its turn's basis on db (seon.turn:

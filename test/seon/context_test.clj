@@ -19,6 +19,11 @@
                                  [demo-test/f-test "(deftest f-test (is (= 4 (f 2))))"]
                                  [demo-test/g-test "(deftest g-test (is (= 1 (g))))"]])))))
 
+(defn- wiki!
+  "The checkout's wiki into conn, as root's boot loads it (seon.root/start!): the help page
+  every render reads is a page of it."
+  [conn] (d/transact conn (docs/load-tx @conn "docs" (docs/pages (seon.config/checkout) "docs"))))
+
 (deftest each-thing-is-said-once
   (let [db (db-with-program)
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make `demo/f` double."
@@ -85,7 +90,7 @@
                                            {:type :fail :var "#'demo-test/f-test" :message "x"}
                                            {:type :error :var nil :message "test process died: 9"}]}))))
     (testing "the printed context carries them"
-      (let [text (:content (peek (context/messages block)))]
+      (let [text (:content (peek (context/messages "H" block)))]
         (is (re-find #":regression" text))
         (is (re-find #"did not load" text))))
     (testing "a design step that has not improved its plan is told what it lacks and the call that does it"
@@ -169,7 +174,7 @@
 (deftest repeated-evals-fold-and-every-item-fits-its-share
   (let [db (db-with-program)
         t (task-f db)
-        text-of (fn [items] (:content (peek (context/messages (context/current-state db t {:turn 1 :max-turns 4 :last-items items})))))]
+        text-of (fn [items] (:content (peek (context/messages "H" (context/current-state db t {:turn 1 :max-turns 4 :last-items items})))))]
     (testing "259 items, 11 distinct: 11 folded items whose times sum to 259"
       (let [le (context/fold-evals (evals 259 11))]
         (is (= 11 (count le)))
@@ -200,7 +205,8 @@
   ;; it before (current-state and messages, the first turn's text carried in the scrollback),
   ;; equals the text seon.context/render makes again from the recorded basis on the commit it
   ;; names, after the branch moved on (the program changed, later turns were written)
-  (ts/test-branch! (fn [_ conn] (let [program (fn [src] [{:db/id "f" :var/name 'demo/f :var/ns "ns" :var/form "form"}
+  (ts/test-branch! (fn [_ conn] (let [_ (wiki! conn)
+        program (fn [src] [{:db/id "f" :var/name 'demo/f :var/ns "ns" :var/form "form"}
                            {:db/id "form" :form/id (str "demo/f " src) :form/src src :form/ns "ns" :form/order 0 :form/defines ["f"]}
                            {:db/id "ns" :ns/name 'demo}])
         _ (d/transact conn (program "(defn f \"Doubles.\" [x] (* 2 x))"))
@@ -217,7 +223,7 @@
         ;; turn 0: what the model was sent, the old way
         db0 @conn
         b0 (basis db0 0)
-        msgs0 (context/messages (context/current-state db0 (task/task db0 "demo/f") (assoc observed :turn 0 :max-turns 4 :repairs [])))
+        msgs0 (context/messages "H" (context/current-state db0 (task/task db0 "demo/f") (assoc observed :turn 0 :max-turns 4 :repairs [])))
         sent0 (context/reader-text msgs0)
         code0 "(defn f [x] (* 3 x)"
         evals0 (context/evaluations-text [{:id 0 :tag :ret :form "(defn f [x] (* 3 x))" :printed "#'demo/f"}])
@@ -228,7 +234,7 @@
         db1 @conn
         b1 (basis db1 1)
         {:keys [text repairs]} (reader/forgive code0)
-        sent1 (context/reader-text (context/messages (context/current-state db1 (task/task db1 "demo/f")
+        sent1 (context/reader-text (context/messages "H" (context/current-state db1 (task/task db1 "demo/f")
                                                                             (assoc observed :turn 1 :max-turns 4 :truncated? true :source text :repairs repairs))
                                                      [{:reply "f triples." :calls calls0 :attempt (:content (second msgs0))}]))
         _ (record! b1 {:seon.turn/reply "" :seon.turn/calls [{:id "call-1" :code "(my.turn/wait)" :evals ""}]})
@@ -249,7 +255,7 @@
   ;; item gets its one share like any other, so turn after turn the context cannot nest
   (let [db (db-with-program)
         t (task-f db)
-        text-of (fn [items] (:content (peek (context/messages (context/current-state db t {:turn 1 :max-turns 4 :last-items items})))))
+        text-of (fn [items] (:content (peek (context/messages "H" (context/current-state db t {:turn 1 :max-turns 4 :last-items items})))))
         c0 (text-of (evals 259 11))
         item (fn [c] {:id 0 :tag :ret :form "(seon.turn/context-block \"demo/f\" \"demo/f#1\")" :printed (pr-str c) :value c})
         c1 (text-of [(item c0)])
@@ -319,7 +325,7 @@
   (let [turns [{:attempt "C0" :reply "R0" :calls [{:id "a" :code "(def x 41)" :evals "E0"}]}
                {:reply "" :calls [{:id "b" :code "(inc x)" :evals "E1"} {:id "c" :code "(dec x)" :evals "E2"}]}
                {:reply "R2" :calls []}]
-        ms (context/messages {:task "t"} turns)]
+        ms (context/messages "H" {:task "t"} turns)]
     (is (= ["system" "user" "assistant" "tool" "assistant" "tool" "tool" "assistant" "user"] (mapv :role ms))
         "the first context, then each reply with its calls' answers, then the current state")
     (is (= [[{:id "a" :code "(def x 41)"}] "a" "E0"] [(:tool-calls (nth ms 2)) (:tool-call-id (nth ms 3)) (:content (nth ms 3))])
@@ -328,7 +334,7 @@
     (is (not (contains? (nth ms 7) :tool-calls)) "a reply that called nothing carries no calls")
     (is (str/starts-with? (:content (peek ms)) "The current state") "the current state comes last"))
   (testing "a reply that called nothing is followed by a user message, so two replies never meet"
-    (let [ms (context/messages {:task "t"} [{:attempt "C0" :reply "R0" :calls []} {:reply "R1" :calls []}])]
+    (let [ms (context/messages "H" {:task "t"} [{:attempt "C0" :reply "R0" :calls []} {:reply "R1" :calls []}])]
       (is (= ["system" "user" "assistant" "user" "assistant" "user"] (mapv :role ms)))))
   (testing "the history budget keeps whole turns, the newest always"
     (let [turns [{:reply (apply str (repeat 400 "a")) :calls []} {:reply "R1" :calls [{:id "b" :code "(f)" :evals "E1"}]} {:reply "R2" :calls []}]]
@@ -361,6 +367,7 @@
   ;; turn sections), even after the program the task cites changed
   (ts/test-branch!
     (fn [_ conn]
+      (wiki! conn)
       (d/transact conn (program-facts '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))" []]]))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/f``` triple."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
@@ -376,7 +383,8 @@
             r2 (request 2)]
         (is (= (pop r0) (subvec r1 0 (dec (count r0)))) "turn 1 starts with turn 0's request but its turn sections")
         (is (= (pop r1) (subvec r2 0 (dec (count r1)))) "turn 2 starts with turn 1's request but its turn sections")
-        (is (= (context/help-text) (:content (first r0))) "the system message is the help page, the same for every agent")
+        (is (= (context/help-text @conn) (:content (first r0))) "the system message is the help page as main holds it")
+        (is (str/starts-with? (:content (first r0)) "# The agent\n\nYou are a Seon agent") "the page, from its sections")
         (is (str/includes? (:content (second r2)) "Doubles.") "the attempt sections are the first turn's")
         (is (str/starts-with? (:content (peek r2)) "The current state") "the turn sections come last")
         (is (str/includes? (:content (peek r2)) ":turn \"3 of 4\"") "a model turn says which of its most it is")
@@ -392,7 +400,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/g``` exact."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
         block (context/current-state db (task/task db "demo/f") {:results {'demo-test/f-test :fail} :turn 1 :max-turns 4})
-        ms (context/messages block [{:attempt (:content (second (context/messages block))) :reply "R0" :calls [{:id "a" :code "(g 2)" :evals "1"}]}])
+        ms (context/messages "H" block [{:attempt (:content (second (context/messages "H" block))) :reply "R0" :calls [{:id "a" :code "(g 2)" :evals "1"}]}])
         times (fn [s] (count (filter #(str/includes? (str (:content %)) s) ms)))]
     (is (= 1 (times "Make ```demo/g``` exact.")) "the plan once")
     (is (= 1 (times "(defn g \\\"Halves.\\\"")) "a cited source once")
@@ -468,11 +476,14 @@
   ;; as the agent works, so it is turn content, never the cached prefix
   (let [db (db-with-program)
         will {:added ['demo/h] :changed ['demo/f] :schemas [:demo/k]}
-        ms (context/messages (context/current-state db (task-f db) {:turn 1 :max-turns 4 :will-merge will}))]
+        ms (context/messages "H" (context/current-state db (task-f db) {:turn 1 :max-turns 4 :will-merge will}))]
     (is (str/includes? (:content (peek ms)) ":will-merge") "in the turn sections")
     (is (str/includes? (:content (peek ms)) "demo/h"))
     (is (not (str/includes? (:content (second ms)) ":will-merge")) "not in the attempt sections")
-    (is (nil? (:will-merge (context/current-state db (task-f db) {:turn 1 :max-turns 4 :will-merge {}}))) "nothing to carry, no section")))
+    (is (= {} (:will-merge (context/current-state db (task-f db) {:turn 1 :max-turns 4 :will-merge {}})))
+        "measured and nothing to carry says so")
+    (is (not (contains? (context/current-state db (task-f db) {:turn 1 :max-turns 4}) :will-merge))
+        "not measured (a basis from before it was) is no section, never an empty one")))
 
 (deftest unresolved-names-share-one-problem
   ;; a measured context (2026-10-22) repeated the same 280-character problem under each name
