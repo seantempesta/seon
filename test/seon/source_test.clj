@@ -238,7 +238,7 @@
   ;; BUILD plan P5 (task seon.source/the-next-generation-runs-from-the-merges-commit),
   ;; through the path the owner uses: bin/root starts a root on a clone of this checkout
   ;; (Seon's own source as main's program, its store under this test's directory); through
-  ;; its entrance two loop turns merge seon.fixtures/generation 1 -> 2 and a new
+  ;; its server two loop turns merge seon.fixtures/generation 1 -> 2 and a new
   ;; seon.fixtures/generations, each live in place. Root is SIGKILLed and the same binary,
   ;; older than both merges, started on the same store and main: it catches up at boot
   ;; (seon.program/load-all!). Then the cold-start path: my.root/build! builds main's last

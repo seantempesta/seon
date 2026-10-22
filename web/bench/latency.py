@@ -1,4 +1,4 @@
-"""Root's web latency at the current agent count (ported from proto/web/bench/latency.py, lane L2).
+"""Root's web latency at the current agent count (ported from proto/web/bench/latency.py, session L2).
 usage: python3 -I latency.py PORT [GETS] [EVALS] [TABS]
 - page GET: sequential keep-alive GETs of / (ms p50/p95, bytes)
 - patch latency: POST /call?fn=seon.root/submit! (a UI call: an eval recorded with origin :ui)

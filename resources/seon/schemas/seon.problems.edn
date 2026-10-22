@@ -1,4 +1,4 @@
-;; Problems as typed facts (lane D2, notes/option3-D2-problems.md): the error variants every
+;; Problems as typed facts (session D2, notes/option3-D2-problems.md): the error variants every
 ;; producer builds through seon.contract/error (the one error map), the recorded error (one
 ;; entity per signature on main, R4's seon.error), the problem members of an attempt's end,
 ;; and the shape of the one read, seon.problems/report.
@@ -28,9 +28,9 @@
                                                      [:commit :uuid] [:t :int] [:branch-commit [:maybe :uuid]] [:image-t :int]]]
  :seon.root/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/proc-defect]] [:pid {:optional true} [:maybe :keyword]]]]
  :seon.root/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/refused]]]]
- ;; a defect answering one outside request at root's server (seon.entrance/respond): the
- ;; line it took, and the cause's ex-data printed; the door goes on serving
- :seon.entrance/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.entrance/defect]] [:line :string] [:data {:optional true} :string]]]
+ ;; a defect answering one outside request at root's server (seon.server/respond): the
+ ;; line it took, and the cause's ex-data printed; the server goes on serving
+ :seon.server/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/defect]] [:line :string] [:data {:optional true} :string]]]
  :seon.writer/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.writer/refused]] [:ok false?]]]
  :seon.merge/uncontracted [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/uncontracted]]
                                                   [:merged? false?] [:uncontracted [:vector :qualified-symbol]]]]
@@ -113,7 +113,7 @@
  ;; a cost proof's measured rows and verdict per test (seon.cost/proof's report)
  :seon.cost/report [:map [:rows [:vector :seon.cost/row]] [:verdict :seon.cost/verdict]]
  :seon.attempt/costs [:map-of {:seon.db/data true} :qualified-symbol :seon.cost/report]
- ;; waste charged to the producer of what the agent was shown (R4, census idea 14)
+ ;; waste charged to the producer of what the agent was shown (R4, v1 survey idea 14)
  :seon.learn/waste [:map-of {:seon.db/data true} :any [:map [:forms :int] [:turns :int]]]
  :seon.attempt/waste :seon.learn/waste
  :seon.end/waste :seon.learn/waste

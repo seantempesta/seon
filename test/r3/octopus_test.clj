@@ -1,7 +1,7 @@
-(ns r3.train-test
-  "Merge-train rules of seon.reconcile/actions, over a small main: disjoint merges run and land
-  together; overlapping ones serialize; unknown changes run alone; a train closes when its
-  first member ends; it lands only once no merge attempt is running."
+(ns r3.octopus-test
+  "Octopus-merge rules of seon.reconcile/actions, over a small main: disjoint merges run and merge
+  together; overlapping ones serialize; unknown changes run alone; an octopus merge closes when its
+  first member ends; it merges only once no merge attempt is running."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [seon.reconcile :as r] [seon.task :as task]
             [seon.template :as tpl] [seon.db :as pdb] [datahike.api :as d]))
 
@@ -35,12 +35,12 @@
 (deftest unknown-changes-run-alone
   (main [["a" nil] ["b" ["[:var x/g]"]]] (fn [conn] (is (= 1 (count (spawned (r/reconcile @conn)))) "a merge whose changes no attempt measured runs alone"))))
 
-(deftest a-train-lands-once-no-merge-runs-and-closes-when-a-member-ends
+(deftest an-octopus-merge-waits-for-running-merges-and-closes-when-a-member-ends
   (main [["a" ["[:var x/f]"]] ["b" ["[:var x/g]"]] ["c" ["[:var x/k]"]]] (fn [conn] (start-merge! conn "t/a-merge" :ended)
     (start-merge! conn "t/b-merge" :running)
     (let [acts (r/reconcile @conn)]
-      (is (not-any? #(= :merge-train (:op %)) acts) "b still runs: the train waits for it")
-      (is (not (contains? (spawned acts) "t/c-merge")) "a ended: the train is closed to new members"))
+      (is (not-any? #(= :octopus-merge (:op %)) acts) "b still runs: the octopus merge waits for it")
+      (is (not (contains? (spawned acts) "t/c-merge")) "a ended: the octopus merge is closed to new members"))
     (d/transact conn {:tx-data [{:seon.attempt/id "t/b-merge#1" :seon.attempt/status :ended}]})
-    (let [train (first (filter #(= :merge-train (:op %)) (r/reconcile @conn)))]
-      (is (= ["t/a-merge#1" "t/b-merge#1"] (mapv :attempt (:members train))) "both land in one train")))))
+    (let [octopus (first (filter #(= :octopus-merge (:op %)) (r/reconcile @conn)))]
+      (is (= ["t/a-merge#1" "t/b-merge#1"] (mapv :attempt (:members octopus))) "both merge in one octopus merge")))))

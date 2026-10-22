@@ -12,18 +12,18 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 | `bin/seon logs` | `runs/root.log`, no command | partial |
 | `bin/seon open`, `init`, `reset`, `nuke` | none (one root per checkout; per-checkout ports, `bin/ports`) | missing |
 | `bin/seon config apply` (sparse, per branch) | config layers plus `--set`; `seon.root/apply!` re-reads `system.edn` | partial |
-| `bin/lane` claims and proven commits | worktrees (`bin/worktree`) and root's landings | dropped |
+| `bin/lane` claims and proven commits | worktrees (`bin/worktree`) and root's merges | dropped |
 
-## The MCP door
+## The MCP server
 
 | v1 | next | Status |
 |---|---|---|
 | `eval_clj` (an agent's REPL or root's) | `seon_eval` (one evaluator: no JVM mode) | present |
 | `runtime_status` (health, problems, flow, readiness) | `seon_agents` lists agents and tasks; health only on the dashboard | partial |
 | an outside agent works a task | `seon_attach`, `seon_context`, `seon_done` | new |
-| refusals and defects answered per request | a defect answers that request the typed `:seon.entrance/defect` and the server goes on (`seon.entrance/respond`); a refused attach still writes the task's state first (`seon.entrance/attach-writes-nothing-when-it-is-refused`) | partial |
+| refusals and defects answered per request | a defect answers that request the typed `:seon.server/defect` and the server goes on (`seon.server/respond`); a refused attach still writes the task's state first (`seon.entrance/attach-writes-nothing-when-it-is-refused`) | partial |
 
-The server's ops are one table, `seon.entrance/ops`: MCP lists each as the tool `seon_<op>` (`seon.entrance/mcp-reply`, answered by the entrance itself on its one port; `bin/mcp` is a stdio relay of a few MB, no Seon binary), so a new op is one row. An eval as root goes through the agents' REPL path (`seon.repl/eval-string`: the one printer, cost, error maps, `*1` and `*e`), in `root.repl` with `sys` a local, recorded on main by `seon.repl/record-tx` like an agent's evaluation. The dashboard's calls of root's functions are the requests the API fns send (`seon.root/request`), so the UI and `seon.root/merge!` cannot disagree on a request or a refusal. Not this: a second read/eval loop, a second recorder, or an `:op`'s request map written again in `seon.web`.
+The server's ops are one table, `seon.server/ops`: MCP lists each as the tool `seon_<op>` (`seon.server/mcp-reply`, answered by the server itself on its one port; `bin/mcp` is a stdio relay of a few MB, no Seon binary), so a new op is one row. An eval as root goes through the agents' REPL path (`seon.repl/eval-string`: the one printer, cost, error maps, `*1` and `*e`), in `root.repl` with `sys` a local, recorded on main by `seon.repl/record-tx` like an agent's evaluation. The dashboard's calls of root's functions are the requests the API fns send (`seon.root/request`), so the UI and `seon.root/merge!` cannot disagree on a request or a refusal. Not this: a second read/eval loop, a second recorder, or an `:op`'s request map written again in `seon.web`.
 
 `seon_agents` returns every task (230+, mostly cancelled): too much context for an outside agent.
 
@@ -80,9 +80,9 @@ The server's ops are one table, `seon.entrance/ops`: MCP lists each as the tool 
 | history kept | `:seon.config.store/keep-history?` (default true), fixed when a store is made; a kept store made without it keeps its layout ([storage](storage.md#history)) | present |
 | storage collection, log rotation (`seon.maintenance`) | root collects at quiescence with no agent live, when a branch is gone ([storage](storage.md#collection)); no log rotation | partial |
 | blobs out of line (`seon.blob`) | large values out of line inside Datahike's own store, written once, kept by GC's mark ([storage](storage.md#values-out-of-line)); zstd for every stored value, built from source ([storage](storage.md#compression)); plain values stored as data, not EDN text ([storage](storage.md#plain-values)) | present |
-| every dial documented | one aero file, one resolver (`seon.config`) | present |
+| every config key documented | one aero file, one resolver (`seon.config`) | present |
 | one error shape, recorded once per signature, problem report | `seon.contract/error`, `seon.error`, `seon.problems` | present |
-| named catch sites | `docs/DRAGONS.md`, `bin/dragons` | new |
+| named catch sites | `docs/failure-points.md`, `bin/laws` | new |
 
 ## Onboarding and docs
 
@@ -96,7 +96,7 @@ The server's ops are one table, `seon.entrance/ops`: MCP lists each as the tool 
 
 1. History: kept since 2026-10-22 (A.2); the `my.program/history` function is not built.
 2. Storage: collection beside live agents (the design in [storage](storage.md#collection)); a trained zstd dictionary once a representative corpus exists; log rotation.
-3. The door: health through MCP, a compact `seon_agents`; an outside attempt whose agent dies ends (`seon.reconcile/an-outside-attempts-agent-death-ends-it`); the turns, inspection and restore/replay of `archive/jolt/door` (the tasks in `seon.entrance`).
+3. The server: health through MCP, a compact `seon_agents`; an outside attempt whose agent dies ends (`seon.reconcile/an-outside-attempts-agent-death-ends-it`); the turns, inspection and restore/replay of `archive/jolt/door` (the tasks in `seon.server`).
 4. The owner's view: `/ns` pages and the message input bar, with messages stored as facts.
 5. Main wins a conflict; an unrun proof is unknown, not red.
 6. The wiki's missing concept pages (`seon.docs/every-concept-has-its-page`) and its health measures (`seon.docs/the-wiki-stays-true-and-healthy`).

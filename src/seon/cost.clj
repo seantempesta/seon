@@ -256,9 +256,9 @@
    :map/reduce-kv {:ns 4.7 :bytes 0.0 :what "one step of reduce-kv over a hash map"}
    :edn/read-char {:ns 29.22 :bytes 38.02 :what "clojure.edn/read-string, per character of a vector of integers"}
    :pr-str/char {:ns 61.9 :bytes 25.67 :what "pr-str, per character printed (a vector of integers)"}
-   ;; lane D2, source mode, load 3, 2026-10-20, at 2k: a pull is 21 us and 28 KB, each further
+   ;; session D2, source mode, load 3, 2026-10-20, at 2k: a pull is 21 us and 28 KB, each further
    ;; attribute 9.7 us and 13 KB (a finding: the pull's own allocation, like seon.db/eid's seek)
-   ;; lane STORES, 2026-10-21, load 8, at 10k, three runs: measured on a branch of the seeded test
+   ;; session STORES, 2026-10-21, load 8, at 10k, three runs: measured on a branch of the seeded test
    ;; store (seon.test-store/test-branch!: ~2,000 datoms beside the setup's) instead of an empty store,
    ;; a pull 21 us and 24.6 KB, each further attribute 11.3-15.1 us and 11.6 KB: pull-attr's one
    ;; entity sat in a one-level index before, the seed makes it the two levels real dbs have
