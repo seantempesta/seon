@@ -69,7 +69,7 @@ The same method serves our lanes and Seon's agents: small changes, integrated of
 
 Its references are derived from the plan's citations by the one parser ([references](docs/references.md)), and the names it changes are its write set. **A lane's brief is its task** (owner, 2026-10-21: process, not whim): root writes what the lane needs into the task and the wiki sections it cites. What anyone learns goes back into the task or that section, never only into a report. Order: delete first, then foundations (a shared interface lands first as its own small task), then fixes.
 
-**Every ready task runs now, in parallel** (owner, 2026-10-21: "get rid of all of it": no lane cap, no locks, no waiting). Root launches every ready task whose write set doesn't overlap a running lane's. Each lane works in its own worktree (`bin/worktree NAME`: `../next-NAME` on `jolt/NAME`). Lanes waiting on a dependency read and plan, and keep nothing running.
+**Every ready task runs now, in parallel** (owner, 2026-10-21: "get rid of all of it": no lane cap, no locks, no waiting). Lanes are truly independent (owner, 2026-10-22: "Each lane should be able to do anything they want to the codebase, fully test it and then we can shut it down and merge it"): each works in its own worktree (`bin/worktree NAME`: `../next-NAME` on `jolt/NAME`) on its own root and stores, may change any file, runs the full `bin/test` and `bin/check` there, and stops; root merges and resolves conflicts at landing. Write sets inform root's landing order; they never fence a lane. Lanes waiting on a dependency read and plan, and keep nothing running.
 
 **A lane's method:**
 1. **Learn:** find the wiki sections, tasks and code for the problem; read what v1 did (`~/src/seon`, read-only); research the field's best known way (web, `../bin/agy-agent`), and verify it. Cite what you find in the plan; where a section and the code disagree, that is a wiki edit the task owes.
@@ -89,7 +89,7 @@ Its references are derived from the plan's citations by the one parser ([referen
 **If nothing has changed, we do nothing.**
 - No proc steps, renders, pings, flushes or polls on an idle system.
 - **Reactive:** a proc reports its own problems as facts and its changes as events. Health is the absence of open problem facts.
-- **No clock or timer decides anything.** Work runs because it arrived, is admitted by its measured workload, and parks when there is none. Time is measured and recorded, never acted on.
+- **No clock or timer decides anything.** Work runs because it arrived, is admitted by its measured workload, and parks when there is none. Time is measured and recorded, never acted on: `bin/dragons clocks` lists every place time decides and `bin/dragons measures` every clock read, each named in [clocks](docs/clocks.md) with its reason; an unnamed one is red.
 - **The exceptions:**
   - the cron proc, which only puts a message on a queue at a scheduled time;
   - a message's delayed insert (core.async `timeout`) when a provider says "retry after a short wait";
@@ -130,12 +130,12 @@ Every need is met by one of these. If one doesn't fit, stop and say so; never ro
   - Ports too: each checkout has its own (`bin/ports`).
 - **One store, many branches,** as in production. Tests, checks and runs take a branch of one seeded store. A separate store is a last resort, and says why where it is made.
 - **Contracts on every function,** armed at definition, and every contract must generate (`mg/check` in `bin/check`).
-- **No guards or fences.** Every outside-world failure point is named in `DRAGONS.md`, with its one edge function and declared error. Nothing else catches.
+- **No guards or fences.** Every outside-world failure point is named in `DRAGONS.md`, with its one edge function and declared error. Nothing else catches: `bin/dragons catch` lists every `catch` and is red on one the page does not name.
 - **Effects go through their owner** (`my.fx/call`, `my.fx/send`). The asker records the outcome on its own branch.
 - **Durability is continuous group commit.** A write is answered when committed in memory. One followed by an outside effect waits for the sync that covers it.
 - **Every definition happens once, where it is defined.**
   - Behaviour varies through the environment (a forked process holding exactly its definitions) or through data.
-  - `intern`, `alter-var-root` and `with-redefs` are code smells (owner, 2026-10-21: "intern isn't banned it's a code smell"). A legitimate use builds vars programmatically in a namespace you own, where no definition form exists (a REPL harness, a test environment), and its docstring says why. Filling a gap in another namespace (a library's, Jolt's stdlib) is fixed in that namespace's owner instead. Stub-by-rebinding is replaced by a test environment that holds the stub's definition.
+  - `intern`, `alter-var-root` and `with-redefs` are code smells (owner, 2026-10-21: "intern isn't banned it's a code smell"). A legitimate use builds vars programmatically in a namespace you own, where no definition form exists (a REPL harness, a test environment), and its docstring says why. Filling a gap in another namespace (a library's, Jolt's stdlib) is fixed in that namespace's owner instead. Stub-by-rebinding is replaced by a test environment that holds the stub's definition. `bin/dragons resolution` lists every such site in `src`, each named in [resolution](docs/resolution.md) with its reason.
 - **Results are reused by input digest.** A test's result is keyed by the digest of everything it reaches, a check step's by its build's source, a build's by its sources. Unchanged inputs are never run again.
   - Content-keyed reuse is allowed for units measured as expensive; no other caches, and never one keyed by time.
 - **Estimates are proofs.** A function whose input grows carries a cost proof. An overrun, or growth steeper than the work needs, is red.
@@ -175,7 +175,7 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
 ## 8. The machine
 
 - **The target is a 16 GB MacBook M1** (owner, 2026-10-22). Seon stays within `:seon.config.machine/memory-mb`, and `bin/check scale` fails past it.
-- **Builds:** `nice -n 15 bin/build`, in parallel, no lock. Full checks run one at a time, niced. Every process on a store uses the same LMDB build. Details, and the disk rules (worktrees removed at landing, no new top-level directories, pruning): [machine](docs/machine.md).
+- **Builds:** `nice -n 15 bin/build`, in parallel, no lock. Full checks run niced, each lane in its own worktree. Every process on a store uses the same LMDB build. Details, and the disk rules (worktrees removed at landing, no new top-level directories, pruning): [machine](docs/machine.md).
 - **Never flood it.** Anything that makes threads or processes starts at n ≤ 100 under `nice -n 15`; kill your own process past 200 threads. One experiment at a time.
 - **Leave nothing running when you finish,** and say so. Kill only PIDs you started; never `pkill` or `killall`. Delete only paths you created. A process that must outlive a tool call is double-forked (`bin/root` does).
 - **Git in a worktree:** `git -C` on your own checkout only; never `git submodule` in a worktree (after merging main, `bin/worktree --sync NAME` from the main tree); never bare `git stash`; never `checkout`, `restore` or `reset` on paths you don't own; commit explicit paths; never push.

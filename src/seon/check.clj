@@ -596,6 +596,8 @@
                 :born-after r-n :resumed-b r-b :b-tests (select-keys t-b [:pass :fail :error]) :resumed-clone r-c
                 :merge-b [(select-keys mmb [:ok :applied]) (dissoc mb :ops)] :after-merging-b r-n2}
        :checks {:main-recovered (and (= (:main-datoms expect) md) (:recovered? (:store st)))
+                ;; phase 1's root was SIGKILLed: it left no stop fact, so this boot found its end :unclean
+                :the-killed-root-ended-unclean (= :unclean (:cause (:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))))
                 :branches-recovered (= #{:dur-a :dur-b :dur-c :dur-clone} (set (get-in st [:store :recovered-branches])))
                 :main-runs-the-merged-f1 (= "20" (ffirst r-n))
                 :b-resumes-its-work (and (= "\"b:1\"" (ffirst r-b)) (re-find #"unmerged" (str (second r-b))))
@@ -931,18 +933,26 @@
 
 (defn root-serve
   "A root with its entrance on 127.0.0.1:(:seon.config.root/entrance-port) (seon.entrance),
-  until stdin closes: what an outside agent's MCP server (target/seon mcp) talks to. A
-  checkout whose config names no entrance port (0) serves none, and says so."
+  until stdin closes (bin/root stop) or SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks):
+  what an outside agent's MCP server (target/seon mcp) talks to. Its end is a fact on main
+  naming that cause (seon.root/stop!). A checkout whose config names no entrance port (0)
+  serves none, and says so."
   []
   (let [port (seon.config/value :seon.config.root/entrance-port)
         _ (when (zero? port)
             (out! "ROOT REFUSED: :seon.config.root/entrance-port is 0 (no entrance); bin/worktree --ports writes config/local.edn with this checkout's ports")
             (lib/c-exit 1))
         sys (c/start! {})]
-    (seon.entrance/serve! sys port)
-    (out! "ROOT LISTENING " port)
-    (loop [] (when (read-line) (recur)))
-    (c/stop! sys)
+    ;; the first cause stops root, once; a signal's hook waits for that stop, then Jolt exits
+    (let [cause (promise) stopped (promise)
+          end! (fn [why] (deliver cause why)
+                 (when (= why @cause) (out! "ROOT STOPPED " (pr-str (select-keys (c/stop! sys why) [:cause :ms :stop-fact-refused]))) (deliver stopped true))
+                 @stopped)]
+      (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (end! :signal))))
+      (seon.entrance/serve! sys port)
+      (out! "ROOT LISTENING " port)
+      (loop [] (when (read-line) (recur)))
+      (end! :stdin-eof))
     (lib/c-exit 0)))
 
 (defn- eval-records
@@ -1151,6 +1161,8 @@
     "contracts" (contracts)
     "census" (census n)
     "e2e" (lib/c-exit (if (seon.e2e/run n more) 0 1))
+    ;; swarm N M: seon.e2e's swarm row (N tasks over 5 shared vars, max-running M), SWARM OK/FAILED
+    "swarm" (lib/c-exit (if (seon.e2e/run "swarm" [(or n "20") (or (first more) "8")]) 0 1))
     "admit" (admit)
     "record" (record)
     "orphan" (orphan)

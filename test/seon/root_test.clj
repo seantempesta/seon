@@ -132,6 +132,27 @@
         (is (every? attempts-2 attempts-1) "and the first boot's attempt (it reaps it and starts the next)"))
       (finally (sh/sh "rm" "-rf" path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
 
+(deftest every-end-of-a-root-is-a-fact
+  ;; task seon.root/every-end-of-a-root-is-a-fact: a clean stop is a fact naming its cause
+  ;; (:seon.root/stopped; here its stdin closes, as bin/root stop closes it), the next boot
+  ;; records it as :seon.root/previous-end, and a boot that left no stop fact (SIGKILL, a
+  ;; crash) is found :unclean. A store of this test's own, as a-second-boot-resumes-the-same-main's
+  ;; (root-answers names its fifo and log after the store); removed at the end.
+  (let [path (str (.getCanonicalPath (java.io.File. ".")) "/target/runs/root-test-ends-" (random-uuid))
+        ev (fn [code] {:op :eval :agent "root" :code code})
+        printed (fn [l] (some-> (:printed (first (:items (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil))))) edn/read-string))
+        [b1] (str/split-lines (root-answers path [] [(ev "(:boot sys)")]))
+        [prev killed] (str/split-lines
+                       (root-answers path [] [(ev "(:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))")
+                                              (ev "(#'seon.root/previous-end (d/db-with @(:conn sys) [{:seon.root/id :root :seon.root/boot \"killed-boot\"}]))")]))]
+    (try
+      (is (string? (printed b1)))
+      (is (= {:boot (printed b1) :cause :stdin-eof} (select-keys (printed prev) [:boot :cause]))
+          "the second boot found the first's clean end: its stdin closed")
+      (is (= {:boot "killed-boot" :cause :unclean} (select-keys (printed killed) [:boot :cause]))
+          "a boot that left no stop fact is found :unclean")
+      (finally (sh/sh "rm" "-rf" path (str path "-in") (str path ".log") (str path "-agents"))))))
+
 (deftest a-built-root-reads-a-line-citation
   ;; task jolt.ns/whole-program-inference-keeps-nil-checks: compiled, `[from to]` destructured
   ;; from `(if dash [a b] [suffix])` typed `to` a string, so `(nil? to)` folded false and

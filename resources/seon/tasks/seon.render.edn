@@ -19,4 +19,8 @@
   :seon.task/plan "Seen 2026-10-21 by lane RENDER's verifier: the attempts table shows a6's calc/neg attempt at 8,126 ms against its siblings' 100-250 ms, and nothing on the page says where the time went (seon.render.ui/attempt-row shows end-ms minus start-ms only). Lane AGENTS records each turn's split (:seon.turn/split: tests, context, model, eval, record; 7ef171b on jolt/agents). Once that is on main: the attempt row's ms cell shows the split summed over its turns (the largest part first, each part's ms), its title each turn's; the agent page's work box shows the split per turn. Replaces the bare span; no new measurement."
   :seon.task/kind :work
   :seon.task/needs #{"seon.turn/a-turn-records-what-it-saw-and-spent"}
-  :seon.task/proofs #{seon.render-test/an-attempt-row-shows-its-turns-split}}]
+  :seon.task/proofs #{seon.render-test/an-attempt-row-shows-its-turns-split}}
+ {:seon.task/name "an-ended-agent-leaves-the-grid-by-an-event"
+  :seon.task/plan "Found by lane HARVEST's clock census (bin/dragons clocks, docs/clocks.md#time-decides-owed-its-owners-fix). seon.render.proc/order leaves out an agent ended more than RETIRE-MS (90000, a literal, not config) ago, and seon.render.proc/ordered re-derives the order when the agents changed or a second passed (a literal 1000, a cache keyed by time): what the grid shows is decided by the clock, and an idle dashboard's content changes with nothing happening. v1: the grid showed live agents and the ended ones as their own section. Correct: an ended agent leaves the grid on an event (the next agent's start, the user's dismissal, or a bounded count of ended agents kept, each a config key), the order is derived when the agents changed and only then. Deletes RETIRE-MS, the :order-at clause and the :retire-ms caption field; the three leave docs/clocks.md's owed list."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.render-test/an-ended-agent-leaves-the-grid-by-an-event}}]
