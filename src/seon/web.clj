@@ -15,14 +15,14 @@
 
   Callbacks are data (DECISIONS): one stateless /call route whose payload is the call
   (fn, agent, args, a form's fields). Root's verbs (seon.root/spawn!, submit!, run-tests!,
-  merge!, merge-main!, clone!, interrupt!, kill!) become root's requests, each recorded on
-  main as root's evaluation, origin :ui; any other fn runs in the agent as an eval of
-  (seon.web/ui-call 'fn args), origin :ui, refused as data unless the var is marked
-  ^:seon/callable."
+  merge!, merge-main!, clone!, interrupt!, kill!) become the requests their fns send
+  (seon.root/request), each recorded on main as root's evaluation, origin :ui; any other fn
+  runs in the agent as an eval of (seon.web/ui-call 'fn args), origin :ui, refused as data
+  unless the var is marked ^:seon/callable."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [ring-chez.adapter :as adapter]
-            [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render.ui :as ui] [seon.web.html :as h] [seon.step :as step]))
+            [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render.ui :as ui] [seon.web.html :as h] [seon.step :as step] [seon.repl :as repl] [seon.root :as c]))
 
 ;;; --- the files it serves ------------------------------------------------------------
 
@@ -69,49 +69,25 @@
                       (str sym " is not callable from the UI: mark it ^:seon/callable")
                       {:seon.render/fn sym}))))
 
-(def ^:private root-verbs
-  "Root's verbs a UI call may name, by the request each becomes."
-  '#{seon.root/spawn! seon.root/submit! seon.root/run-tests! seon.root/merge! seon.root/merge-main!
-     seon.root/clone! seon.root/interrupt! seon.root/kill!})
-
 (defn- live? {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
   [a] (boolean (and a (not (#{:dead :killed :ended} (:status a))))))
 
 (defn requests
-  "A UI call as root's requests: [[req target-agent] ...]. index {agent {:pid :branch
-  :status}}; fields: the posting form's fields."
+  "A UI call as root's requests: [[req target-agent] ...]. Root's verb is the request its
+  fn sends (seon.root/request; none when root refuses it); any other fn is an eval of it in
+  the agent, through the allowlist (ui-call). index {agent {:pid :branch :status}}."
   {:malli/schema [:=> [:cat :seon.render/call :map] [:vector [:tuple :map [:maybe :keyword]]]]}
   [{f :var :keys [agent args forms]} index]
-  (let [one (fn [req] [[req agent]])]
+  (let [one (fn [verb id args] (let [r (c/request verb id args (get index id))] (if (contract/error? r) [] [[r id]])))]
     (case f
-      seon.root/spawn! (vec (repeat (min 100 (max 1 (or (:n args) 1)))
-                                    [{:op :spawn :opts (cond-> {} (not (str/blank? (:task args))) (assoc :task (:task args)))} nil]))
-      seon.root/submit! (if (str/blank? forms)
-                          []
-                          (if (= :all agent)
-                            (vec (for [[id a] (sort-by (comp str key) index) :when (live? a)]
-                                   [{:op :eval :id id :forms forms :origin :ui} id]))
-                            (one {:op :eval :id agent :forms forms :origin :ui})))
-      seon.root/run-tests! (one {:op :tests :id agent})
-      seon.root/merge! (if-let [b (get-in index [agent :branch])]
-                         (one {:op :merge-tests :id agent :merge-branch b :data-attrs :all})
-                         [])
-      seon.root/merge-main! (one {:op :merge-main :id agent :data-attrs :all})
-      seon.root/clone! (one {:op :clone :parent agent :opts {}})
-      seon.root/kill! (one {:op :kill :id agent})
-      ;; an effect on a process, not a request: performed by this proc (interrupt!)
-      seon.root/interrupt! []
-      (one {:op :eval :id agent :origin :ui :forms (pr-str (list 'seon.web/ui-call (list 'quote f) (merge args (dissoc (:fields args) :forms))))}))))
-
-(defn- record-tx
-  "Root's evaluation of a UI call of its verb, recorded on main (origin :ui), as
-  seon.entrance records an outside agent's."
-  {:malli/schema [:=> [:cat :seon.render/call] :seon.db/tx-data]}
-  [{f :var :keys [agent args forms]}]
-  [{:seon.cluster.eval/id (str "root-ui-" (lib/now-ns) "/0") :seon.cluster.eval/agent "agent"
-    :seon.cluster.eval/record {:tag :ret :form (pr-str (cond-> (list f) agent (concat [agent]) (seq args) (concat [args]) forms (concat [forms])))
-                               :shown "requested" :origin :ui}}
-   {:db/id "agent" :seon.agent/id :root}])
+      seon.root/spawn! (vec (repeat (min 100 (max 1 (or (:n args) 1))) [(c/request 'spawn! nil (cond-> {} (not (str/blank? (:task args))) (assoc :task (:task args))) nil) nil]))
+      seon.root/submit! (cond (str/blank? forms) []
+                              (= :all agent) (vec (for [[id a] (sort-by (comp str key) index) :when (live? a)] [(c/request 'submit! id {:forms forms :origin :ui} a) id]))
+                              :else (one 'submit! agent {:forms forms :origin :ui}))
+      ;; seon.root/interrupt! is no request: an effect on a process, performed by this proc
+      (if (= "seon.root" (namespace f))
+        (one (symbol (name f)) agent args)
+        (one 'submit! agent {:origin :ui :forms (pr-str (list 'seon.web/ui-call (list 'quote f) (merge args (dissoc (:fields args) :forms))))})))))
 
 ;;; --- HTTP edge ----------------------------------------------------------------------------
 
@@ -123,13 +99,13 @@
              [(java.net.URLDecoder/decode k "UTF-8") (java.net.URLDecoder/decode (or v "") "UTF-8")])))
 
 (defn- ask!
-  "Put m with a fresh promise on the proc's :http in-port and wait for the answer (the
-  edge's blocking read; the proc never waits)."
+  "Put m with a fresh promise on the proc's :http in-port and wait for its one answer (the
+  edge's blocking read; the proc never waits; at stop every waiting promise answers nil)."
   {:malli/schema [:=> [:cat :seon.host/chan :map] :any]}
   [ch m]
   (let [p (promise)]
     (a/>!! ch (assoc m :p p))
-    (deref p 10000 nil)))
+    @p))
 
 (defn- html-response {:malli/schema [:=> [:cat [:maybe :string]] :map]}
   [s]
@@ -252,9 +228,13 @@
             ;; answered to the render proc, which shows each in the stream by its tag
             (doseq [[req target] reqs]
               (step/out! o :to-api {:op :request :req req :route [:render :answers] :tag [:web (:var c) target]}))
-            (when (contains? root-verbs (:var c))
-              (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (record-tx c)}}
-                                   :route [:render :answers] :tag [:web-record]}))
+            ;; root's verb is root's evaluation, recorded on main (origin :ui) as root's REPL records one
+            (when (= "seon.root" (namespace (:var c)))
+              (let [{f :var :keys [agent args forms]} c
+                    it {:id 0 :tag :ret :printed "requested" :origin :ui
+                        :form (pr-str (cond-> (list f) agent (concat [agent]) (seq args) (concat [args]) forms (concat [forms])))}]
+                (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx :root (str "root-ui-" (lib/now-ns)) [it] nil)}}
+                                     :route [:render :answers] :tag [:web-record]})))
             (update st :calls (fnil inc 0)))
     st))
 

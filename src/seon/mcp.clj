@@ -2,27 +2,12 @@
   "A thin MCP server for outside agents (owner, 2026-10-20: \"minimal MCP wrapping so they can
   repl in and run statements against any agent or as root\"): JSON-RPC 2.0 over stdio, each
   tool exactly one request to root's entrance (seon.entrance, line EDN on 127.0.0.1), its
-  answer the tool's text. No logic lives here.
+  answer the tool's text: the tools are the entrance's verbs (seon.entrance/verbs), each
+  seon_<op>. No logic lives here.
 
     target/seon mcp PORT        (root runs the entrance on PORT)"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.data.json :as json] [clojure.edn :as edn]))
-
-(def tools
-  "Each tool: its name, what it does, its arguments (JSON Schema) and the entrance request it is."
-  [{:name "seon_agents" :description "Live agents (id, branch, status, task) and every task (execution, done, blocked-by, problem)."
-    :schema {:type "object" :properties {}} :op :agents}
-   {:name "seon_eval" :description "Evaluate Clojure in a running agent's process (recorded on its branch, origin :outside) or as \"root\" in root's process (root.repl: `sys` is root; my.root/run!, my.root/cancel!, seon.root/merge! ...). Answers one reply item per form."
-    :schema {:type "object" :properties {:agent {:type "string" :description "an agent id (a3) or root"}
-                                         :code {:type "string" :description "Clojure forms"}}
-             :required ["agent" "code"]}
-    :op :eval}
-   {:name "seon_context" :description "The current-state block of the task an agent works: what the model would read now."
-    :schema {:type "object" :properties {:agent {:type "string"}} :required ["agent"]} :op :context}
-   {:name "seon_attach" :description "Work a task as a Seon agent: root starts an agent on the task's branch (model outside) and answers its id."
-    :schema {:type "object" :properties {:task {:type "string" :description "ns/name"}} :required ["task"]} :op :attach}
-   {:name "seon_done" :description "Hand the attempt the agent works back to root: its proofs run, it is judged, and merged when the done rule has no refusal."
-    :schema {:type "object" :properties {:agent {:type "string"}} :required ["agent"]} :op :done}])
+  (:require [seon.contract :refer [defn defn-]] [seon.entrance :as entrance] [clojure.data.json :as json] [clojure.edn :as edn] [clojure.string :as str]))
 
 (defn- request!
   "One entrance request on 127.0.0.1:port, its answer as text. The interop edge: a refused
@@ -41,9 +26,9 @@
 (defn- tool-text
   "What a tool call answers: the context's text itself for seon_context (the model's own
   view, not an escaped string inside a map), else the entrance's answer line."
-  {:malli/schema [:=> [:cat :map :string] :string]}
-  [tool line]
-  (or (when (= :context (:op tool)) (:context (edn/read-string line))) line))
+  {:malli/schema [:=> [:cat :keyword :string] :string]}
+  [op line]
+  (or (when (= :context op) (:context (edn/read-string line))) line))
 
 (defn reply
   "The JSON-RPC answer to one message, or nil for a notification."
@@ -54,10 +39,13 @@
      "result" (case method
                 "initialize" {"protocolVersion" (get params "protocolVersion" "2024-11-05")
                               "capabilities" {"tools" {}} "serverInfo" {"name" "seon" "version" "next"}}
-                "tools/list" {"tools" (mapv (fn [t] {"name" (:name t) "description" (:description t) "inputSchema" (:schema t)}) tools)}
-                "tools/call" (let [t (first (filter #(= (get params "name") (:name %)) tools))
+                "tools/list" {"tools" (vec (for [[op v] entrance/verbs]
+                                             {"name" (str "seon_" (name op)) "description" (:doc v)
+                                              "inputSchema" (cond-> {:type "object" :properties (:args v)} (:required v) (assoc :required (:required v)))}))}
+                "tools/call" (let [n (get params "name")
+                                   op (when (str/starts-with? n "seon_") (keyword (subs n 5)))
                                    args (into {} (for [[k v] (get params "arguments")] [(keyword k) v]))]
-                               {"content" [{"type" "text" "text" (if t (tool-text t (request! port (assoc args :op (:op t)))) (str "no tool " (get params "name")))}]})
+                               {"content" [{"type" "text" "text" (if (entrance/verbs op) (tool-text op (request! port (assoc args :op op))) (str "no tool " n))}]})
                 {})}))
 
 (defn serve!
