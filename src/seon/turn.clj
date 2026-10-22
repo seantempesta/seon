@@ -74,7 +74,7 @@
         unc (set/difference (harvest/uncontracted db) gaps-before)
         unmerged (branch/unmerged)]
     {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :task (task/task db id)
-     :will-merge (program/divergence (agent/merge-base) db)
+     :will-merge (program/divergence (:base @agent/state) db)
      :refusals (r/done-refusals (r/done-input (r/index db) id results unc (mapv #(pr-str (:key %)) unmerged) nil plan-before))}))
 
 (defn- end!
