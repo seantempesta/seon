@@ -72,21 +72,24 @@
 (defn- shard!
   "One shard bin/test runs (out/shard-<i>.edn): its namespaces required, its tests run
   (seon.proofs/run-tests!), each test named as it starts and each red one printed (RED); then
-  its greens stored at their digests (seon.proofs/store-greens!), unless the tree changed
-  since the plan was made (an edit during the run: what ran is not what the digests name, so
+  its greens stored at their digests (seon.proofs/store-greens!), unless the tree is not the
+  plan's before and after the run (an edit during the run: what ran is not what the digests name, so
   nothing is kept, and the run stays as reported). A shard that dies midway stores nothing.
   Then SHARD n green m red. Answers the exit status."
   [file]
   (let [{:keys [tests digests tree]} (edn/read-string (slurp file))
         t0 (profile/now-ns)]
     (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
-    (let [same? (= tree (fx/tree-id (System/getProperty "user.dir")))
+    (let [before (fx/tree-id (System/getProperty "user.dir"))
           ran (proofs/run-tests! tests digests
                                  (fn [x] (cond (:seon.test/started x) (println "started" (:seon.test/started x))
                                                (:seon.test/output x) (print (:seon.test/output x))
                                                (:seon.test/report x) nil
                                                (not (proofs/green? x)) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))
                                    (flush)))
+          ;; the tree the tests read is the plan's from before the run to after it: an edit
+          ;; during the run (a test reading files reads it) is not what the digests name
+          same? (= tree before (fx/tree-id (System/getProperty "user.dir")))
           unstored (when same? (proofs/store-greens! #(fx/write-file {:req %}) (config/value :seon.config.source/test-results-dir) ran))
           red (count (remove proofs/green? (vals ran)))]
       (when-not same? (println "the tree changed since the plan: no result stored"))
