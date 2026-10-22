@@ -503,6 +503,17 @@
                     {:seen #{} :order []}
                     (sort-by k nodes)))))
 
+(defn closure
+  "The nodes reachable from start through (neighbors node), start excluded, each once, in
+  the order reached. One visit per node and edge."
+  {:malli/schema [:=> [:cat [:sequential :any] :seon.host/fn] [:vector :any]]}
+  [start neighbors]
+  (loop [front (vec start) seen (set start) out []]
+    (if-let [[n & more] (seq front)]
+      (let [new (into [] (comp (remove seen) (distinct)) (neighbors n))]
+        (recur (into (vec more) new) (into seen new) (into out new)))
+      out)))
+
 (defn load-order
   "forms (form rows) in the order to load them: namespaces in dependency order (after each
   namespace among them that their forms require or whose vars they reference; ties by
@@ -564,15 +575,14 @@
   Cost: nothing unless a macro changed; then its namespaces' forms."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:vector :map]]}
   [db changed]
-  (loop [front (vec changed) seen (set (map :id changed)) out []]
-    (if-let [[f & more] (seq front)]
-      (let [es (distinct (for [[k s] (:defines f)
-                               :when (and (= :var k) (= :macro (:var/kind (d/entity db [:var/name s]))))
-                               e (requiring db (symbol (namespace s)))]
-                           e))
-            new (into [] (comp (filter #(live? db %)) (map #(form-row db %)) (remove (comp seen :id))) es)]
-        (recur (into (vec more) new) (into seen (map :id) new) (into out new)))
-      out)))
+  (let [rows (into {} (map (juxt :e identity)) changed)
+        row #(or (rows %) (form-row db %))]
+    (mapv row (closure (map :e changed)
+                       (fn [e] (for [[k s] (:defines (row e))
+                                     :when (and (= :var k) (= :macro (:var/kind (d/entity db [:var/name s]))))
+                                     e' (requiring db (symbol (namespace s)))
+                                     :when (live? db e')]
+                                 e'))))))
 
 (defn- names
   "The qualified keywords a schema or contract form names."
@@ -587,10 +597,9 @@
   [db keys]
   (if (empty? keys)
     []
-    (let [named (into {} (for [[k f] (merge contract/forms (schema-changes db))] [k (names f)]))
-          reached (loop [r keys]
-                    (let [r' (into r (for [[k ns] named :when (and (not (r k)) (some r ns))] k))]
-                      (if (= r r') r (recur r'))))]
+    (let [naming (reduce (fn [m [k f]] (reduce #(update %1 %2 (fnil conj []) k) m (names f)))
+                         {} (merge contract/forms (schema-changes db)))
+          reached (into keys (closure keys naming))]
       (vec (distinct (for [dt (d/datoms db :aevt :var/contract)
                            :when (some reached (names (sedn/decode (:v dt))))
                            :let [fe (:db/id (:var/form (d/entity db (:e dt))))]
@@ -832,10 +841,8 @@
         plain (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) live))
         ;; the digest of key k reaching from the forms ids, with their namespaces' plain forms
         digest-of (fn [k ids]
-                    (let [reached (loop [front (into (vec ids) (comp (mapcat #(plain (:ns (by-id %)))) (map :id)) ids) seen #{}]
-                                    (if-let [[id & more] (seq front)]
-                                      (if (seen id) (recur more seen) (recur (into (vec more) (edges (by-id id))) (conj seen id)))
-                                      seen))
+                    (let [start (into (vec ids) (comp (mapcat #(plain (:ns (by-id %)))) (map :id)) ids)
+                          reached (into (set start) (closure start #(edges (by-id %))))
                           reads? (some #(let [f (by-id %)]
                                           (and (some tree-readers (:refs f))
                                                (not (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f))))))
