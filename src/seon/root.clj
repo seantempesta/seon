@@ -10,7 +10,7 @@
     :fork-server  :io     the fork server's command pipe, its events, its restart
     :reconciler   :io     main's commits through a bounded buffer (every commit's datoms; the hook a
                           reconciler and the dashboard plug into)
-  and one proc per agent (`agent-proc`, added and removed with flow/update!), its stand-in:
+  and one proc per agent (`agent-proc`, added and removed with flow/update!), its agent proc:
   it owns root's end of the agent's socket and its process, and passes Flow's pause, resume and stop on to the
   agent's own loop (seon.step/run-loop), which runs the same step-fn contract.
 
@@ -99,7 +99,7 @@
     st))
 
 (defn- proc-sym
-  "The step-fn of root proc pid, as its declaration names it (an agent's stand-in for an
+  "The step-fn of root proc pid, as its declaration names it (an agent's proc for an
   agent id)."
   {:malli/schema [:=> [:cat :seon.root/api-state [:maybe :keyword]] :qualified-symbol]}
   [st pid]
@@ -194,7 +194,7 @@
 (defn- start-agent
   "Register a new agent: its socket (root keeps one end; the other goes to whoever forks
   it), its proc definition (added to the graph by update! at the end of the step). Root's
-  end is a jolt.async.remote end (session RC1): its :in is the stand-in's :from, so the
+  end is a jolt.async.remote end (session RC1): its :in is the agent proc's :from, so the
   agent's port is an ordinary channel. Answers [st id agent-end-fd]."
   {:malli/schema [:=> [:cat :seon.root/api-state :map] [:tuple :seon.root/api-state :seon.agent/id :seon.lib/fd]]}
   [st {:keys [branch task cloned-from]}]
@@ -220,7 +220,7 @@
      id a]))
 
 (defn- end-agent
-  "The agent's process is gone and its stand-in saw its last frame: its proc leaves the
+  "The agent's process is gone and its agent proc saw its last frame: its proc leaves the
   graph (update! at the end of the step) and its branch's connection is released."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :map] :seon.root/api-state]}
   [st o {:keys [agent rid pid inflight]}]
@@ -336,7 +336,7 @@
       st)))
 
 (defn- back-op
-  "A message from a stand-in, a fork-server or writer event, or the error reader."
+  "A message from an agent proc, a fork-server or writer event, or the error reader."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :map] :seon.root/api-state]}
   [st o m]
   (cond
@@ -441,14 +441,14 @@
       ;; an effect owner's failed outcome (seon.fx/owner-proc)
       :problem (problem st (err/occurrence (:error m) (:class m) {:agent (:agent m) :task (get-in st [:view :agents (:agent m) :task])}
                                            (System/currentTimeMillis)))
-      ;; an agent's stand-in observed it stalled (seon.agent-proc :stall?)
+      ;; an agent's proc observed it stalled (seon.agent-proc :stall?)
       :stalled (-> st (set-agent (:agent m) {:stalled (:quiet-ms (:error m))})
                    (problem (err/occurrence (:error m) :agent {:agent (:agent m) :task (get-in st [:view :agents (:agent m) :task])
                                                                :form (get-in m [:error :last-op :form])}
                                             (System/currentTimeMillis))))
       ;; the stall timer: each agent with an eval in flight checks its own quiet time
       :stall-check (let [now (System/currentTimeMillis)]
-                     (reduce (fn [st id] (to-agent st id {:op :stall? :now-ms now :dial-ms (:stall-ms st)})) (dissoc st ::stall-due) (::busy st)))
+                     (reduce (fn [st id] (to-agent st id {:op :stall? :now-ms now :stall-ms (:stall-ms st)})) (dissoc st ::stall-due) (::busy st)))
       :kill-all (reduce (fn [st aid] (-> st (set-agent aid {:status :killed}) (to-agent aid {:op :kill}))) st (keys (:agents st)))
       st)))
 
@@ -486,7 +486,7 @@
 
 (defn api-proc
   "The api. In :ext (the API's callers, each request with its reply promise: the
-  promises live only here), :back (the agents' stand-ins and the error reader),
+  promises live only here), :back (the agent procs and the error reader),
   :from-writer and :from-fs (answers and events). Out :to-writer, :to-fs, :events, and
   [agent :in] for each agent (routed by the resolver).
   Agents are procs of this graph: a step that spawned or ended agents applies ONE
@@ -526,7 +526,7 @@
                   st)
                 st))
          st (flush-problems st o)
-         ;; while an agent has an eval in flight, the stall check runs every half dial
+         ;; while an agent has an eval in flight, the stall check runs every half stall bound
          st (if (and (seq (::busy st)) (not (::stall-due st)) (pos? (:stall-ms st)) (:back st))
               (let [back (:back st)]
                 ;; a go block parks on the timer (Jolt's take! with a callback forks a thread per
@@ -972,7 +972,7 @@
   (some-> (:pid (agent-entry sys agent-id)) (lib/c-kill lib/SIGUSR1))
   nil)
 
-(defn kill! "SIGKILL the agent's process (through its stand-in). nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
+(defn kill! "SIGKILL the agent's process (through its agent proc). nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
   [sys agent-id] (request! sys 'kill! agent-id nil) nil)
 
 (defn pause-agent!
@@ -1029,7 +1029,7 @@
   The timer starts at the first timeout and the io poller at the first socket wait (an
   agent's), so a root has both once its first agent runs.
   With a running sys, also one thread per :mixed proc of its declaration (Flow runs :io
-  procs, agents' stand-ins included, on the carriers), its two edge readers (Flow's
+  procs, agent procs included, on the carriers), its two edge readers (Flow's
   error channel, the fork server's socket) and, while the web
   proc listens, the web server's acceptor and sweeper."
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :seon.root/sys] :map]]}

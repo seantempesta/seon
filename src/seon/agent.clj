@@ -443,7 +443,7 @@
   [m]
   (case (:op m)
     ;; the proofs of the task root names (:task), as this branch holds them
-    ;; root hears the test child's pid once it is forked (its stand-in's :tests-started event)
+    ;; root hears the test child's pid once it is forked (its agent proc's :tests-started event)
     :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
                                                               (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
                                                               #(send! {:op :tests-started :id (:id m) :pid %}))

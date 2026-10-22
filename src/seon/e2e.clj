@@ -184,7 +184,7 @@
   (seon.config/provider (assoc seon.config/config :seon.config.ai/provider :openai-compat)))
 
 (defn always-wrong
-  "The stand-in for a model that never gets it right: every reply defines app.calc/add as
+  "The scripted model that never gets it right: every reply defines app.calc/add as
   subtraction (inv1's repro: add always wrong, with twice needing it)."
   {:malli/schema [:=> [:cat :seon.model/request] :string]}
   [_]

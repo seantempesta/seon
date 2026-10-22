@@ -1,6 +1,6 @@
 # Storage
 
-One durable store holds every branch as Datahike index trees in konserve, one content-addressed node per key, on LMDB. A commit costs the nodes it rewrites, so what it writes depends on how values are laid out, whether history is kept, and how nodes are encoded. The store is opened in `seon.db` (`seon.db/open!`, ```seon.db/store-cfg```). Its failure points are in [failure points](failure-points.md), and its dials (`:seon.config.store/*`) in [config](config.md).
+One durable store holds every branch as Datahike index trees in konserve, one content-addressed node per key, on LMDB. A commit costs the nodes it rewrites, so what it writes depends on how values are laid out, whether history is kept, and how nodes are encoded. The store is opened in `seon.db` (`seon.db/open!`, ```seon.db/store-cfg```). Its failure points are in [failure points](failure-points.md), and its config keys (`:seon.config.store/*`) in [config](config.md).
 
 ## Identity
 
@@ -59,7 +59,7 @@ A datom value at least `:seon.config.store/value-out-of-line-bytes` large (1,024
 - `restore` swaps the values back before the node enters the cache, so a live node never holds a reference.
 - GC's mark (`mark`, `mark-unseen`) adds the keys each stored node references, so a value lives while a tree reaches it.
 
-The size is a lower bound of the value's serialized size: a string's characters, a collection's elements. Hashing a 2 KB value and asking the store for it each cost about 15–18 µs on Jolt, and a commit rewrites the tail nodes with every large value in them. So the key of a value known to be stored (read back, or found by the store) is kept in the node cache under its datom, whose hash the datom caches. A value only queued for writing is not kept there, so a commit that fails before the write leaves no reference to a value the store lacks. Stored nodes describe themselves, so a store holding both kinds reads either, whatever the dial says now. Proof: `seon.db-test/a-large-value-lives-once-under-its-own-key`.
+The size is a lower bound of the value's serialized size: a string's characters, a collection's elements. Hashing a 2 KB value and asking the store for it each cost about 15–18 µs on Jolt, and a commit rewrites the tail nodes with every large value in them. So the key of a value known to be stored (read back, or found by the store) is kept in the node cache under its datom, whose hash the datom caches. A value only queued for writing is not kept there, so a commit that fails before the write leaves no reference to a value the store lacks. Stored nodes describe themselves, so a store holding both kinds reads either, whatever the config key says now. Proof: `seon.db-test/a-large-value-lives-once-under-its-own-key`.
 
 Thresholds measured at 20 turns with LZ4: 4,096 B moves nothing (a turn's values are 1.5–2.5 KB) and costs 862 KB per turn; 1,024 B costs 237 KB; 256 B costs 223 KB (it also moves the basis, ~400 B). 1,024 is the default: it takes nearly all the gain, and every value it moves is its own LMDB key.
 

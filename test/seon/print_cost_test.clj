@@ -48,7 +48,7 @@
 
 (def ^:private fixed
   "What does not grow with the entries: about sixty small maps per print (the context and its
-  dials, the options, the root's row and node, its sizings, the tree's and the emitter's maps
+  config keys, the options, the root's row and node, its sizings, the tree's and the emitter's maps
   and the answer). A map of at most :sort-bound (64) keys is shown sorted, which adds per-entry
   work below 65 entries: the sizes start above it."
   (round (priced {:map/assoc! 60})))

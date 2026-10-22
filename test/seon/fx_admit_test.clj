@@ -30,7 +30,7 @@
         [st _] (fx/owner-proc st :in (req 2 10))
         [st _] (fx/owner-proc st :done {:dest {:agent :a1} :outcome {:value 1} :est 10 :cost 10})]
     (is (= (/ r0 2) r1) "a 429 halves the admitted rate")
-    (is (< r1 (get-in st [:bucket :per-ms]) (inc r0)) "a success raises it by a twentieth, never past the dial")))
+    (is (< r1 (get-in st [:bucket :per-ms]) (inc r0)) "a success raises it by a twentieth, never past the configured rate")))
 
 (deftest a-later-step-of-a-chain-runs-first
   (let [[st _] (fx/owner-proc (owner 1 nil) :in (req 1 0))

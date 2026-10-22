@@ -8,7 +8,7 @@
 ;; and its entries declare the attributes root writes on main's root entity (seon.config/facts).
 {:seon.config/config
  [:map {:closed true :seon.db/attributes true :seon.render/html seon.render.ui/config-panel
-        :description "The resolved config: every limit, bound, dial and default of the platform, one key each."}
+        :description "The resolved config: every limit, bound and default of the platform, one key each."}
   ;; root and its procs
   [:seon.config.root/max-agents :seon.config.root/max-agents]
   [:seon.config.root/api-writes :seon.config.root/api-writes]

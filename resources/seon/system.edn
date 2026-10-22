@@ -6,7 +6,7 @@
 ;; from tasks.
 ;;
 ;; A proc: {:proc step-fn symbol, :args map, :chan-opts map}. A :bind/<name> keyword is a
-;; value the boot step holds (a connection, a channel, a dial; seon.root/bindings), put in
+;; value the boot step holds (a connection, a channel, a config key; seon.root/bindings), put in
 ;; at build. :conns is the dependency graph: procs park on their inputs until upstream
 ;; sends, readiness is each proc's ping-map-fn, and there is no start order.
 ;; :fx declares the effect kinds (session FX1): each becomes an owner :fx/<kind> and its workers.

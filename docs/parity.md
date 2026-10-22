@@ -80,7 +80,7 @@ The server's ops are one table, `seon.server/ops`: MCP lists each as the tool `s
 | history kept | `:seon.config.store/keep-history?` (default true), fixed when a store is made; a kept store made without it keeps its layout ([storage](storage.md#history)) | present |
 | storage collection, log rotation (`seon.maintenance`) | root collects at quiescence with no agent live, when a branch is gone ([storage](storage.md#collection)); no log rotation | partial |
 | blobs out of line (`seon.blob`) | large values out of line inside Datahike's own store, written once, kept by GC's mark ([storage](storage.md#values-out-of-line)); zstd for every stored value, built from source ([storage](storage.md#compression)); plain values stored as data, not EDN text ([storage](storage.md#plain-values)) | present |
-| every dial documented | one aero file, one resolver (`seon.config`) | present |
+| every config key documented | one aero file, one resolver (`seon.config`) | present |
 | one error shape, recorded once per signature, problem report | `seon.contract/error`, `seon.error`, `seon.problems` | present |
 | named catch sites | `docs/failure-points.md`, `bin/laws` | new |
 

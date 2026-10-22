@@ -167,7 +167,7 @@
 
 (deftest agent-stand-in
   ;; root's end of the agent's socket is a jolt.async.remote end: the agent's frames arrive
-  ;; as values on its :in (the stand-in's :from), and nil there is its close
+  ;; as values on its :in (the agent proc's :from), and nil there is its close
   (let [[r a] (sock/socketpair)
         end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
         st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
@@ -353,7 +353,7 @@
             (is (= (:view rs) (:view rs2)))))))))
 
 (defn- answering-sys
-  "(f sys), sys's server answering every request with r (a stand-in for the api), on a
+  "(f sys), sys's server answering every request with r (a stub for the api), on a
   branch of the test store deleted when f returns."
   [r f]
   (ts/test-branch! (fn [cfg conn] (let [ext (a/chan 4)]

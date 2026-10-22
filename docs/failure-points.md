@@ -49,7 +49,7 @@ function. The same sites check judges the other laws: [clocks](clocks.md) and [r
 
 | failure point | edge | answer |
 |---|---|---|
-| A peer's socket is gone (EOF, or its end frame) | root: `jolt.async.remote`'s reader pump; agents and the fork server: `seon.sock/fill!`, `seon.sock/recv!` | root: the end's `:in` closes, the stand-in's `:from` reads nil and becomes `{:op :dead}`; elsewhere `:eof` |
+| A peer's socket is gone (EOF, or its end frame) | root: `jolt.async.remote`'s reader pump; agents and the fork server: `seon.sock/fill!`, `seon.sock/recv!` | root: the end's `:in` closes, the agent proc's `:from` reads nil and becomes `{:op :dead}`; elsewhere `:eof` |
 | A write to a dead peer (EPIPE) | `seon.sock/send-frame!` | `:epipe`; the agent exits, root reads EOF |
 | `fork()` refused (another Chez thread active, the OS) | `seon.lib/fork!`, the one spawning skeleton (the fork server's agents and standby, an agent's test child and clone) | its `refused` branch with the active Chez threads, checked once, never waited out: `:fork-failed` / `:standby-failed` with `:active-threads`; the test run's `:error` report; the clone's `:clone-failed` |
 | An outside client half-open at root's server (it never sends its line, or never reads its answer) | `seon.server/serve-connection!`, on that connection's own edge thread | nothing: that connection's thread parks (no bound can tell slow from gone); every other connection is served. It shows as one more root thread, and ends when the client's socket closes |
@@ -88,7 +88,7 @@ Two rules of the OS and Chez that no code may "fix" by adding a thread or a chec
   sockets close**, so the sender keeps its copy until the receiver confirms (the fork
   server's `:in-flight`, a clone's socket kept until `:cloned`). A descriptor rides a frame
   of its own on a socket a pump also writes (`seon.agent-proc/send-fd!`), sent only while
-  that pump is idle: the agent asks for it (`:fd-ready`) and the stand-in holds its other
+  that pump is idle: the agent asks for it (`:fd-ready`) and the agent proc holds its other
   messages until it is sent.
 
 ## Contracts over host objects are proved by deftests, never by generation

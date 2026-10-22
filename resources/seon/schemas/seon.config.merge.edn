@@ -1,4 +1,4 @@
-;; Merges and refinement (next's task dials; a task's own :seon.config.merge/* and
+;; Merges and refinement (next's task config keys; a task's own :seon.config.merge/* and
 ;; :seon.config.agent/max-turns override the root's).
 {:seon.config.merge/max-running [:int {:min 1 :seon.config/unit "merges" :description "Merge attempts at once (an octopus merge when their definitions are disjoint; 1 is git's queue)."}]
  :seon.config.merge/max-conflicts [:int {:min 0 :seon.config/unit "conflicts" :description "Conflicts past which a merge attempt is refused (too many to resolve)."}]

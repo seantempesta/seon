@@ -5,7 +5,7 @@
   (`eval-tool`), so the model sees each evaluation's answer before its next call.
 
   Providers (`:seon.model/provider`, dispatched on :kind):
-  - :scripted, a deterministic stand-in: the function named by :script answers the reply
+  - :scripted, a deterministic scripted model: the function named by :script answers the reply
     text for a request (it sees the task id, turn and messages, as a test double may), sent
     as one eval call, its prose read as comments (seon.reader/forgive);
   - :openai-compat, an OpenAI-compatible chat API (DeepSeek's: base URL plus

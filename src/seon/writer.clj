@@ -222,7 +222,7 @@
   "The writer: root's own writes to main (group commit), d/branch!, and every merge into
   main. Each agent process writes its own branch (run-ahead, seon.agent) and tells it
   :agent-commit, so the one flush covers it. In :in (every write request, from the :api
-  and the agents' stand-ins). Out :to-fork-server (main's
+  and the agent procs). Out :to-fork-server (main's
   commits and forks, FIFO), :to-api (answers {:dest :r}, after the batch's flush, and
   {:op :writer :tx-count :p50-ms :commits}), :main (main's commits), :events.
   A closed :in is the end of the flow: everything taken is committed and flushed, then

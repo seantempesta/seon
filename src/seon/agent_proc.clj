@@ -92,10 +92,10 @@
                                                                         :since-ms (System/currentTimeMillis)})))]}]))
     :write [(cond-> (to-proc! st (:msg m)) (= :fx-reply (:op (:msg m))) (update :fx-out (fnil dec 1))) nil]
     ;; root's stall check (seon.root's timer): a request in flight, no frame from the agent
-    ;; for longer than the dial and no effect of its outstanding is a stall, observed once
+    ;; for longer than the stall bound and no effect of its outstanding is a stall, observed once
     ;; per quiet spell
     :stall? (let [quiet (- (:now-ms m) (:last-frame-ms st (:now-ms m)))]
-              (if (and (seq (:inflight st)) (not (:stall-seen st)) (> quiet (:dial-ms m)) (zero? (:fx-out st 0)) (not (:dead? st)))
+              (if (and (seq (:inflight st)) (not (:stall-seen st)) (> quiet (:stall-ms m)) (zero? (:fx-out st 0)) (not (:dead? st)))
                 [(assoc st :stall-seen true)
                  {:to-api [{:op :stalled :agent (:id st)
                             :error (contract/error :seon.agent/stalled 'seon.agent-proc/agent-proc

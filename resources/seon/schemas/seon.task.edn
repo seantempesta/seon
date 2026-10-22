@@ -74,7 +74,7 @@
                         [:seon.attempt/unmerged {:optional true} [:vector :string]]
                         [:seon.attempt/changed {:optional true} [:set :string]]]
  ;; ---- the done rule and the reconciler's answer ----
- :seon.reconcile/merge-dials [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?]]
+ :seon.reconcile/merge-config [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?]]
  ;; a released task not done at quiescence: a root cause (its stuck fact, or cancelled or held)
  ;; and the released tasks it blocks, transitively
  :seon.reconcile/stuck-row [:map {:closed true} [:task :seon.task/id] [:cause :string]
@@ -150,7 +150,7 @@
                                         [:reasoning-effort {:optional true} [:enum :low :medium :high]]]]]
  :seon.model/request [:map [:messages [:vector :seon.model/message]] [:task :seon.task/id] [:turn :int]]
  :seon.model/completion [:map [:text :string] [:prompt-tokens {:optional true} :int] [:completion-tokens {:optional true} :int] [:ms number?]
-                         ;; the counts are the stand-in's own estimate (seon.print.select/estimate), not a provider's measure
+                         ;; the counts are the scripted model's own estimate (seon.print.select/estimate), not a provider's measure
                          [:estimated {:optional true} :boolean]
                          ;; the reply's calls of the one tool, eval, in order
                          [:tool-calls {:optional true} [:vector :seon.model/tool-call]]

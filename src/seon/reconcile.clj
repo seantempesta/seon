@@ -25,8 +25,8 @@
   definitions they change are disjoint (an octopus merge); 1 is git's one-at-a-time merge queue."
   (cfg/value :seon.config.merge/max-running))
 
-(def merge-dials
-  "The merge dials' defaults, when the task sets none (:seon.config.merge/*): the config's."
+(def merge-defaults
+  "The merge config's defaults, when the task sets none (:seon.config.merge/*): the config's."
   {:max-conflicts (cfg/value :seon.config.merge/max-conflicts) :max-merge-turns (cfg/value :seon.config.merge/max-merge-turns)})
 
 (def default-budget
@@ -38,11 +38,11 @@
   {:malli/schema [:=> [:cat :seon.task/own] :boolean]}
   [t] (< (:seon.task/generation t 0) (:seon.task/budget t default-budget)))
 
-(defn dials
-  "Task t's merge dials: its own :seon.config.merge/* over the defaults."
-  {:malli/schema [:=> [:cat :seon.task/own] :seon.reconcile/merge-dials]}
+(defn merge-config
+  "Task t's merge config: its own :seon.config.merge/* over the defaults."
+  {:malli/schema [:=> [:cat :seon.task/own] :seon.reconcile/merge-config]}
   [t]
-  (into {} (for [[k v] merge-dials] [k (get t (keyword "seon.config.merge" (name k)) v)])))
+  (into {} (for [[k v] merge-defaults] [k (get t (keyword "seon.config.merge" (name k)) v)])))
 
 ;; ---- the view: one read of main ---------------------------------------------------
 
@@ -85,8 +85,8 @@
 
 (defn hairy
   "Is a merge too hairy to keep resolving, from measured facts: more conflicts than the
-  dial; main deleted a var the task's plan or proofs reference; more model turns without
-  green than the dial. Answers {:rule :reason} or nil. The merge agent stops early on it;
+  config key; main deleted a var the task's plan or proofs reference; more model turns without
+  green than the config key. Answers {:rule :reason} or nil. The merge agent stops early on it;
   the reconciler decides from the attempt's facts alone."
   {:malli/schema [:=> [:cat [:map [:conflicts [:sequential [:map [:key :any] [:kind :keyword]]]]
                              [:task [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
@@ -760,7 +760,7 @@
      :main (let [db (:db m) t (:max-tx db)
                  next? (and (:idx st) (= t (inc (:t st))))
                  idx (if next? (observe (:idx st) db (:ops m)) (index db))
-                 ;; a commit touching tasks, attempts or dials ends a quiet spell (root's own
+                 ;; a commit touching tasks, attempts or config keys ends a quiet spell (root's own
                  ;; quiescent fact does not)
                  work? (or (not next?) (some (fn [[_ _ a]] (and (keyword? a) (watched-ns (namespace a)) (not= "seon.root" (namespace a)))) (:ops m)))
                  ;; a commit holding only refused attempts (the refusals' own writes) changes

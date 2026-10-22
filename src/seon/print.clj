@@ -16,7 +16,7 @@
   (:require [clojure.string :as str] [seon.print.select :as select] [seon.config :as config]))
 
 (def budgets
-  "Tokens each kind of shown value may spend: a reply's value (Seon's shipped agent dial),
+  "Tokens each kind of shown value may spend: a reply's value (Seon's shipped agent config key),
   a value shown inside another (a refused argument, a test's expected and actual, ex-data),
   a form echoed back, and the whole context block (breadth first, so every section shows
   before any one deepens). The config's :seon.config.render.agent/token-budget and

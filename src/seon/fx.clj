@@ -2,8 +2,8 @@
   "Effects (session FX1, notes/option3-FX1-effects.md). Every outside effect kind has ONE
   owner proc in root behind a bounded channel, and `workers` performer procs:
 
-    agent --socket--> stand-in --:fx/<kind>--> owner --:work--> worker (performs)
-    agent <--socket-- stand-in <--api :back--- owner <--:done-- worker
+    agent --socket--> agent proc --:fx/<kind>--> owner --:work--> worker (performs)
+    agent <--socket-- agent proc <--api :back--- owner <--:done-- worker
 
   The owner admits (concurrency = its workers; priority and budget are request attributes,
   rate and budget counters its live state), queues by priority, and replies {:dest :r}
@@ -24,7 +24,7 @@
 
 ;; ---- performers: the interop edges, one Var per kind ------------------------------------
 
-(defn echo "The stand-in effect: answers the request as its value." {:malli/schema [:=> [:cat :map] :map]}
+(defn echo "The test effect: answers the request as its value." {:malli/schema [:=> [:cat :map] :map]}
   [req] {:value (:req req)})
 
 (defn write-file
@@ -160,7 +160,7 @@
 
 (defn refill
   "The owner's token bucket at now-ms (session R3): tokens grow at :per-ms up to :cap since :at.
-  A bucket is the provider's rate as data: tokens per second, set from the dial and halved by
+  A bucket is the provider's rate as data: tokens per second, set from its config key and halved by
   a rate-limit outcome."
   {:malli/schema [:=> [:cat :seon.fx/bucket :int] :seon.fx/bucket]}
   [{:keys [tokens cap per-ms at] :as b} now-ms]
@@ -184,7 +184,7 @@
   "The owner at a worker's outcome m: the worker is free; the task's spend grows by the actual
   cost; the bucket gets back (or pays) the difference from the estimate; a rate-limit outcome
   (the provider's 429, the named failure point of this edge) halves the bucket's rate, and each
-  other outcome raises it by a twentieth back toward the dial (AIMD, TCP's congestion rule)."
+  other outcome raises it by a twentieth back toward the configured rate (AIMD, TCP's congestion rule)."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [st {:keys [budget-key cost est outcome]}]
   (let [limited? (= :seon.model/rate-limited (:seon.error/type outcome))]
@@ -236,12 +236,12 @@
 
 (defn- bound
   "The owner's queue holds at most :seon.config.fx/buf requests; at the bound it reads only :done
-  (Flow's input filter), so stand-ins park on :in: back-pressure to the asking agent."
+  (Flow's input filter), so agent procs park on :in: back-pressure to the asking agent."
   {:malli/schema [:=> [:cat :map] :map]}
   [st] (assoc st ::flow/input-filter (if (>= (count (:queue st)) (cfg/value :seon.config.fx/buf)) #(not= :in %) identity)))
 
 (defn owner-proc
-  "The owner of one effect kind. In :in (the stand-ins' requests {:req :dest :prio
+  "The owner of one effect kind. In :in (the agent procs' requests {:req :dest :prio
   :budget :budget-key :agent}, addressed by id; :seon.config.fx/buf), :done (the workers'
   outcomes). Out :to-workers (its performers' shared channel), :out (the api's :back:
   {:dest :r})."

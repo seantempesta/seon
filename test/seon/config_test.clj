@@ -134,7 +134,7 @@
     (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6) (config/facts c {:seon.config.web/port "--set"}))})
     (is (= c (config/from-db @conn)))
     (is (= {:seon.config.web/port "--set"} (d/q '[:find ?s . :where [?e :seon.root/id :root] [?e :seon.config/sources ?s]] @conn)))
-    ;; the reconciler's root read sees the same dials
+    ;; the reconciler's root read sees the same config keys
     (is (= {:boot "boot-1" :max-running 6 :max-merging (config/value :seon.config.merge/max-running)} (task/root @conn)))
     ;; a branch made from main holds them too (what an agent forked onto it reads)
     (d/branch! conn (:branch cfg) child)

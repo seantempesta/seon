@@ -73,7 +73,7 @@
 
 (defn- proc-health-of
   "Each declared root proc (the built system's, once it is) with the defects root's view
-  holds of it: {pid {:defects n :newest message}}; the agents' stand-ins are not procs here."
+  holds of it: {pid {:defects n :newest message}}; agent procs are not counted here."
   {:malli/schema [:=> [:cat :map [:sequential :map]] :map]}
   [st root-errors]
   (let [sysp (:system-p st)

@@ -218,13 +218,13 @@
   (let [{:keys [gaps-before plan-before]} (begin! task attempt)
         t0-task (task/task (agent/db) task)
         merge? (= :merge (:seon.task/kind t0-task))
-        dials (r/dials t0-task)]
+        merge-cfg (r/merge-config t0-task)]
     (when merge? (branch/merge-main!))
     (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (profile/now-ns) :attempt attempt
                :max-turns max-turns :merge? merge? :gaps-before gaps-before}]
       (let [{:keys [refusals unmerged] :as obs} (observe task (:gaps-before st) plan-before)
             stop (get-in @agent/state [:turn :stop])
-            hairy (when merge? (r/hairy (merge dials {:conflicts unmerged :task (:task obs) :merge-turns (:merge-turns st)})))]
+            hairy (when merge? (r/hairy (merge merge-cfg {:conflicts unmerged :task (:task obs) :merge-turns (:merge-turns st)})))]
         (cond
           ;; git's CI after the merge: green on the combined program; merge main again until
           ;; it brings nothing new

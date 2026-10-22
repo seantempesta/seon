@@ -1,7 +1,7 @@
 # Config
 
 Owner, 2026-10-21: "the only things that should stay are documented config schemas". Every
-limit, bound, dial and default of the platform is one key in one aero file, documented beside
+limit, bound and default of the platform is one key in one aero file, documented beside
 its value, validated by its schema, and read through one resolver.
 
 ## The file

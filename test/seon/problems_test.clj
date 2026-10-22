@@ -216,17 +216,17 @@
         st (#'ap/agent-proc {:id :a1 :end end :branch :b1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4) :fx-kinds #{:fx/model}})
         [st _] (#'ap/agent-proc st :in {:op :req :rid 1 :kind :eval :msg {:op :eval :forms "(Thread/sleep 99999)"}})
         st (assoc st :last-frame-ms 1000)]
-    (testing "an eval in flight, no frame for longer than the dial, no effect outstanding: stalled, once"
-      (let [[st outs] (#'ap/agent-proc st :in {:op :stall? :now-ms 5000 :dial-ms 2000})
+    (testing "an eval in flight, no frame for longer than the stall bound, no effect outstanding: stalled, once"
+      (let [[st outs] (#'ap/agent-proc st :in {:op :stall? :now-ms 5000 :stall-ms 2000})
             s (first (filter #(= :stalled (:op %)) (:to-api outs)))]
         (is (= :seon.agent/stalled (get-in s [:error :seon.error/type])))
         (is (= 4000 (get-in s [:error :quiet-ms])))
         (is (contract/valid? :seon.agent/stalled (:error s)))
-        (is (empty? (:to-api (second (#'ap/agent-proc st :in {:op :stall? :now-ms 6000 :dial-ms 2000})))) "reported once per quiet spell")))
+        (is (empty? (:to-api (second (#'ap/agent-proc st :in {:op :stall? :now-ms 6000 :stall-ms 2000})))) "reported once per quiet spell")))
     (testing "an effect outstanding is waiting on its owner, not stalled"
       (let [[st _] (#'ap/agent-proc st :from {:op :fx :k 1 :kind :model})
             st (assoc st :last-frame-ms 1000)]
-        (is (empty? (:to-api (second (#'ap/agent-proc st :in {:op :stall? :now-ms 9000 :dial-ms 2000})))))))))
+        (is (empty? (:to-api (second (#'ap/agent-proc st :in {:op :stall? :now-ms 9000 :stall-ms 2000})))))))))
 
 (deftest an-effect-error-is-counted-by-root
   (testing "the owner of an effect kind tells the api about each error outcome"

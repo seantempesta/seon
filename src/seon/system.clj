@@ -59,6 +59,6 @@
      :conns (:conns d)}))
 
 (defn fx-owners
-  "The effect owners' pids in a built procs map: what an agent's stand-in may address."
+  "The effect owners' pids in a built procs map: what an agent's proc may address."
   {:malli/schema [:=> [:cat :map] [:set :keyword]]}
   [procs] (into #{} (filter #(= "fx" (namespace %))) (keys procs)))

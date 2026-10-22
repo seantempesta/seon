@@ -113,7 +113,7 @@
   ;; owner, 2026-10-22 (DECISIONS "Agents work at the REPL, through tool calls"): a reply was a
   ;; batch of forms whose results came only after the whole reply, and 18% of model turns were
   ;; repetition loops asking for answers the model could not see. Now each call of the one
-  ;; tool, eval, is answered as its own tool message before the next model call: the stand-in
+  ;; tool, eval, is answered as its own tool message before the next model call: the scripted model
   ;; (seon.fixtures/two-calls) writes its second call from the answer its first call got
   (let [[end msgs] (in-agent ["(seon.turn/work! {:task \"demo/t\" :attempt \"demo/t#calls\" :max-turns 2})"
                               (str "(let [db (seon.agent/db)]"

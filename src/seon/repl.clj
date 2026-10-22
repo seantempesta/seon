@@ -72,7 +72,7 @@
   (let [r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. code))
         starts (delay (reader/line-starts code))
         eval-fn (:repl/eval-fn req eval)
-        ;; the form's budget of work (engine ticks): the request's, else the dial for an
+        ;; the form's budget of work (engine ticks): the request's, else the config key for an
         ;; agent's model and an outside agent; root's own platform requests run unbounded
         ticks (let [t (or (:ticks req)
                           (when (#{:model :outside :ui} (:origin req)) (cfg/value :seon.config.agent/form-ticks)))]

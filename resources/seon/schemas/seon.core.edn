@@ -44,7 +44,7 @@
  :seon.writer/state [:map [:conn :seon.host/conn] [:cfg :seon.db/cfg]]
  :seon.writer/request [:map [:op :keyword]]
  ;; an effect owner's token bucket (seon.fx, session R3): tokens now, capacity, the refill rate
- ;; per ms now and as dialed, the ms it was last refilled at
+ ;; per ms now and as configured, the ms it was last refilled at
  :seon.fx/bucket [:map [:tokens number?] [:cap number?] [:per-ms number?] [:rate-ms {:optional true} number?] [:at :int]]
  ;; the fork server (seon.fork-server)
  :seon.fork-server/event [:map [:ev :keyword]]
