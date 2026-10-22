@@ -351,8 +351,18 @@
 ;; server's main, an agent's branch copy) applies the writer's RESOLVED datoms rather
 ;; than re-resolving tempids with its own counter.
 
+(defn report->tx-meta
+  "The transaction entity's own facts in the writer's tx-report ({attribute value}: its
+  :db/txInstant and any tx-meta; empty without history): what a replica of the branch
+  applies as its own transaction's :tx-meta, so its transaction entity holds main's facts
+  (a transaction's id is its branch's own, so they cannot travel as datoms on it)."
+  {:malli/schema [:=> [:cat :seon.db/tx-report] :map]}
+  [rep]
+  (into {} (for [dt (:tx-data rep) :when (and (= (:e dt) (:tx dt)) (:added dt))] [(:a dt) (:v dt)])))
+
 (defn report->tx
-  "The writer's tx-report as explicit-id tx-data (the transaction entity's own datoms left out)."
+  "The writer's tx-report as explicit-id tx-data (the transaction entity's own datoms left
+  out: report->tx-meta carries them)."
   {:malli/schema [:=> [:cat :seon.db/tx-report] :seon.db/resolved-tx]}
   [rep]
   (vec (for [dt (:tx-data rep) :when (not= (:e dt) (:tx dt))]

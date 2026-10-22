@@ -234,7 +234,15 @@
         (is (= (:max-tx (:db-after rep)) (:max-tx (:db st))))
         (is (= [:applied] (map :ev (:ev outs))))
         (testing "and a commit it already holds is skipped"
-          (is (= [st nil] (#'server/server-step st :cmd {:op :tx :t (:max-tx (:db st)) :tx-data ops}))))))))))
+          (is (= [st nil] (#'server/server-step st :cmd {:op :tx :t (:max-tx (:db st)) :tx-data ops}))))))
+    (testing "the replica's transaction holds main's transaction facts (its instant, its tx-meta): seon.db/report->tx-meta"
+      (let [rep (d/with db {:tx-data [{:note/text "w"}] :tx-meta {:note/text "the commit's own fact"}})
+            t (:max-tx (:db-after rep))
+            [st2 _] (step #'server/server-step st :cmd {:op :tx :t t :ns 0 :tx-data (pdb/report->tx rep) :tx-meta (pdb/report->tx-meta rep)})
+            instant (fn [d] (:db/txInstant (d/entity d t)))]
+        (is (inst? (instant (:db-after rep))) "main's transaction has its instant (history is kept)")
+        (is (= (instant (:db-after rep)) (instant (:db st2))))
+        (is (= "the commit's own fact" (:note/text (d/entity (:db st2) t))) "and its tx-meta")))))))
 
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'seon.procs-test)]
