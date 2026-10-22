@@ -1,16 +1,16 @@
 #!/bin/zsh
-# bin/worktree-check [NAME]   prove the worktree workflow end to end with this checkout's tools: a throwaway
-# worktree (bin/worktree NAME, default worktree-check), its build, its own root on its own ports, an eval
+# bin/worktree-check [NAME [BASE]]   prove the worktree workflow end to end with this checkout's tools: a throwaway
+# worktree (bin/worktree NAME BASE, default worktree-check from main; a worktree session names its own branch), its build, its own root on its own ports, an eval
 # through its server and through its MCP server (./bin/mcp), the standing root (7888) untouched,
 # `bin/check smoke` on a store of the checks' own, the root stopped, nothing left running, the
 # worktree and its branch removed. Run it from the main tree. Every step's exit status is printed;
 # the last line is WORKTREE-CHECK OK or WORKTREE-CHECK FAILED, and so is the exit status.
 setopt pipefail
-MAIN=$(cd "$(dirname "$0")/.." && pwd); NAME=${1:-worktree-check}; WT=$MAIN/../next-$NAME; WT=${WT:A}
+MAIN=$(cd "$(dirname "$0")/.." && pwd); NAME=${1:-worktree-check}; BASE=${2:-main}; WT=$MAIN/../next-$NAME; WT=${WT:A}
 fails=0
 step() { local name=$1; shift; local t0=$SECONDS
   if "$@"; then print "OK   $name ($((SECONDS-t0)) s)"; else print "FAIL $name ($((SECONDS-t0)) s)"; fails=$((fails+1)); fi }
-step "worktree" $MAIN/bin/worktree $NAME main
+step "worktree" $MAIN/bin/worktree $NAME $BASE
 step "own ports" zsh -c "cd $WT && bin/ports"
 step ".mcp.json committed and unmodified" zsh -c "cd $WT && git diff --quiet -- .mcp.json && grep -q './bin/mcp' .mcp.json"
 step "build seon" zsh -c "cd $WT && nice -n 15 bin/build seon > target/worktree-check-build.log 2>&1"
