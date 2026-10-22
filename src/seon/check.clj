@@ -7,7 +7,7 @@
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
   reference (await-ref, seon.e2e/await-db), never a poll or a deadline."
-  (:require [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.entrance] [clojure.data.json] [seon.cost] [seon.problems]))
+  (:require [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [clojure.data.json] [seon.cost] [seon.problems]))
 
 (defn- out! [& xs] (println (apply str xs)) (flush))
 
@@ -55,7 +55,7 @@
 
 (defn- started
   "Agent id's :started event for an eval of form: it began, so a kill, an interrupt or a pause
-  lands on a running eval; the form tells it from an earlier one's."
+  arrives on a running eval; the form tells it from an earlier one's."
   [id form] #(and (= :started (:type %)) (= id (:agent %)) (= form (:form %))))
 
 (defn- ping
@@ -128,8 +128,8 @@
                            (deftest sq-test (is (= 144 (sq 12))))
                            (transact! [{:note/text \"sq is defined\" :note/agent :a1}])
                            (sq 12)"
-                  (ids 1) "(ns app.census (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn n-vars {:malli/schema [:=> [:cat] :int]} [] (count (q '[:find ?v :where [?v :var/name]])))
-                           (deftest n-vars-test (is (< 360 (n-vars))) (is (some #{'app.census/n-vars} (q '[:find [?v ...] :where [_ :var/name ?v]]))))
+                  (ids 1) "(ns app.count (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn n-vars {:malli/schema [:=> [:cat] :int]} [] (count (q '[:find ?v :where [?v :var/name]])))
+                           (deftest n-vars-test (is (< 360 (n-vars))) (is (some #{'app.count/n-vars} (q '[:find [?v ...] :where [_ :var/name ?v]]))))
                            (transact! [{:note/text (str \"the program has \" (n-vars) \" vars\") :note/agent :a2}])
                            (n-vars)"
                   (ids 2) "(ns app.docs (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn doc-of {:malli/schema [:=> [:cat :symbol] [:maybe :string]]} [v] (q '[:find ?d . :in $ ?v :where [?e :var/name ?v] [?e :var/doc ?d]] v))
@@ -181,7 +181,7 @@
         ;; robustness: a1 runs forever; kill it; the others keep working
         ev (c/events sys)
         hung (c/submit! sys (ids 0) "(loop [] (recur))")
-        ;; the kill lands mid-eval: the agent said it began
+        ;; the kill arrives mid-eval: the agent said it began
         _ (await-event ev (started (ids 0) "(loop [] (recur))"))
         _ (out! (ids 0) " running: " (get-in (c/state sys) [:agents (ids 0) :running]))
         _ (c/kill! sys (ids 0))
@@ -197,7 +197,7 @@
                 :a3-merged-twice (and (:merged? m3) (:merged? m3b))
                 :a2-refused (not (:merged? m2))}}))))
 
-;; ---- contracts (lane G1, proto/core 9f5100a proto.smoke/contracts) --------------------
+;; ---- contracts (session G1, proto/core 9f5100a proto.smoke/contracts) --------------------
 
 (seon.contract/defn probe-callee
   "A contracted function, for the direct-link check below."
@@ -240,18 +240,18 @@
                 :wrong-arity {:refused (count (results :refused)) :not-refused (mapv symbol (results :not-refused))
                               :other (mapv symbol (results :other)) :no-bad-arity (mapv symbol (results :no-bad-arity))}
                 :direct-linked-caller direct :boot (dissoc boot :uncontracted)
-                :guarantees (if contract/on? :on :off)}
+                :instrument (if contract/on? :on :off)}
        :checks {:direct-linked-caller-refused (= direct :refused) :every-fn-contracted (empty? uncontracted)
                 :late-ones-armed (every? contract/armed? late)
                 :every-wrong-arity-refused (and (empty? (results :not-refused)) (empty? (results :other)))}}))))
 
-(defn admit
+(defn instrument
   "An agent's defn with :malli/schema is armed (a bad call refuses as the error map); one
-  without is admitted with a warning that grows with the agent's uncontracted definitions."
+  without is instrumented with a warning that grows with the agent's uncontracted definitions."
   []
-  (run-check "ADMIT" {:datoms 500}
+  (run-check "INSTRUMENT" {:datoms 500}
    (fn [sys]
-    (let [[a] (spawn-ready! sys "admit")
+    (let [[a] (spawn-ready! sys "instrument")
           [d1 bad] @(c/submit! sys a "(defn sq {:malli/schema [:=> [:cat :int] :int]} [x] (* x x)) (sq \"x\")")
           [u1] @(c/submit! sys a "(defn plain [x] x)")
           [u2] @(c/submit! sys a "(defn plain2 [x] x)")]
@@ -275,10 +275,10 @@
        :checks {:four-items (= 4 (count r1)) :its-evals-recorded (= "4" (:printed (first r2)))
                 :its-defn-recorded (re-find #"f3" (str (:printed (second r2))))}}))))
 
-;; ---- problems (lane D2): each class provoked, then read back from main ----------------
+;; ---- problems (session D2): each class provoked, then read back from main ----------------
 
 (def ^:private problem-specs
-  "Two tasks the stand-in model cannot make green in one turn: p1's proof wants 99 (the
+  "Two tasks the scripted model cannot make green in one turn: p1's proof wants 99 (the
   reply adds 1), and p2's proof is a cost proof whose estimate allows half a call."
   [{:var "p2-input" :ns 'app.par :stub "(defn p2-input [n] [n])"}
    {:name "p1" :ns 'app.par :stub "(defn p1 {:malli/schema [:=> [:cat :int] :int]} [x] 0)"
@@ -332,7 +332,7 @@
                 :red (and red (seq (:assertions red)) (= ['app.proofs/p1-test] (:proofs red)))
                 :cost (and cost-row (false? (get-in cost-row [:verdict :ok?])) (seq (:rows cost-row)))}}))))
 
-;; ---- the census gate (SEON - Main's census of ~/src/seon, 2026-10-20) ------------------
+;; ---- the mg/check gate (v1's survey of ~/src/seon, 2026-10-20) ------------------
 
 (def ^:private pure-nss
   "The namespaces whose contracted functions are pure functions of plain data: mg/check
@@ -351,17 +351,17 @@
   "The [:fn ...] schemas without a :gen property in form f, anywhere in it."
   [f] (filter #(and (vector? %) (= :fn (first %)) (not (:gen (when (map? (second %)) (second %))))) (tree-seq coll? seq f)))
 
-(defn census
-  "The census gate: no [:fn pred] schema without :gen anywhere in the registry or a
+(defn mg-check
+  "The mg/check gate: no [:fn pred] schema without :gen anywhere in the registry or a
   contract, and every contract whose arguments generate and whose namespace is pure passes
   malli.generator/check (100 runs each). Prints the counts and the contracts it checked.
-  With shard \"I/K\" (0 <= I < K) it censuses only the
+  With shard \"I/K\" (0 <= I < K) it checks only the
   contracted vars at positions I, I+K, ... of the platform's contracted vars sorted by
   symbol (the registry's own forms in shard 0), so K shards in K processes check exactly
   what one run does. By var, not namespace: seon.reconcile alone holds 36 of the 82
   checked contracts, so a namespace split cannot go below its share."
   [& [shard]]
-  (run-check "CENSUS" nil
+  (run-check "MG-CHECK" nil
    (fn [_]
     (let [[i k] (if shard (mapv #(Long/parseLong %) (clojure.string/split shard #"/")) [0 1])
         vs (keep-indexed #(when (= i (mod %1 k)) %2)
@@ -374,7 +374,7 @@
                                           (m/-function-schema-arities s)))
                                 (catch Throwable _ false)))
         ;; a proc's step-fn is tested as a plain function on its own states (seon.procs-test):
-        ;; its contract admits any map as state
+        ;; its contract accepts any map as state
         pure (filter #(and (or (pure-nss (ns-name (:ns (meta %)))) (pure-fns (symbol %)))
                            (not= :seon.step/step-fn (contract/contract %)) (generates? %)) vs)
         checked (for [v pure
@@ -416,7 +416,7 @@
         r9 @(c/submit! sys b "(count (vec (range 300000000))) (+ 5 5)")
         r11 @(c/submit! sys b "(def kept 7) (loop [] (recur)) (+ kept 1)" {:ticks 1000000000})
         p12 (c/submit! sys b "(reduce + (range)) :next")
-        ;; the interrupt lands on the running eval: the agent said it began
+        ;; the interrupt arrives on the running eval: the agent said it began
         _ (await-event ev (started b "(reduce + (range)) :next"))
         _ (c/interrupt! sys b)
         r12 @p12
@@ -734,11 +734,11 @@
     (out! (pr-str {:running (mapv :running rows) :stopped (mapv :stopped rows)}))
     (lib/c-exit (if (every? exact? rows) 0 1))))
 
-;; ---- delivery (lane F2): main's commits to the reconciler, messages to agents ------
+;; ---- delivery (session F2): main's commits to the reconciler, messages to agents ------
 
 (defn drain
   "n agents each transact in a loop, and root's own writes stream in, when stop! is
-  called. Every request the entrance accepted is answered; every :ok write is in the
+  called. Every request the server accepted is answered; every :ok write is in the
   store afterwards (durable: reopened in a fresh connection), and nothing is left running."
   [n]
   (run-check "DRAIN" {:datoms 2000}
@@ -773,13 +773,13 @@
                 :nothing-left-running (empty? left)
                 :graph-stopped (true? (:graph st))}}))))
 
-;; ---- writers (lane F2): group commit at 1/8/32/256 concurrent writers --------------
+;; ---- writers (session F2): group commit at 1/8/32/256 concurrent writers --------------
 
 (defn backpressure
   "1. Across the ring: an agent floods root with 20,000 messages while its proc is paused.
      Its channel fills, the poller leaves the frames in the ring, the ring fills, and the
      agent's own send waits: its proc takes nothing while paused (its count when the pause
-     landed, read by the ping after it, is its count after the window), the flood is not
+     arrived, read by the ping after it, is its count after the window), the flood is not
      through, the agent is still busy,
      and after resume all 20,000 arrive, in order, then its reply.
   2. A saturated writer: the writer proc is paused while n agents transact (their own
@@ -797,7 +797,7 @@
         ;; the flood began (the agent said so); then what arrives while paused is the measurement
         _ (await-event ev (started a flood))
         _ (c/pause-agent! sys a)
-        ;; what its proc had taken when the pause landed (the ping after it is FIFO), and after the window
+        ;; what its proc had taken when the pause arrived (the ping after it is FIFO), and after the window
         p0 (ping sys a)
         _ (Thread/sleep (seon.config/value :seon.config.check/hold-ms))
         p1 (ping sys a)
@@ -836,7 +836,7 @@
                 :writer-paused-holds-all (zero? answered-while-paused)
                 :writer-resumed-completes-all (= n ok)}}))))
 
-;; ---- hot reload (lane F2): a proc's step-fn var redefined in the built binary -----------
+;; ---- hot reload (session F2): a proc's step-fn var redefined in the built binary -----------
 
 (defn hotreload
   "Redefine the :reconciler proc's step-fn Var while root runs (alter-var-root, as a defn
@@ -870,7 +870,7 @@
        :checks {:redefined-step-ran (realized? hit) :compiled-caller-reaches-the-redefinition (and (= "[a/b \"x\"]" before) (= "redefined" after))}}))))
 
 (defn fx
-  "Lane FX1: the effect hop end to end. One agent; per-call cost of a synchronous effect
+  "Session FX1: the effect hop end to end. One agent; per-call cost of a synchronous effect
   (my.fx/call :echo) inside one eval, against a plain call and a branch write; file
   write-back through :file against spit in the agent; async sends; an effect in a test
   fork; the outcomes recorded on the agent's branch."
@@ -925,7 +925,7 @@
               [st nil])))
 
 (defn config-check
-  "The config as data on main (lane CONFIG): root's boot writes the config in force on
+  "The config as data on main (session CONFIG): root's boot writes the config in force on
   main's root entity; an agent, forked holding the same config and reading no environment,
   reads the same facts from its own branch's db."
   []
@@ -984,7 +984,7 @@
   "A root with its entrance on 127.0.0.1:(:seon.config.root/entrance-port) (seon.entrance),
   until stdin closes (bin/root stop) or SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks):
   what an outside agent's MCP relay (bin/mcp) talks to. Its end is a fact on main
-  naming that cause (seon.root/stop!). A checkout whose config names no entrance port (0)
+  naming that cause (seon.root/stop!). A checkout whose config names no server port (0)
   serves none, and says so."
   []
   (let [port (seon.config/value :seon.config.root/entrance-port)
@@ -998,7 +998,7 @@
                  (when (= why @cause) (out! "ROOT STOPPED " (pr-str (select-keys (c/stop! sys why) [:cause :ms :stop-fact-refused]))) (deliver stopped true))
                  @stopped)]
       (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (end! :signal))))
-      (seon.entrance/serve! sys port)
+      (seon.server/serve! sys port)
       (out! "ROOT LISTENING " port)
       (loop [] (when (read-line) (recur)))
       (end! :stdin-eof))
@@ -1026,8 +1026,8 @@
   []
   (run-check "MCP" {:datoms 2000}
    (fn [sys]
-    (let [;; port 0: the kernel picks a free one, so two lanes' proofs never collide
-        port (.getLocalPort ^java.net.ServerSocket (seon.entrance/serve! sys 0))
+    (let [;; port 0: the kernel picks a free one, so two worktrees' proofs never collide
+        port (.getLocalPort ^java.net.ServerSocket (seon.server/serve! sys 0))
         [a] (spawn-ready! sys {:task "mcp" :branch :mcp1})
         msgs [{"jsonrpc" "2.0" "id" 1 "method" "initialize" "params" {"protocolVersion" "2024-11-05"}}
               {"jsonrpc" "2.0" "method" "notifications/initialized"}
@@ -1081,7 +1081,7 @@
   (dec (count (clojure.string/split-lines (:out (clojure.java.shell/sh "ps" "-M" "-p" (str pid)))))))
 
 (defn threads-check
-  "Lane RC1's physics rule: the processes that fork (the fork server; an agent, for its
+  "Session RC1's physics rule: the processes that fork (the fork server; an agent, for its
   tests and clones) must stay single-threaded, so no sweeper thread ever starts in them.
   An agent evaluates, collects, runs its tests in a fork and is cloned; then the fork
   server, the agent and the clone each have one thread."
@@ -1168,7 +1168,7 @@
         ;; the tab's opening ran its course: its keyframe (the feed's first patch: a new tab is
         ;; stale until it), then a settled mark (the render proc has nothing in flight)
         settled (await-ref feed :settled)
-        ;; root's declared procs and its effect owners (their lanes step only when given work)
+        ;; root's declared procs and its effect owners (their workers step only when given work)
         decl (seon.system/read-decl (seon.config/value :seon.config.root/system-path))
         pids (sort-by str (concat (keys (:procs decl)) (for [k (keys (:fx decl))] (keyword "fx" (name k)))))
         counts (fn [] (into (sorted-map) (for [pid pids :let [p (ping sys pid)]] [pid (if (:blocked p) :blocked (:count p))])))
@@ -1250,11 +1250,11 @@
     "drain" (drain (n-or "32"))
     "backpressure" (backpressure (n-or "200"))
     "contracts" (contracts)
-    "census" (census n)
+    "mg-check" (mg-check n)
     "e2e" (lib/c-exit (if (seon.e2e/run n more) 0 1))
     ;; swarm N M: seon.e2e's swarm row (N tasks over 5 shared vars, max-running M), SWARM OK/FAILED
     "swarm" (lib/c-exit (if (seon.e2e/run "swarm" [(or n "20") (or (first more) "8")]) 0 1))
-    "admit" (admit)
+    "instrument" (instrument)
     "record" (record)
     "orphan" (orphan)
     "lease" (lease)
@@ -1264,7 +1264,7 @@
     "problems" (problems-check)
     "threads" (threads-check)
     "root" (root-serve)
-    ;; this checkout's ports as the config resolves them, "ENTRANCE WEB" (bin/ports)
+    ;; this checkout's ports as the config resolves them, "SERVER WEB" (bin/ports)
     "ports" (do (println (seon.config/value :seon.config.root/entrance-port) (seon.config/value :seon.config.web/port)) (lib/c-exit 0))
     "mcp-proof" (mcp-proof)
     "hotreload" (hotreload)
