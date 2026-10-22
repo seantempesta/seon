@@ -257,9 +257,9 @@
         cloned (sh/sh "git" "clone" "-q" "--local" here tree)
         root (atom (ts/start-root! (assoc root0 :args ["--set" (str ":seon.config.source/root=" (pr-str tree))
                                                        "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]"])))
-        ask (fn [code] (let [a (try (clojure.edn/read-string {:default tagged-literal} (ts/ask @root {:op :eval :agent "root" :code code}))
-                                    (catch Exception _ nil))]
-                         (some-> a :items first :printed clojure.edn/read-string)))]
+        ;; the printed value of a root eval; a reply that is an error stays the error value
+        ask (fn [code] (let [a (ts/ask @root {:op :eval :agent "root" :code code})]
+                         (if (:error a) a (clojure.edn/read-string (:printed (first (:items a)))))))]
     (try
       (is (zero? (:exit cloned)) (:err cloned))
       (is (some? (:port @root)) (str "the root started: " (slurp (str dir "/runs/root.log"))))

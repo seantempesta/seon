@@ -46,11 +46,11 @@
         root (ts/start-root! {:store (test-store) :main main :runs runs
                               :args ["--set" (str ":seon.config.source/root=" (pr-str checkout))
                                      "--set" ":seon.config.source/dirs=[\"src\" \"test\"]"]})
-        {:keys [exit log]} (ts/stop-root! root)]
+        {:keys [exit log] :as stopped} (ts/stop-root! root)]
     (drop-main! main)
     (sh/sh "rm" "-rf" runs)
     (is (some? (:port root)) "the root boots with src and test imported, and listens")
-    (is (= 0 exit) "and stops cleanly")
+    (is (= 0 exit) (str "and stops cleanly: " (pr-str stopped)))
     (is (not (str/includes? log "Could not locate")) "every required library located")))
 
 (defn- root-answers
@@ -61,9 +61,10 @@
   ([path main requests {:keys [args env]}]
    (let [root (ts/start-root! (cond-> {:store path :main main :runs (str path "-runs") :args (vec args)} env (assoc :env env)))
          answers (when (:port root) (mapv #(ts/ask root %) requests))
-         {:keys [exit log]} (ts/stop-root! root)]
+         stopped (ts/stop-root! root)]
      (sh/sh "rm" "-rf" (str path "-runs"))
-     (str (str/join "\n" answers) (when (seq answers) "\n") "EXIT " exit "\n" log))))
+     ;; each answer as the data it is (an error value among them), one per line
+     (str (str/join "\n" (map pr-str answers)) (when (seq answers) "\n") "EXIT " (or (:exit stopped) (pr-str stopped)) "\n" (:log stopped)))))
 
 (deftest a-root-resumes-a-store-an-earlier-build-wrote
   ;; task seon.root/a-root-resumes-a-store-an-earlier-build-wrote: the store as builds of

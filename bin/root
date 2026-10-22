@@ -1,7 +1,7 @@
 #!/bin/zsh
 # bin/root [start [ARGS]|stop|kill|status|next]   this checkout's standing root, on this checkout's own
-# ports (bin/ports): its server (reached by bin/mcp, or `printf '{:op :agents}\n' | nc -w 5
-# 127.0.0.1 PORT`) and its dashboard. `start` (the default) runs it detached: double-forked so it
+# ports (bin/ports): its server (reached by bin/mcp, or `printf '{:op :agents}\n' | bin/ask
+# PORT`) and its dashboard. `start` (the default) runs it detached: double-forked so it
 # is re-parented to PID 1, because the tool host kills a background task's whole process tree
 # when the task stops or its agent exits (ISOLATION, 2026-10-21). It runs until `bin/root stop`
 # closes its stdin. ARGS go to the root (`--set :seon.config.source/root=\"DIR\"`, ...). Its
@@ -52,7 +52,7 @@ launch() {
   # sends it TERM: the root's stdin closes (it stops cleanly), and held writes its exit status
   # on the done fifo stop reads. A root started with SEON_STARTER_FIFO (a test's) ends with its
   # starter. (A `tail -f /dev/null | root` holder outlived every root that crashed or was killed.)
-  "$ROOT/bin/held" --detach --log "$LOG" --pids "$PIDS" --ready "$READY" --done "$DONE" \
+  "$ROOT/bin/held" --detach --drain --log "$LOG" --pids "$PIDS" --ready "$READY" --done "$DONE" \
     "$ROOT/bin/root" run "$1" "$PORT" "$WEB" "${@:2}"
   read -r T R P < "$READY"
   rm -f "$READY"
@@ -68,13 +68,15 @@ stop() {
   read -r -u 3 st; exec 3<&-
   rm -f "$PIDS" "$PORTF" "$DONE"; print "root $R stopped (exit $st)"
 }
-# kill: SIGKILL the root (a crash, as a test makes one); answered at its death, as stop is
+# kill: SIGKILL the root (a crash, as a test makes one); answered when it and everything it started
+# is gone (bin/held's "drained"), where stop is answered at the root's exit
 kill_root() {
   read T R < "$PIDS"
   rm -f "$DONE"; mkfifo "$DONE"; exec 3<>"$DONE"
   kill -9 $R
-  read -r -u 3 st; exec 3<&-
-  rm -f "$PIDS" "$PORTF" "$DONE"; print "root $R killed"
+  # its status line, then "drained": every process the root started is gone (bin/held --drain)
+  read -r -u 3 st; read -r -u 3 drained; exec 3<&-
+  rm -f "$PIDS" "$PORTF" "$DONE"; print "root $R killed (${drained:-not drained})"
 }
 case ${1:-start} in
   status)
@@ -92,7 +94,7 @@ case ${1:-start} in
   next)
     running || { print -u2 "no root running: next restarts a running root's next generation"; exit 1 }
     # its answer {:items [{:printed "[\"CHECKOUT\" \"--set\" ...]"}]}: the vector's strings, NUL-separated
-    gen=("${(@0)$(print -r -- '{:op :eval :agent "root" :code "(my.root/next-generation sys)"}' | nc -w 30 127.0.0.1 $(cat "$PORTF") |
+    gen=("${(@0)$(print -r -- '{:op :eval :agent "root" :code "(my.root/next-generation sys)"}' | "$ROOT/bin/ask" $(cat "$PORTF") |
       perl -0777 -ne 'm/:printed "((?:[^"\\]|\\.)*)"/ or exit 1; my $v = $1; $v =~ s/\\(.)/$1/g;
         while ($v =~ /"((?:[^"\\]|\\.)*)"/g) { my $s = $1; $s =~ s/\\(.)/$1/g; print "$s\0" }')}")
     gen=(${gen:#})

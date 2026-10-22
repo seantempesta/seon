@@ -4,7 +4,7 @@
   many branches, as in production; owner, 2026-10-21). Test-only, so it lives in test/, not
   in src (session DUP-HELPERS); it seeds and opens through seon.db's own seed! and open-main!."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn]))
 
 (def ^:private store
   "The test store's config, made and seeded with about 2,000 datoms on first use."
@@ -94,26 +94,31 @@
   (assoc root :port (bound-port (:runs root))))
 
 (defn kill-root!
-  "SIGKILL the root (bin/root kill), answered at its death as its holder reaped it."
-  {:malli/schema [:=> [:cat [:map [:runs :string]]] :map]}
-  [root] (root-sh root "kill" []))
+  "SIGKILL the root (bin/root kill), answered once the root and every process it started are
+  gone (bin/held --drain). Answers {:drained boolean}: false when bin/root did not say so."
+  {:malli/schema [:=> [:cat [:map [:runs :string]]] [:map [:drained :boolean]]]}
+  [root] {:drained (boolean (re-find #"\(drained\)" (:out (root-sh root "kill" []))))})
 
 (defn ask
-  "One request m to a started root's server: its line written on a socket, one reply line
-  read. The read ends on the reply, or on EOF when the root closes the connection or dies
-  (nil: a verdict, never a hang on nc's timeout, which macOS never fires)."
-  {:malli/schema [:=> [:cat [:map [:port :int]] :map] [:maybe :string]]}
+  "One request m to a started root's server (bin/ask: its line on a socket, one reply line read,
+  ending on the reply or when the root closes the connection or dies): the reply as data
+  (tagged literals kept), or one recorded error value, {:error :eof} (closed with no reply),
+  {:error :reset} or {:error :refused} (docs/failure-points.md), never a hang on nc's timeout,
+  which macOS never fires. A caller asserts on :error."
+  {:malli/schema [:=> [:cat [:map [:port :int]] :map] :map]}
   [{:keys [port]} m]
-  (with-open [s (java.net.Socket. "127.0.0.1" (int port))]
-    (doto (.getOutputStream s) (.write (.getBytes (str (pr-str m) "\n") "UTF-8")) (.flush))
-    (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s) "UTF-8")))))
+  (let [{:keys [out]} (sh/sh "bin/ask" (str port) :in (str (pr-str m) "\n"))]
+    (if (clojure.string/blank? out)
+      {:error :no-answer}
+      (clojure.edn/read-string {:default tagged-literal} out))))
 
 (defn stop-root!
   "Stop a root start-root! started (bin/root stop: its stdin closes, it stops cleanly, and the
-  wait ends at its exit). Answers {:exit :log}: its exit status, and its whole output."
-  {:malli/schema [:=> [:cat [:map [:runs :string]]] [:map [:exit [:maybe :int]] [:log :string]]]}
+  wait ends at its exit). Answers {:exit :log}: its exit status, and its whole output; or
+  {:error :stopped-without-status :out out :log log} when bin/root printed none."
+  {:malli/schema [:=> [:cat [:map [:runs :string]]] :map]}
   [{:keys [runs] :as root}]
   (let [{:keys [out]} (root-sh root "stop" [])
-        log (java.io.File. (str runs "/root.log"))]
-    {:exit (some-> (re-find #"\(exit (\d+)\)" out) second parse-long)
-     :log (if (.exists log) (slurp log) "")}))
+        log (let [f (java.io.File. (str runs "/root.log"))] (if (.exists f) (slurp f) ""))
+        status (second (re-find #"\(exit (\d+)\)" out))]
+    (if status {:exit (parse-long status) :log log} {:error :stopped-without-status :out out :log log})))

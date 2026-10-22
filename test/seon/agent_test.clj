@@ -31,14 +31,18 @@
         root (ts/start-root! {:store store :main main :runs (str path "-runs")
                               :args (into ["--set" (str ":seon.config.source/root=" (pr-str checkout)) "--set" (str ":seon.config.source/dirs=" (pr-str dirs))]
                                           (mapcat (fn [x] ["--set" x])) sets)})
-        ask (fn [m] (let [l (ts/ask root m)] (when l (edn/read-string {:default tagged-literal} l))))
-        out (when (:port root)
-              (ask {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str (str path "-tasks")) ")")})
-              (ask {:op :attach :task "demo/t"})
-              ;; the attached agent ready: asked until it is idle (bound: 300 asks, as before; an
-              ;; event for an agent's readiness at the server is task seon.check/a-test-root-names-its-store-and-main's note)
-              (loop [i 0] (when (and (< i 300) (not (re-find #"idle" (pr-str (ask {:op :agents}))))) (Thread/sleep 200) (recur (inc i))))
-              (mapv #(ask (if (map? %) % {:op :eval :agent "a1" :code %})) forms))]
+        ask (fn [m] (ts/ask root m))
+        eval-root (fn [code] (ask {:op :eval :agent "root" :code code}))
+        out (if (:port root)
+              (do
+                (eval-root (str "(my.root/load-tasks! sys " (pr-str (str path "-tasks")) ")"))
+                ;; the agent's :ready event, tapped before the attach that spawns it and awaited
+                ;; after: its hello (a ping of :agents until idle was a poll)
+                (eval-root "(def ready-ev (c/events sys))")
+                (ask {:op :attach :task "demo/t"})
+                (eval-root "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (= :ready (:type e)) (= :a1 (:agent e))) :ready (recur))))")
+                (mapv #(ask (if (map? %) % {:op :eval :agent "a1" :code %})) forms))
+              [{:error :root-did-not-listen :log (let [f (java.io.File. (str path "-runs/root.log"))] (if (.exists f) (slurp f) ""))}])]
     (ts/stop-root! root)
     (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
     (sh/sh "rm" "-rf" (str path "-runs") (str path "-tasks"))
@@ -50,17 +54,19 @@
   fork server's standby and of the fork server, so its group kill (seon.fork-server/main) never
   runs and each agent has only its own socket to root to end on. Answers {:agents {id pid}
   :left #{pid} :out text}: the agents' pids as root reported them, the processes of the fork
-  server's group still alive once all have ended or 100 checks 0.1 s apart have passed (the
-  bound only ends a red run; the assertion is on the processes), and root's log, for a red
-  run's message."
+  server's group still alive once everything root started has ended (the wait is
+  seon.test-store/kill-root!'s drain, an event; a process that never ends holds the test), and
+  root's log, for a red run's message."
   [code fork-server-first?]
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         main (str "root-ended-" (random-uuid))
         store (str checkout "/target/runs/test-store")
         runs (str checkout "/target/runs/" main "-runs")
         root (ts/start-root! {:store store :main main :runs runs})
-        ask (fn [m] (some-> (ts/ask root m) (->> (edn/read-string {:default tagged-literal}))))
-        eval-root (fn [code] (some-> (ask {:op :eval :agent "root" :code code}) :items first :printed edn/read-string))
+        ask (fn [m] (ts/ask root m))
+        ;; the printed value of a root eval; a reply that is an error stays the error
+        eval-root (fn [code] (let [r (ask {:op :eval :agent "root" :code code})]
+                               (if (:error r) r (edn/read-string (:printed (first (:items r)))))))
         ;; spawn! answers at each agent's hello: both are ready
         _ (eval-root "[(c/spawn! sys {}) (c/spawn! sys {})]")
         ;; a2 begins its form (the agent's :started event, tapped before it is sent)
@@ -74,15 +80,15 @@
     (when fork-server-first?
       (doseq [k (children fs) :when (not (pids k))] (sh/sh "kill" "-9" (str k)))
       (sh/sh "kill" "-9" (str fs)))
-    (ts/kill-root! root)
-    (let [left (loop [i 0]
-                 (let [l (->> (str/split-lines (:out (sh/sh "pgrep" "-g" (str fs)))) (remove str/blank?) (map parse-long) set)]
-                   (if (or (empty? l) (>= i 100)) l (do (Thread/sleep 100) (recur (inc i))))))
+    ;; answered once root and every process it started has ended (bin/held --drain): what is
+    ;; left in the fork server's group then is what did not end with its root
+    (let [drained (:drained (ts/kill-root! root))
+          left (->> (str/split-lines (:out (sh/sh "pgrep" "-g" (str fs)))) (remove str/blank?) (map parse-long) set)
           log (let [f (java.io.File. (str runs "/root.log"))] (if (.exists f) (slurp f) ""))]
       (doseq [p left] (sh/sh "kill" "-9" (str p)))
       (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
       (sh/sh "rm" "-rf" runs)
-      {:agents agents :out log :left left})))
+      {:agents agents :out log :left (if drained left (conj left :not-drained))})))
 
 (deftest an-agent-ends-when-its-root-is-gone
   ;; task seon.agent/an-agent-ends-with-its-root: with its fork server gone first (a pid
@@ -117,15 +123,15 @@
         store (str checkout "/target/runs/test-store")
         runs (str checkout "/target/runs/" main "-runs")
         root (ts/start-root! {:store store :main main :runs runs})
-        ask (fn [m] (some-> (ts/ask root m) (->> (edn/read-string {:default tagged-literal}))))
-        eval-root (fn [code] (some-> (ask {:op :eval :agent "root" :code code}) :items first :printed))
+        ask (fn [m] (ts/ask root m))
+        eval-root (fn [code] (let [r (ask {:op :eval :agent "root" :code code})] (if (:error r) r (:printed (first (:items r))))))
         ;; spawn! answers at the agent's hello: it is ready; the eval has begun at its :started event
         _ (eval-root "(c/spawn! sys {})")
         _ (eval-root (str "(let [ev (c/events sys)] (def blocked (c/submit! sys :a1 \"(clojure.core.async/<!! (clojure.core.async/chan))\")) "
                           "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= :a1 (:agent e))) :began (recur)))))"))
         _ (eval-root "(c/interrupt! sys :a1)")
-        stopped (eval-root "(clojure.string/starts-with? (:printed (first (deref blocked 10000 [{:printed \"still blocked\"}]))) \"interrupted by root\")")
-        next-answer (some-> (ask {:op :eval :agent "a1" :code "(+ 2 2)"}) :items first :printed)]
+        stopped (eval-root "(clojure.string/starts-with? (:printed (first @blocked)) \"interrupted by root\")")
+        next-answer (let [r (ask {:op :eval :agent "a1" :code "(+ 2 2)"})] (if (:error r) r (:printed (first (:items r)))))]
     (ts/stop-root! root)
     (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
     (sh/sh "rm" "-rf" runs)

@@ -147,18 +147,16 @@ step idle ":steps-at-idle|:bytes-at-idle|reached-tab|^IDLE " env SEON_WEB_PORT=$
 
 if want orphan; then
 echo "== orphan (root dies under busy agents, a clone and a test child)"
-SEON_MAIN=check-orphan run orphan > "$OUT/orphan.log" 2>&1
+# held --drain returns once root and every process it started has ended (bin/held's lifeline pipe,
+# which each inherits): the orphans' end is the event this waits on, not a count of seconds. An
+# orphan that never ends holds this step open: no clock calls it dead, so that verdict is the
+# harness's (docs/failure-points.md)
+(cd "$ROOT/target" && SEON_MAIN=check-orphan "$ROOT/bin/held" --drain ./seon orphan 7>&-) > "$OUT/orphan.log" 2>&1
 (( $? == 0 )) || { echo "FAILED orphan (no test child)"; FAILED+=("orphan (no test child, $OUT/orphan.log)") }
 ORPHAN_FAILED=${#FAILED}
 PIDS=$(sed -n 's/^PIDS //p' "$OUT/orphan.log")
-# the orphans are given until their parent's death reaches them: each is asked once a
-# second for up to 5 s, and a survivor past that is the failure
-LEFT=$PIDS
-for i in 1 2 3 4 5; do
-  LEFT=$(for p in ${=PIDS}; do kill -0 $p 2>/dev/null && echo $p; done)
-  [[ -z $LEFT ]] && break
-  sleep 1
-done
+# every process of the tree has ended by now (the drain above); any pid still alive is a survivor
+LEFT=$(for p in ${=PIDS}; do kill -0 $p 2>/dev/null && echo $p; done)
 if [[ -z $PIDS ]]; then echo "FAIL no pids"; FAILED+=("orphan (no pids, $OUT/orphan.log)")
 elif [[ -n $LEFT ]]; then echo "FAIL left running: $LEFT"; kill -9 ${=LEFT}; FAILED+=("orphan (left running: $LEFT)")
 else echo "PASS none of $PIDS outlived root"; (( ${#FAILED} == ORPHAN_FAILED )) && GREEN+=(check-orphan); fi
