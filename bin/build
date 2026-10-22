@@ -4,9 +4,9 @@
 # target/lib/libprobe.dylib (native/probe.c), target/lib/liblmdb.dylib (LMDB, robust locks),
 # target/lib/liblz4.dylib and target/lib/libzstd.dylib (the store's compressors) and target/seon (the platform, -main seon.check).
 #
-#   bin/build            every step; chez, jolt, lmdb, lz4 and zstd are skipped when their stamp matches their pin
-#   bin/build chez|jolt|hello|native|lmdb|lz4|zstd|seon   one step (and the steps before it when their output is missing)
-#   BUILD_FORCE=1 bin/build     rebuild every step
+#   bin/build            every step; chez, jolt, native, lmdb, lz4 and zstd are skipped when their stamp matches their pin
+#   bin/build chez|jolt|hello|native|lmdb|lz4|zstd|seon   one step, and each step it needs whose stamp is stale
+#   BUILD_FORCE=1 bin/build     every stamp removed first: each step rebuilds, once
 #
 # Everything is written under target/; nothing is installed outside it. Dependency
 # downloads (Maven jars, git deps) land in target/home, because HOME points there
@@ -44,8 +44,10 @@ copy_tree() {
   find "$2" -name .git -prune -exec rm -rf {} +
 }
 
-# stamp NAME PIN: true when target/NAME.stamp records PIN (and BUILD_FORCE is unset).
-fresh() { [ -z "${BUILD_FORCE:-}" ] && [ -f "$T/$1.stamp" ] && [ "$(cat "$T/$1.stamp")" = "$2" ]; }
+# fresh NAME PIN: true when target/NAME.stamp records PIN. A forced build removes every stamp
+# once, here, so each step rebuilds once however many steps call it.
+fresh() { [ -f "$T/$1.stamp" ] && [ "$(cat "$T/$1.stamp")" = "$2" ]; }
+[ -z "${BUILD_FORCE:-}" ] || rm -f "$T"/chez.stamp "$T"/jolt.stamp "$T"/native.stamp "$T"/lmdb.stamp "$T"/lz4.stamp "$T"/zstd.stamp
 
 CHEZ_PIN=$(git -C "$RC/chez" rev-parse HEAD)
 JOLT_PIN=$(git -C "$RC/jolt" rev-parse HEAD)
