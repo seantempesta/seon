@@ -11,6 +11,10 @@ A proof measures the function under test, on the thread that calls it, and nothi
 
 Each size is the least of several repeats (`seon.cost/measure`), less what measuring an empty call costs. The proofs: `seon.profile-test/a-threads-allocation-is-its-own`, `seon.profile-test/a-measure-is-the-same-beside-another-thread`.
 
+## An accepted overrun and its ratchet
+
+A proof past its estimate stays green while the task its `:overrun` names is open and every dimension at the largest size is within `seon.cost/ratchet` (1.5x) of the `:measured` the task recorded, so a regression is red even inside an open overrun. That record is only comparable on the measure it was taken with: when the measure changes (18b0774 made bytes and time the proof's own thread's), every record is measured again and says so. Bytes and calls are now exact, the same in every run (`seon.program/record-tx`: 161, 172, 183 KB at 100, 1k, 10k forms, alone, niced or at load 17). Time, the thread's CPU, still moves with the machine's load (record-tx: 158 us at load 10, 213 us at load 17), so a record's time is taken as `bin/prove` runs, under load, and the ratchet's 1.5x is that spread. A record left from the old measure made record-tx red at 1.37x of an old 114 us under rename's 4 shards: a stale record, not a regression (the digest was not stale: a test's reach digest names the Chez and Jolt checked out, `seon.fx/tree-id`, and `bin/test` builds that runtime before any test runs).
+
 ## Where it is used
 
 An agent's task names its cost proofs as goals ([agent](agent.md)); `bin/test` runs them with every other test; the time a proof's estimate is priced in is the unit table `seon.cost/units`. Clocks that order events are `seon.profile/now-ns` ([machine](machine.md#the-clock)); `cpu-ns` orders nothing ([clocks](clocks.md)).
