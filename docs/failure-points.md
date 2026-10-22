@@ -138,7 +138,7 @@ held, and every other process with the env open (root always has its store open)
 its next write, forever. Measured 2026-10-21 by `target/lmdb-kill` (`native/lmdb_kill.c`):
 with the POSIX build the next writer and the holder both block; with the robust build both
 commit and the killed transaction is gone. `bin/build lmdb` builds `target/lib/liblmdb.dylib`
-robust from `../vendor-c/lmdb` (stamped with its commit), `bin/env` points `JOLT_LMDB_LIB`
+robust from `reference-code/lmdb` (stamped with its commit), `bin/env` points `JOLT_LMDB_LIB`
 at it, and `bin/check`'s `lmdb-kill` step proves it. Every process on a store must load the
 same build: the lock scheme is part of the lock file's format.
 

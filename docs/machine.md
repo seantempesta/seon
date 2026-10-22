@@ -34,7 +34,7 @@ Leave nothing running when you finish, and say so in your report. Kill only PIDs
 
 Disk stays bounded (owner, 2026-10-21: "cleanup shit we aren't using anymore and build in rules so this doesn't get out of control"; the tree had reached 261 GB):
 - a worktree session's worktree is removed in the merge that merges it (`bin/worktree --remove NAME`, run by root after the merge; the branch stays in git);
-- a worktree session's scratch lives inside its worktree (`target/`, `runs/`) and goes with it; nobody creates a new top-level directory in `~/src/seon-jolt` (the fork repositories [forks](forks.md) lists, `notes/`, `bin/`, `test-results/` (test results by reach digest, shared by every checkout) and the worktrees are the only ones);
+- a worktree session's scratch lives inside its worktree (`target/`, `runs/`) and goes with it; nobody creates a new top-level directory in the main tree or beside it: the main tree's `test-results/` (test results by reach digest, shared by every checkout; `bin/env`) and `config/worktree-ports` (the worktrees' port blocks; `bin/ports`) are gitignored, and the worktrees are the only directories beside it (`bin/worktree --path NAME`; `SEON_WORKTREES` moves them);
 - what is kept is what git and the store record (commits, task facts, notes); build output, compile caches and finished experiments' stores are regenerable and are deleted when their checkout or experiment ends;
 - root prunes each checkout's `target/check/` to its last three runs at each merge, and a run's old generations (each a tree and a binary, ~200 MB) to the one running and the one before it.
 

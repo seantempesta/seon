@@ -6,7 +6,7 @@ Datahike on Jolt, every process a Flow proc. Local only; never pushed.
 ## Clone and build
 
 ```sh
-git -c protocol.file.allow=always clone --recurse-submodules ~/src/seon-jolt/next
+git -c protocol.file.allow=always clone --recurse-submodules PATH/TO/next
 cd next
 bin/build        # Chez (our fork) -> Jolt (our fork) -> target/hello; all output in target/
 target/hello     # => hello: (datahike hello)
@@ -18,9 +18,10 @@ bin/check        # the end-to-end suite on target/seon (smoke ... scale 100)
 
 **Prerequisites** (not installed by the build): a C compiler and make (macOS: the Xcode
 command line tools), git, network access to GitHub and Maven Central on the first build,
-OpenSSL 3 at run time (Homebrew `openssl@3` on macOS; jolt-lang/crypto loads it), and
-LMDB's source at `../vendor-c/lmdb` (branch `mdb.master3`): `bin/build lmdb` builds it with
-robust locks into `target/lib/liblmdb.dylib`, which `bin/env` points `JOLT_LMDB_LIB` at.
+and OpenSSL 3 at run time (Homebrew `openssl@3` on macOS; jolt-lang/crypto loads it).
+LMDB's source is the `reference-code/lmdb` submodule (branch `mdb.master3`): `bin/build lmdb`
+builds it with robust locks into `target/lib/liblmdb.dylib`, which `bin/env` points
+`JOLT_LMDB_LIB` at.
 
 **Working here as an agent:** start with `AGENTS.md` (also `CLAUDE.md`). next/ replaces
 `~/src/seon`; `docs/parity.md` tracks each v1 capability.
@@ -29,7 +30,7 @@ robust locks into `target/lib/liblmdb.dylib`, which `bin/env` points `JOLT_LMDB_
 
 - `reference-code/` — our forks as submodules on their `jolt/main` branches (`docs/forks.md`)
 - `deps.edn` — `:local/root` only into `reference-code/`; everything else pinned
-- `bin/` — `build`, `test`, `check`, `env`
+- `bin/` — `build`, `test`, `check`, `env`, `worktree`, `root`, `agy-agent` (Gemini reviewers)
 - `native/` — `probe.c` (Mach memory accounting), built into `target/lib`
 - `src/`, `web/`, `resources/` — the platform, arriving by need (see each README)
 - `test/` — deftests; `test/build/` holds the build's smoke binary

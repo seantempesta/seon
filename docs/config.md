@@ -23,8 +23,8 @@ Later layers win, key by key, and the merged map is validated once:
 
 1. the shipped file;
 2. the checkout's own `config/local.edn` (gitignored), which `bin/ports` writes with the
-   checkout's ports from `../worktree-ports` (main 7888/7777, worktree k 7900+10k/7901+10k;
-   `bin/worktree --remove` frees the block);
+   checkout's ports from the main tree's `config/worktree-ports` (gitignored; main 7888/7777,
+   worktree k 7900+10k/7901+10k; `bin/worktree --remove` frees the block);
 3. the command line: `--config FILE` and `--set :ns/key=edn`, read from `*command-line-args*`
    while namespaces load (Jolt's jolt/argv binds it in a built binary), taken out of the
    mode's own args.

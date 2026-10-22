@@ -3,18 +3,19 @@
 # (:seon.config.root/entrance-port, :seon.config.web/port; `seon ports`).
 #
 # The ports live in the checkout's own config layer, config/local.edn (gitignored), which this
-# writes once when it is missing: the main tree (next/) gets 7888 7777, the owner's; each
-# worktree (next-NAME) its own block K from ../worktree-ports (one line per worktree, "NAME K";
-# server 7900+10K, web 7901+10K), allocated once under a lock and freed by
+# writes once when it is missing: the main tree (git's common dir; next/) gets 7888 7777, the
+# owner's; each worktree its own block K from the main tree's config/worktree-ports (gitignored;
+# one line per worktree, "DIRNAME K"; server 7900+10K, web 7901+10K), allocated once under a lock and freed by
 # bin/worktree --remove. No two checkouts share a port, so every worktree session can run its own root
 # beside the owner's. Edit local.edn to move them; this reads what the config resolves.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 NAME=${ROOT:t}
+MAIN_TREE=$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
 LOCAL=$ROOT/config/local.edn
 if [[ ! -f $LOCAL ]]; then
-  if [[ $NAME == next ]]; then E=7888 W=7777
+  if [[ ${ROOT:A} == ${MAIN_TREE:A} ]]; then E=7888 W=7777
   else
-    REG=${ROOT:h}/worktree-ports
+    REG=$MAIN_TREE/config/worktree-ports
     K=$(/usr/bin/lockf -k "$REG.lock" zsh -c '
       touch "$1"
       k=$(awk -v n="$2" "\$1==n {print \$2}" "$1")
@@ -29,7 +30,7 @@ if [[ ! -f $LOCAL ]]; then
   cat > "$LOCAL" <<LOCAL
 ;; This checkout's own config layer (gitignored), over resources/seon/config/default.edn and
 ;; under the command line's --config and --set (seon.config). Written by bin/ports from
-;; ../worktree-ports ($NAME); edit it to move this checkout's ports.
+;; the main tree's config/worktree-ports ($NAME); edit it to move this checkout's ports.
 {;; root's server (bin/root, bin/mcp)
  :seon.config.root/entrance-port #long #or [#env SEON_ENTRANCE_PORT $E]
  ;; the dashboard; bin/check and bin/test set SEON_WEB_PORT=0, so their roots serve none
