@@ -70,11 +70,12 @@
 
 (defn analyze-form
   "The compiler's account units of form in namespace nsym, analyzed without running it. A
-  form that sets up its namespace's environment is run first (an ns form for a namespace
-  not loaded, a defmacro whose macro is not defined yet), since what follows it is
-  analyzed against that environment (K1). A namespace is loaded when the process loaded
-  its lib (`clojure.core/loaded-libs`), not merely when it exists: the namespace of a file
-  the binary never loaded (test/'s) gets its requires and aliases from its own ns form.
+  form that sets up its namespace's environment is run first (the ns form, a defmacro whose
+  macro is not defined yet), since what follows it is analyzed against that environment
+  (K1). The ns form always runs, as loading the file would run it: its requires and aliases
+  are the file's, whatever the namespace held before (a binary's own namespace, one of
+  test/'s that main's program loaded with its old ns form, or one another namespace's
+  require marked loaded), and running it again on the namespace it set up changes nothing.
   Answers {:units [...] :ns-form? b}."
   {:malli/schema [:=> [:cat :symbol :any] :map]}
   [nsym form]
@@ -82,7 +83,7 @@
         hv (head-var form nsx)
         ns-form? (= #'clojure.core/ns hv)
         macro? (= #'clojure.core/defmacro hv)]
-    (when (or (and ns-form? (not (contains? (loaded-libs) (second form))))
+    (when (or ns-form?
               (and macro? (not (some-> (ns-resolve nsx (second form)) bound?))))
       (binding [*ns* nsx] (eval form)))
     {:units [(program/unit-account (analyze nsym form))] :ns-form? ns-form?}))
