@@ -116,7 +116,7 @@
 
 (defn loop-turn!
   "The loop's turn on root sys, whose Seon source is on: a task redefines a platform
-  function (seon.fixtures/generation, 1 -> 2) on its branch, its merge task lands it, the
+  function (seon.fixtures/generation, 1 -> 2) on its branch, its merge task merges it, the
   reconciler commits main's file on the merges branch, and the merge loads in place: root
   and every agent forked after it run the new definition, with no build and no restart
   (BUILD plan P4). Waits for quiescence. Answers {:commit sha (the merged attempt's)

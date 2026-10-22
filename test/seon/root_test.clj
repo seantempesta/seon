@@ -73,7 +73,7 @@
 
 (deftest a-root-resumes-a-store-an-earlier-build-wrote
   ;; task seon.root/a-root-resumes-a-store-an-earlier-build-wrote: the store as builds of
-  ;; 2026-10-21 before CONFIG landed left it (next/runs/store-full-20261021, read 17:35): its
+  ;; 2026-10-21 before CONFIG merged left it (next/runs/store-full-20261021, read 17:35): its
   ;; schema lacks the attributes added since (the config's, the model manifest's, the source's), and its main's
   ;; root entity holds a quiescent fact and no boot (their boot fact was refused), which
   ;; seon.task/entity-value could not read. The built root resumes that main and answers a

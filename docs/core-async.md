@@ -59,5 +59,5 @@ Closing and nil:
 - **Request and answer:** carry `:reply` (a channel, or a Flow coord) in the request. **Credit:** an asker keeps at most N requests outstanding and its answer channel holds N, so an answer never parks; without credit, two bounded queues in a request/answer cycle deadlock. A `promise-chan` per request works when exactly one answer is wanted.
 - **Failure:** a throw inside a `go` kills that fiber. Its result channel closes, and `jolt.fibers/monitor!` and `join` see the throwable. Answer errors as values on the reply channel.
 - **Quiet:** core.async alone cannot see it. Count messages (see [flow](flow.md#idioms-for-seon)).
-- **Until THREADS' fix lands:** don't leave `put!`/`take!` pending (that rules out fixed-tap mults, pub/sub, `put!` callbacks), and use `pipeline-async` (go) rather than `pipeline` when threads matter.
+- **Until THREADS' fix merges:** don't leave `put!`/`take!` pending (that rules out fixed-tap mults, pub/sub, `put!` callbacks), and use `pipeline-async` (go) rather than `pipeline` when threads matter.
 

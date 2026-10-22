@@ -21,8 +21,8 @@
 
 (def default-max-merging
   "Merge attempts at once when main's root entity states no :seon.config.merge/max-running:
-  the config's (1: merge trains stay off, DECISIONS). They run together only when the
-  definitions they change are disjoint (a merge train); 1 is git's one-at-a-time merge queue."
+  the config's (1: octopus merges stay off, DECISIONS). They run together only when the
+  definitions they change are disjoint (an octopus merge); 1 is git's one-at-a-time merge queue."
   (cfg/value :seon.config.merge/max-running))
 
 (def merge-dials
@@ -315,7 +315,7 @@
       (and (= :design kind) plan-before) (assoc :plan-before plan-before))))
 
 (defn- merge-keys
-  "The program keys merge task id lands: what the attempts on its branch measured as changed
+  "The program keys merge task id merges: what the attempts on its branch measured as changed
   (:seon.attempt/changed of its own attempts and of the tasks it needs on the same branch),
   or nil when no attempt there measured it (unknown: it overlaps every merge)."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:maybe [:set :string]]]}
@@ -349,21 +349,21 @@
                    (let [rs (done-refusals (done-input idx id (:seon.attempt/results a {}) (:seon.attempt/uncontracted a #{})
                                                            (:seon.attempt/unmerged a []) (:seon.attempt/basis-t a) (:seon.attempt/plan a)))]
                      (cond
-                       (and (empty? rs) merge?) {:op :land :attempt aid :task id}
+                       (and (empty? rs) merge?) {:op :ready-to-merge :attempt aid :task id}
                        (empty? rs) {:op :accept :attempt aid :task id}
                        :else
                        (failed aid id t (str "attempt " aid " ended " (name (:seon.attempt/outcome a :error))
                                              (some->> (:seon.attempt/reason a) (str " (") (#(str % ")")))
                                              ": " (refusals-text rs)))))))
-        ;; the merge train (bors, GitHub's merge queue): green merge attempts land together in
+        ;; the octopus merge (bors, GitHub's merge queue): green merge attempts merge together in
         ;; one commit once no merge attempt is still running, so every member merged the same
-        ;; main; a train closes when its first member ends (no new member joins until it
-        ;; lands, so landing cannot starve)
-        lands (filter #(= :land (:op %)) judged)
-        judged (remove #(= :land (:op %)) judged)
+        ;; main; an octopus merge closes when its first member ends (no new member joins until it
+        ;; merges, so merging cannot starve)
+        ready (filter #(= :ready-to-merge (:op %)) judged)
+        judged (remove #(= :ready-to-merge (:op %)) judged)
         live-merge? (some (:live idx) (:merging idx))
-        train (when (and (seq lands) (not live-merge?))
-                [{:op :merge-train :attempt (:attempt (first lands)) :members (mapv #(select-keys % [:attempt :task]) lands)}])
+        octopus (when (and (seq ready) (not live-merge?))
+                [{:op :octopus-merge :attempt (:attempt (first ready)) :members (mapv #(select-keys % [:attempt :task]) ready)}])
         closed? (some #(= :ended (get-in idx [:attempts % :seon.attempt/status])) (:merging idx))
         room (max 0 (- (:max-running root default-max-running) (- (count (:live idx)) (count (:kill idx)))))
         merge? (fn [id] (= :merge (get-in idx [:tasks id :seon.task/kind])))
@@ -384,7 +384,7 @@
         spawns (for [id starts :let [t (get-in idx [:tasks id])]]
                  {:op :spawn :task id :env (desired-env t)
                   :attempt (str id "#" (inc (count (get-in idx [:by-task id]))))})]
-    (vec (concat reaps kills judged train spawns))))
+    (vec (concat reaps kills judged octopus spawns))))
 
 ;; ---- stuck: observed, never held ------------------------------------------------------
 
@@ -551,12 +551,12 @@
                                                (stuck-tx (:idx st) attempt (:task act) (:problem act)))))
       ;; a merge task's branch into main: clean by construction when the branch holds main's
       ;; program head; behind: its task runs again, a new agent
-      ;; a merge train: every member's branch into main in one commit (each holds main's
+      ;; an octopus merge: every member's branch into main in one commit (each holds main's
       ;; program head, the members' changes are disjoint); a member found behind or refused
       ;; is answered alone
-      :merge-train (let [bs (mapv #(get-in (task/attempt (:db st) (:attempt %)) [:seon.attempt/env :branch]) (:members act))]
-                     (one (request (assoc-in st [:flights attempt :branches] bs) attempt :trained
-                                   {:op :write :req {:op :merge-train :branches bs :data-attrs #{}}})))
+      :octopus-merge (let [bs (mapv #(get-in (task/attempt (:db st) (:attempt %)) [:seon.attempt/env :branch]) (:members act))]
+                     (one (request (assoc-in st [:flights attempt :branches] bs) attempt :octopus-merged
+                                   {:op :write :req {:op :octopus-merge :branches bs :data-attrs #{}}})))
       :attach (one (write st attempt :done (tpl/attach-tx (:db st) act))))))
 
 (defn- judge-tx
@@ -660,7 +660,7 @@
                 (one (request (-> st (assoc-in [:flights aid :results] (proofs/results r))
                                   (assoc-in [:flights aid :run-problems] {:failures (proofs/failures r) :costs (proofs/costs r)}))
                               aid :read {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}})))
-      ;; what the branch changed since its merge base (three-way's :ours), measured for the train
+      ;; what the branch changed since its merge base (three-way's :ours), measured for the octopus merge
       :read (one (request (assoc-in st [:flights aid :branch-db] r) aid :diffed
                           {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}}))
       ;; every attempt is a new agent: none is reused
@@ -668,17 +668,17 @@
       :diffed (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
                     [st o2] (write st aid :done (judge-tx st f (:results f) (:branch-db f) (into #{} (map pr-str) (:ours r))))]
                 [st [o1 o2]])
-      ;; each member's answer, as one write: merged at the train's t, behind (its merge task
+      ;; each member's answer, as one write: merged at the octopus merge's t, behind (its merge task
       ;; runs again, a new agent), or refused: a failed attempt like any other (a refinement
       ;; chain while the budget lasts, else stuck)
       ;; the merged members' namespaces that are Seon's own source are written back: main's
-      ;; files after the train, committed on the merges branch (:git), the sha recorded on
+      ;; files after the octopus merge, committed on the merges branch (:git), the sha recorded on
       ;; each merged attempt (the self-improvement loop: the next generation builds it)
-      :trained (let [merged (keep (fn [[m x]] (when (:merged? x) [m x])) (map vector (:members act) (:results r)))
+      :octopus-merged (let [merged (keep (fn [[m x]] (when (:merged? x) [m x])) (map vector (:members act) (:results r)))
                      paths (vec (sort (distinct (mapcat (comp :files second) merged))))
                      back? (and (:source st) (seq paths))]
                  (one (write (cond-> st back? (assoc-in [:flights aid :writeback] {:files paths :members (mapv first merged)}))
-                             aid (if back? :landed :done)
+                             aid (if back? :merged-to-write-back :done)
                            (vec (mapcat (fn [{:keys [attempt task]} r]
                                           (let [problem (str "merge refused: " (:seon.error/message r))]
                                             (cond
@@ -691,7 +691,7 @@
                                               :else (into (cas-tx attempt :ended :bailed {:seon.attempt/error (error-text r)})
                                                           (stuck-tx (:idx st) attempt task problem)))))
                                         (:members act) (:results r))))))
-      :landed (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
+      :merged-to-write-back (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)
                        files (source/files (:db r) paths)]
                    (if (empty? files)

@@ -24,7 +24,7 @@ Seon mechanisms deliberately left behind, and why. Started from `../proto/BAGGAG
 ## Left behind from v1 Seon (`~/src/seon`), on purpose
 
 Each row of `docs/parity.md` marked dropped, with its reason:
-- **`bin/lane` claims and proven commits:** worktrees and root's landings, with no locks (`../notes/DECISIONS.md`, "No locks, no lane cap, no waiting").
+- **`bin/lane` claims and proven commits:** worktrees and root's merges, with no locks (`../notes/DECISIONS.md`, "No locks, no lane cap, no waiting").
 - **`chain!` and `:seon.task/next`:** tasks are linked by `:needs` only.
 - **The 13 `.agents/skills`:** an agent's context is its task and the wiki sections the task cites ("process, not whim").
 - **The JVM evaluator mode of `eval_clj`:** one evaluator, Jolt's.

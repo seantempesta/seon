@@ -73,9 +73,9 @@
                       {:merged? false :tx (:max-tx main) :uncontracted uncontracted
                        :seon.error/fix "Declare each function's contract ({:malli/schema [:=> [:cat ...] ...]}) and merge again."}))))
 
-(defn- merge-train
-  "Merge branches into main in ONE commit (a merge train, session R3; git's octopus merge, every
-  member a parent): each member that holds main's program head and is not refused lands, in
+(defn- octopus-merge
+  "Merge branches into main in ONE commit (an octopus merge, session R3, as git's, every
+  member a parent): each member that holds main's program head and is not refused merges, in
   order; a member whose changes meet an earlier member's is behind (it merges main first).
   Members are judged against the same main, so the commit is each one's clean merge.
   Answers [st {:results [answer per branch, in order]}]."
@@ -89,8 +89,8 @@
                                refusal (if have? (merge-refusal main head r) (refused (str "no branch " b) {:merged? false}))
                                refusal (or refusal
                                            (when (some taken (keys (:ours r)))
-                                             (contract/error :seon.merge/behind 'seon.writer/merge-train
-                                                             "another member of the train changes the same definitions: merge main into the branch first"
+                                             (contract/error :seon.merge/behind 'seon.writer/octopus-merge
+                                                             "another member of the octopus merge changes the same definitions: merge main into the branch first"
                                                              {:merged? false :tx (:max-tx main) :behind (count (filter taken (keys (:ours r))))})))]
                            (-> acc (update :members conj {:branch b :r r :refusal refusal})
                                (cond-> (nil? refusal) (update :taken into (keys (:ours r)))))))
@@ -110,10 +110,10 @@
 
 (defn- merge-branch
   "Merge the branch into main (git: only a branch that contains main's head; session M1): a
-  train of one. Answers [st result]."
+  octopus merge of one. Answers [st result]."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/branch :seon.merge/data-attrs] [:tuple :seon.writer/state :map]]}
   [st o branch data-attrs]
-  (let [[st r] (merge-train st o [branch] data-attrs)
+  (let [[st r] (octopus-merge st o [branch] data-attrs)
         r1 (first (:results r))]
     [st (cond-> r1 (and (:merged? r1) (:datoms r)) (assoc :datoms (:datoms r)))]))
 
@@ -167,7 +167,7 @@
                (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
                         (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st) :lease (:lease m)}))
-      :merge-train (let [[st r] (merge-train st o (vec (:branches m)) (:data-attrs m #{}))] (reply st r))
+      :octopus-merge (let [[st r] (octopus-merge st o (vec (:branches m)) (:data-attrs m #{}))] (reply st r))
       :merge (if (exists? (:branch m))
                (let [[st r] (merge-branch st o (:branch m) (:data-attrs m #{}))] (reply st r))
                (reply st (refused (str "no branch " (:branch m)) {:merged? false})))

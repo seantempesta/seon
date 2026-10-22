@@ -1,5 +1,5 @@
 [{:seon.task/name "drivers-leave-src"
-  :seon.task/plan "Audit E: the release binary's -main lives in the check driver (check.clj:1275, 1,312 lines with 9 bench modes bin/check never runs); production root requires seon.fixtures and defaults to the scripted test model (root.clj:30,509,541). seon.main holds -main and the root/web/mcp entry points; seon.e2e and seon.fixtures move to test/ (or a :check alias); benches to bench/. About -680 lines from src/. After the in-flight worktree sessions land (their files overlap)."
+  :seon.task/plan "Audit E: the release binary's -main lives in the check driver (check.clj:1275, 1,312 lines with 9 bench modes bin/check never runs); production root requires seon.fixtures and defaults to the scripted test model (root.clj:30,509,541). seon.main holds -main and the root/web/mcp entry points; seon.e2e and seon.fixtures move to test/ (or a :check alias); benches to bench/. About -680 lines from src/. After the in-flight worktree sessions merge (their files overlap)."
   :seon.task/kind :work
   :seon.task/needs #{"seon.program/definitions-from-the-compiler" "seon.reconcile/stuck-is-observed-data"}
   :seon.task/proofs #{seon.main-test/root-boots-without-test-fixtures}}

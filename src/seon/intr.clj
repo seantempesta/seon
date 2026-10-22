@@ -57,13 +57,13 @@
     "(lambda (sig f) (register-signal-handler sig (lambda (s) (when (eq? #t (f)) (set-timer 1)))))"))
 
 ;; Outside any run-interruptible the engine timer has Chez's default handler, which
-;; raises; a kick that lands just outside one (a token set between push and entry)
+;; raises; a kick that arrives just outside one (a token set between push and entry)
 ;; must do nothing there. An agent runs no fibers, so no scheduler handler is replaced.
 (defchecked ^:private quiet-timer* [:=> [:cat] :any] (scm/eval-string "(lambda () (timer-interrupt-handler (lambda () (void))))"))
 
 (defn install!
   "Register root's interrupt handler (a forked child inherits it): it arms the engine timer
-  for one tick when a token was newly set, so the stop lands at once."
+  for one tick when a token was newly set, so the stop merges at once."
   {:malli/schema [:=> [:cat] :boolean]}
   []
   (quiet-timer*)

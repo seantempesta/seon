@@ -28,7 +28,7 @@ References and their depths: [references](references.md).
 
 ## The program and its loop
 
-- [source](source.md): agents change Seon's own functions at the REPL on their branches; a merge lands them on main, writes the files back and runs them next.
+- [source](source.md): agents change Seon's own functions at the REPL on their branches; a merge merges them on main, writes the files back and runs them next.
 - [references](references.md): what a text cites, read by one parser (`seon.ref`), becomes its references, pulled into a context at the depth its delimiter asks.
 - [render](render.md): every view, the model's context included, is the one value printer or a render declared on the value's schema; nothing clips.
 - [agent](agent.md): the help page, what every agent reads first and `my.agent/help` answers.
@@ -36,7 +36,7 @@ References and their depths: [references](references.md).
 ## How work moves
 
 - [tasks](tasks.md): all work is tasks linked by `:needs`; a request becomes design → implement → merge on one branch, in one transaction, before any agent forks.
-- [landing](landing.md): how a branch lands on main: what it runs, how batches are proven, how conflicts are resolved.
+- [merging](merging.md): how a branch merges into main: what it runs, how batches are proven, how conflicts are resolved.
 - [machine](machine.md): the machine Seon is built on and for, and the rules that keep builds, disk and processes bounded.
 - Who does what, delegation and briefs: [AGENTS.md §2](../AGENTS.md).
 

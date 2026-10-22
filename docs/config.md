@@ -35,7 +35,7 @@ config says so: `:seon.config.web/port` and `:seon.config.root/entrance-port` sh
 
 ```seon.config/load-layers``` reads the layers and ```seon.config/layered``` merges them; ```seon.config/overrides``` reads the command line; ```seon.config/sources``` names each key's layer (`:seon.config/sources` on main). `bin/ports` and `bin/worktree` write and free a checkout's layer.
 
-**A value one run needs goes on that run's command line, never in the environment** (landing of CONFIG, 2026-10-21): the checkout's `config/local.edn` is a later layer than the shipped file's `#env` defaults, so a check that handed its MCP client a port through `SEON_ENTRANCE_PORT` was overridden by a stale local file and dialled a port nothing listened on. `--set :seon.config.root/entrance-port=N` is the top layer and always wins. Not this: a new `#env` read for a per-run value.
+**A value one run needs goes on that run's command line, never in the environment** (the merge of CONFIG, 2026-10-21): the checkout's `config/local.edn` is a later layer than the shipped file's `#env` defaults, so a check that handed its MCP client a port through `SEON_ENTRANCE_PORT` was overridden by a stale local file and dialled a port nothing listened on. `--set :seon.config.root/entrance-port=N` is the top layer and always wins. Not this: a new `#env` read for a per-run value.
 
 ## The resolver
 

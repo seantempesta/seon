@@ -12,7 +12,7 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 | `bin/seon logs` | `runs/root.log`, no command | partial |
 | `bin/seon open`, `init`, `reset`, `nuke` | none (one root per checkout; per-checkout ports, `bin/ports`) | missing |
 | `bin/seon config apply` (sparse, per branch) | config layers plus `--set`; `seon.root/apply!` re-reads `system.edn` | partial |
-| `bin/lane` claims and proven commits | worktrees (`bin/worktree`) and root's landings | dropped |
+| `bin/lane` claims and proven commits | worktrees (`bin/worktree`) and root's merges | dropped |
 
 ## The MCP server
 

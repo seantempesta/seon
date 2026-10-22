@@ -7,14 +7,14 @@
 #   4. build (bin/build: each step skips what is up to date);
 #   5. restart the standing root on its store (bin/root stop, start): it boots on main's build and
 #      imports its source tree (docs/source.md).
-# Worktree sessions merge first (root merges their branches into main, docs/landing.md); then bin/update.
+# Worktree sessions merge first (root merges their branches into main, docs/merging.md); then bin/update.
 # Every step's exit status counts; the last line is UPDATE OK or UPDATE FAILED.
 setopt pipefail
 MAIN=$(cd "$(dirname "$0")/.." && pwd); MERGES=${MAIN:h}/next-merges
 fail() { print -u2 "update: $*"; print "UPDATE FAILED"; exit 1 }
 cd "$MAIN" || fail "no main tree"
 [[ $(git branch --show-current) == main ]] || fail "the main tree is not on main"
-# submodules are left out: a landing that bumps a pin leaves the checkout behind it, and the
+# submodules are left out: a merge that bumps a pin leaves the checkout behind it, and the
 # submodule step below moves every submodule to main's pins
 git diff --quiet --ignore-submodules && git diff --cached --quiet --ignore-submodules || fail "the main tree has uncommitted changes"
 if git rev-parse -q --verify jolt/merges >/dev/null; then

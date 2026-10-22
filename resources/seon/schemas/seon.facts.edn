@@ -207,7 +207,7 @@
  :seon.attempt/conflicts [:set {:seon.db/component true} :seon.db/ref]
  :seon.attempt/unmerged [:set :string]
  ;; measured at the attempt's end from the branch (seon.merge/three-way's :ours): the printed
- ;; program keys the branch changed since its merge base; the merge train admits on them
+ ;; program keys the branch changed since its merge base; the octopus merge admits on them
  :seon.attempt/changed [:set :string]
  :seon.attempt/attempt-fact [:map {:seon.db/attributes true}
                              [:seon.attempt/id :seon.attempt/id] [:seon.attempt/task :seon.attempt/task]

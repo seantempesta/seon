@@ -1,5 +1,5 @@
 (ns seon.problems-test
-  "Session D2: every class of problem lands as a typed fact written by its observer, and
+  "Session D2: every class of problem arrives as a typed fact written by its observer, and
   seon.problems/report lists them by class at a cost that follows the problems, not the
   program. Run: bin/test seon.problems-test"
   (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is testing]] [clojure.edn :as edn]
