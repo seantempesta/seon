@@ -51,6 +51,14 @@
    :env {:branch (task/default-branch (str "demo/" nm)) :model model :max-turns r/default-max-turns}})
 (defn- t [nm] (symbol "demo-test" (str nm "-test")))
 
+(deftest task-state-is-what-happened
+  ;; the one derivation of a task's observed state, from the index (seon.render.proc/task-rows reads it)
+  (let [db (db-of diamond :extra (into (merged "a") (concat (attempt "b" 1 :done) (attempt "c" 1 :running))))
+        idx (r/index db)]
+    (is (= {"demo/a" :merged "demo/b" :done "demo/c" :running "demo/d" :blocked}
+           (into {} (for [id ["demo/a" "demo/b" "demo/c" "demo/d"]] [id (r/task-state idx id)]))))
+    (is (= :held (r/task-state (r/index (db-of diamond :released [])) "demo/a")) "never released")))
+
 (deftest needs-dag-starts-in-dependency-order
   (are [db expected] (= expected (r/reconcile db))
     ;; nothing done: only the root of the diamond can start

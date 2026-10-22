@@ -143,19 +143,38 @@
 (defn- view! {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/fn [:* :any]] :seon.root/api-state]}
   [st f & args] (apply update st :view f args))
 
+(def gone-statuses "Agent statuses of a process gone (:seon.agent/status)." (get-in contract/forms [:seon.agent/status 1 :seon.status/gone]))
+(def ^:private stopped-statuses (get-in contract/forms [:seon.agent/status 1 :seon.status/stopped]))
+
+(defn- failed
+  "What went wrong in agent id's view change m (a its entry before), as the one error map,
+  or nil: a spawn or fork refused (:error); a red test run or a refused merge of an agent
+  with no task (a task's attempt records its own at its end, seon.problems/report)."
+  {:malli/schema [:=> [:cat :seon.agent/id :map :map] [:maybe :seon.error/base]]}
+  [id a m]
+  (let [{:keys [fail error reports]} (:tests m) r (:merged m)]
+    (cond
+      (:error m) (contract/error :seon.agent/failed 'seon.root/spawn! (str (:error m)) {:agent id})
+      (:task a) nil
+      (pos? (+ (or fail 0) (or error 0)))
+      (contract/error :seon.agent/failed 'seon.agent/run-tests
+                      (str "tests red" (some->> (first (remove #(= :pass (:type %)) reports)) :var (str ": "))) {:agent id})
+      (and (false? (:merged? r)) (contract/error? r)) r)))
+
 (defn- set-agent
-  "Merge m into agent id's view entry. A stopped agent stays stopped: :killed (a kill) or
-  :ended (root stopped it because its attempt ended)."
+  "Merge m into agent id's view entry, recording what went wrong in it (`failed`). A stopped
+  agent stays stopped: :killed (a kill) or :ended (root stopped it because its attempt ended)."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.agent/id :map] :seon.root/api-state]}
   [st id m]
-  (if (get-in st [:view :agents id])
-    (cond-> (update-in st [:view :agents id]
-               (fn [a] (let [a' (cond-> (merge a (dissoc m :ready :evals-add))
-                                  (and (:ready m) (= :spawning (:status a))) (assoc :status :idle)
-                                  (:evals-add m) (update :evals #(vec (take-last 20 (into (or % []) (:evals-add m))))))]
-                         (if (and (#{:killed :ended} (:status a)) (not (#{:killed :ended :dead} (:status a')))) (assoc a' :status (:status a)) a'))))
-      ;; the agents with an eval in flight: the stall check's set
-      (contains? m :running) (update ::busy (fnil (if (:running m) conj disj) #{}) id))
+  (if-let [a (get-in st [:view :agents id])]
+    (let [a' (cond-> (merge a (dissoc m :ready :evals-add))
+               (and (:ready m) (= :spawning (:status a))) (assoc :status :idle)
+               (:evals-add m) (update :evals #(vec (take-last 20 (into (or % []) (:evals-add m))))))
+          e (failed id a m)]
+      (cond-> (assoc-in st [:view :agents id] (if (and (stopped-statuses (:status a)) (not (gone-statuses (:status a')))) (assoc a' :status (:status a)) a'))
+        e (problem (err/occurrence e :agent {:agent id :task (:task a)} (System/currentTimeMillis)))
+        ;; the agents with an eval in flight: the stall check's set
+        (contains? m :running) (update ::busy (fnil (if (:running m) conj disj) #{}) id)))
     st))
 
 (defn- to-agent
@@ -208,16 +227,15 @@
   (let [{:keys [branch]} (get-in st [:agents agent])
         v (get-in st [:view :agents agent])
         ;; stopped by root: a kill, or the end of its attempt (:ended); else it died
-        stopped (#{:killed :ended} (:status v))
-        killed? (some? stopped)
+        stop (stopped-statuses (:status v))
         ;; neither stopped by root nor killed: a death, with what root saw of it (lane D2)
-        died (when-not (or rid killed?)
+        died (when-not (or rid stop)
                (contract/error :seon.agent/died 'seon.root/api-proc (str "agent " (name agent) " died" (exit-text (:exit v)))
                                {:agent agent :pid (or pid (:pid v)) :exit (:exit v)
                                 :stderr (stderr-tail (agent/stderr-path (get-in st [:view :store :agents-dir]) agent))
                                 :last-op (some-> (:running v) (select-keys [:form :since-ms]) (assoc :kind :eval))}))
         e (or died (gone agent "agent stopped"))]
-    (step/out! o :events (step/event {:type (or stopped :dead) :agent agent}))
+    (step/out! o :events (step/event {:type (or stop :dead) :agent agent}))
     (let [st (cond
                (nil? died) (reduce (fn [st r] (deliver-rid st r (no-agent (get-in st [:pending r :kind]) e))) st inflight)
                ;; the exit status is known (reaped first), or never will be (a clone, an
@@ -228,7 +246,7 @@
                :else (assoc-in st [::dying (or pid (:pid v))] [agent died inflight]))
           st (cond-> st rid (deliver-rid rid {:stopped true :agent agent}))]
       (-> st (update :agents dissoc agent) (update :agent-procs dissoc agent) (assoc ::update true)
-          (set-agent agent {:status (or stopped :dead) :ended-ms (System/currentTimeMillis) :running nil})))))
+          (set-agent agent {:status (or stop :dead) :ended-ms (System/currentTimeMillis) :running nil})))))
 
 (defn- pend
   "st with caller p awaiting the answer to a new request id (seon.step/pend), and the id."
@@ -252,7 +270,7 @@
       :spawn (let [opts (cond-> (:opts m) (:branch (:opts m)) (update :branch #(pdb/on-main (pdb/conn-main (:conn st)) %)))
                    holder (and (:branch opts)
                                (some (fn [[aid a]] (when (and (= (:branch opts) (:branch a)) (not (:ended-ms a))
-                                                              (not (#{:dead :killed :ended} (:status a))))
+                                                              (not (gone-statuses (:status a))))
                                                      aid))
                                      (get-in st [:view :agents])))]
                (cond
@@ -345,7 +363,7 @@
     (:ev m)
     (case (:ev m)
       :forked (do (step/out! o :events (step/event {:type :spawned :agent (:agent m) :pid (:pid m) :fork-ms (:fork-ms m)}))
-                  (when (#{:killed :ended} (get-in st [:view :agents (:agent m) :status])) (lib/c-kill (:pid m) 9))
+                  (when (stopped-statuses (get-in st [:view :agents (:agent m) :status])) (lib/c-kill (:pid m) 9))
                   (-> st (set-agent (:agent m) {:pid (:pid m)})
                       (view! update-in [:server :agents-forked] (fnil inc 0))
                       (view! update-in [:stats :fork-ms] lib/push-window (:fork-ms m) 500)
