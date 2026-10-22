@@ -278,8 +278,8 @@
  ;; SEON_AI_PROVIDER=openai-compat) uses the endpoint below; SEON_PROFILE=scripted, the
  ;; scripted provider (a test fixture) bin/check and bin/test run under, no paid call: it needs
  ;; that profile, which states its script (SEON_AI_PROVIDER=scripted alone leaves none, and boot
- ;; refuses the provider's contract). Provenance: owner,
- ;; DeepSeek is the default model (AGENTS.md "The machine"); check the context before any paid call.
+ ;; refuses the provider's contract). There is no default model (docs/model.md#no-default-model);
+ ;; check the context before any paid call.
  :seon.config.ai/provider #keyword #or [#env SEON_AI_PROVIDER #profile {:default "none" :scripted "scripted" :deepseek "openai-compat"}]
  ;; The scripted provider's reply function (a test fixture): replies by task.
  :seon.config.ai/script #profile {:scripted seon.fixtures/reply}

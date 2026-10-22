@@ -495,3 +495,18 @@
         refs (:references (context/current-state db (task/task db "demo/u") {:turn 0 :max-turns 4}))]
     (is (= ['demo/f] (keep :symbol refs)) "the resolved name as itself")
     (is (= {:unresolved ['demo/x 'demo/y] :problem (:unresolved seon.ref/problem-messages)} (last refs)) "the others, one problem")))
+
+(deftest a-cited-task-shows-its-plan-at-that-depth
+  ;; wiki audit 2026-10-23 R4: a plan citing another task by its ns/name sees that task's
+  ;; plan as a section at the citation's depth, not an unresolved name
+  (let [db (db-with-program)
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo.other :seon.task/name "g"
+                                               :seon.task/plan "G is defined first. Then f calls it."
+                                               :seon.task/proofs #{'demo-test/g-test}}
+                                              {:seon.task/ns 'demo :seon.task/name "f"
+                                               :seon.task/plan "Read `demo.other/g` before you start."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+        block (context/current-state db (task/task db "demo/f") {:results {} :reds [] :turn 0 :max-turns 4})
+        shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))]
+    (is (= "G is defined first. Then f calls it." (:seon.ref/lead (shown "demo.other/g"))) "doc depth: the task's plan")
+    (is (not (clojure.string/includes? (str (:references block)) "demo.other/g")) "and not an unresolved name")))
