@@ -407,7 +407,7 @@
       (refer 'my.agent :exclude '[source source-fn pst])
       ;; clojure.repl as clojure.main's REPL has it (clojure.main/repl-requires). Jolt's lacks
       ;; source, source-fn and pst: interned from my.agent, whose source also reads the agent's
-      ;; own redefinitions from its branch db (task jolt.repl/clojure-repl-is-complete moves the
+      ;; own redefinitions from its branch db (task seon.context/the-standard-repl-tools moves the
       ;; file-reading part into Jolt's own clojure.repl)
       (doseq [s '[source-fn source pst] :let [v (ns-resolve 'my.agent s)]]
         (intern (find-ns 'clojure.repl) (with-meta s (select-keys (meta v) [:macro :arglists :doc])) @v))

@@ -136,20 +136,28 @@
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest a-moved-store-opens
-  ;; task seon.db/a-store-opens-where-it-lies: a store's Datahike id is (hasch/uuid path) of
-  ;; the path it was created at (seon.db/store-cfg), so a store renamed or copied (kept runs:
-  ;; next/runs/store-full-20261021, renamed from next/runs/store) is refused at its new path
-  ;; with "Store identity mismatch". A store on disk of this test's own, the last resort:
-  ;; what is proved is a move; removed at the end
+  ;; task seon.db/a-store-opens-where-it-lies: a store was named by (hasch/uuid path) of the
+  ;; path it was given (seon.db/store-cfg), so a store renamed or copied (kept runs:
+  ;; next/runs/store-full-20261021, renamed from next/runs/store) was refused at its new path
+  ;; with "Store identity mismatch". Now it is named by the id it records. A store on disk of
+  ;; this test's own, the last resort: what is proved is a move and a copy; removed at the end
   (let [base (str (System/getProperty "user.dir") "/target/db-test-move-" (random-uuid))
         moved (str base "-moved")
-        _ (d/release (:conn (pdb/open! :lmdb base 0 :db)))
-        _ (clojure.java.shell/sh "mv" base moved)]
+        copied (str base "-copied")
+        made (do (d/release (:conn (pdb/open! :lmdb base 0 :db))) (get-in (pdb/store-cfg :lmdb base) [:store :id]))
+        _ (clojure.java.shell/sh "mv" base moved)
+        _ (clojure.java.shell/sh "cp" "-R" moved copied)
+        opens (fn [path] (let [r (try (pdb/open! :lmdb path 0 :db) (catch Exception e {:refused (ex-message e)}))]
+                           (is (some? (:conn r)) (str path " opens: " (:refused r)))
+                           (when-let [c (:conn r)]
+                             (is (= made (get-in r [:cfg :store :id])) "named by the id it was made with")
+                             (is (= path (get-in r [:cfg :store :path])) "its config names where it lies now")
+                             (is (seq (d/datoms @c :eavt)) "and it holds its data")
+                             (d/release c))))]
     (try
-      (let [r (try (pdb/open! :lmdb moved 0 :db) (catch Exception e {:refused (ex-message e)}))]
-        (is (some? (:conn r)) (str "the moved store opens: " (:refused r)))
-        (some-> (:conn r) d/release))
-      (finally (clojure.java.shell/sh "rm" "-rf" base moved)))))
+      (opens moved)
+      (opens copied)
+      (finally (clojure.java.shell/sh "rm" "-rf" base moved copied)))))
 
 (deftest a-kept-store-whose-types-differ-is-refused
   ;; an attribute's value type is fixed once installed (Datahike refuses to alter it), so a

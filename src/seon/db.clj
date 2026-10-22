@@ -6,7 +6,7 @@
   (BAGGAGE.md)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-] :as contract] [seon.schema.datahike :as sd] [seon.config :as cfg]
-            [datahike.connections] [datahike.writing] [datahike.db.transaction :as dbt] [hasch.core :as hasch] [datahike.api :as d] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
+            [datahike.connections] [datahike.writing] [datahike.config] [datahike.store] [konserve.store] [datahike.db.transaction :as dbt] [hasch.core :as hasch] [datahike.api :as d] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
             [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix]))
 
 (def schema
@@ -47,28 +47,44 @@
 ;; holding E4a's real index nodes, one content-addressed node per key. Branching factor
 ;; 64: a commit rewrites the nodes it touched, so smaller nodes mean fewer bytes printed
 ;; and written per commit (dev/dur.clj: 512 -> 64 cut a small commit 27 -> 16 ms with
-;; fsync, before the node emitter). LMDB runs MDB_NOSYNC and the writer syncs the env
-;; once per commit (sync!), so a commit is one drive flush, not one per node.
+;; fsync, before the node emitter). LMDB runs MDB_NOSYNC and the flusher syncs the env
+;; once for every commit so far (sync!), so a commit is at most one drive flush, not one per node.
 
 (def ^:private MDB_NOSYNC 0x10000)
 
+(defn- stored-id
+  "The id the store cfg names was made with, read from its :db head's stored config (0.8 ms),
+  or nil when no store is there yet."
+  {:malli/schema [:=> [:cat :seon.db/cfg] [:maybe :uuid]]}
+  [cfg]
+  (let [{:keys [backend path]} (:store cfg)]
+    (when (posix/exists? (if (= backend :lmdb) (str path "/data.mdb") path))
+      (-> (konserve.store/connect-store (:store cfg) {:sync? true})
+          (datahike.store/add-cache-and-handlers (datahike.config/load-config cfg))
+          (datahike.writing/read-head :db)
+          (get-in [:config :store :id])))))
+
 (defn store-cfg
-  "Datahike config for the durable store at path; backend :lmdb (default) or :file. It names
+  "Datahike config for the durable store at path; backend :lmdb (default) or :file. A store is
+  named by the id it records, never by where it lies: a kept run opens wherever it is copied,
+  moved or archived (stored-id); the path names only a store this config is about to make.
+  A copy keeps its original's id, as a replica does, so one process opens one of them. It names
   no :keep-history?: that is fixed when a store is made (Datahike's store-fixed-record-keys;
   made-cfg), and a connect adopts what the store records, so a kept store made either way opens."
   {:malli/schema [:=> [:cat [:enum :lmdb :file] :string] :seon.db/cfg]}
   [backend path]
-  {:store (cond-> {:backend backend :path path :id (hasch/uuid path)
-                   :default-serializer :FaslSerializer}
-            (= backend :lmdb) (assoc :lmdb {:flags MDB_NOSYNC :map-size (cfg/value :seon.config.store/lmdb-map-bytes)})
-            ;; konserve's per-value compressor (its header names it, so stored values of either kind read)
-            (#{:lz4 :zstd} (cfg/value :seon.config.store/compressor)) (assoc-in [:config :compressor] {:type (cfg/value :seon.config.store/compressor)})
-            (= backend :file) (assoc :config {:defer-immutable-sync? true}))
-   :schema-flexibility :write
-   :writer writer-cfg
-   :index-config (let [n (cfg/value :seon.config.store/value-out-of-line-bytes)]
-                   (cond-> {:branching-factor (cfg/value :seon.config.store/branching-factor)}
-                     (int? n) (assoc :value-out-of-line-bytes n)))})
+  (let [cfg {:store (cond-> {:backend backend :path path :id (hasch/uuid path)
+                             :default-serializer :FaslSerializer}
+                      (= backend :lmdb) (assoc :lmdb {:flags MDB_NOSYNC :map-size (cfg/value :seon.config.store/lmdb-map-bytes)})
+                      ;; konserve's per-value compressor (its header names it, so stored values of either kind read)
+                      (#{:lz4 :zstd} (cfg/value :seon.config.store/compressor)) (assoc-in [:config :compressor] {:type (cfg/value :seon.config.store/compressor)})
+                      (= backend :file) (assoc :config {:defer-immutable-sync? true}))
+             :schema-flexibility :write
+             :writer writer-cfg
+             :index-config (let [n (cfg/value :seon.config.store/value-out-of-line-bytes)]
+                             (cond-> {:branching-factor (cfg/value :seon.config.store/branching-factor)}
+                               (int? n) (assoc :value-out-of-line-bytes n)))}]
+    (if-let [id (stored-id cfg)] (assoc-in cfg [:store :id] id) cfg)))
 
 (defn made-cfg
   "cfg as a store is made with it: keeping history (its temporal indexes, and each
@@ -239,7 +255,7 @@
         exists? (posix/exists? (if (= backend :lmdb) (str path "/data.mdb") path))]
     (when-not exists?
       (d/create-database (made-cfg cfg))
-      (let [conn (d/connect cfg)] (seed! conn n) (when-not (= :db main) (d/release conn))))
+      (let [conn (d/connect cfg)] (seed! conn n) (d/release conn)))
     (let [[conn existed?] (open-main! cfg main)
           added (install-missing! conn)
           cfg (cond-> cfg (not= :db main) (assoc :branch main))]

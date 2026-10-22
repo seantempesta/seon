@@ -15,3 +15,12 @@
     (is (keyword? (:handle r-ret)) "root's value has its result handle, as an agent's does")
     (is (= (select-keys a-err [:tag :form :printed]) (select-keys r-err [:tag :form :printed])) "an error replies alike")
     (is (= "1" (:printed r-star)) "`sys` is this root: one agent")))
+
+(deftest a-door-defect-answers-that-request-alone
+  ;; task seon.entrance/a-door-defect-answers-that-request-alone: a request whose verb throws
+  ;; (attach! refuses a task id that is not a string: its contract) is answered the typed
+  ;; :seon.entrance/defect naming the line it took, and the door answers the next request
+  (let [[defect ok] (at/in-agent [{:op :attach :task 5} {:op :eval :agent "root" :code "(+ 1 2)"}])]
+    (is (= :seon.entrance/defect (:seon.error/type defect)))
+    (is (= (pr-str {:op :attach :task 5}) (:line defect)))
+    (is (= "3" (:printed ok)) "the door goes on")))
