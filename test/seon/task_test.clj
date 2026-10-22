@@ -3,7 +3,7 @@
   seon.task/a-task-cites-what-it-needs): references from the plan, never authored, and a
   citation that resolves to nothing answered beside the write."
   (:require [clojure.test :refer [deftest is]] [datahike.api :as d]
-            [seon.db :as pdb] [seon.task :as task]))
+            [seon.db :as pdb] [seon.task :as task] [seon.ref :as ref] [seon.template :as template]))
 
 (defn- db-with-program []
   ;; one recorded definition, its form (seon.program's facts), written as data
@@ -20,6 +20,14 @@
     (is (= #{'demo/f} (set (:seon.task/references written))) "a cited name, not a literal or a form")
     (is (not (contains? (first (task/create-tx (db-with-program) [(decl "No names here.")])) :seon.task/references))
         "no names, no key")))
+
+(deftest a-templates-instructions-are-cited-as-a-plan-is
+  ;; owner, 2026-10-22: instructions are cited text; a var a kind's instructions cite reaches
+  ;; the task's references, and so its context, exactly as a plan's does
+  (doseq [kind [:design :implement :test :merge]
+          :let [[written] (task/create-tx (db-with-program) [(assoc (decl "") :seon.task/instructions (template/instructions kind))])]]
+    (is (contains? (set (:seon.task/references written)) 'my.agent/callers) (str kind " cites the navigation verbs"))
+    (is (= (set (ref/names (template/instructions kind))) (set (:seon.task/references written))) (str kind ": every name, derived"))))
 
 (deftest unresolved-citations-are-answered-not-refused
   (let [db (db-with-program)

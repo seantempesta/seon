@@ -5,11 +5,14 @@
     (whoami)                  {:id :branch :pid}
     (messages)                the messages delivered and not yet taken, taken
     (send-message tos body)   body to the agents tos (ids), delivered by root
+    (callers 'ns/f)           the program vars whose recorded definition names ns/f
+    (callees 'ns/f)           the vars ns/f's recorded definition names
+    (grep "text")             the program vars whose recorded definition's text holds it
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context]
-            [clojure.java.io :as io] [clojure.string :as str] [clojure.main]))
+            [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "The live value of an earlier result, by handle (:h3)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
@@ -19,6 +22,33 @@
   [] (agent/messages))
 (defn send-message "Send body to the agents tos (ids); root delivers it by id. nil." {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
   [tos body] (agent/send-message tos body))
+
+(defn callers
+  "The program vars whose recorded definition names var sym (its :form/refs on this branch),
+  sorted; sym itself left out."
+  {:malli/schema [:=> [:cat :qualified-symbol] [:vector :qualified-symbol]]}
+  [sym]
+  (vec (sort (disj (set (d/q '[:find [?v ...] :in $ ?s :where [?f :form/refs ?s] [?f :form/defines ?e] [?e :var/name ?v]]
+                             (agent/db) sym))
+                   sym))))
+
+(defn callees
+  "The vars var sym's recorded definition names on this branch (its :form/refs: program,
+  library and clojure.core alike), sorted; sym itself left out."
+  {:malli/schema [:=> [:cat :qualified-symbol] [:vector :qualified-symbol]]}
+  [sym]
+  (vec (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]]
+                             (agent/db) sym))
+                   sym))))
+
+(defn grep
+  "The program vars whose recorded definition's text (:form/src on this branch) holds the
+  string s, sorted: a text search over the program as the branch holds it."
+  {:malli/schema [:=> [:cat :string] [:vector :qualified-symbol]]}
+  [s]
+  (vec (sort (d/q '[:find [?n ...] :in $ ?s :where [?f :form/src ?src] [(clojure.string/includes? ?src ?s)]
+                    [?f :form/defines ?v] [?v :var/name ?n]]
+                  (agent/db) s))))
 
 (defn- file-source
   "The text of the form at var v's :file and :line on the classpath (Clojure's clojure.repl/source-fn
