@@ -4,7 +4,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [clojure.java.io] [clojure.string] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.config :as cfg] [seon.contract :as contract] [seon.edn]
-            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb]))
+            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -235,6 +235,18 @@
     (pdb/sync! cfg)
     (d/release c)
     (reduce + 0 (for [[k v] (stored-bytes path) :when (not= v (get before k))] v))))
+
+;; ---- node compression (task seon.db/nodes-compress: :seon.config.store/compressor) ----------
+
+(deftest nodes-compress-through-the-lz4-the-build-made
+  ;; the store's nodes are LZ4 frames through the liblz4 bin/build makes from Chez's vendored
+  ;; lz4 (target/lib/liblz4.dylib, bin/env's JOLT_LZ4_LIB), never a system library; a frame
+  ;; round-trips, and real text (the checkout's docs) compresses
+  (is (= (str (cfg/checkout) "/target/lib/liblz4.dylib") konserve.jolt.lz4/lib-path))
+  (let [text (.getBytes ^String (slice @prose 0 65536) "UTF-8")
+        frame (konserve.jolt.lz4/compress text)]
+    (is (= (seq text) (seq (konserve.jolt.lz4/decompress frame))) "a frame round-trips")
+    (is (< (alength frame) (/ (alength text) 1.5)) (str "64 KiB of docs compress to " (alength frame) " bytes"))))
 
 (deftest a-commit-costs-what-it-writes
   ;; task seon.db/the-store-grows-with-what-it-keeps. Estimate, from what a commit must

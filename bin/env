@@ -6,6 +6,10 @@
 ROOT=${ROOT:-$(cd "$(dirname "$0")/.." && pwd)}
 JOLT_LMDB_LIB=${JOLT_LMDB_LIB:-$ROOT/target/lib/liblmdb.dylib}
 export JOLT_LMDB_LIB
+# LZ4: konserve.jolt.lz4 loads JOLT_LZ4_LIB, the store's node compressor, built from Chez's
+# vendored lz4 (bin/build lz4).
+JOLT_LZ4_LIB=${JOLT_LZ4_LIB:-$ROOT/target/lib/liblz4.dylib}
+export JOLT_LZ4_LIB
 # The checkout this process runs from: seon.config reads resources/seon/config/default.edn
 # here and resolves its #seon/checkout paths (the probe library, system.edn, the tasks) under it.
 # (not JOLT_PWD: Jolt resolves a child process's relative path, ./seon, against it)

@@ -75,7 +75,7 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 | one store, many Datahike branches | `seon.db` (LMDB), `seon.writer` | present |
 | history kept | `:seon.config.store/keep-history?` (default true), fixed when a store is made; a kept store made without it keeps its layout ([storage](storage.md#history)) | present |
 | storage collection, log rotation (`seon.maintenance`) | none; `datahike.gc/gc-storage!` runs on Jolt with a `java.util.Date` | missing |
-| blobs out of line (`seon.blob`) | in progress: LZ4 node compression through liblz4, and large values out of line inside Datahike's own store | missing |
+| blobs out of line (`seon.blob`) | LZ4 node compression through liblz4 built from source ([storage](storage.md#node-compression)); large values out of line inside Datahike's own store in progress | partial |
 | every dial documented | one aero file, one resolver (`seon.config`) | present |
 | one error shape, recorded once per signature, problem report | `seon.contract/error`, `seon.error`, `seon.problems` | present |
 | named catch sites | `docs/DRAGONS.md`, `bin/dragons` | new |
