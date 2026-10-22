@@ -253,13 +253,14 @@
 ;; ---- the model provider, as the config states it --------------------------------------------
 
 (defn provider
-  "The model provider config c names (:seon.config.ai/*, resolved for its model): the
+  "The model provider config c names (:seon.config.ai/*, resolved for its model): none, the
   scripted stand-in, or the OpenAI-compatible endpoint with the NAME of its key's
   environment variable (never the key)."
   {:malli/schema [:=> [:cat :seon.config/config] :seon.model/provider]}
   [c]
   (let [v #(:value (resolve-in c {} % {}))]
     (case (:seon.config.ai/provider c)
+      :none {:kind :none}
       :scripted {:kind :scripted :script (:seon.config.ai/script c)}
       :openai-compat (cond-> {:kind :openai-compat :base-url (v :seon.config.ai/base-url) :model (:seon.config.ai/model c)
                               :api-key-env (v :seon.config.ai/api-key-variable) :max-tokens (v :seon.config.ai/max-tokens)}
