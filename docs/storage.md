@@ -17,6 +17,10 @@ One durable store holds every branch as Datahike index trees in konserve, one co
 
 Inline values were the cause. Every commit rewrites the tail leaf of `:eavt` and `:aevt`, which holds each value inline, so a turn's text was written again by every later commit until its leaf split, and the waste grew with the run. With values inline and LZ4, per-turn cost against the bound is 0.83 at 10 turns, 1.16 at 20 and 1.74 at 40. Out of line it stays near flat: 0.29, 0.33 and 0.41. Every layout commits in about 1.7 ms per turn.
 
+## Entity ids
+
+The entity whose unique attribute holds a value is found by `seon.db/eid`: one seek in that attribute's AVET index, never a Datalog query (a query planned per call cost ~95 µs and 100 KB at 100 tasks). It is the one lookup; every namespace that needs an entity id by value calls it. Reading an entity's facts needs no id first: a pull by lookup ref (`(d/pull db attrs [:seon.root/id :root])`) answers nil when no entity holds the value, so root's facts, a task, an attempt or an error record are pulled directly (lane DUP-HELPERS, task `seon.db/one-entity-id-lookup`).
+
 ## History
 
 A store keeps history when `:seon.config.store/keep-history?` is true, the default (v1's ruling 23, and Datahike's own default). With history, `d/history`, `as-of` and `since` work, a retraction stays a datom, and a transaction keeps its tx-meta. `:db/txInstant` is part of that tx-meta: Datahike applies tx-meta only when history is on, and drops it silently when it is off. The flag is fixed when a store is made (Datahike's `store-fixed-record-keys`). So ```seon.db/made-cfg``` adds it only when a store is created (`seon.db/open!`, and the test store), and ```seon.db/store-cfg``` never names it. A connect adopts what the store recorded, so a store made either way still opens: the standing root's store was made without history, and it keeps that layout. Proofs: `seon.db-test/the-store-keeps-history`, `seon.db-test/a-kept-store-keeps-the-history-it-was-made-with`.

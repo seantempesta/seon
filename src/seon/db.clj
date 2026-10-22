@@ -5,7 +5,7 @@
   (konserve.jolt.fasl-store, FaslSerializer), and the JVM-written-store reader stays behind
   (BAGGAGE.md)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-] :as contract] [seon.schema.datahike :as sd] [seon.config :as cfg]
+  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-] :as contract] [seon.schema.datahike :as sd] [seon.config :as cfg]
             [datahike.connections] [datahike.writing] [datahike.db.transaction :as dbt] [hasch.core :as hasch] [datahike.api :as d] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
             [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix]))
 
@@ -13,6 +13,13 @@
   "The Datahike schema, derived from the registry's entity schemas (resources/seon/schemas,
   seon.schema.datahike; lane D1): one source of truth with the contracts."
   (sd/declarations contract/registry))
+
+(defn eid
+  "The entity id of the entity whose unique attribute a has value v on db, or nil: one seek
+  in a's AVET index, never a query (a Datalog query here cost ~95 us and 100 KB at 100
+  tasks, planned on every call). The one entity lookup (docs/storage.md#entity-ids)."
+  {:malli/schema [:=> [:cat :seon.host/db :keyword :any] [:maybe :int]]}
+  [db a v] (:e (first (d/datoms db :avet a v))))
 
 (defn seed-tx
   "Transactions of an example program sized by n (the test store's and the check store's
@@ -266,7 +273,7 @@
   (:collect) and root refuses it while an agent is live (docs/storage.md#collection)."
   {:malli/schema [:=> [:cat :seon.host/conn] [:or [:map [:skipped :boolean]] :seon.root/collected]]}
   [conn]
-  (let [last (d/q '[:find ?c . :where [?e :seon.root/id :root] [?e :seon.root/collected ?c]] @conn)
+  (let [last (:seon.root/collected (d/pull @conn [:seon.root/collected] [:seon.root/id :root]))
         now (set (d/branches conn))
         gone (count (remove now (:branches last)))]
     (cond
@@ -276,9 +283,9 @@
       ;; spawns behind root's writer for seconds (scale: 8.2 s to ready, 2026-10-22)
       (zero? gone) {:swept 0 :ms 0.0 :branches now :gone 0}
       :else
-      (let [t0 (System/nanoTime)
+      (let [t0 (profile/now-ns)
             swept @(d/gc-storage conn (java.util.Date. 0))]
-        {:swept (count swept) :ms (/ (- (System/nanoTime) t0) 1e6) :branches now :gone gone}))))
+        {:swept (count swept) :ms (profile/ms-since t0) :branches now :gone gone}))))
 
 (defn lease!
   "Make this process mint the store's entity ids from its lease: from lease, up to (not

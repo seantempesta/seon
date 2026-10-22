@@ -2,7 +2,7 @@
   "Every proc's step-fn, called as a plain function (no graph, no Flow), checked against
   its `:malli/schema` (seon.step/step-schema) and against what each arity must do.
   Run: bin/test seon.procs-test (proto/flow f2-final test/proto/procs_test.clj)"
-  (:require [clojure.test :refer [deftest is testing run-tests]]
+  (:require [seon.profile :as profile] [clojure.test :refer [deftest is testing run-tests]]
             [malli.core :as m] [seon.contract]
             [clojure.core.async :as a] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec]
             [clojure.core.async.flow :as flow]
@@ -83,7 +83,7 @@
 (deftest reconciler
   (pdb/test-branch! (fn [_ conn] (let [st (#'reconcile/reconciler-proc {:boot "b" :provider {:kind :scripted :script 'seon.fixtures/reply}})]
     (testing "a main commit with no tasks: the reconciler reads it and starts nothing (quiescence: seon.reconcile-test)"
-      (let [[st outs] (step #'reconcile/reconciler-proc st :main {:t 7 :ops [] :db @conn :ns (sock/now-ns)})]
+      (let [[st outs] (step #'reconcile/reconciler-proc st :main {:t 7 :ops [] :db @conn :ns (profile/now-ns)})]
         (is (= 1 (:seen st)))
         (is (= :main-seen-us (:k (first (:to-api outs)))))
         (is (empty? (:flights st)))))

@@ -14,7 +14,7 @@
 
 (deftest finding-a-task-by-its-id-is-one-index-seek
   (cost/proof
-    {:of 'seon.task/eid :input 'seon.task-cost-test/tasks-db
+    {:of 'seon.db/eid :input 'seon.task-cost-test/tasks-db
      :n "tasks on main"
      :work (str "one seek in the unique attribute's AVET index: 2-3 B-tree nodes, a binary search of ~6 datom "
                 "comparisons (~100 ns each on Jolt) per node, then one datom answered; no query planning, nothing "

@@ -1,12 +1,23 @@
 (ns seon.db-test
   "One store, many branches, as in production (owner, 2026-10-21): bin/test seeds one test
   store and each test takes a branch of it through one helper (seon.db/test-branch!)."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [clojure.java.io] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.config :as cfg] [seon.contract :as contract] [seon.edn]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
+
+(deftest eid-is-the-entity-of-a-unique-value
+  (let [db (pdb/test-db)]
+    (testing "a unique attribute's value names its entity: the one a query finds"
+      (is (= (d/q '[:find ?e . :where [?e :var/name app.m0/f1]] db) (pdb/eid db :var/name 'app.m0/f1)))
+      (is (= 'app.m0/f1 (:var/name (d/entity db (pdb/eid db :var/name 'app.m0/f1))))))
+    (testing "a value no entity holds is nil, not an id"
+      (is (nil? (pdb/eid db :var/name 'app.m0/no-such)))
+      (is (nil? (pdb/eid db :seon.root/id :root))))
+    (testing "root's facts pulled by lookup ref are nil before root's first boot: no eid guard is needed"
+      (is (nil? (d/pull db [:seon.root/boot] [:seon.root/id :root]))))))
 
 (deftest a-test-takes-a-branch-of-the-test-store
   (pdb/test-branch! (fn [cfg-a a] (pdb/test-branch! (fn [cfg-b b] (let [seed (d/connect (dissoc cfg-a :branch))]
@@ -374,9 +385,9 @@
         n 20]
     (try
       (let [once (write-turns! conn cfg path :once n n)
-            t0 (System/nanoTime)
+            t0 (profile/now-ns)
             per-turn (write-turns! conn cfg path :per-turn n 1)
-            ms (/ (- (System/nanoTime) t0) 1e6)
+            ms (profile/ms-since t0)
             bound (+ once (* n 32 1024))]
         (println (str "a-commit-costs-what-it-writes: " n " turns, one commit " once " B, per turn " per-turn " B, bound " bound " B, "
                       (format "%.1f" (/ ms n)) " ms per turn (compressor " (cfg/value :seon.config.store/compressor)

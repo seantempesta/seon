@@ -300,6 +300,4 @@
   the root entity holds. What agents, the dashboard and the context read."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :map]]}
   [db]
-  (when-let [e (d/q '[:find ?e . :where [?e :seon.root/id :root]] db)]
-    (let [r (d/pull db (keys-declared) e)]
-      (when (seq r) r))))
+  (not-empty (d/pull db (keys-declared) [:seon.root/id :root])))

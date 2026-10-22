@@ -28,7 +28,6 @@
 (lib/defc c-recvmsg "recvmsg" [:int :pointer :int] :ssize_t {:blocking true})
 (lib/defc c-recvmsg-nb "recvmsg" [:int :pointer :int] :ssize_t)
 (lib/defc c-poll "poll" [:pointer :int :int] :int {:blocking true})
-(lib/defc c-clock-ns "clock_gettime_nsec_np" [:int] :uint64)
 
 (defmacro ^:private with-mem
   "Allocate n bytes for body, freed after it (jolt.ffi's caller-owned form)."
@@ -45,11 +44,6 @@
 (def ^:private F-SETFD 2)
 (def ^:private FD-CLOFORK 2)
 (def ^:private MSG-DONTWAIT 0x80)
-
-(defn now-ns
-  "A monotonic clock every process shares (CLOCK_UPTIME_RAW), for one-way latencies."
-  {:malli/schema [:=> [:cat] :int]}
-  [] (c-clock-ns 8))
 
 (def BUF
   "Each socket's send and receive buffer, bytes (:seon.config.agent/sock-buf-bytes)."

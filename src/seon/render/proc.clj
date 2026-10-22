@@ -23,7 +23,7 @@
   out; a tab that opened or fell behind gets a keyframe composed here from the retained
   fragments, rendering nothing."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str]
+  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.ai :as ai]
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.context :as context] [seon.print :as print]
@@ -320,7 +320,7 @@
   [st o]
   (if-not (:view st)
     st
-    (let [t0 (lib/now-ns)
+    (let [t0 (profile/now-ns)
           now-ms (System/currentTimeMillis)
           ;; the stream: each new event's row rendered once
           ;; an agent that ended after its attempt finished ended normally: its event says so
@@ -368,7 +368,7 @@
                                    [st (cond-> ps p (conj p))]))
                                [st []] (sort-by str views))
           idx (index-of (:agents sys))
-          ms (lib/ms-since t0)]
+          ms (profile/ms-since t0)]
       (doseq [p patches] (step/out! o :to-web p))
       (when (not= idx (:index st)) (step/out! o :to-web {:op :index :agents idx}))
       (doseq [[k v] (:waiting st)] (step/out! o :to-web {:op :page :k k :view v :html (page-html st v)}))

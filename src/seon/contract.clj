@@ -293,7 +293,7 @@
   :uncontracted [sym] :invalid [error] :ms}."
   {:malli/schema [:=> [:cat [:sequential :symbol]] :seon.contract/report]}
   [nss]
-  (let [t0 (System/nanoTime)
+  (let [t0 (profile/now-ns)
         rs (for [n nss v (vals (ns-interns (the-ns n))) :when (contract v)] [v (arm! v)])
         r (reduce (fn [acc [v r]] (if (error? r) (update acc :invalid conj r) (update acc r (fnil inc 0)))) {:invalid []} rs)]
-    (assoc r :uncontracted (uncontracted nss) :ms (/ (- (System/nanoTime) t0) 1e6))))
+    (assoc r :uncontracted (uncontracted nss) :ms (profile/ms-since t0))))

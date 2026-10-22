@@ -20,7 +20,7 @@
   runs in the agent as an eval of (seon.web/ui-call 'fn args), origin :ui, refused as data
   unless the var is marked ^:seon/callable."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn]
+  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [ring-chez.adapter :as adapter]
             [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render.ui :as ui] [seon.web.html :as h] [seon.step :as step] [seon.repl :as repl] [seon.root :as c]))
 
@@ -233,7 +233,7 @@
               (let [{f :var :keys [agent args forms]} c
                     it {:id 0 :tag :ret :printed "requested" :origin :ui
                         :form (pr-str (cond-> (list f) agent (concat [agent]) (seq args) (concat [args]) forms (concat [forms])))}]
-                (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx :root (str "root-ui-" (lib/now-ns)) [it] nil)}}
+                (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx :root (str "root-ui-" (profile/now-ns)) [it] nil)}}
                                      :route [:render :answers] :tag [:web-record]})))
             (update st :calls (fnil inc 0)))
     st))

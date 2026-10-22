@@ -11,7 +11,7 @@
   F2): the same process contract as root's Flow procs, with pause, resume, stop and ping
   as messages on its pipe."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program]
+  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program]
             [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]
             [jolt.deps] [clojure.edn :as edn]))
 
@@ -51,25 +51,25 @@
      :tick [st {:ev (reap st)}]
      :tx (if (<= (:t m) (:max-tx (:db st)))
            [st nil] ; already in the db this server was forked with
-           (let [t0 (lib/now-ns)
+           (let [t0 (profile/now-ns)
                  ;; main's transaction facts as this transaction's own (seon.db/report->tx-meta)
                  db' (:db-after (d/with (:db st) {:tx-data (:tx-data m) :tx-meta (:tx-meta m {})}))
                  st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled
                  errs (seq (program/load-changes! db' (:tx-data m)))]
              [st {:ev (cond-> [] errs (conj {:ev :load-errors :t (:t m) :errors (vec errs)})
-                        true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (lib/ms-since t0)
-                                    :lag-ms (/ (- (lib/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}]))
-     :fork (let [t0 (lib/now-ns)]
+                        true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (profile/ms-since t0)
+                                    :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}]))
+     :fork (let [t0 (profile/now-ns)]
              (fork-carrying! st #(repl/run! % m (:db st) (:ns m))
                              (fn [n] [st {:ev [{:ev :fork-failed :agent (:agent m) :active-threads n}]}])
                              (fn [pid] [st {:ev (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
-                                                        :fork-ms (lib/ms-since t0) :t (:max-tx (:db st))}]
+                                                        :fork-ms (profile/ms-since t0) :t (:max-tx (:db st))}]
                                                       (reap st))}])))
      :stats [st {:ev [{:ev :stats :t (:max-tx (:db st)) :datoms (count (d/datoms (:db st) :eavt))
                        :mismatch (:mismatch st) :mem-mb (lib/r2 (lib/real-mb)) :os-threads (lib/nthreads)
                        :active-threads (lib/active-threads)}]}]
-     :static (let [t0 (lib/now-ns)] (lib/static!) [st {:ev [{:ev :static :ms (lib/ms-since t0)}]}])
+     :static (let [t0 (profile/now-ns)] (lib/static!) [st {:ev [{:ev :static :ms (profile/ms-since t0)}]}])
      ;; a standby (lane F2): a fork of this server, idle on its own named pipes until root
      ;; promotes it, so that no fork after boot ever comes from root (multithreaded).
      ;; The previous standby is killed: one standby at a time.

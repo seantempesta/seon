@@ -2,7 +2,7 @@
   "Lane D2: every class of problem lands as a typed fact written by its observer, and
   seon.problems/report lists them by class at a cost that follows the problems, not the
   program. Run: bin/test seon.problems-test"
-  (:require [clojure.test :refer [deftest is testing]] [clojure.edn :as edn]
+  (:require [seon.profile :as profile] [clojure.test :refer [deftest is testing]] [clojure.edn :as edn]
             [datahike.api :as d] [clojure.core.async :as a]
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
             [seon.repl :as repl] [seon.proofs :as proofs] [seon.root :as root] [seon.agent-proc :as ap]
@@ -82,7 +82,7 @@
         st (rec/reconciler-proc {:boot "boot-1"})
         round (fn [f i]
                 (let [db @conn
-                      e (try (rec/reconciler-proc st :main {:t (:max-tx db) :ops [] :db db :ns (sock/now-ns)}) nil
+                      e (try (rec/reconciler-proc st :main {:t (:max-tx db) :ops [] :db db :ns (profile/now-ns)}) nil
                              (catch Throwable e e))
                       f (err/fold f (err/occurrence (agent/error-map e) :platform {} (+ 5000 i)))
                       [f tx] (err/flush-tx f db)]
@@ -162,7 +162,7 @@
     (is (= [] (writes o3)) "the answered write is followed by nothing: 500 repeats of a written signature are counted in the fold")))
 
 (deftest an-agent-death-is-recorded-with-its-cause
-  (let [dir (str (System/getProperty "java.io.tmpdir") "/d2-death-" (System/nanoTime))
+  (let [dir (str (System/getProperty "java.io.tmpdir") "/d2-death-" (profile/now-ns))
         _ (.mkdirs (java.io.File. (str dir "-agents")))
         _ (spit (str dir "-agents/a1.err") (str (apply str (repeat 3000 "x")) "\nChez: out of memory\n"))
         p (promise)

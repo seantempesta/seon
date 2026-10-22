@@ -6,7 +6,7 @@
   stop). `reconciler-proc` is the root proc that runs it on main's commits and carries the
   actions out as requests to the api, each action's facts written by the writer."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
+  (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm] [seon.source :as source]
             [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
             [seon.config :as cfg]))
@@ -428,7 +428,7 @@
   "Main's last quiescence report on db ({:t :stuck}, written by the reconciler proc), or nil."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.root/quiescent]]}
   [db]
-  (when (task/eid db :seon.root/id :root) (:seon.root/quiescent (d/pull db [:seon.root/quiescent] [:seon.root/id :root]))))
+  (:seon.root/quiescent (d/pull db [:seon.root/quiescent] [:seon.root/id :root])))
 
 (defn last-commit
   "The merges commit of db's last merged attempt (the write-back's sha), or nil."
@@ -442,7 +442,7 @@
   nil."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.root/generation]]}
   [db]
-  (when (task/eid db :seon.root/id :root) (:seon.root/generation (d/pull db [:seon.root/generation] [:seon.root/id :root]))))
+  (:seon.root/generation (d/pull db [:seon.root/generation] [:seon.root/id :root])))
 
 ;; ---- queries, over one index (list it once: (index db)) -----------------------------
 
@@ -486,11 +486,9 @@
   and the error that ended it and its waste as data), or {}."
   {:malli/schema [:=> [:cat :seon.host/db :seon.attempt/id] :map]}
   [db aid]
-  (let [e (d/q '[:find ?e . :in $ ?a :where [?e :seon.end/attempt ?a]] db aid)]
-    (if e
-      (let [m (d/pull db [:seon.end/outcome :seon.end/reason :seon.end/turns :seon.end/tokens :seon.end/error :seon.end/waste] e)]
-        (into {} (for [[k v] m] [(keyword (name k)) v])))
-      {})))
+  (into {} (for [[k v] (d/pull db [:seon.end/outcome :seon.end/reason :seon.end/turns :seon.end/tokens :seon.end/error :seon.end/waste]
+                                [:seon.end/attempt aid])]
+              [(keyword (name k)) v])))
 
 (defn- error-text
   "Error map e as an attempt's stored error (:seon.attempt/error): the one error map, its
@@ -764,7 +762,7 @@
                            :quiet (boolean (and (:quiet st) (not work?)))
                            :refused (if (and work? (not refusals?)) #{} (:refused st #{})))
                  [st outs] (pass st)]
-             [st {:to-api (into [{:op :stat :k :main-seen-us :v (/ (- (sock/now-ns) (:ns m)) 1000.0)}] outs)}])
+             [st {:to-api (into [{:op :stat :k :main-seen-us :v (/ (- (profile/now-ns) (:ns m)) 1000.0)}] outs)}])
      ;; an outside agent handed its attempt back: judged as a turn loop's end is
      :judge (let [{:keys [attempt task env agent]} m
                   st (assoc-in st [:flights attempt] {:act {:op :spawn :attempt attempt :task task :env env} :agent agent})

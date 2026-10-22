@@ -2,7 +2,7 @@
   "seon.profile: every contracted call counted exactly, one in 64 timed, read per epoch."
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :as contract :refer [defn defn-]]
-            [seon.profile :as profile] [seon.repl :as repl] [seon.agent :as agent]))
+            [seon.profile :as profile] [seon.repl :as repl] [seon.agent :as agent] [jolt.ffi :as ffi]))
 
 (defn- leaf {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))
 
@@ -58,3 +58,22 @@
         (is (= {'seon.profile-test/branch 1 'seon.profile-test/leaf 300}
                (into {} (map (juxt :var :calls)) fns)))
         (is (= fns (:fns (:seon.cluster.eval/record (first (repl/record-tx :a "r" items nil))))))))))
+
+;; the system's clock read directly (macOS clock_gettime_nsec_np, CLOCK_UPTIME_RAW = 8), the
+;; one every process on the machine reads
+(ffi/defcfn ^:private uptime-raw "clock_gettime_nsec_np" [:int] :long)
+
+(deftest the-clock-is-the-one-every-process-reads
+  (testing "profile/now-ns is the machine's CLOCK_UPTIME_RAW, not a count from this process's start"
+    (let [a (uptime-raw 8) t (profile/now-ns) b (uptime-raw 8)]
+      (is (<= a t b) (str "system " a " .. " b ", profile/now-ns " t))))
+  (testing "it resolves below a microsecond (the least step between two different reads)"
+    (let [step (apply min (for [_ (range 1000) :let [a (profile/now-ns) b (loop [b (profile/now-ns)] (if (= a b) (recur (profile/now-ns)) b))]] (- b a)))]
+      (is (< step 1000) (str "least step " step " ns")))))
+
+(deftest reading-the-clock-allocates-nothing
+  (let [n 10000
+        bytes (fn [f] (let [a0 (profile/alloc-bytes)] (f) (- (profile/alloc-bytes) a0)))
+        empty-loop (bytes #(dotimes [_ n] nil))
+        reads (bytes #(dotimes [_ n] (profile/now-ns)))]
+    (is (<= (- reads empty-loop) 1024) (str n " reads allocated " reads " bytes, an empty loop " empty-loop))))

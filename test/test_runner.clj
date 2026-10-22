@@ -8,7 +8,7 @@
   results directory every checkout and worktree shares (:seon.config.source/test-results-dir),
   one <digest>.edn per result. A landing runs it: what the change reaches, minus what is
   green at its digest."
-  (:require [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
+  (:require [seon.profile :as profile] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
             [clojure.test :as t] [datahike.api :as d] [seon.config :as config] [seon.db :as pdb]
             [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.program :as program] [seon.source :as source]))
 
@@ -77,10 +77,10 @@
   (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
   (into {} (for [tst tests
                  :let [rc (ref t/*initial-report-counters*)
-                       t0 (System/nanoTime)
+                       t0 (profile/now-ns)
                        _ (binding [t/*report-counters* rc] (t/test-vars [(resolve tst)]))
                        r (assoc (select-keys @rc [:pass :fail :error]) :test tst :digest (digests tst)
-                                :ms (quot (- (System/nanoTime) t0) 1000000))]]
+                                :ms (quot (- (profile/now-ns) t0) 1000000))]]
              (do (fx/write-file {:req {:path (result-path dir (digests tst)) :text (sedn/encode r)}})
                  [tst r]))))
 
@@ -89,14 +89,14 @@
   digest run; exits 1 when one is red."
   [names]
   (let [root (System/getProperty "user.dir")
-        t0 (System/nanoTime)
+        t0 (profile/now-ns)
         nss (set (if (seq names) (map symbol names) (test-namespaces)))
         db (program-db root)
         digests (into {} (filter #(nss (symbol (namespace (key %))))) (program/reach-digests db (inputs root)))
         dir (config/value :seon.config.source/test-results-dir)
         {:keys [reused run]} (plan digests dir)
         _ (println (str "reach: " (count digests) " tests, " (count reused) " green at their digest (reused), "
-                        (count run) " to run; digests in " (quot (- (System/nanoTime) t0) 1000000) " ms; results " dir))
+                        (count run) " to run; digests in " (quot (- (profile/now-ns) t0) 1000000) " ms; results " dir))
         ran (run-vars! run digests dir)
         red (sort (keep (fn [[tst r]] (when-not (green? r) tst)) ran))]
     (println (str "reach: ran " (count ran) ", " (- (count ran) (count red)) " green, " (count red) " red"

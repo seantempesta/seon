@@ -7,7 +7,7 @@
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
   reference (await-ref, seon.e2e/await-db), never a poll or a deadline."
-  (:require [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.entrance] [seon.mcp] [clojure.data.json] [seon.cost] [seon.problems]))
+  (:require [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.entrance] [seon.mcp] [clojure.data.json] [seon.cost] [seon.problems]))
 
 (defn- out! [& xs] (println (apply str xs)) (flush))
 
@@ -145,9 +145,9 @@
         _ (out! "merge " (ids 1) " with its conflict unmerged: " (dissoc m2 :tx))
         ;; clone: a3 forks itself, live values and all, onto a branch of its branch
         _ @(c/submit! sys (ids 2) "(def memo (atom {:seen 1}))")
-        t-clone (lib/now-ns)
+        t-clone (profile/now-ns)
         cl (ready! sys #(deref (c/clone! sys (ids 2) {:task "a3's clone"})))
-        _ (out! "clone " (ids 2) " -> " cl " in " (lib/r2 (lib/ms-since t-clone)) " ms; the clone says: "
+        _ (out! "clone " (ids 2) " -> " cl " in " (lib/r2 (profile/ms-since t-clone)) " ms; the clone says: "
                 (short-items @(c/submit! sys (:id cl) "(my.agent/whoami) (swap! memo update :seen inc) (doc-of 'app.m0/f1)"))
                 "; the parent still has " (:printed (first @(c/submit! sys (ids 2) "@memo"))))
         ;; merge main forward into a1's branch (git merge main): it now sees a3's notes too
@@ -353,10 +353,10 @@
         pure (filter #(and (or (pure-nss (ns-name (:ns (meta %)))) (pure-fns (symbol %)))
                            (not= :seon.step/step-fn (contract/contract %)) (generates? %)) vs)
         checked (for [v pure
-                      :let [t0 (System/nanoTime)
+                      :let [t0 (profile/now-ns)
                             r (try (mg/check (m/deref (contract/schema (contract/contract v))) @v {:registry contract/registry :num-tests 100 :seed 42})
                                (catch Throwable e {:smallest :threw :seed (ex-message e)}))]]
-                  [(symbol v) r (lib/r2 (/ (- (System/nanoTime) t0) 1e6))])
+                  [(symbol v) r (lib/r2 (profile/ms-since t0))])
         ;; malli could not generate an [:and ...] argument (such-that): not generated, not failed
         such-that (set (for [[sym r] checked :when (= ":malli.generator/such-that-failure" (:seed r))] sym))
         checked (remove (comp such-that first) checked)
@@ -452,25 +452,25 @@
    (fn [sys]
     (let [mem0 (lib/sysmem)
         th-boot (thread-diff (c/declared-threads sys) (c/threads))
-        t0 (lib/now-ns)
+        t0 (profile/now-ns)
         ids (ready! sys #(vec (pmap (fn [i] (c/spawn! sys {:task (str "scale " i)})) (range n))))
-        t-ready (lib/ms-since t0)
+        t-ready (profile/ms-since t0)
         th-ready (thread-diff (c/declared-threads sys) (c/threads))
         _ (out! "ready in " (lib/r2 t-ready) " ms: " (frequencies (map #(get-in (c/state sys) [:agents % :status]) ids)))
         work (fn [id]
                (let [k (subs (name id) 1)
-                     t1 (lib/now-ns)
+                     t1 (profile/now-ns)
                      r @(c/submit! sys id (str "(ns app.s" k " (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* x " k "))
                                                 (deftest f-test (is (= (* 2 " k ") (f 2))))
                                                 (transact! [{:note/text \"hi from " k "\" :note/agent " id "}])
                                                 (f 21)"))
-                     t2 (lib/now-ns)
+                     t2 (profile/now-ns)
                      tr @(c/run-tests! sys id)
-                     t3 (lib/now-ns)]
+                     t3 (profile/now-ns)]
                  {:id id :ok (and (every? #(= :ret (:tag %)) r) (= 1 (:pass tr)) (zero? (+ (:fail tr) (:error tr))))
                   :eval-ms (/ (- t2 t1) 1e6) :tests-ms (/ (- t3 t2) 1e6)}))
         results (vec (pmap work ids))
-        t-done (lib/ms-since t0)
+        t-done (profile/ms-since t0)
         th-work (thread-diff (c/declared-threads sys) (c/threads))
         st (c/state sys)
         mem1 (lib/sysmem)
@@ -614,7 +614,7 @@
   (run-check "WINDOW-WRITE" {:main (keyword nm) :flush-ms 1000}
    (fn [sys]
     (let [flushes #(:flushes (::flow/state (flow/ping-proc (:graph sys) :writer :timeout-ms 1000)))
-          t (fn [p] (let [t0 (lib/now-ns) r @p] [(:ok r) (lib/r2 (lib/ms-since t0))]))
+          t (fn [p] (let [t0 (profile/now-ns) r @p] [(:ok r) (lib/r2 (profile/ms-since t0))]))
           a (t (c/transact-main! sys [{:note/text "A" :note/agent :window}]))
           ;; the window passes (the measurement: A is flushed by then)
           _ (Thread/sleep 1500)
@@ -647,9 +647,9 @@
   stop!, the stop's answer and any process it left."
   [n]
   (vec (for [i (range n)]
-         (let [t0 (lib/now-ns)
+         (let [t0 (profile/now-ns)
                sys (c/start! {:datoms 2000})
-               boot-ms (lib/ms-since t0)
+               boot-ms (profile/ms-since t0)
                ids (apply spawn-ready! sys (map #(str "lc " %) (range 3)))
                ok? (every? #(= "4" (:printed (first @(c/submit! sys % "(+ 2 2)")))) ids)
                health (c/health sys)
@@ -758,10 +758,10 @@
         _ (Thread/sleep 400)
         while-paused (:noise (c/stats sys) 0)
         busy (get-in (c/state sys) [:agents a :status])
-        t0 (lib/now-ns)
+        t0 (profile/now-ns)
         _ (c/resume-agent! sys a)
         r @p
-        drain-ms (lib/ms-since t0)
+        drain-ms (profile/ms-since t0)
         st (c/stats sys)
         ids (ready! sys #(vec (pmap (fn [i] (c/spawn! sys {:task (str "bp " i)})) (range n))))
         mb0 (lib/r2 (lib/real-mb))
@@ -774,10 +774,10 @@
         _ (Thread/sleep 500)
         answered-while-paused (count (filter realized? mains))
         mb1 (lib/r2 (lib/real-mb))
-        t1 (lib/now-ns)
+        t1 (profile/now-ns)
         _ (flow/resume-proc (:graph sys) :writer)
         rs (mapv deref mains)
-        resume-ms (lib/ms-since t1)
+        resume-ms (profile/ms-since t1)
         ok (count (filter :ok rs))]
       {:report {:flood {:arrived (:noise st) :ordered (:noise-ordered st) :reply (:printed (second r)) :arrived-while-paused while-paused :status-while-paused busy :drain-ms (lib/r2 drain-ms)}
                 :writer {:agents n :writer-buf (seon.config/value :seon.config.root/writer-buf) :answered-while-paused answered-while-paused
@@ -835,7 +835,7 @@
         _ (.mkdirs (java.io.File. dir))
         ev (fn [code] (let [r @(c/submit! sys a code)] (last r)))
         ;; per call, timed inside the agent: (loop n) of the form, µs each
-        per (fn [form k] (let [code (str "(let [t0 (System/nanoTime)] (dotimes [i " k "] " form ") (/ (- (System/nanoTime) t0) " k " 1000.0))")]
+        per (fn [form k] (let [code (str "(let [t0 (seon.profile/now-ns)] (dotimes [i " k "] " form ") (/ (- (seon.profile/now-ns) t0) " k " 1000.0))")]
                            (dotimes [_ 3] (ev code))
                            (lib/summ (vec (for [_ (range 7)] (parse-double (:printed (ev code))))))))
         ok1 (ev "(my.fx/call :echo {:x 1})")
@@ -970,9 +970,9 @@
         ;; held open anywhere (bin/check mcp hung two hours on one) leaves the client waiting
         in (str (:agents-dir (:store (c/state sys))) "/mcp-in.jsonl") ; this root's own run dir
         _ (spit in (apply str (map #(str (clojure.data.json/write-str %) "\n") msgs)))
-        t0 (lib/now-ns)
+        t0 (profile/now-ns)
         r (clojure.java.shell/sh "sh" "-c" (str "exec ./seon mcp --set :seon.config.root/entrance-port=" port " < '" in "'"))
-        ms (lib/ms-since t0)
+        ms (profile/ms-since t0)
         _ (clojure.java.shell/sh "rm" "-f" in)
         answers (into {} (for [l (clojure.string/split-lines (:out r)) :when (clojure.string/starts-with? l "{")
                                :let [j (clojure.data.json/read-str l)]] [(get j "id") j]))
@@ -1095,9 +1095,9 @@
   else as it is. Each step's root then works on a branch of it, its own main (seon.db/open!)."
   [n]
   (let [path (seon.config/value :seon.config.root/store-path)
-        t0 (lib/now-ns)
+        t0 (profile/now-ns)
         {:keys [seeded? conn]} (seon.db/open! :lmdb path n :db)
-        ms (lib/r2 (lib/ms-since t0))
+        ms (lib/r2 (profile/ms-since t0))
         datoms (count (d/datoms @conn :eavt))
         branches (count (d/branches conn))]
     (d/release conn)

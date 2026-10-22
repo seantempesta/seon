@@ -3,7 +3,7 @@
   the in-port, one Datahike commit per branch, one flush). From proto/flow f2-final
   proto.control's writer (lane F2; writer design A, notes/option3-F1-flow.md section 4)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
+  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
             [seon.program :as program] [seon.merge :as pm] [seon.source :as source] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
@@ -13,8 +13,8 @@
   forks from root). Answers st."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/t :seon.db/resolved-tx :map :seon.host/db] :seon.writer/state]}
   [st o t ops tx-meta db]
-  (step/out! o :to-fork-server {:op :tx :t t :ns (lib/now-ns) :tx-data ops :tx-meta tx-meta})
-  (step/out! o :main {:t t :ops ops :db db :ns (sock/now-ns)})
+  (step/out! o :to-fork-server {:op :tx :t t :ns (profile/now-ns) :tx-data ops :tx-meta tx-meta})
+  (step/out! o :main {:t t :ops ops :db db :ns (profile/now-ns)})
   (when-let [errs (seq (program/load-changes! db ops))]
     (step/out! o :events (step/event {:type :load-errors :errors (vec errs)})))
   st)
@@ -244,7 +244,7 @@
      (let [ms (drain (:to-writer st) m)
            o (volatile! {})
            c0 (:commits st)
-           t0 (lib/now-ns)
+           t0 (profile/now-ns)
            flush-due? (some #(= :flush (:op %)) ms)
            reqs (remove #(= :flush (:op %)) ms)
            st (commit-batch (reduce #(writer-one %1 o %2) st reqs) o)
@@ -258,14 +258,14 @@
            st (cond
                 (not (:durable? st)) st
                 flush-now? (-> st (assoc :dirty false :notified false) (update :flushes (fnil inc 0)))
-                (and dirty (not (:notified st))) (do (step/out! o :to-flusher {:op :dirty :since (lib/now-ns)})
+                (and dirty (not (:notified st))) (do (step/out! o :to-flusher {:op :dirty :since (profile/now-ns)})
                                                      (assoc st :dirty true :notified true))
                 :else (assoc st :dirty dirty))
            n-tx (count (filter #(= :tx (:op %)) reqs))
            st (-> st (update :tx-count + n-tx) (update :batches inc))]
        ;; what changed, to root's view: a batch, or a flush (its count is shown, never pinged)
        (when (or (seq reqs) flush-now?)
-         (step/out! o :to-api {:op :writer :tx-count (:tx-count st) :batch-ms (lib/ms-since t0) :n-tx n-tx :commits commits
+         (step/out! o :to-api {:op :writer :tx-count (:tx-count st) :batch-ms (profile/ms-since t0) :n-tx n-tx :commits commits
                                :flushes (:flushes st 0)}))
        [st @o]))))
 
@@ -284,6 +284,6 @@
   ([st _ m]
    (if (nil? m)
      [st nil]
-     (let [left-ms (- (:flush-ms st) (quot (- (lib/now-ns) (:since m)) 1000000))]
+     (let [left-ms (- (:flush-ms st) (quot (- (profile/now-ns) (:since m)) 1000000))]
        (when (pos? left-ms) (Thread/sleep (long left-ms)))
        [(update st :asked inc) {:to-writer [{:op :flush}]}]))))

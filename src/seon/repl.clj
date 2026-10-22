@@ -385,7 +385,7 @@
     (swap! agent/state dissoc :defs)
     (when (and contract/record? (= :agent (:mode @agent/state)) (seq items))
       (try
-        (agent/transact! (into defs (record-tx (:id @agent/state) (str (name (:id @agent/state)) "-" (lib/c-getpid) "-" (lib/now-ns))
+        (agent/transact! (into defs (record-tx (:id @agent/state) (str (name (:id @agent/state)) "-" (lib/c-getpid) "-" (profile/now-ns))
                                                items (:max-tx (agent/db)))))
         (catch clojure.lang.ExceptionInfo e
           (if (= :seon.db/lease-spent (:seon.error/type (ex-data e)))

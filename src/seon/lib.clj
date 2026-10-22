@@ -66,10 +66,6 @@
 (def PAGE 16384)
 (defn ignore-sigpipe! {:malli/schema [:=> [:cat] :seon.ffi/address]}
   [] (c-signal 13 1))
-(defn now-ns {:malli/schema [:=> [:cat] :seon.lib/ns-time]}
-  [] (System/nanoTime))
-(defn ms-since {:malli/schema [:=> [:cat :seon.lib/ns-time] :seon.lib/ms]}
-  [t0] (/ (- (now-ns) t0) 1e6))
 
 (defn mp-probe
   "This process's Mach VM accounting: {:phys-fp :internal :resident :regions {:jit :malloc :anon0 :other}} in MB."

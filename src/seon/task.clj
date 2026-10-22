@@ -8,17 +8,10 @@
   them) and the one reader (pull shapes for the reconciler and the agent). From lanes R1
   and M1's proto.agents.task; the attributes are derived from resources/seon/schemas (lane D1)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm] [seon.edn :as sedn]
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm] [seon.db :as pdb] [seon.edn :as sedn]
             [seon.print :as print] [seon.ref :as ref]))
 
 ;; ---- identity --------------------------------------------------------------------
-
-(defn eid
-  "The entity id of the entity whose unique attribute a has value v on db, or nil: one seek
-  in a's AVET index, never a query (a Datalog query here cost ~95 us and
-  100 KB at 100 tasks, planned on every call)."
-  {:malli/schema [:=> [:cat :seon.host/db :keyword :any] [:maybe :int]]}
-  [db a v] (:e (first (d/datoms db :avet a v))))
 
 (defn entity-tx
   "Make entity e state exactly want on attributes attrs: per attribute, the values e holds
@@ -89,7 +82,7 @@
   (let [ids (mapv #(task-id (:seon.task/ns %) (:seon.task/name %)) decls)
         new (set ids)
         graph (zipmap ids (map #(set (:seon.task/needs % #{})) decls))
-        missing (seq (for [[_ ns] graph n ns :when (and (not (new n)) (nil? (eid db :seon.task/id n)))] n))
+        missing (seq (for [[_ ns] graph n ns :when (and (not (new n)) (nil? (pdb/eid db :seon.task/id n)))] n))
         cyc (cycle-in graph)
         refused (fn [m] {:seon.error/type :seon.task/refused :seon.error/operation 'seon.task/create-tx
                          :seon.error/message m})]
@@ -146,7 +139,7 @@
   observer that already moved it leaves it), with the observed members m."
   {:malli/schema [:=> [:cat :seon.host/db :seon.attempt/id :seon.attempt/status :seon.attempt/status :map] [:vector :any]]}
   [db aid from to m]
-  (let [e (eid db :seon.attempt/id aid)]
+  (let [e (pdb/eid db :seon.attempt/id aid)]
     (into [[:db/cas e :seon.attempt/status from to]]
           (when (seq m) [(assoc m :db/id e)]))))
 
@@ -224,9 +217,8 @@
   its prerequisites only)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe :seon.task/task]]}
   [db id]
-  (when (eid db :seon.task/id id)
-    (let [own (fn [i] (when (eid db :seon.task/id i) (task-value (d/pull db task-pull [:seon.task/id i]))))]
-      (assoc (own id) :seon.task/accumulated (accumulate own id)))))
+  (let [own (fn [i] (some-> (d/pull db task-pull [:seon.task/id i]) task-value))]
+    (some-> (own id) (assoc :seon.task/accumulated (accumulate own id)))))
 
 (def ^:private attempt-pull
   [:seon.attempt/id {:seon.attempt/task [:seon.task/id]} :seon.attempt/status :seon.attempt/boot :seon.attempt/agent
@@ -264,14 +256,13 @@
   "Attempt aid on db, or nil."
   {:malli/schema [:=> [:cat :seon.host/db :seon.attempt/id] [:maybe :seon.attempt/attempt]]}
   [db aid]
-  (when (eid db :seon.attempt/id aid) (attempt-value (d/pull db attempt-pull [:seon.attempt/id aid]))))
+  (some-> (d/pull db attempt-pull [:seon.attempt/id aid]) attempt-value))
 
 (defn root
   "Root's boot and dials on db: {:boot :max-running :max-merging}, nil before the first boot."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe [:map [:boot :string] [:max-running :int] [:max-merging {:optional true} :int]]]]}
   [db]
-  (when-let [r (and (eid db :seon.root/id :root)
-                    (d/pull db [:seon.root/boot :seon.config.agent/max-running :seon.config.merge/max-running] [:seon.root/id :root]))]
+  (when-let [r (d/pull db [:seon.root/boot :seon.config.agent/max-running :seon.config.merge/max-running] [:seon.root/id :root])]
     (cond-> {:boot (:seon.root/boot r) :max-running (:seon.config.agent/max-running r)}
       (:seon.config.merge/max-running r) (assoc :max-merging (:seon.config.merge/max-running r)))))
 
@@ -365,8 +356,8 @@
                          ;; defaulted, needs as entity ids (a task new in this write by its tempid, its id)
                          (let [want (-> (merge (dissoc d :seon.task/ns :seon.task/name :seon.task/config) (:seon.task/config d) (references-of d))
                                         (update :seon.task/branch #(or % (default-branch id)))
-                                        (assoc :seon.task/needs (into #{} (map #(or (eid db :seon.task/id %) %)) (:seon.task/needs d))))]
-                           (cond-> (conj (entity-tx db (eid db :seon.task/id id) (conj stated-attributes :seon.task/needs) want) (declared id d))
+                                        (assoc :seon.task/needs (into #{} (map #(or (pdb/eid db :seon.task/id %) %)) (:seon.task/needs d))))]
+                           (cond-> (conj (entity-tx db (pdb/eid db :seon.task/id id) (conj stated-attributes :seon.task/needs) want) (declared id d))
                              ;; declared again after its removal: revived
                              (and (nil? (stored id)) (= :cancelled (:seon.task/execution (all id))))
                              (conj {:seon.task/id id :seon.task/execution :held}))))

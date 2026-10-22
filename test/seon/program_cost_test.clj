@@ -38,7 +38,7 @@
      :fixed {:ns 18000 :bytes 8000 :calls 12}
      :sizes [100 1000 10000]
      ;; measured 2026-10-21 (source mode, load 5): 105 -> 114 us and 121 -> 138 KB from 100 to
-     ;; 10k forms, flat as estimated; each seek allocates as seon.task/eid's does (~30 KB)
+     ;; 10k forms, flat as estimated; each seek allocates as seon.db/eid's does (~30 KB)
      :overrun {:task "seon.db/avet-seek-allocates" :measured {:ns 114000.0 :bytes 137744.0}}}))
 
 (defn program-of

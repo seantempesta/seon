@@ -13,7 +13,7 @@
   breaks its forks; docs/DRAGONS.md, "Physics". Agent code calls the verbs of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (lane F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
+  (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
             [malli.registry :as mr]))
 
@@ -118,7 +118,7 @@
       ;; past this process's block of entity ids: the typed refusal, nothing applied
       (when-let [e (and (not (map? r)) (pdb/lease-spent r (:lease @state)))] (throw (ex-info (:seon.error/message e) e)))
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
-      (let [now (lib/now-ns)
+      (let [now (profile/now-ns)
             since (:dirty-at (swap! state #(-> % (assoc :db (:db-after r)) (update :dirty-at (fn [t] (or t now))))))]
         (when (>= (- now since) (* 1000000 pdb/flush-ms)) (commit!))
         (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
@@ -369,10 +369,10 @@
   (then the last test it started is named)."
   {:malli/schema [:=> [:cat pos-int? [:set :qualified-symbol]] :seon.test/result]}
   [ticks proofs]
-  (let [[r w] (lib/pipe) t0 (lib/now-ns)]
+  (let [[r w] (lib/pipe) t0 (profile/now-ns)]
     (lib/fork!
       {:refused (fn [n] (lib/c-close r) (lib/c-close w)
-                  {:pass 0 :fail 0 :error 1 :ms (lib/ms-since t0)
+                  {:pass 0 :fail 0 :error 1 :ms (profile/ms-since t0)
                    :reports [{:type :error :message (str "cannot fork the tests: " n " Chez threads active (a running future?)")}]})
        :child (fn []
                 (lib/c-close r)
@@ -391,7 +391,7 @@
                                 (if (= ls :eof) line (recur (or (peek ls) line)))))
                        st (lib/wait-status pid)]
                    (lib/c-close r)
-                   (assoc (run-answer line st) :ms (lib/ms-since t0) :pid pid :exit st)))})))
+                   (assoc (run-answer line st) :ms (profile/ms-since t0) :pid pid :exit st)))})))
 
 ;; ---- the loop ----------------------------------------------------------------------
 
@@ -426,7 +426,7 @@
   {:malli/schema [:function [:=> [:cat] :seon.lib/mb] [:=> [:cat :boolean] :seon.lib/mb]]}
   ([] (mem-mb false))
   ([fresh?]
-   (let [{:keys [mem-at mem]} @state now (lib/now-ns)]
+   (let [{:keys [mem-at mem]} @state now (profile/now-ns)]
      (if (and (not fresh?) mem-at (< (- now mem-at) 1000000000))
        mem
        (let [m (lib/r2 (lib/real-mb))] (swap! state assoc :mem m :mem-at now) m)))))
@@ -457,12 +457,12 @@
     ;; a message (lane F2): it waits in :inbox until the agent's code takes it ((messages));
     ;; root hears that it arrived
     :message (do (swap! state update :inbox (fnil conj []) (select-keys m [:from :body]))
-                 [{:op :received :sent-ns (:ns m) :recv-ns (sock/now-ns)}])
+                 [{:op :received :sent-ns (:ns m) :recv-ns (profile/now-ns)}])
     nil))
 
 (defn hello! {:malli/schema [:=> [:cat :int :map] [:or [:= true] [:= :dead]]]}
   [t-req-ns extra]
-  (send! (merge {:op :hello :pid (lib/c-getpid) :start-ms (lib/ms-since t-req-ns) :mem-mb (mem-mb) :t (:max-tx (db))} extra)))
+  (send! (merge {:op :hello :pid (lib/c-getpid) :start-ms (profile/ms-since t-req-ns) :mem-mb (mem-mb) :t (:max-tx (db))} extra)))
 
 ;; ---- stderr: a file per agent, its tail read by root when the agent dies -------------
 
@@ -488,7 +488,7 @@
   head is this db); the clone is double-forked so it is not this agent's child."
   {:malli/schema [:=> [:cat :seon.wire/seon-msg] :any]}
   [{:keys [k] :as m}]
-  (let [t0 (lib/now-ns)
+  (let [t0 (profile/now-ns)
         ;; the clone's socket: root sends it in a frame of its own while its writer pump is
         ;; idle (SCM_RIGHTS beside another writer's frames would not be atomic): this agent
         ;; says it waits, root holds its other messages until the descriptor is sent

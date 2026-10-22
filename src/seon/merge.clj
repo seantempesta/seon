@@ -58,7 +58,7 @@
   [db [kind a b]]
   (let [[attr v] (case kind :var [:var/name a] :method [:method/key (program/method-key a b)]
                        :impl [:impl/key (program/impl-key a b)] :ns [:ns/name a])]
-    (:e (first (d/datoms db :avet attr v)))))
+    (pdb/eid db attr v)))
 
 (defn- def-content
   "Definition k's content on db, when it points to form row f: the form's id, and its text
@@ -172,7 +172,7 @@
 (defn- set-form-tx
   {:malli/schema [:=> [:cat :seon.host/db :string [:maybe :map]] :seon.db/tx-data]}
   [db id content]
-  (let [e (:e (first (d/datoms db :avet :form/id id)))]
+  (let [e (pdb/eid db :form/id id)]
     (if (nil? content)
       (if e [[:db/retractEntity e]] [])
       (let [{:keys [ns src order lead defines declares refs requires banned inline-defs timeouts catches]} content]
@@ -221,7 +221,7 @@
   binary's (:schema/source retracted), or retracted."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword [:maybe :seon.merge/schema-entry]] :seon.db/tx-data]}
   [db k content]
-  (let [e (:e (first (d/datoms db :avet :schema/key k)))]
+  (let [e (pdb/eid db :schema/key k)]
     (cond (nil? content) (if e [[:db/retractEntity e]] [])
           :else (cond-> [{:schema/key k :schema/form (:form content) :schema/file (:file content)}]
                   (and e (:schema/source (d/entity db e))) (conj [:db/retract e :schema/source true])))))
