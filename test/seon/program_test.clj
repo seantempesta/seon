@@ -494,6 +494,13 @@
         env #(:env (fx/inputs here % here))]
     (is (not= (env cfg) (env (assoc cfg :seon.config.ai/model "b"))) "another value in force: another :env, every test reruns")
     (is (= (env cfg) (env (assoc cfg :seon.config.web/port 9999))) "a checkout's own TCP port is no input")
+    ;; owner, 2026-10-23: agents' greens and a checkout's are one store, so where a process
+    ;; runs (its :seon.config/place keys) is no input; how a test behaves still is
+    (is (= (env cfg) (env (assoc cfg :seon.config.root/main "in-agent-1" :seon.config.root/store-path "/x/store"
+                                     :seon.config.source/root here :seon.config.source/dirs ["src" "test"]
+                                     :seon.config.source/test-results-dir "/x/results")))
+        "a root's own main, store, source and results directory are no input")
+    (is (not= (env cfg) (env (assoc cfg :seon.config.store/eid-lease 50))) "a bound a test runs under is one")
     (is (= (:env (fx/inputs here cfg here))
            (:env (fx/inputs here (assoc cfg :seon.config.root/runs-dir "/elsewhere/runs") "/elsewhere")))
         "a path under the checkout is the same input in any checkout")))

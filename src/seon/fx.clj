@@ -106,11 +106,14 @@
 (defn config-input
   "The config in force as a test reads it, cfg (seon.config/config: the shipped file, this
   checkout's config/local.edn, the #env values, the profile), as text: the checkout's own path
-  written as <checkout>, and the TCP ports left out (each checkout's own by design, bin/ports;
-  a test's root takes its own). What a result depends on that git does not see."
+  written as <checkout>, and the keys that say where a process runs left out (their schemas'
+  :seon.config/place: its ports, main, store, runs, source tree and results directory: each
+  checkout's and each root's own by design, while :tree covers the source's content). What a
+  result depends on that git does not see, so an agent's root and a checkout on one tree key
+  their results alike (docs/merging.md)."
   {:malli/schema [:=> [:cat :map :string] :string]}
   [cfg checkout]
-  (str/replace (sedn/encode (into (sorted-map) (remove (fn [[k]] (= "TCP port" (get-in cfg/schema-forms [k 1 :seon.config/unit])))) cfg))
+  (str/replace (sedn/encode (into (sorted-map) (remove (fn [[k]] (get-in cfg/schema-forms [k 1 :seon.config/place]))) cfg))
                checkout "<checkout>"))
 
 (defn declared-refs
