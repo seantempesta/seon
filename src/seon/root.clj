@@ -696,7 +696,8 @@
         _ (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
         _ (lib/static!)
         db @conn
-        ;; physics: the fork server is forked before any thread exists
+        ;; physics: the fork server is forked while this is the one active thread (Jolt's carriers,
+        ;; timer and watcher parked: the child resets them, seon.lib/fork!; docs/failure-points.md, Physics)
         {:keys [pid fd]} (fs/fork-server db)
         ;; then the GC's sweeper threads, a declared number (Chez would grow them by timing)
         sweepers (lib/gc-sweepers! (cfg/value :seon.config.root/gc-sweepers))
