@@ -56,7 +56,7 @@ The server's ops are one table, `seon.server/ops`: MCP lists each as the tool `s
 | one done rule shared with merge | `seon.reconcile/done-refusals` (a proof that never ran counts red, not unknown) | partial |
 | tests selected by reach; results reused by reach digest | `seon.program/reach-digests`; `bin/test --reach` reuses green results in `../test-results` | present for `bin/test`; agents' proof runs don't reuse |
 | contracts armed at definition; cost proofs; per-function profile | `seon.contract`, `seon.cost`, `seon.profile` | present |
-| turns-to-green report (median, p90) | `seon.learn` charges waste per attempt | partial |
+| turns-to-green report (median, p90) | `seon.learn` charges overrun per attempt | partial |
 | scheduled work (`seon.schedule`) | none (AGENTS names a cron proc; `system.edn` has none) | missing |
 
 ## Context, printing, the page

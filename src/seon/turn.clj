@@ -79,13 +79,13 @@
 
 (defn- end!
   "The attempt's end: the live runtime staged onto the branch, the end written there (with
-  the error that ended it and the turns' waste, as data: session D2), and the branch committed
+  the error that ended it and the turns' overrun, as data: session D2), and the branch committed
   (a turn's end commits the agent's run-ahead writes)."
   {:malli/schema [:=> [:cat :map :seon.attempt/outcome [:maybe :string] [:maybe :map]] :seon.turn/end]}
   [{:keys [turn tokens t0 attempt log]} outcome reason error]
   (stage/stage!)
   (agent/write-end! attempt {:outcome outcome :turns turn :tokens tokens :reason reason :error error
-                             :waste (learn/summary (learn/waste (or log []) (learn/final-symbols (or log []))))})
+                             :overrun (learn/summary (learn/overrun (or log []) (learn/final-symbols (or log []))))})
   (cond-> {:outcome outcome :turns turn :model-calls turn :results {} :uncontracted #{}
            :ms (profile/ms-since t0)}
     tokens (assoc :tokens tokens)
@@ -179,7 +179,7 @@
                                                      :record-ms (long (profile/ms-since t3))}
                                               tests-ms (assoc :tests-ms tests-ms))}])
         (cond-> (-> (assoc st :turn (inc turn) :tokens (when (and tokens used) (+ tokens used)))
-                    ;; what this turn's block showed, by producer, and what it evaluated (waste)
+                    ;; what this turn's block showed, by producer, and what it evaluated (overrun)
                     (update :log (fnil conj []) {:n turn
                                                  :shown {'seon.context/resolve-ref (set (keep :symbol (:references block)))
                                                          'seon.context/found (set (keep :symbol (:found block)))

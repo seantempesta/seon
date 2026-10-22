@@ -1,11 +1,11 @@
 (ns seon.learn
-  "Waste, charged to the producer of what an agent was shown (session R4's seon.learn, v1 survey
+  "Overrun, charged to the producer of what an agent was shown (session R4's seon.learn, v1 survey
   idea 14; ported by session D2). At an attempt's end the agent folds its
   turns: each turn's forms, and what that turn's context block showed, by its producer.
-  A form that looks for code instead of changing it is waste, charged to whoever should
+  A form that looks for code instead of changing it is overrun, charged to whoever should
   have shown that code; an error repeating an earlier turn's is charged to the render that
-  delivered it. Stored as one map per attempt (:seon.end/waste on the branch, carried to
-  :seon.attempt/waste by the judge). R4's template rows and trials are not ported (next)."
+  delivered it. Stored as one map per attempt (:seon.end/overrun on the branch, carried to
+  :seon.attempt/overrun by the judge). R4's template rows and trials are not ported (next)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.error :as err]
             [seon.reader :as reader]))
@@ -36,8 +36,8 @@
                               (remove #(#{"clojure.core" "clojure.repl" "clojure.string"} (or (namespace %) (str %)))))
                     nodes)}))
 
-(defn waste
-  "The waste of an attempt's turns, each form charged to a producer. turns: [{:n :shown
+(defn overrun
+  "The overrun of an attempt's turns, each form charged to a producer. turns: [{:n :shown
   {producer #{symbol}} :items [{:form :error}]}]; final: the qualified symbols the
   attempt's error-free definitions use. A form looking for code a producer showed already
   is :re-read (charged to that producer: its render did not satisfy); looking for code the
@@ -66,9 +66,9 @@
           (recur more (into seen (keep #(sig (:error %)) (:items t))) (into acc charged)))))))
 
 (defn summary
-  "Waste by producer: {producer {:forms n :turns n}}; a turn counts for a producer when any
+  "Overrun by producer: {producer {:forms n :turns n}}; a turn counts for a producer when any
   of its forms was charged to it."
-  {:malli/schema [:=> [:cat [:sequential :map]] :seon.learn/waste]}
+  {:malli/schema [:=> [:cat [:sequential :map]] :seon.learn/overrun]}
   [ws]
   (into {} (for [[p xs] (group-by :producer ws)] [p {:forms (count xs) :turns (count (distinct (map :turn xs)))}])))
 
