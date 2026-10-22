@@ -161,6 +161,17 @@
     (some-> (:sent sb) sock/close!)
     (sock/close! (:fd sb))))
 
+(defn- release!
+  "Release what init opened: kill the server and its standbys, join the event reader, and
+  reap the server when it is root's child (the boot server; a promoted one is not). nil."
+  {:malli/schema [:=> [:cat :map] :nil]}
+  [{:keys [pid reader] :as st}]
+  (some-> pid (lib/c-kill 9))
+  (drop-standby (:standby st)) (drop-standby (:standby-pending st))
+  (some-> ^Thread reader (.join 5000))
+  (some-> pid (lib/c-waitpid (ffi/alloc 4) 0))
+  nil)
+
 (defn- promote
   "The current server died: its standby becomes the server. It is sent main's commits
   since its fork and the requests the dead server never answered (an agent socket the
@@ -203,10 +214,7 @@
   ([st tr]
    ;; the stop transition releases what init opened: the server, its standby, the reader
    (when (and (= tr ::flow/stop) (not (:stopping st)))
-     (some-> (:pid st) (lib/c-kill 9))
-     (drop-standby (:standby st)) (drop-standby (:standby-pending st))
-     (some-> ^Thread (:reader st) (.join 5000))
-     (some-> (:pid st) (lib/c-waitpid (ffi/alloc 4) 0)))
+     (release! st))
    st)
   ([st in m]
    (case in
@@ -218,14 +226,9 @@
                          (= :tx (:op m)) (update :log conj m))]
                 [(if (>= (count (:log st)) (cfg/value :seon.config.root/standby-every)) (request-standby st) st) nil]))
      :ext (if (= :shutdown (:op m))
-            (let [{:keys [pid reader]} st]
-              (some-> pid (lib/c-kill 9))
-              (drop-standby (:standby st)) (drop-standby (:standby-pending st))
-              (some-> ^Thread reader (.join 5000))
-              ;; reaped when it is root's child (the boot server; a promoted one is not)
-              (some-> pid (lib/c-waitpid (ffi/alloc 4) 0))
-              (sock/close! (:fd st))
-              [(assoc st :stopping true :standby nil :standby-pending nil) {:to-api [{:op :fs-down :pid pid}]}])
+            (do (release! st)
+                (sock/close! (:fd st))
+                [(assoc st :stopping true :standby nil :standby-pending nil) {:to-api [{:op :fs-down :pid (:pid st)}]}])
             (let [req (dissoc m :rid)]
               (when (:pid st) (sock/send! (:fd st) req))
               [(update st :waiters conj {:rid (:rid m) :req req}) nil]))

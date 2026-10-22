@@ -164,6 +164,10 @@
     (is (= '[app/g] (:seon.attempt/uncontracted ended)))
     (is (= ["[:var app/g]"] (:seon.attempt/changed ended)))))
 
+(deftest an-attempt-without-an-end-reads-nil
+  ;; no end written (a silent death) is nothing to read, not an empty end
+  (is (nil? (r/pull-end (db-of diamond :extra (attempt "a" 1 :running)) "demo/a#1"))))
+
 (deftest a-death-names-its-cause
   ;; task seon.agent/a-death-names-its-cause: a dead agent's attempt carries the end it wrote
   ;; on its branch before it exited (its cause), beside the death root observed (exit status);
@@ -179,7 +183,7 @@
         (is (= "boom" (get-in (err tx) [:cause :seon.error/message])))
         (is (= {:exit 70} (:exit (err tx))))))
     (testing "a silent death: named by its exit"
-      (let [tx (#'r/dead-tx "demo/a#1" (assoc died :exit {:signal 9} :seon.error/message "agent a1 died: signal 9") {})]
+      (let [tx (#'r/dead-tx "demo/a#1" (assoc died :exit {:signal 9} :seon.error/message "agent a1 died: signal 9") nil)]
         (is (= "agent a1 died: signal 9" (:seon.attempt/reason (row tx))))
         (is (= {:signal 9} (:exit (err tx))))))
     (testing "the turn loop threw and the agent lives: its error is the attempt's reason"

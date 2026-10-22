@@ -228,6 +228,9 @@
     (let [p (promise)]
       (step #'root/api-proc st :ext {:op :clone :parent :nope :p p})
       (is (bare? @p) (pr-str @p)))
+    (let [p (promise)]
+      (step #'root/api-proc st :ext {:op :ping :id :nope :p p})
+      (is (= :seon.root/refused (:seon.error/type @p)) "a request kind with no producer is refused, not left unanswered"))
     (doseq [[verb a] [['merge-main! nil] ['merge! nil] ['merge! {:branch :b :status :dead}] ['nope! nil]]]
       (is (bare? (root/request verb :a1 nil a)) (str verb))))
   (ts/test-branch! (fn [cfg conn]

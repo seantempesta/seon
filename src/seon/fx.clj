@@ -271,7 +271,7 @@
                  (when-not limited? (reply! o (:dest m) (:outcome m)))
                    ;; root counts every failed effect across agents (seon.error, class :effect);
                    ;; the asker records its own outcome on its branch
-                   (when (:seon.error/type (:outcome m))
+                   (when (contract/error? (:outcome m))
                      (step/out! o :out {:op :problem :class :effect :error (dissoc (:outcome m) :seon.fx/us :seon.fx/queue-us)
                                         :agent (get-in m [:dest :agent])}))
                    (let [st (settle st m)
@@ -322,7 +322,7 @@
   [{:keys [req ctx]}]
   (let [p (cond-> (:provider ctx) (and (:model req) (= :openai-compat (:kind (:provider ctx)))) (assoc :model (:model req)))
         c (model/complete p (dissoc req :model))]
-    (cond (:seon.error/type c) c
+    (cond (contract/error? c) c
           (and (:prompt-tokens c) (:completion-tokens c)) {:value c :cost (+ (:prompt-tokens c) (:completion-tokens c))}
           :else {:value c})))
 

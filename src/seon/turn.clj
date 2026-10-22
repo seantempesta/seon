@@ -16,7 +16,7 @@
   Root starts it by evaluating (seon.turn/work! '{...}) in the agent; the attempt's end is
   a fact on the branch (:seon.end/*), which root's judge reads."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.set :as set]
+  (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.set :as set]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context] [seon.program :as program]
             [seon.harvest :as harvest] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
@@ -149,7 +149,7 @@
                      {})
         model-ms (long (profile/ms-since t1))
         c (:value r)]
-    (if (:seon.error/type r)
+    (if (contract/error? r)
       r
       (let [t2 (profile/now-ns)
             ;; each eval call through the one REPL path, in order; its answer is the call's result
@@ -236,4 +236,4 @@
           hairy (end! st :merge-failed (:reason hairy) nil)
           (>= (:turn st) max-turns) (end! st :cap (r/refusals-text refusals) nil)
           :else (let [st' (act! st obs model)]
-                  (if (:seon.error/type st') (end! st :error (:seon.error/message st') st') (recur st'))))))))
+                  (if (contract/error? st') (end! st :error (:seon.error/message st') st') (recur st'))))))))

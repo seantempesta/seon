@@ -706,7 +706,7 @@
     (run-check "LIFECYCLE" {:datoms 2000}
      (fn [sys]
       (let [[a] (spawn-ready! sys "paused")
-            _ (c/pause-agent! sys a)
+            _ (flow/pause-proc (:graph sys) a)
             ;; the proc's control channel is FIFO: this ping is taken after the pause
             paused-health (ping sys a)
             p1 (c/submit! sys a "(def x 1) x")
@@ -714,7 +714,7 @@
             ;; the measurement: no answer within the window while paused
             held (deref p1 (seon.config/value :seon.config.check/hold-ms) :held)
             held-state (= :paused (:status (ping sys a)))
-            _ (c/resume-agent! sys a)
+            _ (flow/resume-proc (:graph sys) a)
             r1 @p1 r2 @p2]
         {:report {:threads {:declared-running (c/declared-threads sys) :declared-stopped (c/declared-threads)}
                   :cycles (mapv #(select-keys % [:cycle :boot-ms :running :stopped :left :health]) rows)
@@ -796,7 +796,7 @@
         p (c/submit! sys a flood)
         ;; the flood began (the agent said so); then what arrives while paused is the measurement
         _ (await-event ev (started a flood))
-        _ (c/pause-agent! sys a)
+        _ (flow/pause-proc (:graph sys) a)
         ;; what its proc had taken when the pause landed (the ping after it is FIFO), and after the window
         p0 (ping sys a)
         _ (Thread/sleep (seon.config/value :seon.config.check/hold-ms))
@@ -804,10 +804,10 @@
         [n0 n1] (map #(get-in % [:state :noise]) [p0 p1])
         busy (get-in (c/state sys) [:agents a :status])
         t0 (profile/now-ns)
-        _ (c/resume-agent! sys a)
+        _ (flow/resume-proc (:graph sys) a)
         r @p
         drain-ms (profile/ms-since t0)
-        st (c/stats sys)
+        st (:stats (c/state sys))
         ids (ready! sys #(vec (pmap (fn [i] (c/spawn! sys {:task (str "bp " i)})) (range n))))
         mb0 (lib/r2 (lib/real-mb))
         _ (flow/pause-proc (:graph sys) :writer)

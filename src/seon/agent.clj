@@ -82,10 +82,6 @@
       (cond
         (= m :dead) (lib/c-exit 0)
         (and (= op (:op m)) (= k (:k m))) m
-        ;; Flow's ping reaches a waiting agent too: health while an effect is in flight
-        (= :ping (:op m)) (do (send! {:op :pong :status :waiting :count (:n @state 0) :held 0
-                                      :state {:evals (:n @state) :waiting-for op}})
-                              (recur))
         :else (do (swap! state update :pending conj m) (recur))))))
 
 
@@ -146,11 +142,11 @@
     (swap! state update :fx-pending dissoc k)
     (swap! state assoc-in [:defs [:fx k]]
            [(cond-> (into {:seon.fx/id (str (name (:id @state)) "-" (lib/c-getpid) "-fx" k) :seon.fx/kind kind
-                           :seon.fx/status (if (:seon.error/type r) :error :ok)
+                           :seon.fx/status (if (contract/error? r) :error :ok)
                            :seon.fx/us (long (:seon.fx/us r 0)) :seon.fx/queue-us (long (:seon.fx/queue-us r 0))}
                           (for [[f a] model-cost-attrs :let [v (when (map? c) (get c f))] :when (int? v)] [a (long v)]))
               (:cost r) (assoc :seon.fx/cost (long (:cost r)))
-              (:seon.error/type r) (assoc :seon.fx/error (str (:seon.error/type r) ": " (:seon.error/message r))
+              (contract/error? r) (assoc :seon.fx/error (str (:seon.error/type r) ": " (:seon.error/message r))
                                           :seon.fx/error-type (:seon.error/type r)))])
     kind))
 

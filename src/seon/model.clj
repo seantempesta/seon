@@ -214,7 +214,7 @@
                          (json/write-str (request-body provider request)))
             ms (profile/ms-since t0)]
         (cond
-          (:seon.error/type r) r
+          (contract/error? r) r
           (not= 200 (:status r)) (provider-error (str "HTTP " (:status r)) (:status r)
                                                  (cond-> {:body (:body r)}
                                                    (retry-after-ms (:headers r)) (assoc :retry-after-ms (retry-after-ms (:headers r)))))

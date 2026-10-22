@@ -85,8 +85,7 @@
                                                          (string? (:forms msg)) (assoc :form (:forms msg))))
                       ;; what root last asked of it, for a stall or a death (seon.agent/last-op)
                       true (assoc :last-op (cond-> {:kind kind :since-ms (System/currentTimeMillis)}
-                                             (string? (:forms msg)) (assoc :form (:forms msg))))
-                      (= kind :ping) (update :pings conj rid))]
+                                             (string? (:forms msg)) (assoc :form (:forms msg)))))]
              [st {:to-api [(status st (cond-> {:status :busy}
                                         (= kind :eval) (assoc :running {:form (:forms msg)
                                                                         :since-ms (System/currentTimeMillis)})))]}]))
@@ -167,9 +166,6 @@
                (assoc st :noise (inc (:noise st)) :noise-ordered ordered :noise-bad bad))
       :received (do (step/out! o :to-api {:op :stat :k :msg-us :v (/ (- (:recv-ns m) (:sent-ns m)) 1000.0)}) st)
       :send (do (step/out! o :to-api {:op :message :from id :to (:to m) :body (:body m)}) st)
-      :pong (if-let [rid (peek (:pings st))]
-              (answer-rid (update st :pings pop) o rid (dissoc m :op))
-              st)
       ;; the agent began request rid's eval, or forked rid's test child: root's events say so
       :started (do (step/out! o :events (step/event (cond-> {:type :started :agent id :rid (:id m)}
                                                          (get-in st [:inflight (:id m) :form]) (assoc :form (get-in st [:inflight (:id m) :form])))))
@@ -246,7 +242,7 @@
        :workload :io
        :ping-map-fn (fn [st] {:id (:id st) :pid (:pid st) :dead? (boolean (:dead? st)) :inflight (count (:inflight st)) :noise (:noise st)})})
   ([args] (assoc (select-keys args [:id :end :branch :pid])
-                 :inflight {} :noise 0 :pings clojure.lang.PersistentQueue/EMPTY :fx-kinds (:fx-kinds args)
+                 :inflight {} :noise 0 :fx-kinds (:fx-kinds args)
                  ::flow/in-ports {:from (:in (:end args))}
                  ::flow/out-ports {:to-writer (:to-writer args) :to-api (:back args) :events (:events args)}))
   ([st tr]

@@ -129,8 +129,8 @@
    :attempts {} :by-task {} :done {} :ready (sorted-set) :ready-key {}
    :live #{} :reap #{} :kill {} :judge #{} :merging #{}})
 
-(def finished "Attempt statuses that make its task done (:seon.attempt/status)." (get-in contract/forms [:seon.attempt/status 1 :seon.status/finished]))
-(def ^:private judged (get-in contract/forms [:seon.attempt/status 1 :seon.status/judged]))
+(def finished "Attempt statuses that make its task done (:seon.attempt/status)." (:seon.status/finished (contract/properties :seon.attempt/status)))
+(def ^:private judged (:seon.status/judged (contract/properties :seon.attempt/status)))
 
 (defn- live-in?
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.attempt/attempt] :boolean]}
@@ -352,7 +352,7 @@
                        (and (empty? rs) merge?) {:op :land :attempt aid :task id}
                        (empty? rs) {:op :accept :attempt aid :task id}
                        :else
-                       (failed aid id t (str "attempt " aid " ended " (name (:seon.attempt/outcome a :error))
+                       (failed aid id t (str "attempt " aid " ended" (some->> (:seon.attempt/outcome a) name (str " "))
                                              (some->> (:seon.attempt/reason a) (str " (") (#(str % ")")))
                                              ": " (refusals-text rs)))))))
         ;; the merge train (bors, GitHub's merge queue): green merge attempts land together in
@@ -486,12 +486,12 @@
 
 (defn pull-end
   "The end attempt aid's turn loop wrote on branch db ({:outcome :reason :turns :tokens},
-  and the error that ended it and its waste as data), or {}."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.attempt/id] :map]}
+  and the error that ended it and its waste as data), or nil: it wrote none."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.attempt/id] [:maybe :map]]}
   [db aid]
-  (into {} (for [[k v] (d/pull db [:seon.end/outcome :seon.end/reason :seon.end/turns :seon.end/tokens :seon.end/error :seon.end/waste]
-                                [:seon.end/attempt aid])]
-              [(keyword (name k)) v])))
+  (some->> (d/pull db [:seon.end/outcome :seon.end/reason :seon.end/turns :seon.end/tokens :seon.end/error :seon.end/waste]
+                   [:seon.end/attempt aid])
+           (into {} (map (fn [[k v]] [(keyword (name k)) v])))))
 
 ;; ---- the reconciler proc: actions carried out as requests, every answer as data ----------
 ;; Root's executor (R1's proto.agents.root, a thread per attempt) as one step-fn: main's
@@ -597,7 +597,7 @@
   "Attempt aid's death on main: the end its agent wrote on its branch before it exited (its
   reason, and its error as the cause), beside e, the death root observed (:seon.agent/died:
   exit status, stderr tail, last op; or :seon.root/no-agent). A silent death wrote no end."
-  {:malli/schema [:=> [:cat :seon.attempt/id :seon.error/base :map] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.attempt/id :seon.error/base [:maybe :map]] [:vector :any]]}
   [aid e end]
   (cas-tx aid :running :dead {:seon.attempt/end-ms (System/currentTimeMillis)
                               :seon.attempt/reason (if (:reason end) (str (:reason end) " (" (:seon.error/message e) ")") (:seon.error/message e))
@@ -618,7 +618,7 @@
     (case step
       :ignored [st []]
       :done (done st)
-      :dead-read (one (write st aid :done (dead-tx aid (:died f) (if (:db r) (pull-end (:db r) aid) {}))))
+      :dead-read (one (write st aid :done (dead-tx aid (:died f) (some-> (:db r) (pull-end aid)))))
       :spawned (if-let [ag (:id r)]
                  (one (write (assoc-in st [:flights aid :agent] ag) aid :started
                              (task/attempt-start-tx aid (:task act) (:boot st) ag (:env act) (System/currentTimeMillis)
