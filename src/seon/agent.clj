@@ -292,27 +292,23 @@
       (assoc :got (print/text (second (:actual m)) (:part print/budgets)))
       (contract/valid? :seon.cost/report cost) (assoc :cost cost))))
 
-(defn results-dir
-  "Where this root's agents keep their test results: beside its store, under its main (this
-  root's agents only), never the results directory bin/test and every checkout share: an agent's REPL can
-  change live state its recorded forms do not show (until the owner rules that agents share)."
-  {:malli/schema [:=> [:cat] :string]}
-  [] (str (cfg/value :seon.config.root/store-path) "-results/" (cfg/value :seon.config.root/main)))
-
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/reach-digests) against base's (main at its merge base), the greens stored at
   those digests and proofs. The digests' inputs with no program facts are this boot's
   :inputs on root's :seon.root/source fact (seon.root/import-source!: present only when root's
-  binary is built from its source tree), so an agent's results are kept by digest in
-  results-dir; a root with no such fact this boot shares nothing and reuses nothing (the
+  binary is built from its source tree), so an agent's results are kept by digest in the one
+  results directory every checkout shares (:seon.config.source/test-results-dir: owner,
+  2026-10-23, a test that is the same is not run again once green, \"especially when freshly
+  branched\"; every eval is a recorded form, so the digest covers what ran); a root with no
+  such fact this boot shares nothing and reuses nothing (the
   inputs then are blank, which keys nothing stored: it only selects). A test is selected when
   it is a proof or reaches what the branch changed since base (a var, method, fixture, ns form,
   macro or schema entry), and runs when no green is stored at its digest
   (seon.reconcile/done-refusals reads the selected). Scratch namespaces' tests (user,
   ^:scratch) never merge, so they never judge; a proof with no test var here does not run, and
   one with a var but no program facts (loaded, never recorded) has no digest: it always runs.
-  Answers the plan with :digests {test digest} and :dir (results-dir when shared)."
+  Answers the plan with :digests {test digest} and :dir (the results directory when shared)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]]
                   [:map [:selected [:vector :qualified-symbol]] [:run [:vector :qualified-symbol]] [:reused [:map-of :qualified-symbol :map]]
                    [:digests [:map-of :qualified-symbol :string]] [:dir [:maybe :string]]]]}
@@ -321,7 +317,7 @@
         source (:seon.root/source root)
         shared (when (= (:boot source) (:seon.root/boot root)) (:inputs source))
         in (or shared {:env "" :tree "" :data-refs (fx/declared-refs (cfg/value :seon.config.root/system-path))})
-        dir (when shared (results-dir))
+        dir (when shared (cfg/value :seon.config.source/test-results-dir))
         judges? (fn [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
                           (and (:test m) (not (program/scratch-ns? (:ns m))))))
         cd (into {} (filter (comp judges? key)) (program/reach-digests db in))
