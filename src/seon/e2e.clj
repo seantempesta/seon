@@ -340,6 +340,6 @@
                     "swarm" (swarm x y)
                     "model" (model-run x)
                     "stuck" (stuck)))
-    (do (println (str "e2e: no mode " (pr-str mode) "; usage: seon e2e loop|calc|resume|resume2|scenario|swarm|model|stuck [ARGS]"))
+    (do (println (str "e2e: no mode " mode "; usage: seon e2e loop|calc|resume|resume2|scenario|swarm|model|stuck [ARGS]"))
         (println "E2E FAILED")
         false)))

@@ -132,7 +132,7 @@
                           [k {:stored stored :declared t}]))
         _ (when (seq differ)
             (let [e (contract/error :seon.db/types-differ 'seon.db/open!
-                                    (str "the store holds " (count differ) " attributes as another value type than the schema declares: " (pr-str (keys differ)))
+                                    (str "the store holds " (count differ) " attributes as another value type than the schema declares (each in :seon.db/attributes)")
                                     {:seon.db/attributes differ
                                      :seon.error/fix "An attribute's value type is fixed once installed: open a store made with this schema (a fresh one), or keep running the build that made this store."})]
               (throw (ex-info (:seon.error/message e) e))))
@@ -331,10 +331,14 @@
     {:used-bytes (.length (java.io.File. (str (get-in cfg [:store :path]) "/data.mdb")))
      :map-bytes (get-in cfg [:store :lmdb :map-size])}))
 
-(defn lease-base
-  "The first entity id past every branch head of the store: agents' leases start here."
-  {:malli/schema [:=> [:cat :seon.host/conn] :int]}
-  [conn] (+ (cfg/value :seon.config.store/eid-lease) (max (:max-eid @conn) (#'datahike.writing/roster-max-eid (:store @conn)))))
+(defn lease-block!
+  "Reserve the next block of eid-lease entity ids from this process's one counter for db's
+  store (the counter its own writes mint from, seeded past every branch head): answers the
+  block's lease, its ids lease+1 up to lease+eid-lease (exclusive, lease!). The process's
+  later ids start past it, so a block and the writes to main never meet."
+  {:malli/schema [:=> [:cat :seon.host/db] :int]}
+  [db]
+  (.getAndAdd ^java.util.concurrent.atomic.AtomicLong (datahike.writing/eid-allocator db) (cfg/value :seon.config.store/eid-lease)))
 
 (defn head
   "Branch b's committed value, read from the store (another process may have committed it)."

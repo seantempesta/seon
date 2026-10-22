@@ -145,9 +145,9 @@
 
  ;; ---- the one read: seon.problems/report ----
  :seon.problems/class [:enum :platform :eval :agent :effect :red :cost :merge :dead :error :waste :stuck :failed :task-conflict]
- :seon.problems/row [:map
+ :seon.problems/row [:map {:seon.render/ai seon.render.ai/problem-row}
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]
                      [:at-ms [:maybe :int]]]
- :seon.problems/report [:map [:t :int]
+ :seon.problems/report [:map {:seon.render/ai seon.render.ai/report} [:t :int]
                         [:classes [:map-of :seon.problems/class [:map [:n nat-int?] [:rows [:vector :seon.problems/row]]]]]]}

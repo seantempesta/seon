@@ -66,7 +66,7 @@
       (is (some #(= {:op :keyframe :view :root} %) (:to-render out)))
       (is (some #(= :views (:op %)) (:to-render out))))
     (testing "a stale tab gets the keyframe, the other view's tab nothing"
-      (let [[st _] (#'w/web-proc st :from-render {:op :keyframe :view :root :html "<html><body><div id=\"app\">k</div></body></html>"})]
+      (let [[st _] (#'w/web-proc st :from-render {:op :keyframe :view :root :html "<div id=\"app\">k</div>"})]
         (is (str/includes? (a/poll! root-tab) "data: elements <div id=\"app\">k</div>"))
         (is (nil? (a/poll! zoom-tab)))
         (testing "then a patch of its view, serialized once, offered to it alone"

@@ -41,8 +41,8 @@
                     " for i in {1..300}; do " (ask {:op :agents}) " | grep -q idle && break; sleep 0.2; done;"
                     (str/join (for [f forms] (str (ask (if (map? f) f {:op :eval :agent "a1" :code f})) ";")))
                     " exec 3>&-; wait $R")
-        {:keys [out]} (sh/sh "zsh" "-c" script :dir "target")]
-    (sh/sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
+        {:keys [out]} (ts/binary-sh "zsh" "-c" script :dir "target")]
+    (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
     (sh/sh "rm" "-rf" (str path "-in") (str path ".log") (str path "-tasks"))
     (mapv #(let [a (edn/read-string {:default tagged-literal} %)] (if (contains? a :items) (first (:items a)) a)) (str/split-lines (str/replace out #"(?s)^.*ROOT LISTENING[^\n]*\n" ""))))))
 
@@ -228,3 +228,27 @@
                       {:sets [":seon.config.ai/provider=:none"]
                        :decls [{:seon.task/name "m" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= [:error :seon.model/no-provider [:seon.model/no-provider]] (edn/read-string (:printed r))) (pr-str r))))
+
+(deftest no-entity-of-main-is-inside-an-agents-lease
+  ;; bin/check lease, nondeterministic (2026-10-22): agent a's db held id lease+50, its
+  ;; ceiling, which no agent mints. Root handed out leases from a base it read once at boot,
+  ;; before its own writes to main (the source import's program, later facts) went on minting
+  ;; from under that base, through the agents' blocks: an agent's "new" ids are main's
+  ;; entities. With eid-lease 50, root writes 150 entities after a1 holds its lease, clones a1
+  ;; (the writer's :clone-branch reserves the clone's block too) and writes 150 more: no
+  ;; entity of main lies in either block, and the two blocks are apart
+  (let [w "@(seon.root/transact-main! sys (vec (for [i (range 150)] {:note/text (str \"root-\" i)})))"
+        [r] (in-agent [{:op :eval :agent "root"
+                        :code (str "(do " w
+                                   " (let [c @(seon.root/clone! sys :a1)] " w
+                                   " (let [db @(:conn sys) es (into #{} (map :e) (datahike.api/datoms db :eavt))"
+                                   " block (fn [a] (let [ids (:ids @(seon.root/agent-stats! sys a))] [(:from ids) (+ (:from ids) (:of ids))]))"
+                                   " inside (fn [[lo hi]] (count (filter #(< lo % hi) es)))"
+                                   " a (block :a1) b (block (:id c))]"
+                                   " [(- (second a) (first a)) (inside a) (inside b) (or (<= (second a) (first b)) (<= (second b) (first a)))])))")}]
+                      {:sets [":seon.config.store/eid-lease=50"]})
+        [of in-a1 in-clone apart] (edn/read-string (:printed r))]
+    (is (= 50 of) (pr-str r))
+    (is (= 0 in-a1) "main's entities stay out of the agent's block")
+    (is (= 0 in-clone) "and out of its clone's")
+    (is (true? apart) "the clone's block is not its parent's")))

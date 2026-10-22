@@ -235,7 +235,8 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe :seon.task/task]]}
   [db id]
   (let [own (fn [i] (some-> (d/pull db task-pull [:seon.task/id i]) task-value))]
-    (some-> (own id) (assoc :seon.task/accumulated (accumulate own id)))))
+    ;; the value names its schema, so a REPL shows it by its declared render (seon.render/printed)
+    (some-> (own id) (assoc :seon.task/accumulated (accumulate own id)) (vary-meta assoc :seon.render/schema :seon.task/task))))
 
 (def ^:private attempt-pull
   '[* {:seon.attempt/task [:seon.task/id]}

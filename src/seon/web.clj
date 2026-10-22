@@ -20,7 +20,7 @@
   runs in the agent as an eval of (seon.web/ui-call 'fn args), origin :ui, refused as data
   unless the var is marked ^:seon/callable."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [ring-chez.adapter :as adapter]
             [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render.ui :as ui] [seon.web.html :as h] [seon.step :as step] [seon.root :as c]))
 
@@ -85,7 +85,7 @@
       seon.root/interrupt! []
       (if (= "seon.root" (namespace f))
         (one (symbol (name f)) agent args)
-        (one 'submit! agent {:origin :ui :forms (pr-str (list 'seon.web/ui-call (list 'quote f) (merge args (dissoc (:fields args) :forms))))})))))
+        (one 'submit! agent {:origin :ui :forms (sedn/encode (list 'seon.web/ui-call (list 'quote f) (merge args (dissoc (:fields args) :forms))))})))))
 
 ;;; --- HTTP edge ----------------------------------------------------------------------------
 
@@ -137,7 +137,7 @@
           (and (= m :get) (= uri "/render.edn"))
           {:status 200 :headers {"Content-Type" "application/edn" "Cache-Control" "no-store"} :body (str (ask! ch {:op :render-stats}))}
           (and (= m :get) (= uri "/web.edn"))
-          {:status 200 :headers {"Content-Type" "application/edn"} :body (pr-str (ask! ch {:op :stats}))}
+          {:status 200 :headers {"Content-Type" "application/edn"} :body (sedn/encode (ask! ch {:op :stats}))}
           (and (= m :post) (= uri "/call"))
           (let [fields (into {} (for [[k v] (form-params (some-> (:body req) slurp))] [(keyword k) v]))
                 args (some-> (get q "args") edn/read-string)
@@ -175,8 +175,7 @@
   [st view html]
   (if-not html
     st
-    (let [body (second (re-find #"(?s)<body[^>]*>(.*)</body>" html))
-          chunk (patch-event (or body html))]
+    (let [chunk (patch-event html)]
       (reduce-kv (fn [st k {:keys [ch] :as tab}]
                    (if (and (= view (:view tab)) (contains? (:stale st) k))
                      (let [ok (a/offer! ch chunk)]
@@ -197,6 +196,13 @@
                            (str "/feed?view=" (if (= :root view) "root" (name view)))
                            (h/raw body))))))
 
+(defn- stats
+  "The web proc's own numbers: its :stats answer and its ping map."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  {:tabs (count (:tabs st)) :stale (count (:stale st)) :sent-bytes (:bytes st 0) :patches (:patches st 0)
+   :chunk-p50-bytes (lib/p50 (:chunk-bytes st)) :listening (:listening st) :port (:port st) :calls (:calls st 0) :error (:error st)})
+
 (defn- http-in
   "A request from the edge."
   {:malli/schema [:=> [:cat :map :seon.host/volatile :map] :map]}
@@ -215,10 +221,7 @@
              (let [[st k] (step/pend st [(:p m) :text])]
                (step/out! o :to-render {:op (if (= :context (:op m)) :context :stats) :k k})
                st)
-    :stats (do (deliver (:p m) {:tabs (count (:tabs st)) :stale (count (:stale st)) :sent-bytes (:bytes st 0)
-                                :patches (:patches st 0) :chunk-p50-bytes (lib/p50 (:chunk-bytes st)) :listening (:listening st)
-                                :port (:port st) :calls (:calls st 0) :error (:error st)})
-               st)
+    :stats (do (deliver (:p m) (stats st)) st)
     :call (let [c (:call m)
                 reqs (requests c (:index st {}))]
             (when (= 'seon.root/interrupt! (:var c))
@@ -229,7 +232,7 @@
             (doseq [[req target] reqs
                     :let [{f :var :keys [agent args forms]} c
                           form (when (= "seon.root" (namespace f))
-                                 (pr-str (cond-> (list f) agent (concat [agent]) (seq args) (concat [args]) forms (concat [forms]))))]]
+                                 (sedn/encode (cond-> (list f) agent (concat [agent]) (seq args) (concat [args]) forms (concat [forms]))))]]
               (let [tag (cond-> [:web f target] form (conj form))]
                 (if (contract/error? req)
                   (step/out! o :to-render {:op :refused :tag tag :r req})
@@ -273,9 +276,7 @@
        :outs {:to-render "views open, page and keyframe requests" :to-api "UI calls as root's requests"}
        ;; socket writes and offers only; rendering is the render proc's
        :workload :io
-       :ping-map-fn (fn [st] {:listening (:listening st) :port (:port st) :tabs (count (:tabs st))
-                              :stale (count (:stale st)) :patches (:patches st 0) :calls (:calls st 0)
-                              :bytes (:bytes st 0) :error (:error st)})})
+       :ping-map-fn stats})
   ([args]
    (let [port (:port args)
          http (a/chan 256)
