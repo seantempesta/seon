@@ -259,8 +259,17 @@
  :seon.turn/truncated :boolean
  ;; who read the context: the agent's model, or an outside agent through the entrance (a read is a turn)
  :seon.turn/origin [:enum :model :outside]
- ;; the exact user message the reader got (the system prompt is seon.context/system-prompt)
- :seon.turn/context :string
+ ;; what the reader's context was built from, never its text (a model call stores its basis,
+ ;; not its prompt): the commit it read, its task, attempt and turn, the observations no db
+ ;; holds (the proofs' results, red assertions, refusals, the run's errors), whether the
+ ;; branch's unmerged entries show, and the last evaluations' transcript while no earlier turn
+ ;; shows them. seon.context/render makes the exact user message from it on that commit.
+ :seon.turn/basis [:map {:seon.db/edn true} [:commit :uuid] [:task :seon.task/id] [:attempt :seon.attempt/id]
+                   [:turn :int] [:max-turns :int] [:origin :seon.turn/origin] [:observed :map]
+                   [:merge? {:optional true} :boolean] [:last-evals {:optional true} :string]]
+ ;; what a model turn's forms evaluated to, as the later turns' scrollback shows it
+ ;; (seon.context/evaluations-text: folded, within the evals budget)
+ :seon.turn/evals :string
  ;; the provider's finish_reason, the model that answered, and its reasoning text
  :seon.turn/finish :string
  :seon.turn/model :string
@@ -279,7 +288,8 @@
                           [:seon.turn/reply :seon.turn/reply] [:seon.turn/forms :seon.turn/forms] [:seon.turn/errors :seon.turn/errors]
                           [:seon.turn/red :seon.turn/red] [:seon.turn/ms :seon.turn/ms] [:seon.turn/tokens :seon.turn/tokens]
                           [:seon.turn/truncated {:optional true} :seon.turn/truncated]
-                          [:seon.turn/origin {:optional true} :seon.turn/origin] [:seon.turn/context {:optional true} :seon.turn/context]
+                          [:seon.turn/origin {:optional true} :seon.turn/origin] [:seon.turn/basis {:optional true} :seon.turn/basis]
+                          [:seon.turn/evals {:optional true} :seon.turn/evals]
                           [:seon.turn/finish {:optional true} :seon.turn/finish] [:seon.turn/model {:optional true} :seon.turn/model]
                           [:seon.turn/reasoning {:optional true} :seon.turn/reasoning] [:seon.turn/split {:optional true} :seon.turn/split]]
  :seon.end/end-fact [:map {:seon.db/attributes true}

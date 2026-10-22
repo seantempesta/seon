@@ -24,5 +24,5 @@ Nothing is pinged and nothing runs on a beat (owner, 2026-10-21). A render pass 
 
 ## A context read is shown once
 
-An outside agent reads its current-state block through root's entrance (`{:op :context}`, recorded with origin `:context`). The agent's page shows the text it last read, as is; every other view of that read (a card, a history row, the stream) refers to it (`read its current-state block · ≈N tokens`), never repeats it. The agent's own turn and the door print the block the same way (`seon.context/messages`, 16,000 tokens).
+An outside agent reads its current-state block through root's entrance (`{:op :context}`, recorded with origin `:context`). The agent's page shows the text it last read, made again from that turn's basis (`seon.context/recorded`, `seon.context/render`: a turn records the commit it read and the observations no db holds, never the text); every other view of that read (a card, a history row, the stream) refers to it (`read its current-state block · ≈N tokens`), never repeats it. The agent's own turn and the door print the block the same way (`seon.context/messages`, 16,000 tokens).
 

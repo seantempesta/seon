@@ -3,7 +3,8 @@
   store and each test takes a branch of it through one helper (seon.db/test-branch!)."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
-            [seon.db :as pdb] [seon.config :as cfg] [seon.contract :as contract]))
+            [seon.db :as pdb] [seon.config :as cfg] [seon.contract :as contract] [seon.edn]
+            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -149,3 +150,57 @@
         (is (some? (:conn r)) (str "the moved store opens: " (:refused r)))
         (some-> (:conn r) d/release))
       (finally (clojure.java.shell/sh "rm" "-rf" base moved)))))
+
+(defn- stored-bytes
+  "Value bytes of every key in the LMDB store at path, by key."
+  [path]
+  (let [db (klmdb/open-env! path nil)]
+    (lmdb/read-txn db (fn [txn] (into {} (for [k (lmdb/all-keys db txn)] [k (alength ^bytes (lmdb/get-bytes db txn k))]))))))
+
+(defn- turn-facts
+  "Turn k of an attempt as seon.turn/act! records it: the basis its context was built from
+  (the commit, its red assertion; the text is made again from it, seon.context/render), its
+  reply (1,500 bytes) and what its forms evaluated to as the next turn shows them (2,000)."
+  [k]
+  [{:seon.turn/id (str "att/" k) :seon.turn/attempt "att" :seon.turn/n k :seon.turn/origin :model
+    :seon.turn/basis (seon.edn/encode {:commit (random-uuid) :task "t/x" :attempt "att" :turn k :max-turns 8 :origin :model
+                                       :observed {:results {'t-test/x :fail} :run-errors [] :refusals [{:refusal :proof-red :symbol 't-test/x}]
+                                                  :reds [{:test 't-test/x :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))"}]}})
+    :seon.turn/reply (apply str (repeat 1500 "r")) :seon.turn/evals (apply str (repeat 2000 "e"))}])
+
+(defn- write-turns!
+  "Bytes the store at path gains when branch b gets n turns through the agent's run-ahead
+  writer (datahike.writer/apply!), committed every `every` turns."
+  [conn cfg path b n every]
+  (d/branch! conn :db b)
+  (let [c (d/connect (assoc cfg :branch b))
+        before (stored-bytes path)]
+    (doseq [k (range n)]
+      (dw/apply! c {:tx-data (turn-facts k)})
+      (when (zero? (mod (inc k) every)) (dw/commit-pending! c)))
+    (pdb/sync! cfg)
+    (d/release c)
+    (reduce + 0 (for [[k v] (stored-bytes path) :when (not= v (get before k))] v))))
+
+(deftest a-commit-costs-what-it-writes
+  ;; task seon.db/the-store-grows-with-what-it-keeps. Estimate, from what a commit must
+  ;; write: its own datoms (each value twice, in :eavt and :aevt) and the root-to-leaf path
+  ;; it touched in each index, whose nodes hold small datoms: at branching factor 64 about 11
+  ;; keys of ~1.5-3 KB (a 1-datom commit measured 16.8-27.7 KB at 5k-225k datoms,
+  ;; test/seon/bench_commit.clj), so <= 32 KB per commit above its values. So n turns
+  ;; committed one by one (an agent commits each turn) cost what the same turns cost in
+  ;; one commit plus n paths. Measured 2026-10-22: a turn with an 8 KB context, committed
+  ;; per turn, wrote ~15x the one commit, because every commit rewrites the whole tail leaf
+  ;; of :eavt and :aevt (up to 64 contexts) holding the values inline. A store on disk of
+  ;; this test's own, the last resort: the in-memory store writes no nodes; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-commit-" (random-uuid))
+        {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
+        n 20]
+    (try
+      (let [once (write-turns! conn cfg path :once n n)
+            per-turn (write-turns! conn cfg path :per-turn n 1)
+            bound (+ once (* n 32 1024))]
+        (is (<= per-turn bound)
+            (str n " per-turn commits wrote " per-turn " bytes; the same turns in one commit wrote " once
+                 ", so the bound is " bound " (" (format "%.1f" (/ (double per-turn) bound)) "x over)")))
+      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))

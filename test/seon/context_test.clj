@@ -5,7 +5,7 @@
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.task :as task] [seon.context :as context] [seon.print :as print]
             [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs]
-            [seon.print.select :as select] [clojure.string :as str] [clojure.walk :as walk]))
+            [seon.print.select :as select] [clojure.string :as str] [clojure.walk :as walk] [seon.edn]))
 
 (defn- db-with-program []
   (let [db (pdb/test-db)]
@@ -194,14 +194,54 @@
           (is (= (:seon.render.data/next-offset c) (- (count whole) (count rest))) (pr-str f))
           (is (= (seq whole) (seq (concat (take (:seon.render.data/next-offset c) whole) rest))) (pr-str f)))))))
 
-(deftest the-page-reads-the-context-as-recorded
-  ;; the one source of what an agent read: its turns' recorded user messages, model or outside
-  (let [db (d/db-with (db-with-program)
-                      [{:seon.turn/id "a#1/0" :seon.turn/attempt "a#1" :seon.turn/n 0 :seon.turn/origin :model :seon.turn/context "first"}
-                       {:seon.turn/id "a#1/read-1" :seon.turn/attempt "a#1" :seon.turn/n 1 :seon.turn/origin :outside :seon.turn/context "second"}
-                       {:seon.turn/id "b#1/0" :seon.turn/attempt "b#1" :seon.turn/n 0 :seon.turn/origin :model :seon.turn/context "other"}])]
-    (is (= {:text "second" :origin :outside :turn "a#1/read-1"} (context/recorded db "a#1")) "the last read of the attempt")
-    (is (nil? (context/recorded db "c#1")) "an attempt that read nothing has no context")))
+(deftest a-turn-records-its-basis-and-its-context-is-made-again-from-it
+  ;; task seon.db/the-store-grows-with-what-it-keeps (owner, 2026-10-22: store each turn's
+  ;; basis, not its context text): the text the model was sent, built as the turn loop built
+  ;; it before (current-state and messages, the first turn's text carried in the scrollback),
+  ;; equals the text seon.context/render makes again from the recorded basis on the commit it
+  ;; names, after the branch moved on (the program changed, later turns were written)
+  (let [[_ conn] (pdb/test-branch!)
+        program (fn [src] [{:db/id "f" :var/name 'demo/f :var/ns "ns" :var/form "form"}
+                           {:db/id "form" :form/id (str "demo/f " src) :form/src src :form/ns "ns" :form/order 0 :form/defines ["f"]}
+                           {:db/id "ns" :ns/name 'demo}])
+        _ (d/transact conn (program "(defn f \"Doubles.\" [x] (* 2 x))"))
+        _ (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make `demo/f` triple."
+                                                   :seon.task/proofs #{'demo-test/f-test}}]))
+        observed {:results {'demo-test/f-test :fail} :run-errors []
+                  :reds [{:test 'demo-test/f-test :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))" :got "(= 6 4)"}]
+                  :refusals [{:refusal :proof-red :symbol 'demo-test/f-test} {:refusal :contract-gap :symbol 'demo/helper}]}
+        basis (fn [db n] {:commit (d/commit-id db) :task "demo/f" :attempt "demo/f#1" :turn n :max-turns 4 :origin :model :observed observed})
+        record! (fn [b more] (d/transact conn [(merge {:seon.turn/id (str "demo/f#1/" (:turn b)) :seon.turn/attempt "demo/f#1"
+                                                       :seon.turn/n (:turn b) :seon.turn/origin :model :seon.turn/basis (seon.edn/encode b)
+                                                       :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1 :seon.turn/tokens 1}
+                                                      more)]))
+        ;; turn 0: what the model was sent, the old way
+        db0 @conn
+        b0 (basis db0 0)
+        sent0 (:content (peek (context/messages (context/current-state db0 (task/task db0 "demo/f") (assoc observed :turn 0 :max-turns 4 :repairs []))))) 
+        reply0 "```clojure\n(defn f [x] (* 3 x)\n```"
+        evals0 (context/evaluations-text [{:id 0 :tag :ret :form "(defn f [x] (* 3 x))" :printed "#'demo/f"}])
+        _ (record! b0 {:seon.turn/reply reply0 :seon.turn/evals evals0 :seon.turn/truncated true})
+        ;; the reply changed the program: turn 0's text must come from its own commit
+        _ (d/transact conn (program "(defn f \"Triples.\" [x] (* 3 x))"))
+        db1 @conn
+        b1 (basis db1 1)
+        {:keys [text repairs]} (reader/forgive reply0)
+        sent1 (:content (peek (context/messages (context/current-state db1 (task/task db1 "demo/f")
+                                                                       (assoc observed :turn 1 :max-turns 4 :truncated? true :source text :repairs repairs))
+                                                [{:reply reply0 :evals (str "Your evaluations:\n" evals0) :context sent0}])))
+        _ (record! b1 {:seon.turn/reply "(my.turn/wait)" :seon.turn/evals ""})
+        _ (d/transact conn (program "(defn f \"Later.\" [x] x)"))
+        db @conn
+        e-of (fn [id] (d/q '[:find ?e . :in $ ?id :where [?e :seon.turn/id ?id]] db id))]
+    (is (str/includes? sent0 "Doubles.") "turn 0 read the program as it stood")
+    (is (str/includes? sent1 "Triples.") "turn 1 read the changed program")
+    (is (= sent0 (context/turn-text db (e-of "demo/f#1/0"))) "turn 0's text, made again from its basis")
+    (is (= sent1 (context/turn-text db (e-of "demo/f#1/1"))) "turn 1's text, its scrollback included")
+    (is (= sent1 (:content (peek (:messages (context/render db1 b1))))) "the turn loop's own render is the same text")
+    (is (= {:text sent1 :origin :model :turn "demo/f#1/1"} (context/recorded db "demo/f#1")) "the page reads the last turn's")
+    (is (nil? (context/recorded db "c#1")) "an attempt that read nothing has no context")
+    (is (< (count (seon.edn/encode b1)) 600) "the basis is small: no text the db already holds")))
 
 (deftest a-context-read-as-a-value-does-not-grow-the-next-context
   ;; the model evaluates something that answers a whole context (its own block, say): the

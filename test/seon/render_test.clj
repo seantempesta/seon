@@ -6,7 +6,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.render.proc :as p]
-            [seon.web.html :as h] [seon.db] [seon.reconcile] [seon.task] [datahike.api :as d]))
+            [seon.web.html :as h] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [datahike.api :as d]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -288,11 +288,18 @@
     (testing "the agent page's panel is the text it read, as recorded (seon.context/recorded), and one copy of it"
       (let [ctxv (#'p/context-of nil {:seon.attempt/task "t/x"} {:evals [{:tag :ret :form "(+ 1 2)" :printed "3"} read]})]
         (is (= :why (first (keys ctxv))) "no db: why, not a rebuild"))
-      (seon.db/test-branch! (fn [_ conn] (let [db (d/db-with @conn [{:seon.turn/id "t/x#1/read-1" :seon.turn/attempt "t/x#1" :seon.turn/n 1
-                                  :seon.turn/origin :outside :seon.turn/context ctx}])
+      (seon.db/test-branch! (fn [_ conn] (let [_ (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "p"}]))
+            ;; an outside read whose done rule refused 360 contract gaps: its basis, never its text
+            b {:commit (d/commit-id @conn) :task "t/x" :attempt "t/x#1" :turn 1 :max-turns 1 :origin :outside
+               :observed {:results {} :reds [] :run-errors []
+                          :refusals (vec (for [i (range 360)] {:refusal :contract-gap :symbol (symbol "app.m" (str "f" i))}))}}
+            _ (d/transact conn [{:seon.turn/id "t/x#1/read-1" :seon.turn/attempt "t/x#1" :seon.turn/n 1
+                                 :seon.turn/origin :outside :seon.turn/basis (seon.edn/encode b)}])
+            db @conn
             ctxv (#'p/context-of db {:seon.attempt/id "t/x#1" :seon.attempt/task "t/x"} {:evals [read]})]
-        (is (= {:text ctx :origin :outside} (select-keys ctxv [:text :origin])) "the text it read, as is")
-        (is (= 1 (count (re-seq #"app.m/f359" (:text ctxv)))) "one copy")
+        (is (= {:text (:content (peek (:messages (seon.context/render db b)))) :origin :outside} (select-keys ctxv [:text :origin]))
+            "the text it read, made again from its basis")
+        (is (str/includes? (:text ctxv) "app.m/f0") "what the read showed")
         (is (:why (#'p/context-of db {:seon.attempt/id "t/x#2" :seon.attempt/task "t/x"} {:evals []})) "an attempt that read nothing says why")))))))
 
 (deftest a-hand-spawned-agent-says-why-it-has-no-context

@@ -8,7 +8,7 @@
   Each run ends on what the system observes (the reconciler's quiescence report, or a fact
   on main), never on a deadline. Prints one EDN line per phase; the last line is the run's
   numbers and its verdict."
-  (:require [seon.root :as c] [my.root :as root] [seon.task :as task] [seon.reconcile :as r]
+  (:require [seon.root :as c] [my.root :as root] [seon.task :as task] [seon.context :as context] [seon.reconcile :as r]
             [seon.fixtures :as fx] [datahike.api :as d] [seon.lib :as lib] [clojure.string :as str] [clojure.edn :as edn] [seon.config] [clojure.java.shell :as sh]))
 
 (defn- now [] (System/currentTimeMillis))
@@ -135,8 +135,10 @@
           ;; the second turn read its first answer's failure as the assertion and what it got
           ;; (square was (twice x), and twice is still its stub on square's branch: 0)
           sq-db (:db @(c/branch-db sys (task/default-branch "calc/square")))
-          sq-turns (sort-by first (d/q '[:find ?n ?c ?s :where [?e :seon.turn/n ?n] [?e :seon.turn/origin :model]
-                                         [?e :seon.turn/context ?c] [?e :seon.turn/split ?s]] sq-db))
+          ;; (each turn's text made again from its basis: seon.context/render)
+          sq-turns (sort-by first (map (fn [[n e s]] [n (context/turn-text sq-db e) s])
+                                       (d/q '[:find ?n ?e ?s :where [?e :seon.turn/n ?n] [?e :seon.turn/origin :model]
+                                              [?e :seon.turn/basis _] [?e :seon.turn/split ?s]] sq-db)))
           read-failure? (and (= 2 (count sq-turns))
                              (str/includes? (second (second sq-turns)) ":assert \"(= 9 (app.calc/square 3))\"")
                              (str/includes? (second (second sq-turns)) ":got \"(= 9 0)\"")

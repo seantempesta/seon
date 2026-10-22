@@ -18,7 +18,8 @@
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.set :as set]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context]
-            [seon.harvest :as harvest] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg]))
+            [seon.harvest :as harvest] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg]
+            [seon.edn :as sedn] [datahike.api :as d]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: the task and
 ;; attempt it works, and a stop a verb requested.
@@ -92,11 +93,26 @@
 (defn- observed
   "The context inputs observe's map holds, beyond the proofs' results: every refusal of the
   done rule, the failing assertions of each test it names, the run's own errors."
-  {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
-  [db {:keys [run refusals task]}]
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{:keys [run refusals task results]}]
   (let [proofs (:proofs (:seon.task/accumulated task))
         named (into (set proofs) (keep :symbol) refusals)]
-    {:refusals refusals :reds (proofs/red-reports run named) :run-errors (proofs/run-errors run)}))
+    {:results results :refusals refusals :reds (proofs/red-reports run named) :run-errors (proofs/run-errors run)}))
+
+(defn- basis!
+  "What a turn's context is built from, recorded instead of its text (a model call stores its
+  basis, not its prompt): the commit it reads (the run-ahead writes committed now, as the
+  model call's wait would), the task, attempt and turn, the observations no db holds, and
+  the last evaluations' transcript while no earlier turn shows them."
+  {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id :int :int :seon.turn/origin :map] :seon.turn/basis]}
+  [task attempt turn max-turns origin observed]
+  (agent/commit!)
+  (let [items (when (or (= :outside origin) (zero? turn)) (last-evals))
+        ev (when (seq items) (context/evaluations-text items))]
+    (cond-> {:commit (d/commit-id (agent/db)) :task task :attempt attempt :turn turn :max-turns max-turns
+             :origin origin :observed (dissoc observed :merge?)}
+      (:merge? observed) (assoc :merge? true)
+      ev (assoc :last-evals ev))))
 
 (defn- act!
   "One model turn: the context of what was observed to the model, the reply's forms through
@@ -104,18 +120,13 @@
   provider error. The model call is an effect (my.fx :model, lane FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
   {:malli/schema [:=> [:cat :map :map [:maybe :string]] [:or :map :map]]}
-  [{:keys [turn tokens max-turns merge? attempt] :as st} {:keys [results unmerged tests-ms] :as obs} model-name]
+  [{:keys [turn tokens max-turns merge? attempt] :as st} {:keys [results tests-ms] :as obs} model-name]
   (let [t (:task obs)
         proofs (:proofs (:seon.task/accumulated t))
-        db (agent/db)
         t0 (System/nanoTime)
-        block (context/current-state db t (merge (observed db obs)
-                                                 {:results results :turn turn :max-turns max-turns
-                                                  ;; the last turn's items as (my.turn/evals) answers them: the transcript's cuts read through it
-                                                  :last-items (last-evals)
-                                                  :unmerged (when merge? unmerged) :truncated? (:truncated? st)
-                                                  :source (:source st) :repairs (:repairs st [])}))
-        messages (context/messages block (:turns st []))
+        basis (basis! (:seon.task/id t) attempt turn max-turns :model
+                      (cond-> (observed obs) merge? (assoc :merge? true)))
+        {:keys [block messages]} (context/render (agent/db) basis)
         context-ms (ms-since t0)
         t1 (System/nanoTime)
         r (agent/fx! :model (cond-> {:messages messages :task (:seon.task/id t) :turn turn}
@@ -125,17 +136,19 @@
         c (:value r)]
     (if (:seon.error/type r)
       r
-      (let [{:keys [text repairs]} (reader/forgive (:text c))
+      (let [{:keys [text]} (reader/forgive (:text c))
             t2 (System/nanoTime)
             items (repl/eval-string text)
             eval-ms (ms-since t2)
             _ (swap! agent/state assoc-in [:turn :evals] items)
             used (+ (:prompt-tokens c) (:completion-tokens c))
             t3 (System/nanoTime)]
-        ;; what the model read (the user message: the system prompt is seon.context/system-prompt),
-        ;; what it answered and how it stopped, and where the turn's time went as this agent saw it
+        ;; what the model read, as its basis (seon.context/render makes the text from it), what
+        ;; it answered and how it stopped, what its forms evaluated to as the next turns show it,
+        ;; and where the turn's time went as this agent saw it
         (agent/transact! [(cond-> {:seon.turn/id (str attempt "/" turn) :seon.turn/attempt attempt :seon.turn/n turn
-                                   :seon.turn/origin :model :seon.turn/context (:content (peek messages))
+                                   :seon.turn/origin :model :seon.turn/basis (sedn/encode basis)
+                                   :seon.turn/evals (context/evaluations-text items)
                                    :seon.turn/reply (:text c) :seon.turn/forms (count items)
                                    :seon.turn/errors (count (filter #(= :err (:tag %)) items))
                                    :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))
@@ -148,11 +161,7 @@
                            :seon.turn/split (pr-str (cond-> {:context-ms context-ms :model-ms model-ms :eval-ms eval-ms
                                                              :record-ms (ms-since t3)}
                                                       tests-ms (assoc :tests-ms tests-ms)))}])
-        (cond-> (-> (assoc st :turn (inc turn) :tokens (+ tokens used) :truncated? (boolean (:truncated? c))
-                           :source text :repairs repairs)
-                    ;; the conversation so far, as a REPL keeps its scrollback: the next turn reads it
-                    (update :turns (fnil conj []) (cond-> {:reply (:text c) :evals (context/evaluations-text items)}
-                                                    (empty? (:turns st)) (assoc :context (:content (peek messages)))))
+        (cond-> (-> (assoc st :turn (inc turn) :tokens (+ tokens used))
                     ;; what this turn's block showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
                                                  :shown {'seon.context/resolve-ref (set (map :symbol (:references block)))
@@ -168,16 +177,14 @@
   {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id] :string]}
   [task attempt]
   (let [{:keys [gaps-before plan-before]} (begin! task attempt)
-        {:keys [results unmerged tests-ms] :as obs} (observe task gaps-before plan-before)
-        db (agent/db)
+        {:keys [tests-ms] :as obs} (observe task gaps-before plan-before)
+        n (get-in (swap! agent/state update-in [:turn :reads] (fnil inc 0)) [:turn :reads])
         t0 (System/nanoTime)
-        text (:content (second (context/messages (context/current-state db (:task obs) (merge (observed db obs)
-                                                                                              {:results results :turn 0 :max-turns 1
-                                                                                               :last-items (last-evals) :unmerged unmerged})))))
-        n (get-in (swap! agent/state update-in [:turn :reads] (fnil inc 0)) [:turn :reads])]
-    ;; the read is a turn of this attempt, as a model turn is: what was read and what it cost
+        basis (basis! task attempt n 1 :outside (assoc (observed obs) :merge? true))
+        text (:content (peek (:messages (context/render (agent/db) basis))))]
+    ;; the read is a turn of this attempt, as a model turn is: what it was built from and what it cost
     (agent/transact! [{:seon.turn/id (str attempt "/read-" n) :seon.turn/attempt attempt :seon.turn/n n
-                       :seon.turn/origin :outside :seon.turn/context text
+                       :seon.turn/origin :outside :seon.turn/basis (sedn/encode basis)
                        :seon.turn/split (pr-str (cond-> {:context-ms (ms-since t0)} tests-ms (assoc :tests-ms tests-ms)))}])
     text))
 
