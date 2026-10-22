@@ -42,6 +42,17 @@
     {:db db :inputs in
      :digests (into {} (filter #(nss (symbol (namespace (key %))))) (program/reach-digests db in))}))
 
+(defn- refused-names
+  "Why the arguments after --plan WHAT OUT [--all] cannot select tests, or nil: a flag this runner
+  does not know (bin/test --reach ran nothing and passed: reach is the default since bin/prove),
+  or a name that is no test namespace of test/."
+  [names]
+  (let [flags (filter #(str/starts-with? % "--") names)
+        nss (set (map str (test-namespaces)))
+        unknown (remove #(or (str/starts-with? % "--") (nss %)) names)]
+    (cond (seq flags) (str "no flag " (str/join " " flags) " (bin/test [--all] [NS ...])")
+          (seq unknown) (str "no test namespace " (str/join " " unknown) " in test/"))))
+
 (defn- write!
   "text to path through the effect owner's file write (seon.fx/write-file); its declared
   error is thrown with its data, so the run ends red naming the path, never as if written."
@@ -102,6 +113,8 @@
   (names, one line) and out/steps.edn ({:tree :digests {step digest}}) for bin/prove to run. Answers the exit
   status: 1 when a check step names a function the program does not define."
   [what all? out names]
+  (if-let [bad (refused-names names)]
+    (do (println (str "TEST FAILED: " bad)) 1)
   (let [root (System/getProperty "user.dir")
         t0 (profile/now-ns)
         {:keys [db inputs digests]} (tests-of root names)
@@ -121,7 +134,14 @@
       (when (seq run-steps) (println "prove: check steps to run:" (str/join " " run-steps)))
       (when (seq missing)
         (println "prove: check steps naming a function the program does not define (seon.proofs/check-steps):" (str/join " " missing))))
-    (if (seq missing) 1 0)))
+    (cond
+      (seq missing) 1
+      ;; namespaces named, and none of their tests is a test the program holds: a selection that
+      ;; matched nothing passes nothing
+      (and (seq names) tests? (empty? digests)) (do (println (str "TEST FAILED: " (str/join " " names) " select no test")) 1)
+      :else (do (when (and (empty? run-tests) (empty? run-steps))
+                  (println (str "prove: nothing to run: " (count reused) " reused green at their digest")))
+                0)))))
 
 (defn- store-steps!
   "bin/prove's last part: each step of out/steps.edn that bin/check named green in out/green
