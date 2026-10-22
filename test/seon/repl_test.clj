@@ -2,7 +2,7 @@
   "An agent's REPL answers: asked of an agent in a root of its own (seon.agent-test/in-agent), and a form bounded by the work it does, never by a clock (seon.intr/run under a tick budget)."
   (:require [clojure.test :refer [deftest is]] [clojure.string :as str] [seon.agent-test :as at]
             [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]
-            [seon.ref :as ref] [seon.template :as template]))
+            [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl]))
 
 (deftest source-answers-a-platform-var-from-the-program
   ;; task seon.repl/source-reads-the-program: clojure.repl's source and source-fn, as at any
@@ -40,6 +40,26 @@
         items (at/in-agent (mapv first rows))]
     (doseq [[[form k expected] item] (map vector rows items)]
       (is (str/includes? (str (get item k)) expected) (str form " -> " (pr-str item))))))
+
+(deftest a-reply-item-carries-values-not-their-printed-text
+  ;; convergence item 9: the middleware answer under the item's own keys, so nothing is
+  ;; printed and read back in the agent. The REPL's own handler in this process, as a
+  ;; scratch session (not agent mode: nothing is transacted)
+  (let [answers (volatile! [])
+        old @agent/state]
+    (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
+    (try ((repl/handler) {"op" "eval" "code" "(defn uncontracted-g [x] x) (/ 1 0)" :reply #(vswap! answers conj %)})
+         (finally (reset! agent/state old)))
+    (let [[d e] (repl/fold @answers)]
+      (is (= [:ret :err] (mapv :tag [d e])) (pr-str @answers))
+      (is (= [0 1] (mapv :id [d e])))
+      (is (= :h0 (:handle d)))
+      (is (= :uncontracted-definition (:seon.repl/finding (first (:warnings d)))) "the warning, a map")
+      (is (= ['seon.repl-test.scratch/uncontracted-g] (:uncontracted (first (:warnings d)))))
+      (is (every? number? (map :ms [d e])))
+      (is (= :seon.agent/eval-error (:seon.error/type (:err e))) "the error map itself")
+      (is (= (:seon.error/message (:err e)) (:printed e)))
+      (is (str/includes? (str (:err-text e)) "Divide by zero") (pr-str e)))))
 
 (defn- runnable
   "The forms text tells an agent to run, in order: each single-backticked code span that is a
