@@ -214,28 +214,34 @@
 
 (defn- blame
   "{final line number {:sha :time}} of the file at path in the repository at root, from git blame
-  --porcelain (an uncommitted line is sha 000...)."
+  --porcelain (an uncommitted line is sha 000...). A commit with no committer time is a failure
+  to read git's answer: it throws, never a time of 0."
   {:malli/schema [:=> [:cat :string :string] [:map-of :int :map]]}
   [root path]
-  (let [out (git! {} root ["blame" "--porcelain" "--" path] nil)]
-    (loop [ls (str/split-lines out) cur nil times {} acc {}]
-      (if-let [l (first ls)]
-        (if-let [[_ sha line] (re-matches #"([0-9a-f]{40}) \d+ (\d+)(?: \d+)?" l)]
-          (recur (rest ls) {:sha sha :line (parse-long line)} times (assoc acc (parse-long line) {:sha sha}))
-          (if-let [[_ t] (re-matches #"committer-time (\d+)" l)]
-            (recur (rest ls) cur (assoc times (:sha cur) (parse-long t)) acc)
-            (recur (rest ls) cur times acc)))
-        (update-vals acc (fn [{:keys [sha]}] {:sha sha :time (get times sha 0)}))))))
+  (let [out (git! {} root ["blame" "--porcelain" "--" path] nil)
+        lines (loop [ls (str/split-lines out) cur nil times {} acc {}]
+                (if-let [l (first ls)]
+                  (if-let [[_ sha line] (re-matches #"([0-9a-f]{40}) \d+ (\d+)(?: \d+)?" l)]
+                    (recur (rest ls) {:sha sha} times (assoc acc (parse-long line) sha))
+                    (if-let [[_ t] (re-matches #"committer-time (\d+)" l)]
+                      (recur (rest ls) cur (assoc times (:sha cur) (parse-long t)) acc)
+                      (recur (rest ls) cur times acc)))
+                  [acc times]))
+        [acc times] lines]
+    (update-vals acc (fn [sha] (if-let [t (times sha)]
+                                 {:sha sha :time t}
+                                 (throw (ex-info (str "git blame gave no committer time for " sha) {})))))))
 
 (defn wiki-history
   "For each requested wiki section ({:path :address :lines [from to] :files {name {:file :ns}}}) the
   commit that last changed its lines (git blame of its page, the newest committer time among its
   lines; nil when a line is not committed yet) and, for each (commit, file) the sections' cited
-  vars live in, the file's text at that commit (nil: the file did not exist then), read from
-  git once. Answers {:value {:sections {address {:commit sha}} :files {[sha file] text-or-nil}
-  :errors {address message}}}: a page git cannot blame (not a git checkout, an untracked file)
-  names its sections under :errors, never an exception; or :seon.fx/io-error. The wiki's loader
-  records a section whose history is unread as of today and says so (seon.docs/baseline-reads)."
+  vars live in, the file's text at that commit: nil when the commit has no such path (git ls-tree
+  says so), else `git show`'s text. Every git call goes through `git!`. Answers {:value {:sections
+  {address {:commit sha}} :files {[sha file] text-or-nil} :errors {[sha file] message}}}: a page git
+  cannot blame (not a git checkout, an untracked file) answers {:error message} for its sections, and
+  a (commit, file) git cannot show is under :errors, never nil; or :seon.fx/io-error. The wiki's
+  loader records a section whose history is unread as of today and says so (seon.docs/baseline-reads)."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [root sections]} :req}]
   (try
@@ -250,9 +256,14 @@
                                             newest (when (seq ls) (apply max-key :time ls))]
                                         {:commit (when (and newest (not (re-matches #"0+" (:sha newest)))) (:sha newest))}))]))
           needed (distinct (for [{:keys [address files]} sections :let [c (:commit (infos address))] :when c [_ {:keys [file]}] files] [c file]))
-          texts (into {} (for [[c f] needed]
-                           [[c f] (let [r (sh/sh "git" "-C" root "show" (str c ":" f))] (when (zero? (:exit r)) (:out r)))]))]
-      {:value {:sections infos :files texts}})
+          shown (into {} (for [[c f] needed]
+                           [[c f] (try (if (str/blank? (git! {} root ["ls-tree" c "--" f] nil))
+                                         {:text nil}
+                                         {:text (git! {} root ["show" (str c ":" f)] nil)})
+                                       (catch Throwable e {:error (or (ex-message e) (str (type e)))}))]))]
+      {:value {:sections infos
+               :files (into {} (keep (fn [[k r]] (when (contains? r :text) [k (:text r)]))) shown)
+               :errors (into {} (keep (fn [[k r]] (when (:error r) [k (:error r)]))) shown)}})
     (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path root}))))
 
 ;; Dependencies: fetching is an outside-world effect with one owner (the PKG plan), and

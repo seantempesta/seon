@@ -84,7 +84,7 @@
         unc (added-gaps (:base @agent/state) db)
         unmerged (branch/unmerged)
         {:keys [caused attention]} (problems/caused-split (:base @agent/state) db)]
-    {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :attention (vec attention) :task (task/task db id)
+    {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :attention attention :task (task/task db id)
      :will-merge (program/divergence (:base @agent/state) db)
      ;; root's ruling (a): what this turn ran, what the judge will run, what the merge runs
      :tests (when-not (contract/error? run)

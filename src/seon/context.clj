@@ -309,7 +309,7 @@
       ;; measured and empty ({}) says so; absent only when not measured (a basis before D4)
       ;; the sections of the wiki this branch's code changes made stale (seon.problems/caused-split): to read and
       ;; probably fix; never a reason to refuse done
-      (seq attention) (assoc :attention (vec attention))
+      (seq attention) (assoc :attention attention)
       (some? will-merge) (assoc :will-merge will-merge)
       ;; root's ruling (a), 2026-10-22: the tests this turn ran (the proofs and the tests the
       ;; branch changed), those the judge runs at the attempt's end, the process tests run only

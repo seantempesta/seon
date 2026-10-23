@@ -7,7 +7,7 @@
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
             [seon.repl :as repl] [seon.proofs :as proofs] [seon.root :as root] [seon.agent-proc :as ap]
             [seon.reconcile :as rec] [seon.sock :as sock]
-            [seon.render :as render] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.cost :as cost] [seon.docs]))
+            [seon.render :as render] [konserve.jolt.fasl] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.cost :as cost] [seon.docs]))
 
 (defn- invalid [op v]
   (contract/error :seon.instrument/contract-error op (str op " invalid-input: its arguments do not satisfy its contract")
@@ -707,21 +707,22 @@
   ;; per citation or site. Before: ~150 KB per catch site, both dbs read in full.
   (cost/proof {:of 'seon.problems/caused :input 'seon.problems-test/caused-flat-input
                :n "sections citing a var and catch sites in the program, one of each changed"
-               :work "three aevt scans of the sections, the var and task names, the catch forms, and the stale scan of the vars and forms; candidates only through the rule"
+               :work "three aevt scans of the sections, the var and task names, the catch forms, and for the stale sections only the names the branch changed (program/changed-vars) and the sections that differ; candidates only through the rule"
                :growth :linear
-               :per-n {:ns 30000 :bytes 35000 :calls 0}
-               :fixed {:ns 2400000 :bytes 4600000 :calls 18}
+               :per-n {:ns 25000 :bytes 30000 :calls 0}
+               :fixed {:ns 1800000 :bytes 3000000 :calls 24}
                :sizes [10 100 1000]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
 
 (defn- form-id-of [db v] (:form/id (:var/form (d/entity db (pdb/eid db :var/name v)))))
 (defn- change-var
-  "db with var v's form another form (a new form id: the form's text changed)."
+  "db with var v defined by another form (a new form with another id, as redefining it records one)."
   [db v]
-  (let [f (:var/form (d/entity db (pdb/eid db :var/name v)))
-        old (:form/id f)]
-    (d/db-with (d/db-with db [[:db/retract (:db/id f) :form/id old]]) [[:db/add (:db/id f) :form/id (str "changed-" (random-uuid))]])))
+  (let [ve (pdb/eid db :var/name v) f (:var/form (d/entity db ve))]
+    (d/db-with db [{:db/id -1 :form/id (str "changed-" (random-uuid)) :form/src (:form/src f) :form/ns (:db/id (:form/ns f))
+                    :form/order (:form/order f) :form/defines [ve]}
+                   [:db/add ve :var/form -1]])))
 
 (deftest a-section-is-stale-when-the-code-it-cites-changed-after-its-text
   (let [db0 (ts/test-db)
@@ -752,7 +753,7 @@
                  (:seon.section/text (d/pull db3 [:seon.section/text] [:seon.section/address "demo/p.md#p"])))))))
     (testing "it is attention, never a refusal: a branch that changes the code sees it, and the done rule does not"
       (let [head (change-var db1 v) {:keys [caused attention]} (problems/caused-split db1 head)]
-        (is (= #{} caused))
+        (is (= [] caused))
         (is (= 1 (count attention)))
         (is (re-find #"demo/p.md#p describes" (first attention)))
         (is (= #{} (problems/caused db1 head)))
@@ -835,3 +836,17 @@
                :per-n {:ns 0 :bytes 0 :calls 0}
                :fixed {:ns 3000000 :bytes 4000000 :calls 30}
                :sizes [10 100 1000]}))
+
+(deftest attention-survives-a-store-write
+  ;; the turn records what it observed in its basis; a sorted set cannot be written to the store
+  ;; (konserve's fasl), which ended every scripted turn's agent. caused-split answers vectors.
+  (let [db0 (ts/test-db)
+        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
+        base (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" (str "# P\n\nIt reads `" v "`.\n")}))
+        head (change-var base v)
+        {:keys [caused attention]} (problems/caused-split base head)]
+    (is (seq attention) "the branch made a section stale")
+    (is (vector? attention))
+    (is (vector? caused))
+    (is (= {:attention attention :caused caused}
+           (konserve.jolt.fasl/decode (konserve.jolt.fasl/encode {:attention attention :caused caused}))) "and it is written to the store and read back")))

@@ -263,36 +263,42 @@
 
 (defn baseline-reads
   "The baseline of the sections of plan (baseline-plan) from the history answer (seon.fx/wiki-history's
-  value {:sections :files}): {address {:read {name form-id} :unread reason}}. A section's :read is each
-  cited var's form id in its file as of the commit that last changed the section (found by
-  seon.source/defining-ids, the id seon.program/account would record), or \"absent\" for a var the file
-  did not define then or a file that did not exist: a citation that was ahead of the code, stale once
-  the code exists. A section git could not answer for, or whose old file does not read, is read as of
-  today with :unread naming why (attention, seon.problems/stale-sections); one with an uncommitted line
-  has no entry (today's). The failure point: an old file that does not read."
+  value {:sections :files :errors}): {address {:read {name form-id} :unread reason}}. A section's :read
+  is each cited var's form id in its file as of the commit that last changed the section (found by
+  seon.source/defining-ids, the id seon.program/account would record), or \"absent\" for a var the
+  file at that commit does not mention at all, or a file that did not exist: a citation that was ahead
+  of the code, stale once the code exists. A section with an uncommitted line is read as of today
+  (:read, nothing unread): its text is newer than git's. A section git could not answer for, whose
+  old file git could not show or does not read, or that cites a var the old file mentions but no form
+  this reading knows (defining-ids finds a form by its head) defines, is read as of today with :unread
+  naming why (attention, seon.problems/stale-sections), never a guess of \"absent\". The failure
+  point: an old file that does not read."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :map] :map] :map]}
-  [db plan {:keys [sections files]}]
+  [db plan {:keys [sections files errors]}]
   (let [cache (volatile! {})
         ids-at (fn [sha file nsym]
                  (or (@cache [sha file])
                      (let [text (get files [sha file])
-                           r (if (nil? text)
-                               {:ids {}}
-                               (try {:ids (source/defining-ids nsym text)}
-                                    (catch Throwable e {:error (str file " at " (subs sha 0 8) " does not read: " (or (ex-message e) (str (type e))))})))]
+                           r (cond (get errors [sha file]) {:error (str file " at " (subs sha 0 8) " could not be read from git: " (get errors [sha file]))}
+                                   (nil? text) {:ids {}}
+                                   :else (try {:ids (source/defining-ids nsym text) :text text}
+                                              (catch Throwable e {:error (str file " at " (subs sha 0 8) " does not read: " (or (ex-message e) (str (type e))))})))]
                        (vswap! cache assoc [sha file] r)
-                       r)))]
+                       r)))
+        mentioned? (fn [text n] (boolean (re-find (re-pattern (str "[\\s(\\[{'#]" (java.util.regex.Pattern/quote (name n)) "[\\s)\\]}]")) text)))]
     (into {}
           (keep (fn [{:keys [address] :as r}]
                   (let [info (get sections address) sha (:commit info)
                         today (read-map db (set (keys (:files r))))]
                     (cond
-                      (and info (not (:error info)) (nil? sha)) nil
+                      (and info (not (:error info)) (nil? sha)) [address {:read today}]
                       (or (nil? info) (:error info)) [address {:read today :unread (or (:error info) "git gave no history for the section")}]
                       :else (let [per (for [[n {:keys [file ns]}] (:files r)] [n (ids-at sha file ns)])
-                                  bad (some :error (map second per))]
+                                  bad (or (some :error (map second per))
+                                          (some (fn [[n res]] (when (and (not (contains? (:ids res) n)) (:text res) (mentioned? (:text res) n))
+                                                                (str n " is in its file at " (subs sha 0 8) ", but no form this reading knows (one by its head) defines it")))
+                                                per))]
                               (if bad
                                 [address {:read today :unread bad}]
                                 [address {:read (into {} (for [[n res] per] [n (get (:ids res) n "absent")]))}]))))))
           plan)))
-
