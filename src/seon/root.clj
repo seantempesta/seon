@@ -27,7 +27,7 @@
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.docs :as docs] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
-            [seon.turn] [my.fx] [my.task] [my.turn] [my.branch] [clojure.core.async.flow :as flow] [clojure.core.async.flow.spi :as spi] [clojure.test]
+            [seon.turn] [my.fx] [my.task] [my.turn] [my.branch] [clojure.core.async.flow :as flow] [clojure.test]
             [taoensso.trove :as trove]))
 
 
@@ -1072,42 +1072,3 @@
       (when (= :lmdb (:backend (:store (:cfg sys)))) (klmdb/close-env! (:store-path sys)))
       (cond-> {:stopped true :cause cause :drained drained :graph graph :agents-left 0 :ms (lib/r2 (profile/ms-since t0))}
         (contract/error? fact) (assoc :stop-fact-refused fact))))))
-
-;; ====================================================================================
-;; Root's threads: a declared number (session THREADS)
-;; ====================================================================================
-
-(defn declared-threads
-  "The threads root runs, as {:roster {name-stem n} :gc-sweepers n} (stems as
-  seon.lib/thread-roster folds them). Without a system, the process's own: main, Jolt's
-  shutdown watcher, timer, io poller and fiber carriers, and the GC sweepers fixed at boot.
-  The timer starts at the first timeout and the io poller at the first socket wait (an
-  agent's), so a root has both once its first agent runs.
-  With a running sys, also one thread per :mixed proc of its declaration (Flow runs :io
-  procs, agent procs included, on the carriers), its two edge readers (Flow's
-  error channel, the fork server's socket) and, while the web
-  proc listens, the web server's acceptor and sweeper."
-  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :seon.root/sys] :map]]}
-  ([] {:roster {"main" 1 "jolt-shutdown" 1 "jolt-timer" 1 "jolt-io-poller" 1 "jolt-carrier" (lib/fiber-carriers)}
-       :gc-sweepers (cfg/value :seon.config.root/gc-sweepers)})
-  ([sys]
-   (let [procs (vals (:procs @(get-in sys [:bindings :system])))
-         mixed (count (filter #(= :mixed (or (:workload (spi/describe (:proc %))) :mixed)) procs))
-         ;; the web proc's listener, when it bound its port (its :web event in root's view):
-         ;; ring-chez-adapter's acceptor and its connection sweeper, each a future (a thread
-         ;; of Jolt's agent pool; task seon.web/web-server-threads-are-joined-at-stop)
-         web? (true? (get-in (state sys) [:web :listening]))]
-     (update (declared-threads) :roster merge
-             (cond-> {"async-mixed" mixed "seon-flow-errors" 1 "seon-fs-events" 1}
-               web? (assoc "clojure-agent-pool" 2))))))
-
-(defn threads
-  "The threads this process runs now, measured as declared-threads declares them, and :os,
-  the OS's count (seon.lib/nthreads): the roster's sum plus the sweepers when nothing
-  else runs."
-  {:malli/schema [:=> [:cat] :map]}
-  []
-  {:roster (lib/thread-roster) :gc-sweepers (lib/gc-sweepers! -1) :os (lib/nthreads)})
-
-
-
