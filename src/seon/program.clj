@@ -171,7 +171,11 @@
                            (when (banned s) (vswap! acc update :banned conj s))
                            (vswap! acc update :refs conj s))
          :host-static (vswap! acc update :refs conj (symbol (str (:class n)) (str (:member n))))
-         (:quote :const) (vswap! acc update :refs into (quoted-vars (datum n)))
+         ;; a scalar names no var unless it is a qualified symbol: most constants (keywords,
+         ;; strings, numbers) cost no walk
+         (:quote :const) (let [x (datum n)]
+                           (when (or (coll? x) (qualified-symbol? x))
+                             (vswap! acc update :refs into (quoted-vars x))))
          :try (vswap! acc update :catches into (map sedn/encode) (catches n))
          :invoke (when (and (= 'clojure.core/deref (invoked n)) (= 3 (count (:args n))))
                    (vswap! acc update :timeouts conj 'clojure.core/deref))
@@ -272,16 +276,16 @@
           :else :value)))
 
 (defn- macro-uses
-  "The macros form text src calls in namespace nsx: each list in the form as read whose head
-  resolves there to a macro var. The IR is the expansion, which names no macro, and a
+  "The macros form (as read) calls in namespace nsx: each list in it whose head resolves
+  there to a macro var. The IR is the expansion, which names no macro, and a
   top-level call expanding to a do leaves its units' forms no trace of it (Clojure's
   compilation-unit rule), so the form itself is read. A macro's own template names the
   macros it expands to as quoted vars (quoted-vars), which closes the chain."
-  {:malli/schema [:=> [:cat :seon.host/namespace :string] [:set :qualified-symbol]]}
-  [nsx src]
+  {:malli/schema [:=> [:cat :seon.host/namespace :any] [:set :qualified-symbol]]}
+  [nsx form]
   (into #{} (keep (fn [x] (when (and (seq? x) (symbol? (first x)))
                             (let [v (ns-resolve nsx (first x))] (when (and (var? v) (:macro (meta v))) (symbol v))))))
-        (tree-seq coll? seq (binding [*ns* nsx] (read-string src)))))
+        (tree-seq coll? seq form)))
 
 (defn form-id
   "A form's identity: its namespace and exact text, by their content hash (hasch's uuid, the
@@ -293,14 +297,15 @@
 
 (defn account
   "The program account of one top-level form, or nil when it is none of the program's.
-  opts: :nodes (each analyzed unit's node; or :units, their unit-accounts), :src (its exact text), :ns (the namespace
+  opts: :nodes (each analyzed unit's node; or :units, their unit-accounts), :src (its exact text), :form
+  (src as the reader read it: macro-uses walks it, so the text is read once), :ns (the namespace
   it was evaluated in), :ns-after (where it left the REPL), :ns-form? (it is an `ns` form:
   its head resolves to clojure.core/ns), :before (readback: var -> root before; nil for an
   analysis without running: every top-level def counts), :ran? (the form returned; a form
   that threw records only the vars it set), :ns-meta (an ns form's name's metadata: Jolt's
   ns drops it, jolt/ns-meta), :lead, :order, :k (occurrence of its text)."
-  {:malli/schema [:=> [:cat :map] [:maybe :map]]}
-  [{:keys [nodes units src ns ns-after ns-form? ns-meta before ran? lead order k] :or {k 0}}]
+  {:malli/schema [:=> [:cat [:map [:src :string] [:form :any]]] [:maybe :map]]}
+  [{:keys [nodes units src form ns ns-after ns-form? ns-meta before ran? lead order k] :or {k 0}}]
   (let [units (or units (map unit-account nodes))
         nsym (if ns-form? ns-after ns)
         nsx (find-ns nsym)
@@ -326,7 +331,7 @@
                (or ns-form? (seq defs) (seq declares) (seq methods) (seq impls) (:env? a)))
       (cond-> {:id (form-id nsym src k) :src src :ns nsym :ns-form? (boolean ns-form?)
                :defs defs :declares declares :methods (or methods []) :impls (or impls [])
-               :refs (into (:refs a) (macro-uses nsx src)) :requires (:requires a) :banned (:banned a) :inline-defs (:inline-defs a)
+               :refs (into (:refs a) (macro-uses nsx form)) :requires (:requires a) :banned (:banned a) :inline-defs (:inline-defs a)
                :timeouts (:timeouts a) :catches (:catches a)}
         lead (assoc :lead lead)
         order (assoc :order order)))))
@@ -475,7 +480,8 @@
             (:ns/name x) [:ns (:ns/name x)]))
 
 (defn form-row
-  "Form entity e as the loader and the merge read it."
+  "Form entity e as the loader and the merge read it (:source when it is the text of the
+  source tree the binary was built from, :form/source: its :order is its place in that file)."
   {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
   [db e]
   (let [f (d/entity db e)]
@@ -483,7 +489,8 @@
                    :defines (into #{} (keep definition-key) (:form/defines f))
                    :declares (into #{} (map :var/name) (:form/declares f))}
                   (for [[a k] form-sets] [k (set (get f a))]))
-      (:form/lead f) (assoc :lead (:form/lead f)))))
+      (:form/lead f) (assoc :lead (:form/lead f))
+      (:form/source f) (assoc :source true))))
 
 (defn- live-ids
   "{form id -> entity} of db's live forms (live?), from four index scans and no entity read:
@@ -597,8 +604,11 @@
   "forms (form rows) in the order to load them: namespaces in dependency order (after each
   namespace among them that their forms require or whose vars they reference; ties by
   name), and within a namespace by order, each form after the earliest form among them
-  that interns (defines or declares) a var it references. A file's own order is kept: it
-  already loads. Cost: one pass over the forms and their references."
+  that interns (defines or declares) a var it references, unless both were read from a file
+  (:source): a file's own order is kept, since it already loads, though a form's :refs name
+  the vars its quoted data names too (seon.db/install-missing! names 'seon.db/open!, defined
+  after it; task seon.program/load-dependencies-leave-quoted-names-out). Cost: one pass over
+  the forms and their references."
   {:malli/schema [:=> [:cat [:sequential :map]] [:vector :map]]}
   [forms]
   (let [by-id (into {} (map (juxt :id identity)) forms)
@@ -611,7 +621,9 @@
         ns-deps (into {} (for [[n fs] by-ns]
                            [n (into (set (mapcat :requires fs))
                                     (for [f fs r (:refs f) :let [g (interns r)] :when g] (:ns (by-id g))))]))
-        deps (fn [f] (for [r (:refs f) :let [g (interns r)] :when (and g (not= g (:id f)) (= (:ns f) (:ns (by-id g))))] g))]
+        deps (fn [f] (for [r (:refs f) :let [g (interns r)]
+                           :when (and g (not= g (:id f)) (= (:ns f) (:ns (by-id g))) (not (and (:source f) (:source (by-id g)))))]
+                       g))]
     (vec (for [n (topo nss #(disj (ns-deps %) %) str)
                id (topo (map :id (by-ns n)) #(deps (by-id %)) #(:order (by-id %)))]
            (by-id id)))))
