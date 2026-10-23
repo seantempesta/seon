@@ -43,9 +43,11 @@
   unmerged entry on the branch (a merge conflict not resolved). A :design task readies
   the interface and plan for its implement step, so its own proofs may stay red but not
   unknown (each written and run), and it is refused :no-design until its plan differs from
-  the one its attempt began with (or that one is unknown)."
+  the one its attempt began with (or that one is unknown). A deferred proof (a process test:
+  run only when root asks, owner's ruling 2026-10-23) is neither red nor unknown here; while
+  unrun it is the merge's open :unrun problem."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/refusal]]}
-  [{:keys [proofs results main-green allowed-red uncontracted unmerged kind plan plan-before]}]
+  [{:keys [proofs results main-green allowed-red uncontracted unmerged kind plan plan-before deferred]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
         design? (= :design kind)]
     (vec (concat
@@ -53,7 +55,7 @@
            (when (and design? (or (nil? plan-before) (= plan plan-before))) [{:refusal :no-design}])
            ;; a proof with no result never ran: unknown, not red (v1's reading); a design
            ;; leaves its proofs red, never unknown (the implement step needs them written)
-           (for [p (sort-by str proofs) :let [s (get results p)] :when (if design? (nil? s) (not= :pass s))]
+           (for [p (sort-by str proofs) :let [s (get results p)] :when (and (not (contains? deferred p)) (if design? (nil? s) (not= :pass s)))]
              {:refusal (if s :proof-red :proof-unknown) :symbol p})
            (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t))] {:refusal :regression :symbol t})
            (for [t (sort-by str (keys results))
@@ -283,9 +285,9 @@
   (nil: main as idx holds it), over the index: the regression and allowed-red sets restricted to the tests
   that ran (the only ones done-refusals asks about), each test looked up by its claimants; for
   a :design task, its accumulated plan now and plan-before, the one its attempt began with
-  (:seon.attempt/plan; nil: unknown)."
-  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:maybe :int] [:maybe :seon.task/plan]] :seon.reconcile/done-input]}
-  [idx id results uncontracted unmerged basis plan-before]
+  (:seon.attempt/plan; nil: unknown); deferred, the process tests its run left to root's gate."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:maybe :int] [:maybe :seon.task/plan] [:set :qualified-symbol]] :seon.reconcile/done-input]}
+  [idx id results uncontracted unmerged basis plan-before deferred]
   (let [by? (fn [x] (when-let [mt (get-in idx [:done x :merged-t])] (or (nil? basis) (<= mt basis))))
         claim (fn [t] (disj (get-in idx [:claims t] #{}) id))
         kind (get-in idx [:tasks id :seon.task/kind] :work)]
@@ -295,7 +297,8 @@
              :main-green (into #{} (filter #(some by? (claim %))) (keys results))
              :allowed-red (into #{} (filter #(some (complement by?) (claim %))) (keys results))
              :uncontracted uncontracted
-             :unmerged (vec unmerged)}
+             :unmerged (vec unmerged)
+             :deferred deferred}
       (= :design kind) (assoc :plan (:plan (task/accumulate (:tasks idx) id)))
       (and (= :design kind) plan-before) (assoc :plan-before plan-before))))
 
@@ -332,16 +335,19 @@
                    (failed aid id t (str "its agent died" (some->> (:seon.attempt/reason a) (str ": "))))
                    :else
                    (let [rs (done-refusals (done-input idx id (:seon.attempt/results a {}) (:seon.attempt/uncontracted a #{})
-                                                           (:seon.attempt/unmerged a []) (:seon.attempt/basis-t a) (:seon.attempt/plan a)))]
+                                                           (:seon.attempt/unmerged a []) (:seon.attempt/basis-t a) (:seon.attempt/plan a)
+                                                           (set (:seon.attempt/deferred a))))]
                      (cond
-                       ;; root's ruling (2026-10-22): the process tests the branch's change
-                       ;; reaches gate its merge like proofs, run on a checkout (:gate, seon.fx/run-tests)
+                       ;; the process tests the branch's change reaches run before its merge
+                       ;; only when root asked (:seon.task/gate?, my.root/gate!; owner's ruling
+                       ;; 2026-10-23), on a checkout (:gate, seon.fx/run-tests)
                        (and (empty? rs) merge?)
                        (let [deferred (sort-by str (:seon.attempt/deferred a #{})) dres (:seon.attempt/deferred-results a)
                              red (for [t deferred :let [s (get dres t)] :when (not= :pass s)] [t (or s :unknown)])]
-                         ;; root's ruling (a), 2026-10-23: the gate runs where a checkout is
-                         ;; declared; without one the merge goes on, its deferred tests unrun
-                         (cond (or (empty? deferred) (nil? (get-in idx [:root :gate-checkout]))) {:op :ready-to-merge :attempt aid :task id}
+                         ;; unasked, or with no checkout declared (root's ruling (a), 2026-10-23),
+                         ;; the merge goes on, its deferred tests unrun: an open :unrun problem
+                         (cond (or (empty? deferred) (not (:seon.task/gate? t)) (nil? (get-in idx [:root :gate-checkout])))
+                               {:op :ready-to-merge :attempt aid :task id}
                                (nil? dres) {:op :gate :attempt aid :task id :tests (vec deferred)}
                                (empty? red) {:op :ready-to-merge :attempt aid :task id}
                                :else (failed aid id t (str "attempt " aid "'s deferred tests, run on a checkout at its merge, are not green: "

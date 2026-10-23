@@ -32,7 +32,7 @@ The turn's part:
 - `:test-run`: the test run itself failing (a timeout, a dead fork); no test result is real until it runs.
 - `:unmerged`: on a merge task, the entries to resolve.
 - `:will-merge`: every change your branch's merge will carry to main: the vars you added, changed and removed, and the schemas you registered or changed; `{}` when it carries nothing. Anything listed that the task does not need, put back.
-- `:deferred-to-merge`: how many tests your change reaches that start a process of their own (a shell, a fork, a root); they run at the merge, on a checkout, never in your turn. `(my.agent/deferred)` lists them.
+- `:tests`: how many tests this turn ran (`:this-turn`: your proofs and the tests your branch changed), how many root's judge runs at your attempt's end (`:at-judge`, `(my.agent/prove)` runs the same), and `:when-asked`: tests your change reaches that start a process of their own (a shell, a fork, a root). Those never run in your turn or the judge, a proof among them; root runs them when it asks, and a proof among them is read as deferred, not unknown. `(my.agent/deferred)` lists them.
 - Your last evaluations, when no earlier turn shows them.
 
 ## The REPL

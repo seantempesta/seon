@@ -311,12 +311,12 @@
       ;; measured and empty ({}) says so; absent only when not measured (a basis before D4)
       (some? will-merge) (assoc :will-merge will-merge)
       ;; root's ruling (a), 2026-10-22: the tests this turn ran (the proofs and the tests the
-      ;; branch changed), those the judge runs at the attempt's end, those the merge runs; a
-      ;; run its bound ended leaves the rest unknown, never red
+      ;; branch changed), those the judge runs at the attempt's end, the process tests run only
+      ;; when root asks (owner, 2026-10-23); a run its bound ended leaves the rest unknown, never red
       tests (assoc :tests (cond-> tests
                             (:unfinished tests) (assoc :unfinished-run '(my.agent/prove))
                             (pos? (:at-judge tests 0)) (assoc :judge-runs '(my.agent/prove))
-                            (pos? (:at-merge tests 0)) (assoc :merge-runs '(my.agent/deferred))))
+                            (pos? (:when-asked tests 0)) (assoc :root-runs '(my.agent/deferred))))
       (seq last-items) (assoc :last-evals (transcript (fold-evals last-items))))))
 
 (defn evaluations-text

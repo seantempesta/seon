@@ -401,16 +401,17 @@
   A fork refused (threads active) is :seon.test/fork-refused: no test ran.
   Root's ruling (a), 2026-10-22: mode :turn (a turn's observation) selects the proofs and the
   tests the branch itself changed or added; mode :judge (root's judge at the attempt's end)
-  selects the plan's tests that stay in-process. Either way the plan's process tests are the
-  merge's (seon.fx/run-tests): the answer names them (:deferred) and how many the judge runs
-  (:at-judge). A proof always runs: it is the task's own."
+  selects the plan's tests. Either way a process test (the plan's :process: it reaches a shell,
+  a fork, a root or the binary), a proof among them, never runs here: the owner's ruling,
+  2026-10-23, runs those only when named (root's gate, my.root/gate!). The answer names them
+  (:deferred) and how many the judge runs (:at-judge)."
   {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge]] [:or :seon.test/result :seon.test/fork-refused]]
                   [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]]}
   ([ticks proofs mode] (run-tests-forked ticks proofs mode (fn [_] nil)))
   ([ticks proofs mode forked]
   (let [plan (test-plan (db) (:base @state) proofs)
         proc (:process plan)
-        keep? #(or (contains? proofs %) (not (proc %)))
+        keep? #(not (proc %))
         judge (filterv keep? (:selected plan))
         deferred (vec (remove keep? (:selected plan)))
         selected (if (= :judge mode)

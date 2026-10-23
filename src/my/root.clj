@@ -44,6 +44,15 @@
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
   [sys ids] @(root/transact-main! sys (task/execution-tx ids :cancelled)))
 
+(defn gate!
+  "Root's go for tasks ids: the process tests each one's change reaches (a shell, a fork, a
+  root, the binary: never run automatically, owner's ruling 2026-10-23) run on the gate
+  checkout (:seon.config.source/gate-checkout) before it merges, and a red refuses the merge.
+  Set before the merge task's attempt is judged; a merge that went on unasked holds an open
+  :unrun problem naming them."
+  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
+  [sys ids] @(root/transact-main! sys (vec (for [id ids] {:seon.task/id id :seon.task/gate? true}))))
+
 (defn task-files
   "The task files under dir (:seon.config.root/tasks-dir by default), read:
   {owning-ns declarations or refusal}. A file's name is its owning namespace. Each work

@@ -86,9 +86,10 @@
      :tests (when-not (contract/error? run)
               (let [results (proofs/results run)
                     unfinished (count (remove #(contains? results %) (:selected run)))]
-                (cond-> {:this-turn (count (:selected run)) :at-judge (:at-judge run) :at-merge (count (:deferred run))}
+                (cond-> {:this-turn (count (:selected run)) :at-judge (:at-judge run) :when-asked (count (:deferred run))}
                   (pos? unfinished) (assoc :unfinished unfinished))))
-     :refusals (r/done-refusals (r/done-input (r/index db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before))}))
+     :refusals (r/done-refusals (r/done-input (r/index db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before
+                                              (if (contract/error? run) #{} (set (:deferred run)))))}))
 
 (defn- end!
   "The attempt's end: the live runtime staged onto the branch, the end written there (with

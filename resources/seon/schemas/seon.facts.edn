@@ -144,6 +144,9 @@
  ;; the refinement chains a task's failures may attach (generations; :seon.reconcile/default-budget
  ;; when absent); replaces :seon.config.merge/max-attach
  :seon.task/budget [:int {:min 0}]
+ ;; root's go (my.root/gate!): the process tests this task's change reaches run on the gate
+ ;; checkout before it merges; without it they are never run automatically (owner, 2026-10-23)
+ :seon.task/gate? :boolean
  ;; derived by the reconciler when a failure finds the budget spent: the attempt, the root cause
  ;; and the tasks it blocks (the task stays released; it is not ready while this holds)
  :seon.task/stuck [:map {:seon.db/data true} [:attempt :seon.attempt/id] [:cause :string] [:blocks [:vector :seon.task/id]]]
@@ -165,6 +168,7 @@
                           [:seon.task/evidence {:optional true} :seon.task/evidence]
                           [:seon.task/generation {:optional true} :seon.task/generation]
                           [:seon.task/budget {:optional true} :seon.task/budget] [:seon.task/stuck {:optional true} :seon.task/stuck]
+                          [:seon.task/gate? {:optional true} :seon.task/gate?]
                           [:seon.task/failure {:optional true} :seon.task/failure]
                           [:seon.task/declared {:optional true} :seon.task/declared]
                           [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]

@@ -322,7 +322,7 @@
     (testing "the done rule judges every accumulated proof"
       (is (= [[:proof-red (t "a")]]
              (mapv (juxt :refusal :symbol)
-                   (r/done-refusals (r/done-input (r/index db) "demo/b-merge" {(t "b") :pass (t "a") :fail} #{} [] nil nil))))))))
+                   (r/done-refusals (r/done-input (r/index db) "demo/b-merge" {(t "b") :pass (t "a") :fail} #{} [] nil nil #{}))))))))
 
 (deftest with-merge-chains-work-through-merges
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])])]
@@ -344,24 +344,38 @@
   ;; (the attempt helper names branches by task id; only the action matters here)
   )
 
-(deftest a-merge-with-deferred-tests-is-gated-first
-  ;; root's rulings (2026-10-22/23): the process tests a branch's change reaches run at its merge,
-  ;; on a worktree of the root's declared gate checkout, and gate it like proofs: unrun, the
-  ;; member is gated first (alone); all passing, it merges; a red, or a run that could not run
-  ;; them (:error), is refused as a red proof is, never hidden. A root that declares no gate
-  ;; checkout merges with them unrun (an open problem until they run)
+(deftest a-merge-with-deferred-tests-is-gated-only-when-root-asks
+  ;; root's rulings (2026-10-22/23) and the owner's (2026-10-23: process tests never run
+  ;; automatically): with root's go on the task (my.root/gate!, :seon.task/gate?) the process
+  ;; tests a branch's change reaches run before its merge, on a worktree of the root's declared
+  ;; gate checkout, and gate it like proofs: unrun, the member is gated first (alone); all
+  ;; passing, it merges; a red, or a run that could not run them (:error), is refused as a red
+  ;; proof is, never hidden. Unasked, or with no gate checkout declared, it merges with them
+  ;; unrun (an open problem until they run)
   (let [gate {:seon.root/id :root :seon.config.source/gate-checkout "/the/merges/tree"}
-        land (fn [root & kv] (r/reconcile (mdb [(decl "a")] :extra (concat (attempt "a" 1 :done)
-                                                                          (apply attempt "a-merge" 1 :ended :outcome :green :results {(t "a") :pass}
-                                                                                 :deferred ['seon.root-test/boots] kv)
-                                                                          (when root [root])))))
+        asked {:seon.task/id "demo/a-merge" :seon.task/gate? true}
+        land (fn [root go & kv] (r/reconcile (mdb [(decl "a")] :extra (concat (attempt "a" 1 :done)
+                                                                             (apply attempt "a-merge" 1 :ended :outcome :green :results {(t "a") :pass}
+                                                                                    :deferred ['seon.root-test/boots] kv)
+                                                                             (when go [go])
+                                                                             (when root [root])))))
         octopus [{:op :octopus-merge :attempt "demo/a-merge#1" :members [{:attempt "demo/a-merge#1" :task "demo/a-merge"}]}]]
-    (is (= [{:op :gate :attempt "demo/a-merge#1" :task "demo/a-merge" :tests ['seon.root-test/boots]}] (land gate)))
-    (is (= octopus (land gate :deferred-results {'seon.root-test/boots :pass})))
-    (is (= [:attach] (map :op (land gate :deferred-results {'seon.root-test/boots :fail}))))
-    (is (= [:attach] (map :op (land gate :deferred-results {'seon.root-test/boots :error}))) "a run that could not run them is no pass")
-    (is (str/includes? (:problem (first (land gate :deferred-results {'seon.root-test/boots :fail}))) "seon.root-test/boots"))
-    (is (= octopus (land nil)) "no gate checkout declared: it merges, the deferred tests unrun")))
+    (is (= [{:op :gate :attempt "demo/a-merge#1" :task "demo/a-merge" :tests ['seon.root-test/boots]}] (land gate asked)))
+    (is (= octopus (land gate asked :deferred-results {'seon.root-test/boots :pass})))
+    (is (= [:attach] (map :op (land gate asked :deferred-results {'seon.root-test/boots :fail}))))
+    (is (= [:attach] (map :op (land gate asked :deferred-results {'seon.root-test/boots :error}))) "a run that could not run them is no pass")
+    (is (str/includes? (:problem (first (land gate asked :deferred-results {'seon.root-test/boots :fail}))) "seon.root-test/boots"))
+    (is (= octopus (land gate nil)) "unasked: it merges, the deferred tests unrun")
+    (is (= octopus (land nil asked)) "no gate checkout declared: it merges, the deferred tests unrun")))
+
+(deftest a-deferred-proof-is-neither-red-nor-unknown
+  ;; owner's ruling (2026-10-23): a process test never runs in an agent's turn or root's judge,
+  ;; a proof among them; the done rule reads it as deferred to root's gate, and still refuses a
+  ;; proof that is neither green nor deferred
+  (let [in {:proofs #{'app/p 'app/q} :results {'app/p :pass} :main-green #{} :allowed-red #{} :uncontracted #{}}]
+    (is (= [{:refusal :proof-unknown :symbol 'app/q}] (r/done-refusals in)))
+    (is (= [] (r/done-refusals (assoc in :deferred #{'app/q}))))
+    (is (= [{:refusal :proof-red :symbol 'app/p}] (r/done-refusals (assoc in :results {'app/p :fail} :deferred #{'app/q}))))))
 
 (deftest merges-run-one-at-a-time
   ;; git's merge queue: a merge agent's last merge-main and root's merge see the same main,
@@ -433,7 +447,7 @@
     (let [db (design-db (attempt "a" 1 :running))]
       (is (= [:no-design]
              (mapv :refusal (r/done-refusals (r/done-input (r/index db) "demo/a" {(t "a") :fail} #{} []
-                                                           nil (:seon.attempt/plan (task/attempt db "demo/a#1")))))))))
+                                                           nil (:seon.attempt/plan (task/attempt db "demo/a#1")) #{})))))))
   (testing "ended green with the plan unchanged: refused, so a refinement attaches, never accepted"
     (is (= [{:op :attach :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended green: no-design"}]
            (r/reconcile (design-db (attempt "a" 1 :ended :outcome :green :results {(t "a") :fail})))))))

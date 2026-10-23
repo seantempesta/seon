@@ -116,7 +116,9 @@
                              [:uncontracted [:set :qualified-symbol]] [:unmerged {:optional true} [:vector :string]]
                              [:kind {:optional true} :seon.task/kind]
                              ;; a :design task's accumulated plan now and as its attempt began
-                             [:plan {:optional true} :seon.task/plan] [:plan-before {:optional true} :seon.task/plan]]
+                             [:plan {:optional true} :seon.task/plan] [:plan-before {:optional true} :seon.task/plan]
+                             ;; the process tests the attempt's run left to root's gate (neither red nor unknown)
+                             [:deferred {:optional true} [:set :qualified-symbol]]]
  :seon.reconcile/refusal [:map {:closed true}
                           [:refusal [:enum :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design]]
                           [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string]]

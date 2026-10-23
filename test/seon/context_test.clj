@@ -541,9 +541,9 @@
   ;; process tests. The turn says each, and what runs the rest
   (let [db (db-with-program)
         b (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4
-                                                  :tests {:this-turn 2 :at-judge 40 :at-merge 3 :unfinished 1}})]
-    (is (= {:this-turn 2 :at-judge 40 :at-merge 3 :unfinished 1
-            :unfinished-run '(my.agent/prove) :judge-runs '(my.agent/prove) :merge-runs '(my.agent/deferred)}
+                                                  :tests {:this-turn 2 :at-judge 40 :when-asked 3 :unfinished 1}})]
+    (is (= {:this-turn 2 :at-judge 40 :when-asked 3 :unfinished 1
+            :unfinished-run '(my.agent/prove) :judge-runs '(my.agent/prove) :root-runs '(my.agent/deferred)}
            (:tests b)))
     (is (nil? (:tests (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4}))) "not measured: nothing said")))
 
