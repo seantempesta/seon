@@ -283,7 +283,7 @@
                             (let [v (ns-resolve nsx (first x))] (when (and (var? v) (:macro (meta v))) (symbol v))))))
         (tree-seq coll? seq (binding [*ns* nsx] (read-string src)))))
 
-(defn- form-id
+(defn form-id
   "A form's identity: its namespace and exact text, by their content hash (hasch's uuid, the
   one Datahike names content by; Clojure's 32-bit hash let two texts of one length share an
   id), and an imported file's repeated text adds its occurrence."

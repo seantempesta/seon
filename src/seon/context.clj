@@ -263,7 +263,7 @@
   branch's unmerged entries (base, ours, theirs); what its merge will carry to main; what
   happened to the last reply; the last evaluations; turns left."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds last-items turn max-turns unmerged truncated? reasons run-errors source repairs will-merge tests]}]
+  [db t {:keys [results reds last-items turn max-turns unmerged truncated? reasons run-errors source repairs will-merge tests attention]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
         task? #(and (qualified-symbol? (:seon.ref/name %)) (ref/task? db (:seon.ref/name %)))
@@ -307,6 +307,9 @@
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
       ;; owner D4 (2026-10-22): every change the branch's merge carries to main, every turn
       ;; measured and empty ({}) says so; absent only when not measured (a basis before D4)
+      ;; the sections of the wiki this branch's code changes made stale (seon.problems/caused-split): to read and
+      ;; probably fix; never a reason to refuse done
+      (seq attention) (assoc :attention attention)
       (some? will-merge) (assoc :will-merge will-merge)
       ;; root's ruling (a), 2026-10-22: the tests this turn ran (the proofs and the tests the
       ;; branch changed), those the judge runs at the attempt's end, the process tests run only
