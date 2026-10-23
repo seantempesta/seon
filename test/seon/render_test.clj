@@ -1065,3 +1065,15 @@
             :seon.render/refs [{:symbol 'demo/f :arglists '([x]) :summary "Doubles." :seon.render/n 1 :seon.render/address "demo/f"}]}
            d))
     (is (not (str/includes? (r/ai d {}) ";;")) "no comment lines: data only")))
+
+(deftest the-html-fallback-folds-only-what-nests
+  ;; the owner, 2026-10-23, on the default html: a fold and its "map 12 items, depth 0" header on
+  ;; every collection was noise. The value printed and a collection of scalars are inline; a
+  ;; nested collection that holds collections folds, saying what it holds
+  (let [flat (h/html (r/html {:seon.task/id "demo/f" :seon.task/proofs ['demo-test/f-test]} {}))
+        nested (h/html (r/html {:seon.task/id "demo/f" :rows [{:a 1} {:a 2}]} {}))]
+    (is (not (str/includes? flat "<details")) "a map of scalars and a vector of one symbol: no fold")
+    (is (not (str/includes? flat "items, depth")))
+    (is (str/includes? flat "demo-test/f-test") "the value is all there")
+    (is (= 1 (count (re-seq #"<details" nested))) "only the vector of maps folds")
+    (is (str/includes? nested "vector 2 items"))))
