@@ -31,11 +31,11 @@ case ${1:-} in
 esac
 mkdir -p "$OUT"; rm -f $OUT/shard-*(N)
 runner --plan $WHAT "$OUT" "$@" || { echo "TEST FAILED (the plan)"; exit 1 }
-# a test that starts ./seon (a root, an agent) runs the binary, which its digest does not
-# cover: whatever is about to run, runs on target/seon built from this tree (a no-op build
-# costs ~30 s, so only when something runs)
+# a test or step that reaches a process of its own (a root, an agent, the binary) runs target/seon,
+# which its digest does not cover: that binary is built from this tree first (a no-op build costs
+# ~30-45 s). The plan names what it selected that reaches one (out/binary); nothing, no build
 F=($OUT/shard-*.edn(N))
-if (( ${#F} )) || [[ -s $OUT/steps ]]; then
+if [[ -s $OUT/binary ]]; then
   nice -n 15 "$ROOT/bin/build" seon > "$OUT/build.log" 2>&1 || { tail -5 "$OUT/build.log"; echo "TEST FAILED (bin/build seon: $OUT/build.log)"; exit 1 }
 fi
 st=0 P=()

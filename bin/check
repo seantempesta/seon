@@ -55,7 +55,10 @@ export SEON_PROFILE=${SEON_PROFILE:-scripted}
 SEL=
 [[ ${1:-} == --steps ]] && { SEL=$2; shift 2; set -- 100 }
 S=$ROOT/target/seon
-[[ -x $S ]] || { echo "check: no target/seon; run bin/build seon" >&2; exit 1 }
+# NEEDS: does this run use the binary? A selected run whose steps need none (steps-binary empty:
+# laws, lmdb-kill) seeds no store, starts no root and wants no build
+NEEDS=1; [[ -n $SEL && ! -s $SEL/steps-binary ]] && NEEDS=
+(( NEEDS )) && { [[ -x $S ]] || { echo "check: no target/seon; run bin/build seon" >&2; exit 1 } }
 # what this run starts ends with it (bin/held): a fifo of its own, held open read-write while
 # bin/check lives, named to every step; its EOF, bin/check gone however it ended, ends them
 STARTER=$ROOT/target/tmp/check-starter-$$.fifo
@@ -85,14 +88,16 @@ OUT=$ROOT/target/check/$(date +%Y%m%dT%H%M%S)
 mkdir -p "$OUT/stores"
 : > "$OUT/failed"; : > "$OUT/green"
 # want STEP: is STEP one this run runs? A step seon.proofs/check-steps does not name is FAILED.
-KNOWN=" $(run steps) " ONLY=${SEL:+$(cat "$SEL/steps")}
+# (a selected run's steps were named by the plan from the same table: no binary asked)
+KNOWN= ONLY=
+if [[ -n $SEL ]]; then ONLY=$(cat "$SEL/steps"); else KNOWN=" $(run steps) "; fi
 # failed WHY / green STEP / is-green STEP: the run's record, one line each in OUT/failed and
 # OUT/green, appended by the steps running at once (a line is one write)
 failed() { print -r -- "$*" >> "$OUT/failed" }
 green() { print -r -- "check-$1" >> "$OUT/green" }
 is-green() { grep -qx "check-$1" "$OUT/green" }
 want() {
-  [[ $KNOWN == *" $1 "* ]] || { failed "$1 (not a step of seon.proofs/check-steps)"; echo "FAILED $1 (not in seon.proofs/check-steps)"; return 1 }
+  [[ -n $SEL || $KNOWN == *" $1 "* ]] || { failed "$1 (not a step of seon.proofs/check-steps)"; echo "FAILED $1 (not in seon.proofs/check-steps)"; return 1 }
   [[ -z $SEL || " $ONLY " == *" $1 "* ]]
 }
 
@@ -114,12 +119,14 @@ step() {
   return 0
 }
 
+if (( NEEDS )); then
 echo "== seed (the one store every step branches from: made when missing)"; step seed "" run seed 2000
 read -r STORE KB0 BR0 <<< "$(run store)"
 # the steps' own mains: what a failed earlier run left is deleted before this run's step
 STEPS=(seed fx config system mcp threads instrument record problems smoke robust lifecycle backpressure hotreload drain idle
        orphan durable window lease e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns e2e-sibling swarm e2e-loop e2e-held resume scale)
 run drop ${STEPS/#/check-} > "$OUT/drop-before.log" 2>&1 || failed "drop-before ($OUT/drop-before.log)"
+fi
 
 # ---- the steps, each a unit u-NAME: what it runs, in order, on its own store ----
 u-laws() { echo "== laws (every law's sites: catch, clocks, measures, resolution)"; step laws "OK \(|FAILED" "$ROOT/bin/laws" }
@@ -224,7 +231,7 @@ u-resume() {
 # beside others takes a store of its own: an APFS clone of the one
 # seeded store (its data file; LMDB makes its lock file), the same content as a branch of it,
 # deleted when the unit is green. scale runs alone after them: it measures the machine's memory.
-JOBS=$(run jobs)
+if (( NEEDS )); then JOBS=$(run jobs); else JOBS=2; fi
 UNITS=(laws lmdb-kill contracts test-inputs mg-check fx config system mcp threads instrument record problems smoke robust lifecycle
        backpressure hotreload drain idle orphan durable window lease e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns
        e2e-sibling swarm e2e-loop e2e-held resume)
@@ -238,7 +245,7 @@ unit() {
   # a unit this run does not select takes no store and shows nothing
   [[ -n $SEL && " $ONLY " != *" $1 "* ]] && return 0
   export SEON_STORE=$OUT/stores/$1
-  mkdir -p "$SEON_STORE" && cp -c "$STORE/data.mdb" "$SEON_STORE/data.mdb"
+  (( NEEDS )) && { mkdir -p "$SEON_STORE" && cp -c "$STORE/data.mdb" "$SEON_STORE/data.mdb" }
   { u-$1 } > "$OUT/$1.shown" 2>&1
   grep -q "^$1[ -]" "$OUT/failed" || rm -rf "$SEON_STORE"
   cat "$OUT/$1.shown"
@@ -248,16 +255,16 @@ for i in $(seq 1 $JOBS); do print -u 3 x; done
 for u in $UNITS; do read -u 3 tok; { unit $u; print -u 3 x } & done
 wait
 exec 3>&-
-echo "== scale $N"; step scale ":all-ok|:spawn->all|:end-to-end|:control-real-mb|:all-killed|^SCALE " run scale $N
+(( NEEDS )) && { echo "== scale $N"; step scale ":all-ok|:spawn->all|:end-to-end|:control-real-mb|:all-killed|^SCALE " run scale $N }
 
 # what the green steps made is deleted; a failed step's branches stay until its next run
 GREEN=(${(f)"$(<$OUT/green)"})
-run drop $GREEN > "$OUT/drop-after.log" 2>&1 || failed "drop-after ($OUT/drop-after.log)"
+(( NEEDS )) && { run drop $GREEN > "$OUT/drop-after.log" 2>&1 || failed "drop-after ($OUT/drop-after.log)" }
 FAILED=(${(f)"$(<$OUT/failed)"})
-read -r _ KB1 BR1 <<< "$(run store)"
+(( NEEDS )) && read -r _ KB1 BR1 <<< "$(run store)"
 [[ -n $SEL ]] && print -r -- "${GREEN[@]}" > "$SEL/green"
 echo
-echo "store $STORE: ${KB0} KB and ${BR0} branches before the run, ${KB1} KB and ${BR1} after; run directory $(du -sk "$OUT" | cut -f1) KB"
+(( NEEDS )) && echo "store $STORE: ${KB0} KB and ${BR0} branches before the run, ${KB1} KB and ${BR1} after; run directory $(du -sk "$OUT" | cut -f1) KB"
 if (( ${#FAILED} )); then
   echo "CHECK FAILED: ${#FAILED} step(s)"; for f in $FAILED; do echo "  $f"; done
   echo "outputs: $OUT"

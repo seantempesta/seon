@@ -52,7 +52,8 @@
         idx (into {} (filter #(nss (symbol (namespace (key %))))) (program/reach-index db in))]
     {:db db :inputs in
      :digests (update-vals idx :digest)
-     :process (set (keep (fn [[t v]] (when (:process? v) t)) idx))}))
+     :process (set (keep (fn [[t v]] (when (:process? v) t)) idx))
+     :binary (set (keep (fn [[t v]] (when (:binary? v) t)) idx))}))
 
 (defn automatic
   "What a run that names nothing selects from cand ({key digest}): every key but those in
@@ -166,7 +167,7 @@
   process (automatic). Answers {:run-tests :run-steps :reused :cand :left (the process keys
   left out) :digests :steps :missing :inputs}."
   [root what all? names]
-  (let [{:keys [db inputs digests process]} (tests-of root names)
+  (let [{:keys [db inputs digests process binary]} (tests-of root names)
         dir (config/value :seon.config.source/test-results-dir)
         tests? (not= what "checks") checks? (not= what "tests")
         ;; the steps' functions walked once: their digests and which boot a root or a process
@@ -178,14 +179,16 @@
         cand (if named? all-cand (automatic all-cand process))
         {:keys [run reused]} (proofs/plan nil cand (if all? {} (proofs/greens dir (vec (vals cand)))) #{})
         {run-steps true run-tests false} (group-by string? run)]
-    {:run-tests (vec run-tests) :run-steps (vec run-steps) :reused reused :cand cand
+    {:run-tests (vec run-tests) :run-steps (vec run-steps) :reused reused :cand cand :process process :binary binary
      :left (when-not named? (vec (sort-by str (filter all-cand process))))
      :digests digests :steps steps :missing missing :inputs inputs}))
 
 (defn- prove!
   "The planning part of bin/prove and bin/test (what is tests, checks or both): plan-of's tests
   are dealt into out's shards (write-shards!), and its bin/check steps are written to out/steps
-  (names, one line) and out/steps.edn ({:tree :digests {step digest}}) for bin/prove to run. Answers the exit
+  (names, one line) and out/steps.edn ({:tree :digests {step digest}}) for bin/prove to run;
+  out/binary names the selected keys that reach target/seon, out/steps-binary the steps among
+  them (both empty: nothing to build, nothing to seed). Answers the exit
   status: 1 when a check step names a function the program does not define."
   [what all? out names]
   (if-let [bad (refused-names names)]
@@ -193,8 +196,14 @@
   (let [t0 (profile/now-ns)
         dir (config/value :seon.config.source/test-results-dir)
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left digests steps missing inputs]} (plan-of (source-tree) what all? names)
-        n (write-shards! out run-tests digests (:tree inputs))]
+        {:keys [run-tests run-steps reused cand left digests steps missing inputs binary]} (plan-of (source-tree) what all? names)
+        n (write-shards! out run-tests digests (:tree inputs))
+        ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
+        ;; mode): bin/test builds target/seon only when this is not empty, bin/check seeds only for the steps
+        step-bin (filterv proofs/step-needs-binary? run-steps)
+        bin-keys (into (vec (filter binary run-tests)) step-bin)
+        _ (write! (str out "/binary") (str (str/join " " bin-keys) (when (seq bin-keys) "\n")))
+        _ (write! (str out "/steps-binary") (str (str/join " " step-bin) (when (seq step-bin) "\n")))]
     (when left
       (println (str "prove: " (count left) " tests and steps that reach a process left out (run them by name:"
                     " bin/test NS, bin/check MODE, or the full run): " (str/join " " (map str left)))))
@@ -216,8 +225,8 @@
 (defn- store-steps!
   "bin/prove's last part: each step of out/steps.edn that bin/check named green in out/green
   (check-<step>, space separated) stored green at its digest (seon.proofs/store-greens!),
-  unless the binary the steps ran was built from another tree than the plan's
-  (target/seon.tree, bin/build's): an edit between the plan and the build. A red one is not
+  unless the step ran on a binary (seon.proofs/step-needs-binary?) built from another tree
+  than the plan's (target/seon.tree, bin/build's): an edit between the plan and the build. A red one is not
   stored, so it runs again. Answers the exit status: 1 when a step ran red or was not stored."
   [out]
   (let [dir (config/value :seon.config.source/test-results-dir)
@@ -226,9 +235,12 @@
         green (set (when (.isFile f) (map #(str/replace % #"^check-" "") (str/split (str/trim (slurp f)) #"\s+"))))
         red (sort (remove green (keys digests)))
         built (let [b (io/file "target/seon.tree")] (when (.isFile b) (str/trim (slurp b))))
-        unstored (if (= tree built)
-                   (proofs/store-greens! #(fx/write-file {:req %}) dir (into {} (for [[k dg] digests :when (green k)] [k {:step k :digest dg :pass 1 :fail 0 :error 0}])))
-                   (do (println "prove: the binary was built from another tree than the plan's: no step stored") []))]
+        ;; a step that runs a seon.check mode ran on target/seon: kept only if built from the plan's tree;
+        ;; laws and lmdb-kill ran no mode, so no binary's tree is theirs to compare
+        keep? (fn [k] (and (green k) (or (= tree built) (not (proofs/step-needs-binary? k)))))
+        unstored (do (when (and (not= tree built) (some #(and (green %) (proofs/step-needs-binary? %)) (keys digests)))
+                       (println "prove: the binary was built from another tree than the plan's: no step that ran on it stored"))
+                     (proofs/store-greens! #(fx/write-file {:req %}) dir (into {} (for [[k dg] digests :when (keep? k)] [k {:step k :digest dg :pass 1 :fail 0 :error 0}]))))]
     (doseq [u unstored] (println "UNSTORED" (:key u) (:message u)))
     (println (str "prove: " (count (filter green (keys digests))) " check steps green, " (count red) " red"
                   (when (seq red) (str ": " (str/join " " red)))))

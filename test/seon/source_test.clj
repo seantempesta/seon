@@ -417,20 +417,30 @@
   ;; reaches none. Step E's run 4: a change to seon.problems/report reached tests that boot a
   ;; root, and an agent's proof run spun for minutes in its fork
   (let [text (str "(ns app.proc-test (:require [clojure.java.shell :as sh] [clojure.test :refer [deftest is]] [app.proc :as p]"
-                  " [seon.lib :as lib] [seon.test-store :as ts] [seon.agent-test :as at]))\n\n"
+                  " [seon.lib :as lib] [seon.test-store :as ts] [seon.agent-test :as at] [seon.program :as sp]))\n\n"
                   "(defn- shell-ok? [] (zero? (:exit (sh/sh \"true\"))))\n\n"
                   "(deftest via-shell (is (shell-ok?)) (is (= 2 (p/twice 1))))\n\n"
                   "(deftest via-fork (is (lib/fork! (fn [] 0))))\n\n"
                   "(deftest via-binary (is (ts/binary-sh \"./seon\" \"version\")))\n\n"
                   "(deftest via-root (is (at/in-agent [\"1\"])))\n\n"
+                  ;; tree-readers names binary-sh and a shell as quoted data: a test that only reaches that list
+                  ;; uses neither (the reach walk's own tests read it)
+                  "(deftest via-names (is (seq sp/tree-readers)))\n\n"
                   "(deftest pure (is (= 2 (p/twice 1))))\n")
         db (d/db-with (empty-db) (source/import-tx (empty-db) {"src/app/proc.clj" "(ns app.proc)\n\n(defn twice [x] (* 2 x))\n"
+                                                               "src/seon/program.clj" "(ns seon.program)\n\n(def tree-readers '#{seon.test-store/binary-sh clojure.java.shell/sh})\n"
                                                                "test/app/proc_test.clj" text}))
         idx (program/reach-index db {:env "" :tree ""})
         mine (into {} (filter #(= "app.proc-test" (namespace (key %)))) idx)]
     (is (= {'app.proc-test/via-shell true 'app.proc-test/via-fork true 'app.proc-test/via-binary true
-            'app.proc-test/via-root true 'app.proc-test/pure false}
+            'app.proc-test/via-root true 'app.proc-test/via-names false 'app.proc-test/pure false}
            (update-vals mine :process?))
         "each process var marks the test that reaches it, and only that")
     (is (= #{'app.proc-test/via-shell 'app.proc-test/via-fork 'app.proc-test/via-binary 'app.proc-test/via-root}
-           (set (filter #(= "app.proc-test" (namespace %)) (program/process-tests idx)))))))
+           (set (filter #(= "app.proc-test" (namespace %)) (program/process-tests idx)))))
+    ;; only seon.test-store/binary-sh runs target/seon (:seon.config.source/binary-vars): a shell
+    ;; or a fork is a process, not the binary, so a run of only those builds nothing (via-root
+    ;; reaches the binary through the real program's start-root!, which this program lacks)
+    (is (= {'app.proc-test/via-shell false 'app.proc-test/via-fork false 'app.proc-test/via-binary true
+            'app.proc-test/via-root false 'app.proc-test/via-names false 'app.proc-test/pure false}
+           (update-vals mine :binary?)))))

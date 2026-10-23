@@ -832,15 +832,30 @@
   [f] (boolean (and (some tree-readers (:refs f))
                     (not (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f)))))))
 
+(def ^:private names-only
+  "The vars whose forms only name other vars, as quoted data (the reach walk follows a quoted
+  name): reaching one is not using what it names."
+  '#{seon.program/tree-readers seon.program/env-readers})
+
+(defn- uses?
+  "Does form f use one of vars (:seon.config.source/process-vars or -binary-vars)? A form uses
+  a var it references and does not define (a var's own form names itself), and not when it
+  only names vars as data (names-only: tree-readers lists the binary-sh that the reach walk's
+  own tests never run)."
+  {:malli/schema [:=> [:cat [:set :qualified-symbol] :map] :boolean]}
+  [vars f]
+  (let [own (set (keep (fn [[k s]] (when (= :var k) s)) (:defines f)))]
+    (boolean (and (not-any? names-only own) (some #(and (vars %) (not (own %))) (:refs f))))))
+
 (defn- reach-fold
-  "(f key {:digest :process?}) of each of db's tests (or each of roots' keys) under inputs: the
-  key's reach digest and whether what it reaches references one of
-  :seon.config.source/process-vars. What a key reaches (its own form and its namespace's plain
+  "(f key {:digest :process? :binary?}) of each of db's tests (or each of roots' keys) under inputs: the
+  key's reach digest and whether what it reaches uses one of :seon.config.source/process-vars
+  (:process?) or -binary-vars (:binary?). What a key reaches (its own form and its namespace's plain
   forms, then every reference, method, extension, contract's schema entry and inputs'
   :data-refs, a test's form never walked on to) is a graph whose strongly connected
   components (components) each get, once and sinks first, a Merkle digest of their forms' own
   digests and the digests of the components they reach, and whether they or those read the
-  tree or reach a process; a key's answer is of its starting forms' components. One pass over
+  tree, use a process var or use a binary var (uses?); a key's answer is of its starting forms' components. One pass over
   the condensed graph, O(forms + edges), whatever the number of keys: the one walk
   reach-digests and reach-index read."
   {:malli/schema [:=> [:cat :seon.host/db :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]] :seon.host/fn] :map]}
@@ -865,8 +880,9 @@
         plain (update-vals (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) live)) #(mapv :id %))
         adj (into {} (map (juxt :id #(vec (edges %)))) forms)
         pvars (cfg/value :seon.config.source/process-vars)
+        bvars (cfg/value :seon.config.source/binary-vars)
         ;; one pass over the condensed graph, sinks first (Bazel's and Nix's action keys)
-        [comp-of cd rd pd] (reduce (fn [[comp-of cd rd pd] c]
+        [comp-of cd rd pd bd] (reduce (fn [[comp-of cd rd pd bd] c]
                                      (let [ms (set c)
                                            fs (map by-id c)
                                            kids (distinct (for [id c w (adj id) :when (not (ms w))] (get comp-of w)))]
@@ -874,14 +890,15 @@
                                         (conj cd (error/digest (str (str/join " " (sort (map #(error/digest (str (:ns %) "\n" (:src %))) fs)))
                                                                     "|" (str/join " " (sort (map cd kids))))))
                                         (conj rd (boolean (or (some tree-reading? fs) (some rd kids))))
-                                        (conj pd (boolean (or (some #(some pvars (:refs %)) fs) (some pd kids))))]))
-                                   [(transient {}) [] [] []]
+                                        (conj pd (boolean (or (some #(uses? pvars %) fs) (some pd kids))))
+                                        (conj bd (boolean (or (some #(uses? bvars %) fs) (some bd kids))))]))
+                                   [(transient {}) [] [] [] []]
                                    (components (mapv :id forms) adj))
         ;; key k from the forms ids, with their namespaces' plain forms
         answer (fn [k ids]
                  (let [cs (distinct (map #(get comp-of %) (into (vec ids) (mapcat #(plain (:ns (by-id %)))) ids)))]
                    (f k {:digest (error/digest (apply str k "\n" env "\n" (when (some rd cs) tree) (sort (map cd cs))))
-                         :process? (boolean (some pd cs))})))]
+                         :process? (boolean (some pd cs)) :binary? (boolean (some bd cs))})))]
     (if roots
       ;; a root naming a var with no form here (renamed, not imported) gets no digest: its
       ;; caller names it missing, never a digest of :env alone that a stale green matches
@@ -911,12 +928,14 @@
   ([db inputs roots] (reach-fold db inputs roots (fn [_ a] (:digest a)))))
 
 (defn reach-index
-  "{test {:digest :process?}} of db's tests under inputs, from the one walk (reach-fold): its
-  reach digest (reach-digests) and whether it reaches a process of its own (a var of
-  :seon.config.source/process-vars: process-tests). With roots (a bin/check step's mode
-  functions, as reach-digests takes them), the same of each key."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol [:map [:digest :string] [:process? :boolean]]]]
-                  [:=> [:cat :seon.host/db :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]]] [:map-of :any [:map [:digest :string] [:process? :boolean]]]]]}
+  "{test {:digest :process? :binary?}} of db's tests under inputs, from the one walk (reach-fold):
+  its reach digest (reach-digests), whether it reaches a process of its own (a var of
+  :seon.config.source/process-vars: process-tests) and whether it uses the built binary (a var of
+  :seon.config.source/binary-vars: bin/test builds target/seon only for these); uses? says what
+  is a use. With roots (a
+  bin/check step's mode functions, as reach-digests takes them), the same of each key."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol [:map [:digest :string] [:process? :boolean] [:binary? :boolean]]]]
+                  [:=> [:cat :seon.host/db :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]]] [:map-of :any [:map [:digest :string] [:process? :boolean] [:binary? :boolean]]]]]}
   ([db inputs] (reach-index db inputs nil))
   ([db inputs roots]
    (reach-fold db inputs roots (fn [_ a] a))))
