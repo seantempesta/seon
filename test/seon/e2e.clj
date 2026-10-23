@@ -116,13 +116,13 @@
 
 (defn loop-turn!
   "The loop's turn on root sys, whose Seon source is on: a task redefines a platform
-  function (seon.fixtures/generation, 1 -> 2) on its branch, its merge task merges it, the
+  function (seon.generation/generation, 1 -> 2) on its branch, its merge task merges it, the
   reconciler commits main's file on the merges branch, and the merge loads in place: root
   and every agent forked after it run the new definition, with no build and no restart
   (BUILD plan P4). Waits for quiescence. Answers {:commit sha (the merged attempt's)
   :commits [[attempt sha]] :commit-errors [[attempt message]] :turn-ms (release to quiet) :spans [[attempt start end] ms
   from release]
-  :root (seon.fixtures/generation in root) :agent (in an agent forked after the merge)
+  :root (seon.generation/generation in root) :agent (in an agent forked after the merge)
   :quiescent q}. k: the scenario (fixtures/scenarios), :loop by default; :loop-2 is the
   second turn."
   ([sys] (loop-turn! sys :loop))
@@ -139,7 +139,7 @@
      :turn-ms turn-ms
      :spans (vec (sort (for [[a s e] (d/q '[:find ?a ?s ?e :where [?x :seon.attempt/id ?a] [?x :seon.attempt/start-ms ?s] [?x :seon.attempt/end-ms ?e]] d)]
                          [a (- s t0) (- e t0)])))
-     :root (seon.fixtures/generation) :agent (first (fresh sys "(seon.fixtures/generation)"))
+     :root (seon.generation/generation) :agent (first (fresh sys "(seon.generation/generation)"))
      :quiescent q})))
 
 (defn loop-run
