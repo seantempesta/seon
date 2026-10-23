@@ -1046,3 +1046,14 @@
     (if f
       (is (= f @(requiring-resolve n)) (pr-str v face hint))
       (is (contains? #{'seon.render/print-ai 'seon.render/print-html (r/faces face)} n) (pr-str v face hint)))))
+
+(deftest a-cited-reference-renders-as-its-prose
+  ;; root's review 2026-10-23: a reference showed as the printer's raw #:seon.ref{...}; a section
+  ;; renders as its heading, address and text, a var as Clojure's (doc) prints it
+  (let [section (r/ai {:seon.ref/address "docs/render.md#the-walk" :seon.ref/heading "The walk" :seon.ref/summary "A view is a walk."
+                       :seon.ref/below [{:seon.ref/address "docs/render.md#units" :seon.ref/heading "Units"}]}
+                      {:schema :seon.ref/view})
+        v (r/ai {:symbol 'seon.config/from-db :arglists '([db]) :doc "The config root wrote on db."} {:schema :seon.ref/var-view})]
+    (is (= "## The walk  (docs/render.md#the-walk)\n\nA view is a walk.\n\n- Units  (docs/render.md#units)" section))
+    (is (not (str/includes? section "#:seon.ref")))
+    (is (= "-------------------------\nseon.config/from-db\n([db])\n  The config root wrote on db." v))))

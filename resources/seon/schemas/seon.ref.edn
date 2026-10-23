@@ -71,7 +71,13 @@
  ;; a section as a citation's depth shows it: at summary its heading and its lead's first
  ;; sentence, at doc its lead (or opening) and the sections below, at code its own text too;
  ;; with no lead, :no-lead at summary and doc
- :seon.ref/view [:map
+ ;; what a cited var shows at its citation's depth (seon.docs/resolve-ref), rendered as Clojure's
+ ;; own (doc) prints a var
+ :seon.ref/var-view [:map {:seon.render/ai seon.render.ai/var-doc}
+                     [:symbol :qualified-symbol] [:arglists {:optional true} :any] [:summary {:optional true} :string]
+                     [:doc {:optional true} :string] [:contract {:optional true} :any] [:source {:optional true} :string]
+                     [:left-out {:optional true} :string] [:read {:optional true} :any]]
+ :seon.ref/view [:map {:seon.render/ai seon.render.ai/cited-view}
                  [:seon.ref/address :seon.ref/address]
                  [:seon.ref/heading :string]
                  [:seon.ref/summary {:optional true} :string]

@@ -258,7 +258,9 @@
                       [(update-in st [:refs i :seon.render/cited-at] conj at) (conj nums (get-in refs [i :seon.render/n]))]
                       (if-let [[kind v] (docs/cited db c)]
                         [{:refs (conj refs {:seon.render/n next :seon.render/kind kind :seon.render/address k
-                                            :seon.render/depth (:seon.ref/depth c) :seon.render/value v :seon.render/cited-at [at]})
+                                            :seon.render/depth (:seon.ref/depth c) :seon.render/value v :seon.render/cited-at [at]
+                                            ;; its view's schema, whose render shows it as its prose
+                                            :seon.render/schema (if (#{:var :unresolved} kind) (if (:symbol v) :seon.ref/var-view :seon.ref/view) :seon.ref/view)})
                           :index (assoc index k (count refs)) :next (inc next)}
                          (conj nums next)]
                         [st nums]))))

@@ -132,3 +132,14 @@
         "the form returned: no longer running")
     (is (= :spawning (:seon.agent/status (pull db3 "b2"))) "the next boot's a3")
     (is (= :idle (:seon.agent/status (pull db3 "b1"))) "is not the earlier boot's")))
+
+(deftest a-new-boot-leaves-the-earlier-boots-agents
+  ;; root's agents are this boot's: a boot retracts the earlier boots' agents' link to root
+  (let [db (d/db-with (ts/test-db) (into [{:seon.root/id :root :seon.root/boot "b1"}] (task/agent-tx "b1" :a1 {:status :idle})))
+        db2 (d/db-with db (into (task/boot-tx "b2" 4) (task/earlier-agents-tx db)))
+        db3 (d/db-with db2 (task/agent-tx "b2" :a1 {:status :spawning}))
+        agents (fn [db] (set (map :seon.agent/key (:seon.agent/_root (d/pull db '[{:seon.agent/_root [:seon.agent/key]}] [:seon.root/id :root]))))) ]
+    (is (= #{"b1/a1"} (agents db)))
+    (is (= #{} (agents db2)) "the new boot holds none of the earlier boot's")
+    (is (= #{"b2/a1"} (agents db3)) "and its own as they start")
+    (is (some? (d/entity db3 [:seon.agent/key "b1/a1"])) "the earlier agent is kept, not deleted")))

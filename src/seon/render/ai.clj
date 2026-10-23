@@ -355,3 +355,27 @@
   {:malli/schema [:=> [:cat :map :seon.render/opts] :seon.render/text]}
   [a opts] (projected a [:seon.attempt/id :seon.attempt/status :seon.attempt/outcome :seon.attempt/reason :seon.attempt/model
                          :seon.attempt/turns :seon.attempt/max-turns :seon.attempt/branch] opts))
+
+(defn var-doc
+  "A cited var as Clojure's own (doc) prints it: a rule, its name, its arglists, its doc (or the
+  first sentence at a summary's depth), then its contract; at a source's depth its source; and
+  what was left out with the form that reads it."
+  {:malli/schema [:=> [:cat :map :seon.render/opts] :seon.render/text]}
+  [{:keys [symbol arglists summary doc contract source left-out read unresolved problem]} _]
+  {:text (str/join "\n" (remove nil? ["-------------------------" (str symbol)
+                                      (when unresolved (str "  " problem))
+                                      (some-> arglists pr-str)
+                                      (some->> (or doc summary) (str "  "))
+                                      (some->> contract pr-str (str "  contract "))
+                                      source
+                                      (when left-out (str "  (left out: " left-out "; " (pr-str read) " reads it)"))]))})
+
+(defn cited-view
+  "A cited section, file, task or namespace as its prose: its heading and address, its text at
+  the citation's depth (the summary, the lead or opening, or the whole text), then the sections
+  below it as headings with their addresses."
+  {:malli/schema [:=> [:cat :map :seon.render/opts] :seon.render/text]}
+  [{:seon.ref/keys [address heading summary lead opening text below] :as v} _]
+  {:text (str/join "\n\n" (remove nil? [(str "## " (or heading address) (when heading (str "  (" address ")")))
+                                        (or text lead opening summary (when (:unresolved v) (:problem v)))
+                                        (when (seq below) (str/join "\n" (for [b below] (str "- " (:seon.ref/heading b) "  (" (:seon.ref/address b) ")"))))]))})
