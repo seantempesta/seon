@@ -40,7 +40,7 @@ Grouped as `docs/plan.md` "In flight" assigns them; anything not listed is merge
 | ``jolt/writeback-order`` | `../next-writeback-order` | WIP committed a4d1ae96, untested; no step-E note was written | agent loop |
 | ``jolt/ctx-loop`` | `../next-ctx-loop` | 5 commits, main merged; no handoff note (the cited `handoff-speed.md` was never written) | agent loop |
 | ``jolt/agent-view`` | `../next-agent-view` | `notes/agent-view-handoff-2026-10-23.md`; self-review, full run, merge | agent view |
-| ``jolt/datom-cost`` | `.worktrees/datom-cost` | only its note so far: `notes/handoff-store.md` | store |
+| ``jolt/datom-cost`` | `.worktrees/datom-cost` | the add path at its floor (task `datahike.transaction/a-datom-costs-its-index-inserts`); its Jolt half is ``jolt/record-field-binds`` | store |
 
 `handoff-shrink.md`, `handoff-clocks.md` and `handoff-step-e.md` were never written; their groups start from the task files.
 Kept for the owner, merged but holding a store or run output: `../next-agent-ends-with-root`, `../next-global-ids`, `../next-turn-cost` (`runs-2`, `runs-3`, `runs-noprovider`), `../next-drivers-out`. Thirteen other merged worktrees were removed, and fifteen orphan processes were ended.
