@@ -38,8 +38,12 @@
      :fixed {:ns 18000 :bytes 8000 :calls 12}
      :sizes [100 1000 10000]
      ;; measured 2026-10-21 (source mode, load 5): 105 -> 114 us and 121 -> 138 KB from 100 to
-     ;; 10k forms, flat as estimated; each seek allocates as seon.db/eid's does (~30 KB)
-     :overrun {:task "seon.db/avet-seek-allocates" :measured {:ns 114000.0 :bytes 137744.0}}}))
+     ;; 10k forms, on the whole process's count. Re-measured 2026-10-23 on the proof's own thread
+     ;; (18b0774: per-thread bytes, thread CPU time; release runtime, Chez 80e4b9f, load 17, as
+     ;; bin/prove runs): 161 -> 183 KB, the same in every run (six AVET seeks, ~21 KB each as
+     ;; seon.task-cost-test's one seek, and the entity reads), and 192 -> 213 us, which machine
+     ;; load moves ~1.3x (158 us at load 10). The record a ratchet compares with is this measure's
+     :overrun {:task "seon.db/avet-seek-allocates" :measured {:ns 213400.0 :bytes 183100.0}}}))
 
 (defn program-of
   "load-order's argument: the n live forms of app.pc (the test store's example program is

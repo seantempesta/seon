@@ -6,7 +6,7 @@ Seon is where many agents do real work for their user, each in its own process o
 
 You are in `next/`, **Seon on Jolt, built to replace Seon** (`~/src/seon`, the JVM version, now read-only reference): everything v1 does, smaller, faster and more certain; a v1 capability left out is left out on purpose, with its reason in `BAGGAGE.md`.
 
-Read before acting: this file (§§1–3 first), then `../RESUME.md` (what is in flight, and THE PLAN), then `docs/README.md` (the wiki's map) and `docs/parity.md`, then your task (`resources/seon/tasks/<ns>.edn`) and what its plan cites.
+Read before acting: this file (§§1–3 first), then `../RESUME.md` (what is in flight, and THE PLAN), then `docs/README.md` (the wiki's map) and `docs/parity.md`, then your task (``resources/seon/tasks/<ns>.edn``) and what its plan cites.
 
 The running system: `bin/root status|start` (the owner's main tree: server port 7888, dashboard http://127.0.0.1:7777/); Claude reaches it through the `seon` MCP server (§6). The standing root's store (`runs/store`) holds kept runs, which are evidence: never experiment on it. Experiments run in a worktree (`bin/worktree NAME`) on that worktree's own root and stores.
 
@@ -62,7 +62,7 @@ Then write down what is known, hand the detail to an agent with a brief, and ret
 
 The same method serves our worktree sessions and Seon's agents: small changes, integrated often, testing the merged result and running only what the change reaches.
 
-**Work is tasks.** All work is a task in `resources/seon/tasks/<owning-ns>.edn` (`my.root/load-tasks!`):
+**Work is tasks.** All work is a task in ``resources/seon/tasks/<owning-ns>.edn`` (`my.root/load-tasks!`):
 - `:seon.task/plan`: what exists, what v1 did, the cause, what it replaces and deletes;
 - `:seon.task/proofs`: the deftests and cost proofs that say it is done;
 - `:seon.task/needs`: what must merge first.
@@ -178,9 +178,21 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
 
 ## 7. The docs are a wiki, and the system's memory
 
-- **Pages:** `docs/<topic>.md`, one concept per page; `docs/README.md` is the map, and it states how the wiki is kept (one home per concept, a leading sentence that stands alone, patterns in their topic sections, everything linked, current truth rather than a dated log). Sections are addressed `topic#slug` and mirrored in the database.
+- **Pages:** ``docs/<topic>.md``, one concept per page; `docs/README.md` is the map, and it states how the wiki is kept (one home per concept, a leading sentence that stands alone, patterns in their topic sections, everything linked, current truth rather than a dated log). Sections are addressed `topic#slug` and mirrored in the database.
 - **References are what the text cites, read by one parser**, at the depth the delimiter asks: [references](docs/references.md). Prefer citing a var to a `file:line`.
 - **Merging a change updates its section in the same commit.** Before reporting, read your task's context through the server and confirm it pulls what the task needs.
+
+### Where information lives
+
+Each kind of information has one home, and a fact found anywhere else is moved there:
+- **the wiki** (`docs/`): how the system works now, by topic; no dated logs, no plans;
+- **docstrings and schemas**: what one var or one value is, beside its code; a key's meaning is its comment in `resources/seon/config/default.edn`. A page cites the var rather than restating it;
+- **task entries** (`resources/seon/tasks/`): work to do, its reproduction, cause, proofs and what it deletes;
+- **DECISIONS** (`../notes/DECISIONS.md`): the owner's standing rulings, one line each with its quote, date and where it is now stated;
+- **RESUME** (`../RESUME.md`): what is in flight, the open owner questions and THE PLAN, on one screen;
+- **git**: history: who did what, when, and every number a merge measured (in its commit message).
+
+A note (`notes/`) is a working paper. Once its content is filed in one of the homes above, it moves to `notes/archive/` in the same commit, and no live doc cites it as current.
 
 ## 7a. Words
 
@@ -201,11 +213,9 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
 | stand-in | proc | core.async Flow |
 | dial | config key | Clojure map, Datahike config |
 | admit, guarantees | instrument | Malli `malli.instrument` |
-| stuck | blocked | plain English (stored as `:seon.task/stuck` until migrated) |
-| waste | overrun | plain English (stored as `:seon.attempt/waste` until migrated) |
-| refusal | invalid, explained (a contract's); refused (a merge's) | Malli `m/explain` (stored as `:seon.attempt/refusal` until migrated) |
+| refusal | invalid, explained (a contract's); refused (a merge's) | Malli `m/explain` (stored as `:seon.reconcile/refusal`, its `:refusal` kinds, until the rename task's branch merges) |
 
-Library words stay: proc, step-fn, transact, branch, merge, schema, registry, contract (a Malli function schema), flusher, group commit, fork server, lease, generation.
+Library words stay: proc, step-fn, transact, branch, merge, schema, registry, contract (a Malli function schema), flusher, group commit, fork server, lease, generation. **Waste** stays our word for the turns and tokens an attempt spent past what its work needed (`:seon.attempt/waste`; owner, 2026-10-23). A stored keyword is renamed by erasing the store, never by a migration (DECISIONS).
 
 ## 8. The machine
 
@@ -215,14 +225,14 @@ Library words stay: proc, step-fn, transact, branch, merge, schema, registry, co
 - **Leave nothing running when you finish,** and say so. Kill only PIDs you started; never `pkill` or `killall`. Delete only paths you created. A process that must outlive a tool call is double-forked (`bin/root` does).
 - **A root's processes end with it:** kill the root, or its fork server's process group (`kill -9 -PGID`), never a fork server by pid. Killing the fork server first skips the group kill that ends its agents ([failure points](docs/failure-points.md), root dies).
 - **Git in a worktree:** `git -C` on your own checkout only; never `git submodule` in a worktree (after merging main, `bin/worktree --sync NAME` from the main tree); never bare `git stash`; never `checkout`, `restore` or `reset` on paths you don't own; commit explicit paths; never push.
-- **Secrets are never printed.** Paid model runs need the owner's go. Install nothing system-wide. Never write in `~/src/seon`.
+- **Secrets are never printed.** Paid model runs spend from the owner's standing $50 budget, on productive work only, with the context checked first; past it they need the owner's go ([model](docs/model.md#paid-runs)). Install nothing system-wide. Never write in `~/src/seon`.
 
 ## 9. Mistakes we have made, and do not repeat
 
 - **Root doing the work itself** (owner, 2026-10-22: "you spent most of the session just debugging rather than outsourcing with agents"): debugging, measuring or reading many files personally, step by step, while the plan stood still. Delegate it with a brief (§2).
 - **Trees before the forest:** a detail chased past its worth with no step of THE PLAN asking for it; guessing at a cause instead of launching agents to find it.
 - **Serial work:** one agent at a time, or waiting on one result with independent work ready.
-- **A clock, timer, sleep, poll, deadline, ping or fixed slot** standing in for a dependency or a workload. "Never came" is a recorded fact (stuck, stalled, dead).
+- **A clock, timer, sleep, poll, deadline, ping or fixed slot** standing in for a dependency or a workload. "Never came" is a recorded fact (blocked, stalled, dead).
 - **A swallowed error, an ignored answer, a fake default.** Unknown is not `{}`, `0`, `nil` or `:ok`, and a proc answers every request it took.
 - **Routing around a principle:**
   - a fallback instead of an error fact;
@@ -240,7 +250,7 @@ Library words stay: proc, step-fn, transact, branch, merge, schema, registry, co
 - **A check that cannot fail,** or that only prints. Every check mode ends on `X OK` / `X FAILED` and an exit status. When a rule changes, read every step it touches.
 - **Merging on a check nobody read,** or copying whole files over newer changes.
 - **Re-running everything on every change,** a full run while iterating, or a second run of an unchanged tree (§3, Testing).
-- **Deleting a record** (a store, a branch, history). Runs are kept, and reclaiming space is the owner's act.
+- **Deleting a record** (a store, a branch, history). Runs are kept, and reclaiming space is the owner's act. The one exception: until Seon holds a user's data, the standing store is test data, erased (never migrated) when its schema changes, on the owner's go ([machine](docs/machine.md#disk-stays-bounded)).
 - **Flooding the machine,** killing by pattern, or leaving things running.
 
 ## 10. Done
