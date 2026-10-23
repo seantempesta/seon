@@ -291,6 +291,10 @@
  :seon.config.source/binary-vars #{seon.test-store/binary-sh}
  ;; Unit: branch. Merges are committed here, never on main and never pushed (owner).
  :seon.config.source/branch "jolt/seon-merges"
+ ;; Unit: branch. Git's main, which worktree branches merge into: a branch's health step reads
+ ;; what it caused since its merge base with it (seon.fx/base-commit; root's ruling,
+ ;; 2026-10-23). At the bound: n/a.
+ :seon.config.source/main "main"
  ;; Unit: a git identity. Seon authors and commits its merges (the message names the merged
  ;; tasks and runs). Stated here because a root's HOME is its checkout's target/home, which
  ;; holds no git identity (bin/check loop, 2026-10-21: "Author identity unknown").
