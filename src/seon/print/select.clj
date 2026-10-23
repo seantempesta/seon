@@ -543,9 +543,19 @@
   [node]
   (+ (count " (drop  )") (count (str (:total node 0)))))
 
+(defn- first-at-least
+  "Collection `node` showing only its first member, at its least, before its cut: the floor
+  fill-members holds to and select's error measures."
+  {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc] :seon.print/alloc]}
+  [context node]
+  (let [[held & more] (seq (:pending node))]
+    (sized context (assoc node :kids [(minimal context (child context node held 0))] :pending more))))
+
 (defn- fill-members
   "Sequence or set `node` within `budget`: whole members in order while each fits beside the one
-  cut that follows them; the first that does not fit is allotted what is left when that shows part of it."
+  cut that follows them; the first that does not fit is allotted what is left when that shows part of it.
+  A first member that shows no part is shown at its least when that fits, so a node shows its first
+  member whenever its least form fits (select's floor)."
   {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc number?] :seon.print/alloc]}
   [context node budget]
   (let [sep (separator context node)]
@@ -561,9 +571,13 @@
                           (whole context member (- budget (:ub (sized context (assoc node :kids kids :pending nil))) sep)))))
             part (when (and member (not shown))
                    (let [allotted (allot context member cap)]
-                     (when (and (<= (:ub allotted) cap) (shows? allotted)) allotted)))]
+                     (when (and (<= (:ub allotted) cap) (shows? allotted)) allotted)))
+            least (when (and member (not shown) (not part) (empty? kids))
+                    (let [floor (first-at-least context node)]
+                      (when (<= (:ub floor) budget) floor)))]
         (cond
           part (sized context (assoc node :kids (conj kids part) :pending more))
+          least least
           (nil? shown) (cut)
           more (recur (conj kids shown) (+ spent sep (:ub shown)) more)
           :else (let [complete (sized context (assoc node :kids (conj kids shown) :pending nil))]
@@ -647,12 +661,12 @@
         budget (:budget context)
         least (minimal context root)
         shown (when (<= (:ub least) budget) (allot context root budget))
-        first-member (when (and shown (#{:map :coll} (:kind shown)) (zero? (:n shown)) (not (bound? context shown)))
-                       (when-let [[held] (seq (:pending root))]
-                         (minimal context (child context root held 0))))]
+        floor (when (and shown (#{:map :coll} (:kind shown)) (zero? (:n shown)) (not (bound? context shown))
+                         (seq (:pending root)))
+                (first-at-least context root))]
     (cond
       (nil? shown) (insufficient-budget context (:ub least))
-      first-member (insufficient-budget context (:ub (sized context (assoc root :kids [first-member]))))
+      floor (insufficient-budget context (:ub floor))
       :else {:root shown})))
 
 (defn- cut-node

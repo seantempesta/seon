@@ -74,6 +74,8 @@
   (is (lawful? [(list 0 [(apply str "aaaaaa" (repeat 82 "a"))])
                 {:A (apply str (repeat 66 "\"a")) :B {:A nil :B 0}}]
                70))
+  ;; a first member whose least form fits is shown, though a string four levels down cannot show
+  (is (lawful? [[[["aaaaa\"a\"a\"a\"aa\"\"aa\"aa\"\"aaaa\"a\naaa\"a\"aaaaaa\"aa\"\na\"\"aaa\"aa\"\"\"\"a\"\"aa\"\"a\"aaaa\"\"\"\"aaa\"a\"\"\"a\"a\"\"\"a\"\"\"\"\"\"\"\"aaa\"\"a\"a\"a"]]]] 60))
   (doseq [budget [40 120 400]]
     (is (lawful? {:a {:b (str/join "\n" (repeat 30 "a line of text")) :c [1 2 {:d "x\ny" :e {:f (vec (range 40))}}]}
                   :g (str/join "\n" (repeat 5 "zz")) :h {:i {:j {:k "deep"}}}}
