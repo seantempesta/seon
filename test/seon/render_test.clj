@@ -180,7 +180,7 @@
         db (-> db (d/db-with (seon.task/create-tx db [(decl "a" #{'p/x}) (decl "b" #{'p/z} "t/a") (decl "c" #{'p/w})]))
                (d/db-with (seon.task/execution-tx ["t/a" "t/b"] :running))
                (d/db-with (seon.task/execution-tx ["t/c"] :cancelled))
-               (d/db-with (conj (seon.task/run-start-tx "t/a#1" "t/a" "boot-1" (seon.task/agent-key "boot-1" :a1) {:branch :task-t-a :model nil :max-turns 40} 1 "Make a.")
+               (d/db-with (conj (seon.task/run-start-tx "t/a#1" "t/a" "boot-1" :a1 {:branch :task-t-a :model nil :max-turns 40} 1 "Make a.")
                                 {:seon.run/id "t/a#1" :seon.run/tokens 7
                                  :seon.run/results [{:seon.proof/test 'p/x :seon.proof/status :pass} {:seon.proof/test 'p/y :seon.proof/status :fail}]})))
         rows (p/task-rows (seon.reconcile/index db))]
@@ -923,7 +923,7 @@
              [{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan walked-plan :seon.task/execution :running
                :seon.task/branch :task-demo-f :seon.task/kind :work :seon.task/proofs #{'demo/f-test}}]
              (seon.task/agent-tx "b1" :a3 {:status :idle :pid 77 :running {:form "(f 2)"}})
-             (seon.task/run-start-tx "demo/f#1" "demo/f" "b1" k {:branch :task-demo-f :model "m" :max-turns 8} 0 "p")
+             (seon.task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch :task-demo-f :model "m" :max-turns 8} 0 "p")
              [{:seon.run/id "demo/f#1" :seon.run/results [{:seon.proof/test 'demo/f-test :seon.proof/status :pass}]}]
              (seon.task/message-tx "m-1" "owner" "demo/f#1" "check g, see `seon.print`")
              [{:db/id "run" :seon.run/id "demo/f#1"}

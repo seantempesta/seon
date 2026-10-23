@@ -92,7 +92,7 @@
        (d/branch! conn main b)
        (let [bc (d/connect (assoc cfg :branch b))]
          (try
-           (d/transact conn (task/run-start-tx "demo/f#1" "demo/f" "b1" k {:branch b :model "m" :max-turns 8} 0 "p"))
+           (d/transact conn (task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch b :model "m" :max-turns 8} 0 "p"))
            (d/transact conn (task/message-tx "m-1" "owner" "demo/f#1" "check g"))
            ;; on the branch, which forked before main held the run or the message
            (d/transact bc [{:db/id "run" :seon.run/id "demo/f#1"} {:seon.turn/id "demo/f#1/0" :seon.turn/run "run" :seon.turn/n 0 :seon.turn/origin :model}])

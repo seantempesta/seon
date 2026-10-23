@@ -15,7 +15,7 @@
         t0 (:max-tx db)]
     (case (.nextInt rng 9)
       0 (when t (task/execution-tx [t] (pick [:running :held :cancelled :running])))
-      1 (when t (let [aid (str t "#x" k)] (let [boot (pick ["r3-boot" "old-boot"])] (task/run-start-tx aid t boot (task/agent-key boot :ax) (env t) 0 "p"))))
+      1 (when t (let [aid (str t "#x" k)] (task/run-start-tx aid t (pick ["r3-boot" "old-boot"]) :ax (env t) 0 "p")))
       2 (when a [{:seon.run/id (:seon.run/id a) :seon.run/status (pick [:ended :dead :done :merged :closed :running])
                   :seon.run/merged-t (+ 900 (.nextInt rng 300)) :seon.run/basis-t (+ 900 (.nextInt rng 300))
                   :seon.run/results [{:seon.proof/test (symbol "app.proofs" (str "p" (.nextInt rng 30) "-test"))

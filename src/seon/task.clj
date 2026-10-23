@@ -180,19 +180,22 @@
     aid (conj {:db/id aid :seon.run/id aid})))
 
 (defn run-start-tx
-  "A run begins: root observed it spawn its agent (its key, seon.task/agent-key; nil: root
-  refused the spawn, and no agent exists), given the task's accumulated plan."
-  {:malli/schema [:=> [:cat :seon.run/id :seon.task/id :string [:maybe :string] :seon.task/env :int :seon.task/plan] [:vector :map]]}
+  "A run begins: root observed it spawn agent id agent in its boot (nil: root refused the
+  spawn, and no agent exists), given the task's accumulated plan. The run refs the agent's
+  entity, named by its key in that boot (seon.task/agent-key) and holding its id, so a read of
+  the run names its agent before root has recorded anything else of it."
+  {:malli/schema [:=> [:cat :seon.run/id :seon.task/id :string [:maybe :keyword] :seon.task/env :int :seon.task/plan] [:vector :map]]}
   [aid task boot agent {:keys [branch model max-turns]} start-ms plan]
-  (filterv some?
-  [(cond-> {:seon.run/id aid :seon.run/task [:seon.task/id task] :seon.run/status :running
-            :seon.run/boot boot :seon.run/start-ms start-ms
-            :seon.run/branch branch :seon.run/max-turns max-turns :seon.run/plan plan}
-     agent (assoc :seon.run/agent agent)
-     model (assoc :seon.run/model model))
-   ;; the agent its own entity map, so it takes its content id (Datahike's content-tempids);
-   ;; its tempid is its key, unique in a transaction that starts several runs
-   (when agent {:db/id agent :seon.agent/key agent})]))
+  (let [k (when agent (agent-key boot agent))]
+    (filterv some?
+             [(cond-> {:seon.run/id aid :seon.run/task [:seon.task/id task] :seon.run/status :running
+                       :seon.run/boot boot :seon.run/start-ms start-ms
+                       :seon.run/branch branch :seon.run/max-turns max-turns :seon.run/plan plan}
+                k (assoc :seon.run/agent k)
+                model (assoc :seon.run/model model))
+              ;; the agent its own entity map, so it takes its content id (Datahike's content-tempids);
+              ;; its tempid is its key, unique in a transaction that starts several runs
+              (when k {:db/id k :seon.agent/key k :seon.agent/id agent})])))
 
 (defn status-tx
   "Move run aid from status `from` to `to` (Datahike's compare-and-swap: a racing

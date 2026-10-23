@@ -26,7 +26,7 @@
   as :seon.merge/conflict values; unmerged as printed keys)."
   [nm n status & {:keys [boot model results outcome conflicts unmerged changed caused plan deferred deferred-results] :or {boot "boot-1" plan (str "Make " nm " true.")}}]
   (let [id (str "demo/" nm) aid (str id "#" n)]
-    (into (task/run-start-tx aid id boot (task/agent-key boot (keyword (str "a-" nm n)))
+    (into (task/run-start-tx aid id boot (keyword (str "a-" nm n))
                                  {:branch (task/default-branch id) :model model :max-turns (cfg/value :seon.config.agent/max-turns)} 1000 plan)
           [(cond-> {:seon.run/id aid :seon.run/status status}
              results (assoc :seon.run/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s})))

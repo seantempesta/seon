@@ -71,7 +71,7 @@
         db (d/db-with empty-db (task/create-tx empty-db decls))
         att (fn [id n status turns]
               (let [tid (str "demo/" id) branch (task/default-branch (str "demo/" (first (str/split id #"-"))))]
-                (conj (task/run-start-tx (str tid "#" n) tid "boot-1" (task/agent-key "boot-1" (keyword (str "a-" id n))) {:branch branch :model nil :max-turns 4} 1000 "Make it true.")
+                (conj (task/run-start-tx (str tid "#" n) tid "boot-1" (keyword (str "a-" id n)) {:branch branch :model nil :max-turns 4} 1000 "Make it true.")
                       {:seon.run/id (str tid "#" n) :seon.run/status status :seon.run/turns turns})))
         db (d/db-with db (concat (att "a" 1 :closed 3) (att "a" 2 :ended 2) (att "a-merge" 1 :merged 0)
                                  (att "b" 1 :ended 1) (att "b-merge" 1 :merged 0)
