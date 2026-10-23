@@ -100,6 +100,9 @@ REPLACE = [
     ('test/seon/source_test.clj', "the next agent's harvest read", "the next agent's stage read"),
 ]
 
+# (file, regex, replacement) over the whole file: a local named with an old word
+FILE_REGEX = [('test/datahike/query_test.clj', r'(?<![\w-])refusal(?![\w-])', 'refused')]
+
 moved = dissolve()
 changed = {f: 0 for f in {TASKS + o + '.edn' for o in moved.values()}}
 def put(path, text):
@@ -120,6 +123,8 @@ for f in files:
             line = re.sub(r'\bseon\.(?:fences|audit)/([\w-]+)', lambda m: (OWNER_OF.get(m.group(1)) or 'seon.audit') + '/' + m.group(1), line)
         lines.append(line)
     t = '\n'.join(lines)
+    for g, a, b in FILE_REGEX:
+        if g == f: t = re.sub(a, b, t)
     for g, a, b in REPLACE:
         if g == f: t = t.replace(a, b, 1) if a in t else t
     if t != s: put(f, t)
