@@ -13,7 +13,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 ## jolt
 
-`reference-code/jolt` pinned at `4342b73c`, the tip of ``jolt/fork-carriers``.
+`reference-code/jolt` pinned at `ce384f07`, the tip of ``jolt/hashset-bulk`` (on ``jolt/fork-carriers`` `4342b73c`).
 
 - Fork repo: ``~/src/seon-jolt/jolt``. Upstream: ``jolt-lang/jolt``. Fork: ``seantempesta/jolt``.
 - Base: `f714b0ed`, upstream main (nightly + 10), the merge-base with upstream's main.
@@ -56,6 +56,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
   - `d7ec259b` a build's own evals compile outside its unit, so an eval at macro expansion no longer references the build's unbound defs. Generic.
   - `60961b84` `jolt.host/runtime-fingerprint`: the runtime's identity as its compiled units are keyed. Generic.
   - `6871f997`, `e469164c`, `52b50504`, `4342b73c` `jolt-after-fork-child!`: a forked process drops the bookkeeping of the runtime threads fork(2) did not copy (carriers, timer and its deadlines, shutdown watcher, thread tables) and starts no thread; fork-child-test proves a parked go, a timeout and a double fork's grandchild ([failure points](failure-points.md)). Generic.
+  - `ce384f07` `java.util.HashSet`'s bulk Collection methods (`addAll`, `removeAll`, `retainAll`, `containsAll`): `datahike.api/datoms-diff` threw on any two trees that partly share ([storage](storage.md#merges-read-what-changed)). Generic.
 - ``upstream/*`` branches in the fork repo: `arraycopy-object-block`, `deftype-field-access`, `fiber-park`, `fork-reprotect-jit`, `host-site-coll-reads`, `remote-chan`, `static-code-cow`. None is pushed or opened: they exist only in ``~/src/seon-jolt/jolt``, cut on jolt-lang/jolt main `8bebf786`. Before one is opened: the gate sweep of `fork`, `slots` and `static`, `make fibers` re-run alone on arraycopy-object-block (a new untriaged red under load), a Gambit check of deftype-field-access, a non-root Linux sweep, and a rebase on upstream's current main. static-code-cow is not for upstream (jolt itself never forks, and under the hardened runtime code outside MAP_JIT needs an entitlement or the process is SIGKILLed): it stays in our patch set. Of the Chez patches, 0006 belongs upstream (no fix in cisco/ChezScheme or Racket CS), 0007 only as an issue first. Drafts and reproductions: ``~/src/seon-jolt/notes/upstream/``.
 - Open: the fork repo's ``jolt/main`` is at `44c9574a` (``jolt/load-form``, which Seon does not use; not in the pin), and `d7ec259b`..`4342b73c` are only in the submodule clone, not yet in the fork repo. ``jolt/main`` should be moved to the pin's line.
 
@@ -79,11 +80,11 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 ## datahike
 
-`reference-code/datahike` pinned at `fd0c065`, the tip of ``jolt/deref-config``.
+`reference-code/datahike` pinned at `0783e8b`, the tip of ``jolt/global-ids``.
 
 - Fork repo: ``~/src/seon-jolt/libs/datahike``. Upstream: ``replikativ/datahike``.
 - Base: `ad9fc97` "baseline", a history-less snapshot of Seon's fork ``seantempesta/datahike`` `ccba220b` (unknown: that commit is not in the repo, so the snapshot cannot be checked against it).
-- Branch chain: ``jolt/main`` `fde9f89` → ``jolt/run-ahead`` `fe50764` → `jvm` = ``jolt/eid-lease`` `4b93a1b` → ``jolt/values-out-of-line`` `594815d` → ``jolt/deref-config`` `fd0c065`.
+- Branch chain: ``jolt/main`` `fde9f89` → ``jolt/run-ahead`` `fe50764` → `jvm` = ``jolt/eid-lease`` `4b93a1b` → ``jolt/values-out-of-line`` `594815d` → ``jolt/deref-config`` `fd0c065` → ``jolt/global-ids`` `0783e8b`.
 - Jolt-first (owner, DECISIONS "Storage is tuned for our workload"): the `jvm` branch freezes `4b93a1b`, the last commit that keeps the `:clj`/`:cljs`/Fressian code; the line after it drops that code from each file a change touches, each deletion its own commit.
 - Ours, on ``jolt/main``:
   - `a6b9b86` `:jolt` reader conditionals and Jolt index and node-cache files. Jolt.
@@ -100,20 +101,22 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
   - `5ed8d8f` `gc-storage!` `:sync? true` runs the whole collection on the calling thread. Generic.
   - `032552b` run-ahead writes at a `:sync` writer's serial caller (`apply!`, `pending?`, `commit-pending!`). Jolt (our design).
   - `fe50764` `merge-db!` on a `:sync` writer applies on the calling thread. Jolt.
-  - `4b93a1b` a process holding a block of entity ids mints inside it (`set-eid-ceiling!`, ``:entity-id/lease-spent``) ([storage](storage.md#leases)). Generic.
+  - `4b93a1b` a process holding a block of entity ids mints inside it (`set-eid-ceiling!`, ``:entity-id/lease-spent``); deleted by `be25be4`. Generic.
   - `4ae0593` large values out of line in `CachedStorage` (`:index-config :value-out-of-line-bytes`; GC's mark keeps them) ([storage](storage.md#values-out-of-line)). Generic.
   - `d904dea` ``:db.type/data`` and a total order on plain data ([storage](storage.md#plain-values)). Generic.
   - `594815d` a `:sync` writer runs `gc-storage!` as a collection, not a transaction ([storage](storage.md#collection)). Jolt (our writer).
   - `fd0c065` `deref-conn` keeps the connection's own config, so a moved store's db names where it is now. Generic.
+  - `be25be4` a store's ids: entity ids and transaction ids each issued once across every branch (`datahike.ids`, `set-ids!`, the writer's `with-store-ids`); a transaction takes its id when it begins ([storage](storage.md#ids)). Generic.
+  - `5c869bf`, `508918c`, `0783e8b` content entity ids: `:db/contentId`, an identity whose value names its entity (`content-eid`, `content-tempids`, `:entity-id/collision`); the partition `[1, tx0)` counter ids, `[tx0, 2^40)` tx ids, `[2^40, 2^60)` content ids; an existing identity may gain it ([storage](storage.md#ids)). Generic.
 - Open: the fork repo's ``jolt/main`` is at `fe50764`; `4b93a1b`..`fd0c065` are only in the submodule clone, not yet in the fork repo.
 
 ## persistent-sorted-set
 
-`reference-code/persistent-sorted-set` pinned at `9cce727`, the tip of ``jolt/main``.
+`reference-code/persistent-sorted-set` pinned at `1cae7f2`, the tip of ``jolt/forward-cursor-comparator`` (on ``jolt/main`` `9cce727`).
 
 - Fork repo: ``~/src/seon-jolt/e4/pss-a``. Upstream: ``replikativ/persistent-sorted-set`` 0.4.137.
 - Base: none; written fresh, with no upstream history (root commit `d397c58`).
-- Ours: `d397c58` the JVM core as Jolt deftypes; `d565937` EDN node forms; `df6735e` `Arrays/sort`; `9cce727` the node emitter writes `#pss/leaf` and `#pss/branch` without the generic printer. Jolt.
+- Ours: `d397c58` the JVM core as Jolt deftypes; `d565937` EDN node forms; `df6735e` `Arrays/sort`; `9cce727` the node emitter writes `#pss/leaf` and `#pss/branch` without the generic printer; `1cae7f2` `forwardCursor` takes a `java.util.Comparator` (every planned `d/history` query threw). Jolt.
 - It is an overlay, not a whole library: `deps.edn` puts its `src` on `:paths`, ahead of the mvn 0.4.137 jar Datahike depends on, which still supplies the other namespaces.
 
 ## konserve
