@@ -21,7 +21,7 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 | ``eval_clj`` (an agent's REPL or root's) | `seon_eval` (one evaluator: no JVM mode) | present |
 | ``runtime_status`` (health, problems, flow, readiness) | `seon_agents` lists agents and tasks; health only on the dashboard | partial |
 | an outside agent works a task | `seon_attach`, `seon_context`, `seon_done` | new |
-| reasons and defects answered per request | a defect answers that request the typed `:seon.server/defect` and the server goes on (`seon.server/respond`); a refused attach still writes the task's state first (task `seon.entrance/attach-writes-nothing-when-it-is-refused`) | partial |
+| reasons and defects answered per request | a defect answers that request the typed `:seon.server/defect` and the server goes on (`seon.server/respond`); a refused attach still writes the task's state first (task `seon.server/attach-writes-nothing-when-it-is-refused`) | partial |
 
 The server's ops, the MCP tools and root's evaluation path are [server](server.md#ops). `seon_agents` returns every task, the cancelled ones included: too much context for an outside agent.
 
@@ -29,7 +29,7 @@ The server's ops, the MCP tools and root's evaluation path are [server](server.m
 
 | v1 | next | Status |
 |---|---|---|
-| `my.task/current`, `update!`, `send-back!`; `my.turn/wait` | `current`, `update!`, `fail!` (send-back replaced: a failure is task data, held for root: [tasks](tasks.md#a-refused-attempt-is-held-for-root)); `my.turn/wait` | present (an agent holds its task from the fork: [tasks](tasks.md#the-agent-knows-its-task)) |
+| `my.task/current`, `update!`, `send-back!`; `my.turn/wait` | `current`, `update!`, `fail!` (send-back replaced: a failure is task data, held for root: [tasks](tasks.md#a-refused-run-is-held-for-root)); `my.turn/wait` | present (an agent holds its task from the fork: [tasks](tasks.md#the-agent-knows-its-task)) |
 | `my.program/callers`, `source`, `tests-reaching` | `my.agent/callers`, `callees`, `grep`, `source-fn`; `seon.program/reach-digests` (the digest of what a test reaches; `my.agent/prove` runs the tests a change reaches) | present |
 | `my.program/history` | none yet; the store keeps history ([storage](storage.md#history)), the function is not built | missing |
 | `my.program/search`, `similar` (embeddings) | none; decided (DECISIONS, "Embeddings join the context"), not built; the context's `:found` finds helpers by the call graph meanwhile (`seon.context/found`) | missing |
@@ -57,7 +57,7 @@ The server's ops, the MCP tools and root's evaluation path are [server](server.m
 | one done rule shared with merge | `seon.reconcile/done-explain` (a proof that never ran is `:proof-unknown`, not red; a deferred process test is neither until root asks; a problem the branch made true is `:open-problem`; [tasks](tasks.md#the-done-rule)) | present |
 | tests selected by reach; results reused by reach digest | `seon.proofs/plan` over `seon.program/reach-digests`: `bin/prove`, `bin/test` and `bin/check` reuse greens in the results directory every checkout shares (`:seon.config.source/test-results-dir`; check steps keyed too); agents' runs select and reuse by the same plan against their merge base (`seon.agent/test-plan`), also finding a green by its digest among main's result facts | present; an agent shares the greens when its root's binary is built from its source tree ([merging](merging.md#a-merge-runs-what-the-change-reaches)) |
 | contracts armed at definition; cost proofs; per-function profile | `seon.contract`, `seon.cost`, `seon.profile` | present |
-| turns-to-green report (median, p90) | `seon.learn` charges overrun per attempt (stored as ``:seon.attempt/waste``) | partial |
+| turns-to-green report (median, p90) | `seon.learn` charges overrun per run (stored as ``:seon.run/waste``) | partial |
 | scheduled work (``seon.schedule``) | none (AGENTS names a cron proc; `resources/seon/system.edn` has none) | missing |
 
 ## Context, printing, the page
@@ -66,12 +66,12 @@ The server's ops, the MCP tools and root's evaluation path are [server](server.m
 |---|---|---|
 | generated task context; one reference rule (`seon.ref`); forgiving reader | `seon.context`, `seon.ref`, `seon.reader/forgive` | present |
 | `(help)` checked against the program | [agent](agent.md), the system message; `my.agent/help`; every form on it run in an agent by `seon.repl-test/the-help-page-runs` | present |
-| context: stable attempt sections, cached; small turn sections; must-reads capped | `seon.context/messages` (the help, the attempt sections, the scrollback, the turn); vars at their citation's depth, `:seon.config.render/reference-tokens`; cache hits on each turn | present |
+| context: stable run sections, cached; small turn sections; must-reads capped | `seon.context/messages` (the help, the run sections, the scrollback, the turn); vars at their citation's depth, `:seon.config.render/reference-tokens`; cache hits on each turn | present |
 | one printer with a budget and runnable continuations; renders on schemas | `seon.print`, `seon.render` | present |
 | wiki sections in the context | `seon.docs` | new |
 | Datastar pages: `/`, `/agent/{id}` | `seon.web` | present |
-| `/agent/{id}/debug`: each model call, what it was sent (remade from its basis), its tokens | `/agent/{id}` is the debug view ([render](render.md#the-agents-window)): each turn a row (`seon.render.ui/turn-row`), its context remade by `seon.context/remade` with each part's tokens, the whole request at `/turn?view=&id=`; `/attempt/{id}`, stable across boots | present |
-| `/agent/{id}/message` (the owner's input bar) | the page's message bar and the server's `:message` op, both `seon.root/message!`: root's one delivery into the agent's inbox, which its next turn takes into its basis (`:messages` in the block) | present: a fact on main (from `"owner"`, to the attempt), and on the agent's branch when its turn takes it, named by id in the turn's basis |
+| `/agent/{id}/debug`: each model call, what it was sent (remade from its basis), its tokens | `/agent/{id}` is the debug view ([render](render.md#the-agents-window)): each turn a row (`seon.render.ui/turn-row`), its context remade by `seon.context/remade` with each part's tokens, the whole request at `/turn?view=&id=`; `/run/{id}`, stable across boots | present |
+| `/agent/{id}/message` (the owner's input bar) | the page's message bar and the server's `:message` op, both `seon.root/message!`: root's one delivery into the agent's inbox, which its next turn takes into its basis (`:messages` in the block) | present: a fact on main (from `"owner"`, to the run), and on the agent's branch when its turn takes it, named by id in the turn's basis |
 | `/ns/{ns}` and its debug pages; `/data`; `/chains`; `/health` | none (task `seon.render/namespace-agent-debug-and-data-pages`; the routes here: [dashboard](dashboard.md)) | missing |
 | POSTs refuse a cross-origin request (``::same-origin``) | `POST /call` reads no Origin or Sec-Fetch-Site (`seon.web/handler`): any page open in the owner's browser can post calls to every live agent | missing |
 

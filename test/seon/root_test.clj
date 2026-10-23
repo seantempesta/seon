@@ -77,7 +77,7 @@
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         path (str checkout "/target/root-test-resume-" (random-uuid))
         later? #(or (str/starts-with? (namespace (:db/ident %)) "seon.config") (= "seon.ai.model" (namespace (:db/ident %)))
-                    (#{:ns/file :ns/tail :form/lead :form/source :seon.attempt/commit :seon.attempt/commit-error} (:db/ident %)))
+                    (#{:ns/file :ns/tail :form/lead :form/source :seon.run/commit :seon.run/commit-error} (:db/ident %)))
         cfg (pdb/store-cfg :lmdb path)
         _ (d/create-database cfg)
         c (d/connect cfg)
@@ -104,7 +104,7 @@
 (deftest a-second-boot-resumes-the-same-main
   ;; task seon.root/one-main-resumed: a root started with no main named works on the
   ;; config's main ("main"), and a second root on the same store resumes it: the task the
-  ;; first loaded and the attempt it started are still there. A store of this test's own, the
+  ;; first loaded and the run it started are still there. A store of this test's own, the
   ;; last resort: what is proved is the default main of a store, which a shared test store's
   ;; other users would also resume; removed at the end.
   (let [checkout (.getCanonicalPath (java.io.File. "."))
@@ -113,7 +113,7 @@
         _ (.mkdirs (java.io.File. tasks))
         _ (spit (str tasks "/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]))
         main {:op :eval :agent "root" :code "(name (seon.db/conn-main (:conn sys)))"}
-        held {:op :eval :agent "root" :code "[(count (seon.task/tasks @(:conn sys))) (set (map str (keys (seon.task/attempts @(:conn sys)))))]"}
+        held {:op :eval :agent "root" :code "[(count (seon.task/tasks @(:conn sys))) (set (map str (keys (seon.task/runs @(:conn sys)))))]"}
         first-boot (str/split-lines (root-answers path "main" [main {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str tasks) ")")}
                                                            {:op :attach :task "demo/t"} held]))
         second-boot (str/split-lines (root-answers path "main" [main held]))
@@ -121,11 +121,11 @@
     (try
       (is (= "\"main\"" (printed (first first-boot))) "a boot with no main named works on the config's main")
       (is (= "\"main\"" (printed (first second-boot))) "the second boot resumes the same main")
-      (let [[tasks-1 attempts-1] (edn/read-string (printed (nth first-boot 3)))
-            [tasks-2 attempts-2] (edn/read-string (printed (second second-boot)))]
-        (is (= [2 1] [tasks-1 (count attempts-1)]) "the first boot holds root's task and the one it loaded, and the attempt it started")
+      (let [[tasks-1 runs-1] (edn/read-string (printed (nth first-boot 3)))
+            [tasks-2 runs-2] (edn/read-string (printed (second second-boot)))]
+        (is (= [2 1] [tasks-1 (count runs-1)]) "the first boot holds root's task and the one it loaded, and the run it started")
         (is (= 2 tasks-2) "the second boot still holds both tasks")
-        (is (every? attempts-2 attempts-1) "and the first boot's attempt (it reaps it and starts the next)"))
+        (is (every? runs-2 runs-1) "and the first boot's run (it reaps it and starts the next)"))
       (finally (sh/sh "rm" "-rf" path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
 
 (deftest a-dead-link-in-the-wiki-is-a-problem-and-the-boot-goes-on
