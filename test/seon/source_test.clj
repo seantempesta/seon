@@ -13,9 +13,11 @@
             [seon.merge :as pm]
             [seon.program :as program]
             [seon.source :as source]
-            [seon.program-test :as pt]))
+            [seon.program-test :as pt] [seon.stage :as stage]))
 
 (defn- empty-db [] (ts/test-db))
+
+(declare hold!)
 
 (def ^:private here (System/getProperty "user.dir"))
 
@@ -137,14 +139,15 @@
 (deftest an-agent-runs-its-branchs-change-to-imported-source
   (let [main (main-with-file)
         branch (pt/record main 'app.pt-src "(defn twice [x] (* 2 x))")]
-    ;; the process holds the imported namespace, as a binary built from that source does
-    (remove-ns 'app.pt-src)
-    (create-ns 'app.pt-src)
-    (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! main))
-        "main's imported text whose namespace this process holds is the binary's: never evaluated (the example program is)")
-    (is (= [] (program/load-diff! main branch)))
-    (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
-    (is (nil? (resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again")))
+    ;; the process holds the imported namespace, as a binary built from that source does:
+    ;; every var it defines bound
+    (hold! 'app.pt-src pt-text)
+    (let [add0 @(resolve 'app.pt-src/add)]
+      (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! main))
+          "main's imported text whose namespace this process holds is the binary's: never evaluated (the example program is)")
+      (is (= [] (program/load-diff! main branch)))
+      (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
+      (is (identical? add0 @(resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again"))))
 
 (deftest an-imported-namespace-the-process-does-not-hold-is-loaded
   ;; task seon.agent/an-agent-holds-mains-tests: test/ is imported but not built into the
@@ -400,6 +403,22 @@
     (is (= [] errs))
     (is (= 6 ((resolve 'app.mm-src/g) 5)) "the new record")
     (is (true? ((resolve 'app.mm-src/box?) ((resolve 'app.mm-src/->Box) 1))) "an instance? test held by the binary sees the redefined record")))
+
+(deftest a-form-imported-into-a-loaded-namespace-is-loaded-not-unmapped
+  ;; the step E dry run (2026-10-22): a root restarted on a tree whose test namespace gained a
+  ;; deftest imported it onto main, but held? read the namespace's existence as "the binary
+  ;; holds it", so neither root nor the fork server loaded it; the next agent's harvest read
+  ;; the missing var as an unmap and the merge deleted the deftest from main
+  (let [nsym (symbol (str "app.imported-" (random-uuid)))
+        path (str "test/app/" (str/replace (name nsym) "-" "_") ".clj")
+        a-text (str "(ns " nsym ")\n\n(defn a [] 1)\n")
+        db (d/db-with (empty-db) (source/import-tx (empty-db) {path a-text}))
+        _ (program/load-all! db)
+        rep (d/with db (source/replace-tx db {path (str a-text "\n(defn b [] 2)\n")}))
+        errs (program/load-changes! (:db-after rep) (pdb/report->tx rep))]
+    (is (= [] errs))
+    (is (= 2 (some-> (resolve (symbol (str nsym) "b")) deref (apply []))) "the imported form is loaded where main's program runs")
+    (is (= [] (stage/stage-tx (:db-after rep))) "so staging this runtime unmaps nothing")))
 
 (deftest the-source-read-carries-each-reference-code-pin
   ;; land6 review, must-fix 4: a cited reference-code file shows the revision main's source

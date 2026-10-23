@@ -157,9 +157,9 @@
  ;; declared once here and read through seon.contract/properties (as a status set is)
  :seon.problems/class [:enum {:seon.problems/derived #{:dead-citation :unnamed-site :stale-pin}
                              :seon.problems/areas [[:docs #{:dead-citation :stale-pin}] [:tests #{:red :cost}]
-                                                    [:laws #{:unnamed-site}] [:merges #{:merge :task-conflict}] [:tasks #{:failed}]
+                                                    [:laws #{:unnamed-site}] [:merges #{:merge :task-conflict :unrun}] [:tasks #{:failed}]
                                                     [:agents #{:dead :error :waste}] [:errors #{:platform :eval :agent :effect}]]}
-                       :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :dead-citation :unnamed-site :stale-pin]
+                       :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :dead-citation :unnamed-site :stale-pin :unrun]
  :seon.problems/row [:map {:seon.render/ai seon.render.ai/problem-row}
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]

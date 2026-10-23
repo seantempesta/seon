@@ -19,6 +19,7 @@
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task :attempt (the task and attempt root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
+;; :walks (test-plan's last reach walks, each keyed by the db value it walked: walks)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 (defonce state (atom nil))
 
@@ -296,6 +297,21 @@
       (assoc :got (print/text (second (:actual m)) (:part print/budgets)))
       (contract/valid? :seon.cost/report cost) (assoc :cost cost))))
 
+(defn- walk
+  "(f db inputs), reused while db is the very value walked last for role (:branch, :base): a
+  value never changes, so neither does its walk (AGENTS §5, results reused by input). An
+  attempt's base stays one value until merge-main! replaces it, so its digests are walked once
+  per base, not once per observe; root's :tests after the last observe reuses the branch's.
+  Measured 2026-10-23: a reach walk ~1.2-1.4 s, 1.7-1.9 GB on Seon's program (2144 forms)."
+  {:malli/schema [:=> [:cat [:enum :branch :base] :seon.host/db :seon.program/inputs :seon.host/fn] :map]}
+  [role db inputs f]
+  (let [w (get-in @state [:walks role])]
+    (if (and w (identical? db (:db w)) (= inputs (:inputs w)))
+      (:value w)
+      (let [v (f db inputs)]
+        (swap! state assoc-in [:walks role] {:db db :inputs inputs :value v})
+        v))))
+
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/reach-digests) against base's (main at its merge base), the greens stored at
@@ -328,10 +344,10 @@
         dir (when shared (cfg/value :seon.config.source/test-results-dir))
         judges? (fn [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
                           (and (:test m) (not (program/scratch-ns? (:ns m))))))
-        idx (into {} (filter (comp judges? key)) (program/reach-index db in))
+        idx (into {} (filter (comp judges? key)) (walk :branch db in program/reach-index))
         cd (update-vals idx :digest)
         unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))]
-    (-> (proofs/plan (some-> base (program/reach-digests in)) cd (if dir (proofs/greens dir (vec (vals cd))) {}) proofs)
+    (-> (proofs/plan (when base (walk :base base in program/reach-digests)) cd (if dir (proofs/greens dir (vec (vals cd))) {}) proofs)
         (update :selected into unrecorded)
         (update :run into unrecorded)
         (assoc :digests cd :dir dir
@@ -398,12 +414,30 @@
   Each test that ran green is stored at its digest in test-plan's :dir through root's :file
   owner (seon.proofs/store-greens!); a write refused is named under :unstored, and that test
   runs again. :ran is how many tests reported. (forked pid) runs here once the child exists.
-  A fork refused (threads active) is :seon.test/fork-refused: no test ran."
-  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol]] [:or :seon.test/result :seon.test/fork-refused]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]]}
-  ([ticks proofs] (run-tests-forked ticks proofs (fn [_] nil)))
-  ([ticks proofs forked]
-  (let [{:keys [selected run reused digests dir]} (test-plan (db) (:base @state) proofs)
+  A fork refused (threads active) is :seon.test/fork-refused: no test ran.
+  Root's ruling (a), 2026-10-22: mode :turn (a turn's observation) selects the proofs and the
+  tests the branch itself changed or added; mode :judge (root's judge at the attempt's end)
+  selects the plan's tests. Either way a process test (the plan's :process: it reaches a shell,
+  a fork, a root or the binary), a proof among them, never runs here: the owner's ruling,
+  2026-10-23, runs those only when named (root's gate, my.root/gate!). The answer names them
+  (:deferred) and how many the judge runs (:at-judge)."
+  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge]] [:or :seon.test/result :seon.test/fork-refused]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]]}
+  ([ticks proofs mode] (run-tests-forked ticks proofs mode (fn [_] nil)))
+  ([ticks proofs mode forked]
+  (let [plan (test-plan (db) (:base @state) proofs)
+        proc (:process plan)
+        keep? #(not (proc %))
+        judge (filterv keep? (:selected plan))
+        deferred (vec (remove keep? (:selected plan)))
+        selected (if (= :judge mode)
+                   judge
+                   ;; the proofs as the plan selects them (one loaded but never recorded has
+                   ;; no digest and is selected all the same), and the tests the branch changed
+                   (vec (sort-by str (filter keep? (into (set (filter proofs (:selected plan)))
+                                                         (filter (:digests plan) (program/changed-vars (:base @state) (db))))))))
+        {:keys [reused digests dir]} plan
+        run (filterv #(not (reused %)) selected)
         reused-reports (vec (for [t selected :when (reused t)] {:type :pass :var (str "#'" t) :reused true}))
         [r w] (lib/pipe) t0 (profile/now-ns)
         res (lib/fork!
@@ -439,7 +473,8 @@
         (cond-> (seq unstored) (assoc :unstored unstored))
         (update :reports into reused-reports)
         (update :pass + (count reused-reports))
-        (assoc :reused (count reused-reports) :ran (count (distinct (keep :var (:reports res))))))))))
+        (assoc :reused (count reused-reports) :ran (count (distinct (keep :var (:reports res))))
+               :selected selected :deferred deferred :at-judge (count judge)))))))
 
 ;; ---- the loop ----------------------------------------------------------------------
 
@@ -480,6 +515,7 @@
     ;; root hears the test child's pid once it is forked (its agent proc's :tests-started event)
     :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
                                                               (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
+                                                              :judge
                                                               #(send! {:op :tests-started :id (:id m) :pid %}))
              :mem-mb (mem-mb)}]
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded

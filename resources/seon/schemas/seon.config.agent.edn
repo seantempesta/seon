@@ -9,4 +9,5 @@
  :seon.config.agent/sock-buf-bytes [:int {:min 4096 :seon.config/unit "bytes" :description "Each socket's send and receive buffer (root, fork server and agents)."}]
  :seon.config.agent/form-ticks [:int {:min 0 :seon.config/unit "engine ticks" :description "Work one form the model or an outside agent sends may do before it stops with :seon.repl/ticks-spent. 0: none."}]
  :seon.config.agent/form-top-fns [:int {:min 0 :seon.config/unit "functions" :description "How many of a form's costliest contracted functions its reply item keeps (seon.repl/wrap-cost)."}]
- :seon.config.agent/test-ticks [:int {:min 0 :seon.config/unit "engine ticks" :description "Work one proof run may do before it stops with :seon.test/ticks-spent naming the running test. 0: none."}]}
+ :seon.config.agent/test-ticks [:int {:min 0 :seon.config/unit "engine ticks" :description "Work one proof run may do before it stops with :seon.test/ticks-spent naming the running test. 0: none."}]
+ :seon.config.agent/turn-test-ticks [:int {:min 0 :seon.config/unit "engine ticks" :description "Work a turn's own test run (the proofs and the tests the branch changed) may do; at the bound the unfinished tests are unknown, never red. 0: none."}]}

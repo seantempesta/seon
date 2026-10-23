@@ -212,6 +212,14 @@
  ;; than a form's: cost proofs measure large sizes. At the bound the run stops with
  ;; :seon.test/ticks-spent naming the test that was running. 0: none.
  :seon.config.agent/test-ticks 200000000000
+ ;; Unit: engine ticks a turn's own test run may do: the task's proofs and the tests the
+ ;; branch changed or added (root's ruling (a), 2026-10-22; the reached in-process set is the
+ ;; judge's, at the attempt's end, under test-ticks). Provenance: step E's run 7, where a change
+ ;; to seon.problems/report put 294 reached tests in every turn's run and one ran for 2.5 h;
+ ;; the same budget as one form's (~5-25 s of work). At the bound the run stops with
+ ;; :seon.test/ticks-spent; the tests it did not finish are unknown, never red, and the turn
+ ;; says how many and how to run them (my.agent/prove). 0: none.
+ :seon.config.agent/turn-test-ticks 20000000000
 
  ;; ==== merges =================================================================================
 
@@ -241,6 +249,14 @@
  ;; boots): absent, no source is imported and nothing is written. config/local.edn or --set names
  ;; another tree: the main tree's names ../next-merges, so write-back never edits main's files.
  :seon.config.source/root #env SEON_SOURCE_ROOT
+ ;; Unit: path. The checkout the merge gate runs a merge's deferred process tests on
+ ;; (seon.fx/run-tests: a worktree of it at the merges head, the candidate's files over it,
+ ;; prove's entry there). Provenance: root's ruling (a), 2026-10-23, from step E's dry run (a test
+ ;; root importing test/ could not host a checkout, and its gated merges were all refused).
+ ;; Absent (as here; the standing root's config/local.edn names its merges tree): a merge that
+ ;; reaches process tests merges with them recorded unrun on its attempt, an open problem
+ ;; ("merged with N process tests unrun") until they run; root's git merge runs them (bin/prove).
+ :seon.config.source/gate-checkout #env SEON_GATE_CHECKOUT
  ;; Unit: paths under the root, read in this order. Their .clj files are namespaces; the .edn
  ;; files under resources/seon/schemas are schema resources (schemas are program: an agent
  ;; changes one with my.schema/register!, and the merge writes it back; owner 2026-10-21).
@@ -276,6 +292,10 @@
  ;; whose target/seon bin/root next starts. Kept with the run (a generation is a record of what
  ;; ran); one worktree and one ~200 MB binary per merges commit built.
  :seon.config.source/generations-dir #join [#ref [:seon.config.root/runs-dir] "/generations"]
+ ;; Unit: path. Where a merge's deferred process tests run (seon.fx/run-tests, root's ruling
+ ;; 2026-10-22): <dir>/<sha>-<uuid>, a worktree of the merges head with the candidate's files,
+ ;; removed after its run; its log stays beside it (<dir>/<sha>-<uuid>.tests.log).
+ :seon.config.source/tests-dir #join [#ref [:seon.config.root/runs-dir] "/merge-tests"]
  ;; Unit: path. Test results by reach digest (task seon.program/tests-run-by-reach; owner
  ;; 2026-10-21: "incremental tests even across worktrees based on test digest"): one directory
  ;; beside the checkouts, shared by every checkout and worktree, one <digest>.edn per result,
@@ -337,8 +357,12 @@
  ;; the reasoning ate the reply (:seon.model/reasoning-ate-reply). v1 ships 65,536 for Flash
  ;; with thinking on (its 4,096 and 8,192 starved reasoning). Ported 2026-10-21 after the first
  ;; DeepSeek agent on Seon's own code: two refinement attempts answered empty, reasoning took all
- ;; 2,048. Billed by use, so the ceiling costs nothing unspent.
- :seon.config.ai/max-tokens #long #or [#env SEON_AI_MAX_TOKENS 65536]
+ ;; 2,048. 2026-10-22, step E (root's research, notes/agent-context-research-2026-10-22.md §3.3):
+ ;; 8,192 while thinking is off (the default below). The largest ordinary reply measured ~5k;
+ ;; loop replies ran for minutes (168 of 181 model-minutes, 12.4M tokens, AUDIT-agents §5.2),
+ ;; and a task whose every reply runs to 65,536 costs ~$5.8 (one such reply ~$0.04). A task or
+ ;; model that turns thinking on raises it through the resolver (v1's 65,536 for that case).
+ :seon.config.ai/max-tokens #long #or [#env SEON_AI_MAX_TOKENS 8192]
  ;; DeepSeek's thinking mode (:enabled | :disabled). Off (owner, 2026-10-21: "if we can't have
  ;; intuitive function calling based on the context our context is bad and instructions need
  ;; help"): a task whose next step needs long reasoning is a context or instruction defect to
@@ -459,6 +483,11 @@
  ;; the plan's cited vars and the proofs call. 0 shows none. Provenance: R4's k = 5
  ;; (notes/option3-R4-learning.md 5: 14 of 16 needed helpers in the top 5).
  :seon.config.render/found 5
+ ;; Unit: tokens (seon.print.select/estimate). The attempt's map of the namespaces its proofs and
+ ;; cited vars live in (seon.context/ns-map): each namespace's functions, most referenced first,
+ ;; within an equal share. Provenance: root's research (2026-10-22, lever 1), aider's default
+ ;; --map-tokens 1k. At the bound a namespace's rest is (clojure.repl/dir ns).
+ :seon.config.render/map-tokens 1000
  ;; Unit: items. A list shown in part (seon.print/bounded) shows this many, then `+N more:
  ;; where` (docs/render.md#bounded-lists). Provenance: the literals each list carried before
  ;; (render.ui and render.ai, 2026-10-22), kept as they were.

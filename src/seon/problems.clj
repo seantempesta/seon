@@ -39,7 +39,7 @@
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses "Attempt statuses of a death (:seon.attempt/status)." (:seon.status/failed (contract/properties :seon.attempt/status)))
 (def ^:private finished "Attempt statuses that make its task done (:seon.attempt/status, as seon.reconcile/finished)." (:seon.status/finished (contract/properties :seon.attempt/status)))
-(def attempt-classes [:red :cost :merge :dead :error :waste :task-conflict])
+(def attempt-classes [:red :cost :merge :dead :error :waste :task-conflict :unrun])
 
 (defn- es
   "The entities carrying attribute a (its aevt index: only the entities that have it)."
@@ -209,6 +209,7 @@
   them)."
   [:seon.attempt/id :seon.attempt/status :seon.attempt/outcome :seon.attempt/reason :seon.attempt/end-ms :seon.attempt/agent
    :seon.attempt/unmerged :seon.attempt/failures :seon.attempt/costs :seon.attempt/error :seon.attempt/waste :seon.attempt/task-conflicts
+   :seon.attempt/deferred :seon.attempt/gate-unread {:seon.attempt/deferred-results [:seon.proof/test :seon.proof/status]}
    {:seon.attempt/task [:db/id :seon.task/id :seon.task/ns :seon.task/proofs]}
    {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
@@ -282,7 +283,17 @@
       (and err (not merge?) (not (death-statuses status)))
       (assoc :error [(assoc base :error err :producer (:seon.error/operation err) :evidence {:from aid :error err})])
       (seq waste)
-      (assoc :waste [(assoc base :waste waste :evidence {:from aid :waste waste})]))))
+      (assoc :waste [(assoc base :waste waste :evidence {:from aid :waste waste})])
+      ;; owner's ruling, 2026-10-23: merged with its deferred process tests unasked (or no
+      ;; gate checkout declared): open until each is recorded passing (my.root/gate!)
+      (and (= :merged status) (seq (:seon.attempt/deferred p))
+           (not-every? (into #{} (keep #(when (= :pass (:seon.proof/status %)) (:seon.proof/test %))) (:seon.attempt/deferred-results p))
+                       (:seon.attempt/deferred p)))
+      (assoc :unrun [(cond-> (assoc base :open? true :tests (vec (sort-by str (:seon.attempt/deferred p)))
+                            :reason (str "merged with " (count (:seon.attempt/deferred p)) " process tests unrun")
+                            :evidence {:from aid :deferred (vec (sort-by str (:seon.attempt/deferred p)))})
+                       ;; the changed namespaces its gate could not read, and why
+                       (:seon.attempt/gate-unread p) (assoc :unread (:seon.attempt/gate-unread p)))]))))
 
 (defn report
   "Every problem recorded on main db, by class: {:t :classes {class {:n :rows}}}. Counted
@@ -299,7 +310,7 @@
         errors (group-by :class (map #(let [r (error-row db ans %)] (update r :count max (get live (:signature r) 0)))
                                      (es db :seon.error/signature)))
         attempts (into (sorted-set)
-                       (concat (mapcat #(es db %) [:seon.attempt/failures :seon.attempt/costs :seon.attempt/error :seon.attempt/waste
+                       (concat (mapcat #(es db %) [:seon.attempt/failures :seon.attempt/costs :seon.attempt/error :seon.attempt/waste :seon.attempt/deferred
                                                    :seon.attempt/conflicts :seon.attempt/unmerged :seon.attempt/task-conflicts])
                                (mapcat (fn [s] (map :e (d/datoms db :avet :seon.attempt/status s))) (conj death-statuses :behind))))
         by-class (apply merge-with into (map #(attempt-rows db ans %) attempts))

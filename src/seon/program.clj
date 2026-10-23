@@ -459,17 +459,21 @@
   (let [ds (:form/defines (d/entity db e))]
     (or (empty? ds) (boolean (some #(= e (form-of db (:db/id %))) ds)))))
 
+(defn- definition-key
+  "Definition entity x's program key ([:var sym], [:method ...], [:impl ...], [:ns sym])."
+  {:malli/schema [:=> [:cat :any] [:maybe :seon.merge/program-key]]}
+  [x] (cond (:var/name x) [:var (:var/name x)]
+            (:method/key x) (into [:method] (sedn/decode (:method/key x)))
+            (:impl/key x) (into [:impl] (sedn/decode (:impl/key x)))
+            (:ns/name x) [:ns (:ns/name x)]))
+
 (defn form-row
   "Form entity e as the loader and the merge read it."
   {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
   [db e]
-  (let [f (d/entity db e)
-        def-key (fn [x] (cond (:var/name x) [:var (:var/name x)]
-                              (:method/key x) (into [:method] (sedn/decode (:method/key x)))
-                              (:impl/key x) (into [:impl] (sedn/decode (:impl/key x)))
-                              (:ns/name x) [:ns (:ns/name x)]))]
+  (let [f (d/entity db e)]
     (cond-> (into {:e e :id (:form/id f) :src (:form/src f) :ns (:ns/name (:form/ns f)) :order (:form/order f)
-                   :defines (into #{} (keep def-key) (:form/defines f))
+                   :defines (into #{} (keep definition-key) (:form/defines f))
                    :declares (into #{} (map :var/name) (:form/declares f))}
                   (for [[a k] form-sets] [k (set (get f a))]))
       (:form/lead f) (assoc :lead (:form/lead f)))))
@@ -578,9 +582,16 @@
 
 (defn- held?
   "Does this process already hold form row f compiled: imported from the source tree, in a
-  namespace it holds (the binary's own; test/ is imported but not built in)?"
+  namespace it holds (the binary's own; test/ is imported but not built in), every var it
+  defines bound there? A form imported into a namespace loaded earlier (a test namespace
+  loaded at boot, then a re-import adding a deftest) defines a var this process does not
+  hold yet: it is loaded, never read as an unmap (seon.stage/stage-tx)."
   {:malli/schema [:=> [:cat :seon.host/db :map] :boolean]}
-  [db f] (boolean (and (:form/source (d/entity db (:e f))) (find-ns (:ns f)))))
+  [db f]
+  (boolean (and (:form/source (d/entity db (:e f)))
+                (when-let [n (find-ns (:ns f))]
+                  (every? (fn [[k s]] (or (not= :var k) (some-> (get (ns-interns n) (symbol (name s))) bound?)))
+                          (:defines f))))))
 
 (defn- requiring
   "The form entities of namespace nsym and of every namespace a form requires it from: where
@@ -707,17 +718,6 @@
     :method (when-let [v (find-var a)] (when (instance? clojure.lang.MultiFn @v) (remove-method @v (read-string b))))
     nil))
 
-(defn- definitions
-  "{program key -> form id} of db's definitions that point to a form."
-  {:malli/schema [:=> [:cat :seon.host/db] :map]}
-  [db]
-  (into {} (for [f (live-forms db) k (:defines f) :let [e (case (first k) :var (pdb/eid db :var/name (second k))
-                                                             :method (pdb/eid db :method/key (method-key (second k) (nth k 2)))
-                                                             :impl (pdb/eid db :impl/key (impl-key (second k) (nth k 2)))
-                                                             :ns (pdb/eid db :ns/name (second k)))]
-             :when (and e (= (:e f) (form-of db e)))]
-         [k (:id f)])))
-
 (defn- load!
   "Load changed (form rows this binary does not hold), the forms a changed macro expanded
   in (dependents) and the forms whose contracts the changed schema keys reach
@@ -739,14 +739,20 @@
   "Make this process run db-to's program where it holds db-from's: each live form db-to
   has that db-from had not is loaded (but the binary's own), with what it reaches (load!),
   and each definition db-from had that db-to has none of is removed. Answers the load
-  errors."
+  errors. Cost: each db's form ids and definition pointers, read as datoms; a form row is
+  built only for a form db-to has live that db-from had not (measured 2026-10-23 on Seon's
+  program: four live-forms reads, ~1.4 s, before)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.program/error]]}
   [db-from db-to]
-  (let [from (set (map :id (live-forms db-from)))
-        to-defs (definitions db-to)
+  (let [live-ids (fn [db] (into #{} (for [dt (d/datoms db :aevt :form/id) :when (live? db (:e dt))] (:v dt))))
+        def-keys (fn [db] (into #{} (for [a (vals pointer) dt (d/datoms db :aevt a)] (definition-key (d/entity db (:e dt))))))
+        from (live-ids db-from)
+        to-defs (def-keys db-to)
         sc-from (schema-changes db-from)]
-    (doseq [k (keys (definitions db-from)) :when (not (contains? to-defs k))] (remove-definition! k))
-    (load! db-to (filterv #(not (or (from (:id %)) (held? db-to %))) (live-forms db-to))
+    (doseq [k (sort-by str (def-keys db-from)) :when (not (contains? to-defs k))] (remove-definition! k))
+    (load! db-to (filterv #(not (held? db-to %))
+                          (for [dt (d/datoms db-to :aevt :form/id) :when (and (not (from (:v dt))) (live? db-to (:e dt)))]
+                            (form-row db-to (:e dt))))
            (set (for [[k v] (schema-changes db-to) :when (not= v (get sc-from k))] k)))))
 
 (defn load-changes!

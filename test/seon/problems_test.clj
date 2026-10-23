@@ -406,6 +406,33 @@
     (is (= :lost (:status (first (filter #(= "t/l#1" (:attempt %)) rows)))))
     (is (not-any? #(= "t/l#1" (:attempt %)) (get-in (problems/report db) [:classes :error :rows])))))
 
+(deftest a-merge-with-its-process-tests-unrun-is-an-open-problem
+  ;; owner's ruling, 2026-10-23: a change that reaches process tests merges with them unrun
+  ;; unless root asked; unknown stays visible, an open :unrun row, until each is recorded
+  ;; passing (my.root/gate! runs them): one passing of two, or a red, keeps it open
+  (let [att (fn [extra] (:db-after (d/with (seeded 1 5)
+                                           [{:seon.task/id "t/u" :seon.task/ns 't :seon.task/name "u" :seon.task/plan "p" :seon.task/execution :running
+                                             :seon.task/branch :u :seon.task/kind :merge}
+                                            (merge {:seon.attempt/id "t/u#1" :seon.attempt/task [:seon.task/id "t/u"] :seon.attempt/boot "b" :seon.attempt/agent :a9
+                                                    :seon.attempt/start-ms 1 :seon.attempt/end-ms 9 :seon.attempt/branch :u :seon.attempt/max-turns 2
+                                                    :seon.attempt/status :merged :seon.attempt/deferred ['seon.root-test/boots 'seon.check-test/clean]}
+                                                   extra)])))
+        rows #(get-in (problems/report %) [:classes :unrun :rows])]
+    (is (= [["t/u#1" "merged with 2 process tests unrun" true]] (mapv (juxt :attempt :reason :open?) (rows (att {})))))
+    (is (= 1 (count (rows (att {:seon.attempt/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :pass}]}))))
+        "one of two recorded: still open")
+    (is (= 1 (count (rows (att {:seon.attempt/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :pass}
+                                                                {:seon.proof/test 'seon.check-test/clean :seon.proof/status :fail}]}))))
+        "a red among them: still open")
+    (is (= [] (rows (att {:seon.attempt/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :pass}
+                                                         {:seon.proof/test 'seon.check-test/clean :seon.proof/status :pass}]})))
+        "each passing: the row closes")
+    (is (= [{:ns 'app.repl-only :reason "no :ns/file on the branch: its forms were never written to a file"}]
+           (:unread (first (rows (att {:seon.attempt/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :error}
+                                                                       {:seon.proof/test 'seon.check-test/clean :seon.proof/status :error}]
+                                       :seon.attempt/gate-unread [{:ns 'app.repl-only :reason "no :ns/file on the branch: its forms were never written to a file"}]})))))
+        "a gate that could not read a changed namespace names it, and why, on the open row")))
+
 ;; ---- derived: a dead citation is true while it is true (notes/health-design-2026-10-23.md) ----
 
 (deftest a-deleted-var-makes-its-citation-dead-until-it-is-back
