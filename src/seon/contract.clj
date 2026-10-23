@@ -2,7 +2,7 @@
   "From proto/core 9f5100a proto.contract (session G1). The rule: every platform function carries a Malli function schema over named,
   registered schemas, and every call is checked on entry (inputs, arity) and on exit
   (output) by malli's own `m/-instrument`, as Seon's `seon.instrument/compiled-wrapper`
-  does. A refusal throws an ex-info whose data is the one error map
+  does. An error throws an ex-info whose data is the one error map
   (`:seon.error/type :seon.instrument/contract-error`), caught only at an entrant
   boundary (the agent's eval, a Flow proc, the API caller).
 
@@ -15,7 +15,7 @@
     wrappers and their compiled validators copy-on-write.
   - `arm!` is the same for one var: an agent's `defn` with `:malli/schema` metadata is
     armed when it is defined, and main's program when it loads.
-  - `:seon.config.contract/guarantees :off` (the config, read once at load) installs no
+  - `:seon.config.contract/instrument :off` (the config, read once at load) installs no
     wrapper and no recording transaction: the same binary measured with instrumentation off;
     `:contracts` arms the wrappers without the recording transaction."
   (:refer-clojure :exclude [defn defn-])
@@ -24,14 +24,14 @@
             [seon.config :as config]))
 
 (def on?
-  "Are the contracts on in this process (:seon.config.contract/guarantees)? :off: no
+  "Are the contracts on in this process (:seon.config.contract/instrument)? :off: no
   wrapper and no recording; :contracts: wrappers, no recording transaction (for measuring
   the two apart); :on: both."
-  (not= :off (config/value :seon.config.contract/guarantees)))
+  (not= :off (config/value :seon.config.contract/instrument)))
 
 (def record?
-  "Does each eval request write its recording transaction (:seon.config.contract/guarantees :on)?"
-  (= :on (config/value :seon.config.contract/guarantees)))
+  "Does each eval request write its recording transaction (:seon.config.contract/instrument :on)?"
+  (= :on (config/value :seon.config.contract/instrument)))
 
 ;; ---- the predicate pack: host objects with no data form ------------------------------
 ;; Named predicate schemas (malli simple schemas), so a contract names them like any
@@ -111,13 +111,13 @@
   {:malli/schema [:=> [:cat :any] :seon.host/schema]}
   [?schema] (m/schema ?schema options))
 
-;; ---- refusals: malli's report -> the error map, thrown ---------------------------------
+;; ---- invalid: malli's report -> the error map, thrown ---------------------------------
 
 (clojure.core/defn- problems {:malli/schema [:=> [:cat :seon.host/schema :any] [:vector :seon.error/problem]]} [s v]
   (vec (for [{:keys [path in schema value]} (:errors (m/explain s v))]
          {:path path :in in :expected (m/form schema) :value (print/text value (:part print/budgets))})))
 
-(clojure.core/defn- refusal
+(clojure.core/defn- invalid
   "Malli's report for fn-sym, as the thrown error map."
   {:malli/schema [:=> [:cat :qualified-symbol :qualified-keyword :map] :any]}
   [fn-sym kind data]
@@ -142,12 +142,12 @@
     (throw (ex-info (:seon.error/message e) e))))
 
 (clojure.core/defn wrap
-  "f instrumented by the compiled function schema s, refusals named fn-sym, and counted
+  "f instrumented by the compiled function schema s, errors named fn-sym, and counted
   under fn-sym (seon.profile: every call counted, one in 64 timed, the check included),
   except seon.profile's own functions."
   {:malli/schema [:=> [:cat :qualified-symbol :seon.host/schema :seon.host/fn] :seon.host/fn]}
   [fn-sym s f]
-  (let [checked (m/-instrument {:schema (m/deref s) :scope #{:input :output} :report (fn [kind data] (refusal fn-sym kind data))} f options)]
+  (let [checked (m/-instrument {:schema (m/deref s) :scope #{:input :output} :report (fn [kind data] (invalid fn-sym kind data))} f options)]
     ;; the meter is not metered: reading a count must not add one
     (if (= "seon.profile" (namespace fn-sym)) checked (profile/counted fn-sym checked))))
 
@@ -159,7 +159,7 @@
 ;; use this namespace's defn, defn- and defchecked in place of clojure.core's.
 
 (clojure.core/defn checked
-  "f checked by contract form c (compiled once, here: seon.contract/wrap), refusals
+  "f checked by contract form c (compiled once, here: seon.contract/wrap), errors
   named fn-sym; f itself when instrumentation is off."
   {:malli/schema [:=> [:cat :qualified-symbol :any :seon.host/fn] :seon.host/fn]}
   [fn-sym c f]

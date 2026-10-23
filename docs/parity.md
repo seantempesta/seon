@@ -12,7 +12,7 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 | ``bin/seon logs`` | `runs/root.log`, no command | partial |
 | ``bin/seon open``, ``init``, ``reset``, ``nuke`` | none (one root per checkout; per-checkout ports, `bin/ports`) | missing |
 | ``bin/seon config apply`` (sparse, per branch) | config layers plus `--set`; `seon.root/apply!` re-reads `resources/seon/system.edn` | partial |
-| ``bin/lane`` claims and proven commits | worktrees (`bin/worktree`) and root's merges | dropped |
+| ``bin/worker`` claims and proven commits | worktrees (`bin/worktree`) and root's merges | dropped |
 
 ## The MCP server
 
@@ -21,7 +21,7 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 | ``eval_clj`` (an agent's REPL or root's) | `seon_eval` (one evaluator: no JVM mode) | present |
 | ``runtime_status`` (health, problems, flow, readiness) | `seon_agents` lists agents and tasks; health only on the dashboard | partial |
 | an outside agent works a task | `seon_attach`, `seon_context`, `seon_done` | new |
-| refusals and defects answered per request | a defect answers that request the typed `:seon.server/defect` and the server goes on (`seon.server/respond`); a refused attach still writes the task's state first (task `seon.entrance/attach-writes-nothing-when-it-is-refused`) | partial |
+| reasons and defects answered per request | a defect answers that request the typed `:seon.server/defect` and the server goes on (`seon.server/respond`); a refused attach still writes the task's state first (task `seon.entrance/attach-writes-nothing-when-it-is-refused`) | partial |
 
 The server's ops, the MCP tools and root's evaluation path are [server](server.md#ops). `seon_agents` returns every task, the cancelled ones included: too much context for an outside agent.
 
@@ -53,8 +53,8 @@ The server's ops, the MCP tools and root's evaluation path are [server](server.m
 | three-way program merge, conflicts as entries, forward merge | `seon.merge`, `my.branch/merge-main!` | present |
 | many agents merging onto shared definitions at once (v1's swarm) | `bin/check swarm` (`seon.e2e`'s swarm row: 20 tasks over 5 shared vars, 8 agents at once; red unless conflicts arose and every one was resolved, every task done, and a fresh agent on main gets every proof's value) | present |
 | main wins a conflict | ours is kept | missing |
-| a changed function no test reaches refuses the branch (``:seon.test/unreached``, ``:seon.source/unreached``) | none: `seon.reconcile/done-refusals` has no coverage refusal | missing |
-| one done rule shared with merge | `seon.reconcile/done-refusals` (a proof that never ran is `:proof-unknown`, not red; [tasks](tasks.md#the-done-rule)) | present |
+| a changed function no test reaches refuses the branch (``:seon.test/unreached``, ``:seon.source/unreached``) | none: `seon.reconcile/done-explain` has no coverage reason | missing |
+| one done rule shared with merge | `seon.reconcile/done-explain` (a proof that never ran is `:proof-unknown`, not red; [tasks](tasks.md#the-done-rule)) | present |
 | tests selected by reach; results reused by reach digest | `seon.proofs/plan` over `seon.program/reach-digests`: `bin/prove`, `bin/test` and `bin/check` reuse greens in `../test-results` (check steps keyed too); agents' runs select and reuse by the same plan (`seon.agent/test-plan`) | present; agents' greens are kept per root ([merging](merging.md#a-merge-runs-what-the-change-reaches)) |
 | contracts armed at definition; cost proofs; per-function profile | `seon.contract`, `seon.cost`, `seon.profile` | present |
 | turns-to-green report (median, p90) | `seon.learn` charges overrun per attempt (stored as ``:seon.attempt/waste``) | partial |

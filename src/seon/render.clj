@@ -111,7 +111,7 @@
 
 (defn print-ai
   "The one value printer as the default :ai render: v's text under opts' budget ({:text
-  :truncated?}), one line when shown :inline; the refusal's message when even its first part
+  :truncated?}), one line when shown :inline; the error's message when even its first part
   does not fit."
   {:malli/schema [:=> [:cat :any :seon.render/opts] :seon.render/text]}
   [v opts]

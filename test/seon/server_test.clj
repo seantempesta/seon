@@ -16,7 +16,7 @@
     (is (= (select-keys a-err [:tag :form :printed]) (select-keys r-err [:tag :form :printed])) "an error replies alike")
     (is (= "1" (:printed r-star)) "`sys` is this root: one agent")))
 
-(deftest a-server-refusal-is-the-one-error-map
+(deftest a-server-refused-answer-is-the-one-error-map
   ;; task seon.render/one-owner-per-view-path (B2): the server refuses as root does, with the
   ;; one error map, never a second {:error "text"} shape
   (let [answers (at/in-agent [{:op :nope} {:op :context :agent "a9"} {:op :done :agent "a9"} {:op :attach :task "no/such"}])]
@@ -83,7 +83,7 @@
   ;; task seon.render/a-debug-view-of-any-agent (parity row 73): the owner's message, sent as
   ;; the page's message bar sends it (seon.root/message!, here through the server's :message
   ;; op), is root's one delivery: it is in the agent's inbox when the agent next reads it,
-  ;; though it arrived while the agent was not reading its socket; no agent, the refusal
+  ;; though it arrived while the agent was not reading its socket; no agent: refused
   (let [[sent taken none] (at/in-agent [{:op :message :agent "a1" :body "use demo/g"}
                                         "(my.agent/messages)"
                                         {:op :message :agent "a9" :body "hello?"}])]

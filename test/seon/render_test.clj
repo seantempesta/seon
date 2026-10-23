@@ -297,7 +297,7 @@
 (defn- turn-rows-of "The conversation's rows that are turns, rendered." [page] (filter #(str/includes? % "class=\"turn ") (conv-html page)))
 
 (deftest a-context-read-is-shown-once
-  (let [ctx (str "{:turn \"1 of 8\" :refused [{:refusal :contract-gap :vars [" (str/join " " (for [i (range 360)] (str "app.m/f" i))) "]}]}")
+  (let [ctx (str "{:turn \"1 of 8\" :refused [{:reason :contract-gap :vars [" (str/join " " (for [i (range 360)] (str "app.m/f" i))) "]}]}")
         read {:id 0 :tag :ret :form "(print (seon.turn/context-block \"t/x\" \"t/x#1\"))" :printed "nil" :out ctx :origin :context}
         card (h/html (ui/agent-card {:id :a14 :status :idle :evals [read]} {}))
         row (h/html (ui/history-row read {}))]
@@ -317,7 +317,7 @@
             ;; an outside read whose done rule refused 360 contract gaps: its basis, never its text
             b {:commit (d/commit-id @conn) :task "t/x" :attempt "t/x#1" :turn 1 :max-turns 1 :origin :outside
                :observed {:results {} :reds [] :run-errors []
-                          :refusals (vec (for [i (range 360)] {:refusal :contract-gap :symbol (symbol "app.m" (str "f" i))}))}}
+                          :reasons (vec (for [i (range 360)] {:reason :contract-gap :symbol (symbol "app.m" (str "f" i))}))}}
             _ (d/transact conn [{:seon.turn/id "t/x#1/read-1" :seon.turn/attempt "t/x#1" :seon.turn/n 1
                                  :seon.turn/origin :outside :seon.turn/basis b}])
             db @conn
@@ -429,7 +429,7 @@
       (is (not (str/includes? html "seon.error/type")) what))))
 
 (deftest a-refused-merge-says-why-once
-  ;; task seon.render/one-owner-per-view-path (B2, A14): a refusal is the one error map; the
+  ;; task seon.render/one-owner-per-view-path (B2, A14): a reason is the one error map; the
   ;; card's pill and the stream's row read its message, once
   (let [r (seon.contract/error :seon.root/refused 'seon.root/merge! "2 functions have no contract" {:agent :a1})
         card (h/html (ui/agent-card {:id :a1 :status :idle :evals [] :merged r} {}))
@@ -441,7 +441,7 @@
 ;;; --- the values agents and root read: declared AI and HTML renders, one per value --------
 
 (def ^:private behind
-  ;; as seon.writer/merge-refusal makes it
+  ;; as seon.writer/merge-reason makes it
   (seon.contract/error :seon.merge/behind 'seon.writer/merge-branch
                        "main changed 3 key(s) since the branch's merge base: merge main into the branch first"
                        {:tx 812 :behind 3
@@ -641,7 +641,7 @@
                                                            :seon.task/proofs #{'demo-test/f-test}}]))
            observed {:results {'demo-test/f-test :fail} :run-errors []
                      :reds [{:test 'demo-test/f-test :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))" :got "(= 6 4)"}]
-                     :refusals [{:refusal :proof-red :symbol 'demo-test/f-test}] :will-merge {}}
+                     :reasons [{:reason :proof-red :symbol 'demo-test/f-test}] :will-merge {}}
            turn! (fn [n obs reply calls usage]
                    (let [b {:commit (d/commit-id @conn) :task "demo/f" :attempt "demo/f#1" :turn n :max-turns 8 :origin :model :observed obs}]
                      (d/transact conn [(merge usage {:seon.turn/id (str "demo/f#1/" n) :seon.turn/attempt "demo/f#1" :seon.turn/n n
@@ -661,7 +661,7 @@
               (assoc (u 3900 120 0) :seon.turn/reasoning "The plan says triple; the proof checks (f 2) is 6."))
        (d/transact conn (seon.repl/record-tx :a3 "a3-77-2000" [{:id 6 :tag :ret :form "(f 2)" :printed "6" :ms 0.1 :origin :ui}] nil))
        (d/transact conn (program "(defn f \"Triples.\" [x] (* 3 x))"))
-       (turn! 1 (assoc observed :results {'demo-test/f-test :pass} :reds [] :refusals [] :will-merge {:changed ['demo/f]}
+       (turn! 1 (assoc observed :results {'demo-test/f-test :pass} :reds [] :reasons [] :will-merge {:changed ['demo/f]}
                        :messages [{:from :owner :body "check demo/g too"}])
               "Done; checking g." [{:id "call-1" :code "(my.turn/wait)" :evals ""}] (u 4400 40 3800))
        (f @conn)))))

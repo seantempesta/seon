@@ -170,27 +170,27 @@
                    (str (when (> times 1) (str ";; " times "x, the same form and answer\n")) text))))
 
 (defn- refused
-  "The done rule's refusals as the agent reads them, beyond its own red proofs (shown with
+  "The done rule's reasons as the agent reads them, beyond its own red proofs (shown with
   the proofs): a red test names its failures, a contract gap its var, a design step that
   has not improved its plan the call that does."
-  {:malli/schema [:=> [:cat [:vector :seon.reconcile/refusal] [:vector :map]] [:vector :map]]}
-  [refusals reds]
-  (let [rs (remove #(= :proof-red (:refusal %)) refusals)
-        gaps (vec (keep #(when (= :contract-gap (:refusal %)) (:symbol %)) rs))
-        unmerged (vec (keep #(when (= :unmerged (:refusal %)) (:key %)) rs))]
+  {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done] [:vector :map]] [:vector :map]]}
+  [reasons reds]
+  (let [rs (remove #(= :proof-red (:reason %)) reasons)
+        gaps (vec (keep #(when (= :contract-gap (:reason %)) (:symbol %)) rs))
+        unmerged (vec (keep #(when (= :unmerged (:reason %)) (:key %)) rs))]
     ;; a contract gap and an unmerged entry say one thing about many names: one entry each,
     ;; its names a list the printer budgets
     (vec (concat
-           (for [{:keys [refusal symbol]} rs :when (not (#{:contract-gap :unmerged} refusal))]
-             (case refusal
-               (:regression :stray-red) (cond-> {:refusal refusal :test symbol}
+           (for [{:keys [reason symbol]} rs :when (not (#{:contract-gap :unmerged} reason))]
+             (case reason
+               (:regression :stray-red) (cond-> {:reason reason :test symbol}
                                           (seq (filter #(= symbol (:test %)) reds))
                                           (assoc :failures (mapv failure (filter #(= symbol (:test %)) reds))))
-               :no-design {:refusal refusal :unchanged :seon.task/plan
+               :no-design {:reason reason :unchanged :seon.task/plan
                            :do '(my.task/update! :seon.task/plan str "\n\n" "<what the implement step must do>")}
-               {:refusal refusal}))
-           (when (seq gaps) [{:refusal :contract-gap :vars gaps}])
-           (when (seq unmerged) [{:refusal :unmerged :keys unmerged}])))))
+               {:reason reason}))
+           (when (seq gaps) [{:reason :contract-gap :vars gaps}])
+           (when (seq unmerged) [{:reason :unmerged :keys unmerged}])))))
 
 (defn- near
   "Where position at of text is: its line's number and its column (1-based), and the
@@ -226,7 +226,7 @@
   happened to the last reply; the messages delivered since the last turn (the owner's, root's,
   other agents'); the last evaluations; turns left."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds last-items turn max-turns unmerged truncated? refusals run-errors source repairs will-merge messages]}]
+  [db t {:keys [results reds last-items turn max-turns unmerged truncated? reasons run-errors source repairs will-merge messages]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
         task? #(and (qualified-symbol? (:seon.ref/name %)) (ref/task? db (:seon.ref/name %)))
@@ -261,7 +261,7 @@
       max-turns (assoc :turn (str (inc turn) " of " max-turns))
       (seq sections) (assoc :sections sections)
       (seq helpers) (assoc :found helpers)
-      (seq (refused (vec refusals) (vec reds))) (assoc :refused (refused (vec refusals) (vec reds)))
+      (seq (refused (vec reasons) (vec reds))) (assoc :refused (refused (vec reasons) (vec reds)))
       (seq run-errors) (assoc :test-run {:failed (vec run-errors)})
       (last-reply truncated? source (vec repairs)) (assoc :your-last-reply (last-reply truncated? source (vec repairs)))
       (:seon.task/evidence t) (assoc :evidence (:seon.task/evidence t))

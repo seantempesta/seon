@@ -58,7 +58,7 @@
 
 (defn ui-call
   "Run var sym on args in this process if the var is marked ^:seon/callable (the UI
-  allowlist); otherwise the refusal as data. What a /call naming an agent's own function
+  allowlist); otherwise the error as data. What a /call naming an agent's own function
   evaluates in that agent (recorded with origin :ui)."
   {:malli/schema [:=> [:cat :symbol [:maybe :map]] :any]}
   [sym args]
@@ -71,7 +71,7 @@
 
 (defn requests
   "A UI call as root's requests: [[req target-agent] ...]. Root's function is the request it
-  sends (seon.root/request; its refusal when root refuses it); any other fn is an eval of it in
+  sends (seon.root/request; its refused answer when root refuses it); any other fn is an eval of it in
   the agent, through the allowlist (ui-call). index {agent {:pid :branch :status}}."
   {:malli/schema [:=> [:cat :seon.render/call :map] [:vector [:tuple :map [:maybe :keyword]]]]}
   [{f :var :keys [agent args forms]} index]

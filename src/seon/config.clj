@@ -32,7 +32,7 @@
 
 (defn checkout
   "The checkout this process runs from: SEON_CHECKOUT (bin/env exports it; the binary runs
-  from target/), else JOLT_PWD (a `jolt run` from the checkout), or the refusal naming both.
+  from target/), else JOLT_PWD (a `jolt run` from the checkout), or the error naming both.
   Not JOLT_PWD for the binary: Jolt resolves a child process's relative path against it."
   {:malli/schema [:=> [:cat] :string]}
   []
@@ -96,8 +96,8 @@
 
 ;; ---- resolving -------------------------------------------------------------------------------
 
-(defn refusal
-  "The thrown refusal for a config value m that does not satisfy :seon.config/config: one
+(defn invalid
+  "The thrown error for a config value m that does not satisfy :seon.config/config: one
   problem per refused key (unknown, invalid, missing), each naming the key."
   {:malli/schema [:=> [:cat :map] :seon.config/refused]}
   [m]
@@ -112,13 +112,13 @@
 
 (defn resolved
   "Raw (what aero read) as the config: nil values dropped (absent), then validated against
-  :seon.config/config. Answers the map, or throws the refusal."
+  :seon.config/config. Answers the map, or throws the error."
   {:malli/schema [:=> [:cat :map] :seon.config/config]}
   [raw]
   (let [m (into {} (remove (comp nil? val)) raw)]
     (if (m/validate config-schema m)
       m
-      (let [r (refusal m)] (throw (ex-info (:seon.error/message r) r))))))
+      (let [r (invalid m)] (throw (ex-info (:seon.error/message r) r))))))
 
 (defn- refuse!
   {:malli/schema [:=> [:cat :qualified-symbol :string] :nil]}
@@ -142,7 +142,7 @@
   [] (vec *command-line-args*))
 
 (defn parse-set
-  "--set's argument `:ns/key=edn` as [key value], or the refusal naming it."
+  "--set's argument `:ns/key=edn` as [key value], or the error naming it."
   {:malli/schema [:=> [:cat :string] [:tuple :qualified-keyword :any]]}
   [s]
   (let [i (str/index-of s "=")
@@ -221,7 +221,7 @@
   agent's own settings (a :seon.task/config map), then the model's entry (default
   :seon.config.ai/model), then that model's provider's, then c's own key. Answers {:value
   :source}, :source one of [:task], [:model id], [:provider id], [:config layer]. A key set
-  nowhere is a defect of the caller: the refusal names it (absent is never nil)."
+  nowhere is a defect of the caller: the error names it (absent is never nil)."
   {:malli/schema [:=> [:cat :map :map :qualified-keyword :seon.config/context] :seon.config/resolved]}
   [c srcs k {:keys [task model]}]
   (let [m (or model (:seon.config.ai/model c))
@@ -306,7 +306,13 @@
 
 (defn from-db
   "The config root wrote on db (main, or any branch made from it since): every declared key
-  the root entity holds. What agents, the dashboard and the context read."
+  the root entity holds, each as its schema declares it. What agents, the dashboard and the
+  context read. A [:set T] key is a cardinality-many attribute (seon.schema.datahike/
+  declaration), which a pull answers as a vector: it is read back as the set it was (the
+  first set-valued key, :seon.config.source/process-vars, came back a vector, so the config
+  in force and main's copy of it differed)."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :map]]}
   [db]
-  (not-empty (d/pull db (keys-declared) [:seon.root/id :root])))
+  (let [schema (d/schema db)]
+    (not-empty (into {} (for [[k v] (d/pull db (keys-declared) [:seon.root/id :root])]
+                          [k (if (= :db.cardinality/many (get-in schema [k :db/cardinality])) (set v) v)])))))
