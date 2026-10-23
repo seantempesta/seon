@@ -27,6 +27,20 @@
     (is (= :query/nested-call
            (:error (refusal '[:find ?n :where [?e :ns/name ?n] (not [?e :ns/name ?n] [(clojure.string/ends-with? (str ?n) "three")])])))
         "and inside not")
+    (is (= :query/nested-call
+           (:error (refusal '[:find ?n :where [?e :ns/name ?n]
+                              (or (and [?e :ns/name ?n] [(clojure.string/ends-with? (str ?n) "-test")]) [?e :ns/name ?n])])))
+        "and inside or")
+    (is (= :query/nested-call
+           (:error (refusal '[:find ?n :where [?e :ns/name ?n]
+                              (not-join [?n] [?x :ns/name ?n] [(clojure.string/ends-with? (str ?n) "three")])])))
+        "and inside not-join")
+    (is (= :query/nested-call
+           (:error (refusal '[:find ?n :where [?e :ns/name ?n] [(contains? '#{proof.three} ?n)]])))
+        "a quoted literal inside a quoted query is the list (quote ...), refused")
+    (is (= #{['proof.three]}
+           (d/q '[:find ?n :where [?e :ns/name ?n] [(contains? #{proof.three} ?n)]] db))
+        "the literal itself is a constant")
     (is (= #{['proof.three]}
            (d/q '[:find ?n :where (not [(clojure.string/ends-with? ?s "-test")]) [?e :ns/name ?n] [(str ?n) ?s]
                   [(clojure.string/starts-with? ?s "proof.")]] db))

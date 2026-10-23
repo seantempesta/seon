@@ -83,7 +83,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 ## datahike
 
-`reference-code/datahike` pinned at `ae35add`, the tip of ``jolt/nested-call-refused``, on `bae7c3e` (the tip of ``jolt/release-drains``: ``jolt/in-scalar`` `1880fcc` merged in (both on ``jolt/global-ids`` `b4596cf`, ``jolt/gc-cache-epoch`` `700c473` merged in)).
+`reference-code/datahike` pinned at `dda24c0`, the tip of ``jolt/nested-call-refused``, on `bae7c3e` (the tip of ``jolt/release-drains``: ``jolt/in-scalar`` `1880fcc` merged in (both on ``jolt/global-ids`` `b4596cf`, ``jolt/gc-cache-epoch`` `700c473` merged in)).
 
 - Fork repo: ``~/src/seon-jolt/libs/datahike``. Upstream: ``replikativ/datahike``.
 - Base: `ad9fc97` "baseline", a history-less snapshot of Seon's fork ``seantempesta/datahike`` `ccba220b` (unknown: that commit is not in the repo, so the snapshot cannot be checked against it).
@@ -115,7 +115,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
   - `5c869bf`, `508918c`, `0783e8b` content entity ids: `:db/contentId`, an identity whose value names its entity (`content-eid`, `content-tempids`, `:entity-id/collision`); the partition `[1, tx0)` counter ids, `[tx0, 2^40)` tx ids, `[2^40, 2^60)` content ids; an existing identity may gain it ([storage](storage.md#ids)). Generic.
   - `deaf43a` a consumer group's probe-driven seek decision compares the probe set with its scan op's estimate, not the group's output estimate: a group probed by one entity scanned its whole attribute (task datahike.query/a-probed-entity-is-sought-not-scanned). Generic.
   - `7de92bb`, `a9adc83`, `1880fcc` `probe-driven-threshold` 18, Jolt's measured break-even (a probe's seek and merge ~5.6k ticks, a scanned datom ~316), not the JVM's 2500 (a JVM build must set 2500); `datahike.test.query-planner-test/test-a-probed-group-answers-the-same-either-side-of-the-seek-threshold`. Jolt.
-  - `ae35add` a nested call in a predicate or function clause, `[(f (g ?x))]`, is refused when the query is parsed, naming the clause (`datahike.query/refuse-nested-calls`, `:query/nested-call`): no engine evaluates it, the parser read it as a constant list and a predicate throwing on it read as false, so the query answered nothing (Datomic refuses it; upstream answers the empty set). A quoted form passes. Proof: `datahike.query-test/a-nested-call-in-a-predicate-is-refused`. Generic.
+  - `ae35add`, `dda24c0` a nested call in a predicate or function clause, `[(f (g ?x))]`, is refused when the query is parsed, naming the clause (`datahike.query/refuse-nested-calls`, `:query/nested-call`): no engine evaluates it, the parser read it as a constant list and a predicate throwing on it read as false, so the query answered nothing (Datomic refuses it; upstream answers the empty set). A quoted form passes only as `q`'s query (`'#{a}` elsewhere is the list `(quote #{a})`, refused). Proof: `datahike.query-test/a-nested-call-in-a-predicate-is-refused`. Generic.
 - Open: the fork repo's ``jolt/main`` is at `fe50764`; `4b93a1b`..`fd0c065` are only in the submodule clone, not yet in the fork repo.
 
 ## persistent-sorted-set
