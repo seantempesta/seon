@@ -20,7 +20,8 @@
   watched: waited for exactly, so the wait is the reap, and its :exit event. Answers [st events]."
   {:malli/schema [:=> [:cat :map :seon.lib/pid] [:tuple :map [:vector :seon.fork-server/event]]]}
   [st pid]
-  (lib/c-waitpid pid (:status-buf st) 0)
+  (when-not (= pid (lib/c-waitpid pid (:status-buf st) 0))
+    (throw (ex-info "the fork server cannot wait for a child it watched" {:pid pid})))
   [(update st :children disj pid)
    [{:ev :exit :pid pid :status (lib/decode-status (ffi/read (:status-buf st) :int))}]])
 
