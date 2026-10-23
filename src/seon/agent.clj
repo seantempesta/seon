@@ -19,7 +19,7 @@
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task :attempt (the task and attempt root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
-;; :walks (test-plan's last reach walks, each keyed by the db value it walked: walks)
+;; :base-graph (test-plan's reach graph of its base, keyed by the base value: base-graph)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 (defonce state (atom nil))
 
@@ -300,19 +300,22 @@
       (assoc :got (print/text (second (:actual m)) (:part print/budgets)))
       (contract/valid? :seon.cost/report cost) (assoc :cost cost))))
 
-(defn- walk
-  "(f db inputs), reused while db is the very value walked last for role (:branch, :base): a
-  value never changes, so neither does its walk (AGENTS §5, results reused by input). An
-  attempt's base stays one value until merge-main! replaces it, so its digests are walked once
-  per base, not once per observe; root's :tests after the last observe reuses the branch's.
-  Measured 2026-10-23: a reach walk ~1.2-1.4 s, 1.7-1.9 GB on Seon's program (2144 forms)."
-  {:malli/schema [:=> [:cat [:enum :branch :base] :seon.host/db :seon.program/inputs :seon.host/fn] :map]}
-  [role db inputs f]
-  (let [w (get-in @state [:walks role])]
-    (if (and w (identical? db (:db w)) (= inputs (:inputs w)))
+(defn- base-graph
+  "The reach graph of base under inputs, with its index ({:graph :index}: seon.program/
+  reach-graph, graph-index), reused while base is the very value built last: a value never
+  changes, so neither does its graph (AGENTS §5, results reused by input). An attempt's base
+  stays one value until merge-main! replaces it, so its graph is built once per base; each plan
+  of the branch updates it by what the branch changed (seon.program/reach-update). Measured
+  2026-10-23 on Seon's program (2,616 forms): the graph 640 ms, 816 MB; a one-form change's
+  update and index 20-45 ms."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.program/inputs] :map]}
+  [base inputs]
+  (let [w (:base-graph @state)]
+    (if (and w (identical? base (:db w)) (= inputs (:inputs w)))
       (:value w)
-      (let [v (f db inputs)]
-        (swap! state assoc-in [:walks role] {:db db :inputs inputs :value v})
+      (let [g (program/reach-graph base (:data-refs inputs))
+            v {:graph g :index (program/graph-index g inputs nil)}]
+        (swap! state assoc :base-graph {:db base :inputs inputs :value v})
         v))))
 
 (defn test-plan
@@ -347,10 +350,12 @@
         dir (when shared (cfg/value :seon.config.source/test-results-dir))
         judges? (fn [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
                           (and (:test m) (not (program/scratch-ns? (:ns m))))))
-        idx (into {} (filter (comp judges? key)) (walk :branch db in program/reach-index))
+        b (when base (base-graph base in))
+        g (if b (program/reach-update (:graph b) db) (program/reach-graph db (:data-refs in)))
+        idx (into {} (filter (comp judges? key)) (program/graph-index g in nil))
         cd (update-vals idx :digest)
         unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))]
-    (-> (proofs/plan (when base (walk :base base in program/reach-digests)) cd (if dir (proofs/greens dir (vec (vals cd))) {}) proofs)
+    (-> (proofs/plan (some-> b :index (update-vals :digest)) cd (if dir (proofs/greens dir (vec (vals cd))) {}) proofs)
         (update :selected into unrecorded)
         (update :run into unrecorded)
         (assoc :digests cd :dir dir
