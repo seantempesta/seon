@@ -17,7 +17,7 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
-            [seon.render :as render] [seon.print :as print] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.proofs :as proofs] [seon.cost :as cost]))
+            [seon.render :as render] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.proofs :as proofs] [seon.cost :as cost]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -84,7 +84,7 @@
          {:keys [shown truncated? omitted lines]} (print/prose s budget {:one-line? (boolean one-line?)})]
      (if-not truncated?
        shown
-       (let [words (str (print/cut-words omitted lines nil) (when whole (str " · the whole value: " (print/text whole (form-budget)) " at its REPL")))
+       (let [words (str (emit/cut-words omitted lines nil) (when whole (str " · the whole value: " (print/text whole (form-budget)) " at its REPL")))
              cut (if href
                    [:a {:class "seon-print-elision" :href href :title "the whole on this page"} words]
                    [:span {:class "seon-print-elision" :title s} words])]
@@ -653,12 +653,6 @@
     [:span {:class "eagent"} (if (:agent ev) [:a {:href (str "/agent/" (dom-id (:agent ev)))} (kname (:agent ev))] "root")]
     [:span {:class "edetail"} (event-detail ev)]])
 
-(defn events-list
-  "The stream around rows already serialized (each event's row is rendered once)."
-  {:malli/schema [:=> [:cat [:sequential :string] :seon.render/opts] :any]}
-  [rows _]
-  [:ol {:id "events" :class "events"} (map h/raw rows)])
-
 (defn events-count
   "The stream's header: newest first, and how many of the events since root's boot it
   keeps (:seon.config.render.list/stream); the older are not kept anywhere."
@@ -778,7 +772,7 @@
         (slot "ctx")
         [:div {:class "stream"}
          [:header [:span {:class "kicker"} "event stream"] (slot "events-n")]
-         (slot "events")]]]]
+         [:ol {:id "events" :class "events"} (for [e (:events sys)] (slot (str "ev-" (:seq e))))]]]]]
      :seon.render/units
      (vec (concat
            [(u "problems" (:problems sys []) :seon.render/problems-banner)
@@ -789,13 +783,14 @@
             (u "t-tasks" {:rows (:task-rows sys) :attempts attempts :main-t (:t main)} :seon.render/work)
             (u "t-errors" {:root-errors root-errors :root-errors-total (:root-errors-total sys) :boot boot :store store} :seon.render/root-errors)
             (u "ctx" (:context sys) :seon.render/context)
-            ;; the stream's patches are the render proc's prepends; this unit keeps the list
-            ;; for pages and keyframes
-            (assoc {:id "events" :input (:event-rows sys []) :render `events-list} :keyframe-only true)
             (u "events-n" {:kept (count (:events sys)) :seen (:events-seen sys 0)} :seon.render/events-count)
             (u "webstats" web :seon.render/web)]
            ;; the config root wrote on main, by its schema's declared render (none before boot's fact)
            (when-let [c (:config sys)] [{:id "t-config" :input c :schema :seon.config/config}])
+           ;; the stream, newest first: a new event's row is prepended, one past the cap removed,
+           ;; and a row whose event changed (main said how a stopped agent's attempt ended) replaced
+           (for [e (:events sys)]
+             {:id (str "ev-" (:seq e)) :input e :schema :seon.render/event :container "#events" :prepend? true})
            (for [id order]
              {:id (str "cb-" (dom-id id)) :input (ended-as (get agents id) id agent-attempt) :agent id :schema :seon.render/agent
               :shell (str "card-" (dom-id id)) :container "#grid"})))}))
@@ -804,7 +799,7 @@
 
 (defn task-box
   "A task: its kind and execution, its plan (accumulated along its needs), instructions, what
-  is wrong (its problem, failure, budget-spent fact), its needs and proofs, and its evidence."
+  is wrong (its failure, held for root), its needs and proofs, and its evidence."
   {:malli/schema [:=> [:cat :seon.task/task :seon.render/opts] :any]}
   [t _]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)]
@@ -815,11 +810,8 @@
                    (if-let [st (:seon.task/state t)] (kname st) (kname (:seon.task/execution t)))))
       [:pre {:class "plan" :title "its plan, accumulated along its needs: theirs first"} plan]
       (when (:seon.task/instructions t) [:p {:class "muted"} (:seon.task/instructions t)])
-      (when (:seon.task/problem t) [:p {:class "err"} (:seon.task/problem t)])
       (when-let [{:keys [reason counterexample attempt]} (:seon.task/failure t)]
         [:p {:class "err"} "failed" (when attempt (str " in " attempt)) ": " reason (when counterexample (list " · counterexample " [:code counterexample]))])
-      (when-let [{:keys [cause blocks]} (:seon.task/stuck t)]
-        [:p {:class "warn"} "budget spent: " cause (when (seq blocks) (str " · blocks " (str/join ", " (sort blocks))))])
       (when (seq (:seon.task/needs t))
         [:p {:class "muted"} "needs "
          ;; met or not, when the producer carries what blocks it (seon.reconcile/blocked-by)
@@ -911,7 +903,7 @@
   exact calls and estimated ms. Takes a reply item or the recorded evaluation."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [e opts]
-       [:li {:class (str "hr tag-" (kname (or (:tag e) :ret)))}
+       [:li {:id (:unit opts) :class (str "hr tag-" (kname (or (:tag e) :ret)))}
       [:div {:class "who muted"} (case (:origin e)
                                    :ui "the owner evaluated, from this window"
                                    :outside "an outside agent evaluated, through root's server"
@@ -919,7 +911,7 @@
                                    "root's request: the agent evaluated it (its turn loop, when the form is seon.turn/work!)")]
       (when (:lead e) [:p {:class "lead"} (prose (str/replace (:lead e) #"(?m)^\s*;+ ?" "") (form-budget))])
       [:div {:class "hf"} [:code (prose (:form e) (form-budget))]]
-      [:div {:class "hv"} (eval-out e (or (:budget opts) (config/value :seon.config.render/value-budget)) (part) nil true)]
+      [:div {:class "hv"} (eval-out e (or (:budget opts) (config/value :seon.config.render/history-row-budget)) (part) nil true)]
       (when (and (seq (:out e)) (not (context-read? e))) [:pre {:class "out"} (prose (:out e) (part))])
       (eval-meta e)
       ;; where its time went is for when it is slow: behind a disclosure, the costliest named
@@ -1000,7 +992,7 @@
         (str (:model turns) " model" (when (pos? (:reads turns)) (str " · " (:reads turns) " reads")))]
        [:span [:em "tokens"] (group3 (:tokens turns))]
        [:span {:title "at the model's configured prices, off-peak (the provider charges twice at peak); a turn whose provider did not split cached from uncached prompt tokens, or whose model has no prices, is not priced"}
-        [:em "cost"] (cond (= :scripted (config/value :seon.config.ai/provider)) "none: a scripted run calls no model"
+        [:em "cost"] (cond (and (nil? (:usd turns)) (= :scripted (config/value :seon.config.ai/provider))) "none: a scripted run calls no model"
                            (and (:usd turns) (pos? (:unpriced turns))) (str (cost-str (:usd turns)) " + " (:unpriced turns) " turns not priced")
                            (:usd turns) (cost-str (:usd turns))
                            (pos? (:unpriced turns)) (str "unknown: " (:unpriced turns) " turns whose provider gave no cached/uncached split, or a model with no prices")
@@ -1050,11 +1042,11 @@
   facts with :context {:sections :text :href} and :usd assoc'd by the page."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [{:seon.turn/keys [id n origin reply reasoning calls tokens cache-hit-tokens cache-miss-tokens split finish model forms errors red truncated basis]
-    :keys [context usd messages previous]} _]
+    :keys [context usd messages previous]} opts]
   (let [budget (config/value :seon.config.render/turn-text-budget)
         prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
         obs (:observed basis)]
-    [:li {:id (str "turn-" (dom-id id)) :class (str "turn o-" (kname origin) (when (and errors (pos? errors)) " has-err"))}
+    [:li {:id (or (:unit opts) (str "turn-" (dom-id id))) :class (str "turn o-" (kname origin) (when (and errors (pos? errors)) " has-err"))}
      ;; the conversation first: who spoke, what it was told, what it thought and did
      [:header
       [:b (if (= :outside origin) (str "read " n) (str "turn " (inc n)))]
@@ -1116,18 +1108,16 @@
         [:pre {:class "ctx"} (prose (:text context) budget {:href (:href context)})]])]))
 
 (defn turns-list
-  "The agent's conversation, oldest first: its turns (each by its declared render, turn-row) and
-  its evaluations outside them (the owner's, an outside agent's, the turn loop's own form), in
-  the order they were written, each row serialized ahead (rendered once while its facts are the
-  same); why there is no turn when there is none; and how many older evaluations it left.
-  input {:attempt :rows :turns (how many of the rows are turns) :why :more}."
+  "The head of the agent's conversation, whose rows follow it, oldest first: its turns (each by
+  its declared render, turn-row) and its evaluations outside them (history-row), each a unit of
+  the window; why there is no turn when there is none; and how many older evaluations it left.
+  input {:attempt :turns (how many) :why :more}."
   {:malli/schema [:=> [:cat :seon.render/turns :seon.render/opts] :any]}
-  [{:keys [attempt rows turns why more]} _]
-  [:section {:id "z-turns" :class "box"}
+  [{:keys [attempt turns why more]} _]
+  [:section {:id "z-turns" :class "convhead"}
    (kicker "conversation" (if attempt (str "attempt " (:seon.attempt/id attempt) ", oldest first") "no attempt"))
    (when more [:p {:class "more muted"} more])
-   (when (zero? turns) [:p {:class "muted"} why])
-   [:ol {:class "turns"} (map h/raw rows)]])
+   (when (zero? turns) [:p {:class "muted"} why])])
 
 (defn branch-box
   "What the branch's merge will carry to main (:will-merge, as its newest turn measured it
@@ -1171,19 +1161,24 @@
   result), its evaluations from outside the turns, and the input at the bottom; on the right a
   live tile per value it shows, the last changed first."
   {:malli/schema [:=> [:cat :seon.render/agent-page :seon.render/opts] :any]}
-  [{:keys [agent attempt task turns] :as page} _]
+  [{:keys [agent attempt task conv] :as page} _]
   (let [id (:id agent)]
     {:seon.render/html
      [:div {:id "app" :class "window"}
       (topbar true)
       [:main {:class "wlayout"}
-       [:section {:class "chat"} (slot "z-head") (slot "z-turns") (slot "z-input")]
+       [:section {:class "chat"} (slot "z-head") (slot "z-turns")
+        [:ol {:id "z-conv" :class "turns"} (for [c conv] (slot (:id c)))]
+        (slot "z-input")]
        [:aside {:class "wside"} (slot "z-tiles")]]]
      :seon.render/units
+     (into
      [{:id "z-head" :input {:agent agent :attempt attempt :task task :turns (:totals page)} :schema :seon.render/zoom-head}
-      {:id "z-turns" :input {:attempt attempt :rows turns :turns (:n (:totals page)) :why (:turns-why page)
+      {:id "z-turns" :input {:attempt attempt :turns (:n (:totals page)) :why (:turns-why page)
                              :more (print/more (:history-total page) (:history-shown page) "older evaluations outside its turns, recorded on its branch (:seon.cluster.eval/record)")}
        :schema :seon.render/turns}
       {:id "z-input" :input {:id id :live? (boolean (live (shown-status agent)))
                              :held (when (= :held (:seon.task/execution task)) (:seon.task/id task))} :schema :seon.render/agent-input}
-      {:id "z-tiles" :input {:tiles (:tiles page)} :schema :seon.render/tiles}]}))
+      {:id "z-tiles" :input {:tiles (:tiles page)} :schema :seon.render/tiles}]
+     ;; each row of the conversation, appended in the order it was written
+     (map #(assoc % :container "#z-conv") conv))}))

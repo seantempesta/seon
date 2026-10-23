@@ -73,7 +73,7 @@
    :writer {:tx-count 1 :recent []} :fork-server {:status :up} :stats {} :store {} :boot {}})
 
 (defn- fresh-state []
-  {:rid 1 :pending {} :watch #{:root} :waiting {} :kf-wanted #{} :new-events [] :events [] :event-rows []
+  {:rid 1 :pending {} :watch #{:root} :waiting {} :kf-wanted #{} :new-events [] :events []
    :views {} :zoom {} :merges 0 :main {:t 1}})
 
 (deftest render-step
@@ -181,8 +181,8 @@
 
 (deftest stop-row-says-how-it-ended-once-main-knows
   (let [[st1 _] (answer (fresh-state) view0)
-        [st2 _] (answer (assoc st1 :new-events [{:type :killed :agent :a7 :at-ms 1}]) view0)
-        row (second (first (:event-rows st2)))
+        [st2 out2] (answer (assoc st1 :new-events [{:type :killed :agent :a7 :at-ms 1}]) view0)
+        row (second (first (:prepends (first (filter #(= :patch (:op %)) (:to-web out2))))))
         _ (is (str/includes? row "KILLED") "before main records the attempt's end, a stop reads as a kill")
         [_ out] (answer (assoc st2 :agent-attempt {:a7 {:seon.attempt/status :merged}}) view0)
         frag (some #(when (= "ev-1" (first %)) (second %)) (:frags (first (filter #(= :patch (:op %)) (:to-web out)))))]
@@ -275,7 +275,7 @@
 
 (deftest a-capped-list-says-how-many-more
   (let [conv (fn [shown total] (:input (first (filter #(= "z-turns" (:id %))
-                                                      (:seon.render/units (ui/agent-page {:agent {:id :a1 :status :idle} :turns ["<li>r</li>"] :totals {:n 0}
+                                                      (:seon.render/units (ui/agent-page {:agent {:id :a1 :status :idle} :conv [] :totals {:n 0}
                                                                                           :history-total total :history-shown shown} {}))))))]
     (testing "the agent's conversation: its newest evaluations, and how many older its branch records"
       (is (str/includes? (h/html (ui/turns-list (conv 100 140) {})) "+40 more: older evaluations outside its turns, recorded on its branch")))
@@ -289,6 +289,12 @@
   (second (#'p/zoom-value (cond-> {:agent-attempt (if attempt {id attempt} {}) :tasks {} :zoom {id (if db {:db db} {})}}
                             ag (assoc-in [:view :agents id] ag))
                           id)))
+
+(defn- conv-html
+  "The conversation's rows of a window's value, each as its unit renders it (its schema's render)."
+  [page] (mapv #(h/html (r/html (:input %) {:schema (:schema %) :unit (:id %)})) (:conv page)))
+
+(defn- turn-rows-of "The conversation's rows that are turns, rendered." [page] (filter #(str/includes? % "class=\"turn ") (conv-html page)))
 
 (deftest a-context-read-is-shown-once
   (let [ctx (str "{:turn \"1 of 8\" :refused [{:refusal :contract-gap :vars [" (str/join " " (for [i (range 360)] (str "app.m/f" i))) "]}]}")
@@ -317,8 +323,8 @@
             db @conn
             page (zoom db :a14 {:seon.attempt/id "t/x#1" :seon.attempt/task "t/x" :seon.attempt/agent :a14 :seon.attempt/status :running}
                        {:status :idle :evals [read]})
-            html (str/join (:turns page))]
-        (is (= 1 (count (:turns page))))
+            html (str/join (conv-html page))]
+        (is (= 1 (count (:conv page))))
         (is (str/includes? html (seon.web.html/escape (subs (seon.context/reader-text (:messages (seon.context/render db b))) 0 200)))
             "the text it read, made again from its basis")
         (is (str/includes? html "app.m/f0") "what the read showed")
@@ -463,7 +469,6 @@
          :seon.task/accumulated {:plan (str/join "\n" (cons "Make `app.calc/add` pass." (for [i (range 400)] (str "Step " i ": read `app.calc/f" i "` and its proof."))))
                                  :proofs (set (for [i (range 12)] (symbol "app.proofs" (str "add-" i "-test"))))}
          :seon.task/failure {:reason "add cannot be total over longs" :counterexample "(add Long/MAX_VALUE 1)" :attempt "calc/add#2"}
-         :seon.task/stuck {:attempt "calc/add#2" :cause "failed: held for root" :blocks ["calc/div" "calc/mul"]}
          :seon.task/evidence {:from "calc/add#2" :conflicts [] :unmerged [] :red ['app.proofs/add-0-test] :problem "red"}))
 
 (deftest a-task-reads-its-state-plan-proofs-and-failure
@@ -473,7 +478,6 @@
     (let [text (:text (r/printed (with-meta failed-task {:seon.render/schema :seon.task/task}) 'result/h2))]
       (is (str/starts-with? text "task calc/add · work · held · needs calc/sub"))
       (is (str/includes? text "failed: add cannot be total over longs · counterexample (add Long/MAX_VALUE 1)"))
-      (is (str/includes? text "budget spent: failed: held for root · blocks calc/div, calc/mul"))
       (testing "a long plan shows whole under the REPL's reply budget"
         (is (str/includes? text "Step 399")))
       (testing "(the part budget when the env names none)"
@@ -482,10 +486,9 @@
         (is (str/includes? text "12 proofs: app.proofs/add-0-test"))
         (is (str/includes? text "+4 more: (get-in result/h2 [:seon.task/accumulated :proofs])")))
       (is (str/includes? text "evidence: {:from \"calc/add#2\""))))
-  (testing "the page's task box shows the failure and the budget-spent fact too"
+  (testing "the page's task box shows the failure too"
     (let [html (h/html (r/html failed-task {:schema :seon.task/task}))]
-      (is (str/includes? html "failed in calc/add#2: add cannot be total over longs"))
-      (is (str/includes? html "budget spent: failed: held for root · blocks calc/div, calc/mul")))))
+      (is (str/includes? html "failed in calc/add#2: add cannot be total over longs")))))
 
 (deftest an-attempt-reads-in-one-line
   (is (= "running calc/add#1 on a3, turn 2, 1840 tokens"
@@ -508,8 +511,9 @@
     (is (= "task-conflict calc/add calc/add#3 plan: {:base \"Make add.\", :ours \"Make add total.\", :theirs \"Make add pass.\"}"
            (line :task-conflict {:task "calc/add" :attempt "calc/add#3" :attr :plan :open? true
                                  :evidence {:task "calc/add" :attr :plan :base "Make add." :ours "Make add total." :theirs "Make add pass." :from "calc/add#3"}})))
-    (is (= "budget spent calc/add calc/add#2: failed: held for root · blocks calc/div, calc/mul"
-           (line :stuck {:task "calc/add" :attempt "calc/add#2" :cause "failed: held for root" :blocks ["calc/div" "calc/mul"]})))
+    (is (= "failed calc/add calc/add#2: attempt calc/add#2 ended cap: proof-red app.proofs/add-test"
+           (line :failed {:task "calc/add" :attempt "calc/add#2" :reason "attempt calc/add#2 ended cap: proof-red app.proofs/add-test"}))
+        "a refused attempt's hold: a reason and no counterexample")
     (is (= "failed calc/add calc/add#2: add cannot be total over longs"
            (line :failed {:task "calc/add" :attempt "calc/add#2" :reason "add cannot be total over longs" :counterexample "(add Long/MAX_VALUE 1)"})))
     (is (= "merge calc/add calc/add#2: main changed 3 key(s) since the branch's merge base: merge main into the branch first · 1 conflicts · unmerged var app.calc/add"
@@ -520,11 +524,11 @@
            (line :platform {:signature "s" :message "Datahike transact refused" :count 4 :answered-by ["calc/fix-store"]}))))
   (testing "the whole report at root's REPL: by class, each row by its render, closed rows marked"
     (let [rep (with-meta {:t 90 :classes {:failed {:n 1 :rows [(row {:task "calc/add" :reason "not total" :open? true})]}
-                                          :stuck {:n 1 :rows [(row {:task "calc/sub" :cause "held" :open? false})]}
+                                          :merge {:n 1 :rows [(row {:task "calc/sub" :attempt "calc/sub#1" :error behind :open? false})]}
                                           :red {:n 0 :rows []}}}
                 {:seon.render/schema :seon.problems/report})
           text (:text (r/printed rep 'result/h1))]
-      (is (= ["problems recorded on main at t 90" "# failed 1" "- failed calc/add: not total" "# budget spent 1" "- budget spent calc/sub: held (closed)"
+      (is (= ["problems recorded on main at t 90" "# failed 1" "- failed calc/add: not total" "# merge 1" "- merge calc/sub calc/sub#1: main changed 3 key(s) since the branch's merge base: merge main into the branch first (closed)"
               "the whole value as data: (with-meta result/h1 nil)"]
              (str/split-lines text))))))
 
@@ -616,8 +620,7 @@
     (let [units (concat (:seon.render/units (r/html (assoc sys :order [:a1] :series {} :agent-attempt {}) {:schema :seon.render/system}))
                         (:seon.render/units (r/html {:agent {:id :a1 :status :idle} :totals {:n 0} :history-total 0 :history-shown 0 :context {:why "none"}}
                                                            {:schema :seon.render/agent-page})))]
-      (is (= #{"events"} (set (map :id (filter :render units))))
-          "only the stream's list around rows serialized ahead (jolt/printer-eval makes its rows units)")
+      (is (= #{} (set (map :id (filter :render units)))) "no unit names a render function: each names its input's schema")
       (doseq [{:keys [id schema]} (remove :render units)]
         (is (r/declared schema :html) (str id " names " schema ", which declares an HTML render"))))))
 ;; ---- the agent's debug view (task seon.render/a-debug-view-of-any-agent) ----------------
@@ -663,8 +666,6 @@
               "Done; checking g." [{:id "call-1" :code "(my.turn/wait)" :evals ""}] (u 4400 40 3800))
        (f @conn)))))
 
-(defn- turn-rows-of "The conversation's rows that are turns." [page] (filter #(str/includes? % "class=\"turn ") (:turns page)))
-
 (def ^:private attempt1
   {:seon.attempt/id "demo/f#1" :seon.attempt/task "demo/f" :seon.attempt/agent :a3 :seon.attempt/status :running
    :seon.attempt/env {:branch :task-demo-f :model "deepseek-flash" :max-turns 8} :seon.attempt/start-ms 0 :seon.attempt/pid 77})
@@ -692,8 +693,8 @@
           (is (str/includes? t0 "what call-0 answered, as the model read it")))
         (testing "the evaluations outside the turns are in the conversation in the order they were written: the owner's (f 2), not the turn's forms again"
           (is (= 1 (:history-total page)))
-          (is (= 3 (count (:turns page))) "two turns, and the owner's evaluation between them")
-          (is (str/includes? (nth (:turns page) 1) "(f 2)") "written after turn 0's forms, before turn 1"))
+          (is (= [:seon.turn/turn-fact :seon.agent/item :seon.turn/turn-fact] (mapv :schema (:conv page))) "two turns, and the owner's evaluation between them")
+          (is (str/includes? (nth (conv-html page) 1) "(f 2)") "written after turn 0's forms, before turn 1"))
         (testing "the proofs it saw and the messages it took"
           (is (str/includes? t0 "0/1 pass"))
           (is (str/includes? t0 "✕ <code>f-test</code>"))
@@ -701,7 +702,7 @@
           (is (str/includes? t1 "since the turn before: f-test fail → pass") "what changed since the turn before")
           (is (str/includes? t1 "check demo/g too")))
         (testing "the head: totals over the turns, priced where the provider split its cache"
-          (is (= {:n 2 :model 2 :reads 0 :evals 3 :tokens 8460 :unpriced 0} (dissoc (:totals page) :usd)))
+          (is (= {:n 2 :model 2 :reads 0 :evals 3 :read? true :tokens 8460 :unpriced 0} (dissoc (:totals page) :usd)))
           (is (< 0 (:usd (:totals page)) 0.01)))
         (testing "the branch box reads the newest turn's :will-merge"
           (is (= {:changed ['demo/f]} (get-in page [:branch :will-merge])))
@@ -810,3 +811,22 @@
         (is (= 2 (count (turn-rows-of page))) "its own turns, from its branch")
         (is (nil? (:status (:agent page))) "the live a3 works another attempt: not this one's process")
         (is (str/includes? (first (turn-rows-of page)) "/turn?view=attempt%3Ademo%2Ff%231&amp;id=") "its turns link through its own view")))))
+
+
+(deftest the-conversation-appends-new-rows
+  ;; the window's conversation: each turn and evaluation is a unit of the window, rendered once
+  ;; and appended when it is new; the list is not sent again
+  (let [ev (fn [i] {:id i :tag :ret :form (str "(+ " i " 1)") :printed (str (inc i)) :ms 0.1})
+        view (fn [n] (assoc-in view0 [:agents :a1 :evals] (mapv ev (range n))))
+        st0 (assoc (fresh-state) :watch #{:a1})
+        [st1 out1] (answer st0 (view 2))
+        [st2 out2] (answer st1 (view 3))
+        patch (fn [out] (first (filter #(and (= :patch (:op %)) (= :a1 (:view %))) (:to-web out))))
+        [[sel html]] (:appends (patch out2))]
+    (is (= "#z-conv" (ffirst (:appends (patch out1)))) "the first pass adds the rows there are")
+    (is (= "#z-conv" sel))
+    (is (str/includes? html "(+ 2 1)") "the new evaluation's row")
+    (is (not (str/includes? html "(+ 1 1)")) "an earlier row is not sent again")
+    (testing "the page, composed, holds every row, oldest first"
+      (let [page (p/page-html st2 :a1)]
+        (is (< (str/index-of page "(+ 0 1)") (str/index-of page "(+ 1 1)") (str/index-of page "(+ 2 1)")))))))

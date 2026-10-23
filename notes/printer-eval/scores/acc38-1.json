@@ -1,0 +1,79 @@
+[
+ {
+  "section": 1,
+  "answer": "The top of AGENTS.md is shown, through the heading 'Forest before trees' and its line 'Stop and step back when:'. The rest is not shown.",
+  "left_out": "+20541 chars",
+  "read_form": "(subs (get-in (nth (my.turn/evals) 3) [:value]) 6261)",
+  "confident": true
+ },
+ {
+  "section": 2,
+  "answer": "No. The shown part of docs/render.md has the title and the headings 'No clipping', 'Prose', 'Bounded lists', and 'Tiles are data; the context reads the page's derivations' (cut in its first lines). '## One printer' is not shown.",
+  "left_out": "+11603 chars in 56 more lines",
+  "read_form": "(subs (get-in (nth (my.turn/evals) 5) [:value]) 2629)",
+  "confident": true
+ },
+ {
+  "section": 3,
+  "answer": "HTTP 400. The body is shown only up to the start of docs/core-async 'core.async.flow on Jolt' text.",
+  "left_out": "+10964 chars of the response body",
+  "read_form": "(subs (get-in result/h3 [:seon.error/data :body]) 289)",
+  "confident": true
+ },
+ {
+  "section": 4,
+  "answer": "not shown. The text shows only that the task is id calc/add-r2-design, kind :design, and that its :instructions value is cut right away.",
+  "left_out": "+2162 chars",
+  "read_form": null,
+  "confident": true
+ },
+ {
+  "section": 5,
+  "answer": "It shows the first :program line ':program {:ok true, :datoms 73}' and the start of the second ':program {:ok'. The rest of the log is not shown.",
+  "left_out": "+2262 chars in 19 more lines",
+  "read_form": null,
+  "confident": true
+ },
+ {
+  "section": 6,
+  "answer": "The title is '# Render: what a person or a model reads'. The plan's text is cut after its first few words.",
+  "left_out": "+14120 chars",
+  "read_form": "(subs (:seon.task/plan result/h3) 112)",
+  "confident": true
+ },
+ {
+  "section": 7,
+  "answer": "The failing test is add-test (variants.clj:24). Expected: (= 3 (- 1 2)). Actual: (not (= 3 -1)).",
+  "left_out": "+269 chars in 7 more lines",
+  "read_form": null,
+  "confident": true
+ },
+ {
+  "section": 8,
+  "answer": "The last section heading shown is '## Where Jolt's Flow differs from upstream'. Its first bullet is cut.",
+  "left_out": "+10543 chars",
+  "read_form": "(subs (get-in result/h3 [:seon.error/data :body]) 710)",
+  "confident": true
+ },
+ {
+  "section": 9,
+  "answer": "The last task line shown is ':task calc/add-merge {:execution :running, :done true, :blocked-by #{}, :attempts [[calc/add-merge#1 :merged :green 0 0]]}'.",
+  "left_out": "+1643 chars in 12 more lines",
+  "read_form": "(subs (:out (nth (my.turn/evals) 1)) 665)",
+  "confident": true
+ },
+ {
+  "section": 10,
+  "answer": "The last section heading shown is '## 1. What Seon is for, and what moving forward means'. Its text is cut right after the heading.",
+  "left_out": "+25313 chars",
+  "read_form": "(subs (:seon.task/plan result/h3) 1489)",
+  "confident": true
+ },
+ {
+  "section": 11,
+  "answer": "No. The shown text of AGENTS.md runs through section 5 (Laws), stopping at the step-fn contract bullet 'buffers are bounded by their loss semantics;'. Section 8 'The machine' is not shown.",
+  "left_out": "+7279 chars",
+  "read_form": "(subs result/h3 19523)",
+  "confident": true
+ }
+]

@@ -1,0 +1,74 @@
+[
+ {
+  "section": 1,
+  "ranking": [
+   "Q",
+   "P",
+   "R"
+  ],
+  "why": "Q gives the char count with its unit and the exact subs form, at the same cost as P, while R cuts mid-word and drops the unit."
+ },
+ {
+  "section": 2,
+  "ranking": [
+   "Q",
+   "R",
+   "P"
+  ],
+  "why": "Q is the smallest and states the omitted lines as well as chars, R gives a clear chars count, and P's bare +2140 has no unit and is the largest."
+ },
+ {
+  "section": 3,
+  "ranking": [
+   "Q",
+   "P",
+   "R"
+  ],
+  "why": "Q shows the HTTP 400 status and gives the subs form to read the rest, P gives the form but almost no content, and R omits both the status and the form."
+ },
+ {
+  "section": 4,
+  "ranking": [
+   "Q",
+   "R",
+   "P"
+  ],
+  "why": "Q shows two log entries with a clear chars count, R is cheapest and reports the omitted line count but cuts the second entry short, and P's +2236 has no unit."
+ },
+ {
+  "section": 5,
+  "ranking": [
+   "R",
+   "P",
+   "Q"
+  ],
+  "why": "R shows both the task and the attempt id for about the same cost, P shows only the attempt key with its unit, and Q shows just the task and a line count."
+ },
+ {
+  "section": 6,
+  "ranking": [
+   "R",
+   "P",
+   "Q"
+  ],
+  "why": "R reports both the omitted chars and the omitted lines at the lowest cost, P gives the omitted chars with a unit, and Q's bare +14120 is the largest with no unit."
+ },
+ {
+  "section": 7,
+  "ranking": [
+   "P",
+   "Q",
+   "R"
+  ],
+  "why": "P shows the first failure in full and states the omitted chars and lines, Q adds a second failure with a clear unit, and R's unitless +245 is the least clear."
+ },
+ {
+  "section": 8,
+  "ranking": [
+   "R",
+   "P",
+   "Q"
+  ],
+  "why": "R shows the full task and attempt id with a clear chars count, P shows the max-turns key with an unclear unitless +7, and Q is cheapest but hides the attempt value."
+ }
+]

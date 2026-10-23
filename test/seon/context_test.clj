@@ -5,7 +5,7 @@
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.task :as task] [seon.context :as context] [seon.print :as print]
             [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs]
-            [seon.print.select :as select] [clojure.string :as str] [clojure.walk :as walk] [seon.edn]))
+            [seon.print.select :as select] [clojure.string :as str] [seon.edn] [seon.print-test :as print-test]))
 
 (defn- db-with-program []
   (let [db (ts/test-db)]
@@ -191,13 +191,10 @@
             shown (context/shown-evals (context/fold-evals items))
             share (quot context/last-evals-budget 11)]
         (is (every? #(<= (:tokens %) share) shown))
-        (is (= 22 (count (mapcat :cuts shown))) "each of 11 items cuts its value and its output")
-        (doseq [c (mapcat :cuts shown)
-                :let [f (:seon.print/continuation c)
-                      rest ((eval (list 'fn '[items] (walk/postwalk-replace {'(my.turn/evals) 'items} f))) items)
-                      whole (get-in items (into [(nth (:seon.print/requery-id c) 2)] (:seon.render.data/path c)))]]
-          (is (= (:seon.render.data/next-offset c) (- (count whole) (count rest))) (pr-str f))
-          (is (= (seq whole) (seq (concat (take (:seon.render.data/next-offset c) whole) rest))) (pr-str f)))))))
+        (let [cuts (for [{:keys [text]} shown c (print-test/cuts-of text)] [text c])]
+          (is (= 22 (count cuts)) "each of 11 items cuts its value and its output")
+          (doseq [[text c] cuts]
+            (is (print-test/reads-exactly? text '(my.turn/evals) items c) (pr-str c))))))))
 
 (deftest a-turn-records-its-basis-and-its-context-is-made-again-from-it
   ;; task seon.db/the-store-grows-with-what-it-keeps (owner, 2026-10-22: store each turn's
@@ -511,3 +508,18 @@
     (is (str/includes? (:content (peek ms)) ":from :owner") "who sent it")
     (is (not (str/includes? (:content (second ms)) "use demo/g")) "not in the cached attempt sections")
     (is (not (contains? (context/current-state db (task-f db) {:turn 1 :max-turns 4}) :messages)) "none delivered: no section")))
+
+(deftest a-cited-task-shows-its-plan-at-that-depth
+  ;; wiki audit 2026-10-23 R4: a plan citing another task by its ns/name sees that task's
+  ;; plan as a section at the citation's depth, not an unresolved name
+  (let [db (db-with-program)
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo.other :seon.task/name "g"
+                                               :seon.task/plan "G is defined first. Then f calls it."
+                                               :seon.task/proofs #{'demo-test/g-test}}
+                                              {:seon.task/ns 'demo :seon.task/name "f"
+                                               :seon.task/plan "Read `demo.other/g` before you start."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+        block (context/current-state db (task/task db "demo/f") {:results {} :reds [] :turn 0 :max-turns 4})
+        shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))]
+    (is (= "G is defined first. Then f calls it." (:seon.ref/lead (shown "demo.other/g"))) "doc depth: the task's plan")
+    (is (not (clojure.string/includes? (str (:references block)) "demo.other/g")) "and not an unresolved name")))

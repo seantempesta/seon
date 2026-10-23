@@ -19,7 +19,9 @@
                     ;; what a cut reads the value through: its result handle (result/h3) or a form
                     [:handle {:optional true} :any]
                     ;; the producer's declared schema of the value, when known
-                    [:schema {:optional true} [:maybe :qualified-keyword]]]
+                    [:schema {:optional true} [:maybe :qualified-keyword]]
+                    ;; the unit the render proc renders it as: its element's id
+                    [:unit {:optional true} [:maybe :string]]]
  ;; an :ai render's result: its text, and whether it cut (each cut names what it left and how to read it)
  :seon.render/text [:map [:text :string] [:truncated? {:optional true} :boolean]]
 
@@ -63,7 +65,7 @@
  ;; the agent window's head: its view entry, attempt and task, the totals over its turns
  :seon.render/zoom-head [:map {:seon.render/html seon.render.ui/zoom-head} [:agent :map] [:turns :map]]
  ;; the attempt's turns, each row serialized ahead by its declared render (seon.render.ui/turn-row)
- :seon.render/turns [:map {:seon.render/html seon.render.ui/turns-list} [:rows [:sequential :string]] [:turns nat-int?]]
+ :seon.render/turns [:map {:seon.render/html seon.render.ui/turns-list} [:turns nat-int?]]
  ;; the input at the bottom of the agent's window
  :seon.render/agent-input [:map {:seon.render/html seon.render.ui/agent-input} [:id :keyword] [:live? :boolean]]
  ;; the agent window's live tiles, the last changed first, each serialized ahead
