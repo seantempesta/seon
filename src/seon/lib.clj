@@ -94,6 +94,22 @@
   [] (let [b (ffi/alloc 24)] (sysmem* b)
                   {:free-mb (/ (* PAGE (ffi/read b :long 0)) 1048576.0) :internal-mb (/ (* PAGE (ffi/read b :long 8)) 1048576.0)}))
 
+(defn dir-texts
+  "The text of each file in dir whose name ends with suffix, by name, sorted: the one read of a
+  directory of files (the wiki's pages, the task files). A file listed and gone when it is read
+  (a git merge or bin/update rewriting it, a link to nothing) is left out of this read, as a
+  deleted file is: the change that removed it, or the one that writes it back, makes the next
+  read (task seon.watch/a-vanished-file-is-a-fact; docs/failure-points.md)."
+  {:malli/schema [:=> [:cat :string :string] [:map-of :string :string]]}
+  [dir suffix]
+  (into (sorted-map)
+        (keep (fn [^java.io.File f]
+                (let [n (.getName f)]
+                  (when (.endsWith n suffix)
+                    (try [n (slurp f)]
+                         (catch java.io.FileNotFoundException _ nil))))))
+        (or (seq (.listFiles (java.io.File. dir))) [])))
+
 (defn line-reader
   "A fn of a wait in ms (negative: until something arrives) that answers the complete
   lines that arrived (a vector, maybe empty) or :eof. A signal ending the wait (EINTR)
