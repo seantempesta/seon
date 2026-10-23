@@ -56,8 +56,9 @@ fresh() { [ -f "$T/$1.stamp" ] && [ "$(cat "$T/$1.stamp")" = "$2" ]; }
 pin() {
   if [ -z "$(git -C "$1" status --porcelain -uall --ignore-submodules=all)" ]; then git -C "$1" rev-parse HEAD; return; fi
   i=$(mktemp -u "${TMPDIR:-/tmp}/seon-pin.XXXXXX")
-  echo "$(git -C "$1" rev-parse HEAD)+$(GIT_INDEX_FILE=$i git -C "$1" add -A && GIT_INDEX_FILE=$i git -C "$1" write-tree)"
+  t=$(GIT_INDEX_FILE=$i git -C "$1" add -A && GIT_INDEX_FILE=$i git -C "$1" write-tree) || { rm -f "$i"; die "pin $1: git add or write-tree failed"; }
   rm -f "$i"
+  echo "$(git -C "$1" rev-parse HEAD)+$t"
 }
 CHEZ_PIN=$(pin "$RC/chez")
 JOLT_PIN=$(pin "$RC/jolt")

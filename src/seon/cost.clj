@@ -48,8 +48,9 @@
   "The dimensions a verdict is decided on: counted, so the same code on the same input
   measures the same on any machine at any load, and a green is a function of its reach
   digest (AGENTS.md section 5, results reused by input digest). Cost is work done: ticks
-  (the time dimension: jolt.host/ticks-of, measured once Jolt's jolt/thread-ticks pin lands;
-  judged wherever an estimate and a measure both have them), bytes and calls. CPU time (:ns) moves with load
+  (the time dimension: jolt.host/ticks-of, in Jolt's pin; judged wherever an estimate and a
+  measure both have them, and once does not measure them yet), bytes and calls. An estimate with
+  none of them both stated and measured is red (:uncounted). CPU time (:ns) moves with load
   (158 to 210 us for one function between load 10 and 17, check-events 2026-10-23): it is
   measured, recorded and shown, never red."
   #{:ticks :bytes :calls})
@@ -141,9 +142,13 @@
         unmeasured (vec (for [d dimensions :when (and (dims d) (seq rows) (every? #(nil? (get-in % [:measured d])) rows))] d))
         held? (when-let [{:keys [measured]} (:overrun e)]
                 (and largest (every? (fn [[d m]] (or (not (exact d)) (<= (get-in largest [:measured d] 0.0) (* ratchet m)))) measured)))
-        red? (fn [fs] (some (comp exact :dim) fs))]
-    (cond-> {:ok? (or (not (or (red? over) (red? steeper))) (boolean held?))
+        red? (fn [fs] (some (comp exact :dim) fs))
+        ;; a verdict needs a counted dimension both estimated and measured: one judged on time
+        ;; alone could never be red (time is shown, never red)
+        uncounted? (not-any? #(and (exact %) (dims %) (not (some #{%} unmeasured))) dimensions)]
+    (cond-> {:ok? (and (not uncounted?) (or (not (or (red? over) (red? steeper))) (boolean held?)))
              :over over :steeper steeper :under under :unmeasured unmeasured}
+      uncounted? (assoc :uncounted true)
       (and held? (or (red? over) (red? steeper)))
       (assoc :accepted {:task (:task (:overrun e)) :over over :steeper steeper}))))
 
@@ -224,7 +229,7 @@
   estimate e, a regression past the recorded overrun. The one wording of a verdict: the
   agent's text (`explain`) and the page's verdict box (seon.render.ui/verdict-box)."
   {:malli/schema [:=> [:cat :seon.cost/verdict [:maybe :seon.cost/estimate]] [:sequential [:tuple :string :string]]]}
-  [{:keys [ok? over steeper under unmeasured accepted]} e]
+  [{:keys [ok? over steeper under unmeasured accepted] :as v} e]
   (concat [[(if ok? "ok" "bad") (if ok? "within estimate" "OVER ESTIMATE")]]
           (for [{:keys [dim n ratio]} over]
             [(if (exact dim) "bad" "muted") (str (if (exact dim) "OVER: " "TIME OVER (measured, not red): ") (name dim) " at n=" n " is " (format "%.2f" ratio) "x its estimate (allowed " (slack dim) "x).")])
@@ -233,6 +238,8 @@
                         (format "%.2f" allowed) ". Something does more passes over the data than the work needs.")])
           (for [{:keys [dim n ratio]} under] ["muted" (str "LOOSE: " (name dim) " at n=" n " is " (format "%.2f" ratio) "x its estimate: tighten the estimate.")])
           (for [d unmeasured] ["muted" (str "NOT MEASURED: " (name d) ".")])
+          (when (:uncounted v)
+            [["bad" "NO COUNTED DIMENSION: the estimate states no bytes, calls or ticks that were measured; time alone is never red, so the proof could not fail."]])
           (when-let [{:keys [task]} accepted]
             [["muted" (str "OVERRUN accepted while task " task " is open (within " ratchet "x of "
                            (if-let [m (:measured (:overrun e))] (print/text m (:part print/budgets)) "the overrun its task recorded") "): it is that task's work.")]])
@@ -279,7 +286,7 @@
   seon.cost-test/the-unit-table-is-current measures them again (seon.cost-test/unit-benches)
   and is red when a row's bytes have drifted past 1.25x, naming the row it measured, so
   estimates stay derived from today's physics. :ns is CPU time, shown, never judged; each row
-  gains :ticks (jolt.host/ticks-of, Jolt jolt/thread-ticks) when that pin lands."
+  gains :ticks (jolt.host/ticks-of) when once measures them."
   {:seq/reduce {:ns 1.4 :bytes 0.0 :what "one step of reduce over a vector"}
    :fn/call {:ns 7.4 :bytes 0.0 :what "a reduce step calling one plain function, both defined at the REPL"}
    :fn/armed-call {:ns 32.8 :bytes 353.53 :what "a reduce step calling one contracted function ([:=> [:cat :int] :int])"}

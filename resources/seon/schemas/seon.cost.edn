@@ -51,5 +51,7 @@
                      [:under [:vector :seon.cost/over]]
                      ;; a dimension the estimate states that was not measured (contracts off: no calls)
                      [:unmeasured [:vector :seon.cost/dim]]
+                     ;; no counted dimension (ticks, bytes, calls) both estimated and measured: red, the proof could not fail
+                     [:uncounted {:optional true} :boolean]
                      ;; the over and steeper findings an open overrun task accepts (still shown, not red)
                      [:accepted {:optional true} [:map [:task :string] [:over [:vector :seon.cost/over]] [:steeper [:vector :seon.cost/fit]]]]]}

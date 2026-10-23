@@ -79,6 +79,16 @@
   (let [e (assoc linear :per-n {:ns 1000.0} :fixed {})]
     (is (empty? (:steeper (cost/judge e (rows e (fn [n] {:ns (cost/work :n-log-n n)}))))))))
 
+(deftest an-estimate-of-time-alone-is-red-it-could-not-fail
+  ;; time is shown, never red: an estimate stating only :ns judged nothing (review 2026-10-23)
+  (let [e (assoc linear :per-n {:ns 100.0} :fixed {})
+        v (cost/judge e (rows e (fn [n] {:ns (* 60.0 n) :bytes (* 50.0 n)})))]
+    (is (not (:ok? v)))
+    (is (:uncounted v))
+    (is (re-find #"NO COUNTED DIMENSION" (cost/explain e (rows e (fn [n] {:ns (* 60.0 n) :bytes (* 50.0 n)})) v))))
+  (is (:ok? (cost/judge linear (rows linear (fn [n] {:ns (* 60.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)}))))
+      "with bytes and calls stated and measured, it judges"))
+
 (deftest a-loose-estimate-is-a-finding-not-red
   (let [v (cost/judge linear (rows linear (fn [n] {:ns (* 10.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})))]
     (is (:ok? v))
@@ -226,7 +236,7 @@
 (deftest the-unit-table-is-current
   ;; every row of the table measured again at 10k units (the table's own n: a unit's bytes at 1k
   ;; differ, 630 against 825 B for :map/assoc): its bytes within 1.25x (counted, the same at any
-  ;; load; ticks join when jolt.host/ticks-of's pin lands); a drifted row means the estimates
+  ;; load; ticks join when seon.cost/once measures them); a drifted row means the estimates
   ;; priced by it are stale. Its ns (CPU time) no verdict decides on (seon.cost/exact): measured,
   ;; not asserted (pure-tests 2026-10-23: within 3x of a table measured under another day's load
   ;; was no function of the digest)

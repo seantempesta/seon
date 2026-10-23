@@ -445,10 +445,10 @@
         checked (for [v pure
                       :let [t0 (profile/now-ns)
                             r (try (mg/check (m/deref (contract/schema (contract/contract v))) @v {:registry contract/registry ::mg/=>seed (seed-of v)})
-                               (catch Throwable e {:smallest :threw :seed (ex-message e)}))]]
+                               (catch Throwable e {:smallest :threw :problem (ex-message e)}))]]
                   [(symbol v) r (lib/r2 (profile/ms-since t0))])
         ;; malli could not generate an [:and ...] argument (such-that): not generated, not failed
-        such-that (set (for [[sym r] checked :when (= ":malli.generator/such-that-failure" (:seed r))] sym))
+        such-that (set (for [[sym r] checked :when (= ":malli.generator/such-that-failure" (:problem r))] sym))
         checked (remove (comp such-that first) checked)
         failed (vec (for [[sym r] checked :when (some? r)]
                       [sym (if (= :threw (:smallest r)) r

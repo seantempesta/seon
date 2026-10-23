@@ -440,7 +440,8 @@
         ;; src and test as they are on disk (tracked and untracked, unignored), not HEAD's: the
         ;; digests are the working tree's, and HEAD's copy was red whenever the tree was dirty
         ;; (pure-tests 2026-10-23: HEAD is no input of the digest)
-        _ (sh/sh "zsh" "-c" (str "cd '" here "' && git ls-files -z -co --exclude-standard src test | tar -c --null -T - -f - | tar -x -C '" copy "'"))
+        ;; (a tracked file deleted on disk is no file of the tree: left out)
+        _ (sh/sh "zsh" "-c" (str "cd '" here "' && for f in ${(0)\"$(git ls-files -z -co --exclude-standard src test)\"}; do [[ -e $f ]] && print -rN -- $f; done | tar -c --null -T - -f - | tar -x -C '" copy "'"))
         in {:env "e" :tree "t"}
         a (program/reach-digests (runner/program-db here) in)
         b (program/reach-digests (runner/program-db here) in)

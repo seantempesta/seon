@@ -130,13 +130,20 @@ u-mg-check() {
   local K=$JOBS CP=() ok=1 i st
   # each contract's seed is derived from the step's reach digest (bin/prove's plan), or, in a run
   # that stores no result, from the binary's tree (seon.check/mg-check)
-  local base=$( [[ -n $SEL ]] && sed -n 's/.*"mg-check" "\([0-9a-f]*\)".*/\1/p' "$SEL/steps.edn" ); base=${base:-$(cat "$ROOT/target/seon.tree")}
+  local base
+  if [[ -n $SEL ]]; then
+    base=$(sed -n 's/.*"mg-check" "\([0-9a-f]*\)".*/\1/p' "$SEL/steps.edn")
+    [[ -n $base ]] || { failed "mg-check (no digest for it in $SEL/steps.edn)"; echo "FAILED mg-check (no digest in steps.edn)"; return 0 }
+  else base=$(cat "$ROOT/target/seon.tree"); fi
+  # its K shards take K of the run's JOBS tokens: one is the unit's own, the others are waited for
+  for i in $(seq 2 $K); do read -u 3 tok; done
   for i in $(seq 0 $((K-1))); do { time (run mg-check $i/$K $base > "$OUT/mg-check-$i.log" 2>&1) } 2> "$OUT/mg-check-$i.time" & CP+=($!); done
   for i in $(seq 0 $((K-1))); do
     wait ${CP[$((i+1))]}; st=$?
     grep -E ":generated|^MG-CHECK " "$OUT/mg-check-$i.log"
     (( st == 0 )) || { ok=0; failed "mg-check-$i (exit $st, expected 0, $OUT/mg-check-$i.log)"; echo "FAILED mg-check-$i (exit $st, expected 0)"; }
   done
+  for i in $(seq 2 $K); do print -u 3 x; done
   (( ok )) && green mg-check
 }
 u-fx() { echo "== fx (an effect from an agent through its owner proc)"; step fx ":unknown|:test-fork|^FX " run fx 20 }
@@ -214,16 +221,18 @@ UNITS=(laws lmdb-kill contracts test-inputs mg-check fx config system mcp thread
        e2e-sibling swarm e2e-loop e2e-held resume)
 # the longest first, by the last full run's measured wall seconds (a unit not measured yet first):
 # what orders the queue, never what a step proves
-PREVS=("$ROOT"/target/check/2*(N/)); PREVS=(${PREVS:#$OUT}); PREV=${PREVS[-1]:-}
-secs() { local f r t=0; for f in "$PREV/$1".time(N) "$PREV/$1"-*.time(N); do r=$(sed -n 's/^real \([0-9.]*\).*/\1/p' "$f" | head -1); t=$(( t + ${r:-0} )); done; print $t }
-[[ -n $PREV ]] && UNITS=(${(f)"$(for u in $UNITS; do print "$(secs $u) $u"; done | sort -k1,1 -n -r -s | awk '{print $2}')"})
+# the last full run: the latest that ran scale (a selected run's times cover only its steps)
+PREVS=("$ROOT"/target/check/2*/scale.time(N)); PREVS=(${PREVS:h}); PREVS=(${PREVS:#$OUT}); PREV=${PREVS[-1]:-}
+secs() { local f r t=0 seen=0; for f in "$PREV/$1".time(N) "$PREV/$1"-*.time(N); do seen=1; r=$(sed -n 's/^real \([0-9.]*\).*/\1/p' "$f" | head -1); t=$(( t + ${r:-0} )); done; (( seen )) && print $t || print 1e9 }
+[[ -n $PREV ]] && UNITS=(${(f)"$(for u in $UNITS; do print "$(secs $u) $u"; done | sort -k1,1 -g -r -s | awk '{print $2}')"})
 unit() {
+  # a unit this run does not select takes no store and shows nothing
+  [[ -n $SEL && " $ONLY " != *" $1 "* ]] && return 0
   export SEON_STORE=$OUT/stores/$1
   mkdir -p "$SEON_STORE" && cp -c "$STORE/data.mdb" "$SEON_STORE/data.mdb"
   { u-$1 } > "$OUT/$1.shown" 2>&1
   grep -q "^$1[ -]" "$OUT/failed" || rm -rf "$SEON_STORE"
-  # a unit this run does not select showed only its header
-  (( $(wc -l < "$OUT/$1.shown") > 1 )) && cat "$OUT/$1.shown"
+  cat "$OUT/$1.shown"
 }
 mkfifo "$OUT/pool"; exec 3<>"$OUT/pool"; rm "$OUT/pool"
 for i in $(seq 1 $JOBS); do print -u 3 x; done

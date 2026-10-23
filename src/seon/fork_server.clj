@@ -53,8 +53,7 @@
   ;; notes/pure-tests/lifecycle.md)
   ([st tr]
    (when (= tr ::flow/stop)
-     (run! #(lib/c-kill % 9) (:children st))
-     (while (pos? (lib/c-waitpid -1 (:status-buf st) 0))))
+     (doseq [pid (:children st)] (lib/c-kill pid 9) (lib/c-waitpid pid (:status-buf st) 0)))
    st)
   ([st _ m]
    (case (:op m)
