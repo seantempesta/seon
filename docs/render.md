@@ -116,6 +116,7 @@ There is one value printer, `seon.print`, and nothing is cut before it. A value 
 Text for the wire, storage, a digest, a file, a URL, a command line or code to evaluate is `seon.edn/encode` (EDN that reads back, whole: no print limits), and only that var prints beside the printer:
 
 - `seon.edn/encode`: EDN for storage and the wire, whole.
+- `my.root/first-moves!`: the code text it sends an agent to evaluate (the call to `seon.judge/first-move` on a task id): code to evaluate, not output.
 
 An agent's namespace refers `clojure.pprint`'s `pp` and `pprint` (`seon.agent/make-ns!`), as a plain Clojure REPL does (AGENTS §4, "what would a plain REPL do"); what they write reaches the model as the evaluation's `:out`, budgeted as prose. A check's console lines are the printer's whole text (`seon.main/shown`).
 
