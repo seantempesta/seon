@@ -92,7 +92,7 @@
   that answered is remembered under its slot (a key asked again gets that answer, nothing runs);
   an error is never remembered, so asking again retries, and it is recorded as a :platform problem
   (the api's :problem) as well as answered, but for :seon.root/ended: the agent it asked ended (a
-  cancel, its attempt's end, its attempt's record), and the run ends with it, no fault of the
+  cancel, its run's end, its run's record), and the run ends with it, no fault of the
   platform (bin/check e2e-calc: a cancel killed an agent whose turn had asked for its tests); a
   prove agent root stopped (a cancel) ends its run the same way.
   Answers [st outputs]."

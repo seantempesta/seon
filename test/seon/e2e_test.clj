@@ -1,5 +1,5 @@
 (ns seon.e2e-test
-  "A run ends on what the system observes: quiescence, or a recorded defect (audit FENCES
+  "A run ends on what the system observes: quiescence, or a recorded defect (audit GUARDS
   #26: a flight whose answer is lost never ends, so quiescence never comes; a root proc's
   defect recorded on main ends the wait instead). No clock."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
@@ -64,15 +64,15 @@
     (is (str/includes? (first (:expect (e2e/expectation :newns false))) "(inc 1)"))
     (is (not-any? #(str/includes? % "(inc 1)") (:expect (e2e/expectation :newns true))))))
 
-(deftest turns-count-the-work-attempts
+(deftest turns-count-the-work-runs
   (let [decls (tpl/with-merge (vec (for [nm ["a" "b" "c"]]
                                      {:seon.task/ns 'demo :seon.task/name nm :seon.task/plan "Make it true." :seon.task/proofs #{(symbol "demo-test" nm)}})))
         empty-db (ts/test-db)
         db (d/db-with empty-db (task/create-tx empty-db decls))
         att (fn [id n status turns]
               (let [tid (str "demo/" id) branch (task/default-branch (str "demo/" (first (str/split id #"-"))))]
-                (conj (task/attempt-start-tx (str tid "#" n) tid "boot-1" (keyword (str "a-" id n)) {:branch branch :model nil :max-turns 4} 1000 "Make it true.")
-                      {:seon.attempt/id (str tid "#" n) :seon.attempt/status status :seon.attempt/turns turns})))
+                (conj (task/run-start-tx (str tid "#" n) tid "boot-1" (keyword (str "a-" id n)) {:branch branch :model nil :max-turns 4} 1000 "Make it true.")
+                      {:seon.run/id (str tid "#" n) :seon.run/status status :seon.run/turns turns})))
         db (d/db-with db (concat (att "a" 1 :closed 3) (att "a" 2 :ended 2) (att "a-merge" 1 :merged 0)
                                  (att "b" 1 :ended 1) (att "b-merge" 1 :merged 0)
                                  (att "c" 1 :ended 4) (att "c-merge" 1 :closed 0)))]

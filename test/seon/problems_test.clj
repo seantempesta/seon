@@ -133,7 +133,7 @@
         cs (proofs/costs run)]
     (is (= #{'app.t/red 'app.t/f-cost} (set (keys fs))))
     (is (= 8 (count (get fs 'app.t/red))) "at most 8 assertions per test")
-    (is (contract/valid? :seon.attempt/failures fs))
+    (is (contract/valid? :seon.run/failures fs))
     (is (= "(= 3 0)" (:expected (first (get fs 'app.t/red)))) "printed by the one printer")
     (is (= {'app.t/f-cost {:rows [] :verdict verdict}} cs) "a cost proof's rows and verdict, as data")))
 
@@ -201,7 +201,7 @@
     (testing "a red run of an agent with no task"
       (is (= [[:agent :seon.agent/failed "tests red: #'app.t/red" :a1]]
              (written (step (api view) :back {:op :status :agent :a1 :set {:tests red}})))))
-    (testing "a task's agent: its attempt records its reds at its end, not root"
+    (testing "a task's agent: its run records its reds at its end, not root"
       (is (= [] (written (step (api view) :back {:op :status :agent :a2 :set {:tests red}})))))
     (testing "a merge the writer refused is recorded as the writer's refused answer"
       (let [r (contract/error :seon.merge/behind 'seon.writer/merge-branch "main changed 2 key(s)" {:tx 1 :behind 2})]
@@ -244,28 +244,28 @@
 ;; ---- the read -----------------------------------------------------------------------------
 
 (defn- seeded
-  "A main db with n recorded errors, n red attempts and n dead attempts over a task each,
-  plus k clean tasks with green attempts (the program the read must not cost)."
+  "A main db with n recorded errors, n red runs and n dead runs over a task each,
+  plus k clean tasks with green runs (the program the read must not cost)."
   [n k]
   (ts/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (for [i (range n)] (err/occurrence {:seon.error/type :seon.agent/eval-error :seon.error/operation 'seon.repl/eval-code
                                                                   :seon.error/message (str "Unable to resolve symbol: s" (char (+ 97 (mod i 26))) i) :class "x"}
                                                                  :eval {:agent :a1 :task "t/x0"} 100)))
         [_ tx] (err/flush-tx f @conn)
-        att (fn [tid aid m] (merge {:seon.attempt/id aid :seon.attempt/task [:seon.task/id tid] :seon.attempt/boot "b" :seon.attempt/agent :a1
-                                    :seon.attempt/start-ms 1 :seon.attempt/end-ms 2 :seon.attempt/branch :b :seon.attempt/max-turns 2} m))
+        att (fn [tid aid m] (merge {:seon.run/id aid :seon.run/task [:seon.task/id tid] :seon.run/boot "b" :seon.run/agent :a1
+                                    :seon.run/start-ms 1 :seon.run/end-ms 2 :seon.run/branch :b :seon.run/max-turns 2} m))
         task (fn [tid] {:seon.task/id tid :seon.task/ns 't :seon.task/name (subs tid 2) :seon.task/plan "p" :seon.task/execution :running
                         :seon.task/branch :b :seon.task/kind :work})]
     (d/transact conn tx)
     (d/transact conn (vec (concat (for [i (range k)] (task (str "t/c" i)))
-                                  (for [i (range k)] (att (str "t/c" i) (str "t/c" i "#1") {:seon.attempt/status :done :seon.attempt/outcome :green}))
+                                  (for [i (range k)] (att (str "t/c" i) (str "t/c" i "#1") {:seon.run/status :done :seon.run/outcome :green}))
                                   (for [i (range n)] (assoc (task (str "t/r" i)) :seon.task/proofs #{'app.t/red}))
                                   (for [i (range n)] (att (str "t/r" i) (str "t/r" i "#1")
-                                                          {:seon.attempt/status :closed :seon.attempt/outcome :cap
-                                                           :seon.attempt/failures {'app.t/red [{:type :fail :message "m" :expected "1" :actual "2"}]}}))
+                                                          {:seon.run/status :closed :seon.run/outcome :cap
+                                                           :seon.run/failures {'app.t/red [{:type :fail :message "m" :expected "1" :actual "2"}]}}))
                                   (for [i (range n)] (task (str "t/d" i)))
                                   (for [i (range n)] (att (str "t/d" i) (str "t/d" i "#1")
-                                                          {:seon.attempt/status :dead :seon.attempt/reason "its agent died"
-                                                           :seon.attempt/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1})})))))
+                                                          {:seon.run/status :dead :seon.run/reason "its agent died"
+                                                           :seon.run/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1})})))))
     @conn))))
 
 (deftest problems-lists-every-class-with-what-a-declaration-needs
@@ -279,7 +279,7 @@
     (is (= 3 (count (get-in r [:classes :dead :rows]))))
     (let [red (first (get-in r [:classes :red :rows]))]
       (is (= ['app.t/red] (:proofs red)) "the failing test reproduces it")
-      (is (= {:from (:attempt red) :red ['app.t/red]} (select-keys (:evidence red) [:from :red])) "evidence as data")
+      (is (= {:from (:run red) :red ['app.t/red]} (select-keys (:evidence red) [:from :red])) "evidence as data")
       (is (= 't (:owner-ns red)))
       (is (:open? red)))
     (let [e (first (get-in r [:classes :eval :rows]))]
@@ -291,14 +291,14 @@
       (let [behind (contract/error :seon.merge/behind 'seon.writer/merge-branch "main changed 2 key(s)" {:behind 2})
             db2 (:db-after (d/with db [{:seon.task/id "t/m" :seon.task/ns 't :seon.task/name "m" :seon.task/plan "p" :seon.task/execution :running
                                          :seon.task/branch :b :seon.task/kind :merge}
-                                        {:seon.attempt/id "t/m#1" :seon.attempt/task [:seon.task/id "t/m"] :seon.attempt/boot "b" :seon.attempt/agent :a2
-                                         :seon.attempt/start-ms 1 :seon.attempt/end-ms 9 :seon.attempt/branch :b :seon.attempt/max-turns 2
-                                         :seon.attempt/status :behind :seon.attempt/unmerged ["[:var app/g]"]
-                                         :seon.attempt/conflicts [{:seon.merge/key [:var 'app/f] :seon.merge/kind :both-modified}]
-                                         :seon.attempt/error behind}]))
+                                        {:seon.run/id "t/m#1" :seon.run/task [:seon.task/id "t/m"] :seon.run/boot "b" :seon.run/agent :a2
+                                         :seon.run/start-ms 1 :seon.run/end-ms 9 :seon.run/branch :b :seon.run/max-turns 2
+                                         :seon.run/status :behind :seon.run/unmerged ["[:var app/g]"]
+                                         :seon.run/conflicts [{:seon.merge/key [:var 'app/f] :seon.merge/kind :both-modified}]
+                                         :seon.run/error behind}]))
             [m] (get-in (problems/report db2) [:classes :merge :rows])]
         (is (= ["t/m#1" :behind 1 ["[:var app/g]"] 'seon.writer/merge-branch]
-               [(:attempt m) (:status m) (:conflicts m) (:unmerged m) (:producer m)]))
+               [(:run m) (:status m) (:conflicts m) (:unmerged m) (:producer m)]))
         (is (= [{:key [:var 'app/f] :kind :both-modified}] (get-in m [:evidence :conflicts])))
         (is (= :seon.merge/behind (get-in m [:error :seon.error/type])))))
     (testing "a task whose evidence names a problem answers it: mining files no duplicate"
@@ -317,8 +317,8 @@
 
 (deftest problems-reads-only-the-problems
   (cost/proof {:of 'seon.problems/report :input 'seon.problems-test/rows-input
-               :n "recorded problems of each class (per n: one signature, one red attempt, one dead attempt)"
-               :work (str "one index seek per class, then per row one pull: the signature's 13 attributes; an attempt's 12 and "
+               :n "recorded problems of each class (per n: one signature, one red run, one dead run)"
+               :work (str "one index seek per class, then per row one pull: the signature's 13 attributes; a run's 12 and "
                           "its task's 2 (a nested pull), and one status pull to know whether its task is done; about 500 "
                           "characters of EDN read (example, failures, error)")
                :growth :linear
@@ -329,12 +329,12 @@
 
 (defn clean-input
   "The flatness proof's input at k: 4 problems of each class over k clean tasks, each with a
-  green attempt."
+  green run."
   [k] [(seeded 4 k)])
 
 (deftest problems-cost-nothing-for-a-clean-program
   (cost/proof {:of 'seon.problems/report :input 'seon.problems-test/clean-input
-               :n "clean tasks (each with a green attempt), beside 4 problems of each class"
+               :n "clean tasks (each with a green run), beside 4 problems of each class"
                :work "none per clean task: the indexes the read seeks hold only problem rows; the 4 problem sets cost what they cost"
                :growth :constant
                :ops {:db/pull 28 :db/pull-attr 152 :edn/read-char 2000}
@@ -381,30 +381,30 @@
     (is (nil? (:truncated? (model/parse-reply (body "stop") 9.0 4096))) "a reply that stopped on its own is not cut")))
 
 (deftest another-tasks-unfinished-proof-is-not-a-problem
-  ;; T5's real run: one attempt's run reports every program test, so 210 rows named other
+  ;; T5's real run: one run's run reports every program test, so 210 rows named other
   ;; tasks' proofs not done yet (allowed reds); only the task's own proofs are its problems
   (ts/test-branch! (fn [_ conn]
     (d/transact conn [{:seon.task/id "t/a" :seon.task/ns 't :seon.task/name "a" :seon.task/plan "p" :seon.task/execution :running
                        :seon.task/branch :b :seon.task/kind :work :seon.task/proofs #{'app.t/a-test}}])
-    (d/transact conn [{:seon.attempt/id "t/a#1" :seon.attempt/task [:seon.task/id "t/a"] :seon.attempt/boot "b" :seon.attempt/agent :a1
-                       :seon.attempt/start-ms 1 :seon.attempt/end-ms 2 :seon.attempt/branch :b :seon.attempt/max-turns 2
-                       :seon.attempt/status :ended :seon.attempt/outcome :red
-                       :seon.attempt/failures {'app.t/a-test [{:type :fail :expected "1" :actual "2"}]
+    (d/transact conn [{:seon.run/id "t/a#1" :seon.run/task [:seon.task/id "t/a"] :seon.run/boot "b" :seon.run/agent :a1
+                       :seon.run/start-ms 1 :seon.run/end-ms 2 :seon.run/branch :b :seon.run/max-turns 2
+                       :seon.run/status :ended :seon.run/outcome :red
+                       :seon.run/failures {'app.t/a-test [{:type :fail :expected "1" :actual "2"}]
                                                'app.t/other-test [{:type :fail :expected "3" :actual "4"}]}}])
     (is (= ['app.t/a-test] (mapv :test (get-in (problems/report @conn) [:classes :red :rows])))))))
 
-(deftest a-lost-attempt-is-a-death
-  ;; task seon.render/one-owner-per-view-path (A1): the failed attempt statuses are the
+(deftest a-lost-run-is-a-death
+  ;; task seon.render/one-owner-per-view-path (A1): the failed run statuses are the
   ;; declared set (:seon.status/failed), not a literal in the reader
   (let [db (:db-after (d/with (seeded 1 5)
                               [{:seon.task/id "t/l" :seon.task/ns 't :seon.task/name "l" :seon.task/plan "p" :seon.task/execution :running
                                 :seon.task/branch :l :seon.task/kind :work}
-                               {:seon.attempt/id "t/l#1" :seon.attempt/task [:seon.task/id "t/l"] :seon.attempt/boot "b" :seon.attempt/agent :a9
-                                :seon.attempt/start-ms 1 :seon.attempt/end-ms 9 :seon.attempt/branch :l :seon.attempt/max-turns 2
-                                :seon.attempt/status :lost}]))
+                               {:seon.run/id "t/l#1" :seon.run/task [:seon.task/id "t/l"] :seon.run/boot "b" :seon.run/agent :a9
+                                :seon.run/start-ms 1 :seon.run/end-ms 9 :seon.run/branch :l :seon.run/max-turns 2
+                                :seon.run/status :lost}]))
         rows (get-in (problems/report db) [:classes :dead :rows])]
-    (is (= :lost (:status (first (filter #(= "t/l#1" (:attempt %)) rows)))))
-    (is (not-any? #(= "t/l#1" (:attempt %)) (get-in (problems/report db) [:classes :error :rows])))))
+    (is (= :lost (:status (first (filter #(= "t/l#1" (:run %)) rows)))))
+    (is (not-any? #(= "t/l#1" (:run %)) (get-in (problems/report db) [:classes :error :rows])))))
 
 (deftest a-merge-with-its-process-tests-unrun-is-an-open-problem
   ;; owner's ruling, 2026-10-23: a change that reaches process tests merges with them unrun
@@ -413,24 +413,24 @@
   (let [att (fn [extra] (:db-after (d/with (seeded 1 5)
                                            [{:seon.task/id "t/u" :seon.task/ns 't :seon.task/name "u" :seon.task/plan "p" :seon.task/execution :running
                                              :seon.task/branch :u :seon.task/kind :merge}
-                                            (merge {:seon.attempt/id "t/u#1" :seon.attempt/task [:seon.task/id "t/u"] :seon.attempt/boot "b" :seon.attempt/agent :a9
-                                                    :seon.attempt/start-ms 1 :seon.attempt/end-ms 9 :seon.attempt/branch :u :seon.attempt/max-turns 2
-                                                    :seon.attempt/status :merged :seon.attempt/deferred ['seon.root-test/boots 'seon.check-test/clean]}
+                                            (merge {:seon.run/id "t/u#1" :seon.run/task [:seon.task/id "t/u"] :seon.run/boot "b" :seon.run/agent :a9
+                                                    :seon.run/start-ms 1 :seon.run/end-ms 9 :seon.run/branch :u :seon.run/max-turns 2
+                                                    :seon.run/status :merged :seon.run/deferred ['seon.root-test/boots 'seon.check-test/clean]}
                                                    extra)])))
         rows #(get-in (problems/report %) [:classes :unrun :rows])]
-    (is (= [["t/u#1" "merged with 2 process tests unrun" true]] (mapv (juxt :attempt :reason :open?) (rows (att {})))))
-    (is (= 1 (count (rows (att {:seon.attempt/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :pass}]}))))
+    (is (= [["t/u#1" "merged with 2 process tests unrun" true]] (mapv (juxt :run :reason :open?) (rows (att {})))))
+    (is (= 1 (count (rows (att {:seon.run/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :pass}]}))))
         "one of two recorded: still open")
-    (is (= 1 (count (rows (att {:seon.attempt/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :pass}
+    (is (= 1 (count (rows (att {:seon.run/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :pass}
                                                                 {:seon.proof/test 'seon.check-test/clean :seon.proof/status :fail}]}))))
         "a red among them: still open")
-    (is (= [] (rows (att {:seon.attempt/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :pass}
+    (is (= [] (rows (att {:seon.run/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :pass}
                                                          {:seon.proof/test 'seon.check-test/clean :seon.proof/status :pass}]})))
         "each passing: the row closes")
     (is (= [{:ns 'app.repl-only :reason "no :ns/file on the branch: its forms were never written to a file"}]
-           (:unread (first (rows (att {:seon.attempt/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :error}
+           (:unread (first (rows (att {:seon.run/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :error}
                                                                        {:seon.proof/test 'seon.check-test/clean :seon.proof/status :error}]
-                                       :seon.attempt/gate-unread [{:ns 'app.repl-only :reason "no :ns/file on the branch: its forms were never written to a file"}]})))))
+                                       :seon.run/gate-unread [{:ns 'app.repl-only :reason "no :ns/file on the branch: its forms were never written to a file"}]})))))
         "a gate that could not read a changed namespace names it, and why, on the open row")))
 
 ;; ---- derived: a dead citation is true while it is true (notes/health-design-2026-10-23.md) ----

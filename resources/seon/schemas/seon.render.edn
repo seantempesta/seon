@@ -20,15 +20,15 @@
 
  ;; ---- what root's dashboard shows: the whole system as one value ----
  ;; the api's view (agents, writer, fork server, store, boot, root errors) joined with every
- ;; proc's health, main's tasks and attempts, the series the tiles draw, and the events.
+ ;; proc's health, main's tasks and runs, the series the tiles draw, and the events.
  ;; Its HTML face is root's layout; its AI face is root's context (a budgeted text).
  :seon.render/system [:map {:seon.render/html seon.render.ui/system-page :seon.render/ai seon.render.ai/system}
                       [:agents :map] [:health :map] [:writer :map] [:fork-server :map]
-                      [:main :map] [:tasks :map] [:attempts :map] [:events [:vector :any]]]
+                      [:main :map] [:tasks :map] [:runs :map] [:events [:vector :any]]]
  ;; one agent as root holds it (the api's view entry, its id added): its card in root's layout
  :seon.render/agent [:map {:seon.render/html seon.render.ui/agent-card}
                      [:id :keyword] [:status {:optional true} [:maybe :keyword]]]
- ;; one agent zoomed: the agent, its attempt and task on main, its evaluations on its branch,
+ ;; one agent zoomed: the agent, its run and task on main, its evaluations on its branch,
  ;; the current-state block its model reads. Its HTML face is the agent's page.
  :seon.render/agent-page [:map {:seon.render/html seon.render.ui/agent-page}
                           [:agent :seon.render/agent]]
@@ -43,9 +43,9 @@
                      [:cells [:sequential [:tuple :any :any nat-int?]]] [:off :int]]
  ;; every declared root proc's health, by proc id
  :seon.render/procs-health [:map {:seon.render/html seon.render.ui/tile-health} [:health :map]]
- ;; the work: every task's row (seon.render.proc/task-rows), main's attempts, main's t
+ ;; the work: every task's row (seon.render.proc/task-rows), main's runs, main's t
  :seon.render/work [:map {:seon.render/html seon.render.ui/tile-tasks}
-                    [:rows [:maybe :map]] [:attempts [:maybe :map]]]
+                    [:rows [:maybe :map]] [:runs [:maybe :map]]]
  ;; root's own defects, the boot's numbers and the store
  :seon.render/root-errors [:map {:seon.render/html seon.render.ui/tile-errors}]
  ;; root's context: the system's AI face as root reads it
@@ -57,9 +57,9 @@
  :seon.render/web [:map {:seon.render/html seon.render.ui/web-stats}]
  ;; the zoomed agent's head (its entry as root holds it, its card's numbers)
  :seon.render/zoom-head [:map {:seon.render/html seon.render.ui/zoom-head} [:id :keyword]]
- ;; the zoomed agent's work on main: its attempt and task
+ ;; the zoomed agent's work on main: its run and task
  :seon.render/zoom-work [:map {:seon.render/html seon.render.ui/zoom-work}]
- ;; the zoomed agent's last test run, and main's results of its attempt
+ ;; the zoomed agent's last test run, and main's results of its run
  :seon.render/proofs [:map {:seon.render/html seon.render.ui/proofs-box}]
  ;; the current-state block the zoomed agent's model reads, or why there is none
  :seon.render/zoom-context [:map {:seon.render/html seon.render.ui/zoom-context}]

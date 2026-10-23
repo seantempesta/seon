@@ -22,7 +22,7 @@
   [why] (contract/error :seon.root/refused 'seon.server/answer why))
 
 (defn task-summaries
-  "Every task on main db: {id {:execution :done :blocked-by :attempts [[id status outcome
+  "Every task on main db: {id {:execution :done :blocked-by :runs [[id status outcome
   turns tokens]] :failure}}: the server's and the e2e harness's one summary."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
@@ -30,8 +30,8 @@
     (into (sorted-map)
           (for [[id t] (:tasks idx)]
             [id (cond-> {:execution (:seon.task/execution t) :done (r/done? idx id) :blocked-by (r/blocked-by idx id)
-                         :attempts (mapv (juxt :seon.attempt/id :seon.attempt/status :seon.attempt/outcome :seon.attempt/turns :seon.attempt/tokens)
-                                         (sort-by :seon.attempt/id (map (:attempts idx) (get-in idx [:by-task id]))))}
+                         :runs (mapv (juxt :seon.run/id :seon.run/status :seon.run/outcome :seon.run/turns :seon.run/tokens)
+                                         (sort-by :seon.run/id (map (:runs idx) (get-in idx [:by-task id]))))}
                   (:seon.task/failure t) (assoc :failure (:reason (:seon.task/failure t))))]))))
 
 (defn- agents-answer
@@ -64,11 +64,11 @@
     items))
 
 (defn- attach!
-  "Start an outside attempt of task id: its desired model is \"outside\", so the
+  "Start an outside run of task id: its desired model is \"outside\", so the
   reconciler starts no turn loop for it and does not kill it. The agent is spawned first;
-  only once it exists are its env, the release and the attempt written, in one transaction,
-  so a refused spawn writes nothing and the reconciler never sees a release with no attempt
-  (it would spawn a second agent for it). Answers {:agent :task :attempt}."
+  only once it exists are its env, the release and the run written, in one transaction,
+  so a refused spawn writes nothing and the reconciler never sees a release with no run
+  (it would spawn a second agent for it). Answers {:agent :task :run}."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.task/id] :map]}
   [sys id]
   (let [db @(:conn sys)
@@ -76,20 +76,20 @@
     (if-not t
       (refused (str "no task " id))
       (let [env (assoc (r/desired-env t) :model "outside")
-            aid (task/attempt-id id (inc (count (filter #(= id (:seon.attempt/task %)) (vals (task/attempts db))))))
-            ag (c/spawn! sys {:branch (:branch env) :task id :attempt aid})]
+            aid (task/run-id id (inc (count (filter #(= id (:seon.run/task %)) (vals (task/runs db))))))
+            ag (c/spawn! sys {:branch (:branch env) :task id :run aid})]
         @(c/transact-main! sys (vec (concat (task/env-tx id {:model "outside"}) (task/execution-tx [id] :running)
-                                            (task/attempt-start-tx aid id (:boot sys) ag env (System/currentTimeMillis)
+                                            (task/run-start-tx aid id (:boot sys) ag env (System/currentTimeMillis)
                                                                    (:plan (:seon.task/accumulated t))))))
-        {:agent ag :task id :attempt aid}))))
+        {:agent ag :task id :run aid}))))
 
-(defn- attempt-of
-  "The live attempt agent ag works, from main: {:attempt :task :env}, or nil."
+(defn- run-of
+  "The live run agent ag works, from main: {:run :task :env}, or nil."
   {:malli/schema [:=> [:cat :seon.root/sys :keyword] [:maybe :map]]}
   [sys ag]
-  (some (fn [a] (when (and (= ag (:seon.attempt/agent a)) (= :running (:seon.attempt/status a)))
-                  {:attempt (:seon.attempt/id a) :task (:seon.attempt/task a) :env (:seon.attempt/env a)}))
-        (vals (task/attempts @(:conn sys)))))
+  (some (fn [a] (when (and (= ag (:seon.run/agent a)) (= :running (:seon.run/status a)))
+                  {:run (:seon.run/id a) :task (:seon.run/task a) :env (:seon.run/env a)}))
+        (vals (task/runs @(:conn sys)))))
 
 (def ops
   "The server's ops, the one table, keyed by a request's :op (an EDN request is a
@@ -98,7 +98,7 @@
   answer, a fn of root's system, the agent the request names (:root, an agent's keyword, or
   nil) and the request. MCP lists each as the tool seon_<op> (mcp-reply)."
   (array-map
-   :agents {:doc "Live agents (id, branch, status, task) and every task (execution, done, blocked-by, its attempts as [id status outcome turns tokens], problem)."
+   :agents {:doc "Live agents (id, branch, status, task) and every task (execution, done, blocked-by, its runs as [id status outcome turns tokens], problem)."
             :args {} :answer (fn [sys _ _] (agents-answer sys))}
    :eval {:doc "Evaluate Clojure in a running agent's process (recorded on its branch, origin :outside) or as \"root\" in root's process (root.repl: `sys` is root; my.root/run!, my.root/cancel!, seon.root/merge! ...), each through the one REPL path. Answers one reply item per form."
           :args {:agent {:type "string" :description "an agent id (a3) or root"} :code {:type "string" :description "Clojure forms"}}
@@ -112,8 +112,8 @@
    :context {:doc "The current-state block of the task an agent works: what the model would read now."
              :args {:agent {:type "string"}} :required ["agent"]
              :answer (fn [sys ag _]
-                       (if-let [{:keys [task attempt]} (attempt-of sys ag)]
-                         (let [r @(c/submit! sys ag (sedn/encode (list 'print (list 'seon.turn/context-block task attempt))) {:origin :context})]
+                       (if-let [{:keys [task run]} (run-of sys ag)]
+                         (let [r @(c/submit! sys ag (sedn/encode (list 'print (list 'seon.turn/context-block task run))) {:origin :context})]
                            (cond (contract/error? r) r (= :err (:tag (last r))) (:err (last r)) :else {:context (:out (last r))}))
                          (refused (str ag " works no task: attach one first"))))}
    :attach {:doc "Work a task as a Seon agent: root starts an agent on the task's branch (model outside) and answers its id."
@@ -125,12 +125,12 @@
            :answer (fn [sys ag req]
                      (let [r @(c/prove! sys ag (set (map symbol (:names req))))]
                        (if (contract/error? r) r (select-keys r [:key :ran :pass :fail :error :red :reused :ms]))))}
-   :done {:doc "Hand the attempt the agent works back to root: its proofs run, it is judged, and merged when the done rule has no reason."
+   :done {:doc "Hand the run the agent works back to root: its proofs run, it is judged, and merged when the done rule has no reason."
           :args {:agent {:type "string"}} :required ["agent"]
           :answer (fn [sys ag _]
-                    (if-let [{:keys [attempt task env]} (attempt-of sys ag)]
-                      (do (c/judge! sys {:attempt attempt :task task :env env :agent ag})
-                          {:judging attempt})
+                    (if-let [{:keys [run task env]} (run-of sys ag)]
+                      (do (c/judge! sys {:run run :task task :env env :agent ag})
+                          {:judging run})
                       (refused (str ag " works no task"))))}))
 
 (defn answer

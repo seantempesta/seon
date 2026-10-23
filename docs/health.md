@@ -4,7 +4,7 @@ Health is the set of open problems: a value computed when something reads it (`s
 
 ## Two kinds of problem
 
-A **recorded** problem is one only an effect can observe. Any code reports one by transacting it: an error recorded once per signature (`seon.error`), or an attempt's red proof, death, conflict or waste written as a fact at its end. `seon.problems/report` reads what was recorded, at a cost that follows the problems and never the program.
+A **recorded** problem is one only an effect can observe. Any code reports one by transacting it: an error recorded once per signature (`seon.error`), or a run's red proof, death, conflict or waste written as a fact at its end. `seon.problems/report` reads what was recorded, at a cost that follows the problems and never the program.
 
 A **derived** problem is something the program's facts make true now. It is a read over facts the loaders already write, so nothing writes the problem and nothing closes it. It is open exactly while it is true, and fixing the fact closes it. `seon.problems/health` is `report` plus the derived classes, in the same value (`:seon.problems/report`). Not this: a check that stores its findings and must remember to retract them, or a timer that re-runs a scan.
 
@@ -37,7 +37,7 @@ The test service ([merging](merging.md#the-test-service)) leaves a fact per test
 
 `seon.problems/caused` is the set of derived problems a branch's head has that its merge base had not: what the branch's own work broke.
 - The agent's turn computes it each turn (`seon.turn`'s observe), so its context lists them with the done rule's other reasons.
-- Root's judge records it at the attempt's end (`:seon.attempt/caused`, from the writer's `:branch-diff`).
+- Root's judge records it at the run's end (`:seon.run/caused`, from the writer's `:branch-diff`).
 - `seon.reconcile/done-explain` gives `:open-problem` as a reason while any is open, so the task is held for root naming it ([tasks](tasks.md#the-done-rule)).
 
 Nothing gates an evaluation. An agent may break a citation in one eval and fix it three evals later (AGENTS §4: get out of an agent's way). A merge needs no rule of its own: a branch behind main is refused `:behind` and judged again after merging main.

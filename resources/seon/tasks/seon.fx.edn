@@ -12,7 +12,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.fx-test/add-lib-loads-a-resolved-library seon.fx-test/a-changed-artifact-is-refused-by-its-checksum}}
  {:seon.task/name "the-rate-limited-requeue-reads-what-its-owner-sets"
-  :seon.task/plan "What exists: `seon.fx/owner-proc`'s :done arm re-queues a :seon.model/rate-limited outcome behind three guards on values its own procs always set: `(and limited? (:request m))` though `seon.fx/worker-proc` always sends :request; `(or (::qk r) [...])` though `seon.fx/dispatch` sets ::qk on everything it sends a worker; `(if (vector? qk) (second qk) 0)` though qk is always a vector; plus a :seq bump re-insertion under the old key may not need (check). Merged from an agent's attempt (573f12f) with the guards the audit graded C+. Correct: read :request and ::qk as given; a message without them is a defect the contract names. Deletes: the three guards (and the :seq bump if it proves unneeded)."
+  :seon.task/plan "What exists: `seon.fx/owner-proc`'s :done arm re-queues a :seon.model/rate-limited outcome behind three guards on values its own procs always set: `(and limited? (:request m))` though `seon.fx/worker-proc` always sends :request; `(or (::qk r) [...])` though `seon.fx/dispatch` sets ::qk on everything it sends a worker; `(if (vector? qk) (second qk) 0)` though qk is always a vector; plus a :seq bump re-insertion under the old key may not need (check). Merged from an agent's run (573f12f) with the guards the audit graded C+. Correct: read :request and ::qk as given; a message without them is a defect the contract names. Deletes: the three guards (and the :seq bump if it proves unneeded)."
   :seon.task/kind :work
   :seon.task/proofs #{seon.fx-admit-test/a-rate-limited-model-call-waits-for-the-bucket-and-is-answered}}
  {:seon.task/name "an-effect-opens-a-receipt"
@@ -28,4 +28,13 @@
   :seon.task/plan "What exists: no :web effect, so an agent cannot fetch a page or search (parity.md gap 11). v1: `my.web/fetch` and `search`, http(s) only, no userinfo in the URL, manual redirects with loop detection, a body cap (~/src/seon/src/seon/web/jvm.clj:42,156,297-334); the search key held by root, named by an env-var config key. Correct: :web-fetch and :web-search kinds in system.edn :fx, the search key read only by root's owner (as `seon.fx/model` reads the model key), with my.web as a wrapper over `my.fx/call`; caps as :seon.config.web/* keys."
   :seon.task/kind :work
   :seon.task/needs #{"seon.fx/an-effect-opens-a-receipt"}
-  :seon.task/proofs #{seon.fx-test/redirects-are-bounded seon.fx-test/search-key-stays-in-root}}]
+  :seon.task/proofs #{seon.fx-test/redirects-are-bounded seon.fx-test/search-key-stays-in-root}}
+ {:seon.task/name "write-back-answers-what-happened"
+  :seon.task/plan "Done: `seon.fx/write-file` writes path.fx-PID and renames it over path with rename(2) (`seon.lib/c-rename`, with errno): a failed rename answers :seon.fx/io-error {:path :tmp :errno :message} and removes the tmp; success answers {:value {:bytes n :path path}}, n the path's size on disk after the rename. Replaces an ignored `.renameTo` boolean, which answered success for a rename that failed (a missing directory, a cross-device path, a permission) and left the tmp, so the loop's last step (merged code written back) could record a write that never reached disk. One syscall more; constant, no cost proof."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.fx-test/a-failed-rename-is-an-io-error-and-leaves-no-tmp
+                      seon.fx-test/a-write-back-answers-the-bytes-on-disk}}
+ {:seon.task/name "a-transient-model-failure-parks"
+  :seon.task/plan "Done: a :seon.model/rate-limited outcome (the provider's 429) is not answered to its asker: `seon.fx/owner-proc` records the :effect problem, `seon.fx/settle` halves the bucket's rate (AIMD), and the request the worker performed goes back on the queue under its old key, so `seon.fx/dispatch` sends it again when the bucket refills; the agent's fx! stays parked on its one answer, the call that went through or a non-transient error. This is the delayed insert AGENTS.md section 4 allows for a provider's retry-after. A transport failure (`seon.model/http-post`'s caught exception, no status) is not transient by any provider's statement: it answers the agent and ends the run :error, recorded; re-sending it would be a blind retry. `seon.model/http-post` has no deadline (the reply ends when the server ends it). Per 429: one queue insert, and no model call beyond those the provider refused."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.fx-admit-test/a-rate-limited-model-call-waits-for-the-bucket-and-is-answered}}]

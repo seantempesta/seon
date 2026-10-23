@@ -3,7 +3,7 @@
   it, so the test boots a root of its own, as seon.root-test does, and asks the agent over
   the server what its REPL answers.
 
-  An agent's test run, read from its child's pipe (task seon.fences/one-test-bound-derived-and-named):
+  An agent's test run, read from its child's pipe (task seon.agent/one-test-bound-derived-and-named):
   no clock ends it; the child's exit does, and a child that died names the test it was running.
   Run: bin/test seon.agent-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
@@ -294,8 +294,8 @@
 
 (deftest a-failure-marked-through-the-server-holds-the-task
   ;; owner, 2026-10-22: a failure is task data and root reacts to it. The agent marks its
-  ;; task failed on its branch, hands the attempt back (seon_done), and root, at the
-  ;; attempt's end, holds the task as :failed and reports it among the problems
+  ;; task failed on its branch, hands the run back (seon_done), and root, at the
+  ;; run's end, holds the task as :failed and reports it among the problems
   (let [[f _ seen] (in-agent ["(:reason (my.task/fail! \"the premise is refuted\" '(= 1 2)))"
                               {:op :done :agent "a1"}
                               {:op :eval :agent "root"
@@ -322,9 +322,9 @@
   ;; repetition loops asking for answers the model could not see. Now each call of the one
   ;; tool, eval, is answered as its own tool message before the next model call: the scripted model
   ;; (seon.fixtures/two-calls) writes its second call from the answer its first call got
-  (let [[end msgs] (in-agent ["(seon.turn/work! {:task \"demo/t\" :attempt \"demo/t#calls\" :max-turns 2})"
+  (let [[end msgs] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#calls\" :max-turns 2})"
                               (str "(let [db (seon.agent/db)]"
-                                   " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task \"demo/t\" :attempt \"demo/t#calls\""
+                                   " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task \"demo/t\" :run \"demo/t#calls\""
                                    "                                       :turn 2 :max-turns 2 :origin :model :observed {}}))"
                                    "      (filter #(#{\"assistant\" \"tool\"} (:role %))) (mapv #(select-keys % [:role :tool-calls :tool-call-id :content]))))")]
                              {:sets [":seon.config.ai/script=seon.fixtures/two-calls"]})
@@ -342,18 +342,18 @@
   ;; task seon.agent/a-death-names-its-cause: a defect that no request's own boundary
   ;; catches (here the agent redefines, at its REPL as an agent changes the platform, a
   ;; function its own loop calls after each request: seon.agent/db)
-  ;; ends the process at its entrant boundary: the cause is the attempt's end on its branch,
+  ;; ends the process at its entrant boundary: the cause is the run's end on its branch,
   ;; written before the process exits, and root answers the request it died in with the
   ;; exit status the fork server reaped
   (let [[_ died end] (in-agent [{:op :context :agent "a1"}
                                 "(in-ns 'seon.agent) (clojure.core/defn db [] (throw (ex-info \"boom: the loop's own function\" {:x 1})))"
                                 {:op :eval :agent "root"
-                                 :code (str "(let [a (first (filter #(= :a1 (:seon.attempt/agent %)) (vals (seon.task/attempts @(:conn sys)))))]"
-                                            " (seon.reconcile/pull-end (:db @(seon.root/branch-db sys (seon.task/default-branch \"demo/t\"))) (:seon.attempt/id a)))")}])
+                                 :code (str "(let [a (first (filter #(= :a1 (:seon.run/agent %)) (vals (seon.task/runs @(:conn sys)))))]"
+                                            " (seon.reconcile/pull-end (:db @(seon.root/branch-db sys (seon.task/default-branch \"demo/t\"))) (:seon.run/id a)))")}])
         end (edn/read-string {:default tagged-literal} (:printed end))]
     (is (= :seon.agent/died (:seon.error/type died)) "the request it died in is answered with its death, the one error map")
     (is (= {:exit 70} (:exit died)) "named by the exit status root observed")
-    (is (= :error (:outcome end)) "the attempt's end is on its branch")
+    (is (= :error (:outcome end)) "the run's end is on its branch")
     (is (= "boom: the loop's own function" (get-in end [:error :seon.error/message])) "with its cause, the one error map")
     (is (= 'seon.repl/serve! (get-in end [:error :seon.error/operation])))))
 
@@ -362,17 +362,17 @@
 
 (deftest a-killed-test-run-names-the-test-that-was-running
   (testing "a child killed while running app-test/slow: that test is red, with how the child ended"
-    (let [run (agent/run-answer (started "#'app-test/slow") {:signal 9})]
+    (let [run (agent/test-run-answer (started "#'app-test/slow") {:signal 9})]
       (is (= {'app-test/slow :error} (proofs/results run)))
-      (is (= [] (proofs/run-errors run)) "the death is the running test's, not an anonymous run error")
+      (is (= [] (proofs/test-run-errors run)) "the death is the running test's, not an anonymous run error")
       (is (= {:signal 9} (:exit (first (:reports run)))))))
   (testing "a child that wrote its result last: the result"
     (let [res {:pass 1 :fail 0 :error 0 :test 1 :reports [{:type :pass :var "#'app-test/fast" :message nil}]}]
-      (is (= res (agent/run-answer (pr-str res) {:exit 0})))))
+      (is (= res (agent/test-run-answer (pr-str res) {:exit 0})))))
   (testing "a child that died before any test started: one run error naming its exit"
-    (let [run (agent/run-answer nil {:exit 1})]
+    (let [run (agent/test-run-answer nil {:exit 1})]
       (is (= {} (proofs/results run)))
-      (is (= 1 (count (proofs/run-errors run)))))))
+      (is (= 1 (count (proofs/test-run-errors run)))))))
 
 (deftest after-merge-main-the-agent-judges-against-the-new-base
   ;; task seon.agent/an-agents-base-is-its-merge-base: an agent chooses the tests that judge
@@ -423,26 +423,26 @@
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 
-(deftest a-root-with-no-provider-ends-the-attempt-on-its-typed-error
+(deftest a-root-with-no-provider-ends-the-run-on-its-typed-error
   ;; root's ruling 2026-10-22: a root with no model provider (no SEON_PROFILE) answers the
   ;; first turn with :seon.model/no-provider; the error reaches whoever can act on it: the
-  ;; attempt's record on main and my.root/problems' :error rows
-  (let [q "[:find (pull ?e [:seon.attempt/outcome :seon.attempt/error]) . :where [?e :seon.attempt/task ?t] [?t :seon.task/id \"demo/m\"] [?e :seon.attempt/error]]"
+  ;; run's record on main and my.root/problems' :error rows
+  (let [q "[:find (pull ?e [:seon.run/outcome :seon.run/error]) . :where [?e :seon.run/task ?t] [?t :seon.task/id \"demo/m\"] [?e :seon.run/error]]"
         [r] (in-agent [{:op :eval :agent "root"
                         :code (str "(do (my.root/run! sys [\"demo/m\"])"
                                    " (let [a (datahike.api/q '" q " (seon.e2e/await-db sys #(datahike.api/q '" q " %)))]"
-                                   " [(:seon.attempt/outcome a) (:seon.error/type (:seon.attempt/error a))"
+                                   " [(:seon.run/outcome a) (:seon.error/type (:seon.run/error a))"
                                    " (mapv #(get-in % [:error :seon.error/type]) (get-in (my.root/problems sys) [:classes :error :rows]))]))")}]
                       {:sets [":seon.config.ai/provider=:none"]
                        :decls [{:seon.task/name "m" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= [:error :seon.model/no-provider [:seon.model/no-provider]] (edn/read-string (:printed r))) (pr-str r))))
 
-(deftest a-turn-that-repeats-the-last-from-the-same-state-ends-the-attempt
+(deftest a-turn-that-repeats-the-last-from-the-same-state-ends-the-run
   ;; root's research, lever 2 (2026-10-22): loops took 45% of tokens, and the step E dry run's
   ;; first real design made one pair of calls 18 times from an unchanged state. A turn whose
-  ;; calls repeat the last turn's, from the same observed state, ends the attempt as
+  ;; calls repeat the last turn's, from the same observed state, ends the run as
   ;; :no-progress, naming the code; the judge refines from that evidence
-  (let [[end] (in-agent ["(seon.turn/work! {:task \"demo/t\" :attempt \"demo/t#loop\" :max-turns 5})"]
+  (let [[end] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#loop\" :max-turns 5})"]
                         {:sets [":seon.config.ai/script=seon.fixtures/same-call"]})
         end (edn/read-string {:default tagged-literal} (:printed end))]
     (is (= [:no-progress 2] [(:outcome end) (:model-calls end)]) (pr-str end))

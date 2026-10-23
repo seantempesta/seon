@@ -16,7 +16,7 @@
   event carries is its owner's to emit. A pass: an event asks the api for its view; while that request is in
   flight, more events only queue, so a burst becomes one pass (the round trip is the
   coalescing window: no step sleeps). The answer is joined with health, main's tasks and
-  attempts, and the series (one point per change) into the system value (:seon.render/system); its declared
+  runs, and the series (one point per change) into the system value (:seon.render/system); its declared
   render (seon.render.ui/system-page) answers the layout and its units. Then, per unit:
   inputs before render (an unchanged input renders nothing), bytes before send (an
   unchanged fragment sends nothing). The web proc serializes each patch once and fans it
@@ -85,7 +85,7 @@
 
 (defn system-value
   "The whole system as one value (:seon.render/system), from the render proc's state:
-  root's view (the api's), every proc's health, main (t, datoms, tasks, attempts), the
+  root's view (the api's), every proc's health, main (t, datoms, tasks, runs), the
   series, the events, the render's own numbers."
   {:malli/schema [:=> [:cat :map :int :int] :seon.render/system]}
   [st now-ns now-ms]
@@ -101,17 +101,17 @@
      ;; step that threw); no ping, no beat
      :health (proc-health-of st (:root-errors v []))
      ;; merges into main: root's merge! of a branch (its events) and the reconciler's
-     ;; merged attempts (main's facts)
-     :main (assoc (:main st {}) :merges (+ (:merges st 0) (count (filter #(= :merged (:seon.attempt/status %)) (vals (:attempts st))))))
+     ;; merged runs (main's facts)
+     :main (assoc (:main st {}) :merges (+ (:merges st 0) (count (filter #(= :merged (:seon.run/status %)) (vals (:runs st))))))
      :recorded (:recorded st)
-     :tasks (:tasks st {}) :attempts (:attempts st {}) :task-rows (:task-rows st {}) :agent-attempt (:agent-attempt st {})
+     :tasks (:tasks st {}) :runs (:runs st {}) :task-rows (:task-rows st {}) :agent-run (:agent-run st {})
      ;; one point per change, from the data itself: transactions per writer batch, ms per
      ;; fork, datoms per main commit
      :series {:tx (vec (take-last (series-cap) (map second (get-in v [:writer :recent]))))
               :fork (vec (take-last (series-cap) (get-in v [:stats :fork-ms])))
               :datoms (:datoms-series st [])}
-     ;; a stop that arrived before main recorded how the attempt ended says so once main does
-     :events (mapv #(ui/ended-as % (:agent %) (:agent-attempt st {})) (:events st [])) :events-seen (:ev-seq st 0)
+     ;; a stop that arrived before main recorded how the run ended says so once main does
+     :events (mapv #(ui/ended-as % (:agent %) (:agent-run st {})) (:events st [])) :events-seen (:ev-seq st 0)
      :web {:tabs (:tabs st 0)}
      :retire-ms RETIRE-MS
      :config (:config st)
@@ -121,35 +121,35 @@
 
 (defn task-rows
   "Each task's row as observed, read from the reconciler's index (`seon.reconcile/task-state`):
-  {id {:state :blocked-by #{id} :needs :attempts n :tokens n :newest attempt :kind :green n
+  {id {:state :blocked-by #{id} :needs :runs n :tokens n :newest run :kind :green n
   :red n :allowed-red n :proofs n}}. The desired execution stays on the task; this is what
   happened."
   {:malli/schema [:=> [:cat :seon.reconcile/index] :map]}
   [idx]
   (into {} (for [[id t] (:tasks idx)
-                 :let [as (sort-by :seon.attempt/start-ms (map (:attempts idx) (get-in idx [:by-task id])))
-                       results (:seon.attempt/results (last as) {})
+                 :let [as (sort-by :seon.run/start-ms (map (:runs idx) (get-in idx [:by-task id])))
+                       results (:seon.run/results (last as) {})
                        own (get-in idx [:acc id] #{})]]
              [id {:state (reconcile/task-state idx id) :blocked-by (reconcile/blocked-by idx id) :needs (:seon.task/needs t)
-                  :attempts (count as) :tokens (reduce + 0 (keep :seon.attempt/tokens as)) :newest (last as) :kind (:seon.task/kind t)
+                  :runs (count as) :tokens (reduce + 0 (keep :seon.run/tokens as)) :newest (last as) :kind (:seon.task/kind t)
                   ;; its own proofs (red blocks it) apart from other tasks' (an allowed red)
                   :green (count (filter #(= :pass (get results %)) own)) :red (count (filter #(and (contains? results %) (not= :pass (get results %))) own))
                   :allowed-red (count (filter (fn [[p r]] (and (not= :pass r) (not (contains? own p)))) results))
                   :proofs (count own)}])))
 
 (defn- main-info
-  "What the tiles show of main's db value: t, datoms, program vars, tasks and attempts
+  "What the tiles show of main's db value: t, datoms, program vars, tasks and runs
   (read when main's t moved: O(datoms) for the count, O(tasks) for the rest)."
   {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
   [st db]
   (if (= (:max-tx db) (get-in st [:main :t]))
     st
-    (let [tasks (task/tasks db) idx (reconcile/index db) attempts (:attempts idx)
+    (let [tasks (task/tasks db) idx (reconcile/index db) runs (:runs idx)
           n (count (d/datoms db :eavt))]
       (assoc st :main {:t (:max-tx db) :datoms n :vars (count (d/datoms db :aevt :var/name))}
              ;; one point per main commit this proc read
              :datoms-series (vec (take-last (series-cap) (conj (:datoms-series st []) (double n))))
-             :main-db db :tasks tasks :attempts attempts
+             :main-db db :tasks tasks :runs runs
              ;; the config in force, as root wrote it on main's root entity (one pull)
              :config (config/from-db db)
              ;; main's open problems, recorded (D2's one read; ~2.7 ms, costs the problems) and
@@ -158,7 +158,7 @@
              :recorded (problems/health db)
              :task-rows (task-rows idx)
              ;; how each agent's work ended, for the words its card and its events use
-             :agent-attempt (into {} (for [a (sort-by :seon.attempt/start-ms (vals attempts))] [(:seon.attempt/agent a) a]))))))
+             :agent-run (into {} (for [a (sort-by :seon.run/start-ms (vals runs))] [(:seon.run/agent a) a]))))))
 
 ;;; --- units, rendered incrementally ---------------------------------------------------------
 
@@ -231,15 +231,15 @@
   "The context the agent's reader last got, exactly as recorded on db (seon.context/recorded:
   a model turn's message or an outside read), or why there is none."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :map] :map] :map]}
-  [db attempt ag]
-  (let [r (when (and db attempt) (context/recorded db (:seon.attempt/id attempt)))]
+  [db run ag]
+  (let [r (when (and db run) (context/recorded db (:seon.run/id run)))]
     (cond
-      (nil? attempt) {:why (str "no attempt on main: spawned by hand"
+      (nil? run) {:why (str "no run on main: spawned by hand"
                                 (when (:task ag) (str " with the description \"" (:task ag) "\""))
                                 ", not for a task, so no model works it and there is no current-state block;"
                                 " its REPL and evaluations are above. A task's agent is started by the reconciler"
                                 " (my.root/run! sys [task-id]) or attached through root's server ({:op :attach :task id}).")}
-      (nil? r) {:why (str "no context read yet in attempt " (:seon.attempt/id attempt))}
+      (nil? r) {:why (str "no context read yet in run " (:seon.run/id run))}
       :else {:text (:text r) :tokens (select/estimate (:text r)) :origin (:origin r) :turn (:turn r)})))
 
 (defn- zoom-value
@@ -248,21 +248,21 @@
   [st id]
   (let [ag (assoc (get-in st [:view :agents id] {}) :id id)
         z (get-in st [:zoom id] {})
-        ;; the newest attempt it works (main-info's index of each agent's newest)
-        attempt (get-in st [:agent-attempt id])
+        ;; the newest run it works (main-info's index of each agent's newest)
+        run (get-in st [:agent-run id])
         db (:db z)
         records (if db (eval-records db id) (vec (map-indexed (fn [i e] [(str "v/" i) e]) (:evals ag))))
-        ctx-key [(:t z) (:seon.attempt/id attempt) (:seon.attempt/turns attempt) (:tests ag)]
+        ctx-key [(:t z) (:seon.run/id run) (:seon.run/turns run) (:tests ag)]
         ;; a new context read is a new evaluation of the agent's
         ctx-key (conj ctx-key (some? db) (get-in st [:main :t]) (count (:evals ag)) (peek (:evals ag)))
         ;; its branch's db, else main's (the task is main's; a merged branch may be gone)
         ctx (if (= ctx-key (:ctx-key z)) (:ctx z)
-                (let [c (context-of (or db (:main-db st)) attempt ag)]
+                (let [c (context-of (or db (:main-db st)) run ag)]
                   (cond-> c
                     ;; on main: its branch is gone (reading it failed), or not read yet
                     (and (nil? db) (:main-db st)) (assoc :from (if (:db-error z) :main-gone :main)))))]
     [(assoc-in st [:zoom id] (assoc z :ctx-key ctx-key :ctx ctx))
-     {:agent (ui/ended-as ag id (:agent-attempt st {})) :attempt attempt :task (when attempt (get (:tasks st) (:seon.attempt/task attempt)))
+     {:agent (ui/ended-as ag id (:agent-run st {})) :run run :task (when run (get (:tasks st) (:seon.run/task run)))
       ;; each proof's task, to tell a blocking red from an allowed one
       :owners (into {} (for [[tid t] (:tasks st) p (:seon.task/proofs t)] [p tid]))
       :context ctx :history (vec (rseq records))

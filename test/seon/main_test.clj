@@ -1,5 +1,5 @@
 (ns seon.main-test
-  "A root holds no program it was not given (FENCES #50): a fresh store, as seon.root/start!
+  "A root holds no program it was not given (GUARDS #50): a fresh store, as seon.root/start!
   opens it by default, holds the schema and nothing else; root's warm-up needs no seed."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d]
