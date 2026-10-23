@@ -72,7 +72,10 @@
                                                          [:max-tokens {:optional true} :int] [:reasoning-chars :int]]]
  ;; the config names no model provider (no profile): the turn ends on it, naming what to set
  :seon.model/no-provider [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/no-provider]]]]
- :seon.model/failure [:or :seon.model/no-provider :seon.model/provider-error :seon.model/rate-limited :seon.model/transport :seon.model/reasoning-ate-reply]
+ ;; the scripted provider's :script names a function this process cannot load (its namespace is
+ ;; on no source root, or does not define it): seon.model/scripted
+ :seon.model/no-script [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/no-script]] [:script :qualified-symbol]]]
+ :seon.model/failure [:or :seon.model/no-provider :seon.model/no-script :seon.model/provider-error :seon.model/rate-limited :seon.model/transport :seon.model/reasoning-ate-reply]
 
  ;; ---- recorded errors: one entity per signature (main), counted across agents ----
  ;; who observed it: a root proc's defect, an agent's eval, an agent's death or stall, an effect's outcome
