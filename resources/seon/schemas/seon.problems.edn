@@ -174,11 +174,11 @@
  ;; ---- the one read: seon.problems/report ----
  ;; each class's area, the group root's page and context show it under (docs/health.md),
  ;; declared once here and read through seon.contract/properties (as a status set is)
- :seon.problems/class [:enum {:seon.problems/derived #{:dead-citation :unnamed-site :stale-pin :stale-section :orphan-page :problem-unlinked}
+ :seon.problems/class [:enum {:seon.problems/derived #{:dead-citation :unnamed-site :stale-pin :stale-section :orphan-page :uncited-task :problem-unlinked}
                              ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it)
                              :seon.problems/attention #{:stale-section}
                              :seon.problems/areas [[:docs #{:dead-citation :stale-pin :stale-section :orphan-page}] [:tests #{:red :cost :test-red}]
-                                                    [:laws #{:unnamed-site}] [:merges #{:merge :task-conflict :unrun}] [:tasks #{:failed}]
+                                                    [:laws #{:unnamed-site}] [:merges #{:merge :task-conflict :unrun}] [:tasks #{:failed :uncited-task}]
                                                     [:agents #{:dead :error :waste}] [:errors #{:platform :eval :agent :effect}] [:health #{:problem-unlinked}]]
                              ;; each class's section of the wiki: what it is and how it is fixed. A class with open rows whose
                              ;; section is no stored section is itself a problem (:problem-unlinked)
@@ -190,9 +190,9 @@
                                                   :dead "docs/root.md#runs-and-judging" :failed "docs/tasks.md#a-refused-run-is-held-for-root"
                                                   :dead-citation "docs/health.md#a-dead-citation" :unnamed-site "docs/health.md#a-laws-unnamed-site"
                                                   :stale-pin "docs/forks.md#branch-scheme" :stale-section "docs/health.md#a-stale-section"
-                                                  :orphan-page "docs/health.md#an-orphan-page" :problem-unlinked "docs/health.md#a-problem-with-no-page"}}
+                                                  :orphan-page "docs/health.md#an-orphan-page" :uncited-task "docs/health.md#a-task-that-cites-nothing" :problem-unlinked "docs/health.md#a-problem-with-no-page"}}
                        :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :test-red :dead-citation :unnamed-site :stale-pin :unrun
-                       :stale-section :orphan-page :problem-unlinked]
+                       :stale-section :orphan-page :uncited-task :problem-unlinked]
  :seon.problems/row [:map {:seon.render/ai seon.render.ai/problem-row}
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]

@@ -285,6 +285,11 @@
               (update :seon.task/kind #(or % :work)))
     (:seon.task/references t) (update :seon.task/references set)))
 
+(def placeholder-assertion
+  "The assertion seon.context writes into a proof's test that does not exist yet (its :proof-unknown
+  `do`); seon.problems/uncited-tasks reads a proof still holding it as a placeholder."
+  "write the assertion: the behaviour, on data")
+
 (defn accumulate
   "Task id's accumulated plan and proofs over its needs (owner: a task
   inherits its prerequisites' plan and proofs and adds its own, so a refinement only

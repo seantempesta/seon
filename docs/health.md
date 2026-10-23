@@ -1,6 +1,6 @@
 # Health
 
-Health is the set of open problems: a value computed when something reads it (`seon.problems/health`). It is never stored, never precomputed and never polled. Root's page, an agent's context and the done rule each read it on the db they hold. It is the recorded classes (`seon.problems/report`) beside the derived ones (`:dead-citation`, `:unnamed-site`, `:stale-pin`, `:stale-section`, `:orphan-page`, `:problem-unlinked`), one value by class (`:seon.problems/report`).
+Health is the set of open problems: a value computed when something reads it (`seon.problems/health`). It is never stored, never precomputed and never polled. Root's page, an agent's context and the done rule each read it on the db they hold. It is the recorded classes (`seon.problems/report`) beside the derived ones (`:dead-citation`, `:unnamed-site`, `:stale-pin`, `:stale-section`, `:orphan-page`, `:uncited-task`, `:problem-unlinked`), one value by class (`:seon.problems/report`).
 
 ## Two kinds of problem
 
@@ -45,6 +45,10 @@ While root has recorded no import there is nothing to compare, and the class has
 ## An orphan page
 
 A page of the wiki that no other page links to, the map (docs/README.md) included as a linker, is an `:orphan-page` (`seon.problems/orphan-pages`): a section of another page has a reference to one of its sections, or it is orphaned. The map is the root and is not judged, and a db whose wiki has no map has no orphans (unknown). Adding a link anywhere closes it, with nothing written.
+
+## A task that cites nothing
+
+An `:implement` task that is ready (not done, every task it needs done) is an `:uncited-task` (`seon.problems/uncited-tasks`) when the plan it holds, its own and its needs' (its design step's, `seon.task/accumulate`) cites no var, attribute or section (`:no-references`), when it names no proof (`:no-proofs`), or when a proof is still the placeholder `seon.context` writes for a missing one (`:placeholder-proof`). The context pulls what the plan cites ([references](references.md#task-references)), so a plan in prose alone gives the agent nothing to read. A design step's prose plan is its input and is never judged: the design step writes the cited plan. The row closes when the design step's plan cites a name (one backtick, [references](references.md#the-delimiter-picks-the-depth)), the proofs are named and no proof is the placeholder, with nothing written to close it. Cost: the task, kind and `needs` datoms once, then a walk of each ready implement task's needs.
 
 ## A problem with no page
 

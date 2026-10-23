@@ -196,7 +196,7 @@
                ;; no result: never written, or never run; what writes and runs it
                :proof-unknown {:reason reason :test symbol
                                :do (list 'do (list 'in-ns (list 'quote (clojure.core/symbol (namespace symbol))))
-                                         (list 'clojure.test/deftest (clojure.core/symbol (name symbol)) '(clojure.test/is false "write the assertion: the behaviour, on data"))
+                                         (list 'clojure.test/deftest (clojure.core/symbol (name symbol)) (list 'clojure.test/is false task/placeholder-assertion))
                                          (list 'clojure.test/run-test-var (list 'var symbol)))}
                {:reason reason}))
            (when (seq gaps) [{:reason :contract-gap :vars gaps}])

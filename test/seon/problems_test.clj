@@ -7,7 +7,7 @@
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
             [seon.repl :as repl] [seon.proofs :as proofs] [seon.root :as root] [seon.agent-proc :as ap]
             [seon.reconcile :as rec] [seon.sock :as sock]
-            [seon.render :as render] [konserve.jolt.fasl] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.cost :as cost] [seon.docs]))
+            [seon.render :as render] [konserve.jolt.fasl] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.task] [seon.cost :as cost] [seon.docs]))
 
 (defn- invalid [op v]
   (contract/error :seon.instrument/contract-error op (str op " invalid-input: its arguments do not satisfy its contract")
@@ -853,3 +853,58 @@
     (is (vector? caused))
     (is (= {:attention attention :caused caused}
            (konserve.jolt.fasl/decode (konserve.jolt.fasl/encode {:attention attention :caused caused}))) "and it is written to the store and read back")))
+
+(defn- uncited-fixture
+  "A db of design/implement pairs for the uncited-task proofs: [db rows-fn]. Each pair is
+  [name design-plan & more design keys]; every design step has a finished run (its implement step
+  is ready) unless named in not-done."
+  [pairs not-done]
+  (let [db0 (ts/test-db)
+        decl (fn [n kind plan & {:as more}]
+               (merge {:seon.task/ns 'app :seon.task/name n :seon.task/plan plan :seon.task/kind kind
+                       :seon.task/proofs #{'app-test/a-proof}} more))
+        pair (fn [[n plan & more]]
+               [(apply decl n :design plan more)
+                (decl (str n "-impl") :implement "" :seon.task/needs #{(str "app/" n)} :seon.task/proofs #{})])
+        stub (str "(deftest stub (is false \"" seon.task/placeholder-assertion "\"))")
+        done (first (:seon.status/finished (contract/properties :seon.run/status)))
+        tx (seon.task/create-tx db0 (vec (mapcat pair pairs)))]
+    (d/db-with db0 (concat tx [{:db/id -1 :var/name 'app-test/stub :var/form -2} {:db/id -2 :form/id "f-stub" :form/src stub}
+                               {:db/id -3 :var/name 'app-test/real :var/form -4} {:db/id -4 :form/id "f-real" :form/src "(deftest real (is (= 1 1)))"}]
+                              (for [[n] pairs :when (not (not-done n))]
+                                {:seon.run/task [:seon.task/id (str "app/" n)] :seon.run/status done})))))
+
+(defn uncited-input
+  "The cost proof's input at n: n design steps (a finished run, a plan citing a var) and an
+  implement step each, all ready and fine."
+  [n] (let [v (:v (first (d/datoms (ts/test-db) :aevt :var/name)))]
+        [(uncited-fixture (for [i (range n)] [(str "t" i) (str "It changes `" v "`.")]) #{}) {}]))
+
+(deftest uncited-tasks-follow-the-ready-implement-steps
+  (cost/proof {:of 'seon.problems/uncited-tasks :input 'seon.problems-test/uncited-input
+               :n "ready implement steps, each citing"
+               :work "the kind and task datoms once, then each implement step's needs walked once"
+               :growth :linear
+               :per-n {:ns 100000 :bytes 130000 :calls 4}
+               :fixed {:ns 500000 :bytes 500000 :calls 3}
+               :sizes [10 100 300]}))
+
+(deftest a-ready-implement-task-that-cites-nothing-is-a-problem
+  ;; the context is only as good as the plan it is built from: an implement step whose accumulated
+  ;; plan (its design step's) cites no var, attribute or section reaches no reference, so the walk
+  ;; pulls nothing (task seon.render/spend-has-a-render, 2026-10-23). A design step's prose plan is
+  ;; its input, never red.
+  (let [v (:v (first (d/datoms (ts/test-db) :aevt :var/name)))
+        cited (str "It changes `" v "`.")
+        pairs [["cites" cited] ["prose" "Something should be shown somewhere."]
+               ["stubbed" cited :seon.task/proofs #{'app-test/stub}] ["bare" cited :seon.task/proofs #{}]
+               ["waits" "Prose, but its design step is not done."] ["real" cited :seon.task/proofs #{'app-test/real}]]
+        db (uncited-fixture pairs #{"waits"})
+        rows #(into #{} (map (juxt (comp :task :evidence) (comp :reason :evidence))) (get-in (problems/health %) [:classes :uncited-task :rows]))]
+    (is (= #{["app/prose-impl" :no-references] ["app/stubbed-impl" :placeholder-proof] ["app/bare-impl" :no-proofs]} (rows db))
+        "an implement step citing nothing, one whose proof is the stub, one with no proof; design steps' prose plans and an implement step whose design is not done are not judged; a real proof is fine")
+    (testing "each closes with nothing written to close it"
+      (let [fixed [["cites" cited] ["prose" (str "Show `" v "` somewhere.")] ["stubbed" cited :seon.task/proofs #{'app-test/real}]
+                   ["bare" cited :seon.task/proofs #{'app-test/real}] ["waits" "Prose, but its design step is not done."] ["real" cited :seon.task/proofs #{'app-test/real}]]]
+        (is (= #{} (rows (uncited-fixture fixed #{"waits"}))))))
+    (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :uncited-task))))

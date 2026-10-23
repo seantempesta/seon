@@ -388,6 +388,52 @@
    {:seon.run/task [:db/id :seon.task/id :seon.task/ns :seon.task/proofs]}
    {:seon.run/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
+(defn- task-ready?
+  "Is task te one not done whose needs are all done? Here ready deliberately means only that: the
+  question is whether its plan can be worked, not whether the reconciler would start it now
+  (seon.reconcile's index also asks for a release and no live run, which a db alone does not
+  hold). A task waiting on another is judged when its needs are done."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
+  [db te]
+  (and (not (task/done? db te))
+       (every? #(task/done? db (:v %)) (d/datoms db :eavt te :seon.task/needs))))
+
+(defn uncited-tasks
+  "Each ready :implement task, which holds its design step's plan along :needs (seon.task/accumulate),
+  whose accumulated plan cites nothing (no :seon.task/references: the context pulls no var, attribute
+  or section for it), that names no proof, or one of whose proofs is still the placeholder
+  seon.context writes, as an :uncited-task row with its reason (:no-references, :no-proofs,
+  :placeholder-proof). A design step's plan is prose, its input: design writes the cited plan,
+  so only the implement step is judged. Closed when the design step's plan cites a name, the
+  proofs are named and written. Cost: the task, kind, reference and proof datoms once, then a
+  walk of each implement task's needs."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (let [kinds (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.task/kind))
+        chain (fn chain [seen e]
+                (if (seen e) seen
+                    (reduce chain (conj seen e) (map :v (d/datoms db :eavt e :seon.task/needs)))))
+        vals-of (fn [es a] (into #{} (mapcat #(map :v (d/datoms db :eavt % a))) es))
+        placeholder? (fn [sym] (some-> (pdb/eid db :var/name sym) (->> (d/entity db)) :var/form :form/src
+                                      (str/includes? task/placeholder-assertion)))]
+    (vec (for [{:keys [e v]} (sort-by :v (d/datoms db :aevt :seon.task/id))
+               :when (and (= :implement (kinds e)) (task-ready? db e))
+               :let [es (chain #{} e)
+                     proofs (vals-of es :seon.task/proofs)
+                     reasons (cond-> []
+                               (empty? (vals-of es :seon.task/references)) (conj :no-references)
+                               (empty? proofs) (conj :no-proofs)
+                               (some placeholder? proofs) (conj :placeholder-proof))]
+               reason reasons
+               :let [s (str "uncited-task " v " " (name reason))]]
+           {:signature s :task v :reason reason :open? true
+            :message (case reason
+                       :no-references (str v " is ready and its plan cites no var, attribute or section: the context pulls nothing for it")
+                       :no-proofs (str v " is ready and names no proof")
+                       :placeholder-proof (str v " is ready and a proof of it is still the placeholder assertion (seon.task/placeholder-assertion)"))
+            :producer nil :owner-ns 'seon.task :proofs []
+            :evidence {:kind :uncited-task :task v :reason reason} :answered-by (get-in ans [:signature s] []) :at-ms nil}))))
+
 ;; ---- tasks held for root -----------------------------------------------------------------
 
 (defn- failed-row
@@ -515,7 +561,7 @@
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the
   program's facts make true now (`dead-citations`, `unnamed-sites`, `stale-pins`, `stale-sections`,
-  `orphan-pages`, and `problem-unlinked` over all of them). What the page, an agent's context and
+  `orphan-pages`, `uncited-tasks`, and `problem-unlinked` over all of them). What the page, an agent's context and
   the done and merge gates read: computed when read, never stored, never polled."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]
                   [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}
@@ -523,7 +569,8 @@
   ([db fold]
    (let [ans (answers db)
          derived {:dead-citation (dead-citations db ans) :unnamed-site (unnamed-sites db ans) :stale-pin (stale-pins db ans)
-                  :stale-section (stale-sections db ans) :orphan-page (orphan-pages db ans)}
+                  :stale-section (stale-sections db ans) :orphan-page (orphan-pages db ans)
+                  :uncited-task (uncited-tasks db ans)}
          classes (merge (:classes (report db fold)) (update-vals derived (fn [rows] {:n (count rows) :rows rows})))
          ;; its own class last: a missing section of the unlinked class is one more row
          unlinked (problem-unlinked db ans classes)
