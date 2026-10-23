@@ -20,9 +20,23 @@
 #             on the fifo F (the port the root bound), at its death before that, F closed (EOF)
 #   --done F  at CMD's end, its exit status written on the fifo F if someone holds it open
 # held exits with CMD's status (128+N for a signal).
+#
+# bin/held --reclaim DIR   (no CMD) removes from DIR the starter fifos of starters that are gone:
+# <who>-starter-<pid>.fifo whose pid is not a process. A starter removes its own fifo when it ends
+# or is terminated (TERM, INT, HUP); only SIGKILL runs nothing, and leaves its fifo for the next
+# starter to reclaim here (kill -0: a fact about a process, not a clock; a reused pid keeps a
+# stale file, never loses a live one's).
 use strict; use warnings; use POSIX (); use IO::Handle; use Fcntl qw(O_WRONLY O_NONBLOCK F_SETFD);
 my %o;
-while (@ARGV && $ARGV[0] =~ /^--(detach|drain|log|pids|ready|done)$/) { shift; $o{$1} = $1 =~ /^(detach|drain)$/ ? 1 : shift }
+while (@ARGV && $ARGV[0] =~ /^--(detach|drain|log|pids|ready|done|reclaim)$/) { shift; $o{$1} = $1 =~ /^(detach|drain)$/ ? 1 : shift }
+if (defined $o{reclaim}) {
+  for my $f (glob("$o{reclaim}/*-starter-*.fifo")) {
+    next unless $f =~ /-starter-(\d+)\.fifo$/;
+    next if kill(0, $1) || $!{EPERM};   # a process (ours or another user's) holds that pid
+    unlink $f;
+  }
+  exit 0;
+}
 @ARGV or die "usage: bin/held [--detach] [--drain] [--log F] [--pids F] [--ready F] [--done F] CMD [ARGS]\n";
 $SIG{PIPE} = "IGNORE";
 if ($o{detach}) { exit 0 if fork; POSIX::setsid(); exit 0 if fork; open STDIN, "<", "/dev/null" }

@@ -58,9 +58,12 @@ S=$ROOT/target/seon
 # what this run starts ends with it (bin/held): a fifo of its own, held open read-write while
 # bin/check lives, named to every step; its EOF, bin/check gone however it ended, ends them
 STARTER=$ROOT/target/tmp/check-starter-$$.fifo
-mkdir -p "$ROOT/target/tmp"; rm -f "$STARTER"; mkfifo "$STARTER"; exec 7<>"$STARTER"
+mkdir -p "$ROOT/target/tmp"; "$ROOT/bin/held" --reclaim "$ROOT/target/tmp"
+rm -f "$STARTER"; mkfifo "$STARTER"; exec 7<>"$STARTER"
 export SEON_STARTER_FIFO=$STARTER
+# gone with this run, however it ends but SIGKILL (which no handler sees: bin/held --reclaim removes it)
 trap 'rm -f "$STARTER"' EXIT
+trap 'exit 143' TERM INT HUP
 # (fd 7, the fifo's write end, stays bin/check's own: a child holding it would keep the fifo open)
 run() { (cd "$ROOT/target" && "$ROOT/bin/held" ./seon "$@" 2>&1 7>&-) }
 # a step's own settings, the same alone or in the run: lease's block is small enough to spend

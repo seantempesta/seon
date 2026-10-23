@@ -5,7 +5,7 @@
   under that main, and a recovery step reopens the same store on the same main."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d]
-            [seon.db :as pdb] [clojure.core.async :as a] [seon.check] [seon.source] [clojure.string]))
+            [seon.db :as pdb] [clojure.core.async :as a] [seon.check] [seon.source] [clojure.string] [clojure.string :as str] [seon.lib]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -125,3 +125,26 @@
                          v))]
     (is (seq files))
     (is (= #{'seon.test-store/root-sh} launchers))))
+
+(deftest a-starter-that-is-gone-leaves-no-fifo-after-the-next-starter
+  ;; task seon.check/a-killed-starter-leaves-no-fifo: a starter removes its own fifo when it ends
+  ;; or is terminated; SIGKILL runs nothing, so the next starter reclaims it (bin/held --reclaim):
+  ;; the fifo of a pid that is no process goes, a live pid's (this test process) and any file not
+  ;; named <who>-starter-<pid>.fifo stay
+  (let [dir (str (.getCanonicalPath (java.io.File. "target/tmp")) "/reclaim-" (random-uuid))
+        _ (.mkdirs (java.io.File. dir))
+        dead-pid (str/trim (:out (ts/binary-sh "sh" "-c" "echo $$")))   ; a process that has ended
+        live-pid (str (seon.lib/c-getpid))
+        mk (fn [n] (let [p (str dir "/" n)] (clojure.java.shell/sh "mkfifo" p) p))
+        dead-check (mk (str "check-starter-" dead-pid ".fifo"))
+        dead-test (mk (str "test-starter-" dead-pid ".fifo"))
+        live (mk (str "test-starter-" live-pid ".fifo"))
+        other (mk "something-else.fifo")
+        exists? #(.exists (java.io.File. ^String %))]
+    (try
+      (clojure.java.shell/sh "bin/held" "--reclaim" dir)
+      (is (not (exists? dead-check)) "a gone check's fifo is reclaimed")
+      (is (not (exists? dead-test)) "a gone test runner's fifo is reclaimed")
+      (is (exists? live) "a live starter's fifo stays")
+      (is (exists? other) "a file not named for a starter stays")
+      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
