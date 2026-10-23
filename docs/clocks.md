@@ -49,7 +49,6 @@ site is red, and a fixed one leaves this list in the fix's commit.
 A bound passed under another name, which the marks do not see; each is owed its mark or its fix.
 - `seon.check/lifecycle`: its bound is a 3-arity `deref` over `:seon.config.check/hold-ms`, a check's measurement window like `seon.check/backpressure`'s.
 - `seon.render.proc/ordered`: re-derives the grid's order when a second has passed, for `seon.render.proc/order`; task `seon.render/an-ended-agent-leaves-the-grid-by-an-event`.
-- `seon.agent/mem-mb`: memory re-read at most once a second, a cache keyed by time (a `now-ns` difference compared to a literal); task `seon.agent/memory-is-read-when-asked`.
 
 ## Time decides nothing here: clock reads named as data
 

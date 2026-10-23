@@ -473,3 +473,14 @@
     (is (= "did you mean print, printf, println" (:seon.error/fix em)))
     (is (= "Unable to resolve symbol: prinltn in this context" (:seon.error/message em)) "the suggestions are not in the message too")
     (is (nil? (:data em)) "no printed copy of the ex-data")))
+
+(deftest memory-is-read-when-asked
+  ;; task seon.agent/memory-is-read-when-asked: mem-mb is a reading made at the call, never a
+  ;; value kept for a time, so two calls back to back see what the process allocated between
+  ;; them (a reading cached for a second answers the first one again)
+  (let [before (agent/mem-mb)
+        held (byte-array (* 96 1024 1024))
+        _ (dotimes [i (quot (alength held) 4096)] (aset-byte held (* i 4096) 1))
+        after (agent/mem-mb)]
+    (is (>= (- after before) 64.0) (str "96 MB written between two calls shows in the second: " before " -> " after))
+    (is (pos? (alength held)) "held until the second reading")))
