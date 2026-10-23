@@ -230,9 +230,12 @@
                 "11.5 ms / 16 MB at 3,000, one form re-folded each time; the per-form part is the scan "
                 "(~3 us, ~5 KB a form), the re-fold is the change's")
      :growth :linear
-     ;; ticks measured 2026-10-23 (seon.cost's once): 0.50M at 100, 1.24M at 1,000; calls 16
+     ;; ticks measured (seon.cost's once): 0.50M at 100 and 1.24M at 1,000 on Jolt e0351af8;
+     ;; 427k and 1.07M on 0d39edc3, whose protocol calls on a record stopped reading every field.
+     ;; The fixed part fell with it (~714 ticks a form, so ~356k fixed): the old 420k left 7k
+     ;; above it at 100 and the growth fit read n^1.96. calls 16
      :per-n {:ticks 850 :bytes 5000 :calls 0}
-     :fixed {:ticks 420000 :bytes 4000000 :calls 16}
+     :fixed {:ticks 350000 :bytes 4000000 :calls 16}
      :sizes [100 1000 10000]}))
 
 (defn- calls-form
