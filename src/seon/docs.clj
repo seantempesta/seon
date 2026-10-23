@@ -65,8 +65,29 @@
       (assoc :seon.section/dead-links (into #{} (comp (filter (comp #{:missing} first)) (map second)) targets)))))
 
 (def ^:private section-attrs
-  "A stored section's stated attributes (seon.task/entity-tx makes them exactly what its text says)."
-  [:seon.section/heading :seon.section/lead :seon.section/text :seon.section/parent :seon.section/references :seon.section/names :seon.section/dead-links])
+  "A stored section's stated attributes (seon.task/entity-tx makes them exactly what its text says).
+  :seon.section/read is stated too, but by the load: it keeps the stored value while the text is unchanged."
+  [:seon.section/heading :seon.section/lead :seon.section/text :seon.section/parent :seon.section/references :seon.section/names :seon.section/dead-links :seon.section/read])
+
+(defn read-map
+  "The form id of each of names that is a var of db with a form, {name form-id}: the code as it
+  stands, which a section citing the names describes (:seon.section/read). The form id is the form's
+  own digest, so it moves exactly when the form's text does."
+  {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-symbol]] [:map-of :qualified-symbol :string]]}
+  [db names]
+  (into {} (keep (fn [n] (when-let [e (pdb/eid db :var/name n)]
+                           (when-let [id (some-> (d/entity db e) :var/form :form/id)] [n id]))))
+        names))
+
+(defn reviewed-tx
+  "The transaction recording that who read section address as it is though its code changed: its
+  :seon.section/read made the current form ids, the text untouched, and the review (who, and the form
+  ids it read at) kept as a fact. nil when no such section."
+  {:malli/schema [:=> [:cat :seon.host/db :string :string] [:maybe [:vector :map]]]}
+  [db address who]
+  (when-let [e (pdb/eid db :seon.section/address address)]
+    (let [now (read-map db (set (:seon.section/names (d/pull db [:seon.section/names] e))))]
+      [{:db/id e :seon.section/read now :seon.section/reviewed {:by who :forms now}}])))
 
 ;; ---- the load ---------------------------------------------------------------------------
 
@@ -88,9 +109,16 @@
                             (into [] (keep #(citation-target db dir stored loaded firsts %)) (:seon.ref/citations s))]))]
     (vec (concat
            (mapcat (fn [s]
-                     (let [a (:seon.section/address s) want (wanted stored s (targets a)
-                                          (into #{} (comp (map :seon.ref/name) (filter qualified-symbol?)) (ref/kept db (:seon.ref/citations s))))]
-                       (if-let [e (stored a)]
+                     (let [a (:seon.section/address s)
+                           names (into #{} (comp (map :seon.ref/name) (filter qualified-symbol?)) (ref/kept db (:seon.ref/citations s)))
+                           e (stored a)
+                           held (when e (d/pull db [:seon.section/text :seon.section/read] e))
+                           ;; what the section read is kept while its text is unchanged (the code as it stood when it was written)
+                           read (if (and held (= (:seon.section/text s) (:seon.section/text held)) (:seon.section/read held))
+                                  (:seon.section/read held)
+                                  (read-map db names))
+                           want (cond-> (wanted stored s (targets a) names) (seq read) (assoc :seon.section/read read))]
+                       (if e
                          (task/entity-tx db e section-attrs want)
                          [(assoc want :db/id a :seon.section/address a)])))
                    parsed)

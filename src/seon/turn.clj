@@ -83,8 +83,8 @@
         db (agent/db)
         unc (added-gaps (:base @agent/state) db)
         unmerged (branch/unmerged)
-        caused (problems/caused (:base @agent/state) db)]
-    {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :task (task/task db id)
+        {:keys [caused attention]} (problems/caused-split (:base @agent/state) db)]
+    {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :attention attention :task (task/task db id)
      :will-merge (program/divergence (:base @agent/state) db)
      ;; root's ruling (a): what this turn ran, what the judge will run, what the merge runs
      :tests (when-not (contract/error? run)
@@ -127,13 +127,13 @@
   done rule, the failing assertions of each test it names, the run's own errors, and what the
   branch's merge will carry to main."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{:keys [run reasons task results will-merge tests]}]
+  [{:keys [run reasons task results will-merge tests attention]}]
   (let [proofs (:proofs (:seon.task/accumulated task))
         named (into (set proofs) (keep :symbol) reasons)]
     {:results results :reasons reasons
      :reds (if (contract/error? run) [] (proofs/red-reports run named))
      :run-errors (if (contract/error? run) [(:seon.error/message run)] (proofs/run-errors run))
-     :will-merge will-merge :tests tests}))
+     :will-merge will-merge :tests tests :attention attention}))
 
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its
