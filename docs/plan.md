@@ -4,7 +4,7 @@ What is in flight, what the owner has not yet ruled, and the steps from here to 
 
 ## Now (2026-10-23, afternoon)
 
-Pins: see docs/forks.md · `src` 17,391 lines (19,304 this morning; aim ~10k) · paid runs ~$0.16 of the $50 budget · standing root on 7888/7777 (`runs/store`, test data), loading main's source from `../next-merges` (root's write-back tree: live, never remove).
+Pins: see docs/forks.md · `src` resists growth (AGENTS §1; no line target) · paid runs ~$0.40 of the $50 budget · standing root on 7888/7777 (`runs/store`, test data), loading main's source from `.worktrees/merges` (root's write-back tree: live, never remove). The repo is `~/src/seon-next` since the cutover of 2026-10-23: next's history joined to Seon v1's (tag `v1-final`); the old tree `~/src/seon-jolt/next` is an archive.
 
 **Goal:** real Seon agents fixing problems in the system (THE PLAN's step E). **Reached once:** paid run #10, DeepSeek flash with thinking off, carried `seon.context/the-map-reads-the-program-not-the-process` through design (3 turns), implement (7) and merge, for about $0.004. The lever was act-first design instructions. Seon's own per-turn time is ~1.8 s; the model's ~16–18 s now dominates.
 **How work moves now:** sessions self-review, then report ready to the merge session ("Merge: integrate ready branches into main"), which merges, proves and updates. Its log is `notes/merge-log.md`. A session that finishes claims its next task by creating its branch (AGENTS §3). Root keeps THE PLAN, rulings, briefs and docs (AGENTS §2, "Root's working rules").

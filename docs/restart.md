@@ -5,7 +5,7 @@ How a fresh root picks up the work when every Claude session, memory and transcr
 ## What survives
 
 - Git: `main`, every `jolt/*` and `claude/*` branch, and the forks on GitHub (``seantempesta/<lib>``). Every pin of main resolves there.
-- The disk: each worktree (`.worktrees/<name>`, or `../next-<name>` made before the cutover), committed or not, with its `notes/handoff-*.md` on its branch, and the standing store `runs/store`.
+- The disk: each worktree (`.worktrees/<name>`), committed or not, with its `notes/handoff-*.md` on its branch, and the standing store `runs/store`.
 - The repo's docs: AGENTS.md (the method and root's working rules), `docs/plan.md` (Now, In flight, THE PLAN), `docs/decisions.md` (the owner's rulings), `notes/merge-log.md` (every merge the merge session made), and `notes/root/` (root's notes, with its old memories in `notes/root/memory/`).
 
 Nothing else does: no Claude session, its sidebar group, a running agent or a queued message.
@@ -33,10 +33,7 @@ Old branches that are probably superseded: ``jolt/land2``, ``jolt/land11``, ``jo
 
 ## The order from here
 
-1. The merge session merges health, then wiki-stale, then whatever reports ready.
-2. Root holds main still, and rename-run merges; the store is erased.
-3. self-contained merges, then step R: a fresh clone into `~/src/seon-next`, build, prove, a grep for the prototype folder's name that finds nothing, and the full run (`notes/cutover-step-R-2026-10-23.md`). Then the unmerged branches are fetched into the new repo, and work moves there (`.worktrees/<name>`).
-4. Step E continues: a second paid real task, within the $50 budget, on a context that has been checked.
+The cutover is done (2026-10-23): `~/src/seon-next` is the repo, its main is next's history joined to Seon v1's (merge "Seon on Jolt replaces Seon v1", tag `v1-final`), and every live branch was fetched into it; the old tree `~/src/seon-jolt/next` is an archive. What is in flight is [plan](plan.md) "In flight"; THE PLAN there is the order.
 
 ## The prompt for a fresh account
 
