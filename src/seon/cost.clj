@@ -262,6 +262,9 @@
    :sort/compare {:ns 13.51 :bytes 39.04 :what "sort of shuffled integers, per n log2 n"}
    :str/append {:ns 9.9 :bytes 36.0 :what "StringBuilder append of one char"}
    :str/seq-char {:ns 29.9 :bytes 272.0 :what "one step of a seq over a String's chars (doseq, reduce)"}
+   ;; worktree session printer-eval, source mode, 2026-10-23, at 10k: the string literal's escape
+   ;; (seon.print.emit/string-literal), 2.5x a char seq's bytes
+   :str/escape {:ns 181.4 :bytes 684.55 :what "clojure.string/escape of a text by char-escape-string, newlines kept, per char"}
    :map/literal {:ns 5.2 :bytes 144.0 :what "a small map literal of 5 keys built per element"}
    :map/seq-step {:ns 28.3 :bytes 127.1 :what "one step of reduce over a hash map's entries (each a map entry)"}
    :map/reduce-kv {:ns 4.7 :bytes 0.0 :what "one step of reduce-kv over a hash map"}

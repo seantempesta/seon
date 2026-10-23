@@ -1,0 +1,72 @@
+[
+ {
+  "section": 1,
+  "answer": "The evaluation that raised an error is {:tag :err, :form \"(seon.model/call provider request)\"}, which is the third evaluation (index 2). Its message: \"The provider answered HTTP 400: the request's messages exceed the model's context window.\"",
+  "left_out": "5524 characters of the error's response body (:seon.error/data :body) are not shown.",
+  "read_form": "(subs (get-in (nth (my.turn/evals) 2) [:value :seon.error/data :body]) 5729)",
+  "confident": true
+ },
+ {
+  "section": 2,
+  "answer": "The d/datoms evaluation returned 400 datoms in total (66 shown, 334 not shown). The total is my count of the shown rows plus the \"334 members not shown\" note.",
+  "left_out": "334 datoms (rows) are not shown.",
+  "read_form": "(drop 66 (get-in (nth (my.turn/evals) 2) [:value]))",
+  "confident": true
+ },
+ {
+  "section": 3,
+  "answer": "not shown",
+  "left_out": "The calc/neg#1 attempt map is cut to \"\u202610\" entries, so its :seon.attempt/status is not shown.",
+  "read_form": "(val (nth (seq result/h3) 2))",
+  "confident": true
+ },
+ {
+  "section": 4,
+  "answer": "not shown. :seon.config.root/max-agents is not among the shown keys. 17 config keys are shown and 73 are not shown (90 in total).",
+  "left_out": "73 config keys are not shown.",
+  "read_form": "(drop 17 result/h3)",
+  "confident": true
+ },
+ {
+  "section": 5,
+  "answer": "The provider answered HTTP 400.",
+  "left_out": "10964 characters of the response body are not shown.",
+  "read_form": "(subs (get-in result/h3 [:seon.error/data :body]) 289)",
+  "confident": true
+ },
+ {
+  "section": 6,
+  "answer": "not shown",
+  "left_out": "The :stuck class is cut to 2 members (\u00ab2\u00bb) and is not shown. The :red class is also cut to 2 members, and one more class (\u00ab3\u00bb) is cut.",
+  "read_form": "(get-in result/h3 [:classes :stuck])",
+  "confident": true
+ },
+ {
+  "section": 7,
+  "answer": "not shown",
+  "left_out": "The calc/neg task map is cut to 11 members, so its :seon.task/execution is not shown.",
+  "read_form": "(val (nth (seq result/h3) 4))",
+  "confident": true
+ },
+ {
+  "section": 8,
+  "answer": "The value holds 2 turns (the first is shown, and 1 more is not shown). The eval calls of the first turn are not shown; the :calls vector has 1 member that is cut.",
+  "left_out": "The first turn's :calls (1 member), its :basis (2 members), and the second turn (1 member, not shown).",
+  "read_form": "(get-in result/h3 [0 :seon.turn/calls])",
+  "confident": true
+ },
+ {
+  "section": 9,
+  "answer": "The datoms total 400 rows (364 shown, 36 not shown). The total is my count of the shown rows plus the 36 not shown.",
+  "left_out": "36 datoms (rows) are not shown.",
+  "read_form": "(drop 364 result/h3)",
+  "confident": true
+ },
+ {
+  "section": 10,
+  "answer": "No. The shown text ends in section 5 (\"Laws\"), so section 8 \"The machine\" is not shown.",
+  "left_out": "7279 characters of the AGENTS.md text are not shown.",
+  "read_form": "(subs result/h3 19523)",
+  "confident": true
+ }
+]
