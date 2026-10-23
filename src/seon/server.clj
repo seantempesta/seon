@@ -87,9 +87,8 @@
   "The live run agent ag works, from main: {:run :task :env}, or nil."
   {:malli/schema [:=> [:cat :seon.root/sys :keyword] [:maybe :map]]}
   [sys ag]
-  (some (fn [a] (when (and (= ag (:seon.run/agent a)) (= :running (:seon.run/status a)))
-                  {:run (:seon.run/id a) :task (:seon.run/task a) :env (:seon.run/env a)}))
-        (vals (task/runs @(:conn sys)))))
+  (some (fn [a] (when (= ag (:seon.run/agent a)) {:run (:seon.run/id a) :task (:seon.run/task a) :env (:seon.run/env a)}))
+        (task/running @(:conn sys))))
 
 (def ops
   "The server's ops, the one table, keyed by a request's :op (an EDN request is a
@@ -113,8 +112,7 @@
              :args {:agent {:type "string"} :task {:type "string" :description "ns/name, instead of an agent"}}
              :answer (fn [sys ag req]
                        (let [ag (or ag (when-let [t (:task req)]
-                                         (or (some (fn [a] (when (and (= t (:seon.run/task a)) (= :running (:seon.run/status a))) (:seon.run/agent a)))
-                                                   (vals (task/runs @(:conn sys))))
+                                         (or (some (fn [a] (when (= t (:seon.run/task a)) (:seon.run/agent a))) (task/running @(:conn sys)))
                                              (:agent (attach! sys t)))))]
                          (if-let [{:keys [task run env]} (when ag (run-of sys ag))]
                            ;; an outside model's read is its turn, and takes its messages; anyone
