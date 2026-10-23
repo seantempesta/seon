@@ -34,11 +34,14 @@ The turn's part:
 - `:attention`: the wiki sections your code changes made stale, to read and probably fix; never a reason to refuse done.
 - `:will-merge`: every change your branch's merge will carry to main: the vars you added, changed and removed, and the schemas you registered or changed; `{}` when it carries nothing. Anything listed that the task does not need, put back.
 - `:tests`: how many tests this turn ran (`:this-turn`: your proofs and the tests your branch changed), how many root's judge runs at your attempt's end (`:at-judge`, `(my.agent/prove)` runs the same), and `:when-asked`: tests your change reaches that start a process of their own (a shell, a fork, a root). Those never run in your turn or the judge, a proof among them; root runs them when it asks, and a proof among them is read as deferred, not unknown. `(my.agent/deferred)` lists them.
+- `:messages`: what was sent to you since your last turn, each `{:from :body}`: the owner's words (`:from "owner"`), root's, or another agent's (its attempt id). The owner's is a fact (`:seon.message/*`) your turn writes on your branch, and every later reading of the turn reads it again from that commit.
 - Your last evaluations, when no earlier turn shows them.
 
 ## The REPL
 
 This is a real Clojure REPL: what you define becomes part of your branch's program exactly as written.
+
+- Your work is Clojure forms evaluated here. Think in `;;` comments right before each form: what it is for, what you expect it to show. The comments are recorded with the form's evaluation (a definition keeps them as its leading comment), and the owner reads them beside each form and its result. The eval tool's optional `thinking` says why the whole call.
 
 - `(ns app.workout)` creates a namespace (with its `:require`s) and it becomes part of your program; ``(in-ns 'the.ns)`` then ``(defn f ...)`` changes an existing one, and its callers see it at once.
 - Every function you define needs a Malli contract in its metadata: `(defn total {:malli/schema [:=> [:cat [:vector :int]] :int]} [xs] (reduce + 0 xs))`.

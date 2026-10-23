@@ -24,6 +24,7 @@
  :seon.config.render/value-budget [:int {:min 1 :seon.config/unit "tokens" :description "A rendered value whose env names no budget."}]
  :seon.config.render/root-context-budget [:int {:min 1 :seon.config/unit "tokens" :description "Root's context, the system's AI face; later sections past it are named."}]
  :seon.config.render/history-row-budget [:int {:min 1 :seon.config/unit "tokens" :description "Each evaluation's value in an agent's history on its page."}]
+ :seon.config.render/turn-text-budget [:int {:min 1 :seon.config/unit "tokens" :description "Each part of a turn on its agent's page (reply, reasoning, eval code and answer, the context it read); past it the cut links the whole request."}]
  :seon.config.render/line-budget [:int {:min 1 :seon.config/unit "tokens" :description "A message or reason in one line: root's context, a tile's or card's line, a declared AI render's line."}]
  :seon.config.render/cell-budget [:int {:min 1 :seon.config/unit "tokens" :description "A table cell or a stream row's field: a form, a value, a reason in a row."}]
  :seon.config.render.list/stream [:int {:min 1 :seon.config/unit "events" :description "Events the dashboard's stream keeps, newest first; its header says how many older it did not keep."}]
