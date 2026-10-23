@@ -34,7 +34,7 @@ The queue order first; anything not listed is merged or old.
 | ``jolt/rename-run`` | `../next-rename` | attempt → run, ready at the freeze: `notes/rename-run/HANDOFF.md`. Erase the standing store after it merges. |
 | ``jolt/self-contained`` | `../next-self-contained` | Step A, step C (GitHub URLs) and step R (the fresh clone into `~/src/seon-next`), after rename-run: `notes/handoff-self-contained.md`. |
 | ``jolt/agent-view`` | `../next-agent-view` | The chat window, renders, messages as facts. Self-review, then its full run, then merge. Then the work-done recording task. |
-| ``jolt/writeback-order`` | `../next-writeback-order` | Seon's write-back puts a new form before its first user, which blocks every merge that adds a helper. Then step E's second paid real task: `notes/handoff-step-e.md`. |
+| ``jolt/writeback-order`` | `../next-writeback-order` | Seon's write-back puts a new form before its first user, which blocks every merge that adds a helper. Then step E's second paid real task: `notes/handoff-step-e.md` if it was written. Its session failed at the handover with 3 files uncommitted in the worktree, so start with `git -C ../next-writeback-order status` and `diff`. |
 | ``jolt/datom-cost`` | `.worktrees/datom-cost` | Datahike's add path costs ~7k ticks per datom (a 5.4 s import where ~0.35 s is due): `notes/handoff-store.md`. |
 | ``jolt/ctx-loop`` | `../next-ctx-loop` | The context render profiled on Seon's own program: `notes/handoff-speed.md`. |
 | ``jolt/reconcile-topo``, ``jolt/live-forms`` | `../next-drivers-out` | shrink's deletions, and the `seon.e2e` agent-test regression (two `seon.agent-test` reds on main: the test makes a root require `seon.e2e`, which lives in `test/` now): `notes/handoff-shrink.md`. |
