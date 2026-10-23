@@ -57,7 +57,7 @@
 
 (defn- reply
   "outs with an answer r for each of rids."
-  {:malli/schema [:=> [:cat [:vector :map] [:sequential :int] :any] [:vector :map]]}
+  {:malli/schema [:=> [:cat [:vector :map] [:or [:set :int] [:sequential :int]] :any] [:vector :map]]}
   [outs rids r] (into outs (for [rid rids] {:op :prove-answer :rid rid :r r})))
 
 (defn- slot
