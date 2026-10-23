@@ -1,5 +1,5 @@
 (ns seon.root
-  "Root: the control process (session F2, ../notes/archive/option3-F1-flow.md; proto/flow f2-final
+  "Root: the control process (session F2, notes/archive/option3-F1-flow.md; proto/flow f2-final
   proto.control's api, reader, boot and API). Boots the database
   (Datahike, E4a index), forks the single-threaded fork server before any thread exists,
   then runs ONE root graph of four procs:
@@ -579,7 +579,7 @@
 
 (declare call!)
 
-(defn- import-source!
+(defn import-source!
   "Main's program follows Seon's own source (seon.source): root's dirs read through the
   :source effect (their files, the tree's HEAD commit and its reference-code pins, and the
   tree's inputs with no program facts, seon.fx/inputs). When what they read differs from
@@ -615,18 +615,21 @@
     @(call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/source fact}]}})
     fact))
 
+(defn platform-tx
+  "Error e, observed at ms outside root's procs (boot, the file watcher: seon.watch), as the
+  transaction recording it on main db: a :platform error by its signature (seon.error), what
+  my.root/problems shows."
+  {:malli/schema [:=> [:cat :seon.host/db :map :int] [:vector :any]]}
+  [db e ms] (second (err/flush-tx (err/fold {} (err/occurrence e :platform {} ms)) db)))
+
 (defn wiki-tx
   "The wiki (the checkout's docs/) onto main db, written in the boot fact's own commit so main
   holds it before any agent forks: the help page every agent reads first is one of its pages
-  (seon.context/help-text). An unchanged wiki writes nothing. A wiki the one load refuses (a
-  link to no section, seon.docs/load-dir-tx) is a recorded :platform error (seon.error, what
-  my.root/problems shows) and main keeps the wiki it held: the boot goes on."
-  {:malli/schema [:=> [:cat :seon.host/db :string :int] [:vector :any]]}
-  [db checkout ms]
-  (let [w (docs/load-dir-tx db checkout "docs")]
-    (if (contract/error? w)
-      (second (err/flush-tx (err/fold {} (err/occurrence w :platform {} ms)) db))
-      w)))
+  (seon.context/help-text). An unchanged wiki writes nothing. A link to no section is kept on
+  its section and shows as a dead citation (seon.problems/health), never refuses the load."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :any]]}
+  [db checkout]
+  (docs/load-dir-tx db checkout "docs"))
 
 (defn- previous-end
   "How the root before this boot on main ended: the stop fact it wrote, or, when it wrote
@@ -757,7 +760,7 @@
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
           r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running) (into (cfg/facts config cfg/sources))
-                                                                                  (into (wiki-tx db (cfg/checkout) (System/currentTimeMillis))))
+                                                                                  (into (wiki-tx db (cfg/checkout))))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev}))}})]
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
     (when source (import-source! sys source))

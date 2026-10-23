@@ -284,7 +284,7 @@
   than real turn text and made LZ4 look like the fix (2026-10-22)."
   [k]
   [{:seon.turn/id (str "att/" k) :seon.turn/attempt "att" :seon.turn/n k :seon.turn/origin :model
-    :seon.turn/basis {:commit (random-uuid) :task "t/x" :attempt "att" :turn k :max-turns 8 :origin :model
+    :seon.turn/basis {:commit (java.util.UUID. 0 k) :task "t/x" :attempt "att" :turn k :max-turns 8 :origin :model
                                        :observed {:results {'t-test/x :fail} :run-errors [] :reasons [{:reason :proof-red :symbol 't-test/x}]
                                                   :reds [{:test 't-test/x :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))"}]}}
     :seon.turn/reply (slice @prose k 1500)

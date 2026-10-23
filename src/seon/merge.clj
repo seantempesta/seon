@@ -52,16 +52,6 @@
                 k))
     data-attrs))
 
-(defn- def-entity
-  "The entity of definition key k on db, or nil."
-  {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe :int]]}
-  [db [kind a b]]
-  (let [[attr v] (case kind :var [:var/name a] :method [:method/key (program/method-key a b)]
-                       :impl [:impl/key (program/impl-key a b)] :ns [:ns/name a])]
-    (pdb/eid db attr v)))
-
-(def ^:private pointer {:var :var/form :method :method/form :impl :impl/form :ns :ns/form})
-
 (defn- def-content
   "Definition k's content on db, when it points to form row f: the form's id, and its text
   (so a conflict shows each side's code as written)."
@@ -84,8 +74,8 @@
   (let [schema (d/schema db)
         forms (program/live-forms db)
         defs (for [f forms k (:defines f)
-                   :let [e (def-entity db k)]
-                   :when (and e (some #(= (:e f) (:db/id (get (d/entity db e) %))) [:var/form :method/form :impl/form :ns/form]))]
+                   :let [e (program/def-eid db k)]
+                   :when (and e (some #(= (:e f) (:db/id (get (d/entity db e) %))) (vals program/pointer)))]
                [k (def-content db k e f)])
         data (for [a (sort (data-attr-set db data-attrs))
                    dt (d/datoms db :aevt a)]
@@ -165,7 +155,7 @@
                       (:ns/name x) [:ns (:ns/name x)])]
     (into #{}
           (concat (when-let [k (form-key x)] (cons k def-key))
-                  (when own-def (remove nil? [own-def (pointed (pointer (first own-def)))]))
+                  (when own-def (remove nil? [own-def (pointed (program/pointer (first own-def)))]))
                   (when-let [k (:schema/key x)] [[:schema k]])
                   (for [dt (when (seq data-attrs) ds) :when (data-attrs (:a dt))]
                     (if (many (:a dt))
@@ -180,8 +170,8 @@
     :form (when-let [e (pdb/eid db :form/id a)]
             (when (program/live? db e) (dissoc (program/form-row db e) :e :id)))
     (:var :method :impl :ns)
-    (when-let [e (def-entity db k)]
-      (when-let [f (:db/id (get (d/entity db e) (pointer kind)))]
+    (when-let [e (program/def-eid db k)]
+      (when-let [f (:db/id (get (d/entity db e) (program/pointer kind)))]
         (let [row (program/form-row db f)]
           (when (and (program/live? db f) (contains? (:defines row) k)) (def-content db k e row)))))
     :schema (when-let [e (pdb/eid db :schema/key a)]
@@ -239,7 +229,7 @@
   [db [kind a :as k]]
   (case kind
     :form (pdb/eid db :form/id a)
-    (:var :method :impl :ns) (def-entity db k)
+    (:var :method :impl :ns) (program/def-eid db k)
     :schema (pdb/eid db :schema/key a)
     :datum a))
 
