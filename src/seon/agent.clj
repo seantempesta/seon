@@ -312,10 +312,14 @@
   (seon.reconcile/done-refusals reads the selected). Scratch namespaces' tests (user,
   ^:scratch) never merge, so they never judge; a proof with no test var here does not run, and
   one with a var but no program facts (loaded, never recorded) has no digest: it always runs.
-  Answers the plan with :digests {test digest} and :dir (results-dir when shared)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]]
+  With no base (a tree with nothing to diff against: root's on-change runs), the proofs and
+  every test with no green at its digest (seon.proofs/plan's own rule). Answers the plan with
+  :digests {test digest}, :dir (results-dir when shared) and :process, the tests that reach a
+  process of their own (seon.program/reach-index, the same walk as the digests): never run
+  automatically, only when named (owner's ruling, 2026-10-23)."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] [:set :qualified-symbol]]
                   [:map [:selected [:vector :qualified-symbol]] [:run [:vector :qualified-symbol]] [:reused [:map-of :qualified-symbol :map]]
-                   [:digests [:map-of :qualified-symbol :string]] [:dir [:maybe :string]]]]}
+                   [:digests [:map-of :qualified-symbol :string]] [:dir [:maybe :string]] [:process [:set :qualified-symbol]]]]}
   [db base proofs]
   (let [root (d/entity db [:seon.root/id :root])
         source (:seon.root/source root)
@@ -324,12 +328,14 @@
         dir (when shared (results-dir))
         judges? (fn [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
                           (and (:test m) (not (program/scratch-ns? (:ns m))))))
-        cd (into {} (filter (comp judges? key)) (program/reach-digests db in))
+        idx (into {} (filter (comp judges? key)) (program/reach-index db in))
+        cd (update-vals idx :digest)
         unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))]
-    (-> (proofs/plan (program/reach-digests base in) cd (if dir (proofs/greens dir (vec (vals cd))) {}) proofs)
+    (-> (proofs/plan (some-> base (program/reach-digests in)) cd (if dir (proofs/greens dir (vec (vals cd))) {}) proofs)
         (update :selected into unrecorded)
         (update :run into unrecorded)
-        (assoc :digests cd :dir dir))))
+        (assoc :digests cd :dir dir
+               :process (program/process-tests idx)))))
 
 (defn- run-tests-here
   "The tests a test-plan runs (var symbols), by the one runner (seon.proofs/run-tests!, nothing

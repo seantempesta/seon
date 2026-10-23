@@ -5,25 +5,17 @@
             [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.docs :as docs]
             [seon.config :as cfg] [seon.test-store :as ts] [datahike.api :as d]))
 
-(deftest source-answers-a-platform-var-from-the-program
-  ;; task seon.repl/source-reads-the-program: clojure.repl's source and source-fn, as at any
-  ;; Clojure REPL, answer the text of the form that defined a var the binary holds compiled
-  ;; and, as Clojure's does, a library var's form read from its :file and :line (a live agent
-  ;; spent all 8 turns on (source datahike.connector/connect), 2026-10-21)
-  (let [[fn-item src-item lib-item] (at/in-agent ["(clojure.repl/source-fn 'seon.reconcile/stuck)"
-                                                  "(do (require '[clojure.repl :refer [source]]) (source seon.reconcile/stuck))"
-                                                  "(do (require 'datahike.connector) (clojure.repl/source-fn 'datahike.connector/connect))"])]
-    (is (str/includes? (:printed fn-item) "(defn stuck") (:printed fn-item))
-    (is (str/includes? (str (:out src-item)) "(defn stuck") (str src-item))
-    (is (str/includes? (:printed lib-item) "(defn connect") (:printed lib-item))))
-
 (deftest an-agent-repl-answers-what-a-clojure-repl-answers
   ;; owner, 2026-10-21: "Whatever intuitions agents have we need to make sure we are matching a
   ;; real clojure repl as much as possible AND improving on it". Each row is what a Clojure
   ;; user types at clojure.main's REPL (clojure.main/repl-requires refers source, apropos,
   ;; dir, pst, doc, find-doc, pp, pprint) and what it answers, in an agent's own namespace;
-  ;; the improvements: source reads the agent's own redefinitions and Seon's program.
+  ;; the improvements: source reads the agent's own redefinitions and Seon's program (task
+  ;; seon.repl/source-reads-the-program: a compiled platform var's form from the program facts,
+  ;; a library var's from its :file and :line; a live agent spent all 8 turns on
+  ;; (source datahike.connector/connect), 2026-10-21).
   (let [rows [["(source seon.reconcile/stuck)" :out "(defn stuck"]
+              ["(clojure.repl/source-fn 'seon.reconcile/stuck)" :printed "(defn stuck"]
               ["(do (require 'datahike.connector) (source datahike.connector/connect))" :out "(defn connect"]
               ["(defn twice [x] (* 2 x))" :printed "twice"]
               ["(source twice)" :out "(defn twice [x] (* 2 x))"]
