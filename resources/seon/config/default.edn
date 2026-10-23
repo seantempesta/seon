@@ -534,6 +534,10 @@
  :seon.config.render.list/stream 60
  ;; Unit: points a sparkline keeps, the newest changes. Provenance: the render proc's SERIES-CAP 60.
  :seon.config.render.list/series 60
+ ;; Unit: ended agents the dashboard's grid keeps beside every live one, the newest ended first;
+ ;; an agent's end pushes the oldest kept one off, and the tile counts those off it. Provenance:
+ ;; replaces seon.render.proc's RETIRE-MS (90 s after an end), a clock deciding what the grid shows.
+ :seon.config.render.list/ended 10
  ;; Unit: evaluations an agent's page shows, newest first (seon.print/bounded names the rest
  ;; on its branch). Provenance: the render proc's HISTORY-CAP 100.
  :seon.config.render.list/history 100

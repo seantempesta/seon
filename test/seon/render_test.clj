@@ -104,8 +104,10 @@
         (is (= "#grid" sel))
         (is (str/includes? html "id=\"card-a2\""))
         (is (str/includes? html "id=\"cb-a2\""))
-        (testing "an agent ended long ago leaves the grid: its card removed"
-          (let [view3 (assoc-in view2 [:agents :a2] {:branch :agent-2 :status :killed :ended-ms 0 :evals []})
+        (testing "the oldest ended agent leaves the grid when newer ones end: its card removed"
+          (let [newer (into {} (for [i (range 1 (inc (seon.config/value :seon.config.render.list/ended)))]
+                                 [(keyword (str "z" i)) {:branch (keyword (str "agent-z" i)) :status :killed :ended-ms (* 1000 i) :evals []}]))
+                view3 (update (assoc-in view2 [:agents :a2] {:branch :agent-2 :status :killed :ended-ms 0 :evals []}) :agents merge newer)
                 [_ out] (answer st3 view3)
                 patch (first (filter #(= :patch (:op %)) (:to-web out)))]
             (is (= ["card-a2"] (:removes patch)))))))
@@ -263,9 +265,9 @@
   (testing "the stream's header: how many events it keeps of all since boot"
     (is (str/includes? (h/html (ui/events-count {:kept 60 :seen 112} {}))
                        "60 kept of 112 since root's boot · 52 older not kept")))
-  (testing "agents ended long ago leave the grid; the tile counts them"
-    (is (str/includes? (h/html (ui/tile-agents {:cells [[:a1 :idle 0]] :off 12 :retire-ms 90000} {}))
-                       "1 on the grid · +12 ended over 90 s ago, off it")))
+  (testing "agents ended earlier leave the grid; the tile counts them"
+    (is (str/includes? (h/html (ui/tile-agents {:cells [[:a1 :idle 0]] :off 12 :ended-kept 10} {}))
+                       "1 on the grid · +12 ended earlier, off it (the newest 10 ended stay)")))
   (testing "a held task's pill says what holding means and how to release it"
     (is (str/includes? (ui/state-title :held) "(my.root/run! sys [id])"))))
 
@@ -355,9 +357,9 @@
     (let [html (h/html (ui/tile-tasks {:rows {"t/a" {:state :held :blocked-by #{} :green 0 :red 0 :proofs 1 :attempts 0 :tokens 0}}
                                                           :attempts {}} {}))]
       (is (re-find #"pill s-held\" title=\"held: declared in a task file" html))))
-  (testing "boot's program count is definitions, and the agents tile names its retire window"
+  (testing "boot's program count is definitions, and the agents tile names how many ended agents stay"
     (is (str/includes? (h/html (ui/tile-errors {:root-errors [] :boot {:program {:loaded 360}} :store {}} {})) "360 defs"))
-    (is (str/includes? (h/html (ui/tile-agents {:cells [] :off 3 :retire-ms 90000} {})) "+3 ended over 90 s ago, off it"))))
+    (is (str/includes? (h/html (ui/tile-agents {:cells [] :off 3 :ended-kept 10} {})) "+3 ended earlier, off it (the newest 10 ended stay)"))))
 
 (deftest an-ended-agent-reads-ended-and-offers-no-live-buttons
   (testing "root's own word for an agent it stopped because its attempt ended"
@@ -878,3 +880,26 @@
     (is (= 1 (count (re-seq #"class=\"wtile\"" (second (first (:prepends patch)))))) "one tile, not the column")
     (is (= ["tile-proofs"] (map #(re-find #"tile-[a-z]+" %) (filter #(str/starts-with? % "tile-") (:removes patch)))) "its old element removed")
     (is (empty? (tile-ids (map first (:frags patch)))) "no other tile is sent")))
+
+(deftest an-ended-agent-leaves-the-grid-by-an-event
+  ;; task seon.render/an-ended-agent-leaves-the-grid-by-an-event: the grid shows every live agent
+  ;; and the newest :seon.config.render.list/ended ended ones; an agent's end (an event, the
+  ;; :ended-ms root recorded) pushes the oldest ended one off, and the order is a function of
+  ;; the agents alone: no clock argument, and an unchanged agents map derives nothing again
+  (let [n (seon.config/value :seon.config.render.list/ended)
+        ended (into {} (for [i (range 1 (+ n 4))] [(keyword (str "e" i)) {:status :killed :ended-ms (* 1000 (- (+ n 4) i))}]))
+        live {:l1 {:status :idle} :l2 {:status :busy}}
+        agents (merge ended live)
+        order (#'p/order agents)]
+    (is (= (+ n 2) (count order)) "every live agent and the newest n ended")
+    (is (every? (set order) [:l1 :l2]) "no live agent leaves")
+    ;; ended-ms runs against the ids: e1 ended last, e(n+3) first
+    (is (not-any? (set order) [(keyword (str "e" (+ n 1))) (keyword (str "e" (+ n 2))) (keyword (str "e" (+ n 3)))]) "the three that ended first are off the grid, whatever their ids")
+    (let [agents' (assoc agents :l1 {:status :killed :ended-ms 999999})
+          order' (#'p/order agents')]
+      (is (= (+ n 1) (count order')) "an agent that ends is one more ended: the live count drops, the ended stay at n")
+      (is (some #{:l1} order') "the newest end stays")
+      (is (not-any? (set order') [(keyword (str "e" n))]) "and the oldest kept ended one left by that event"))
+    (let [st {:view {:agents agents}}
+          st1 (#'p/ordered st)]
+      (is (identical? (:order st1) (:order (#'p/ordered (assoc st1 :view {:agents agents})))) "unchanged agents: not derived again"))))

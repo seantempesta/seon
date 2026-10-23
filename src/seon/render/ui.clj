@@ -203,15 +203,15 @@
   "The swarm: one cell per agent colored by status (a cell flashes when its agent
   evaluates; clicking one zooms the agent), a status bar and the counts.
   input {:cells [[id status evals-seen] ...] in grid order, :off agents ended more than
-  :retire-ms ago and left off the grid}."
+  :ended-kept ended agents stay on it, so the older ones are off the grid}."
   {:malli/schema [:=> [:cat :seon.render/swarm :seon.render/opts] :any]}
-  [{:keys [cells off retire-ms]} opts]
+  [{:keys [cells off ended-kept]} opts]
   (let [freq (frequencies (map second cells))
         alive (reduce + 0 (map val (filter (comp live key) freq)))
         segs (for [s (concat status-order (sort-by str (remove (set status-order) (keys freq)))) :let [n (get freq s 0)] :when (pos? n)] [s n])]
     (metric-tile
       {:id "t-agents" :kicker "agents" :big (str alive) :unit "live"
-       :sub (str (count cells) " on the grid" (when (pos? (or off 0)) (str " · +" off " ended over " (quot (or retire-ms 0) 1000) " s ago, off it")))
+       :sub (str (count cells) " on the grid" (when (pos? (or off 0)) (str " · +" off " ended earlier, off it (the newest " ended-kept " ended stay)")))
        :body (list [:div {:class "swarm"}
                     (for [[id st n] cells]
                       [:a {:class (str "cell s-" (kname st) " f" (mod (or n 0) 2)) :href (str "/agent/" (dom-id id)) :title (str (kname id) " · " (kname st))}])]
@@ -796,7 +796,7 @@
      (vec (concat
            [(u "problems" (:problem-areas sys) :seon.render/problems-banner)
             (u "t-agents" {:cells (mapv (fn [id] (let [a (get agents id)] [id (shown-status (ended-as a id agent-attempt)) (count (:evals a))])) order)
-                           :off (- (count agents) (count order)) :retire-ms (:retire-ms sys)} :seon.render/swarm)]
+                           :off (- (count agents) (count order)) :ended-kept (:ended-kept sys)} :seon.render/swarm)]
            (for [t (load-tiles writer fork-server main series)] (u (:id t) t :seon.render/tile))
            [(u "t-health" {:health procs} :seon.render/procs-health)
             (u "t-tasks" {:rows (:task-rows sys) :attempts attempts :main-t (:t main)} :seon.render/work)
