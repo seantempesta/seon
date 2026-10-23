@@ -9,6 +9,22 @@ set -eu
 OLD=$HOME/src/seon-jolt/next
 NEW=$HOME/src/seon-next
 
+### D (a precondition of R0; check first: `git -C $OLD tag -l 'history/*' | wc -l` is 0 until it has run, 2026-10-23)
+# D1 root commits the outer repo's pending work: the staged renames, RESUME, DECISIONS (history-bundles/uncommitted/ holds copies made by old-cleanup)
+#    git -C $HOME/src/seon-jolt add -A && git -C $HOME/src/seon-jolt commit -m "Checkpoint before the cutover"
+# D2 the outer repo's history as one tag, then the nested repos from the bundles old-cleanup made (the Chez, Jolt, Datahike, konserve and
+#    persistent-sorted-set bundles are fork-family: they went to their modules as attic/* in step B, not here)
+git -C $OLD fetch $HOME/src/seon-jolt refs/heads/main:refs/tags/history/prototype
+B=$HOME/src/seon-jolt/history-bundles
+for f in proto__core proto__flow pf1__core-fixed r3__next l3__next r5__next fx1__next e4__rust e9__datahike-jolt-src e9__konserve-jolt-src; do
+  git -C $OLD fetch $B/$f.bundle "refs/heads/*:refs/tags/history/${f//__//}/*"       # l3__next -> history/l3/next/<branch>
+done
+# D3 nothing lost: every bundle branch tip is now a tag
+for f in proto__core proto__flow pf1__core-fixed r3__next l3__next r5__next fx1__next e4__rust e9__datahike-jolt-src e9__konserve-jolt-src; do
+  git bundle list-heads $B/$f.bundle | awk '$2 ~ /^refs\/heads\//{print $1}' | while read sha; do
+    git -C $OLD cat-file -e $sha || echo "LOST ${f} $sha"; done; done
+git -C $OLD rev-parse -q --verify history/l3/next/main >/dev/null && echo "D ok (seon.merge.edn cites history/l3/next/*)"
+
 ### R0 Preconditions (all must pass; they check what A, C and D were to have done)
 [ ! -e "$NEW" ]                                              # the target does not exist
 [ "$(git -C $OLD branch --show-current)" = main ]            # the old tree is on main
@@ -22,7 +38,10 @@ git -C $OLD ls-tree main reference-code/ | awk '$2=="commit"{print $3, $4}' | wh
   case $url in https://github.com/*) repo=${url#https://github.com/} ;; *) echo "not a github url: $path $url"; exit 1 ;; esac
   gh api "repos/${repo%.git}/commits/$sha" --jq .sha >/dev/null || { echo "MISSING $path $sha on $repo"; exit 1; }
 done
-echo "R0 ok: preconditions hold, every pin is on GitHub"
+# no live worktree holds uncommitted work (a worktree's changes are not in any branch): list the dirty ones, each owner commits first
+dirty=$(git -C $OLD worktree list --porcelain | awk '/^worktree /{print $2}' | while read w; do [ -n "$(git -C $w status --porcelain --untracked-files=no -- . ':!reference-code' 2>/dev/null)" ] && echo $w; done)
+[ -z "$dirty" ] || { echo "UNCOMMITTED WORK in: $dirty"; exit 1; }
+echo "R0 ok: preconditions hold, every pin is on GitHub, no worktree is dirty"
 
 ### R1 The clone, with its submodules from GitHub (the tags, the history/prototype history among them, come with it)
 git clone --recurse-submodules $OLD $NEW
@@ -32,9 +51,14 @@ cd $NEW
 echo "R1 ok: $(git rev-parse --short HEAD), $(git tag | wc -l) tags"
 
 ### R2 The unmerged branches of the old repo, as local branches here (not jolt/merges: the new root starts that from main)
-for b in $(git -C $OLD branch --no-merged main --format='%(refname:short)' --list 'jolt/*' | grep -vx 'jolt/merges'); do
+# every branch of the old repo main does not contain, jolt/* and claude/* (the sessions' work), as a local branch of the same name; the list is kept
+for b in $(git -C $OLD branch --no-merged main --format='%(refname:short)' --list 'jolt/*' 'claude/*' | grep -vx 'jolt/merges'); do
   git fetch -q $OLD "refs/heads/$b:refs/heads/$b"
+  echo "$b $(git rev-parse --short $b) ahead $(git rev-list --count main..$b)" >> fetched-branches.txt
 done
+# nothing missed: every unmerged tip of the old repo is a tip here
+git -C $OLD for-each-ref --format='%(refname:short) %(objectname)' refs/heads/jolt refs/heads/claude | while read b sha; do
+  [ "$b" = jolt/merges ] || git merge-base --is-ancestor $sha main || [ "$(git rev-parse -q --verify $b)" = "$sha" ] || echo "NOT FETCHED $b"; done
 git remote remove origin                                     # nothing to fetch from or push to by accident
 echo "R2 ok: $(git branch --list 'jolt/*' | wc -l) jolt/* branches"
 
@@ -82,7 +106,13 @@ bin/root status                                              # up, on 7888 / 777
 echo "R8 ok"
 ```
 
-## After it
+## After it, for every session (one command each, in the new root)
+
+A session's old worktree (`../next-NAME`, `.worktrees/NAME`) belongs to the old repo; its work is the branch R2 fetched. Recreate it:
+```sh
+cd ~/src/seon-next && bin/worktree NAME        # an existing branch jolt/NAME is checked out at .worktrees/NAME
+```
+The list to recreate is `fetched-branches.txt` (delete it afterwards: untracked). Sessions keep working in the old worktree until their branch is fetched; after R2 they commit nothing more there.
 
 - **The old tree stays** as the archive until the owner deletes it (step S of the plan). It is not edited again.
 - **Tell `old-cleanup`** (it deletes the nine fork source folders once step C is merged on main and R1 above has cloned from GitHub) and the other sessions: the root is `~/src/seon-next`; their worktrees of the old tree are finished or recreated with `bin/worktree NAME`, which checks out an existing `jolt/NAME`.
