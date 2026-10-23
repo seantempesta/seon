@@ -9,10 +9,12 @@
   - the checkout (`SEON_CHECKOUT`, which bin/env exports for the binary, else `JOLT_PWD`,
     which `jolt run` callers set), where the file and the checkout-relative paths live;
   - the profile (`SEON_PROFILE`, default `:default`), handed to aero's `#profile`;
-  - overrides: aero's `#env` in the file itself; the checkout's own `config/local.edn`
-    (gitignored; bin/worktree writes its ports); the command line's `--config FILE` and
+  - overrides: aero's `#env` in the file itself; the command line's `--config FILE` and
     `--set :ns/key=edn` (every mode of the binary; taken out of the mode's args). Later layers
-    win, key by key; `sources` names the layer of each key.
+    win, key by key; `sources` names the layer of each key. A checkout's `config/local.edn`
+    (gitignored; its ports, and the standing root's source) is no implicit layer: bin/root
+    and bin/ports pass it with --config, so a check's or a test's process reads only what its
+    command line gives it.
 
   The file is read once, when this namespace loads (root's boot: every process of the
   platform is root or forked from it, so agents and the fork server hold the same value and
@@ -129,10 +131,6 @@
 ;; separately or do command line overrides." Later layers win, key by key; the merged map is
 ;; validated once, and every key remembers the layer it came from (`sources`).
 
-(defn local-path
-  "The checkout's own config (gitignored; bin/worktree writes it with the worktree's ports)."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [dir] (str dir "/config/local.edn"))
 
 (defn argv
   "This process's command line, as *command-line-args* holds it while namespaces load (a
@@ -189,15 +187,15 @@
      :sources (into {} (for [[src l] layers [k v] l :when (some? v)] [k src]))}))
 
 (defn load-layers
-  "The layers this process reads: the shipped file, the checkout's config/local.edn when it
-  exists, then the command line's --config files and --set keys, in order."
+  "The layers this process reads: the shipped file, then the command line's --config files
+  and --set keys, in order. The checkout's config/local.edn is a layer only when a
+  --config names it (bin/root, bin/ports): read implicitly, it gave a check's root in the
+  main tree the standing root's source tree (task seon.check/a-checks-roots-take-explicit-config)."
   {:malli/schema [:=> [:cat :string :keyword [:sequential :string]] [:vector [:tuple :string :map]]]}
   [dir prof args]
-  (let [local (local-path dir)]
-    (into (cond-> [["resources/seon/config/default.edn" (read-layer (path dir) prof dir)]]
-            (.exists (io/file local)) (conj ["config/local.edn" (read-layer local prof dir)]))
-          (for [[src x] (:layers (overrides args))]
-            [src (if (string? x) (read-layer x prof dir) x)]))))
+  (into [["resources/seon/config/default.edn" (read-layer (path dir) prof dir)]]
+        (for [[src x] (:layers (overrides args))]
+          [src (if (string? x) (read-layer x prof dir) x)])))
 
 (def ^:private loaded
   (let [dir (checkout)] (layered (load-layers dir (profile) (argv)))))
