@@ -7,7 +7,7 @@
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
             [seon.repl :as repl] [seon.proofs :as proofs] [seon.root :as root] [seon.agent-proc :as ap]
             [seon.reconcile :as rec] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.cost :as cost]))
+            [seon.render :as render] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.cost :as cost] [seon.docs]))
 
 (defn- invalid [op v]
   (contract/error :seon.instrument/contract-error op (str op " invalid-input: its arguments do not satisfy its contract")
@@ -432,3 +432,232 @@
                                                                        {:seon.proof/test 'seon.check-test/clean :seon.proof/status :error}]
                                        :seon.attempt/gate-unread [{:ns 'app.repl-only :reason "no :ns/file on the branch: its forms were never written to a file"}]})))))
         "a gate that could not read a changed namespace names it, and why, on the open row")))
+
+;; ---- derived: a dead citation is true while it is true (notes/health-design-2026-10-23.md) ----
+
+(deftest a-deleted-var-makes-its-citation-dead-until-it-is-back
+  (let [db (ts/test-db)
+        v (:v (first (d/datoms db :aevt :var/name)))
+        e (:e (first (d/datoms db :aevt :var/name)))
+        none (symbol (namespace v) "no-such-var")
+        page (str "# Health\n\nThe check reads `" v "` and `" none "`; a prose word " (namespace v) "/nor-this is no citation.\n")
+        db (d/db-with db (seon.docs/load-tx db "demo" {"demo/h.md" page}))
+        dead #(get-in (problems/health %) [:classes :dead-citation])]
+    (testing "the loader keeps the names the text cites as references: a backticked name, never a prose word naming nothing"
+      (is (= #{v none} (set (:seon.section/names (d/pull db [:seon.section/names] [:seon.section/address "demo/h.md#health"]))))))
+    (testing "a backticked name that never named anything is dead from its load"
+      (is (= [[none "demo/h.md#health"]] (mapv (juxt :name :section) (:rows (dead db))))))
+    (let [gone (d/db-with db [[:db/retractEntity e]])]
+      (testing "the var deleted: its citation is dead, with what a row needs"
+        (let [rows (:rows (dead gone))
+              r (first (filter #(= v (:name %)) rows))]
+          (is (= 2 (:n (dead gone))))
+          (is (= (str "demo/h.md#health cites " v ", which names nothing") (:message r)))
+          (is (= (symbol (namespace v)) (:owner-ns r)) "owned by the namespace that lost it")
+          (is (contract/valid? :seon.problems/report (problems/health gone)))
+          (is (empty? (get-in (problems/report gone) [:classes :dead-citation])) "report is what was recorded: a derived class is health's")))
+      (testing "the var back: the citation names it again; nothing was written to close it"
+        (let [back (d/db-with gone [{:var/name v}])]
+          (is (= [none] (mapv :name (:rows (dead back))))))))))
+
+(defn citing-input
+  "The cost proof's input at n: a wiki page of n sections, each citing one of the seed's vars
+  (cycling past its count), every cited var then deleted, so every citation is dead."
+  [n] (let [db0 (ts/test-db)
+            vs (vec (take n (map :v (d/datoms db0 :aevt :var/name))))
+            page (apply str "# Cited\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\nIt reads `" (nth vs (mod i (count vs))) "`.\n")))
+            db (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/c.md" page}))
+            cited (into #{} (map :v) (d/datoms db :aevt :seon.section/names))]
+        [(d/db-with db (vec (for [s cited :let [e (pdb/eid db :var/name s)] :when e] [:db/retractEntity e]))) {}]))
+
+(deftest dead-citations-follow-the-citations
+  (cost/proof {:of 'seon.problems/dead-citations :input 'seon.problems-test/citing-input
+               :n "sections, each citing one var, every one deleted (each a dead citation)"
+               :work (str "fixed: main's var names read once into a set (the seed's ~300 vars). Per cited name: one set "
+                          "lookup; a dead one also runs seon.ref/names-on-db? (an AVET seek for the var, two for a task, "
+                          "one for its namespace: ~4 seeks at ~17 us and ~33 KB, seon.db/avet-seek-allocates) and pulls its "
+                          "section's address (one pull)")
+               :growth :linear
+               :per-n {:ns 90000 :bytes 170000 :calls 6}
+               :fixed {:ns 2000000 :bytes 3000000 :calls 5}
+               :sizes [10 100 1000]}))
+
+(deftest caused-is-what-the-branch-made-true
+  (let [db0 (ts/test-db)
+        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
+        e (fn [db s] (pdb/eid db :var/name s))
+        none (symbol (namespace v) "no-such-var")
+        page (str "# P\n\nIt reads `" v "`, `" w "` and `" none "`.\n")
+        base (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" page}))]
+    (testing "an unchanged branch caused nothing, though base has a dead citation of its own"
+      (is (= #{} (problems/caused base base))))
+    (testing "the branch deleted v: the citation of v is its; the one base had is not"
+      (let [head (d/db-with base [[:db/retractEntity (e base v)]])]
+        (is (= #{(str "demo/p.md#p cites " v ", which names nothing")} (problems/caused base head)))
+        (testing "and fixed it by restoring v: nothing"
+          (is (= #{} (problems/caused base (d/db-with head [{:var/name v}])))))))))
+
+(deftest a-catch-its-page-does-not-name-is-a-law-problem
+  ;; bin/laws catch's rule, from the compiler's facts: a live form carrying :form/catches, by
+  ;; the var it defines, named by docs/failure-points.md's cited names
+  (let [db0 (ts/test-db)
+        [fe v] (first (for [{:keys [e]} (d/datoms db0 :aevt :form/defines)
+                            :when (seon.program/live? db0 e)
+                            d (:form/defines (d/entity db0 e)) :when (:var/name d)]
+                        [e (:var/name d)]))
+        ;; the test db's program is an example app; make its namespace one of Seon's src
+        ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :avet :var/name v))))))
+        db1 (d/db-with db0 [[:db/add fe :form/catches "{:class Exception, :answers :expr}"] [:db/add ns-e :ns/file "src/app/m.clj"]])
+        unnamed #(mapv (juxt :law :site) (get-in (problems/health %) [:classes :unnamed-site :rows]))]
+    (is (= [] (unnamed db0)) "no catch, no site")
+    (is (= [[:catch v]] (unnamed db1)) "a catch the page does not name")
+    (testing "a namespace outside src (an agent's app, a test: a deftest's `is` expands to a catch) is no failure point"
+      (is (= [] (unnamed (d/db-with db1 [[:db/add ns-e :ns/file "test/app/x_test.clj"]])))))
+    (testing "the page names it: no problem, nothing written to close it"
+      (let [page (str "# Failure points\n\n| failure | edge |\n|---|---|\n| x | `" v "` |\n")]
+        (is (= [] (unnamed (d/db-with db1 (seon.docs/load-tx db1 "docs" {"docs/failure-points.md" page})))))))))
+
+(deftest a-pin-the-wiki-states-is-the-recorded-gitlink
+  (let [db0 (ts/test-db)
+        page "# Forks\n\n## Jolt\n\n`reference-code/jolt` pinned at `4342b73c`, the tip of ``jolt/x``.\n\n## Chez\n\n`reference-code/chez` pinned at `80e4b9f`.\n"
+        db (d/db-with db0 (seon.docs/load-tx db0 "docs" {"docs/forks.md" page}))
+        pinned (fn [pins] (mapv (juxt :path :stated :recorded)
+                                (get-in (problems/health (cond-> db pins (d/db-with [{:seon.root/id :root :seon.root/source {:root "/c" :files 1 :forms 1 :ms 1 :pins pins}}])))
+                                        [:classes :stale-pin :rows])))]
+    (is (= [] (pinned nil)) "no import recorded: unknown, not a mismatch")
+    (is (= [] (pinned {"reference-code/jolt" "4342b73cdeadbeef" "reference-code/chez" "80e4b9f0"})))
+    (is (= [["reference-code/chez" "80e4b9f" "d19eb3b0"]] (pinned {"reference-code/jolt" "4342b73cdeadbeef" "reference-code/chez" "d19eb3b0"})))
+    (is (= [["reference-code/jolt" "4342b73c" nil]] (pinned {"reference-code/chez" "80e4b9f0"})) "a pin with no gitlink")))
+
+(deftest an-error-closes-when-its-subject-changes
+  ;; an old store's :seon.docs/refused error (the type left the code) names its link's target in
+  ;; its example; a new error may name :seon.error/subject. Neither is ever retracted.
+  (let [db0 (ts/test-db)
+        refused (fn [db] (d/db-with db [{:seon.error/signature "aaaaaaaaaaaaaaaa" :seon.error/class :platform :seon.error/count 1
+                                         :seon.error/agents 0 :seon.error/first-ms 1 :seon.error/last-ms 1
+                                         :seon.error/type :seon.docs/refused :seon.error/message "demo/a.md#a links to demo/b.md#b, which is no section"
+                                         :seon.error/example {:seon.error/type :seon.docs/refused :seon.ref/address "demo/b.md#b"}}]))
+        row #(first (get-in (problems/report %) [:classes :platform :rows]))
+        db (refused db0)]
+    (testing "the target section is missing: the error is open"
+      (is (not (false? (:open? (row db))))))
+    (let [after (d/db-with db (seon.docs/load-tx db "demo" {"demo/b.md" "# B\n\nThe target.\n"}))]
+      (testing "the section exists now: closed, with nothing written to close it"
+        (is (some? (pdb/eid after :seon.section/address "demo/b.md#b")))
+        (is (false? (:open? (row after))))
+        (is (= 1 (:count (row after))) "the record is kept"))
+      (testing "the context marks it closed"
+        (is (re-find #"\(closed\)" (render/ai (problems/report after) {})))))
+    (testing "a named subject: open until a fact of the var is written after the error"
+      (let [v (:v (first (d/datoms db0 :aevt :var/name)))
+            e (:e (first (d/datoms db0 :aevt :var/name)))
+            err (d/db-with db0 [{:seon.error/signature "bbbbbbbbbbbbbbbb" :seon.error/class :platform :seon.error/count 1
+                                 :seon.error/agents 0 :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/subject v}])]
+        (is (not (false? (:open? (row err)))))
+        (is (false? (:open? (row (d/db-with err [{:db/id e :var/doc "changed"}])))))))))
+
+(defn- literal-catch-sites
+  "The old bin/laws rule over text: each line of each src file but check.clj and e2e.clj, strings
+  and comments stripped, holding `(catch ` is a site of the last top-level def before it, as
+  ns/name."
+  [files]
+  (set (for [[path text] files :when (not (re-find #"/(check|e2e)\.clj$" path))
+             :let [nsym (seon.source/file-ns text)]
+             site (loop [lines (str/split-lines text) in-str? false n nil acc []]
+                    (if-let [l (first lines)]
+                      (let [n (if-let [m (re-find #"^\((?:defn-?|defchecked|defmacro|def|defonce) (\S+)(?: (\S+))?" l)]
+                                (if (str/starts-with? (second m) "^") (nth m 2) (second m))
+                                n)
+                            [code in-str?] (loop [cs (seq l) in-str? in-str? out []]
+                                             (if-let [c (first cs)]
+                                               (cond in-str? (cond (= c \\) (recur (nnext cs) true out) (= c \") (recur (next cs) false out) :else (recur (next cs) true out))
+                                                     (= c \\) (recur (nnext cs) false out)
+                                                     (= c \") (recur (next cs) true out)
+                                                     (= c \;) [out false]
+                                                     :else (recur (next cs) false (conj out c)))
+                                               [out in-str?]))]
+                        (recur (rest lines) in-str? n (cond-> acc (str/includes? (apply str code) "(catch ") (conj (str nsym "/" n)))))
+                      acc))]
+         site)))
+
+(deftest the-catch-class-finds-the-sites-the-literal-scan-finds
+  ;; parity (root's review of a370169): over Seon's own src the :unnamed-site class lists exactly the
+  ;; sites bin/laws' text scan listed, none dropped (a catch in a defmethod, an extend-protocol or a
+  ;; reify is attributed to its form). Extras the compiler's facts add are listed here, each justified.
+  (let [files (:value (seon.fx/read-source {:req {:root (System/getProperty "user.dir") :dirs ["src"]}}))
+        _ (doseq [n (keep #(seon.source/file-ns (val %)) files)] (require n))
+        db0 (ts/test-db)
+        db (d/db-with db0 (seon.source/import-tx db0 files))
+        class (set (map #(str (:site %)) (get-in (problems/health db) [:classes :unnamed-site :rows])))
+        literal (literal-catch-sites files)
+        extras {}]
+    (is (seq literal))
+    (is (= #{} (clojure.set/difference literal class)) "no literal site dropped")
+    (is (= (set (keys extras)) (clojure.set/difference class literal)) "every extra is listed with its reason")))
+
+;; ---- cost proofs of the derived classes beyond dead-citations ---------------------------------
+
+(defn catch-forms
+  "db0 with n more live forms in a src namespace, each defining one var and carrying a catch the
+  law page does not name (so each is an :unnamed-site)."
+  [db0 n]
+  (let [ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :aevt :var/name))))))]
+    (d/db-with db0 (into [[:db/add ns-e :ns/file "src/app/m.clj"]]
+                         (mapcat (fn [i] [{:db/id (- (inc (* 2 i))) :form/id (str "cost-form-" i) :form/ns ns-e :form/order i :form/src "(defn f [])"
+                                           :form/catches #{"{:class Exception, :answers :expr}"} :form/defines [(- (* 2 i))]}
+                                          {:db/id (- (* 2 i)) :var/name (symbol "app.cost" (str "v" i)) :var/ns ns-e :var/form (- (inc (* 2 i)))}]))
+                         (range 1 (inc n))))))
+
+(defn catch-input "The cost proof's input at n: n unnamed catch sites." [n] [(catch-forms (ts/test-db) n) {}])
+
+(defn health-input "The cost proof's input at n: the db of n unnamed catch sites." [n] [(catch-forms (ts/test-db) n)])
+
+(defn caused-input
+  "The cost proof's input at n: [base head], base holding n catch sites, head one more."
+  [n] (let [base (catch-forms (ts/test-db) n)] [base (d/db-with base [{:db/id -1 :form/id "cost-head" :form/ns (:db/id (:var/ns (d/entity base (:e (first (d/datoms base :aevt :var/name))))))
+                                                                        :form/order 0 :form/src "(defn g [])" :form/catches #{"{:class Exception, :answers :expr}"} :form/defines [-2]}
+                                                                       {:db/id -2 :var/name 'app.cost/head :var/form -1}])]))
+
+(defn pins-input
+  "The cost proof's input at n: docs/forks.md of n sections each stating a pin, root's import
+  recording a different gitlink for every one (so each is a :stale-pin)."
+  [n] (let [db0 (ts/test-db)
+            page (apply str "# Forks\n\nThe pins.\n" (for [i (range n)] (str "\n## F" i "\n\n`reference-code/lib" i "` pinned at `abc" i "`.\n")))
+            db (d/db-with db0 (seon.docs/load-tx db0 "docs" {"docs/forks.md" page}))]
+        [(d/db-with db [{:seon.root/id :root :seon.root/source {:pins (into {} (for [i (range n)] [(str "reference-code/lib" i) (str "def" i)]))}}]) {}]))
+
+(deftest unnamed-sites-follow-the-catch-forms
+  (cost/proof {:of 'seon.problems/unnamed-sites :input 'seon.problems-test/catch-input
+               :n "live forms carrying a catch, each defining one var, none named by the page"
+               :work "once: the page's cited names as a set, the method and impl owners; per site: its form entity, its defines and one row"
+               :growth :linear
+               :per-n {:ns 76000 :bytes 74500 :calls 2}
+               :fixed {:ns 50000 :bytes 50000 :calls 1}
+               :sizes [10 100 1000]}))
+
+(deftest stale-pins-follow-the-pin-page
+  (cost/proof {:of 'seon.problems/stale-pins :input 'seon.problems-test/pins-input
+               :n "sections of docs/forks.md, each stating one stale pin"
+               :work "one AVET range of addresses, then per section a pull of its text, one regex scan and one row"
+               :growth :linear
+               :per-n {:ns 30000 :bytes 30000 :calls 2}
+               :fixed {:ns 600000 :bytes 600000 :calls 5}
+               :sizes [10 100 1000]}))
+
+(deftest health-follows-what-is-recorded-and-cited
+  (cost/proof {:of 'seon.problems/health :input 'seon.problems-test/health-input
+               :n "unnamed catch sites (the derived classes dominate; the recorded part is the seed's)"
+               :work "report once, then the three derived reads; the sites dominate"
+               :growth :linear
+               :per-n {:ns 80000 :bytes 80000 :calls 2}
+               :fixed {:ns 3000000 :bytes 3000000 :calls 60}
+               :sizes [10 100 1000]}))
+
+(deftest caused-reads-both-dbs-in-full
+  (cost/proof {:of 'seon.problems/caused :input 'seon.problems-test/caused-input
+               :n "unnamed catch sites in the base (the head has one more)"
+               :work "the two derived reads (citations, sites) over base and over head: today O(program) twice, not O(changed)"
+               :growth :linear
+               :per-n {:ns 150000 :bytes 155000 :calls 4}
+               :fixed {:ns 1500000 :bytes 1500000 :calls 10}
+               :sizes [10 100 1000]}))

@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg]))
+            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [clojure.edn]))
 
 (def help-page
   "The help page, docs/agent.md: what every agent reads first (its system message, the same
@@ -133,24 +133,18 @@
     (:message r) (assoc :message (:message r))))
 
 (defn callees
-  "The program functions proof p calls directly (one level), each at summary level: its
-  arglists, contract and doc, never its body. Read from p's source by the reader and
-  resolved in p's namespace; a var is program when db holds it."
+  "The program functions proof p calls directly (one level: its recorded form's :form/refs,
+  the compiler's resolved references), each at summary level from its own facts on db: its
+  contract and doc, never its body; a var is program when db holds it (a branch's callee
+  this process never loaded included)."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :map]]}
   [db p]
-  (let [nsx (find-ns (symbol (namespace p)))
-        src (source-of db p)]
-    (if-not (and nsx src)
-      []
-      (vec (for [sym (distinct (filter symbol? (tree-seq coll? seq (reader/read-text src (ns-name nsx)))))
-                 :let [v (ns-resolve nsx sym)]
-                 :when (and (var? v) (not (:test (meta v))))
-                 :let [q (symbol (str (ns-name (:ns (meta v)))) (str (:name (meta v))))]
-                 :when (and (not= q p) (pdb/eid db :var/name q))]
-             (cond-> {:var q}
-               (:arglists (meta v)) (assoc :arglists (:arglists (meta v)))
-               (:malli/schema (meta v)) (assoc :contract (:malli/schema (meta v)))
-               (:doc (meta v)) (assoc :doc (:doc (meta v)))))))))
+  (vec (for [q (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db p)) p))
+             :let [v (d/entity db [:var/name q])]
+             :when (and v (not= :test (:var/kind v)))]
+         (cond-> {:var q}
+           (:var/contract v) (assoc :contract (clojure.edn/read-string (:var/contract v)))
+           (:var/doc v) (assoc :doc (:var/doc v))))))
 
 ;; ---- the last evaluations: folded, each an equal share --------------------------------
 
@@ -208,16 +202,18 @@
 (defn- refused
   "The done rule's reasons as the agent reads them, beyond its own red proofs (shown with
   the proofs): a red test names its failures, a contract gap its var, a design step that
-  has not improved its plan the call that does."
+  has not improved its plan the call that does, an open problem its work made true what it
+  is (seon.problems/caused)."
   {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done] [:vector :map]] [:vector :map]]}
   [reasons reds]
   (let [rs (remove #(= :proof-red (:reason %)) reasons)
         gaps (vec (keep #(when (= :contract-gap (:reason %)) (:symbol %)) rs))
-        unmerged (vec (keep #(when (= :unmerged (:reason %)) (:key %)) rs))]
+        unmerged (vec (keep #(when (= :unmerged (:reason %)) (:key %)) rs))
+        opened (vec (keep #(when (= :open-problem (:reason %)) (:key %)) rs))]
     ;; a contract gap and an unmerged entry say one thing about many names: one entry each,
     ;; its names a list the printer budgets
     (vec (concat
-           (for [{:keys [reason symbol]} rs :when (not (#{:contract-gap :unmerged} reason))]
+           (for [{:keys [reason symbol]} rs :when (not (#{:contract-gap :unmerged :open-problem} reason))]
              (case reason
                (:regression :stray-red) (cond-> {:reason reason :test symbol}
                                           (seq (filter #(= symbol (:test %)) reds))
@@ -231,7 +227,8 @@
                                          (list 'clojure.test/run-test-var (list 'var symbol)))}
                {:reason reason}))
            (when (seq gaps) [{:reason :contract-gap :vars gaps}])
-           (when (seq unmerged) [{:reason :unmerged :keys unmerged}])))))
+           (when (seq unmerged) [{:reason :unmerged :keys unmerged}])
+           (when (seq opened) [{:reason :open-problem :problems opened}])))))
 
 (defn- near
   "Where position at of text is: its line's number and its column (1-based), and the

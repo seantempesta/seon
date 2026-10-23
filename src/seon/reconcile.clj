@@ -36,14 +36,15 @@
   never ran); a regression (a test green on main, the
   proofs of merged tasks, red here); a stray red (a red test that is no task's open
   proof); a contract gap (a function the attempt defined without a contract); an
-  unmerged entry on the branch (a merge conflict not resolved). A :design task readies
+  unmerged entry on the branch (a merge conflict not resolved); an open problem the
+  branch's work made true (seon.problems/caused: a citation of a var it deleted). A :design task readies
   the interface and plan for its implement step, so its own proofs may stay red but not
   unknown (each written and run), and it is refused :no-design until its plan differs from
   the one its attempt began with (or that one is unknown). A deferred proof (a process test:
   run only when root asks, owner's ruling 2026-10-23) is neither red nor unknown here; while
   unrun it is the merge's open :unrun problem."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
-  [{:keys [proofs results main-green allowed-red uncontracted unmerged kind plan plan-before deferred]}]
+  [{:keys [proofs results main-green allowed-red uncontracted unmerged caused kind plan plan-before deferred]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
         design? (= :design kind)]
     (vec (concat
@@ -58,7 +59,8 @@
                  :when (and (red? t) (not (proofs t)) (not (main-green t)) (not (allowed-red t)))]
              {:reason :stray-red :symbol t})
            (for [s (sort-by str uncontracted)] {:reason :contract-gap :symbol s})
-           (for [k (sort unmerged)] {:reason :unmerged :key k})))))
+           (for [k (sort unmerged)] {:reason :unmerged :key k})
+           (for [k (sort caused)] {:reason :open-problem :key k})))))
 
 (defn hairy
   "Is a merge too hairy to keep resolving, from measured facts: more conflicts than the
@@ -330,9 +332,10 @@
                    (= :dead (:seon.attempt/status a))
                    (failed aid id (str "its agent died" (some->> (:seon.attempt/reason a) (str ": "))))
                    :else
-                   (let [rs (done-explain (done-input idx id (:seon.attempt/results a {}) (:seon.attempt/uncontracted a #{})
-                                                           (:seon.attempt/unmerged a []) (:seon.attempt/basis-t a) (:seon.attempt/plan a)
-                                                           (set (:seon.attempt/deferred a))))]
+                   (let [rs (done-explain (assoc (done-input idx id (:seon.attempt/results a {}) (:seon.attempt/uncontracted a #{})
+                                                                 (:seon.attempt/unmerged a []) (:seon.attempt/basis-t a) (:seon.attempt/plan a)
+                                                                 (set (:seon.attempt/deferred a)))
+                                                      :caused (:seon.attempt/caused a #{})))]
                      (cond
                        ;; the process tests the branch's change reaches run before its merge
                        ;; only when root asked (:seon.task/gate?, my.root/gate!; owner's ruling
@@ -590,7 +593,7 @@
                     ;; spend is what the end measured: no end (died, killed, never reached
                     ;; seon.turn/end!) is outcome :no-end with its turns, calls and tokens absent
                     (merge (task/end-members (cond-> (merge (select-keys end [:turns :model-calls :tokens])
-                                                      {:outcome (:outcome end :no-end) :results results :uncontracted (set (:uncontracted diff))
+                                                      {:outcome (:outcome end :no-end) :results results :uncontracted (set (:uncontracted diff)) :caused (set (:caused diff))
                                                        :conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
                                                        :unmerged (mapv sedn/encode (:unmerged diff))
                                                        :changed (into #{} (map sedn/encode) (:ours diff))

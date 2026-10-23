@@ -1,5 +1,5 @@
 (ns seon.intr
-  "Copied from session R2's r2.intr (../notes/archive/option3-R2-nrepl.md), which replaces T1's throwing
+  "Copied from session R2's r2.intr (notes/archive/option3-R2-nrepl.md), which replaces T1's throwing
   handler: T1's never stopped a form that catches Throwable and left a binding behind.
 
   Stopping a running eval in a single-threaded agent with Jolt's own mechanism,

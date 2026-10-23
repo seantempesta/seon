@@ -1,5 +1,5 @@
 (ns seon.fx
-  "Effects (session FX1, ../notes/archive/option3-FX1-effects.md). Every outside effect kind has ONE
+  "Effects (session FX1, notes/archive/option3-FX1-effects.md). Every outside effect kind has ONE
   owner proc in root behind a bounded channel, and `workers` performer procs:
 
     agent --socket--> agent proc --:fx/<kind>--> owner --:work--> worker (performs)
@@ -106,11 +106,14 @@
 (defn config-input
   "The config in force as a test reads it, cfg (seon.config/config: the shipped file, this
   checkout's config/local.edn, the #env values, the profile), as text: the checkout's own path
-  written as <checkout>, and the TCP ports left out (each checkout's own by design, bin/ports;
-  a test's root takes its own). What a result depends on that git does not see."
+  written as <checkout>, and the keys that say where a process runs left out (their schemas'
+  :seon.config/place: its ports, main, store, runs, source tree and results directory: each
+  checkout's and each root's own by design, while :tree covers the source's content). What a
+  result depends on that git does not see, so an agent's root and a checkout on one tree key
+  their results alike (docs/merging.md)."
   {:malli/schema [:=> [:cat :map :string] :string]}
   [cfg checkout]
-  (str/replace (sedn/encode (into (sorted-map) (remove (fn [[k]] (= "TCP port" (get-in cfg/schema-forms [k 1 :seon.config/unit])))) cfg))
+  (str/replace (sedn/encode (into (sorted-map) (remove (fn [[k]] (get-in cfg/schema-forms [k 1 :seon.config/place]))) cfg))
                checkout "<checkout>"))
 
 (defn declared-refs
@@ -140,18 +143,36 @@
       (git! env root ["write-tree"] nil)
       (finally (.delete idx)))))
 
+(defn pin
+  "What a build or a test reads from the checkout at dir (a submodule), by content: its HEAD
+  when its files are HEAD's, else HEAD+ the tree-id of its files as they are, so an
+  uncommitted edit in a dependency is an input like a committed one (bin/build's pin computes
+  the same, and builds it)."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [dir]
+  (let [head (git! {} dir ["rev-parse" "HEAD"] nil)]
+    (if (str/blank? (git! {} dir ["status" "--porcelain" "-uall" "--ignore-submodules=all"] nil))
+      head
+      (str head "+" (tree-id dir)))))
+
 (defn inputs
   "The one producer of the checkout at root's inputs that have no program facts, for bin/test
   and for root's :source read (read-source, which records them for its agents):
   {:tree (tree-id: every file and pin, for a test reading files or running the binary) :env
-  (every test's: the tree's env-input? entries, every submodule's pin, Jolt's included, and
+  (every test's: the tree's env-input? entries, every submodule's pin (its files as they are),
+  Jolt's included, and
   the config in force, config-input) :data-refs (declared-refs of its system.edn)}, by
   relative paths and content, so the same content at another path is the same inputs."
   {:malli/schema [:function [:=> [:cat :string] :seon.program/inputs] [:=> [:cat :string :map :string] :seon.program/inputs]]}
   ([root] (inputs root cfg/config (cfg/checkout)))
   ([root cfg checkout]
    (let [tree (tree-id root)
-         entries (for [l (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil)) :let [[_ p] (str/split l #"\t" 2)] :when (env-input? p)] l)]
+         entries (for [l (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil)) :let [[m p] (str/split l #"\t" 2)] :when (env-input? p)]
+                   ;; a submodule by its pin: its files as they are, an uncommitted edit included
+                   ;; (a clean one's line is its gitlink's, as before; one not checked out has no files to read)
+                   (let [d (str root "/" p)
+                         pn (when (and (str/starts-with? m "160000") (.exists (java.io.File. d ".git"))) (pin d))]
+                     (if (and pn (str/includes? pn "+")) (str l " " pn) l)))]
      {:tree tree
       :env (err/digest (str/join "\n" (concat entries [(config-input cfg checkout)])))
       :data-refs (declared-refs (str root "/resources/seon/system.edn"))})))

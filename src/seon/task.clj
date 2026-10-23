@@ -158,7 +158,7 @@
   "The observed members of an attempt's end (proto.agents/end), as attributes: a count
   nobody measured (no end written, a reply without usage) is absent, never 0."
   {:malli/schema [:=> [:cat :seon.turn/end :int :int] :map]}
-  [{:keys [outcome turns model-calls tokens results uncontracted reason conflicts unmerged changed deferred]} end-ms basis-t]
+  [{:keys [outcome turns model-calls tokens results uncontracted reason conflicts unmerged changed deferred caused]} end-ms basis-t]
   (cond-> {:seon.attempt/outcome outcome :seon.attempt/basis-t basis-t :seon.attempt/end-ms end-ms
            :seon.attempt/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s}))}
     turns (assoc :seon.attempt/turns turns)
@@ -169,6 +169,7 @@
     (seq unmerged) (assoc :seon.attempt/unmerged (vec unmerged))
     (seq changed) (assoc :seon.attempt/changed (vec changed))
     (seq deferred) (assoc :seon.attempt/deferred (vec deferred))
+    (seq caused) (assoc :seon.attempt/caused (vec caused))
     reason (assoc :seon.attempt/reason reason)))
 
 (defn carry-tx
@@ -286,6 +287,7 @@
       (:seon.attempt/changed a) (update :seon.attempt/changed set)
       (:seon.attempt/deferred a) (update :seon.attempt/deferred set)
       (:seon.attempt/deferred-results a) (update :seon.attempt/deferred-results #(into {} (map (juxt :seon.proof/test :seon.proof/status)) %))
+      (:seon.attempt/caused a) (update :seon.attempt/caused set)
       conflicts (assoc :seon.attempt/conflicts
                        (vec (sort-by (comp str :key) (map pm/conflict-value conflicts)))))))
 

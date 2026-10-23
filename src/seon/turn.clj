@@ -18,7 +18,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.intr :as intr] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
-            [seon.proofs :as proofs] [seon.context :as context] [seon.program :as program] [seon.merge :as pm]
+            [seon.proofs :as proofs] [seon.context :as context] [seon.program :as program] [seon.merge :as pm] [seon.problems :as problems]
             [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
             [datahike.api :as d]))
 
@@ -69,7 +69,8 @@
   "What a turn starts from, measured now: the proofs run in a fork of this agent (a run it
   could not fork ran no proof: every proof is unknown, and the refused answer is the run's error),
   the contract gaps the branch adds since its merge base (seon.merge/uncontracted, as root's
-  judge and the merge gate ask it) and its unmerged entries, the done rule over them, and
+  judge and the merge gate ask it), its unmerged entries, the problems its work made true
+  (seon.problems/caused, as root's judge asks it), the done rule over them, and
   the task as the branch holds it (its plan may have improved)."
   {:malli/schema [:=> [:cat :seon.task/id :seon.task/plan] :map]}
   [id plan-before]
@@ -79,8 +80,9 @@
         results (if (contract/error? run) {} (proofs/results run))
         db (agent/db)
         unc (added-gaps (:base @agent/state) db)
-        unmerged (branch/unmerged)]
-    {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :task (task/task db id)
+        unmerged (branch/unmerged)
+        caused (problems/caused (:base @agent/state) db)]
+    {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :task (task/task db id)
      :will-merge (program/divergence (:base @agent/state) db)
      ;; root's ruling (a): what this turn ran, what the judge will run, what the merge runs
      :tests (when-not (contract/error? run)
@@ -88,8 +90,9 @@
                     unfinished (count (remove #(contains? results %) (:selected run)))]
                 (cond-> {:this-turn (count (:selected run)) :at-judge (:at-judge run) :when-asked (count (:deferred run))}
                   (pos? unfinished) (assoc :unfinished unfinished))))
-     :reasons (r/done-explain (r/done-input (r/index db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before
-                                              (if (contract/error? run) #{} (set (:deferred run)))))}))
+     :reasons (r/done-explain (assoc (r/done-input (r/index db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before
+                                                   (if (contract/error? run) #{} (set (:deferred run))))
+                                     :caused caused))}))
 
 (defn- end!
   "The attempt's end: the live runtime staged onto the branch, the end written there (with

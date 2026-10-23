@@ -1,5 +1,5 @@
 (ns seon.problems
-  "The one read of every problem Seon recorded (session D2, ../notes/archive/option3-D2-problems.md):
+  "The one read of every problem Seon recorded (session D2, notes/archive/option3-D2-problems.md):
   main's db value in, one report out, by class. Root and the owner mine tasks from it by
   hand: each row carries what a task-file declaration needs (its producer and owning
   namespace, its evidence as data, the proofs that reproduce it) and the tasks that already
@@ -21,12 +21,24 @@
     :failed                         a task held for root with a failure: an attempt refused, its
                                     agent dead or its merge refused (seon.reconcile/hold-tx), or
                                     marked failed (my.task/fail!, root or a check): its reason, a
-                                    counterexample when marked, its evidence; open while held"
+                                    counterexample when marked, its evidence; open while held
+    :dead-citation                  a name a wiki section cites (:seon.section/names) that names
+                                    nothing now (seon.ref/names-on-db?): derived when read,
+                                    never written, so it is open exactly while it is true
+    :unnamed-site                   a site of a law (`laws`: a catch) its page does not name:
+                                    derived from the compiler's facts and the page's names
+    :stale-pin                      a pin the wiki states (`pins`: docs/forks.md) that is not
+                                    the gitlink root's source import recorded
+
+  `report` reads what was recorded, at a cost that follows the problems. `health` adds the
+  derived classes, which read the program's names once (a set): their cost follows the
+  citations (seon.problems-test/dead-citations-follow-the-citations)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [seon.merge :as pm] [seon.reconcile :as reconcile] [seon.db :as pdb]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [seon.merge :as pm] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses "Attempt statuses of a death (:seon.attempt/status)." (:seon.status/failed (contract/properties :seon.attempt/status)))
+(def ^:private finished "Attempt statuses that make its task done (:seon.attempt/status, as seon.reconcile/finished)." (:seon.status/finished (contract/properties :seon.attempt/status)))
 (def attempt-classes [:red :cost :merge :dead :error :waste :task-conflict :unrun])
 
 (defn- es
@@ -53,8 +65,21 @@
 
 ;; ---- recorded errors ------------------------------------------------------------------
 
+(defn- closed?
+  "Is the recorded error r (entity e) closed: its subject (a var's name or a section's address,
+  :seon.error/subject, or, on a store from before the type left the code, the target address of a
+  :seon.docs/refused link) has a fact written after the error's last one. Nothing is written to
+  close it, and a subject that does not exist yet has changed nothing."
+  {:malli/schema [:=> [:cat :seon.host/db :map :int] :boolean]}
+  [db r e]
+  (let [subject (or (:seon.error/subject r)
+                    (when (= :seon.docs/refused (:seon.error/type r)) (:seon.ref/address (:seon.error/example r))))
+        s (when subject (pdb/eid db (if (symbol? subject) :var/name :seon.section/address) subject))
+        last-tx (reduce max (map :tx (d/datoms db :eavt e)))]
+    (boolean (and s (some #(> (:tx %) last-tx) (d/datoms db :eavt s))))))
+
 (defn- error-row
-  "One recorded error (entity e) as a row."
+  "One recorded error (entity e) as a row, :open? false once its subject changed (`closed?`)."
   {:malli/schema [:=> [:cat :seon.host/db :map :int] :seon.problems/row]}
   [db ans e]
   (let [r (d/pull db '[*] e)
@@ -69,7 +94,113 @@
              :evidence (cond-> {:kind :error :signature s :count (:seon.error/count r) :agents (:seon.error/agents r 0) :example ex}
                          (:seon.error/form r) (assoc :form (:seon.error/form r)))
              :proofs [] :answered-by (get-in ans [:signature s] []) :at-ms (:seon.error/last-ms r)}
-      (:seon.error/form r) (assoc :form (:seon.error/form r)))))
+      (:seon.error/form r) (assoc :form (:seon.error/form r))
+      (closed? db r e) (assoc :open? false))))
+
+;; ---- derived: what the program's facts make true now ------------------------------------
+
+(defn dead-citations
+  "Each name a wiki section cites (:seon.section/names) that names nothing on db
+  (seon.ref/names-on-db?, the one rule for a name), and each link it makes that reached no
+  section at load (:seon.section/dead-links) and still reaches none, as a :dead-citation row:
+  open while it is true, since nothing writes it. Cost: main's var names read once into a set
+  and one set lookup per cited name; the rule runs only on a name the set misses; one seek per
+  dead link."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (let [vars (into #{} (map :v) (d/datoms db :aevt :var/name))
+        row (fn [e k v message evidence]
+              (let [a (:seon.section/address (d/pull db [:seon.section/address] e))
+                    s (str "dead-citation " a " " v)]
+                (merge {:signature s :section a :open? true :message (message a)
+                        :producer nil :owner-ns (when (symbol? v) (symbol (namespace v))) :proofs []
+                        :evidence (assoc evidence :kind :dead-citation :section a) :answered-by (get-in ans [:signature s] []) :at-ms nil}
+                       {k v})))]
+    (vec (concat
+           (for [{:keys [e v]} (d/datoms db :aevt :seon.section/names)
+                 :when (not (or (vars v) (ref/names-on-db? db v)))]
+             (row e :name v #(str % " cites " v ", which names nothing") {:name v}))
+           (for [{:keys [e v]} (d/datoms db :aevt :seon.section/dead-links)
+                 :when (nil? (pdb/eid db :seon.section/address v))]
+             (row e :target v #(str % " links to " v ", which is no section") {:target v}))))))
+
+(def laws
+  "The laws the compiler's facts answer exactly, as data: the fact that marks a site, the page
+  that must name each site's function, and the namespaces the law leaves out (the check
+  drivers: bin/laws' scope). The others stay bin/laws' text scan: clocks and measures (a host
+  member is recorded as jolt.host/static-member, not by its name), resolution (a quoted
+  symbol is a ref, so the facts over-count)."
+  [{:law :catch :fact :form/catches :page "docs/failure-points.md" :except #{"seon.check" "seon.e2e"}}])
+
+(defn unnamed-sites
+  "Each site of a law (`laws`) its page does not name: a live form carrying the law's fact,
+  by the var it defines, in a namespace of Seon's own src (an agent's app and any test are not
+  failure points: a deftest's `is` expands to a catch), whose name no section of the page cites (:seon.section/names), as an
+  :unnamed-site row. Cost: the forms carrying the fact (aevt) and the wiki's cited names, once."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (vec (for [{:keys [law fact page except]} laws
+             :let [named (into #{} (keep (fn [{:keys [e v]}]
+                                           (when (str/starts-with? (:seon.section/address (d/pull db [:seon.section/address] e)) (str page "#")) v)))
+                               (d/datoms db :aevt :seon.section/names))
+                   owners (merge (into {} (map (fn [{:keys [e v]}] [v (:method/multi (d/entity db e))])) (d/datoms db :aevt :method/form))
+                                 (into {} (map (fn [{:keys [e v]}] [v (:impl/protocol (d/entity db e))])) (d/datoms db :aevt :impl/form)))]
+             fe (distinct (map :e (d/datoms db :aevt fact)))
+             :when (program/live? db fe)
+             :let [f (d/entity db fe)
+                   ;; a catch is attributed to its form: the vars it defines, else the multimethod or
+                   ;; protocol it extends, else the form's id: no site drops
+                   sites (or (seq (map :var/name (:form/defines f))) (some-> (owners fe) vector) [(:form/id f)])
+                   file (some-> f :form/ns :ns/file)
+                   nsym (:ns/name (:form/ns f))]
+             v sites
+             ;; the law is Seon's own source's (bin/laws scans src): an agent's app, and a test's
+             ;; `is` (which expands to a catch), are not failure points of the system
+             :when (and (not (except (str nsym))) (not (named v)) (some-> file (str/starts-with? "src/")))
+             :let [s (str "unnamed-site " (name law) " " v)]]
+         {:signature s :law law :site v :page page :open? true
+          :message (str v " has a " (name law) " site that " page " does not name")
+          :producer nil :owner-ns nsym :proofs []
+          :evidence {:kind :unnamed-site :law law :site v :page page} :answered-by (get-in ans [:signature s] []) :at-ms nil})))
+
+(def pins
+  "Where the wiki states each customized library's pin: the page, and the line that states one
+  (`reference-code/x` pinned at `sha`), compared with the gitlinks root's source import
+  recorded (:seon.root/source :pins, seon.root/import-source!)."
+  {:page "docs/forks.md" :line #"(?m)^`(reference-code/[^`]+)` pinned at `([0-9a-f]+)`"})
+
+(defn stale-pins
+  "Each pin the wiki states (`pins`) that is not the gitlink root's source import recorded, as a
+  :stale-pin row; none while root has recorded no import (unknown, not a mismatch). Cost: the
+  page's sections (one AVET range of addresses) and their text."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (let [{:keys [page line]} pins
+        recorded (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/source]) :seon.root/source :pins)]
+    (vec (when recorded
+           (for [{a :v e :e} (d/datoms db :aevt :seon.section/address) :when (str/starts-with? a (str page "#"))
+                 [_ path sha] (re-seq line (or (:seon.section/text (d/pull db [:seon.section/text] e)) ""))
+                 :let [g (get recorded path)] :when (not (some-> g (str/starts-with? sha)))
+                 :let [s (str "stale-pin " a " " path)]]
+             {:signature s :section a :path path :stated sha :recorded g :open? true
+              :message (str a " states " path " pinned at " sha ", its gitlink is " (or g "none"))
+              :producer nil :owner-ns 'seon.docs :proofs []
+              :evidence {:kind :stale-pin :section a :path path :stated sha :recorded g} :answered-by (get-in ans [:signature s] []) :at-ms nil})))))
+
+;; ---- caused: what a branch's own work made true -----------------------------------------
+
+(defn caused
+  "The derived problems the branch at head has that base (its merge base) had not, by
+  message: what the branch's own work broke. The done rule refuses while any is open
+  (seon.reconcile/done-explain :open-problem), and the agent reads them each turn; an
+  evaluation is never refused (AGENTS: get out of an agent's way). Cost: the two derived reads
+  over base and over head, O(the program's citations and catch forms) twice, not O(changed): about
+  75 KB per catch site per read (seon.problems-test/caused-reads-both-dbs-in-full bounds it)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :string]]}
+  [base head]
+  (let [derived #(concat (dead-citations % {}) (unnamed-sites % {}))
+        before (into #{} (map :signature) (derived base))]
+    (into (sorted-set) (comp (remove (comp before :signature)) (map :message)) (derived head))))
 
 ;; ---- attempts ------------------------------------------------------------------------
 
@@ -83,10 +214,10 @@
    {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
 (defn- task-done?
-  "Has task te an attempt finished (`seon.reconcile/finished`)? One avet seek, then its attempts."
+  "Has task te an attempt finished (`finished`)? One avet seek, then its attempts."
   {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
   [db te]
-  (boolean (some #(reconcile/finished (:seon.attempt/status (d/pull db [:seon.attempt/status] (:e %))))
+  (boolean (some #(finished (:seon.attempt/status (d/pull db [:seon.attempt/status] (:e %))))
                  (d/datoms db :avet :seon.attempt/task te))))
 
 ;; ---- tasks held for root -----------------------------------------------------------------
@@ -191,3 +322,18 @@
                      (into {} (for [c attempt-classes :let [rows (vec (sort-by #(- (or (:end-ms %) 0)) (get by-class c)))]]
                                 [c {:n (count rows) :rows rows}]))
                      {:failed {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))}})})))
+
+(defn health
+  "Every open problem on db, one value by class: what was recorded (`report`) and what the
+  program's facts make true now (`dead-citations`, `unnamed-sites`, `stale-pins`). What the page, an agent's context and
+  the done and merge gates read: computed when read, never stored, never polled."
+  {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]
+                  [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}
+  ([db] (health db {}))
+  ([db fold]
+   (let [ans (answers db) dead (dead-citations db ans) unnamed (unnamed-sites db ans) pinned (stale-pins db ans)]
+     (vary-meta (update (report db fold) :classes assoc
+                        :dead-citation {:n (count dead) :rows dead}
+                        :unnamed-site {:n (count unnamed) :rows unnamed}
+                        :stale-pin {:n (count pinned) :rows pinned})
+                assoc :seon.render/schema :seon.problems/report))))

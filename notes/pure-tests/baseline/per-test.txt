@@ -1,0 +1,72 @@
+shard 0: 110 tests, 110 with ms, sum 432.6s
+shard 1: 110 tests, 110 with ms, sum 104.8s
+shard 2: 110 tests, 109 with ms, sum 50.9s
+shard 3: 110 tests, 109 with ms, sum 335.4s
+--- by namespace (s, n)
+  368.9  17 seon.source-test
+  187.8  17 seon.agent-test
+   69.2  10 seon.repl-test
+   59.9   1 r3.inc-test
+   49.8  29 seon.program-test
+   49.6   9 seon.root-test
+   49.5   6 seon.server-test
+   15.2   1 seon.program-cost-test
+   12.1  14 seon.merge-test
+   11.8  18 seon.db-test
+    9.2   4 seon.check-test
+    7.6  13 seon.cost-test
+    6.2  34 seon.render-test
+    4.4  19 seon.problems-test
+    4.1   3 seon.task-cost-test
+    2.7   8 seon.proofs-test
+    1.8  42 seon.reconcile-test
+    1.7  11 seon.print-test
+    1.6   4 seon.schema-test
+    1.4   7 seon.model-test
+    1.3  23 seon.context-test
+    1.1   1 seon.docs-cost-test
+    1.1  10 seon.profile-test
+    0.9  24 seon.procs-test
+    0.8   2 seon.print-cost-test
+--- slowest 40
+  351.4 s0 seon.source-test/a-restart-catches-up-and-a-new-generation-resumes
+   59.9 s3 r3.inc-test/incremental-equals-full
+   41.9 s3 seon.agent-test/an-agents-test-run-is-its-proofs-and-what-its-change-reaches
+   29.4 s3 seon.agent-test/an-agent-holds-mains-tests-and-runs-them
+   23.5 s0 seon.program-test/the-same-tree-gives-the-same-digests-in-any-checkout-and-any-run
+   21.6 s3 seon.agent-test/each-eval-call-is-answered-before-the-next
+   18.9 s3 seon.agent-test/a-root-with-no-provider-ends-the-attempt-on-its-typed-error
+   18.5 s1 seon.root-test/a-build-without-whole-program-inference-reads-with-tools-reader
+   17.7 s3 seon.repl-test/the-help-page-runs
+   16.4 s3 seon.agent-test/a-failure-marked-through-the-server-holds-the-task
+   15.9 s3 seon.repl-test/the-template-instructions-run
+   15.2 s3 seon.agent-test/an-agent-that-throws-ends-with-its-cause
+   15.2 s2 seon.program-cost-test/load-order-is-one-pass-over-the-forms
+   14.7 s1 seon.server-test/a-root-eval-replies-like-an-agent-eval
+   13.1 s3 seon.repl-test/an-interrupt-stops-only-the-request-it-arrives-in
+   12.6 s1 seon.server-test/a-refused-attach-writes-nothing
+   11.9 s3 seon.agent-test/an-agent-finds-no-repository
+   11.2 s3 seon.repl-test/source-answers-a-platform-var-from-the-program
+   11.2 s3 seon.repl-test/an-agent-repl-answers-what-a-clojure-repl-answers
+   11.1 s1 seon.server-test/a-server-refusal-is-the-one-error-map
+   11.0 s1 seon.server-test/a-server-defect-answers-that-request-alone
+   10.5 s0 seon.program-test/a-test-running-the-binary-takes-the-tree
+   10.5 s3 seon.agent-test/no-entity-of-main-is-inside-an-agents-lease
+   10.5 s1 seon.root-test/a-root-binary-requires-a-library-it-did-not-compile
+   10.0 s3 seon.agent-test/a-forked-agent-knows-its-task
+    9.7 s0 seon.program-test/only-a-test-reading-the-tree-takes-its-digest
+    8.7 s2 seon.check-test/a-check-leaves-its-store-as-it-found-it
+    7.5 s0 seon.cost-test/the-unit-table-is-current
+    5.7 s1 seon.root-test/main-follows-its-source-tree-across-restarts
+    5.6 s2 seon.db-test/minting-past-the-lease-is-refused-not-shared
+    5.3 s2 seon.render-test/one-printer-and-no-cut-before-it
+    4.9 s0 seon.source-test/importing-src-records-every-form-exactly
+    4.0 s0 seon.source-test/import-then-write-back-is-a-zero-diff
+    4.0 s3 seon.merge-test/three-way-cases
+    3.3 s3 seon.task-cost-test/finding-a-task-by-its-id-is-one-index-seek
+    3.2 s1 seon.root-test/a-second-boot-resumes-the-same-main
+    3.0 s3 seon.agent-test/a-blocked-agent-ends-with-its-root
+    2.9 s2 seon.problems-test/problems-reads-only-the-problems
+    2.9 s1 seon.root-test/root-threads-are-what-root-declares
+    2.9 s3 seon.agent-test/an-agent-ends-when-its-root-is-gone
+--- no result (red or unstored): ['seon.program-cost-test/recording-a-form-is-flat-in-the-program', 'seon.agent-test/a-wide-reach-reuses-unchanged-results']

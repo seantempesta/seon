@@ -52,14 +52,6 @@
                 k))
     data-attrs))
 
-(defn- def-entity
-  "The entity of definition key k on db, or nil."
-  {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe :int]]}
-  [db [kind a b]]
-  (let [[attr v] (case kind :var [:var/name a] :method [:method/key (program/method-key a b)]
-                       :impl [:impl/key (program/impl-key a b)] :ns [:ns/name a])]
-    (pdb/eid db attr v)))
-
 (defn- def-content
   "Definition k's content on db, when it points to form row f: the form's id, and its text
   (so a conflict shows each side's code as written)."
@@ -82,8 +74,8 @@
   (let [schema (d/schema db)
         forms (program/live-forms db)
         defs (for [f forms k (:defines f)
-                   :let [e (def-entity db k)]
-                   :when (and e (some #(= (:e f) (:db/id (get (d/entity db e) %))) [:var/form :method/form :impl/form :ns/form]))]
+                   :let [e (program/def-eid db k)]
+                   :when (and e (some #(= (:e f) (:db/id (get (d/entity db e) %))) (vals program/pointer)))]
                [k (def-content db k e f)])
         data (for [a (sort (data-attr-set db data-attrs))
                    dt (d/datoms db :aevt a)]
@@ -179,58 +171,16 @@
 ;; ---- tx-data: setting keys on a db ---------------------------------------------------
 
 
-(defn- def-ref
-  "The entity map naming definition k on db: its entity when db has it, else an upsert by
-  its identity with its tempid (Datahike allocates a tempid first seen as a ref, in
-  :form/defines, before the map that upserts it, and a form defining two existing
-  definitions, a protocol or a record, then conflicts)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/def-key] :map]}
-  [db [kind a b :as k]]
-  (cond-> (case kind
-            :var {:db/id (str "var " a) :var/name a :var/ns (program/ns-tid (symbol (namespace a)))}
-            :method (let [k (program/method-key a b)] {:db/id (str "method " k) :method/key k :method/multi a :method/dispatch b})
-            :impl (let [k (program/impl-key a b)] {:db/id (str "impl " k) :impl/key k :impl/protocol a :impl/type b})
-            :ns {:db/id (program/ns-tid a) :ns/name a})
-    (def-entity db k) (assoc :db/id (def-entity db k))))
-
-(def ^:private pointer {:var :var/form :method :method/form :impl :impl/form :ns :ns/form})
-
 (defn- set-form-tx
   {:malli/schema [:=> [:cat :seon.host/db :string [:maybe :map]] :seon.db/tx-data]}
   [db id content]
   (let [e (pdb/eid db :form/id id)]
     (if (nil? content)
       (if e [[:db/retractEntity e]] [])
-      (let [{:keys [ns src order lead defines declares refs requires banned inline-defs timeouts catches]} content]
-        (into [{:db/id (program/ns-tid ns) :ns/name ns}
-               (cond-> {:db/id (program/form-tid id) :form/id id :form/src src :form/ns (program/ns-tid ns) :form/order order}
-                 lead (assoc :form/lead lead)
-                 (seq defines) (assoc :form/defines (mapv #(:db/id (def-ref db %)) defines))
-                 (seq declares) (assoc :form/declares (mapv #(:db/id (def-ref db [:var %])) declares))
-                 (seq refs) (assoc :form/refs (vec refs))
-                 (seq requires) (assoc :form/requires (vec requires))
-                 (seq banned) (assoc :form/banned (vec banned))
-                 (seq inline-defs) (assoc :form/inline-defs (vec inline-defs))
-                 (seq timeouts) (assoc :form/timeouts (vec timeouts))
-                 (seq catches) (assoc :form/catches (vec catches)))]
-              (concat (map #(def-ref db %) defines)
-                      (for [s declares] (def-ref db [:var s]))))))))
-
-(defn- set-def-tx
-  {:malli/schema [:=> [:cat :seon.host/db :any [:maybe :map]] :seon.db/tx-data]}
-  [db k content]
-  (let [e (def-entity db k)
-        x (when e (d/entity db e))
-        attrs (case (first k) :var [:var/form :var/kind :var/contract :var/doc] :ns [:ns/form :ns/file] [(pointer (first k))])
-        now (when content
-              (cond-> {(pointer (first k)) (program/form-tid (:form content))}
-                (:kind content) (assoc :var/kind (:kind content))
-                (:contract content) (assoc :var/contract (:contract content))
-                (:doc content) (assoc :var/doc (:doc content))
-                (:file content) (assoc :ns/file (:file content))))]
-    (into (if content [(merge (def-ref db k) now) {:db/id (program/form-tid (:form content)) :form/id (:form content)}] [])
-          (for [a attrs :let [old (get x a)] :when (and (some? old) (not (contains? now a)))]
-            [:db/retract e a (if (#{:var/form :ns/form :method/form :impl/form} a) (:db/id old) old)]))))
+      (let [eid-of #(program/def-eid db %)]
+        (into [{:db/id (program/ns-tid (:ns content)) :ns/name (:ns content)} (program/form-tx id content eid-of)]
+              (concat (map #(program/def-ref % (eid-of %)) (:defines content))
+                      (for [s (:declares content)] (program/def-ref [:var s] (eid-of [:var s])))))))))
 
 (defn- set-datum-tx
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key :any] :seon.db/tx-data]}
@@ -263,7 +213,7 @@
                   (mapcat (fn [[k content]]
                             (case (first k)
                               :form (set-form-tx db (second k) content)
-                              (:var :method :impl :ns) (set-def-tx db k content)
+                              (:var :method :impl :ns) (program/def-tx db k (program/def-eid db k) content)
                               :schema (set-schema-tx db (second k) content)
                               :datum (set-datum-tx db k content)))
                           (sort-by (comp sedn/encode key) m))))]

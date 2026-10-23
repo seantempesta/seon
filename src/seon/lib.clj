@@ -34,6 +34,7 @@
 (defc c-waitpid-nb "waitpid" [:int :pointer :int] :int)
 (defc c-pipe "pipe" [:pointer] :int)
 (defc c-close "close" [:int] :int)
+(defc c-shutdown "shutdown" [:int :int] :int)
 (defc c-read "read" [:int :pointer :size_t] :ssize_t {:blocking true})
 (defc c-write "write" [:int :pointer :size_t] :ssize_t {:blocking true})
 (defc c-signal "signal" [:int :pointer] :pointer)
