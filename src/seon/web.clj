@@ -136,6 +136,10 @@
           (and (= m :get) (= uri "/turn"))
           {:status 200 :headers {"Content-Type" "text/plain; charset=utf-8" "Cache-Control" "no-store"}
            :body (str (ask! ch {:op :turn-text :agent (view-of (get q "view")) :turn (get q "id")}))}
+          ;; an entity's walk on main: its node, its units, what its prose cites, each by its
+          ;; render, beside the text a model reads of it (seon.render/walk); /walk is root's
+          (and (= m :get) (or (= uri "/walk") (re-matches #"/walk/\d+" uri)))
+          (html-response (ask! ch {:op :walk :eid (some-> (re-find #"\d+$" uri) parse-long)}))
           (and (= m :get) (str/starts-with? uri "/agent/")) (html-response (ask! ch {:op :page :view (view-of (subs uri 7))}))
           (and (= m :get) (str/starts-with? uri "/attempt/"))
           (html-response (ask! ch {:op :page :view (view-of (str "attempt:" (java.net.URLDecoder/decode (subs uri 9) "UTF-8")))}))
@@ -230,10 +234,10 @@
     :page (let [[st k] (step/pend st [(:p m) (:view m)])]
             (step/out! o :to-render {:op :page :view (:view m) :k k})
             st)
-    (:context :render-stats :turn-text)
+    (:context :render-stats :turn-text :walk)
              (let [[st k] (step/pend st [(:p m) :text])]
-               (step/out! o :to-render (merge {:op ({:context :context :render-stats :stats :turn-text :turn-text} (:op m)) :k k}
-                                              (select-keys m [:agent :turn])))
+               (step/out! o :to-render (merge {:op ({:context :context :render-stats :stats :turn-text :turn-text :walk :walk} (:op m)) :k k}
+                                              (select-keys m [:agent :turn :eid])))
                st)
     :stats (do (deliver (:p m) (stats st)) st)
     :call (let [c (:call m)

@@ -403,6 +403,20 @@
     [st (when (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:removes patch)))
           (assoc patch :op :patch :view view-id))]))
 
+(defn walk-html
+  "The walk page of entity eid on main as this proc last read it (root's when eid is nil):
+  seon.render/walk rendered on both faces (seon.render/rendered), laid out by
+  seon.render.ui/walk-page; a page saying why when main is not read yet or eid is no entity."
+  {:malli/schema [:=> [:cat :map [:maybe pos-int?]] :string]}
+  [st eid]
+  (let [db (:main-db st)
+        eid (or eid (when db (:db/id (d/entity db [:seon.root/id :root]))))
+        w (when (and db eid) (render/walk db eid))]
+    (h/html (ui/shell (str "walk " eid) "/feed?view=root"
+                      (cond (nil? db) [:p "main is not read yet: reload"]
+                            (:seon.error/type w) [:p (:seon.error/message w)]
+                            :else (ui/walk-page (render/rendered w {}) {}))))))
+
 (defn page-html
   "The composed document of view-id from its retained fragments (renders nothing)."
   {:malli/schema [:=> [:cat :map :any] [:maybe :string]]}
@@ -593,6 +607,7 @@
                                       (ask-state (update st :kf-wanted conj (:view m)) o))
                           :context (do (step/out! o :to-web {:op :text :k (:k m) :text (:context st "")}) st)
                           :turn-text (do (step/out! o :to-web {:op :text :k (:k m) :text (turn-text st (:agent m) (:turn m))}) st)
+                          :walk (do (step/out! o :to-web {:op :text :k (:k m) :text (walk-html st (:eid m))}) st)
                           :stats (do (step/out! o :to-web {:op :text :k (:k m) :text (sedn/encode (stats st))}) st)
                           st)
               st)]
