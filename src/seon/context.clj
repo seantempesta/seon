@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [clojure.edn]))
+            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [clojure.edn]))
 
 (def help-page
   "The help page, docs/agent.md: what every agent reads first (its system message, the same
@@ -55,15 +55,26 @@
       :else (assoc doc :left-out (str "its source, about " n " tokens, over the context's " reference-tokens)
                        :read (list 'clojure.repl/source sym)))))
 
+(defn- rrf
+  "Rankings fused by reciprocal rank (Cormack et al. 2009): each item scores the sum of 1/(k + rank)
+  over the rankings it is in, k :seon.config.vector/rrf-k; best first, the name breaking a tie."
+  {:malli/schema [:=> [:cat [:sequential [:sequential :qualified-symbol]]] [:vector :qualified-symbol]]}
+  [rankings]
+  (let [k (cfg/value :seon.config.vector/rrf-k)
+        s (apply merge-with + {} (for [r rankings] (into {} (map-indexed (fn [i x] [x (/ 1.0 (+ k i 1))])) r)))]
+    (mapv peek (sort (map (fn [[x v]] [(- v) (str x) x]) s)))))
+
 (defn found
-  "The helpers the plan does not name (R4's lever, from the call graph): the program functions
-  that sources (the plan's cited vars and the proofs) name in their recorded definitions, one
-  hop, less named and less macros, ranked as a search ranks terms (tf-idf): called by more of
-  the sources, and by fewer forms of the whole program; each at doc depth; at most the
-  config's :seon.config.render/found, then a line saying how many it left and how to read
-  them."
-  {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-symbol] [:vector :qualified-symbol]] [:vector :any]]}
-  [db named sources]
+  "The helpers the plan does not name (R4's lever), from two rankings fused by reciprocal rank
+  (rrf): the call graph's, the program functions that sources (the plan's cited vars and the
+  proofs) name in their recorded definitions, one hop, ranked as a search ranks terms (tf-idf:
+  called by more of the sources, and by fewer forms of the whole program); and the program's
+  forms nearest the task's plan (seon.vector/near over its vector, the :seon.config.render/found-near
+  nearest), which finds a helper nothing cited calls. Less named and less macros; each at doc
+  depth; at most the config's :seon.config.render/found, then a line saying how many it left and
+  how to read them. A task with no vector yet (nil, or not embedded) ranks by the call graph alone."
+  {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-symbol] [:vector :qualified-symbol] [:maybe :int]] [:vector :any]]}
+  [db named sources task]
   (let [pairs (d/q '[:find ?s ?r :in $ [?s ...] :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r] [?v :var/name ?r] [?v :var/form _]]
                    db sources)
         macro? #(= :macro (:var/kind (d/entity db [:var/name %])))
@@ -72,9 +83,15 @@
         n (count (d/datoms db :aevt :form/id))
         score (fn [[r k]] (* k (Math/log (/ n (inc (count (d/datoms db :avet :form/refs r)))))))
         ;; each hit's score taken once (sort-by would take it per comparison: an index count each)
-        hits (->> pairs (map second) (remove #(or (named %) (macro? %))) frequencies
-                  (map (fn [e] [(- (score e)) (str (key e)) (key e)])) sort (mapv peek))
-        [shown more] (print/bounded hits :seon.config.render/found "(my.agent/callees 'ns/f) of each cited var")]
+        calls (->> pairs (map second) (remove #(or (named %) (macro? %))) frequencies
+                   (map (fn [e] [(- (score e)) (str (key e)) (key e)])) sort (mapv peek))
+        ;; the forms nearest the plan, as the vars they define, in their order
+        similar (when task
+                  (into [] (comp (mapcat (fn [[f _]] (map :var/name (:var/_form (d/entity db f)))))
+                                 (remove #(or (named %) (macro? %))) (distinct))
+                        (vector/near db task (+ (cfg/value :seon.config.render/found-near) (count named)) {:of :form/id})))
+        hits (if (seq similar) (rrf [calls similar]) calls)
+        [shown more] (print/bounded hits :seon.config.render/found "(my.agent/callees 'ns/f) of each cited var, (my.agent/similar \"text\")")]
     (cond-> (mapv #(resolve-ref db % :doc) shown) more (conj more))))
 
 (defn- summary-of
@@ -284,7 +301,7 @@
         task? #(and (qualified-symbol? (:seon.ref/name %)) (ref/task? db (:seon.ref/name %)))
         refs (filterv #(and (qualified-symbol? (:seon.ref/name %)) (not (task? %))) cites)
         named (into (set proofs) (map :seon.ref/name) refs)
-        helpers (found db named (into (mapv :seon.ref/name refs) (sort-by str proofs)))
+        helpers (found db named (into (mapv :seon.ref/name refs) (sort-by str proofs)) (some->> (:seon.task/id t) (pdb/eid db :seon.task/id)))
         nsmap (ns-map db (into (vec (sort-by str proofs)) (map :seon.ref/name) refs))
         sections (into [] (comp (filter #(or (simple-symbol? (:seon.ref/name %)) (task? %) (and (:seon.ref/path %) (not (:seon.ref/problem-kind %)))))
                                 (map #(cited-view db %)))
