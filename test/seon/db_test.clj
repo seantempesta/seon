@@ -145,15 +145,19 @@
         _ (d/create-database (pdb/made-cfg cfg))
         c0 (d/connect cfg)
         _ (d/transact c0 {:tx-data (mapv #(dissoc % :db/contentId) pdb/schema)})
-        old (get-in (d/transact c0 [{:db/id "f" :form/id "app.k/old" :form/src "(def old 1)"}]) [:tempids "f"])
+        old (get-in (d/transact c0 [{:db/id "f" :form/id "app.k/old" :form/src "(def old 1)" :form/ns "n"} {:db/id "n" :ns/name 'app.k}]) [:tempids "f"])
+        old-ns (pdb/eid @c0 :ns/name 'app.k)
         _ (d/release c0)
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
     (try
       (is (< old datahike.constants/tx0) "minted before: a counter id")
       (is (true? (get-in (d/schema @conn) [:form/id :db/contentId])) "the identity gained its content id")
       (is (= old (pdb/eid @conn :form/id "app.k/old")) "the entity it held keeps its id")
-      (let [new (get-in (d/transact conn [{:db/id "f" :form/id "app.k/new" :form/src "(def new 1)"}]) [:tempids "f"])]
-        (is (= (datahike.db.transaction/content-eid :form/id "app.k/new") new) "a new identity takes its content id"))
+      (let [r (d/transact conn [{:db/id "f" :form/id "app.k/new" :form/src "(def new 1)" :form/ns "n"} {:db/id "n" :ns/name 'app.k}])
+            new (get-in r [:tempids "f"])]
+        (is (= (datahike.db.transaction/content-eid :form/id "app.k/new") new) "a new identity takes its content id")
+        (is (= old-ns (get-in r [:tempids "n"]) (:db/id (:form/ns (d/entity @conn new))))
+            "a tempid naming an identity the store holds is that entity, refs made before its map included"))
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest a-kept-store-from-before-the-runtime-attribute-opens
