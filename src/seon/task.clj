@@ -1,6 +1,6 @@
 (ns seon.task
   "Tasks as data (TASK-CHAIN §1, the target model): one entity per task on main, its
-  desired state written by root; attempts and proof results are observed state, written
+  desired state written by root; runs and proof results are observed state, written
   by their observer (root's executor) when the event happens. There is no chain entity:
   `:seon.task/needs` is the one dependency edge.
 
@@ -33,7 +33,7 @@
   [ns-sym nm] (str ns-sym "/" nm))
 
 (defn default-branch
-  "The branch a task's attempts check out when it names none: task-<ns>-<name>."
+  "The branch a task's runs check out when it names none: task-<ns>-<name>."
   {:malli/schema [:=> [:cat :seon.task/id] :seon.task/branch]}
   [id] (keyword (str "task-" (str/replace id #"[^A-Za-z0-9-]" "-"))))
 
@@ -113,7 +113,7 @@
   (mapv (fn [id] {:seon.task/id id :seon.task/execution execution}) ids))
 
 (defn env-tx
-  "Change task id's desired environment (branch, model, max-turns): a running attempt in
+  "Change task id's desired environment (branch, model, max-turns): a running run in
   another environment is restarted clean by the reconciler."
   {:malli/schema [:=> [:cat :seon.task/id [:map [:branch {:optional true} :keyword] [:model {:optional true} :string]
                                            [:max-turns {:optional true} pos-int?]]] [:vector :map]]}
@@ -129,48 +129,48 @@
   [boot max-running]
   [{:seon.root/id :root :seon.root/boot boot :seon.config.agent/max-running max-running}])
 
-(defn attempt-id
-  "Task id's nth attempt's id: attempts are numbered from 1, in the order they start."
-  {:malli/schema [:=> [:cat :seon.task/id pos-int?] :seon.attempt/id]}
+(defn run-id
+  "Task id's nth run's id: runs are numbered from 1, in the order they start."
+  {:malli/schema [:=> [:cat :seon.task/id pos-int?] :seon.run/id]}
   [id n] (str id "#" n))
 
-(defn attempt-start-tx
-  "An attempt begins: root observed it spawn its agent (nil: root refused the spawn, and no
+(defn run-start-tx
+  "A run begins: root observed it spawn its agent (nil: root refused the spawn, and no
   agent exists), given the task's accumulated plan."
-  {:malli/schema [:=> [:cat :seon.attempt/id :seon.task/id :string [:maybe :keyword] :seon.task/env :int :seon.task/plan] [:vector :map]]}
+  {:malli/schema [:=> [:cat :seon.run/id :seon.task/id :string [:maybe :keyword] :seon.task/env :int :seon.task/plan] [:vector :map]]}
   [aid task boot agent {:keys [branch model max-turns]} start-ms plan]
-  [(cond-> {:seon.attempt/id aid :seon.attempt/task [:seon.task/id task] :seon.attempt/status :running
-            :seon.attempt/boot boot :seon.attempt/start-ms start-ms
-            :seon.attempt/branch branch :seon.attempt/max-turns max-turns :seon.attempt/plan plan}
-     agent (assoc :seon.attempt/agent agent)
-     model (assoc :seon.attempt/model model))])
+  [(cond-> {:seon.run/id aid :seon.run/task [:seon.task/id task] :seon.run/status :running
+            :seon.run/boot boot :seon.run/start-ms start-ms
+            :seon.run/branch branch :seon.run/max-turns max-turns :seon.run/plan plan}
+     agent (assoc :seon.run/agent agent)
+     model (assoc :seon.run/model model))])
 
 (defn status-tx
-  "Move attempt aid from status `from` to `to` (Datahike's compare-and-swap: a racing
+  "Move run aid from status `from` to `to` (Datahike's compare-and-swap: a racing
   observer that already moved it leaves it), with the observed members m."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.attempt/id :seon.attempt/status :seon.attempt/status :map] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.run/id :seon.run/status :seon.run/status :map] [:vector :any]]}
   [db aid from to m]
-  (let [e (pdb/eid db :seon.attempt/id aid)]
-    (into [[:db/cas e :seon.attempt/status from to]]
+  (let [e (pdb/eid db :seon.run/id aid)]
+    (into [[:db/cas e :seon.run/status from to]]
           (when (seq m) [(assoc m :db/id e)]))))
 
 (defn end-members
-  "The observed members of an attempt's end (proto.agents/end), as attributes: a count
+  "The observed members of a run's end (proto.agents/end), as attributes: a count
   nobody measured (no end written, a reply without usage) is absent, never 0."
   {:malli/schema [:=> [:cat :seon.turn/end :int :int] :map]}
   [{:keys [outcome turns model-calls tokens results uncontracted reason conflicts unmerged changed deferred caused]} end-ms basis-t]
-  (cond-> {:seon.attempt/outcome outcome :seon.attempt/basis-t basis-t :seon.attempt/end-ms end-ms
-           :seon.attempt/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s}))}
-    turns (assoc :seon.attempt/turns turns)
-    model-calls (assoc :seon.attempt/model-calls model-calls)
-    tokens (assoc :seon.attempt/tokens tokens)
-    (seq uncontracted) (assoc :seon.attempt/uncontracted (vec uncontracted))
-    (seq conflicts) (assoc :seon.attempt/conflicts (mapv pm/conflict-tx conflicts))
-    (seq unmerged) (assoc :seon.attempt/unmerged (vec unmerged))
-    (seq changed) (assoc :seon.attempt/changed (vec changed))
-    (seq deferred) (assoc :seon.attempt/deferred (vec deferred))
-    (seq caused) (assoc :seon.attempt/caused (vec caused))
-    reason (assoc :seon.attempt/reason reason)))
+  (cond-> {:seon.run/outcome outcome :seon.run/basis-t basis-t :seon.run/end-ms end-ms
+           :seon.run/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s}))}
+    turns (assoc :seon.run/turns turns)
+    model-calls (assoc :seon.run/model-calls model-calls)
+    tokens (assoc :seon.run/tokens tokens)
+    (seq uncontracted) (assoc :seon.run/uncontracted (vec uncontracted))
+    (seq conflicts) (assoc :seon.run/conflicts (mapv pm/conflict-tx conflicts))
+    (seq unmerged) (assoc :seon.run/unmerged (vec unmerged))
+    (seq changed) (assoc :seon.run/changed (vec changed))
+    (seq deferred) (assoc :seon.run/deferred (vec deferred))
+    (seq caused) (assoc :seon.run/caused (vec caused))
+    reason (assoc :seon.run/reason reason)))
 
 (defn carry-tx
   "The task content (seon.merge/carried-platform-attrs) branch changed since base, carried
@@ -179,7 +179,7 @@
   value, is a conflict for root (never resolved here). Tasks main does not hold are left.
   Answers {:tx :conflicts [{:task :attr :base :ours :theirs}]}. Cost: the carried datoms of
   the three dbs, read once."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:map [:tx [:vector :any]] [:conflicts :seon.attempt/task-conflicts]]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:map [:tx [:vector :any]] [:conflicts :seon.run/task-conflicts]]]}
   [base branch main]
   (let [vs (fn [db] (into {} (for [a (sort pm/carried-platform-attrs) dt (d/datoms db :aevt a)] [[(:e dt) a] (:v dt)])))
         b (vs base) o (vs branch) m (vs main)]
@@ -193,10 +193,10 @@
 
 (defn onto-tx
   "The facts that put task id as main holds it, and every task it needs (transitively) that
-  branch does not hold, onto branch: a kept branch resumed for an attempt starts from main's
+  branch does not hold, onto branch: a kept branch resumed for a run starts from main's
   task. Root released it after holding it (seon.reconcile/hold-tx), so main's holds the
-  failure and evidence the last attempt left, root's edits, and the branch's own carried at
-  its attempt's end (carry-tx); or the branch was forked before main held the task or its
+  failure and evidence the last run left, root's edits, and the branch's own carried at
+  its run's end (carry-tx); or the branch was forked before main held the task or its
   needs. Another task the branch holds is left as the branch has it. Empty when the branch
   holds them all as main does. Cost: the closure's tasks, pulled once each."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.task/id] [:vector :map]]}
@@ -266,43 +266,43 @@
     ;; the value names its schema, so a REPL shows it by its declared render (seon.render/printed)
     (some-> (own id) (assoc :seon.task/accumulated (accumulate own id)) (vary-meta assoc :seon.render/schema :seon.task/task))))
 
-(def ^:private attempt-pull
-  '[* {:seon.attempt/task [:seon.task/id]}
-    {:seon.attempt/results [:seon.proof/test :seon.proof/status]}
-    {:seon.attempt/deferred-results [:seon.proof/test :seon.proof/status]}
-   {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
+(def ^:private run-pull
+  '[* {:seon.run/task [:seon.task/id]}
+    {:seon.run/results [:seon.proof/test :seon.proof/status]}
+    {:seon.run/deferred-results [:seon.proof/test :seon.proof/status]}
+   {:seon.run/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
-(defn- attempt-value
-  "A pulled attempt as :seon.attempt/attempt."
-  {:malli/schema [:=> [:cat :seon.attempt/pulled] :seon.attempt/attempt]}
+(defn- run-value
+  "A pulled run as :seon.run/run."
+  {:malli/schema [:=> [:cat :seon.run/pulled] :seon.run/run]}
   [a]
-  (let [{:seon.attempt/keys [branch model max-turns results uncontracted conflicts unmerged]} a]
-    (cond-> (-> a (dissoc :db/id :seon.attempt/branch :seon.attempt/model :seon.attempt/max-turns :seon.attempt/results
-                          :seon.attempt/uncontracted :seon.attempt/conflicts :seon.attempt/unmerged)
-                (update :seon.attempt/task :seon.task/id)
-                (assoc :seon.attempt/env {:branch branch :model model :max-turns max-turns}))
-      results (assoc :seon.attempt/results (into {} (map (juxt :seon.proof/test :seon.proof/status)) results))
-      uncontracted (assoc :seon.attempt/uncontracted (set uncontracted))
-      unmerged (assoc :seon.attempt/unmerged (vec (sort unmerged)))
-      (:seon.attempt/changed a) (update :seon.attempt/changed set)
-      (:seon.attempt/deferred a) (update :seon.attempt/deferred set)
-      (:seon.attempt/deferred-results a) (update :seon.attempt/deferred-results #(into {} (map (juxt :seon.proof/test :seon.proof/status)) %))
-      (:seon.attempt/caused a) (update :seon.attempt/caused set)
-      conflicts (assoc :seon.attempt/conflicts
+  (let [{:seon.run/keys [branch model max-turns results uncontracted conflicts unmerged]} a]
+    (cond-> (-> a (dissoc :db/id :seon.run/branch :seon.run/model :seon.run/max-turns :seon.run/results
+                          :seon.run/uncontracted :seon.run/conflicts :seon.run/unmerged)
+                (update :seon.run/task :seon.task/id)
+                (assoc :seon.run/env {:branch branch :model model :max-turns max-turns}))
+      results (assoc :seon.run/results (into {} (map (juxt :seon.proof/test :seon.proof/status)) results))
+      uncontracted (assoc :seon.run/uncontracted (set uncontracted))
+      unmerged (assoc :seon.run/unmerged (vec (sort unmerged)))
+      (:seon.run/changed a) (update :seon.run/changed set)
+      (:seon.run/deferred a) (update :seon.run/deferred set)
+      (:seon.run/deferred-results a) (update :seon.run/deferred-results #(into {} (map (juxt :seon.proof/test :seon.proof/status)) %))
+      (:seon.run/caused a) (update :seon.run/caused set)
+      conflicts (assoc :seon.run/conflicts
                        (vec (sort-by (comp str :key) (map pm/conflict-value conflicts)))))))
 
-(defn attempts
-  "Every attempt on db, by id."
-  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :seon.attempt/id :seon.attempt/attempt]]}
+(defn runs
+  "Every run on db, by id."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :seon.run/id :seon.run/run]]}
   [db]
-  (into {} (for [a (d/q '[:find [(pull ?e pattern) ...] :in $ pattern :where [?e :seon.attempt/id]] db attempt-pull)]
-             [(:seon.attempt/id a) (attempt-value a)])))
+  (into {} (for [a (d/q '[:find [(pull ?e pattern) ...] :in $ pattern :where [?e :seon.run/id]] db run-pull)]
+             [(:seon.run/id a) (run-value a)])))
 
-(defn attempt
-  "Attempt aid on db, or nil."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.attempt/id] [:maybe :seon.attempt/attempt]]}
+(defn run
+  "Run aid on db, or nil."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:maybe :seon.run/run]]}
   [db aid]
-  (some-> (d/pull db attempt-pull [:seon.attempt/id aid]) attempt-value))
+  (some-> (d/pull db run-pull [:seon.run/id aid]) run-value))
 
 (defn root
   "Root's boot and config keys on db: {:boot :max-running :max-merging :gate-checkout}, nil
@@ -316,23 +316,23 @@
       (:seon.config.source/gate-checkout r) (assoc :gate-checkout (:seon.config.source/gate-checkout r)))))
 
 (defn entity-value
-  "The task, attempt or root that entity e of db is now, as the reconciler's index holds it:
-  [:task own-value] (no accumulation), [:attempt attempt-value], [:root (root db)], or nil
+  "The task, run or root that entity e of db is now, as the reconciler's index holds it:
+  [:task own-value] (no accumulation), [:run run-value], [:root (root db)], or nil
   when e is none of them (retracted, or another kind). One pull of e."
   {:malli/schema [:=> [:cat :seon.host/db :int]
-                  [:maybe [:or [:tuple [:= :task] :seon.task/own] [:tuple [:= :attempt] :seon.attempt/attempt] [:tuple [:= :root] :map]]]]}
+                  [:maybe [:or [:tuple [:= :task] :seon.task/own] [:tuple [:= :run] :seon.run/run] [:tuple [:= :root] :map]]]]}
   [db e]
-  (let [k (d/pull db [:seon.task/id :seon.attempt/id :seon.root/id] e)]
+  (let [k (d/pull db [:seon.task/id :seon.run/id :seon.root/id] e)]
     (cond (:seon.task/id k) [:task (task-value (d/pull db task-pull e))]
-          (:seon.attempt/id k) [:attempt (attempt-value (d/pull db attempt-pull e))]
+          (:seon.run/id k) [:run (run-value (d/pull db run-pull e))]
           (:seon.root/id k) [:root (root db)])))
 
 (defn entity-ids
-  "Every task, attempt and root entity of db (the reconciler's list, before it watches)."
+  "Every task, run and root entity of db (the reconciler's list, before it watches)."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :int]]}
   [db]
   (vec (concat (map :e (d/datoms db :aevt :seon.root/id)) (map :e (d/datoms db :aevt :seon.task/id))
-               (map :e (d/datoms db :aevt :seon.attempt/id)))))
+               (map :e (d/datoms db :aevt :seon.run/id)))))
 
 ;; ---- task files: declarations as reviewable data -----------------------------------
 ;; resources/seon/tasks/<ns>.edn holds one vector of :seon.task/declaration entries (without
