@@ -4,7 +4,7 @@
   many branches, as in production; owner, 2026-10-21). Test-only, so it lives in test/, not
   in src (session DUP-HELPERS); it seeds and opens through seon.db's own seed! and open-main!."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [seon.lib]))
 
 (def ^:private store
   "The test store's config, made and seeded with about 2,000 datoms on first use."
@@ -34,13 +34,20 @@
          (finally (d/release conn) (pdb/delete-main! seed b) (d/release seed)))))
 
 (def ^:private starter
-  "This test process's starter fifo: made once and held open read-write for the process's life
-  (its children do not inherit it), so its EOF says the test process is gone however it ended;
-  what a test starts runs under bin/held, which ends it then (task
-  seon.check/a-test-root-names-its-store-and-main). [path its-holder]."
-  (delay (let [path (str (.getCanonicalPath (java.io.File. "target/tmp")) "/test-starter-" (random-uuid) ".fifo")]
-           (.mkdirs (java.io.File. "target/tmp"))
+  "This test process's starter fifo: made once, named by its pid, and held open read-write for the
+  process's life (its children do not inherit it), so its EOF says the test process is gone however
+  it ended; what a test starts runs under bin/held, which ends it then (task
+  seon.check/a-test-root-names-its-store-and-main). Removed when the process ends or is
+  terminated (a shutdown hook); a SIGKILLed one's is reclaimed by the next process's first use
+  (bin/held --reclaim: its pid is no process) - task seon.check/a-killed-starter-leaves-no-fifo.
+  [path its-holder]."
+  (delay (let [dir (.getCanonicalPath (java.io.File. "target/tmp"))
+               path (str dir "/test-starter-" (seon.lib/c-getpid) ".fifo")]
+           (.mkdirs (java.io.File. dir))
+           (sh/sh "bin/held" "--reclaim" dir)
+           (sh/sh "rm" "-f" path)
            (sh/sh "mkfifo" path)
+           (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (.delete (java.io.File. path)))))
            [path (java.io.RandomAccessFile. path "rw")])))
 
 (defn binary-sh
