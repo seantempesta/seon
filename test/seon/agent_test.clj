@@ -11,6 +11,10 @@
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
             [seon.fx :as fx] [test-runner :as runner]))
 
+(def ^:private await-file
+  "seon.await, which a root (importing src only) loads by this path."
+  (.getCanonicalPath (java.io.File. "test/seon/await.clj")))
+
 (defn in-agent
   "A root on the checkout's src (its source root), one agent on a task of its own, each of
   forms evaluated in that agent (a string) or sent to the server as it is (a map): the
@@ -296,10 +300,10 @@
   ;; owner, 2026-10-22: a failure is task data and root reacts to it. The agent marks its
   ;; task failed on its branch, hands the attempt back (seon_done), and root, at the
   ;; attempt's end, holds the task as :failed and reports it among the problems
-  (let [[f _ seen] (in-agent ["(:reason (my.task/fail! \"the premise is refuted\" '(= 1 2)))"
+  (let [[_ f _ seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} "(:reason (my.task/fail! \"the premise is refuted\" '(= 1 2)))"
                               {:op :done :agent "a1"}
                               {:op :eval :agent "root"
-                               :code (str "(let [t (:max-tx @(:conn sys))] (require 'seon.e2e) (seon.e2e/await-quiet sys (inc t))"
+                               :code (str "(let [t (:max-tx @(:conn sys))] (seon.await/await-quiet sys (inc t))"
                                           " [(seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) \"demo/t\")"
                                           " (select-keys (first (get-in (my.root/problems sys) [:classes :failed :rows])) [:task :reason :counterexample :open?])])")}])]
     (is (= (pr-str "the premise is refuted") (:printed f)))
@@ -428,9 +432,9 @@
   ;; first turn with :seon.model/no-provider; the error reaches whoever can act on it: the
   ;; attempt's record on main and my.root/problems' :error rows
   (let [q "[:find (pull ?e [:seon.attempt/outcome :seon.attempt/error]) . :where [?e :seon.attempt/task ?t] [?t :seon.task/id \"demo/m\"] [?e :seon.attempt/error]]"
-        [r] (in-agent [{:op :eval :agent "root"
+        [_ r] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root"
                         :code (str "(do (my.root/run! sys [\"demo/m\"])"
-                                   " (let [a (datahike.api/q '" q " (seon.e2e/await-db sys #(datahike.api/q '" q " %)))]"
+                                   " (let [a (datahike.api/q '" q " (seon.await/await-db sys #(datahike.api/q '" q " %)))]"
                                    " [(:seon.attempt/outcome a) (:seon.error/type (:seon.attempt/error a))"
                                    " (mapv #(get-in % [:error :seon.error/type]) (get-in (my.root/problems sys) [:classes :error :rows]))]))")}]
                       {:sets [":seon.config.ai/provider=:none"]
