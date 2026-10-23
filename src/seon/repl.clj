@@ -352,16 +352,17 @@
   agent's entity, its details in one EDN attribute (the lean record, L1's measurement:
   three attributes, not nine, nothing queries the details apart), and the agent's answered
   t. A form's error is stored as its error map (data: grouped by :seon.error/type and
-  operation without parsing text). Ids are new each time; the agent entity is the one
-  upsert."
-  {:malli/schema [:=> [:cat :seon.agent/id :string :seon.agent/items [:maybe :int]] :seon.db/tx-data]}
-  [id run items t-basis]
+  operation without parsing text). Ids are new each time; who evaluated is the one upsert, by
+  its identity: an agent's key ({:seon.agent/key k}, seon.task/agent-key) or root's
+  ({:seon.root/id :root})."
+  {:malli/schema [:=> [:cat :map :string :seon.agent/items [:maybe :int]] :seon.db/tx-data]}
+  [who run items t-basis]
   (conj (vec (for [it items :when (:id it)]
                {:seon.cluster.eval/id (str run "/" (:id it)) :seon.cluster.eval/agent "agent"
                 :seon.cluster.eval/record (cond-> (select-keys it [:tag :form :lead :out :ms :alloc-bytes :ticks :fns :origin])
                                             (:printed it) (assoc :shown (:printed it))
                                             (= :err (:tag it)) (assoc :error (or (:err it) (:printed it))))}))
-        (cond-> {:db/id "agent" :seon.agent/id id} t-basis (assoc :seon.agent/answered-t t-basis))))
+        (cond-> (assoc who :db/id "agent") t-basis (assoc :seon.agent/answered-t t-basis))))
 
 (defn- record!
   "Record items (with the defs their forms recorded) on this branch through the agent's
@@ -374,7 +375,7 @@
     (swap! agent/state dissoc :defs)
     (if (and contract/record? (= :agent (:mode @agent/state)) (seq items))
       (let [run (str (name (:id @agent/state)) "-" (lib/c-getpid) "-" (profile/now-ns))]
-        (agent/transact! (into defs (record-tx (:id @agent/state) run items (:max-tx (agent/db)))))
+        (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} run items (:max-tx (agent/db)))))
         (mapv #(cond-> % (:id %) (assoc :record (str run "/" (:id %)))) items))
       items)))
 

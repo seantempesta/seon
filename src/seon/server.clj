@@ -60,7 +60,7 @@
                     (binding [*sys* sys]
                       (repl/eval-string code {"ns" "root.repl" :origin :outside :ticks 0
                                               :repl/eval-fn (fn [form] (eval (list 'let '[sys seon.server/*sys*] form)))})))]
-    @(c/transact-main! sys (repl/record-tx :root (str "root-outside-" (profile/now-ns)) items nil))
+    @(c/transact-main! sys (repl/record-tx {:seon.root/id :root} (str "root-outside-" (profile/now-ns)) items nil))
     items))
 
 (defn- attach!
@@ -79,7 +79,7 @@
             aid (task/run-id id (inc (count (filter #(= id (:seon.run/task %)) (vals (task/runs db))))))
             ag (c/spawn! sys {:branch (:branch env) :task id :run aid})]
         @(c/transact-main! sys (vec (concat (task/env-tx id {:model "outside"}) (task/execution-tx [id] :running)
-                                            (task/run-start-tx aid id (:boot sys) ag env (System/currentTimeMillis)
+                                            (task/run-start-tx aid id (:boot sys) (task/agent-key (:boot sys) ag) env (System/currentTimeMillis)
                                                                    (:plan (:seon.task/accumulated t))))))
         {:agent ag :task id :run aid}))))
 

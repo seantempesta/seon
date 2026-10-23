@@ -49,7 +49,7 @@
                                  "(seon.contract/valid? :seon.run/status :paused)\n"
                                  "(defn status-of {:malli/schema [:=> [:cat :seon.run/status] :keyword]} [s] s)\n"
                                  "(status-of :paused)\n"
-                                 "(seon.contract/valid? :seon.run/run-fact {:seon.run/id \"a#1\" :seon.run/task 1 :seon.run/status :paused :seon.run/boot \"b\" :seon.run/agent :a :seon.run/start-ms 0})\n"
+                                 "(seon.contract/valid? :seon.run/run-fact {:seon.run/id \"a#1\" :seon.run/task 1 :seon.run/status :paused :seon.run/boot \"b\" :seon.run/agent 2 :seon.run/start-ms 0})\n"
                                  "(:seon.error/type (my.schema/register! :x.schema-test/thing [:map [:x.schema-test/part :x.schema-test/nowhere]]))\n"
                                  "(:seon.schema/key (my.schema/register! :seon.run/invalid :string))\n"
                                  "(:seon.schema/key (my.schema/register! :user/qty :int))\n"
