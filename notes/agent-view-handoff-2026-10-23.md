@@ -125,6 +125,23 @@ The owner's assessment, 2026-10-23: "this is pretty rough and isn't well tested"
 - **A cost proof stating only `:ns` can't fail.** Count calls, bytes or ticks. Proofs measure only up to `:seon.config.proofs/cost-max-n` (1000).
 - **Moving a clock read into a new function needs its name in `docs/clocks.md`** (laws `measures`).
 
+## The cache task, in flight (seon.derive)
+
+- **The owner's ruling** (root, `docs/decisions.md` at main `0ac25d38`): "I want reuse of all unique and immutable data we are sure is the same and is expensive to render". This widens `resources/seon/tasks/seon.derive.edn`:
+  - one mechanism over src, test and bin, renders included;
+  - keyed by the digest of exactly what it reads (content ids, reach digests);
+  - shared across branches, sessions and worktrees, as facts in the store;
+  - nothing that reads the clock, the network or a model, or launches a process;
+  - net size counted over src, test and bin; if it grows, state by how much and the time and calls it saves;
+  - proofs: sensitivity, precision, a second request does no work, a concurrent duplicate waits.
+- **The rewrite is owed to root**, with the first slice sized for one session: test results as facts, plus test_runner's per-file analysis.
+- **Root's cross-worktree question, answered** (sent to root):
+  - Each checkout has its own store, and facts don't cross checkouts. `../test-results` is today's only cross-checkout sharing.
+  - So "facts only" in a checkout's own store would regress universal reuse; I withdrew the -38.
+  - Options: (i) main's store read-only plus writes through main root's server; (ii) one shared results store beside main, with a branch per writer and reads through `seon.union`, about +40 to +80 lines; (iii) keep the directory.
+- **test_runner:** the 8-15 s and 7-12 s are its re-import and digests on every run. The facts-only step doesn't remove them; a derived kind keyed by file content digests would, and it is the first user.
+- **Waiting on pure-tests** (session `local_c9ae8597-80db-412a-ac03-35194fe08e84`): its numbers and line counts for test_runner, bin/prove and bin/test, its two caching tasks, and whether checkouts can share one LMDB store. Then rewrite the task and send it to root.
+
 ## The next steps, in root's order
 
 1. Read the Haiku round 6 report (or rerun it on `notes/browser-tester.md`); fix what it finds; `bin/prove` once.
