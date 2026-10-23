@@ -33,14 +33,26 @@
     (d/db-with db (source/import-tx db files))))
 
 (defn- tests-of
-  "{test digest} of the named test namespaces (or every one) on the checkout at root: its
-  program db (program-db) and inputs, and the db itself."
+  "{test digest} of the named test namespaces (or every one) on the checkout at root, the
+  ones among them that reach a process of their own (:process, seon.program/reach-index), its
+  program db (program-db) and inputs."
   [root names]
   (let [nss (set (if (seq names) (map symbol names) (test-namespaces)))
         db (program-db root)
-        in (fx/inputs root)]
+        in (fx/inputs root)
+        idx (into {} (filter #(nss (symbol (namespace (key %))))) (program/reach-index db in))]
     {:db db :inputs in
-     :digests (into {} (filter #(nss (symbol (namespace (key %))))) (program/reach-digests db in))}))
+     :digests (update-vals idx :digest)
+     :process (set (keep (fn [[t v]] (when (:process? v) t)) idx))}))
+
+(defn automatic
+  "What a run that names nothing selects from cand ({key digest}): every key but those in
+  process, the tests and bin/check steps that reach a process of their own (a root, an agent,
+  a shell, a fork, the binary: seon.program/reach-index's :process?). Owner, 2026-10-23: tests
+  shouldn't be running agent turns, not automatically at least. Those run when named (bin/test
+  NS, bin/check MODE), in the full run, or by root's gate before a merge that reaches them."
+  {:malli/schema [:=> [:cat [:map-of :any :string] [:set :any]] [:map-of :any :string]]}
+  [cand process] (apply dissoc cand process))
 
 (defn- write!
   "text to path through the effect owner's file write (seon.fx/write-file); its declared
@@ -104,14 +116,22 @@
   [what all? out names]
   (let [root (System/getProperty "user.dir")
         t0 (profile/now-ns)
-        {:keys [db inputs digests]} (tests-of root names)
+        {:keys [db inputs digests process]} (tests-of root names)
         dir (config/value :seon.config.source/test-results-dir)
         tests? (not= what "checks") checks? (not= what "tests")
-        {steps :digests missing :missing} (when checks? (proofs/step-digests #(program/reach-digests db inputs %) inputs))
-        cand (merge (when tests? digests) steps)
+        ;; the steps' functions walked once: their digests and which boot a root or a process
+        step-idx (when checks? (program/reach-index db inputs (into {} (filter (comp vector? val)) proofs/check-steps)))
+        {steps :digests missing :missing} (when checks? (proofs/step-digests #(update-vals (select-keys step-idx (keys %)) :digest) inputs))
+        process (into (if tests? process #{}) (keep (fn [[k v]] (when (:process? v) k))) step-idx)
+        named? (or all? (seq names))
+        all-cand (merge (when tests? digests) steps)
+        cand (if named? all-cand (automatic all-cand process))
         {:keys [run reused]} (proofs/plan nil cand (if all? {} (proofs/greens dir (vec (vals cand)))) #{})
         {run-steps true run-tests false} (group-by string? run)
         n (write-shards! out (vec run-tests) digests (:tree inputs))]
+    (when-not named?
+      (println (str "prove: " (count (filter all-cand process)) " tests and steps that reach a process left out (run them by name:"
+                    " bin/test NS, bin/check MODE, or the full run): " (str/join " " (sort (map str (filter all-cand process)))))))
     (println (str "prove: " (count cand) " keys (" (if tests? (count digests) 0) " tests, " (count steps) " check steps), "
                   (count reused) " green at their digest (reused), " (count run-tests) " tests to run in " (if (seq run-tests) n 0)
                   " shards, " (count run-steps) " steps to run; selected in " (quot (- (profile/now-ns) t0) 1000000) " ms; results " dir))

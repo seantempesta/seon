@@ -812,10 +812,14 @@
 
 (defn reach-index
   "{test {:digest :process?}} of db's tests under inputs, from the one walk (reach-fold): its
-  reach digest (reach-digests) and whether it reaches a process of its own (process-tests)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol [:map [:digest :string] [:process? :boolean]]]]}
-  [db inputs]
-  (reach-fold db inputs nil (fn [k reached ctx] {:digest (reach-digest inputs k reached ctx) :process? (reaches-process? reached ctx)})))
+  reach digest (reach-digests) and whether it reaches a process of its own (process-tests).
+  With roots (a bin/check step's mode functions, as reach-digests takes them), the same of
+  each key."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol [:map [:digest :string] [:process? :boolean]]]]
+                  [:=> [:cat :seon.host/db :seon.program/inputs [:map-of :string [:sequential :qualified-symbol]]] [:map-of :string [:map [:digest :string] [:process? :boolean]]]]]}
+  ([db inputs] (reach-index db inputs nil))
+  ([db inputs roots]
+   (reach-fold db inputs roots (fn [k reached ctx] {:digest (reach-digest inputs k reached ctx) :process? (reaches-process? reached ctx)}))))
 
 (defn- reach-fold
   "(f key reached {:by-id :digest}) of each of db's tests (or each of roots' keys), reached the

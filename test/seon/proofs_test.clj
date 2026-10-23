@@ -95,6 +95,24 @@
       (is (= {} (program/reach-digests db {:env "e" :tree "t"} {"gone" '[app.pv-check/renamed]})))
       (is (= ["smoke"] (:missing (proofs/step-digests (fn [roots] (dissoc (zipmap (keys roots) (map str (keys roots))) "smoke")) {:env "e" :tree "t"})))))))
 
+(deftest a-run-that-names-nothing-leaves-out-what-reaches-a-process
+  ;; owner, 2026-10-23: tests shouldn't be running agent turns, not automatically at least. A
+  ;; step (or test) whose function reaches a process var (a fork, a shell, a root booted for it:
+  ;; seon.program/process-vars) is classified by the one walk and left out of a run that names
+  ;; nothing; it runs when named
+  (let [db (record (prog) 'user "(ns app.pv-boot (:require [app.pv-calc :as c] [seon.lib]))"
+                   'app.pv-boot "(defn smoke [] (seon.lib/fork! {:child (fn [] nil) :refused identity :parent identity}))"
+                   'app.pv-boot "(defn calc [] (c/add 1 2))")
+        idx (program/reach-index db {:env "e" :tree "t"} {"smoke" '[app.pv-boot/smoke] "calc" '[app.pv-boot/calc]})
+        process (set (keep (fn [[k v]] (when (:process? v) k)) idx))
+        cand {"smoke" (:digest (idx "smoke")) "calc" (:digest (idx "calc")) 'app.pv-calc-test/add-test "d"}]
+    (is (= #{"smoke"} process) "the step that forks reaches a process; the one that adds does not")
+    (is (= (program/reach-digests db {:env "e" :tree "t"} {"smoke" '[app.pv-boot/smoke] "calc" '[app.pv-boot/calc]})
+           (update-vals idx :digest))
+        "the walk's digests are reach-digests'")
+    (is (= {"calc" (:digest (idx "calc")) 'app.pv-calc-test/add-test "d"} (runner/automatic cand process))
+        "a run that names nothing selects every key but it")))
+
 (deftest shards-split-by-namespace-and-each-result-is-stored
   (record (ts/test-db) 'user "(ns app.pv-red-test (:require [clojure.test :refer [deftest is use-fixtures]]))"
           'app.pv-red-test "(def ^:dynamic *fx* nil)"
