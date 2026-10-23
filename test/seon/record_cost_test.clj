@@ -23,14 +23,14 @@
   (wide-first r))
 
 (deftest a-protocol-call-costs-what-its-method-reads
-  ;; the work, whatever the width: one protocol dispatch (the record's descriptor table, one
-  ;; eq? lookup) and the one field the method reads; a plain call is 5 ticks (seon.cost/units
-  ;; :fn/call). Red while a method entry reads every field (~6 ticks a field): 27 ticks at 2
-  ;; fields and 153 at 20, 3.8x over
+  ;; the work, whatever the width: call-wide's call and the method's, and the dispatch, one
+  ;; lookup in the record's descriptor table (priced as a hash map get); the field read is a
+  ;; slot. Red while a method entry reads every field (~6 ticks a field): 27 ticks at 2 fields
+  ;; and 153 at 20, 7x over
   (cost/proof
     {:of 'seon.record-cost-test/call-wide :input 'seon.record-cost-test/wide-record
      :n "fields of the record"
      :work "one protocol dispatch and one field read, whatever the record's width"
      :growth :constant
-     :per-n {:ticks 40}
+     :ops {:fn/call 2 :map/get 1}
      :sizes [2 20 200]}))
