@@ -8,14 +8,14 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 - ``jolt/<topic>`` holds one fix, cut from ``jolt/main`` (or from the topic it needs) and merged into ``jolt/main`` once measured. A pin may sit on a topic branch that has not yet been merged into ``jolt/main``; its section says so.
 - ``upstream/<topic>`` is a generic fix cut cleanly from upstream's own main, the only candidate for an upstream pull request, opened only when 100% sure.
 - Commits in the forks carry no AI trailers.
-- Submodule URLs (`.gitmodules`) are local paths under `~/src/seon-jolt` until the owner approves pushing to the GitHub forks (``seantempesta/<lib>``). The rule comes from DECISIONS, "Libraries on Jolt".
+- Submodule URLs (`.gitmodules`) are the GitHub forks, ``https://github.com/seantempesta/<lib>`` (owner, 2026-10-23); `persistent-sorted-set` and `jolt-overlay` are private, so a fresh clone needs the owner's GitHub login. A fork's branches are pushed there, never `main`, never forced. The rule comes from DECISIONS, "Libraries on Jolt".
 - Pin bumps happen only in root's merges into main ([merging](merging.md)). `git -C <dir> log --oneline -- reference-code/<lib>` in this repository lists each bump with what it brought.
 
 ## jolt
 
 `reference-code/jolt` pinned at `e0351af8`, the tip of ``jolt/global-ids-pin``: ``jolt/pin-2026-10-23`` `f05de7db` with ``jolt/hashset-bulk`` `ce384f07` merged in.
 
-- Fork repo: ``~/src/seon-jolt/jolt``. Upstream: ``jolt-lang/jolt``. Fork: ``seantempesta/jolt``.
+- Fork repo: ``https://github.com/seantempesta/jolt``. Upstream: ``jolt-lang/jolt``. Fork: ``seantempesta/jolt``.
 - Base: `f714b0ed`, upstream main (nightly + 10), the merge-base with upstream's main.
 - Branch chain: ``jolt/main`` `1fad8b83` → ``jolt/j2-on-main`` `fc5d2f82` (merges ``jolt/cache-records-relative``) → ``jolt/eval-outside-build`` `d7ec259b` → ``jolt/runtime-fingerprint`` `60961b84` → ``jolt/fork-carriers`` `4342b73c` → ``jolt/thread-ticks`` `ed1e37a1` + ``jolt/temp-file-unique`` `a2fec377` (merged as `21e91705`) → ``jolt/aot-cache-hit`` `5edda163` → ``jolt/pin-2026-10-23`` `f05de7db`.
 - Ours, on ``jolt/main`` `1fad8b83`:
@@ -60,14 +60,14 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
   - `a2fec377` `File/createTempFile`: an exclusive create, the name from the pid and a counter. Generic.
   - `5edda163` the AOT cache's readers digest is folded once per key, not into every namespace digest, so a checkout's cache hits (a start 7.3 s to 0.6 s). Generic.
   - `ce384f07` `java.util.HashSet`'s bulk Collection methods (`addAll`, `removeAll`, `retainAll`, `containsAll`): `datahike.api/datoms-diff` threw on any two trees that partly share ([storage](storage.md#merges-read-what-changed)). Generic.
-- ``upstream/*`` branches in the fork repo: `arraycopy-object-block`, `deftype-field-access`, `fiber-park`, `fork-reprotect-jit`, `host-site-coll-reads`, `remote-chan`, `static-code-cow`. None is pushed or opened: they exist only in ``~/src/seon-jolt/jolt``, cut on jolt-lang/jolt main `8bebf786`. Before one is opened: the gate sweep of `fork`, `slots` and `static`, `make fibers` re-run alone on arraycopy-object-block (a new untriaged red under load), a Gambit check of deftype-field-access, a non-root Linux sweep, and a rebase on upstream's current main. static-code-cow is not for upstream (jolt itself never forks, and under the hardened runtime code outside MAP_JIT needs an entitlement or the process is SIGKILLed): it stays in our patch set. Of the Chez patches, 0006 belongs upstream (no fix in cisco/ChezScheme or Racket CS), 0007 only as an issue first. Drafts and reproductions: ``~/src/seon-jolt/notes/upstream/``.
+- ``upstream/*`` branches in the fork repo: `arraycopy-object-block`, `deftype-field-access`, `fiber-park`, `fork-reprotect-jit`, `host-site-coll-reads`, `remote-chan`, `static-code-cow`. None is pushed or opened: they exist only as branches of the fork repo, cut on jolt-lang/jolt main `8bebf786`. Before one is opened: the gate sweep of `fork`, `slots` and `static`, `make fibers` re-run alone on arraycopy-object-block (a new untriaged red under load), a Gambit check of deftype-field-access, a non-root Linux sweep, and a rebase on upstream's current main. static-code-cow is not for upstream (jolt itself never forks, and under the hardened runtime code outside MAP_JIT needs an entitlement or the process is SIGKILLed): it stays in our patch set. Of the Chez patches, 0006 belongs upstream (no fix in cisco/ChezScheme or Racket CS), 0007 only as an issue first. Drafts and reproductions: ``notes/upstream/`` in the tag ``history/prototype`` (``git show history/prototype:notes/upstream/<file>``).
 - Open: the fork repo's ``jolt/main`` is at `44c9574a` (``jolt/load-form``, which Seon does not use; not in the pin), and `d7ec259b`..`f05de7db` are only in the submodule clone, not yet in the fork repo. ``jolt/main`` should be moved to the pin's line.
 
 ## chez
 
 `reference-code/chez` pinned at `80e4b9f`, the tip of ``jolt/signal-wakes-wait``.
 
-- Fork repo: ``~/src/seon-jolt/e14/chez-share``. Upstream: ``cisco/ChezScheme``.
+- Fork repo: ``https://github.com/seantempesta/ChezScheme``. Upstream: ``cisco/ChezScheme``.
 - Base: `e95a7ef`, Chez Scheme v10.4.1.
 - Branch chain: ``jolt/main`` `fdd1e1e` (= ``jolt/gc-sweepers``) → ``jolt/thread-bytes`` `d19eb3b` → ``jolt/signal-wakes-wait`` `80e4b9f`.
 - Ours:
@@ -85,7 +85,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 `reference-code/datahike` pinned at `b4596cf`, the tip of ``jolt/global-ids`` (``jolt/gc-cache-epoch`` `700c473` merged in).
 
-- Fork repo: ``~/src/seon-jolt/libs/datahike``. Upstream: ``replikativ/datahike``.
+- Fork repo: ``https://github.com/seantempesta/datahike``. Upstream: ``replikativ/datahike``.
 - Base: `ad9fc97` "baseline", a history-less snapshot of Seon's fork ``seantempesta/datahike`` `ccba220b` (unknown: that commit is not in the repo, so the snapshot cannot be checked against it).
 - Branch chain: ``jolt/main`` `fde9f89` → ``jolt/run-ahead`` `fe50764` → `jvm` = ``jolt/eid-lease`` `4b93a1b` → ``jolt/values-out-of-line`` `594815d` → ``jolt/deref-config`` `fd0c065` → ``jolt/global-ids`` `0783e8b`.
 - Jolt-first (owner, DECISIONS "Storage is tuned for our workload"): the `jvm` branch freezes `4b93a1b`, the last commit that keeps the `:clj`/`:cljs`/Fressian code; the line after it drops that code from each file a change touches, each deletion its own commit.
@@ -120,7 +120,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 - A1 (2026-10-20): `a1/jolt-main` = `jolt/main` `fde9f89` (which already holds F2's f2-final `writer.cljc` byte for byte) + `jolt/node-cache-reads` `deee8c2` + `jolt/qcache-off` `21bc8cd` + `jolt/branch-pointer` `7de2e94` (on `jolt/branch-roster` `c0f9149`). `jolt/main` itself is checked out in L1's worktree `l1/qc/dh-main`, so root moves it. Versioning tests: 13 tests, 49 pass, 3 fail, 4 error; `jolt/main` is 1 fail, 4 error. The 2 new failures are `commit-as-db-preserves-only-attached-generation-identity`'s query-cache evidence assertions (miss-owner, hit), which `qcache-off` makes false by design.
 
-- Fork repo: ``~/src/seon-jolt/e4/pss-a``. Upstream: ``replikativ/persistent-sorted-set`` 0.4.137.
+- Fork repo: ``https://github.com/seantempesta/persistent-sorted-set``. Upstream: ``replikativ/persistent-sorted-set`` 0.4.137.
 - Base: none; written fresh, with no upstream history (root commit `d397c58`).
 - Ours: `d397c58` the JVM core as Jolt deftypes; `d565937` EDN node forms; `df6735e` `Arrays/sort`; `9cce727` the node emitter writes `#pss/leaf` and `#pss/branch` without the generic printer; `1cae7f2` `forwardCursor` takes a `java.util.Comparator` (every planned `d/history` query threw). Jolt.
 - It is an overlay, not a whole library: `deps.edn` puts its `src` on `:paths`, ahead of the mvn 0.4.137 jar Datahike depends on, which still supplies the other namespaces.
@@ -129,7 +129,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 `reference-code/konserve` pinned at `3dbd4d5`, the tip of ``jolt/lz4-ffi``.
 
-- Fork repo: ``~/src/seon-jolt/libs/konserve``. Upstream: ``replikativ/konserve``.
+- Fork repo: ``https://github.com/seantempesta/konserve``. Upstream: ``replikativ/konserve``.
 - Base: `4991e67` "baseline", a history-less snapshot of Seon's fork `af35a97` (unknown: that commit is not in the repo, so the snapshot cannot be checked against it).
 - Branch chain: ``jolt/main`` `849d87d` → ``jolt/atomic-append`` `b110d99` → ``jolt/lz4-ffi`` `3dbd4d5`.
 - Ours, on ``jolt/main``:
@@ -153,7 +153,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 `reference-code/malli` pinned at `0762fb6b`, ``jolt/mg-seed`` (mg/check takes its `:seed` and returns it on failure), on top of `5a830e14` (``jolt/main``, ``jolt/instrument-arity``).
 
-- Fork repo: ``~/src/seon-jolt/l1/wt/malli`` (a clone of ``seantempesta/malli``). Upstream: ``metosin/malli``.
+- Fork repo: ``https://github.com/seantempesta/malli`` (a clone of ``seantempesta/malli``). Upstream: ``metosin/malli``.
 - Base: `80138076`, upstream master (0.20.0 + 14), the merge-base with upstream's master.
 - Ours, from Seon's fork (`dd13ff81`, the pin before ours):
   - `ac1d51e0`, `3517a3cd` sci: drop an unsupported preset option; resolve loaded qualified Vars directly. Generic.
@@ -171,7 +171,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 `reference-code/crypto` pinned at `902196e`, the tip of ``jolt/main`` and ``jolt/seam-claims``.
 
-- Fork repo: ``~/src/seon-jolt/libs/crypto``. Upstream: ``jolt-lang/crypto``.
+- Fork repo: ``https://github.com/seantempesta/crypto``. Upstream: ``jolt-lang/crypto``.
 - Base: `e6981b8`, upstream main (Ed25519, PR #16).
 - Ours: `902196e` arms claim host tables only (`{:kind :table}` on every `__register-*!`). Generic.
 
@@ -179,7 +179,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 `reference-code/jolt-fressian` pinned at `8f3eb5d`, the tip of ``jolt/main`` (and the fork repo's `main`).
 
-- Fork repo: ``~/src/seon-jolt/e9/jolt-fressian``. Upstream: ``jolt-lang/jolt-fressian``.
+- Fork repo: ``https://github.com/seantempesta/jolt-fressian``. Upstream: ``jolt-lang/jolt-fressian``.
 - Base: `7e7922a`, upstream main.
 - Ours: `8f3eb5d` decode fixes: hash-map tag lookup, a code-byte dispatch table, a byte-array reader (leaf decode 8.6× faster). Generic.
 - Off the default path: `deps.edn` alias `:fressian`, for opening a JVM-written store.
@@ -188,7 +188,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 `reference-code/jolt-overlay` pinned at `4ecb7a8`, the tip of ``jolt/main`` (and the fork repo's `main`).
 
-- Fork repo: ``~/src/seon-jolt/libs/jolt-overlay``. No upstream: `.jolt` copies of two libraries Datahike needs.
+- Fork repo: ``https://github.com/seantempesta/jolt-overlay``. No upstream: `.jolt` copies of two libraries Datahike needs.
 - Base: `d2013ff` "baseline" (a `deps.edn`).
 - Ours: `355f390` clojure.spec.alpha 0.5.238 verbatim; `3427652` hasch.platform 0.4.100 verbatim, plus `res` in spec.alpha (a resolved deftype is not an emittable literal); `4ecb7a8` hasch's digest names upper-cased (`SHA-512`, `MD5`). Jolt (workarounds).
 - **Recommendation: don't fold it into `jolt` as is.** Each change is a workaround for a generic gap elsewhere: (1) jolt-lang/crypto's `MessageDigest/getInstance` is case-sensitive where the JVM's is not, so the fix belongs in crypto, and hasch.platform's copy then goes; (2) `resolve` of a deftype yields a value Jolt cannot emit as a literal, a Jolt compiler gap. Once both are fixed, what remains is spec.alpha verbatim, which Jolt could ship in its stdlib or we could take as a pinned dependency.

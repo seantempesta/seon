@@ -1,38 +1,38 @@
 [submodule "reference-code/jolt"]
 	path = reference-code/jolt
-	url = /Users/sean/src/seon-jolt/jolt
+	url = https://github.com/seantempesta/jolt
 	branch = jolt/main
 [submodule "reference-code/chez"]
 	path = reference-code/chez
-	url = /Users/sean/src/seon-jolt/e14/chez-share
+	url = https://github.com/seantempesta/ChezScheme
 	branch = jolt/main
 [submodule "reference-code/datahike"]
 	path = reference-code/datahike
-	url = /Users/sean/src/seon-jolt/libs/datahike
+	url = https://github.com/seantempesta/datahike
 	branch = jolt/main
 [submodule "reference-code/persistent-sorted-set"]
 	path = reference-code/persistent-sorted-set
-	url = /Users/sean/src/seon-jolt/e4/pss-a
+	url = https://github.com/seantempesta/persistent-sorted-set
 	branch = jolt/main
 [submodule "reference-code/konserve"]
 	path = reference-code/konserve
-	url = /Users/sean/src/seon-jolt/libs/konserve
+	url = https://github.com/seantempesta/konserve
 	branch = jolt/main
 [submodule "reference-code/jolt-fressian"]
 	path = reference-code/jolt-fressian
-	url = /Users/sean/src/seon-jolt/e9/jolt-fressian
+	url = https://github.com/seantempesta/jolt-fressian
 	branch = jolt/main
 [submodule "reference-code/jolt-overlay"]
 	path = reference-code/jolt-overlay
-	url = /Users/sean/src/seon-jolt/libs/jolt-overlay
+	url = https://github.com/seantempesta/jolt-overlay
 	branch = jolt/main
 [submodule "reference-code/crypto"]
 	path = reference-code/crypto
-	url = /Users/sean/src/seon-jolt/libs/crypto
+	url = https://github.com/seantempesta/crypto
 	branch = jolt/main
 [submodule "reference-code/malli"]
 	path = reference-code/malli
-	url = /Users/sean/src/seon-jolt/l1/wt/malli
+	url = https://github.com/seantempesta/malli
 	branch = jolt/main
 [submodule "reference-code/awesome-jolt"]
 	path = reference-code/awesome-jolt
