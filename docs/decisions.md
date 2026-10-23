@@ -7,6 +7,8 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 Owner, 2026-10-23: "don't forget to clean up the old work trees once they aren't needed and don't throw away good work have agents learn from it if you want a clean implementation. No crappy slow repetitive code." Stated in: AGENTS §9.
 ### Reuse every unique, immutable result that is proven the same and expensive to make
 Owner, 2026-10-23: "I want reuse of all unique and immutable data we are sure is the same and is expensive to render". A pure computation's result is reused wherever its inputs are the same by content: keyed by the digest of exactly what it reads (content ids, the reach walk's digests), shared across branches, sessions and worktrees, and only for units measured as expensive (AGENTS §5). Anything that reads the clock, the network or a model, or launches a process, is not reused; the reach walk classifies it. One mechanism serves every such result, in `src`, `test` or `bin`, and it replaces the per-case caches it covers. Stated in: not yet (owed AGENTS §5 and the section of the task one-content-keyed-derivation (on ``jolt/one-content-keyed-derivation``, not merged yet)).
+### The design stage looks around and writes the referenced plan
+Owner, 2026-10-23: "That's why I have the design task first. Look around and write the referenced plan". A request's first stage is design: its agent reads (the program, the wiki, v1) and its output is the task's plan with resolved references and named proofs, which the walk then pulls for implement. Reading first is the design stage's job, so first moves are judged per stage: design by the plan it writes, implement by acting on the cited vars and proofs. A Claude session doesn't hand-write task plans that a design agent should write. Stated in: not yet (owed docs/tasks.md#a-request-is-one-transaction and the judge's task).
 ### src resists growth; no line-count target
 Owner, 2026-10-23: "don't hyper fixate on LoC. I want some resitance to growth mostly so agents reuse what's there and improve the core parts rather than making one offs". Replaces the "about 10k lines" aim. Stated in: AGENTS §1; docs/plan.md (THE PLAN step 4).
 ### The context is data, made relevant at its producer; renders do not turn it into prose
@@ -138,7 +140,7 @@ Owner, 2026-10-21: "But fucking name the processes if they really have to be dif
 ### Work is admitted by its measured workload, through flows
 Owner, 2026-10-21: "I don't want slots I want smarter systems where we understand the workload and they are flow based." Stated in: AGENTS §4.
 ### Embeddings join the context: fused, small and measured
-Owner, 2026-10-21: quote not recorded. Stated in: docs/parity.md#the-agents-repl-my (decided, not built).
+Owner, 2026-10-21: quote not recorded; 2026-10-23: "We can build bindings to some fast C library for running it ourselves right? maybe as a flow so it's just processing requests". Stated in: docs/vector.md.
 ### Patterns live in the topic sections, linked
 Owner, 2026-10-21: "I want us to learn how we can detect patterns in our code and reuse these solutions". Stated in: docs/README.md#how-the-wiki-is-kept.
 ### If nothing has changed, we do nothing; no clock or timer decides (three exceptions)

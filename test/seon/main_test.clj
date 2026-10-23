@@ -62,3 +62,13 @@
     (is (pos? (count rows)) "the facts hold src's docstrings")
     (is (= [] (sort (for [[n doc] rows :when (dated doc)] [n (dated doc)])))
         "no src docstring holds an ISO date")))
+
+(deftest only-measure-reads-the-tick-counter
+  ;; task seon.profile/a-call-is-measured-one-way: a call is measured one way, so no src form but
+  ;; seon.profile/measure! reads the engine's tick counter (jolt.host/ticks-of or jolt.host/ticks):
+  ;; a measurement built beside it is red here. Read from the compiler's facts
+  (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
+        callers (d/q '[:find [?n ...] :in $ [?r ...] :where [?f :form/refs ?r] [?f :form/defines ?v] [?v :var/name ?n]
+                       [?f :form/ns ?ns] [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]]
+                     db ['jolt.host/ticks-of 'jolt.host/ticks])]
+    (is (= ['seon.profile/measure!] (vec callers)))))

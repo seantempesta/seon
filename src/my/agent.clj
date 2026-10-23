@@ -8,6 +8,8 @@
     (callers 'ns/f)           the program vars whose recorded definition names ns/f
     (callees 'ns/f)           the vars ns/f's recorded definition names
     (grep "text")             the program vars whose recorded definition's text holds it
+    (similar 'ns/f)           what is nearest ns/f's definition by meaning: vars, wiki sections, tasks
+    (similar "text")          what is nearest the text by meaning (seon.vector/near)
     (prove)                   run what judges this branch: the task's proofs and the tests reaching
                               what it changed since main, each green one at its digest reused
     (help)                    the help page's sections (docs/agent.md); (help "done") one whole
@@ -15,7 +17,7 @@
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
-            [seon.config :as cfg] [seon.proofs :as proofs] [seon.task :as task]
+            [seon.config :as cfg] [seon.proofs :as proofs] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract]
             [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "The live value of an earlier result, by handle (:h3)." {:malli/schema [:=> [:cat :keyword] :any]}
@@ -44,6 +46,26 @@
   (vec (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]]
                              (agent/db) sym))
                    sym))))
+
+(defn similar
+  "What on this branch is nearest x by meaning (seon.vector/near): x a var, by its definition's
+  vector, or text, embedded as a search's query by root's :embed effect. [[name score] ...] best
+  first, k of them (10 unless given), each name a var, a wiki section's address or a task's id;
+  a var with no vector yet answers [], and a failed embedding its error."
+  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :string]] [:or [:vector [:tuple :any number?]] :map]]
+                            [:=> [:cat [:or :qualified-symbol :string] nat-int?] [:or [:vector [:tuple :any number?]] :map]]]}
+  ([x] (similar x 10))
+  ([x k]
+   (let [db (agent/db)
+         q (if (symbol? x)
+             (some-> (d/entity db [:var/name x]) :var/form :db/id)
+             (let [r (agent/fx! :embed {:texts [(str vector/query-prompt x)]} {})]
+               (if (contract/error? r) r (first (:vectors (:value r))))))
+         name-of (fn [e] (let [x (d/entity db e)]
+                           (or (some-> (:var/_form x) first :var/name) (:seon.section/address x) (:seon.task/id x) e)))]
+     (cond (contract/error? q) q
+           (nil? q) []
+           :else (mapv (fn [[e s]] [(name-of e) s]) (vector/near db q k))))))
 
 (defn prove
   "Run what root's judge will run on this branch (seon.agent/run-tests-forked :judge, in a fork
