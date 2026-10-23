@@ -346,17 +346,20 @@
                        (vec (sort-by (comp str :key) (map pm/conflict-value conflicts)))))))
 
 (defn runs
-  "Every run on db, by id."
+  "Every run on db, by id: each entity its start recorded (run-start-tx: :seon.run/status among
+  it). A run a branch only names by reference (a turn's, a message's: an entity holding its id
+  alone, so the ref resolves to main's entity) is no run record on that branch."
   {:malli/schema [:=> [:cat :seon.host/db] [:map-of :seon.run/id :seon.run/run]]}
   [db]
-  (into {} (for [a (d/q '[:find [(pull ?e pattern) ...] :in $ pattern :where [?e :seon.run/id]] db run-pull)]
+  (into {} (for [a (d/q '[:find [(pull ?e pattern) ...] :in $ pattern :where [?e :seon.run/status]] db run-pull)]
              [(:seon.run/id a) (run-value a)])))
 
 (defn run
-  "Run aid on db, or nil."
+  "Run aid on db, or nil: nil too where db only names it by reference (runs)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:maybe :seon.run/run]]}
   [db aid]
-  (some-> (d/pull db run-pull [:seon.run/id aid]) run-value))
+  (let [a (d/pull db run-pull [:seon.run/id aid])]
+    (when (:seon.run/status a) (run-value a))))
 
 (defn root
   "Root's boot and config keys on db: {:boot :max-running :max-merging :gate-checkout}, nil

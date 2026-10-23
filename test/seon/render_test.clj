@@ -508,7 +508,7 @@
                        [{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan walked-plan :seon.task/execution :running
                          :seon.task/branch :task-demo-f :seon.task/kind :work :seon.task/proofs #{'demo/f-test}}]
                        (seon.task/agent-tx "b1" :a3 {:status :idle :pid 77 :branch :task-demo-f})
-                       (seon.task/run-start-tx "demo/f#1" "demo/f" "b1" k {:branch :task-demo-f :model "m" :max-turns 8} 0 "p")
+                       (seon.task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch :task-demo-f :model "m" :max-turns 8} 0 "p")
                        (seon.task/message-tx "m-1" "owner" "demo/f#1" "check g")
                        ;; root's own evaluation, from its REPL
                        (seon.repl/record-tx {:seon.root/id :root} "root-1" [{:id 1 :tag :ret :form "(my.root/problems sys)" :printed "{}"}] nil)])
