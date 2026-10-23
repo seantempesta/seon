@@ -83,8 +83,9 @@
                 "with no neighbors costs its visit alone; nothing per node already queued (the frontier "
                 "was copied on every visit before: 446 KB at 100 leaves, quadratic)")
      :growth :linear
-     :per-n {:ns 400 :bytes 1100 :calls 0}
-     :fixed {:ns 2000 :bytes 2000 :calls 1}
+     ;; ticks measured 2026-10-23 (seon.cost's once): 12.9k at 100, 153k at 1,000
+     :per-n {:ticks 160 :bytes 1100 :calls 0}
+     :fixed {:ticks 2000 :bytes 2000 :calls 1}
      :sizes [100 1000 10000]}))
 
 (defn knotted
@@ -102,8 +103,9 @@
                 "each node popped into its component once. Measured 2026-10-23: 145 us / 214 KB at 100 "
                 "nodes, 1.6 ms / 2.2 MB at 1,000, 21 ms / 21.7 MB at 10,000 (~2 us, ~2.2 KB a node)")
      :growth :linear
-     :per-n {:ns 2000 :bytes 2000 :calls 0}
-     :fixed {:ns 2000 :bytes 2000 :calls 1}
+     ;; ticks measured 2026-10-23 (seon.cost's once): 54k at 100, 559k at 1,000
+     :per-n {:ticks 560 :bytes 2000 :calls 0}
+     :fixed {:ticks 2000 :bytes 2000 :calls 1}
      :sizes [100 1000 10000]}))
 
 (defn keyed-chain
@@ -125,8 +127,9 @@
                 "quadratic here). Measured 2026-10-23: 81 ms / 94 MB at 100, 244 ms / 270 MB at 1,000, "
                 "557 ms / 665 MB at 3,000; the fixed part is the test store's example program")
      :growth :linear
-     :per-n {:ns 160000 :bytes 200000}
-     :fixed {:ns 60000000 :bytes 78000000}
+     ;; ticks measured 2026-10-23 (seon.cost's once): 31.7M at 100, 95.1M at 1,000
+     :per-n {:ticks 71000 :bytes 200000}
+     :fixed {:ticks 25000000 :bytes 78000000}
      :sizes [100 1000 10000]}))
 
 (defn changed-top
@@ -149,6 +152,7 @@
                 "11.5 ms / 16 MB at 3,000, one form re-folded each time; the per-form part is the scan "
                 "(~3 us, ~5 KB a form), the re-fold is the change's")
      :growth :linear
-     :per-n {:ns 4000 :bytes 5000}
-     :fixed {:ns 3000000 :bytes 4000000}
+     ;; ticks measured 2026-10-23 (seon.cost's once): 0.50M at 100, 1.24M at 1,000; calls 16
+     :per-n {:ticks 850 :bytes 5000 :calls 0}
+     :fixed {:ticks 420000 :bytes 4000000 :calls 16}
      :sizes [100 1000 10000]}))
