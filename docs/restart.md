@@ -5,7 +5,7 @@ How a fresh root picks up the work when every Claude session, memory and transcr
 ## What survives
 
 - Git: `main`, every `jolt/*` and `claude/*` branch, and the forks on GitHub (``seantempesta/<lib>``). Every pin of main resolves there.
-- The disk: each worktree (`../next-<name>`, `.worktrees/<name>`), committed or not, with its `notes/handoff-*.md` on its branch, and the standing store `runs/store`.
+- The disk: each worktree (`.worktrees/<name>`, or `../next-<name>` made before the cutover), committed or not, with its `notes/handoff-*.md` on its branch, and the standing store `runs/store`.
 - The repo's docs: AGENTS.md (the method and root's working rules), `docs/plan.md` (Now, In flight, THE PLAN), `docs/decisions.md` (the owner's rulings), `notes/merge-log.md` (every merge the merge session made), and `notes/root/` (root's notes, with its old memories in `notes/root/memory/`).
 
 Nothing else does: no Claude session, its sidebar group, a running agent or a queued message.

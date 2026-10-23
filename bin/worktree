@@ -34,6 +34,7 @@ die() { print -u2 "worktree: $*"; exit 1; }
 # the main tree (git's common dir), whichever checkout this runs from: the worktrees and the port
 # registry (bin/ports) live inside it, so the root folder holds everything and can be moved whole
 MAIN_TREE=$(cd "$(git -C "$MAIN" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
+MAIN=$MAIN_TREE   # submodules, target/ and git calls below are the main tree's, whichever checkout this runs from
 wt_path() { print "$MAIN_TREE/.worktrees/$1"; }
 
 if [[ ${1:-} == --path ]]; then
