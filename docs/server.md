@@ -14,7 +14,7 @@ The ops are one table, ```seon.server/ops```, keyed by a request's `:op`; each e
 
 - `:agents`: live agents and every task's summary (`seon.server/task-summaries`: execution, done, blocked-by, its runs, its failure).
 - `:eval`: Clojure evaluated in a running agent's process (recorded on its branch, origin `:outside`) or as `"root"` in root's process, with `sys` bound to root (`seon.server/*sys*`). Both go through the one REPL path, `seon.repl/eval-string` ([processes](processes.md#the-agent-process)).
-- `:context`: the current-state block of the task an agent works, as the model would read it now (`seon.turn/context-block`; it names an agent or a task, attaching one if none works it), recorded with origin `:context` ([render](render.md#a-context-read-is-shown-once)).
+- `:context`: the current-state block of the task an agent works, as the model would read it now (`seon.turn/context-block`; it names an agent or a task, attaching one if none works it), recorded with origin `:context`, a row of the agent's page like any evaluation ([render](render.md#the-page)).
 - `:message`: the owner's words to a running agent (`seon.root/message!`, the page's message bar sends the same request): root delivers them, and the agent's next turn reads them in its block ([render](render.md)).
 - `:attach`: root starts an agent on the task's branch with model `"outside"`, so no turn loop runs in it, and answers its id once the agent is ready (its hello), or the end it met first, which is the run's death ([root](root.md#holders-and-refused-spawns)).
 - `:prove`: the tests a branch's change reaches, run once per branch and tx however many ask, through the one test service (`seon.prove`, [merging](merging.md#the-test-service)); it names an agent's branch, else main.

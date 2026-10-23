@@ -317,6 +317,61 @@
        {:seon.render/root root :seon.render/nodes nodes :seon.render/refs (:refs st)})
      (contract/error :seon.render/no-entity `walk (str "no entity " eid " on this db") {:seon.render/eid eid}))))
 
+(defn- merged
+  "Entity eid walked on each of dbs that holds it (walk), as one walk: the root node from the first
+  db holding the entity, each unit node once, from the first db holding it (by its entity, else its
+  attribute), in unit order; the refs of the last walk, each walk given the refs before it as seen.
+  Main first: what root observed of an entity there (an agent's status, its run's) wins over an
+  older copy on a branch, which adds what only it recorded (its evaluations, its turns). Each entity
+  node says when it was made (:seon.render/t). Every db holding none: :seon.render/no-entity."
+  {:malli/schema [:=> [:cat [:vector :seon.host/db] pos-int? [:vector :seon.render/ref]] [:or :seon.render/walk :seon.render/no-entity]]}
+  [dbs eid seen]
+  (let [;; an entity node's :seon.render/t: the first transaction asserting it on the db it came from
+        ;; (transactions are issued store-wide, so they order entities across branches; an id does
+        ;; not: a content id is a hash). One index read per node, its own datoms.
+        made (fn [db nd] (cond-> nd (= :entity (:seon.render/kind nd))
+                           (assoc :seon.render/t (reduce min (map :tx (d/datoms db :eavt (:seon.render/eid nd)))))))
+        ws (reduce (fn [ws db]
+                     (let [w (walk db eid (or (:seon.render/refs (peek ws)) seen))]
+                       (if (:seon.error/type w) ws (conj ws (update w :seon.render/nodes (fn [nds] (mapv #(made db %) nds)))))))
+                   [] dbs)
+        key-of (fn [nd] (if (= :entity (:seon.render/kind nd)) (:seon.render/eid nd) [(:seon.render/eid nd) (get-in nd [:seon.render/from :seon.render/attr])]))]
+    (if (empty? ws)
+      (contract/error :seon.render/no-entity `merged (str "no entity " eid " on these dbs") {:seon.render/eid eid})
+      {:seon.render/root (:seon.render/root (first ws))
+       :seon.render/nodes (let [all (mapcat :seon.render/nodes ws)
+                                first-of (reduce (fn [m nd] (let [k (key-of nd)] (if (contains? m k) m (assoc m k nd)))) {} all)
+                                attr-of #(get-in % [:seon.render/from :seon.render/attr])
+                                order (into {} (map-indexed (fn [i a] [a i])) (:seon.render/units (contract/properties (:seon.render/schema (:seon.render/root (first ws))))))]
+                            ;; each unit's nodes in its attribute's declared place, entities in the order they were made
+                            (vec (sort-by (fn [nd] [(order (attr-of nd) 0) (:seon.render/t nd 0) (:seon.render/eid nd)]) (vals first-of))))
+       :seon.render/refs (:seon.render/refs (peek ws))})))
+
+(defn page
+  "What the page of entity eid shows, on dbs (main first, then the branch that recorded what main
+  does not hold: an agent's): its walk (merged), and the walk of each unit its schema names as part
+  of its page (:seon.render/parts: an agent's run), their units joined to its own (a part's units
+  that lead back to the entity itself left out) and their prose's citations numbered with its own.
+  One function makes every page: root's, an agent's, any entity's; its layout is its renders'
+  (seon.render.ui/page)."
+  {:malli/schema [:=> [:cat [:vector :seon.host/db] pos-int?] [:or :seon.render/walk :seon.render/no-entity]]}
+  [dbs eid]
+  (let [w (merged dbs eid [])]
+    (if (:seon.error/type w)
+      w
+      (let [parts (set (:seon.render/parts (contract/properties (get-in w [:seon.render/root :seon.render/schema]))))]
+        (reduce (fn [w nd]
+                  (let [p (merged dbs (:seon.render/eid nd) (:seon.render/refs w))]
+                    (if (:seon.error/type p)
+                      w
+                      (let [held (set (map :seon.render/eid (:seon.render/nodes w)))]
+                        ;; a part's entity the page holds already (two runs' one task) is shown once
+                        (-> w
+                            (update :seon.render/nodes into (remove #(or (= eid (:seon.render/eid %)) (and (= :entity (:seon.render/kind %)) (held (:seon.render/eid %))))) (:seon.render/nodes p))
+                            (assoc :seon.render/refs (:seon.render/refs p)))))))
+                w
+                (filter #(and (= :entity (:seon.render/kind %)) (parts (get-in % [:seon.render/from :seon.render/attr]))) (:seon.render/nodes w)))))))
+
 (defn data
   "Walk w as one value a model reads: the entity's own attributes, each unit under the attribute
   that reached it (a reverse unit as a vector of its entities, a forward one as its entity or value),
@@ -332,10 +387,11 @@
                                                (assoc value :seon.render/n n :seon.render/address address))
                                              refs))))
 
-(defn- shown
+(defn shown
   "Node or ref x rendered :as as on both faces by its schema's renders (render: none declared, the
   one printer, whose nested values show by their own), with which render made each face
-  (render-name) and whether the :ai face was cut."
+  (render-name) and whether the :ai face was cut. The one site every part of a walk or a page is
+  rendered at."
   {:malli/schema [:=> [:cat :map :seon.render/as :seon.render/opts] :map]}
   [x as opts]
   (let [v (:seon.render/value x) schema (:seon.render/schema x)

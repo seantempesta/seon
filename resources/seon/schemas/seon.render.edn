@@ -5,7 +5,9 @@
 ;; else the one value printer (seon.print). The values below are what root's web renders.
 {:seon.render/hiccup [:vector :any]
  :seon.render/face [:enum :ai :html]
- :seon.render/as [:enum :inline :block :tile]
+ ;; how a value is shown: in one line, as the page's main pane, a tile of its column, a row of its
+ ;; list (an entity schema's {:seon.render/as :row} puts its entities in the page's list, newest first)
+ :seon.render/as [:enum :inline :block :tile :row]
  ;; a render's props (its second argument), every one optional: like React's, a render that
  ;; does not care about one ignores it
  :seon.render/opts [:map
@@ -33,11 +35,16 @@
  ;; an entity schema's units (a schema property): the attributes a view of its entity shows, in
  ;; pull's syntax, a leading _ the reverse ref
  :seon.render/units [:vector :keyword]
+ ;; an entity schema's units whose entities are part of its page (a schema property): each is walked
+ ;; too, and its units join the page's (an agent's run: its task, turns and messages; seon.render/page)
+ :seon.render/parts [:vector :keyword]
  :seon.render/depth :seon.ref/depth
  :seon.render/value :any
  ;; the schema of a node's value: its entity schema, or a value's attribute (absent: no entity schema names it)
  :seon.render/schema :qualified-keyword
  :seon.render/eid pos-int?
+ ;; the transaction that made an entity a page shows (seon.render/page): what orders its list
+ :seon.render/t pos-int?
  :seon.render/attr :keyword
  :seon.render/line pos-int?
  ;; where a node or a citation came from: the entity and the attribute that reached it (a unit's
@@ -65,7 +72,8 @@
  :seon.render/node [:and :seon.render/shown
                     [:map [:seon.render/kind :seon.render/kind] [:seon.render/value :seon.render/value]
                      [:seon.render/schema {:optional true} :seon.render/schema] [:seon.render/eid :seon.render/eid]
-                     [:seon.render/from {:optional true} :seon.render/from] [:seon.render/cites {:optional true} :seon.render/cites]]]
+                     [:seon.render/from {:optional true} :seon.render/from] [:seon.render/cites {:optional true} :seon.render/cites]
+                     [:seon.render/t {:optional true} :seon.render/t]]]
  ;; a citation's content, pulled once at the depth it was first cited (seon.docs/cited), and every place citing it
  :seon.render/ref [:and :seon.render/shown
                    [:map [:seon.render/n :seon.render/n] [:seon.render/kind :seon.render/kind] [:seon.render/address :seon.render/address]
@@ -78,62 +86,29 @@
  :seon.render/cite-state [:map [:refs :seon.render/refs] [:index [:map-of :string nat-int?]] [:next :seon.render/n]]
  :seon.render/walk [:map [:seon.render/root :seon.render/root] [:seon.render/nodes :seon.render/nodes] [:seon.render/refs :seon.render/refs]]
  :seon.render/no-entity [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-entity]] [:seon.render/eid :seon.render/eid]]]
- ;; ---- what root's dashboard shows: the whole system as one value ----
+ ;; a page's location that main names no entity for (seon.render.proc/page-value): an agent's id of no agent in root's boot
+ :seon.render/no-location [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-location]] [:view :string]]]
+ ;; ---- what root's context reads: the whole system as one value ----
  ;; the api's view (agents, writer, fork server, store, boot, root errors) joined with every
- ;; proc's health, main's tasks and runs, the series the tiles draw, and the events.
- ;; Its HTML face is root's layout; its AI face is root's context (a budgeted text).
- :seon.render/system [:map {:seon.render/html seon.render.ui/system-page :seon.render/ai seon.render.ai/system}
+ ;; proc's health, main's tasks and runs, the series and the events. Its AI face is root's
+ ;; context (a budgeted text); the page is root's entity's (seon.render/page), not this value's.
+ :seon.render/system [:map {:seon.render/ai seon.render.ai/system}
                       [:agents :map] [:health :map] [:writer :map] [:fork-server :map]
                       [:main :map] [:tasks :map] [:runs :map] [:events [:vector :any]]]
- ;; one agent as root holds it (the api's view entry, its id added): its card in root's layout
- :seon.render/agent [:map {:seon.render/html seon.render.ui/agent-card}
-                     [:id :keyword] [:status {:optional true} [:maybe :keyword]]]
- ;; one agent zoomed: the agent, its run and task on main, its evaluations on its branch,
- ;; the current-state block its model reads. Its HTML face is the agent's page.
- :seon.render/agent-page [:map {:seon.render/html seon.render.ui/agent-page}
-                          [:agent :seon.render/agent]]
- ;; ---- the parts of root's layout: each unit's input, its render declared here ----
- ;; (a unit names its input's schema, never a render function: docs/render.md#the-frame-and-its-units)
- ;; what is wrong now, by area: the lines root's context leads with (seon.render.ai/problem-areas)
- :seon.render/problems-banner [:sequential {:seon.render/html seon.render.ui/tile-problems} [:tuple :keyword [:sequential :string]]]
- ;; a tile as data (seon.render.ui/load-tiles; every tile's own render builds one)
- :seon.render/tile [:map {:seon.render/html seon.render.ui/metric-tile} [:id :string]]
- ;; the swarm: one cell per agent shown [id status evals-seen], and how many ended off the grid
- :seon.render/swarm [:map {:seon.render/html seon.render.ui/tile-agents}
-                     [:cells [:sequential [:tuple :any :any nat-int?]]] [:off :int]]
- ;; every declared root proc's health, by proc id
- :seon.render/procs-health [:map {:seon.render/html seon.render.ui/tile-health} [:health :map]]
- ;; the work: every task's row (seon.render.proc/task-rows), main's runs, main's t
- :seon.render/work [:map {:seon.render/html seon.render.ui/tile-tasks}
-                    [:rows [:maybe :map]] [:runs [:maybe :map]]]
- ;; root's own defects, the boot's numbers and the store
- :seon.render/root-errors [:map {:seon.render/html seon.render.ui/tile-errors}]
- ;; root's context: the system's AI face as root reads it
- :seon.render/context [:map {:seon.render/html seon.render.ui/context-panel}
-                       [:text {:optional true} [:maybe :string]]]
- ;; the stream's header: events kept, of those seen since boot
- :seon.render/events-count [:map {:seon.render/html seon.render.ui/events-count} [:kept nat-int?] [:seen nat-int?]]
- ;; the web proc's own numbers (tabs open)
- :seon.render/web [:map {:seon.render/html seon.render.ui/web-stats}]
- ;; the agent window's head: its view entry, run and task, the totals over its turns
- :seon.render/zoom-head [:map {:seon.render/html seon.render.ui/zoom-head} [:agent :map] [:turns :map]]
- ;; the run's turns, each row serialized ahead by its declared render (seon.render.ui/turn-row)
- :seon.render/turns [:map {:seon.render/html seon.render.ui/turns-list} [:turns nat-int?]]
- ;; the input at the bottom of the agent's window
+ ;; ---- the parts of a page (seon.render.ui/page): each unit's input, its render declared here ----
+ ;; (a unit names its input's schema, never a render function: docs/render.md#the-page-is-units)
+ ;; the entity a page is of, its main pane
+ :seon.render/page-head [:and {:seon.render/html seon.render.ui/head} :seon.render/node]
+ ;; one row of its list: a turn and the evaluations it ran, or one evaluation or message
+ :seon.render/page-row [:vector {:seon.render/html seon.render.ui/row :min 1} :seon.render/node]
+ ;; one tile of its column: a unit that is not a row
+ :seon.render/page-tile [:and {:seon.render/html seon.render.ui/tile} :seon.render/node]
+ ;; its list's end: the older rows, counted and unrendered, and the view that asks for them
+ :seon.render/page-more [:map {:seon.render/html seon.render.ui/more} [:older nat-int?] [:view :string]]
+ ;; the input at the top of root's page
+ :seon.render/root-input [:map {:seon.render/html seon.render.ui/root-input}]
+ ;; the input at the top of an agent's page: its REPL, its messages, its held task's release
  :seon.render/agent-input [:map {:seon.render/html seon.render.ui/agent-input} [:id :keyword] [:live? :boolean]]
- ;; one live tile of the agent window: a value and the schema whose render shows it as a tile
- :seon.render/window-tile [:map {:seon.render/html seon.render.ui/window-tile} [:value :any] [:schema :qualified-keyword]]
- ;; the agent's last test run, and main's results of its run
- :seon.render/proofs [:map {:seon.render/html seon.render.ui/proofs-box}]
- ;; what the agent's branch will carry to main, as its newest turn measured it
- :seon.render/branch [:map {:seon.render/html seon.render.ui/branch-box}]
- ;; the problems main recorded of an agent or its task, in root's context's words
- :seon.render/agent-problems [:map {:seon.render/html seon.render.ui/problems-box} [:rows [:vector :map]]]
- ;; one event of root's stream
- :seon.render/event [:map {:seon.render/html seon.render.ui/event-row} [:type :keyword]]
- ;; a declared proc's health as what flows: the defects root recorded of it (no ping)
- :seon.render/proc-health [:map {:seon.render/html seon.render.ui/proc-health}
-                           [:pid :keyword] [:defects nat-int?] [:newest {:optional true} [:maybe :string]]]
  ;; a cost proof's report as the agent's test run holds it: the estimate's function, the
  ;; rows measured and the verdict (seon.cost/proof's :actual)
  :seon.render/cost-report [:map {:seon.render/html seon.render.ui/cost-report}
