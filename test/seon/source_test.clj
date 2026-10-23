@@ -609,3 +609,21 @@
               :sizes refresh-sizes}]]
     (testing (str (:of e) " on " (:input e))
       (cost/proof e))))
+
+(deftest a-helper-recorded-after-its-user-is-written-before-it
+  ;; step E run #10 (2026-10-23): an agent defined form-of at its REPL, then redefined
+  ;; summary-of (which keeps its place) to call it; the merge wrote form-of after summary-of,
+  ;; a file that cannot load fresh. file-text writes a form after what it references in its
+  ;; namespace, unless an earlier form declares it, and leaves a file in that order as it is
+  (let [db0 (empty-db)
+        db (d/db-with db0 (source/import-tx db0 {"src/app/wb.clj" "(ns app.wb)\n\n(defn a [] 1)\n\n(defn b [] (a))\n"}))
+        db (d/db-with db (source/text-tx db 'app.wb "(defn- h [] 2)" nil))
+        db (d/db-with db (source/text-tx db 'app.wb "(defn a [] (h))" nil))
+        text (source/file-text db 'app.wb)]
+    (is (< (str/index-of text "(defn- h") (str/index-of text "(defn a")) text)
+    (is (< (str/index-of text "(defn a") (str/index-of text "(defn b")) "the rest keeps its order")
+    (is (= 2 (do (load-string (str/replace text "app.wb" "app.wb-fresh")) ((resolve 'app.wb-fresh/b)))) "the written file loads fresh and runs")
+    (testing "an earlier declare: the file stays as written"
+      (let [src "(ns app.wd)\n\n(declare g)\n\n(defn f [] (g))\n\n(defn g [] 3)\n"
+            dbd (d/db-with db0 (source/import-tx db0 {"src/app/wd.clj" src}))]
+        (is (= src (source/file-text dbd 'app.wd)))))))
