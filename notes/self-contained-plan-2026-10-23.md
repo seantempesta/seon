@@ -121,8 +121,8 @@ Nested repos with commits found nowhere else (the survey's EXTRACT 6, re-measure
 ### Options
 
 - **A tag per history, fetched into the repo it belongs to. Recommended.**
-  - `git fetch <repo> 'refs/heads/*:refs/tags/history/<dir>/*'`: the outer repo as `history/seon-jolt`, the nested ones under `history/<dir>/<branch>`, and fork-family ones as `attic/<dir>/<branch>` in their module.
-  - A tag is git's name for a fixed record, and `git clone` copies every tag. History stays readable (`git log history/seon-jolt -- proto/core`) and deduplicated.
+  - `git fetch <repo> 'refs/heads/*:refs/tags/history/<dir>/*'`: the outer repo as `history/prototype`, the nested ones under `history/<dir>/<branch>`, and fork-family ones as `attic/<dir>/<branch>` in their module.
+  - A tag is git's name for a fixed record, and `git clone` copies every tag. History stays readable (`git log history/prototype -- proto/core`) and deduplicated.
   - No file lands in the working tree, so grep, the build and the program import never see it.
   - Cost: +20 MiB to next's .git (now 256 MB with modules), +1.4 MiB to the modules.
 - **A `git bundle` per repo** (the owner's suggestion): the same content as one file each.
@@ -137,7 +137,7 @@ Nested repos with commits found nowhere else (the survey's EXTRACT 6, re-measure
 - `../RESUME.md` (48 lines: THE PLAN, In flight) becomes **`docs/plan.md`**. It is root's state, kept current like any wiki page. AGENTS.md:9, :24, :32, :36 then say `docs/plan.md`.
 - `../notes/DECISIONS.md` (147 lines) becomes **`docs/decisions.md`**: the owner's rulings, a section each, in the order they were made. A ruling superseded later stays, marked superseded with a link to its successor. `../notes/archive/DECISIONS-superseded.md` goes to `notes/archive/`.
 - With a section per ruling, the existing prose citations (`DECISIONS "Callbacks are data"`) can become links (`[decisions#callbacks-are-data](docs/decisions.md#...)`) that `seon.ref` resolves into the task's or docstring's references. That is a follow-up wiki edit, not part of the move.
-- Both are moved by root **[root]**, because root edits them all the time and the outer copies have uncommitted changes. The move is one commit in next. The outer copies then get a one-line pointer, in the commit taken just before the `history/seon-jolt` tag.
+- Both are moved by root **[root]**, because root edits them all the time and the outer copies have uncommitted changes. The move is one commit in next. The outer copies then get a one-line pointer, in the commit taken just before the `history/prototype` tag.
 
 ## 5. Where worktrees live (owner ruling 2026-10-23)
 
@@ -203,7 +203,7 @@ git -C $S for-each-ref --format='%(objectname) %(refname)' refs/heads |
 
 **D. [root] History tags in next:**
 1. Root commits the outer repo's pending work (the staged renames, RESUME, DECISIONS) and does step E.
-2. Then: `git -C next fetch ~/src/seon-jolt 'refs/heads/main:refs/tags/history/seon-jolt'`.
+2. Then: `git -C next fetch ~/src/seon-jolt 'refs/heads/main:refs/tags/history/prototype'`.
 3. Then, for each nested repo in §3: `git -C next fetch <repo> 'refs/heads/*:refs/tags/history/<dir>/*'`. Fork-family repos go to their module as `attic/...` (in step B).
 4. Verify with the same LOST loop against next's tags.
 
@@ -211,8 +211,8 @@ Expected: +20 MiB in next/.git. A tag is a record, so it is never deleted (AGENT
 
 **E. [root] Content moves into next (one commit):**
 - `RESUME.md` → `docs/plan.md` and `notes/DECISIONS.md` → `docs/decisions.md`: **done by `wiki-live` (ed8218a, 68eb8ec)**, not here; `notes/archive/DECISIONS-superseded.md` is copied with the archive below (the docstrings and tests that cite it say `notes/archive/`);
-- **Docs only (owner, 2026-10-23): the parent's `notes/archive/` and `notes/upstream/` are not copied into next.** They stay reachable in history, `git show history/seon-jolt:notes/archive/<file>` (step D), and task `seon.docs/docs-are-the-only-documentation` folds their lasting facts into docs sections and repoints the citations. Until that task has run, the citations of `notes/archive/...` in `src`, tests and task plans name a path that is not in the tree: so step E repoints them to the tag form `history/seon-jolt:notes/archive/<file>` (a path git reads, no file needed), in the same commit as the one `bin/prove`;
-- `flowlab/`: its checks (`docs_check.clj`) become tests or are dropped by the same task; until then `docs/flow.md` and `docs/core-async.md` cite `history/seon-jolt:flowlab/docs_check.clj`;
+- **Docs only (owner, 2026-10-23): the parent's `notes/archive/` and `notes/upstream/` are not copied into next.** They stay reachable in history, `git show history/prototype:notes/archive/<file>` (step D), and task `seon.docs/docs-are-the-only-documentation` folds their lasting facts into docs sections and repoints the citations. Until that task has run, the citations of `notes/archive/...` in `src`, tests and task plans name a path that is not in the tree: so step E repoints them to the tag form `history/prototype:notes/archive/<file>` (a path git reads, no file needed), in the same commit as the one `bin/prove`;
+- `flowlab/`: its checks (`docs_check.clj`) become tests or are dropped by the same task; until then `docs/flow.md` and `docs/core-async.md` cite `history/prototype:flowlab/docs_check.clj`;
 - the citations fixed: AGENTS.md:9/:24/:32/:36, BAGGAGE.md:3/:27, docs/forks.md:4/:23, docs/flow.md:3/:71, docs/core-async.md:3, the 21 `notes/...` citations in task plans (to `notes/archive/...`), seon.fx.edn's absolute path;
 - optionally `tmp/agy/` → `runs/agy/`.
 Each running session's brief names `../RESUME.md`; they read the new path after merging main.
@@ -226,7 +226,7 @@ git -C next ls-files | grep -v '^notes/' | xargs grep -nE '\.\./|/Users/sean|seo
 - Then the owner deletes the parent folder's experiment directories (the survey's list, about 15.9 GiB), once its EXTRACT items 1–3 are filed as tasks. Tags preserve their history; their untracked build output is not kept.
 
 **R. [root, last] The fresh root: a clone at `~/src/seon-next`, not a move** (owner, via root, 2026-10-23: "a clean, fresh directory with history kept"). The old `~/src/seon-jolt/next` stays untouched until the clone is proven, so there is no rollback to plan: delete the clone. Run after C, D and E have merged on main and the open branches have merged or been parked (a branch not yet merged is a branch of the old repo: `git fetch` it into the clone from the old repo before the old one goes). What the clone is and is not, measured:
-- **History kept:** the clone has every commit and tag of next, so also the `history/*` tags (D) and the branches of the old repo as `origin/*` remote-tracking refs (make the ones wanted local: `git branch jolt/NAME origin/jolt/NAME`). The outer repo's history is the `history/seon-jolt` tag.
+- **History kept:** the clone has every commit and tag of next, so also the `history/*` tags (D) and the branches of the old repo as `origin/*` remote-tracking refs (make the ones wanted local: `git branch jolt/NAME origin/jolt/NAME`). The outer repo's history is the `history/prototype` tag.
 - **Nothing carried by accident:** `target/`, `runs/`, `config/local.edn`, `test-results/`, `config/worktree-ports` are untracked and stay behind, so nothing absolute comes along (`runs/store` is erased when `rename` merges, owner ruling: test data, so the new root starts with a fresh store and no absolute path can carry over).
 - **Submodules** come from the GitHub URLs of C (the two private repos need `gh` auth); Chez's and Jolt's nested submodules from upstream GitHub. No `protocol.file.allow` is needed any more, and the README's clone line stops saying it.
 
@@ -256,7 +256,7 @@ cp -R ~/.claude/projects/-Users-sean-src-seon-jolt-next ~/.claude/projects/-User
 
 **Fallback, only if the clone cannot be proven:** the in-place move, `mv ~/src/seon-jolt/next ~/src/seon-next`, then `git worktree repair <each worktree path>` in the root and `git -C .git/modules/reference-code/<m> worktree repair <each submodule worktree path>` per module (rehearsed in a scratch repo: it repairs both links), with `config/local.edn` and the Claude memory directory renamed as in R6. Remove the other worktrees first (`git worktree move` refuses a worktree with submodules).
 
-**S. [owner] The deletion of `~/src/seon-jolt`.** After R and the acceptance grep below, the parent folder holds only what `old-cleanup` bundled and the outer repo's own history (tag `history/seon-jolt`, step D) and `history-bundles/`. The owner deletes it. `bin/agy-agent`'s old state in `../tmp/agy` (4.6 MB) goes with it unless step E copied it to `runs/agy`.
+**S. [owner] The deletion of `~/src/seon-jolt`.** After R and the acceptance grep below, the parent folder holds only what `old-cleanup` bundled and the outer repo's own history (tag `history/prototype`, step D) and `history-bundles/`. The owner deletes it. `bin/agy-agent`'s old state in `../tmp/agy` (4.6 MB) goes with it unless step E copied it to `runs/agy`.
 
 **Acceptance: next names nothing outside its root** (the dated `notes/` excepted, as they record paths as they were):
 ```sh
