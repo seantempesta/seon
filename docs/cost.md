@@ -16,6 +16,15 @@ A proof measures the function under test, on the thread that calls it, and nothi
 
 Each size is the least of several repeats (`seon.cost/measure`), less what measuring an empty call costs. The proofs: `seon.profile-test/a-threads-allocation-is-its-own`, `seon.profile-test/a-measure-is-the-same-beside-another-thread`.
 
+## How growth is judged
+
+A dimension is steeper when its fitted growth exponent passes the estimate's growth by more than ```seon.cost/steeper-by``` over the same sizes. ```seon.cost/judge``` fits it so that a change making every size cheaper, or dearer, by one amount never moves the verdict (task `seon.cost/a-speedup-never-reads-as-steeper`):
+- with three sizes or more, on each size's increment over the smallest, m(n) - m(n0), against the work's own, W(n) - W(n0): no fixed part is assumed;
+- with two (a run capped at `:seon.config.proofs/cost-max-n` measures the two smallest), one increment has no shape, so the fixed part taken off is the estimate's `:fixed`, but never more than the smallest size leaves beyond its estimated per-unit part;
+- for constant work, on the cost itself, which should not grow.
+
+Fitted on the stated `:fixed` taken off every size, a faster fixed part left the smallest size's remainder near zero, and the fit read a speedup as growth: reach-update on a faster Jolt, under its estimate at both sizes, read n^1.96.
+
 ## An accepted overrun and its ratchet
 
 Cost is work done, counted (ticks, bytes, calls), never wall time (owner's ruling). A proof past its estimate stays green while the task its `:overrun` names is open and every dimension at the largest size is within `seon.cost/ratchet` (1.5x) of the `:measured` the task recorded, so a regression is red even inside an open overrun. A record is comparable only on the measure it was taken with: the proof's own thread's bytes and calls, exact and the same in every run, and that thread's CPU, which still moves with the machine's load. When the measure changes, every record is measured again on the new one, and its comment says when and under what load.
