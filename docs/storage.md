@@ -92,7 +92,7 @@ History is kept, so garbage comes from deleted branches: check and test mains, w
 
 Why only with no agent live: every commit is one LMDB write transaction (nodes, values, commit record and head), and LMDB's writer lock serializes commits from every process. But a commit can reuse a value out of line that the store held when its node was flushed. A collection running at that moment could sweep the value, because no branch reached it. Collecting concurrently would need a mark outside the lock, then a short delta mark and sweep inside one write transaction, plus commits that re-assert reused values in their own transaction. Collecting beside live agents is not built.
 
-A live agent holds its branch: root refuses a second spawn on a branch a live agent holds, and caps the live agents at `:seon.config.root/max-agents` ([root](root.md#holders-and-spawn-refusals)).
+A live agent holds its branch: root refuses a second spawn on a branch a live agent holds, and caps the live agents at `:seon.config.root/max-agents` ([root](root.md#holders-and-refused-spawns)).
 
 ## Compiled code
 

@@ -121,7 +121,7 @@
               :answered-by (get-in ans [:from aid] []) :at-ms (:seon.attempt/end-ms p)}
         ;; a red proof is this attempt's problem when the task itself states it: an inherited
         ;; proof was green on main when the task started (its needs were done), so red now it
-        ;; is a regression, the attempt's refusal reason; another task's proof not green yet is
+        ;; is a regression, the attempt's reason; another task's proof not green yet is
         ;; an allowed red. Both stay in the attempt's facts as evidence, never problem rows.
         own (set (get-in p [:seon.attempt/task :seon.task/proofs]))
         failures (select-keys (:seon.attempt/failures p) own)

@@ -5,7 +5,7 @@
   the reply's calls of the one tool, eval, goes through the one REPL path
   (seon.repl/eval-string: read, evaluate, record) and its answer is that call's result, which
   the next model call reads, and the turn's facts are written on the branch. The loop repeats until the done
-  rule has no refusal, a function ends it (my.turn/wait, my.task/fail!) or the turns run
+  rule has no reason, a function ends it (my.turn/wait, my.task/fail!) or the turns run
   out. All green at the start ends it with no model call.
 
   A merge task's agent first merges main into the branch (no model call) and merges main
@@ -67,7 +67,7 @@
 
 (defn- observe
   "What a turn starts from, measured now: the proofs run in a fork of this agent (a run it
-  could not fork ran no proof: every proof is unknown, and the refusal is the run's error),
+  could not fork ran no proof: every proof is unknown, and the refused answer is the run's error),
   the contract gaps the branch adds since its merge base (seon.merge/uncontracted, as root's
   judge and the merge gate ask it) and its unmerged entries, the done rule over them, and
   the task as the branch holds it (its plan may have improved)."
@@ -88,7 +88,7 @@
                     unfinished (count (remove #(contains? results %) (:selected run)))]
                 (cond-> {:this-turn (count (:selected run)) :at-judge (:at-judge run) :when-asked (count (:deferred run))}
                   (pos? unfinished) (assoc :unfinished unfinished))))
-     :refusals (r/done-refusals (r/done-input (r/index db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before
+     :reasons (r/done-explain (r/done-input (r/index db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before
                                               (if (contract/error? run) #{} (set (:deferred run)))))}))
 
 (defn- end!
@@ -118,14 +118,14 @@
     cache-miss-tokens (assoc :seon.turn/cache-miss-tokens cache-miss-tokens)))
 
 (defn- observed
-  "The context inputs observe's map holds, beyond the proofs' results: every refusal of the
+  "The context inputs observe's map holds, beyond the proofs' results: every reason of the
   done rule, the failing assertions of each test it names, the run's own errors, and what the
   branch's merge will carry to main."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{:keys [run refusals task results will-merge tests]}]
+  [{:keys [run reasons task results will-merge tests]}]
   (let [proofs (:proofs (:seon.task/accumulated task))
-        named (into (set proofs) (keep :symbol) refusals)]
-    {:results results :refusals refusals
+        named (into (set proofs) (keep :symbol) reasons)]
+    {:results results :reasons reasons
      :reds (if (contract/error? run) [] (proofs/red-reports run named))
      :run-errors (if (contract/error? run) [(:seon.error/message run)] (proofs/run-errors run))
      :will-merge will-merge :tests tests}))
@@ -227,7 +227,7 @@
 (defn work!
   "Work task `task` as attempt `attempt` (the model `model` when set, else root's), at most
   max-turns model calls. A turn whose calls repeat the last turn's, made from the same
-  observed state (its refusals and proof results), ends the attempt :no-progress, naming
+  observed state (the done rule's reasons and proof results), ends the attempt :no-progress, naming
   the code (root's research, lever 2: loops took 45% of tokens; the step E dry run's first
   real design repeated one pair of calls 18 times): the judge refines from that evidence.
   Answers the end ({:outcome :turns :model-calls :tokens :ms}); the same end is written on
@@ -243,21 +243,21 @@
     (when merge? (branch/merge-main!))
     (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (profile/now-ns) :attempt attempt
                :max-turns max-turns :merge? merge?}]
-      (let [{:keys [refusals unmerged] :as obs} (observe task plan-before)
+      (let [{:keys [reasons unmerged] :as obs} (observe task plan-before)
             stop (get-in @agent/state [:turn :stop])
             hairy (when merge? (r/hairy (merge merge-cfg {:conflicts unmerged :task (:task obs) :merge-turns (:merge-turns st)})))]
         (cond
           ;; git's CI after the merge: green on the combined program; merge main again until
           ;; it brings nothing new
-          (and (empty? refusals) merge?)
+          (and (empty? reasons) merge?)
           (let [m (branch/merge-main!)]
             (if (and (empty? (:applied m)) (empty? (:conflicts m))) (end! st :green nil nil) (recur st)))
-          (empty? refusals) (end! st :green nil nil)
+          (empty? reasons) (end! st :green nil nil)
           stop (end! st (:outcome stop) (:reason stop) nil)
           hairy (end! st :merge-failed (:reason hairy) nil)
-          (>= (:turn st) max-turns) (end! st :cap (r/refusals-text refusals) nil)
+          (>= (:turn st) max-turns) (end! st :cap (r/explain-text reasons) nil)
           :else (let [st' (act! st obs model)
-                      seen [(select-keys obs [:refusals :results]) (:calls st')]]
+                      seen [(select-keys obs [:reasons :results]) (:calls st')]]
                   (cond
                     (contract/error? st') (end! st :error (:seon.error/message st') st')
                     (= seen (:seen st)) (end! st' :no-progress (str "turn " (:turn st) " repeated turn " (dec (:turn st))

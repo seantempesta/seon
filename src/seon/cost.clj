@@ -32,7 +32,7 @@
   under (a third of the estimate or less at the largest size: the estimate is loose, a
   finding, not red), unmeasured (a stated dimension with nothing measured)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.profile :as profile]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.profile :as profile] [seon.config :as config]
             [clojure.test :as t] [clojure.string :as str] [seon.print :as print]))
 
 ;; ---- the judge (pure) -----------------------------------------------------------------
@@ -162,13 +162,26 @@
 
 (declare units)
 
+(defn sizes
+  "The sizes a proof measures: its sizes, ascending, up to cap (:seon.config.proofs/cost-max-n),
+  and at least its two smallest, the fewest a growth fit needs ([100 1000 10000] at cap 1000:
+  [100 1000]; [1000 10000 100000]: [1000 10000]). Never a size smaller than the proof states:
+  scaled down to n=10, fixed per-call costs swamp the per-element price its estimate states
+  (print-cost and ref proofs went 1.8-5x over). Building the input at 10k cost 10-19 s per
+  proof in every run (notes/test-time-2026-10-23.md); the full run measures as written."
+  {:malli/schema [:=> [:cat [:sequential pos-int?] pos-int?] [:vector pos-int?]]}
+  [ns cap]
+  (let [ns (vec (sort ns))]
+    (into (vec (take 2 ns)) (filter #(<= % cap)) (drop 2 ns))))
+
 (defn run
-  "Estimate e measured: its function on its input at each size, ascending, stopping after
-  the first size over its estimate. Answers {:rows :verdict}."
+  "Estimate e measured: its function on its input at each size (sizes, under
+  :seon.config.proofs/cost-max-n), ascending, stopping after the first size over its estimate.
+  Answers {:rows :verdict}."
   {:malli/schema [:=> [:cat :seon.cost/estimate] [:map [:rows [:vector :seon.cost/row]] [:verdict :seon.cost/verdict]]]}
   [e]
   (let [f @(requiring-resolve (:of e)) input @(requiring-resolve (:input e))]
-    (loop [[n & more] (sort (:sizes e)) rows []]
+    (loop [[n & more] (sizes (:sizes e) (config/value :seon.config.proofs/cost-max-n)) rows []]
       (if (nil? n)
         {:rows rows :verdict (judge e rows)}
         (let [row {:n n :measured (measure f (vec (input n))) :expected (expected e units n)}

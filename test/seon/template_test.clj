@@ -43,4 +43,4 @@
     (is (= #{'demo-test/workouts-test} (:proofs (:seon.task/accumulated (ts "demo/workouts-implement"))))
         "the request's proofs reach implement along :needs")
     (is (= :seon.task/refused (:seon.error/type (tpl/request-tx after (assoc req :seon.task/needs #{"demo/nothing"}))))
-        "a refusal answers as it is, and nothing is written")))
+        "an error answers as it is, and nothing is written")))

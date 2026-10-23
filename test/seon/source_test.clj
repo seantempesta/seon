@@ -259,7 +259,7 @@
         ;; run's) otherwise opens a store whose main already holds these merges, made in another
         ;; run's clone (task seon.source/the-restart-test-runs-its-root-on-its-own-store)
         env ["env" (str "SEON_RUNS=" dir "/runs") (str "SEON_STORE=" dir "/runs/store") "SEON_MAIN=main"
-             (str "SEON_ENTRANCE_PORT=" port) "SEON_WEB_PORT=0"]
+             (str "SEON_SERVER_PORT=" port) "SEON_WEB_PORT=0"]
         root! (fn [& args] (apply ts/binary-sh (concat env [(str here "/bin/root")] args)))
         ;; one request line, then its one reply line: the read ends on the reply, or on EOF when the
         ;; root closes the connection or dies (nil, a recorded verdict); nc -w never times out on macOS
@@ -355,9 +355,9 @@
       (is (= (str/replace text "\n :seon.attempt/pid :int" "")
              (edit [[:db/retractEntity [:schema/key :seon.attempt/pid]]]))))
     (testing "a new key after the last entry, read back as written"
-      (let [out (edit [{:schema/key :seon.attempt/refusal :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]
-        (is (= (str (subs text 0 (- (count text) 2)) "\n :seon.attempt/refusal [:map [:seon.error/message :string]]}\n") out))
-        (is (= (assoc (edn/read-string text) :seon.attempt/refusal [:map [:seon.error/message :string]])
+      (let [out (edit [{:schema/key :seon.attempt/invalid :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]
+        (is (= (str (subs text 0 (- (count text) 2)) "\n :seon.attempt/invalid [:map [:seon.error/message :string]]}\n") out))
+        (is (= (assoc (edn/read-string text) :seon.attempt/invalid [:map [:seon.error/message :string]])
                (edn/read-string out)))))))
 
 ;; ---- a merge loads in place (BUILD plan P4) ---------------------------------------------
