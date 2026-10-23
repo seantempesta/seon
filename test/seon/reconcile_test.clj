@@ -1,5 +1,5 @@
 (ns seon.reconcile-test
-  "(reconcile db), index then actions, answers exactly the expected actions for a table of task graphs: needs
+  "(actions-for db), index then actions, answers exactly the expected actions for a table of task graphs: needs
   DAGs, max-running, held and cancelled tasks, environment changes, a previous root's
   runs, ended runs judged by the done rule, dead agents."
   (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is are testing]]
@@ -13,7 +13,7 @@
 
 (defn- empty-db [] (ts/test-db))
 
-(defn- reconcile "The actions that move db toward its desired state: index, then actions." [db] (r/actions (r/index db)))
+(defn- actions-for "The actions that move db toward its desired state: index, then actions." [db] (r/actions (r/index db)))
 
 (defn- decl [nm & {:keys [needs proofs model]}]
   (cond-> {:seon.task/ns 'demo :seon.task/name nm :seon.task/plan (str "Make " nm " true.")
@@ -66,7 +66,7 @@
     (is (= :held (r/task-state (r/index (db-of diamond :released [])) "demo/a")) "never released")))
 
 (deftest needs-dag-starts-in-dependency-order
-  (are [db expected] (= expected (reconcile db))
+  (are [db expected] (= expected (actions-for db))
     ;; nothing done: only the root of the diamond can start
     (db-of diamond) [(spawn "a" 1)]
     ;; a merged: b and c start, d waits for both
@@ -80,7 +80,7 @@
 
 (deftest max-running-caps-parallel-runs
   (let [three [(decl "x") (decl "y") (decl "z")]]
-    (are [db expected] (= expected (reconcile db))
+    (are [db expected] (= expected (actions-for db))
       (db-of three :max-running 1) [(spawn "x" 1)]
       (db-of three :max-running 2) [(spawn "x" 1) (spawn "y" 1)]
       ;; x running: one slot left of two
@@ -90,7 +90,7 @@
 
 (deftest nothing-autoruns-held-and-cancelled
   (let [three [(decl "x") (decl "y") (decl "z")]]
-    (are [db expected] (= expected (reconcile db))
+    (are [db expected] (= expected (actions-for db))
       ;; written tasks are held
       (db-of three :released []) []
       ;; only the released one starts
@@ -101,32 +101,32 @@
 (deftest cancel-kills-and-blocks-dependents
   (let [db (db-of diamond :extra (concat (merged "a") (run "b" 1 :running) (run "c" 1 :running)
                                          (task/execution-tx ["demo/b"] :cancelled)))]
-    (is (= [{:op :kill :run "demo/b#1" :reason :cancelled}] (reconcile db)))
+    (is (= [{:op :kill :run "demo/b#1" :reason :cancelled}] (actions-for db)))
     (is (= #{"demo/b" "demo/c"} (r/blocked-by (r/index db) "demo/d")))
     ;; killed: nothing restarts it, and d stays blocked once c merges
     (let [db (d/db-with db (concat (task/status-tx db "demo/b#1" :running :killed {})
                                    (task/status-tx db "demo/c#1" :running :merged {})))]
-      (is (= [] (reconcile db)))
+      (is (= [] (actions-for db)))
       (is (= #{"demo/b"} (r/blocked-by (r/index db) "demo/d"))))))
 
 (deftest held-kills-without-restart
   (let [db (db-of [(decl "x")] :extra (concat (run "x" 1 :running) (task/execution-tx ["demo/x"] :held)))]
-    (is (= [{:op :kill :run "demo/x#1" :reason :held}] (reconcile db)))))
+    (is (= [{:op :kill :run "demo/x#1" :reason :held}] (actions-for db)))))
 
 (deftest environment-change-restarts-clean
   (let [db (db-of [(decl "x" :model "m1")] :extra (concat (run "x" 1 :running :model "m1")
                                                           (task/env-tx "demo/x" {:model "m2"})))]
-    (is (= [{:op :kill :run "demo/x#1" :reason :env-changed}] (reconcile db)))
+    (is (= [{:op :kill :run "demo/x#1" :reason :env-changed}] (actions-for db)))
     (let [db (d/db-with db (task/status-tx db "demo/x#1" :running :killed {}))]
-      (is (= [(spawn "x" 2 :model "m2")] (reconcile db))))))
+      (is (= [(spawn "x" 2 :model "m2")] (actions-for db))))))
 
 (deftest a-previous-roots-runs-are-reaped-and-resumed
   (let [db (db-of [(decl "x") (decl "y" :needs ["x"])] :extra (run "x" 1 :running :boot "boot-0"))]
-    (is (= [{:op :reap :run "demo/x#1"} (spawn "x" 2)] (reconcile db)))
+    (is (= [{:op :reap :run "demo/x#1"} (spawn "x" 2)] (actions-for db)))
     (is (= #{} (:live (r/index db))))))
 
 (deftest ended-runs-are-judged-by-the-done-rule
-  (are [extra expected] (= expected (reconcile (db-of diamond :extra extra)))
+  (are [extra expected] (= expected (actions-for (db-of diamond :extra extra)))
     ;; green: a work task is accepted on its branch
     (run "a" 1 :ended :outcome :green :results {(t "a") :pass (t "b") :fail})
     [{:op :accept :run "demo/a#1" :task "demo/a"}]
@@ -252,7 +252,7 @@
 
 (deftest an-ended-run-of-a-cancelled-task-is-closed
   (is (= [{:op :close :run "demo/a#1"}]
-         (reconcile (db-of diamond :extra (concat (run "a" 1 :ended :outcome :green :results {(t "a") :pass})
+         (actions-for (db-of diamond :extra (concat (run "a" 1 :ended :outcome :green :results {(t "a") :pass})
                                                     (task/execution-tx ["demo/a"] :cancelled)))))))
 
 (deftest done-explain-table
@@ -282,8 +282,8 @@
         y (fn [basis] (into (run "y" 1 :ended :outcome :green :results {(t "x") :fail (t "y") :pass})
                             [{:seon.run/id "demo/y#1" :seon.run/basis-t basis}]))]
     (is (= {:op :accept :run "demo/y#1" :task "demo/y"}
-           (first (reconcile (db-of two :extra (concat merged-x (y 50)))))))
-    (is (= :hold (:op (first (reconcile (db-of two :extra (concat merged-x (y 150))))))))))
+           (first (actions-for (db-of two :extra (concat merged-x (y 50)))))))
+    (is (= :hold (:op (first (actions-for (db-of two :extra (concat merged-x (y 150))))))))))
 
 (deftest contracts-are-checked
   ;; with the contracts on (:seon.config.contract/instrument, config: in every digest), a call
@@ -331,16 +331,16 @@
            (select-keys (task/task db "demo/a-merge") [:seon.task/kind :seon.task/needs :seon.task/branch])))
     (is (= #{"demo/a-merge"} (:seon.task/needs (task/task db "demo/b"))))
     (testing "a's work first; accepted on its branch, its merge task starts on the same branch"
-      (is (= [(mspawn "a" 1)] (reconcile db)))
+      (is (= [(mspawn "a" 1)] (actions-for db)))
       (let [db (d/db-with db (run "a" 1 :done))]
-        (is (= [(mspawn "a-merge" 1)] (reconcile db)))
+        (is (= [(mspawn "a-merge" 1)] (actions-for db)))
         (testing "b waits for a's merge, not a's work"
           (is (= #{"demo/a-merge"} (r/blocked-by (r/index db) "demo/b"))))))))
 
 (deftest green-merge-run-merges
   ;; an octopus merge of one: no other merge run runs
   (is (= [{:op :octopus-merge :run "demo/a-merge#1" :members [{:run "demo/a-merge#1" :task "demo/a-merge"}]}]
-         (reconcile (mdb [(decl "a")] :extra (concat (run "a" 1 :done)
+         (actions-for (mdb [(decl "a")] :extra (concat (run "a" 1 :done)
                                                        (run "a-merge" 1 :ended :outcome :green :results {(t "a") :pass}))))))
   ;; (the run helper names branches by task id; only the action matters here)
   )
@@ -355,7 +355,7 @@
   ;; unrun (an open problem until they run)
   (let [gate {:seon.root/id :root :seon.config.source/gate-checkout "/the/merges/tree"}
         asked {:seon.task/id "demo/a-merge" :seon.task/gate? true}
-        judged (fn [root go & kv] (reconcile (mdb [(decl "a")] :extra (concat (run "a" 1 :done)
+        judged (fn [root go & kv] (actions-for (mdb [(decl "a")] :extra (concat (run "a" 1 :done)
                                                                              (apply run "a-merge" 1 :ended :outcome :green :results {(t "a") :pass}
                                                                                     :deferred ['seon.root-test/boots] kv)
                                                                              (when go [go])
@@ -383,7 +383,7 @@
   ;; so a merge is never behind; work tasks still run in parallel
   (let [three [(decl "x") (decl "y") (decl "z")]
         done-work (mapcat #(run % 1 :done) ["x" "y" "z"])]
-    (are [extra expected] (= expected (map :task (filter #(= :spawn (:op %)) (reconcile (mdb three :extra extra)))))
+    (are [extra expected] (= expected (map :task (filter #(= :spawn (:op %)) (actions-for (mdb three :extra extra)))))
       done-work ["demo/x-merge"]
       ;; one merge running: none starts
       (concat done-work (run "x-merge" 1 :running)) []
@@ -392,7 +392,7 @@
       ;; merged: the next one starts
       (concat done-work (run "x-merge" 1 :merged)) ["demo/y-merge"])
     (testing "work tasks are not queued"
-      (is (= ["demo/x" "demo/y" "demo/z"] (map :task (reconcile (mdb three))))))))
+      (is (= ["demo/x" "demo/y" "demo/z"] (map :task (actions-for (mdb three))))))))
 
 (deftest boot-records-merge-max-running-one
   ;; DECISIONS: octopus merges stay off (one merge at a time) until the octopus merge's combined test run
@@ -405,15 +405,15 @@
   ;; x and y change disjoint definitions: an octopus merge could take both, but the config says 1
   (let [two [(decl "x") (decl "y")]
         extra (concat (run "x" 1 :done :changed #{"[:var app.m/x]"}) (run "y" 1 :done :changed #{"[:var app.m/y]"}))]
-    (is (= ["demo/x-merge"] (map :task (filter #(= :spawn (:op %)) (reconcile (mdb two :extra extra))))))
+    (is (= ["demo/x-merge"] (map :task (filter #(= :spawn (:op %)) (actions-for (mdb two :extra extra))))))
     (testing "an octopus merge is turned on by writing the fact"
       (is (= ["demo/x-merge" "demo/y-merge"]
-             (map :task (filter #(= :spawn (:op %)) (reconcile (mdb two :extra (concat extra [{:seon.root/id :root :seon.config.merge/max-running 8}]))))))))))
+             (map :task (filter #(= :spawn (:op %)) (actions-for (mdb two :extra (concat extra [{:seon.root/id :root :seon.config.merge/max-running 8}]))))))))))
 
 (deftest unmerged-refuses-done
   (is (= [{:op :hold :run "demo/a#1" :task "demo/a"
            :problem "run demo/a#1 ended green: unmerged [:var app/f]"}]
-         (reconcile (db-of diamond :extra (run "a" 1 :ended :outcome :green :results {(t "a") :pass}
+         (actions-for (db-of diamond :extra (run "a" 1 :ended :outcome :green :results {(t "a") :pass}
                                                      :unmerged ["[:var app/f]"]))))))
 
 (deftest an-open-problem-its-work-caused-refuses-done
@@ -422,14 +422,14 @@
   (let [msg "docs/x.md#y cites app/f, which names nothing"]
     (is (= [{:op :hold :run "demo/a#1" :task "demo/a"
              :problem (str "run demo/a#1 ended green: open-problem " msg)}]
-           (reconcile (db-of diamond :extra (run "a" 1 :ended :outcome :green :results {(t "a") :pass} :caused [msg])))))
+           (actions-for (db-of diamond :extra (run "a" 1 :ended :outcome :green :results {(t "a") :pass} :caused [msg])))))
     (is (= [{:reason :open-problem :key msg}]
            (r/done-explain {:proofs #{(t "a")} :results {(t "a") :pass} :main-green #{} :allowed-red #{} :uncontracted #{} :caused #{msg}})))))
 
 (deftest behind-merge-gets-a-new-run
   (testing "root's merge found main moved: the merge task's next run is a new agent; no catch-up"
     (let [db (mdb [(decl "a")] :extra (concat (run "a" 1 :done) (run "a-merge" 1 :behind :outcome :green)))]
-      (is (= [(mspawn "a-merge" 2)] (reconcile db))))))
+      (is (= [(mspawn "a-merge" 2)] (actions-for db))))))
 
 (deftest design-may-leave-its-proofs-red
   ;; a design step's work is the plan: done only when the plan differs from the one it began with
@@ -461,18 +461,18 @@
                                                            nil (:seon.run/plan (task/run db "demo/a#1")) #{})))))))
   (testing "ended green with the plan unchanged: refused, so it is held for root, never accepted"
     (is (= [{:op :hold :run "demo/a#1" :task "demo/a" :problem "run demo/a#1 ended green: no-design"}]
-           (reconcile (design-db (run "a" 1 :ended :outcome :green :results {(t "a") :fail})))))))
+           (actions-for (design-db (run "a" 1 :ended :outcome :green :results {(t "a") :fail})))))))
 
 (deftest a-design-step-is-done-when-it-improved-the-plan
   ;; root's judge carried the plan the run improved on its branch to main (judge-tx)
   (is (= [{:op :accept :run "demo/a#1" :task "demo/a"}]
-         (reconcile (design-db (concat (run "a" 1 :ended :outcome :green :results {(t "a") :fail})
+         (actions-for (design-db (concat (run "a" 1 :ended :outcome :green :results {(t "a") :fail})
                                          [{:seon.task/id "demo/a" :seon.task/plan "Make a true. Design: (defn f [xs] ...) one pass over xs."}]))))))
 
 (defn- held
   "main db after the hold the reconciler's one action for it writes (its :hold op), and the action."
   [db]
-  (let [[act :as acts] (reconcile db)]
+  (let [[act :as acts] (actions-for db)]
     (assert (= [:hold] (map :op acts)) (pr-str acts))
     [(d/db-with db (r/hold-tx (task/run db (:run act)) (:problem act))) act]))
 
@@ -532,7 +532,7 @@
   (let [db (mdb [(decl "add")] :extra (run "add" 1 :ended :outcome :cap :results {(t "add") :fail}))
         [db' act] (held db)
         released (d/db-with db' (task/execution-tx ["demo/add"] :running))
-        [sp & more] (reconcile released)]
+        [sp & more] (actions-for released)]
     (is (nil? more))
     (is (= (mspawn "add" 2) sp) "a new run, on the task's own branch")
     (is (= (get-in (task/run db "demo/add#1") [:seon.run/env :branch]) (get-in sp [:env :branch])))
@@ -639,7 +639,7 @@
     (is (some? asked) "the first pass asks for the spawn")
     (is (= :refused (:seon.run/status run)) "the refused answer is written as the run")
     (is (= held-why (:seon.run/reason run)) "with root's reason")
-    (is (= [(spawn "a" 2)] (reconcile (d/db-with db written))) "the next pass starts the task again")))
+    (is (= [(spawn "a" 2)] (actions-for (d/db-with db written))) "the next pass starts the task again")))
 
 (deftest a-refused-task-asks-again-when-main-moves
   ;; if nothing has changed, asking again is refused again: neither the refused answer nor
@@ -682,7 +682,7 @@
     (is (= :held (:seon.task/execution (task/task judged "demo/a"))) "held for root, without a merge")
     (is (= f (:seon.task/failure (task/task judged "demo/a"))) "the failure, on main")
     (is (= :failed (r/task-state idx "demo/a")))
-    (is (= [{:op :close :run "demo/a#1"}] (reconcile judged)) "the run ends; nothing refines or retries it")
+    (is (= [{:op :close :run "demo/a#1"}] (actions-for judged)) "the run ends; nothing refines or retries it")
     (let [[row & more] (get-in (problems/report judged) [:classes :failed :rows])]
       (is (nil? more))
       (is (= {:task "demo/a" :reason "the premise is refuted" :counterexample "(= 1 2)" :open? true}

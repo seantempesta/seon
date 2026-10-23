@@ -132,7 +132,7 @@
 
 (defn- ns-form
   "A file's first form when it is an ns form naming its namespace, read once (not run), or nil."
-  {:malli/schema [:=> [:cat :string] :any]}
+  {:malli/schema [:=> [:cat :string] [:maybe [:sequential :any]]]}
   [text]
   (let [form (binding [*ns* (the-ns 'user)] (read {:eof nil} (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. text))))]
     (when (and (seq? form) (= 'ns (first form)) (symbol? (second form))) form)))
