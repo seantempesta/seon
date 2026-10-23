@@ -6,7 +6,7 @@
             [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.watch :as watch] [datahike.api :as d]))
 
 (defn- write-declared!
-  "Declared state's tx written on main: the refusal that built it as it is; an empty tx
+  "Declared state's tx written on main: the error that built it as it is; an empty tx
   writes nothing ({:ok true :changed 0}); else the writer's answer, with counts, the datoms
   written and the citation problems of decls (seon.task/citation-problems) when any."
   {:malli/schema [:=> [:cat :seon.root/sys :any :map [:maybe [:sequential :any]]] :map]}
@@ -17,7 +17,7 @@
                 (cond-> (merge @(root/transact-main! sys tx) counts {:datoms (count tx)}) (seq ps) (assoc :problems ps)))))
 
 (defn create!
-  "Write task declarations as held tasks. Answers the writer's answer, or the refusal."
+  "Write task declarations as held tasks. Answers the writer's answer, or the error."
   {:malli/schema [:=> [:cat :seon.root/sys [:vector :seon.task/declaration]] :map]}
   [sys decls] (write-declared! sys (task/create-tx @(:conn sys) decls) {} decls))
 
@@ -25,7 +25,7 @@
   "Work request decl (seon.template/request: design -> implement -> merge on one branch):
   the linked set written released in one transaction on main (seon.template/request-tx),
   so no agent forks before every task of it is set. Answers the writer's answer with the
-  set's ids, or the refusal."
+  set's ids, or the error."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.task/declaration] :map]}
   [sys decl]
   (let [tx (tpl/request-tx @(:conn sys) decl)]
@@ -61,7 +61,7 @@
 
 (defn task-files
   "The task files under dir (:seon.config.root/tasks-dir by default), read:
-  {owning-ns declarations or refusal}. A file's name is its owning namespace. Each work
+  {owning-ns declarations or error}. A file's name is its owning namespace. Each work
   task is followed by its merge task (seon.template/with-merge, over all files, so a need
   on another file's work task is a need on its merge), derived here and never written in
   a file."
@@ -82,7 +82,7 @@
 (defn load-tasks!
   "Reconcile the task files into main (seon.task/load-tx): new entries created held, changed
   ones updated, removed ones cancelled; unchanged ones write nothing. Answers the writer's
-  answer with the counts, or the refusal. Releasing stays run!'s."
+  answer with the counts, or the error. Releasing stays run!'s."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-tasks! sys nil))
   ([sys dir]

@@ -111,7 +111,7 @@
       (swap! state assoc :db (:db-after r))
       {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
     (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta)})]
-      ;; past this process's block of entity ids: the typed refusal, nothing applied
+      ;; past this process's block of entity ids: the typed error, nothing applied
       (when-let [e (and (not (map? r)) (pdb/lease-spent r (:lease @state)))] (throw (ex-info (:seon.error/message e) e)))
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
       (swap! state assoc :db (:db-after r) :dirty? true)
@@ -151,7 +151,7 @@
     kind))
 
 (defn- fx-test
-  "An effect asked inside a test fork: the stub's outcome, or the declared refusal."
+  "An effect asked inside a test fork: the stub's outcome, or the declared error."
   {:malli/schema [:=> [:cat :keyword :map] :map]}
   [kind req]
   (if *fx-stub*
@@ -220,7 +220,7 @@
 (defn error-map
   "An exception caught at one of the agent's entrant boundaries (operation: the REPL's
   seon.repl/eval-code by default) as the one error map: its ex-data when that already is
-  one (a contract refusal names its operation, member and problems), else the
+  one (a contract's error names its operation, member and problems), else the
   :seon.agent/eval-error variant, with the exception's class, its ex-data printed by the one
   printer, and its cause chain (each cause's class and message)."
   {:malli/schema [:function [:=> [:cat :seon.host/throwable] :seon.error/base]
@@ -309,7 +309,7 @@
   inputs then are blank, which keys nothing stored: it only selects). A test is selected when
   it is a proof or reaches what the branch changed since base (a var, method, fixture, ns form,
   macro or schema entry), and runs when no green is stored at its digest
-  (seon.reconcile/done-refusals reads the selected). Scratch namespaces' tests (user,
+  (seon.reconcile/done-explain reads the selected). Scratch namespaces' tests (user,
   ^:scratch) never merge, so they never judge; a proof with no test var here does not run, and
   one with a var but no program facts (loaded, never recorded) has no digest: it always runs.
   With no base (a tree with nothing to diff against: root's on-change runs), the proofs and

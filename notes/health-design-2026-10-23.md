@@ -44,8 +44,8 @@ The owner suggested `d/listen` or the existing tx stream. Neither is needed for 
 
 - **The dashboard** already re-runs `report` when main's t moves. The new classes simply appear in the same unit. After commit 1, that unit is declared on `:seon.problems/report`'s render, grouped by area: docs, laws, contracts, tests, errors, attempts.
 - **An agent's context** renders its branch on each turn. It shows `caused` (its own problems) first, each with file:line and the fix the class names.
-- **The `seon_done` gate:** `seon.reconcile/done-refusals` (`reconcile.clj:37-63`) gains `:open-problems`, refused while `caused` is non-empty.
-- **The merge gate:** `seon.writer/merge-refusal` (`writer.clj:38`) gains the same rule.
+- **The `seon_done` gate:** `seon.reconcile/done-explain` (`reconcile.clj:37-63`) gains `:open-problems`, refused while `caused` is non-empty.
+- **The merge gate:** `seon.writer/merge-refused` (`writer.clj:38`) gains the same rule.
 
 What already exists:
 - The vendored Datahike supports `d/listen` (`reference-code/datahike/src/datahike/core.cljc:208`), but Seon never calls it, and it is unverified on Jolt.
@@ -117,7 +117,7 @@ The page-units path updates it: the unit's input is `report`'s value, and only a
    - `caused`;
    - each class with its deftest (red on a fixture branch that deletes a cited var, green after restoring it) and its cost proof.
    - About +90 lines of src.
-3. **Gates:** `:open-problems` in `done-refusals` and `merge-refusal`. About +12 lines.
+3. **Gates:** `:open-problems` in `done-explain` and `merge-refused`. About +12 lines.
 4. **Context:** the agent's context render shows `caused` first. About +10 lines.
 5. **Every writer:** `my.root/load-paths!` (about +20, built), then the `:watch` proc and `native/watch.c` (§5, after root's go on the event source).
 6. **Reported-problem closing:** an optional `:seon.error/subject` plus v1's changed-subject rule in `error-row`. About +15 lines.
@@ -168,7 +168,7 @@ Both are the write's own commit, so nothing runs on an idle tree and nothing pol
 
 ### 1. No contract: an open problem, one mechanism
 
-New class `:uncontracted` (area contracts) in `seon.problems`: a live var with `:var/kind :fn` and no `:var/contract`, row subject the var. It is a query over the facts `seon.problems/dead-citations` and `unnamed-sites` already read, so `caused` (`problems.clj:172`) carries it with no new code, and `done-refusals` (`reconcile.clj:63`) already refuses `:open-problem` for it.
+New class `:uncontracted` (area contracts) in `seon.problems`: a live var with `:var/kind :fn` and no `:var/contract`, row subject the var. It is a query over the facts `seon.problems/dead-citations` and `unnamed-sites` already read, so `caused` (`problems.clj:172`) carries it with no new code, and `done-explain` (`reconcile.clj:63`) already refuses `:open-problem` for it.
 
 What it replaces, so there is one mechanism (today there are four spellings of one question):
 - `seon.merge/uncontracted` (`merge.clj:112`) and `:contract-gap` (`reconcile.clj:59`, `context.clj:180-194`, `writer.clj:44-49`, `turn.clj:64-66`, `:seon.attempt/uncontracted` in `task.clj:161-283`): deleted. `caused` is the branch's head minus its merge base, the same difference `merge/uncontracted` takes over `:ours`, and the writer's `:branch-diff` already returns `:caused` (`writer.clj:191`). The merge gate asks `caused` as the judge does.

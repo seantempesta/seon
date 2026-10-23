@@ -19,6 +19,7 @@
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+"$ROOT/bin/ports" --write   # the port keys under their current names (bin/ports)
 T=$ROOT/target
 RC=$ROOT/reference-code
 STEP=${1:-all}

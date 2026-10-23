@@ -172,7 +172,7 @@
 (defn caused
   "The derived problems the branch at head has that base (its merge base) had not, by
   message: what the branch's own work broke. The done rule refuses while any is open
-  (seon.reconcile/done-refusals :open-problem), and the agent reads them each turn; an
+  (seon.reconcile/done-explain :open-problem), and the agent reads them each turn; an
   evaluation is never refused (AGENTS: get out of an agent's way)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :string]]}
   [base head]
@@ -229,7 +229,7 @@
               :answered-by (get-in ans [:from aid] []) :at-ms (:seon.attempt/end-ms p)}
         ;; a red proof is this attempt's problem when the task itself states it: an inherited
         ;; proof was green on main when the task started (its needs were done), so red now it
-        ;; is a regression, the attempt's refusal reason; another task's proof not green yet is
+        ;; is a regression, the attempt's reason; another task's proof not green yet is
         ;; an allowed red. Both stay in the attempt's facts as evidence, never problem rows.
         own (set (get-in p [:seon.attempt/task :seon.task/proofs]))
         failures (select-keys (:seon.attempt/failures p) own)

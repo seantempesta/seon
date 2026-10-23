@@ -27,7 +27,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **run-loop** | the step-fn contract run on one thread, lifecycle as messages | `seon.step/run-loop` |
 | **effect worker** | a proc performing one kind of effect (a file, a git commit, a build, a model call) off root's graph, its answer data | `seon.fx/procs`, `seon.fx/worker-proc` |
 | **server** (was door) | root's request server: the `:op`s a caller sends over the socket, and the `seon_*` MCP tools `bin/mcp` relays ([server](server.md#ops)) | `seon.server/ops` |
-| **holder** | a live agent holding a branch; a spawn on a held branch, or past the live-agent cap, is refused ([root](root.md#holders-and-spawn-refusals)) | `seon.root/spawn!` |
+| **holder** | a live agent holding a branch; a spawn on a held branch, or past the live-agent cap, is refused ([root](root.md#holders-and-refused-spawns)) | `seon.root/spawn!` |
 | **dashboard** | the web page root serves, a render of main's facts pushed as they change ([dashboard](dashboard.md)) | `seon.web/web-proc`, `seon.render.proc/render-proc` |
 | **config key** (was dial) | a config key: one documented value in `resources/seon/config/default.edn` (unit, provenance, bound), validated by its `seon.config.*` schema, read once at boot and written as facts on main | `seon.config`, `seon.config/from-db` |
 
@@ -49,9 +49,9 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 |---|---|---|
 | **contract** | a function's ``:malli/schema``, checked from its definition on (inputs, arity, output) | `seon.contract/defn` |
 | **registry** | the named schemas, data in ``resources/seon/schemas/*.edn`` | `seon.contract/registry` |
-| **invalid** (was refusal) | a contract's failure, explained (`m/explain`), thrown as the one error map (`:seon.error/type`) | `seon.contract/error` |
+| **invalid** (was refusal) | a contract's failure, explained (`m/explain`), thrown as the one error map (`:seon.error/type`) | `seon.contract/invalid` |
 | **instrument** (was admit) | an agent's def armed by its contract, or warned (the uncontracted set grows) | `seon.repl/wrap-instrument` |
-| **instrument mode** (was guarantees) | `:seon.config.contract/guarantees` (`SEON_GUARANTEES`): `:on`, `:contracts` (no recording), `:off` | `seon.contract/on?`, `record?` |
+| **instrument mode** (was guarantees) | `:seon.config.contract/instrument` (`SEON_INSTRUMENT`): `:on`, `:contracts` (no recording), `:off` | `seon.contract/on?`, `record?` |
 
 ## Data (Datahike's and git's words)
 
@@ -73,13 +73,13 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **task** | an entity of desired state: plan, instructions, proofs, `:needs`, environment, execution | `seon.task` |
 | **needs** | a task's prerequisites (refs); the only dependency edge, no chain entity | `seon.task/create-tx` |
 | **accumulated** | a task's plan and proofs with its prerequisites', derived along `:needs` | `seon.task/tasks` |
-| **attempt** | observed state: one agent working one task once (`task#n`); a spawn root refused is an attempt too (`:refused`, no agent, root's reason), named by `seon.reconcile/stuck` at quiescence and asked again only once main moves for another reason. Its turns, model calls and tokens are what its end measured: absent when unknown (no end is outcome `:no-end`), never 0 ([root](root.md#attempts-and-judging)) | `seon.task/attempt-start-tx` |
+| **attempt** | observed state: one agent working one task once (`task#n`); a spawn root refused is an attempt too (`:refused`, no agent, root's reason), named by `seon.reconcile/root-causes` at quiescence and asked again only once main moves for another reason. Its turns, model calls and tokens are what its end measured: absent when unknown (no end is outcome `:no-end`), never 0 ([root](root.md#attempts-and-judging)) | `seon.task/attempt-start-tx` |
 | **template** | a task kind's defaults: work, design, implement, test, merge | `seon.template` |
 | **merge task** | an ordinary task (kind `:merge`) whose new agent merges main into the branch and goes green | `seon.template/with-merge` |
 | **request** | what someone asked, as design → implement → merge tasks on one branch, written in one transaction | `seon.template/request` |
 | **held for root** | a task whose attempt was refused (done rule, dead agent, refused merge) or marked failed: its failure and evidence on it, execution `:held`, state `:failed`, until root releases, edits or cancels it; never retried on its own | `seon.reconcile/hold-tx` |
 | **observed state** | what happened to a task (running, blocked, open, held, failed, done, merged, cancelled; `:seon.task/state`), derived once from the index | `seon.reconcile/task-state` |
-| **done rule** | why an attempt's measured facts do not make its task done; empty means done | `seon.reconcile/done-refusals` |
+| **done rule** | why an attempt's measured facts do not make its task done; empty means done | `seon.reconcile/done-explain` |
 | **reconciler** | the pure function of main's db to actions, and the proc that carries them out | `seon.reconcile/reconcile`, `reconciler-proc` |
 | **flight** | one action carried out as a chain of requests and answers in the reconciler proc | `seon.reconcile/advance` |
 | **turn loop** | inside an agent: observe, then end or act (context to the model, forms through the REPL path) | `seon.turn/work!` |

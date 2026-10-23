@@ -119,7 +119,7 @@
    :attach {:doc "Work a task as a Seon agent: root starts an agent on the task's branch (model outside) and answers its id."
             :args {:task {:type "string" :description "ns/name"}} :required ["task"]
             :answer (fn [sys _ req] (attach! sys (:task req)))}
-   :done {:doc "Hand the attempt the agent works back to root: its proofs run, it is judged, and merged when the done rule has no refusal."
+   :done {:doc "Hand the attempt the agent works back to root: its proofs run, it is judged, and merged when the done rule has no reason."
           :args {:agent {:type "string"}} :required ["agent"]
           :answer (fn [sys ag _]
                     (if-let [{:keys [attempt task env]} (attempt-of sys ag)]

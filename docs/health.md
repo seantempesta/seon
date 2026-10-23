@@ -34,7 +34,7 @@ A law the compiler's facts answer exactly is a derived class too: `seon.problems
 `seon.problems/caused` is the set of derived problems a branch's head has that its merge base had not: what the branch's own work broke.
 - The agent's turn computes it each turn (`seon.turn`'s observe), so its context lists them with the done rule's other refusals.
 - Root's judge records it at the attempt's end (`:seon.attempt/caused`, from the writer's `:branch-diff`).
-- `seon.reconcile/done-refusals` refuses `:open-problem` while any is open, so a refinement attaches naming it ([tasks](tasks.md#the-done-rule)).
+- `seon.reconcile/done-explain` gives `:open-problem` as a reason while any is open, so the task is held for root naming it ([tasks](tasks.md#the-done-rule)).
 
 Nothing gates an evaluation. An agent may break a citation in one eval and fix it three evals later (AGENTS §4: get out of an agent's way). A merge needs no rule of its own: a branch behind main is refused `:behind` and judged again after merging main.
 
