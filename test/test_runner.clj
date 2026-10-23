@@ -10,7 +10,7 @@
   bin/test runs each shard in a process of its own, at once. The program the plan reads is kept
   per git tree in a store of its own (program-db)."
   (:require [seon.profile :as profile] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
-            [datahike.api :as d] [seon.config :as config] [seon.db :as pdb]
+            [datahike.api :as d] [seon.config :as config] [seon.db :as pdb] [seon.test-store :as ts]
             [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.source :as source] [seon.system :as system]))
 
 (defn- test-namespaces
@@ -264,13 +264,16 @@
   (let [t0 (profile/now-ns)
         dir (config/value :seon.config.source/test-results-dir)
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left digests steps missing inputs binary]} (plan-of (source-tree) what all? names (config/value :seon.config.proofs/program-store))
+        {:keys [run-tests run-steps reused cand left digests steps missing inputs binary]} (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store)))
         n (write-shards! out run-tests digests (:tree inputs))
         ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
         ;; mode): bin/test builds target/seon only when this is not empty, bin/check seeds only for the steps
         step-bin (filterv proofs/step-needs-binary? run-steps)
         bin-keys (into (vec (filter binary run-tests)) step-bin)
         _ (write! (str out "/binary") (str (str/join " " bin-keys) (when (seq bin-keys) "\n")))
+        ;; the process tests' store, made here before any shard starts (shards' roots that each made
+        ;; it raced: seon.test-store/process-store), for this schema (seon.test-store/kept-store!)
+        _ (when (seq (filter binary run-tests)) (ts/make-process-store! (config/checkout)))
         _ (write! (str out "/steps-binary") (str (str/join " " step-bin) (when (seq step-bin) "\n")))]
     (when left
       (println (str "prove: " (count left) " tests and steps that reach a process left out (run them by name:"

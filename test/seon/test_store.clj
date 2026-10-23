@@ -14,6 +14,24 @@
            (let [conn (d/connect cfg)] (pdb/ids! conn) (pdb/seed! conn 2000) (d/release conn))
            cfg)))
 
+(defn kept-store!
+  "The path of the kept store of regenerable output at base for this schema,
+  base-<seon.db/schema-digest> (the test runner's program store, the process tests' store); a
+  store at base made with another schema (base itself, or base-<8 hex digits> but this one) is
+  removed: it is output, made again from its inputs, never a record, so a changed schema makes a
+  new store, nothing migrated or refused (task seon.test-store/a-kept-store-is-keyed-by-its-schema).
+  Nothing is made here; the caller opens it."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [base]
+  (let [f (java.io.File. ^String base)
+        dir (.getParentFile f)
+        stem (.getName f)
+        keyed (str stem "-" pdb/schema-digest)
+        old (re-pattern (str "\\Q" stem "\\E(-[0-9a-f]{8})?"))]
+    (doseq [n (some-> dir .list seq) :when (and (re-matches old n) (not= n keyed))]
+      (sh/sh "rm" "-rf" (str dir "/" n)))
+    (str dir "/" keyed)))
+
 (def ^:private program-store-path
   "This process's store of kept program dbs, one branch per git tree (test-runner/program-db),
   under target/tmp: a test process's own, so shards running at once never share one; removed
@@ -29,8 +47,8 @@
 
 (defn process-store
   "The path of the one durable store the process tests' roots take a branch of (each its own
-  main): <checkout>/target/runs/test-store, made once by bin/test before any shard starts
-  (seon seed 0, as bin/check seeds its store), so no two shards' roots ever create it at once.
+  main): <checkout>/target/runs/test-store-<schema digest> (kept-store!), made once by bin/test's
+  plan before any shard starts (make-process-store!), so no two shards' roots ever create it at once.
   A root that found it missing created it (seon.db/open!), and another root starting in
   another shard meanwhile saw its data file and opened a database not yet made: \"Database
   does not exist\" (task seon.test-store/the-process-store-is-made-before-any-shard). A missing
@@ -38,11 +56,23 @@
   {:malli/schema [:function [:=> [:cat] :string] [:=> [:cat :string] :string]]}
   ([] (process-store (.getCanonicalPath (java.io.File. "."))))
   ([checkout]
-   (let [path (str checkout "/target/runs/test-store")]
+   (let [path (str checkout "/target/runs/test-store-" pdb/schema-digest)]
      (when-not (pdb/store? path)
-       (throw (ex-info (str "no process store at " path ": bin/test makes it (seon seed 0) before any shard starts; run the test through bin/test")
+       (throw (ex-info (str "no process store at " path ": bin/test makes it (its plan: make-process-store!) before any shard starts; run the test through bin/test")
                        {:seon.error/type :seon.test-store/no-process-store :path path})))
      path)))
+
+(defn make-process-store!
+  "The process tests' store (process-store) of checkout, made when missing (the schema and no
+  example program on :db, as a root's own store starts) and every one of another schema removed
+  (kept-store!): bin/test's plan calls it before any shard starts, when a selected test runs
+  the binary. Answers its path."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [checkout]
+  (let [path (kept-store! (str checkout "/target/runs/test-store"))]
+    (.mkdirs (.getParentFile (java.io.File. ^String path)))
+    (d/release (:conn (pdb/open! :lmdb path 0 :db)))
+    path))
 
 (defn test-db
   "The test store's seed as a db value (the schema and about 2,000 datoms of the example
