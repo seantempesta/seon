@@ -13,7 +13,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program] [seon.db :as pdb]
             [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]
-            [jolt.deps] [clojure.edn :as edn]))
+            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx]))
 
 (defn- reap
   "Every child that exited, as :exit events (non-blocking waitpid), and st without them in
@@ -45,7 +45,11 @@
   ([] {:ins {:cmd "main's commits and fork requests, FIFO; :tick when idle"} :outs {:ev "events for root"}
        :workload :io
        :ping-map-fn (fn [st] {:t (:max-tx (:db st)) :mismatch (:mismatch st)})})
-  ([{:keys [db conn]}] {:db db :mismatch 0 :conn conn :status-buf (ffi/alloc 4) :children #{}})
+  ;; :graph, main's reach graph (seon.program/reach-graph), kept with :db through each commit and
+  ;; handed to every agent forked (seon.agent/base-graph): built here once per root boot, a
+  ;; standby inherits it
+  ([{:keys [db conn graph]}] {:db db :graph (or graph (program/reach-graph db (fx/declared-refs (cfg/value :seon.config.root/system-path))))
+                              :mismatch 0 :conn conn :status-buf (ffi/alloc 4) :children #{}})
   ;; stop (root closed its end, or died): every child (agents, the standby) killed and reaped
   ;; before this process exits, so root's waitpid of this server is the end of every one of
   ;; them. An agent that had closed its socket but not yet exited was handed to launchd when
@@ -63,14 +67,14 @@
            (let [t0 (profile/now-ns)
                  ;; main's commit as main's own transaction t (seon.db/replay)
                  db' (pdb/replay (:db st) (:t m) (:tx-data m) (:tx-meta m {}))
-                 st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc))
+                 st (cond-> (assoc st :db db' :graph (program/reach-update (:graph st) db')) (not= (:max-tx db') (:t m)) (update :mismatch inc))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled
                  errs (seq (program/load-changes! db' (:tx-data m)))]
              [st {:ev (cond-> [] errs (conj {:ev :load-errors :t (:t m) :errors (vec errs)})
                         true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (profile/ms-since t0)
                                     :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}]))
      :fork (let [t0 (profile/now-ns)]
-             (fork-carrying! st #(repl/run! % m (:db st) (:ns m))
+             (fork-carrying! st #(repl/run! % (assoc m :graph (:graph st)) (:db st) (:ns m))
                              (fn [n] [st {:ev [{:ev :fork-failed :agent (:agent m) :active-threads n}]}])
                              (fn [pid] (let [[st evs] (reap (update st :children conj pid))]
                                          [st {:ev (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
@@ -83,7 +87,7 @@
      ;; a standby (session F2): a fork of this server, idle on its own named pipes until root
      ;; promotes it, so that no fork after boot ever comes from root (multithreaded).
      ;; The previous standby is killed: one standby at a time.
-     :standby (fork-carrying! st #(main (:db st) % false)
+     :standby (fork-carrying! st #(main (:db st) % false (:graph st))
                               (fn [n] [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads n}]}])
                               (fn [pid] (when-let [old (:standby-pid st)] (lib/c-kill old 9))
                                 (let [[st evs] (reap (-> st (assoc :standby-pid pid) (update :children conj pid)))]
@@ -108,8 +112,9 @@
   that every agent, test child and clone inherits; a standby (boot? false) stays in it.
   EOF on the socket is root's death: the server kills the group, itself included. Never
   returns."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.lib/fd :boolean] :any]}
-  [db0 fd boot?]
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.lib/fd :boolean] :any] [:=> [:cat :seon.host/db :seon.lib/fd :boolean [:maybe :map]] :any]]}
+  ([db0 fd boot?] (main db0 fd boot? nil))
+  ([db0 fd boot? graph]
   ;; every agent forked from here works in the scratch dir, with no repository above it: an
   ;; agent changes code through its REPL and git finds nothing (owner, 2026-10-22)
   (when boot? (lib/c-setpgid 0 0) (dev-classpath!)
@@ -117,10 +122,10 @@
   (let [conn (sock/conn fd)
         recv! (fn [] (let [m (sock/recv-within! conn 100)]
                        (case m :eof nil :timeout [:cmd {:op :tick}] [:cmd m])))]
-    (step/run-loop #'server-step {:db db0 :conn conn}
+    (step/run-loop #'server-step {:db db0 :conn conn :graph graph}
                    recv! (fn [_ m] (sock/send! fd m)))
     (lib/c-kill 0 9)
-    (lib/c-exit 0)))
+    (lib/c-exit 0))))
 
 ;; ---- root's side: the :fork-server proc (proto/flow f2-final proto.control) ----------
 

@@ -19,7 +19,7 @@
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task :attempt (the task and attempt root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
-;; :base-graph (test-plan's reach graph of its base, keyed by the base value: base-graph)
+;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 (defonce state (atom nil))
 
@@ -299,20 +299,23 @@
 
 (defn- base-graph
   "The reach graph of base under inputs, with its index ({:graph :index}: seon.program/
-  reach-graph, graph-index), reused while base is the very value built last: a value never
-  changes, so neither does its graph (AGENTS §5, results reused by input). An attempt's base
-  stays one value until merge-main! replaces it, so its graph is built once per base; each plan
-  of the branch updates it by what the branch changed (seon.program/reach-update). Measured
-  2026-10-23 on Seon's program (2,616 forms): the graph 640 ms, 816 MB; a one-form change's
-  update and index 20-45 ms."
+  graph-index), reused while base is the very value it was made for: a value never changes,
+  so neither does its graph (AGENTS §5, results reused by input). A new base (merge-main!, a
+  resumed branch's older one) is the graph held updated to it (seon.program/reach-update, in
+  either direction), never built again: the graph held is the one this process was forked
+  with, main's, kept by the fork server (:graph), and built here only when there is none or
+  its :data-refs are not inputs'. Measured 2026-10-23 on Seon's program (2,616 forms): the
+  graph 640 ms, 816 MB; a one-form change's update and index 20-45 ms."
   {:malli/schema [:=> [:cat :seon.host/db :seon.program/inputs] :map]}
   [base inputs]
-  (let [w (:base-graph @state)]
-    (if (and w (identical? base (:db w)) (= inputs (:inputs w)))
+  (let [{w-db :db g0 :graph :as w} (:base-graph @state)]
+    (if (and w (identical? base w-db) (= inputs (:inputs w)))
       (:value w)
-      (let [g (program/reach-graph base (:data-refs inputs))
+      (let [g (cond (not (and g0 (= (:data-refs inputs) (:data-refs g0)))) (program/reach-graph base (:data-refs inputs))
+                    (identical? base w-db) g0
+                    :else (program/reach-update g0 base))
             v {:graph g :index (program/graph-index g inputs nil)}]
-        (swap! state assoc :base-graph {:db base :inputs inputs :value v})
+        (swap! state assoc :base-graph {:db base :graph g :inputs inputs :value v})
         v))))
 
 (defn test-plan
@@ -665,7 +668,7 @@
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
-  [fd {id :agent branch :branch task :task attempt :attempt cfg :cfg resumed :resumed commit :commit t :t} db0 serve]
+  [fd {id :agent branch :branch task :task attempt :attempt cfg :cfg resumed :resumed commit :commit t :t graph :graph} db0 serve]
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
   (sock/clofork! fd)
@@ -692,11 +695,14 @@
      ;; :base is the branch's merge base with main: a new branch's is the image (main as it
      ;; forked); a resumed one's is older than main, and comparing against main's head would
      ;; read main's later changes as the branch's (seon.program/divergence, changed-vars)
-     (reset! state {:id id :branch branch :task task :attempt attempt :fd fd :conn c :db @store-conn
+     (reset! state (cond-> {:id id :branch branch :task task :attempt attempt :fd fd :conn c :db @store-conn
                    :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
-                   :ns nsx :interrupt-ok intr-ok :serve serve})
+                   :ns nsx :interrupt-ok intr-ok :serve serve}
+                   ;; main's reach graph as the fork server keeps it, for db0: test-plan's base
+                   ;; graph starts from it (base-graph), never built in this process
+                   graph (assoc :base-graph {:db db0 :graph graph})))
      ;; a kept branch, resumed (root released its held task: seon.reconcile/hold-tx), takes
      ;; its task from main, with the failure and evidence the last attempt left there
      (when-let [tx (when resumed (not-empty (task/onto-tx db0 @store-conn task)))]
