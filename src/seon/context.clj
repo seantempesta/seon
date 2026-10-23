@@ -78,13 +78,13 @@
 
 (defn- cited-view
   "What citation c asks to see, at its depth: a wiki section from main's sections, else a file of
-  the checkout read now (never stored), else a namespace; a citation that reaches nothing says
-  so, as an unresolved name does."
+  the checkout read now (never stored), else a task by its ns/name, else a namespace; a
+  citation that reaches nothing says so, as an unresolved name does."
   {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :map]}
   [db {:seon.ref/keys [name path anchor depth]}]
   (let [a (or (some-> name str) (str path (when anchor (str "#" anchor))))]
     (or (some-> (if name
-                  (ref/namespace-view db name depth)
+                  (if (qualified-symbol? name) (ref/task-view db name depth) (ref/namespace-view db name depth))
                   (or (when anchor (docs/view db a depth)) (ref/file-view db (cfg/checkout) path anchor depth)))
                 (assoc :seon.ref/depth depth))
         {:seon.ref/address a :unresolved true :problem (:unresolved ref/problem-messages)})))
@@ -148,13 +148,13 @@
 (defn shown-evals
   "The last evaluations (folded) as the model reads them: each folded item printed by the
   one printer within an equal share of last-evals-budget, its cuts reading through
-  (nth (my.turn/evals) k): [{:times n :text :cuts}] (the printer's answer)."
+  (nth (my.turn/evals) k): [{:times n :text}] (the printer's answer)."
   {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
   [folded]
   (let [share (max 32 (quot last-evals-budget (max 1 (count folded))))]
     (vec (for [{:keys [k item times]} folded
                :let [r (print/print-value (shown-eval item) {:handle (list 'nth '(my.turn/evals) k) :budget share})]]
-           (assoc (if (:text r) r {:text (:seon.error/message r) :cuts []}) :times times)))))
+           (assoc (if (:text r) r {:text (:seon.error/message r)}) :times times)))))
 
 (defn- transcript
   "The shown evaluations as one text, a repeated one headed by how many times it repeated."
@@ -222,10 +222,11 @@
   [db t {:keys [results reds last-items turn max-turns unmerged truncated? refusals run-errors source repairs will-merge]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
-        refs (filterv (comp qualified-symbol? :seon.ref/name) cites)
+        task? #(and (qualified-symbol? (:seon.ref/name %)) (ref/task? db (:seon.ref/name %)))
+        refs (filterv #(and (qualified-symbol? (:seon.ref/name %)) (not (task? %))) cites)
         named (into (set proofs) (map :seon.ref/name) refs)
         helpers (found db named (into (mapv :seon.ref/name refs) (sort-by str proofs)))
-        sections (into [] (comp (filter #(or (simple-symbol? (:seon.ref/name %)) (and (:seon.ref/path %) (not (:seon.ref/problem-kind %)))))
+        sections (into [] (comp (filter #(or (simple-symbol? (:seon.ref/name %)) (task? %) (and (:seon.ref/path %) (not (:seon.ref/problem-kind %)))))
                                 (map #(cited-view db %)))
                        cites)]
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])

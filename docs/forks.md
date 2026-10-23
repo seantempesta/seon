@@ -1,92 +1,199 @@
-# Forks: provenance
+# Forks
 
-Every customized library is a submodule in `reference-code/` pinned to its fork's
-`jolt/main` (branch scheme: `../notes/DECISIONS.md`, "Libraries on Jolt"). Submodule URLs
-are local paths under `~/src/seon-jolt` until the owner approves pushing to the GitHub forks.
-Fixes arrive as `jolt/<topic>` branches merged into `jolt/main` by root once measured; generic
-fixes are cut again from upstream's main as `upstream/<topic>`. **Generic** = an upstream
-candidate; **Jolt** = specific to running on Jolt (kept on `jolt/main`).
+Every library we customize is a git submodule under `reference-code/`, pinned at a commit of our fork that carries a short list of our own commits on top of an upstream base, each marked **Generic** (an upstream candidate) or **Jolt** (specific to running on Jolt, kept on our line).
 
-## jolt — `reference-code/jolt`, `jolt/main` = `a9aef8ea` (A1: + jolt/flow-update, jolt/seam-claims, jolt/printer-port, jolt/go-fiber-default)
+## Branch scheme
 
-- Repo: `~/src/seon-jolt/jolt` (the worktrees `jolt-final`, `jolt-f1`, `jolt-u1`, `jolt-e14` share it). Upstream: `jolt-lang/jolt`. Fork: `seantempesta/jolt`.
-- Base: `f714b0ed` (upstream main, v0.8.23 + 20). `jolt/main` = branch `final` (`40028e79`) fast-forwarded to F1's `f1-flow` (`00d090a5`); no merge was needed.
+- ``jolt/main`` in each fork is our working line; it may stay Jolt-specific.
+- ``jolt/<topic>`` holds one fix, cut from ``jolt/main`` (or from the topic it needs) and merged into ``jolt/main`` once measured. A pin may sit on a topic branch that has not yet been merged into ``jolt/main``; its section says so.
+- ``upstream/<topic>`` is a generic fix cut cleanly from upstream's own main, the only candidate for an upstream pull request, opened only when 100% sure.
+- Commits in the forks carry no AI trailers.
+- Submodule URLs (`.gitmodules`) are local paths under `~/src/seon-jolt` until the owner approves pushing to the GitHub forks (``seantempesta/<lib>``). The rule comes from DECISIONS, "Libraries on Jolt".
+- Pin bumps happen only in root's merges into main ([merging](merging.md)). `git -C <dir> log --oneline -- reference-code/<lib>` in this repository lists each bump with what it brought.
+
+## jolt
+
+`reference-code/jolt` pinned at `4342b73c`, the tip of ``jolt/fork-carriers``.
+
+- Fork repo: ``~/src/seon-jolt/jolt``. Upstream: ``jolt-lang/jolt``. Fork: ``seantempesta/jolt``.
+- Base: `f714b0ed`, upstream main (nightly + 10), the merge-base with upstream's main.
+- Branch chain: ``jolt/main`` `1fad8b83` → ``jolt/j2-on-main`` `fc5d2f82` (merges ``jolt/cache-records-relative``) → ``jolt/eval-outside-build`` `d7ec259b` → ``jolt/runtime-fingerprint`` `60961b84` → ``jolt/fork-carriers`` `4342b73c`.
+- Ours, on ``jolt/main`` `1fad8b83`:
+  - `28970daf` perf: deftype `set!` by a memoized per-type flag and direct index. Generic (``upstream/deftype-field-access``).
+  - `f944a449` perf: deftype method bodies read and write fields by slot index. Generic (``upstream/deftype-field-access``).
+  - `971d6d0b` perf: host method sites answer `valAt`/`get`/`count`/`nth` on native persistent colls directly. Generic (``upstream/host-site-coll-reads``).
+  - `3659e27a` chez-patches 0006: a forked child re-protects MAP_JIT code before returning to Scheme (macOS arm64). Generic (``upstream/fork-reprotect-jit``).
+  - `40028e79` chez-patches 0007: static code leaves MAP_JIT after a static collect, so fork children share it copy-on-write (macOS arm64). Generic (``upstream/static-code-cow``; also a Chez candidate).
+  - `00d090a5` Flow `stop` awaits every proc's exit; Flow's own go blocks run on fibers. Jolt for now: upstream only once proven.
+  - `9946e2fa`, `765cd5a0` GC policy sizes the nursery bound and growth allowance from the collectable heap, not the static generation; its gate asks that `System/gc` shrank the allowance. Generic.
+  - `2dc7bca1` library seam arms declare their claim (`{:kind :table}`); UUID and Class on the eq/hash fast paths. Generic.
+  - `1b0d7719` `instance?` arms may claim class names (`{:classes #{...}}`). Generic.
+  - `414ce2b6` Flow `update!` changes a running flow in place. Generic.
+  - `7706dc1b` Flow `update!` plans only changed definitions and reroutes only changed conns (add+remove one proc at 1,000 procs: 18 MB / 4.8 ms → 0.4 MB / 0.46 ms). Generic.
+  - `33cb3b3a` Flow's launcher carries its step Var as metadata, so `update!`'s fingerprint needs no datafy. Generic.
+  - `1a00a128` the readable printer writes every level into one string port. Generic.
+  - `93af2568` `go` runs on fibers by default (`*go-backend* :fiber`). Jolt (a default for our line).
+  - `e95ca73a` sorted-coll predicates read a host table's tag once. Generic.
+  - `1cae8e72` an array built from an array of its own kind copies the backing. Generic.
+  - `cf6e0866` `jolt.async.remote`: core.async channels whose other end is another OS process. Generic (``upstream/remote-chan``).
+  - `9d423a92`, `f0bd21be`, `d516c9b7` `jolt.async.remote`: `close!` never touches a descriptor its pumps closed; a passed socket is held until the receiver answers; generic wording. Generic.
+  - `a036858d` remote ends' buffers start at 4 KB and grow. Generic.
+  - `dd7b18da` build smoke: bignum literals round-trip in a built binary. Generic.
+  - `55508e3c` the runtime fingerprint names the Chez boots it runs on. Generic.
+  - `c22cb9c0`, `00a3b321` `try`/`catch` on Chez: a one-shot escape and a hand-pushed handler instead of `guard`, emitted at the try's site so the frame keeps its line. Generic.
+  - `9e42a0d8` `jolt.analyzer/*unit-tap*` receives every top-level unit the runtime analyzes; `defprotocol` defines its value whole. Generic.
+  - `90b1e924` runtime threads carry names; chez-patches 0008, `(cs)collect_sweepers` fixes the GC's sweeper pool. Generic.
+  - `c508734d` a `put!`/`take!` that cannot complete at once is a waiter on the channel, its callback run on a fiber. Generic.
+  - `6b862dff` Process: the exit status is recorded under the process mutex. Generic.
+  - `02f97367` `run-interruptible` takes a tick budget. Generic.
+  - `fce0f40c` a built binary binds `*command-line-args*` to its argv while its namespaces load and `-main` runs. Generic.
+  - `16a1c18e` `jolt build`: an app that keeps the compiler carries jolt's install sources (one gzip-per-file blob), so it requires a jolt namespace from any cwd (binary +0.91 MB, RSS +1.9 MB). Generic.
+  - `f8dced2c` the AOT cache keys a project with data readers the same on every run (unchanged `bin/build seon`: 0/265 → 217/217 hits). Generic.
+  - `be2495af` inference: an element read off a typed vector may be nil. Generic.
+  - `4ebd36eb` deps: a ``:local/root`` that does not exist is unresolved, as tools.deps refuses it. Generic.
+- Ours, above ``jolt/main``:
+  - `f1e21977`, `2db1551c` AOT cache: one cache shared by checkouts of a project; a `.res` sidecar names each read relative to the project root (the root itself `.`), a listed directory is a read, sidecars by temp+rename. Generic. Known: one sidecar holds the last compile's names, so checkouts whose read sets differ take turns missing.
+  - `d7ec259b` a build's own evals compile outside its unit, so an eval at macro expansion no longer references the build's unbound defs. Generic.
+  - `60961b84` `jolt.host/runtime-fingerprint`: the runtime's identity as its compiled units are keyed. Generic.
+  - `6871f997`, `e469164c`, `52b50504`, `4342b73c` `jolt-after-fork-child!`: a forked process drops the bookkeeping of the runtime threads fork(2) did not copy (carriers, timer and its deadlines, shutdown watcher, thread tables) and starts no thread; fork-child-test proves a parked go, a timeout and a double fork's grandchild ([failure points](failure-points.md)). Generic.
+- ``upstream/*`` branches in the fork repo: `arraycopy-object-block`, `deftype-field-access`, `fiber-park`, `fork-reprotect-jit`, `host-site-coll-reads`, `remote-chan`, `static-code-cow`. None is pushed or opened: they exist only in ``~/src/seon-jolt/jolt``, cut on jolt-lang/jolt main `8bebf786`. Before one is opened: the gate sweep of `fork`, `slots` and `static`, `make fibers` re-run alone on arraycopy-object-block (a new untriaged red under load), a Gambit check of deftype-field-access, a non-root Linux sweep, and a rebase on upstream's current main. static-code-cow is not for upstream (jolt itself never forks, and under the hardened runtime code outside MAP_JIT needs an entitlement or the process is SIGKILLed): it stays in our patch set. Of the Chez patches, 0006 belongs upstream (no fix in cisco/ChezScheme or Racket CS), 0007 only as an issue first. Drafts and reproductions: ``~/src/seon-jolt/notes/upstream/``.
+- Open: the fork repo's ``jolt/main`` is at `44c9574a` (``jolt/load-form``, which Seon does not use; not in the pin), and `d7ec259b`..`4342b73c` are only in the submodule clone, not yet in the fork repo. ``jolt/main`` should be moved to the pin's line.
+
+## chez
+
+`reference-code/chez` pinned at `80e4b9f`, the tip of ``jolt/signal-wakes-wait``.
+
+- Fork repo: ``~/src/seon-jolt/e14/chez-share``. Upstream: ``cisco/ChezScheme``.
+- Base: `e95a7ef`, Chez Scheme v10.4.1.
+- Branch chain: ``jolt/main`` `fdd1e1e` (= ``jolt/gc-sweepers``) → ``jolt/thread-bytes`` `d19eb3b` → ``jolt/signal-wakes-wait`` `80e4b9f`.
 - Ours:
-  - `28970daf`, `f944a449`, `971d6d0b` — perf: deftype field access by slot, `set!` dispatch, host method sites on native colls. Generic (U1: `upstream/deftype-field-access`, `upstream/host-site-coll-reads`).
-  - `3659e27a` — chez-patch 0006, the fork child re-protects MAP_JIT code (E0). Generic (`upstream/fork-reprotect-jit`).
-  - `40028e79` — chez-patch 0007, static code leaves MAP_JIT after a static collect, so fork children share it (E14). Generic, macOS arm64 only (`upstream/static-code-cow`; also a Chez candidate).
-  - `00d090a5` — Flow `stop` awaits every proc's exit; Flow's mults run on fibers (F1; owner-approved 2026-10-20). Jolt for now: propose upstream only once proven.
-- `jolt/embed-stdlib` `16a1c18e` (session J1, 2026-10-21; on `jolt/main` `086315a1`, for root to merge) — `jolt build`: an app that keeps the compiler carries jolt's install sources (jolt-core, stdlib, vendored libraries) as one gzip-per-file blob constant in its runtime unit, attached by `jolt-source-blob-attach-bytes!` (`host/chez/java/io.ss`), so it requires a jolt namespace it did not compile in from any cwd; before, its launcher's install roots were relative to the cwd. This is what Jolt's own design already assumed (`resolve-on-roots` probes embedded keys first; `bld-dep-resources` leaves a dependency's copy of a jolt namespace out because jolt supplies it; #1232's rule that a binary never depends on the build machine's paths), so absolute roots were not taken. Binary +0.91 MB, start unchanged, RSS +1.9 MB. Proof: build-smoke's `install-sources` case. Generic (upstream candidate). Open: an app compiles each such namespace from source in every process (install-owned and embedded files are not AOT-cached, `aot-cacheable-file`): 6 ms for clojure.core.rrb-vector, measured.
-- `jolt/stable-cache-keys` `f8dced2c` (session CACHEKEYS, 2026-10-21; on `16a1c18e`, for root to merge) — the AOT cache keys a project with data readers the same on every run (the BUILD plan's J1). `load-data-readers!` merges every root's `data_readers` file before loading any reader namespace (as Clojure reads them all at startup), so `aot-readers-digest`, folded into every key, is the full table's at lookup as at publish; and `jolt.main`'s `apply-project!` sets the source roots last, after the `:jolt/provides`, features, replacements and natives, so the scan's loads see them (`datahike.readers` failed on `java.time.ZoneOffset` and was compiled and thrown away once per tag). Unchanged `bin/build seon`: 0/265 → 217/217 hits, pass 1 16-20 s → 0.8 s, total ~40 → 22 s. Proof: aot-cache-smoke (ac3). Generic (upstream candidate).
-- `jolt/infer-nil-union` `be2495af` (session WPI, 2026-10-21; on `f8dced2c`, for root to merge) — inference: an element read off a typed vector (`nth`, `first`, `second`, `peek`, `last`, `fnext`) is joined with `nth`'s default or `:nil`, so `nil?` on a destructured missing slot no longer folds false (`seon.ref/line-citation` failed on `path:50` in every built root, with or without whole-program inference). +8 lines in `jolt.passes.types`, seed re-minted. Proof: build-smoke's elem-nil case. Generic (upstream candidate).
-- `jolt/cache-records-relative` `2db1551c` (session J2, 2026-10-21; on `f8dced2c`; merged onto `jolt/main` `1fad8b83` as `jolt/j2-on-main` `fc5d2f82`, the pin `jolt/j2` carries, for root to merge) — one AOT cache shared by checkouts of a project (the BUILD plan's J2): a `.res` sidecar names each read relative to the project root (user.dir; the root itself `.`, a jar entry under it inside its `jar:file:` URL, a read outside it absolute), so a checkout reading another's sidecar hashes its own files (before, B hashed A's and was served A's artifact after B's file changed); a listed directory (`jolt-list-dir`, `File.list`, `Files/walkFileTree`, `Files/newDirectoryStream`) is a recorded read keyed by its sorted names; `.deps`/`.res`/`.ct`/`.cti` are written by temp+rename; `JOLT_CACHE_GENERATIONS` (default 3) generations are kept. Known: one sidecar holds the last compile's names, so checkouts whose read SETS differ take turns missing (ccache keeps several manifests). Proof: aot-cache-smoke (ah)-(al), 46/46. Generic (upstream candidate).
-- `jolt/load-form` `44c9574a` (session RELOAD) — dropped 2026-10-22 (RELOAD goes, `../notes/DECISIONS.md`); the pin is back on `fc5d2f82`.
-- Pending: F2, J2 (`jolt-j2`, `jolt/fiber-park`) and L1 (`jolt-l1`) fixes arrive as `jolt/<topic>` branches. Note `jolt-l1` is its own clone with a branch also named `jolt/main`, at `40028e79` (behind this one): L1's work should come over as topic branches onto `00d090a5`.
+  - `359f151` Jolt's chez-patches 0006 (`reference-code/chez/c/thread.c`) and 0007 (`reference-code/chez/c/segment.c`, `reference-code/chez/c/gcwrapper.c`, `reference-code/chez/c/externs.h`). Generic (Chez candidates; 0007 macOS arm64 only).
+  - `8741ee8` Jolt's chez-patches 0001–0005 unchanged (lock-free thread activation, oversize chunk spare segment, boot load in place, vfasl string sharing, same-device compares both handles), as Jolt's CI builds Chez. Generic.
+  - `4aa052d` vfasl: a negative bignum's bigits are its magnitude's. Generic.
+  - `1d686b2` vfasl: an fxvector's header carries its length. Generic.
+  - `c559ff3`, `0fd14b5`, `556ede5` mats: vfasl round-trips of a non-empty fxvector and of negative bignums. Generic.
+  - `fdd1e1e` `(cs)collect_sweepers` fixes the parallel collector's sweeper pool at n threads. Generic.
+  - `2986324`, `275aa26`, `d19eb3b` a per-thread mutator byte count, `(cs)thread_bytes_allocated`, counting every mutator `find_room` and not the collector's or the runtime's own allocation. Generic.
+  - `80e4b9f` a pending signal wakes a thread in `S_condition_wait`, so its handlers run before the caller waits again. Generic.
+- Open: the fork repo's ``jolt/main`` is at `cd1e16c`; `fdd1e1e`..`80e4b9f` are only in the submodule clone, not yet in the fork repo.
 
-## chez — `reference-code/chez`, `jolt/main` = `359f151`
+## datahike
 
-- Repo: `~/src/seon-jolt/e14/chez-share` (same commit as its branch `seon-jolt-0006-0007`). Upstream: `cisco/ChezScheme`.
-- Base: `e95a7ef`, v10.4.1. Ours: `359f151` applies Jolt's chez-patches 0006 (`c/thread.c`) and 0007 (`c/segment.c`, `c/gcwrapper.c`, `c/externs.h`). Both generic (Chez candidates, 0007 macOS arm64 only).
-- **Not applied: patches 0001–0005** (lock-free thread activation, oversize chunk spare segment, boot load in place, vfasl string sharing, same-device). This is the kernel the running runtime (`jolt-final`) was built with: its binary has `S_share_static_code` but neither `S_lockfree_activation` nor `S_vfasl_bytes`. `notes/HANDOFF.md` and `notes/decision-bench.md` say 0001–0007; that is wrong. `e14/chez-full-install` has 0001–0007 but no committed source. See `SCAFFOLD.md` for the choice.
+`reference-code/datahike` pinned at `fd0c065`, the tip of ``jolt/deref-config``.
 
-## datahike — `reference-code/datahike`, `jolt/run-ahead` = `fe50764` on `jolt/main` `25a6b5d` (owned by L1; moving)
+- Fork repo: ``~/src/seon-jolt/libs/datahike``. Upstream: ``replikativ/datahike``.
+- Base: `ad9fc97` "baseline", a history-less snapshot of Seon's fork ``seantempesta/datahike`` `ccba220b` (unknown: that commit is not in the repo, so the snapshot cannot be checked against it).
+- Branch chain: ``jolt/main`` `fde9f89` → ``jolt/run-ahead`` `fe50764` → `jvm` = ``jolt/eid-lease`` `4b93a1b` → ``jolt/values-out-of-line`` `594815d` → ``jolt/deref-config`` `fd0c065`.
+- Jolt-first (owner, DECISIONS "Storage is tuned for our workload"): the `jvm` branch freezes `4b93a1b`, the last commit that keeps the `:clj`/`:cljs`/Fressian code; the line after it drops that code from each file a change touches, each deletion its own commit.
+- Ours, on ``jolt/main``:
+  - `a6b9b86` `:jolt` reader conditionals and Jolt index and node-cache files. Jolt.
+  - `8efacfb`, `8132b95` an interim index, then dropped for the Jolt persistent-sorted-set translation. Jolt.
+  - `70ef3a3` EDN roots and nodes over StringSerializer. Jolt.
+  - `8bd49ad` `boolean-cmp` via `compare`. Generic (works on the JVM too).
+  - `9c38f95` Fressian read handlers for a JVM-written store (Jolt), writer start poll timeout 0, schema attribute classes as sets.
+  - `fde9f89` the `:sync` writer with `transact-batch!` group commit. Jolt (our design).
+- Ours, above ``jolt/main``:
+  - `deee8c2` freshly written index nodes are not put in the node cache. Generic.
+  - `21bc8cd`, `0f1b619` the query result cache is off by default; its tests bind it on. Jolt (measured on our workload).
+  - `c0f9149` the branch roster is a konserve append log, O(1) per `branch!`. Generic.
+  - `7de2e94` `branch!` from a compact head writes the same pointer under the new name. Generic.
+  - `5ed8d8f` `gc-storage!` `:sync? true` runs the whole collection on the calling thread. Generic.
+  - `032552b` run-ahead writes at a `:sync` writer's serial caller (`apply!`, `pending?`, `commit-pending!`). Jolt (our design).
+  - `fe50764` `merge-db!` on a `:sync` writer applies on the calling thread. Jolt.
+  - `4b93a1b` a process holding a block of entity ids mints inside it (`set-eid-ceiling!`, ``:entity-id/lease-spent``) ([storage](storage.md#leases)). Generic.
+  - `4ae0593` large values out of line in `CachedStorage` (`:index-config :value-out-of-line-bytes`; GC's mark keeps them) ([storage](storage.md#values-out-of-line)). Generic.
+  - `d904dea` ``:db.type/data`` and a total order on plain data ([storage](storage.md#plain-values)). Generic.
+  - `594815d` a `:sync` writer runs `gc-storage!` as a collection, not a transaction ([storage](storage.md#collection)). Jolt (our writer).
+  - `fd0c065` `deref-conn` keeps the connection's own config, so a moved store's db names where it is now. Generic.
+- Open: the fork repo's ``jolt/main`` is at `fe50764`; `4b93a1b`..`fd0c065` are only in the submodule clone, not yet in the fork repo.
 
-- A1 `jolt/run-ahead` (for root to merge onto `jolt/main`): `032552b` `datahike.writer/apply!`, `pending?`, `commit-pending!` (run-ahead writes at a :sync writer's serial caller); `fe50764` `merge-db!` on a :sync writer applies on the calling thread (its `go` block hung a forked agent, which has no scheduler threads); the cause, an agent forked with its parent's carrier pool marked started and no carrier thread, is fixed in Jolt `jolt/fork-carriers` (failure-points.md, Physics). `jolt/main` `25a6b5d` = b8d109b + `jolt/tests-qcache-off` 0f1b619 + `jolt/sync-through` 5ed8d8f.
+## persistent-sorted-set
 
-- A1 (2026-10-20): `a1/jolt-main` = `jolt/main` `fde9f89` (which already holds F2's f2-final `writer.cljc` byte for byte) + `jolt/node-cache-reads` `deee8c2` + `jolt/qcache-off` `21bc8cd` + `jolt/branch-pointer` `7de2e94` (on `jolt/branch-roster` `c0f9149`). `jolt/main` itself is checked out in L1's worktree `l1/qc/dh-main`, so root moves it. Versioning tests: 13 tests, 49 pass, 3 fail, 4 error; `jolt/main` is 1 fail, 4 error. The 2 new failures are `commit-as-db-preserves-only-attached-generation-identity`'s query-cache evidence assertions (miss-owner, hit), which `qcache-off` makes false by design.
+`reference-code/persistent-sorted-set` pinned at `9cce727`, the tip of ``jolt/main``.
 
-- Repo: `~/src/seon-jolt/libs/datahike` (L1 works in its worktree `l1/wt/datahike`). Upstream: `replikativ/datahike`; base is Seon's fork `seantempesta/datahike` `ccba220b` (commit `ad9fc97` "baseline").
-- L1 consolidated all four copies: `libs/datahike`, `e4/datahike-a`, `proto/core/vendor/datahike` and F1's `:sync` writer from `proto/flow/vendor/datahike`.
-- Ours: `a6b9b86` `:jolt` reader conditionals and Jolt index/node-cache files (Jolt); `8efacfb`, `8132b95` the interim index, then dropped for the Jolt PSS translation (Jolt); `70ef3a3` EDN roots/nodes over StringSerializer (Jolt); `8bd49ad` `boolean-cmp` via `compare` (generic: works on the JVM too); `9c38f95` proto/core's changes: Fressian read handlers for a JVM-written store (Jolt), writer start poll timeout 0, schema attribute classes as sets; `fde9f89` the `:sync` writer with `transact-batch!` group commit (ours, design-specific).
-- **F2 is still editing the writer (`transact-batch!`), so `jolt/main` will move;** the pin follows when root merges it.
-- **Jolt-first from 2026-10-22** (owner, DECISIONS "Storage is tuned for our workload"): the `jvm` branch freezes `4b93a1b`, the pin next ran on that day, holding both; the main line drops `:clj`/`:cljs`/Fressian code from each file a change touches, each deletion its own commit.
-- `jolt/values-out-of-line` (session BLOBS, 2026-10-22, on `4b93a1b`): `4ae0593` large values out of line in `CachedStorage` (`:index-config :value-out-of-line-bytes`; GC's mark keeps them), `d904dea` `:db.type/data` and a total order on plain data ([storage](storage.md#values-out-of-line), [storage](storage.md#plain-values)).
+- Fork repo: ``~/src/seon-jolt/e4/pss-a``. Upstream: ``replikativ/persistent-sorted-set`` 0.4.137.
+- Base: none; written fresh, with no upstream history (root commit `d397c58`).
+- Ours: `d397c58` the JVM core as Jolt deftypes; `d565937` EDN node forms; `df6735e` `Arrays/sort`; `9cce727` the node emitter writes `#pss/leaf` and `#pss/branch` without the generic printer. Jolt.
+- It is an overlay, not a whole library: `deps.edn` puts its `src` on `:paths`, ahead of the mvn 0.4.137 jar Datahike depends on, which still supplies the other namespaces.
 
-## persistent-sorted-set — `reference-code/persistent-sorted-set`, `jolt/main` = `9cce727` (L1)
+## konserve
 
-- Repo: `~/src/seon-jolt/e4/pss-a` (L1 worktree `l1/wt/pss-a`). Upstream: `replikativ/persistent-sorted-set` 0.4.137.
-- Ours (no upstream history; written fresh): `d397c58` the JVM core as Jolt deftypes, `d565937` EDN node forms, `df6735e` `Arrays/sort`, `9cce727` proto/core's node emitter. Jolt.
-- It is an overlay, not a whole library: `deps.edn` puts its `src` on `:paths`, ahead of the mvn 0.4.137 jar datahike depends on, which still supplies the other namespaces.
+`reference-code/konserve` pinned at `3dbd4d5`, the tip of ``jolt/lz4-ffi``.
 
-## konserve — `reference-code/konserve`, `jolt/main` = `39ce147` (A1: + jolt/sync-sweep 14a376c, 39ce147)
+- Fork repo: ``~/src/seon-jolt/libs/konserve``. Upstream: ``replikativ/konserve``.
+- Base: `4991e67` "baseline", a history-less snapshot of Seon's fork `af35a97` (unknown: that commit is not in the repo, so the snapshot cannot be checked against it).
+- Branch chain: ``jolt/main`` `849d87d` → ``jolt/atomic-append`` `b110d99` → ``jolt/lz4-ffi`` `3dbd4d5`.
+- Ours, on ``jolt/main``:
+  - `88753d6` Jolt reader conditionals in the serializers. Jolt.
+  - `33f81d6` StringSerializer writes and reads UTF-8 EDN through the streams. Generic (fixes a JVM ClassCastException).
+  - `4f50c49`, `4ae0b8c`, `e186f51` a POSIX filestore and an LMDB store over `jolt.ffi`, dispatched from `konserve.store`. Jolt.
+  - `10e47f6` the lock token channel is `(chan 1)`, a workaround for Jolt's `poll!` missing a pending put. Jolt.
+  - `b19e78f` `konserve.jolt.bin`, a measured codec that is not wired. Jolt (candidate to delete).
+  - `f7cdc98` FaslSerializer (header byte 4) through `konserve.jolt.fasl`. Jolt.
+  - `14a376c` `sweep!` with ``:konserve.gc/sync-io?`` lists and deletes through the store's synchronous operations. Generic.
+  - `39ce147` `konserve.jolt.lmdb-ffi/compact-copy!`, a compacted copy of the env that returns a sweep's freed pages. Jolt.
+  - `849d87d` jfasl: a stable tagged format in place of raw Chez fasl. Jolt.
+- Ours, above ``jolt/main``:
+  - `b110d99` an append is one transaction on a store that runs them (`PTransactBackingStore`, the LMDB store's one write transaction), so two processes appending one log never lose an element. Generic in shape, LMDB-only in effect.
+  - `37a28e4`, `7c462af` `konserve.jolt.lz4`, LZ4 frames through liblz4's frame API over `jolt.ffi` (the JVM Lz4Compressor's format), loaded from `JOLT_LZ4_LIB` ([storage](storage.md#compression)). Jolt.
+  - `3dbd4d5` `konserve.jolt.zstd` and `ZstdCompressor` (header byte 2, `:zstd`), libzstd's simple API, one frame per value at level 3, loaded from `JOLT_ZSTD_LIB` ([storage](storage.md#compression)). Jolt.
+- Open: `konserve.jolt.fasl-store` names persistent-sorted-set node types; its cleaner home may be the persistent-sorted-set fork, with konserve's serializer taking the freeze and thaw from the store.
+- Open: the fork repo's ``jolt/main`` is at `849d87d`; `b110d99`..`3dbd4d5` are only in the submodule clone, not yet in the fork repo.
 
-- Repo: `~/src/seon-jolt/libs/konserve` (`jolt/main` built in S1's clone and fetched back; `main` stays at `b19e78f`). Upstream: `replikativ/konserve`; base is Seon's fork `af35a97` (commit `4991e67` "baseline").
-- Ours: `88753d6` Jolt reader conditionals in serializers (Jolt); `33f81d6` StringSerializer writes and reads UTF-8 EDN through the streams (generic: fixes a JVM ClassCastException); `4f50c49`, `4ae0b8c`, `e186f51` POSIX filestore and LMDB store over `jolt.ffi`, dispatched from `konserve.store` (Jolt); `10e47f6` lock token channel `(chan 1)`, a workaround for Jolt's `poll!` missing a pending put (the generic fix is in Jolt); `b19e78f` `konserve.jolt.bin`, a measured but unwired codec (candidate to delete); `f7cdc98` X1's FaslSerializer, byte 4 (Jolt).
-- `f7cdc98` places X1's files: `x1/src/x1/codec.clj` → `konserve.jolt.fasl` (`src/konserve/jolt/fasl.jolt`), `jfasl.ss` → `src/konserve/jolt/jfasl.ss`, `store_codec.clj` → `konserve.jolt.fasl-store`. X1's patch was written against proto/core's `jvm-interop` overlay of `konserve.serializers`; only its fasl hunks apply to konserve itself. The overlay's E9 Fressian reader stays in proto/core until the Fressian bridge is placed.
-- `jolt/atomic-append` `b110d99` (session STORES, 2026-10-21; generic in shape, LMDB-only in effect): `PTransactBackingStore` and the LMDB store's one write transaction, so `konserve.core/append` (Datahike's branch roster) is atomic across processes; it lost 32 of 100 branches when two processes made 50 each (`seon.db-test/two-processes-branch-one-store`).
-- `jolt/lz4-ffi` `37a28e4`, `7c462af` (session BLOBS, 2026-10-22; Jolt): `konserve.jolt.lz4`, LZ4 frames through liblz4's frame API over `jolt.ffi` (the JVM Lz4Compressor's format: 64 KiB blocks, content size recorded), and the `:jolt` branches of `konserve.compressor`; it loads `JOLT_LZ4_LIB`, which Seon's `bin/env` points at the lz4 `bin/build lz4` makes from Chez's vendored source ([storage](storage.md#compression)).
-- `jolt/lz4-ffi` also holds `3dbd4d5` (session BLOBS, 2026-10-22; Jolt): `konserve.jolt.zstd` and `ZstdCompressor` (header byte 2, `:zstd`), libzstd's simple API over `jolt.ffi`, one frame per value at level 3; it loads `JOLT_ZSTD_LIB` ([storage](storage.md#compression)).
-- `konserve.jolt.fasl-store` names persistent-sorted-set node types. Its cleaner home may be the PSS fork, with konserve's serializer taking the freeze/thaw from the store; that is a design call for L1.
+## malli
 
-## crypto — `reference-code/crypto`, `jolt/main` = `902196e`
+`reference-code/malli` pinned at `5a830e14`, the tip of ``jolt/main`` and ``jolt/instrument-arity``.
 
-- Repo: `~/src/seon-jolt/libs/crypto`. Upstream `jolt-lang/crypto` `e6981b8`. Ours: `902196e` arms claim host tables only ({:kind :table}) (L1, `jolt/seam-claims`). Generic.
+- Fork repo: ``~/src/seon-jolt/l1/wt/malli`` (a clone of ``seantempesta/malli``). Upstream: ``metosin/malli``.
+- Base: `80138076`, upstream master (0.20.0 + 14), the merge-base with upstream's master.
+- Ours, from Seon's fork (`dd13ff81`, the pin before ours):
+  - `ac1d51e0`, `3517a3cd` sci: drop an unsupported preset option; resolve loaded qualified Vars directly. Generic.
+  - `606083c5` the resolving registry is the ref validation scope. Generic.
+  - `25710a67` generator: resolve a symbol ``:gen/gen``, fail `::no-generator` for a non-generator. Generic.
+  - `8725a8cb` eval returns a loaded function Var itself, so a re-evaluated `defn` stays live. Generic.
+  - `56394c54`, `befcd302` instrument: a throwing validator is an `::invalid-schema-at-call` report carrying the arm's schema and values. Generic.
+  - `a89ebef0` a registry pointer and an outermost ref share their target's cached validator. Generic.
+  - `43c6dca8` a passing instrumented call allocates no regex driver, argument vector or guard pair. Generic.
+  - `418df441` `-strument!` passes `:registry`; `-strument-each!` continues past a failing Var; `primitive-fn?` and `malli.error/levenshtein` public. Generic.
+  - `dd13ff81` levenshtein keeps two primitive int rows. Generic.
+- Ours, on ``jolt/main``: `5a830e14` `-instrument` of a one-fixed-arity function schema gets a wrapper of that arity (call 0.24 → 0.06 µs). Generic.
 
-## malli — `reference-code/malli`, `jolt/main` = `5a830e14`
+## crypto
 
-- Repo: `~/src/seon-jolt/l1/wt/malli` (L1's clone of `seantempesta/malli`). Base `dd13ff81` (Seon's pin). Ours: `5a830e14` `-instrument` of a one-fixed-arity function schema gets a wrapper of that arity (L1, `jolt/instrument-arity`; call 0.24 -> 0.06 µs). Generic.
+`reference-code/crypto` pinned at `902196e`, the tip of ``jolt/main`` and ``jolt/seam-claims``.
 
-## jolt-fressian — `reference-code/jolt-fressian`, `jolt/main` = `8f3eb5d`
+- Fork repo: ``~/src/seon-jolt/libs/crypto``. Upstream: ``jolt-lang/crypto``.
+- Base: `e6981b8`, upstream main (Ed25519, PR #16).
+- Ours: `902196e` arms claim host tables only (`{:kind :table}` on every `__register-*!`). Generic.
 
-- Repo: `~/src/seon-jolt/e9/jolt-fressian`. Upstream: `jolt-lang/jolt-fressian`, base `7e7922a`.
-- Ours: `8f3eb5d` E9's decode fixes (hash-map tag lookup, code-byte dispatch table, byte-array reader; 8.6× faster). Generic.
+## jolt-fressian
+
+`reference-code/jolt-fressian` pinned at `8f3eb5d`, the tip of ``jolt/main`` (and the fork repo's `main`).
+
+- Fork repo: ``~/src/seon-jolt/e9/jolt-fressian``. Upstream: ``jolt-lang/jolt-fressian``.
+- Base: `7e7922a`, upstream main.
+- Ours: `8f3eb5d` decode fixes: hash-map tag lookup, a code-byte dispatch table, a byte-array reader (leaf decode 8.6× faster). Generic.
 - Off the default path: `deps.edn` alias `:fressian`, for opening a JVM-written store.
 
-## jolt-overlay — `reference-code/jolt-overlay`, `jolt/main` = `4ecb7a8`
+## jolt-overlay
 
-- Repo: `~/src/seon-jolt/libs/jolt-overlay`. No upstream: `.jolt` copies of two libraries Datahike needs.
-- Ours: `355f390` clojure.spec.alpha 0.5.238 verbatim; `3427652` hasch.platform 0.4.100 verbatim, plus `res` in spec.alpha: a resolved deftype is not an emittable literal; `4ecb7a8` hasch's digest names upper-cased (`SHA-512`, `MD5`).
-- **Recommendation: don't fold it into `jolt` as is.** Each change is a workaround for a generic gap elsewhere: (1) jolt-lang/crypto's `MessageDigest/getInstance` is case-sensitive where the JVM's is not, so the fix belongs in crypto and hasch.platform's copy then goes; (2) `resolve` of a deftype yields a value Jolt cannot emit as a literal, a Jolt compiler gap. Once both are fixed, what remains is spec.alpha verbatim, which Jolt could ship in its stdlib or we could take as a pinned dependency.
+`reference-code/jolt-overlay` pinned at `4ecb7a8`, the tip of ``jolt/main`` (and the fork repo's `main`).
 
-## Dropped: superv.async
+- Fork repo: ``~/src/seon-jolt/libs/jolt-overlay``. No upstream: `.jolt` copies of two libraries Datahike needs.
+- Base: `d2013ff` "baseline" (a `deps.edn`).
+- Ours: `355f390` clojure.spec.alpha 0.5.238 verbatim; `3427652` hasch.platform 0.4.100 verbatim, plus `res` in spec.alpha (a resolved deftype is not an emittable literal); `4ecb7a8` hasch's digest names upper-cased (`SHA-512`, `MD5`). Jolt (workarounds).
+- **Recommendation: don't fold it into `jolt` as is.** Each change is a workaround for a generic gap elsewhere: (1) jolt-lang/crypto's `MessageDigest/getInstance` is case-sensitive where the JVM's is not, so the fix belongs in crypto, and hasch.platform's copy then goes; (2) `resolve` of a deftype yields a value Jolt cannot emit as a literal, a Jolt compiler gap. Once both are fixed, what remains is spec.alpha verbatim, which Jolt could ship in its stdlib or we could take as a pinned dependency.
 
-`libs/superv.async`'s only change (`4b07d0f`) prints a stack trace in the supervisor's error
-fn, a debugging aid. The library is needed (konserve and datahike require it), the fork is not:
-`deps.edn` pins `seantempesta/superv.async` `501b4294`, the same commit datahike declares, with
-`core.async` excluded because Jolt ships its own.
+## Unmodified submodules
+
+- `reference-code/lmdb` at `253ba52`, upstream ``LMDB/lmdb`` branch `mdb.master3`; built from source by `bin/build`.
+- `reference-code/zstd` at `f8745da` (v1.5.7), upstream ``facebook/zstd``; built by `bin/build zstd` ([storage](storage.md#compression)).
+- `reference-code/awesome-jolt` at `9a04599`, upstream ``jlt-commons/awesome-jolt`` `main`; reference reading only.
+
+## Dropped fork: superv.async
+
+The fork's only change printed a stack trace in the supervisor's error fn; `deps.edn` pins ``seantempesta/superv.async`` `501b4294`, the commit Datahike declares, with `core.async` excluded because Jolt ships its own.
 
 ## Unmodified, pinned in `deps.edn`
 
-ring-chez-adapter
-`fa0674e3`, multipart `ca51dd47`, time `a28ab100`, http-client `5a9706e0`
-(R1's), fipp 0.6.29, core.cache 1.0.225.
+ring-chez-adapter `fa0674e3`, multipart `ca51dd47`, time `a28ab100`, http-client `5a9706e0`, data.json 2.5.1, edamame 1.4.32, rewrite-clj 1.2.51, tools.reader 1.5.2, aero 1.1.6, fipp 0.6.29, core.cache 1.0.225.
