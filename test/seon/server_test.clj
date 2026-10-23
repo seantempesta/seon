@@ -78,3 +78,18 @@
                                               :seon.task/proofs #{'demo-test/u} :seon.task/branch :task-demo-t}]})]
     (clojure.test/is (clojure.string/includes? (pr-str refused) "is held by live agent") "the attach is refused: demo/t's agent holds the branch")
     (clojure.test/is (= "[:held nil 0]" (:printed seen)) "and wrote nothing: demo/u is still held, with no env and no run")))
+
+(deftest a-message-reaches-the-agent
+  ;; task seon.render/a-debug-view-of-any-agent (parity row 73): the owner's message, sent as
+  ;; the page's message bar sends it (seon.root/message!, here through the server's :message
+  ;; op), is root's one delivery: it is in the agent's inbox when the agent next reads it,
+  ;; though it arrived while the agent was not reading its socket; no agent: refused
+  (let [[sent taken none] (at/in-agent [{:op :message :agent "a1" :body "use demo/g"}
+                                        "(my.agent/messages)"
+                                        {:op :message :agent "a9" :body "hello?"}])]
+    (is (true? (:ok sent)) "answered when its fact is on main")
+    (is (re-find #":from :owner" (:printed taken)) (:printed taken))
+    (is (re-find #":body \"use demo/g\"" (:printed taken)))
+    (is (re-find #":to \"demo/t#1\"" (:printed taken)) "to the run the agent works")
+    (is (re-find #":id \"m-" (:printed taken)) "the fact's id, which the agent writes on its branch")
+    (is (contract/error? none) "no live agent a9: refused, as root refuses")))

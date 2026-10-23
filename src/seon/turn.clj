@@ -138,15 +138,31 @@
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its
   basis, not its prompt): the commit it reads (the run-ahead writes committed now, as the
-  model call's wait would), the task, run and turn, the observations no db holds, and
-  the last evaluations' transcript while no earlier turn shows them."
-  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id :int :int :seon.turn/origin :map] :seon.turn/basis]}
-  [task run turn max-turns origin observed]
-  (agent/commit!)
-  (let [items (when (or (= :outside origin) (zero? turn)) (last-evals))
+  model call's wait would), the task, run and turn, the observations no db holds, the
+  messages delivered since the last turn (taken: the turn is their reader; a message that is
+  a fact is written on this branch first, the same fact root wrote on main, and the basis
+  names it by id, so its text is read again from the commit), and the last evaluations'
+  transcript while no earlier turn shows them. A read that is not the run's turn (take?
+  false: an observer's read of an agent its model drives) shows the inbox and leaves it, each
+  message as it was sent."
+  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id :int :int :seon.turn/origin :map :boolean] :seon.turn/basis]}
+  [task run turn max-turns origin observed take?]
+  (let [msgs (agent/inbox)
+        {facts true others false} (if take? (group-by (comp some? :id) msgs) {false msgs})
+        _ (when (seq facts)
+            (agent/transact! (vec (for [{:keys [id from to body]} facts]
+                                    (cond-> {:seon.message/id id :seon.message/from (name from) :seon.message/body body}
+                                      to (assoc :seon.message/to to))))))
+        _ (agent/commit!)
+        ;; taken once their facts are committed: a refused write leaves them in the inbox
+        _ (when take? (agent/taken! (count msgs)))
+        items (when (or (= :outside origin) (zero? turn)) (last-evals))
         ev (when (seq items) (context/evaluations-text items))]
     (cond-> {:commit (d/commit-id (agent/db)) :task task :run run :turn turn :max-turns max-turns
-             :origin origin :observed (dissoc observed :merge?)}
+             :origin origin :observed (cond-> (dissoc observed :merge?)
+                                        (seq facts) (assoc :message-ids (mapv :id facts))
+                                        ;; a send no fact holds (another agent's, until its sender writes one)
+                                        (seq others) (assoc :messages (mapv (fn [{:keys [from body]}] {:from (name from) :body body}) others)))}
       (:merge? observed) (assoc :merge? true)
       ev (assoc :last-evals ev))))
 
@@ -161,7 +177,7 @@
         proofs (:proofs (:seon.task/accumulated t))
         t0 (profile/now-ns)
         basis (basis! (:seon.task/id t) run turn max-turns :model
-                      (cond-> (observed obs) merge? (assoc :merge? true)))
+                      (cond-> (observed obs) merge? (assoc :merge? true)) true)
         {:keys [block messages]} (context/render (agent/db) basis)
         context-ms (long (profile/ms-since t0))
         t1 (profile/now-ns)
@@ -176,7 +192,8 @@
             ;; an interrupt left from before this turn's evals is not theirs
             _ (intr/clear-pending!)
             ;; each eval call through the one REPL path, in order; its answer is the call's result
-            calls (mapv (fn [{:keys [id code]}] {:id id :code code :items (repl/eval-string (:text (reader/forgive code)))})
+            calls (mapv (fn [{:keys [id code thinking]}] (cond-> {:id id :code code :items (repl/eval-string (:text (reader/forgive code)))}
+                                                             thinking (assoc :thinking thinking)))
                         (:tool-calls c))
             items (into [] (mapcat :items) calls)
             eval-ms (long (profile/ms-since t2))
@@ -188,7 +205,10 @@
         ;; and where the turn's time went as this agent saw it
         (agent/transact! [(cond-> (merge (usage c) {:seon.turn/id (str run "/" turn) :seon.turn/run run :seon.turn/n turn
                                    :seon.turn/origin :model :seon.turn/basis basis
-                                   :seon.turn/calls (mapv (fn [{:keys [id code items]}] {:id id :code code :evals (context/evaluations-text items)}) calls)
+                                   :seon.turn/calls (mapv (fn [{:keys [id code thinking items]}]
+                                                            (cond-> {:id id :code code :evals (context/evaluations-text items) :items (vec (keep :record items))}
+                                                              thinking (assoc :thinking thinking)))
+                                                          calls)
                                    :seon.turn/reply (:text c) :seon.turn/forms (count items)
                                    :seon.turn/errors (count (filter #(= :err (:tag %)) items))
                                    :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))
@@ -214,14 +234,15 @@
   "The current-state block of task, as the model sees it on this branch now (the proofs run
   again): what an outside agent working the task reads, recorded as a turn of the run
   (origin :outside). It also makes this process work task as run, so the my.* functions act
-  on it."
-  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :string]}
-  [task run]
+  on it. take?: the read is the run's turn (its model is outside) and takes the messages
+  delivered; else it is an observer's, and leaves them for the model's next turn."
+  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id :boolean] :string]}
+  [task run take?]
   (let [{:keys [plan-before]} (begin! task run)
         {:keys [tests-ms] :as obs} (observe task plan-before)
         n (get-in (swap! agent/state update-in [:turn :reads] (fnil inc 0)) [:turn :reads])
         t0 (profile/now-ns)
-        basis (basis! task run n 1 :outside (assoc (observed obs) :merge? true))
+        basis (basis! task run n 1 :outside (assoc (observed obs) :merge? true) take?)
         text (context/reader-text (:messages (context/render (agent/db) basis)))]
     ;; the read is a turn of this run, as a model turn is: what it was built from and what it cost
     (agent/transact! [{:seon.turn/id (str run "/read-" n) :seon.turn/run run :seon.turn/n n

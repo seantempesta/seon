@@ -7,7 +7,7 @@
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.render.proc :as p]
             [seon.web.html :as h] [seon.config] [seon.docs] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
-            [seon.fx] [seon.source] [seon.program]))
+            [seon.fx] [seon.source] [seon.program] [seon.web] [seon.turn] [seon.model]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -17,14 +17,14 @@
 
 (deftest selection
   (testing "the value's own override key wins: data as is"
-    (is (= [:b "mine"] (r/html {:a 1 :seon.render/html [:b "mine"]} {:seon.render/schema :seon.task/task}))))
+    (is (= [:b "mine"] (r/html {:a 1 :seon.render/html [:b "mine"]} {:schema :seon.task/task}))))
   (testing "the schema's declared render, named by the producer"
     (is (= 'seon.render.ui/task-box (r/declared :seon.task/task :html)))
-    (is (str/includes? (h/html (r/html task {:seon.render/schema :seon.task/task})) "task · calc/add")))
+    (is (str/includes? (h/html (r/html task {:schema :seon.task/task})) "task · calc/add")))
   (testing "a pulled entity's schema is the one its identity attribute names"
     (is (= :seon.run/run (r/schema-of {:seon.run/id "x#1"} nil)))
     (is (str/includes? (h/html (r/html {:seon.run/id "calc/add#1" :seon.run/agent :a3 :seon.run/status :running} {}))
-                       "href=\"/agent/a3\"")))
+                       "href=\"/run/calc%2Fadd%231\"")))
   (testing "no declaration: the one value printer's hiccup"
     (let [out (r/html {:k [1 2 3]} {})]
       (is (= "seon-data-panel" (get-in out [1 :class])))))
@@ -45,7 +45,7 @@
                         :red {:n 0 :rows []}}}})
 
 (deftest root-context
-  (let [text (r/ai sys {:seon.render/schema :seon.render/system :seon.render/budget 700})
+  (let [text (r/ai sys {:schema :seon.render/system :budget 700})
         lines (str/split-lines text)]
     (testing "problems first: root's defect, then what main recorded (one producer); no proc is pinged"
       (is (= "# problems" (second lines)))
@@ -58,7 +58,7 @@
     (testing "the live view is not a second producer: an agent's own entry makes no problem line"
       (is (not-any? #(re-find #"^- a\d" %) lines)))
     (testing "over the budget: later sections are named, not silently cut"
-      (let [small (r/ai sys {:seon.render/schema :seon.render/system :seon.render/budget 40})]
+      (let [small (r/ai sys {:schema :seon.render/system :budget 40})]
         (is (str/includes? small "not shown, over the budget"))
         (is (<= (seon.print.select/estimate (first (str/split small #"\n\(not shown"))) 40))))))
 
@@ -144,7 +144,7 @@
     (is (= :died (ui/shown-status (ui/ended-as {:status :dead} :a1 {}))))
     (is (= :idle (ui/shown-status (ui/ended-as {:status :idle} :a1 {:a1 {:seon.run/status :merged}})))))
   (testing "its card says how it ended, not KILLED"
-    (let [html (h/html (:seon.render/html (ui/agent-card {:id :a1 :status :killed :ended-as :merged :evals []} {})))]
+    (let [html (h/html (ui/agent-card {:id :a1 :status :killed :ended-as :merged :evals []} {}))]
       (is (str/includes? html "ended · merged"))
       (is (not (str/includes? html ">killed<"))))))
 
@@ -154,8 +154,8 @@
     (is (str/includes? (h/html (ui/red-label 'app.proofs/abs-test #{'app.proofs/add-test} owners)) "allowed: a proof of calc/abs"))))
 
 (deftest problems-tile
-  (is (str/includes? (h/html (:seon.render/html (ui/tile-problems [] {}))) "no problems"))
-  (let [html (h/html (:seon.render/html (ui/tile-problems [[:root ["proc writer UNKNOWN"]]] {})))]
+  (is (str/includes? (h/html (ui/tile-problems [] {})) "no problems"))
+  (let [html (h/html (ui/tile-problems [[:root ["proc writer UNKNOWN"]]] {}))]
     (is (str/includes? html "1 kind of problem open"))
     (is (str/includes? html "proc writer UNKNOWN")))
   (testing "grouped by the area each class declares (:seon.problems/class): a dead citation under docs"
@@ -163,7 +163,7 @@
                                          :recorded {:classes {:dead-citation {:n 1 :rows [{:signature "s" :message "docs/x.md#y cites app/f, which names nothing"
                                                                                            :open? true :producer nil :owner-ns 'app :proofs [] :evidence {} :answered-by [] :at-ms nil}]}
                                                               :agent {:n 1 :rows [{:signature "s1" :count 1 :message "agent a2 died"}]}}}))
-          html (h/html (:seon.render/html (ui/tile-problems areas {})))]
+          html (h/html (ui/tile-problems areas {}))]
       (is (= [:docs :errors] (mapv first areas)))
       (is (str/includes? (first (second (first areas))) "derived dead-citation 1: docs/x.md#y cites app/f, which names nothing"))
       (is (str/includes? html "area-docs"))
@@ -204,6 +204,20 @@
 
 ;; ---- no clipping: every cut on the page and in root's context says what it left -------------
 
+(defn- zoom
+  "The agent page's value for agent id as the render proc makes it: root's view entry ag (nil:
+  not in root's view), its newest run on main, its branch db read (nil: not read)."
+  [db id run ag]
+  (second (#'p/zoom-value (cond-> {:agent-run (if run {id run} {}) :tasks {} :zoom {id (if db {:db db} {})}}
+                            ag (assoc-in [:view :agents id] ag))
+                          id)))
+
+(defn- conv-html
+  "The conversation's rows of a window's value, each as its unit renders it (its schema's render)."
+  [page] (mapv #(h/html (r/html (:input %) {:schema (:schema %) :unit (:id %)})) (:conv page)))
+
+(defn- turn-rows-of "The conversation's rows that are turns, rendered." [page] (filter #(str/includes? % "class=\"turn ") (conv-html page)))
+
 (defn- long-text [n] (str/join " " (for [i (range n)] (str "word" i))))
 
 (deftest no-cut-on-the-page-drops-silently
@@ -213,7 +227,7 @@
   (let [err (long-text 400)
         form (str "(defn f [x] " (long-text 200) ")")
         evals (vec (for [i (range 10)] {:id i :tag :ret :form "(+ 1 2)" :printed "3"}))
-        html (h/html (:seon.render/html (ui/agent-card {:id :a1 :status :busy :error (seon.contract/error :seon.agent/failed (quote seon.root/spawn!) err {:agent :a1}) :running {:form form} :evals evals} {})))
+        html (h/html (ui/agent-card {:id :a1 :status :busy :error (seon.contract/error :seon.agent/failed (quote seon.root/spawn!) err {:agent :a1}) :running {:form form} :evals evals} {}))
         omitted (fn [s] (some-> (re-find #"…\+(\d+) chars" s) second parse-long))]
     (testing "a long error is elided: its beginning, then how many characters it left, the whole on hover"
       (is (str/includes? html "word0 word1"))
@@ -233,12 +247,12 @@
   (testing "tasks are all listed; the runs table says how many more main holds"
     (let [rows (into {} (for [i (range 50)] [(str "t/x" i) {:state :done :blocked-by #{} :green 1 :red 0 :proofs 1 :runs 1 :tokens 0}]))
           runs (into {} (for [i (range 12)] [(str "t/x" i "#1") {:seon.run/id (str "t/x" i "#1") :seon.run/status :done :seon.run/start-ms i}]))
-          html (h/html (:seon.render/html (ui/tile-tasks {:rows rows :runs runs} {})))]
+          html (h/html (ui/tile-tasks {:rows rows :runs runs} {}))]
       (is (str/includes? html ">t/x49<") "the 50th task is listed")
       (is (str/includes? html "+4 more: older, on main: (seon.task/runs (deref (:conn sys))) at root's REPL"))))
   (testing "root's defects: the count is every one recorded, not the ones the view keeps"
-    (let [html (h/html (:seon.render/html (ui/tile-errors {:root-errors (vec (for [i (range 20)] {:pid :render :message (str "boom " i)}))
-                                                           :root-errors-total 31 :boot {} :store {}} {})))]
+    (let [html (h/html (ui/tile-errors {:root-errors (vec (for [i (range 20)] {:pid :render :message (str "boom " i)}))
+                                                           :root-errors-total 31 :boot {} :store {}} {}))]
       (is (str/includes? html "31 defects in root's own procs"))
       (is (str/includes? html "+25 more"))
       (is (< (str/index-of html "boom 19") (str/index-of html "boom 14")) "newest first"))))
@@ -250,7 +264,7 @@
         s (assoc sys :tasks {"t/x0" {}} :runs runs :task-rows {}
                  :root-errors [{:pid :render :message (long-text 300)}] :root-errors-total 4
                  :events (vec (for [i (range 30)] {:type :ready :agent :a1 :at-ms i})))
-        text (r/ai s {:seon.render/schema :seon.render/system :seon.render/budget 2000})]
+        text (r/ai s {:schema :seon.render/system :budget 2000})]
     (testing "five ended runs shown, seven more named with the form that reads them"
       (is (str/includes? text "+7 more: ended, all in (seon.task/runs (deref (:conn sys)))")))
     (testing "a long reason is elided with the form that reads its rest"
@@ -263,10 +277,10 @@
 
 (deftest the-page-says-what-it-keeps
   (testing "the stream's header: how many events it keeps of all since boot"
-    (is (str/includes? (h/html (:seon.render/html (ui/events-count {:kept 60 :seen 112} {})))
+    (is (str/includes? (h/html (ui/events-count {:kept 60 :seen 112} {}))
                        "60 kept of 112 since root's boot · 52 older not kept")))
   (testing "agents ended earlier leave the grid; the tile counts them"
-    (is (str/includes? (h/html (:seon.render/html (ui/tile-agents {:cells [[:a1 :idle 0]] :off 12 :ended-kept 10} {})))
+    (is (str/includes? (h/html (ui/tile-agents {:cells [[:a1 :idle 0]] :off 12 :ended-kept 10} {}))
                        "1 on the grid · +12 ended earlier, off it (the newest 10 ended stay)")))
   (testing "a held task's pill says what holding means and how to release it"
     (is (str/includes? (ui/state-title :held) "(my.root/run! sys [id])"))))
@@ -274,8 +288,8 @@
 (deftest root-context-groups-blocked-tasks-by-what-blocks-them
   (let [rows {"t/a" {:state :blocked :blocked-by #{"t/root"}} "t/b" {:state :blocked :blocked-by #{"t/root" "t/other"}}
               "t/c" {:state :blocked :blocked-by #{"t/root"}} "t/d" {:state :done :blocked-by #{}}}
-        text (r/ai (assoc sys :tasks {"t/a" {}} :task-rows rows) {:seon.render/schema :seon.render/system :seon.render/budget 2000})]
-    (is (str/includes? text "3 blocked, waiting on: t/root (3), t/other (1)") "each blocker once, the one holding most first")
+        text (r/ai (assoc sys :tasks {"t/a" {}} :task-rows rows) {:schema :seon.render/system :budget 2000})]
+    (is (str/includes? text "3 with needs not done, waiting on: t/root (3), t/other (1)") "each blocker once, the one holding most first")
     (is (not (str/includes? text "t/a blocked by")) "not one line per blocked task")))
 
 ;; ---- the GUARDS audit's names for the same law (seon.render/no-clip-in-renders) -------------
@@ -287,50 +301,29 @@
     (is (nil? (resolve 'seon.render.ai/tokens)))))
 
 (deftest a-capped-list-says-how-many-more
-  (testing "the agent page's history: the newest rows, and how many older its branch records"
-    (let [html (h/html (:seon.render/html (ui/history-more {:shown 1 :total 140} {})))]
-      (is (str/includes? html "+139 more: older evaluations, recorded on its branch"))))
-  (testing "nothing capped, nothing said; no evaluation, that none is yet"
-    (is (str/includes? (h/html (:seon.render/html (ui/history-more {:shown 1 :total 1} {}))) "hidden"))
-    (is (str/includes? (h/html (:seon.render/html (ui/history-more {:shown 0 :total 0} {}))) "no evaluations yet"))))
-
-(deftest history-prepends-new-rows
-  ;; an agent's page: each evaluation is a unit of the page, rendered once and prepended when
-  ;; it is new; the list is not sent again (it was, whole, at every evaluation)
-  (let [ev (fn [i] {:id i :tag :ret :form (str "(+ " i " 1)") :printed (str (inc i)) :ms 0.1})
-        view (fn [n] (assoc-in view0 [:agents :a1 :evals] (mapv ev (range n))))
-        st0 (assoc (fresh-state) :watch #{:a1})
-        [st1 out1] (answer st0 (view 2))
-        [st2 out2] (answer st1 (view 3))
-        patch (fn [out] (first (filter #(and (= :patch (:op %)) (= :a1 (:view %))) (:to-web out))))
-        [[sel html]] (:prepends (patch out2))]
-    (is (= "#z-history" (ffirst (:prepends (patch out1)))) "the first pass adds the rows there are")
-    (is (= "#z-history" sel))
-    (is (str/includes? html "(+ 2 1)") "the new evaluation's row")
-    (is (str/includes? html "id=\"hr-v_2\""))
-    (is (not (str/includes? html "(+ 1 1)")) "an earlier row is not sent again")
-    (is (not-any? #(str/starts-with? (first %) "hr-") (:frags (patch out2))))
-    (testing "the page, composed, holds every row, newest first"
-      (let [page (p/page-html st2 :a1)]
-        (is (< (str/index-of page "id=\"hr-v_2\"") (str/index-of page "id=\"hr-v_1\"") (str/index-of page "id=\"hr-v_0\"")))))))
+  (let [conv (fn [shown total] (:input (first (filter #(= "z-turns" (:id %))
+                                                      (:seon.render/units (ui/agent-page {:agent {:id :a1 :status :idle} :conv [] :totals {:n 0}
+                                                                                          :history-total total :history-shown shown} {}))))))]
+    (testing "the agent's conversation: its newest evaluations, and how many older its branch records"
+      (is (str/includes? (h/html (ui/turns-list (conv 100 140) {})) "+40 more: older evaluations outside its turns, recorded on its branch")))
+    (testing "nothing capped, nothing said"
+      (is (not (str/includes? (h/html (ui/turns-list (conv 1 1) {})) "more"))))))
 
 (deftest a-context-read-is-shown-once
   (let [ctx (str "{:turn \"1 of 8\" :refused [{:reason :contract-gap :vars [" (str/join " " (for [i (range 360)] (str "app.m/f" i))) "]}]}")
-        read {:id 0 :tag :ret :form "(print (seon.turn/context-block \"t/x\" \"t/x#1\"))" :printed "nil" :out ctx :origin :context}
-        card (h/html (:seon.render/html (ui/agent-card {:id :a14 :status :idle :evals [read]} {})))
-        row (h/html (:seon.render/html (ui/history-row read {})))]
+        read {:id 0 :tag :ret :form "(print (seon.turn/context-block \"t/x\" \"t/x#1\" true))" :printed "nil" :out ctx :origin :context}
+        card (h/html (ui/agent-card {:id :a14 :status :idle :evals [read]} {}))
+        row (h/html (ui/history-row read {}))]
     (testing "a card and a history row refer to the block; they never print it again"
       (is (str/includes? card "read its current-state block"))
-      (is (str/includes? card "href=\"/agent/a14#z-context\""))
+      (is (str/includes? card "href=\"/agent/a14#z-turns\""))
       (is (not (str/includes? card "app.m/f359")))
       (is (str/includes? row "read its current-state block"))
       (is (not (str/includes? row "app.m/f359"))))
     (testing "the stream says what happened"
-      (is (str/includes? (h/html (:seon.render/html (ui/event-row {:type :reply :agent :a14 :at-ms 0 :items [read]} {})))
+      (is (str/includes? (h/html (ui/event-row {:type :reply :agent :a14 :at-ms 0 :items [read]} {}))
                          "read its current-state block")))
-    (testing "the agent page's panel is the text it read, as recorded (seon.context/recorded), and one copy of it"
-      (let [ctxv (#'p/context-of nil {:seon.run/task "t/x"} {:evals [{:tag :ret :form "(+ 1 2)" :printed "3"} read]})]
-        (is (= :why (first (keys ctxv))) "no db: why, not a rebuild"))
+    (testing "the agent page's turn row is the text the read got, made again from its basis, and one copy of it"
       (ts/test-branch! (fn [_ conn] (let [;; the wiki, as root's boot loads it: the help page every render reads
                                           _ (d/transact conn (seon.docs/load-tx @conn "docs" (seon.docs/pages (seon.config/checkout) "docs")))
                                           _ (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "p"}]))
@@ -341,34 +334,37 @@
             _ (d/transact conn [{:seon.turn/id "t/x#1/read-1" :seon.turn/run "t/x#1" :seon.turn/n 1
                                  :seon.turn/origin :outside :seon.turn/basis b}])
             db @conn
-            ctxv (#'p/context-of db {:seon.run/id "t/x#1" :seon.run/task "t/x"} {:evals [read]})]
-        (is (= {:text (seon.context/reader-text (:messages (seon.context/render db b))) :origin :outside} (select-keys ctxv [:text :origin]))
+            page (zoom db :a14 {:seon.run/id "t/x#1" :seon.run/task "t/x" :seon.run/agent :a14 :seon.run/status :running}
+                       {:status :idle :evals [read]})
+            html (str/join (conv-html page))]
+        (is (= 1 (count (:conv page))))
+        (is (str/includes? html (seon.web.html/escape (subs (seon.context/reader-text (:messages (seon.context/render db b))) 0 200)))
             "the text it read, made again from its basis")
-        (is (str/includes? (:text ctxv) "app.m/f0") "what the read showed")
-        (is (:why (#'p/context-of db {:seon.run/id "t/x#2" :seon.run/task "t/x"} {:evals []})) "a run that read nothing says why")))))))
+        (is (str/includes? html "app.m/f0") "what the read showed")
+        (is (str/includes? html "read 1") "an outside read is a read, not a model turn")))))))
 
 (deftest a-hand-spawned-agent-says-why-it-has-no-context
-  (let [{:keys [why]} (#'p/context-of nil nil {:task "index rows by id (#0)"})]
+  (let [why (:turns-why (zoom nil :a2 nil {:status :idle :task "index rows by id (#0)" :evals []}))]
     (is (str/includes? why "spawned by hand with the description \"index rows by id (#0)\""))
     (is (str/includes? why "(my.root/run! sys [task-id])") "how an agent gets a context")))
 
 (deftest the-tiles-explain-their-numbers
   (testing "an ended card's reds are said to be other tasks' proofs"
-    (let [html (h/html (:seon.render/html (ui/agent-card {:id :a6 :status :killed :ended-as :merged :evals []
-                                                          :tests {:pass 2 :fail 7 :error 0}} {})))]
+    (let [html (h/html (ui/agent-card {:id :a6 :status :killed :ended-as :merged :evals []
+                                                          :tests {:pass 2 :fail 7 :error 0}} {}))]
       (is (str/includes? html "its run ended merged: its own proofs passed; these reds are other tasks' proofs, allowed"))))
   (testing "the count pills say what each state is; held says why"
-    (let [html (h/html (:seon.render/html (ui/tile-tasks {:rows {"t/a" {:state :held :blocked-by #{} :green 0 :red 0 :proofs 1 :runs 0 :tokens 0}}
-                                                          :runs {}} {})))]
+    (let [html (h/html (ui/tile-tasks {:rows {"t/a" {:state :held :blocked-by #{} :green 0 :red 0 :proofs 1 :runs 0 :tokens 0}}
+                                                          :runs {}} {}))]
       (is (re-find #"pill s-held\" title=\"held: declared in a task file" html))))
   (testing "boot's program count is definitions, and the agents tile names how many ended agents stay"
-    (is (str/includes? (h/html (:seon.render/html (ui/tile-errors {:root-errors [] :boot {:program {:loaded 360}} :store {}} {}))) "360 defs"))
-    (is (str/includes? (h/html (:seon.render/html (ui/tile-agents {:cells [] :off 3 :ended-kept 10} {}))) "+3 ended earlier, off it (the newest 10 ended stay)"))))
+    (is (str/includes? (h/html (ui/tile-errors {:root-errors [] :boot {:program {:loaded 360}} :store {}} {})) "360 defs"))
+    (is (str/includes? (h/html (ui/tile-agents {:cells [] :off 3 :ended-kept 10} {})) "+3 ended earlier, off it (the newest 10 ended stay)"))))
 
 (deftest an-ended-agent-reads-ended-and-offers-no-live-buttons
   (testing "root's own word for an agent it stopped because its run ended"
     (is (= :ended (ui/shown-status {:status :ended})))
-    (is (str/includes? (h/html (:seon.render/html (ui/event-row {:type :ended :agent :a6 :at-ms 0 :ended-as :merged} {})))
+    (is (str/includes? (h/html (ui/event-row {:type :ended :agent :a6 :at-ms 0 :ended-as :merged} {}))
                        "stopped by root: its run ended merged")))
   (testing "its live buttons and REPL box are marked live, which an ended card hides; history stays"
     (let [shell (h/html (ui/card-shell :a6))]
@@ -379,11 +375,11 @@
 
 (deftest a-cut-value-names-the-form-that-reads-it
   (let [txt (pr-str (apply str (repeat 300 "lorem ipsum ")))
-        row (h/html (:seon.render/html (ui/history-row {:tag :ret :form "(apply str (repeat 300 \"lorem ipsum \"))" :printed txt :handle :h0} {})))]
+        row (h/html (ui/history-row {:tag :ret :form "(apply str (repeat 300 \"lorem ipsum \"))" :printed txt :handle :h0} {}))]
     (is (re-find #"…\+\d+ chars · the whole value: result/h0 at its REPL" row))))
 
 (deftest the-writer-tile-counts-per-commit-and-per-flush
-  (let [html (h/html (:seon.render/html (ui/metric-tile (first (ui/load-tiles {:tx-per-commit 1.0 :commits 40 :tx-count 40 :flushes 10} {} {} {})) {})))]
+  (let [html (h/html (ui/metric-tile (first (ui/load-tiles {:tx-per-commit 1.0 :commits 40 :tx-count 40 :flushes 10} {} {} {})) {}))]
     (is (str/includes? html ">tx/commit<"))
     (is (str/includes? html "<dd>1.00</dd>"))
     (is (str/includes? html ">commits/flush</dt><dd>4.0<") "40 commits over 10 flushes")
@@ -400,7 +396,7 @@
     (is (nil? (resolve 'seon.render.proc/SAMPLE-MS)))
     (is (nil? (resolve 'seon.render.proc/start-sampler!))))
   (testing "health is each declared proc's recorded defects: no ping, no steps/s"
-    (let [html (h/html (:seon.render/html (ui/tile-health {:health {:api {:defects 0} :render {:defects 2 :newest "boom"}}} {})))]
+    (let [html (h/html (ui/tile-health {:health {:api {:defects 0} :render {:defects 2 :newest "boom"}}} {}))]
       (is (str/includes? html "2 procs · 1 with a defect recorded"))
       (is (str/includes? html "2 defects"))
       (is (str/includes? html "no defect recorded"))
@@ -427,9 +423,9 @@
 
 (deftest the-load-tiles-are-data-the-context-reads
   (let [tiles (ui/load-tiles {:tx-count 4} {:status :down :pid 7} {:datoms 100} {})
-        text (r/ai sys {:seon.render/schema :seon.render/system :seon.render/budget 2000})]
+        text (r/ai sys {:schema :seon.render/system :budget 2000})]
     (is (= ["t-writer" "t-fork-server" "t-main"] (mapv :id tiles)))
-    (is (str/includes? (h/html (:seon.render/html (ui/metric-tile (second tiles) {}))) "pill srv s-down"))
+    (is (str/includes? (h/html (ui/metric-tile (second tiles) {})) "pill srv s-down"))
     (testing "root's context prints the page's own tiles, one line each"
       (is (some #(str/starts-with? % "- writer 4 txs, batch") (str/split-lines text)))
       (is (some #(str/starts-with? % "- fork server up – ms fork p50, forked –") (str/split-lines text))))))
@@ -441,7 +437,7 @@
         it {:id 1 :tag :err :form "(/ 1 0)" :err e :printed "ArithmeticException: Divide by zero" :ms 0.1}
         rec (some :seon.cluster.eval/record (seon.repl/record-tx :a1 "r-1" [it] nil))]
     (doseq [[what x] [["live" it] ["recorded" rec]]
-            :let [html (h/html (:seon.render/html (ui/history-row x {})))]]
+            :let [html (h/html (ui/history-row x {}))]]
       (is (str/includes? html "Divide by zero") what)
       (is (not (str/includes? html "seon.error/type")) what))))
 
@@ -449,7 +445,7 @@
   ;; task seon.render/one-owner-per-view-path (B2, A14): a reason is the one error map; the
   ;; card's pill and the stream's row read its message, once
   (let [r (seon.contract/error :seon.root/refused 'seon.root/merge! "2 functions have no contract" {:agent :a1})
-        card (h/html (:seon.render/html (ui/agent-card {:id :a1 :status :idle :evals [] :merged r} {})))
+        card (h/html (ui/agent-card {:id :a1 :status :idle :evals [] :merged r} {}))
         row (ui/event-detail {:type :merged :agent :a1 :result r})]
     (is (str/includes? card "2 functions have no contract") "the pill's title says why, not that its tests were red")
     (is (= 1 (count (re-seq #"no contract" row))) row)
@@ -468,7 +464,7 @@
   (testing "an error map's schema is its variant: the base's render, whatever the variant"
     (is (= :seon.merge/behind (r/schema-of behind nil)))
     (is (= :seon.error/base (r/schema-of {:seon.error/type :no.such/variant :seon.error/operation 'a/b :seon.error/message "m"} nil))))
-  (let [text (r/ai behind {:seon.render/handle 'result/h4})]
+  (let [text (r/ai behind {:handle 'result/h4})]
     (testing "the message first, as a REPL answers; the fix; then its variant, where, and its own keys"
       (is (str/starts-with? text "main changed 3 key(s)"))
       (is (str/includes? text "fix: A merge task merges main into the branch (my.branch/merge-main!)"))
@@ -498,13 +494,13 @@
       (testing "a long plan shows whole under the REPL's reply budget"
         (is (str/includes? text "Step 399")))
       (testing "(the part budget when the env names none)"
-        (is (re-find #"…\+\d+ chars in \d+ more lines \(subs \(get-in result/h2 \[:seon.task/accumulated :plan\]\) \d+\)" (r/ai failed-task {:seon.render/handle 'result/h2}))))
+        (is (re-find #"…\+\d+ chars in \d+ more lines \(subs \(get-in result/h2 \[:seon.task/accumulated :plan\]\) \d+\)" (r/ai failed-task {:handle 'result/h2}))))
       (testing "the proofs are a bounded list: how many more and where"
         (is (str/includes? text "12 proofs: app.proofs/add-0-test"))
         (is (str/includes? text "+4 more: (get-in result/h2 [:seon.task/accumulated :proofs])")))
       (is (str/includes? text "evidence: {:from \"calc/add#2\""))))
   (testing "the page's task box shows the failure too"
-    (let [html (h/html (r/html failed-task {:seon.render/schema :seon.task/task}))]
+    (let [html (h/html (r/html failed-task {:schema :seon.task/task}))]
       (is (str/includes? html "failed in calc/add#2: add cannot be total over longs")))))
 
 (deftest a-run-reads-in-one-line
@@ -514,7 +510,7 @@
                     :seon.run/reason (str "merge refused: " (:seon.error/message behind))
                     :seon.run/conflicts [{:key "var app.calc/add" :kind :var :base "a" :ours "b" :theirs "c"}]
                     :seon.run/unmerged ["var app.calc/add"]}
-                   {:seon.render/handle '(get atts "calc/add#2")})]
+                   {:handle '(get atts "calc/add#2")})]
     (is (str/starts-with? line "ended calc/add#2 merge-failed: merge refused: main changed 3 key(s)"))
     (is (str/includes? line " · 1 conflicts in (:seon.run/conflicts (get atts \"calc/add#2\")) · 1 unmerged in (:seon.run/unmerged (get atts \"calc/add#2\"))"))))
 
@@ -524,7 +520,7 @@
 
 (deftest every-problem-class-reads-what-it-is-about-and-why
   ;; rows as seon.problems/report makes them, one per class that had no line of its own
-  (let [line #(r/ai (row (assoc %2 :class %1)) {:seon.render/schema :seon.problems/row})]
+  (let [line #(r/ai (row (assoc %2 :class %1)) {:schema :seon.problems/row})]
     (is (= "task-conflict calc/add calc/add#3 plan: {:base \"Make add.\", :ours \"Make add total.\", :theirs \"Make add pass.\"}"
            (line :task-conflict {:task "calc/add" :run "calc/add#3" :attr :plan :open? true
                                  :evidence {:task "calc/add" :attr :plan :base "Make add." :ours "Make add total." :theirs "Make add pass." :from "calc/add#3"}})))
@@ -634,13 +630,257 @@
 
 (deftest every-part-names-its-inputs-schema
   (testing "a unit names its input's schema, whose declared render shows it, never a render function (docs/render.md#the-frame-and-its-units)"
-    (let [units (concat (:seon.render/units (r/render-face :html (assoc sys :order [:a1] :series {} :agent-run {}) {:seon.render/schema :seon.render/system}))
-                        (:seon.render/units (r/render-face :html {:agent {:id :a1 :status :idle} :context {:why "none"}}
-                                                           {:seon.render/schema :seon.render/agent-page})))]
-      (is (= #{"z-history-more"} (set (map :id (filter :render units))))
-          "only the history's count line and its rows, serialized ahead (jolt/printer-eval makes the rows units); an event row names :seon.render/event")
+    (let [units (concat (:seon.render/units (r/html (assoc sys :order [:a1] :series {} :agent-run {}) {:schema :seon.render/system}))
+                        (:seon.render/units (r/html {:agent {:id :a1 :status :idle} :totals {:n 0} :history-total 0 :history-shown 0 :context {:why "none"}}
+                                                           {:schema :seon.render/agent-page})))]
+      (is (= #{} (set (map :id (filter :render units)))) "no unit names a render function: each names its input's schema")
       (doseq [{:keys [id schema]} (remove :render units)]
         (is (r/declared schema :html) (str id " names " schema ", which declares an HTML render"))))))
+;; ---- the agent's debug view (task seon.render/a-debug-view-of-any-agent) ----------------
+
+(defn- with-turns
+  "(f db) on a branch holding the wiki, a task demo/f and the run demo/f#1's two model turns
+  as seon.turn/act! writes them (its facts, then its split; the second turn took an owner's
+  message), the program changing between them."
+  [f]
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [program (fn [src] [{:db/id "f" :var/name 'demo/f :var/ns "ns" :var/form "form"}
+                              {:db/id "form" :form/id (str "demo/f " src) :form/src src :form/ns "ns" :form/order 0 :form/defines ["f"]}
+                              {:db/id "ns" :ns/name 'demo}])
+           _ (d/transact conn (seon.docs/load-tx @conn "docs" (seon.docs/pages (seon.config/checkout) "docs")))
+           _ (d/transact conn (program "(defn f \"Doubles.\" [x] (* 2 x))"))
+           _ (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make `demo/f` triple."
+                                                           :seon.task/proofs #{'demo-test/f-test}}]))
+           observed {:results {'demo-test/f-test :fail} :test-run-errors []
+                     :reds [{:test 'demo-test/f-test :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))" :got "(= 6 4)"}]
+                     :reasons [{:reason :proof-red :symbol 'demo-test/f-test}] :will-merge {}}
+           turn! (fn [n obs reply calls usage]
+                   (let [b {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn n :max-turns 8 :origin :model :observed obs}]
+                     (d/transact conn [(merge usage {:seon.turn/id (str "demo/f#1/" n) :seon.turn/run "demo/f#1" :seon.turn/n n
+                                                     :seon.turn/origin :model :seon.turn/basis b :seon.turn/calls calls :seon.turn/reply reply
+                                                     :seon.turn/forms (count calls) :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 2300
+                                                     :seon.turn/finish "tool_calls" :seon.turn/model "deepseek-v4-flash"})])
+                     (d/transact conn [{:seon.turn/id (str "demo/f#1/" n)
+                                        :seon.turn/split {:tests-ms 410 :context-ms 12 :model-ms 2100 :eval-ms 180 :record-ms 3}}])))
+           u (fn [p c hit] (seon.turn/usage {:prompt-tokens p :completion-tokens c :cache-hit-tokens hit :cache-miss-tokens (- p hit)}))]
+       ;; turn 0's call evaluated two forms, each with its thought, as seon.repl/record-tx records
+       ;; them in the agent's process (pid 77); and the owner evaluated one form from the page
+       (d/transact conn (seon.repl/record-tx :a3 "a3-77-1000" [{:id 4 :tag :ret :form "(in-ns 'demo)" :lead ";; work in demo" :printed "#namespace[demo]" :ms 0.2}
+                                                              {:id 5 :tag :ret :form "(defn f [x] (* 3 x))" :lead ";; triple, as the plan says" :printed "#'demo/f" :ms 1.1}] nil))
+       (turn! 0 observed "I will make f triple."
+              [{:id "call-0" :code ";; work in demo\n(in-ns 'demo)\n;; triple, as the plan says\n(defn f [x] (* 3 x))" :items ["a3-77-1000/4" "a3-77-1000/5"] :thinking "redefine f, then the proof runs"
+                :evals (seon.context/evaluations-text [{:id 5 :tag :ret :form "(defn f [x] (* 3 x))" :printed "#'demo/f"}])}]
+              (assoc (u 3900 120 0) :seon.turn/reasoning "The plan says triple; the proof checks (f 2) is 6."))
+       (d/transact conn (seon.repl/record-tx :a3 "a3-77-2000" [{:id 6 :tag :ret :form "(f 2)" :printed "6" :ms 0.1 :origin :ui}] nil))
+       (d/transact conn (program "(defn f \"Triples.\" [x] (* 3 x))"))
+       ;; the owner's message as seon.turn/basis! takes it: the fact root wrote on main, written on
+       ;; the branch before the turn's commit, and named by id in the basis
+       (d/transact conn [{:seon.message/id "m-1" :seon.message/from "owner" :seon.message/to "demo/f#1" :seon.message/body "check demo/g too"}])
+       (turn! 1 (assoc observed :results {'demo-test/f-test :pass} :reds [] :reasons [] :will-merge {:changed ['demo/f]}
+                       :message-ids ["m-1"])
+              "Done; checking g." [{:id "call-1" :code "(my.turn/wait)" :evals ""}] (u 4400 40 3800))
+       (f @conn)))))
+
+(def ^:private run1
+  {:seon.run/id "demo/f#1" :seon.run/task "demo/f" :seon.run/agent :a3 :seon.run/status :running
+   :seon.run/env {:branch :task-demo-f :model "deepseek-flash" :max-turns 8} :seon.run/start-ms 0 :seon.run/pid 77})
+
+(deftest each-turn-is-a-row
+  (with-turns
+    (fn [db]
+      (let [page (zoom db :a3 run1 {:status :running :branch :task-demo-f :pid 77 :evals [] :running {:form "(seon.turn/work! '{})"}})
+            [t0 t1] (turn-rows-of page)]
+        (is (= 2 (count (turn-rows-of page))) "every turn, oldest first")
+        (is (str/includes? t0 "turn 1 of 8") "numbered as its context says it (:turn \"1 of 8\")") (is (str/includes? t1 "turn 2 of 8"))
+        (is (str/includes? t0 "id demo/f#1/0") "and its id, which counts from 0, named as an id")
+        (is (str/includes? t0 "its thought ") "a form's lead is labeled a thought, not the reply")
+        (is (str/includes? t0 "its reply ") "the reply labeled")
+        (is (str/includes? (h/html (ui/turn-row {:seon.turn/id "demo/f#1/2" :seon.turn/n 2 :seon.turn/origin :model :seon.turn/reply ""} {})) "no reply text")
+            "a model turn that answered only with forms says so")
+        (testing "tokens, the cached share, the cost at the model's prices, where the time went, how it stopped"
+          (is (str/includes? t0 "4,020 tokens"))
+          (is (str/includes? t0 "0% cached"))
+          (is (str/includes? t1 "86% cached") "3,800 of 4,400")
+          (is (str/includes? t1 (format "$%.4f" (seon.model/cost "deepseek-flash" (seon.turn/usage {:prompt-tokens 4400 :completion-tokens 40 :cache-hit-tokens 3800 :cache-miss-tokens 600})))))
+          (is (str/includes? t0 "2100 ms") "its model's ms")
+          (is (str/includes? t0 "tool_calls")))
+        (testing "what it said, thought and did, and what the REPL answered it"
+          (is (str/includes? t0 "I will make f triple."))
+          (is (str/includes? t0 "The plan says triple"))
+          (is (str/includes? t0 "redefine f, then the proof runs") "the call's thinking")
+          (is (re-find #"(?s)<p class=\"lead\"><em>its thought </em>work in demo</p>.*\(in-ns 'demo\).*#namespace\[demo\].*<p class=\"lead\"><em>its thought </em>triple, as the plan says</p>.*\(defn f \[x\] \(\* 3 x\)\).*#'demo/f" t0)
+              "per form, in order: its thought, the form, its result")
+          (is (str/includes? t0 "what call-0 answered, as the model read it")))
+        (testing "the evaluations outside the turns are in the conversation in the order they were written: the owner's (f 2), not the turn's forms again"
+          (is (= 1 (:history-total page)))
+          (is (= [:seon.turn/turn-fact :seon.agent/item :seon.turn/turn-fact] (mapv :schema (:conv page))) "two turns, and the owner's evaluation between them")
+          (is (str/includes? (nth (conv-html page) 1) "(f 2)") "written after turn 0's forms, before turn 1"))
+        (testing "the proofs it saw and the messages it took"
+          (is (str/includes? t0 "0/1 proofs pass"))
+          (is (str/includes? t0 "✕ <code>f-test</code>"))
+          (is (str/includes? t1 "1/1 proofs pass"))
+          (is (str/includes? t1 "since the turn before: f-test fail → pass") "what changed since the turn before")
+          (is (str/includes? t1 "check demo/g too")))
+        (testing "the head: totals over the turns, priced where the provider split its cache"
+          (is (= {:n 2 :model 2 :reads 0 :evals 3 :read? true :tokens 8460 :unpriced 0} (dissoc (:totals page) :usd)))
+          (is (< 0 (:usd (:totals page)) 0.01)))
+        (testing "the branch box reads the newest turn's :will-merge"
+          (let [b (some #(when (str/starts-with? (:id %) "tile-branch-") (get-in % [:input :value])) (:tiles page))]
+            (is (= {:changed ['demo/f]} (:will-merge b)))
+            (is (= "demo/f#1/1" (:turn b)))))))))
+
+(deftest a-turn-row-shows-the-context-remade-from-its-basis
+  (with-turns
+    (fn [db]
+      (let [page (zoom db :a3 run1 nil)
+            e0 (d/q '[:find ?e . :where [?e :seon.turn/id "demo/f#1/0"]] db)
+            e1 (d/q '[:find ?e . :where [?e :seon.turn/id "demo/f#1/1"]] db)
+            r0 (seon.context/remade db e0)
+            [t0 t1] (turn-rows-of page)]
+        (is (str/includes? t0 "Doubles.") "turn 0 read the program as it stood at its commit")
+        (is (not (str/includes? t0 "Triples.")))
+        (is (str/includes? t0 (seon.web.html/escape (subs (seon.context/turn-text db e0) 0 300))) "its text is seon.context's, made from the basis")
+        (testing "each part's tokens, as the printer sizes them"
+          (doseq [{:keys [part tokens]} (seon.context/sections r0)]
+            (is (str/includes? t0 (str part " " (ui/group3 tokens))) part))
+          (is (str/includes? t0 "<code>:task</code>") "each section key's own count"))
+        (is (str/includes? t1 "scrollback, 1 earlier turns") "turn 1's request carried turn 0")
+        (is (str/includes? t1 "/turn?view=a3&amp;id=demo%2Ff%231%2F1") "the whole request's link")
+        (testing "the whole request, served at that link, is every message the model read, in order"
+          (let [txt (p/turn-text {:zoom {:a3 {:db db}}} :a3 "demo/f#1/1")]
+            (is (str/starts-with? txt ";; ---- system"))
+            (is (str/includes? txt ";; ---- tool · answer to call-0"))
+            (is (str/includes? txt "check demo/g too") "the message it took, in its turn sections")
+            (is (= txt (seon.context/request-text (:messages (seon.context/remade db e1)))))))
+        (is (str/includes? (p/turn-text {:zoom {}} :a3 "demo/f#1/1") "open its window first") "not read: says how")))))
+
+(deftest the-agent-head-says-why
+  (testing "a live agent evaluating its turn loop"
+    (let [w (ui/why {:id :a3 :status :running :running {:form "(seon.turn/work! '{:task \"demo/f\"})"}} run1 nil 2)]
+      (is (some #(str/starts-with? % "evaluating (seon.turn/work!") w))
+      (is (some #(str/includes? % "run demo/f#1 running: 2 model turns recorded of at most 8; the turn after the last recorded is in flight") w))))
+  (testing "an ended agent, read from the store, and its task held for root"
+    (let [w (ui/why {:id :a3} (assoc run1 :seon.run/status :ended :seon.run/outcome :cap :seon.run/reason "turns ran out: demo-test/f-test red")
+                    {:seon.task/id "demo/f" :seon.task/execution :held :seon.task/failure {:reason "refused: demo-test/f-test red" :counterexample ""}} 8)]
+      (is (= ["not in root's view (its process ended, or another boot ran it): read from the store"
+              "run demo/f#1 ended, outcome cap: turns ran out: demo-test/f-test red"
+              "its task demo/f is held for root: refused: demo-test/f-test red; release it to run a next run"] w))))
+  (testing "nothing known"
+    (is (= ["root holds no agent a9 and main records no run it worked"] (ui/why {:id :a9} nil nil 0))))
+  (testing "the head shows the run's numbers and cost"
+    (let [html (h/html (ui/zoom-head {:agent {:id :a3 :status :idle :pid 77 :mem-mb 120.5 :evals []} :run run1
+                                                         :turns {:n 2 :model 2 :reads 0 :evals 5 :tokens 8460 :usd 0.00123 :unpriced 1}} {}))]
+      (is (str/includes? html "deepseek-flash"))
+      (is (str/includes? html "8,460"))
+      (is (str/includes? html "$0.0012 + 1 turns not priced"))
+      (is (str/includes? html "120.5 MB")))))
+
+(deftest an-ended-agent-page-reads-the-store
+  (testing "root's view holds no a7: its branch is its newest run's, asked of the writer"
+    (let [o (volatile! {})
+          st (#'p/ask-branches {:watch #{:a7 :root} :pending {} :rid 0 :agent-run {:a7 (assoc run1 :seon.run/agent :a7 :seon.run/status :ended)}} o)]
+      (is (= [{:op :branch-db :branch :task-demo-f}] (mapv #(get-in % [:req :req]) (:to-api @o))))
+      (testing "and not again while nothing moved"
+        (let [o2 (volatile! {})]
+          (#'p/ask-branches (assoc st :pending {}) o2)
+          (is (empty? (:to-api @o2)))))
+      (testing "a commit event of a watched agent moves it: read again"
+        (let [o3 (volatile! {})
+              st (#'p/on-event (assoc st :pending {} :new-events []) {:type :commit :agent :a7 :t 99})]
+          (#'p/ask-branches st o3)
+          (is (= 1 (count (:to-api @o3))))))))
+  (testing "its page from the branch alone: its turns, why it is as it is, nothing live to act on"
+    (with-turns
+      (fn [db]
+        (let [att (assoc run1 :seon.run/status :ended :seon.run/outcome :green)
+              page (zoom db :a3 att nil)
+              actions (h/html (ui/agent-input {:id :a3 :live? false :held nil} {}))]
+          (is (= 2 (count (turn-rows-of page))))
+          (is (some #(str/includes? % "read from the store") (ui/why (:agent page) att nil 2)))
+          (is (str/includes? actions "its process has ended"))
+          (is (not (str/includes? actions "seon.root%2Fsubmit")) "no REPL to evaluate in"))))))
+
+(deftest the-agent-page-acts-through-roots-requests
+  (let [idx {:a3 {:pid 77 :branch :task-demo-f :status :idle}}
+        html (h/html (ui/agent-input {:id :a3 :live? true :held "demo/f"} {}))]
+    (testing "the window's input and buttons are UI calls of root's functions"
+      (is (str/includes? html "/call?fn=seon.root%2Fsubmit%21&amp;agent=a3"))
+      (is (str/includes? html "/call?fn=seon.root%2Finterrupt%21&amp;agent=a3"))
+      (is (str/includes? html "/call?fn=seon.root%2Frelease%21&amp;agent=a3&amp;args=")))
+    (testing "each is root's request, the one table the server's ops send too"
+      (is (= [[{:op :eval :id :a3 :forms "(+ 1 2)" :origin :ui} :a3]] (seon.web/requests {:var 'seon.root/submit! :agent :a3 :forms "(+ 1 2)"} idx)))
+      (is (= [[{:op :message :id :a3 :from :owner :body "check g"} :a3]] (seon.web/requests {:var 'seon.root/message! :agent :a3 :args {:body "check g"}} idx)))
+      (is (= [[{:op :message :id :a3 :from :owner :body "check g"} :a3]] (seon.web/requests {:var 'seon.root/submit! :agent :a3 :forms " > check g"} idx))
+          "a line the input sends that starts with > is a message, not a form")
+      (is (= [[{:op :write :req {:op :tx :branch :db :tx-data (seon.task/execution-tx ["demo/f"] :running)}} :a3]]
+             (seon.web/requests {:var 'seon.root/release! :agent :a3 :args {:task "demo/f"}} idx))
+          "my.root/run!'s one transaction")
+      (is (= [] (seon.web/requests {:var 'seon.root/interrupt! :agent :a3} idx)) "an interrupt is the web proc's signal, no request"))))
+
+(deftest a-runs-window-is-its-agent-as-that-run-ran
+  ;; agent ids start again each boot: a run's window is stable. /run/<id> reads the
+  ;; run's agent and branch, and root's view entry only while that agent works this run
+  (with-turns
+    (fn [db]
+      (let [st {:runs {"demo/f#1" run1 "demo/g#1" (assoc run1 :seon.run/id "demo/g#1")}
+                ;; a3 now works another run (a later boot's a3)
+                :agent-run {:a3 (assoc run1 :seon.run/id "demo/g#1")}
+                :view {:agents {:a3 {:status :idle :pid 99 :evals []}}} :tasks {}
+                :zoom {:run/demo/f#1 {:db db}}}
+            page (second (#'p/zoom-value st (keyword "run" "demo/f#1")))]
+        (is (= "demo/f#1" (:seon.run/id (:run page))))
+        (is (= 2 (count (turn-rows-of page))) "its own turns, from its branch")
+        (is (nil? (:status (:agent page))) "the live a3 works another run: not this one's process")
+        (is (str/includes? (first (turn-rows-of page)) "/turn?view=run%3Ademo%2Ff%231&amp;id=") "its turns link through its own view")))))
+
+
+(deftest the-conversation-appends-new-rows
+  ;; the window's conversation: each turn and evaluation is a unit of the window, rendered once
+  ;; and appended when it is new; the list is not sent again
+  (let [ev (fn [i] {:id i :tag :ret :form (str "(+ " i " 1)") :printed (str (inc i)) :ms 0.1})
+        view (fn [n] (assoc-in view0 [:agents :a1 :evals] (mapv ev (range n))))
+        st0 (assoc (fresh-state) :watch #{:a1})
+        [st1 out1] (answer st0 (view 2))
+        [st2 out2] (answer st1 (view 3))
+        patch (fn [out] (first (filter #(and (= :patch (:op %)) (= :a1 (:view %))) (:to-web out))))
+        [[sel html]] (:appends (patch out2))]
+    (is (= "#z-conv" (ffirst (:appends (patch out1)))) "the first pass adds the rows there are")
+    (is (= "#z-conv" sel))
+    (is (str/includes? html "(+ 2 1)") "the new evaluation's row")
+    (is (not (str/includes? html "(+ 1 1)")) "an earlier row is not sent again")
+    (testing "the page, composed, holds every row, oldest first"
+      (let [page (p/page-html st2 :a1)]
+        (is (< (str/index-of page "(+ 0 1)") (str/index-of page "(+ 1 1)") (str/index-of page "(+ 2 1)")))))))
+
+(deftest the-printer-renders-each-nested-value-by-its-own-render
+  ;; owner, 2026-10-23: the default render auto-renders. A value inside the printed one whose
+  ;; schema declares a render shows as that render, one line, in its place: the run's :ai
+  ;; render in the text, a call of its :html render in the hiccup (expanded by the serializer);
+  ;; the printed value itself is the printer's, never its own render again
+  (let [a {:seon.run/id "calc/square#1" :seon.run/agent :a4 :seon.run/status :done :seon.run/outcome :green}
+        v {:newest a :count 3}]
+    (is (= "{:count 3, :newest ended calc/square#1 green}" (r/ai v {})) "the text: the run's own one line")
+    (let [html (h/html (r/html v {}))]
+      (is (str/includes? html "<tr class=\"at s-done o-green\">") "the hiccup: the run's own render")
+      (is (str/includes? html "seon-print-keyword\">:count") "around it, the printer's map"))
+    (is (= "{:k [1 2 3]}" (r/ai {:k [1 2 3]} {})) "a value with no render of its own prints as data")
+    (is (str/includes? (r/ai a {}) "calc/square#1") "the value itself by its render, as before")))
+
+(deftest one-tiles-change-sends-one-tile
+  ;; the agent window's right column: each tile is a unit; a change to one value is that tile
+  ;; removed and prepended anew (the last changed first), the others not sent
+  (let [st0 (assoc (fresh-state) :watch #{:a1})
+        [st1 _] (answer st0 view0)
+        view1 (assoc-in view0 [:agents :a1 :tests] {:pass 1 :fail 0 :error 0 :ms 3.0 :reports [{:type :pass :var "#'app.proofs/t"}]})
+        [_ out] (answer st1 view1)
+        patch (first (filter #(and (= :patch (:op %)) (= :a1 (:view %))) (:to-web out)))
+        tile-ids (fn [xs] (keep #(re-find #"tile-[a-z]+-\d+" (str %)) xs))]
+    (is (= "#z-tiles" (ffirst (:prepends patch))) "the changed tile is prepended")
+    (is (str/includes? (second (first (:prepends patch))) "its last run: 1 proof, its assertions 1 pass") "proofs and assertions each named")
+    (is (= 1 (count (re-seq #"class=\"wtile\"" (second (first (:prepends patch)))))) "one tile, not the column")
+    (is (= ["tile-proofs"] (map #(re-find #"tile-[a-z]+" %) (filter #(str/starts-with? % "tile-") (:removes patch)))) "its old element removed")
+    (is (empty? (tile-ids (map first (:frags patch)))) "no other tile is sent")))
 
 (deftest an-ended-agent-leaves-the-grid-by-an-event
   ;; task seon.render/an-ended-agent-leaves-the-grid-by-an-event: the grid shows every live agent

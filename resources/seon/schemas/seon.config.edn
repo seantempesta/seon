@@ -109,6 +109,7 @@
   [:seon.config.render/value-budget :seon.config.render/value-budget]
   [:seon.config.render/root-context-budget :seon.config.render/root-context-budget]
   [:seon.config.render/history-row-budget :seon.config.render/history-row-budget]
+  [:seon.config.render/turn-text-budget :seon.config.render/turn-text-budget]
   [:seon.config.render/line-budget :seon.config.render/line-budget]
   [:seon.config.render/cell-budget :seon.config.render/cell-budget]
   [:seon.config.render.list/stream :seon.config.render.list/stream]
@@ -123,8 +124,8 @@
   [:seon.config.contract/instrument :seon.config.contract/instrument]
   [:seon.config.native/probe-lib :seon.config.native/probe-lib]]
 
- ;; which layer each key came from (seon.config/sources): the shipped file, config/local.edn,
- ;; a --config file or --set; written beside the config on main's root entity, as EDN text
+ ;; which layer each key came from (seon.config/sources): the shipped file, a --config file
+ ;; (the standing root's config/local.edn among them) or --set; written beside the config on main's root entity, as EDN text
  :seon.config/sources [:map-of {:seon.db/data true} :qualified-keyword :string]
  :seon.config/sources-fact [:map {:seon.db/attributes true} [:seon.config/sources :seon.config/sources]]
 

@@ -141,7 +141,7 @@
  :seon.reconcile/actions [:vector :seon.reconcile/action]
  ;; ---- the model ----
  ;; a conversation message: an assistant's may carry its eval calls, a tool message answers one by its id
- :seon.model/tool-call [:map [:id :string] [:code :string]]
+ :seon.model/tool-call [:map [:id :string] [:code :string] [:thinking {:optional true} :string]]
  :seon.model/message [:map [:role [:enum "system" "user" "assistant" "tool"]] [:content :string]
                       [:tool-calls {:optional true} [:vector :seon.model/tool-call]] [:tool-call-id {:optional true} :string]
                       [:reasoning {:optional true} :string]]

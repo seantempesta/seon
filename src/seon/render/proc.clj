@@ -26,7 +26,7 @@
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
-            [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.context :as context] [seon.print :as print]
+            [seon.web.html :as h] [seon.model :as model] [seon.task :as task] [seon.reconcile :as reconcile] [seon.context :as context] [seon.print :as print]
             [seon.config :as config] [seon.step :as step]))
 
 (defn- event-cap "Events the stream keeps (:seon.config.render.list/stream)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/stream))
@@ -112,7 +112,7 @@
      ;; fork, datoms per main commit
      :series {:tx (vec (take-last (series-cap) (map second (get-in v [:writer :recent]))))
               :fork (vec (take-last (series-cap) (get-in v [:stats :fork-ms])))
-              :datoms (:datoms-series st [])}
+              :vars (:vars-series st [])}
      ;; a stop that arrived before main recorded how the run ended says so once main does
      :events (mapv #(ui/ended-as % (:agent %) (:agent-run st {})) (:events st [])) :events-seen (:ev-seq st 0)
      :web {:tabs (:tabs st 0)}
@@ -134,24 +134,29 @@
                        results (:seon.run/results (last as) {})
                        own (get-in idx [:acc id] #{})]]
              [id {:state (reconcile/task-state idx id) :blocked-by (reconcile/blocked-by idx id) :needs (:seon.task/needs t)
-                  :runs (count as) :tokens (reduce + 0 (keep :seon.run/tokens as)) :newest (last as) :kind (:seon.task/kind t)
+                  :runs (count as)
+                  ;; unknown is not 0: a run records its tokens at its end
+                  :tokens (when-let [ts (seq (keep :seon.run/tokens as))] (reduce + ts)) :newest (last as) :kind (:seon.task/kind t)
                   ;; its own proofs (red blocks it) apart from other tasks' (an allowed red)
                   :green (count (filter #(= :pass (get results %)) own)) :red (count (filter #(and (contains? results %) (not= :pass (get results %))) own))
                   :allowed-red (count (filter (fn [[p r]] (and (not= :pass r) (not (contains? own p)))) results))
                   :proofs (count own)}])))
 
 (defn- main-info
-  "What the tiles show of main's db value: t, datoms, program vars, tasks and runs
-  (read when main's t moved: O(datoms) for the count, O(tasks) for the rest)."
+  "What the tiles show of main's db value: t, program vars, tasks and runs, read when
+  main's t moved: O(vars) for the vars (an index count), O(tasks) for the rest, nothing per
+  datom of main (seon.render-cost-test/main-info-reads-what-the-page-shows: was a count of
+  every datom, 15 ms at 47k datoms, 174 ms on the owner's main). Main's datom count is root's
+  state's on demand ((c/state sys {:datoms true}))."
   {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
   [st db]
   (if (= (:max-tx db) (get-in st [:main :t]))
     st
     (let [tasks (task/tasks db) idx (reconcile/index db) runs (:runs idx)
-          n (count (d/datoms db :eavt))]
-      (assoc st :main {:t (:max-tx db) :datoms n :vars (count (d/datoms db :aevt :var/name))}
+          vars (count (d/datoms db :aevt :var/name))]
+      (assoc st :main {:t (:max-tx db) :vars vars}
              ;; one point per main commit this proc read
-             :datoms-series (vec (take-last (series-cap) (conj (:datoms-series st []) (double n))))
+             :vars-series (vec (take-last (series-cap) (conj (:vars-series st []) (double vars))))
              :main-db db :tasks tasks :runs runs
              ;; the config in force, as root wrote it on main's root entity (one pull)
              :config (config/from-db db)
@@ -166,15 +171,16 @@
 ;;; --- units, rendered incrementally ---------------------------------------------------------
 
 (defn- render-unit
-  "A unit's HTML: its render applied to its input (an agent's card takes the entry with its
-  id), or the input's schema-declared render; the env names the unit (its element's id)."
+  "A unit's HTML: its input rendered (an agent's card takes the entry with its id), by its
+  render when it names one, else by the render its schema declares, shown as the unit says
+  (:as), its unit named (its element's id: :unit)."
   {:malli/schema [:=> [:cat :map] :string]}
-  [{:keys [id input render schema agent]}]
+  [{:keys [id input render schema agent as]}]
   (let [v (if agent (assoc input :id agent) input)
-        env {:seon.render/schema schema :seon.render/unit id}]
+        opts (cond-> {:schema schema :unit id} as (assoc :as as))]
     (h/html (if render
-              (:seon.render/html ((requiring-resolve render) v env))
-              (render/html v env)))))
+              ((requiring-resolve render) v opts)
+              (render/html v opts)))))
 
 (defn- step-units
   "Run a layout's units against what the view retained: a unit whose input is unchanged is
@@ -220,56 +226,159 @@
 
 ;;; --- one agent, zoomed ------------------------------------------------------------------------
 
-(defn- eval-records
-  "The evaluations recorded on branch db for agent id: [[eval-id record] ...], oldest
-  first, the newest :seon.config.render.list/history, with the count of all of them as its metadata (:total)."
-  {:malli/schema [:=> [:cat :seon.host/db :keyword] [:vector :any]]}
-  [db id]
-  (let [rows (d/q '[:find ?eid ?r :in $ ?id :where [?a :seon.agent/id ?id] [?e :seon.cluster.eval/agent ?a]
-                    [?e :seon.cluster.eval/id ?eid] [?e :seon.cluster.eval/record ?r]] db id)
-        key (fn [[eid]] (let [[run ord] (str/split eid #"/")] [(or (some-> run (str/split #"-") last parse-long) 0) (or (parse-long (str ord)) 0)]))]
-    (with-meta (vec (take-last (history-cap) (sort-by key rows))) {:total (count rows)})))
+(defn- record-ord
+  "An evaluation record's id (<run>/<item id>) as its item's id: its order in the request that
+  ran it (what a turn's call names, :items)."
+  {:malli/schema [:=> [:cat :string] :int]}
+  [eid]
+  (parse-long (peek (str/split eid #"/"))))
 
-(defn- context-of
-  "The context the agent's reader last got, exactly as recorded on db (seon.context/recorded:
-  a model turn's message or an outside read), or why there is none."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :map] :map] :map]}
-  [db run ag]
-  (let [r (when (and db run) (context/recorded db (:seon.run/id run)))]
-    (cond
-      (nil? run) {:why (str "no run on main: spawned by hand"
-                                (when (:task ag) (str " with the description \"" (:task ag) "\""))
-                                ", not for a task, so no model works it and there is no current-state block;"
-                                " its REPL and evaluations are above. A task's agent is started by the reconciler"
-                                " (my.root/run! sys [task-id]) or attached through root's server ({:op :attach :task id}).")}
-      (nil? r) {:why (str "no context read yet in run " (:seon.run/id run))}
-      :else {:text (:text r) :tokens (select/estimate (:text r)) :origin (:origin r) :turn (:turn r)})))
+(defn- eval-records
+  "The evaluations recorded on branch db for agent id, in the order they were written:
+  {:all [[eval-id record tx]] :by-id {eval-id record}}, the second what a turn's calls are read
+  through."
+  {:malli/schema [:=> [:cat :seon.host/db :keyword] [:map [:all [:vector :any]] [:by-id :map]]]}
+  [db id]
+  (let [rows (sort-by (fn [[eid _ tx]] [tx (record-ord eid)])
+                      (d/q '[:find ?eid ?r ?tx :in $ ?id :where [?a :seon.agent/id ?id] [?e :seon.cluster.eval/agent ?a]
+                             [?e :seon.cluster.eval/id ?eid ?tx] [?e :seon.cluster.eval/record ?r]] db id))]
+    {:all (vec rows) :by-id (into {} (for [[eid r] rows] [eid r]))}))
+
+(defn messages-of
+  "The messages turn entity e took, read from e's db by seon.context/taken-messages."
+  {:malli/schema [:=> [:cat :any] [:vector :map]]}
+  [e]
+  (context/taken-messages (d/entity-db e) (:observed (:seon.turn/basis e))))
+
+(defn- turn-rows
+  "The turns of run on branch db, oldest first (as written), each its facts with its cost
+  at model's prices (seon.model/cost) and the context it read, made again from its basis
+  (seon.context/remade: its sections' tokens and its reader text; a basis never changes, so
+  made once per turn id, in cache), linking the whole request at href-of its id, each call with
+  the evaluation records it names (record-of: record id -> record). [rows cache']."
+  {:malli/schema [:=> [:cat :seon.host/db :string [:maybe :string] :map :seon.host/fn :map] [:tuple [:vector :map] :map]]}
+  [db aid model cache href-of record-of]
+  (reduce (fn [[rows cache] e]
+            (let [t (-> (d/pull db '[*] e) (dissoc :db/id)
+                        ;; the transaction it was written in: its place in the conversation
+                        (assoc :tx (:tx (first (d/datoms db :eavt e :seon.turn/id))))
+                        ;; each call's forms as they ran, by the ids it names
+                        (update :seon.turn/calls (fn [cs] (mapv (fn [c] (assoc c :records (vec (keep record-of (:items c))))) cs)))
+                        (assoc :messages (messages-of (d/entity db e))))
+                  tid (:seon.turn/id t)
+                  c (or (get cache tid)
+                        (when (:seon.turn/basis t)
+                          (let [r (context/remade db e)]
+                            {:sections (context/sections r) :text (context/reader-text (:messages r)) :href (href-of tid)})))]
+              [(conj rows (cond-> (assoc t :usd (model/cost model t)
+                                         ;; the proofs the turn before it saw: what changed since
+                                         :previous (get-in (peek rows) [:seon.turn/basis :observed :results]))
+                            c (assoc :context c)))
+               (cond-> cache c (assoc tid c))]))
+          [[] cache] (sort (d/q '[:find [?e ...] :in $ ?a :where [?e :seon.turn/run ?a]] db aid))))
+
+(defn turn-href
+  "Where the turn tid of view's agent serves its whole request (seon.web's route)."
+  {:malli/schema [:=> [:cat :keyword :string] :string]}
+  [view tid] (str "/turn?view=" (ui/view-param view) "&id=" (java.net.URLEncoder/encode ^String tid "UTF-8")))
+
+(defn turn-text
+  "The whole request turn tid of view's agent read (seon.context/request-text), made again from
+  its basis on the agent's branch as this proc last read it, or why it cannot be."
+  {:malli/schema [:=> [:cat :map :keyword :string] :string]}
+  [st view tid]
+  (let [db (get-in st [:zoom view :db])
+        e (when db (d/q '[:find ?e . :in $ ?t :where [?e :seon.turn/id ?t]] db tid))]
+    (cond (nil? db) (str "the branch of " (ui/kname view) " is not read: open its window first, which reads it")
+          (nil? e) (str "no turn " tid " on the branch of " (ui/kname view))
+          :else (context/request-text (:messages (context/remade db e))))))
+
+(defn- problem-rows
+  "The problems main recorded (seon.problems/report) of agent id or its task, each as root's
+  context words it (seon.render.ai/problem-row) with its evidence."
+  {:malli/schema [:=> [:cat [:maybe :map] :keyword [:maybe :string]] [:vector :map]]}
+  [report id task]
+  (vec (for [[c {:keys [n rows]}] (sort-by key (:classes report))
+             r rows
+             :when (or (= id (:agent r)) (= id (:last-agent r)) (and task (or (= task (:task r)) (= task (:last-task r)))))]
+         {:line (:text (ai/problem-row (assoc r :class c :n n) {})) :evidence (:evidence r)})))
 
 (defn- zoom-value
-  "The agent page's value (:seon.render/agent-page) for agent id, and the zoom's state."
+  "The agent page's value (:seon.render/agent-page) for agent id, and the zoom's state: root's
+  view entry while it lives, else nothing; its newest run and task on main; from the
+  run's branch (read from the store, kept after the agent ends) its turns, each row
+  rendered once while its facts are unchanged, and its evaluations."
   {:malli/schema [:=> [:cat :map :keyword] [:tuple :map :map]]}
-  [st id]
-  (let [ag (assoc (get-in st [:view :agents id] {}) :id id)
-        z (get-in st [:zoom id] {})
-        ;; the newest run it works (main-info's index of each agent's newest)
-        run (get-in st [:agent-run id])
+  [st view]
+  (let [;; a run's window (agent ids start again each boot), or an agent's newest run
+        ;; (main-info's index of each agent's newest)
+        run (if (= "run" (namespace view)) (get (:runs st) (name view)) (get-in st [:agent-run view]))
+        id (if (= "run" (namespace view)) (:seon.run/agent run) view)
+        ;; root's view entry, while the agent it names works this run
+        live? (= (:seon.run/id run) (:seon.run/id (get-in st [:agent-run id])))
+        ag (assoc (if (or live? (not= "run" (namespace view))) (get-in st [:view :agents id] {}) {}) :id id)
+        z (get-in st [:zoom view] {})
+        task (when run (get (:tasks st) (:seon.run/task run)))
         db (:db z)
-        records (if db (eval-records db id) (vec (map-indexed (fn [i e] [(str "v/" i) e]) (:evals ag))))
-        ctx-key [(:t z) (:seon.run/id run) (:seon.run/turns run) (:tests ag)]
-        ;; a new context read is a new evaluation of the agent's
-        ctx-key (conj ctx-key (some? db) (get-in st [:main :t]) (count (:evals ag)) (peek (:evals ag)))
-        ;; its branch's db, else main's (the task is main's; a merged branch may be gone)
-        ctx (if (= ctx-key (:ctx-key z)) (:ctx z)
-                (let [c (context-of (or db (:main-db st)) run ag)]
-                  (cond-> c
-                    ;; on main: its branch is gone (reading it failed), or not read yet
-                    (and (nil? db) (:main-db st)) (assoc :from (if (:db-error z) :main-gone :main)))))]
-    [(assoc-in st [:zoom id] (assoc z :ctx-key ctx-key :ctx ctx))
-     {:agent (ui/ended-as ag id (:agent-run st {})) :run run :task (when run (get (:tasks st) (:seon.run/task run)))
-      ;; each proof's task, to tell a blocking red from an allowed one
-      :owners (into {} (for [[tid t] (:tasks st) p (:seon.task/proofs t)] [p tid]))
-      :context ctx :history (vec (rseq records))
-      :history-total (or (:total (meta records)) (count records))}]))
+        {:keys [all by-id]} (if db (eval-records db id) {:all (vec (map-indexed (fn [i e] [(str "v/" i) e i]) (:evals ag))) :by-id {}})
+        model (or (get-in run [:seon.run/env :model]) (config/value :seon.config.ai/model))
+        [turns cache] (if (and db run)
+                        (turn-rows db (:seon.run/id run) model (:turn-ctx z {}) #(turn-href view %) by-id)
+                        [[] (:turn-ctx z {})])
+        ;; the evaluations outside the turns (the owner's, an outside agent's, root's): the turns
+        ;; show their own forms; the newest :seon.config.render.list/history
+        in-turns (set (for [t turns c (:seon.turn/calls t) i (:items c)] i))
+        ;; a context read's own evaluation is its read's row (the turn), never a second one
+        outside (vec (remove (fn [[eid r]] (or (in-turns eid) (= :context (:origin r)))) all))
+        records (with-meta (vec (take-last (history-cap) outside)) {:total (count outside)})
+        newest (peek turns)
+        agent (ui/ended-as ag id (:agent-run st {}))
+        branch {:branch (or (get-in run [:seon.run/env :branch]) (:branch ag)) :turn (:seon.turn/id newest)
+                :will-merge (get-in newest [:seon.turn/basis :observed :will-merge])
+                :conflicts (:seon.run/conflicts run) :unmerged (:seon.run/unmerged run)}
+        problems (problem-rows (:recorded st) id (:seon.run/task run))
+        ;; the right column: each value the window shows as its tile, renumbered when its value
+        ;; changes, so the last changed is first
+        ;; each tile renumbered when its value changes: its unit's id carries the number, so a
+        ;; change is the old element removed and the new one prepended, the last changed first
+        tiles (reduce (fn [acc [k v schema]]
+                        (let [old (get acc k)]
+                          (cond (nil? v) (dissoc acc k)
+                                (= v (:input old)) acc
+                                :else (assoc acc k {:input v :schema schema :seq (inc (reduce max 0 (map :seq (vals acc))))}))))
+                      (:tiles z {})
+                      [[:task (when task (assoc task :seon.task/state (get-in st [:task-rows (:seon.task/id task) :state])
+                                                :seon.task/blocked-by (set (get-in st [:task-rows (:seon.task/id task) :blocked-by]))))
+                        :seon.task/task]
+                       [:proofs {:tests (:tests agent) :results (:seon.run/results run)
+                                 :seen (not-empty (get-in newest [:seon.turn/basis :observed :results])) :seen-turn (:seon.turn/id newest)
+                                 :own (get-in task [:seon.task/accumulated :proofs])
+                                 :owners (into {} (for [[tid t] (:tasks st) p (:seon.task/proofs t)] [p tid]))} :seon.render/proofs]
+                       [:branch branch :seon.render/branch]
+                       [:problems {:rows problems} :seon.render/agent-problems]])
+        why-none (cond (nil? run) (str "no run on main: spawned by hand"
+                                           (when (:task ag) (str " with the description \"" (:task ag) "\""))
+                                           ", not for a task, so no model works it and it has no turns;"
+                                           " its REPL and evaluations are below. A task's agent is started by the reconciler"
+                                           " (my.root/run! sys [task-id]) or attached through root's server ({:op :attach :task id}).")
+                       (nil? db) (if (:db-error z) (str "its branch could not be read: " (:db-error z)) "its branch is being read")
+                       :else (str "no turn recorded yet in run " (:seon.run/id run)))]
+    [(assoc-in st [:zoom view] (assoc z :turn-ctx cache :tiles tiles))
+     {:agent agent :run run :task task
+      :tiles (vec (for [[k {:keys [input schema seq]}] (sort-by (comp - :seq val) tiles)]
+                    {:id (str "tile-" (name k) "-" seq) :input {:value input :schema schema} :schema :seon.render/window-tile}))
+      ;; the conversation: its turns and its evaluations outside them, in the order they were
+      ;; written, each a unit of the window by its schema's render (rendered when its value changes)
+      :conv (mapv second (sort-by first (concat (for [t turns] [(:tx t) {:id (str "c-" (ui/dom-id (:seon.turn/id t))) :input t :schema :seon.turn/turn-fact}])
+                                                (for [[eid r tx] records] [tx {:id (str "c-" (ui/dom-id eid)) :input r :schema :seon.agent/item}]))))
+      :turns-why why-none
+      :totals {:n (count turns) :model (count (filter #(= :model (:seon.turn/origin %)) turns))
+               :reads (count (remove #(= :model (:seon.turn/origin %)) turns)) :evals (count all) :read? (some? db)
+               ;; unknown is not 0: no turn that reported its tokens, no total
+               :tokens (when-let [ts (seq (keep :seon.turn/tokens turns))] (reduce + ts))
+               :usd (when-let [us (seq (keep :usd turns))] (reduce + us))
+               :unpriced (count (filter #(and (:seon.turn/tokens %) (nil? (:usd %))) turns))}
+      :history-total (or (:total (meta records)) (count records)) :history-shown (count records)}]))
 
 ;;; --- the pass ------------------------------------------------------------------------------------
 
@@ -280,7 +389,7 @@
   (let [[st value schema] (if (= :root view-id)
                             [st sys :seon.render/system]
                             (let [[st v] (zoom-value st view-id)] [st v :seon.render/agent-page]))
-        out (render/render-face :html value {:seon.render/schema schema})
+        out (render/html value {:schema schema})
         units (:seon.render/units out)
         skeleton (h/html (:seon.render/html out))
         [view patch n] (step-units (get-in st [:views view-id]) units)
@@ -323,7 +432,7 @@
           st (ordered st)
           sys (system-value st t0 now-ms)
           ;; root's context: the system's AI face, also a unit of root's layout
-          ctx (render/ai sys {:seon.render/schema :seon.render/system})
+          ctx (render/ai sys {:schema :seon.render/system})
           sys (assoc sys :context {:text ctx :tokens (select/estimate ctx)} :problem-areas (ai/problem-areas sys))
           st (assoc st :context ctx)
           views (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st)))
@@ -367,11 +476,34 @@
   [x ch n] (loop [acc [x]] (if-let [y (and (< (count acc) n) (a/poll! ch))] (recur (conj acc y)) acc)))
 
 (defn- on-event
-  "An event: kept for the stream (merges counted), and the view asked for."
+  "An event: kept for the stream (merges counted), and the view asked for. A watched agent's
+  commit moves its branch: the page reads it again (its turns are written there)."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [st ev]
   (cond-> (update st :new-events conj ev)
-    (and (= :merged (:type ev)) (get-in ev [:result :merged?])) (update :merges (fnil inc 0))))
+    (and (= :merged (:type ev)) (get-in ev [:result :merged?])) (update :merges (fnil inc 0))
+    (and (= :commit (:type ev)) (contains? (:watch st) (:agent ev))) (assoc-in [:zoom (:agent ev) :commit-t] (:t ev))))
+
+(defn- ask-branches
+  "Ask for each watched agent's branch db when it moved since this proc read it: its branch is
+  root's view's while it lives, else its newest run's on main (kept in the store after it
+  ended); it moved when its t in root's view or its last commit event changed. A read in
+  flight is left: its answer's pass asks again."
+  {:malli/schema [:=> [:cat :map :seon.host/volatile] :map]}
+  [st o]
+  (reduce (fn [st view]
+            (let [att? (= "run" (namespace view))
+                  run (if att? (get-in st [:runs (name view)]) (get-in st [:agent-run view]))
+                  id (if att? (:seon.run/agent run) view)
+                  a (when-not att? (get-in st [:view :agents id]))
+                  b (or (:branch a) (get-in run [:seon.run/env :branch]))
+                  at [b (:t a) (get-in st [:zoom view :commit-t])]
+                  kind [:branch view]]
+              (if (and b (not= at (get-in st [:zoom view :read])) (not (some #{kind} (vals (:pending st)))))
+                (-> st (assoc-in [:zoom view :read] at) (ask o kind {:op :write :req {:op :branch-db :branch b}}))
+                st)))
+          ;; the views a tab watches, and a page or keyframe waiting for its pass
+          st (filter keyword? (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st))))))
 
 (defn- web-answered
   "The web proc's call (tag [:web var agent form?]) answered r: shown in the stream; root's
@@ -399,16 +531,10 @@
     (= :state kind)
     (let [st (assoc st :view r)
           tx (get-in r [:writer :tx-count])
-          st (if (not= tx (:main-tx st)) (-> st (assoc :main-tx tx) (ask o :main {:op :write :req {:op :branch-db :branch :db}})) st)
-          ;; a watched agent's branch moved: read its branch db (its evaluations, its task)
-          st (reduce (fn [st id]
-                       (let [a (get-in r [:agents id])]
-                         (if (and a (:branch a) (not= (:t a) (get-in st [:zoom id :t])))
-                           (-> st (assoc-in [:zoom id :t] (:t a)) (ask o [:branch id] {:op :write :req {:op :branch-db :branch (:branch a)}}))
-                           st)))
-                     st (filter keyword? (:watch st)))]
-      (pass st o))
-    (= :main kind) (if (seon.contract/error? r) st (pass (main-info st (:db r)) o))
+          st (if (not= tx (:main-tx st)) (-> st (assoc :main-tx tx) (ask o :main {:op :write :req {:op :branch-db :branch :db}})) st)]
+      ;; a watched agent's branch moved: read its branch db (its turns, evaluations and task)
+      (pass (ask-branches st o) o))
+    (= :main kind) (if (seon.contract/error? r) st (pass (ask-branches (main-info st (:db r)) o) o))
     ;; an agent's branch db; a branch that is gone (merged and removed) is recorded as such
     (and (vector? kind) (= :branch (first kind)))
     (let [z [:zoom (second kind)]
@@ -463,6 +589,7 @@
                                       (do (step/out! o :to-web {:op :keyframe :view (:view m) :html (page-html st (:view m))}) st)
                                       (ask-state (update st :kf-wanted conj (:view m)) o))
                           :context (do (step/out! o :to-web {:op :text :k (:k m) :text (:context st "")}) st)
+                          :turn-text (do (step/out! o :to-web {:op :text :k (:k m) :text (turn-text st (:agent m) (:turn m))}) st)
                           :stats (do (step/out! o :to-web {:op :text :k (:k m) :text (sedn/encode (stats st))}) st)
                           st)
               st)]
