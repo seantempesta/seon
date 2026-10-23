@@ -1,7 +1,7 @@
 (ns seon.fx-test
   "The effect owner and worker step-fns as plain functions (no graph): admission by workers,
   priority order, budget refused, the queue bound, and a worker answering a defect."
-  (:require [clojure.test :refer [deftest is testing]] [jolt.deps] [seon.fx :as fx] [seon.config :as cfg]
+  (:require [clojure.test :refer [deftest is testing]] [jolt.deps] [seon.fx :as fx] [seon.config :as cfg] [seon.contract :as contract]
             [clojure.core.async.flow :as flow]))
 
 (defn- owner [workers] (fx/owner-proc {:kind :t :workers workers :work nil :back nil}))
@@ -35,6 +35,42 @@
         out (first (get o [:fx/t :done]))]
     (is (= :seon.fx/defect (get-in out [:outcome :seon.error/type])))
     (is (= {:agent :a1 :op :fx-reply :k 1} (:dest out)))))
+
+;; ---- a batch kind and a held host object (seon.vector's :embed) ------------------------
+
+(deftest a-batch-kind-takes-what-is-queued
+  (let [ks (fn [o] (map #(mapv (fn [m] (get-in m [:req :k])) (:batch %)) (:to-workers o)))
+        [st o] (fx/owner-proc (fx/owner-proc {:kind :t :workers 1 :batch 3 :work nil :back nil}) :in (req 1))
+        _ (is (= [[1]] (ks o)) "with nothing queued behind it, the head goes alone")
+        st (reduce (fn [st k] (first (fx/owner-proc st :in (req k)))) st [2 3 4 5])
+        [st o] (fx/owner-proc st :done {:batch [{:dest (:dest (req 1)) :outcome {:value 1}}]})]
+    (is (= [{:dest (:dest (req 1)) :r {:value 1}}] (:out o)) "each request of a batch is answered")
+    (is (= [[2 3 4]] (ks o)) "the free worker takes the head and those queued behind it, up to :batch")
+    (is (= [5] (map (comp :k :req) (vals (:queue st)))) "the rest waits")
+    (is (= 1 (:busy st)) "a batch holds one worker")))
+
+(deftest a-worker-performs-a-batch-in-one-call-and-opens-once
+  (let [st (fx/worker-proc {:kind :t :owner :fx/t :ctx {:path "m"}
+                            :open (fn [ctx] {:model (:path ctx) :id (random-uuid)})
+                            :perform (fn [{:keys [batch handle]}] (mapv (fn [m] {:value [(get-in m [:req :k]) (count batch) handle]}) batch))})
+        item (fn [& ks] {:batch (mapv #(assoc (req %) :in-ns 0 :taken-ns 0) ks)})
+        [st o] (fx/worker-proc st :work (item 1 2))
+        [_ o2] (fx/worker-proc st :work (item 3))
+        vals-of (fn [o] (mapv #(get-in % [:outcome :value]) (:batch (first (get o [:fx/t :done])))))
+        [[k1 n1 h1] [k2 n2 h2]] (vals-of o)
+        [[k3 n3 h3]] (vals-of o2)]
+    (is (= [1 2 2 2] [k1 n1 k2 n2]) "one call performs the batch, one outcome per request in order")
+    (is (= "m" (:model h1)) "the host object is made from the kind's ctx")
+    (is (= h1 h2 h3) "and made once: the next item reuses it")
+    (is (= [3 1] [k3 n3]))))
+
+(deftest an-open-that-fails-answers-every-request-and-opens-again
+  (let [st (fx/worker-proc {:kind :t :owner :fx/t :open (fn [_] (contract/error :seon.vector/model-unopened 'seon.vector/open "no model" {:path "m"}))
+                            :perform (fn [_] (throw (ex-info "never performed" {})))})
+        [st o] (fx/worker-proc st :work {:batch [(assoc (req 1) :in-ns 0 :taken-ns 0) (assoc (req 2) :in-ns 0 :taken-ns 0)]})]
+    (is (= [:seon.vector/model-unopened :seon.vector/model-unopened]
+           (mapv #(get-in % [:outcome :seon.error/type]) (:batch (first (get o [:fx/t :done]))))))
+    (is (nil? (:handle st)) "nothing is held, so the next item opens again")))
 
 ;; ---- write-back answers what happened (audit FENCES #21) ------------------------------
 
