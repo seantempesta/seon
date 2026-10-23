@@ -29,7 +29,7 @@ The queue order first; anything not listed is merged or old.
 
 | Branch | Worktree | State and next step |
 |---|---|---|
-| ``jolt/health`` | `../next-health` | Seven review fixes, review trailers, health in prove. One `root.clj` conflict with main to resolve, then report to the merge session. |
+| ``jolt/health`` | `../next-health` | Nearly all of it is on main (aac06296). The branch adds one src line (seon.prove/reply, not re-proved) and `notes/handoff-health.md` (6a326234), which names five items to check on main first: contracts for seon.prove/*, :prove in the system check, the mcp tool count, the cost proof in ticks, and reviews read from HEAD rather than --all. |
 | ``jolt/wiki-stale`` | `../next-wiki-stale` | Ready; merges right after health. |
 | ``jolt/rename-run`` | `../next-rename` | attempt → run, ready at the freeze: `notes/rename-run/HANDOFF.md`. Erase the standing store after it merges. |
 | ``jolt/self-contained`` | `../next-self-contained` | Step A, step C (GitHub URLs) and step R (the fresh clone into `~/src/seon-next`), after rename-run: `notes/handoff-self-contained.md`. |
