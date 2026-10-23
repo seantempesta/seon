@@ -27,6 +27,20 @@ The design: one mechanism, one tier, one store.
 5. The space is bounded by a config key in bytes (:seon.config.derive/max-bytes). Eviction is by size, never by time.
 6. Only pure work derives. A process test, or anything that reads the clock, the network or a model, is refused, by the reach walk's own classification (what it marks as reaching a process), never by a hand list.
 
+The store is fast enough to be the cache. Measured by global-ids, 2026-10-23 (REPL, LMDB, zstd, a fresh process reading a store another wrote):
+
+| Read | First | After |
+|---|---|---|
+| raw konserve key, 1 KB | 42 µs | 24 µs |
+| raw konserve key, 100 KB | 120 µs | ~146 µs |
+| fact by lookup ref, 1 KB | 1.2 ms (index nodes load) | 222 µs |
+| fact by lookup ref, 100 KB | 330-400 µs | |
+
+- An agent reads it itself after seon.db/after-fork!. LMDB readers do not block, so a hit never touches root. Main's head opens in about 1 ms, then seeks.
+- A result is a fact, not a raw key: a raw key outside any branch is swept by seon.db/collect!. The derived entity's identity attribute is flagged {:seon.db/identity true :seon.db/content-id true}, so one derivation on two branches is one entity, and a value of 1,024 B or more is stored once under its content key (seon.db-test/a-large-value-lives-once-under-its-own-key).
+- A result every agent shares goes on main through root's writer (group commit). A per-attempt one stays on the attempt's branch.
+- The union (about 0.6-0.75 ms a query, but a round trip to root's writer) is for joining what several branches wrote. A derivation reads main's head directly.
+
 It replaces and deletes, in order of measured cost; each first user is a proof that a second request at the same digest does no work, measured in calls and ticks:
 - (a) the ../test-results directory: results become facts. This also removes self-contained's step A, which only moves that directory.
 - (b) per-file analysis in the plan: pure-tests' (c), 8-15 s a run.
