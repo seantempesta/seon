@@ -53,21 +53,18 @@
              :when (and (= :error type) (nil? (test-symbol var)))]
          (or message "an error with no message"))))
 
-(def max-assertions
-  "Failing assertions a red test keeps in its run's facts (the first ones)."
-  8)
-
 (defn failures
   "The failing assertions of the test run, per test: {test [{:type :message :expected :actual}]},
-  the first max-assertions of each (expected and actual as the test child printed them)."
+  the first :seon.config.proofs/max-assertions of each (expected and actual as the test child printed them)."
   {:malli/schema [:=> [:cat [:map [:reports [:sequential :seon.test/report]]]] :seon.run/failures]}
   [test-run]
-  (reduce (fn [acc {:keys [type var] :as r}]
+  (let [kept (cfg/value :seon.config.proofs/max-assertions)]
+   (reduce (fn [acc {:keys [type var] :as r}]
             (let [t (test-symbol var)]
-              (if (and t (#{:fail :error} type) (< (count (get acc t)) max-assertions))
+              (if (and t (#{:fail :error} type) (< (count (get acc t)) kept))
                 (update acc t (fnil conj []) (select-keys r [:type :message :expected :actual]))
                 acc)))
-          {} (:reports test-run)))
+          {} (:reports test-run))))
 
 (defn costs
   "The cost proofs' reports of the test run, per test ({:rows :verdict}, kept as data)."

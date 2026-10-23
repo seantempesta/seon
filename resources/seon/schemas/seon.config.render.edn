@@ -7,6 +7,7 @@
  :seon.config.render.agent/max-number-digits [:int {:min 1 :seon.config/unit "digits" :description "A big number past this prints its digit count."}]
  :seon.config.render.agent/sort-bound [:int {:min 1 :seon.config/unit "keys" :description "A keyword map or set of at most this many is shown sorted."}]
  :seon.config.render/width [:int {:min 16 :seon.config/unit "chars" :description "The printed line width."}]
+ :seon.config.render/nest-depth [:int {:min 0 :seon.config/unit "levels" :description "Nesting levels the printer indents; deeper levels print at the last indent (seon.print.emit)."}]
  :seon.config.render/part-budget [:int {:min 1 :seon.config/unit "tokens" :description "A value shown inside another (a refused argument, a test's expected and actual)."}]
  :seon.config.render/form-budget [:int {:min 1 :seon.config/unit "tokens" :description "A form echoed back."}]
  :seon.config.render/context-budget [:int {:min 1 :seon.config/unit "tokens" :description "The whole context block the model reads."}]

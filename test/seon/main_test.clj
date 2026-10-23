@@ -90,3 +90,37 @@
                        (tree-seq coll? seq (binding [*read-eval* false *ns* (the-ns nsn)]
                                              (read-string {:read-cond :allow :features #{:clj}} src)))))]
     (is (= #{'seon.task} (into #{} (keep (fn [[nsn src]] (when (reads? nsn src) nsn))) forms)))))
+
+(deftest a-bound-is-a-config-key
+  ;; task seon.config/a-bound-is-a-config-key (AGENTS §5, only documented config): every limit,
+  ;; bound or default is a config key. Read from the compiler's facts (each src form's recorded
+  ;; source, as data): a top-level def of a number, and a literal count over 2 given to take,
+  ;; take-last, drop or drop-last, is a site; each site is named in docs/config.md#constants
+  ;; with its reason, and a name there whose site is gone is red too. A foreign interface's
+  ;; constant, named in upper case as its header names it, is the interface's, not a bound
+  (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
+        forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
+                     [(clojure.string/starts-with? ?file "src/")]] db)
+        read-in (fn [nsn src] (require nsn)
+                  (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))
+        foreign? (fn [s] (not (re-find #"[a-z]" (name s))))
+        sites (into (sorted-set)
+                    (for [[nsn src] forms
+                          :let [f (read-in nsn src)
+                                v (when (and (seq? f) (symbol? (second f))) (symbol (str nsn) (name (second f))))]
+                          :when v
+                          :when (or (and (#{'def 'defonce} (first f)) (number? (last f)) (not (foreign? v)))
+                                    (some #(and (seq? %) (symbol? (first %)) (#{"take" "take-last" "drop" "drop-last"} (name (first %)))
+                                                (number? (second %)) (> (second %) 2))
+                                          (tree-seq coll? seq f)))]
+                      v))
+        page (slurp "docs/config.md")
+        section (second (re-find #"(?s)## Constants\n(.*?)(?:\n## |\z)" page))
+        ;; the names each bullet lists before its reason (its text up to the first `: `)
+        named (into (sorted-set)
+                    (for [l (clojure.string/split-lines (or section "")) :when (clojure.string/starts-with? l "- ")
+                          [_ n] (re-seq #"`([a-z][\w.-]*/[\w*!?<>=-]+)`" (first (clojure.string/split l #": " 2)))]
+                      (symbol n)))]
+    (is (some? section) "docs/config.md has its Constants section")
+    (is (= #{} (apply disj sites named)) "every bound left in src is named in docs/config.md#constants with its reason")
+    (is (= #{} (apply disj named sites)) "and every name there is still such a site")))

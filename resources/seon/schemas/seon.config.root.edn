@@ -1,6 +1,8 @@
 ;; Root and its procs (new in next: v1's root was a JVM with other bounds). Values, units and
 ;; provenance: resources/seon/config/default.edn.
 {:seon.config.root/max-agents [:int {:min 1 :seon.config/unit "agents" :description "Live agents at most; a spawn past it is refused (root holds a socket per agent)."}]
+ :seon.config.root/death-stderr-bytes [:int {:min 1 :seon.config/unit "bytes" :description "How much of a dead agent's stderr its death records: the last bytes of its file (seon.root/stderr-tail)."}]
+ :seon.config.root/view-window [:int {:min 1 :seon.config/unit "entries" :description "The newest entries root's view keeps of a list it grows (an agent's evaluations, root's own defects); the view counts them all."}]
  :seon.config.root/api-writes [:int {:min 1 :seon.config/unit "requests" :description "Writer requests from the api in flight at most; at the bound the api reads only answers."}]
  :seon.config.root/api-batch [:int {:min 1 :seon.config/unit "messages" :description "Most messages one api step takes before applying its graph change."}]
  :seon.config.root/writer-batch [:int {:min 1 :seon.config/unit "requests" :description "Most requests one writer step drains and commits together (group commit)."}]

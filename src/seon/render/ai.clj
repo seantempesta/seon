@@ -216,7 +216,7 @@
   {:malli/schema [:=> [:cat :seon.render/system] [:map [:root [:vector :string]] [:classes [:vector [:tuple :keyword :string]]]]]}
   [{:keys [root-errors root-errors-total recorded]}]
   (let [n-errs (or root-errors-total (count root-errors))
-        [shown more] (print/bounded (reverse (map-indexed vector root-errors)) :seon.config.render.list/top "(:root-errors (seon.root/state sys)) holds the newest 20" n-errs)
+        [shown more] (print/bounded (reverse (map-indexed vector root-errors)) :seon.config.render.list/top (str "(:root-errors (seon.root/state sys)) holds the newest " (config/value :seon.config.root/view-window)) n-errs)
         errs (concat
                (for [[i e] shown]
                  (str "defect in " (ui/kname (:pid e)) ": " (print/line (:message e) (line-budget) (list :message (list 'nth '(:root-errors (seon.root/state sys)) i)))))
