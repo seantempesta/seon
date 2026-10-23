@@ -399,15 +399,21 @@
   ([ticks proofs forked]
   (let [{:keys [selected run reused digests dir]} (test-plan (db) (:base @state) proofs)
         reused-reports (vec (for [t selected :when (reused t)] {:type :pass :var (str "#'" t) :reused true}))
-        [r w] (lib/pipe) t0 (profile/now-ns)
+        [r w] (sock/socketpair) t0 (profile/now-ns)
         res (lib/fork!
               {:refused (fn [n] (lib/c-close r) (lib/c-close w)
                           (contract/error :seon.test/fork-refused 'seon.agent/run-tests-forked
                                           (str "cannot fork the tests: " n " Chez threads active (a running future?)") {:active-threads n}))
                :child (fn []
                         (lib/c-close r)
-                        ;; the run ends by its budget; if the agent dies first, the next write to the
-                        ;; pipe ends this child (EPIPE). The agent's socket is FD_CLOFORK: not held here.
+                        ;; the run ends by its budget, or with its agent: the agent's end of this socket
+                        ;; pair closing raises SIGIO here and ends the child, whatever the test is
+                        ;; doing (task seon.agent/a-proof-run-ends-with-its-agent; the agent's own
+                        ;; socket to root is FD_CLOFORK: not held here, so its handler is replaced)
+                        (when-let [unwatched (sock/signal-at-input! w)]
+                          (sock/write-line! w (sedn/encode {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (:seon.error/message unwatched)}]}))
+                          (lib/c-exit 0))
+                        (intr/exit-at-eof! #(sock/peer-gone? w))
                         (lib/set-trip! (* 16 1048576))
                         (swap! state assoc :mode :test :evaluating false)
                         (let [res (try (run-tests-here w ticks run)
