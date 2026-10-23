@@ -1,18 +1,24 @@
 #!/bin/zsh
 # bin/update   bring the standing root up to date with main, from the main tree, in one go:
 #   1. merge Seon's own merges (jolt/merges: what the standing root's merges committed in
-#      the merges worktree, bin/worktree --path merges) into main;
+#      the write-back tree that config/local.edn's :seon.config.source/root names) into main;
 #   2. fast-forward jolt/merges to main, so the standing root's source tree is main's;
-#   3. move both trees' submodules to main's pins (bin/worktree --sync merges for the merges worktree);
+#   3. move both trees' submodules to main's pins (bin/worktree --sync for the write-back tree);
 #   4. build (bin/build: each step skips what is up to date);
 #   5. restart the standing root on its store (bin/root stop, start): it boots on main's build and
 #      imports its source tree (docs/source.md).
 # Worktree sessions merge first (root merges their branches into main, docs/merging.md); then bin/update.
 # Every step's exit status counts; the last line is UPDATE OK or UPDATE FAILED.
 setopt pipefail
-MAIN=$(cd "$(dirname "$0")/.." && pwd); MERGES=$("$MAIN/bin/worktree" --path merges)
+MAIN=$(cd "$(dirname "$0")/.." && pwd)
 fail() { print -u2 "update: $*"; print "UPDATE FAILED"; exit 1 }
 cd "$MAIN" || fail "no main tree"
+# the merges tree is the one the standing root writes back into: its path comes from one place, the main tree's
+# config/local.edn (:seon.config.source/root, #seon/checkout "rel/path" or an absolute string), before and after the cutover
+src=$(sed -nE 's|^[[:space:]]*:seon\.config\.source/root[[:space:]]+(#seon/checkout[[:space:]]+)?"([^"]+)".*|\2|p' config/local.edn 2>/dev/null | head -1)
+[[ -n $src ]] || fail "config/local.edn names no :seon.config.source/root: the standing root has no write-back tree to update"
+MERGES=${src:A}; [[ $src == /* ]] || MERGES=$MAIN/$src; MERGES=${MERGES:A}
+[[ -d $MERGES ]] || fail "the write-back tree $MERGES (:seon.config.source/root) does not exist: make it with bin/worktree merges, or fix config/local.edn"
 [[ $(git branch --show-current) == main ]] || fail "the main tree is not on main"
 # submodules are left out: a merge that bumps a pin leaves the checkout behind it, and the
 # submodule step below moves every submodule to main's pins
@@ -23,12 +29,10 @@ if git rev-parse -q --verify jolt/merges >/dev/null; then
     git merge --no-ff -q jolt/merges -m "Merge jolt/merges: the standing root's merges ($n commits)" || fail "merging jolt/merges into main"
     print "merged $n commits of jolt/merges into main"
   fi
-  if [[ -d $MERGES ]]; then
-    git -C "$MERGES" diff --quiet || fail "$MERGES has uncommitted changes"
-    git -C "$MERGES" merge --ff-only -q main || fail "fast-forwarding jolt/merges to main"
-    "$MAIN/bin/worktree" --sync merges >/dev/null || fail "syncing $MERGES's submodules"
-    print "jolt/merges at $(git -C "$MERGES" log --oneline -1 | cut -c1-60)"
-  fi
+  git -C "$MERGES" diff --quiet || fail "$MERGES has uncommitted changes"
+  git -C "$MERGES" merge --ff-only -q main || fail "fast-forwarding jolt/merges to main"
+  "$MAIN/bin/worktree" --sync "$MERGES" >/dev/null || fail "syncing $MERGES's submodules"
+  print "jolt/merges at $(git -C "$MERGES" log --oneline -1 | cut -c1-60)"
 fi
 git -c protocol.file.allow=always submodule update --init -q || fail "main's submodules"
 nice -n 15 bin/build > target/update-build.log 2>&1 || { tail -5 target/update-build.log >&2; fail "build (target/update-build.log)" }

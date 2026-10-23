@@ -7,7 +7,7 @@
 # bin/worktree --at DIR COMMIT [REPO]  a detached worktree of REPO (default next/) at COMMIT in DIR, set
 #                             up as below: what a generation is built in (seon.fx/build, docs/source.md)
 # bin/worktree --remove-at DIR remove such a worktree and its submodule worktrees
-# bin/worktree --sync NAME    move that worktree's submodules to the pins its branch records (after
+# bin/worktree --sync NAME|DIR move that worktree's submodules to the pins its branch records (after
 #                             merging main), by `git -C` on its own submodule checkouts only. Never
 #                             run `git submodule` in a worktree: it rewrites the module config every
 #                             checkout shares (core.worktree), and main's submodules break.
@@ -117,7 +117,7 @@ fi
 
 if [[ ${1:-} == --sync ]]; then
   NAME=${2:-}; [[ -n $NAME ]] || die "usage: bin/worktree --sync NAME"
-  WT=$(wt_path "$NAME")
+  if [[ $NAME == /* ]]; then WT=$NAME; else WT=$(wt_path "$NAME"); fi   # a name, or the absolute path of a worktree anywhere (bin/update: the write-back tree config names)
   [[ -d $WT ]] || die "no worktree at $WT"
   git -C "$WT" ls-tree HEAD reference-code/ | while read -r mode type sha sub; do
     [[ $type == commit ]] || continue
