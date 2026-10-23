@@ -44,7 +44,7 @@ git -C $OLD ls-tree $BR reference-code/ | awk '$2=="commit"{print $3, $4}' | whi
   gh api "repos/${repo%.git}/commits/$sha" --jq .sha >/dev/null || { echo "MISSING $sub $sha on $repo"; exit 1; }
 done
 # no live worktree holds uncommitted work (a worktree's changes are not in any branch): list the dirty ones, each owner commits first
-dirty=$(git -C $OLD worktree list --porcelain | awk '/^worktree /{print $2}' | while read w; do [ -n "$(git -C $w status --porcelain --untracked-files=no -- . ':!reference-code' 2>/dev/null)" ] && echo $w; done)
+dirty=$(git -C $OLD worktree list --porcelain | awk '/^worktree /{print $2}' | while read w; do [ -n "$(git -C $w status --porcelain --untracked-files=no -- . ':!reference-code' 2>/dev/null)" ] && echo $w; done; true)
 [ -z "$dirty" ] || { echo "UNCOMMITTED WORK in: $dirty"; exit 1; }
 echo "R0 ok: preconditions hold, every pin is on GitHub, no worktree is dirty"
 
