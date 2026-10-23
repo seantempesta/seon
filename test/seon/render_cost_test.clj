@@ -133,8 +133,8 @@
                 "Not sized here: card-many forward refs and components (pulled whole, as pull gives them); "
                 "citations: a-walk-pulls-each-citation-once")
      :growth :linear
-     ;; entity-schema, texts, prose? of :seon.cluster.eval/id, cite: measured 419 / 4,019 calls at 100 / 1,000
-     :per-n {:calls 4}
+     ;; entity-schema, relevant (its declared keys), texts, prose? of :seon.cluster.eval/id, cite: measured 512 calls at 100
+     :per-n {:calls 5}
      ;; walk, the root's schema, its prose and citations, each unit attribute read forward and its ref test
      :fixed {:calls 19}
      :sizes [100 1000 4000]}))

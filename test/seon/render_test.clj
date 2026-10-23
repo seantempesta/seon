@@ -950,18 +950,19 @@
         (is (= {:seon.agent/id :a3 :seon.agent/status :idle :seon.agent/pid 77 :seon.agent/running "(f 2)"}
                (select-keys (:seon.render/value root) [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/running])))
         (is (not (contains? (:seon.render/value root) :seon.agent/root)) "a unit is its own node, not again in the entity")
-        (is (= [:seon.attempt/_agent :seon.cluster.eval/_agent :seon.cluster.eval/_agent :seon.agent/root] (mapv attr-of (:seon.render/nodes w))))
+        (is (= [:seon.attempt/_agent :seon.cluster.eval/_agent :seon.cluster.eval/_agent] (mapv attr-of (:seon.render/nodes w)))
+            "its run and its evaluations; root, of no use to a working agent, is not its unit")
         (is (every? #(= eid (get-in % [:seon.render/from :seon.render/eid])) (:seon.render/nodes w)) "each says where it came from")
         (is (= ["demo/f#1"] (values-of w :seon.attempt/_agent :seon.attempt/id)))
         (is (= ["a3-77-1/1" "a3-77-1/2"] (values-of w :seon.cluster.eval/_agent :seon.cluster.eval/id)))
-        (is (= [:root] (values-of w :seon.agent/root :seon.root/id)))
         (testing "each node is an entity with its own schema; an evaluation, with no identity, the one naming the ref that reached it"
-          (is (= [:seon.attempt/attempt-fact :seon.db/eval-fact :seon.db/eval-fact :seon.root/root-fact] (mapv :seon.render/schema (:seon.render/nodes w))))
+          (is (= [:seon.attempt/attempt-fact :seon.db/eval-fact :seon.db/eval-fact] (mapv :seon.render/schema (:seon.render/nodes w))))
           (is (every? #(= :entity (:seon.render/kind %)) (:seon.render/nodes w))))
-        (testing "one hop: a neighbour's refs are {:db/id}, its components whole"
+        (testing "a neighbour holds only the attributes its schema declares relevant (:seon.render/keys)"
           (let [run (first (:seon.render/nodes w))]
-            (is (= [:db/id] (keys (get-in run [:seon.render/value :seon.attempt/task]))))
-            (is (= [:pass] (mapv :seon.proof/status (get-in run [:seon.render/value :seon.attempt/results]))))))))
+            (is (= "demo/f#1" (get-in run [:seon.render/value :seon.attempt/id])))
+            (is (not (contains? (:seon.render/value run) :seon.attempt/plan)) "its plan is its task's")
+            (is (not (contains? (:seon.render/value run) :seon.attempt/boot)) "its boot is root's")))))
     (testing "a run: its task, its turns, the messages to it"
       (let [w (r/walk db (eid-of db [:seon.attempt/id "demo/f#1"]))]
         (is (= :seon.attempt/attempt-fact (get-in w [:seon.render/root :seon.render/schema])))
@@ -1056,7 +1057,8 @@
                                 :seon.render/from {:seon.render/eid 1 :seon.render/attr :seon.attempt/task}}
                                {:seon.render/kind :entity :seon.render/eid 3 :seon.render/value {:seon.turn/id "demo/f#1/0"}
                                 :seon.render/from {:seon.render/eid 1 :seon.render/attr :seon.turn/_attempt}}]
-           :seon.render/refs [{:seon.render/n 1 :seon.render/kind :var :seon.render/address "demo/f"
+           :seon.render/refs [{:seon.render/n 1 :seon.render/kind :var :seon.render/address "demo/f" :seon.render/depth :summary
+                               :seon.render/cited-at [{:seon.render/eid 2 :seon.render/attr :seon.task/plan}]
                                :seon.render/value {:symbol 'demo/f :arglists '([x]) :summary "Doubles."}}]}
         d (r/data w)]
     (is (= {:seon.attempt/id "demo/f#1" :seon.attempt/status :running
@@ -1070,8 +1072,8 @@
   ;; the owner, 2026-10-23, on the default html: a fold and its "map 12 items, depth 0" header on
   ;; every collection was noise. The value printed and a collection of scalars are inline; a
   ;; nested collection that holds collections folds, saying what it holds
-  (let [flat (h/html (r/html {:seon.task/id "demo/f" :seon.task/proofs ['demo-test/f-test]} {}))
-        nested (h/html (r/html {:seon.task/id "demo/f" :rows [{:a 1} {:a 2}]} {}))]
+  (let [flat (h/html (r/html {:demo/id "f" :demo/proofs ['demo-test/f-test]} {}))
+        nested (h/html (r/html {:demo/id "f" :rows [{:a 1} {:a 2}]} {}))]
     (is (not (str/includes? flat "<details")) "a map of scalars and a vector of one symbol: no fold")
     (is (not (str/includes? flat "items, depth")))
     (is (str/includes? flat "demo-test/f-test") "the value is all there")
