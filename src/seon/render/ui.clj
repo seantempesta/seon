@@ -389,9 +389,9 @@
      [:form {:class "flex gap-2" :seon/call 'seon.root/submit! :seon/agent id}
       [:span {:class "text-signal"} (str (kname id) "=>")]
       ;; Enter sends, Shift+Enter is a new line: a form with its ;; thought spans lines
-      [:textarea {:name "forms" :class "flex-1 min-w-0" :rows 2 :autocomplete "off" :spellcheck "false" :autofocus true
+      [:textarea {:name "forms" :class "flex-1 min-w-0" :rows 3 :autocomplete "off" :spellcheck "false" :autofocus true
                   (keyword "data-on:keydown") "if (evt.key==='Enter' && !evt.shiftKey) { evt.preventDefault(); el.form.requestSubmit() }"
-                  :placeholder ";; your thought\n(+ 1 2)  evaluates in its REPL (Enter; Shift+Enter for a new line) · > a message, read at its next turn"}]
+                  :placeholder ";; your thought\n(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)\n> a message, read at its next turn"}]
       [:button {:type "button" :class "rounded border border-base-700 px-2" :title "interrupt the running form; the agent keeps its state"
                 :seon/call 'seon.root/interrupt! :seon/agent id} "⏹ interrupt"]]
      [:p {:class "text-text-500"} "no process of it in root's view: no REPL to evaluate in, no turn to read a message; what it did is below, read from the store"])
@@ -524,8 +524,10 @@
   (let [h (:seon.render/hiccup (render/shown nd :tile {}))
         what (or (:seon.render/schema nd) (get-in nd [:seon.render/from :seon.render/attr]))]
     [:div {:id (:unit opts) :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
-     [:div {:class "text-2xs uppercase tracking-wider text-text-500"} (name what)]
-     (if (= :entity (:seon.render/kind nd)) [:a {:href (str "/walk/" (:seon.render/eid nd)) :class "block text-text-200 hover:no-underline"} h] h)]))
+     (if (= :entity (:seon.render/kind nd))
+       [:a {:href (str "/walk/" (:seon.render/eid nd)) :class "text-2xs uppercase tracking-wider"} (str (name what) " · its page →")]
+       [:div {:class "text-2xs uppercase tracking-wider text-text-500"} (name what)])
+     h]))
 
 (defn head
   "A page's main pane, the unit's element (opts :unit): its entity by its own render
@@ -581,6 +583,7 @@
       [:div {:class "grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]"}
        [:main {:class "flex min-w-0 flex-col gap-3"}
         (slot "p-head") (when input (slot "p-input"))
+        [:h2 {:class "text-2xs uppercase tracking-wider text-text-500"} "what it ran, newest first"]
         [:ol {:id "p-rows" :class "flex flex-col gap-2"} (for [r on] (slot (:id r)))]
         [:div {:id "p-foot"} (slot (str "p-more-" (count on)))]]
        [:aside {:id "p-tiles" :class "grid content-start gap-2 sm:grid-cols-2 lg:grid-cols-1"} (for [t tiles] (slot (tile-id t)))]]]
