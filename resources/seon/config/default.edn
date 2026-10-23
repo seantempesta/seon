@@ -399,11 +399,6 @@
  ;; fix, not a cost to pay every turn. A model or task can turn it on through the resolver
  ;; (task -> model -> provider -> config); effort is :seon.config.ai/reasoning-effort.
  :seon.config.ai/thinking :disabled
- ;; Unit: USD. One first-move pass's spend (my.root/first-moves!: one call per task, ~6k
- ;; prompt tokens at turn 0, ~$0.001 a task off-peak, twice at DeepSeek's peak); at the bound
- ;; the pass stops and writes :seon.judge/stopped. 0.10 is about a hundred tasks' first moves,
- ;; out of the owner's standing $50 (docs/model.md#paid-runs).
- :seon.config.ai/judge-pass-usd 0.10
  ;; Unit: model calls in flight at once, cluster-wide: our admission cap, the :model owner's
  ;; workers (session FX1). At the bound turns queue in the owner, by priority. Our choice, small:
  ;; eight is twice the runs running at once (:seon.config.agent/max-running 4), so a

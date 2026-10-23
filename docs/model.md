@@ -33,17 +33,3 @@ A model call fails as data, at its one edge ([failure points](failure-points.md)
 ## Paid runs
 
 The API key is read from the environment variable the provider names, at the call, by root's `:model` owner only: it is never logged, printed or stored, and every agent unsets it at birth. Paid runs spend from the owner's standing budget and only on productive work, with the context checked first ([machine](machine.md#secrets-and-paid-runs)).
-
-## The first-move judge
-
-Until the context has a format agents respond well to, no live agent runs (owner, 2026-10-23; [decisions](decisions.md)). The format is measured instead with one model call per task, no loop, and nothing of the reply run. ```my.root/first-moves!``` sends each task's turn-0 request through root's `:model` owner: ```seon.judge/request```, the messages ```seon.context/render``` makes, as `seon.turn/act!` sends them, with the model and mode the task resolves to.
-
-The reply's first move is scored from the compiler's facts, never by another model. The scoring runs in one disposable agent the pass spawns, because reading a reply as loading does runs its ns form. ```seon.judge/form-facts``` reads with `*read-eval*` off and analyzes each form without running it. ```seon.judge/score``` then gives these measures against ```seon.judge/subject```:
-- `:acted`: it defines a var or rewrites the plan, rather than only reading;
-- `:right-var`: a form that is not a read names a cited var;
-- `:right-test`: it defines a proof, or a form that is not a read names one;
-- `:waste`: the vars whose source the context shows (cited at code depth) that it reads again;
-- `:uncompiled`: its forms that do not compile (`:seon.judge/uncompiled`, [failure points](failure-points.md));
-- `:green`: it defines a cited var or a proof, or rewrites the plan.
-
-Each score is a `:seon.judge` fact on main, keyed by the digest of the request it answers (```seon.judge/digest```). The fact holds the version that served the context, the call's usage and its USD cost (```seon.model/cost```, off-peak prices). A pass reads that fact first and calls the model only for a request it holds none for, so an unchanged context costs nothing. A paid call is made only while the pass has spent under `:seon.config.ai/judge-pass-usd`. At that bound the pass stops and writes `:seon.judge/stopped`. A reply whose usage cannot be priced ends the pass with `:seon.judge/cost-unknown`, since an unknown cost is never 0. Every call's cost counts toward the owner's budget above (`seon.judge-test/a-pass-scores-each-request-once`, `seon.judge-test/a-pass-stops-at-its-bound`).
