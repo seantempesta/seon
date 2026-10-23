@@ -72,13 +72,13 @@
 ;; ---- the shipped file and its schemas ----------------------------------------------------
 
 (deftest the-shipped-file-validates-under-every-profile
-  ;; the scripted stand-in's script is stated only under :scripted (checks and tests)
+  ;; the scripted model's script is stated only under :scripted (checks and tests)
   (doseq [p [:default :scripted :deepseek]]
     (let [c (read-file (config/path (config/checkout)) p (config/checkout))]
       (is (= (set (keys c)) (set (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.source/root :seon.config.source/gate-checkout} (not= :scripted p) (conj :seon.config.ai/script))
                                          (config/keys-declared)))) p)))
   (let [shipped #(read-file (config/path (config/checkout)) % (config/checkout))]
-    (is (= {:kind :none} (config/provider (shipped :default))) "no profile: no provider, never the stand-in")
+    (is (= {:kind :none} (config/provider (shipped :default))) "no profile: no provider, never the scripted model")
     (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider (shipped :scripted))))
     (is (= :openai-compat (:seon.config.ai/provider (shipped :deepseek))))))
 
@@ -267,15 +267,13 @@
 
 (deftest bin-ports-writes-its-keys-under-their-current-names
   ;; task seon.db/stored-attributes-take-the-new-words: bin/ports owns the port keys of a
-  ;; checkout's local layer and writes them on every run under their current names, so a file
-  ;; written before :seon.config.root/entrance-port became server-port boots after one run,
-  ;; with its ports and every other entry kept
+  ;; checkout's local layer and writes them on every run, keeping its ports and every other entry
   (let [root (config/checkout)
         f (str root "/target/ports-test-" (random-uuid) ".edn")]
     (try
       (spit f (str ";; the main tree's config/worktree-ports (x); edit it to move this checkout's ports.\n"
-                   "{;; root's entrance (bin/root, bin/mcp)\n"
-                   " :seon.config.root/entrance-port #long #or [#env SEON_ENTRANCE_PORT 7920]\n"
+                   "{;; root's server (bin/root, bin/mcp)\n"
+                   " :seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 7920]\n"
                    " :seon.config.web/port #long #or [#env SEON_WEB_PORT 7921]\n"
                    " ;; the merges tree\n"
                    " :seon.config.source/root \".worktrees/merges\"}\n"))
@@ -284,7 +282,6 @@
         (is (= 0 (:exit r)) (:err r))
         (is (= "7920 7921" (str/trim (:out r))) "it boots, on the ports the file held")
         (is (str/includes? text ":seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 7920]"))
-        (is (not (str/includes? text "entrance-port")) "the old name is gone")
         (is (str/includes? text " ;; the merges tree\n :seon.config.source/root \".worktrees/merges\"}") "every other entry is kept")
         (is (= text (do (clojure.java.shell/sh "env" "-u" "SEON_WEB_PORT" (str root "/bin/ports") f) (slurp f))) "a second run writes the same file"))
       (finally (clojure.java.io/delete-file f true)))))

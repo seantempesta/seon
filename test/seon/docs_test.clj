@@ -255,3 +255,51 @@
         r (seon.fx/git-commit {:req {:dir dir :branch "elsewhere" :files {} :allow-empty? true :message (seon.docs/review-message "docs/p.md#p" "sean")}})]
     (is (string? (get-in r [:value :sha])) "the review commit exists, on a branch HEAD does not contain")
     (is (contains? (stale-of) ["docs/p.md#p" 'app.gb/f]) "and HEAD's section is still stale")))
+
+;; ---- text uses Clojure's words too (task seon.docs/names-are-clojures-words) ---------------
+
+(def ^:private text-kept
+  "Files where an old word of section 7a's table is the subject or another sense, each with its reason.
+  The quoted span of an owner's sentence is kept too (the quote is what he said), and the Jolt message
+  and image name that hold the old word."
+  {"AGENTS.md" "the table names the old words"
+   "docs/vocabulary.md" "its rows say `(was X)`"
+   "docs/decisions.md" "the owner's rulings quote his words, and their titles stay as stated"
+   "resources/seon/tasks/seon.docs.edn" "the rename's plan names the old words"
+   "resources/seon/tasks/seon.db.edn" "the stored-names plan names the old words"
+   "test/seon/docs_test.clj" "this test names the old words"
+   "src/seon/reader.clj" "a Markdown code fence, CommonMark's word"
+   "src/seon/ref.clj" "a Markdown code fence, CommonMark's word"
+   "resources/seon/schemas/seon.ref.edn" "the :fence block kind is CommonMark's"
+   "test/seon/reader_test.clj" "a Markdown code fence"
+   "test/seon/ref_test.clj" "a Markdown code fence"
+   "test/seon/agent_test.clj" "the named reader test is about a Markdown code fence"
+   "test/seon/program_test.clj" "the named reader test is about a Markdown code fence"
+   "test/seon/fixtures.clj" "a reply in a Markdown code fence"
+   "src/seon/server.clj" "cites v1's namespace proto.agents.entrance"
+   "BAGGAGE.md" "cites a decision by its title, \"No locks, no lane cap, no waiting\""
+   "resources/seon/tasks/seon.context.edn" "t5.refusal/* is the name of a past agent's test namespace"})
+
+(defn- old-word-patterns
+  "Whole-word patterns for the table's old words, as the text spells them (a plural, \"merge train\"); \"admit\"
+  and \"land\" are also plain English and Seon's admission, so only names are read for them."
+  [agents]
+  (for [w (old-words agents) :when (not (#{"admit" "land"} w))]
+    [w (re-pattern (str "(?i)(?<!\\w)" (if (= w "merge-train") "merge[ -]train" w) "s?(?!\\w)"))]))
+
+(deftest no-text-uses-an-old-word
+  (let [root (config/checkout)
+        patterns (old-word-patterns (slurp (str root "/AGENTS.md")))
+        kept-span #"(?i)owner,? [^\"]{0,40}?\"[^\"]*\"|Attempting to call unbound fn|zoom-a8-attempt|\(was attempt\)"
+        text? (fn [^String p] (or (str/starts-with? p "bin/") (re-find #"\.(clj|edn|md|html|js|css|c|h)$" p)))
+        paths (for [dir ["bin" "docs" "resources" "src" "test" "web" "config" "native"]
+                    f (file-seq (java.io.File. (str root "/" dir))) :when (.isFile ^java.io.File f)
+                    :let [p (subs (.getPath ^java.io.File f) (inc (count root)))] :when (text? p)]
+                p)
+        hits (for [p (concat ["AGENTS.md" "BAGGAGE.md" "README.md"] paths) :when (not (text-kept p))
+                   :let [lines (str/split-lines (slurp (str root "/" p)))]
+                   [i line0] (map-indexed vector lines) :let [line (str/replace line0 kept-span "")]
+                   [w re] patterns :when (re-find re line)]
+               [p (inc i) w])]
+    (is (contains? (set (map first patterns)) "attempt") "the table is read, the run row included")
+    (is (empty? hits) "no text uses an old word outside text-kept: each is [file line word]")))

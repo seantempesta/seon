@@ -293,7 +293,7 @@
 
 (deftest an-agent-that-ended-is-answered-ended-one-never-had-no-agent
   ;; bin/check e2e-calc (2026-10-23): root's answer says whether the agent ended (its view
-  ;; records :ended-ms: a kill, its attempt's end, a death) or root never had it, so a reader
+  ;; records :ended-ms: a kill, its run's end, a death) or root never had it, so a reader
   ;; (seon.prove) tells a cancel from a defect by the type alone
   (let [st (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                              :view {:agents {:a7 {:status :killed :ended-ms 1}}} :graph (promise)
