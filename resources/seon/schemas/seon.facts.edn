@@ -133,7 +133,7 @@
                      [:seon.cluster.eval/record :seon.cluster.eval/record]]
  ;; an entity's units (seon.render/walk): the neighbours a view of it shows, one hop, as pull's
  ;; attributes (a leading _ the reverse ref), each rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/units [:seon.attempt/_agent :seon.cluster.eval/_agent :seon.agent/root]}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/ai seon.render.ai/agent-fact :seon.render/html seon.render.ui/walk-line :seon.render/units [:seon.attempt/_agent :seon.cluster.eval/_agent :seon.agent/root]}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/id {:optional true} :seon.agent/id]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status] [:seon.agent/pid {:optional true} :seon.agent/pid]
@@ -242,7 +242,7 @@
  ;; measured at the attempt's end from the branch (seon.problems/caused): the derived problems
  ;; its work made true since its merge base, by message; the done rule refuses while any is open
  :seon.attempt/caused [:set :string]
- :seon.attempt/attempt-fact [:map {:seon.db/attributes true :seon.render/units [:seon.attempt/task :seon.turn/_attempt :seon.message/_to]}
+ :seon.attempt/attempt-fact [:map {:seon.db/attributes true :seon.render/ai seon.render.ai/attempt-fact :seon.render/html seon.render.ui/walk-line :seon.render/units [:seon.attempt/task :seon.turn/_attempt :seon.message/_to]}
                              [:seon.attempt/id :seon.attempt/id] [:seon.attempt/task :seon.attempt/task]
                              [:seon.attempt/status :seon.attempt/status] [:seon.attempt/boot :seon.attempt/boot]
                              [:seon.attempt/agent {:optional true} :seon.attempt/agent] [:seon.attempt/start-ms :seon.attempt/start-ms]
@@ -314,7 +314,7 @@
  :seon.root/stopped :seon.root/end
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
  :seon.root/previous-end :seon.root/end
- :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/units [:seon.agent/_root]}
+ :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/ai seon.render.ai/root-fact :seon.render/html seon.render.ui/walk-line :seon.render/units [:seon.agent/_root]}
                           [:seon.root/id :seon.root/id] [:seon.root/boot :seon.root/boot]
                           [:seon.root/stopped {:optional true} :seon.root/stopped]
                           [:seon.root/previous-end {:optional true} :seon.root/previous-end]

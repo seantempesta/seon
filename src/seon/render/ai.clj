@@ -327,3 +327,39 @@
                                   [text (conj left title)])))
                             [head []] (remove (comp empty? second) sections))]
     {:text (cond-> text (seq left) (str "\n(not shown, over the budget: " (str/join ", " left) ")"))}))
+
+;; ---- the walk's entities, focused: what an agent or the owner acts on, not every attribute ----
+
+(defn root-fact
+  "Root as a neighbour in a walk, one line: its boot and generation, and how it last stopped.
+  Its config is not shown: a config key reaches a context when the task's code reads it, never
+  as root's whole map (the owner, 2026-10-23: the config dump)."
+  {:malli/schema [:=> [:cat :map :seon.render/opts] :seon.render/text]}
+  [r _]
+  {:text (str "root " (ui/kname (:seon.root/id r)) ", boot " (:seon.root/boot r)
+              (some->> (get-in r [:seon.root/generation :commit]) (str ", generation "))
+              (some->> (get-in r [:seon.root/stopped :cause]) ui/kname (str ", last stopped "))
+              (when (:seon.root/quiescent r) ", quiescent"))})
+
+(defn agent-fact
+  "An agent in a walk, one line: its id, status, process and the form it runs; its description
+  only for one no run started (a run's agent is described by its run)."
+  {:malli/schema [:=> [:cat :map :seon.render/opts] :seon.render/text]}
+  [a _]
+  {:text (str "agent " (ui/kname (:seon.agent/id a)) " " (some-> (:seon.agent/status a) ui/kname)
+              (some->> (:seon.agent/pid a) (str ", pid "))
+              (some->> (:seon.agent/branch a) ui/kname (str ", branch "))
+              (some->> (:seon.agent/running a) (str ", running "))
+              (some->> (:seon.agent/description a) (str ": ")))})
+
+(defn attempt-fact
+  "A run in a walk, one line: its id, status or outcome and reason, model, turns and branch.
+  Its plan is its task's, shown by the task; its boot is root's."
+  {:malli/schema [:=> [:cat :map :seon.render/opts] :seon.render/text]}
+  [a _]
+  (let [{:seon.attempt/keys [id status outcome reason model max-turns turns branch]} a]
+    {:text (str "run " id " " (ui/kname (or outcome status))
+                (some->> reason (str ": "))
+                (some->> model (str ", model "))
+                (when max-turns (str ", turn " (or turns 0) " of " max-turns))
+                (some->> branch ui/kname (str ", branch ")))}))

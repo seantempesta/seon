@@ -104,6 +104,13 @@
   "The members of an agent's view entry recorded on its entity (seon.task/agent-tx)."
   [:status :pid :mem-mb :running :task :branch :forked-ms :ended-ms])
 
+(defn- observed
+  "What root records of agent entry a: its observed-keys, less :task for an agent a run started,
+  whose :task is that run's task id (the run names its task; recording it again pulled the task
+  into every walk of the agent twice)."
+  {:malli/schema [:=> [:cat [:maybe :map]] :map]}
+  [a] (cond-> (select-keys a observed-keys) (:attempt a) (dissoc :task)))
+
 (defn- record-agents
   "What root observed of its agents in this step, written to main as one transaction: an
   agent's facts (seon.task/agent-tx) when a member it records changed since before (its view
@@ -113,11 +120,11 @@
   (let [now (get-in st [:view :agents])
         changed (for [[id a] now
                       :let [b (get before id)]
-                      :when (and (not (identical? a b)) (not= (select-keys a observed-keys) (select-keys b observed-keys)))]
+                      :when (and (not (identical? a b)) (not= (observed a) (observed b)))]
                   id)]
     (if (and (seq changed) (not (:writer-closed st)))
       (do
-        (step/out! o :to-writer {:op :tx :branch :db :tx-data (into [] (mapcat #(task/agent-tx (:boot st) % (select-keys (get now %) observed-keys))) changed)
+        (step/out! o :to-writer {:op :tx :branch :db :tx-data (into [] (mapcat #(task/agent-tx (:boot st) % (observed (get now %)))) changed)
                                  :dest {:agent-facts (vec changed)}})
         st)
       st)))

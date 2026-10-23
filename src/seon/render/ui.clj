@@ -1247,3 +1247,9 @@
     [:pre (str/join "\n\n" (concat [(:seon.render/ai-text root)]
                                    (map :seon.render/ai-text nodes)
                                    (map #(str "[" (:seon.render/n %) "] " (:seon.render/address %) "\n" (:seon.render/ai-text %)) refs)))]]])
+
+(defn walk-line
+  "An entity a walk shows in one line, as html: its :ai render's text (seon.render.ai/root-fact,
+  agent-fact, attempt-fact) in a line of the page."
+  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
+  [v opts] [:p {:class "walk-line"} (:text (render/render v (assoc opts :face :ai)))])
