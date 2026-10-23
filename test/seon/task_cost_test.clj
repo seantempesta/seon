@@ -51,7 +51,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "t" :seon.task/plan "p"}]))
         report {:rows [{:n 100 :measured {:ns 1200.0 :bytes 900.0} :expected {:ns 1000.0 :bytes 800.0}}] :verdict {:ok? false :over [{:dim :ns :n 100 :ratio 1.2}] :steeper [] :under [] :unmerged []}}]
     [(d/db-with db (vec (for [i (range n) :let [aid (str "demo/t#" i)]
-                              tx (concat (task/attempt-start-tx aid "demo/t" "boot-1" (keyword (str "a" i)) {:branch :b :model "m" :max-turns 4} 1000 "p")
+                              tx (concat (task/attempt-start-tx aid "demo/t" "boot-1" (task/agent-key "boot-1" (keyword (str "a" i))) {:branch :b :model "m" :max-turns 4} 1000 "p")
                                          [(assoc (task/end-members {:outcome :error :turns 3 :model-calls 3 :tokens 900 :results {'demo-test/t :fail}
                                                                     :uncontracted #{} :reason "the model failed"} 2000 7)
                                                  :seon.attempt/id aid :seon.attempt/commit "c0ffee"

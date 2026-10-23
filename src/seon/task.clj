@@ -165,10 +165,11 @@
   and by the turn that takes it on its branch (one entity: both ids are content ids)."
   {:malli/schema [:=> [:cat :string :string [:maybe :seon.attempt/id] :any] [:vector :map]]}
   [mid from aid body]
-  ;; the run its own entity map: only a top-level map takes its content id (Datahike's content-tempids)
+  ;; the run its own entity map: only a top-level map takes its content id (Datahike's
+  ;; content-tempids); its tempid is its id, so every ref to it in one transaction is one entity
   (cond-> [(cond-> {:seon.message/id mid :seon.message/from from :seon.message/body body}
-             aid (assoc :seon.message/to "run"))]
-    aid (conj {:db/id "run" :seon.attempt/id aid})))
+             aid (assoc :seon.message/to aid))]
+    aid (conj {:db/id aid :seon.attempt/id aid})))
 
 (defn attempt-start-tx
   "An attempt begins: root observed it spawn its agent (its key, seon.task/agent-key; nil: root
@@ -179,10 +180,11 @@
   [(cond-> {:seon.attempt/id aid :seon.attempt/task [:seon.task/id task] :seon.attempt/status :running
             :seon.attempt/boot boot :seon.attempt/start-ms start-ms
             :seon.attempt/branch branch :seon.attempt/max-turns max-turns :seon.attempt/plan plan}
-     agent (assoc :seon.attempt/agent "agent")
+     agent (assoc :seon.attempt/agent agent)
      model (assoc :seon.attempt/model model))
-   ;; the agent its own entity map, so it takes its content id (Datahike's content-tempids)
-   (when agent {:db/id "agent" :seon.agent/key agent})]))
+   ;; the agent its own entity map, so it takes its content id (Datahike's content-tempids);
+   ;; its tempid is its key, unique in a transaction that starts several runs
+   (when agent {:db/id agent :seon.agent/key agent})]))
 
 (defn status-tx
   "Move attempt aid from status `from` to `to` (Datahike's compare-and-swap: a racing
