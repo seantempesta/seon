@@ -191,20 +191,20 @@
   64)
 
 (defn- once
-  "One call of f on args: the engine ticks it ran on this thread (jolt.host/ticks-of, the one
-  owner of the timer), less tick-allowance for each collection during it; its ns of this
-  thread's CPU; the bytes this thread allocated; and contracted calls (calls only when the
-  contracts are on: seon.profile counts armed functions). The collection count is read
+  "One call of f on args, measured by the one measurement of a call (seon.profile/measure!): the
+  engine ticks it ran on this thread, less tick-allowance for each collection during it; its ns
+  of this thread's CPU; the bytes this thread allocated; and contracted calls (calls only when
+  the contracts are on: seon.profile counts armed functions). The collection count is read
   outside the bytes' window, so reading it allocates nothing the call is charged."
   {:malli/schema [:=> [:cat :seon.host/fn [:sequential :any]] :seon.cost/dims]}
   [f args]
   (let [g0 (:count (lib/gc-stats))
-        a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/cpu-ns)
-        k (jolt.host/ticks-of #(apply f args))
-        t1 (profile/cpu-ns) c (profile/calls) a1 (profile/alloc-bytes)
-        gcs (- (:count (lib/gc-stats)) g0)]
-    (cond-> {:ticks (double (max 0 (- k (* tick-allowance gcs)))) :ns (double (- t1 t0)) :bytes (double (- a1 a0))}
-      contract/on? (assoc :calls (double c)))))
+        m (volatile! nil)
+        _ (profile/measure! #(apply f args) #(vreset! m %))
+        gcs (- (:count (lib/gc-stats)) g0)
+        {:keys [ticks bytes cpu-ns calls]} @m]
+    (cond-> {:ticks (double (max 0 (- ticks (* tick-allowance gcs)))) :ns (double cpu-ns) :bytes (double bytes)}
+      contract/on? (assoc :calls (double calls)))))
 
 (def ^:private baseline
   "What measuring a call that does nothing costs: the clock, tick and allocation reads themselves."
