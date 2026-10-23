@@ -5,7 +5,7 @@
   forms in one pass over them and their references."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]]
-            [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.program :as program]))
+            [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.program :as program] [clojure.java.shell :as sh]))
 
 (defn- acct
   {:malli/schema [:=> [:cat :int :string] :map]}
@@ -64,3 +64,44 @@
      ;; itself, and the depth-first sort once for the namespaces and once per namespace (one here)
      :fixed {:calls 3}
      :sizes [100 1000 10000]}))
+
+
+(def ^:private stores
+  "The stores on disk divergence's proof made ([path conns]), removed when it ends."
+  (atom []))
+
+(defn on-disk-diverged-of
+  "divergence's arguments on a store on disk of its own (the last resort: Datahike's
+  datoms-diff skips the index subtrees two branches share once they are stored, and the test
+  store's in-memory branches hold none, so there both answers grow with the program): main
+  holding n forms (branch-of's), and a branch of it that redefines one."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db]]}
+  [n]
+  (let [path (str (System/getProperty "user.dir") "/target/tmp/divergence-" n "-" (random-uuid))
+        {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
+        _ (d/transact conn {:tx-data (vec (mapcat #(program/account-tx @conn (acct % "x") %) (range n)))})
+        base @conn
+        _ (d/branch! conn :db :branch)
+        bc (d/connect (assoc cfg :branch :branch))]
+    (swap! stores conj [path [bc conn]])
+    (d/transact bc {:tx-data (program/record-tx @bc (acct (quot n 2) "(inc x)"))})
+    [base @bc]))
+
+(deftest divergence-reads-what-the-branch-changed
+  (try
+    (cost/proof
+      {:of 'seon.program/divergence :input 'seon.program-cost-test/on-disk-diverged-of
+       :n "forms main and the branch hold (the branch redefines one)"
+       :work (str "the :var/form and :schema/form datoms that differ (d/datoms-diff over :aevt, skipping the "
+                  "stored subtrees both share: one index path per changed entry, log n), and per entry among "
+                  "them its name and two content seeks; nothing reads the forms they share")
+       :growth :log
+       ;; measured 2026-10-23 on LMDB (load ~10): 440 KB at 100 forms, 542 KB at 1,000, 736 KB at
+       ;; 10,000 (the aevt scans before: 428 KB, 3.1 MB, 33 MB); contracted calls: divergence and
+       ;; the two eid seeks of the one changed var's content
+       :per-n {:bytes 45000.0}
+       :fixed {:bytes 150000.0 :calls 3}
+       :sizes [100 1000 10000]})
+    (finally
+      (doseq [[path conns] @stores] (run! d/release conns) (sh/sh "rm" "-rf" path))
+      (reset! stores []))))

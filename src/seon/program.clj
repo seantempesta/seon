@@ -720,16 +720,19 @@
   changed; each sorted, an empty kind left out ({}: nothing). Compared by content: a var's
   form by its :form/id (its text), a schema by its form's text, because entity ids are a
   branch's own and a merge applies main's forms by content under the branch's ids. Cost:
-  each db's :var/form and :schema/form datoms, and two seeks per entry whose ids differ."
+  the :var/form and :schema/form datoms that differ between the two (d/datoms-diff, which
+  skips the index subtrees they share), and two seeks per entry among them: what the branch
+  changed, not the program (before, both dbs' every :var/form and :schema/form datom, each
+  turn: pure-tests 2026-10-23)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db]
                   [:map-of [:enum :added :changed :removed :schemas] [:vector [:or :qualified-symbol :qualified-keyword]]]]}
   [db-from db-to]
-  (let [by (fn [db a] (into {} (map (juxt :e :v)) (d/datoms db :aevt a)))
-        ;; the entries whose ids differ, by name, then compared by content
+  (let [;; the entries whose ids differ, by name, then compared by content
         differ (fn [attr name-attr content]
-                 (let [a (by db-from attr) b (by db-to attr)]
-                   (into #{} (for [e (into (set (keys a)) (keys b)) :when (not= (a e) (b e))
-                                   :let [n (name-attr (d/entity (if (b e) db-to db-from) e))
+                 (let [[gone added] (d/datoms-diff db-from db-to :aevt [attr])
+                       to (into #{} (map :e) added)]
+                   (into #{} (for [e (into to (map :e) gone)
+                                   :let [n (name-attr (d/entity (if (to e) db-to db-from) e))
                                          x (content db-from n) y (content db-to n)]
                                    :when (not= x y)]
                                [(cond (nil? x) :added (nil? y) :removed :else :changed) n]))))
