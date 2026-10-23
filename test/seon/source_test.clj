@@ -520,9 +520,9 @@
   [n] (refresh-program n true))
 
 (defn read-of
-  "seon.source/read-nss's argument: refresh-of n's edited file, by namespace."
+  "seon.source/read-nss's argument: refresh-of n's edited file."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
-  [n] (let [[_ ch] (refresh-of n)] [{'rfc.c ["src/rfc/c.clj" (ch "src/rfc/c.clj")]}]))
+  [n] [(second (refresh-of n))])
 
 (defn interface-of
   "seon.source/db-interface's arguments: hub-refresh-of n's db and its hub."
@@ -532,7 +532,7 @@
 (defn diff-of
   "seon.source/program-tx's arguments: refresh-of n's db and its edited file, read."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :map :set]]}
-  [n] (let [[db ch] (refresh-of n)] [db (#'source/read-nss {'rfc.c ["src/rfc/c.clj" (ch "src/rfc/c.clj")]}) ch #{}]))
+  [n] (let [[db ch] (refresh-of n)] [db (#'source/read-nss ch) ch #{}]))
 
 (defn transact-of
   "datahike.api/db-with's arguments: refresh-of n's db and its refresh's facts."

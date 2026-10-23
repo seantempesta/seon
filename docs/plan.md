@@ -2,23 +2,28 @@
 
 What is in flight, what the owner has not yet ruled, and the steps from here to the goal (Seon agents fixing problems in the system); [AGENTS.md](../AGENTS.md) says who does what and the method, the [map](README.md) how the system works, [decisions](decisions.md) the owner's standing rulings, and git the history.
 
-## Now (2026-10-23)
+## Now (2026-10-23, evening)
 
-Pins: Jolt `f05de7db`, Chez `80e4b9f` (docs/forks.md) · `src` 17,470 lines (aim ~10k) · paid runs $0.144 of the $50 budget · standing root on 7888/7777 (`runs/store`, test data).
+Pins: Jolt `e0351af8`, Datahike `b4596cf`, persistent-sorted-set `1cae7f2`, Malli `0762fb6b`, Chez `80e4b9f` (docs/forks.md) · `src` ~18.5k lines (aim ~10k) · paid runs $0.144 of the $50 budget · standing root on 7888/7777 (`runs/store`, test data, erased at each rename pass).
 
-**Goal:** real Seon agents fixing problems in the system (THE PLAN's step E). A small real request has gone design → implement on DeepSeek; no model-made change has merged yet.
-**Owner's focus:** (1) the agent's context, tuned by evidence: it speaks Clojure, with thinking beside the forms; (2) the agent debug view; (3) shrink brief 1.
-Honest state, what is solid and what is not: `notes/ASSESSMENT-2026-10-23.md`.
+**Goal:** real Seon agents fixing problems in the system (THE PLAN's step E). The loop turn is measured at 11.4 s (112 s this morning); the cold automatic test run is ~54–62 s (26 min this morning); a warm one is its plan only.
+**Root's working schedule:** `notes/root-schedule-2026-10-23.md` in root's worktree (the queue, the rules, what was rescheduled).
 
 ## In flight
 
-Merged to main: no automatic retries (``jolt/hold-for-root``), rename pass 2 (stored names; the standing store is erased, not migrated), ``jolt/agent-ready``, ``jolt/printer-eval``, ``jolt/process-tests``, ``jolt/reach-index``.
+Merged today, in order: ``jolt/hold-for-root``, ``jolt/agent-ready``, ``jolt/printer-eval``, ``jolt/wiki-live``, ``jolt/reach-index``, ``jolt/process-tests``, rename pass 2, ``jolt/health`` part 1 (problem classes, the watcher, the done refusal), ``jolt/test-root``, ``jolt/starter-fifo`` (and the stop-hang fix), ``jolt/pure-tests``, ``jolt/brief3`` (shared greens), ``jolt/shard-time``, ``jolt/ticks-cost``, ``jolt/no-idle-build``, ``jolt/reach-scc2``, ``jolt/dry-run`` (the gate on demand, turn-cost fixes), ``jolt/global-ids`` (the store-wide counter, content ids, delta and verbatim merges, the all-branches union `seon.union`, the store-gc fix).
 
-**Merge queue** (each branch reviewed before merge and proven on a frozen tree; root bumps a fork's pin at merge, and each worktree session runs `bin/worktree --sync NAME` after merging main), next first: ``jolt/health`` (dead citations and other problems as classes of `seon.problems/report`), ``jolt/test-root``, then ``jolt/wiki-live`` (this branch: the wiki made current), then ``jolt/brief3`` (shrink brief 3; agents share greens), ``jolt/dry-run`` (step E: the gate's `:tests`, the three test tiers, thinking off, `reasoning_content` sent back), ``jolt/global-ids`` (content-derived ids, global addressing), ``jolt/pure-tests``, ``jolt/proof-ends``.
-
-**Research and planning:**
-- ``jolt/agent-view``: the agent debug view, with thinking beside the forms.
-- ``jolt/self-contained``: `next` as the self-contained Seon root (fork homes are the GitHub forks; the project root is `~/src/seon-next`, worktrees at `.worktrees/NAME`); main-tree steps need root's go.
+**Merge queue,** one heavy run at a time, root scheduling it; each branch merges main, does the revert check, runs one `bin/prove` plus the named process tests it reaches, and gets a §9 review:
+1. ``jolt/health``: the test service (`seon_prove`, one runner for every agent), proving now; then `caused` at O(changed), the Flow loader and commit stream, every write checked by `mg/check`.
+2. ``jolt/reach-update``: the incremental reach graph (a plan ~20–45 ms after one build per base).
+3. ``jolt/refresh``: the incremental re-import (re-reads only changed files; the per-form diff is in progress).
+4. ``jolt/divergence``: the turn's divergence from deltas.
+5. dry-run's fork-server fix: the replica reads main's head instead of replaying (first spawn 2.4 s → ~0.4 s).
+6. ``jolt/proof-ends``: proof forks end with their agent.
+7. ``jolt/agent-view``: the chat window, renders as (value opts) functions with auto-render, and messages as facts through the union; then its full run.
+8. ``jolt/rename-run``: rename pass 3, attempt → run (a script, refreshed over each main).
+9. ``jolt/self-contained``: step A (test-results inside the root), the fork pushes, step C (GitHub URLs), step R (a fresh clone into `~/src/seon-next`, prove, grep clean), then move the sessions.
+Then the first full run, and step E with paid DeepSeek runs.
 
 ## Open owner questions
 

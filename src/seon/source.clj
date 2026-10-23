@@ -152,20 +152,17 @@
         (for [[k v] (sort-by (comp str key) (sedn/decode text))]
           {:schema/key k :schema/form (binding [*print-namespace-maps* false] (sedn/encode v)) :schema/file path :schema/source true})))
 
-(defn- by-ns
-  "files' ({relative path text}) Clojure files by the namespace each declares: {nsym [path
-  text]}; a file with no ns form is left out."
-  {:malli/schema [:=> [:cat [:map-of :string :string]] [:map-of :symbol [:tuple :string :string]]]}
+(defn load-order
+  "The Clojure files ({relative path text}) with an ns form, as [ns path text] in the order loading
+  them takes: each after the files it requires, ties by path (the order import-tx analyzes them in,
+  so a namespace the process never loaded is set up before a file that requires it)."
+  {:malli/schema [:=> [:cat [:map-of :string :string]] [:vector [:tuple :symbol :string :string]]]}
   [files]
-  (into {} (for [[path text] files :when (str/ends-with? path ".clj") :let [nsym (file-ns text)] :when nsym] [nsym [path text]])))
-
-(defn- load-order
-  "The namespaces of by ({nsym [path text]}) in the order loading them would take, each after
-  the ones it requires (ties by path)."
-  {:malli/schema [:=> [:cat [:map-of :symbol [:tuple :string :string]]] [:vector :symbol]]}
-  [by]
-  (let [reqs (into {} (for [[nsym [_ text]] by] [nsym (file-requires nsym text)]))]
-    (program/topo (vec (keys by)) #(reqs %) #(first (by %)))))
+  (let [by-ns (into {} (for [[path text] files :when (str/ends-with? path ".clj") :let [nsym (file-ns text)] :when nsym] [nsym [path text]]))
+        reqs (into {} (for [[nsym [_ text]] by-ns] [nsym (file-requires nsym text)]))]
+    (vec (for [nsym (program/topo (vec (keys by-ns)) #(reqs %) #(first (by-ns %)))
+               :let [[path text] (by-ns nsym)]]
+           [nsym path text]))))
 
 (defn import-tx
   "The facts of files ({relative path text}) as program on db: each namespace's file's forms
@@ -176,9 +173,10 @@
   form, not a schema resource) is left out."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] :seon.db/tx-data]}
   [db files]
-  (let [by (by-ns files)]
-    (vec (concat (for [nsym (load-order by) :let [[path text] (by nsym)] op (text-tx db nsym text path)] op)
-                 (for [[path text] (sort-by key files) :when (schema-resource? path) op (schema-tx path text)] op)))))
+  (vec (concat (for [[nsym path text] (load-order files)
+                     op (text-tx db nsym text path)]
+                 op)
+               (for [[path text] (sort-by key files) :when (schema-resource? path) op (schema-tx path text)] op))))
 
 (defn source-files
   "The files db holds as program: each imported namespace's file (:ns/file) and each schema
@@ -194,11 +192,11 @@
   [:form/id :var/name :ns/name :method/key :impl/key :schema/key :schema.file/path])
 
 (defn- read-nss
-  "Each namespace of by ({nsym [path text]}) read and analyzed in load order: {nsym
+  "Each namespace of files ({relative path text}) read and analyzed in load order: {nsym
   {:accounts :tail :file}} (accounts, with its file's relative path)."
-  {:malli/schema [:=> [:cat [:map-of :symbol [:tuple :string :string]]] [:map-of :symbol :map]]}
-  [by]
-  (into {} (for [nsym (load-order by) :let [[path text] (by nsym)]] [nsym (assoc (accounts nsym text) :file path)])))
+  {:malli/schema [:=> [:cat [:map-of :string :string]] [:map-of :symbol :map]]}
+  [files]
+  (into {} (for [[nsym path text] (load-order files)] [nsym (assoc (accounts nsym text) :file path)])))
 
 (defn- ns-tx
   "The facts that make namespace nsym's program on db its file's (read, as read-nss answers
@@ -279,7 +277,7 @@
   this is import-tx's program."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] :seon.db/tx-data]}
   [db files]
-  (let [read (read-nss (by-ns files))
+  (let [read (read-nss files)
         gone (for [dt (d/datoms db :aevt :ns/file) :let [n (:ns/name (d/entity db (:e dt)))] :when (not (contains? read n))] [n nil])]
     (program-tx db (into read gone) files
                 (into (set (filter schema-resource? (keys files)))
@@ -345,14 +343,15 @@
   (let [ns-of-path (fn [p] (some #(when (= p (:v %)) (:ns/name (d/entity db (:e %)))) (d/datoms db :aevt :ns/file)))
         texts (into {} (filter val) changed)
         gone (into {} (for [[p t] changed :when (and (nil? t) (str/ends-with? p ".clj")) :let [n (ns-of-path p)] :when n] [n nil]))
-        read (loop [round (by-ns texts) check (keys gone) read gone]
+        read (loop [round texts check (keys gone) read gone]
                (if (and (empty? round) (empty? check))
                  read
-                 (let [read (into read (read-nss round))
-                       moved (filter #(not= (db-interface db %) (read-interface (read %))) (concat (keys round) check))]
+                 (let [now (read-nss round)
+                       read (into read now)
+                       moved (filter #(not= (db-interface db %) (read-interface (read %))) (concat (keys now) check))]
                    (recur (into {} (for [n moved d (required-by db n) :when (not= d n)
                                          :let [p (:ns/file (d/entity db [:ns/name d]))] :when p]
-                                     [d [p (or (texts p) (file-text db d))]]))
+                                     [p (or (texts p) (file-text db d))]))
                           [] read))))]
     (program-tx db read changed (set (filter schema-resource? (keys changed))))))
 
