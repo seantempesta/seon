@@ -70,6 +70,8 @@
   [:seon.config.source/tests-dir :seon.config.source/tests-dir]
   [:seon.config.source/test-results-dir :seon.config.source/test-results-dir]
   [:seon.config.proofs/jobs :seon.config.proofs/jobs]
+  [:seon.config.proofs/program-store :seon.config.proofs/program-store]
+  [:seon.config.proofs/program-store-max-bytes :seon.config.proofs/program-store-max-bytes]
   [:seon.config.proofs/seed-salt :seon.config.proofs/seed-salt]
   [:seon.config.proofs/cost-max-n :seon.config.proofs/cost-max-n]
   [:seon.config.proofs/seeds :seon.config.proofs/seeds]

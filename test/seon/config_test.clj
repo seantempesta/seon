@@ -14,7 +14,7 @@
 
 (defn- read-file
   "A config file at p read with aero under profile prof, resolved and validated (or the error, thrown)."
-  [p prof dir] (config/resolved (aero/read-config p {:profile prof ::config/checkout dir})))
+  [p prof dir] (config/resolved (aero/read-config p {:profile prof ::config/checkout dir :resolver aero/relative-resolver})))
 
 (defn- tags
   "test/seon/config/tags.edn read with aero under profile p (default :default)."
