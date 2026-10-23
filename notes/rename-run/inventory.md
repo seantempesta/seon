@@ -22,5 +22,8 @@ Passes 1-2 (names in code, stored keywords) were already on main; what was left 
 | dial, pillar, verb | 3, 2, 3 | none left outside the table and the pass-2 plans | rows; seon.docs.edn/seon.db.edn plans |
 | admit | 11 | none | `seon.fx/admit` is admission by workload (kept sense) |
 
-Names needing a ruling (proposed to root, done as proposed, not answered at writing): `seon.entrance.edn` -> `seon.server.edn`;
-`seon.fences.edn` -> `seon.audit.edn`; the seven ids above. No `bin/` command carries an old word.
+Rulings (root, 2026-10-23): `seon.entrance.edn` -> `seon.server.edn` (ids `seon.server/*`); `seon.fences.edn` DISSOLVED into the
+owning namespaces' task files (17 entries; `vocab_pass.py` `OWNER_OF`), settled in decisions.md; refusal ids by sense
+(`an-error-is-the-one-error-map`, `an-observers-defect-is-a-problem-not-invalid-input`); no legacy read of `entrance-port`:
+bin/ports reads only `server-port`, and the pass rewrites the old key in each live checkout's gitignored config/local.edn.
+No `bin/` command carries an old word.

@@ -3,7 +3,7 @@
   it, so the test boots a root of its own, as seon.root-test does, and asks the agent over
   the server what its REPL answers.
 
-  An agent's test run, read from its child's pipe (task seon.audit/one-test-bound-derived-and-named):
+  An agent's test run, read from its child's pipe (task seon.agent/one-test-bound-derived-and-named):
   no clock ends it; the child's exit does, and a child that died names the test it was running.
   Run: bin/test seon.agent-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]

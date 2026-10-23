@@ -277,9 +277,7 @@
    "test/seon/program_test.clj" "the named reader test is about a Markdown code fence"
    "test/seon/fixtures.clj" "a reply in a Markdown code fence"
    "src/seon/server.clj" "cites v1's namespace proto.agents.entrance"
-   "test/seon/config_test.clj" "tests bin/ports' reading of the earlier entrance-port key and its comment"
    "BAGGAGE.md" "cites a decision by its title, \"No locks, no lane cap, no waiting\""
-   "bin/ports" "reads the earlier :seon.config.root/entrance-port from a checkout's local.edn until it is rewritten"
    "resources/seon/tasks/seon.context.edn" "t5.refusal/* is the name of a past agent's test namespace"})
 
 (defn- old-word-patterns

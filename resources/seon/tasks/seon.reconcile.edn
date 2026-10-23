@@ -31,7 +31,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.reconcile-test/a-refused-end-write-is-reported-at-quiet}}
  {:seon.task/name "an-octopus-merge-is-proven-by-one-combined-run"
-  :seon.task/plan "What exists: octopus merges (the reconciler's :octopus-merge op) and reach selection (`seon.agent/run-tests-forked`), kept off by seon.audit/octopus-merges-off-as-decided until this exists. Correct: an octopus merge's members are proven together by one combined run of the tests their changes reach; on red the members are bisected (halves re-run) to name the one that broke it, and the green members merge. Replaces the off switch. Reference only: jolt/r5-port 302ce17 (parked, on an old base; notes/archive/option3-R5-octopus merges.md); re-derive on main's reconciler."
+  :seon.task/plan "What exists: octopus merges (the reconciler's :octopus-merge op) and reach selection (`seon.agent/run-tests-forked`), kept off by seon.reconcile/octopus-merges-off-as-decided until this exists. Correct: an octopus merge's members are proven together by one combined run of the tests their changes reach; on red the members are bisected (halves re-run) to name the one that broke it, and the green members merge. Replaces the off switch. Reference only: jolt/r5-port 302ce17 (parked, on an old base; notes/archive/option3-R5-octopus merges.md); re-derive on main's reconciler."
   :seon.task/kind :work
   :seon.task/proofs #{seon.reconcile-test/a-red-octopus-merge-is-bisected-to-its-member}}
  {:seon.task/name "an-outside-runs-agent-death-ends-it"
@@ -54,4 +54,9 @@
  {:seon.task/name "the-judge-reads-its-branch-in-one-request"
   :seon.task/plan "What exists: after :tested, `seon.reconcile/advance` asks the writer :branch-db (step :read), then :branch-diff (step :diffed), and judge-tx reads both (reconcile.clj:636-652). The writer's :branch-diff already reads the branch head (`seon.writer/branch-merge` answers [head result]). Correct: :branch-diff's answer carries the head db and base t; the judge asks once and the :read step goes. Deletes one round trip per run and the :read arm."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.reconcile-test/the-judge-reads-its-branch-in-one-request}}]
+  :seon.task/proofs #{seon.reconcile-test/the-judge-reads-its-branch-in-one-request}}
+ {:seon.task/name "octopus-merges-off-as-decided"
+  :seon.task/plan "Restates a ruling now in force (DECISIONS: Root's calls on R3's questions: octopus merges stay off until one combined test run of all members, the par-200 hang and root memory growth with concurrent merges are fixed): `:seon.config.merge/max-running` is 1 in resources/seon/config/default.edn, read through the one resolver, and `seon.task/boot-tx` writes it on main with the config in force; the code default `seon.reconcile/default-max-merging` is deleted. Nothing left to do: close."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.reconcile-test/boot-records-merge-max-running-one
+                      seon.reconcile-test/two-ready-disjoint-merges-run-one-at-a-time-by-default}}]

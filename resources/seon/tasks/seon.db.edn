@@ -93,4 +93,8 @@ Done: the proof below green; bin/test green; bin/laws, bin/check mg-check, instr
   :seon.task/kind :work
   :seon.task/proofs #{seon.db-test/a-store-made-again-at-a-removed-path-is-a-new-store seon.db-test/a-release-commits-what-was-applied
                       seon.db-test/database-exists-answers-whether-a-store-is-there}}
-]
+ {:seon.task/name "leases-and-store-size-are-declared-bounds"
+  :seon.task/plan "Part (1) replaced 2026-10-23 by store-wide ids (task seon.db/each-id-is-issued-once): no agent holds a block, so none can mint past one. Done: an agent's lease is a ceiling where the id is minted, on our jolt/eid-lease Datahike branch: `seon.db/lease!` (from `seon.db/after-fork!`) sets a per-store ceiling with `dbtx/set-eid-ceiling!` at lease + `:seon.config.store/eid-lease`, and next-eid raises {:error :entity-id/lease-spent} past it, before anything applies (`dw/apply!` runs ahead, so a check after it would be too late); `seon.db/lease-spent` turns that into the typed :seon.db/lease-spent naming the lease and the fix, as an :err item in the agent's eval. The LMDB map size is `:seon.config.store/lmdb-map-bytes` in resources/seon/config/default.edn (the SEON_LMDB_MB, SEON_TRIP_MB and SEON_AGENT_HEAP_MB reads are gone), and the store reports its map use (`seon.db/map-use`: data.mdb's length against the map size; `seon.db/lease-use` an agent's ids used of its lease). Before, an agent minting past its block silently took the next agent's ids, and two branches merged different entities under one id."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.db-test/each-id-is-issued-once-across-branches
+                      seon.db-test/the-store-reports-its-map-use}}]

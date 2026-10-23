@@ -15,7 +15,7 @@ Five worktree sessions, grouped so that related tasks stay in one session's cont
 
 | Group | Tasks, in order | Model | Talks to |
 |---|---|---|---|
-| **Vocabulary** | ``jolt/rename-run`` widened to every AGENTS §7a word: one scripted pass, a `bin/laws` check, `seon.audit.edn` dissolved into its owners' files | Sonnet | merge (the freeze) |
+| **Vocabulary** | ``jolt/rename-run`` widened to every AGENTS §7a word: one scripted pass, a `bin/laws` check, the guards audit's task file dissolved into its owners' files | Sonnet | merge (the freeze) |
 | **Merge and cutover** (main tree) | ``jolt/health`` again (merge main, revert the revert 1ef9f0e9, prove), ``jolt/wiki-stale``, ``jolt/reconcile-topo`` and ``jolt/live-forms``, then the freeze: ``jolt/rename-run`` (run → run, store erased), ``jolt/self-contained`` (steps A, D), step R (`~/src/seon-next`) | Sonnet | every group; root for the freeze |
 | **Shrink** | the two `seon.agent-test` reds on main ("No such namespace: seon.e2e"), the remaining driver deletions from `src` (task `seon.main/drivers-leave-src`), the clocks still deciding (``jolt/memory-is-read-when-asked``, the fork server's 100 ms idle poll) | Sonnet | merge |
 | **Agent loop** (THE PLAN 1, 2, E) | ``jolt/writeback-order`` (a new form before its first user; WIP committed a4d1ae96), ``jolt/ctx-loop`` (the context render on Seon's own program), then step E's second paid real task | Opus | agent view |
