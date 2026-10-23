@@ -1,6 +1,6 @@
 (ns datahike.query-test
   "Datahike's query, as Seon's agents call it: what it answers and what it refuses."
-  (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d] [datahike.datom :as datom] [seon.test-store :as ts])
+  (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d] [seon.test-store :as ts])
   (:import [clojure.lang ExceptionInfo]))
 
 (deftest a-nested-call-in-a-predicate-is-refused
@@ -76,10 +76,11 @@
                                                    (d/q '[:find ?x :in [?x ...] ?f :where [(?f ?x)]]
                                                         [1] (fn [_] (throw (ex-info "own" {:error :seon/own})))))))))
         "a call's own typed error is passed on as is")
-    (testing "the built-in comparisons order values of different kinds as the indexes do, and never throw"
-      (let [xs [:k "s" 'sym 7 3 5.5]]
-        (is (= (set (for [x xs :when (pos? (datom/compare-value x 5))] [x]))
-               (d/q '[:find ?x :in [?x ...] :where [(> ?x 5)]] xs))
-            "each value against a number, by compare-value"))
+    (testing "the built-in comparisons keep Clojure's semantics: values of different kinds are an error"
+      (doseq [[path q args] [["the planner, where a same-kind bound is a range scan" '[:find ?n :where [_ :ns/name ?n] [(> ?n 5)]] [db]]
+                             ["a relation of inputs" '[:find ?x :in [?x ...] :where [(< ?x 4)]] [[1 "a"]]]]]
+        (is (= :query/call-threw (:error (ex-data (is (thrown? ExceptionInfo (apply d/q q args)))))) path))
+      (is (= #{['proof.two]} (d/q '[:find ?n :where [_ :ns/name ?n] [(> ?n proof.one-test)] [(< ?n proof.zz)]] db))
+          "symbols against a symbol: the range scan answers")
       (is (= #{[3]} (d/q '[:find ?x :in [?x ...] :where [(< ?x 4)] [(> ?x 2)]] [1 2 3 4 5])) "numbers as before")
-      (is (= #{[3]} (d/q '[:find ?x :in [?x ...] :where [(< 2 ?x 4)]] [1 2 3 4 5])) "a chain of three"))))
+      (is (= #{[3] [4]} (d/q '[:find ?x :in [?x ...] :where [(< 2 ?x 4.5)]] [1 2 3 4 5])) "a chain of three, across number classes"))))
