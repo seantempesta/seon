@@ -183,11 +183,12 @@
   commit whose parent is the branch head (a branch not there yet starts at dir's HEAD, the
   commit the running generation's tree checks out), and the ref moved only from that head. No
   working tree or checkout is touched, so main and every worktree's files stay as they are.
-  Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing to write),
-  or :seon.fx/io-error."
+  With :allow-empty? and no files it commits the branch's own tree again (an empty commit: a review,
+  seon.docs/review-message). Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing
+  to write), or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [dir branch files message]} :req}]
-  (if (empty? files)
+  [{{:keys [dir branch files message allow-empty?]} :req}]
+  (if (and (empty? files) (not allow-empty?))
     {:value {:sha nil :files 0}}
     (try
       (let [ref (str "refs/heads/" branch)
@@ -232,10 +233,27 @@
                                  {:sha sha :time t}
                                  (throw (ex-info (str "git blame gave no committer time for " sha) {})))))))
 
+(defn- reviews
+  "{section address {:sha :time}}: the newest commit of the repository at root (reachable from HEAD) whose message
+  carries the trailer `Reviewed: <address>` for it, in the checkout's own history (HEAD: a review that
+  never reached it is not a review here), from ONE git log (an empty review commit touches
+  no file, so no per-file log finds it). Each address is one trailer line."
+  {:malli/schema [:=> [:cat :string] [:map-of :string :map]]}
+  [root]
+  (let [out (git! {} root ["log" "HEAD" "--grep=^Reviewed: " "--format=%x01%H%x00%ct%x00%(trailers:key=Reviewed,valueonly)"] nil)]
+    (reduce (fn [m rec]
+              (let [[sha ct trailers] (str/split rec #"\x00" 3)
+                    t (parse-long (str/trim ct))]
+                (reduce (fn [m a] (if (> t (:time (m a) -1)) (assoc m a {:sha (str/trim sha) :time t}) m))
+                        m (remove str/blank? (map str/trim (str/split-lines (or trailers ""))))))) 
+            {} (remove str/blank? (str/split out #"\x01")))))
+
 (defn wiki-history
   "For each requested wiki section ({:path :address :lines [from to] :files {name {:file :ns}}}) the
   commit that last changed its lines (git blame of its page, the newest committer time among its
-  lines; nil when a line is not committed yet) and, for each (commit, file) the sections' cited
+  lines; nil when a line is not committed yet) or, when it is newer or as new, the last commit whose
+  `Reviewed:` trailer names the section (one git log for all of them, `reviews`): a review is a
+  commit, so it survives an erased store and a fresh clone. And, for each (commit, file) the sections' cited
   vars live in, the file's text at that commit: nil when the commit has no such path (git ls-tree
   says so), else `git show`'s text. Every git call goes through `git!`. Answers {:value {:sections
   {address {:commit sha}} :files {[sha file] text-or-nil} :errors {[sha file] message}}}: a page git
@@ -246,6 +264,7 @@
   [{{:keys [root sections]} :req}]
   (try
     (let [by-path (group-by :path sections)
+          reviewed (reviews root)
           blamed (into {} (for [p (keys by-path)]
                             [p (try (blame root p) (catch Throwable e {:error (or (ex-message e) (str (type e)))}))]))
           infos (into {} (for [{:keys [path address lines]} sections
@@ -253,8 +272,10 @@
                            [address (if (:error b)
                                       {:error (:error b)}
                                       (let [ls (keep b (range (first lines) (inc (second lines))))
-                                            newest (when (seq ls) (apply max-key :time ls))]
-                                        {:commit (when (and newest (not (re-matches #"0+" (:sha newest)))) (:sha newest))}))]))
+                                            newest (when (seq ls) (apply max-key :time ls))
+                                            rv (get reviewed address)]
+                                        {:commit (when (and newest (not (re-matches #"0+" (:sha newest))))
+                                                   (if (and rv (>= (:time rv) (:time newest))) (:sha rv) (:sha newest)))}))]))
           needed (distinct (for [{:keys [address files]} sections :let [c (:commit (infos address))] :when c [_ {:keys [file]}] files] [c file]))
           shown (into {} (for [[c f] needed]
                            [[c f] (try (if (str/blank? (git! {} root ["ls-tree" c "--" f] nil))

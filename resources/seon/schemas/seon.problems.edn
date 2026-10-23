@@ -4,12 +4,18 @@
 ;; and the shape of the one read, seon.problems/report.
 {;; ---- variants of the one error map (each [:and :seon.error/base ...]) ----
  :seon.agent/eval-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/eval-error]]
-                                                [:class :string] [:data {:optional true} :string] [:phase {:optional true} :keyword]
+                                                [:class :string] [:data {:optional true} :map] [:phase {:optional true} :keyword]
+                                                [:jolt.error/line {:optional true} :int] [:jolt.error/column {:optional true} :int]
+                                                [:jolt.error/symbol {:optional true} :string] [:jolt.error/ns {:optional true} :string]
+                                                [:jolt.error/kind {:optional true} :keyword] [:jolt.error/type {:optional true} :keyword]
+                                                [:jolt.error/suggestions {:optional true} [:vector :string]]
                                                 [:causes {:optional true} [:vector :string]]]]
  :seon.db/types-differ [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/types-differ]]
                                                 [:seon.db/attributes [:map-of :qualified-keyword [:map [:stored :keyword] [:declared :keyword]]]]]]
  :seon.db/ids-unopened [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/ids-unopened]] [:path :string] [:errno :int]]]
  :seon.root/no-agent [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-agent]] [:agent {:optional true} [:maybe :keyword]]]]
+ ;; a request to an agent after it ended (root stopped it, or it died): not gone, it was
+ :seon.root/ended [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/ended]] [:agent :keyword]]]
  :seon.agent/last-op [:map [:kind :keyword] [:form {:optional true} [:maybe :string]] [:since-ms {:optional true} [:maybe :int]]]
  :seon.agent/died [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/died]] [:agent :keyword]
                                           [:pid {:optional true} [:maybe :int]] [:exit {:optional true} [:maybe :seon.lib/exit-status]]

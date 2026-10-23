@@ -153,11 +153,11 @@
                            (assert (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
         put (fn [p t] (.mkdirs (.getParentFile (java.io.File. (str dir "/" p)))) (spit (str dir "/" p) t))]
     (git "init" "-q")
-    (put "src/app/gb.clj" "(ns app.gb)\n\n(defn f [] 1)\n\n(defn g [] 2)\n")
+    (put "src/app/gb.clj" "(ns app.gb)\n\n(defn f [] 1)\n\n(clojure.core/defn g [] 2)\n")
     (put "docs/p.md" "# P\n\nIt reads `app.gb/f`.\n\n## Q\n\nIt reads `app.gb/g`, `app.gb/h` and `app.gl/z`.\n")
     (git "add" ".") (git "commit" "-q" "-m" "first")
     (let [first (git "rev-parse" "HEAD")]
-      (put "src/app/gb.clj" "(ns app.gb)\n\n(defn f [] 11)\n\n(defn g [] 2)\n\n(defn h [] 3)\n")
+      (put "src/app/gb.clj" "(ns app.gb)\n\n(defn f [] 11)\n\n(clojure.core/defn g [] 2)\n\n(defn h [] 3)\n")
       (put "src/app/gl.clj" "(ns app.gl)\n\n(defn z [] 4)\n")
       (git "add" ".") (git "commit" "-q" "-m" "second")
       {:dir dir :first first :second (git "rev-parse" "HEAD")})))
@@ -231,3 +231,27 @@
       (is (= {:read (seon.docs/read-map db #{'app.m0/f2})} (r "docs/p.md#c"))))
     (testing "a file git could not show is unread with git's words, never absent"
       (is (re-find #"git show: exploded" (:unread (r "docs/p.md#d")))))))
+
+(deftest a-review-is-a-commit-and-survives-a-rebuilt-store
+  ;; a review (my.docs/reviewed!) is an empty git commit with `Reviewed: <address>`; the baseline takes, per
+  ;; section, the newer of the commit that last changed its lines and the last review naming it, from one
+  ;; git log, so a store rebuilt from scratch reads the reviewed section fresh
+  (let [{:keys [dir]} (git-fixture)
+        stale-of (fn [] (let [{:keys [db]} (db-of-fixture dir "src/app/gb.clj")]
+                          (set (map (juxt :section :name) (get-in (problems/health db) [:classes :stale-section :rows])))))
+        branch (str/trim (:out (clojure.java.shell/sh "git" "-C" dir "rev-parse" "--abbrev-ref" "HEAD")))]
+    (is (contains? (stale-of) ["docs/p.md#p" 'app.gb/f]) "before the review the section is stale")
+    (let [r (seon.fx/git-commit {:req {:dir dir :branch branch :files {} :allow-empty? true :message (seon.docs/review-message "docs/p.md#p" "sean")}})]
+      (is (string? (get-in r [:value :sha])) "the review is a commit")
+      (is (= 1 (count (re-seq #"Reviewed: docs/p.md#p" (:out (clojure.java.shell/sh "git" "-C" dir "log" "HEAD" "--format=%B")))))))
+    (let [after (stale-of)]
+      (is (not (contains? after ["docs/p.md#p" 'app.gb/f])) "a store rebuilt from the repository reads the reviewed section fresh")
+      (is (contains? after ["docs/p.md#q" 'app.gb/h]) "and the section nobody reviewed is still stale"))))
+
+(deftest a-review-on-another-branch-does-not-freshen-the-checkouts-section
+  (let [{:keys [dir]} (git-fixture)
+        stale-of (fn [] (let [{:keys [db]} (db-of-fixture dir "src/app/gb.clj")]
+                          (set (map (juxt :section :name) (get-in (problems/health db) [:classes :stale-section :rows])))))
+        r (seon.fx/git-commit {:req {:dir dir :branch "elsewhere" :files {} :allow-empty? true :message (seon.docs/review-message "docs/p.md#p" "sean")}})]
+    (is (string? (get-in r [:value :sha])) "the review commit exists, on a branch HEAD does not contain")
+    (is (contains? (stale-of) ["docs/p.md#p" 'app.gb/f]) "and HEAD's section is still stale")))

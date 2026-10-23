@@ -1,5 +1,8 @@
 #!/bin/zsh
-# bin/worktree NAME [BASE]    a worktree of next/ at ../next-NAME on branch jolt/NAME (from BASE, default main)
+# bin/worktree NAME [BASE]    a worktree of the main tree on branch jolt/NAME (a new one from BASE, default
+#                             main; an existing one as it is), at <root>/.worktrees/NAME (gitignored: a
+#                             worktree is inside the root it belongs to)
+# bin/worktree --path NAME    that path
 # bin/worktree --remove NAME  remove that worktree and its submodule worktrees (the branch is kept)
 # bin/worktree --at DIR COMMIT [REPO]  a detached worktree of REPO (default next/) at COMMIT in DIR, set
 #                             up as below: what a generation is built in (seon.fx/build, docs/source.md)
@@ -28,6 +31,15 @@
 set -eu
 MAIN=$(cd "$(dirname "$0")/.." && pwd)
 die() { print -u2 "worktree: $*"; exit 1; }
+# the main tree (git's common dir), whichever checkout this runs from: the worktrees and the port
+# registry (bin/ports) live inside it, so the root folder holds everything and can be moved whole
+MAIN_TREE=$(cd "$(git -C "$MAIN" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
+wt_path() { print "$MAIN_TREE/.worktrees/$1"; }
+
+if [[ ${1:-} == --path ]]; then
+  [[ -n ${2:-} ]] || die "usage: bin/worktree --path NAME"
+  wt_path "$2"; exit 0
+fi
 
 # setup WT: WT's submodules as worktrees of this checkout's submodule repos at the pins WT's
 # commit records (read with ls-tree, never `git submodule`), and target/ cloned
@@ -104,7 +116,7 @@ fi
 
 if [[ ${1:-} == --sync ]]; then
   NAME=${2:-}; [[ -n $NAME ]] || die "usage: bin/worktree --sync NAME"
-  WT=$(dirname "$MAIN")/next-$NAME
+  WT=$(wt_path "$NAME")
   [[ -d $WT ]] || die "no worktree at $WT"
   git -C "$WT" ls-tree HEAD reference-code/ | while read -r mode type sha sub; do
     [[ $type == commit ]] || continue
@@ -118,24 +130,30 @@ fi
 
 if [[ ${1:-} == --remove ]]; then
   NAME=${2:-}; [[ -n $NAME ]] || die "usage: bin/worktree --remove NAME"
-  WT=$(dirname "$MAIN")/next-$NAME
+  WT=$(wt_path "$NAME")
   [[ -d $WT ]] || die "no worktree at $WT"
   unsub "$WT"
   git -C "$MAIN" worktree remove --force "$WT"
   # its port block (bin/ports) is free again
-  REG=$(dirname "$MAIN")/worktree-ports
-  [[ -f $REG ]] && /usr/bin/lockf -k "$REG.lock" zsh -c 'grep -v "^$2 " "$1" > "$1.new"; mv "$1.new" "$1"' _ "$REG" "next-$NAME"
+  REG=$MAIN_TREE/config/worktree-ports
+  [[ -f $REG ]] && /usr/bin/lockf -k "$REG.lock" zsh -c 'grep -v "^$2 " "$1" > "$1.new"; mv "$1.new" "$1"' _ "$REG" "${WT:t}"
   print "removed $WT (branch jolt/$NAME kept)"
   exit 0
 fi
 
 NAME=${1:-}; BASE=${2:-main}
 [[ -n $NAME && $NAME != seon* ]] || die "usage: bin/worktree NAME [BASE] (a name not starting with seon)"
-WT=$(dirname "$MAIN")/next-$NAME
+WT=$(wt_path "$NAME")
 BR=jolt/$NAME
 [[ ! -e $WT ]] || die "$WT exists"
 
-git -C "$MAIN" worktree add -q -b "$BR" "$WT" "$BASE"
+# a branch that exists (a worktree recreated after a move, a branch with unmerged work) is checked out
+# as it is; BASE only names the start of a new one
+if git -C "$MAIN" show-ref -q --verify "refs/heads/$BR"; then
+  git -C "$MAIN" worktree add -q "$WT" "$BR"
+else
+  git -C "$MAIN" worktree add -q -b "$BR" "$WT" "$BASE"
+fi
 
 setup "$WT"
 

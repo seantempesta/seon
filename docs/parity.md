@@ -90,6 +90,6 @@ The server's ops, the MCP tools and root's evaluation path are [server](server.m
 
 | v1 | next | Status |
 |---|---|---|
-| `CLAUDE.md` (the laws) | `CLAUDE.md` is `AGENTS.md` | present |
+| `CLAUDE.md` (the laws) | `AGENTS.md` alone: Claude Code reads it when the folder has no `CLAUDE.md` | present |
 | 13 skills in ``.agents/skills`` | the task's context and this wiki | dropped |
 | architecture pages | topic pages and the [map](README.md), loaded into the store as sections (`seon.docs`); no check fails on a dangling citation (task `seon.docs/the-wiki-stays-true-and-healthy`) | partial |

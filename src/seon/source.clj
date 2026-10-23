@@ -117,13 +117,14 @@
   symbol form-id}, the id seon.program/account gives the form (the namespace and the form's exact
   text, and its occurrence among the same text), but found by the form's head and name alone,
   with no analysis and nothing run: what a file at an old commit would have recorded, read without
-  loading it. A form defined by a macro of another head is not found."
+  loading it. A head is known by its name whatever its namespace (clojure.core/defn, seon.contract/defn);
+  a form defined by a macro of another name is not found."
   {:malli/schema [:=> [:cat :symbol :string] [:map-of :qualified-symbol :string]]}
   [nsym text]
   (let [seen (volatile! {})]
     (into {} (keep (fn [{:keys [form src ns]}]
                      (let [k (get (vswap! seen update [ns src] (fnil inc -1)) [ns src])]
-                       (when (and (seq? form) (contains? defining-heads (first form)) (symbol? (second form)))
+                       (when (and (seq? form) (symbol? (first form)) (contains? defining-heads (symbol (name (first form)))) (symbol? (second form)))
                          [(symbol (str ns) (name (second form))) (program/form-id ns src k)]))))
           (:forms (read-forms nsym text)))))
 
