@@ -70,20 +70,20 @@
   [] (c-signal 13 1))
 
 (defn mp-probe
-  "This process's Mach VM accounting: {:phys-fp :internal :resident :regions {:jit :malloc :anon0 :other}} in MB."
+  "This process's memory as macOS's ledger holds it (native/probe.c, task_info TASK_VM_INFO):
+  {:phys-fp :internal :compressed :resident} in MB."
   {:malli/schema [:=> [:cat] :seon.lib/probe]}
   []
-  (let [b (ffi/alloc 4096) n (mp-probe* b 4096)] (read-string (ffi/read-bytes b n))))
+  (let [b (ffi/alloc 256) n (mp-probe* b 256)] (read-string (ffi/read-bytes b n))))
 
 (defn real-mb
-  "Pages this process owns (copied from its parent or newly dirtied), in MB: footprint
-  overstates a forked child (docs/cost.md#how-we-measure), so count shared-now-private +
-  private resident pages."
+  "This process's memory as macOS charges it, in MB: its phys_footprint (what Activity Monitor and
+  jetsam charge: private dirty pages, compressed ones included). A forked child is charged what
+  it writes, never what it only shares with its parent, and the parent keeps its own charge
+  (docs/cost.md#how-we-measure)."
   {:malli/schema [:function [:=> [:cat] :seon.lib/mb] [:=> [:cat :seon.lib/probe] :seon.lib/mb]]}
   ([] (real-mb (mp-probe)))
-  ([p] (reduce + 0.0 (for [k [:jit :malloc :anon0 :other]
-                           :let [r (get-in p [:regions k])]]
-                       (+ (:snp r 0.0) (:prv-res r 0.0))))))
+  ([p] (double (:phys-fp p))))
 
 (defn sysmem {:malli/schema [:=> [:cat] :seon.lib/sysmem]}
   [] (let [b (ffi/alloc 24)] (sysmem* b)

@@ -50,6 +50,24 @@
   (lib/fork! {:child #(lib/c-exit (let [r (deref (future (f)) 5000 ::hung)] (cond (= ::hung r) 2 (true? r) 0 :else 1)))
               :refused (fn [n] {:refused n}) :parent lib/wait-status}))
 
+(deftest the-memory-gauge-reads-what-macos-charges-across-a-fork
+  ;; task seon.lib/real-mb-reads-what-macos-charges: the gauge is the task's phys_footprint, what
+  ;; macOS charges (Activity Monitor, jetsam). It counted a process's private and shared-now-private
+  ;; resident pages, and a fork turns the parent's pages copy-on-write: a parent holding 730 MB read
+  ;; 76 MB after forking a child (measured 2026-10-23), so root, which forks the fork server, read a
+  ;; quarter of what it holds. A forked child is charged what it writes, not what it shares.
+  (let [before (lib/real-mb)
+        block (byte-array (* 300 1024 1024))]
+    (java.util.Arrays/fill block (byte 7))
+    (let [held (lib/real-mb)]
+      (is (< 285 (- held before) 330) (str "a 300 MB block written: " before " -> " held " MB"))
+      (is (= {:exit 0} (in-child (fn [] (let [b0 (lib/real-mb)]
+                                          (dotimes [i (* 30 1024 1024)] (aset block i (byte 1)))
+                                          (< 28 (- (lib/real-mb) b0) 60)))))
+          "a forked child is charged the 30 MB it writes")
+      (is (< (* 0.95 held) (lib/real-mb)) (str "the parent still holds its block after the fork: " held " MB before"))
+      (aget block 0))))
+
 (deftest a-forked-child-runs-go-blocks-and-makes-a-store
   ;; fork(2) copies only the calling thread: jolt's carriers, timer and shutdown watcher
   ;; are parked (not active) when the one active thread forks, so the child inherited a
