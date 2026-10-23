@@ -17,7 +17,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.agent-test/a-wide-reach-reuses-unchanged-results}}
  {:seon.task/name "memory-is-read-when-asked"
-  :seon.task/plan "`seon.agent/mem-mb` re-reads `lib/real-mb` (~1.5 ms, walking the VM regions) at most once a second and answers the cached value otherwise: a cache keyed by time (AGENTS §5 allows content-keyed reuse only; docs/clocks.md#time-decides-owed-its-owners-fix). Correct: find its callers; read memory where a caller needs it (a turn's start, a process's status reply), measured, so the cost is paid per question asked, or keep the last reading as a recorded fact with its time and let the reader see its age. Deletes :mem-at and the 1 s comparison; mem-mb leaves docs/clocks.md's owed list."
+  :seon.task/plan "Done. `seon.agent/mem-mb` reads `lib/real-mb` (~1.5 ms, walking the VM regions) when asked, on the events that report the agent's state (its hello, each commit, a `:tests` reply, `:stats`), never per evaluation and never kept for a time: no cache keyed by time (AGENTS §5), no clock. It left docs/clocks.md's owed list."
   :seon.task/kind :work
   :seon.task/proofs #{seon.agent-test/memory-is-read-when-asked}}
  {:seon.task/name "an-agents-base-is-its-merge-base"
