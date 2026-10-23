@@ -145,7 +145,8 @@
       (finally (.delete idx)))))
 
 (defn base-commit
-  "The commit the checkout at root's health is read against (root's ruling, 2026-10-23). With a
+  "The commit the checkout at root's health is read against (health is what a branch caused,
+  docs/health.md#checks-are-callers-of-seon). With a
   branch other than git's main checked out (:seon.config.source/main; a detached HEAD too), its
   merge base with main: a branch with no commits of its own, or one main has passed, has HEAD
   itself or an older commit, so it caused only what it changes. With main checked out, its first
