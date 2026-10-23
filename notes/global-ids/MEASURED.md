@@ -153,3 +153,27 @@ Recommendation: option 1, stated in `seon.merge` as the one merge rule for ident
 - Schema conflicts across kept branches (one ident, two value types, attack §4.5): the standing store's kept branches were not read. Opening it would take its LMDB writer lock, and the only kept copy (`runs/store-full-20261021`) predates per-agent branches.
 - Leaf sharing after a branch merges main twice (attack §4.6). This waits for verbatim merge-main to exist; under today's re-transacting merge-main the diff is doubled by construction (attack §1.10).
 - U's total size on a realistic store: estimated as main's history plus Σ Δ. At 300 attempts of about 100 datoms that is main plus about 30k datoms. That is small next to the 115k-datom main measured here.
+
+## 8. Root's writer ops by kind, before and after (2026-10-23, after the delta merge)
+
+How: `bench/split.clj` at the REPL, niced, with the machine at load ~30.
+- **Main's program:** Seon's own `src` and `test` imported through `seon.source/import-tx`: 106 files, 2,128 live forms, 67,975 datoms, on LMDB.
+- **The branch:** one turn, `seon.fixtures/generation` redefined as the agent records it, plus 40 turn facts. The branch differs from its base by 69 datoms.
+- **Before** is jolt/land14's code: three `seon.merge/program` reads per decision. **After** is jolt/global-ids (delta-three-way, merge-tx).
+
+| writer op | before | after | grows with |
+|---|---|---|---|
+| `seon.merge/program`, one db | 488 ms | (not called) | the program |
+| `:branch-diff`: three-way + unmerged | 1,466 + 488 ≈ 1,950 ms | 7.9 + 0.09 ≈ 8 ms | Δ (and log N per seek) |
+| `:merge` decision: three-way + merge-refusal's unmerged | ≈ 1,950 ms | ≈ 8 ms | Δ |
+| `:merge` tx-data | `apply-tx`: ~66 ms (MEASURED §5, 115k) | `merge-tx` (verbatim): 1.7 ms | Δ |
+| `:merge` commit (`d/merge-db`) | (the same Datahike commit) | 8.2 ms for the 29 carried datoms | Δ + log N paths |
+| `:tx`, 55 datoms on main | | 3.8 ms | Δ + log N paths |
+| `:tx`, 1 datom on main | | 1.25 ms | log N paths |
+| sync (LMDB env sync, nothing pending) | | ~0 ms (one fsync when commits are pending: 5-10 ms, storage.md) | pending commits |
+| `:spawn` (`d/branch!`) | | 1.0 ms | O(1) |
+
+- A merge of one turn now costs about **18 ms** in the writer: 8 ms deciding, 1.7 ms building the tx-data, 8.2 ms committing.
+- Before, it cost about **2 s**, and `:branch-diff` cost another 2 s.
+- No writer op left reads the whole program. The one O(changes) step left is `program/load-changes!` in `main-commit`: root loads the forms that changed.
+- The turn's 40 platform facts stayed on the branch. 29 datoms merged: the new form, the var's repointing, and the transactions' facts.
