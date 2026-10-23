@@ -5,6 +5,8 @@
  :seon.error/message :string
  :seon.error/fix :string
  :seon.error/member :keyword
+ :seon.error/in [:qualified-symbol {:description "The fn an error was raised in (a var symbol, as `ns/name`)."}]
+ :seon.error/at [:map {:description "A position in that form's own text (what (source v) prints), 1-based."} [:line :int] [:column {:optional true} :int]]
  :seon.error/problem [:map {:description "One refused part of a value: malli's path and the value shown as text."}
                       [:path vector?] [:in vector?] [:expected :any] [:value :string]]
  :seon.error/problems [:vector :seon.error/problem]
@@ -17,6 +19,8 @@
                    [:seon.error/message :seon.error/message]
                    [:seon.error/fix {:optional true} :seon.error/fix]
                    [:seon.error/member {:optional true} :seon.error/member]
+                   [:seon.error/in {:optional true} :seon.error/in]
+                   [:seon.error/at {:optional true} :seon.error/at]
                    [:seon.error/problems {:optional true} :seon.error/problems]
                    [:seon.error/subject {:optional true} :seon.error/subject]]
  ;; the instrumented wrapper's errors (Seon's variant names)

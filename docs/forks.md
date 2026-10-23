@@ -8,7 +8,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 - ``jolt/<topic>`` holds one fix, cut from ``jolt/main`` (or from the topic it needs) and merged into ``jolt/main`` once measured. A pin may sit on a topic branch that has not yet been merged into ``jolt/main``; its section says so.
 - ``upstream/<topic>`` is a generic fix cut cleanly from upstream's own main, the only candidate for an upstream pull request, opened only when 100% sure.
 - Commits in the forks carry no AI trailers.
-- Submodule URLs (`.gitmodules`) are the GitHub forks, ``https://github.com/seantempesta/<lib>`` (owner, 2026-10-23); `persistent-sorted-set` and `jolt-overlay` are private, so a fresh clone needs the owner's GitHub login. A fork's branches are pushed there, never `main`, never forced. The rule comes from DECISIONS, "Libraries on Jolt".
+- Submodule URLs (`.gitmodules`) are the GitHub forks, ``https://github.com/seantempesta/<lib>`` (owner, 2026-10-23); `persistent-sorted-set` and `jolt-overlay` are private, so a fresh clone needs the owner's GitHub login. A fork's branches are pushed there, never `main`, never forced. The rule comes from DECISIONS, "Libraries on Jolt". Every pinned commit is pushed to its GitHub fork on a `jolt/<topic>` branch by whoever made it, with no ask (owner, 2026-10-23), no force, never the fork's main.
 - Pin bumps happen only in root's merges into main ([merging](merging.md)). `git -C <dir> log --oneline -- reference-code/<lib>` in this repository lists each bump with what it brought.
 
 ## jolt
@@ -83,7 +83,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 ## datahike
 
-`reference-code/datahike` pinned at `b4596cf`, the tip of ``jolt/global-ids`` (``jolt/gc-cache-epoch`` `700c473` merged in).
+`reference-code/datahike` pinned at `1880fcc`, the tip of ``jolt/in-scalar`` (on ``jolt/global-ids`` `b4596cf`, ``jolt/gc-cache-epoch`` `700c473` merged in).
 
 - Fork repo: ``https://github.com/seantempesta/datahike``. Upstream: ``replikativ/datahike``.
 - Base: `ad9fc97` "baseline", a history-less snapshot of Seon's fork ``seantempesta/datahike`` `ccba220b` (unknown: that commit is not in the repo, so the snapshot cannot be checked against it).
@@ -111,6 +111,8 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
   - `fd0c065` `deref-conn` keeps the connection's own config, so a moved store's db names where it is now. Generic.
   - `be25be4` a store's ids: entity ids and transaction ids each issued once across every branch (`datahike.ids`, `set-ids!`, the writer's `with-store-ids`); a transaction takes its id when it begins ([storage](storage.md#ids)). Generic.
   - `5c869bf`, `508918c`, `0783e8b` content entity ids: `:db/contentId`, an identity whose value names its entity (`content-eid`, `content-tempids`, `:entity-id/collision`); the partition `[1, tx0)` counter ids, `[tx0, 2^40)` tx ids, `[2^40, 2^60)` content ids; an existing identity may gain it ([storage](storage.md#ids)). Generic.
+  - `deaf43a` a consumer group's probe-driven seek decision compares the probe set with its scan op's estimate, not the group's output estimate: a group probed by one entity scanned its whole attribute (task datahike.query/a-probed-entity-is-sought-not-scanned). Generic.
+  - `7de92bb`, `a9adc83`, `1880fcc` `probe-driven-threshold` 18, Jolt's measured break-even (a probe's seek and merge ~5.6k ticks, a scanned datom ~316), not the JVM's 2500 (a JVM build must set 2500); `datahike.test.query-planner-test/test-a-probed-group-answers-the-same-either-side-of-the-seek-threshold`. Jolt.
 - Open: the fork repo's ``jolt/main`` is at `fe50764`; `4b93a1b`..`fd0c065` are only in the submodule clone, not yet in the fork repo.
 
 ## persistent-sorted-set

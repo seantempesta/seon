@@ -291,6 +291,27 @@
             [_ _] (step #'root/api-proc st :from-writer {:dest {:rid rid} :r {:ok true}})]
         (is (= {:ok true} @p))))))
 
+(deftest an-agent-that-ended-is-answered-ended-one-never-had-no-agent
+  ;; bin/check e2e-calc (2026-10-23): root's answer says whether the agent ended (its view
+  ;; records :ended-ms: a kill, its attempt's end, a death) or root never had it, so a reader
+  ;; (seon.prove) tells a cancel from a defect by the type alone
+  (let [st (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                             :view {:agents {:a7 {:status :killed :ended-ms 1}}} :graph (promise)
+                             :system (doto (promise) (deliver {:procs {} :conns []}))})
+        ask (fn [m] (let [p (promise)] (step #'root/api-proc st :ext (assoc m :p p)) @p))]
+    (doseq [op [:eval :tests :stats :merge-main]]
+      (is (= [:seon.root/ended :a7] ((juxt :seon.error/type :agent) (ask {:op op :id :a7 :forms "1"}))) (str op " to an agent that ended"))
+      (is (= :seon.root/no-agent (:seon.error/type (ask {:op op :id :nope :forms "1"}))) (str op " to one root never had")))
+    (is (= :seon.root/ended (:seon.error/type (ask {:op :clone :parent :a7}))) "a clone of an agent that ended")
+    (testing "a request in flight when root stopped its agent is answered ended"
+      (let [p (promise)
+            st (-> st (assoc-in [:agents :a1] {:branch :b1}) (assoc-in [:view :agents :a1] {:status :killed}))
+            [st rid] (#'root/pend st p :eval :a1)
+            st (#'root/end-agent st (volatile! {}) {:agent :a1 :inflight [rid]})]
+        (is (= [:seon.root/ended :a1] ((juxt :seon.error/type :agent) @p)))
+        (is (get-in st [:view :agents :a1 :ended-ms]) "and its view records the end")))
+    (is (= :seon.root/ended (:seon.error/type (root/request 'merge-main! :a7 nil {:status :killed :ended-ms 1}))) "request's merge-main! to an agent that ended")))
+
 (def ^:private fake-members
   "Protocol members a refused answer must not carry: an eval item's, a test count's, a merge's."
   #{:id :tag :ok :merged? :pass :fail :error :reports :applied :conflicts})
@@ -461,6 +482,53 @@
                 [rs2 _] (#'seon.render.proc/render-proc rs :answers (first again))]
             (is (empty? (:pending rs2)))
             (is (= (:view rs) (:view rs2)))))))))
+
+(defn- spawning-api
+  "(f st) on an api state that can spawn: its main a branch of the test store, its graph a stub
+  that takes the update! a spawn makes (the agent's proc), so the api's step runs alone."
+  [f]
+  (ts/test-branch! (fn [_ conn]
+    (f (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 8) :conn conn
+                         :view {:agents {}} :system (doto (promise) (deliver {:procs {} :conns []}))
+                         :graph (doto (promise) (deliver (reify clojure.core.async.flow.impl.graph/Update (update-flow [_ _] {}))))})))))
+
+(deftest a-spawn-is-answered-at-its-agents-ready
+  ;; task seon.root/a-spawn-answers-at-its-agents-ready: never at once, while the agent is
+  ;; :spawning, but at its hello, so what is sent to it next reaches a ready agent
+  (spawning-api (fn [st]
+    (let [p (promise)
+          [st _] (step #'root/api-proc st :ext {:op :spawn :opts {} :p p})]
+      (is (= :unanswered (answer p)) "spawning: not answered")
+      (let [[st _] (step #'root/api-proc st :back {:op :status :agent :a1 :set {:forked-ms 1.0 :mem-mb 1.0 :t 1}})]
+        (is (= :unanswered (answer p)) "a status that is not its hello: still not")
+        (step #'root/api-proc st :back {:op :status :agent :a1 :set {:ready true}})
+        (is (= {:id :a1} (answer p)) "its hello answers it"))))))
+
+(deftest a-spawn-whose-agent-dies-first-answers-the-death
+  ;; the end the agent met before its hello is the answer: died, with the exit status the fork
+  ;; server reaped (the process's exit, never a timeout); stopped first, the stop
+  (spawning-api (fn [st]
+    (let [p (promise)
+          [st _] (step #'root/api-proc st :ext {:op :spawn :opts {} :p p})
+          [st _] (step #'root/api-proc st :from-fs {:ev :forked :agent :a1 :pid 4242 :fork-ms 1.0})
+          [st _] (step #'root/api-proc st :back {:op :ended :agent :a1 :pid 4242 :inflight []})]
+      (is (= :unanswered (answer p)) "its death waits for the exit status")
+      (let [[st _] (step #'root/api-proc st :from-fs {:ev :exit :pid 4242 :status {:exit 3}})
+            first-answer (answer p)]
+        (is (= :seon.agent/died (:seon.error/type first-answer)))
+        (is (= {:exit 3} (:exit first-answer)) "with the status it exited with")
+        (is (= :a1 (:agent first-answer)))
+        ;; exactly one answer: the spawn's entry is gone once answered, so a later hello or end
+        ;; has no caller to answer (a promise ignores a second delivery, so the entry is the proof)
+        (is (not (contains? (:seon.root/spawning st) :a1)) "answered: no spawn is held for the agent")
+        (let [[st _] (step #'root/api-proc st :back {:op :status :agent :a1 :set {:ready true}})]
+          (is (not (contains? (:seon.root/spawning st) :a1)))
+          (is (= first-answer (answer p))))))))
+  (spawning-api (fn [st]
+    (let [p (promise)
+          [st _] (step #'root/api-proc st :ext {:op :spawn :opts {} :p p})]
+      (step #'root/api-proc st :back {:op :ended :agent :a1 :pid nil :inflight []})
+      (is (= :seon.agent/died (:seon.error/type (answer p))) "never forked: its death at once, no status to wait for")))))
 
 (defn- answering-sys
   "(f sys), sys's server answering every request with r (a stub for the api), on a
