@@ -17,6 +17,8 @@ JOLT=$ROOT/target/jolt/jolt
 cd "$ROOT"
 # a root a test boots listens on no dashboard port
 export SEON_WEB_PORT=${SEON_WEB_PORT:-0}
+# every test root has a store of its own: its wiki's baseline from git (4 s) is not what a test asks
+export SEON_WIKI_BASELINE=${SEON_WIKI_BASELINE:-false}
 # agents' turns are the scripted provider's (a test fixture; a root with no profile has no model provider)
 export SEON_PROFILE=${SEON_PROFILE:-scripted}
 runner() { HOME=$ROOT/target/home JOLT_PWD=$ROOT "$JOLT" -A:test run -m test-runner "$@" }
