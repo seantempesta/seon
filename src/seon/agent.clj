@@ -64,11 +64,45 @@
 (defn db {:malli/schema [:=> [:cat] :seon.host/db]}
   [] (:db @state))
 
-(defn messages
-  "The messages delivered to this agent and not yet taken ({:from :body}), taken: root's
-  requests (e.g. :catch-up, \"main moved, merge main\") and other agents' sends."
+(declare handle!)
+
+(defn- arrived!
+  "Take the message m from root if it is a delivery ({:op :message}): into the inbox, and root
+  hears it arrived; answers whether it was one. Wherever the agent reads its socket (the loop,
+  a wait for an answer, a read of its messages), a delivery lands in the inbox at once."
+  {:malli/schema [:=> [:cat :seon.wire/seon-msg] :boolean]}
+  [m]
+  (if (= :message (:op m))
+    (do (doseq [r (handle! m)] (send! r)) true)
+    false))
+
+(defn inbox
+  "The messages delivered to this agent and not yet taken ({:from :body}, and :id :to for a
+  message that is a fact), left in the inbox: root's requests (e.g. :catch-up, \"main moved,
+  merge main\"), other agents' sends and the owner's (the page's message bar). What root sent
+  before this call is read off the socket first (without waiting); any other request read
+  waits in :pending for the loop."
   {:malli/schema [:=> [:cat] [:vector :map]]}
-  [] (let [[old _] (swap-vals! state assoc :inbox [])] (:inbox old)))
+  []
+  (loop []
+    (let [m (sock/next-frame! (:conn @state))]
+      (when-not (#{:none :eof} m)
+        (when-not (arrived! m) (swap! state update :pending conj m))
+        (recur))))
+  (:inbox @state))
+
+(defn messages
+  "The inbox (inbox), taken: its reader is the turn that read them."
+  {:malli/schema [:=> [:cat] [:vector :map]]}
+  []
+  (inbox)
+  (let [[old _] (swap-vals! state assoc :inbox [])] (:inbox old)))
+
+(defn taken!
+  "The first n messages of the inbox leave it: their reader recorded them (seon.turn/basis!
+  takes them once their facts are committed on this branch). nil."
+  {:malli/schema [:=> [:cat nat-int?] :nil]}
+  [n] (swap! state update :inbox #(vec (drop n %))) nil)
 (defn send-message
   "Send body to the agents tos (ids); root delivers it by id. nil."
   {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
@@ -83,6 +117,7 @@
       (cond
         (= m :dead) (lib/c-exit 0)
         (and (= op (:op m)) (= k (:k m))) m
+        (arrived! m) (recur)
         :else (do (swap! state update :pending conj m) (recur))))))
 
 
@@ -614,7 +649,7 @@
                                               :heap-mb (lib/r2 (/ (lib/bytes-in-heap) 1048576.0))}}]
     ;; a message (session F2): it waits in :inbox until the agent's code takes it ((messages));
     ;; root hears that it arrived
-    :message (do (swap! state update :inbox (fnil conj []) (select-keys m [:from :body]))
+    :message (do (swap! state update :inbox (fnil conj []) (select-keys m [:from :body :id :to]))
                  [{:op :received :sent-ns (:ns m) :recv-ns (profile/now-ns)}])
     nil))
 
@@ -721,7 +756,7 @@
      (reset! state (cond-> {:id id :branch branch :task task :run run :fd fd :conn c :db @store-conn
                    :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
-                   :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
+                   :pending clojure.lang.PersistentQueue/EMPTY :inbox [] :tx-seq 0 :mode :agent
                    :ns nsx :interrupt-ok intr-ok :serve serve}
                    ;; main's reach graph as the fork server keeps it, for db0: test-plan's base
                    ;; graph starts from it (base-graph), never built in this process

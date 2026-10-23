@@ -37,14 +37,14 @@
   [form] (print/text form (:form print/budgets)))
 
 (defn- form-src
-  "The exact text of form in code, from its reader position (:line, :column) to where the
-  reader stopped after it (end-line, end-col; all 1-based), or nil for a form that carries
-  no position (a symbol, a number)."
-  {:malli/schema [:=> [:cat :string [:vector :int] :any :int :int] [:maybe :string]]}
-  [code starts form end-line end-col]
+  "The exact text of form in code, from its reader position (:line, :column; 1-based) to end,
+  the offset where the reader stopped after it, or nil for a form that carries no position (a
+  symbol, a number)."
+  {:malli/schema [:=> [:cat :string [:vector :int] :any :int] [:maybe :string]]}
+  [code starts form end]
   (let [{:keys [line column]} (meta form)]
     (when (and line column)
-      (subs code (+ (starts (dec line)) (dec column)) (+ (starts (dec end-line)) (dec end-col))))))
+      (subs code (+ (starts (dec line)) (dec column)) end))))
 
 (defn- keep-source!
   "A definition keeps its exact text on its var (owner: source reads the live var), so
@@ -56,7 +56,8 @@
 (defn- eval-code
   "Read the request's code once, form by form, and evaluate each with (:repl/eval-fn req)
   under seon.intr/run, in the request's \"ns\", else the agent's own. Answers each form,
-  with its exact text (:repl/src); an interrupt stops the request (one pending since its
+  with its exact text (:repl/src) and the ; comments its writer put before it (:lead,
+  seon.reader/lead: the thought beside the form); an interrupt stops the request (one pending since its
   asker cleared it included: agent-step, the turn loop); then done."
   {:malli/schema [:=> [:cat :seon.wire/msg] :any]}
   [{:keys [reply] :as req}]
@@ -69,7 +70,7 @@
         ticks (let [t (or (:ticks req)
                           (when (#{:model :outside :ui} (:origin req)) (cfg/value :seon.config.agent/form-ticks)))]
                 (when (and t (pos? t)) t))]
-    (loop [ns (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state))]
+    (loop [ns (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state)) prev 0]
       (let [form (try (binding [*ns* ns] (read {:eof ::eof} r)) (catch Throwable e e))]
         (cond
           (= ::eof form)
@@ -92,8 +93,11 @@
                 [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1]
                                          (let [v (intr/run ticks #(eval-fn form))] [:ret v *ns*]))
                                        (catch Throwable e [:err e ns (outer-frames)]))
-                common {:id n :out (not-empty (str out)) :form (form-text form) :repl/form form
-                        :repl/src (form-src code @starts form (.getLineNumber r) (.getColumnNumber r))}]
+                end (+ (@starts (dec (.getLineNumber r))) (dec (.getColumnNumber r)))
+                lead (reader/lead code prev end)
+                common (cond-> {:id n :out (not-empty (str out)) :form (form-text form) :repl/form form
+                                :repl/src (form-src code @starts form end)}
+                         lead (assoc :lead lead))]
             (swap! agent/state assoc :repl-vars (if (= tag :ret) {:v1 v :v2 v1 :v3 v2 :e e1} {:v1 v1 :v2 v2 :v3 v3 :e v}))
             (when (= tag :ret) (keep-source! v (:repl/src common)))
             (if (= tag :ret)
@@ -101,11 +105,11 @@
                 (swap! agent/state assoc-in [:results (keyword (str "h" n))] v)
                 (intern (create-ns 'result) (symbol (name h)) v)
                 (reply (merge common {:repl/value v :tag :ret :handle (keyword (str "h" n))}))
-                (recur ns'))
+                (recur ns' end))
               (let [stopped? (:interrupted (ex-data v))]
                 (reply (merge common {:repl/ex v :tag :err :err-text (str err (nrepl/err->msg v {:outer outer}))
                                       "status" (if stopped? ["interrupted"] ["eval-error"])}))
-                (if stopped? (reply {"status" ["done"]}) (recur ns))))))))))
+                (if stopped? (reply {"status" ["done"]}) (recur ns end))))))))))
 
 ;; ---- middleware -------------------------------------------------------------------
 
@@ -178,9 +182,16 @@
                    m))))))
 
 (defn wrap-cost
-  "Per-form wall µs, allocated bytes and the form's costliest contracted functions (each
-  with its exact calls and estimated ms: seon.profile), measured around the per-form eval
-  fn. Reading them costs the functions the form called, not the program's size."
+  "Per-form wall ms, allocated bytes, engine ticks (the work it did, the exact measure:
+  jolt.host/ticks-of) and the
+  form's costliest contracted functions (each with its exact calls and estimated ms:
+  seon.profile), measured around the per-form eval fn. They are recorded once, when the
+  form ran, beside the answer's value: the one value the record (record-tx) stores and the
+  reply shows, so it is shown from that fact and never measured again (the provider's prompt
+  cache holds while the context repeats it byte for byte). jolt.host/ticks-of arms the timer
+  (root's unbounded forms have no budget to), and its count is read in a finally inside it, so
+  a form that threw is counted. Reading them costs the
+  functions the form called, not the program's size."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
@@ -188,14 +199,20 @@
           ef (:repl/eval-fn req eval)]
       (h (-> req
              (assoc :repl/eval-fn (fn [form]
-                                    (let [a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/now-ns)]
-                                      (try (ef form)
+                                    (let [a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/now-ns)
+                                          v (volatile! nil) k (volatile! 0)]
+                                      (try (jolt.host/ticks-of
+                                             (fn [] (let [k0 (jolt.host/ticks)]
+                                                      (try (vreset! v (ef form))
+                                                           (finally (vreset! k (- (jolt.host/ticks) k0)))))))
+                                           @v
                                            (finally (let [t1 (profile/now-ns) a1 (profile/alloc-bytes)]
-                                                      (vreset! last [(/ (quot (- t1 t0) 1000) 1000.0) (- a1 a0) (profile/top (profile/touched) (cfg/value :seon.config.agent/form-top-fns))])))))))
+                                                      (vreset! last {:ms (/ (quot (- t1 t0) 1000) 1000.0) :alloc-bytes (- a1 a0) :ticks @k
+                                                                     :fns (profile/top (profile/touched) (cfg/value :seon.config.agent/form-top-fns))})))))))
              (around-reply (fn [m]
-                             (if-let [[ms a fns] (when (or (contains? m :repl/value) (contains? m :repl/ex)) @last)]
+                             (if-let [{:keys [fns] :as c} (when (or (contains? m :repl/value) (contains? m :repl/ex)) @last)]
                                (do (vreset! last nil)
-                                   (cond-> (assoc m :ms ms :alloc-bytes a)
+                                   (cond-> (merge m (dissoc c :fns))
                                      (seq fns) (assoc :fns (mapv (fn [c] (update c :ms #(/ (Math/round (* % 1000.0)) 1000.0))) fns))))
                                m))))))))
 
@@ -235,7 +252,7 @@
                        md (when (:ns-form? l) (not-empty (dissoc (meta (second (:repl/form m))) :line :column)))
                        _ (when md (alter-meta! (the-ns (:ns-after l)) merge md))
                        acct (when (and l (= :agent (:mode @agent/state)) (:repl/src m))
-                              (program/account (assoc l :src (:repl/src m) :ran? (contains? m :repl/value))))]
+                              (program/account (assoc l :src (:repl/src m) :lead (:lead m) :form (:repl/form m) :ran? (contains? m :repl/value))))]
                    (when l (vreset! last nil))
                    (if acct
                      (do (when contract/record? (agent/transact! (program/record-tx (agent/db) acct)))
@@ -321,7 +338,7 @@
 
 (def ^:private item-keys
   "The keys of a form's answer that are its reply item's."
-  [:id :tag :form :printed :out :err-text :ms :alloc-bytes :handle :err :tokens :truncated? :elisions :recorded :contract :contract-error :warnings :fns])
+  [:id :tag :form :lead :printed :out :err-text :ms :alloc-bytes :ticks :handle :err :tokens :truncated? :elisions :recorded :contract :contract-error :warnings :fns])
 
 (defn fold
   "The answers of one eval request (in order) -> its reply items: each form's answer (:tag),
@@ -341,23 +358,24 @@
   [id run items t-basis]
   (conj (vec (for [it items :when (:id it)]
                {:seon.cluster.eval/id (str run "/" (:id it)) :seon.cluster.eval/agent "agent"
-                :seon.cluster.eval/record (cond-> (select-keys it [:tag :form :out :ms :alloc-bytes :fns :origin])
+                :seon.cluster.eval/record (cond-> (select-keys it [:tag :form :lead :out :ms :alloc-bytes :ticks :fns :origin])
                                             (:printed it) (assoc :shown (:printed it))
                                             (= :err (:tag it)) (assoc :error (or (:err it) (:printed it))))}))
         (cond-> {:db/id "agent" :seon.agent/id id} t-basis (assoc :seon.agent/answered-t t-basis))))
 
 (defn- record!
   "Record items (with the defs their forms recorded) on this branch through the agent's
-  write path (each item's :origin says who asked, when not the agent itself). Answers items."
+  write path (each item's :origin says who asked, when not the agent itself). Answers items,
+  each recorded one with the id of its record (:record, what a turn's call names)."
   {:malli/schema [:=> [:cat :seon.agent/items] :seon.agent/items]}
   [items]
   ;; the effects asked during the request (seon.agent/fx-record!) join its recording
   (let [defs (into [] (mapcat val) (:defs @agent/state))]
     (swap! agent/state dissoc :defs)
     (if (and contract/record? (= :agent (:mode @agent/state)) (seq items))
-      (do (agent/transact! (into defs (record-tx (:id @agent/state) (str (name (:id @agent/state)) "-" (lib/c-getpid) "-" (profile/now-ns))
-                                                 items (:max-tx (agent/db)))))
-          items)
+      (let [run (str (name (:id @agent/state)) "-" (lib/c-getpid) "-" (profile/now-ns))]
+        (agent/transact! (into defs (record-tx (:id @agent/state) run items (:max-tx (agent/db)))))
+        (mapv #(cond-> % (:id %) (assoc :record (str run "/" (:id %)))) items))
       items)))
 
 (defn eval-string
@@ -367,7 +385,9 @@
   adds to the request (root's: seon.server's namespace, origin, budget and eval fn; root's
   requests to an agent: agent-step's). The request's entrant boundary: a defect past a
   form's own (a middleware's, the printer's) ends the request with the answers so far and
-  one :err item, its error map, recorded with them."
+  one :err item, its error map, recorded with them. Each item carries its form's cost
+  (:ms :alloc-bytes :ticks :fns, seon.repl/wrap-cost): the one value the recording stores and the reply shows, taken once
+  when the form ran, so what the model reads of it never changes in a later turn."
   {:malli/schema [:function [:=> [:cat :string] :seon.agent/items] [:=> [:cat :string :map] :seon.agent/items]]}
   ([code] (eval-string code {:origin :model}))
   ([code req]

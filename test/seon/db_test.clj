@@ -4,7 +4,7 @@
   (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [clojure.java.io] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.config :as cfg] [seon.contract :as contract] [seon.edn]
-            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc]))
+            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -159,6 +159,53 @@
         (is (= old-ns (get-in r [:tempids "n"]) (:db/id (:form/ns (d/entity @conn new))))
             "a tempid naming an identity the store holds is that entity, refs made before its map included"))
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest a-release-commits-what-was-applied
+  ;; a write applied run-ahead (datahike.writer/apply!, an agent's transact!) and not yet
+  ;; committed is committed by the release (the :sync writer's shutdown drains it), never
+  ;; dropped. A store on disk of this test's own, the last resort; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))]
+    (try
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
+        (is (map? (dw/apply! conn {:tx-data [{:note/text "applied, not committed"}] :tx-meta (pdb/tx-meta :db)})))
+        (is (dw/pending? conn))
+        (d/release conn true))
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
+        (is (some #(= "applied, not committed" (:v %)) (d/datoms @conn :aevt :note/text)) "the applied write is in the store")
+        (d/release conn true))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest database-exists-answers-whether-a-store-is-there
+  ;; datahike.api/database-exists? answered through a go block that put! its value on
+  ;; Datahike's throwable-promise, which on Jolt is no channel: the fiber threw and the caller
+  ;; waited for ever (pure-tests' store-release-all-hang, after a store was removed). A store
+  ;; on disk of this test's own, the last resort; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))]
+    (try
+      (is (false? (d/database-exists? (pdb/store-cfg :lmdb path))) "no store at the path")
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)] (d/release conn true))
+      (is (true? (d/database-exists? (pdb/store-cfg :lmdb path))) "a store made there")
+      (clojure.java.shell/sh "rm" "-rf" path)
+      (is (false? (d/database-exists? (pdb/store-cfg :lmdb path))) "and none once it is removed")
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest a-store-made-again-at-a-removed-path-is-a-new-store
+  ;; a store released and removed, then made again at its path in the same process: the
+  ;; process's LMDB env for the path closed with the last store over it
+  ;; (konserve.jolt.lmdb/release-env!), so the new store opens its own files, never the old
+  ;; mapping (which still held :db: "Database already exists"). A store on disk of this
+  ;; test's own, the last resort; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))]
+    (try
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
+        (d/transact conn {:tx-data [{:note/text "the first store's"}] :tx-meta (pdb/tx-meta :db)})
+        (d/release conn true))
+      (clojure.java.shell/sh "rm" "-rf" path)
+      (let [{:keys [conn seeded?]} (pdb/open! :lmdb path 0 :db)]
+        (is (true? seeded?) "made, not found")
+        (is (not-any? #(= "the first store's" (:v %)) (d/datoms @conn :aevt :note/text)) "none of the removed store's facts")
+        (d/release conn true))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest a-kept-store-from-before-the-runtime-attribute-opens
   ;; the transaction that installs :seon.tx/runtime cannot carry it in its tx-meta: a kept
@@ -549,3 +596,57 @@
     (is (< (ratio 2) 2.0) (str "2 new identities: " (ratio 2) "x the counter's nodes"))
     (is (< (ratio 10) 6.0) (str "10 new identities: " (ratio 10) "x the counter's nodes"))
     (is (< (ratio 2) (ratio 10)) "more new identities per commit scatter more")))
+
+(defn plain-datoms
+  "d/db-with's arguments for n plain datoms: the test store's seed and n [:db/add e a v] of
+  two cardinality-one attributes (a string and a long), two to an entity, every entity new."
+  [n]
+  [(ts/test-db) (vec (for [i (range n)]
+                       [:db/add (+ 100000000 (quot i 2)) (if (even? i) :form/src :form/order) (if (even? i) (str "(defn f" i ")") i)]))])
+
+(defn identity-datoms
+  "d/db-with's arguments for n datoms as n/2 entity maps, each named by an identity (attribute
+  a, :db/unique, with or without :db/contentId) and holding one plain value."
+  [a n]
+  [(ts/test-db) (vec (for [i (range (quot n 2))] {a (str "proof entity " i) :form/src (str "(defn f" i ")")}))])
+
+(def content-id-datoms (partial identity-datoms :form/id))
+(def unique-datoms (partial identity-datoms :seon.task/id))
+
+(deftest a-datom-costs-its-index-inserts
+  ;; task datahike.transaction/a-datom-costs-its-index-inserts. The floor, measured on this store's
+  ;; seed at 1,000 (the task's plan): its two inserts (:eavt and :aevt, current indexes,
+  ;; transient) 5.5k ticks and 7.0 KB; the card-one check, one :eavt descent, 0.95k and 1.4 KB;
+  ;; the datom 0.5 KB; its conj onto the tx-data twice 0.55 KB; five copies of the db record
+  ;; (indexes, op-count, max-eid, hash) 0.3k and 1.0 KB. Bytes decide: ticks have 3x slack
+  (cost/proof
+    {:of 'datahike.api/db-with :input 'seon.db-test/plain-datoms
+     :n "plain datoms, each of a new entity's cardinality-one attribute"
+     :work "per datom: its insert into :eavt and :aevt, one :eavt descent for the attribute's current value, the datom, its place in the tx-data"
+     :growth :linear
+     :per-n {:ticks 7000 :bytes 10500}
+     :sizes [100 1000 10000]}))
+
+(deftest an-identity-costs-its-seek
+  ;; task datahike.transaction/an-identity-costs-its-seek: an identity adds its :avet insert,
+  ;; the unique check's :avet descent and the entity's upsert seek, ~1.5x a plain datom's
+  ;; floor; a content id adds hashing [attribute value] once. The overruns below are what
+  ;; 1,000 datoms cost when the task was filed: :db/unique 11.5k ticks and 34 KB per datom,
+  ;; a content id 16.9k and 65 KB
+  (cost/proof
+    {:of 'datahike.api/db-with :input 'seon.db-test/unique-datoms
+     :n "datoms, half a :db/unique identity naming its entity map"
+     :work "per datom: its inserts (:avet too for the identity), one descent for a card-one value, one :avet seek per identity"
+     :growth :linear
+     :per-n {:ticks 10000 :bytes 15000}
+     :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :measured {:ticks 11543218.0 :bytes 34428528.0}}
+     ;; the overrun's measure is at 1,000, the largest size in every run (--all too)
+     :sizes [10 100 1000]})
+  (cost/proof
+    {:of 'datahike.api/db-with :input 'seon.db-test/content-id-datoms
+     :n "datoms, half a content-id identity naming its entity map"
+     :work "per datom: as a :db/unique identity's, and the identity's [attribute value] hashed once to its entity id"
+     :growth :linear
+     :per-n {:ticks 11000 :bytes 16000}
+     :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :measured {:ticks 16945178.0 :bytes 64847328.0}}
+     :sizes [10 100 1000]}))

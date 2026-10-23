@@ -262,7 +262,7 @@
         t (task-f db)
         text-of (fn [items] (:content (peek (context/messages "H" (context/current-state db t {:turn 1 :max-turns 4 :last-items items})))))
         c0 (text-of (evals 259 11))
-        item (fn [c] {:id 0 :tag :ret :form "(seon.turn/context-block \"demo/f\" \"demo/f#1\")" :printed (pr-str c) :value c})
+        item (fn [c] {:id 0 :tag :ret :form "(seon.turn/context-block \"demo/f\" \"demo/f#1\" true)" :printed (pr-str c) :value c})
         c1 (text-of [(item c0)])
         c2 (text-of [(item c1)])]
     (is (< (select/estimate c0) (+ (:context print/budgets) context/last-evals-budget)))
@@ -504,6 +504,19 @@
     (is (= ['demo/f] (keep :symbol refs)) "the resolved name as itself")
     (is (= {:unresolved ['demo/x 'demo/y] :problem (:unresolved seon.ref/problem-messages)} (last refs)) "the others, one problem")))
 
+(deftest an-owners-message-reaches-the-next-turn
+  ;; owner, 2026-10-23 (parity row 73): the page's message bar sends the owner's words through
+  ;; root's delivery; the agent's next turn takes its inbox into its basis (seon.turn/basis!),
+  ;; so the block it reads shows them, in the turn sections, and every later reading of that
+  ;; turn shows them again from the basis
+  (let [db (db-with-program)
+        msgs [{:from "owner" :body "use demo/g, not a new helper"}]
+        ms (context/messages "H" (context/current-state db (task-f db) {:turn 1 :max-turns 4 :messages msgs}))]
+    (is (str/includes? (:content (peek ms)) "use demo/g, not a new helper") "in the turn sections")
+    (is (str/includes? (:content (peek ms)) ":from \"owner\"") "who sent it")
+    (is (not (str/includes? (:content (second ms)) "use demo/g")) "not in the cached run sections")
+    (is (not (contains? (context/current-state db (task-f db) {:turn 1 :max-turns 4}) :messages)) "none delivered: no section")))
+
 (deftest an-error-shows-what-its-contract-says
   ;; a contract invalid is data (its problems, the fix): the transcript shows that, not only
   ;; the message (the step E dry run's agent read "invalid-input: its arguments do not
@@ -566,6 +579,21 @@
     (is (= '(clojure.repl/dir demo) (:all (first m))))
     (is (= '#{demo-test/f-test demo-test/g-test} (set (map :symbol (:vars (second m))))))))
 
+(deftest the-map-shows-the-most-used-first-then-by-name
+  ;; each var's uses are counted once and sorted with its name (a ranking takes each key once):
+  ;; the order is uses descending, the name breaking a tie
+  (let [db (db-with-program)
+        ne (fn [db n] (pdb/eid db :ns/name n))
+        db (d/db-with db (vec (for [v '[rank/d rank/c rank/b rank/a]
+                                    x [{:db/id (str v) :var/name v :var/ns (str "ns rank") :var/form (str "form " v)}
+                                       {:db/id (str "form " v) :form/id (str v) :form/src (str "(defn " (name v) " [])") :form/ns "ns rank" :form/order 0 :form/defines [(str v)]}
+                                       {:db/id "ns rank" :ns/name 'rank}]]
+                                x)))
+        db (d/db-with db (vec (for [[i refs] (map-indexed vector '[[rank/c rank/b] [rank/c] [rank/c rank/a] [rank/d]])]
+                                {:form/id (str "user " i) :form/src "(use)" :form/ns (ne db 'demo) :form/order (inc i) :form/refs refs})))]
+    (is (= '[rank/c rank/a rank/b rank/d] (mapv :symbol (:vars (first (context/ns-map db '[rank/a])))))
+        "c named by three forms, then a, b and d by one each, by name")))
+
 (deftest a-cited-task-shows-its-plan-at-that-depth
   ;; wiki audit 2026-10-23 R4: a plan citing another task by its ns/name sees that task's
   ;; plan as a section at the citation's depth, not an unresolved name
@@ -580,3 +608,14 @@
         shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))]
     (is (= "G is defined first. Then f calls it." (:seon.ref/lead (shown "demo.other/g"))) "doc depth: the task's plan")
     (is (not (clojure.string/includes? (str (:references block)) "demo.other/g")) "and not an unresolved name")))
+
+
+(deftest a-taken-message-is-read-from-its-fact
+  ;; root's ruling (2026-10-23): a message is a fact. Root writes the owner's on main; the turn
+  ;; that takes it writes the same fact on its branch and names it in its basis by id, so its
+  ;; block (and every later reading of that turn) reads the text from the commit
+  (let [db (d/db-with (db-with-program) [{:seon.message/id "m-1" :seon.message/from "owner" :seon.message/to "demo/f#1"
+                                          :seon.message/body "use demo/g, not a new helper"}])
+        b (context/current-state db (task-f db) {:turn 1 :max-turns 4 :message-ids ["m-1"]})]
+    (is (= [{:from "owner" :body "use demo/g, not a new helper"}] (:messages b)))
+    (is (str/includes? (:content (peek (context/messages "H" b))) "use demo/g") "in the turn sections")))

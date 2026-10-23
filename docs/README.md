@@ -4,12 +4,15 @@ Seon on Jolt's docs, one concept per page, addressed `topic#section`; find the p
 
 ## How the wiki is kept
 
-The wiki stays healthy by five rules, each a page's or section's to keep:
+The wiki stays healthy by eight rules, each a page's or section's to keep, the last three read by a class of problem ([health](health.md#a-stale-section)):
 - **Patterns live in the topic sections, linked, never in a catch-all file**. A pattern's home is the section where its problem lives: the idiom, its "Not this", its one implementation cited at code depth. Every section with the same problem links to that home with an ordinary link; its backlinks are its instances, so pulling one shows the others, and one fix can unify them.
 - **One home per concept.** A var or mechanism is explained in one section, the one that cites it at code depth (` ```name``` `); others cite it at summary or doc depth and link there instead of re-explaining it.
 - **Every section leads with one sentence that stands alone.** At summary depth an agent sees a section's heading and that sentence (as in v1), and decides by it whether to read on; then the body; then links to related sections.
 - **Everything is linked.** Every section is reachable from the map, every page links its neighbours, and nothing is orphaned or duplicated.
 - **Sections state the current truth by topic.** A change rewrites the section it concerns; nothing is a dated log.
+- **A section that describes code is read again when that code changes.** The loader records the form of each var a section cites when its text is written; a changed form leaves the section a `:stale-section` until it is edited or reviewed (`my.docs/reviewed!`, which is also an empty git commit with a `Reviewed: docs/x.md#heading` trailer, so the review survives a rebuilt store).
+- **Every page is reachable from the map or another page.** A page nothing links to is an `:orphan-page` ([health](health.md#an-orphan-page)).
+- **Every problem class links the section that explains its fix.** One that does not is a `:problem-unlinked` ([health](health.md#a-problem-with-no-page)).
 
 References and their depths: [references](references.md).
 
@@ -48,7 +51,7 @@ References and their depths: [references](references.md).
 - [checks](checks.md): the end-to-end proofs `bin/check` runs, and the task rows `seon.e2e` works.
 - [merging](merging.md): how a branch merges into main: what it runs, how batches are proven, how conflicts are resolved.
 - [machine](machine.md): the machine Seon is built on and for, and the rules that keep builds, disk and processes bounded.
-- [plan](plan.md): what is in flight, what the owner has not yet ruled, and the steps to the goal.
+- [plan](plan.md) (and [restart](restart.md): picking the work up on a fresh account): what is in flight, what the owner has not yet ruled, and the steps to the goal.
 - [decisions](decisions.md): the owner's standing rulings, each with its words, date and where it is now stated.
 - Who does what, delegation and briefs: [AGENTS.md §2](../AGENTS.md).
 

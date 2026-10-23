@@ -11,6 +11,10 @@
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
             [seon.fx :as fx] [test-runner :as runner]))
 
+(def ^:private await-file
+  "seon.await, which a root (importing src only) loads by this path."
+  (.getCanonicalPath (java.io.File. "test/seon/await.clj")))
+
 (defn in-agent
   "A root on the checkout's src (its source root), one agent on a task of its own, each of
   forms evaluated in that agent (a string) or sent to the server as it is (a map): the
@@ -120,7 +124,7 @@
         _ (eval-root "(c/spawn! sys {})")
         parked (str "(do (ns parked-proof (:require [clojure.test :refer [deftest is]]))"
                     " (deftest p (let [w (java.io.FileOutputStream. " (pr-str fifo) ")] (.write w 49) (.flush w) (Thread/sleep 60000) (.write w 50) (.flush w)) (is true))"
-                    " (seon.agent/run-tests-forked 1000000000 '#{parked-proof/p}))")
+                    " (seon.agent/run-tests-forked 1000000000 '#{parked-proof/p} :turn))")
         ;; a1 begins the form (its :started event, tapped before the submit); root knows its pid by then
         _ (eval-root (str "(let [ev (c/events sys)] (c/submit! sys :a1 " (pr-str parked) ") "
                           "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= :a1 (:agent e))) :began (recur)))))"))
@@ -296,10 +300,10 @@
   ;; owner, 2026-10-22: a failure is task data and root reacts to it. The agent marks its
   ;; task failed on its branch, hands the run back (seon_done), and root, at the
   ;; run's end, holds the task as :failed and reports it among the problems
-  (let [[f _ seen] (in-agent ["(:reason (my.task/fail! \"the premise is refuted\" '(= 1 2)))"
+  (let [[_ f _ seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} "(:reason (my.task/fail! \"the premise is refuted\" '(= 1 2)))"
                               {:op :done :agent "a1"}
                               {:op :eval :agent "root"
-                               :code (str "(let [t (:max-tx @(:conn sys))] (require 'seon.e2e) (seon.e2e/await-quiet sys (inc t))"
+                               :code (str "(let [t (:max-tx @(:conn sys))] (seon.await/await-quiet sys (inc t))"
                                           " [(seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) \"demo/t\")"
                                           " (select-keys (first (get-in (my.root/problems sys) [:classes :failed :rows])) [:task :reason :counterexample :open?])])")}])]
     (is (= (pr-str "the premise is refuted") (:printed f)))
@@ -428,9 +432,9 @@
   ;; first turn with :seon.model/no-provider; the error reaches whoever can act on it: the
   ;; run's record on main and my.root/problems' :error rows
   (let [q "[:find (pull ?e [:seon.run/outcome :seon.run/error]) . :where [?e :seon.run/task ?t] [?t :seon.task/id \"demo/m\"] [?e :seon.run/error]]"
-        [r] (in-agent [{:op :eval :agent "root"
+        [_ r] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root"
                         :code (str "(do (my.root/run! sys [\"demo/m\"])"
-                                   " (let [a (datahike.api/q '" q " (seon.e2e/await-db sys #(datahike.api/q '" q " %)))]"
+                                   " (let [a (datahike.api/q '" q " (seon.await/await-db sys #(datahike.api/q '" q " %)))]"
                                    " [(:seon.run/outcome a) (:seon.error/type (:seon.run/error a))"
                                    " (mapv #(get-in % [:error :seon.error/type]) (get-in (my.root/problems sys) [:classes :error :rows]))]))")}]
                       {:sets [":seon.config.ai/provider=:none"]
@@ -460,6 +464,34 @@
     (is (= :seon.test/ticks-spent type) (:printed r))
     (is (= "#'spin-test/spin" test) "naming the test that was running")))
 
+(deftest a-model-turn-records-its-thinking-and-the-message-it-took
+  ;; task seon.render/a-debug-view-of-any-agent: the owner's message is a fact root writes on
+  ;; main (from "owner", to the run the agent works); the turn that takes it writes the same
+  ;; fact on its branch before its commit and names it by id in its basis, so the window and every
+  ;; later reading read its text from that commit; the call's thinking (the eval tool's argument,
+  ;; here the scripted model's) and its form's ;; lead are recorded with the call and its record
+  (let [[_ end turn on-main] (in-agent [{:op :message :agent "a1" :body "use demo/g"}
+                                        "(seon.turn/work! {:task \"demo/t\" :run \"demo/t#think\" :max-turns 1})"
+                                        (str "(let [db (seon.agent/db) t (datahike.api/pull db '[*] [:seon.turn/id \"demo/t#think/0\"])"
+                                             "      ids (get-in t [:seon.turn/basis :observed :message-ids])]"
+                                             "  {:calls (mapv #(select-keys % [:code :thinking :items]) (:seon.turn/calls t)) :ids ids"
+                                             "   :committed (seon.context/taken-messages (datahike.api/commit-as-db db (get-in t [:seon.turn/basis :commit])) {:message-ids ids})"
+                                             "   :leads (mapv #(:lead (datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.cluster.eval/id ?i] [?e :seon.cluster.eval/record ?r]] db %)) (:items (first (:seon.turn/calls t))))})")
+                                        {:op :eval :agent "root"
+                                         :code (str "(datahike.api/q '[:find ?id ?f ?to ?b :where [?m :seon.message/id ?id] [?m :seon.message/from ?f]"
+                                                    " [?m :seon.message/to ?to] [?m :seon.message/body ?b]] @(:conn sys))")}]
+                                       {:sets [":seon.config.ai/script=seon.fixtures/thinking-call"]})
+        end (edn/read-string {:default tagged-literal} (:printed end))
+        {:keys [calls ids committed leads]} (edn/read-string {:default tagged-literal} (:printed turn))
+        [[mid from to body] :as facts] (vec (edn/read-string (:printed on-main)))]
+    (is (= 1 (:model-calls end)) (pr-str end))
+    (is (= [["owner" "demo/t#1" "use demo/g"]] (mapv #(subvec % 1) facts)) "one fact on main: from the owner, to the run a1 works")
+    (is (= [mid] ids) "the turn's basis names the fact root wrote, by its id")
+    (is (= [{:id mid :from "owner" :body "use demo/g"}] committed) "and its text is read from the commit the turn read")
+    (is (= "check the sum before the proof" (:thinking (first calls))) "the call's thinking, recorded with it")
+    (is (= 1 (count (:items (first calls)))) "the call names its one evaluation's record")
+    (is (= [";; the sum first"] leads) "whose record keeps the form's thought")))
+
 (deftest a-compile-errors-line-and-suggestions-arrive-as-data
   ;; the exception Jolt's analyzer raises for `(prinltn 1)`, as the one error map: its line,
   ;; column and symbol are keys, its suggestions the fix, and nothing is a printed copy
@@ -473,3 +505,14 @@
     (is (= "did you mean print, printf, println" (:seon.error/fix em)))
     (is (= "Unable to resolve symbol: prinltn in this context" (:seon.error/message em)) "the suggestions are not in the message too")
     (is (nil? (:data em)) "no printed copy of the ex-data")))
+
+(deftest memory-is-read-when-asked
+  ;; task seon.agent/memory-is-read-when-asked: mem-mb is a reading made at the call, never a
+  ;; value kept for a time, so two calls back to back see what the process allocated between
+  ;; them (a reading cached for a second answers the first one again)
+  (let [before (agent/mem-mb)
+        held (byte-array (* 96 1024 1024))
+        _ (dotimes [i (quot (alength held) 4096)] (aset-byte held (* i 4096) 1))
+        after (agent/mem-mb)]
+    (is (>= (- after before) 64.0) (str "96 MB written between two calls shows in the second: " before " -> " after))
+    (is (pos? (alength held)) "held until the second reading")))

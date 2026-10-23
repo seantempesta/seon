@@ -5,7 +5,7 @@
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.e2e :as e2e]
+            [seon.await :as await] [seon.e2e :as e2e]
             [seon.fixtures :as fx] [seon.ref :as ref] [seon.reader :as reader] [seon.task :as task] [seon.template :as tpl]
             [clojure.string :as str]))
 
@@ -14,7 +14,7 @@
   (ts/test-branch! (fn [_ c] (let [sys {:conn c}
         t (:max-tx @c)
         start (System/currentTimeMillis)
-        waiting (future (e2e/await-quiet sys t))]
+        waiting (future (await/await-quiet sys t))]
     (d/transact c {:tx-data [{:seon.error/signature "0123456789abcdef" :seon.error/class :eval :seon.error/count 1 :seon.error/agents 1
                               :seon.error/first-ms start :seon.error/last-ms start}]})
     (is (not (realized? (do (d/transact c {:tx-data [{:note/text "work goes on"}]}) waiting))) "an agent's eval error is no defect of the run")
@@ -24,7 +24,7 @@
       (is (= :defect (:ended r)))
       (is (= "seon.reconcile/reconciler-proc: boom" (get-in r [:problem :seon.error/message])) "the problem, as recorded"))
     (testing "quiescence ends it as before"
-      (ts/test-branch! (fn [_ c] (let [t (:max-tx @c) waiting (future (e2e/await-quiet {:conn c} t))]
+      (ts/test-branch! (fn [_ c] (let [t (:max-tx @c) waiting (future (await/await-quiet {:conn c} t))]
         (d/transact c {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t (inc t) :root-causes []}}]})
         (is (= {:t (inc t) :root-causes []} (deref waiting)))))))))))
 

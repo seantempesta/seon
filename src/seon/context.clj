@@ -71,8 +71,9 @@
         ;; defn's contract plumbing is named by every contracted form, so it sinks)
         n (count (d/datoms db :aevt :form/id))
         score (fn [[r k]] (* k (Math/log (/ n (inc (count (d/datoms db :avet :form/refs r)))))))
+        ;; each hit's score taken once (sort-by would take it per comparison: an index count each)
         hits (->> pairs (map second) (remove #(or (named %) (macro? %))) frequencies
-                  (sort-by (juxt (comp - score) (comp str key))) (mapv key))
+                  (map (fn [e] [(- (score e)) (str (key e)) (key e)])) sort (mapv peek))
         [shown more] (print/bounded hits :seon.config.render/found "(my.agent/callees 'ns/f) of each cited var")]
     (cond-> (mapv #(resolve-ref db % :doc) shown) more (conj more))))
 
@@ -103,7 +104,8 @@
                          sm (assoc :summary sm))))]
     (vec (for [ns nss
                :let [vs (d/q '[:find [?n ...] :in $ ?ns :where [?e :ns/name ?ns] [?v :var/ns ?e] [?v :var/name ?n] [?v :var/form _]] db ns)
-                     lines (map line (sort-by (juxt (comp - uses) str) vs))
+                     ;; each var's uses counted once (sort-by would count per comparison)
+                     lines (map line (map peek (sort (map (fn [v] [(- (uses v)) (str v) v]) vs))))
                      shown (reduce (fn [[acc spent] l] (let [s (+ spent (:tokens (print/print-value l {:budget share}) share))]
                                                          (if (<= s share) [(conj acc l) s] (reduced [acc spent]))))
                                    [[] 0] lines)]
@@ -255,15 +257,28 @@
       truncated? (assoc :cut "at the model's token limit: what followed the cut was lost. Answer with less: one change at a time.")
       (seq rs) (assoc :repaired (vec rs)))))
 
+
+(defn taken-messages
+  "The messages a turn took, as its basis's :observed names them: each that is a fact read
+  from db (the commit the turn read, where its agent wrote it) by its id, then each send no
+  fact holds as the basis keeps it. The one reader of a turn's messages (the block, the
+  agent's window)."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector [:map [:from :string] [:body :any]]]]}
+  [db {:keys [message-ids messages]}]
+  (into (vec (for [mid message-ids :let [m (d/pull db [:seon.message/from :seon.message/body] [:seon.message/id mid])]]
+               {:id mid :from (:seon.message/from m) :body (:seon.message/body m)}))
+        messages))
+
 (defn current-state
   "The current-state block of task t as data: proofs with their status, red assertions and
   source; what else the done rule refuses (regressions, stray reds, contract gaps), and a
   test run that failed as a whole; resolved references, each at its citation's depth; the
   helpers the plan does not name (:found); the measured evidence it starts from; the
   branch's unmerged entries (base, ours, theirs); what its merge will carry to main; what
-  happened to the last reply; the last evaluations; turns left."
+  happened to the last reply; the messages delivered since the last turn (the owner's, root's,
+  other agents'); the last evaluations; turns left."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds last-items turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge tests]}]
+  [db t {:keys [results reds last-items turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge tests messages message-ids attention]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
         task? #(and (qualified-symbol? (:seon.ref/name %)) (ref/task? db (:seon.ref/name %)))
@@ -307,7 +322,14 @@
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
       ;; owner D4 (2026-10-22): every change the branch's merge carries to main, every turn
       ;; measured and empty ({}) says so; absent only when not measured (a basis before D4)
+      ;; the sections of the wiki this branch's code changes made stale (seon.problems/caused-split): to read and
+      ;; probably fix; never a reason to refuse done
+      (seq attention) (assoc :attention attention)
       (some? will-merge) (assoc :will-merge will-merge)
+      ;; the messages the turn took: those that are facts read again from db (the commit the turn
+      ;; read, where its agent wrote them), the rest as the basis holds them
+      (or (seq message-ids) (seq messages))
+      (assoc :messages (mapv #(dissoc % :id) (taken-messages db {:message-ids message-ids :messages messages})))
       ;; root's ruling (a), 2026-10-22: the tests this turn ran (the proofs and the tests the
       ;; branch changed), those the judge runs at the run's end, the process tests run only
       ;; when root asks (owner, 2026-10-23); a run its bound ended leaves the rest unknown, never red
@@ -347,7 +369,7 @@
   [{:keys [reply calls reasoning]} last?]
   (into [(cond-> {:role "assistant" :content reply}
            reasoning (assoc :reasoning reasoning)
-           (seq calls) (assoc :tool-calls (mapv #(select-keys % [:id :code]) calls)))]
+           (seq calls) (assoc :tool-calls (mapv #(select-keys % [:id :code :thinking]) calls)))]
         (if (seq calls)
           (map (fn [{:keys [id evals]}] {:role "tool" :tool-call-id id :content evals}) calls)
           (when-not last? [{:role "user" :content "Nothing ran: the reply called no eval."}]))))
@@ -418,13 +440,46 @@
 
 (declare render)
 
+(defn remade
+  "The request turn entity e on db read, made again from its basis on the commit it read
+  (render): {:basis :block :messages}."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:map [:basis :seon.turn/basis] [:block :map] [:messages [:vector :seon.model/message]]]]}
+  [db e]
+  (let [b (:seon.turn/basis (turn-record db e))]
+    (assoc (render (d/commit-as-db db (:commit b)) b) :basis b)))
+
 (defn turn-text
   "What the reader of turn entity e on db got (reader-text), made again from its basis on the
   commit it read."
   {:malli/schema [:=> [:cat :seon.host/db :int] :string]}
-  [db e]
-  (let [b (:seon.turn/basis (turn-record db e))]
-    (reader-text (:messages (render (d/commit-as-db db (:commit b)) b)))))
+  [db e] (reader-text (:messages (remade db e))))
+
+(defn sections
+  "Where a request's tokens went, as the printer sizes them (seon.print.select/estimate), in
+  the order it sends them: the help page, the run sections, the scrollback (its earlier
+  turns), the turn sections; the run and turn sections each with the tokens of each key
+  of block printed alone. [{:part :tokens :keys [[k tokens]]}]."
+  {:malli/schema [:=> [:cat [:map [:block :map] [:messages [:vector :seon.model/message]]]]
+                  [:vector [:map [:part :string] [:tokens nat-int?] [:keys {:optional true} [:vector [:tuple :keyword nat-int?]]]]]]}
+  [{:keys [block messages]}]
+  (let [est #(select/estimate (:content %))
+        scroll (subvec messages 2 (dec (count messages)))
+        each (fn [ks] (vec (for [k ks :when (contains? block k)]
+                             [k (select/estimate (print/text {k (get block k)} (:context print/budgets)))])))]
+    [{:part "help page" :tokens (est (first messages))}
+     {:part "run sections" :tokens (est (second messages)) :keys (each run-keys)}
+     {:part (str "scrollback, " (count (filter #(= "assistant" (:role %)) scroll)) " earlier turns") :tokens (reduce + 0 (map est scroll))}
+     {:part "turn sections" :tokens (est (peek messages)) :keys (each (remove (set run-keys) (keys block)))}]))
+
+(defn request-text
+  "The whole request messages, as one text: each message headed by its role (and a tool
+  answer by its call's id, an assistant's eval calls after its reply). What the agent's page
+  links as a turn's whole context."
+  {:malli/schema [:=> [:cat [:vector :seon.model/message]] :string]}
+  [messages]
+  (str/join "\n\n" (for [{:keys [role content tool-calls tool-call-id]} messages]
+                     (str ";; ---- " role (when tool-call-id (str " · answer to " tool-call-id)) "\n" content
+                          (str/join (for [{:keys [id code]} tool-calls] (str "\n;; eval call " id "\n" code)))))))
 
 (defn- run-text
   "The run sections the first model turn e on db was sent, made again from its basis."

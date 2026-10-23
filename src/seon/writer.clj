@@ -237,15 +237,19 @@
                                   :vars (into (sorted-set) (keep (fn [[k s]] (when (= :var k) s))) (keys (:ours r)))})
                                (refused (str "no branch " (:branch m)) {})))
       ;; root's read of a branch (or main): its committed value from the store; :base is the
-      ;; db at the branch's merge base, :base-t main's t there (what of main it holds)
-      :branch-db (reply st (cond
-                             (= main (:branch m)) {:ok true :db @conn}
-                             (exists? (:branch m)) (let [base (pdb/branch-base conn main (:branch m))]
-                                                     {:ok true :db (pdb/head conn (:branch m)) :base base :base-t (:max-tx base)})
-                             :else (refused (str "no branch " (:branch m)) {})))
-      :branch-info (reply st (if (exists? (:branch m))
-                               (let [h (pdb/head conn (:branch m))] {:ok true :datoms (count (d/datoms h :eavt)) :t (:max-tx h)})
-                               (refused (str "no branch " (:branch m)) {})))
+      ;; db at the branch's merge base, :base-t main's t there (what of main it holds). A
+      ;; branch named as a task or run names it (:task-calc-add) is read as the store
+      ;; names it under this main (seon.db/on-main)
+      :branch-db (let [b (pdb/on-main main (:branch m))]
+                   (reply st (cond
+                               (= main b) {:ok true :db @conn}
+                               (exists? b) (let [base (pdb/branch-base conn main b)]
+                                             {:ok true :db (pdb/head conn b) :base base :base-t (:max-tx base)})
+                               :else (refused (str "no branch " b) {}))))
+      :branch-info (let [b (pdb/on-main main (:branch m))]
+                     (reply st (if (exists? b)
+                                 (let [h (pdb/head conn b)] {:ok true :datoms (count (d/datoms h :eavt)) :t (:max-tx h)})
+                                 (refused (str "no branch " b) {}))))
       ;; root's collection of the store (seon.db/collect!), asked at quiescence: swept when a
       ;; branch the last one saw is gone, and recorded on main through the batch
       :collect (let [r (pdb/collect! conn (cfg/value :seon.config.store/sole-writer?))]

@@ -11,22 +11,25 @@ Pins: see docs/forks.md · `src` 17,391 lines (19,304 this morning; aim ~10k) ·
 
 ## In flight
 
-**Merge queue,** worked by the merge session in this order:
-1. ``jolt/in-scalar``: the planner seeks a probed entity instead of scanning (3.24M → 55k ticks at 10k forms), Datahike `7de92bb`.
-2. ``jolt/store-release``: a release drains pending writes (a data-loss fix), and LMDB envs are released (Datahike `9cd6e7b`, konserve `84d8bc0`). It combines its Datahike pin with in-scalar's first.
-3. ``jolt/health`` (7 review fixes, review trailers from HEAD only, `bin/check health` as a prove step), then ``jolt/wiki-stale`` (76 of 81 stale sections fixed, Jolt-diagnostics triage).
-4. ``jolt/calc-stop`` (e2e-calc: an ended agent answered at the producer) and ``jolt/dry-run`` (act-first instructions, code-depth citations).
-5. ``jolt/proof-ends``, ``claude/eval-diagnostics-75a04b`` (eval errors as data, did-you-mean), ``jolt/agent-view`` (chat window, renders as `(value opts)` functions, messages as facts, per-tile updates; its full run first).
-6. **Cutover to `~/src/seon-next`** (owner, 2026-10-23: a clean repo before the account changes): root holds main still, then ``jolt/rename-run`` (run → run) merges, then ``jolt/self-contained`` (step A, the results folder inside the root; step C, GitHub URLs). Then step R: a fresh clone into `~/src/seon-next`, build, prove, a grep for the old prototype folder's name that finds nothing, and the full run. Unmerged branches are fetched into the new repo.
+Updated 2026-10-23 evening by root. Sessions are grouped so related tasks stay in one context (owner: "grouped tasks can stay in one agents context"); each reports ready to the merge session. A new session needs root's go unless the owner starts it (AGENTS §2).
 
-**Working, each on its own branch:**
-- the write-back puts a new form before its first user (dry-run; it blocks every merge that adds a helper), then a second paid real task;
-- the context render on Seon's own program, then Datahike's per-datom add path (~7k ticks a datom, so a 5.4 s import where ~0.35 s is due) (pure-tests);
-- `src` audits for dead code and second mechanisms (shrink);
-- every call kind recording ticks, bytes and calls, and each REPL eval saying what it reused (agent-view, after its merge);
-- the clocks still deciding: render's 90 s retire timer and the fork server's 100 ms idle poll (check-events).
+| Session | Working on | Next |
+|---|---|---|
+| **Merge** (main tree) | ``jolt/analysis-lookups`` (Jolt 86f49de8), with the cost proofs a pin bump runs | ``jolt/agent-view`` (chat window), then the freeze |
+| **Vocabulary** | ``jolt/rename-run``: run → run and every AGENTS §7a word, one scripted pass and a `bin/laws` check; ready | merges first in the freeze; the standing store is erased once |
+| **Agent view** | the context frame and the renders (data, not prose; the printer stays general), on ``jolt/a-page-is-an-entity-and-its-neighbors``, which merges in the freeze | the default HTML value render |
+| ↳ evaluations, page | the context as data (the frame, then the walk), the page entity | through agent view |
+| ↳ embed | similar search by embedding (approved, model download included) | reports to root and merge |
+| **Walk** | health holds a branch to the problems it caused (one `bin/prove` step; no silent `bin/check`), and the divergence bytes regression from health's merge | |
+| **Agent loop** | ``jolt/resumed-branch`` (a resumed branch keeps what main gained; `test/` in every root's dirs) | the first-move judge: ten real tasks, one call each, scored from compiler facts |
+| **Store** (covering shrink) | the reach-update regression from Jolt 0d39edc3 (n^1.96) | a check's roots take explicit config, not the checkout's `config/local.edn` |
+| **Reuse** | option B: `bin/test` branches a kept program db per git tree | the memo is paused until the data context is measured (two attacks: `notes/reuse/`) |
 
-**Waiting on the owner:** task `seon.derive/one-content-keyed-derivation` (reuse of expensive pure results; cold paths are fixed first, and nothing is cached that is fast enough); the type-findings-as-warnings task (on ``jolt/wiki-stale``, not merged yet).
+Ended: shrink (its folder was removed at merge), eval-cost (merged).
+
+**For the owner when he's back:** does `src`'s ~10k aim count code lines (as cloc does: no docstrings, comments, blanks or contracts; ~10.45k now) or every line (18.5k)? Walk measured it on main 450c3fb8; the remaining shrink rows are about −300 lines, which is right under either reading. Root's pick: code lines, with docstrings kept as each var's home (AGENTS §7).
+
+**The freeze**, on root's word: ``jolt/rename-run``, then ``jolt/a-page-is-an-entity-and-its-neighbors``, then the store is erased; then ``jolt/self-contained`` and step R (`~/src/seon-next`). Other sessions keep working, and afterwards re-run the rename's scripts on their branches (`notes/rename-run/` on ``jolt/rename-run``).
 
 ## Open owner questions
 

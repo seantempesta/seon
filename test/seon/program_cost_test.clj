@@ -127,9 +127,15 @@
        ;; measured 2026-10-23 on LMDB, three fresh stores per size, identical bytes each time (+-96 B
        ;; at 1,000): 103.5k ticks / 453 KB at 100 forms, 136k / 612 KB at 1,000, 154k / 678 KB at
        ;; 10,000 (the aevt scans before: 428 KB, 3.1 MB, 33 MB); contracted calls: divergence and
-       ;; the two eid seeks of the one changed var's content
+       ;; the two eid seeks of the one changed var's content.
+       ;; The bytes depend on where the stored index's node boundaries fall around the changed
+       ;; entry, which datoms unrelated to it move: the same code on the same program, with 0 to 64
+       ;; unrelated datoms written first, read 411-597 KB at 100 forms and 548-594 KB at 1,000
+       ;; (2026-10-23, 12 layouts each). Three schema attributes added at the health merge
+       ;; (ac7d3fb2) moved this input from 410 KB to 592 KB with divergence unchanged. The fixed
+       ;; bytes are the bound over those layouts, not one layout's
        :per-n {:ticks 7700.0 :bytes 34000.0}
-       :fixed {:ticks 53000.0 :bytes 230000.0 :calls 3}
+       :fixed {:ticks 53000.0 :bytes 375000.0 :calls 3}
        :sizes divergence-sizes})
     (finally
       ;; each store made, released whatever holds it (release-all) and removed
@@ -224,7 +230,72 @@
                 "11.5 ms / 16 MB at 3,000, one form re-folded each time; the per-form part is the scan "
                 "(~3 us, ~5 KB a form), the re-fold is the change's")
      :growth :linear
-     ;; ticks measured 2026-10-23 (seon.cost's once): 0.50M at 100, 1.24M at 1,000; calls 16
+     ;; ticks measured (seon.cost's once): 0.50M at 100 and 1.24M at 1,000 on Jolt e0351af8;
+     ;; 427k and 1.07M on 0d39edc3, whose protocol calls on a record stopped reading every field.
+     ;; The fixed part fell with it (~714 ticks a form, so ~356k fixed): the old 420k left 7k
+     ;; above it at 100 and the growth fit read n^1.96. calls 16
      :per-n {:ticks 850 :bytes 5000 :calls 0}
-     :fixed {:ticks 420000 :bytes 4000000 :calls 16}
+     :fixed {:ticks 350000 :bytes 4000000 :calls 16}
+     :sizes [100 1000 10000]}))
+
+(defn- calls-form
+  "A defn of m whose body is n steps, each (assoc m :k<i> (str \"s<i>\" (:name m))): a
+  program's usual mix of locals, var calls, keywords and strings; every tenth step also names
+  a var as quoted data ('[app.acct/g :k<i>], as a proc or a render is named), which is walked."
+  {:malli/schema [:=> [:cat pos-int?] :any]}
+  [n]
+  (apply list 'defn 'g '[m]
+         (for [i (range n) :let [k (keyword (str "k" i))]]
+           (if (zero? (mod i 10))
+             (list 'assoc 'm k (list 'quote ['app.acct/g k]))
+             (list 'assoc 'm k (list 'str (str "s" i) (list :name 'm)))))))
+
+(defn- app-acct
+  "Namespace app.acct, referring clojure.core, as a file's ns form would set it up."
+  {:malli/schema [:=> [:cat] :seon.host/namespace]}
+  [] (let [nsx (program/ensure-ns! 'app.acct)] (binding [*ns* nsx] (refer-clojure)) nsx))
+
+(defn calls-node-of
+  "unit-account's argument: the analyzed node of calls-form n in app.acct."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  [n]
+  (let [nsx (app-acct)]
+    [(binding [*ns* nsx] (jolt.analyzer/analyze (jolt.host/ctx-for-ns "app.acct") (calls-form n)))]))
+
+(deftest a-scalar-constant-costs-no-walk
+  ;; task seon.program/an-import-reads-each-form-once
+  (cost/proof
+    {:of 'seon.program/unit-account :input 'seon.program-cost-test/calls-node-of
+     :n "steps in the body (calls-form)"
+     :work (str "one visit per IR node (two invokes, their vars, a local, a keyword invoke, constants): each "
+                "var's ref conj'd; a scalar constant names no var, so it is not walked, and a quoted "
+                "collection is (quoted-vars walked every constant: tree-seq, a set, its contract, 3.5 KB each)")
+     :growth :linear
+     ;; measured 2026-10-23 (n 100 -> 10,000): 5.92 KB, 745 ticks and 9.6 contracted calls a step (vsym,
+     ;; invoked, datum: 354 B each armed, seon.cost/units :fn/armed-call); 10.9 KB, 1,157 ticks and 12.4
+     ;; calls before
+     :per-n {:ticks 750.0 :bytes 5950.0 :calls 9.6}
+     :fixed {:ticks 2000.0 :bytes 12000.0 :calls 7.0}
+     :sizes [100 1000 10000]}))
+
+(defn account-of
+  "account's argument: calls-form n in app.acct as read, its text and its unit's account."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  [n]
+  (let [[node] (calls-node-of n) form (calls-form n)]
+    [{:units [(program/unit-account node)] :src (pr-str form) :form form :ns 'app.acct :ns-after 'app.acct :order 0 :k 0}]))
+
+(deftest an-account-reads-its-form-once
+  ;; task seon.program/an-import-reads-each-form-once
+  (cost/proof
+    {:of 'seon.program/account :input 'seon.program-cost-test/account-of
+     :n "steps in the body (calls-form)"
+     :work (str "the form as read walked once for the macros it calls (macro-uses: tree-seq, 1.1 KB a "
+                "node on Jolt), and its text hashed once (form-id); the text is never read again (it was "
+                "read a second time, 4.6 KB a step)")
+     :growth :linear
+     ;; measured 2026-10-23 (n 1,000 -> 10,000): 13.3 KB and 1.4k ticks a step, 7 contracted calls; 17.9 KB
+     ;; and 2.4k ticks before
+     :per-n {:ticks 1400.0 :bytes 13300.0}
+     :fixed {:ticks 20000.0 :bytes 60000.0 :calls 7.0}
      :sizes [100 1000 10000]}))

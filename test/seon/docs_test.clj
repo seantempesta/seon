@@ -6,7 +6,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.docs :as docs] [seon.ref] [seon.problems :as problems]
+            [seon.docs :as docs] [seon.source] [seon.fx] [seon.ref] [seon.problems :as problems]
             [seon.config :as config]))
 
 (defn- empty-db [] (ts/test-db))
@@ -137,3 +137,169 @@
     (is (contains? words "refusal") "no row is still stored under its old name: the table is read whole")
     (is (empty? (for [n names w words :when (and (uses? w (str n)) (not (kept n)) (not (and (qualified-symbol? n) (kept (symbol (namespace n))))))] [w n]))
         "every name uses Clojure's, a library's or Jolt's word")))
+
+;; ---- the baseline: what a section was written against, from git ---------------------------
+
+(defn- git-fixture
+  "A git repository of its own in a new directory under target/tmp (not the one test store, which holds no
+  git, and not the checkout's repository, whose history answers for the real wiki): bin/test and bin/check
+  run roots with SEON_WIKI_BASELINE=false, so this is the history path's proof against real git. It holds
+  src/app/gb.clj with functions f and g and docs/p.md citing them and app.gb/h, app.gl/z, committed
+  together; then a second commit that changes f, adds h, and adds src/app/gl.clj defining z.
+  Answers {:dir :first :second}."
+  []
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "user.dir") "/target/tmp/git-fixture-" (random-uuid))) (.mkdirs)))
+        git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args)]
+                           (assert (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
+        put (fn [p t] (.mkdirs (.getParentFile (java.io.File. (str dir "/" p)))) (spit (str dir "/" p) t))]
+    (git "init" "-q")
+    (put "src/app/gb.clj" "(ns app.gb)\n\n(defn f [] 1)\n\n(clojure.core/defn g [] 2)\n")
+    (put "docs/p.md" "# P\n\nIt reads `app.gb/f`.\n\n## Q\n\nIt reads `app.gb/g`, `app.gb/h` and `app.gl/z`.\n")
+    (git "add" ".") (git "commit" "-q" "-m" "first")
+    (let [first (git "rev-parse" "HEAD")]
+      (put "src/app/gb.clj" "(ns app.gb)\n\n(defn f [] 11)\n\n(clojure.core/defn g [] 2)\n\n(defn h [] 3)\n")
+      (put "src/app/gl.clj" "(ns app.gl)\n\n(defn z [] 4)\n")
+      (git "add" ".") (git "commit" "-q" "-m" "second")
+      {:dir dir :first first :second (git "rev-parse" "HEAD")})))
+
+(defn- db-of-fixture
+  "A db holding the fixture's current source (src, as the second commit has it) and its wiki
+  loaded with the baseline git gives, and the baseline."
+  [dir src-path]
+  (let [srcs (into {} (for [p (cons src-path (when (.exists (java.io.File. (str dir "/src/app/gl.clj"))) ["src/app/gl.clj"]))] [p (slurp (str dir "/" p))]))
+        db0 (empty-db)
+        db1 (d/db-with db0 (seon.source/import-tx db0 srcs))
+        pages (seon.docs/pages dir "docs")
+        plan (seon.docs/baseline-plan db1 pages)
+        answer (seon.fx/wiki-history {:req {:root dir :sections plan}})
+        baseline (seon.docs/baseline-reads db1 plan (:value answer))]
+    {:db1 db1 :plan plan :answer answer :baseline baseline :pages pages
+     :db (d/db-with db1 (seon.docs/load-tx db1 "docs" pages baseline))}))
+
+(deftest a-sections-baseline-is-the-code-as-of-its-last-commit
+  (let [{:keys [dir first second]} (git-fixture)
+        {:keys [db plan answer baseline]} (db-of-fixture dir "src/app/gb.clj")
+        read #(:seon.section/read (d/pull db [:seon.section/read] [:seon.section/address %]))
+        form-id #(:form/id (:var/form (d/entity db (pdb/eid db :var/name %))))
+        stale (get-in (problems/health db) [:classes :stale-section :rows])]
+    (is (= 2 (count plan)) "both sections cite code")
+    (is (empty? (get-in answer [:value :errors])) "git answered every request")
+    (is (= {:commit first} (get-in answer [:value :sections "docs/p.md#p"])) "the section was last changed in the first commit")
+    (testing "f was changed by the second commit, after the section: the recorded id is not today's"
+      (is (not= (form-id 'app.gb/f) (get (read "docs/p.md#p") 'app.gb/f)))
+      (is (some? (get (read "docs/p.md#p") 'app.gb/f))))
+    (testing "g is unchanged since: recorded as it is now"
+      (is (= (form-id 'app.gb/g) (get (read "docs/p.md#q") 'app.gb/g))))
+    (testing "h did not exist at the commit: recorded absent, stale now that it does (a citation ahead of the code)"
+      (is (= "absent" (get (read "docs/p.md#q") 'app.gb/h))))
+    (testing "z lives in a file that did not exist at the commit (git ls-tree says so): absent, not an error"
+      (is (= "absent" (get (read "docs/p.md#q") 'app.gl/z))))
+    (testing "so the sections stale today are exactly those, one name each"
+      (is (= #{["docs/p.md#p" 'app.gb/f] ["docs/p.md#q" 'app.gb/h] ["docs/p.md#q" 'app.gl/z]} (set (map (juxt :section :name) stale)))))
+    (testing "an unchanged reload keeps the baseline: nothing is rewritten, nothing forgiven"
+      (is (= [] (seon.docs/load-tx db "docs" (seon.docs/pages dir "docs")))))))
+
+(deftest a-baseline-git-cannot-give-is-today-and-says-so
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "user.dir") "/target/tmp/not-git-" (random-uuid))) (.mkdirs)))
+        _ (doseq [[p t] {"src/app/gn.clj" "(ns app.gn)\n\n(defn f [] 1)\n" "docs/p.md" "# P\n\nIt reads `app.gn/f`.\n"}]
+            (.mkdirs (.getParentFile (java.io.File. (str dir "/" p)))) (spit (str dir "/" p) t))
+        {:keys [db baseline]} (db-of-fixture dir "src/app/gn.clj")
+        rows (get-in (problems/health db) [:classes :stale-section :rows])]
+    (is (some? (:unread (get baseline "docs/p.md#p"))) "not a git checkout: the section is unread")
+    (is (= #{nil} (set (map :name rows))) "its record is today's, so no var is stale")
+    (is (re-find #"recorded as of today: its baseline could not be taken from git" (:message (first rows))) "and it says so, as attention")))
+
+(deftest a-baseline-never-guesses
+  ;; baseline-reads over a history answer made by hand: the three ways a var is not simply found
+  (let [db (empty-db)
+        plan [{:path "docs/p.md" :address "docs/p.md#a" :lines [1 3] :files {'app.m0/f0 {:file "src/app/m0.clj" :ns 'app.m0}}}
+              {:path "docs/p.md" :address "docs/p.md#b" :lines [4 6] :files {'app.m0/f1 {:file "src/app/m0.clj" :ns 'app.m0}}}
+              {:path "docs/p.md" :address "docs/p.md#c" :lines [7 9] :files {'app.m0/f2 {:file "src/app/m0.clj" :ns 'app.m0}}}
+              {:path "docs/p.md" :address "docs/p.md#d" :lines [10 12] :files {'app.m0/f3 {:file "src/app/m0.clj" :ns 'app.m0}}}]
+        old "(ns app.m0)\n\n(defn f0 [] 1)\n\n(my.macros/defthing f1 [] 2)\n"
+        answer {:sections {"docs/p.md#a" {:commit (apply str (repeat 40 "a"))} "docs/p.md#b" {:commit (apply str (repeat 40 "a"))}
+                           "docs/p.md#c" {:commit nil} "docs/p.md#d" {:commit (apply str (repeat 40 "b"))}}
+                :files {[(apply str (repeat 40 "a")) "src/app/m0.clj"] old}
+                :errors {[(apply str (repeat 40 "b")) "src/app/m0.clj"] "git show: exploded"}}
+        r (seon.docs/baseline-reads db plan answer)]
+    (testing "a var defined by a form of a head defining-ids knows: its id at that commit"
+      (is (string? (get-in r ["docs/p.md#a" :read 'app.m0/f0])))
+      (is (nil? (:unread (r "docs/p.md#a")))))
+    (testing "a var the old file mentions but no known head defines is unread, never absent"
+      (is (re-find #"no form this reading knows" (:unread (r "docs/p.md#b")))))
+    (testing "a section with an uncommitted line is as of today, nothing unread"
+      (is (= {:read (seon.docs/read-map db #{'app.m0/f2})} (r "docs/p.md#c"))))
+    (testing "a file git could not show is unread with git's words, never absent"
+      (is (re-find #"git show: exploded" (:unread (r "docs/p.md#d")))))))
+
+(deftest a-review-is-a-commit-and-survives-a-rebuilt-store
+  ;; a review (my.docs/reviewed!) is an empty git commit with `Reviewed: <address>`; the baseline takes, per
+  ;; section, the newer of the commit that last changed its lines and the last review naming it, from one
+  ;; git log, so a store rebuilt from scratch reads the reviewed section fresh
+  (let [{:keys [dir]} (git-fixture)
+        stale-of (fn [] (let [{:keys [db]} (db-of-fixture dir "src/app/gb.clj")]
+                          (set (map (juxt :section :name) (get-in (problems/health db) [:classes :stale-section :rows])))))
+        branch (str/trim (:out (clojure.java.shell/sh "git" "-C" dir "rev-parse" "--abbrev-ref" "HEAD")))]
+    (is (contains? (stale-of) ["docs/p.md#p" 'app.gb/f]) "before the review the section is stale")
+    (let [r (seon.fx/git-commit {:req {:dir dir :branch branch :files {} :allow-empty? true :message (seon.docs/review-message "docs/p.md#p" "sean")}})]
+      (is (string? (get-in r [:value :sha])) "the review is a commit")
+      (is (= 1 (count (re-seq #"Reviewed: docs/p.md#p" (:out (clojure.java.shell/sh "git" "-C" dir "log" "HEAD" "--format=%B")))))))
+    (let [after (stale-of)]
+      (is (not (contains? after ["docs/p.md#p" 'app.gb/f])) "a store rebuilt from the repository reads the reviewed section fresh")
+      (is (contains? after ["docs/p.md#q" 'app.gb/h]) "and the section nobody reviewed is still stale"))))
+
+(deftest a-review-on-another-branch-does-not-freshen-the-checkouts-section
+  (let [{:keys [dir]} (git-fixture)
+        stale-of (fn [] (let [{:keys [db]} (db-of-fixture dir "src/app/gb.clj")]
+                          (set (map (juxt :section :name) (get-in (problems/health db) [:classes :stale-section :rows])))))
+        r (seon.fx/git-commit {:req {:dir dir :branch "elsewhere" :files {} :allow-empty? true :message (seon.docs/review-message "docs/p.md#p" "sean")}})]
+    (is (string? (get-in r [:value :sha])) "the review commit exists, on a branch HEAD does not contain")
+    (is (contains? (stale-of) ["docs/p.md#p" 'app.gb/f]) "and HEAD's section is still stale")))
+
+;; ---- text uses Clojure's words too (task seon.docs/names-are-clojures-words) ---------------
+
+(def ^:private text-kept
+  "Files where an old word of section 7a's table is the subject or another sense, each with its reason.
+  The quoted span of an owner's sentence is kept too (the quote is what he said), and the Jolt message
+  and image name that hold the old word."
+  {"AGENTS.md" "the table names the old words"
+   "docs/vocabulary.md" "its rows say `(was X)`"
+   "docs/decisions.md" "the owner's rulings quote his words, and their titles stay as stated"
+   "resources/seon/tasks/seon.docs.edn" "the rename's plan names the old words"
+   "resources/seon/tasks/seon.db.edn" "the stored-names plan names the old words"
+   "test/seon/docs_test.clj" "this test names the old words"
+   "src/seon/reader.clj" "a Markdown code fence, CommonMark's word"
+   "src/seon/ref.clj" "a Markdown code fence, CommonMark's word"
+   "resources/seon/schemas/seon.ref.edn" "the :fence block kind is CommonMark's"
+   "test/seon/reader_test.clj" "a Markdown code fence"
+   "test/seon/ref_test.clj" "a Markdown code fence"
+   "test/seon/agent_test.clj" "the named reader test is about a Markdown code fence"
+   "test/seon/program_test.clj" "the named reader test is about a Markdown code fence"
+   "test/seon/fixtures.clj" "a reply in a Markdown code fence"
+   "src/seon/server.clj" "cites v1's namespace proto.agents.entrance"
+   "BAGGAGE.md" "cites a decision by its title, \"No locks, no lane cap, no waiting\""
+   "resources/seon/tasks/seon.context.edn" "t5.refusal/* is the name of a past agent's test namespace"})
+
+(defn- old-word-patterns
+  "Whole-word patterns for the table's old words, as the text spells them (a plural, \"merge train\"); \"admit\"
+  and \"land\" are also plain English and Seon's admission, so only names are read for them."
+  [agents]
+  (for [w (old-words agents) :when (not (#{"admit" "land"} w))]
+    [w (re-pattern (str "(?i)(?<!\\w)" (if (= w "merge-train") "merge[ -]train" w) "s?(?!\\w)"))]))
+
+(deftest no-text-uses-an-old-word
+  (let [root (config/checkout)
+        patterns (old-word-patterns (slurp (str root "/AGENTS.md")))
+        kept-span #"(?i)owner,? [^\"]{0,40}?\"[^\"]*\"|Attempting to call unbound fn|zoom-a8-attempt|\(was attempt\)"
+        text? (fn [^String p] (or (str/starts-with? p "bin/") (re-find #"\.(clj|edn|md|html|js|css|c|h)$" p)))
+        paths (for [dir ["bin" "docs" "resources" "src" "test" "web" "config" "native"]
+                    f (file-seq (java.io.File. (str root "/" dir))) :when (.isFile ^java.io.File f)
+                    :let [p (subs (.getPath ^java.io.File f) (inc (count root)))] :when (text? p)]
+                p)
+        hits (for [p (concat ["AGENTS.md" "BAGGAGE.md" "README.md"] paths) :when (not (text-kept p))
+                   :let [lines (str/split-lines (slurp (str root "/" p)))]
+                   [i line0] (map-indexed vector lines) :let [line (str/replace line0 kept-span "")]
+                   [w re] patterns :when (re-find re line)]
+               [p (inc i) w])]
+    (is (contains? (set (map first patterns)) "attempt") "the table is read, the run row included")
+    (is (empty? hits) "no text uses an old word outside text-kept: each is [file line word]")))

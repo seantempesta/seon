@@ -312,7 +312,10 @@
    :map/get {:ticks 10.44 :ns 35.6 :bytes 0.0 :what "get of an integer key in a hash map of n"}
    :map/assoc {:ticks 43.53 :ns 117.5 :bytes 825.01 :what "assoc of a new integer key into a persistent hash map"}
    :map/assoc! {:ticks 29.25 :ns 83.2 :bytes 123.72 :what "assoc! of a new integer key into a transient hash map"}
-   :map/update {:ticks 117.14 :ns 238.2 :bytes 1074.43 :what "update of a counter in a hash map (frequencies' step)"}
+   ;; :map/update and the two pull rows re-measured on Jolt 328eaf2c (update's fixed arities; a
+   ;; protocol call on the DB no longer reads its 21 fields): 117 -> 81 ticks and 1074 -> 802 B,
+   ;; 7992 -> 5476 and 4670 -> 2685 ticks
+   :map/update {:ticks 81.44 :ns 206.3 :bytes 802.44 :what "update of a counter in a hash map (frequencies' step)"}
    :set/conj! {:ticks 20.25 :ns 79.1 :bytes 91.72 :what "conj! of a new integer into a transient hash set"}
    :sorted/assoc {:ticks 837.9 :ns 1334.7 :bytes 3327.21 :what "assoc of a new integer key into a sorted map"}
    :sort/compare {:ticks 10.97 :ns 13.51 :bytes 39.04 :what "sort of shuffled integers, per n log2 n"}
@@ -332,5 +335,5 @@
    ;; store (seon.test-store/test-branch!: ~2,000 datoms beside the setup's) instead of an empty store,
    ;; a pull 21 us and 24.6 KB, each further attribute 11.3-15.1 us and 11.6 KB: pull-attr's one
    ;; entity sat in a one-level index before, the seed makes it the two levels real dbs have
-   :db/pull {:ticks 7991.62 :ns 21200.3 :bytes 24612.49 :what "d/pull of one attribute of an entity, by entity id (per pull)"}
-   :db/pull-attr {:ticks 4670.28 :ns 11801.8 :bytes 11576.64 :what "each attribute of a d/pull beyond its first (per attribute)"}})
+   :db/pull {:ticks 5475.52 :ns 15483.7 :bytes 23833.98 :what "d/pull of one attribute of an entity, by entity id (per pull)"}
+   :db/pull-attr {:ticks 2685.38 :ns 7287.7 :bytes 10402.52 :what "each attribute of a d/pull beyond its first (per attribute)"}})

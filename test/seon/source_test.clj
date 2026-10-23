@@ -559,6 +559,19 @@
       (is (= #{"ns rfc.c" "ns rfc.o0"} (written (source/refresh-tx hdb (assoc renamed "src/rfc/o0.clj" (str/replace (source/file-text hdb 'rfc.o0) "(c/f9 x)" "(c/f8 x)")))))
           "a renamed function changes the interface: its dependents are read again"))))
 
+(defn file-of
+  "seon.source/file-text's arguments: a db whose namespace app.ft holds a declare and n
+  functions, each calling the five before it (fewer near the first) and the declared one,
+  and a helper recorded at a REPL after the first function, which now calls it (the
+  write-back moves it before its user)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :symbol]]}
+  [n]
+  (let [call (fn [i] (str "(+ (g x)" (apply str (for [j (range (max 0 (- i 5)) i)] (str " (f" j " x)"))) ")"))
+        text (apply str "(ns app.ft)\n\n(declare g)\n" (for [i (range n)] (str "\n(defn f" i " [x] " (call i) ")\n")))
+        db0 (empty-db)
+        db (d/db-with db0 (source/import-tx db0 {"src/app/ft.clj" text}))]
+    [(pt/record db 'app.ft "(defn- h [x] x)" 'app.ft "(defn f0 [x] (h x))") 'app.ft]))
+
 (def ^:private refresh-sizes
   "Forms in the other files: a fixed change costs the same at each."
   [10 100 1000])
@@ -582,8 +595,9 @@
               :n "forms in the program's other files"
               :work "diff: each of the file's forms looked up by id and compared with its account; the tx: one form's facts"
               :growth :constant
-              ;; measured 2026-10-23: 1.16M -> 1.19M ticks, 3.26 -> 3.39 MB, 142 calls (3.3 ms CPU)
-              :fixed {:ticks 1200000 :bytes 3480000 :calls 142}
+              ;; measured 2026-10-23: 1.20M -> 1.23M ticks, 3.37 -> 3.48 MB, 142 calls (3.3 ms CPU); 1.16M -> 1.19M
+              ;; ticks before form-row read :form/source (seon.program/load-order's :source)
+              :fixed {:ticks 1260000 :bytes 3560000 :calls 142}
               :sizes refresh-sizes}
              {:of 'datahike.api/db-with :input 'seon.source-test/transact-of
               :n "forms in the program's other files"
@@ -609,3 +623,41 @@
               :sizes refresh-sizes}]]
     (testing (str (:of e) " on " (:input e))
       (cost/proof e))))
+
+(deftest a-helper-recorded-after-its-user-is-written-before-it
+  ;; step E run #10 (2026-10-23): an agent defined form-of at its REPL, then redefined
+  ;; summary-of (which keeps its place) to call it; the merge wrote form-of after summary-of,
+  ;; a file that cannot load fresh. file-text writes a form after what it references in its
+  ;; namespace, unless an earlier form declares it, and leaves a file in that order as it is
+  (let [db0 (empty-db)
+        db (d/db-with db0 (source/import-tx db0 {"src/app/wb.clj" "(ns app.wb)\n\n(defn a [] 1)\n\n(defn b [] (a))\n"}))
+        db (pt/record db 'app.wb "(defn- h [] 2)" 'app.wb "(defn a [] (h))")
+        text (source/file-text db 'app.wb)]
+    (is (< (str/index-of text "(defn- h") (str/index-of text "(defn a")) text)
+    (is (< (str/index-of text "(defn a") (str/index-of text "(defn b")) "the rest keeps its order")
+    (is (= 2 (try (load-string (str/replace text "app.wb" "app.wb-fresh")) ((resolve 'app.wb-fresh/b))
+                  (finally (remove-ns 'app.wb-fresh))))
+        "the written file loads fresh and runs")
+    (testing "a declare recorded after its user is written before it"
+      (let [text (source/file-text (pt/record db 'app.wb "(declare k)" 'app.wb "(defn b [] (k) (a))") 'app.wb)]
+        (is (< (str/index-of text "(declare k)") (str/index-of text "(defn b")) text)))
+    (testing "a redefinition that now calls a function after it in the file is written after it"
+      (let [dbl (d/db-with db0 (source/import-tx db0 {"src/app/wl.clj" "(ns app.wl)\n\n(defn a [] 1)\n\n(defn z [] 5)\n"}))
+            text (source/file-text (pt/record dbl 'app.wl "(defn a [] (z))") 'app.wl)]
+        (is (< (str/index-of text "(defn z") (str/index-of text "(defn a")) text)))
+    (doseq [[what src] [["an earlier declare" "(ns app.wd)\n\n(declare g)\n\n(defn f [] (g))\n\n(defn g [] 3)\n"]
+                        ["a quoted name of a later var (no load dependency)" "(ns app.wd)\n\n(defn f [] 'app.wd/g)\n\n(defn g [] 3)\n"]]]
+      (testing (str what ": the file stays as written")
+        (let [dbd (d/db-with db0 (source/import-tx db0 {"src/app/wd.clj" src}))]
+          (is (= src (source/file-text dbd 'app.wd))))))))
+
+(deftest the-write-back-of-a-file-is-one-pass-over-its-forms
+  (cost/proof {:of 'seon.source/file-text :input 'seon.source-test/file-of
+               :n "functions in the namespace, each calling the five before it and a declared one"
+               :work "per form: its row (seon.program/form-row: the entity and its definitions, refs and declares) and its refs looked up once in seon.program/load-order"
+               :growth :linear
+               ;; measured 2026-10-23: 813k -> 63.7M ticks, 2.19 -> 174 MB, 55 -> 4,015 calls from 10 to 1,000 forms;
+               ;; main's file-text (a sort by :order): 789k -> 61.0M ticks, 1.99 -> 153 MB, 4,012 calls (load-order: +4% ticks, +14% bytes, three calls)
+               :per-n {:ticks 64000.0 :bytes 176000.0 :calls 4.0}
+               :fixed {:ticks 200000 :bytes 500000 :calls 15}
+               :sizes [10 100 1000]}))
