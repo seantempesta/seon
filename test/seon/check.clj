@@ -8,8 +8,8 @@
   A mode is its body: run-check boots root, runs it, prints its report and checks, stops
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
-  reference (await-ref, seon.e2e/await-db), never a poll or a deadline."
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.main :refer [out! shown]]))
+  reference (await-ref, seon.await/await-db), never a poll or a deadline."
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.await] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.main :refer [out! shown]]))
 
 
 ;; ---- the harness: one frame, one verdict, one way to wait ------------------------------
@@ -97,7 +97,7 @@
   (ready! sys #(mapv (fn [t] (c/spawn! sys (if (map? t) t {:task t}))) tasks)))
 
 (defn- await-ref
-  "true once (pred @r) holds: a watch on reference r runs pred at each change (seon.e2e/await-db's
+  "true once (pred @r) holds: a watch on reference r runs pred at each change (seon.await/await-db's
   mechanism, on any reference). No deadline, no polling."
   [r pred]
   (let [p (promise) k (gensym "await-")]
@@ -350,7 +350,7 @@
   for the stall), then read my.root/problems: an eval error and a contract's error, an
   effect's io error, a platform defect in the api, a stall, an agent's death with its exit
   status and stderr, a red proof's assertions and a cost proof's verdict. It reads them
-  once main holds each (seon.e2e/await-db over seon.problems/report)."
+  once main holds each (seon.await/await-db over seon.problems/report)."
   []
   (run-check "PROBLEMS" {:datoms 300 :max-running 2 :stall-ms 1000}
    (fn [sys]
@@ -366,7 +366,7 @@
                  (remove #(= :merge (:seon.task/kind %)) (seon.fixtures/decls problem-specs 'problems nil)))
         _ (my.root/create! sys ds)
         _ (my.root/run! sys ["problems/p1" "problems/p2"])
-        _ (seon.e2e/await-db sys #(let [p (seon.problems/report %)]
+        _ (seon.await/await-db sys #(let [p (seon.problems/report %)]
                                     (and (some (fn [r] (= 'app.proofs/p1-test (:test r))) (get-in p [:classes :red :rows]))
                                          (pos? (get-in p [:classes :cost :n])) (pos? (get-in p [:classes :platform :n]))
                                          (some (fn [r] (= :seon.agent/died (:type r))) (get-in p [:classes :agent :rows])))))
@@ -1065,11 +1065,15 @@
     (let [;; the procs that answered a graph ping within :seon.config.check/ping-ms (an expected one that did not is blocked or absent)
           pids (fn [] (set (keys (flow/ping (:graph sys) :timeout-ms (seon.config/value :seon.config.check/ping-ms)))))
         booted (pids)
-        expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/source :fx.source/0 :fx/git :fx.git/0 :fx/deps :fx.deps/0 :fx/build :fx.build/0 :fx/tests :fx.tests/0 :fx/model}
-                     (for [i (range (seon.config/value :seon.config.ai/max-in-flight))] (keyword "fx.model" (str i))))
+        decl (clojure.edn/read-string (slurp (seon.config/value :seon.config.root/system-path)))
+        ;; the procs system.edn declares, and each effect kind's owner and workers: the declaration is the one list
+        expect (into (set (keys (:procs decl)))
+                     (mapcat (fn [[k spec]] (cons (keyword "fx" (name k))
+                                                  (for [i (range (if (number? (:workers spec)) (:workers spec) (seon.config/value :seon.config.ai/max-in-flight)))]
+                                                    (keyword (str "fx." (name k)) (str i))))))
+                     (:fx decl))
         dir (str (:agents-dir (:store (c/state sys))) "/system") ; this root's own run dir
         _ (.mkdirs (java.io.File. dir))
-        decl (clojure.edn/read-string (slurp (seon.config/value :seon.config.root/system-path)))
         write! (fn [nm d] (let [f (str dir "/" nm ".edn")] (spit f (sedn/encode d)) f))
         probe (fn [tag] {:proc 'seon.check/probe-proc :args {:tag tag :events :bind/events}})
         r1 @(c/apply! sys (write! "add" (assoc-in decl [:procs :probe] (probe "one"))))
@@ -1175,7 +1179,7 @@
                 :client-ms (lib/r2 ms) :exit (:exit r)
                 :relay-peak-mb (some-> (peak-mb r) lib/r2) :relay-mb-bound bound
                 :root-down (mapv #(get-in % ["error" "message"]) (lines down)) :root-down-exit (:exit down)}
-       :checks {:five-tools (= 5 (count (get-in answers [2 "result" "tools"])))
+       :checks {:tools-are-the-ops (= (set (map #(str "seon_" (name %)) (keys seon.server/ops))) (set (map #(get % "name") (get-in answers [2 "result" "tools"]))))
                 :notification-unanswered (= #{1 2 3 4 5} (set (keys answers)))
                 :both-recorded-outside (and (= 2 (count mine)) (= 1 (count roots)))
                 :agent-eval (clojure.string/includes? (str (text 4)) "42") :root-eval (clojure.string/includes? (str (text 5)) "1")
@@ -1272,7 +1276,7 @@
       {:report {:web web :needs "a web port: bin/check gives idle one (IDLE_WEB_PORT)"} :checks {:its-root-serves-a-dashboard false}}
     (let [;; the port its web proc bound
         port (:port web)
-        _ (seon.e2e/await-quiet sys 0)
+        _ (seon.await/await-quiet sys 0)
         received (atom 0)
         ;; what the wait needs of the feed's text: its keyframe seen, then a settled mark after it
         ;; (a mark split across two reads is found in the carry of the last read's end)

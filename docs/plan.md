@@ -15,15 +15,16 @@ Five worktree sessions, grouped so that related tasks stay in one session's cont
 
 | Group | Tasks, in order | Model | Talks to |
 |---|---|---|---|
+| **Vocabulary** | ``jolt/rename-run`` widened to every AGENTS §7a word: one scripted pass, a `bin/laws` check, `seon.fences.edn` dissolved into its owners' files | Sonnet | merge (the freeze) |
 | **Merge and cutover** (main tree) | ``jolt/health`` again (merge main, revert the revert 1ef9f0e9, prove), ``jolt/wiki-stale``, ``jolt/reconcile-topo`` and ``jolt/live-forms``, then the freeze: ``jolt/rename-run`` (attempt → run, store erased), ``jolt/self-contained`` (steps A, D), step R (`~/src/seon-next`) | Sonnet | every group; root for the freeze |
 | **Shrink** | the two `seon.agent-test` reds on main ("No such namespace: seon.e2e"), the remaining driver deletions from `src` (task `seon.main/drivers-leave-src`), the clocks still deciding (``jolt/memory-is-read-when-asked``, the fork server's 100 ms idle poll) | Sonnet | merge |
 | **Agent loop** (THE PLAN 1, 2, E) | ``jolt/writeback-order`` (a new form before its first user; WIP committed a4d1ae96), ``jolt/ctx-loop`` (the context render on Seon's own program), then step E's second paid real task | Opus | agent view |
-| **Agent view** (THE PLAN 3) | ``jolt/agent-view`` (self-review, its full run, merge), then every call kind recording ticks, bytes and calls | Opus | agent loop |
+| **Agent view** (THE PLAN 3) | ``jolt/agent-view`` (self-review, its full run, merge); then, re-scoped by the owner, a page is an entity pulled with the neighbours its schema declares (v1's `:seon.render/units`) and the links between root, agent, run, turns and messages are refs (the tasks the agents links are refs and a page is an entity and its neighbors, on ``jolt/a-page-is-an-entity-and-its-neighbors``; it deletes zoom-value, the attempt route, agent-card and the grid, and needs the store erase, so it merges at the freeze); then every call kind recording ticks, bytes and calls | Opus | agent loop, vocab (the freeze) |
 | **Store** | ``jolt/datom-cost``: Datahike's add path at ~7k ticks a datom (`notes/handoff-store.md`) | Opus | merge (pin bumps) |
 
 During the freeze the other groups keep working; after it each merges main and re-runs the rename's scripts on its branch (`notes/rename-run/`).
 
-**Waiting on the owner:** task `seon.derive/one-content-keyed-derivation` (reuse of expensive pure results; cold paths are fixed first, and nothing is cached that is fast enough); the type-findings-as-warnings task (on ``jolt/wiki-stale``, not merged yet).
+**Waiting on the owner:** the task one-content-keyed-derivation (on ``jolt/one-content-keyed-derivation``, not merged yet) (reuse of expensive pure results; cold paths are fixed first, and nothing is cached that is fast enough); the type-findings-as-warnings task (on ``jolt/wiki-stale``, not merged yet).
 
 ## Open owner questions
 
