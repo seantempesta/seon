@@ -32,9 +32,9 @@
         t0 (:max-tx @conn)]
     (testing "a main transaction: committed once, its report to the reconciler, its commit to the fork server, its answer by dest"
       (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})]
-        (is (= (inc t0) (:max-tx @conn)))
+        (is (< t0 (:max-tx @conn)) "main's t moves past its last")
         (is (= [:tx] (map :op (:to-fork-server outs))))
-        (is (= [(inc t0)] (map :t (:main outs))))
+        (is (= [(:max-tx @conn)] (map :t (:main outs))))
         (is (= {:rid 1} (:dest (first (:to-api outs)))))
         (is (true? (:ok (:r (first (:to-api outs))))))
         (testing "group commit: three queued transactions, one step, one commit"
@@ -497,6 +497,26 @@
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'seon.procs-test)]
     (System/exit (if (zero? (+ fail error)) 0 1))))
+
+(deftest the-writer-keeps-the-union-current
+  ;; seon.union through the writer: built at the first :union, then every main commit and
+  ;; every agent's commit notice add their datoms, so one query over its answer sees both
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        main (:branch cfg)
+        ab (pdb/on-main main :a1)
+        union-of (fn [st] (let [[st outs] (step #'writer/writer-proc st :in {:op :union :dest {:rid 9}})] [st (:r (first (:to-api outs)))]))
+        bodies (fn [db] (set (d/q '[:find ?b ?br :where [?m :seon.message/body ?b ?tx] [?tx :seon.tx/branch ?br]] db)))]
+    (d/branch! conn main ab)
+    (let [[st r] (union-of st)
+          _ (is (true? (:ok r)))
+          [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:seon.message/id "m1" :seon.message/from "root" :seon.message/to "a1" :seon.message/body "from main"}] :dest {:rid 1}})
+          bc (d/connect (assoc cfg :branch ab))
+          _ (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from "a1" :seon.message/reply-to "m1" :seon.message/body "from a1"}] :tx-meta (pdb/tx-meta ab)})
+          _ (d/release bc)
+          [st _] (step #'writer/writer-proc st :in {:op :agent-commit :branch :a1})
+          [_ r2] (union-of st)]
+      (is (= #{["from main" main] ["from a1" ab]} (bodies (:db r2))) "a main commit and an agent's commit, each under its branch"))))))
 
 (deftest the-fork-servers-stop-ends-every-child-before-it-answers
   ;; bin/check lifecycle's :left (notes/pure-tests/lifecycle.md): root SIGKILLed the fork

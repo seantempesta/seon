@@ -11,7 +11,7 @@
   F2): the same process contract as root's Flow procs, with pause, resume, stop and ping
   as messages on its pipe."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program]
+  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program] [seon.db :as pdb]
             [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]
             [jolt.deps] [clojure.edn :as edn]))
 
@@ -61,8 +61,8 @@
      :tx (if (<= (:t m) (:max-tx (:db st)))
            [st nil] ; already in the db this server was forked with
            (let [t0 (profile/now-ns)
-                 ;; main's transaction facts as this transaction's own (seon.db/report->tx-meta)
-                 db' (:db-after (d/with (:db st) {:tx-data (:tx-data m) :tx-meta (:tx-meta m {})}))
+                 ;; main's commit as main's own transaction t (seon.db/replay)
+                 db' (pdb/replay (:db st) (:t m) (:tx-data m) (:tx-meta m {}))
                  st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled
                  errs (seq (program/load-changes! db' (:tx-data m)))]
