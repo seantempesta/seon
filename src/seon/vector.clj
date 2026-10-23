@@ -205,11 +205,12 @@
 ;; ---- keeping main's vectors current -------------------------------------------------------
 
 (defn- round
-  "At main's db, the next round: the first :seon.config.vector/texts due go to the :embed effect.
+  "At main's db, the next round: the first :texts due (:seon.config.vector/texts; 0 asks nothing) go
+  to the :embed effect.
   Answers [st outputs]; nothing due, nothing asked."
   {:malli/schema [:=> [:cat :map :seon.host/db] [:tuple :map [:vector :map]]]}
   [st db]
-  (let [due (take (cfg/value :seon.config.vector/texts) (remove (comp (:unembeddable st) first) (due db (:model st))))]
+  (let [due (take (:texts st) (remove (comp (:unembeddable st) first) (due db (:model st))))]
     (if (empty? due)
       [(assoc st :running false) []]
       (let [[st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due)]]
@@ -227,12 +228,13 @@
   those are kept out of later rounds (:unembeddable, shown in its ping), so they never hold back
   the texts due after them."
   {:malli/schema :seon.step/step-fn}
-  ([] {:params {:model "the model id its vectors are made by (seon.vector/model-id)"}
+  ([] {:params {:model "the model id its vectors are made by (seon.vector/model-id)"
+                :texts "the texts one round asks for, :seon.config.vector/texts (0: none, the model never loads)"}
        :ins {:main "main's commit notice {:t :db}, a sliding buffer of one" :answers "the api's answers"}
        :outs {:to-api "its requests to the api: the :embed effect, the write to main"}
        :workload :io
        :ping-map-fn (fn [st] (-> (select-keys st [:running :embedded :written-t]) (assoc :unembeddable (count (:unembeddable st)))))})
-  ([args] {:rid 0 :pending {} :model (:model args) :running false :embedded 0 :written-t -1 :unembeddable #{}})
+  ([args] {:rid 0 :pending {} :model (:model args) :texts (:texts args) :running false :embedded 0 :written-t -1 :unembeddable #{}})
   ([st _] st)
   ([st in m]
    (let [[st outs]

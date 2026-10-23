@@ -101,10 +101,12 @@
 
 (deftest the-proc-asks-for-what-is-due-and-writes-it
   (let [db (db-due-only)
-        st (vector/vectors-proc {:model "m"})
+        st (vector/vectors-proc {:model "m" :texts 64})
         [st o] (vector/vectors-proc st :main {:t 10 :db db})
         ask (first (:to-api o))]
     (is (= :embed (get-in ask [:req :kind])) "main's notice asks the :embed effect")
+    (is (empty? (:to-api (second (vector/vectors-proc (vector/vectors-proc {:model "m" :texts 0}) :main {:t 10 :db db}))))
+        "a proc of 0 texts a round asks nothing: the model never loads")
     (is (= ["title: none | text: (defn g [])"] (get-in ask [:req :req :texts])) "for the texts due, as the model reads them")
     (let [[st o2] (vector/vectors-proc st :main {:t 11 :db db})
           _ (is (empty? (:to-api o2)) "one round at a time: a notice during one is kept")
@@ -120,7 +122,7 @@
 
 (deftest a-failed-embedding-waits-for-the-next-notice
   (let [db (db-due-only)
-        [st o] (vector/vectors-proc (vector/vectors-proc {:model "m"}) :main {:t 10 :db db})
+        [st o] (vector/vectors-proc (vector/vectors-proc {:model "m" :texts 64}) :main {:t 10 :db db})
         e (contract/error :seon.vector/model-unopened 'seon.vector/open "no model file" {:path "m.gguf"})
         [st o2] (vector/vectors-proc st :answers {:tag (:tag (first (:to-api o))) :r e})]
     (is (empty? (:to-api o2)) "nothing is written")

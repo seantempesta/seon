@@ -35,11 +35,13 @@
                 "of them (linear in n), then the shortlist's whole vectors read and ranked: at most "
                 ":seon.config.vector/shortlist (400) of them, a constant")
      :growth :linear
-     ;; measured 2026-10-23: 1.32M ticks / 6.2 MB at 1,000; below the shortlist (all rows reranked)
-     ;; 0.33M / 1.6 MB at 100 and 0.94M / 4.5 MB at 300: ~133 ticks and 383 B a coarse row, ~2,900
-     ;; ticks and 14 KB a reranked row, so 400 reranked rows are the fixed part
-     :per-n {:ticks 160.0 :bytes 450.0}
-     :fixed {:ticks 1250000.0 :bytes 6000000.0}
+     ;; measured 2026-10-23 in the full run: 1.24M ticks / 5.92 MB at 500, 1.32M / 6.18 MB at 1,000,
+     ;; 1.50M / 6.85 MB at 2,000: ~173 ticks and 620 B a coarse row; below the shortlist (all rows
+     ;; reranked) 0.33M / 1.6 MB at 100, ~2,900 ticks and 14 KB a reranked row, so the 400 reranked
+     ;; rows are most of the fixed part (set below it: a fixed part near the smallest size's whole
+     ;; cost reads as steeper growth)
+     :per-n {:ticks 200.0 :bytes 700.0}
+     :fixed {:ticks 1050000.0 :bytes 5200000.0}
      :sizes [500 1000 2000]}))
 
 (defn due-of
