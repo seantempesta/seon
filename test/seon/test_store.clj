@@ -14,6 +14,16 @@
            (let [conn (d/connect cfg)] (pdb/ids! conn) (pdb/seed! conn 2000) (d/release conn))
            cfg)))
 
+(def ^:private program-store-path
+  "This process's store of kept program dbs, one branch per git tree (test-runner/program-db),
+  under target/tmp: a test process's own, so shards running at once never share one."
+  (delay (str (System/getProperty "user.dir") "/target/tmp/program-store-" (random-uuid))))
+
+(defn program-store
+  "The path of this process's store of kept program dbs (program-store-path)."
+  {:malli/schema [:=> [:cat] :string]}
+  [] @program-store-path)
+
 (defn test-db
   "The test store's seed as a db value (the schema and about 2,000 datoms of the example
   program), for a test that only reads or uses d/db-with: no branch is made."

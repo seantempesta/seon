@@ -320,6 +320,17 @@
  ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected. bin/check
  ;; runs this many steps at once too, and mg-check in this many shards (pure-tests 2026-10-23).
  :seon.config.proofs/jobs 4
+ ;; Unit: path. The plan's store of kept program dbs (test-runner/program-db): one LMDB store
+ ;; per checkout, a branch per git tree id holding that tree's program as facts. A tree never
+ ;; seen is branched from the kept tree with the fewest changed files and brought current by
+ ;; seon.source/refresh-tx, so a plan imports the whole program only into an empty store.
+ ;; Provenance: owner via root, 2026-10-23 (option B of notes/test-fork-main-2026-10-23.md).
+ ;; Derived data: deleting it costs one import. At the bound: see program-store-max-bytes.
+ :seon.config.proofs/program-store #seon/checkout "target/program-store"
+ ;; Unit: bytes. The kept program dbs' store on disk (its data.mdb). Measured 2026-10-23: 12 MB
+ ;; for the whole program (118 files), about 2 MB more a kept tree that changed a file. At the
+ ;; bound: after its plan, a run deletes every kept tree but its own and collects the store.
+ :seon.config.proofs/program-store-max-bytes 268435456
  ;; Unit: a salt (integer), 0 normally. Salt of every generative check's seed (seon.proofs/seed): a
  ;; seed is derived from what its check reaches (a test's reach digest, a contract's var and the
  ;; binary's tree), so the same digest draws the same cases and a result is a function of its

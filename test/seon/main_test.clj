@@ -3,7 +3,7 @@
   opens it by default, holds the schema and nothing else; root's warm-up needs no seed."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d]
-            [seon.db :as pdb] [seon.root :as root] [test-runner :as runner]))
+            [seon.db :as pdb] [seon.root :as root] [seon.test-store :as ts] [test-runner :as runner]))
 
 (defn- program-datoms [db]
   (vec (mapcat #(d/datoms db :aevt %) [:ns/name :form/id :var/name :task/name])))
@@ -40,7 +40,7 @@
   ;; release binary compiles what src requires, so no src namespace requires one whose file is
   ;; in test/ (the check driver, the e2e runner, the scripted model's fixtures: task
   ;; seon.main/drivers-leave-src); a scripted root loads its fixture from the checkout by name
-  (let [db (runner/program-db (System/getProperty "user.dir"))
+  (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
         file (into {} (d/q '[:find ?n ?f :where [?e :ns/name ?n] [?e :ns/file ?f]] db))
         in? (fn [dir n] (some-> (file n) (clojure.string/starts-with? dir)))
         reqs (d/q '[:find ?n ?r :where [?e :ns/name ?n] [?e :ns/form ?f] [?f :form/requires ?r]] db)]

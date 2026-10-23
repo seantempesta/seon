@@ -251,7 +251,7 @@
         dir (str here "/target/tmp/one-store-" (random-uuid))
         p1 'seon.reader-test/prose-without-a-fence-is-a-comment
         p2 'seon.reader-test/a-fenced-reply-reads-only-its-code
-        digests (program/reach-digests (runner/program-db here) (fx/inputs here))
+        digests (program/reach-digests (runner/program-db here (ts/program-store)) (fx/inputs here))
         _ (.mkdirs (java.io.File. ^String dir))
         ;; the checkout's green for p1, as bin/test stores one (a run nested in this test's run
         ;; would report through it)

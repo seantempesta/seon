@@ -7,9 +7,9 @@
                                       into OUT/steps (WHAT: tests, checks or both)
     --shard FILE                      one shard's tests run here, each result stored
     --store-steps OUT                 the steps bin/check ran green stored at their digests
-  bin/test runs each shard in a process of its own, at once (a fork of this runtime cannot
-  connect to a store: Datahike's connection state does not survive fork)."
-  (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
+  bin/test runs each shard in a process of its own, at once. The program the plan reads is kept
+  per git tree in a store of its own (program-db)."
+  (:require [seon.profile :as profile] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
             [datahike.api :as d] [seon.config :as config] [seon.db :as pdb]
             [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.source :as source] [seon.system :as system]))
 
@@ -33,22 +33,71 @@
 
 ;; ---- reach -----------------------------------------------------------------------------
 
+;; The program db is a function of the git tree (owner via root, 2026-10-23, option B of
+;; notes/test-fork-main-2026-10-23.md): kept as a branch named by the tree's id, a content key
+;; that is never updated, in one LMDB store per checkout (:seon.config.proofs/program-store).
+
+(defn- tree-branch "The branch keeping the program of git tree id tree." [tree] (keyword (str "tree-" tree)))
+
+(defn- branch-tree "The tree id branch b keeps, or nil (b keeps no tree)." [b]
+  (let [n (name b)] (when (str/starts-with? n "tree-") (subs n 5))))
+
+(defn- program-file?
+  "Is relative path p one of the program's files: a .clj under src or test (what the import reads)?"
+  [p] (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))))
+
+(defn- changed-files
+  "The program files of the checkout at root that differ between git trees a and b (both in
+  root's repository: git diff --name-only), each {path text-now}, a removed one's text nil."
+  [root a b]
+  (into {} (for [p (str/split-lines (:out (sh/sh "git" "-C" root "diff" "--name-only" a b)))
+                 :when (program-file? p) :let [f (io/file root p)]]
+             [p (when (.isFile f) (slurp f))])))
+
+(defn- bounded!
+  "The store under conn within :seon.config.proofs/program-store-max-bytes on disk: past it,
+  every kept tree but keep is deleted and the store collected. Deterministic: no clock, no counts."
+  [conn store keep]
+  (when (> (.length (io/file store "data.mdb")) (config/value :seon.config.proofs/program-store-max-bytes))
+    (doseq [b (d/branches conn) :when (and (branch-tree b) (not= b keep))] (d/delete-branch! conn b))
+    (d/gc-storage conn)))
+
 (defn program-db
-  "A test-store branch's db holding src and test of the checkout at root as program facts
-  (seon.source/import-tx: analyzed, not run)."
-  [root]
-  (let [files (into {} (filter #(str/ends-with? (key %) ".clj")) (:value (fx/read-source {:req {:root root :dirs ["src" "test"]}})))
-        db (ts/test-db)]
-    (d/db-with db (source/import-tx db files))))
+  "The db holding src and test of the checkout at root as program facts (seon.source: analyzed,
+  not run), kept in the LMDB store at store on a branch named by root's git tree id (seon.fx/
+  tree-id): the same tree reads its branch; a tree never seen is branched from the kept tree of
+  the fewest changed program files (one in root's repository) and brought current by
+  seon.source/refresh-tx; a store keeping no tree imports the whole program (seon.source/
+  import-tx). Its connections stay open for the process: the db value reads the store."
+  [root store]
+  (let [tree (fx/tree-id root)
+        b (tree-branch tree)
+        {:keys [conn cfg]} (pdb/open! :lmdb store 0 :db)
+        here (fn [] @(d/connect (assoc cfg :branch b)))]
+    (if (contains? (set (d/branches conn)) b)
+      (here)
+      (let [kept (for [k (d/branches conn) :let [t (branch-tree k)]
+                       :when (and t (zero? (:exit (sh/sh "git" "-C" root "cat-file" "-e" t))))]
+                   [k (changed-files root t tree)])
+            [from files] (first (sort-by (comp count second) kept))
+            _ (d/branch! conn (or from :db) b)
+            c (d/connect (assoc cfg :branch b))
+            tx (if from
+                 (source/refresh-tx @c files)
+                 (source/import-tx @c (into {} (filter #(program-file? (key %)))
+                                             (:value (fx/read-source {:req {:root root :dirs ["src" "test"]}})))))]
+        (d/transact c {:tx-data tx})
+        (bounded! conn store b)
+        @c))))
 
 (defn- tests-of
   "{test digest} of the named test namespaces (or every one) on the checkout at root, the
   ones among them that reach a process of their own (:process, seon.program/graph-index), its
-  program db (program-db), inputs and reach graph (seon.program/reach-graph: walked once, the
-  check steps' index is read from it too)."
-  [root names]
+  program db (program-db, kept in store), inputs and reach graph (seon.program/reach-graph:
+  walked once, the check steps' index is read from it too)."
+  [root names store]
   (let [nss (set (if (seq names) (map symbol names) (test-namespaces root)))
-        db (program-db root)
+        db (program-db root store)
         in (fx/inputs root)
         g (program/reach-graph db (:data-refs in))
         idx (into {} (filter #(nss (symbol (namespace (key %))))) (program/graph-index g in nil))]
@@ -166,10 +215,11 @@
   "What bin/prove and bin/test run on the checkout at root (what: tests, checks or both): the
   tests of names (or all) and the bin/check steps with no green at their digest
   (seon.proofs/plan; all? every one), less, when nothing is named, the ones that reach a
-  process (automatic). Answers {:run-tests :run-steps :reused :cand :left (the process keys
-  left out) :digests :steps :missing :inputs}."
-  [root what all? names]
-  (let [{:keys [graph inputs digests process binary]} (tests-of root names)
+  process (automatic), its program read from the kept store at store (program-db). Answers
+  {:run-tests :run-steps :reused :cand :left (the process keys left out) :digests :steps
+  :missing :inputs}."
+  [root what all? names store]
+  (let [{:keys [graph inputs digests process binary]} (tests-of root names store)
         dir (config/value :seon.config.source/test-results-dir)
         tests? (not= what "checks") checks? (not= what "tests")
         ;; the steps' functions read from the tests' graph: their digests and which boot a root or a process
@@ -198,7 +248,7 @@
   (let [t0 (profile/now-ns)
         dir (config/value :seon.config.source/test-results-dir)
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left digests steps missing inputs binary]} (plan-of (source-tree) what all? names)
+        {:keys [run-tests run-steps reused cand left digests steps missing inputs binary]} (plan-of (source-tree) what all? names (config/value :seon.config.proofs/program-store))
         n (write-shards! out run-tests digests (:tree inputs))
         ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
         ;; mode): bin/test builds target/seon only when this is not empty, bin/check seeds only for the steps

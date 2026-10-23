@@ -123,14 +123,14 @@
           _ (doseq [[p t] files] (.mkdirs (.getParentFile (java.io.File. (str d "/" p)))) (spit (str d "/" p) t))
           _ (clojure.java.shell/sh "git" "-C" d "init" "-q")
           _ (clojure.java.shell/sh "git" "-C" d "add" ".")
-          auto (runner/plan-of d "tests" false nil)
-          named (runner/plan-of d "tests" false ["app.pt-shell-test"])]
+          auto (runner/plan-of d "tests" false nil (ts/program-store))
+          named (runner/plan-of d "tests" false ["app.pt-shell-test"] (ts/program-store))]
       (is (= ['app.pt-calc-test/adds] (:run-tests auto)) "named nothing: the in-process test runs, the shelling one does not")
       (is (= ['app.pt-shell-test/shells] (:left auto)) "and the plan says it left that one out")
       (is (= ['app.pt-shell-test/shells] (:run-tests named)) "named, it runs")
       (testing "a plan of tests and check steps walks the program once: one reach graph serves both indexes"
         (profile/begin!)
-        (runner/plan-of d "both" false nil)
+        (runner/plan-of d "both" false nil (ts/program-store))
         (is (= 1 (some #(when (= 'seon.program/reach-graph (:var %)) (:calls %)) (profile/touched))) "the plan built one reach graph (none counted: instrumentation is off)")))))
 
 (deftest shards-split-by-namespace-and-each-result-is-stored
@@ -221,3 +221,75 @@
      :per-n {:ns 100 :bytes 120}
      :fixed {:ns 20000 :bytes 40000 :calls 1}
      :sizes [100 1000 10000]}))
+
+(defn- checkout!
+  "A git checkout in a scratch dir holding files ({path text}), every file added."
+  [files]
+  (let [d (scratch-dir)]
+    (doseq [[p t] files] (.mkdirs (.getParentFile (java.io.File. (str d "/" p)))) (spit (str d "/" p) t))
+    (clojure.java.shell/sh "git" "-C" d "init" "-q")
+    (clojure.java.shell/sh "git" "-C" d "add" ".")
+    d))
+
+(defn- calls-of
+  "{var calls} of the contracted functions thunk called."
+  [thunk] (profile/begin!) (thunk) (into {} (map (juxt :var :calls)) (profile/touched)))
+
+(deftest a-plan-reads-the-kept-program-db-of-its-tree
+  ;; task seon.proofs/a-plan-keeps-a-program-db-per-tree: the program db is a function of the
+  ;; git tree, kept as a branch named by the tree's id; a tree never seen is the nearest kept
+  ;; one brought current by refresh-tx; only a store with no tree imports the whole program
+  (let [calc "(ns app.kc-calc)\n(defn add [a b] (+ a b))\n"
+        d (checkout! {"deps.edn" "{}"
+                      "src/app/kc_calc.clj" calc
+                      "test/app/kc_calc_test.clj" "(ns app.kc-calc-test (:require [clojure.test :refer [deftest is]] [app.kc-calc :as c]))\n(deftest adds (is (= 3 (c/add 1 2))))\n"
+                      "test/app/kc_other_test.clj" "(ns app.kc-other-test (:require [clojure.test :refer [deftest is]]))\n(deftest other (is true))\n"})
+        store (str (scratch-dir) "/store")
+        plan #(runner/plan-of d "tests" false nil store)
+        first-calls (calls-of plan)
+        p1 (plan)]
+    (is (= 1 (first-calls 'seon.source/import-tx)) "an empty store: the tree is imported once")
+    (let [again (calls-of plan)]
+      (is (nil? (again 'seon.source/import-tx)) "the same tree: its kept branch, no import")
+      (is (nil? (again 'seon.source/refresh-tx)) "and nothing to bring current")
+      (is (= (:digests p1) (:digests (plan))) "and the same digests"))
+    (spit (str d "/src/app/kc_calc.clj") "(ns app.kc-calc)\n(defn add [a b] (+ b a))\n")
+    (let [edited (calls-of plan)
+          p2 (plan)
+          fresh (runner/plan-of d "tests" false nil (str (scratch-dir) "/fresh"))]
+      (is (nil? (edited 'seon.source/import-tx)) "an edited tree: no import")
+      (is (= 1 (edited 'seon.source/refresh-tx)) "the nearest kept tree brought current, once")
+      (is (= (:digests fresh) (:digests p2)) "the same digests a whole import of the edited tree gives")
+      (is (not= (get-in p1 [:digests 'app.kc-calc-test/adds]) (get-in p2 [:digests 'app.kc-calc-test/adds])) "the test reaching the edit moved")
+      (is (= (get-in p1 [:digests 'app.kc-other-test/other]) (get-in p2 [:digests 'app.kc-other-test/other])) "the other did not"))
+    (spit (str d "/src/app/kc_calc.clj") calc)
+    (let [back (calls-of plan)]
+      (is (nil? (back 'seon.source/refresh-tx)) "the first tree again: its kept branch")
+      (is (= (:digests p1) (:digests (plan)))))))
+
+(defn kept-checkout-of
+  "program-db's arguments for a checkout whose src holds n functions (app.kp-big) and a store
+  that already keeps its tree (the first call, not measured, imports it)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :string :string]]}
+  [n]
+  (let [d (checkout! {"deps.edn" "{}"
+                      "src/app/kp_big.clj" (apply str "(ns app.kp-big)\n" (for [i (range n)] (str "(defn f" i " [x] (+ x " i "))\n")))
+                      "test/app/kp_big_test.clj" "(ns app.kp-big-test (:require [clojure.test :refer [deftest is]] [app.kp-big :as b]))\n(deftest f0 (is (= 1 (b/f0 1))))\n"})
+        store (str (scratch-dir) "/store")]
+    (runner/program-db d store)
+    [d store]))
+
+(deftest a-kept-tree-costs-its-lookup-not-its-program
+  ;; task seon.proofs/a-plan-keeps-a-program-db-per-tree: an unchanged tree's program db is its
+  ;; kept branch, whatever the program's size; a one-file change costs that file
+  ;; (seon.source/refresh-tx's proofs in seon.source-test: constant in the program's other files)
+  (cost/proof
+    {:of 'test-runner/program-db :input 'seon.proofs-test/kept-checkout-of
+     :n "functions in the checkout's src"
+     :work (str "the tree's id (git, a child process: no ticks here), the store opened and the tree's "
+                "branch found and connected: a pointer read; nothing of the program is read or imported")
+     :growth :constant
+     ;; measured 2026-10-23: 1.17M ticks and 4.6 MB at 10, 100 and 1,000 functions (the store's open
+     ;; and the branch's connect); a whole import was ~1.8G ticks for the 2,400 forms of src and test
+     :fixed {:ticks 1300000.0 :bytes 5000000.0}
+     :sizes [10 100 1000]}))

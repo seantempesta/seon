@@ -1,6 +1,8 @@
 ;; Proof runs by reach digest (seon.proofs/prove: bin/prove, bin/test, bin/check without a run
 ;; size, an agent's test run). Values, units and provenance: resources/seon/config/default.edn.
-{:seon.config.proofs/jobs [:int {:min 1 :seon.config/unit "processes" :description "Shards a worktree session's or root's proof run (bin/prove, bin/test) runs its selected tests in at once."}]
+{:seon.config.proofs/program-store [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "The plan's store of kept program dbs, a branch per git tree id (test-runner/program-db)."}]
+ :seon.config.proofs/program-store-max-bytes [:int {:min 1 :seon.config/unit "bytes" :description "The kept program dbs' store on disk; past it a run keeps only its own tree and collects."}]
+ :seon.config.proofs/jobs [:int {:min 1 :seon.config/unit "processes" :description "Shards a worktree session's or root's proof run (bin/prove, bin/test) runs its selected tests in at once."}]
  :seon.config.proofs/seed-salt [:int {:seon.config/unit "a salt (integer)" :description "Salt of every generative check's seed (seon.proofs/seed); 0 normally, changed to re-roll every seed once."}]
  :seon.config.proofs/seeds [:int {:min 1 :seon.config/unit "seeds (a count)" :description "How many seeds a randomized property test draws in this run (its test-seed and the next ones); the full run draws 5."}]
  :seon.config.proofs/cost-max-n [:int {:min 1 :seon.config/unit "n (a cost proof's input size)" :description "The largest input a cost proof measures in this run (seon.cost/sizes); the full run measures as written."}]}
