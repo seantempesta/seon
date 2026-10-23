@@ -227,7 +227,7 @@
  ;; disjoint (an octopus merge); 1 is git's one-at-a-time merge queue. Provenance: DECISIONS (root's
  ;; calls on R3's questions): octopus merges stay off until one combined test run of all octopus
  ;; members, the par-200 hang and root memory growth with concurrent merges are fixed. The code
- ;; default had become 8 (b7459c3) with nothing writing the fact (FENCES active bug 1); boot now
+ ;; default had become 8 (b7459c3) with nothing writing the fact (GUARDS active bug 1); boot now
  ;; writes this. An octopus merge is turned on by stating more here (or on main's root entity).
  :seon.config.merge/max-running 1
  ;; Unit: conflicts. A merge run whose merge of main has more is refused

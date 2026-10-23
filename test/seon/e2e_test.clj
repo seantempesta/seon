@@ -1,5 +1,5 @@
 (ns seon.e2e-test
-  "A run ends on what the system observes: quiescence, or a recorded defect (audit FENCES
+  "A run ends on what the system observes: quiescence, or a recorded defect (audit GUARDS
   #26: a flight whose answer is lost never ends, so quiescence never comes; a root proc's
   defect recorded on main ends the wait instead). No clock."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]

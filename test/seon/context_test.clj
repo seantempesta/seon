@@ -505,7 +505,7 @@
     (is (= {:unresolved ['demo/x 'demo/y] :problem (:unresolved seon.ref/problem-messages)} (last refs)) "the others, one problem")))
 
 (deftest an-error-shows-what-its-contract-says
-  ;; a contract refusal is data (its problems, the fix): the transcript shows that, not only
+  ;; a contract invalid is data (its problems, the fix): the transcript shows that, not only
   ;; the message (the step E dry run's agent read "invalid-input: its arguments do not
   ;; satisfy its contract" with no word of which, 2026-10-22)
   (let [em {:seon.error/type :seon.instrument/contract-error :seon.error/operation 'seon.e2e/agents-reused
@@ -530,7 +530,7 @@
     (is (not-any? :reasoning (remove #{assistant} msgs)))))
 
 (deftest an-unknown-proof-says-what-to-write
-  ;; a proof with no result: the refusal names the deftest to write in its namespace and how
+  ;; a proof with no result: the reason names the deftest to write in its namespace and how
   ;; to run it (the dry run's agents read `{:reason :proof-unknown}` and searched for 25 turns)
   (let [db (db-with-program)
         b (context/current-state db (task-f db) {:results {} :reasons [{:reason :proof-unknown :symbol 'demo-test/f-test}] :turn 1 :max-turns 4})

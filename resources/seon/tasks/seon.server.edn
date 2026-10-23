@@ -9,7 +9,7 @@
  {:seon.task/name "restore-and-replay-an-agent"
   :seon.task/plan "Datahike keeps every commit as an immutable value with its parents (`datahike.versioning/branch-history`; `branch!` accepts a commit id; `commit-as-db` loads one): on a copy of t5/out/real3.store, `d/branch!` from the middle of task-t5-edit-forms's 19 commits (335 evals) gave a branch holding exactly its 29 evals. So branching from any commit costs no copy, and an eval between commits is reached by branching from the commit before and replaying. Restore: an agent forked on a kept branch at its end state (resume's load of the branch program). Replay to step N: an agent forked from the run's basis evaluates its recorded forms 1..N in order through its own REPL, every effect answered from its recorded outcome by a replay owner (nothing fires); each result is compared with its record and a divergence recorded (nondeterminism, or a gap in the record). The debugging agent works the re-creation through seon_eval, its new instructions a task whose :evidence names the source run, branch and point. Needs every form's exact text (`seon.repl/eval-record-keeps-a-failing-form-whole`, widened to every form) and effect outcomes recorded whole (the model's reply is on the turn; file and other effects' answers are not). Nothing built yet."
   :seon.task/kind :work
-  :seon.task/needs #{"seon.entrance/inspect-a-kept-run" "seon.repl/eval-record-keeps-a-failing-form-whole"}
+  :seon.task/needs #{"seon.server/inspect-a-kept-run" "seon.repl/eval-record-keeps-a-failing-form-whole"}
   :seon.task/proofs #{seon.server-test/a-replayed-agent-reproduces-its-recorded-results
                       seon.server-test/a-divergence-on-replay-is-recorded}}
  {:seon.task/name "reading-the-context-is-recorded"
@@ -23,7 +23,7 @@
   :seon.task/plan "Done: `seon.server/attach!` spawns the agent first (`seon.root/spawn!`) and only once it exists writes the env (model outside), the release and the run in one transaction, so a refused spawn writes nothing and the reconciler (`seon.reconcile/reconciler-proc`) never sees a release with no run and starts a second agent for it. Before, attach wrote env and :execution :running before spawning, so an error left the task's desired state changed, and the reconciler could fork its own agent onto the branch first (attach's spawn then refused: \"branch ... is held by live agent :a1\")."
   :seon.task/kind :work
   :seon.task/proofs #{seon.server-test/a-refused-attach-writes-nothing}}
- {:seon.task/name "a-door-defect-answers-that-request-alone"
+ {:seon.task/name "a-server-defect-answers-that-request-alone"
   :seon.task/plan "Done: `seon.server/respond` answers a request whose op throws, or whose line does not read, with the typed error map `:seon.server/defect` (`seon.contract/error`, declared in seon.problems.edn: the line it took, the cause's ex-data printed; for MCP inside a JSON-RPC error with the request's id), to that request alone; the connection and every other connection (each its own edge thread in `seon.server/serve-connection!`) go on. A connection is serial (one line in, one out) and bin/mcp opens one per tool call, so the order names the request. Replaced an ad hoc `{:error :data}` (raw ex-data, not always readable). docs/failure-points.md: the server's boundary row and the half-open client row (a client that never sends or never reads parks only its own connection's thread)."
   :seon.task/kind :work
   :seon.task/proofs #{seon.server-test/a-server-defect-answers-that-request-alone}}

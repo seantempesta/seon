@@ -407,7 +407,7 @@
 (deftest a-form-imported-into-a-loaded-namespace-is-loaded-not-unmapped
   ;; the step E dry run (2026-10-22): a root restarted on a tree whose test namespace gained a
   ;; deftest imported it onto main, but held? read the namespace's existence as "the binary
-  ;; holds it", so neither root nor the fork server loaded it; the next agent's harvest read
+  ;; holds it", so neither root nor the fork server loaded it; the next agent's stage read
   ;; the missing var as an unmap and the merge deleted the deftest from main
   (let [nsym (symbol (str "app.imported-" (random-uuid)))
         path (str "test/app/" (str/replace (name nsym) "-" "_") ".clj")

@@ -10,8 +10,12 @@ The rename is two scripts, run from the repository root, in this order, after ev
    docs and anchors). "an attempt" -> "a run". Owner quotes, the quoted Jolt message "Attempting to call unbound fn"
    and the image file name are left as written. Idempotent: text already renamed is untouched.
 
+3. `python3 notes/rename-run/vocab_pass.py`: the other section 7a words (task files seon.entrance -> seon.server and
+   seon.fences -> seon.audit with their ids, the ids named with an old word, FENCES -> GUARDS, stray prose and comments).
+   Idempotent. `seon.docs-test/no-text-uses-an-old-word` is red when an old word reappears outside its `text-kept` list.
+
 To refresh a branch after main moves: merge main, take main's side of each conflicted file
-(`git checkout --theirs -- FILE`), run both scripts, `git add` the explicit paths, commit. Then `bin/build`,
+(`git checkout --theirs -- FILE`), run the three scripts, `git add` the explicit paths, commit. Then `bin/build`,
 `bin/check health` (dead citations must read 0) and the docs and task-files tests.
 By hand, after a merge: a `run` local in code main added that means a test run (step1 patches turn.clj's
 `observe` and `observed`; the build catches an unresolved symbol, not a destructure that is now nil).

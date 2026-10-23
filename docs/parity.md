@@ -21,7 +21,7 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 | ``eval_clj`` (an agent's REPL or root's) | `seon_eval` (one evaluator: no JVM mode) | present |
 | ``runtime_status`` (health, problems, flow, readiness) | `seon_agents` lists agents and tasks; health only on the dashboard | partial |
 | an outside agent works a task | `seon_attach`, `seon_context`, `seon_done` | new |
-| reasons and defects answered per request | a defect answers that request the typed `:seon.server/defect` and the server goes on (`seon.server/respond`); a refused attach still writes the task's state first (task `seon.entrance/attach-writes-nothing-when-it-is-refused`) | partial |
+| reasons and defects answered per request | a defect answers that request the typed `:seon.server/defect` and the server goes on (`seon.server/respond`); a refused attach still writes the task's state first (task `seon.server/attach-writes-nothing-when-it-is-refused`) | partial |
 
 The server's ops, the MCP tools and root's evaluation path are [server](server.md#ops). `seon_agents` returns every task, the cancelled ones included: too much context for an outside agent.
 

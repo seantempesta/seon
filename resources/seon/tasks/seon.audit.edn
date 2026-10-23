@@ -3,7 +3,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.fx-test/a-failed-rename-is-an-io-error-and-leaves-no-tmp
                       seon.fx-test/a-write-back-answers-the-bytes-on-disk}}
- {:seon.task/name "merge-trains-off-as-decided"
+ {:seon.task/name "octopus-merges-off-as-decided"
   :seon.task/plan "Restates a ruling now in force (DECISIONS: Root's calls on R3's questions: octopus merges stay off until one combined test run of all members, the par-200 hang and root memory growth with concurrent merges are fixed): `:seon.config.merge/max-running` is 1 in resources/seon/config/default.edn, read through the one resolver, and `seon.task/boot-tx` writes it on main with the config in force; the code default `seon.reconcile/default-max-merging` is deleted. Nothing left to do: close."
   :seon.task/kind :work
   :seon.task/proofs #{seon.reconcile-test/boot-records-merge-max-running-one
@@ -13,7 +13,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.fx-admit-test/a-rate-limited-model-call-waits-for-the-bucket-and-is-answered}}
  {:seon.task/name "one-test-bound-derived-and-named"
-  :seon.task/plan "Done: a test run is bounded by its work, never a clock: `seon.agent/run-tests-forked` runs the proofs within `:seon.config.agent/test-ticks` engine ticks (named in docs/failure-points.md; bin/check robust asserts that a test that never ends is stopped with :seon.test/ticks-spent naming it). The child writes {:seon.test/started var} as each test var begins (clojure.test's :begin-test-var report, which Jolt emits) and its result as the last line; `seon.agent/test-run-answer` turns the last line and the exit status into the run: the result, or one :error report on the started var with :exit, so `seon.proofs/results` reads that test :error and the context shows a red proof with the death beside it. Deleted: the 30000 ms literals at 8 sites, the :timeout-ms forwarding in `seon.root/ext-op`, the deadline loop of run-tests-forked, and `seon.root/fs-call!`'s 30000 ms deref fallback. The ticks are not a clock and stay: without them robust's endless test hangs. A run that hangs otherwise ends only by an explicit kill of the agent (a stall is task seon.fences/a-stall-is-past-the-requests-own-bound). v1 bounded each test by a declared per-test bound (default 5 s, seon.test/bounded-result, ~/src/seon)."
+  :seon.task/plan "Done: a test run is bounded by its work, never a clock: `seon.agent/run-tests-forked` runs the proofs within `:seon.config.agent/test-ticks` engine ticks (named in docs/failure-points.md; bin/check robust asserts that a test that never ends is stopped with :seon.test/ticks-spent naming it). The child writes {:seon.test/started var} as each test var begins (clojure.test's :begin-test-var report, which Jolt emits) and its result as the last line; `seon.agent/test-run-answer` turns the last line and the exit status into the run: the result, or one :error report on the started var with :exit, so `seon.proofs/results` reads that test :error and the context shows a red proof with the death beside it. Deleted: the 30000 ms literals at 8 sites, the :timeout-ms forwarding in `seon.root/ext-op`, the deadline loop of run-tests-forked, and `seon.root/fs-call!`'s 30000 ms deref fallback. The ticks are not a clock and stay: without them robust's endless test hangs. A run that hangs otherwise ends only by an explicit kill of the agent (a stall is task seon.audit/a-stall-is-past-the-requests-own-bound). v1 bounded each test by a declared per-test bound (default 5 s, seon.test/bounded-result, ~/src/seon)."
   :seon.task/kind :work
   :seon.task/proofs #{seon.agent-test/a-killed-test-run-names-the-test-that-was-running
                       seon.web-test/calls-become-requests}}
@@ -62,7 +62,7 @@
   :seon.task/proofs #{seon.cost-test/the-exponent-tolerance-follows-slack-and-span
                       seon.cost-test/slack-is-the-units-measured-spread
                       seon.context-test/the-prompt-states-the-judges-own-tolerances}}
- {:seon.task/name "the-dragon-gate-sees-fences"
+ {:seon.task/name "the-failure-point-gate-sees-guards"
   :seon.task/plan "What exists: bin/laws lists the sites of each law (catch against docs/failure-points.md; clocks, a sleep, timeout, deadline or *-MS, against docs/clocks.md; measures; resolution) by matching marks in code text with strings and comments stripped (awk), and is red on a site whose function the law's page does not name. Wrong: matching text cannot see a failure turned into a value through a resolved var it does not spell (deref with 3 args, alts! against a timeout, `clojure.core.async.flow/ping-proc` with a bound, Thread .join with a bound), and regex over code stands in for the compiler's facts (AGENTS.md section 9). Correct: the gate reads the compiler's resolved references per definition (the mechanism seon.program/definitions-from-the-compiler records, the same one the intern and alter-var-root sites use), lists every call of clojure.core/deref with 3 args, java.lang.Thread/sleep, clojure.core.async/timeout, clojure.core.async.flow/ping-proc, Thread .join and catch, in src and in the check drivers, and is red unless docs/failure-points.md names that function's row (a real failure point with its declared answer). Replaces the awk; the page gains a Guards section."
   :seon.task/kind :work
   :seon.task/needs #{"seon.program/definitions-from-the-compiler"}
@@ -76,7 +76,7 @@
  {:seon.task/name "a-stall-is-past-the-requests-own-bound"
   :seon.task/plan "What exists: `seon.agent-proc/stall-ms` (30000, a guessed tolerance kept as a var, not a config key) is the silence after which a busy agent is observed stalled once; `seon.root/start!` takes :stall-ms, and the api's step schedules its stall check with a go block on `(a/timeout (quot stall-ms 2))` in seon.root. A 25 s compute shows nothing while a legitimate long proof run reads as stalled. Correct: a request carries its declared bound (the form's, task seon.turn/a-form-has-a-time-bound; a test run's is its tick budget, `:seon.config.agent/test-ticks`) and the agent proc observes a stall when that bound passes with no frame: one recorded :seon.agent/stalled naming the bound, no second number; the ticks come from the one :clock proc (task seon.root/one-clock). Deletes stall-ms, the :stall-ms option and the go-block timer. The flusher's sleep this task also named is gone (durability is continuous group commit, task seon.writer/durability-is-continuous-group-commit)."
   :seon.task/kind :work
-  :seon.task/needs #{"seon.root/one-clock" "seon.turn/a-form-has-a-time-bound" "seon.fences/one-test-bound-derived-and-named"}
+  :seon.task/needs #{"seon.root/one-clock" "seon.turn/a-form-has-a-time-bound" "seon.audit/one-test-bound-derived-and-named"}
   :seon.task/proofs #{seon.procs-test/a-stall-is-observed-past-the-requests-own-bound
                       seon.procs-test/the-flusher-waits-on-the-clock}}
  {:seon.task/name "event-loss-is-counted"

@@ -224,7 +224,7 @@
   '{[seon.db-test/a-commit-costs-what-it-writes seon.profile/now-ns] "printed ms per turn; the verdict is on bytes"
     [seon.db-test/a-commit-costs-what-it-writes seon.profile/ms-since] "printed ms per turn; the verdict is on bytes"
     [seon.lib-test/a-forked-child-runs-go-blocks-and-makes-a-store clojure.core.async/timeout] "a go block's timeout is the behaviour forked; its child's verdict is its exit status"
-    [seon.lib-test/probe-ms seon.profile/now-ns] "the probe's cost as a wall ratio of medians: open, FINDINGS (no counted stand-in for kernel time)"
+    [seon.lib-test/probe-ms seon.profile/now-ns] "the probe's cost as a wall ratio of medians: open, FINDINGS (no counted measure of kernel time)"
     [seon.lib-test/probe-ms seon.profile/ms-since] "the same"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it Thread/sleep] "the stream's pacing is the subject: a deadline can only turn it red (FINDINGS #13)"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it clojure.core/rand-int] "a port: a collision can only turn it red (FINDINGS #14)"

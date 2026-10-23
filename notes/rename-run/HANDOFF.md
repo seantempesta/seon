@@ -22,6 +22,7 @@ Root freezes main first (nothing else merges until the prove ends).
    for f in $(git diff --name-only --diff-filter=U); do git checkout --theirs -- "$f"; done
    python3 notes/rename-run/step1.py
    python3 notes/rename-run/attempt_to_run.py
+   python3 notes/rename-run/vocab_pass.py
    ```
    (`--theirs` is main's side during this merge.) Both scripts are idempotent; the second must end `files N` with
    no "attempt" left in the tree: check with

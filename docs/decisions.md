@@ -173,7 +173,7 @@ Owner, 2026-10-20: "the agent is its own process so having the flow controls be 
 - Changed-since: a Datahike tree diff by node address (port v1 fork `771a0c4b`, prototype first) or a `:seon.tx/changed` stamp against the "no stamps" ruling.
 - Proofs along `:needs`: keep `seon.task/accumulate` (2026-10-20 ruling) or never carry proofs, since an accumulated designed-red check blocks implement (DESIGN-tasks §3.4, §11 #14); possibly moot once templates become held task data.
 - No progress: is a byte-identical repeated reply a recorded fact only, or does it end the run.
-- What is a stall once an eval is bounded by its work: three tasks (`seon.fences/a-stall-is-past-the-requests-own-bound`, `seon.root/one-clock`, `seon.turn/a-form-has-a-time-bound`) still plan a clock; `seon.agent-proc/stall-ms` (30000) remains.
+- What is a stall once an eval is bounded by its work: three tasks (`seon.audit/a-stall-is-past-the-requests-own-bound`, `seon.root/one-clock`, `seon.turn/a-form-has-a-time-bound`) still plan a clock; `seon.agent-proc/stall-ms` (30000) remains.
 - The per-run turn cap: lower `:seon.config.agent/max-turns` (40) to about 2x the measured p90 turns-to-green once 20 real tasks give one.
 - A dropped model connection (`:seon.model/transport`): retry once after a wait, or end as now.
 - File and shell roots: a config key with a permissive default, or none; and whether `:git` `:build` `:deps` `:source` effects are root-only.
@@ -182,7 +182,7 @@ Owner, 2026-10-20: "the agent is its own process so having the flow controls be 
 - Upstream: when to push the `upstream/*` Jolt branches and open PRs, and whether to send the Chez 0006 report and a 0007 issue.
 - Profiling tooling: which to build (Jolt symbol map per generation for `sample`/xctrace; per-op LMDB counts; a `bin/check profile` mode; `mdb_stat` from `bin/build lmdb`).
 - A go for the lmdb-ffi helper reading `mti_semid` that the semaphore-set task needs (a dependency change).
-- `seon.fences.edn`: nine entries read "Done:" yet load as tasks; move the open ones to their owning files and delete the file?
+- `seon.audit.edn`: nine entries read "Done:" yet load as tasks; move the open ones to their owning files and delete the file?
 - Root's external channels (`:to-writer`, `:back`, `:ext`, `:events`, passed as `:bind`) as declared Flow `:conns`?
 - The render proc's render-once caches (`:event-rows`, the zoom history's `:rows`) as units with a `:container`?
 - Do `seon.cost` and `seon.profile` belong in the release binary or with the drivers?
