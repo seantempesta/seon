@@ -566,6 +566,21 @@
     (is (= '(clojure.repl/dir demo) (:all (first m))))
     (is (= '#{demo-test/f-test demo-test/g-test} (set (map :symbol (:vars (second m))))))))
 
+(deftest the-map-shows-the-most-used-first-then-by-name
+  ;; each var's uses are counted once and sorted with its name (a ranking takes each key once):
+  ;; the order is uses descending, the name breaking a tie
+  (let [db (db-with-program)
+        ne (fn [db n] (pdb/eid db :ns/name n))
+        db (d/db-with db (vec (for [v '[rank/d rank/c rank/b rank/a]
+                                    x [{:db/id (str v) :var/name v :var/ns (str "ns rank") :var/form (str "form " v)}
+                                       {:db/id (str "form " v) :form/id (str v) :form/src (str "(defn " (name v) " [])") :form/ns "ns rank" :form/order 0 :form/defines [(str v)]}
+                                       {:db/id "ns rank" :ns/name 'rank}]]
+                                x)))
+        db (d/db-with db (vec (for [[i refs] (map-indexed vector '[[rank/c rank/b] [rank/c] [rank/c rank/a] [rank/d]])]
+                                {:form/id (str "user " i) :form/src "(use)" :form/ns (ne db 'demo) :form/order (inc i) :form/refs refs})))]
+    (is (= '[rank/c rank/a rank/b rank/d] (mapv :symbol (:vars (first (context/ns-map db '[rank/a])))))
+        "c named by three forms, then a, b and d by one each, by name")))
+
 (deftest a-cited-task-shows-its-plan-at-that-depth
   ;; wiki audit 2026-10-23 R4: a plan citing another task by its ns/name sees that task's
   ;; plan as a section at the citation's depth, not an unresolved name
