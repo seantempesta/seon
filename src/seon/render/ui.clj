@@ -303,7 +303,7 @@
   (let [freq (frequencies (map :state (vals rows)))
         [newest older] (print/bounded (sort-by (comp - #(or (:seon.attempt/start-ms %) 0)) (vals attempts)) :seon.config.render.list/rows
                                       "older, on main: (seon.task/attempts (deref (:conn sys))) at root's REPL")
-        tokens (reduce + 0 (map :tokens (vals rows)))
+        tokens (reduce + 0 (keep :tokens (vals rows)))
         running (count (filter #(= :running (:seon.attempt/status %)) (vals attempts)))
         rank (zipmap task-state-order (range))]
          [:section {:id "t-tasks" :class "tile wide"}
@@ -708,7 +708,7 @@
      [:section {:id "problems" :class "problems ok"} [:span {:class "dot s-running"}] [:b "no problems"]
       [:span {:class "muted"} " no proc defect · no problem recorded on main · no red live agent · no agent died"]]
      [:section {:id "problems" :class "problems bad"}
-      (kicker (str (count lines) " problem" (when (not= 1 (count lines)) "s")) "most urgent first · the same lines root's context leads with")
+      (kicker (str (count lines) " kind" (when (not= 1 (count lines)) "s") " of problem") "most urgent first, each with how many · the same lines root's context leads with")
       [:ul (for [l lines] [:li l])]]))
 
 (defn- topbar {:malli/schema [:=> [:cat :any] :any]}
@@ -812,7 +812,7 @@
       (kicker (str "task · " (:seon.task/id t))
               (str (kname (:seon.task/kind t)) " · "
                    ;; what happened (the reconciler's observed state, when the producer carries it), else the desired execution
-                   (if-let [st (:seon.task/state t)] (str (kname st) " · execution " (kname (:seon.task/execution t))) (kname (:seon.task/execution t)))))
+                   (if-let [st (:seon.task/state t)] (kname st) (kname (:seon.task/execution t)))))
       [:pre {:class "plan" :title "its plan, accumulated along its needs: theirs first"} plan]
       (when (:seon.task/instructions t) [:p {:class "muted"} (:seon.task/instructions t)])
       (when (:seon.task/problem t) [:p {:class "err"} (:seon.task/problem t)])
@@ -891,10 +891,12 @@
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [{:keys [tests results own owners seen seen-turn]} opts]
      [:section {:class "box" :id "z-proofs"}
-    (kicker "proofs" (cond tests (str "its last run: " (run-words tests) " · " (ms-str (:ms tests)))
-                           seen (str "as " seen-turn " saw them (root's view holds no run of it)")
+    (kicker "proofs" (cond (seq results) (str "judged on main: " (count (filter #(= :pass (val %)) results)) "/" (count results) " pass")
+                           tests (str "its last run: " (run-words tests) " · " (ms-str (:ms tests)))
+                           seen (str "when " seen-turn " began, before its forms ran")
                            :else "no run: none in root's view, and no turn has run them"))
-    (when (and seen (not tests)) [:p (proof-counts seen)])
+    (when (and seen (not tests))
+      [:p [:em {:class "muted"} (str "when " seen-turn " began: ")] (proof-counts seen)])
     (when (seq results)
       [:div {:class "judged"} [:span {:class "muted"} "judged on main: "]
        [:ul (for [[p s] (sort-by (fn [[p s]] [(if (= :pass s) 1 0) (str p)]) results)]
@@ -910,6 +912,11 @@
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [e opts]
        [:li {:class (str "hr tag-" (kname (or (:tag e) :ret)))}
+      [:div {:class "who muted"} (case (:origin e)
+                                   :ui "the owner evaluated, from this window"
+                                   :outside "an outside agent evaluated, through root's server"
+                                   :context "an outside agent read its context, through root's server"
+                                   "root's request: the agent evaluated it (its turn loop, when the form is seon.turn/work!)")]
       (when (:lead e) [:pre {:class "lead"} (prose (:lead e) (form-budget))])
       [:div {:class "hf"} [:code (prose (:form e) (form-budget))]]
       [:div {:class "hv"} (eval-out e (or (:budget opts) (config/value :seon.config.render/value-budget)) (part) nil true)]
@@ -967,15 +974,16 @@
        [:span {:class "branch"} (str " branch " (kname (or (:branch agent) branch)))]]
       (when-let [t (or (:task agent) (:seon.attempt/task attempt))] [:p {:class "task"} (str t)])
       [:ul {:class "why"} (for [l (why agent attempt task (:n turns))] [:li l])]
-      (agent-stats (cond-> agent (nil? (:pid agent)) (assoc :pid (:seon.attempt/pid attempt))) (count (:evals agent)) nil)
+      (agent-stats agent (:evals turns) nil)
       [:div {:class "stats"}
        [:span [:em "attempt"] (or (:seon.attempt/id attempt) "–")]
        [:span {:title "the task's model, else root's (:seon.config.ai/model)"} [:em "model"]
         (cond model model attempt (str (config/value :seon.config.ai/model) " (root's default)") :else "–")]
        [:span {:title "the attempt's start, local time (:seon.config.web/utc-offset)"} [:em "started"] (str (clock start-ms) " UTC" (config/value :seon.config.web/utc-offset))]
-       (when end-ms [:span {:title "the attempt's end, local time"} [:em "ended"] (clock end-ms)])
+       (when end-ms [:span {:title "the attempt's end, local time"} [:em "ended"] (str (clock end-ms) " UTC" (config/value :seon.config.web/utc-offset))])
        (when (and start-ms end-ms) [:span {:title "wall time, the attempt's start to its end: its fork, every turn and its judging"} [:em "took (wall)"] (ms-str (- end-ms start-ms))])
-       [:span [:em "turns"] (str (:n turns))]
+       [:span {:title "model turns, and context reads through root's server (no model call)"} [:em "turns"]
+        (str (:model turns) " model" (when (pos? (:reads turns)) (str " · " (:reads turns) " reads")))]
        [:span [:em "tokens"] (group3 (:tokens turns))]
        [:span {:title "at the model's configured prices, off-peak (the provider charges twice at peak); a turn whose provider did not split cached from uncached prompt tokens, or whose model has no prices, is not priced"}
         [:em "cost"] (cond (and (:usd turns) (pos? (:unpriced turns))) (str (cost-str (:usd turns)) " + " (:unpriced turns) " turns not priced")
@@ -1052,7 +1060,7 @@
                :when (get split k)]
            [:span [:em label] (ms-str (get split k))])])
       (when (seq (:results obs))
-        [:div {:class "seen"} [:em "proofs it saw "] (proof-counts (:results obs))
+        [:div {:class "seen"} [:em "proofs when it began "] (proof-counts (:results obs))
          (when-let [changed (seq (for [[p r] (sort-by (comp str key) (:results obs)) :let [was (get previous p)] :when (and previous (not= was r))] [p was r]))]
            [:span {:class "changed"} " · since the last turn: "
             (interpose ", " (for [[p was r] changed] (str (name (symbol (str p))) " " (kname was) " → " (kname r))))])])

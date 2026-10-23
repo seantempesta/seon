@@ -180,7 +180,7 @@
         (agent/transact! [(cond-> (merge (usage c) {:seon.turn/id (str attempt "/" turn) :seon.turn/attempt attempt :seon.turn/n turn
                                    :seon.turn/origin :model :seon.turn/basis basis
                                    :seon.turn/calls (mapv (fn [{:keys [id code thinking items]}]
-                                                            (cond-> {:id id :code code :evals (context/evaluations-text items) :items (mapv :id items)}
+                                                            (cond-> {:id id :code code :evals (context/evaluations-text items) :items (vec (keep :record items))}
                                                               thinking (assoc :thinking thinking)))
                                                           calls)
                                    :seon.turn/reply (:text c) :seon.turn/forms (count items)

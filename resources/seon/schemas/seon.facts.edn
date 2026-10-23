@@ -312,9 +312,9 @@
  ;; a model turn's eval calls, each its id, its code and what it evaluated to as the later
  ;; turns' tool messages show it (seon.context/evaluations-text: folded, within the evals budget)
  :seon.turn/calls [:vector {:seon.db/data true} [:map [:id :string] [:code :string] [:evals :string]
-                                                    ;; the ids of the call's reply items (each evaluation's record ends /<id>), and the
+                                                    ;; the ids of the call's evaluation records (:seon.cluster.eval/id), and the
                                                     ;; model's thinking about the call (the eval tool's optional argument)
-                                                    [:items {:optional true} [:vector :int]] [:thinking {:optional true} :string]]]
+                                                    [:items {:optional true} [:vector :string]] [:thinking {:optional true} :string]]]
  ;; the provider's finish_reason, the model that answered, and its reasoning text
  :seon.turn/finish :string
  :seon.turn/model :string

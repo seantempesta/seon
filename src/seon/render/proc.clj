@@ -130,7 +130,9 @@
                        results (:seon.attempt/results (last as) {})
                        own (get-in idx [:acc id] #{})]]
              [id {:state (reconcile/task-state idx id) :blocked-by (reconcile/blocked-by idx id) :needs (:seon.task/needs t)
-                  :attempts (count as) :tokens (reduce + 0 (keep :seon.attempt/tokens as)) :newest (last as) :kind (:seon.task/kind t)
+                  :attempts (count as)
+                  ;; unknown is not 0: an attempt records its tokens at its end
+                  :tokens (when-let [ts (seq (keep :seon.attempt/tokens as))] (reduce + ts)) :newest (last as) :kind (:seon.task/kind t)
                   ;; its own proofs (red blocks it) apart from other tasks' (an allowed red)
                   :green (count (filter #(= :pass (get results %)) own)) :red (count (filter #(and (contains? results %) (not= :pass (get results %))) own))
                   :allowed-red (count (filter (fn [[p r]] (and (not= :pass r) (not (contains? own p)))) results))
@@ -222,14 +224,14 @@
 
 (defn- eval-records
   "The evaluations recorded on branch db for agent id, in the order they were written:
-  {:all [[eval-id record tx]] :by-item {[pid item-id] record}}, the second what a turn's calls
-  are read through."
-  {:malli/schema [:=> [:cat :seon.host/db :keyword] [:map [:all [:vector :any]] [:by-item :map]]]}
+  {:all [[eval-id record tx]] :by-id {eval-id record}}, the second what a turn's calls are read
+  through."
+  {:malli/schema [:=> [:cat :seon.host/db :keyword] [:map [:all [:vector :any]] [:by-id :map]]]}
   [db id]
   (let [rows (sort-by (fn [[eid _ tx]] [tx (second (record-key eid))])
                       (d/q '[:find ?eid ?r ?tx :in $ ?id :where [?a :seon.agent/id ?id] [?e :seon.cluster.eval/agent ?a]
                              [?e :seon.cluster.eval/id ?eid ?tx] [?e :seon.cluster.eval/record ?r]] db id))]
-    {:all (vec rows) :by-item (into {} (for [[eid r] rows :let [[pid item] (record-key eid)]] [[pid item] r]))}))
+    {:all (vec rows) :by-id (into {} (for [[eid r] rows] [eid r]))}))
 
 (defn messages-of
   "The messages turn entity e took (the owner's and others' words, read at its start): today
@@ -242,8 +244,9 @@
   "The turns of attempt on branch db, oldest first (as written), each its facts with its cost
   at model's prices (seon.model/cost) and the context it read, made again from its basis
   (seon.context/remade: its sections' tokens and its reader text; a basis never changes, so
-  made once per turn id, in cache), linking the whole request at href-of its id. [rows cache']."
-  {:malli/schema [:=> [:cat :seon.host/db :string [:maybe :string] :map :seon.host/fn :seon.host/fn] [:tuple [:vector :map] :map]]}
+  made once per turn id, in cache), linking the whole request at href-of its id, each call with
+  the evaluation records it names (record-of: record id -> record). [rows cache']."
+  {:malli/schema [:=> [:cat :seon.host/db :string [:maybe :string] :map :seon.host/fn :map] [:tuple [:vector :map] :map]]}
   [db aid model cache href-of record-of]
   (reduce (fn [[rows cache] e]
             (let [t (-> (d/pull db '[*] e) (dissoc :db/id)
@@ -307,16 +310,16 @@
         z (get-in st [:zoom view] {})
         task (when attempt (get (:tasks st) (:seon.attempt/task attempt)))
         db (:db z)
-        {:keys [all by-item]} (if db (eval-records db id) {:all (vec (map-indexed (fn [i e] [(str "v/" i) e i]) (:evals ag))) :by-item {}})
-        pid (or (:seon.attempt/pid attempt) (:pid ag))
+        {:keys [all by-id]} (if db (eval-records db id) {:all (vec (map-indexed (fn [i e] [(str "v/" i) e i]) (:evals ag))) :by-id {}})
         model (or (get-in attempt [:seon.attempt/env :model]) (config/value :seon.config.ai/model))
         [turns cache] (if (and db attempt)
-                        (turn-rows db (:seon.attempt/id attempt) model (:turn-ctx z {}) #(turn-href view %) #(get by-item [pid %]))
+                        (turn-rows db (:seon.attempt/id attempt) model (:turn-ctx z {}) #(turn-href view %) by-id)
                         [[] (:turn-ctx z {})])
         ;; the evaluations outside the turns (the owner's, an outside agent's, root's): the turns
         ;; show their own forms; the newest :seon.config.render.list/history
-        in-turns (set (for [t turns c (:seon.turn/calls t) i (:items c)] [pid i]))
-        outside (vec (remove (fn [[eid]] (in-turns (subvec (record-key eid) 0 2))) all))
+        in-turns (set (for [t turns c (:seon.turn/calls t) i (:items c)] i))
+        ;; a context read's own evaluation is its read's row (the turn), never a second one
+        outside (vec (remove (fn [[eid r]] (or (in-turns eid) (= :context (:origin r)))) all))
         records (with-meta (vec (take-last (history-cap) outside)) {:total (count outside)})
         rows (reduce (fn [rows [eid r]]
                        (if (contains? rows eid)
@@ -366,7 +369,10 @@
       :turns (mapv second (sort-by first (concat (for [t turns] [(:tx t) (:html (get html (:seon.turn/id t)))])
                                                  (for [[eid _ tx] records] [tx (get rows eid)]))))
       :turns-why why-none
-      :totals {:n (count turns) :tokens (reduce + 0 (keep :seon.turn/tokens turns))
+      :totals {:n (count turns) :model (count (filter #(= :model (:seon.turn/origin %)) turns))
+               :reads (count (remove #(= :model (:seon.turn/origin %)) turns)) :evals (count all)
+               ;; unknown is not 0: no turn that reported its tokens, no total
+               :tokens (when-let [ts (seq (keep :seon.turn/tokens turns))] (reduce + ts))
                :usd (when-let [us (seq (keep :usd turns))] (reduce + us))
                :unpriced (count (filter #(and (:seon.turn/tokens %) (nil? (:usd %))) turns))}
       :branch branch :problems problems

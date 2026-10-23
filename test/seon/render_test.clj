@@ -154,7 +154,7 @@
 (deftest problems-tile
   (is (str/includes? (h/html (ui/tile-problems [] {})) "no problems"))
   (let [html (h/html (ui/tile-problems ["proc writer UNKNOWN"] {}))]
-    (is (str/includes? html "1 problem"))
+    (is (str/includes? html "1 kind of problem"))
     (is (str/includes? html "proc writer UNKNOWN")))
   (testing "a dead agent whose attempt finished is not a problem"
     (is (empty? (ai/problems (assoc sys :agents {:a2 {:status :dead}} :health {} :root-errors [] :recorded {}
@@ -653,7 +653,7 @@
        (d/transact conn (seon.repl/record-tx :a3 "a3-77-1000" [{:id 4 :tag :ret :form "(in-ns 'demo)" :lead ";; work in demo" :printed "#namespace[demo]" :ms 0.2}
                                                               {:id 5 :tag :ret :form "(defn f [x] (* 3 x))" :lead ";; triple, as the plan says" :printed "#'demo/f" :ms 1.1}] nil))
        (turn! 0 observed "I will make f triple."
-              [{:id "call-0" :code ";; work in demo\n(in-ns 'demo)\n;; triple, as the plan says\n(defn f [x] (* 3 x))" :items [4 5] :thinking "redefine f, then the proof runs"
+              [{:id "call-0" :code ";; work in demo\n(in-ns 'demo)\n;; triple, as the plan says\n(defn f [x] (* 3 x))" :items ["a3-77-1000/4" "a3-77-1000/5"] :thinking "redefine f, then the proof runs"
                 :evals (seon.context/evaluations-text [{:id 5 :tag :ret :form "(defn f [x] (* 3 x))" :printed "#'demo/f"}])}]
               (assoc (u 3900 120 0) :seon.turn/reasoning "The plan says triple; the proof checks (f 2) is 6."))
        (d/transact conn (seon.repl/record-tx :a3 "a3-77-2000" [{:id 6 :tag :ret :form "(f 2)" :printed "6" :ms 0.1 :origin :ui}] nil))
@@ -701,7 +701,7 @@
           (is (str/includes? t1 "since the last turn: f-test fail → pass") "what changed since the turn before")
           (is (str/includes? t1 "check demo/g too")))
         (testing "the head: totals over the turns, priced where the provider split its cache"
-          (is (= {:n 2 :tokens 8460 :unpriced 0} (dissoc (:totals page) :usd)))
+          (is (= {:n 2 :model 2 :reads 0 :evals 3 :tokens 8460 :unpriced 0} (dissoc (:totals page) :usd)))
           (is (< 0 (:usd (:totals page)) 0.01)))
         (testing "the branch box reads the newest turn's :will-merge"
           (is (= {:changed ['demo/f]} (get-in page [:branch :will-merge])))
@@ -747,7 +747,7 @@
     (is (= ["root holds no agent a9 and main records no attempt it worked"] (ui/why {:id :a9} nil nil 0))))
   (testing "the head shows the attempt's numbers and cost"
     (let [html (h/html (ui/zoom-head {:agent {:id :a3 :status :idle :pid 77 :mem-mb 120.5 :evals []} :attempt attempt1
-                                                         :turns {:n 2 :tokens 8460 :usd 0.00123 :unpriced 1}} {}))]
+                                                         :turns {:n 2 :model 2 :reads 0 :evals 5 :tokens 8460 :usd 0.00123 :unpriced 1}} {}))]
       (is (str/includes? html "deepseek-flash"))
       (is (str/includes? html "8,460"))
       (is (str/includes? html "$0.0012 + 1 turns not priced"))

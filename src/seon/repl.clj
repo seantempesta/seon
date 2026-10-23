@@ -321,7 +321,8 @@
 
 (defn- record!
   "Record items (with the defs their forms recorded) on this branch through the agent's
-  write path (each item's :origin says who asked, when not the agent itself). Answers items.
+  write path (each item's :origin says who asked, when not the agent itself). Answers items,
+  each recorded one with the id of its record (:record, what a turn's call names).
   When the agent's entity ids are spent (:seon.db/lease-spent) the record cannot be written
   on its branch: root is told ({:op :unrecorded}) and records it as a problem on main, and
   each item says :unrecorded, so its asker knows that fact is coming."
@@ -332,9 +333,9 @@
     (swap! agent/state dissoc :defs)
     (if (and contract/record? (= :agent (:mode @agent/state)) (seq items))
       (try
-        (agent/transact! (into defs (record-tx (:id @agent/state) (str (name (:id @agent/state)) "-" (lib/c-getpid) "-" (profile/now-ns))
-                                               items (:max-tx (agent/db)))))
-        items
+        (let [run (str (name (:id @agent/state)) "-" (lib/c-getpid) "-" (profile/now-ns))]
+          (agent/transact! (into defs (record-tx (:id @agent/state) run items (:max-tx (agent/db)))))
+          (mapv #(cond-> % (:id %) (assoc :record (str run "/" (:id %)))) items))
         (catch clojure.lang.ExceptionInfo e
           (if (= :seon.db/lease-spent (:seon.error/type (ex-data e)))
             (do (agent/send! {:op :unrecorded :error (ex-data e) :forms (count items)})
