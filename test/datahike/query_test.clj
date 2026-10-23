@@ -1,6 +1,6 @@
 (ns datahike.query-test
   "Datahike's query, as Seon's agents call it: what it answers and what it refuses."
-  (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d] [seon.test-store :as ts])
+  (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d] [datahike.datom :as datom] [seon.test-store :as ts])
   (:import [clojure.lang ExceptionInfo]))
 
 (deftest a-nested-call-in-a-predicate-is-refused
@@ -63,9 +63,23 @@
            (d/q '[:find ?n :where [_ :ns/name ?n] [(str ?n) ?s] [(clojure.string/ends-with? ?s "-test")]
                   [(clojure.string/starts-with? ?s "proof.")]] db))
         "given the string, it answers")
-    (testing "the built-in comparisons order values of different kinds, as the indexes do, and never throw"
-      (do
-        (is (= (d/q '[:find ?n :where [_ :ns/name ?n] [(str ?n) ?s] [(clojure.string/starts-with? ?s "proof.")] [(> ?n 5)]] db)
-               (d/q '[:find ?n :where [_ :ns/name ?n] [(str ?n) ?s] [(clojure.string/starts-with? ?s "proof.")] [(> ?n 5)]] db))
-            "a symbol against a number: an answer, the same each time")
-        (is (= #{[3]} (d/q '[:find ?x :in [?x ...] :where [(< ?x 4)] [(> ?x 2)]] [1 2 3 4 5])) "numbers as before")))))
+    (is (let [vs (:values (ex-data e))] (and (= 1 (count vs)) (symbol? (first vs))))
+        "and the call's arguments (the one symbol pos? was given), not the whole row")
+    (testing "every path that runs a predicate raises it"
+      (doseq [[path q args] [["a relation of inputs" '[:find ?x :in [?x ...] :where [(pos? ?x)]] [['a]]]
+                             ["inside not" '[:find ?n :where [_ :ns/name ?n] (not [(pos? ?n)])] [db]]
+                             ["inside or" '[:find ?n :where [_ :ns/name ?n] (or [(pos? ?n)] [(neg? ?n)])] [db]]
+                             ["inside a rule" '[:find ?n :in $ % :where [_ :ns/name ?n] (positive ?n)]
+                              [db '[[(positive ?n) [(pos? ?n)]]]]]]]
+        (is (= :query/call-threw (:error (ex-data (is (thrown? ExceptionInfo (apply d/q q args)))))) path)))
+    (is (= :seon/own (:error (ex-data (is (thrown? ExceptionInfo
+                                                   (d/q '[:find ?x :in [?x ...] ?f :where [(?f ?x)]]
+                                                        [1] (fn [_] (throw (ex-info "own" {:error :seon/own})))))))))
+        "a call's own typed error is passed on as is")
+    (testing "the built-in comparisons order values of different kinds as the indexes do, and never throw"
+      (let [xs [:k "s" 'sym 7 3 5.5]]
+        (is (= (set (for [x xs :when (pos? (datom/compare-value x 5))] [x]))
+               (d/q '[:find ?x :in [?x ...] :where [(> ?x 5)]] xs))
+            "each value against a number, by compare-value"))
+      (is (= #{[3]} (d/q '[:find ?x :in [?x ...] :where [(< ?x 4)] [(> ?x 2)]] [1 2 3 4 5])) "numbers as before")
+      (is (= #{[3]} (d/q '[:find ?x :in [?x ...] :where [(< 2 ?x 4)]] [1 2 3 4 5])) "a chain of three"))))
