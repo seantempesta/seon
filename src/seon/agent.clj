@@ -97,6 +97,12 @@
   []
   (inbox)
   (let [[old _] (swap-vals! state assoc :inbox [])] (:inbox old)))
+
+(defn taken!
+  "The first n messages of the inbox leave it: their reader recorded them (seon.turn/basis!
+  takes them once their facts are committed on this branch). nil."
+  {:malli/schema [:=> [:cat nat-int?] :nil]}
+  [n] (swap! state update :inbox #(vec (drop n %))) nil)
 (defn send-message
   "Send body to the agents tos (ids); root delivers it by id. nil."
   {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}

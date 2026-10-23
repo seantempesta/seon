@@ -726,8 +726,9 @@
           (is (= {:n 2 :model 2 :reads 0 :evals 3 :read? true :tokens 8460 :unpriced 0} (dissoc (:totals page) :usd)))
           (is (< 0 (:usd (:totals page)) 0.01)))
         (testing "the branch box reads the newest turn's :will-merge"
-          (is (= {:changed ['demo/f]} (get-in page [:branch :will-merge])))
-          (is (= "demo/f#1/1" (get-in page [:branch :turn]))))))))
+          (let [b (some #(when (str/starts-with? (:id %) "tile-branch-") (get-in % [:input :value])) (:tiles page))]
+            (is (= {:changed ['demo/f]} (:will-merge b)))
+            (is (= "demo/f#1/1" (:turn b)))))))))
 
 (deftest a-turn-row-shows-the-context-remade-from-its-basis
   (with-turns

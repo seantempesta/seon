@@ -37,14 +37,14 @@
   [form] (print/text form (:form print/budgets)))
 
 (defn- form-src
-  "The exact text of form in code, from its reader position (:line, :column) to where the
-  reader stopped after it (end-line, end-col; all 1-based), or nil for a form that carries
-  no position (a symbol, a number)."
-  {:malli/schema [:=> [:cat :string [:vector :int] :any :int :int] [:maybe :string]]}
-  [code starts form end-line end-col]
+  "The exact text of form in code, from its reader position (:line, :column; 1-based) to end,
+  the offset where the reader stopped after it, or nil for a form that carries no position (a
+  symbol, a number)."
+  {:malli/schema [:=> [:cat :string [:vector :int] :any :int] [:maybe :string]]}
+  [code starts form end]
   (let [{:keys [line column]} (meta form)]
     (when (and line column)
-      (subs code (+ (starts (dec line)) (dec column)) (+ (starts (dec end-line)) (dec end-col))))))
+      (subs code (+ (starts (dec line)) (dec column)) end))))
 
 (defn- keep-source!
   "A definition keeps its exact text on its var (owner: source reads the live var), so
@@ -96,7 +96,7 @@
                 end (+ (@starts (dec (.getLineNumber r))) (dec (.getColumnNumber r)))
                 lead (reader/lead code prev end)
                 common (cond-> {:id n :out (not-empty (str out)) :form (form-text form) :repl/form form
-                                :repl/src (form-src code @starts form (.getLineNumber r) (.getColumnNumber r))}
+                                :repl/src (form-src code @starts form end)}
                          lead (assoc :lead lead))]
             (swap! agent/state assoc :repl-vars (if (= tag :ret) {:v1 v :v2 v1 :v3 v2 :e e1} {:v1 v1 :v2 v2 :v3 v3 :e v}))
             (when (= tag :ret) (keep-source! v (:repl/src common)))

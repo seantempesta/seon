@@ -347,17 +347,16 @@
           (to-agent st id {:op :req :rid rid :kind op :msg msg :merge-branch (:merge-branch m) :data-attrs (:data-attrs m)})))
       ;; a message to a live agent (the owner's, from the page or the server): root's one
       ;; delivery, as an agent's send is; it lands in the agent's inbox, which its next turn reads
-      ;; the owner's message is a fact on main (root's branch: :seon.message/*), delivered at once
-      ;; and answered when the writer has it; the agent writes the same fact on its own branch
+      ;; the owner's message is a fact on main (root's branch: :seon.message/*), delivered and
+      ;; answered once the writer has it; the agent writes the same fact on its own branch
       ;; when its turn takes it (seon.agent/messages)
       :message (if (nil? (get-in st [:agents id]))
                  (reply! st p (gone id (str "no live agent " id)))
                  (let [mid (str "m-" (random-uuid))
                        fact {:seon.message/id mid :seon.message/from (name (:from m)) :seon.message/to (message-to st id) :seon.message/body (:body m)}
                        [st rid] (pend st p :tx nil)]
-                   (step/out! o :to-writer {:op :tx :branch :db :tx-data [fact] :dest {:rid rid}})
-                   (-> st (update :writes (fnil conj #{}) rid)
-                       (deliver-message {:from (:from m) :to [id] :body (:body m) :id mid}))))
+                   (step/out! o :to-writer {:op :tx :branch :db :tx-data [fact] :dest {:rid rid :message {:from (:from m) :to [id] :body (:body m) :id mid}}})
+                   (update st :writes (fnil conj #{}) rid)))
       ;; requests for the writer: answered by rid; a collection only while no agent is live,
       ;; the store's only writer then being root's writer (seon.db/collect!)
       :write (if (and (= :collect (get-in m [:req :op])) (seq (:agents st)))
@@ -411,7 +410,9 @@
                                true (deliver-rid (:rid dest) (dissoc r :sync))))
         ;; the recorded errors' write was answered: the next window may write
         (:errors-flushed dest) (dissoc st ::errors-flight)
-        (:rid dest) (deliver-rid st (:rid dest) r)
+        ;; a message is delivered once its fact is written, never before
+        (:rid dest) (cond-> (deliver-rid st (:rid dest) r)
+                      (and (:message dest) (not (contract/error? r))) (deliver-message (:message dest)))
         (:agent dest) (to-agent st (:agent dest) {:op :write :msg (cond (:op r) r
                                                                           (= :branched (:op dest)) (cond-> {:op :branched :k (:k dest) :cfg (:cfg r)} (contract/error? r) (assoc :error r))
                                                                           :else (assoc r :op (:op dest) :k (:k dest)))})

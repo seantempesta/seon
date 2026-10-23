@@ -81,13 +81,14 @@
 
 
 (defn main-of
-  "The input of size n: an empty render state and the test store's seed with n more evaluation
-  records on main (three datoms each: data, not program), as the render proc reads main when
+  "The input of size n: an empty render state and the test store's seed with n units of 20 more
+  evaluation records on main (three datoms each: data, not program; 60 datoms a unit, so at
+  n = 1000 the records' 60k datoms dwarf the seed's ~5k), as the render proc reads main when
   its t moves."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
   [{} (d/db-with (ts/test-db) (into [{:db/id "a" :seon.agent/id :a1}]
-                                    (for [i (range n)] {:seon.cluster.eval/id (str "a1-1-1/" i) :seon.cluster.eval/agent "a"
+                                    (for [i (range (* 20 n))] {:seon.cluster.eval/id (str "a1-1-1/" i) :seon.cluster.eval/agent "a"
                                                         :seon.cluster.eval/record {:tag :ret :form "(+ 1 2)" :shown "3"}})))])
 
 (deftest main-info-reads-what-the-page-shows
@@ -97,7 +98,7 @@
   ;; attempts, config and problems: none grows with main's other data
   (cost/proof
     {:of 'seon.render.proc/main-info :input 'seon.render-cost-test/main-of
-     :n "evaluation records on main (data that is neither program, task nor problem)"
+     :n "units of 20 evaluation records on main (data that is neither program, task nor problem)"
      :work (str "none per record: the vars are an index count over :var/name, the tasks and attempts the "
                 "reconciler's index over their own attributes, the config one pull of root's entity, the "
                 "problems their own indexes; a record is never walked")

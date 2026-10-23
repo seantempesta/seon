@@ -147,13 +147,15 @@
   message as it was sent."
   {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id :int :int :seon.turn/origin :map :boolean] :seon.turn/basis]}
   [task attempt turn max-turns origin observed take?]
-  (let [msgs (if take? (agent/messages) (agent/inbox))
+  (let [msgs (agent/inbox)
         {facts true others false} (if take? (group-by (comp some? :id) msgs) {false msgs})
         _ (when (seq facts)
             (agent/transact! (vec (for [{:keys [id from to body]} facts]
                                     (cond-> {:seon.message/id id :seon.message/from (name from) :seon.message/body body}
                                       to (assoc :seon.message/to to))))))
         _ (agent/commit!)
+        ;; taken once their facts are committed: a refused write leaves them in the inbox
+        _ (when take? (agent/taken! (count msgs)))
         items (when (or (= :outside origin) (zero? turn)) (last-evals))
         ev (when (seq items) (context/evaluations-text items))]
     (cond-> {:commit (d/commit-id (agent/db)) :task task :attempt attempt :turn turn :max-turns max-turns

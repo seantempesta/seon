@@ -106,6 +106,12 @@
                   :shown shown :truncated? true :omitted omitted :lines lines :offset at}
            cont (assoc :continuation cont)))))))
 
+(defn line-prose
+  "`line`'s prose ({:text :shown :truncated?} and a cut's members, `prose`): what a reader that
+  says whether the line was cut takes."
+  {:malli/schema [:=> [:cat :any pos-int? :any] :seon.print/prose]}
+  [s budget source] (prose (cond-> s (and (some? s) (not (string? s))) (text budget)) budget (cond-> {:one-line? true} source (assoc :source source))))
+
 (defn line
   "Text in one line under budget tokens (a value that is not text printed first): `prose`
   with every whitespace run as one space;
@@ -113,7 +119,7 @@
   form that reads the rest. Root's context and the page's one-line rows (the stream)."
   {:malli/schema [:function [:=> [:cat :any pos-int?] :string] [:=> [:cat :any pos-int? :any] :string]]}
   ([s budget] (line s budget nil))
-  ([s budget source] (:text (prose (cond-> s (and (some? s) (not (string? s))) (text budget)) budget (cond-> {:one-line? true} source (assoc :source source))))))
+  ([s budget source] (:text (line-prose s budget source))))
 
 (defn more
   "What a bounded list leaves: nil when its shown members are all of total, else `+N more`
