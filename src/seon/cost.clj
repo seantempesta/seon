@@ -129,9 +129,32 @@
                         :let [q (ratio r d)] :when (and q (> q (slack d)))]
                     {:dim d :n (:n r) :ratio q}))
         fixed (:fixed e {})
-        allowed (+ steeper-by (exponent (for [r rows] [(:n r) (work (:growth e) (:n r))])))
+        ;; growth is judged so that a change making every size cheaper (or dearer) by one amount
+        ;; never moves it (task seon.cost/a-speedup-never-reads-as-steeper): fitted on the stated
+        ;; :fixed taken off, a faster fixed part left the smallest size's remainder near 0 and the
+        ;; fit read the speedup as growth. With three sizes or more, each size's increment over the
+        ;; smallest, m(n) - m(n0), is fitted against the work's own, W(n) - W(n0): no fixed part
+        ;; assumed. With two there is one increment and no shape to fit, so the fixed part taken
+        ;; off is the estimate's but never more than the smallest size leaves beyond its estimated
+        ;; per-unit part. Constant work has no increments: its cost itself is fitted (it should
+        ;; not grow at all)
+        basis (cond (= :constant (:growth e)) :total (>= (count rows) 3) :increments :else :bounded-fixed)
+        n0 (:n (first rows))
+        w (fn [n] (work (:growth e) n))
+        allowed (+ steeper-by (exponent (if (= :increments basis)
+                                          (for [r (rest rows)] [(:n r) (- (w (:n r)) (w n0))])
+                                          (for [r rows] [(:n r) (w (:n r))]))))
+        fixed-of (fn [d] (let [f (double (get fixed d 0.0))
+                               {:keys [measured expected]} (first rows)
+                               m0 (get measured d) e0 (get expected d)]
+                           (if (and m0 e0) (max 0.0 (min f (- m0 (- e0 f)))) f)))
         steeper (vec (for [d dimensions :when (dims d)
-                           :let [pts (for [r rows :let [m (get-in r [:measured d])] :when m] [(:n r) (- m (get fixed d 0.0))])]
+                           :let [m0 (get-in (first rows) [:measured d])
+                                 pts (case basis
+                                       :total (for [r rows :let [m (get-in r [:measured d])] :when m] [(:n r) m])
+                                       :increments (for [r (rest rows) :let [m (get-in r [:measured d])] :when (and m m0)] [(:n r) (- m m0)])
+                                       :bounded-fixed (let [f (fixed-of d)]
+                                                        (for [r rows :let [m (get-in r [:measured d])] :when m] [(:n r) (- m f)])))]
                            :when (>= (count pts) 2)
                            :let [x (exponent pts)] :when (> x allowed)]
                        {:dim d :exponent x :allowed allowed}))
