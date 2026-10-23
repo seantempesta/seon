@@ -177,19 +177,6 @@
   {:malli/schema [:=> [:cat] [:map [:count :int] [:real-ms :int] [:cpu-ms :int]]]}
   [] (let [[c r u] (gc-stats*)] {:count c :real-ms r :cpu-ms u}))
 
-(defn fiber-carriers
-  "The fiber carrier threads Jolt runs (or will run, before the first fiber): its pool size."
-  {:malli/schema [:=> [:cat] :int]}
-  [] (scm/eval-string "(if jolt-fiber-carriers (vector-length jolt-fiber-carriers) (jolt-fiber-carrier-count))"))
-
-(defn thread-roster
-  "This process's Jolt threads by name, a numbered name folded to its stem
-  (\"jolt-carrier-3\" -> \"jolt-carrier\"): {stem count}. A thread nobody named shows as
-  \"Thread\". The GC's sweepers are C threads, not here: (- (nthreads) this sum)."
-  {:malli/schema [:=> [:cat] [:map-of :string :int]]}
-  []
-  (frequencies (map #(str/replace (.getName ^Thread %) #"-\d+$" "") (keys (Thread/getAllStackTraces)))))
-
 (defchecked ^:private install-signal-handler* [:=> [:cat :int :seon.host/fn] :any]
   (scm/eval-string "(lambda (sig f) (register-signal-handler sig (lambda (s) (f))))"))
 
