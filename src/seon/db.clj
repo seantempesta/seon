@@ -167,12 +167,12 @@
   (install-missing! conn)
   (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx :tx-meta (tx-meta (conn-main conn))})))
 
-;; ---- one store, many branches, as in production (owner, 2026-10-21) ------------
+;; ---- one store, many branches, as in production (DECISIONS, Branches as in production) --
 ;; A store holds one seed on :db. Every root works on a main of its own, a branch of :db
 ;; (production's root works on :db itself; each check step, each run, each test on a
 ;; branch), and its agents' and tasks' branches are named under that main, so roots
-;; sharing a store never share a branch. A branch is one pointer write (~1 ms measured,
-;; 2026-10-21) where a fresh seeded store was ~200 ms and ~2 MB.
+;; sharing a store never share a branch. A branch is one pointer write (~1 ms measured)
+;; where a fresh seeded store was ~200 ms and ~2 MB.
 
 (defn on-main
   "Branch b of the root whose main is `main`, as the store names it: :db names main itself;
@@ -221,7 +221,7 @@
   "Delete main and every branch held under it (of-main) from the store of conn, a connection
   to :db (datahike.api/delete-branch!; a branch's connections are released first): what a
   check step or a test made for itself, deleted by the run that made it. Real agent runs are
-  never deleted this way (owner, 2026-10-22: kept as evidence). Answers the deleted branches;
+  never deleted this way (DECISIONS, Runs are kept, history and all). Answers the deleted branches;
   a main the store lacks deletes nothing."
   {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch] [:vector :seon.db/branch]]}
   [conn main]
@@ -302,8 +302,8 @@
   :seon.root/collected): the record to write, {:swept :ms :branches :gone}. With no record yet
   (a new main) or none gone but branches made since, the record of what is here, nothing swept,
   so a branch seen at one quiescence and gone at a later one is reclaimed; {:skipped true} when
-  the branches are the ones recorded. Only while no other process writes the store (owner,
-  2026-10-22, simplest first): root's writer runs it (:collect), root refuses it while an agent
+  the branches are the ones recorded. Only while no other process writes the store (owner:
+  simplest first): root's writer runs it (:collect), root refuses it while an agent
   is live, and sole? (:seon.config.store/sole-writer?) says no other root writes it; when not,
   {:skipped true :shared true} (docs/storage.md#collection)."
   {:malli/schema [:=> [:cat :seon.host/conn :boolean] [:or [:map [:skipped :boolean] [:shared {:optional true} :boolean]] :seon.root/collected]]}
@@ -316,7 +316,7 @@
       (and last (zero? gone) (= now (:branches last))) {:skipped true}
       ;; no record yet (a new main: every check step's) or nothing gone: record what is here,
       ;; sweep nothing; a full sweep on a store of hundreds of branches held a check step's
-      ;; spawns behind root's writer for seconds (scale: 8.2 s to ready, 2026-10-22)
+      ;; spawns behind root's writer for seconds (scale: 8.2 s to ready)
       (zero? gone) {:swept 0 :ms 0.0 :branches now :gone 0}
       :else
       (let [t0 (profile/now-ns)

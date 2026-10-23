@@ -144,7 +144,7 @@
 (defn transact!
   "Write tx-data to this agent's branch: applied at once to the value ahead of the
   committed one (its answer does not wait for a commit), committed when the agent is idle
-  or at a turn's end, never because time passed (owner, 2026-10-20: the agent-owned run-ahead
+  or at a turn's end, never because time passed (owner: the agent-owned run-ahead
   writer). Answers {:t :datoms :tempids}. Inside a test (a fork of the agent) it applies to
   the fork's db only. A refused transaction throws its message into the caller's eval."
   {:malli/schema [:=> [:cat :seon.db/tx-data] :seon.agent/tx-result]}
@@ -356,7 +356,7 @@
   resumed branch's older one) is the graph held updated to it (seon.program/reach-update, in
   either direction), never built again: the graph held is the one this process was forked
   with, main's, kept by the fork server (:graph), and built here only when there is none or
-  its :data-refs are not inputs'. Measured 2026-10-23 on Seon's program (2,616 forms): the
+  its :data-refs are not inputs'. Measured on Seon's program (2,616 forms): the
   graph 640 ms, 816 MB; a one-form change's update and index 20-45 ms."
   {:malli/schema [:=> [:cat :seon.host/db :seon.program/inputs] :map]}
   [base inputs]
@@ -376,9 +376,10 @@
   those digests (files in results-dir, and the test service's result facts in db: seon.proofs/stored-greens) and proofs. The digests' inputs with no program facts are this boot's
   :inputs on root's :seon.root/source fact (seon.root/import-source!: present only when root's
   binary is built from its source tree), so an agent's results are kept by digest in the one
-  results directory every checkout shares (:seon.config.source/test-results-dir: owner,
-  2026-10-23, a test that is the same is not run again once green, \"especially when freshly
-  branched\"; every eval is a recorded form, so the digest covers what ran); a root with no
+  results directory every checkout shares (:seon.config.source/test-results-dir: DECISIONS, Agents
+  share
+  greens: a test green at its digest never runs again, \"especially when freshly branched\"; every
+  eval is a recorded form, so the digest covers what ran); a root with no
   such fact this boot shares nothing and reuses nothing (the
   inputs then are blank, which keys nothing stored: it only selects). A test is selected when
   it is a proof or reaches what the branch changed since base (a var, method, fixture, ns form,
@@ -390,7 +391,7 @@
   every test with no green at its digest (seon.proofs/plan's own rule). Answers the plan with
   :digests {test digest}, :dir (the results directory when shared) and :process, the tests that reach a
   process of their own (seon.program/reach-index, the same walk as the digests): never run
-  automatically, only when named (owner's ruling, 2026-10-23)."
+  automatically, only when named (DECISIONS, Process tests are not automatic)."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] [:set :qualified-symbol]]
                   [:map [:selected [:vector :qualified-symbol]] [:run [:vector :qualified-symbol]] [:reused [:map-of :qualified-symbol :map]]
                    [:digests [:map-of :qualified-symbol :string]] [:dir [:maybe :string]] [:process [:set :qualified-symbol]]]]}
@@ -506,8 +507,7 @@
   "What a test-plan p runs when a request names namespaces (names; none: every test it selects), as
   p with :selected and :run restricted to them. A test that reaches a process of its own (p's
   :process) runs only when asked for: its namespace is named, or it is one of the proofs;
-  otherwise it is left out and listed under :skipped (owner, 2026-10-23: tests shouldn't be
-  running agent turns, not automatically)."
+  otherwise it is left out and listed under :skipped (DECISIONS, Process tests are not automatic)."
   {:malli/schema [:=> [:cat :map [:maybe [:set :symbol]] [:set :qualified-symbol]] :map]}
   [p names proofs]
   (let [in? #(contains? names (symbol (namespace %)))
@@ -526,12 +526,12 @@
   owner (seon.proofs/store-greens!); a write refused is named under :unstored, and that test
   runs again. :ran is how many tests reported. (forked pid) runs here once the child exists.
   A fork refused (threads active) is :seon.test/fork-refused: no test ran.
-  Root's ruling (a), 2026-10-22: mode :turn (a turn's observation) selects the proofs and the
+  Root's ruling (a): mode :turn (a turn's observation) selects the proofs and the
   tests the branch itself changed or added; mode :judge (root's judge at the run's end, and
   the test service's runs) selects the plan's tests. names (the test service's request: a set of
   namespaces) restricts either to the tests of those namespaces. A process test (the plan's
   :process: it reaches a shell, a fork, a root or the binary) never runs here unless its namespace
-  is named (the owner's ruling, 2026-10-23: only when asked; root's gate, my.root/gate!, asks).
+  is named (DECISIONS, Process tests are not automatic; root's gate, my.root/gate!, asks).
   The answer names those left out (:deferred) and how many the judge runs (:at-judge)."
   {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge]] [:or :seon.test/result :seon.test/fork-refused]]
                   [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]

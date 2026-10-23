@@ -299,7 +299,9 @@
          st {:port port :http http :tabs {} :stale #{} :rid 0 :pending {} :bytes 0 :index {}
              ::flow/in-ports {:http http}}
          ;; whether it listens is an event to the api's view (its first message, on its own
-         ;; in-port: init has no outputs), never a ping (owner, 2026-10-21)
+         ;; in-port: init has no outputs), never a ping (DECISIONS, If nothing has changed, we do
+         ;; nothing; no clock or timer decides
+         ;; (three exceptions))
          _ (a/put! http {:op :listener})]
      (if (and port (pos? port))
        (let [server (try (adapter/run-server (handler http) {:port port :host "127.0.0.1" :strategy :fibers

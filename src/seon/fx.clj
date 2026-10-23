@@ -333,7 +333,7 @@
         {:value {:commit commit :checkout dir :binary (str dir "/target/seon") :ms (profile/ms-since t0)}})))
 (defn test-command
   "The runner the :tests effect calls in a checkout, as argv, for namespaces nss: prove's one
-  entry (land12, root 2026-10-22), each named namespace's tests with no green at their reach
+  entry, each named namespace's tests with no green at their reach
   digest run, the rest reused."
   {:malli/schema [:=> [:cat [:sequential :symbol]] [:vector :string]]}
   [nss] (into ["nice" "-n" "15" "bin/prove" "--tests"] (map str nss)))

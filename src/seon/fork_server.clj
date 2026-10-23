@@ -75,7 +75,7 @@
            (let [t0 (profile/now-ns)
                  ;; main at t is the commit the writer made, read from the store (lazy over its
                  ;; persistent indexes), never its datoms replayed here: replaying a 42,942-datom
-                 ;; import took 3.5 s, and the first fork waited behind it (2026-10-23)
+                 ;; import took 3.5 s, and the first fork waited behind it
                  db' (d/commit-as-db (:store st) (:commit m))
                  st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled
@@ -131,7 +131,9 @@
   ([db0 cfg fd boot?] (main db0 cfg fd boot? nil))
   ([db0 cfg fd boot? graph]
   ;; every agent forked from here works in the scratch dir, with no repository above it: an
-  ;; agent changes code through its REPL and git finds nothing (owner, 2026-10-22)
+  ;; agent changes code through its REPL and git finds nothing (DECISIONS, Agents work at the REPL
+  ;; through tool calls: no git, no
+  ;; source-file editing)
   (when boot? (lib/c-setpgid 0 0) (dev-classpath!)
     (let [dir (get cfg/config :seon.config.agent/cwd)] (.mkdirs (java.io.File. dir)) (lib/c-chdir dir)))
   ;; it reads main's commits from the store itself, opened as an agent opens it

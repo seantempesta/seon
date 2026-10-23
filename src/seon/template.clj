@@ -1,5 +1,5 @@
 (ns seon.template
-  "Task templates (owner, 2026-10-20: tasks chain through `:needs`; each step is a new
+  "Task templates (owner: tasks chain through `:needs`; each step is a new
   agent with improved context).
 
   Every kind (work, design, implement, test, merge) is a default template that overrides
@@ -11,8 +11,9 @@
     from a main that holds that work.
   - `request`: a request (one declaration: what the user asked) becomes design ->
     implement -> merge on design's branch, so each step holds the last one's work, and
-    `request-tx` writes the whole linked set released in one transaction (owner,
-    2026-10-22): the reconciler forks only from a committed main, so every agent of the
+    `request-tx` writes the whole linked set released in one transaction (DECISIONS,
+    A request's whole linked task set is one transaction on main, before any agent forks): the
+    reconciler forks only from a committed main, so every agent of the
     set starts from the same graph.
   A failed run attaches no tasks: its task is held for root (seon.reconcile/hold-tx)."
   (:refer-clojure :exclude [defn defn-])
@@ -80,7 +81,7 @@
   "decls (task declarations of work) followed by their merge tasks; needs on a work task
   of decls become needs on its merge. (A generated input holds at most 4 declarations: each is
   a large nested map, and up to ~100 of them made this one contract's mg/check 78 s of the
-  step's 136, pure-tests 2026-10-23; 4 already cover a need on work, on a merge and outside.)"
+  step's 136; 4 already cover a need on work, on a merge and outside.)"
   {:malli/schema [:=> [:cat [:vector {:gen/max 4} :seon.task/declaration]] [:vector :seon.task/declaration]]}
   [decls]
   (let [id #(task/task-id (:seon.task/ns %) (:seon.task/name %))
