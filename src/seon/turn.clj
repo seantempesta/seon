@@ -257,7 +257,8 @@
   the code (root's research, lever 2: loops took 45% of tokens; the step E dry run's first
   real design repeated one pair of calls 18 times): the judge refines from that evidence.
   Answers the end ({:outcome :turns :model-calls :tokens :ms}); the same end is written on
-  the branch."
+  the branch. It first merges main into the branch (my.branch/merge-main!), as a merge task
+  does again at each green."
   {:malli/schema [:=> [:cat [:map [:task :seon.task/id] [:run :seon.run/id] [:model {:optional true} :string]
                              [:max-turns pos-int?]]]
                   :seon.turn/end]}
@@ -266,7 +267,10 @@
         t0-task (task/task (agent/db) task)
         merge? (= :merge (:seon.task/kind t0-task))
         merge-cfg (r/merge-limits t0-task)]
-    (when merge? (branch/merge-main!))
+    ;; every run starts on main: a kept branch made before main moved merges it first, so
+    ;; the branch's db, its base and this process hold one program (its tests' digests are the
+    ;; program it runs); a branch at main's head brings nothing
+    (branch/merge-main!)
     (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (profile/now-ns) :run run
                :max-turns max-turns :merge? merge?}]
       (let [{:keys [reasons unmerged] :as obs} (observe task plan-before)

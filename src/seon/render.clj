@@ -5,11 +5,11 @@
   A render is a plain function (value opts) -> its result, like a React component: opts are
   its props, all optional (:as, the room it is shown in, :inline, :block or :tile; :budget,
   its tokens; :handle, the form its cuts read the rest through), and a function that does not
-  care about one ignores it (owner, 2026-10-23: \"It's all just functions and results\"). An
+  care about one ignores it (owner: \"It's all just functions and results\"). An
   :html render answers hiccup (serialized by seon.web.html, where a vector headed by a
   function is a call, expanded as Reagent does); an :ai render answers text, or the printer's
-  result {:text :truncated?}. Selection, first match wins, and nothing else (owner,
-  2026-10-20: \"Everything has a schema right so we say this renders this\"):
+  result {:text :truncated?}. Selection, first match wins, and nothing else (DECISIONS,
+  Renders attach to schemas; the UI and the context are renders, ported not reinvented):
     1. the value's own override key (:seon.render/html or :seon.render/ai, in the map or its
        metadata): a render symbol, or already-rendered data;
     2. the render its schema declares: a schema's properties {:seon.render/html sym

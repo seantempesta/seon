@@ -272,7 +272,7 @@
       (last-reply truncated? source (vec repairs)) (assoc :your-last-reply (last-reply truncated? source (vec repairs)))
       (:seon.task/evidence t) (assoc :evidence (:seon.task/evidence t))
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
-      ;; owner D4 (2026-10-22): every change the branch's merge carries to main, every turn
+      ;; owner D4: every change the branch's merge carries to main, every turn
       ;; measured and empty ({}) says so; absent only when not measured (a basis before D4)
       ;; the sections of the wiki this branch's code changes made stale (seon.problems/caused-split): to read and
       ;; probably fix; never a reason to refuse done
@@ -282,9 +282,10 @@
       ;; read, where its agent wrote them), the rest as the basis holds them
       (or (seq message-ids) (seq messages))
       (assoc :messages (mapv #(dissoc % :id) (taken-messages db {:message-ids message-ids :messages messages})))
-      ;; root's ruling (a), 2026-10-22: the tests this turn ran (the proofs and the tests the
+      ;; root's ruling (a): the tests this turn ran (the proofs and the tests the
       ;; branch changed), those the judge runs at the run's end, the process tests run only
-      ;; when root asks (owner, 2026-10-23); a run its bound ended leaves the rest unknown, never red
+      ;; when root asks (DECISIONS, Process tests are not automatic); a run its bound ended leaves
+      ;; the rest unknown, never red
       tests (assoc :tests (cond-> tests
                             (:unfinished tests) (assoc :unfinished-run '(my.agent/prove))
                             (pos? (:at-judge tests 0)) (assoc :judge-runs '(my.agent/prove))

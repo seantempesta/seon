@@ -51,7 +51,7 @@
   (the time dimension: jolt.host/ticks-of, measured by once; judged wherever the estimate states
   them, derived from the unit table's :ops or stated in :per-n), bytes and calls. An estimate with
   none of them both stated and measured is red (:uncounted). CPU time (:ns) moves with load
-  (158 to 210 us for one function between load 10 and 17, check-events 2026-10-23): it is
+  (158 to 210 us for one function between load 10 and 17, check-events): it is
   measured, recorded and shown, never red."
   #{:ticks :bytes :calls})
 
@@ -117,6 +117,37 @@
     (into {} (for [d dimensions :when (or (contains? p d) (contains? f d))]
                [d (+ (double (get f d 0.0)) (* w (double (get p d 0.0))))]))))
 
+(defn growth
+  "Dimension d's growth over rows under estimate e, {:exponent :allowed :basis}, or nil when
+  fewer than two sizes measured it: the fitted exponent and the one the estimate's growth
+  allows over the same sizes (its own plus steeper-by). A change making every size cheaper,
+  or dearer, by one amount never moves it (task seon.cost/a-speedup-never-reads-as-steeper;
+  docs/cost.md#how-growth-is-judged). The basis: :increments, each size's increment over the
+  smallest against the work's own (three sizes or more with two positive increments, no
+  fixed part assumed); :total, the cost itself, for constant work (it should not grow);
+  else :bounded-fixed, the estimate's :fixed taken off but never more than the smallest
+  size leaves beyond its estimated per-unit part. On the stated :fixed alone, a faster fixed
+  part left the smallest size's remainder near 0 and the fit read the speedup as growth."
+  {:malli/schema [:=> [:cat :seon.cost/estimate [:vector :seon.cost/row] :seon.cost/dim]
+                  [:maybe [:map [:exponent :double] [:allowed :double] [:basis [:enum :increments :total :bounded-fixed]]]]]}
+  [e rows d]
+  (let [rs (filterv #(some? (get-in % [:measured d])) rows)
+        m #(double (get-in % [:measured d]))
+        w #(work (:growth e) (:n %))
+        fit (fn [basis pts wpts] {:exponent (exponent pts) :allowed (+ steeper-by (exponent wpts)) :basis basis})
+        r0 (first rs)
+        incs (when (and (>= (count rs) 3) (not= :constant (:growth e)))
+               (for [r (rest rs) :when (pos? (- (m r) (m r0)))] r))]
+    (cond
+      (< (count rs) 2) nil
+      (= :constant (:growth e)) (fit :total (for [r rs] [(:n r) (m r)]) (for [r rs] [(:n r) (w r)]))
+      (>= (count incs) 2) (fit :increments (for [r incs] [(:n r) (- (m r) (m r0))]) (for [r incs] [(:n r) (- (w r) (w r0))]))
+      :else (let [f (double (get-in e [:fixed d] 0.0))
+                  e0 (get-in r0 [:expected d])
+                  f (if e0 (max 0.0 (min f (- (m r0) (- e0 f)))) f)
+                  pts (for [r rs :when (pos? (- (m r) f))] r)]
+              (fit :bounded-fixed (for [r pts] [(:n r) (- (m r) f)]) (for [r pts] [(:n r) (w r)]))))))
+
 (defn judge
   "The verdict on rows (ascending sizes, each measured and expected) under estimate e."
   {:malli/schema [:=> [:cat :seon.cost/estimate [:vector :seon.cost/row]] :seon.cost/verdict]}
@@ -128,13 +159,10 @@
         over (vec (for [r rows d dimensions :when (dims d)
                         :let [q (ratio r d)] :when (and q (> q (slack d)))]
                     {:dim d :n (:n r) :ratio q}))
-        fixed (:fixed e {})
-        allowed (+ steeper-by (exponent (for [r rows] [(:n r) (work (:growth e) (:n r))])))
         steeper (vec (for [d dimensions :when (dims d)
-                           :let [pts (for [r rows :let [m (get-in r [:measured d])] :when m] [(:n r) (- m (get fixed d 0.0))])]
-                           :when (>= (count pts) 2)
-                           :let [x (exponent pts)] :when (> x allowed)]
-                       {:dim d :exponent x :allowed allowed}))
+                           :let [{:keys [exponent allowed]} (growth e rows d)]
+                           :when (and exponent (> exponent allowed))]
+                       {:dim d :exponent exponent :allowed allowed}))
         largest (peek rows)
         under (vec (for [d dimensions :when (dims d)
                          :let [q (when largest (ratio largest d))] :when (and q (< q loose))]
@@ -157,26 +185,26 @@
 (def tick-allowance
   "Ticks a measure allows for each collection that ran during it: a collection or signal
   raised from another thread runs its handler on the measured thread, and those ticks count as
-  the call's (+11 to +27 per forced event, measured 2026-10-23 by dry-run: docs/cost.md); a
+  the call's (+11 to +27 per forced event, measured by dry-run: docs/cost.md); a
   quiet run is exact. The measure takes this many off per collection, so a collection never
   turns a proof red."
   64)
 
 (defn- once
-  "One call of f on args: the engine ticks it ran on this thread (jolt.host/ticks-of, the one
-  owner of the timer), less tick-allowance for each collection during it; its ns of this
-  thread's CPU; the bytes this thread allocated; and contracted calls (calls only when the
-  contracts are on: seon.profile counts armed functions). The collection count is read
+  "One call of f on args, measured by the one measurement of a call (seon.profile/measure!): the
+  engine ticks it ran on this thread, less tick-allowance for each collection during it; its ns
+  of this thread's CPU; the bytes this thread allocated; and contracted calls (calls only when
+  the contracts are on: seon.profile counts armed functions). The collection count is read
   outside the bytes' window, so reading it allocates nothing the call is charged."
   {:malli/schema [:=> [:cat :seon.host/fn [:sequential :any]] :seon.cost/dims]}
   [f args]
   (let [g0 (:count (lib/gc-stats))
-        a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/cpu-ns)
-        k (jolt.host/ticks-of #(apply f args))
-        t1 (profile/cpu-ns) c (profile/calls) a1 (profile/alloc-bytes)
-        gcs (- (:count (lib/gc-stats)) g0)]
-    (cond-> {:ticks (double (max 0 (- k (* tick-allowance gcs)))) :ns (double (- t1 t0)) :bytes (double (- a1 a0))}
-      contract/on? (assoc :calls (double c)))))
+        m (volatile! nil)
+        _ (profile/measure! #(apply f args) #(vreset! m %))
+        gcs (- (:count (lib/gc-stats)) g0)
+        {:keys [ticks bytes cpu-ns calls]} @m]
+    (cond-> {:ticks (double (max 0 (- ticks (* tick-allowance gcs)))) :ns (double cpu-ns) :bytes (double bytes)}
+      contract/on? (assoc :calls (double calls)))))
 
 (def ^:private baseline
   "What measuring a call that does nothing costs: the clock, tick and allocation reads themselves."
@@ -204,7 +232,7 @@
   [100 1000]; [1000 10000 100000]: [1000 10000]). Never a size smaller than the proof states:
   scaled down to n=10, fixed per-call costs swamp the per-element price its estimate states
   (print-cost and ref proofs went 1.8-5x over). Building the input at 10k cost 10-19 s per
-  proof in every run (notes/test-time-2026-10-23.md); the full run measures as written."
+  proof in every run; the full run measures as written."
   {:malli/schema [:=> [:cat [:sequential pos-int?] pos-int?] [:vector pos-int?]]}
   [ns cap]
   ;; a selection of the sizes to measure, one filter by position and size (no output is cut)
@@ -292,7 +320,7 @@
 
 (def units
   "Measured costs of unit operations on this runtime (release seon binary, M5 Max, load 5,
-  2026-10-20, at 10k units; source mode is within 10% except a plain call, 7 ns; the last
+  at 10k units; source mode is within 10% except a plain call, 7 ns; the last
   five rows were measured in source mode after P2 found :str/append mislabeled: the 308 B
   per char it showed was the String's seq, not the StringBuilder; :fn/armed-call and the
   pull rows re-measured on Jolt 00a3b321, J3's try/catch: 990 -> 354 B per armed call), per unit: estimates price their :ops with these.
@@ -301,11 +329,13 @@
   estimates stay derived from today's physics. :ns is CPU time, shown, never judged; each row
   carries :ticks, which estimates' :ops are priced in.
   :ticks per unit (jolt.host/ticks-of, less nothing: no collection ran at 10k) measured
-  2026-10-23 in the REPL at 10k units, twice, identical to the hundredth; the work done, the
+  in the REPL at 10k units, twice, identical to the hundredth; the work done, the
   same at any load (docs/cost.md); seon.cost-test/the-unit-table-is-current holds them to 1.25x."
   {:seq/reduce {:ticks 1.16 :ns 1.4 :bytes 0.0 :what "one step of reduce over a vector"}
    :fn/call {:ticks 5.16 :ns 7.4 :bytes 0.0 :what "a reduce step calling one plain function, both defined at the REPL"}
-   :fn/armed-call {:ticks 12.2 :ns 32.8 :bytes 353.53 :what "a reduce step calling one contracted function ([:=> [:cat :int] :int])"}
+   ;; 353.53 B before malli's total arms went unguarded (task seon.contract/an-armed-call-costs-its-checks:
+   ;; two try's a call, 2026-10-23); a total arm is checked bare
+   :fn/armed-call {:ticks 10.2 :ns 20.3 :bytes 0.02 :what "a reduce step calling one contracted function ([:=> [:cat :int] :int])"}
    :vec/nth {:ticks 8.15 :ns 12.4 :bytes 0.0 :what "nth of a vector"}
    :vec/conj {:ticks 29.18 :ns 30.7 :bytes 245.99 :what "conj onto a persistent vector"}
    :vec/conj! {:ticks 7.49 :ns 12.3 :bytes 43.28 :what "conj! onto a transient vector"}
@@ -321,7 +351,7 @@
    :sort/compare {:ticks 10.97 :ns 13.51 :bytes 39.04 :what "sort of shuffled integers, per n log2 n"}
    :str/append {:ticks 4.1 :ns 9.9 :bytes 36.0 :what "StringBuilder append of one char"}
    :str/seq-char {:ticks 15.0 :ns 29.9 :bytes 272.0 :what "one step of a seq over a String's chars (doseq, reduce)"}
-   ;; worktree session printer-eval, source mode, 2026-10-23, at 10k: the string literal's escape
+   ;; source mode, at 10k: the string literal's escape
    ;; (seon.print.emit/string-literal), 2.5x a char seq's bytes
    :str/escape {:ticks 58.69 :ns 181.4 :bytes 684.55 :what "clojure.string/escape of a text by char-escape-string, newlines kept, per char"}
    :map/literal {:ticks 3.16 :ns 5.2 :bytes 144.0 :what "a small map literal of 5 keys built per element"}
@@ -329,9 +359,9 @@
    :map/reduce-kv {:ticks 1.24 :ns 4.7 :bytes 0.0 :what "one step of reduce-kv over a hash map"}
    :edn/read-char {:ticks 22.29 :ns 29.22 :bytes 38.02 :what "clojure.edn/read-string, per character of a vector of integers"}
    :pr-str/char {:ticks 43.33 :ns 61.9 :bytes 25.67 :what "pr-str, per character printed (a vector of integers)"}
-   ;; session D2, source mode, load 3, 2026-10-20, at 2k: a pull is 21 us and 28 KB, each further
+   ;; source mode, load 3, at 2k: a pull is 21 us and 28 KB, each further
    ;; attribute 9.7 us and 13 KB (a finding: the pull's own allocation, like seon.db/eid's seek)
-   ;; session STORES, 2026-10-21, load 8, at 10k, three runs: measured on a branch of the seeded test
+   ;; load 8, at 10k, three runs: measured on a branch of the seeded test
    ;; store (seon.test-store/test-branch!: ~2,000 datoms beside the setup's) instead of an empty store,
    ;; a pull 21 us and 24.6 KB, each further attribute 11.3-15.1 us and 11.6 KB: pull-attr's one
    ;; entity sat in a one-level index before, the seed makes it the two levels real dbs have
