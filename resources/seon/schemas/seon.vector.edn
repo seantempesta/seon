@@ -1,0 +1,21 @@
+;; A text's embedding (seon.vector, docs/vector.md), on the entity whose text it embeds: a form
+;; (its :form/src, content-addressed, so it is embedded once) or a wiki section (its
+;; :seon.section/text). One stored vector serves every level of the pyramid: a Matryoshka
+;; vector's prefix is itself an embedding.
+{;; the model that made it (its file's sha256): a vector of another model is due again
+ :seon.vector/model :string
+ ;; the whole vector, f16 (768 dims, 1,536 bytes)
+ :seon.vector/f16 bytes?
+ ;; the coarse level: the first :seon.config.vector/coarse-dims dims renormalized, as int8, then
+ ;; the float scale that maps them back (seon.vector/pack)
+ :seon.vector/coarse bytes?
+ ;; the transaction of the text it embeds: a text written since makes it due again
+ :seon.vector/text-t :int
+ ;; the text's whole token count; past :seon.config.vector/max-tokens its first were embedded
+ :seon.vector/tokens :int
+ :seon.vector/fact [:map {:seon.db/attributes true}
+                    [:seon.vector/model :seon.vector/model]
+                    [:seon.vector/text-t :seon.vector/text-t]
+                    [:seon.vector/tokens :seon.vector/tokens]
+                    [:seon.vector/f16 :seon.vector/f16]
+                    [:seon.vector/coarse :seon.vector/coarse]]}

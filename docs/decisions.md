@@ -138,7 +138,7 @@ Owner, 2026-10-21: "But fucking name the processes if they really have to be dif
 ### Work is admitted by its measured workload, through flows
 Owner, 2026-10-21: "I don't want slots I want smarter systems where we understand the workload and they are flow based." Stated in: AGENTS §4.
 ### Embeddings join the context: fused, small and measured
-Owner, 2026-10-21: quote not recorded. Stated in: docs/parity.md#the-agents-repl-my (decided, not built).
+Owner, 2026-10-21: quote not recorded; 2026-10-23: "We can build bindings to some fast C library for running it ourselves right? maybe as a flow so it's just processing requests". Stated in: docs/vector.md.
 ### Patterns live in the topic sections, linked
 Owner, 2026-10-21: "I want us to learn how we can detect patterns in our code and reuse these solutions". Stated in: docs/README.md#how-the-wiki-is-kept.
 ### If nothing has changed, we do nothing; no clock or timer decides (three exceptions)

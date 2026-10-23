@@ -2,11 +2,12 @@
 # bin/build — the runtime from the pinned sources: Chez (our fork) -> Jolt (our fork)
 # -> target/hello (a binary that requires Datahike and opens an in-memory db), then
 # target/lib/libprobe.dylib (native/probe.c, native/ids.c), target/watch (native/watch.c, root's file events), target/lib/liblmdb.dylib (LMDB, robust locks),
-# target/lib/liblz4.dylib and target/lib/libzstd.dylib (the store's compressors), target/css/app.css (the page's stylesheet,
-# Tailwind over resources/public/css/input.css) and target/seon (the platform, -main seon.main; a check mode loads the driver, test/seon/check.clj, at run time).
+# target/lib/liblz4.dylib and target/lib/libzstd.dylib (the store's compressors), target/lib/libseon-embed.dylib
+# (llama.cpp and native/embed.c, with the embedding model fetched once by its sha256), target/css/app.css (the page's
+# stylesheet, Tailwind over resources/public/css/input.css) and target/seon (the platform, -main seon.main; a check mode loads the driver, test/seon/check.clj, at run time).
 #
-#   bin/build            every step; chez, jolt, native, lmdb, lz4, zstd and css are skipped when their stamp matches their pin
-#   bin/build chez|jolt|hello|native|lmdb|lz4|zstd|css|seon   one step, and each step it needs whose stamp is stale
+#   bin/build            every step; chez, jolt, native, lmdb, lz4, zstd, embed and css are skipped when their stamp matches their pin
+#   bin/build chez|jolt|hello|native|lmdb|lz4|zstd|embed|css|seon   one step, and each step it needs whose stamp is stale
 #   BUILD_FORCE=1 bin/build     every stamp removed first: each step rebuilds, once
 #
 # Everything is written under target/; nothing is installed outside it. Dependency
@@ -15,8 +16,8 @@
 # into target/src first (an APFS clone on macOS, so the copy is cheap).
 #
 # Prerequisites (not installed by this script): a C compiler and make (on macOS the
-# Xcode command line tools), git, curl, and network access to GitHub and Maven
-# Central for the first run's dependencies.
+# Xcode command line tools), git, curl, cmake (llama.cpp's build), and network access to GitHub,
+# Maven Central and Hugging Face (the embedding model) for the first run's dependencies.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -49,7 +50,7 @@ copy_tree() {
 # fresh NAME PIN: true when target/NAME.stamp records PIN. A forced build removes every stamp
 # once, here, so each step rebuilds once however many steps call it.
 fresh() { [ -f "$T/$1.stamp" ] && [ "$(cat "$T/$1.stamp")" = "$2" ]; }
-[ -z "${BUILD_FORCE:-}" ] || rm -f "$T"/chez.stamp "$T"/jolt.stamp "$T"/native.stamp "$T"/lmdb.stamp "$T"/lz4.stamp "$T"/zstd.stamp "$T"/css.stamp
+[ -z "${BUILD_FORCE:-}" ] || rm -f "$T"/chez.stamp "$T"/jolt.stamp "$T"/native.stamp "$T"/lmdb.stamp "$T"/lz4.stamp "$T"/zstd.stamp "$T"/embed.stamp "$T"/css.stamp
 
 # pin DIR: what a build reads from the checkout at DIR, by content: its HEAD when its files are
 # HEAD's, else HEAD+ the tree of its files as they are (untracked ones too, in an index of its
@@ -112,11 +113,11 @@ build_hello() {
 }
 
 build_native() {
-  pin=$(git -C "$ROOT" hash-object native/probe.c native/ids.c native/watch.c | tr '\n' ' ')
+  pin=$(git -C "$ROOT" hash-object native/probe.c native/ids.c native/vector.c native/watch.c | tr '\n' ' ')
   if fresh native "$pin" && [ -f "$T/lib/libprobe.dylib" ] && [ -x "$T/watch" ]; then say "native up to date ($pin)"; return; fi
   mkdir -p "$T/lib"
-  say "native: native/probe.c native/ids.c -> target/lib/libprobe.dylib, native/watch.c -> target/watch"
-  cc -O2 -shared -o "$T/lib/libprobe.dylib" "$ROOT/native/probe.c" "$ROOT/native/ids.c" || die "native build failed"
+  say "native: native/probe.c native/ids.c native/vector.c -> target/lib/libprobe.dylib, native/watch.c -> target/watch"
+  cc -O2 -shared -o "$T/lib/libprobe.dylib" "$ROOT/native/probe.c" "$ROOT/native/ids.c" "$ROOT/native/vector.c" || die "native build failed"
   cc -O2 -o "$T/watch" "$ROOT/native/watch.c" -framework CoreServices || die "native build failed (watch)"
   echo "$pin" > "$T/native.stamp"
 }
@@ -197,6 +198,43 @@ build_css() {
   ( cd "$ROOT" && "$TAILWIND" -i resources/public/css/input.css -o "$T/css/app.css" --minify ) > "$T/css-build.log" 2>&1 ||
     die "css build failed; see target/css-build.log"
   echo "$pin" > "$T/css.stamp"
+
+# The embedding model in process (docs/vector.md#the-model): llama.cpp from reference-code/llama.cpp
+# (the official repository at tag v0.7.0, the first release with EmbeddingGemma-2), built static with
+# Metal and no OpenMP (nothing linked from outside target/), and native/embed.c over it, into
+# target/lib/libseon-embed.dylib; root's :embed worker alone loads it (ggml starts threads). The
+# model file (bin/env's SEON_EMBED_MODEL, fetched from SEON_EMBED_MODEL_URL) is one copy in the main
+# tree's target/cache for every worktree, named by its sha256 and checked against it before it is kept.
+LLAMA_SRC=$RC/llama.cpp
+build_embed() {
+  [ -f "$LLAMA_SRC/include/llama.h" ] || die "missing llama.cpp source at $LLAMA_SRC (the reference-code/llama.cpp submodule)"
+  . "$ROOT/bin/env"
+  if [ ! -f "$SEON_EMBED_MODEL" ]; then
+    mkdir -p "$(dirname "$SEON_EMBED_MODEL")"
+    say "embed: fetching the model, $SEON_EMBED_MODEL_URL -> $SEON_EMBED_MODEL"
+    curl -fsSL -o "$SEON_EMBED_MODEL.part" "$SEON_EMBED_MODEL_URL" || die "embed: the model fetch failed ($SEON_EMBED_MODEL_URL)"
+    got=$(shasum -a 256 "$SEON_EMBED_MODEL.part" | cut -d' ' -f1)
+    [ "$got" = "$(basename "$SEON_EMBED_MODEL" .gguf)" ] || { rm -f "$SEON_EMBED_MODEL.part"; die "embed: the model's sha256 is $got, not the pinned $(basename "$SEON_EMBED_MODEL" .gguf)"; }
+    mv "$SEON_EMBED_MODEL.part" "$SEON_EMBED_MODEL"
+  fi
+  pin="$(pin "$LLAMA_SRC") $(git -C "$ROOT" hash-object native/embed.c)"
+  if fresh embed "$pin" && [ -f "$T/lib/libseon-embed.dylib" ]; then say "embed up to date ($pin)"; return; fi
+  command -v cmake >/dev/null 2>&1 || die "missing prerequisite for the embedding model: cmake"
+  mkdir -p "$T/lib"
+  say "embed: $LLAMA_SRC at $pin -> target/lib/libseon-embed.dylib"
+  copy_tree "$LLAMA_SRC" "$T/src/llama.cpp"
+  B=$T/src/llama.cpp/build
+  { cmake -S "$T/src/llama.cpp" -B "$B" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON \
+      -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DLLAMA_BUILD_COMMON=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF \
+      -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=OFF -DLLAMA_OPENSSL=OFF &&
+    cmake --build "$B" --target llama -j "$JOBS" &&
+    cc -O2 -shared -install_name @rpath/libseon-embed.dylib -o "$T/lib/libseon-embed.dylib" \
+      -I"$T/src/llama.cpp/include" -I"$T/src/llama.cpp/ggml/include" "$ROOT/native/embed.c" \
+      "$B/src/libllama.a" "$B/ggml/src/libggml.a" "$B/ggml/src/libggml-base.a" "$B/ggml/src/libggml-cpu.a" \
+      "$B/ggml/src/ggml-metal/libggml-metal.a" "$B/ggml/src/ggml-blas/libggml-blas.a" \
+      -framework Metal -framework Foundation -framework MetalKit -framework Accelerate -lc++; } > "$T/embed-build.log" 2>&1 ||
+    die "embed build failed; see target/embed-build.log"
+  echo "$pin" > "$T/embed.stamp"
 }
 
 build_seon() {
@@ -208,6 +246,7 @@ build_seon() {
   build_lmdb
   build_lz4
   build_zstd
+  build_embed
   build_css
   # the shared compile caches (bin/env): a schema file seon.contract reads, or one added to the
   # directory it lists, moves the key of every namespace compiled against it
@@ -236,8 +275,9 @@ case $STEP in
   lmdb) build_lmdb ;;
   lz4) build_lz4 ;;
   zstd) build_zstd ;;
+  embed) build_embed ;;
   css) build_css ;;
   seon) build_seon ;;
-  all) build_chez; build_jolt; build_native; build_lmdb; build_lz4; build_zstd; build_css; build_hello; build_seon ;;
-  *) die "unknown step $STEP (chez | jolt | hello | native | lmdb | lz4 | zstd | css | seon | all)" ;;
+  all) build_chez; build_jolt; build_native; build_lmdb; build_lz4; build_zstd; build_embed; build_css; build_hello; build_seon ;;
+  *) die "unknown step $STEP (chez | jolt | hello | native | lmdb | lz4 | zstd | embed | css | seon | all)" ;;
 esac
