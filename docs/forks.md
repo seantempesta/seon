@@ -8,7 +8,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 - ``jolt/<topic>`` holds one fix, cut from ``jolt/main`` (or from the topic it needs) and merged into ``jolt/main`` once measured. A pin may sit on a topic branch that has not yet been merged into ``jolt/main``; its section says so.
 - ``upstream/<topic>`` is a generic fix cut cleanly from upstream's own main, the only candidate for an upstream pull request, opened only when 100% sure.
 - Commits in the forks carry no AI trailers.
-- Submodule URLs (`.gitmodules`) are local paths under `~/src/seon-jolt` until the owner approves pushing to the GitHub forks (``seantempesta/<lib>``). The rule comes from DECISIONS, "Libraries on Jolt".
+- Every pinned commit is pushed to its GitHub fork (``seantempesta/<lib>``) on a ``jolt/<topic>`` branch by whoever made it, with no ask (owner, 2026-10-23), no force, never the fork's main; `.gitmodules` moves to the forks' https URLs with self-contained's step C.
 - Pin bumps happen only in root's merges into main ([merging](merging.md)). `git -C <dir> log --oneline -- reference-code/<lib>` in this repository lists each bump with what it brought.
 
 ## jolt
