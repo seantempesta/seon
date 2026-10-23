@@ -65,25 +65,28 @@
      :fixed {:calls 3}
      :sizes [100 1000 10000]}))
 
+(def ^:private divergence-sizes "The sizes divergence's proof measures." [100 1000 10000])
 
-(def ^:private stores
-  "The stores on disk divergence's proof made ([path conns]), removed when it ends."
-  (atom []))
+(defn- on-disk-path
+  "Where divergence's proof keeps its store of size n."
+  {:malli/schema [:=> [:cat pos-int?] :string]}
+  [n] (str (System/getProperty "user.dir") "/target/tmp/divergence-" n))
 
 (defn on-disk-diverged-of
   "divergence's arguments on a store on disk of its own (the last resort: Datahike's
   datoms-diff skips the index subtrees two branches share once they are stored, and the test
   store's in-memory branches hold none, so there both answers grow with the program): main
-  holding n forms (branch-of's), and a branch of it that redefines one."
+  holding n forms (branch-of's), and a branch of it that redefines one. The store is made
+  afresh at on-disk-path; the proof's end releases and removes it."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db]]}
   [n]
-  (let [path (str (System/getProperty "user.dir") "/target/tmp/divergence-" n "-" (random-uuid))
+  (let [path (on-disk-path n)
+        _ (sh/sh "rm" "-rf" path)
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
         _ (d/transact conn {:tx-data (vec (mapcat #(program/account-tx @conn (acct % "x") %) (range n)))})
         base @conn
         _ (d/branch! conn :db :branch)
         bc (d/connect (assoc cfg :branch :branch))]
-    (swap! stores conj [path [bc conn]])
     (d/transact bc {:tx-data (program/record-tx @bc (acct (quot n 2) "(inc x)"))})
     [base @bc]))
 
@@ -96,15 +99,18 @@
                   "stored subtrees both share: one index path per changed entry, log n), and per entry among "
                   "them its name and two content seeks; nothing reads the forms they share")
        :growth :log
-       ;; measured 2026-10-23 on LMDB (load ~10): 440 KB at 100 forms, 542 KB at 1,000, 736 KB at
+       ;; measured 2026-10-23 on LMDB, three fresh stores per size, identical bytes each time (+-96 B
+       ;; at 1,000): 103.5k ticks / 453 KB at 100 forms, 136k / 612 KB at 1,000, 154k / 678 KB at
        ;; 10,000 (the aevt scans before: 428 KB, 3.1 MB, 33 MB); contracted calls: divergence and
        ;; the two eid seeks of the one changed var's content
-       :per-n {:bytes 45000.0}
-       :fixed {:bytes 150000.0 :calls 3}
-       :sizes [100 1000 10000]})
+       :per-n {:ticks 7700.0 :bytes 34000.0}
+       :fixed {:ticks 53000.0 :bytes 230000.0 :calls 3}
+       :sizes divergence-sizes})
     (finally
-      (doseq [[path conns] @stores] (run! d/release conns) (sh/sh "rm" "-rf" path))
-      (reset! stores []))))
+      ;; each store made, released whatever holds it (release-all) and removed
+      (doseq [n divergence-sizes :let [path (on-disk-path n)] :when (pdb/store? path)]
+        (doseq [b [:db :branch]] (d/release (d/connect (assoc (pdb/store-cfg :lmdb path) :branch b)) true))
+        (sh/sh "rm" "-rf" path)))))
 
 (defn fan
   "closure's arguments of size n: one root whose neighbors are n leaves (the frontier n wide)."
