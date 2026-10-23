@@ -302,7 +302,7 @@
 (defn- swarm
   "n tasks over 5 shared definitions, max-running m (more than 5, so tasks on one var run
   at once and their merges conflict): conflicts arose, each was resolved by a merge agent,
-  every task is done, nothing is stuck, and a fresh agent on
+  every task is done, nothing is held for root, and a fresh agent on
   main gets every proof's value (s_k-test asserts (v_j 100) = 100+j). Verdict SWARM."
   [n m]
   {:boot {:max-running (parse-long (or m "8"))} :specs (fx/swarm-specs (parse-long (or n "20"))) :tns 'sw :label "SWARM"

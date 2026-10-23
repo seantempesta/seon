@@ -101,8 +101,7 @@
 
 (defn- old-words
   "The old house words of AGENTS.md section 7a's table, hyphenated (\"merge train\" ->
-  \"merge-train\"), leaving out the rows still stored under their old names (\"stored
-  as\": the stored attributes' task, seon.db/stored-attributes-take-the-new-words)."
+  \"merge-train\"), leaving out a row still stored under its old name (\"stored as\": none now)."
   [agents]
   (let [table (->> (str/split-lines agents)
                    (drop-while #(not (str/starts-with? % "| Old house word")))
@@ -129,6 +128,6 @@
                             x (cons (ns-name n) (map #(symbol (str (ns-name n)) (str %)) (keys (ns-interns n))))]
                         x))]
     (is (contains? words "lane") "the table is read")
-    (is (not (contains? words "refusal")) "a row still stored under its old name waits for its rename")
+    (is (contains? words "refusal") "no row is still stored under its old name: the table is read whole")
     (is (empty? (for [n names w words :when (and (uses? w (str n)) (not (kept n)) (not (and (qualified-symbol? n) (kept (symbol (namespace n))))))] [w n]))
         "every name uses Clojure's, a library's or Jolt's word")))

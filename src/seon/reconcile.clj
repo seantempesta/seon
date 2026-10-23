@@ -708,7 +708,7 @@
 (defn- quiet
   "Report quiescence positively, once per quiet spell: when no flight is in the air and no
   attempt is live after a pass that started nothing, write main's :seon.root/quiescent (the
-  t judged, and the stuck rows), and ask the writer to collect the store (:collect: it sweeps
+  t judged, and the root causes), and ask the writer to collect the store (:collect: it sweeps
   only when a branch is gone, and root refuses it while an agent is live). Their answers are
   not awaited (no flight), and the commits they make touch only root, which does not end the
   spell. Answers [st outputs]."
