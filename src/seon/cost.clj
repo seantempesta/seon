@@ -171,8 +171,8 @@
   proof in every run (notes/test-time-2026-10-23.md); the full run measures as written."
   {:malli/schema [:=> [:cat [:sequential pos-int?] pos-int?] [:vector pos-int?]]}
   [ns cap]
-  (let [ns (vec (sort ns))]
-    (into (vec (take 2 ns)) (filter #(<= % cap)) (drop 2 ns))))
+  ;; a selection of the sizes to measure, one filter by position and size (no output is cut)
+  (vec (keep-indexed (fn [i n] (when (or (< i 2) (<= n cap)) n)) (sort ns))))
 
 (defn run
   "Estimate e measured: its function on its input at each size (sizes, under
