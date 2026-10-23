@@ -246,3 +246,13 @@ The test service's `:prove` proc, state `{:running {digest #{waiter}} :next requ
    - (b) Attention only, never a refusal, until it has run on the 82 contracts for a week with no false failure.
 4. **A check over its tick budget:** (a) **Recommended:** attention (`:over-budget`), the budget a config key; (b) refuse like a failure.
 5. **Where the fork runs main's vars:** the `tests` prove agent (recommended) versus a fork of root (no, it loads main's code into root).
+
+### Every write is checked: root's rulings (2026-10-23)
+
+Approved at net ~−15 src. Build after the first merge lands, in root's run queue.
+1. Exemption is by place, not by a list of names: vars under test/ are exempt from :uncontracted. The check and e2e drivers in src are not exempt: they get contracts, or they leave src (task seon.main/drivers-leave-src). If that is too many now, list the count for root.
+2. A var whose reach touches process-vars is skipped. The skip is recorded and visible. The allowlist is deleted.
+3. :contract-fails refuses seon_done for a var the branch caused.
+4. A check over its tick budget is an "unknown" attention row: never green, never a refusal.
+5. Main's vars run in the tests-branch prove agent.
+The Malli seed bump (jolt/mg-seed) comes with pure-tests' branch. Until it merges, a cached green is not reproducible.
