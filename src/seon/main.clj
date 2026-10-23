@@ -1,13 +1,15 @@
 (ns seon.main
   "The production entry points of the binary: a root serving its checkout (bin/root's `root`
-  mode) and the checkout's ports (`ports`). bin/build compiles the binary with the check
-  driver (seon.check, in test/, outside src: task seon.main/drivers-leave-src), whose -main
-  dispatches these two modes here and every check mode to itself."
+  mode) and the checkout's ports (`ports`); every other mode loads the check driver (seon.check,
+  in test/) from the checkout's source. The binary holds what this namespace requires, so it
+  requires every namespace system.edn names a proc in (seon.system resolves them by name at boot)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.root :as c] [seon.lib :as lib] [seon.print :as print]
             [seon.config] [seon.server] [my.root] [clojure.edn] [jolt.deps]
             ;; the e2e loop's subject: the binary built from a merge answers its new value
-            [seon.generation]))
+            [seon.generation]
+            ;; the procs system.edn names, resolved by name at boot (seon.system/proc-var)
+            [seon.fork-server] [seon.prove] [seon.reconcile] [seon.render.proc] [seon.web] [seon.writer]))
 
 (defn out!
   "xs printed as one line, flushed: a mode's console line (ROOT LISTENING, a verdict)."
