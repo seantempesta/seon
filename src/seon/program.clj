@@ -744,7 +744,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.program/error]]}
   [db-from db-to]
   (let [live-ids (fn [db] (into #{} (for [dt (d/datoms db :aevt :form/id) :when (live? db (:e dt))] (:v dt))))
-        def-keys (fn [db] (into #{} (for [a def-attrs dt (d/datoms db :aevt a)] (definition-key (d/entity db (:e dt))))))
+        def-keys (fn [db] (into #{} (for [a (vals pointer) dt (d/datoms db :aevt a)] (definition-key (d/entity db (:e dt))))))
         from (live-ids db-from)
         to-defs (def-keys db-to)
         sc-from (schema-changes db-from)]
