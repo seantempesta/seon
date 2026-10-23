@@ -299,6 +299,30 @@
   (into {} (for [a (d/q '[:find [(pull ?e pattern) ...] :in $ pattern :where [?e :seon.run/id]] db run-pull)]
              [(:seon.run/id a) (run-value a)])))
 
+(def finished
+  "Run statuses that make its task done: a run's lifecycle sets are declared once, on
+  :seon.run/status's schema, and read once, here (seon.main-test/a-runs-lifecycle-is-read-once)."
+  (:seon.status/finished (contract/properties :seon.run/status)))
+
+(def judged "Run statuses the done rule judges (ended or dead)." (:seon.status/judged (contract/properties :seon.run/status)))
+
+(def failed "Run statuses of a death (its agent died or was lost)." (:seon.status/failed (contract/properties :seon.run/status)))
+
+(defn done?
+  "Has task entity te a run that finished (finished)? One AVET seek of its runs, then each one's
+  status; the reconciler's index answers the same from its own facts (seon.reconcile/task-state)."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
+  [db te]
+  (boolean (some #(finished (:seon.run/status (d/pull db [:seon.run/status] (:e %))))
+                 (d/datoms db :avet :seon.run/task te))))
+
+(defn running
+  "The runs running on db (status :running), each as `run` answers it: one AVET seek of the status,
+  never a read of every run."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.run/run]]}
+  [db]
+  (mapv #(run-value (d/pull db run-pull (:e %))) (d/datoms db :avet :seon.run/status :running)))
+
 (defn run
   "Run aid on db, or nil."
   {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:maybe :seon.run/run]]}

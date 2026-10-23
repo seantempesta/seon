@@ -73,6 +73,24 @@
                      db ['jolt.host/ticks-of 'jolt.host/ticks])]
     (is (= ['seon.profile/measure!] (vec callers)))))
 
+(deftest a-runs-lifecycle-is-read-once
+  ;; task seon.task/a-runs-lifecycle-is-read-once: a run's lifecycle sets are declared once, on
+  ;; :seon.run/status's schema, and read once, by seon.task (finished, judged, failed), which every
+  ;; view and judge requires; a second reader is red here. Each src form's recorded source read as
+  ;; data (the compiler's facts: :form/src), never a text search
+  (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
+        forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
+                     [(clojure.string/starts-with? ?file "src/")]] db)
+        ;; read in the form's own namespace, so its alias keywords (::flow/in-ports) resolve, and its
+        ;; reader conditionals as the compiler reads them (:clj); a call of either schema reader
+        ;; (properties, enum-values) on :seon.run/status. Not covered: a call built by syntax-quote
+        reads? (fn [nsn src] (require nsn)
+                 (some #(and (seq? %) (symbol? (first %)) (#{"properties" "enum-values"} (name (first %)))
+                             (= :seon.run/status (second %)))
+                       (tree-seq coll? seq (binding [*read-eval* false *ns* (the-ns nsn)]
+                                             (read-string {:read-cond :allow :features #{:clj}} src)))))]
+    (is (= #{'seon.task} (into #{} (keep (fn [[nsn src]] (when (reads? nsn src) nsn))) forms)))))
+
 (deftest an-edge-asks-one-way
   ;; task seon.step/an-edge-asks-one-way: an edge asks a proc one way, seon.step/ask-edge, which
   ;; answers a closed channel at once; no src form outside seon.step puts a request carrying its

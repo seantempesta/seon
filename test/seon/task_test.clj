@@ -74,3 +74,18 @@
     (is (= ev (:seon.task/evidence (task/task after "demo/a"))) "the evidence")
     (is (= "demo/a#1" (:run (:seon.task/failure (task/task after "demo/a")))) "and the failure it answers")
     (is (= [] (task/onto-tx main after "demo/a")) "nothing when the branch holds it as main does")))
+
+(deftest a-runs-lifecycle-is-read-from-its-schema
+  ;; task seon.task/a-runs-lifecycle-is-read-once: the sets are the schema's, and the two reads
+  ;; every view and judge shares answer from the runs' own facts
+  (let [db0 (d/db-with (ts/test-db) [{:seon.task/id "demo/a" :seon.task/ns 'demo :seon.task/name "a" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work}
+                                     {:seon.task/id "demo/b" :seon.task/ns 'demo :seon.task/name "b" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b2 :seon.task/kind :work}])
+        start (fn [db aid tid ag] (d/db-with db (task/run-start-tx aid tid "boot-1" ag {:branch :b :model nil :max-turns 4} 1000 "p")))
+        db (-> db0 (start "demo/a#1" "demo/a" :a1) (start "demo/b#1" "demo/b" :a2)
+               (d/db-with [{:seon.run/id "demo/b#1" :seon.run/status :merged}]))
+        te #(:db/id (d/entity db [:seon.task/id %]))]
+    (is (= #{:done :merged} task/finished) "the schema's finished set")
+    (is (= ["demo/a#1"] (mapv :seon.run/id (task/running db))) "only the running run, one seek of the status")
+    (is (= :a1 (:seon.run/agent (first (task/running db)))) "as `run` answers it")
+    (is (false? (task/done? db (te "demo/a"))) "a running run makes no task done")
+    (is (true? (task/done? db (te "demo/b"))) "a merged run does")))
