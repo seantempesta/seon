@@ -6,6 +6,7 @@
 (defn await-db
   "Main's first db value (now or after a later commit) for which (pred db) holds: a watch
   on main's connection runs pred once per commit. No deadline, no polling."
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] ifn?] :seon.host/db]}
   [sys pred]
   (let [p (promise) k (keyword "seon.await" (str "await-" (random-uuid)))
         a (:wrapped-atom (:conn sys))]
@@ -16,6 +17,7 @@
 (defn defect
   "A root proc's defect (a :platform problem) whose record main wrote after t, or nil:
   facts, not clocks."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :map]]}
   [db t]
   (some #(when (some (fn [dt] (> (:tx dt) t)) (d/datoms db :eavt (:e %) :seon.error/last-ms)) (into {} (d/entity db (:e %))))
         (filter #(= :platform (:v %)) (d/datoms db :aevt :seon.error/class))))
@@ -26,6 +28,8 @@
   root proc's defect is recorded on main after t ({:ended :defect :problem p}): a step
   that threw dropped its outputs, so the flight it carried never ends and quiescence never
   comes. No clock."
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :int]
+                  [:or :seon.root/quiescent [:map [:ended [:= :defect]] [:problem [:maybe :map]]]]]}
   [sys t]
   (let [db (await-db sys #(or (when-let [q (r/quiescent %)] (>= (:t q) t)) (defect % t)))]
     (if-let [q (and (r/quiescent db) (>= (:t (r/quiescent db)) t) (r/quiescent db))]
