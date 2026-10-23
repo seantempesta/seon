@@ -110,6 +110,7 @@
   [:seon.config.render/value-budget :seon.config.render/value-budget]
   [:seon.config.render/root-context-budget :seon.config.render/root-context-budget]
   [:seon.config.render/history-row-budget :seon.config.render/history-row-budget]
+  [:seon.config.render/turn-text-budget :seon.config.render/turn-text-budget]
   [:seon.config.render/line-budget :seon.config.render/line-budget]
   [:seon.config.render/cell-budget :seon.config.render/cell-budget]
   [:seon.config.render.list/stream :seon.config.render.list/stream]

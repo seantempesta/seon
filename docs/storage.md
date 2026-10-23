@@ -23,6 +23,10 @@ LMDB's map (`:seon.config.store/lmdb-map-bytes`, 64 GiB) is address space only: 
 
 Inline values were the cause. Every commit rewrites the tail leaf of `:eavt` and `:aevt`, which holds each value inline, so a turn's text was written again by every later commit until its leaf split, and the waste grew with the run. With values inline and LZ4, per-turn cost against the bound is 0.83 at 10 turns, 1.16 at 20 and 1.74 at 40. Out of line it stays near flat: 0.29, 0.33 and 0.41. Every layout commits in about 1.7 ms per turn. The default layout (out of line from 1,024 B) with the default codec, zstd, writes less again ([compression](#compression)).
 
+## What a datom costs to add
+
+`seon.db-test/a-datom-costs-its-index-inserts` says a datom added in memory (`d/db-with`, as every test plan's import is) costs its floor: its inserts into `:eavt` and `:aevt`, one `:eavt` descent for a cardinality-one attribute's current value, the datom and its place in the tx-data, measured at about 6.8k ticks and 10.5 KB on the test store's seed. It costs 7.2k ticks and 11.1 KB. What kept it from its floor was in two dependencies ([forks](forks.md)): a protocol call read every field of the record (Datahike's DB has 21), and Datahike found the current value through a slice's seq and copied the DB record for writes that change nothing. An identity costs more than its `:avet` insert and seek should (`seon.db-test/an-identity-costs-its-seek`, an accepted overrun on its task): 11.5k ticks and 34 KB per datom for a `:db/unique` one, 16.9k and 65 KB for a content id.
+
 ## Entity ids
 
 The entity whose unique attribute holds a value is found by `seon.db/eid`: one seek in that attribute's AVET index, never a Datalog query (a query planned per call cost ~95 µs and 100 KB at 100 tasks). It is the one lookup; every namespace that needs an entity id by value calls it. Reading an entity's facts needs no id first: a pull by lookup ref (`(d/pull db attrs [:seon.root/id :root])`) answers nil when no entity holds the value, so root's facts, a task, an attempt or an error record are pulled directly.

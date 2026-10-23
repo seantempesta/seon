@@ -18,7 +18,7 @@ is judged from the compiler's facts at merge (the vars of `seon.program/banned` 
 
 - `seon.contract/arm!`: arming a contract is Malli's instrument model, the Var's root replaced once by its checked wrapper at definition.
 - `seon.system/step-fn`: `resources/seon/system.edn` names each proc's step-fn Var; the declaration is the set of these resolves.
-- `seon.render/render-face`, `seon.render.proc/render-unit`: a schema's declared render (or a unit's) is a symbol in data, resolved when the value is shown.
+- `seon.render/render-of`, `seon.render.proc/render-unit`: a schema's declared render (or a unit's) is a symbol in data, resolved when the value is shown.
 - `seon.cost/run`: a cost estimate names its function and its input as symbols in data.
 - `seon.agent/test-plan`, `seon.proofs/run-tests!`: a task's proofs and the tests a plan selects are symbols in data (reach digests' keys), resolved to their Vars to run.
 - `seon.program/account`, `seon.program/macro-uses`, `seon.context/callees`, `seon.source/head-var`, `seon.source/analyze-form`, `seon.repl/ns-form?`: the compiler's facts, what a form's head or a method's multi names in its namespace; read, never defined.

@@ -516,7 +516,7 @@
  ;; Unit: bytes. An evaluation that allocated more is flagged on its card and row
  ;; (seon.render.ui/alloc-span). Provenance: render.ui's BIG-ALLOC literal (10 MiB).
  :seon.config.render/big-alloc 10485760
- ;; Unit: tokens a rendered value spends when its env names no budget (seon.render/print-out,
+ ;; Unit: tokens a rendered value spends when its env names no budget (seon.render/print-html and print-ai,
  ;; seon.render/ai, an agent's history row). Provenance: the literal 600 render.clj and
  ;; render.ui carried (2026-10-22), kept as it was.
  :seon.config.render/value-budget 600
@@ -526,6 +526,12 @@
  ;; Unit: tokens each evaluation's value shows in an agent's history on its page (the render
  ;; proc renders each row once). Provenance: the render proc's literal 400.
  :seon.config.render/history-row-budget 400
+ ;; Unit: tokens each part of a turn on its agent's page shows (its reply, reasoning, each eval
+ ;; call's code and answer, the context it read): past it the cut links the turn's whole request
+ ;; (/turn?view=&id=). Provenance: the context's two messages are each under 16,000
+ ;; tokens (seon.context/messages); measured 2026-10-22, a turn's attempt sections are 1.6-1.9k
+ ;; and its turn sections under 0.1k before a proof runs, so 4,000 shows most turns whole.
+ :seon.config.render/turn-text-budget 4000
  ;; Unit: tokens of a message or reason shown in one line (root's context, a tile's or card's
  ;; line, a declared AI render's line); past it the line's cut names the form that reads the
  ;; rest. Provenance: the literals 40-60 render.ui and render.ai carried (2026-10-22), as one.
