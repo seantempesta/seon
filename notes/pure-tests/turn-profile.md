@@ -89,3 +89,13 @@ delta-three-way measures 7-9 ms flat).
 The "~14 s per turn" is no configured budget: it is a measurement written in a comment
 (test/seon/source_test.clj:251). The configured bounds are tick budgets
 (:seon.config.agent/test-ticks and its siblings), work, not time.
+
+## The writer's unsplit time, resolved (global-ids, 2026-10-23)
+
+global-ids measured root's writer ops by kind (REPL, niced, load ~30; main = Seon's src+test,
+2,128 live forms, 68k datoms on LMDB; a branch of one turn, 69 differing datoms), land14 ->
+jolt/global-ids 01df699: seon.merge/program 488 ms per call -> no longer called; :branch-diff
+~1,950 ms -> 8 ms; :merge ~2 s -> ~18 ms; a :tx on main 1.3-3.8 ms; d/branch! 1 ms. The ~115 s
+of writer time this profile could not split was those whole-program reads, ~2 s x (merge +
+:branch-diff) x attempts, under load. Left per turn: seon.program/divergence and reach-digests
+(live-forms on db and base). Detail: notes/global-ids/MEASURED.md section 8 on jolt/global-ids.
