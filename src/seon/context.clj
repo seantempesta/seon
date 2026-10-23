@@ -172,16 +172,18 @@
 (defn- refused
   "The done rule's reasons as the agent reads them, beyond its own red proofs (shown with
   the proofs): a red test names its failures, a contract gap its var, a design step that
-  has not improved its plan the call that does."
+  has not improved its plan the call that does, an open problem its work made true what it
+  is (seon.problems/caused)."
   {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done] [:vector :map]] [:vector :map]]}
   [reasons reds]
   (let [rs (remove #(= :proof-red (:reason %)) reasons)
         gaps (vec (keep #(when (= :contract-gap (:reason %)) (:symbol %)) rs))
-        unmerged (vec (keep #(when (= :unmerged (:reason %)) (:key %)) rs))]
+        unmerged (vec (keep #(when (= :unmerged (:reason %)) (:key %)) rs))
+        opened (vec (keep #(when (= :open-problem (:reason %)) (:key %)) rs))]
     ;; a contract gap and an unmerged entry say one thing about many names: one entry each,
     ;; its names a list the printer budgets
     (vec (concat
-           (for [{:keys [reason symbol]} rs :when (not (#{:contract-gap :unmerged} reason))]
+           (for [{:keys [reason symbol]} rs :when (not (#{:contract-gap :unmerged :open-problem} reason))]
              (case reason
                (:regression :stray-red) (cond-> {:reason reason :test symbol}
                                           (seq (filter #(= symbol (:test %)) reds))
@@ -190,7 +192,8 @@
                            :do '(my.task/update! :seon.task/plan str "\n\n" "<what the implement step must do>")}
                {:reason reason}))
            (when (seq gaps) [{:reason :contract-gap :vars gaps}])
-           (when (seq unmerged) [{:reason :unmerged :keys unmerged}])))))
+           (when (seq unmerged) [{:reason :unmerged :keys unmerged}])
+           (when (seq opened) [{:reason :open-problem :problems opened}])))))
 
 (defn- near
   "Where position at of text is: its line's number and its column (1-based), and the

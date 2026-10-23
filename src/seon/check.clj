@@ -1055,12 +1055,33 @@
                 :remove-stops-only-it (and (= #{:probe2} (set (:stopped r3))) (empty? (:started r3)))
                 :running-set-after (= (conj expect :probe) after)}}))))
 
+(defn health-check
+  "Seon's own health, read by Seon (seon.problems/health), for bin/check and bin/laws: a root
+  booted on this checkout's source (src and the schemas) and its task files (a task is a name
+  the wiki may cite), its wiki loaded once they are (my.root/load-docs!: a prose word is a
+  citation when it names something), red on each open
+  row of the derived classes named, every derived class when none is (:dead-citation, the
+  docs; :unnamed-site, the laws the compiler's facts answer: seon.problems/laws). One line per
+  row: its class and message."
+  [classes]
+  (run-check "HEALTH" {:datoms 0 :source {:root (seon.config/checkout) :dirs ["src" "resources/seon/schemas"]}}
+   (fn [sys]
+     (my.root/load-tasks! sys)
+     (my.root/load-docs! sys)
+     (let [h (seon.problems/health @(:conn sys))
+           cs (or (seq classes) (sort (:seon.problems/derived (contract/properties :seon.problems/class))))]
+       (doseq [c cs r (get-in h [:classes c :rows])] (out! (name c) " " (:message r)))
+       {:report {:open (into (sorted-map) (for [c cs] [c (get-in h [:classes c :n] 0)]))}
+        :checks (into {} (for [c cs] [(keyword (str "no-" (name c))) (zero? (get-in h [:classes c :n] 0))]))}))))
+
 (defn root-serve
   "A root with its server on 127.0.0.1:(:seon.config.root/server-port) (seon.server),
   until stdin closes (bin/root stop) or SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks):
-  what an outside agent's MCP relay (bin/mcp) talks to. Its end is a fact on main
+  what an outside agent's MCP relay (bin/mcp) talks to. It watches its checkout
+  (my.root/watch!: every writer's changes loaded as they happen). Its end is a fact on main
   naming that cause (seon.root/stop!). A checkout whose config names no server port (0)
-  serves none, and says so."
+  serves none, and says so; -1 asks the kernel for a free port. ROOT LISTENING names the port
+  it bound (what bin/root and seon.test-store/start-root! read), never one picked beforehand."
   []
   (let [port (seon.config/value :seon.config.root/server-port)
         _ (when (zero? port)
@@ -1073,8 +1094,13 @@
                  (when (= why @cause) (out! "ROOT STOPPED " (shown (select-keys (c/stop! sys why) [:cause :ms :stop-fact-refused]))) (deliver stopped true))
                  @stopped)]
       (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (end! :signal))))
-      (seon.server/serve! sys port)
-      (out! "ROOT LISTENING " port)
+      ;; the key's three values, read here only: -1 the kernel assigns a port (0 to bind), >0 that
+      ;; port (0, none, refused above); the port bound is the fact, printed for bin/root to record
+      (let [bound (.getLocalPort ^java.net.ServerSocket (seon.server/serve! sys (if (= -1 port) 0 port)))]
+        ;; the watcher ends with this process (target/watch exits on its parent's exit)
+        (let [w (my.root/watch! sys)]
+          (out! "ROOT WATCHING " (if (contract/error? w) (str "nothing: " (:seon.error/message w)) "the checkout and its refs")))
+        (out! "ROOT LISTENING " bound))
       (loop [] (when (read-line) (recur)))
       (end! :stdin-eof))
     (lib/c-exit 0)))
@@ -1374,6 +1400,7 @@
      "system" (fn [n more] (system-check))
      "config" (fn [n more] (config-check))
      "problems" (fn [n more] (problems-check))
+     "health" (fn [n more] (health-check (map keyword (remove nil? (cons n more)))))
      "threads" (fn [n more] (threads-check))
      "root" (fn [n more] (root-serve))
      ;; this checkout's ports as the config resolves them, "SERVER WEB" (bin/ports)
