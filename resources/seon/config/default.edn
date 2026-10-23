@@ -532,8 +532,9 @@
  ;; v1's 2,048 (forms p99 1,766 tokens); at 512, 148 of Seon's 1,393 forms were cut.
  :seon.config.vector/max-tokens 2048
  ;; Unit: texts. One request of main's backlog (seon.vector/vectors-proc): at 175 texts/s a round
- ;; holds the worker ~0.4 s, so a query waits behind at most one round.
- :seon.config.vector/texts 64
+ ;; holds the worker ~0.4 s, so a query waits behind at most one round. 0 embeds nothing and the
+ ;; model never loads: bin/test's and bin/check's roots (SEON_EMBED_TEXTS), which never search.
+ :seon.config.vector/texts #long #or [#env SEON_EMBED_TEXTS 64]
  ;; Unit: requests. What one :embed step takes from the queue (seon.fx :batch): queries queued
  ;; behind a round are embedded together.
  :seon.config.vector/batch 16

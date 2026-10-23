@@ -1244,8 +1244,9 @@
    (fn [sys]
      (let [path (seon.config/value :seon.config.vector/model)
            model (seon.vector/model-id path)]
-       (if-not (.exists (java.io.File. path))
-         {:report {:model path} :checks {:model-present false}}
+       (if (or (not (.exists (java.io.File. path))) (zero? (seon.config/value :seon.config.vector/texts)))
+         {:report {:model path :texts (seon.config/value :seon.config.vector/texts)}
+          :checks {:model-present (.exists (java.io.File. path)) :embedding-on (pos? (seon.config/value :seon.config.vector/texts))}}
          (let [t0 (System/currentTimeMillis)
                _ (my.root/load-tasks! sys)
                _ (my.root/load-docs! sys)
