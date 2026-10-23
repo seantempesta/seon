@@ -13,7 +13,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 ## jolt
 
-`reference-code/jolt` pinned at `e0351af8`, the tip of ``jolt/global-ids-pin``: ``jolt/pin-2026-10-23`` `f05de7db` with ``jolt/hashset-bulk`` `ce384f07` merged in.
+`reference-code/jolt` pinned at `3a3e35e6`, the tip of ``jolt/record-field-binds``, on `e0351af8` (``jolt/global-ids-pin``: ``jolt/pin-2026-10-23`` `f05de7db` with ``jolt/hashset-bulk`` `ce384f07` merged in).
 
 - Fork repo: ``~/src/seon-jolt/jolt``. Upstream: ``jolt-lang/jolt``. Fork: ``seantempesta/jolt``.
 - Base: `f714b0ed`, upstream main (nightly + 10), the merge-base with upstream's main.
@@ -59,6 +59,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
   - `ed1e37a1` one tick count, owned by the timer: `jolt-set-timer!` is the one arm site, `jolt.host/ticks-of` and `jolt.host/ticks` read it, and a tick budget covers all the work in its extent, nested bounded runs included ([cost](cost.md#what-is-measured)). Generic.
   - `a2fec377` `File/createTempFile`: an exclusive create, the name from the pid and a counter. Generic.
   - `5edda163` the AOT cache's readers digest is folded once per key, not into every namespace digest, so a checkout's cache hits (a start 7.3 s to 0.6 s). Generic.
+  - `3a3e35e6` a deftype or defrecord method binds only the fields its body names (a record method bound every field with `get` on each call, ~6 ticks a field: 158 ticks a protocol call on Datahike's 21-field DB, 25-30 now), and `update` has clojure.core's fixed arities (its variadic arity alone allocated 656 B where the assoc is 208 B). Datahike's add path makes ~30 such calls per datom (task datahike.transaction/a-datom-costs-its-index-inserts). Generic.
   - `ce384f07` `java.util.HashSet`'s bulk Collection methods (`addAll`, `removeAll`, `retainAll`, `containsAll`): `datahike.api/datoms-diff` threw on any two trees that partly share ([storage](storage.md#merges-read-what-changed)). Generic.
 - ``upstream/*`` branches in the fork repo: `arraycopy-object-block`, `deftype-field-access`, `fiber-park`, `fork-reprotect-jit`, `host-site-coll-reads`, `remote-chan`, `static-code-cow`. None is pushed or opened: they exist only in ``~/src/seon-jolt/jolt``, cut on jolt-lang/jolt main `8bebf786`. Before one is opened: the gate sweep of `fork`, `slots` and `static`, `make fibers` re-run alone on arraycopy-object-block (a new untriaged red under load), a Gambit check of deftype-field-access, a non-root Linux sweep, and a rebase on upstream's current main. static-code-cow is not for upstream (jolt itself never forks, and under the hardened runtime code outside MAP_JIT needs an entitlement or the process is SIGKILLed): it stays in our patch set. Of the Chez patches, 0006 belongs upstream (no fix in cisco/ChezScheme or Racket CS), 0007 only as an issue first. Drafts and reproductions: ``~/src/seon-jolt/notes/upstream/``.
 - Open: the fork repo's ``jolt/main`` is at `44c9574a` (``jolt/load-form``, which Seon does not use; not in the pin), and `d7ec259b`..`f05de7db` are only in the submodule clone, not yet in the fork repo. ``jolt/main`` should be moved to the pin's line.
@@ -83,7 +84,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 ## datahike
 
-`reference-code/datahike` pinned at `1880fcc`, the tip of ``jolt/in-scalar`` (on ``jolt/global-ids`` `b4596cf`, ``jolt/gc-cache-epoch`` `700c473` merged in).
+`reference-code/datahike` pinned at `6db7188`, the tip of ``jolt/datom-cost``, on `1880fcc` (``jolt/in-scalar``, on ``jolt/global-ids`` `b4596cf`, ``jolt/gc-cache-epoch`` `700c473` merged in).
 
 - Fork repo: ``~/src/seon-jolt/libs/datahike``. Upstream: ``replikativ/datahike``.
 - Base: `ad9fc97` "baseline", a history-less snapshot of Seon's fork ``seantempesta/datahike`` `ccba220b` (unknown: that commit is not in the repo, so the snapshot cannot be checked against it).
@@ -113,6 +114,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
   - `5c869bf`, `508918c`, `0783e8b` content entity ids: `:db/contentId`, an identity whose value names its entity (`content-eid`, `content-tempids`, `:entity-id/collision`); the partition `[1, tx0)` counter ids, `[tx0, 2^40)` tx ids, `[2^40, 2^60)` content ids; an existing identity may gain it ([storage](storage.md#ids)). Generic.
   - `deaf43a` a consumer group's probe-driven seek decision compares the probe set with its scan op's estimate, not the group's output estimate: a group probed by one entity scanned its whole attribute (task datahike.query/a-probed-entity-is-sought-not-scanned). Generic.
   - `7de92bb`, `a9adc83`, `1880fcc` `probe-driven-threshold` 18, Jolt's measured break-even (a probe's seek and merge ~5.6k ticks, a scanned datom ~316), not the JVM's 2500 (a JVM build must set 2500); `datahike.test.query-planner-test/test-a-probed-group-answers-the-same-either-side-of-the-seek-threshold`. Jolt.
+  - `6db7188` a datom's add path costs its index inserts: a card-one attribute's current datom by one `:eavt` descent (`di/-lookup`, `dd/cmp-datoms-ea`), not a slice's seq; the temporal indexes untouched by a first value; no per-datom record copies, closures or concat the op does not need. A plain datom 12.5k ticks and 18.2 KB before (with Jolt `e0351af8`), 6.7k and 11.1 KB after, its floor ~6.8k and ~10.5 KB (`seon.db-test/a-datom-costs-its-index-inserts`). Generic.
 - Open: the fork repo's ``jolt/main`` is at `fe50764`; `4b93a1b`..`fd0c065` are only in the submodule clone, not yet in the fork repo.
 
 ## persistent-sorted-set
