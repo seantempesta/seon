@@ -492,10 +492,17 @@
           [st _] (step #'root/api-proc st :from-fs {:ev :forked :agent :a1 :pid 4242 :fork-ms 1.0})
           [st _] (step #'root/api-proc st :back {:op :ended :agent :a1 :pid 4242 :inflight []})]
       (is (= :unanswered (answer p)) "its death waits for the exit status")
-      (step #'root/api-proc st :from-fs {:ev :exit :pid 4242 :status {:exit 3}})
-      (is (= :seon.agent/died (:seon.error/type (answer p))))
-      (is (= {:exit 3} (:exit (answer p))) "with the status it exited with")
-      (is (= :a1 (:agent (answer p)))))))
+      (let [[st _] (step #'root/api-proc st :from-fs {:ev :exit :pid 4242 :status {:exit 3}})
+            first-answer (answer p)]
+        (is (= :seon.agent/died (:seon.error/type first-answer)))
+        (is (= {:exit 3} (:exit first-answer)) "with the status it exited with")
+        (is (= :a1 (:agent first-answer)))
+        ;; exactly one answer: the spawn's entry is gone once answered, so a later hello or end
+        ;; has no caller to answer (a promise ignores a second delivery, so the entry is the proof)
+        (is (not (contains? (:seon.root/spawning st) :a1)) "answered: no spawn is held for the agent")
+        (let [[st _] (step #'root/api-proc st :back {:op :status :agent :a1 :set {:ready true}})]
+          (is (not (contains? (:seon.root/spawning st) :a1)))
+          (is (= first-answer (answer p))))))))
   (spawning-api (fn [st]
     (let [p (promise)
           [st _] (step #'root/api-proc st :ext {:op :spawn :opts {} :p p})]

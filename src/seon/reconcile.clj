@@ -652,10 +652,14 @@
       :ignored [st []]
       :done (done st)
       :dead-read (one (write st aid :done (dead-tx aid (:died f) (some-> (:db r) (pull-end aid)))))
-      ;; root answers a spawn at its agent's hello, or at the end the agent met first: a death
-      ;; (:seon.agent/died, naming the agent) is this attempt's death, its row started first
-      :spawned (if-let [ag (or (:id r) (when (= :seon.agent/died (:seon.error/type r)) (:agent r)))]
-                 (one (write (cond-> (assoc-in st [:flights aid :agent] ag) (:seon.error/type r) (assoc-in [:flights aid :died-at-spawn] r)) aid :started
+      ;; root answers a spawn at its agent's hello, or at the end the agent met first: a death,
+      ;; a failed spawn or a stop (each names the agent) is this attempt's death, its row
+      ;; started first; the flight keeps the error's base and exit status, which `dead` records
+      :spawned (if-let [ag (or (:id r) (when (#{:seon.agent/died :seon.agent/failed :seon.root/no-agent} (:seon.error/type r)) (:agent r)))]
+                 (one (write (cond-> (assoc-in st [:flights aid :agent] ag)
+                               (:seon.error/type r) (assoc-in [:flights aid :died-at-spawn]
+                                                              (select-keys r [:seon.error/type :seon.error/operation :seon.error/message :exit :agent])))
+                             aid :started
                              (task/attempt-start-tx aid (:task act) (:boot st) ag (:env act) (System/currentTimeMillis)
                                                    (:plan (task/accumulate (get-in st [:idx :tasks]) (:task act))))))
                  ;; root refused it (the branch is held, or too many live agents): the refused answer
