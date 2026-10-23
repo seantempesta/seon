@@ -117,6 +117,37 @@
     (into {} (for [d dimensions :when (or (contains? p d) (contains? f d))]
                [d (+ (double (get f d 0.0)) (* w (double (get p d 0.0))))]))))
 
+(defn growth
+  "Dimension d's growth over rows under estimate e, {:exponent :allowed :basis}, or nil when
+  fewer than two sizes measured it: the fitted exponent and the one the estimate's growth
+  allows over the same sizes (its own plus steeper-by). A change making every size cheaper,
+  or dearer, by one amount never moves it (task seon.cost/a-speedup-never-reads-as-steeper;
+  docs/cost.md#how-growth-is-judged). The basis: :increments, each size's increment over the
+  smallest against the work's own (three sizes or more with two positive increments, no
+  fixed part assumed); :total, the cost itself, for constant work (it should not grow);
+  else :bounded-fixed, the estimate's :fixed taken off but never more than the smallest
+  size leaves beyond its estimated per-unit part. On the stated :fixed alone, a faster fixed
+  part left the smallest size's remainder near 0 and the fit read the speedup as growth."
+  {:malli/schema [:=> [:cat :seon.cost/estimate [:vector :seon.cost/row] :seon.cost/dim]
+                  [:maybe [:map [:exponent :double] [:allowed :double] [:basis [:enum :increments :total :bounded-fixed]]]]]}
+  [e rows d]
+  (let [rs (filterv #(some? (get-in % [:measured d])) rows)
+        m #(double (get-in % [:measured d]))
+        w #(work (:growth e) (:n %))
+        fit (fn [basis pts wpts] {:exponent (exponent pts) :allowed (+ steeper-by (exponent wpts)) :basis basis})
+        r0 (first rs)
+        incs (when (and (>= (count rs) 3) (not= :constant (:growth e)))
+               (for [r (rest rs) :when (pos? (- (m r) (m r0)))] r))]
+    (cond
+      (< (count rs) 2) nil
+      (= :constant (:growth e)) (fit :total (for [r rs] [(:n r) (m r)]) (for [r rs] [(:n r) (w r)]))
+      (>= (count incs) 2) (fit :increments (for [r incs] [(:n r) (- (m r) (m r0))]) (for [r incs] [(:n r) (- (w r) (w r0))]))
+      :else (let [f (double (get-in e [:fixed d] 0.0))
+                  e0 (get-in r0 [:expected d])
+                  f (if e0 (max 0.0 (min f (- (m r0) (- e0 f)))) f)
+                  pts (for [r rs :when (pos? (- (m r) f))] r)]
+              (fit :bounded-fixed (for [r pts] [(:n r) (- (m r) f)]) (for [r pts] [(:n r) (w r)]))))))
+
 (defn judge
   "The verdict on rows (ascending sizes, each measured and expected) under estimate e."
   {:malli/schema [:=> [:cat :seon.cost/estimate [:vector :seon.cost/row]] :seon.cost/verdict]}
@@ -128,36 +159,10 @@
         over (vec (for [r rows d dimensions :when (dims d)
                         :let [q (ratio r d)] :when (and q (> q (slack d)))]
                     {:dim d :n (:n r) :ratio q}))
-        fixed (:fixed e {})
-        ;; growth is judged so that a change making every size cheaper (or dearer) by one amount
-        ;; never moves it (task seon.cost/a-speedup-never-reads-as-steeper): fitted on the stated
-        ;; :fixed taken off, a faster fixed part left the smallest size's remainder near 0 and the
-        ;; fit read the speedup as growth. With three sizes or more, each size's increment over the
-        ;; smallest, m(n) - m(n0), is fitted against the work's own, W(n) - W(n0): no fixed part
-        ;; assumed. With two there is one increment and no shape to fit, so the fixed part taken
-        ;; off is the estimate's but never more than the smallest size leaves beyond its estimated
-        ;; per-unit part. Constant work has no increments: its cost itself is fitted (it should
-        ;; not grow at all)
-        basis (cond (= :constant (:growth e)) :total (>= (count rows) 3) :increments :else :bounded-fixed)
-        n0 (:n (first rows))
-        w (fn [n] (work (:growth e) n))
-        allowed (+ steeper-by (exponent (if (= :increments basis)
-                                          (for [r (rest rows)] [(:n r) (- (w (:n r)) (w n0))])
-                                          (for [r rows] [(:n r) (w (:n r))]))))
-        fixed-of (fn [d] (let [f (double (get fixed d 0.0))
-                               {:keys [measured expected]} (first rows)
-                               m0 (get measured d) e0 (get expected d)]
-                           (if (and m0 e0) (max 0.0 (min f (- m0 (- e0 f)))) f)))
         steeper (vec (for [d dimensions :when (dims d)
-                           :let [m0 (get-in (first rows) [:measured d])
-                                 pts (case basis
-                                       :total (for [r rows :let [m (get-in r [:measured d])] :when m] [(:n r) m])
-                                       :increments (for [r (rest rows) :let [m (get-in r [:measured d])] :when (and m m0)] [(:n r) (- m m0)])
-                                       :bounded-fixed (let [f (fixed-of d)]
-                                                        (for [r rows :let [m (get-in r [:measured d])] :when m] [(:n r) (- m f)])))]
-                           :when (>= (count pts) 2)
-                           :let [x (exponent pts)] :when (> x allowed)]
-                       {:dim d :exponent x :allowed allowed}))
+                           :let [{:keys [exponent allowed]} (growth e rows d)]
+                           :when (and exponent (> exponent allowed))]
+                       {:dim d :exponent exponent :allowed allowed}))
         largest (peek rows)
         under (vec (for [d dimensions :when (dims d)
                          :let [q (when largest (ratio largest d))] :when (and q (< q loose))]

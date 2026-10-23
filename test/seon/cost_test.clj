@@ -95,6 +95,21 @@
         (is (empty? (:steeper (cost/judge e (at #(- (+ 50000.0 (* 90.0 %)) d)))))
             (str "one pass, " d " cheaper at every size, is not steeper"))))))
 
+(deftest growth-takes-the-basis-the-rows-allow
+  (let [e (assoc linear :per-n {:bytes 100.0} :fixed {:bytes 50000.0} :sizes [10 100 1000])
+        g #(cost/growth %1 (rows %1 (fn [n] {:bytes (%2 n)})) :bytes)]
+    (is (= :increments (:basis (g e #(+ 50000.0 (* 90.0 %))))) "three sizes that grow: increments")
+    (is (< 0.95 (:exponent (g e #(+ 50000.0 (* 90.0 %)))) 1.05))
+    (testing "a smallest size that costs more than the next leaves no two increments: the bounded fixed part judges"
+      (let [r (g e #(if (= 10 %) 1000000.0 (+ 50000.0 (* 0.09 % %))))]
+        (is (= :bounded-fixed (:basis r)))))
+    (testing "constant work: its cost itself, which a creep of a few percent barely moves"
+      (let [c (assoc linear :growth :constant :per-n {} :fixed {:bytes 1290000.0} :sizes [10 100 1000])
+            r (g c {10 1230000.0 100 1290000.0 1000 1430000.0})]
+        (is (= :total (:basis r)))
+        (is (< (:exponent r) (:allowed r)))))
+    (is (nil? (cost/growth e [(first (rows e (fn [n] {:bytes (* 90.0 n)})))] :bytes)) "one size has no growth")))
+
 (deftest n-log-n-under-a-linear-estimate-is-not-steeper
   (let [e (assoc linear :per-n {:ns 1000.0} :fixed {})]
     (is (empty? (:steeper (cost/judge e (rows e (fn [n] {:ns (cost/work :n-log-n n)}))))))))
