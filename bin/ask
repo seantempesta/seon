@@ -1,0 +1,15 @@
+#!/usr/bin/perl
+# bin/ask PORT   one request line from stdin to root's server on 127.0.0.1:PORT; its one reply line on
+# stdout. The wait ends on the reply, or on the server closing the connection or dying: then
+# stdout is `{:error :eof}` (closed with no reply) or `{:error :reset}` (reset), exit status 1;
+# a refused connection is `{:error :refused}`. `nc -w N` waits on the open connection past the
+# reply on macOS, and a window only guesses at "never came"; this is the answer or the end.
+use strict; use warnings; use IO::Socket::INET;
+my $port = shift // die "usage: bin/ask PORT < request-line\n";
+my $req = <STDIN>; defined $req or die "bin/ask: no request on stdin\n";
+my $s = IO::Socket::INET->new(PeerAddr => "127.0.0.1", PeerPort => $port, Proto => "tcp")
+  or do { print "{:error :refused}\n"; exit 1 };
+$s->autoflush(1); print $s $req;
+my $line = <$s>;
+if (defined $line) { print $line; exit 0 }
+print $! ? "{:error :reset}\n" : "{:error :eof}\n"; exit 1;

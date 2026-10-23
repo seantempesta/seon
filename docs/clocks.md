@@ -45,6 +45,16 @@ A bound passed under another name, which the marks do not see; each is owed its 
 - `seon.render.proc/ordered`: re-derives the grid's order when a second has passed, for `seon.render.proc/order`; task `seon.render/an-ended-agent-leaves-the-grid-by-an-event`.
 - `seon.agent/mem-mb`: memory re-read at most once a second, a cache keyed by time (a `now-ns` difference compared to a literal); task `seon.agent/memory-is-read-when-asked`.
 
+## Time decides nothing here: clock reads named as data
+
+- `seon.check/hidden-inputs`, `seon.check/named-test-inputs`: the lists the `test-inputs` check step reads test forms against (a clock read, a sleep, a timeout among the names they hold); they name those vars as data and read no clock.
+
+## Time orders a queue (measured workload)
+
+A measured time chooses which work goes first, never whether a result is green (AGENTS.md section 4: work is admitted by its measured workload).
+- `test-runner/shards`: bin/test's shards are dealt by each test's last measured ms (`target/prove/ms`), so they end together; a test never measured counts as the mean.
+- bin/check's queue: a full run's steps start longest first by the wall seconds of the last full run (its `STEP.time` files); a step not measured yet starts first.
+
 ## Time measured (recorded, never compared to decide)
 
 - `seon.profile/now-ns`, `seon.profile/ms-since`: the one clock read ([machine](machine.md#the-clock)); their callers are judged here one by one.
@@ -52,6 +62,7 @@ A bound passed under another name, which the marks do not see; each is owed its 
 - `seon.repl/record!`: a record's id made unique by the clock read.
 - `seon.render.proc/web-answered`: a UI call's answer, its record's id made unique by the clock read and its stream event stamped.
 - `seon.turn/act!`, `seon.turn/work!`, `seon.turn/observe`, `seon.turn/context-block`, `seon.model/openai-compat`, `seon.model/scripted`, `seon.fx/build`, `seon.fx/worker-proc`, `seon.contract/instrument!`, `seon.repl/wrap-cost`, `seon.agent/clone!`, `seon.agent/run-tests-forked`, `seon.proofs/run-tests!`, `seon.db/collect!`, `seon.fork-server/server-step`, `seon.root/import-source!`, `seon.server/root-eval`: a duration recorded on the work's own fact or reply.
+- `my.root/watch!`: the time a file watcher's death was seen, stamped on its `:platform` error ([health](health.md#every-writer-root-loads-what-changed)).
 - `seon.root/state`: the writer's transactions per second over the last second, shown.
 - `seon.render.proc/pass`: a render pass's duration and the events' age, shown on the dashboard.
 - `seon.agent/handle!`, `seon.root/ext-op`, `seon.reconcile/advance`, `seon.reconcile/reconciler-proc`: stamps and durations.

@@ -153,7 +153,7 @@
      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest the-flush-is-continuous-group-commit
-  ;; owner 2026-10-21 (../notes/archive/DECISIONS-superseded.md, "Durability is batched everywhere", superseded
+  ;; owner 2026-10-21 (notes/archive/DECISIONS-superseded.md, "Durability is batched everywhere", superseded
   ;; paragraph): no window. A write is answered when committed in memory; the flusher parks
   ;; until something is unflushed, syncs once for everything committed so far, and says what it
   ;; covered; commits during a sync share the next one; an idle system never syncs.
@@ -497,3 +497,14 @@
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'seon.procs-test)]
     (System/exit (if (zero? (+ fail error)) 0 1))))
+
+(deftest the-fork-servers-stop-ends-every-child-before-it-answers
+  ;; bin/check lifecycle's :left (notes/pure-tests/lifecycle.md): root SIGKILLed the fork
+  ;; server while an agent that had closed its socket was still exiting, and launchd
+  ;; inherited it, alive after stop!. Now the server's stop kills and reaps its children
+  ;; before it answers, so root's wait for the server is the end of every one of them.
+  (let [p (.start (ProcessBuilder. ^java.util.List ["sleep" "600"]))
+        pid (.pid p)]
+    (is (zero? (seon.lib/c-kill pid 0)) "the child is running")
+    (server/server-step {:children #{pid} :status-buf (jolt.ffi/alloc 4)} ::flow/stop)
+    (is (= -1 (seon.lib/c-kill pid 0)) "and gone when the stop answers: killed and reaped")))
