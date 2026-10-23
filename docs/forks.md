@@ -151,7 +151,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 ## malli
 
-`reference-code/malli` pinned at `5a830e14`, the tip of ``jolt/main`` and ``jolt/instrument-arity``.
+`reference-code/malli` pinned at `0762fb6b`, ``jolt/mg-seed`` (mg/check takes its `:seed` and returns it on failure), on top of `5a830e14` (``jolt/main``, ``jolt/instrument-arity``).
 
 - Fork repo: ``~/src/seon-jolt/l1/wt/malli`` (a clone of ``seantempesta/malli``). Upstream: ``metosin/malli``.
 - Base: `80138076`, upstream master (0.20.0 + 14), the merge-base with upstream's master.
