@@ -201,8 +201,9 @@ u-resume() {
 }
 
 # ---- the steps at once: JOBS at a time, the longest first ----
-# One root per store (docs/storage.md#leases: two roots on one store mint the same entity
-# ids), so a unit running beside others takes a store of its own: an APFS clone of the one
+# One root per store (docs/storage.md: two roots branching at once can drop a branch from the
+# store's roster, and a root's collection cannot see another root's agents), so a unit running
+# beside others takes a store of its own: an APFS clone of the one
 # seeded store (its data file; LMDB makes its lock file), the same content as a branch of it,
 # deleted when the unit is green. scale runs alone after them: it measures the machine's memory.
 JOBS=$(run jobs)
