@@ -647,9 +647,14 @@
                 :root-threads {:declared (declared-threads sys) :os (lib/nthreads)
                                :diff {:boot th-boot :all-ready th-ready :after-work th-work :after-kill th-end}}}
        ;; root's threads exactly as declared once agents run (at boot Jolt's io poller has not
-       ;; started yet: it starts at the first socket wait, an agent's)
+       ;; started yet: it starts at the first socket wait, an agent's). With the model open, its
+       ;; foreign threads (the :os count) are judged only where root has settled, after the work and
+       ;; after the kill: right after the last encode, Metal's GCD idle workers are still parked
+       ;; until libdispatch's idle timeout ends them, and waiting that out would need a clock
+       ;; (root's ruling, 2026-10-23); Jolt's own roster is judged at every sample
        :checks {:every-eval-and-test-passed (every? :ok results) :ten-merges-went-in (every? :merged? merged)
-                :root-threads-as-declared (every? empty? [th-ready th-work th-end]) :fits-the-machine (<= need budget)}}))))
+                :root-threads-as-declared (every? empty? [(cond-> th-ready (:foreign (declared-threads sys)) (dissoc :os)) th-work th-end])
+                :fits-the-machine (<= need budget)}}))))
 
 (defn orphan
   "Root dies while its agents are busy (one in a loop, one in a forever test, one clone):
