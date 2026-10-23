@@ -91,4 +91,8 @@
   :seon.task/proofs #{}}
  {:seon.task/name "a-worktree-syncs-every-submodule-its-branch-pins"
   :seon.task/plan "Found 2026-10-23 (shrink session): `bin/worktree --sync NAME` moves only the submodules the worktree already has a checkout of; one main added after the worktree was made (reference-code/llama.cpp) is skipped without a word (its loop's `[[ -e $WT/$sub/.git ]] || continue`), so after merging main the worktree builds and tests without it and nothing says so. Correct: --sync does what setup does for a submodule it lacks (a worktree of the main tree's submodule repo at the branch's pin, and its nested copies), and says so; one it cannot make (the main tree has not checked it out, or lacks the pin) is named and the command exits non-zero, never silent. Proof: a worktree made before a submodule was added gets it from --sync, and one the main tree lacks makes --sync fail with its name."
-  :seon.task/kind :work}]
+  :seon.task/kind :work}
+ {:seon.task/name "durable-read-runs-alone"
+  :seon.task/plan "Reproduction: Found 2026-10-23 by the cutover's decider: red in a built scratch worktree of main 4bc598dc1 as well as in the fresh clone, so it is main's, not the cutover's. `bin/check durable-read` on its own crashes with an unhandled FileNotFoundException from `read-file-string` in `seon.check/durable-read` (a path under target/check-store-agents/): it reads a file another step of `bin/check 100` leaves behind. A check mode is runnable by itself (AGENTS section 3: `bin/check MODE`): make the step make what it reads, or name its dependency as `:needs`. Replaces nothing."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}]

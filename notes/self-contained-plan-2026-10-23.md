@@ -178,7 +178,7 @@ git -C $M for-each-ref --format='%(refname:lstrip=3) %(objectname)' refs/remotes
 # 2. the source's branches the module lacks (jolt: pf1-f2only upstream/{fiber-park,remote-chan,fork-reprotect-jit};
 #    datahike: jolt/{merge-diff,pss-cursors,qcache-lineage,qcache-noinherit} upstream/datoms-diff-portable; konserve: l1/lockwait-probe)
 git -C $S for-each-ref --format='%(refname:lstrip=2)' refs/heads | while read b; do
-  git -C $M show-ref -q --verify refs/heads/$b || git -C $M fetch -q $S "refs/heads/$b:refs/heads/$b"; done
+  git -C $M show-ref -q --verify refs/heads/$b || git -C $M fetch -q $S "refs/heads/${b}:refs/heads/${b}"; done
 # every source branch, also those whose name the module uses at another commit (jolt/main, and
 # upstream/fork-reprotect-jit: the module's cb8dada and the source's d761676 are one patch committed twice): a tag each, nothing overwritten
 git -C $M fetch -q $S 'refs/heads/*:refs/tags/attic/source/*'

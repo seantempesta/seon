@@ -55,7 +55,7 @@ echo "R1 ok: $(git rev-parse --short HEAD), $(git tag | wc -l) tags"
 ### R2 The unmerged branches of the old repo, as local branches here (not jolt/merges: the new root starts that from main)
 # every branch of the old repo main does not contain, jolt/* and claude/* (the sessions' work), as a local branch of the same name; the list is kept
 for b in $(git -C $OLD branch --no-merged main --format='%(refname:short)' --list 'jolt/*' 'claude/*' | grep -vx 'jolt/merges'); do
-  git fetch -q $OLD "refs/heads/$b:refs/heads/$b"
+  git fetch -q $OLD "refs/heads/${b}:refs/heads/${b}"
   echo "$b $(git rev-parse --short $b) ahead $(git rev-list --count main..$b)" >> fetched-branches.txt
 done
 # nothing missed: every unmerged tip of the old repo is a tip here
