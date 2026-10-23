@@ -268,6 +268,14 @@
                 (for [[a text] (texts nd) c (ref/references db text)] [a c]))]
     [st (cond-> nd (seq nums) (assoc :seon.render/cites (vec (distinct nums))))]))
 
+(defn- relevant
+  "Entity value m of schema, as a walk shows it: only the attributes its schema declares
+  relevant (:seon.render/keys) when it declares them, else every one it holds. What is not
+  relevant is never pulled into a view (the owner, 2026-10-23: improve the data at its producer)."
+  {:malli/schema [:=> [:cat [:maybe :qualified-keyword] :map] :map]}
+  [schema m]
+  (if-let [ks (some-> schema contract/properties :seon.render/keys)] (select-keys m ks) m))
+
 (defn walk
   "Entity eid on db as one map: :seon.render/root, the entity's node (its own attributes less its
   units); :seon.render/nodes, a node per unit its entity schema declares (:seon.render/units:
@@ -288,13 +296,13 @@
            ref? (fn [a] (or (not= a (forward a)) (= :db.type/ref (get-in (d/schema db) [a :db/valueType]))))
            refs (when (some ref? units) (d/pull db (into [] (comp (filter ref?) (map (fn [a] {a ['*]}))) units) eid))
            from (fn [a] {:seon.render/eid eid :seon.render/attr a})
-           root (cond-> {:seon.render/kind :entity :seon.render/value (apply dissoc own units) :seon.render/eid eid}
+           root (cond-> {:seon.render/kind :entity :seon.render/value (relevant schema (apply dissoc own units)) :seon.render/eid eid}
                   schema (assoc :seon.render/schema schema))
            nodes (into [] (mapcat (fn [a]
                                     (if (ref? a)
                                       (let [v (get refs a) via (forward a)]
                                         (map (fn [m] (let [s (entity-schema m via)]
-                                                       (cond-> {:seon.render/kind :entity :seon.render/value m :seon.render/eid (:db/id m) :seon.render/from (from a)}
+                                                       (cond-> {:seon.render/kind :entity :seon.render/value (relevant s m) :seon.render/eid (:db/id m) :seon.render/from (from a)}
                                                          s (assoc :seon.render/schema s))))
                                              (if (map? v) [v] v)))
                                       (when (contains? own a)
@@ -307,6 +315,21 @@
            [st nodes] (reduce (fn [[st out] nd] (let [[st nd] (cite db st nd)] [st (conj out nd)])) [st []] nodes)]
        {:seon.render/root root :seon.render/nodes nodes :seon.render/refs (:refs st)})
      (contract/error :seon.render/no-entity `walk (str "no entity " eid " on this db") {:seon.render/eid eid}))))
+
+(defn data
+  "Walk w as one value a model reads: the entity's own attributes, each unit under the attribute
+  that reached it (a reverse unit as a vector of its entities, a forward one as its entity or value),
+  and what its prose cites under :seon.render/refs, each its view with its number. Data, printed by
+  the one printer: no prose, nothing but what the walk pulled."
+  {:malli/schema [:=> [:cat :seon.render/walk] :map]}
+  [{:seon.render/keys [root nodes refs]}]
+  (cond-> (reduce (fn [m {:seon.render/keys [from value]}]
+                    (let [a (:seon.render/attr from)]
+                      (if (not= a (forward a)) (update m a (fnil conj []) value) (assoc m a value))))
+                  (:seon.render/value root) nodes)
+    (seq refs) (assoc :seon.render/refs (mapv (fn [{:seon.render/keys [n address value]}]
+                                               (assoc value :seon.render/n n :seon.render/address address))
+                                             refs))))
 
 (defn- shown
   "Node or ref x rendered :as as on both faces by its schema's renders (render: none declared, the

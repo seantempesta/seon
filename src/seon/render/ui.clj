@@ -1230,24 +1230,12 @@
   [x]
   [:div {:class (str "walk-part as-" (kname (:seon.render/as x)))} (walk-head x) [:div {:class "walk-body"} (:seon.render/hiccup x)]])
 
-(defn walk-text
-  "One rendered part of a walk as a model reads it: a comment line saying what it is (its kind
-  and schema, or its citation's number, address and depth), where it came from (the eid and
-  attribute that reached it) and which render made it, then its :ai text."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.render/keys [kind schema eid from n address depth ai-by ai-text cites]}]
-  (str ";; " (if n (str "[" n "] " (kname kind) " " address " at " (kname depth)) (str (kname kind) " " schema " eid " eid))
-       (when from (str ", reached by " (:seon.render/attr from) " from eid " (:seon.render/eid from)))
-       (when (seq cites) (str ", cites " (str/join " " (map #(str "[" % "]") cites))))
-       ", rendered by " ai-by "\n" ai-text))
-
 (defn walk-page
   "A rendered walk (seon.render/rendered) as a page: the entity's block, its units as tiles and
   what its prose cites, each by its own :html render and saying what it is, where it came from
-  and which renders made it; beside them the text a model reads of the same walk, each part's
-  :ai face in order (root, units, references)."
+  and which renders made it; beside them the walk as the data a model reads (seon.render/data)."
   {:malli/schema [:=> [:cat :seon.render/walk :seon.render/opts] :any]}
-  [{:seon.render/keys [root nodes refs]} _]
+  [{:seon.render/keys [root nodes refs] :as w} _]
   [:main {:class "walk"}
    [:section {:class "walk-parts"}
     [:h2 "the entity"] (walk-part root)
@@ -1255,10 +1243,5 @@
     (when (seq refs) (list [:h2 (str "what its prose cites · " (count refs))] [:div {:class "walk-grid"} (map walk-part refs)]))]
    [:section {:class "walk-text"}
     [:h2 "what a model reads"]
-    [:pre (str/join "\n\n" (map walk-text (concat [root] nodes refs)))]]])
+    [:pre (:text (render/print-ai (render/data w) {}))]]])
 
-(defn walk-line
-  "An entity a walk shows in one line, as html: its :ai render's text (seon.render.ai/root-fact,
-  agent-fact, attempt-fact) in a line of the page."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [v opts] [:pre {:class "walk-line"} (:text (render/render v (assoc opts :face :ai)))])

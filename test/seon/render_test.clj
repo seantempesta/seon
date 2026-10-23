@@ -1047,13 +1047,21 @@
       (is (= f @(requiring-resolve n)) (pr-str v face hint))
       (is (contains? #{'seon.render/print-ai 'seon.render/print-html (r/faces face)} n) (pr-str v face hint)))))
 
-(deftest a-cited-reference-renders-as-its-prose
-  ;; root's review 2026-10-23: a reference showed as the printer's raw #:seon.ref{...}; a section
-  ;; renders as its heading, address and text, a var as Clojure's (doc) prints it
-  (let [section (r/ai {:seon.ref/address "docs/render.md#the-walk" :seon.ref/heading "The walk" :seon.ref/summary "A view is a walk."
-                       :seon.ref/below [{:seon.ref/address "docs/render.md#units" :seon.ref/heading "Units"}]}
-                      {:schema :seon.ref/view})
-        v (r/ai {:symbol 'seon.config/from-db :arglists '([db]) :doc "The config root wrote on db."} {:schema :seon.ref/var-view})]
-    (is (= "## The walk  (docs/render.md#the-walk)\n\nA view is a walk.\n\n- Units  (docs/render.md#units)" section))
-    (is (not (str/includes? section "#:seon.ref")))
-    (is (= "-------------------------\nseon.config/from-db\n([db])\n  The config root wrote on db." v))))
+(deftest a-walk-is-data-a-model-reads
+  ;; the owner, 2026-10-23: what a model reads is data, improved at its producer. The walk as one
+  ;; value: the entity's relevant attributes, each unit under the attribute that reached it, what
+  ;; its prose cites as data under :seon.render/refs; no prose, no printer artifact
+  (let [w {:seon.render/root {:seon.render/kind :entity :seon.render/eid 1 :seon.render/value {:seon.attempt/id "demo/f#1" :seon.attempt/status :running}}
+           :seon.render/nodes [{:seon.render/kind :entity :seon.render/eid 2 :seon.render/value {:seon.task/id "demo/f" :seon.task/plan "Make `demo/f` triple."}
+                                :seon.render/from {:seon.render/eid 1 :seon.render/attr :seon.attempt/task}}
+                               {:seon.render/kind :entity :seon.render/eid 3 :seon.render/value {:seon.turn/id "demo/f#1/0"}
+                                :seon.render/from {:seon.render/eid 1 :seon.render/attr :seon.turn/_attempt}}]
+           :seon.render/refs [{:seon.render/n 1 :seon.render/kind :var :seon.render/address "demo/f"
+                               :seon.render/value {:symbol 'demo/f :arglists '([x]) :summary "Doubles."}}]}
+        d (r/data w)]
+    (is (= {:seon.attempt/id "demo/f#1" :seon.attempt/status :running
+            :seon.attempt/task {:seon.task/id "demo/f" :seon.task/plan "Make `demo/f` triple."}
+            :seon.turn/_attempt [{:seon.turn/id "demo/f#1/0"}]
+            :seon.render/refs [{:symbol 'demo/f :arglists '([x]) :summary "Doubles." :seon.render/n 1 :seon.render/address "demo/f"}]}
+           d))
+    (is (not (str/includes? (r/ai d {}) ";;")) "no comment lines: data only")))

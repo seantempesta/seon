@@ -16,7 +16,7 @@
   (`error`), a task (`task`), an attempt (`attempt`) and a problem row (`problem-row`, the
   line root's context and the page's banner lead with)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [seon.config :as config] [seon.print :as print] [seon.print.select :as select] [seon.render.ui :as ui] [seon.render :as render]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [seon.config :as config] [seon.print :as print] [seon.print.select :as select] [seon.render.ui :as ui]))
 
 (defn- line-budget {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render/line-budget))
 (defn- part-budget {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render/part-budget))
@@ -327,55 +327,3 @@
                                   [text (conj left title)])))
                             [head []] (remove (comp empty? second) sections))]
     {:text (cond-> text (seq left) (str "\n(not shown, over the budget: " (str/join ", " left) ")"))}))
-
-;; ---- the walk's entities, focused: the attributes an agent or the owner acts on, as data ----
-
-(defn- projected
-  "v with only the attributes ks it holds, printed as data by the one printer (seon.render/print-ai):
-  a focused render keeps an entity's own keys, so a reader can query them, and leaves the rest out."
-  {:malli/schema [:=> [:cat :map [:sequential :keyword] :seon.render/opts] :seon.render/text]}
-  [v ks opts] (render/print-ai (select-keys v ks) opts))
-
-(defn root-fact
-  "Root in a walk: its id, boot, generation and how it last stopped, as data. Its config is not
-  shown: a config key reaches a context when the task's code reads it, never as root's whole map
-  (the owner, 2026-10-23: the config dump)."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :seon.render/text]}
-  [r opts] (projected r [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/stopped :seon.root/quiescent] opts))
-
-(defn agent-fact
-  "An agent in a walk: its id, status, pid, branch, the form it runs, and its description (only
-  an agent no run started records one), as data."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :seon.render/text]}
-  [a opts] (projected a [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] opts))
-
-(defn attempt-fact
-  "A run in a walk: its id, status, outcome and reason, model, turns of its max, branch, as data.
-  Its plan is its task's, shown by the task; its boot is root's."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :seon.render/text]}
-  [a opts] (projected a [:seon.attempt/id :seon.attempt/status :seon.attempt/outcome :seon.attempt/reason :seon.attempt/model
-                         :seon.attempt/turns :seon.attempt/max-turns :seon.attempt/branch] opts))
-
-(defn var-doc
-  "A cited var as Clojure's own (doc) prints it: a rule, its name, its arglists, its doc (or the
-  first sentence at a summary's depth), then its contract; at a source's depth its source; and
-  what was left out with the form that reads it."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :seon.render/text]}
-  [{:keys [symbol arglists summary doc contract source left-out read unresolved problem]} _]
-  {:text (str/join "\n" (remove nil? ["-------------------------" (str symbol)
-                                      (when unresolved (str "  " problem))
-                                      (some-> arglists pr-str)
-                                      (some->> (or doc summary) (str "  "))
-                                      (some->> contract pr-str (str "  contract "))
-                                      source
-                                      (when left-out (str "  (left out: " left-out "; " (pr-str read) " reads it)"))]))})
-
-(defn cited-view
-  "A cited section, file, task or namespace as its prose: its heading and address, its text at
-  the citation's depth (the summary, the lead or opening, or the whole text), then the sections
-  below it as headings with their addresses."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :seon.render/text]}
-  [{:seon.ref/keys [address heading summary lead opening text below] :as v} _]
-  {:text (str/join "\n\n" (remove nil? [(str "## " (or heading address) (when heading (str "  (" address ")")))
-                                        (or text lead opening summary (when (:unresolved v) (:problem v)))
-                                        (when (seq below) (str/join "\n" (for [b below] (str "- " (:seon.ref/heading b) "  (" (:seon.ref/address b) ")"))))]))})
