@@ -188,7 +188,7 @@
     (is (= #{'seon.config} (set (map first refs))))
     (is (= '#{(defn checkout) (defn profile) (defn secret)} (set (map second refs))))))
 
-;; ---- layers: the checkout's local.edn, --config, --set ---------------------------------------
+;; ---- layers: the shipped file, --config (a checkout's local.edn only when named), --set ---------------------------------------
 
 (deftest the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
   (let [o (config/overrides ["scale" "100" "--set" ":seon.config.web/port=7791" "--config" "x.edn" "more"])]
@@ -200,6 +200,26 @@
   (doseq [bad ["port=1" ":seon.config.web/port" "seon.config.web/port=1" ":seon.config.web/port=("]]
     (is (= :seon.config/refused (:seon.error/type (refused #(config/parse-set bad)))) bad))
   (is (= :seon.config/refused (:seon.error/type (refused #(config/overrides ["--set"]))))))
+
+(deftest a-checkouts-local-config-is-a-layer-only-when-named
+  ;; task seon.check/a-checks-roots-take-explicit-config: a checkout whose config/local.edn names
+  ;; another source tree (the main tree's names the standing root's) gave every process there,
+  ;; a check's root too, that tree; a layer is only what a command line names
+  (let [co (str (System/getProperty "java.io.tmpdir") "/seon-config-checkout-" (random-uuid))
+        local (str co "/config/local.edn")]
+    (.mkdirs (java.io.File. (str co "/resources/seon/config")))
+    (.mkdirs (java.io.File. (str co "/config")))
+    (spit (str co "/resources/seon/config/default.edn") (slurp (str (config/checkout) "/resources/seon/config/default.edn")))
+    (spit local "{:seon.config.source/root \"/elsewhere/next-merges\" :seon.config.web/port 4242}")
+    (try
+      (let [{c :config srcs :sources} (config/layered (config/load-layers co :default []))]
+        (is (not= "/elsewhere/next-merges" (:seon.config.source/root c)) "unnamed, it is no layer")
+        (is (not-any? #{"config/local.edn"} (vals srcs))))
+      (let [{c :config srcs :sources} (config/layered (config/load-layers co :default ["--config" local]))]
+        (is (= "/elsewhere/next-merges" (:seon.config.source/root c)) "named, it is one")
+        (is (= 4242 (:seon.config.web/port c)))
+        (is (= (str "--config " local) (srcs :seon.config.source/root))))
+      (finally (clojure.java.shell/sh "rm" "-rf" co)))))
 
 (deftest later-layers-win-key-by-key-and-name-their-source
   (let [ls (config/load-layers (config/checkout) :default

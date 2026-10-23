@@ -65,5 +65,5 @@ mkdir -p "${LOCAL:h}"
 if cmp -s "$LOCAL.new" "$LOCAL"; then rm -f "$LOCAL.new"; else mv "$LOCAL.new" "$LOCAL"; fi
 [[ -n $WRITE ]] && exit 0
 . "$ROOT/bin/env"
-layer=(); [[ -n ${1:-} ]] && layer=(--config "$LOCAL")
-cd "$ROOT/target" && exec ./seon ports $layer
+# the layer is named: no process reads config/local.edn unless its command line does
+cd "$ROOT/target" && exec ./seon ports --config "$LOCAL"
