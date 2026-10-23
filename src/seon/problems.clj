@@ -120,7 +120,8 @@
 
 (defn unnamed-sites
   "Each site of a law (`laws`) its page does not name: a live form carrying the law's fact,
-  by the var it defines, whose name no section of the page cites (:seon.section/names), as an
+  by the var it defines, in a namespace of Seon's own src (an agent's app and any test are not
+  failure points: a deftest's `is` expands to a catch), whose name no section of the page cites (:seon.section/names), as an
   :unnamed-site row. Cost: the forms carrying the fact (aevt) and the wiki's cited names, once."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
@@ -132,7 +133,10 @@
              :when (program/live? db fe)
              d (:form/defines (d/entity db fe))
              :let [v (:var/name d)]
-             :when (and v (not (except (namespace v))) (not (named v)))
+             :when (and v (not (except (namespace v))) (not (named v))
+                        ;; the law is Seon's own source's (bin/laws scans src): an agent's app, and a test's
+                        ;; `is` (which expands to a catch), are not failure points of the system
+                        (some-> d :var/ns :ns/file (str/starts-with? "src/")))
              :let [s (str "unnamed-site " (name law) " " v)]]
          {:signature s :law law :site v :page page :open? true
           :message (str v " has a " (name law) " site that " page " does not name")

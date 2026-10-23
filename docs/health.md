@@ -23,7 +23,7 @@ Not covered yet:
 
 ## A law's unnamed site
 
-A law the compiler's facts answer exactly is a derived class too: `seon.problems/laws` holds each one as data (the fact that marks a site, the page that must name it, the check drivers it leaves out), and `seon.problems/unnamed-sites` lists each site whose page does not cite its function (`:unnamed-site`). Today that is `catch`, whose sites from `:form/catches` are exactly `bin/laws`' 26 (measured 2026-10-23). Clocks, measures and resolution stay `bin/laws`' text scan until the compiler's facts can tell their sites: a host member is recorded as `jolt.host/static-member`, not by its name, and a quoted symbol counts as a ref.
+A law the compiler's facts answer exactly is a derived class too: `seon.problems/laws` holds each one as data (the fact that marks a site, the page that must name it, the check drivers it leaves out), and `seon.problems/unnamed-sites` lists each site whose page does not cite its function (`:unnamed-site`). A site is a form of Seon's own `src` (bin/laws scans src): an agent's app and any test are not, since a deftest's `is` expands to a catch (found by e2e-newns, whose agent's test was refused done for it). Today that is `catch`, whose sites from `:form/catches` are exactly `bin/laws`' 26 (measured 2026-10-23). Clocks, measures and resolution stay `bin/laws`' text scan until the compiler's facts can tell their sites: a host member is recorded as `jolt.host/static-member`, not by its name, and a quoted symbol counts as a ref.
 
 ## Checks are callers of Seon
 

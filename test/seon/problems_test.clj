@@ -478,10 +478,14 @@
                             :when (seon.program/live? db0 e)
                             d (:form/defines (d/entity db0 e)) :when (:var/name d)]
                         [e (:var/name d)]))
-        db1 (d/db-with db0 [[:db/add fe :form/catches "{:class Exception, :answers :expr}"]])
+        ;; the test db's program is an example app; make its namespace one of Seon's src
+        ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :avet :var/name v))))))
+        db1 (d/db-with db0 [[:db/add fe :form/catches "{:class Exception, :answers :expr}"] [:db/add ns-e :ns/file "src/app/m.clj"]])
         unnamed #(mapv (juxt :law :site) (get-in (problems/health %) [:classes :unnamed-site :rows]))]
     (is (= [] (unnamed db0)) "no catch, no site")
     (is (= [[:catch v]] (unnamed db1)) "a catch the page does not name")
+    (testing "a namespace outside src (an agent's app, a test: a deftest's `is` expands to a catch) is no failure point"
+      (is (= [] (unnamed (d/db-with db1 [[:db/add ns-e :ns/file "test/app/x_test.clj"]])))))
     (testing "the page names it: no problem, nothing written to close it"
       (let [page (str "# Failure points\n\n| failure | edge |\n|---|---|\n| x | `" v "` |\n")]
         (is (= [] (unnamed (d/db-with db1 (seon.docs/load-tx db1 "docs" {"docs/failure-points.md" page})))))))))
