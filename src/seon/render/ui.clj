@@ -893,7 +893,7 @@
      [:section {:class "box" :id "z-proofs"}
     (kicker "proofs" (cond (seq results) (str "judged on main: " (count (filter #(= :pass (val %)) results)) "/" (count results) " pass")
                            tests (str "its last run: " (run-words tests) " · " (ms-str (:ms tests)))
-                           seen (str "when " seen-turn " began, before its forms ran")
+                           seen "as its newest turn began"
                            :else "no run: none in root's view, and no turn has run them"))
     (when (and seen (not tests))
       [:p [:em {:class "muted"} (str "when " seen-turn " began: ")] (proof-counts seen)])
@@ -975,12 +975,14 @@
       ;; the one sentence: what it worked, how that went, what it took
       (when attempt
         [:p {:class "lead"}
+         (if-not (:read? turns)
+           (str (:seon.attempt/task attempt) ": " (kname (:seon.attempt/status attempt)) " · its branch is being read")
          (str (:seon.attempt/task attempt) ": " (kname (:seon.attempt/status attempt))
               (when-let [o (:seon.attempt/outcome attempt)] (str ", " (kname o)))
               " · " (:model turns) " model turn" (when (not= 1 (:model turns)) "s")
               (when (pos? (:reads turns)) (str ", " (:reads turns) " reads"))
               (when (and start-ms end-ms) (str " · " (ms-str (- end-ms start-ms))))
-              (when (:tokens turns) (str " · " (group3 (:tokens turns)) " tokens")))])
+              (when (:tokens turns) (str " · " (group3 (:tokens turns)) " tokens"))))])
       (when-let [t (or (:task agent) (:seon.attempt/task attempt))] [:p {:class "task"} (str t)])
       [:ul {:class "why"} (for [l (why agent attempt task (:model turns))] [:li l])]
       ;; its evaluations: every one its branch records (the card's count is this boot's process's)
@@ -998,7 +1000,8 @@
         (str (:model turns) " model" (when (pos? (:reads turns)) (str " · " (:reads turns) " reads")))]
        [:span [:em "tokens"] (group3 (:tokens turns))]
        [:span {:title "at the model's configured prices, off-peak (the provider charges twice at peak); a turn whose provider did not split cached from uncached prompt tokens, or whose model has no prices, is not priced"}
-        [:em "cost"] (cond (and (:usd turns) (pos? (:unpriced turns))) (str (cost-str (:usd turns)) " + " (:unpriced turns) " turns not priced")
+        [:em "cost"] (cond (= :scripted (config/value :seon.config.ai/provider)) "none: a scripted run calls no model"
+                           (and (:usd turns) (pos? (:unpriced turns))) (str (cost-str (:usd turns)) " + " (:unpriced turns) " turns not priced")
                            (:usd turns) (cost-str (:usd turns))
                            (pos? (:unpriced turns)) (str "unknown: " (:unpriced turns) " turns whose provider gave no cached/uncached split, or a model with no prices")
                            :else "none spent")]]]))

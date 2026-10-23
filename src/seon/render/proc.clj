@@ -332,7 +332,7 @@
                         [tid (if (= t (:v old)) old {:v t :html (h/html (ui/turn-row t {}))})]))
         newest (peek turns)
         agent (ui/ended-as ag id (:agent-attempt st {}))
-        branch {:branch (or (:branch ag) (get-in attempt [:seon.attempt/env :branch])) :turn (:seon.turn/id newest)
+        branch {:branch (or (get-in attempt [:seon.attempt/env :branch]) (:branch ag)) :turn (:seon.turn/id newest)
                 :will-merge (get-in newest [:seon.turn/basis :observed :will-merge])
                 :conflicts (:seon.attempt/conflicts attempt) :unmerged (:seon.attempt/unmerged attempt)}
         problems (problem-rows (:recorded st) id (:seon.attempt/task attempt))
@@ -370,7 +370,7 @@
                                                  (for [[eid _ tx] records] [tx (get rows eid)]))))
       :turns-why why-none
       :totals {:n (count turns) :model (count (filter #(= :model (:seon.turn/origin %)) turns))
-               :reads (count (remove #(= :model (:seon.turn/origin %)) turns)) :evals (count all)
+               :reads (count (remove #(= :model (:seon.turn/origin %)) turns)) :evals (count all) :read? (some? db)
                ;; unknown is not 0: no turn that reported its tokens, no total
                :tokens (when-let [ts (seq (keep :seon.turn/tokens turns))] (reduce + ts))
                :usd (when-let [us (seq (keep :usd turns))] (reduce + us))
