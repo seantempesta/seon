@@ -1,5 +1,7 @@
 # Step R: the fresh clone at ~/src/seon-next (2026-10-23)
 
+**The runnable form is `notes/cutover-step-R.sh`** (`zsh notes/cutover-step-R.sh` on root's word; `REHEARSE=1 OLD=<clone> NEW=<scratch> BRANCH=<branch>` rehearses D and R0 to R3 and the R6 grep without touching the live repo; rehearsed 2026-10-23 on a clone of this branch, GitHub submodules and all). The sequence below explains it, section by section.
+
 One command sequence, run by root after main is frozen, `jolt/rename-run` has merged, and `jolt/self-contained` (steps A and C) has merged. Context: [the plan](self-contained-plan-2026-10-23.md) (§6, steps A to E and R) and `docs/plan.md` (the cutover). The old tree `~/src/seon-jolt/next` is read only throughout; if any check fails, delete `~/src/seon-next` and nothing else has changed.
 
 Run it in a shell where long commands may take a while: the build and the full run are the long parts (niced, once). `set -eu` stops at the first failing command; each section prints what it proved. Read each section's comment before running it.
