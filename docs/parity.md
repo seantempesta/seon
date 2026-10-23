@@ -29,19 +29,19 @@ The server's ops, the MCP tools and root's evaluation path are [server](server.m
 
 | v1 | next | Status |
 |---|---|---|
-| ``my.task/current``, ``update!``, ``send-back!``; ``my.turn/wait`` | `current`, `update!`, `fail!` (send-back replaced: a failure is task data, held for root: [tasks](tasks.md#a-failed-task-is-held-for-root)); `my.turn/wait` | present (an agent holds its task from the fork: [tasks](tasks.md#the-agent-knows-its-task)) |
-| ``my.program/callers``, ``source``, ``tests-reaching`` | `my.agent/callers`, `callees`, `grep`, `source-fn`; `seon.program/reach-digests` | present |
-| ``my.program/history`` | none; the store keeps history ([storage](storage.md#history)), the function is not built | missing |
-| ``my.program/search``, ``similar`` (embeddings) | none; the context's `:found` finds helpers by the call graph (`seon.context/found`) | missing |
-| ``my.program/diff``, ``sizes``, ``breaks`` | `seon.root/branch-diff` (root only) | partial |
-| ``my.program/write-branch!`` | write-back at merge (`seon.source`, the `:git` effect) | present, better |
-| ``my.message/inbox``, ``send`` (stored facts) | `my.agent/messages`, `send-message`, held in the agent's process | partial |
-| ``my.test/run``, ``check`` | proofs run by themselves after each evaluation, and `my.agent/prove` runs the same selection at the REPL ([turn](turn.md#who-runs-which-tests)) | present |
-| removal that refuses while a referrer remains (``my.program/unmap-subject!``) | plain `ns-unmap`, nothing checked | missing |
-| ``my.web/fetch``, ``search`` | none (no `:web` effect) | missing |
-| ``my.fs/*`` (read, write, list files), ``my.edit/*`` (exact-span text edits), ``my.shell/run!`` (a command, its output and exit), and their handlers' policy (fs roots, no symlink following, a digest precondition on write, argv-only shell with an env allowlist) | none; they go through the effect owner (`my.fx/call`), like every outside-world call. Seon does any work its user wants (AGENTS §1); only Seon's own code changes at the REPL | missing |
-| ``my.schema/register!``, ``my.branch/merge-main!``, ``unmerged``, ``resolve!`` | the same names | present |
-| an effect's receipt committed before its handler runs, settled once, never sent again (``seon.effect``) | the outcome only, recorded after it (`seon.agent` writes `:seon.fx/status` on the answer); a dead agent's effect in flight leaves no record | missing |
+| `my.task/current`, `update!`, `send-back!`; `my.turn/wait` | `current`, `update!`, `fail!` (send-back replaced: a failure is task data, held for root: [tasks](tasks.md#a-refused-attempt-is-held-for-root)); `my.turn/wait` | present (an agent holds its task from the fork: [tasks](tasks.md#the-agent-knows-its-task)) |
+| `my.program/callers`, `source`, `tests-reaching` | `my.agent/callers`, `callees`, `grep`, `source-fn`; `seon.program/reach-digests` | present |
+| `my.program/history` | none yet; the store keeps history ([storage](storage.md#history)), the function is not built | missing |
+| `my.program/search`, `similar` (embeddings) | none; decided (DECISIONS, "Embeddings join the context"), not built; the context's `:found` finds helpers by the call graph meanwhile (`seon.context/found`) | missing |
+| `my.program/diff`, `sizes`, `breaks` | `seon.root/branch-diff` (root only) | partial |
+| `my.program/write-branch!` | write-back at merge (`seon.source`, the `:git` effect) | present, better |
+| `my.message/inbox`, `send` (stored facts) | `my.agent/messages`, `send-message`, held in the agent's process | partial |
+| `my.test/run`, `check` | proofs run by themselves after each evaluation, and `my.agent/prove` runs the same selection at the REPL ([turn](turn.md#who-runs-which-tests)) | present |
+| removal that refuses while a referrer remains (`my.program/unmap-subject!`) | plain `ns-unmap`, nothing checked | missing |
+| `my.web/fetch`, `search` | none (no `:web` effect) | missing |
+| `my.fs/*` (read, write, list files), `my.edit/*` (exact-span text edits), `my.shell/run!` (a command, its output and exit), and their handlers' policy (fs roots, no symlink following, a digest precondition on write, argv-only shell with an env allowlist) | none; they go through the effect owner (`my.fx/call`), like every outside-world call. Seon does any work its user wants (AGENTS §1); only Seon's own code changes at the REPL | missing |
+| `my.schema/register!`, `my.branch/merge-main!`, `unmerged`, `resolve!` | the same names | present |
+| an effect's receipt committed before its handler runs, settled once, never sent again (`seon.effect`) | the outcome only, recorded after it (`seon.agent` writes `:seon.fx/status` on the answer); a dead agent's effect in flight leaves no record | missing |
 
 ## Tasks, merges, tests
 

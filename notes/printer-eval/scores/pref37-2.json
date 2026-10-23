@@ -1,0 +1,192 @@
+[
+ {
+  "pair": 1,
+  "answer_x": "Eval 2, (seon.model/call provider request), HTTP 400 context-window message. Rest of body via footnote 1: (subs (get-in (nth (my.turn/evals) 2) [:value :seon.error/data :body]) 5729).",
+  "answer_y": "Eval 2, (seon.model/call provider request), HTTP 400 context-window message. Rest of body, inline: (subs (get-in (nth (my.turn/evals) 2) [:value :seon.error/data :body]) 5729), 5524 chars.",
+  "x": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 3
+  },
+  "y": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "better": "Y",
+  "why": "Y puts the exact form for the rest of the body inline at the cut, so the answer needs no footnote lookup."
+ },
+ {
+  "pair": 2,
+  "answer_x": "Total not stated; 66 rows shown and 334 not shown (400 implied). Rest via footnote 1: (drop 66 (get-in (nth (my.turn/evals) 2) [:value])).",
+  "answer_y": "Total not stated; 334 not shown (400 implied). Rest, inline: (drop 66 (get-in (nth (my.turn/evals) 2) [:value])).",
+  "x": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 3
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "better": "Y",
+  "why": "Both give the same count and form, but Y's inline form avoids the footnote block."
+ },
+ {
+  "pair": 3,
+  "answer_x": "Status not shown; the attempt is hidden as ...10 under footnote 3, whose form (val (nth (seq result/h3) 2)) returns its whole map.",
+  "answer_y": "Status not shown; inline (val (nth (seq result/h3) 2)) returns the attempt's whole map.",
+  "x": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 3
+  },
+  "y": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "better": "Y",
+  "why": "Y gives the exact form inline beside the hidden entry, so an agent can act without resolving a footnote."
+ },
+ {
+  "pair": 4,
+  "answer_x": "max-agents not shown; 73 keys not shown; inline (drop 17 result/h3) returns them.",
+  "answer_y": "max-agents not shown; 73 keys not shown; footnote 1 gives (drop 17 result/h3).",
+  "x": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 3
+  },
+  "better": "X",
+  "why": "X states the count and the form inline at the cut, while Y pushes the form into a footnote."
+ },
+ {
+  "pair": 5,
+  "answer_x": "HTTP 400; 10964 chars of body not shown; inline (subs (get-in result/h3 [:seon.error/data :body]) 289) returns them.",
+  "answer_y": "HTTP 400; 10964 chars not shown; footnote 1 gives (subs (get-in result/h3 [:seon.error/data :body]) 289).",
+  "x": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 3
+  },
+  "better": "X",
+  "why": "X gives the cut count and the exact reading form inline, so no footnote lookup is needed."
+ },
+ {
+  "pair": 6,
+  "answer_x": "Not shown: the stuck class holds 2 rows that are hidden; inline (get-in result/h3 [:classes :stuck]) returns them.",
+  "answer_y": "Not shown: the stuck class has 2 rows hidden; footnote 2 gives (get-in result/h3 [:classes :stuck]).",
+  "x": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 3
+  },
+  "better": "X",
+  "why": "X puts the stuck-rows form inline at each cut, so the agent sees the way to the rows without a footnote."
+ },
+ {
+  "pair": 7,
+  "answer_x": "Execution of calc/neg not shown; inline (val (nth (seq result/h3) 4)) returns its whole task map.",
+  "answer_y": "Execution not shown; footnote 5 gives (val (nth (seq result/h3) 4)).",
+  "x": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 3
+  },
+  "better": "X",
+  "why": "X gives the exact form inline for calc/neg, while Y requires following footnote 5."
+ },
+ {
+  "pair": 8,
+  "answer_x": "Two turns (one shown, one more hidden); calls form in footnote 2: (get-in result/h3 [0 :seon.turn/calls]).",
+  "answer_y": "Two turns (one shown, one more hidden); calls form inline: (get-in result/h3 [0 :seon.turn/calls]).",
+  "x": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 3
+  },
+  "y": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "better": "Y",
+  "why": "Y shows the calls form inline where the turn is cut, so it needs no footnote."
+ },
+ {
+  "pair": 9,
+  "answer_x": "36 datoms not shown (400 total implied); inline (drop 364 result/h3) returns them.",
+  "answer_y": "36 datoms not shown; footnote 1 gives (drop 364 result/h3).",
+  "x": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 3
+  },
+  "better": "X",
+  "why": "X states the hidden count and the reading form inline, while Y puts the form in a footnote."
+ },
+ {
+  "pair": 10,
+  "answer_x": "Section 8 not shown (text ends in section 5); 7279 chars not shown; inline (subs result/h3 19523) returns them.",
+  "answer_y": "Section 8 not shown; 7279 chars not shown; footnote 1 gives (subs result/h3 19523).",
+  "x": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 3
+  },
+  "better": "X",
+  "why": "X gives the exact form inline at the cut, so the rest of the text is one step away."
+ }
+]

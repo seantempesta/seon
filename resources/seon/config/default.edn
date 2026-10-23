@@ -203,7 +203,7 @@
  ;; :seon.test/ticks-spent naming the test that was running. 0: none.
  :seon.config.agent/test-ticks 200000000000
 
- ;; ==== merges and refinement ==================================================================
+ ;; ==== merges =================================================================================
 
  ;; Unit: merge attempts at once. They run together only when the definitions they change are
  ;; disjoint (an octopus merge); 1 is git's one-at-a-time merge queue. Provenance: DECISIONS (root's
@@ -218,9 +218,6 @@
  ;; Unit: merge turns without green. Past it the merge attempt ends (:merge-turns); a task's
  ;; own :seon.config.merge/max-merge-turns wins.
  :seon.config.merge/max-merge-turns 2
- ;; Unit: refinement chains a task's failures may attach when it declares no :seon.task/budget.
- ;; At the bound the task is observed stuck (a fact naming its cause and what it blocks).
- :seon.config.task/budget 2
 
  ;; ==== Seon's own source ======================================================================
 
@@ -241,6 +238,14 @@
  ;; The owner's standing root adds it (the main tree's config/local.edn), and
  ;; seon.source-test/a-restart-catches-up-and-a-new-generation-resumes boots with those dirs.
  :seon.config.source/dirs ["src" "resources/seon/schemas"]
+ ;; Unit: qualified var names. A test whose reach (seon.program/reach-index, the compiler's
+ ;; facts) references one of these reaches a process of its own: a shell, a fork, a root booted
+ ;; for it, the binary. Such tests never run automatically, only when named (owner, 2026-10-23;
+ ;; root's ruling 2026-10-22: by the reach walk, never a hand tag). Provenance: step E's run 4,
+ ;; where a turn's tests booted roots and spun for minutes in an agent's fork; process tests
+ ;; were 782 s of 917 s of recorded test time (pure-tests, 2026-10-23). A var missing here makes
+ ;; its tests run automatically (slower, never wrong).
+ :seon.config.source/process-vars #{seon.agent-test/in-agent clojure.java.shell/sh seon.lib/fork! seon.test-store/binary-sh}
  ;; Unit: branch. Merges are committed here, never on main and never pushed (owner).
  :seon.config.source/branch "jolt/seon-merges"
  ;; Unit: a git identity. Seon authors and commits its merges (the message names the merged
@@ -267,6 +272,12 @@
  ;; responsive beside a standing root and other worktree sessions (measured in docs/merging.md#a-merge-runs-what-the-change-reaches).
  ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected.
  :seon.config.proofs/jobs 4
+ ;; Unit: the size n of a cost proof's input (seon.cost/sizes). A proof measures its sizes up to
+ ;; this, and at least its two smallest (a growth fit needs two). Provenance: root, 2026-10-23
+ ;; (notes/test-time-2026-10-23.md: building inputs at 10k took 10-19 s per proof in every run).
+ ;; bin/test --all sets SEON_COST_MAX_N=100000, so the full run measures each proof as written.
+ ;; At the bound: the proof measures no size past this but its two smallest.
+ :seon.config.proofs/cost-max-n #long #or [#env SEON_COST_MAX_N 1000]
 
  ;; ==== effects and the model ==================================================================
 

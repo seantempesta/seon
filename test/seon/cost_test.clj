@@ -2,8 +2,8 @@
   "Cost proofs (idea 16): the judge's laws on stated measurements, and seon.cost/proof end
   to end on real functions, red when the body does more than the work needs."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]]
-            [seon.cost :as cost] [seon.profile :as profile] [datahike.api :as d] [seon.db :as pdb] [clojure.edn :as edn]))
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [seon.config]
+            [seon.cost :as cost] [seon.profile :as profile] [datahike.api :as d] [seon.db :as pdb] [clojure.edn :as edn] [clojure.string :as str]))
 
 ;; ---- the judge ------------------------------------------------------------------------
 
@@ -15,6 +15,12 @@
   "Rows of estimate e at its sizes, measured as (m n) per dimension."
   {:malli/schema [:=> [:cat :seon.cost/estimate :seon.host/fn] [:vector :seon.cost/row]]}
   [e m] (vec (for [n (:sizes e)] {:n n :measured (m n) :expected (cost/expected e cost/units n)})))
+
+(deftest a-proofs-sizes-stop-at-the-cap-keeping-two
+  (is (= [100 1000] (cost/sizes [100 1000 10000] 1000)) "the sizes up to the cap")
+  (is (= [1000 10000] (cost/sizes [10000 1000 100000] 1000)) "ascending, and at least the two smallest: a growth fit needs two")
+  (is (= [100 1000 10000] (cost/sizes [10000 100 1000] 100000)) "under the cap: as written, ascending")
+  (is (= [4 40 400] (cost/sizes [4 40 400] 1000))))
 
 (deftest work-is-the-growth-at-n
   (is (= [1.0 1000.0 1000000.0] (mapv #(cost/work % 1000) [:constant :linear :quadratic])))
@@ -101,9 +107,9 @@
 
 (deftest a-one-pass-function-meets-its-estimate
   (let [{:keys [rows verdict]} (cost/run estimate)]
-    (is (= [100 1000 10000] (mapv :n rows)))
+    (is (= (cost/sizes [100 1000 10000] (seon.config/value :seon.config.proofs/cost-max-n)) (mapv :n rows)))
     (when seon.contract/on?
-      (is (= [101.0 1001.0 10001.0] (mapv #(get-in % [:measured :calls]) rows)) "calls are exact"))
+      (is (= (mapv #(double (inc %)) (mapv :n rows)) (mapv #(get-in % [:measured :calls]) rows)) "calls are exact: n + 1"))
     (is (:ok? verdict) (cost/explain estimate rows verdict))))
 
 (deftest a-scan-inside-the-loop-is-red-and-says-why
@@ -159,6 +165,9 @@
                   :per :n-log-n}
    :str/seq-char {:what "one step of a seq over a String's chars (doseq, reduce)" :setup #(vector (apply str (repeat % \a)))
                   :f (fn [s] (reduce (fn [n c] (inc n)) 0 s))}
+   :str/escape {:what "clojure.string/escape of a text by char-escape-string, newlines kept, per char"
+                :setup (fn [n] [(subs (str/join "\n" (repeat (inc (quot n 40)) "line 12 of a long log, as one prints it")) 0 n)])
+                :f (fn [s] (str/escape s #(when-not (= \newline %) (char-escape-string %))))}
    :str/append {:what "StringBuilder append of one char" :setup #(vector (apply str (repeat % \a)))
                 :f (fn [s] (let [sb (StringBuilder.) n (count s)] (loop [i 0] (when (< i n) (.append sb (.charAt ^String s i)) (recur (inc i)))) (.toString sb)))}
    :map/literal {:what "a small map literal of 5 keys built per element" :setup #(vector (vec (range %)))
@@ -198,7 +207,8 @@
     {:ns (- (/ (:ns m) units) (:ns b 0.0)) :bytes (- (/ (:bytes m) units) (:bytes b 0.0))}))
 
 (deftest the-unit-table-is-current
-  ;; every row of the table measured again at 10k units: within 3x of its ns, its bytes within
+  ;; every row of the table measured again at 10k units (the table's own n: a unit's bytes at 1k
+  ;; differ, 630 against 825 B for :map/assoc): within 3x of its ns, its bytes within
   ;; 1.25x (allocation is counted); a drifted row means the estimates priced by it are stale
   (doseq [[k {:keys [ns bytes]}] cost/units
           :let [m (measure-unit k 10000)]]

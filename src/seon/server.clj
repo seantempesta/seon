@@ -23,7 +23,7 @@
 
 (defn task-summaries
   "Every task on main db: {id {:execution :done :blocked-by :attempts [[id status outcome
-  turns tokens]] :problem}}: the server's and the e2e harness's one summary."
+  turns tokens]] :failure}}: the server's and the e2e harness's one summary."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
   (let [idx (r/index db)]
@@ -32,7 +32,7 @@
             [id (cond-> {:execution (:seon.task/execution t) :done (r/done? idx id) :blocked-by (r/blocked-by idx id)
                          :attempts (mapv (juxt :seon.attempt/id :seon.attempt/status :seon.attempt/outcome :seon.attempt/turns :seon.attempt/tokens)
                                          (sort-by :seon.attempt/id (map (:attempts idx) (get-in idx [:by-task id]))))}
-                  (:seon.task/problem t) (assoc :problem (:seon.task/problem t)))]))))
+                  (:seon.task/failure t) (assoc :failure (:reason (:seon.task/failure t))))]))))
 
 (defn- agents-answer
   "Live agents (id, branch, status, task) and every task (task-summaries)."

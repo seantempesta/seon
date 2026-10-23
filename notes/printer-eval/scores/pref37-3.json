@@ -1,0 +1,192 @@
+[
+ {
+  "pair": 1,
+  "answer_x": "The error is from (seon.model/call provider request): HTTP 400, 'the request's messages exceed the model's context window.' The rest of the body is at (subs (get-in (nth (my.turn/evals) 2) [:value :seon.error/data :body]) 5729), 5524 characters.",
+  "answer_y": "Same error: (seon.model/call provider request), HTTP 400, context window exceeded. The cut is marked with the footer symbol, and the footer gives (subs (get-in (nth (my.turn/evals) 2) [:value :seon.error/data :body]) 5729) for the 5524 characters not shown.",
+  "x": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 4,
+   "concise": 3
+  },
+  "y": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "better": "Y",
+  "why": "X states the same cut and form twice (inline and in the footer), while Y states each once through a marker, so it is leaner and nothing repeats."
+ },
+ {
+  "pair": 2,
+  "answer_x": "The d/datoms evaluation holds 66 datoms shown and 334 not shown, so 400 in all (the total is not stated and must be added). The rest is at (drop 66 (get-in (nth (my.turn/evals) 2) [:value])).",
+  "answer_y": "Same: 66 shown and 334 not shown, total 400 by addition. The rest is at (drop 66 (get-in (nth (my.turn/evals) 2) [:value])), given both inline and in the footer.",
+  "x": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 4,
+   "concise": 3
+  },
+  "better": "X",
+  "why": "Y repeats the same form inline and in the footer, while X gives the cut once with a marker and its footer, so it is more concise and not duplicated."
+ },
+ {
+  "pair": 3,
+  "answer_x": "Not shown. The calc/neg#1 entry is only '{...10 marked}', so its status is not in the text. The form that returns it is (val (nth (seq result/h3) 2)).",
+  "answer_y": "Not shown. The calc/neg#1 entry is '{...10 (val (nth (seq result/h3) 2))}', so its status is not in the text. Read it with (val (nth (seq result/h3) 2)).",
+  "x": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 4,
+   "concise": 3
+  },
+  "better": "X",
+  "why": "X gives the form once through a marker, while Y repeats it inline and in the footer, so X is less cluttered and equally clear on what is missing."
+ },
+ {
+  "pair": 4,
+  "answer_x": "max-agents is not in the 17 keys shown, so its value is not shown. 73 config keys are not shown; read them with (drop 17 result/h3).",
+  "answer_y": "max-agents is not shown. 73 config keys are not shown; read them with (drop 17 result/h3).",
+  "x": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 4,
+   "concise": 3
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "better": "Y",
+  "why": "X prints the form inline and again in the footer, while Y gives the count and form once through a marker, so Y is cleaner and not duplicated."
+ },
+ {
+  "pair": 5,
+  "answer_x": "HTTP status 400. 10964 body characters are not shown; read them with (subs (get-in result/h3 [:seon.error/data :body]) 289).",
+  "answer_y": "HTTP status 400. 10964 body characters are not shown; read them with (subs (get-in result/h3 [:seon.error/data :body]) 289), given in the footer.",
+  "x": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 4,
+   "concise": 3
+  },
+  "y": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "better": "Y",
+  "why": "Y gives the cut and its form once through a marker, while X repeats both inline and in the footer, so Y is more concise and not misleading."
+ },
+ {
+  "pair": 6,
+  "answer_x": "The stuck rows are not shown. The stuck class holds 2 members; read them with (get-in result/h3 [:classes :stuck]). The reason is in those rows, so it is not shown either.",
+  "answer_y": "The stuck rows are not shown. The stuck class holds 2 members; read them with (get-in result/h3 [:classes :stuck]), given inline and in the footer.",
+  "x": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 4,
+   "concise": 3
+  },
+  "better": "X",
+  "why": "X gives each cut once with a marker and footer, while Y repeats the form inline and in the footer, so X is leaner with the same information."
+ },
+ {
+  "pair": 7,
+  "answer_x": "The execution is not shown. calc/neg is entry 4, shown as '{...11 (val (nth (seq result/h3) 4))}', and that form returns its whole task map.",
+  "answer_y": "The execution is not shown. calc/neg is entry 4, shown as '{...11 marker}', and marker 5 reads (val (nth (seq result/h3) 4)).",
+  "x": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 4,
+   "concise": 3
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "better": "Y",
+  "why": "Y gives each cut once through a marker, while X repeats the form inline and in the footer, so Y is more concise and not misleading."
+ },
+ {
+  "pair": 8,
+  "answer_x": "The value holds 2 turns, one shown and one not shown, by its '...1' count. The calls of the first turn are at (get-in result/h3 [0 :seon.turn/calls]), with 1 call not shown.",
+  "answer_y": "Two turns in all, one shown, one not. The calls of the first turn are at (get-in result/h3 [0 :seon.turn/calls]), given inline and in the footer.",
+  "x": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 4,
+   "concise": 3
+  },
+  "better": "X",
+  "why": "X states each form once with a marker and footer, while Y repeats the forms inline and in the footer, so X is less repetitive."
+ },
+ {
+  "pair": 9,
+  "answer_x": "The value holds 400 rows in all: 364 shown and 36 not shown. The rows not shown are at (drop 364 result/h3).",
+  "answer_y": "Same counts: 364 shown and 36 not shown, read with (drop 364 result/h3), given inline and in the footer.",
+  "x": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 4,
+   "concise": 3
+  },
+  "better": "X",
+  "why": "X gives the form once through a marker, while Y repeats it inline and in the footer, so X is leaner and equally clear."
+ },
+ {
+  "pair": 10,
+  "answer_x": "Section 8 is not shown: the text ends inside section 5 ('Procs follow the step-fn contract'). 7279 characters are not shown; read them with (subs result/h3 19523).",
+  "answer_y": "Section 8 is not shown: the text ends inside section 5. 7279 characters are not shown; read them with (subs result/h3 19523), given inline and in the footer.",
+  "x": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 4,
+   "concise": 3
+  },
+  "better": "X",
+  "why": "X gives the cut and its form once through a marker, while Y repeats both inline and in the footer, so X is leaner without losing any information."
+ }
+]

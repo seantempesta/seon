@@ -1,0 +1,92 @@
+[
+ {
+  "section": 1,
+  "ranking": [
+   "P",
+   "Q",
+   "R"
+  ],
+  "why": "P states the error message and the exact subs form for the body inline at its cut for about the same cost as Q, while R repeats every cut in a footer and costs the most."
+ },
+ {
+  "section": 2,
+  "ranking": [
+   "Q",
+   "P",
+   "R"
+  ],
+  "why": "Q gives the 334 uncut datoms and the drop form inline at the lowest cost, P repeats the same form in a footer, and R makes the reader follow markers to a footer."
+ },
+ {
+  "section": 3,
+  "ranking": [
+   "P",
+   "R",
+   "Q"
+  ],
+  "why": "P cuts calc/neg#1 inline with its exact val form at the lowest cost, R gives the same form through a marker and a compact footer, and Q repeats all nine forms in a footer for one needed answer."
+ },
+ {
+  "section": 4,
+  "ranking": [
+   "R",
+   "Q",
+   "P"
+  ],
+  "why": "R states the 73 uncut keys and the exact drop form inline at the lowest cost, Q uses a marker and footer for about the same cost, and P repeats the form in a redundant footer."
+ },
+ {
+  "section": 5,
+  "ranking": [
+   "Q",
+   "P",
+   "R"
+  ],
+  "why": "Q gives the 10964 uncut characters and the subs form inline at the lowest cost, P carries the same form through a marker and footer, and R repeats the form in a footer that restates the inline cut."
+ },
+ {
+  "section": 6,
+  "ranking": [
+   "R",
+   "P",
+   "Q"
+  ],
+  "why": "R gives the stuck-class form inline at the lowest cost, P gives the same forms through markers and a footer, and Q repeats its forms in a larger footer."
+ },
+ {
+  "section": 7,
+  "ranking": [
+   "P",
+   "Q",
+   "R"
+  ],
+  "why": "P gives the calc/neg entry as an inline cut with its exact form at the lowest cost, Q uses markers with a footer, and R repeats all twelve forms in a footer on top of the inline cuts."
+ },
+ {
+  "section": 8,
+  "ranking": [
+   "Q",
+   "R",
+   "P"
+  ],
+  "why": "Q gives the two-turn structure and both exact forms inline at the lowest cost, R names the same forms through markers and a footer without repetition, and P repeats its forms in a redundant footer."
+ },
+ {
+  "section": 9,
+  "ranking": [
+   "P",
+   "R",
+   "Q"
+  ],
+  "why": "P gives the 36 uncut datoms and the drop form inline at the lowest cost, R uses a marker with a footer for the same answer, and Q adds a redundant footer on top of its inline cut."
+ },
+ {
+  "section": 10,
+  "ranking": [
+   "R",
+   "Q",
+   "P"
+  ],
+  "why": "R states the 7279 uncut characters and their subs form inline at the lowest cost, Q uses a marker and footer for the same answer, and P repeats the form in a redundant footer."
+ }
+]

@@ -83,7 +83,7 @@
         [req] (:to-api out)]
     (is (= 1 (count (:to-api out))) "the function's request only: nothing is recorded before root answers")
     (is (not (str/includes? (pr-str out) "requested")))
-    (let [rp {:rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events [] :event-rows [] :views {} :zoom {} :merges 0}
+    (let [rp {:rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :zoom {} :merges 0}
           [_ o] (#'p/render-proc rp :answers {:tag (:tag req) :r {:ok true :killed :a1}})
           w (first (filter #(= :write (get-in % [:req :op])) (:to-api o)))
           rec (some :seon.cluster.eval/record (get-in w [:req :req :tx-data]))]
@@ -100,7 +100,7 @@
     (is (empty? (:to-api out)) "no request: root refused it")
     (is (= :refused (:op m)))
     (is (= :seon.root/refused (:seon.error/type (:r m))))
-    (let [rp {:rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events [] :event-rows [] :views {} :zoom {} :merges 0}
+    (let [rp {:rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :zoom {} :merges 0}
           [_ o] (#'p/render-proc rp :from-web m)
           w (first (filter #(= :write (get-in % [:req :op])) (:to-api o)))
           rec (some :seon.cluster.eval/record (get-in w [:req :req :tx-data]))]
