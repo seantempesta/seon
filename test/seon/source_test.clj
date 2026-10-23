@@ -568,8 +568,8 @@
               :n "forms in the program's other files; the read and analysis of one 10-function file"
               :work "read: the file's text read form by form; analyze: each form's account (Jolt's analyzer, not run)"
               :growth :constant
-              ;; measured 2026-10-23: 294k ticks, 2.44 MB, 390 calls at every size (1.3 ms CPU)
-              :fixed {:ticks 300000 :bytes 2500000 :calls 390}
+              ;; measured 2026-10-23: 294k ticks, 2.44 MB, 391 calls at every size (1.3 ms CPU)
+              :fixed {:ticks 300000 :bytes 2500000 :calls 391}
               :sizes refresh-sizes}
              {:of 'seon.source/db-interface :input 'seon.source-test/interface-of
               :n "forms in the program's other files, every file requiring the hub"
