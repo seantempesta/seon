@@ -14,13 +14,18 @@
                       'app.st-stage "(defmulti area :shape)"
                       'app.st-stage "(defmethod area :square [{:keys [s]}] (* s s))"
                       'app.st-stage "(defmethod area :circle [{:keys [r]}] (* 3 r r))")
-        form-of (fn [sym] (:db/id (:var/form (d/entity db (pdb/eid db :var/name sym)))))]
+        form-of (fn [sym] (:db/id (:var/form (d/entity db (pdb/eid db :var/name sym)))))
+        ;; this namespace's definitions only: another test of this process may load the test
+        ;; store's example namespaces without their vars, which stage-tx rightly retracts
+        mine (fn [tx] (filterv #(let [x (d/entity db (second %))]
+                                  (= "app.st-stage" (or (some-> (:var/name x) namespace) (some-> (:method/multi x) namespace))))
+                               tx))]
     (testing "a runtime that matches the branch stages nothing"
-      (is (= [] (stage/stage-tx db))))
+      (is (= [] (mine (stage/stage-tx db)))))
     (ns-unmap 'app.st-stage 'dropped)
     (remove-method @(find-var 'app.st-stage/area) :circle)
     (testing "the unmapped var and the removed method stop pointing to their forms, nothing else"
-      (let [tx (stage/stage-tx db)]
+      (let [tx (mine (stage/stage-tx db))]
         (is (= 2 (count tx)) (pr-str tx))
         (is (some #{[:db/retract (pdb/eid db :var/name 'app.st-stage/dropped) :var/form (form-of 'app.st-stage/dropped)]} tx))
         (is (some #(= :method/form (nth % 2)) tx))
