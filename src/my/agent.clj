@@ -128,8 +128,8 @@
 
 (defn deferred
   "The process tests this branch's change reaches, a proof among them: an agent's turn and
-  root's judge never run them, root's gate runs them when root asks (my.root/gate!; the
-  owner's ruling, 2026-10-23). seon.agent/test-plan's :process among what it selects: names."
+  root's judge never run them, root's gate runs them when root asks (my.root/gate!; DECISIONS,
+  Process tests are not automatic). seon.agent/test-plan's :process among what it selects: names."
   {:malli/schema [:=> [:cat] [:vector :qualified-symbol]]}
   [] (let [proofs (or (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})
            plan (agent/test-plan (agent/db) (:base @agent/state) proofs)]

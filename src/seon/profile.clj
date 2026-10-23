@@ -14,8 +14,8 @@
     per call, no Clojure dispatch. Estimate 1-2 ns per call; probe 0.9 ns (9.5 vs 8.6 ns
     for a bare inc).
   - The clock is the machine's CLOCK_UPTIME_RAW (clock_gettime_nsec_np), a foreign
-    procedure called from Scheme: 9.5 ns a read, nothing allocated, 41 ns resolution
-    (2026-10-22), where Chez's `current-time` was 28 ns, 48 bytes and 1 us, counted from
+    procedure called from Scheme: 9.5 ns a read, nothing allocated, 41 ns resolution,
+    where Chez's `current-time` was 28 ns, 48 bytes and 1 us, counted from
     this process's start. It is Seon's one clock (`now-ns`, docs/machine.md#the-clock):
     every process reads the same timeline, so one process's stamp is another's t0.
   - The sample rate is a power of two, so the test is one fxand. Amortized clock cost: two

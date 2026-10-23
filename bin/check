@@ -64,6 +64,17 @@ S=$ROOT/target/seon
 # laws, lmdb-kill) seeds no store, starts no root and wants no build
 NEEDS=1; [[ -n $SEL && ! -s $SEL/steps-binary ]] && NEEDS=
 (( NEEDS )) && { [[ -x $S ]] || { echo "check: no target/seon; run bin/build seon" >&2; exit 1 } }
+# VERDICT: the line a refused run ends on, its mode's (CONFIG FAILED) or the run's (CHECK FAILED)
+VERDICT=CHECK; [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]] && VERDICT=${(U)1}
+# a binary built from another tree checks another program (and may refuse this tree's config
+# before it says anything): bin/build records the tree it built from, bin/tree names this one
+if (( NEEDS )); then
+  BUILT=$(cat "$ROOT/target/seon.tree" 2>/dev/null) HERE=$("$ROOT/bin/tree" "$ROOT")
+  if [[ -z $BUILT || $BUILT != $HERE ]]; then
+    echo "check: target/seon was built from tree ${BUILT:-unknown}; this checkout is tree ${HERE:-unknown}: run bin/build seon"
+    echo "$VERDICT FAILED (stale binary)"; exit 1
+  fi
+fi
 # what this run starts ends with it (bin/held): a fifo of its own, held open read-write while
 # bin/check lives, named to every step; its EOF, bin/check gone however it ended, ends them
 STARTER=$ROOT/target/tmp/check-starter-$$.fifo
@@ -79,10 +90,13 @@ run-embedding() { SEON_EMBED_TEXTS=64 run "$@" }
 # a single mode: on its own branch check-<mode> of the given store, deleted when it is green
 if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then
   M=check-$1
-  [[ $1 == seed ]] || run seed 2000 > /dev/null || exit 1
-  run drop $M > /dev/null || exit 1
+  # quiet when it works; a seed or a drop that fails prints its own output and the mode's verdict
+  # line (AGENTS section 9: a step never ends without one)
+  quiet() { local what=$1 o; shift; o=$("$@") || { print -r -- "$o"; echo "$VERDICT FAILED ($what)"; exit 1 } }
+  [[ $1 == seed ]] || quiet seed run seed 2000
+  quiet drop run drop $M
   if [[ $1 == idle ]]; then SEON_WEB_PORT=$IDLE_WEB_PORT SEON_MAIN=$M run "$@"; else SEON_MAIN=$M run "$@"; fi; st=$?
-  (( st == 0 )) && { run drop $M > /dev/null || exit 1 }
+  (( st == 0 )) && quiet drop run drop $M
   exit $st
 fi
 N=${1:-100}

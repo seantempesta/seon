@@ -284,7 +284,8 @@
   commits and forks, FIFO), :to-api (answers {:dest :r}, after the batch's flush, and
   {:op :writer :tx-count :p50-ms :commits}), :main (main's commits), :events.
   A closed :in is the end of the flow: everything taken is committed and flushed, then
-  {:op :drained} goes out. Continuous group commit (owner, 2026-10-21: no window): answers
+  {:op :drained} goes out. Continuous group commit (DECISIONS, Durability is continuous group
+  commit): answers
   leave when their batch is committed in memory; a dirty store with no notice out tells the
   flusher {:op :dirty :commits n}, and its {:op :flushed :commits n} makes the store clean
   when n is still the commit count, else the flusher is told again. A :flush? request (an

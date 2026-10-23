@@ -1,0 +1,12 @@
+#!/bin/zsh
+# bin/tree [DIR] — the tree DIR (default: this checkout) is as git names it: HEAD's tree (none before
+# a first commit) with every changed and untracked unignored file added, in an index of its own
+# (the repository's index untouched). bin/build records it beside the binary (target/seon.tree);
+# bin/check compares it with that record before it runs the binary. seon.fx/tree-id computes the
+# same in Clojure. Prints nothing and exits 1 when git cannot name it.
+ROOT=${1:-$(cd "$(dirname "$0")/.." && pwd)}
+idx=$(mktemp -u)
+trap 'rm -f "$idx"' EXIT
+if git -C "$ROOT" rev-parse --verify --quiet HEAD > /dev/null; then GIT_INDEX_FILE=$idx git -C "$ROOT" read-tree HEAD || exit 1; fi
+GIT_INDEX_FILE=$idx git -C "$ROOT" add -A || exit 1
+GIT_INDEX_FILE=$idx git -C "$ROOT" write-tree

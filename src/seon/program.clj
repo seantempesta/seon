@@ -1,6 +1,6 @@
 (ns seon.program
-  "The program is entities, as the compiler knows it (owner, 2026-10-21: \"I don't want
-  regex's I want to know exactly what something is\"; inv4's design).
+  "The program is entities, as the compiler knows it (DECISIONS, Programs are known from
+  the compiler, not from text; inv4's design).
 
   A FORM is the unit of reproduction: its exact text, its namespace and its place. Every
   definition (a var, a multimethod's method, a protocol extension, a namespace) points to
@@ -47,8 +47,8 @@
 ;; ---- the compiler's account of one form ------------------------------------------------
 
 (def banned
-  "The clojure.core vars program code does not call (owner, 2026-10-21: every definition
-  happens once; loading code is an effect)."
+  "The clojure.core vars program code does not call (DECISIONS, Every definition happens once,
+  where it is defined; loading code is an effect)."
   '#{clojure.core/intern clojure.core/alter-var-root clojure.core/eval clojure.core/load-string})
 
 (def ^:private env-calls
@@ -140,7 +140,7 @@
   template, a proc or render named in data). A symbol of no namespace is data. By namespace,
   not by var: whether the var exists yet depends on what this process analyzed before (an
   import of the same files twice gave 43 of 387 tests the same reach digest, so no result was
-  reused across runs or checkouts; worktree session PROVE 2026-10-22), while every imported
+  reused across runs or checkouts), while every imported
   file's namespace exists before any form is analyzed."
   {:malli/schema [:=> [:cat :any] [:set :qualified-symbol]]}
   [x] (into #{} (filter #(and (qualified-symbol? %) (find-ns (symbol (namespace %))))) (tree-seq coll? seq x)))
@@ -801,7 +801,7 @@
   has that db-from had not is loaded (but the binary's own), with what it reaches (load!),
   and each definition db-from had that db-to has none of is removed. Answers the load
   errors. Cost: each db's form ids and definition pointers, read as datoms; a form row is
-  built only for a form db-to has live that db-from had not (measured 2026-10-23 on Seon's
+  built only for a form db-to has live that db-from had not (measured on Seon's
   program: four live-forms reads, ~1.4 s, before)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.program/error]]}
   [db-from db-to]
@@ -848,7 +848,7 @@
   the :var/form and :schema/form datoms that differ between the two (d/datoms-diff, which
   skips the index subtrees they share), and two seeks per entry among them: what the branch
   changed, not the program (before, both dbs' every :var/form and :schema/form datom, each
-  turn: pure-tests 2026-10-23)."
+  turn)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db]
                   [:map-of [:enum :added :changed :removed :schemas] [:vector [:or :qualified-symbol :qualified-keyword]]]]}
   [db-from db-to]
@@ -886,7 +886,7 @@
   "The platform vars whose file reads are of inputs every digest already holds (:env:
   resources/, deps.edn, web/) or of no checkout file at all, so reaching them does not make a
   test read the tree. A reader not named here counts as reading the tree (conservative: a
-  missed name reruns more, never reuses a stale green). Measured 2026-10-22 (worktree session PROVE): with
+  missed name reruns more, never reuses a stale green). Measured: with
   seon.config/baked-schema-forms (a macro every contracted form expands) counted, 327 of 368
   tests took the tree, so any edit anywhere reran them."
   '#{seon.config/baked-schema-forms ;; resources/seon/schemas, in :env
@@ -1094,7 +1094,7 @@
 
 (defn process-tests
   "The keys of index (reach-index's answer) that reach a process of their own (a shell, a
-  fork, a root booted for it, the binary): never run automatically, only when named (owner,
-  2026-10-23). Taking the index, not db, so a caller holding one walks once."
+  fork, a root booted for it, the binary): never run automatically, only when named (DECISIONS,
+  Process tests are not automatic). Taking the index, not db, so a caller holding one walks once."
   {:malli/schema [:=> [:cat [:map-of :any [:map [:process? :boolean]]]] [:set :any]]}
   [index] (into #{} (keep (fn [[t {:keys [process?]}]] (when process? t))) index))

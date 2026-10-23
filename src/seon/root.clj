@@ -731,12 +731,12 @@
 
 (defn start!
   "Boot the control process, the fork server and the root graph on its main, a branch of
-  the one store (owner, 2026-10-21: one store, many branches, as in production). opts:
+  the one store (DECISIONS, Branches as in production). opts:
   {:path dir (the store, created when missing, holding the schema and, given :datoms n,
    about n datoms of an example program on :db; a root holds no program it was not given)
    :main branch (root's main; an existing branch is resumed; :db is the seed itself)
    :backend :lmdb|:file :log? true :max-running n (parallel runs) :provider p (the
-   runs' model) :stall-ms (a guard, seon.agent-proc/stall-ms, for the checks that
+   runs' model) :stall-ms (the stall bound, seon.agent-proc/stall-ms, for the checks that
    move it) :source s}. s: Seon's own source
    is the program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: main's program follows
    root's dirs at boot (import-source!: replaced when they read otherwise than main's last
@@ -753,7 +753,7 @@
         ;; agents write their own branches, so the store is shared: the one durable store
         ;; (the kept runs store, bin/check's, a test's). This root resumes its main, a branch
         ;; of the store's seed, and names its agents' branches under it; a run's record is
-        ;; main's commit history (owner, 2026-10-22: one main, resumed)
+        ;; main's commit history (owner: one main, resumed)
         path (or path (cfg/value :seon.config.root/store-path))
         main (or main (keyword (cfg/value :seon.config.root/main)))
         backend (or backend (cfg/value :seon.config.store/backend))

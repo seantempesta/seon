@@ -251,7 +251,7 @@
         dir (str here "/target/tmp/one-store-" (random-uuid))
         p1 'seon.reader-test/prose-without-a-fence-is-a-comment
         p2 'seon.reader-test/a-fenced-reply-reads-only-its-code
-        digests (program/reach-digests (runner/program-db here) (fx/inputs here))
+        digests (program/reach-digests (runner/program-db here (ts/program-store)) (fx/inputs here))
         _ (.mkdirs (java.io.File. ^String dir))
         ;; the checkout's green for p1, as bin/test stores one (a run nested in this test's run
         ;; would report through it)
@@ -295,6 +295,26 @@
                                    " (#{:ready :dead :ended :killed} (:type e)) (:type e)"
                                    " :else (recur))))))")}])]
     (is (= ":ready" (:printed r)) (pr-str r))))
+
+(deftest a-resumed-branch-holds-what-main-gained
+  ;; step E run #11 (2026-10-23): a kept branch made before main imported test/ was resumed,
+  ;; and its agent held seon.context-test with no vars (seon.agent/init! unmapped every
+  ;; definition main had that the branch did not), so the design never reached its proof's
+  ;; fixtures; and it ran the branch's old version of a function main had redefined since.
+  ;; A resumed agent runs main with the branch's own changes since its merge base
+  (let [[r] (in-agent [{:op :eval :agent "root"
+                        :code (str "(let [ev (seon.root/events sys) m (seon.db/conn-main (:conn sys))]"
+                                   " @(seon.root/transact-main! sys (seon.source/text-tx @(:conn sys) 'demo.kept \"(ns demo.kept)\\n\\n(defn h [] 1)\\n\" nil))"
+                                   " (datahike.api/branch! (:conn sys) m (seon.db/on-main m :kept))"
+                                   " @(seon.root/transact-main! sys (seon.source/text-tx @(:conn sys) 'demo.gained \"(ns demo.gained)\\n\\n(defn g [] 7)\\n\" nil))"
+                                   " @(seon.root/transact-main! sys (seon.source/text-tx @(:conn sys) 'demo.kept \"(ns demo.kept)\\n\\n(defn h [] 2)\\n\" nil))"
+                                   " (let [ag (seon.root/spawn! sys {:branch :kept})]"
+                                   " (loop [] (let [e (clojure.core.async/<!! ev)]"
+                                   " (cond (not= ag (:agent e)) (recur)"
+                                   " (= :ready (:type e)) (:printed (first @(seon.root/submit! sys ag \"[(demo.gained/g) (demo.kept/h)]\")))"
+                                   " (#{:dead :ended :killed} (:type e)) (:type e)"
+                                   " :else (recur))))))")}])]
+    (is (= (pr-str "[7 2]") (:printed r)) "a var main added, and main's redefinition of one the branch left alone")))
 
 (deftest a-failure-marked-through-the-server-holds-the-task
   ;; owner, 2026-10-22: a failure is task data and root reacts to it. The agent marks its

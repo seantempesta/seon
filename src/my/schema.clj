@@ -28,7 +28,7 @@
 
 (defn- new-key-file
   "The resource a new key k goes to: the one holding most keys of k's namespace on db (ties
-  by path), else <schemas-dir>/<namespace>.edn (owner, 2026-10-21)."
+  by path), else <schemas-dir>/<namespace>.edn."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword] :string]}
   [db k]
   (let [counts (frequencies (for [dt (d/datoms db :aevt :schema/key) :when (= (namespace k) (namespace (:v dt)))
@@ -75,7 +75,7 @@
 (defn forms
   "The schema population this agent's branch sees, {key form}: the binary's forms with the
   branch's registrations; (keys (forms)) are every key. With a key, that key's form, or nil
-  (agents asked (forms k) four times in step E's paid runs, 2026-10-22)."
+  (agents asked (forms k) four times in step E's paid runs)."
   {:malli/schema [:function [:=> [:cat] [:map-of :qualified-keyword :any]]
                   [:=> [:cat :qualified-keyword] :any]]}
   ([] (merge contract/forms (program/schema-changes (agent/db))))

@@ -327,8 +327,8 @@
     (into {} (for [[e cs] carrying] [(ids e) {:e e :catches cs :src (srcs e)}]))))
 
 (defn caused-split
-  "{:caused :attention}: the derived problems the branch at head has that base (its merge base) had not, by
-  message: what the branch's own work broke (:caused: the done rule refuses while any is open,
+  "{:caused :attention :rows}: the derived problems the branch at head has that base (its merge base) had not, by
+  message (:rows: each with its class, both kinds): what the branch's own work broke (:caused: the done rule refuses while any is open,
   seon.reconcile/done-explain :open-problem) and what it changed under the wiki (:attention: the
   sections it made stale, which the agent reads and never a reason to refuse; the classes
   :seon.problems/attention declares). An evaluation is never refused (AGENTS: get out of an agent's way).
@@ -342,7 +342,8 @@
   (seon.problems-test/caused-follows-what-changed). Measured on Seon's own program (300 sections,
   880 citations, 1,735 vars, 30 catch forms) with a var every cite deleted: 11-12 ms against 26-29 ms
   for the two full readings; an unchanged branch 7 ms, the scan's floor."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map [:caused [:vector :string]] [:attention [:vector :string]]]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map [:caused [:vector :string]] [:attention [:vector :string]]
+                                                             [:rows [:vector [:map [:class :keyword] [:message :string]]]]]]}
   [base head]
   (let [bs (section-state base) hs (section-state head)
         removed (set/difference (existing-names base) (existing-names head))
@@ -369,7 +370,8 @@
     (let [attention? (:seon.problems/attention (contract/properties :seon.problems/class))
           made (remove (comp before :signature) (rows head hs (fn [fact] (set (keep #(:e ((lf head fact) %)) (changed-forms fact))))))
           messages (fn [pred] (vec (sort (into #{} (comp (filter pred) (map :message)) made))))]
-      {:caused (messages (complement (comp attention? :class))) :attention (messages (comp attention? :class))})))
+      {:caused (messages (complement (comp attention? :class))) :attention (messages (comp attention? :class))
+       :rows (vec (sort-by (juxt (comp str :class) :message) (into #{} (map #(select-keys % [:class :message])) made)))})))
 
 (defn caused
   "The derived problems the branch at head has that base had not that refuse its done (`caused-split`'s :caused)."
@@ -458,8 +460,8 @@
       (assoc :error [(assoc base :error err :producer (:seon.error/operation err) :evidence {:from aid :error err})])
       (seq waste)
       (assoc :waste [(assoc base :waste waste :evidence {:from aid :waste waste})])
-      ;; owner's ruling, 2026-10-23: merged with its deferred process tests unasked (or no
-      ;; gate checkout declared): open until each is recorded passing (my.root/gate!)
+      ;; merged with its deferred process tests unasked (or no gate checkout declared): open until
+      ;; each is recorded passing (my.root/gate!; DECISIONS, Process tests are not automatic)
       (and (= :merged status) (seq (:seon.run/deferred p))
            (not-every? (into #{} (keep #(when (= :pass (:seon.proof/status %)) (:seon.proof/test %))) (:seon.run/deferred-results p))
                        (:seon.run/deferred p)))

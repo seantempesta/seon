@@ -132,7 +132,7 @@
 (defn tree-id
   "git's id of the tree at root as it is on disk: HEAD's tree (none before a first commit)
   with every changed and untracked unignored file added, in an index of its own (the
-  repository's index untouched). bin/build records the same id for the tree it builds
+  repository's index untouched). bin/tree computes the same, which bin/build records for the tree it builds
   (target/seon.tree), so a root can tell whether its binary is built from its source."
   {:malli/schema [:=> [:cat :string] :string]}
   [root]
@@ -143,6 +143,43 @@
       (git! env root ["add" "-A"] nil)
       (git! env root ["write-tree"] nil)
       (finally (.delete idx)))))
+
+(defn base-commit
+  "The commit the checkout at root's health is read against (root's ruling, 2026-10-23). With a
+  branch other than git's main checked out (:seon.config.source/main; a detached HEAD too), its
+  merge base with main: a branch with no commits of its own, or one main has passed, has HEAD
+  itself or an older commit, so it caused only what it changes. With main checked out, its first
+  parent (the previous main, which a merge is held to) when the tree is clean, else HEAD (what the
+  uncommitted change caused). nil when there is no base: main's first commit (no parent), or a
+  repository with no commit or no branch named main (the health step then says which, and its
+  digest is missing); a merge base git cannot find throws git's words (git!)."
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [root]
+  (let [main (cfg/value :seon.config.source/main)
+        on (:out (sh/sh "git" "-C" root "symbolic-ref" "--short" "-q" "HEAD"))
+        named? (fn [rev] (zero? (:exit (sh/sh "git" "-C" root "rev-parse" "--verify" "--quiet" (str rev "^{commit}")))))]
+    (cond (not (and (named? "HEAD") (named? main))) nil
+          (not= main (str/trim on)) (git! {} root ["merge-base" "HEAD" main] nil)
+          (not (str/blank? (git! {} root ["status" "--porcelain" "--ignore-submodules=all"] nil))) (git! {} root ["rev-parse" "HEAD"] nil)
+          :else (let [p (sh/sh "git" "-C" root "rev-parse" "--verify" "--quiet" "HEAD^1")]
+                  (when (zero? (:exit p)) (str/trim (:out p)))))))
+
+(defn tree-of
+  "The id of commit rev's tree in the repository at root."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [root rev] (git! {} root ["rev-parse" (str rev "^{tree}")] nil))
+
+(defn checkout-at
+  "Commit rev's files under paths, as git holds them, extracted into dir (made empty first), for a
+  reader that reads a checkout's files (the :source read, the wiki's and the tasks' loaders).
+  Answers dir; a failure throws git's or tar's stderr, as git! does."
+  {:malli/schema [:=> [:cat :string :string [:sequential :string] :string] :string]}
+  [root rev paths dir]
+  (let [r (apply sh/sh "zsh" "-c" "setopt pipefail; rm -rf \"$1\" && mkdir -p \"$1\" && git -C \"$2\" archive \"$3\" -- \"${@:4}\" | tar -x -C \"$1\""
+                 "checkout-at" dir root rev paths)]
+    (when-not (zero? (:exit r))
+      (throw (ex-info (str "checkout-at " rev ": " (str/trim (str (:err r) (:out r)))) {})))
+    dir))
 
 (defn pin
   "What a build or a test reads from the checkout at dir (a submodule), by content: its HEAD
@@ -333,7 +370,7 @@
         {:value {:commit commit :checkout dir :binary (str dir "/target/seon") :ms (profile/ms-since t0)}})))
 (defn test-command
   "The runner the :tests effect calls in a checkout, as argv, for namespaces nss: prove's one
-  entry (land12, root 2026-10-22), each named namespace's tests with no green at their reach
+  entry, each named namespace's tests with no green at their reach
   digest run, the rest reused."
   {:malli/schema [:=> [:cat [:sequential :symbol]] [:vector :string]]}
   [nss] (into ["nice" "-n" "15" "bin/prove" "--tests"] (map str nss)))

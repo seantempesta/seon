@@ -459,9 +459,9 @@
         ;; (a tracked file deleted on disk is no file of the tree: left out)
         _ (sh/sh "zsh" "-c" (str "cd '" here "' && for f in ${(0)\"$(git ls-files -z -co --exclude-standard src test)\"}; do [[ -e $f ]] && print -rN -- $f; done | tar -c --null -T - -f - | tar -x -C '" copy "'"))
         in {:env "e" :tree "t"}
-        a (program/reach-digests (runner/program-db here) in)
-        b (program/reach-digests (runner/program-db here) in)
-        c (program/reach-digests (runner/program-db copy) in)]
+        a (program/reach-digests (runner/program-db here (ts/program-store)) in)
+        b (program/reach-digests (runner/program-db here (ts/program-store)) in)
+        c (program/reach-digests (runner/program-db copy (ts/program-store)) in)]
     (is (< 300 (count a)) "the whole suite")
     (is (= a b) "the same tree imported twice in one process: every digest equal")
     (is (= a c) "the same tree in another checkout: every digest equal, so its results are shared")
@@ -474,7 +474,7 @@
   ;; seon.program/env-readers: platform reads of resources/ (the baked schemas every contract
   ;; expands), deps.edn or web/ are :env inputs already, so reaching them does not make a test
   ;; rerun on every edit (327 of 368 did); a reader of src, test, docs or the task files still does
-  (let [db (runner/program-db (System/getProperty "user.dir"))
+  (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
         a (program/reach-digests db {:env "e" :tree "t1"})
         b (program/reach-digests db {:env "e" :tree "t2"})
         moved (set (for [[t d] a :when (not= d (b t))] t))]
@@ -516,7 +516,7 @@
 (deftest a-test-running-the-binary-takes-the-tree
   ;; seon.root-test runs target/seon (seon.test-store/binary-sh): what it proves is the whole
   ;; program the binary is built from, so any change to the tree moves its digest
-  (let [db (runner/program-db (System/getProperty "user.dir"))
+  (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
         a (program/reach-digests db {:env "e" :tree "t1"})
         b (program/reach-digests db {:env "e" :tree "t2"})
         runs-binary '[seon.root-test/root-threads-are-what-root-declares seon.root-test/a-root-binary-requires-a-library-it-did-not-compile
