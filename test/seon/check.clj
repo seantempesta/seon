@@ -9,7 +9,7 @@
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
   reference (await-ref, seon.await/await-db), never a poll or a deadline."
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.main :refer [out! shown]]))
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.await] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.main :refer [out! shown]]))
 
 
 ;; ---- the harness: one frame, one verdict, one way to wait ------------------------------

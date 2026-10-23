@@ -7,7 +7,7 @@
   "Main's first db value (now or after a later commit) for which (pred db) holds: a watch
   on main's connection runs pred once per commit. No deadline, no polling."
   [sys pred]
-  (let [p (promise) k (keyword "seon.e2e" (str "await-" (random-uuid)))
+  (let [p (promise) k (keyword "seon.await" (str "await-" (random-uuid)))
         a (:wrapped-atom (:conn sys))]
     (add-watch a k (fn [_ _ _ db] (when (pred db) (deliver p db))))
     (let [db @(:conn sys)] (when (pred db) (deliver p db)))
