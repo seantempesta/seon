@@ -64,7 +64,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **recording** | an eval request's evaluations (on its agent entity, one EDN `:seon.cluster.eval/record` each) and its defs, written by the agent on its own branch | `seon.repl/record-tx` |
 | **observation** | data on the branch that observed it (evaluations, answered t), never carried by a merge: every `seon.*` attribute but the carried task content is a platform record | `seon.merge/carried-platform-attrs` |
 | **generation** | a build of Seon's own source: the running binary is one, and the next is the merges commit built by the `:build` effect, recorded on main (`:seon.root/generation`) and started on the same store by `bin/root next` ([source](source.md#the-next-generation)) | `seon.fx/build`, `my.root/generation`, `my.root/next-generation` |
-| **prove** | run what a change reaches and reuse every test and check step green at its reach digest: `bin/prove` in a checkout, ``(my.agent/prove)`` in an agent (the process tests it reaches run only when root asks; [merging](merging.md#a-merge-runs-what-the-change-reaches)) | `seon.proofs/plan`, `my.agent/prove` |
+| **prove** | run what a change reaches and reuse every test and check step green at its reach digest: `bin/prove` in a checkout, ``(my.agent/prove)`` in an agent (the process tests it reaches run only when root asks, or when they are a proof; [merging](merging.md#a-merge-runs-what-the-change-reaches)) | `seon.proofs/plan`, `my.agent/prove` |
 
 ## Tasks (TASK-CHAIN's words)
 
