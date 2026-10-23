@@ -127,9 +127,15 @@
        ;; measured 2026-10-23 on LMDB, three fresh stores per size, identical bytes each time (+-96 B
        ;; at 1,000): 103.5k ticks / 453 KB at 100 forms, 136k / 612 KB at 1,000, 154k / 678 KB at
        ;; 10,000 (the aevt scans before: 428 KB, 3.1 MB, 33 MB); contracted calls: divergence and
-       ;; the two eid seeks of the one changed var's content
+       ;; the two eid seeks of the one changed var's content.
+       ;; The bytes depend on where the stored index's node boundaries fall around the changed
+       ;; entry, which datoms unrelated to it move: the same code on the same program, with 0 to 64
+       ;; unrelated datoms written first, read 411-597 KB at 100 forms and 548-594 KB at 1,000
+       ;; (2026-10-23, 12 layouts each). Three schema attributes added at the health merge
+       ;; (ac7d3fb2) moved this input from 410 KB to 592 KB with divergence unchanged. The fixed
+       ;; bytes are the bound over those layouts, not one layout's
        :per-n {:ticks 7700.0 :bytes 34000.0}
-       :fixed {:ticks 53000.0 :bytes 230000.0 :calls 3}
+       :fixed {:ticks 53000.0 :bytes 375000.0 :calls 3}
        :sizes divergence-sizes})
     (finally
       ;; each store made, released whatever holds it (release-all) and removed
