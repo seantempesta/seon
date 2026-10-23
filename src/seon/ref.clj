@@ -584,17 +584,25 @@
     (and (empty? (d/datoms db :avet :ns/name nsym))
          (some? (some-> (find-ns nsym) ns-interns (get (symbol (name sym))))))))
 
-(defn names-something?
-  "Does citation c name something on db: a var by its :var/name or as loaded, a task by its
-  :seon.task/id, a namespace by its :ns/name or as loaded, a schema key the contract registry
-  holds (a declared form or a host predicate, :seon.host/db), an entry
-  (file or directory) of the checkout, a section of a Markdown page by its anchor? An anchor
-  with no page of its own (:anchor-missing) names nothing."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :boolean]}
-  [db {sym :seon.ref/name :seon.ref/keys [path anchor]}]
+(defn names-on-db?
+  "Does a name (a qualified symbol, a symbol or a keyword) name something on db: a var by its
+  :var/name or as loaded, a task by its :seon.task/id, a namespace by its :ns/name or as loaded, a
+  schema key the contract registry holds (a declared form or a host predicate, :seon.host/db)?
+  Reads no file of the checkout, so what only cites names (seon.problems/dead-citations) has
+  no tree as an input."
+  {:malli/schema [:=> [:cat :seon.host/db [:or :symbol :keyword]] :boolean]}
+  [db sym]
   (boolean (cond (qualified-symbol? sym) (or (seq (d/datoms db :avet :var/name sym)) (task? db sym) (loaded-var? db sym))
                  (symbol? sym) (or (seq (d/datoms db :avet :ns/name sym)) (find-ns sym))
-                 (keyword? sym) (some? (mr/schema contract/registry sym))
+                 (keyword? sym) (some? (mr/schema contract/registry sym)))))
+
+(defn names-something?
+  "Does citation c name something on db: a name (`names-on-db?`), an entry (file or directory)
+  of the checkout, a section of a Markdown page by its anchor? An anchor with no page of its
+  own (:anchor-missing) names nothing."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :boolean]}
+  [db {sym :seon.ref/name :seon.ref/keys [path anchor]}]
+  (boolean (cond sym (names-on-db? db sym)
                  (nil? path) false
                  anchor (let [f (io/file (cfg/checkout) path)]
                           (and (.isFile f) (some #(= anchor (:seon.ref/anchor %)) (:seon.ref/sections (parse path (slurp f))))))

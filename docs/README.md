@@ -19,7 +19,7 @@ References and their depths: [references](references.md).
 
 ## The running system
 
-- [root](root.md): the control process: the root graph's procs, boot, attempts and judging, holders and refused spawns, stuck and blocked.
+- [root](root.md): the control process: the root graph's procs, boot, attempts and judging, holders and refused spawns, root causes at quiescence.
 - [processes](processes.md): the fork server and each agent's process: single-threaded, forked from main's db value, one socket to root.
 - [server](server.md): root's request server: its ops, one table, and MCP's `seon_*` tools over it.
 - [dashboard](dashboard.md): the live web page: the render proc, the web proc, callbacks as data.
@@ -28,6 +28,7 @@ References and their depths: [references](references.md).
 - [config](config.md): every limit, bound and default is one documented key in one aero file, read through one resolver.
 - [storage](storage.md): one store of Datahike index trees on LMDB; what a commit writes, history, node compression, large values out of line, and collection.
 - [failure points](failure-points.md): every place the outside world can fail, its one catching edge and its declared error; nothing else catches.
+- [health](health.md): the open problems, recorded or derived from the program's facts, read when looked at and never polled; what a branch caused refuses its done.
 - [clocks](clocks.md): where time decides (only the owner's exceptions) and where it is only measured; `bin/laws clocks` and `measures` name every site.
 - [resolution](resolution.md): where a name is resolved or a Var defined at run time, each with its reason; `bin/laws resolution` names every site.
 
@@ -47,6 +48,8 @@ References and their depths: [references](references.md).
 - [checks](checks.md): the end-to-end proofs `bin/check` runs, and the task rows `seon.e2e` works.
 - [merging](merging.md): how a branch merges into main: what it runs, how batches are proven, how conflicts are resolved.
 - [machine](machine.md): the machine Seon is built on and for, and the rules that keep builds, disk and processes bounded.
+- [plan](plan.md): what is in flight, what the owner has not yet ruled, and the steps to the goal.
+- [decisions](decisions.md): the owner's standing rulings, each with its words, date and where it is now stated.
 - Who does what, delegation and briefs: [AGENTS.md §2](../AGENTS.md).
 
 ## Words and provenance

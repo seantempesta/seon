@@ -36,27 +36,31 @@
   never ran); a regression (a test green on main, the
   proofs of merged tasks, red here); a stray red (a red test that is no task's open
   proof); a contract gap (a function the attempt defined without a contract); an
-  unmerged entry on the branch (a merge conflict not resolved). A :design task readies
-  the interface and plan for its implement step, so its own proofs may stay red, and it is
-  refused :no-design until its plan differs from the one its attempt began with (or that
-  one is unknown)."
+  unmerged entry on the branch (a merge conflict not resolved); an open problem the
+  branch's work made true (seon.problems/caused: a citation of a var it deleted). A :design task readies
+  the interface and plan for its implement step, so its own proofs may stay red but not
+  unknown (each written and run), and it is refused :no-design until its plan differs from
+  the one its attempt began with (or that one is unknown). A deferred proof (a process test:
+  run only when root asks, owner's ruling 2026-10-23) is neither red nor unknown here; while
+  unrun it is the merge's open :unrun problem."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
-  [{:keys [proofs results main-green allowed-red uncontracted unmerged kind plan plan-before]}]
+  [{:keys [proofs results main-green allowed-red uncontracted unmerged caused kind plan plan-before deferred]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
         design? (= :design kind)]
     (vec (concat
            (when (and (empty? proofs) (not design?)) [{:reason :no-proofs}])
            (when (and design? (or (nil? plan-before) (= plan plan-before))) [{:reason :no-design}])
-           ;; a proof with no result never ran: unknown, not red (v1's reading)
-           (when-not design?
-             (for [p (sort-by str proofs) :let [s (get results p)] :when (not= :pass s)]
-               {:reason (if s :proof-red :proof-unknown) :symbol p}))
+           ;; a proof with no result never ran: unknown, not red (v1's reading); a design
+           ;; leaves its proofs red, never unknown (the implement step needs them written)
+           (for [p (sort-by str proofs) :let [s (get results p)] :when (and (not (contains? deferred p)) (if design? (nil? s) (not= :pass s)))]
+             {:reason (if s :proof-red :proof-unknown) :symbol p})
            (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t))] {:reason :regression :symbol t})
            (for [t (sort-by str (keys results))
                  :when (and (red? t) (not (proofs t)) (not (main-green t)) (not (allowed-red t)))]
              {:reason :stray-red :symbol t})
            (for [s (sort-by str uncontracted)] {:reason :contract-gap :symbol s})
-           (for [k (sort unmerged)] {:reason :unmerged :key k})))))
+           (for [k (sort unmerged)] {:reason :unmerged :key k})
+           (for [k (sort caused)] {:reason :open-problem :key k})))))
 
 (defn hairy
   "Is a merge too hairy to keep resolving, from measured facts: more conflicts than the
@@ -279,9 +283,9 @@
   (nil: main as idx holds it), over the index: the regression and allowed-red sets restricted to the tests
   that ran (the only ones done-explain asks about), each test looked up by its claimants; for
   a :design task, its accumulated plan now and plan-before, the one its attempt began with
-  (:seon.attempt/plan; nil: unknown)."
-  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:maybe :int] [:maybe :seon.task/plan]] :seon.reconcile/done-input]}
-  [idx id results uncontracted unmerged basis plan-before]
+  (:seon.attempt/plan; nil: unknown); deferred, the process tests its run left to root's gate."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:maybe :int] [:maybe :seon.task/plan] [:set :qualified-symbol]] :seon.reconcile/done-input]}
+  [idx id results uncontracted unmerged basis plan-before deferred]
   (let [by? (fn [x] (when-let [mt (get-in idx [:done x :merged-t])] (or (nil? basis) (<= mt basis))))
         claim (fn [t] (disj (get-in idx [:claims t] #{}) id))
         kind (get-in idx [:tasks id :seon.task/kind] :work)]
@@ -291,7 +295,8 @@
              :main-green (into #{} (filter #(some by? (claim %))) (keys results))
              :allowed-red (into #{} (filter #(some (complement by?) (claim %))) (keys results))
              :uncontracted uncontracted
-             :unmerged (vec unmerged)}
+             :unmerged (vec unmerged)
+             :deferred deferred}
       (= :design kind) (assoc :plan (:plan (task/accumulate (:tasks idx) id)))
       (and (= :design kind) plan-before) (assoc :plan-before plan-before))))
 
@@ -327,10 +332,25 @@
                    (= :dead (:seon.attempt/status a))
                    (failed aid id (str "its agent died" (some->> (:seon.attempt/reason a) (str ": "))))
                    :else
-                   (let [rs (done-explain (done-input idx id (:seon.attempt/results a {}) (:seon.attempt/uncontracted a #{})
-                                                           (:seon.attempt/unmerged a []) (:seon.attempt/basis-t a) (:seon.attempt/plan a)))]
+                   (let [rs (done-explain (assoc (done-input idx id (:seon.attempt/results a {}) (:seon.attempt/uncontracted a #{})
+                                                                 (:seon.attempt/unmerged a []) (:seon.attempt/basis-t a) (:seon.attempt/plan a)
+                                                                 (set (:seon.attempt/deferred a)))
+                                                      :caused (:seon.attempt/caused a #{})))]
                      (cond
-                       (and (empty? rs) merge?) {:op :ready-to-merge :attempt aid :task id}
+                       ;; the process tests the branch's change reaches run before its merge
+                       ;; only when root asked (:seon.task/gate?, my.root/gate!; owner's ruling
+                       ;; 2026-10-23), on a checkout (:gate, seon.fx/run-tests)
+                       (and (empty? rs) merge?)
+                       (let [deferred (sort-by str (:seon.attempt/deferred a #{})) dres (:seon.attempt/deferred-results a)
+                             red (for [t deferred :let [s (get dres t)] :when (not= :pass s)] [t (or s :unknown)])]
+                         ;; unasked, or with no checkout declared (root's ruling (a), 2026-10-23),
+                         ;; the merge goes on, its deferred tests unrun: an open :unrun problem
+                         (cond (or (empty? deferred) (not (:seon.task/gate? t)) (nil? (get-in idx [:root :gate-checkout])))
+                               {:op :ready-to-merge :attempt aid :task id}
+                               (nil? dres) {:op :gate :attempt aid :task id :tests (vec deferred)}
+                               (empty? red) {:op :ready-to-merge :attempt aid :task id}
+                               :else (failed aid id (str "attempt " aid "'s deferred tests, run on a checkout at its merge, are not green: "
+                                                           (str/join ", " (for [[t s] red] (str t " " (name s))))))))
                        (empty? rs) {:op :accept :attempt aid :task id}
                        :else
                        (failed aid id (str "attempt " aid " ended" (some->> (:seon.attempt/outcome a) name (str " "))
@@ -341,8 +361,10 @@
         ;; main; an octopus merge closes when its first member ends (no new member joins until it
         ;; merges, so merging cannot starve)
         ready (filter #(= :ready-to-merge (:op %)) judged)
-        judged (remove #(= :ready-to-merge (:op %)) judged)
         live-merge? (some (:live idx) (:merging idx))
+        ;; one gate at a time, while no merge is in flight (it runs on the merges branch's head)
+        gates (when-not live-merge? (take 1 (filter #(= :gate (:op %)) judged)))
+        judged (remove #(#{:ready-to-merge :gate} (:op %)) judged)
         octopus (when (and (seq ready) (not live-merge?))
                 [{:op :octopus-merge :attempt (:attempt (first ready)) :members (mapv #(select-keys % [:attempt :task]) ready)}])
         closed? (some #(= :ended (get-in idx [:attempts % :seon.attempt/status])) (:merging idx))
@@ -365,7 +387,7 @@
         spawns (for [id starts :let [t (get-in idx [:tasks id])]]
                  {:op :spawn :task id :env (desired-env t)
                   :attempt (task/attempt-id id (inc (count (get-in idx [:by-task id]))))})]
-    (vec (concat reaps kills judged octopus spawns))))
+    (vec (concat reaps kills judged gates octopus spawns))))
 
 ;; ---- held for root, and the root causes at quiescence -----------------------------------
 
@@ -547,7 +569,11 @@
       ;; is answered alone
       :octopus-merge (let [bs (mapv #(get-in (task/attempt (:db st) (:attempt %)) [:seon.attempt/env :branch]) (:members act))]
                      (one (request (assoc-in st [:flights attempt :branches] bs) attempt :octopus-merged
-                                   {:op :write :req {:op :octopus-merge :branches bs :data-attrs #{}}}))))))
+                                   {:op :write :req {:op :octopus-merge :branches bs :data-attrs #{}}})))
+      ;; the merge gate (root asked: :seon.task/gate?): the candidate's files read from its
+      ;; branch, then its deferred tests run on a checkout of the merges head with them (seon.fx/run-tests)
+      :gate (one (request st attempt :gate-read
+                          {:op :write :req {:op :branch-db :branch (get-in (task/attempt (:db st) attempt) [:seon.attempt/env :branch])}})))))
 
 (defn- judge-tx
   "Attempt aid's end on main from MEASURED facts: the end its agent wrote on the branch,
@@ -557,7 +583,7 @@
   the attempt for root (seon.task/carry-tx); and a failure it marked (my.task/fail!)
   carried with the task held."
   {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db]] [:map [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:vector :any]]}
-  [st {:keys [act run-problems worked-error]} results {:keys [db base base-t]} diff]
+  [st {:keys [act run-problems worked-error deferred]} results {:keys [db base base-t]} diff]
   (let [main (:db st)
         aid (:attempt act) id (:task act)
         end (pull-end db aid)
@@ -567,10 +593,11 @@
                     ;; spend is what the end measured: no end (died, killed, never reached
                     ;; seon.turn/end!) is outcome :no-end with its turns, calls and tokens absent
                     (merge (task/end-members (cond-> (merge (select-keys end [:turns :model-calls :tokens])
-                                                      {:outcome (:outcome end :no-end) :results results :uncontracted (set (:uncontracted diff))
+                                                      {:outcome (:outcome end :no-end) :results results :uncontracted (set (:uncontracted diff)) :caused (set (:caused diff))
                                                        :conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
                                                        :unmerged (mapv sedn/encode (:unmerged diff))
-                                                       :changed (into #{} (map sedn/encode) (:ours diff))})
+                                                       :changed (into #{} (map sedn/encode) (:ours diff))
+                                                       :deferred (vec deferred)})
                                         (:reason end) (assoc :reason (:reason end))
                                         (not (:outcome end)) (assoc :reason (if worked-error
                                                                              (str "seon.turn/work! threw: " (:seon.error/message worked-error))
@@ -660,6 +687,7 @@
       :tested (if (contract/error? r)
                 (dead st r)
                 (one (request (-> st (assoc-in [:flights aid :results] (proofs/results r))
+                                  (assoc-in [:flights aid :deferred] (:deferred r))
                                   (assoc-in [:flights aid :run-problems] {:failures (proofs/failures r) :costs (proofs/costs r)}))
                               aid :read {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}})))
       ;; what the branch changed since its merge base (three-way's :ours), measured for the octopus merge
@@ -693,6 +721,28 @@
                                               :else (conj (hold-tx (task/attempt (:db st) attempt) problem)
                                                           {:seon.attempt/id attempt :seon.attempt/error r}))))
                                         (:members act) (:results r))))))
+      ;; the gate's candidate: the files of the namespaces the branch changed, as it holds them
+      :gate-read (let [nss (sort (distinct (for [k (:seon.attempt/changed (task/attempt (:db st) aid))
+                                                  :let [[kind x] (read-string k)]
+                                                  :when (#{:var :form} kind)]
+                                              (symbol (first (str/split (str x) #"/" 2))))))
+                       file (fn [n] (:ns/file (d/entity (:db r) [:ns/name n])))
+                       ;; a changed namespace with no file on the branch (made at the REPL, never
+                       ;; written) cannot be put over the checkout: named, never dropped
+                       unread (vec (for [n nss :when (nil? (file n))]
+                                     {:ns n :reason "no :ns/file on the branch: its forms were never written to a file"}))
+                       files (source/files (:db r) (vec (keep file nss)))]
+                   (one (request (assoc-in st [:flights aid :gate-unread] unread) aid :gated
+                                 {:op :fx :kind :tests :req {:repo (get-in st [:idx :root :gate-checkout]) :branch (:branch (:source st))
+                                                             :files files :tests (:tests act)}})))
+      ;; each deferred test's status on the attempt; the next judgment merges it or holds it. A
+      ;; run over a tree missing a changed namespace (gate-unread) vouches for none: each :error
+      :gated (let [unread (:gate-unread f)
+                   rs (if (or (contract/error? r) (seq unread)) (zipmap (:tests act) (repeat :error)) (get-in r [:value :results]))]
+               (one (write st aid :done (cond-> [{:seon.attempt/id aid
+                                                  :seon.attempt/deferred-results (vec (for [[t s] rs] {:seon.proof/test t :seon.proof/status s}))}]
+                                          (seq unread) (conj {:seon.attempt/id aid :seon.attempt/gate-unread unread})
+                                          (contract/error? r) (conj {:seon.attempt/id aid :seon.attempt/error r})))))
       :write-back (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)
                        files (source/files (:db r) paths)]

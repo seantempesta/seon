@@ -18,7 +18,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.intr :as intr] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
-            [seon.proofs :as proofs] [seon.context :as context] [seon.program :as program] [seon.merge :as pm]
+            [seon.proofs :as proofs] [seon.context :as context] [seon.program :as program] [seon.merge :as pm] [seon.problems :as problems]
             [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
             [datahike.api :as d]))
 
@@ -45,11 +45,11 @@
 
 (defn last-evals
   "The items of this process's last model turn, in order: each one's form, printed value or
-  error, output, and its live value (:value) while this process holds it."
+  error (an error's map, :err), output, and its live value (:value) while this process holds it."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
   (let [rs (:results @agent/state)]
-    (mapv (fn [it] (cond-> (select-keys it [:id :tag :form :printed :out :handle])
+    (mapv (fn [it] (cond-> (select-keys it [:id :tag :form :printed :out :err :handle])
                      (contains? rs (:handle it)) (assoc :value (get rs (:handle it)))))
           (get-in @agent/state [:turn :evals]))))
 
@@ -61,28 +61,40 @@
 
 (defn- added-gaps
   "The functions branch db defines without a contract since its merge base base (the
-  branch's own changes, seon.merge/uncontracted): what root's judge and the merge gate ask."
+  branch's own changes, seon.merge/uncontracted over seon.merge/delta-changes): what root's judge and
+  the merge gate ask."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :qualified-symbol]]}
-  [base db] (set (pm/uncontracted (pm/changes (pm/program base #{}) (pm/program db #{})))))
+  [base db] (set (pm/uncontracted (pm/delta-changes base db #{}))))
 
 (defn- observe
-  "What a turn starts from, measured now: the proofs run in a fork of this agent (a run it
-  could not fork ran no proof: every proof is unknown, and the refused answer is the run's error),
+  "What a turn starts from, measured now: the proofs run by the test service (seon.prove: one run
+  per branch and tx whoever asks, in a fork of this agent; a run it could not fork ran no proof:
+  every proof is unknown, and the refused answer is the run's error),
   the contract gaps the branch adds since its merge base (seon.merge/uncontracted, as root's
-  judge and the merge gate ask it) and its unmerged entries, the done rule over them, and
+  judge and the merge gate ask it), its unmerged entries, the problems its work made true
+  (seon.problems/caused, as root's judge asks it), the done rule over them, and
   the task as the branch holds it (its plan may have improved)."
   {:malli/schema [:=> [:cat :seon.task/id :seon.task/plan] :map]}
   [id plan-before]
   (let [t0 (profile/now-ns)
-        run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks) (:proofs (:seon.task/accumulated (task/task (agent/db) id))))
+        run (agent/prove!)
         tests-ms (long (profile/ms-since t0))
         results (if (contract/error? run) {} (proofs/results run))
         db (agent/db)
         unc (added-gaps (:base @agent/state) db)
-        unmerged (branch/unmerged)]
-    {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :task (task/task db id)
+        unmerged (branch/unmerged)
+        caused (problems/caused (:base @agent/state) db)]
+    {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :task (task/task db id)
      :will-merge (program/divergence (:base @agent/state) db)
-     :reasons (r/done-explain (r/done-input (r/index db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before))}))
+     ;; root's ruling (a): what this turn ran, what the judge will run, what the merge runs
+     :tests (when-not (contract/error? run)
+              (let [results (proofs/results run)
+                    unfinished (count (remove #(contains? results %) (:selected run)))]
+                (cond-> {:this-turn (count (:selected run)) :at-judge (:at-judge run) :when-asked (count (:deferred run))}
+                  (pos? unfinished) (assoc :unfinished unfinished))))
+     :reasons (r/done-explain (assoc (r/done-input (r/index db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before
+                                                   (if (contract/error? run) #{} (set (:deferred run))))
+                                     :caused caused))}))
 
 (defn- end!
   "The attempt's end: the live runtime staged onto the branch, the end written there (with
@@ -115,13 +127,13 @@
   done rule, the failing assertions of each test it names, the run's own errors, and what the
   branch's merge will carry to main."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{:keys [run reasons task results will-merge]}]
+  [{:keys [run reasons task results will-merge tests]}]
   (let [proofs (:proofs (:seon.task/accumulated task))
         named (into (set proofs) (keep :symbol) reasons)]
     {:results results :reasons reasons
      :reds (if (contract/error? run) [] (proofs/red-reports run named))
      :run-errors (if (contract/error? run) [(:seon.error/message run)] (proofs/run-errors run))
-     :will-merge will-merge}))
+     :will-merge will-merge :tests tests}))
 
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its
@@ -189,7 +201,7 @@
                            :seon.turn/split (cond-> {:context-ms context-ms :model-ms model-ms :eval-ms eval-ms
                                                      :record-ms (long (profile/ms-since t3))}
                                               tests-ms (assoc :tests-ms tests-ms))}])
-        (cond-> (-> (assoc st :turn (inc turn) :tokens (when (and tokens used) (+ tokens used)))
+        (cond-> (-> (assoc st :turn (inc turn) :tokens (when (and tokens used) (+ tokens used)) :calls (mapv :code calls))
                     ;; what this turn's block showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
                                                  :shown {'seon.context/resolve-ref (set (keep :symbol (:references block)))
@@ -219,7 +231,10 @@
 
 (defn work!
   "Work task `task` as attempt `attempt` (the model `model` when set, else root's), at most
-  max-turns model calls.
+  max-turns model calls. A turn whose calls repeat the last turn's, made from the same
+  observed state (the done rule's reasons and proof results), ends the attempt :no-progress, naming
+  the code (root's research, lever 2: loops took 45% of tokens; the step E dry run's first
+  real design repeated one pair of calls 18 times): the judge refines from that evidence.
   Answers the end ({:outcome :turns :model-calls :tokens :ms}); the same end is written on
   the branch."
   {:malli/schema [:=> [:cat [:map [:task :seon.task/id] [:attempt :seon.attempt/id] [:model {:optional true} :string]
@@ -246,5 +261,10 @@
           stop (end! st (:outcome stop) (:reason stop) nil)
           hairy (end! st :merge-failed (:reason hairy) nil)
           (>= (:turn st) max-turns) (end! st :cap (r/explain-text reasons) nil)
-          :else (let [st' (act! st obs model)]
-                  (if (contract/error? st') (end! st :error (:seon.error/message st') st') (recur st'))))))))
+          :else (let [st' (act! st obs model)
+                      seen [(select-keys obs [:reasons :results]) (:calls st')]]
+                  (cond
+                    (contract/error? st') (end! st :error (:seon.error/message st') st')
+                    (= seen (:seen st)) (end! st' :no-progress (str "turn " (:turn st) " repeated turn " (dec (:turn st))
+                                                                   "'s calls from the same state: " (str/join " " (:calls st'))) nil)
+                    :else (recur (assoc st' :seen seen)))))))))

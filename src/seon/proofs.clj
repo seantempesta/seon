@@ -8,8 +8,8 @@
   run-tests-forked answer): one status per test var, read the same way by the agent's turn
   loop and root's judge."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.edn :as sedn] [seon.error :as error] [seon.profile :as profile]
-            [clojure.edn :as edn] [clojure.string :as str] [clojure.test :as t]))
+  (:require [seon.contract :refer [defn defn-]] [seon.config :as cfg] [seon.edn :as sedn] [seon.error :as error] [seon.profile :as profile]
+            [clojure.edn :as edn] [datahike.api :as d] [clojure.string :as str] [clojure.test :as t]))
 
 (defn test-symbol
   "The qualified symbol of a report's :var (\"#'ns/name\" or \"ns/name\"), or nil."
@@ -84,16 +84,23 @@
   reach-digests with roots), with the checkout's :env (bin/, native/, resources/, the pins:
   the binary's other inputs) in every digest. laws (bin/laws) reads the whole tree and has no
   functions: its key is the tree's digest (step-digests)."
-  '{"laws" :tree "lmdb-kill" [] "contracts" [seon.check/contracts] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
+  '{"laws" :tree "lmdb-kill" [] "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
     "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]
     "problems" [seon.check/problems-check] "smoke" [seon.check/smoke] "robust" [seon.check/robust]
     "lifecycle" [seon.check/lifecycle] "backpressure" [seon.check/backpressure] "hotreload" [seon.check/hotreload]
     "drain" [seon.check/drain] "idle" [seon.check/idle] "orphan" [seon.check/orphan]
     "durable" [seon.check/durable-write seon.check/durable-read] "window" [seon.check/window-write seon.check/window-read]
-    "lease" [seon.check/lease] "e2e-calc" [seon.e2e/run] "e2e-conflict" [seon.e2e/run] "e2e-semantic" [seon.e2e/run]
+    "ids" [seon.check/ids] "e2e-calc" [seon.e2e/run] "e2e-conflict" [seon.e2e/run] "e2e-semantic" [seon.e2e/run]
     "e2e-hairy" [seon.e2e/run] "e2e-newns" [seon.e2e/run] "e2e-sibling" [seon.e2e/run] "swarm" [seon.e2e/run]
     "e2e-loop" [seon.e2e/run] "e2e-held" [seon.e2e/run] "resume" [seon.e2e/run] "scale" [seon.check/scale]})
+
+(defn step-needs-binary?
+  "Does bin/check's step run a seon.check mode on target/seon (and a store branch): does
+  check-steps name functions for it? laws (the tree's digest) and lmdb-kill (a binary of its
+  own, no functions) do not, so a run of only those builds nothing and seeds nothing."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [step] (let [fns (get check-steps step)] (boolean (and (vector? fns) (seq fns)))))
 
 (defn step-digests
   "Of check-steps, {:digests {step digest} :missing [step ...]}: the reach digests (digests-of,
@@ -121,6 +128,16 @@
   (into {} (for [dg (distinct digests) :let [f (java.io.File. ^String (result-path dir dg))] :when (.isFile f)
                  :let [r (edn/read-string (slurp f))] :when (green? r)]
              [dg r])))
+
+(defn stored-greens
+  "{digest result} of the results db holds as green at digests (:seon.proof/ facts, which the test
+  service records, seon.prove/result-tx): one AVET seek per digest. The same shape greens reads from
+  the files, which stay the lookup across checkouts until the stores are shared."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] [:map-of :string :map]]}
+  [db digests]
+  (into {} (for [dg (distinct digests) :let [e (:e (first (d/datoms db :avet :seon.proof/digest dg)))]
+                 :when (and e (= :pass (:seon.proof/status (d/pull db [:seon.proof/status] e))))]
+             [dg {:digest dg :pass 1 :fail 0 :error 0}])))
 
 (defn result-file
   "The write that stores result r ({:test or :step, :digest, :pass :fail :error :ms}) in dir:
@@ -164,6 +181,29 @@
   a test's run reports through it, never through the enclosing run's binding."
   t/report)
 
+(def ^:dynamic *digests*
+  "{test var -> reach digest} of the run-tests! run in progress (bound around each namespace's
+  run), read by test-seed: a generative test draws from its own digest."
+  {})
+
+(defn seed
+  "A test.check seed (a long) that is a function of parts (a key and its reach digest) and the
+  config's salt (:seon.config.proofs/seed-salt): the same digest draws the same cases, so a
+  result is a function of its digest; a change to what the key reaches draws new ones; the salt
+  re-rolls every seed at once (it is config, so it moves every digest too)."
+  {:malli/schema [:=> [:cat [:* :any]] :int]}
+  [& parts]
+  (Long/parseLong (subs (error/digest (sedn/encode (cons (cfg/value :seon.config.proofs/seed-salt) parts))) 0 15) 16))
+
+(defn test-seed
+  "The seed of the clojure.test test running now: (seed test digest), its digest the one
+  run-tests! runs it at (*digests*; none for a test run another way, which still gets a seed
+  its failure names). A generative test passes it as test.check's :seed (or ::mg/=>seed) and
+  prints it on failure, its reproduction."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (let [v (test-symbol (str (first t/*testing-vars*)))] (seed v (get *digests* v))))
+
 (defn run-tests!
   "The one clojure.test runner (bin/test's shards, an agent's test fork): run tests (var
   symbols, their namespaces loaded) here, each namespace's by clojure.test/test-vars so its
@@ -187,6 +227,7 @@
                                          (vswap! ran assoc v r)
                                          (note! r)))
                          thrown (binding [t/*test-out* out
+                                          *digests* digests
                                           t/report (fn [m]
                                                      ;; a test running tests of its own (test-ns inside a deftest) reports
                                                      ;; them too: only this run's tests are counted

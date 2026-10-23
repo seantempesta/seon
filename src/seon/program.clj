@@ -25,7 +25,7 @@
     platform's own source has the same facts (seon.source)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]
-            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [seon.error :as error] [seon.db :as pdb] [seon.config :as cfg]))
+            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [seon.error :as error] [seon.db :as pdb] [seon.config :as cfg] [clojure.string :as str] [hasch.core :as hasch]))
 
 (defn scratch-ns?
   "Is namespace nsx scratch (never program): `user`, or declared ^:scratch."
@@ -43,14 +43,6 @@
                  (map? v) (every? (fn [[k x]] (and (edn-value? k) (edn-value? x))) v)
                  (coll? v) (every? edn-value? v)
                  :else false)))
-
-(defn var-kind
-  "What a defined var holds now: :fn (a function, which needs a contract), :test, :macro or
-  :value (G1's)."
-  {:malli/schema [:=> [:cat :seon.host/var] [:enum :fn :test :macro :value]]}
-  [v]
-  (let [m (meta v)]
-    (cond (:test m) :test (:macro m) :macro (contract/function-var? v) :fn :else :value)))
 
 ;; ---- the compiler's account of one form ------------------------------------------------
 
@@ -292,11 +284,12 @@
         (tree-seq coll? seq (binding [*ns* nsx] (read-string src)))))
 
 (defn- form-id
-  "A form's identity: its namespace and exact text (an imported file's repeated text adds
-  its occurrence)."
+  "A form's identity: its namespace and exact text, by their content hash (hasch's uuid, the
+  one Datahike names content by; Clojure's 32-bit hash let two texts of one length share an
+  id), and an imported file's repeated text adds its occurrence."
   {:malli/schema [:=> [:cat :symbol :string :int] :string]}
   [nsym src k]
-  (str nsym "/" (Long/toHexString (hash (str nsym "\n" src))) "-" (count src) (when (pos? k) (str "#" k))))
+  (str nsym "/" (hasch/uuid [nsym src]) (when (pos? k) (str "#" k))))
 
 (defn account
   "The program account of one top-level form, or nil when it is none of the program's.
@@ -354,72 +347,107 @@
   {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
   [protocol type] (sedn/encode [protocol type]))
 
-(def ^:private def-attrs
-  "Each definition kind's form pointer."
-  [:var/form :method/form :impl/form :ns/form])
+(def pointer "Each definition kind's form pointer." {:var :var/form :method :method/form :impl :impl/form :ns :ns/form})
+
+(def ^:private form-sets
+  "A form's card-many facts, as stored and as its row (form-row) and its account name them."
+  [[:form/refs :refs] [:form/requires :requires] [:form/banned :banned] [:form/inline-defs :inline-defs]
+   [:form/timeouts :timeouts] [:form/catches :catches]])
 
 (defn- form-of
   "The form entity definition entity e points to, or nil."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :int]]}
-  [db e] (some #(:db/id (get (d/entity db e) %)) def-attrs))
+  [db e] (some #(:db/id (get (d/entity db e) %)) (vals pointer)))
+
+(defn def-eid
+  "The entity of definition key k ([:var v], [:method multi dispatch], [:impl protocol type],
+  [:ns n]) on db, or nil."
+  {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe :int]]}
+  [db [kind a b]]
+  (let [[attr v] (case kind :var [:var/name a] :method [:method/key (method-key a b)]
+                       :impl [:impl/key (impl-key a b)] :ns [:ns/name a])]
+    (pdb/eid db attr v)))
+
+(defn def-ref
+  "The entity map naming definition k: e, its entity (def-eid) when the db has it, else an
+  upsert by its identity with its tempid (Datahike allocates a tempid first seen as a ref,
+  in :form/defines, before the map that upserts it, and a form defining two existing
+  definitions, a protocol or a record, then conflicts)."
+  {:malli/schema [:=> [:cat :any [:maybe :int]] :map]}
+  [[kind a b] e]
+  (cond-> (case kind
+            :var {:db/id (var-tid a) :var/name a :var/ns (ns-tid (symbol (namespace a)))}
+            :method (let [k (method-key a b)] {:db/id (str "method " k) :method/key k :method/multi a :method/dispatch b})
+            :impl (let [k (impl-key a b)] {:db/id (str "impl " k) :impl/key k :impl/protocol a :impl/type b})
+            :ns {:db/id (ns-tid a) :ns/name a})
+    e (assoc :db/id e)))
+
+(defn form-tx
+  "Form id as one entity map, from row (a form's account or a merge's form content): its
+  text, namespace, order and lead, the definitions and declarations it names (def-ref's ids,
+  each definition's entity read from eid-of: a map, or def-eid on the db) and its form-sets."
+  {:malli/schema [:=> [:cat :string :map ifn?] :map]}
+  [id {:keys [ns src order lead defines declares] :as row} eid-of]
+  (into (cond-> {:db/id (form-tid id) :form/id id :form/src src :form/ns (ns-tid ns) :form/order order}
+          lead (assoc :form/lead lead)
+          (seq defines) (assoc :form/defines (mapv #(:db/id (def-ref % (eid-of %))) defines))
+          (seq declares) (assoc :form/declares (mapv #(:db/id (def-ref [:var %] (eid-of [:var %]))) declares)))
+        (for [[a k] form-sets :let [v (get row k)] :when (seq v)] [a (vec v)])))
+
+(defn def-tx
+  "tx-data making definition k point at the form content names (content {:form :kind
+  :contract :doc :file}), retracting what it held that content does not, or, for nil
+  content, retracting what it held. e: its entity on db (def-eid), or nil."
+  {:malli/schema [:=> [:cat :seon.host/db :any [:maybe :int] [:maybe :map]] :seon.db/tx-data]}
+  [db k e content]
+  (let [x (when e (d/entity db e))
+        attrs (case (first k) :var [:var/form :var/kind :var/contract :var/doc] :ns [:ns/form :ns/file] [(pointer (first k))])
+        now (when content
+              (cond-> {(pointer (first k)) (form-tid (:form content))}
+                (:kind content) (assoc :var/kind (:kind content))
+                (:contract content) (assoc :var/contract (:contract content))
+                (:doc content) (assoc :var/doc (:doc content))
+                (:file content) (assoc :ns/file (:file content))))]
+    (into (if content [(merge (def-ref k e) now) {:db/id (form-tid (:form content)) :form/id (:form content)}] [])
+          (for [a attrs :let [old (get x a)] :when (and (some? old) (not (contains? now a)))]
+            [:db/retract e a (if ((set (vals pointer)) a) (:db/id old) old)]))))
+
+(defn- def-keys
+  "The definition keys account acct makes: its vars, methods, extensions and, for an ns
+  form, its namespace."
+  {:malli/schema [:=> [:cat :map] [:vector :any]]}
+  [{:keys [ns ns-form? defs methods impls]}]
+  (vec (concat (for [{v :var} defs] [:var v])
+               (for [{:keys [multi dispatch]} methods] [:method multi dispatch])
+               (for [{:keys [protocol type]} impls] [:impl protocol type])
+               (when ns-form? [[:ns ns]]))))
 
 (defn account-tx
   "The facts of a form's account on db: the form (keeping its order when it is already
   there, else taking the place of the forms it supersedes, else after every form: order
-  next-order), each definition pointing to it, and the forms it supersedes retracted (each
-  whose every definition it redefines). A var's contract or doc the redefinition no longer
-  has is retracted."
+  next-order), each definition pointing to it (def-tx), and the forms it supersedes
+  retracted (each whose every definition it redefines). An account names no definition it
+  lacks: a text form's is its id, text, namespace, lead and order."
   {:malli/schema [:=> [:cat :seon.host/db :map :int] :seon.db/tx-data]}
-  [db {:keys [id src lead ns ns-form? defs declares methods impls refs requires banned inline-defs timeouts catches order]} next-order]
+  [db {:keys [id ns ns-form? defs declares order] :as acct} next-order]
   (let [fe (pdb/eid db :form/id id)
-        dkeys (concat (for [{v :var} defs] [:var/name v])
-                      (for [{:keys [multi dispatch]} methods] [:method/key (method-key multi dispatch)])
-                      (for [{:keys [protocol type]} impls] [:impl/key (impl-key protocol type)])
-                      (when ns-form? [[:ns/name ns]]))
-        des (set (keep (fn [[a v]] (pdb/eid db a v)) dkeys))
+        dkeys (def-keys acct)
+        eids (into {} (for [k (into dkeys (map #(vector :var %)) declares)] [k (def-eid db k)]))
+        des (set (keep eids dkeys))
         olds (disj (set (keep #(form-of db %) des)) fe nil)
         superseded (filterv (fn [o] (every? #(contains? des (:db/id %)) (:form/defines (d/entity db o)))) olds)
         order (or (when fe (:form/order (d/entity db fe)))
                   order
                   (when (seq superseded) (apply min (map #(:form/order (d/entity db %)) superseded)))
                   next-order)
-        lead (or lead (some #(:form/lead (d/entity db %)) superseded))
-        f (form-tid id)
-        ;; a var main already has is named by its entity: Datahike allocates a tempid first
-        ;; seen as a ref (:form/defines) before the map that upserts it, and a form defining
-        ;; two existing vars (a protocol, a record) then conflicts
-        vid (fn [s] (or (pdb/eid db :var/name s) (var-tid s)))
-        dtids (concat (for [{v :var} defs] (vid v))
-                      (for [{:keys [multi dispatch]} methods] (str "method " (method-key multi dispatch)))
-                      (for [{:keys [protocol type]} impls] (str "impl " (impl-key protocol type)))
-                      (when ns-form? [(ns-tid ns)]))
-        nss (into #{ns} (map #(symbol (namespace (:var %)))) defs)]
+        lead (or (:lead acct) (some #(:form/lead (d/entity db %)) superseded))]
     (vec (concat
-           (for [n nss] {:db/id (ns-tid n) :ns/name n})
-           [(cond-> {:db/id f :form/id id :form/src src :form/ns (ns-tid ns) :form/order order}
-              lead (assoc :form/lead lead)
-              (seq dtids) (assoc :form/defines (vec dtids))
-              (seq declares) (assoc :form/declares (mapv vid declares))
-              (seq refs) (assoc :form/refs (vec refs))
-              (seq requires) (assoc :form/requires (vec requires))
-              (seq banned) (assoc :form/banned (vec banned))
-              (seq inline-defs) (assoc :form/inline-defs (vec inline-defs))
-              (seq timeouts) (assoc :form/timeouts (vec timeouts))
-              (seq catches) (assoc :form/catches (vec catches)))]
-           (for [s declares] {:db/id (vid s) :var/name s :var/ns (ns-tid (symbol (namespace s)))})
-           (for [{v :var :keys [kind contract doc]} defs
-                 :let [e (pdb/eid db :var/name v) old (when e (d/entity db e))]
-                 tx (into [(cond-> {:db/id (vid v) :var/name v :var/ns (ns-tid (symbol (namespace v))) :var/form f :var/kind kind}
-                             contract (assoc :var/contract contract) doc (assoc :var/doc doc))]
-                          (for [[a x] [[:var/contract contract] [:var/doc doc]]
-                                :let [o (get old a)] :when (and (some? o) (nil? x))]
-                            [:db/retract e a o]))]
-             tx)
-           (for [{:keys [multi dispatch]} methods :let [k (method-key multi dispatch)]]
-             {:db/id (str "method " k) :method/key k :method/multi multi :method/dispatch dispatch :method/form f})
-           (for [{:keys [protocol type]} impls :let [k (impl-key protocol type)]]
-             {:db/id (str "impl " k) :impl/key k :impl/protocol protocol :impl/type type :impl/form f})
-           (when ns-form? [{:db/id (ns-tid ns) :ns/form f}])
+           (for [n (into #{ns} (map #(symbol (namespace (:var %)))) defs)] {:db/id (ns-tid n) :ns/name n})
+           [(form-tx id (assoc acct :order order :lead lead :defines dkeys) eids)]
+           (map #(def-ref [:var %] (eids [:var %])) declares)
+           (mapcat (fn [{v :var :keys [kind contract doc]}] (def-tx db [:var v] (eids [:var v]) {:form id :kind kind :contract contract :doc doc})) defs)
+           (mapcat #(def-tx db % (eids %) {:form id}) (filter (comp #{:method :impl} first) dkeys))
+           (when ns-form? [{:db/id (ns-tid ns) :ns/form (form-tid id)}])
            (for [o superseded] [:db/retractEntity o])))))
 
 (defn record-tx
@@ -438,21 +466,23 @@
   (let [ds (:form/defines (d/entity db e))]
     (or (empty? ds) (boolean (some #(= e (form-of db (:db/id %))) ds)))))
 
+(defn- definition-key
+  "Definition entity x's program key ([:var sym], [:method ...], [:impl ...], [:ns sym])."
+  {:malli/schema [:=> [:cat :any] [:maybe :seon.merge/program-key]]}
+  [x] (cond (:var/name x) [:var (:var/name x)]
+            (:method/key x) (into [:method] (sedn/decode (:method/key x)))
+            (:impl/key x) (into [:impl] (sedn/decode (:impl/key x)))
+            (:ns/name x) [:ns (:ns/name x)]))
+
 (defn form-row
   "Form entity e as the loader and the merge read it."
   {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
   [db e]
-  (let [f (d/entity db e)
-        def-key (fn [x] (cond (:var/name x) [:var (:var/name x)]
-                              (:method/key x) (into [:method] (sedn/decode (:method/key x)))
-                              (:impl/key x) (into [:impl] (sedn/decode (:impl/key x)))
-                              (:ns/name x) [:ns (:ns/name x)]))]
-    (cond-> {:e e :id (:form/id f) :src (:form/src f) :ns (:ns/name (:form/ns f)) :order (:form/order f)
-             :defines (into #{} (keep def-key) (:form/defines f))
-             :declares (into #{} (map :var/name) (:form/declares f))
-             :refs (set (:form/refs f)) :requires (set (:form/requires f))
-             :banned (set (:form/banned f)) :inline-defs (set (:form/inline-defs f))
-             :timeouts (set (:form/timeouts f)) :catches (set (:form/catches f))}
+  (let [f (d/entity db e)]
+    (cond-> (into {:e e :id (:form/id f) :src (:form/src f) :ns (:ns/name (:form/ns f)) :order (:form/order f)
+                   :defines (into #{} (keep definition-key) (:form/defines f))
+                   :declares (into #{} (map :var/name) (:form/declares f))}
+                  (for [[a k] form-sets] [k (set (get f a))]))
       (:form/lead f) (assoc :lead (:form/lead f)))))
 
 (defn live-forms
@@ -461,6 +491,38 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]]}
   [db]
   (vec (for [dt (d/datoms db :aevt :form/id) :when (live? db (:e dt))] (form-row db (:e dt)))))
+
+(defn account-diff-tx
+  "account-tx of acct at its own order and lead (a file's), less what db holds already:
+  nothing for a form db holds with the same facts (its text, what it defines, declares and
+  names, each definition pointing to it with the same kind, contract and doc), only its
+  order and lead for one that only moved, and otherwise account-tx with the form's facts
+  the account no longer names retracted. A file read again writes what changed in it, not
+  the file (task seon.source/an-import-reads-only-changed-files)."
+  {:malli/schema [:=> [:cat :seon.host/db :map] :seon.db/tx-data]}
+  [db {:keys [id order lead defs declares] :as acct}]
+  (let [fe (pdb/eid db :form/id id)
+        dkeys (def-keys acct)
+        now (into {:id id :src (:src acct) :ns (:ns acct) :defines (set dkeys) :declares (set declares)}
+                  (for [[_ k] form-sets] [k (set (get acct k))]))
+        row (when fe (form-row db fe))
+        held? (and row (= now (select-keys row (keys now)))
+                   (every? #(= fe (some->> (def-eid db %) (form-of db))) dkeys)
+                   (every? (fn [{v :var :keys [kind contract doc]}]
+                             (let [x (d/entity db (def-eid db [:var v]))]
+                               (and (= kind (:var/kind x)) (= contract (:var/contract x)) (= doc (:var/doc x)))))
+                           defs))]
+    (cond
+      (and held? (= order (:order row)) (= lead (:lead row))) []
+      held? [(cond-> {:db/id fe :form/order order} lead (assoc :form/lead lead))]
+      :else (into (vec (for [op (account-tx db acct order)]
+                         (if (and (map? op) (= (form-tid id) (:db/id op)) (:form/src op))
+                           (cond-> (assoc op :form/order order) lead (assoc :form/lead lead))
+                           op)))
+                  (when row
+                    (concat (for [[a k] form-sets v (get row k) :when (not (contains? (get now k) v))] [:db/retract fe a v])
+                            (for [k (:defines row) :when (not (contains? (:defines now) k))] [:db/retract fe :form/defines (def-eid db k)])
+                            (for [v (:declares row) :when (not (contains? (:declares now) v))] [:db/retract fe :form/declares (def-eid db [:var v])])))))))
 
 ;; ---- load order ----------------------------------------------------------------------
 
@@ -476,6 +538,50 @@
                         (update (reduce visit (update st :seen conj n) (sort-by k (deps n))) :order conj n)))
                     {:seen #{} :order []}
                     (sort-by k nodes)))))
+
+(defn closure
+  "The nodes reachable from start through (neighbors node), start excluded, each once, in
+  the order reached. One visit per node and edge."
+  {:malli/schema [:=> [:cat [:or [:sequential :any] [:set :any]] ifn?] [:vector :any]]}
+  [start neighbors]
+  ;; one vector is the queue and the answer: a cursor walks it, each new node appended once
+  (let [q0 (vec (distinct start)) k (count q0)]
+    (loop [q q0 i 0 seen (set q0)]
+      (if (< i (count q))
+        (if-let [ns (seq (neighbors (nth q i)))]
+          (let [new (into [] (comp (remove seen) (distinct)) ns)]
+            (recur (into q new) (inc i) (into seen new)))
+          (recur q (inc i) seen))
+        (subvec q k)))))
+
+(defn components
+  "The strongly connected components of nodes under (neighbors node), each a vector, in
+  reverse topological order: each after every component it reaches. Tarjan's, with a stack
+  of frames rather than recursion (any depth of graph); one visit per node and edge."
+  {:malli/schema [:=> [:cat [:sequential :any] ifn?] [:vector [:vector :any]]]}
+  [nodes neighbors]
+  (let [index (volatile! (transient {})) low (volatile! (transient {})) on (volatile! (transient #{}))
+        stack (volatile! (transient [])) out (volatile! (transient [])) n (volatile! 0)
+        enter! (fn [v] (vswap! index assoc! v @n) (vswap! low assoc! v @n) (vswap! n inc)
+                 (vswap! stack conj! v) (vswap! on conj! v))]
+    (doseq [root nodes :when (nil? (get @index root))]
+      (enter! root)
+      (loop [frames [[root (vec (neighbors root)) 0]]]
+        (when-let [[v ns i] (peek frames)]
+          (if (< i (count ns))
+            (let [w (nth ns i) frames (conj (pop frames) [v ns (inc i)])]
+              (cond (nil? (get @index w)) (do (enter! w) (recur (conj frames [w (vec (neighbors w)) 0])))
+                    (get @on w) (do (vswap! low assoc! v (min (get @low v) (get @index w))) (recur frames))
+                    :else (recur frames)))
+            (let [frames (pop frames)]
+              (when-let [[u] (peek frames)] (vswap! low assoc! u (min (get @low u) (get @low v))))
+              (when (= (get @low v) (get @index v))
+                (vswap! out conj! (loop [c []]
+                                    (let [w (nth @stack (dec (count @stack)))]
+                                      (vswap! stack pop!) (vswap! on disj! w)
+                                      (if (= w v) (conj c w) (recur (conj c w)))))))
+              (recur frames))))))
+    (persistent! @out)))
 
 (defn load-order
   "forms (form rows) in the order to load them: namespaces in dependency order (after each
@@ -515,9 +621,16 @@
 
 (defn- held?
   "Does this process already hold form row f compiled: imported from the source tree, in a
-  namespace it holds (the binary's own; test/ is imported but not built in)?"
+  namespace it holds (the binary's own; test/ is imported but not built in), every var it
+  defines bound there? A form imported into a namespace loaded earlier (a test namespace
+  loaded at boot, then a re-import adding a deftest) defines a var this process does not
+  hold yet: it is loaded, never read as an unmap (seon.stage/stage-tx)."
   {:malli/schema [:=> [:cat :seon.host/db :map] :boolean]}
-  [db f] (boolean (and (:form/source (d/entity db (:e f))) (find-ns (:ns f)))))
+  [db f]
+  (boolean (and (:form/source (d/entity db (:e f)))
+                (when-let [n (find-ns (:ns f))]
+                  (every? (fn [[k s]] (or (not= :var k) (some-> (get (ns-interns n) (symbol (name s))) bound?)))
+                          (:defines f))))))
 
 (defn- requiring
   "The form entities of namespace nsym and of every namespace a form requires it from: where
@@ -538,15 +651,14 @@
   Cost: nothing unless a macro changed; then its namespaces' forms."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:vector :map]]}
   [db changed]
-  (loop [front (vec changed) seen (set (map :id changed)) out []]
-    (if-let [[f & more] (seq front)]
-      (let [es (distinct (for [[k s] (:defines f)
-                               :when (and (= :var k) (= :macro (:var/kind (d/entity db [:var/name s]))))
-                               e (requiring db (symbol (namespace s)))]
-                           e))
-            new (into [] (comp (filter #(live? db %)) (map #(form-row db %)) (remove (comp seen :id))) es)]
-        (recur (into (vec more) new) (into seen (map :id) new) (into out new)))
-      out)))
+  (let [rows (into {} (map (juxt :e identity)) changed)
+        row #(or (rows %) (form-row db %))]
+    (mapv row (closure (map :e changed)
+                       (fn [e] (for [[k s] (:defines (row e))
+                                     :when (and (= :var k) (= :macro (:var/kind (d/entity db [:var/name s]))))
+                                     e' (requiring db (symbol (namespace s)))
+                                     :when (live? db e')]
+                                 e'))))))
 
 (defn- names
   "The qualified keywords a schema or contract form names."
@@ -561,10 +673,9 @@
   [db keys]
   (if (empty? keys)
     []
-    (let [named (into {} (for [[k f] (merge contract/forms (schema-changes db))] [k (names f)]))
-          reached (loop [r keys]
-                    (let [r' (into r (for [[k ns] named :when (and (not (r k)) (some r ns))] k))]
-                      (if (= r r') r (recur r'))))]
+    (let [naming (reduce (fn [m [k f]] (reduce #(update %1 %2 (fnil conj []) k) m (names f)))
+                         {} (merge contract/forms (schema-changes db)))
+          reached (into keys (closure keys naming))]
       (vec (distinct (for [dt (d/datoms db :aevt :var/contract)
                            :when (some reached (names (sedn/decode (:v dt))))
                            :let [fe (:db/id (:var/form (d/entity db (:e dt))))]
@@ -646,17 +757,6 @@
     :method (when-let [v (find-var a)] (when (instance? clojure.lang.MultiFn @v) (remove-method @v (read-string b))))
     nil))
 
-(defn- definitions
-  "{program key -> form id} of db's definitions that point to a form."
-  {:malli/schema [:=> [:cat :seon.host/db] :map]}
-  [db]
-  (into {} (for [f (live-forms db) k (:defines f) :let [e (case (first k) :var (pdb/eid db :var/name (second k))
-                                                             :method (pdb/eid db :method/key (method-key (second k) (nth k 2)))
-                                                             :impl (pdb/eid db :impl/key (impl-key (second k) (nth k 2)))
-                                                             :ns (pdb/eid db :ns/name (second k)))]
-             :when (and e (= (:e f) (form-of db e)))]
-         [k (:id f)])))
-
 (defn- load!
   "Load changed (form rows this binary does not hold), the forms a changed macro expanded
   in (dependents) and the forms whose contracts the changed schema keys reach
@@ -678,14 +778,20 @@
   "Make this process run db-to's program where it holds db-from's: each live form db-to
   has that db-from had not is loaded (but the binary's own), with what it reaches (load!),
   and each definition db-from had that db-to has none of is removed. Answers the load
-  errors."
+  errors. Cost: each db's form ids and definition pointers, read as datoms; a form row is
+  built only for a form db-to has live that db-from had not (measured 2026-10-23 on Seon's
+  program: four live-forms reads, ~1.4 s, before)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.program/error]]}
   [db-from db-to]
-  (let [from (set (map :id (live-forms db-from)))
-        to-defs (definitions db-to)
+  (let [live-ids (fn [db] (into #{} (for [dt (d/datoms db :aevt :form/id) :when (live? db (:e dt))] (:v dt))))
+        def-keys (fn [db] (into #{} (for [a (vals pointer) dt (d/datoms db :aevt a)] (definition-key (d/entity db (:e dt))))))
+        from (live-ids db-from)
+        to-defs (def-keys db-to)
         sc-from (schema-changes db-from)]
-    (doseq [k (keys (definitions db-from)) :when (not (contains? to-defs k))] (remove-definition! k))
-    (load! db-to (filterv #(not (or (from (:id %)) (held? db-to %))) (live-forms db-to))
+    (doseq [k (sort-by str (def-keys db-from)) :when (not (contains? to-defs k))] (remove-definition! k))
+    (load! db-to (filterv #(not (held? db-to %))
+                          (for [dt (d/datoms db-to :aevt :form/id) :when (and (not (from (:v dt))) (live? db-to (:e dt)))]
+                            (form-row db-to (:e dt))))
            (set (for [[k v] (schema-changes db-to) :when (not= v (get sc-from k))] k)))))
 
 (defn load-changes!
@@ -696,7 +802,7 @@
   maps (empty when all loaded)."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.db/op]] [:vector :seon.program/error]]}
   [db ops]
-  (let [ptr (set def-attrs)
+  (let [ptr (set (vals pointer))
         added (set (for [[op e a] ops :when (and (= op :db/add) (ptr a))] e))]
     (doseq [[op e a] ops
             :when (and (= op :db/retract) (ptr a) (not (added e)))
@@ -766,62 +872,179 @@
      seon.web/handler ;; web/public, in :env
      seon.proofs/greens}) ;; the results directory, outside the tree, by digest
 
-(defn- reach-fold
-  "(f key reached {:by-id :digest}) of each of db's tests (or each of roots' keys), reached the
-  form ids its closure reaches (reach-digests' walk: its own form and its namespace's plain
-  forms, then every reference, method, extension, contract's schema entry and inputs'
-  :data-refs, a test's form never walked on to): {key (f ...)}. The one walk reach-digests and
-  process-tests read."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]] :seon.host/fn] :map]}
-  [db {:keys [data-refs]} roots f]
-  (let [schemas (into {} (for [dt (d/datoms db :aevt :schema/key)] [(:v dt) (:schema/form (d/entity db (:e dt)))]))
-        sid #(str "schema " %)
-        named (fn [text] (keep #(when (contains? schemas %) (sid %)) (names (sedn/decode text))))
-        contract (into {} (for [dt (d/datoms db :aevt :var/contract)] [(:var/name (d/entity db (:e dt))) (named (:v dt))]))
-        live (live-forms db)
-        forms (into live (for [[k text] schemas] {:id (sid k) :ns k :src text :refs #{} :defines #{} :schema (named text)}))
-        by-def (fn [kind] (reduce (fn [m f] (reduce (fn [m [k s]] (if (= k kind) (update m s (fnil conj []) (:id f)) m)) m (:defines f))) {} forms))
-        var-form (into {} (for [[s ids] (by-def :var)] [s (peek ids)]))
-        methods (by-def :method) impls (by-def :impl)
-        by-id (into {} (map (juxt :id identity)) forms)
-        digest (into {} (for [f forms] [(:id f) (error/digest (str (:ns f) "\n" (:src f)))]))
+(defn- tree-reading?
+  "Does form f read the tree (a tree-reader referenced, by a form defining no env-reader)?"
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [f] (boolean (and (some tree-readers (:refs f))
+                    (not (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f)))))))
+
+(def ^:private names-only
+  "The vars whose forms only name other vars, as quoted data (the reach walk follows a quoted
+  name): reaching one is not using what it names."
+  '#{seon.program/tree-readers seon.program/env-readers})
+
+(defn- uses?
+  "Does form f use one of vars (:seon.config.source/process-vars or -binary-vars)? A form uses
+  a var it references and does not define (a var's own form names itself), and not when it
+  only names vars as data (names-only: tree-readers lists the binary-sh that the reach walk's
+  own tests never run)."
+  {:malli/schema [:=> [:cat [:set :qualified-symbol] :map] :boolean]}
+  [vars f]
+  (let [own (set (keep (fn [[k s]] (when (= :var k) s)) (:defines f)))]
+    (boolean (and (not-any? names-only own) (some #(and (vars %) (not (own %))) (:refs f))))))
+
+(defn- live-ids
+  "{form id -> entity} of db's live forms (live?), from four index scans and no entity read:
+  a form that defines nothing, or one a definition points to. So two values' difference is
+  their programs' (reach-update), at index speed."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :string :int]]}
+  [db]
+  (let [defining (into #{} (map :e) (d/datoms db :aevt :form/defines))
+        pointed (into #{} (comp (mapcat #(d/datoms db :aevt %)) (map :v)) [:var/form :method/form :impl/form :ns/form])]
+    (into {} (for [dt (d/datoms db :aevt :form/id) :when (or (not (defining (:e dt))) (pointed (:e dt)))] [(:v dt) (:e dt)]))))
+
+(defn- schema-texts
+  "{schema key -> its form's text} of db, from two index scans."
+  {:malli/schema [:=> [:cat :seon.host/db] :map]}
+  [db]
+  (let [text (into {} (map (juxt :e :v)) (d/datoms db :aevt :schema/form))]
+    (into {} (for [dt (d/datoms db :aevt :schema/key)] [(:v dt) (text (:e dt))]))))
+
+(defn- schema-row? {:malli/schema [:=> [:cat :map] :boolean]} [f] (contains? f :schema))
+
+(defn- reach-step
+  "Graph g after the forms removed (ids) and the rows added (form-row's, live on db): each
+  form's neighbours recomputed only where its edges can have changed (an added form; a form
+  referring to, or defining the methods, extensions or contract of, a var a changed form
+  defines), and the components of the changed forms and of every form reaching them re-folded
+  (components over those alone, the rest kept). :affected, how many forms were re-folded."
+  {:malli/schema [:=> [:cat :map :seon.host/db [:sequential :string] [:sequential :map]] :map]}
+  [g db removed added]
+  (let [data-refs (:data-refs g)
+        old (:rows g)
+        gone (keep old removed)
+        defined (fn [f kind] (for [[k a] (:defines f) :when (= kind k)] a))
+        V (set (mapcat #(defined % :var) (concat gone added)))
+        M (set (mapcat #(defined % :method) (concat gone added)))
+        P (set (mapcat #(defined % :impl) (concat gone added)))
+        drop-ids (set removed)
+        gone-ids (reduce disj drop-ids (map :id added))
+        step (fn [m k ids] (update m k #(into (into [] (remove drop-ids) %) ids)))
+        by (fn [m kind] (reduce (fn [m f] (reduce #(step %1 %2 [(:id f)]) m (defined f kind)))
+                                (reduce (fn [m f] (reduce #(step %1 %2 []) m (defined f kind))) m gone) added))
+        rows (into (apply dissoc old removed) (map (juxt :id identity)) added)
+        defs (by (:defs g) :var) methods (by (:methods g) :method) impls (by (:impls g) :impl)
+        var-form #(peek (get defs %))
+        facts (for [v V] [v (d/entity db [:var/name v])])
+        sids (fn [text] (into [] (comp (map #(str "schema " %)) (filter rows)) (names (sedn/decode text))))
+        contract (reduce (fn [m [v e]] (if-let [t (:var/contract e)] (assoc m v (sids t)) (dissoc m v))) (:contract g) facts)
+        tests (reduce (fn [s [v e]] (if (= :test (:var/kind e)) (conj s v) (disj s v))) (:tests g) facts)
+        refd (reduce (fn [m f] (reduce #(update %1 %2 (fnil conj #{}) (:id f)) m (:refs f)))
+                     (reduce (fn [m f] (reduce #(update %1 %2 disj (:id f)) m (:refs f))) (:refd g) gone) added)
         ;; a test's form is reached only as the root it is: another form naming a test (its
         ;; name quoted as data, a proof list) never runs it, clojure.test does
-        test-ids (set (for [dt (d/datoms db :aevt :var/kind) :when (= :test (:v dt)) :let [id (var-form (:var/name (d/entity db (:e dt))))] :when id] id))
-        edges (fn [f] (concat (remove test-ids (keep var-form (:refs f))) (:schema f)
-                              (for [[k s] (:defines f) :when (= :var k)
-                                    id (concat (methods s) (impls s) (contract s) (keep var-form (get data-refs s)))]
-                                id)))
-        plain (update-vals (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) live)) #(mapv :id %))
-        ;; each form's neighbours, built once per call: every test's walk reads them, and
-        ;; rebuilding a form's edges per test that reaches it cost 7.4 GB a call on Seon's own
-        ;; program (pure-tests' measure, 2026-10-23)
-        adj (into {} (map (juxt :id #(vec (edges %)))) forms)
-        ;; key k reaching from the forms ids, with their namespaces' plain forms: a stack
-        ;; (peek/pop), never a copy of the front per step
-        digest-of (fn [k ids]
-                    (f k (loop [stack (into (vec ids) (mapcat #(plain (:ns (by-id %)))) ids) seen #{}]
-                           (if (empty? stack)
-                             seen
-                             (let [id (peek stack) stack (pop stack)]
-                               (if (seen id) (recur stack seen) (recur (into stack (adj id)) (conj seen id))))))
-                       {:by-id by-id :digest digest}))]
+        test-ids (set (keep var-form tests))
+        edges (fn [f] (if (schema-row? f)
+                        (vec (:schema f))
+                        (vec (concat (remove test-ids (keep var-form (:refs f)))
+                                     (for [s (defined f :var)
+                                           id (concat (get methods s) (get impls s) (get contract s) (keep var-form (get data-refs s)))]
+                                       id)))))
+        holders (for [[s vs] data-refs :when (some V vs) id (get defs s)] id)
+        dirty (-> (set (map :id added))
+                  (into (mapcat #(get refd %)) V)
+                  (into (keep var-form) (concat V M P))
+                  (into holders)
+                  (as-> d (into #{} (remove gone-ids) d)))
+        adj (into (apply dissoc (:adj g) gone-ids) (for [id dirty] [id (edges (rows id))]))
+        rev (as-> (:rev g) r
+              (reduce (fn [r id] (reduce #(update %1 %2 disj id) r (get-in g [:adj id]))) r (concat dirty gone-ids))
+              (reduce (fn [r id] (reduce #(update %1 %2 (fnil conj #{}) id) r (adj id))) r dirty)
+              (apply dissoc r gone-ids))
+        flag (fn [k pred] (into (apply disj (k g) removed) (comp (filter pred) (map :id)) added))
+        pvars (cfg/value :seon.config.source/process-vars)
+        bvars (cfg/value :seon.config.source/binary-vars)
+        reads (flag :reads tree-reading?) proc (flag :proc #(uses? pvars %)) bin (flag :bin #(uses? bvars %))
+        plain? (fn [f] (and (not (schema-row? f)) (not-any? (fn [[k]] (= :var k)) (:defines f))))
+        plain (as-> (:plain g) pl
+                (reduce (fn [pl f] (update pl (:ns f) disj (:id f))) pl (filter plain? gone))
+                (reduce (fn [pl f] (update pl (:ns f) (fnil conj #{}) (:id f))) pl (filter plain? added)))
+        own (into (apply dissoc (:own g) removed) (for [f added] [(:id f) (error/digest (str (:ns f) "\n" (:src f)))]))
+        changed (into dirty (map :id) added)
+        affected (into changed (closure changed #(get rev %)))
+        old-comp (:comp-of g)
+        olds (keep old-comp affected)
+        ;; the affected components re-folded sinks first (Bazel's and Nix's action keys): a
+        ;; component's digest is its forms' own and those of the components it reaches
+        [comp-of cd fl n] (reduce (fn [[comp-of cd fl n] c]
+                                    (let [ms (set c)
+                                          kids (distinct (for [id c w (adj id) :when (not (ms w))] (get comp-of w)))
+                                          any (fn [k fs] (boolean (or (some fs c) (some #(get-in fl [% k]) kids))))]
+                                      [(reduce #(assoc! %1 %2 n) comp-of c)
+                                       (assoc! cd n (error/digest (str (str/join " " (sort (map own c))) "|" (str/join " " (sort (map cd kids))))))
+                                       (assoc! fl n {:reads (any :reads reads) :proc (any :proc proc) :bin (any :bin bin)})
+                                       (inc n)]))
+                                  [(transient (apply dissoc old-comp gone-ids))
+                                   (transient (apply dissoc (:cd g) olds))
+                                   (transient (apply dissoc (:flags g) olds))
+                                   (:next g)]
+                                  (components (vec affected) (fn [id] (filter affected (adj id)))))]
+    (assoc g :rows rows :defs defs :methods methods :impls impls :contract contract :tests tests :refd refd :adj adj :rev rev
+           :reads reads :proc proc :bin bin :plain plain :own own
+           :comp-of (persistent! comp-of) :cd (persistent! cd) :flags (persistent! fl) :next n :affected (count affected))))
+
+(defn reach-graph
+  "db's reach graph, a value: its live forms and schema entries (a schema entry's :schema, the
+  entries its form names), each one's neighbours (every reference, method, extension,
+  contract's schema entry and data-refs' names: inputs' :data-refs, system.edn's procs, which
+  root resolves by name), and each strongly connected component's Merkle digest and whether it
+  or what it reaches reads the tree, uses a process var or a binary var (uses?), folded once,
+  sinks first. graph-index answers from it; reach-update changes it."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :map]] :map]}
+  [db data-refs]
+  (let [schemas (schema-texts db)
+        sid #(str "schema " %)
+        live (live-ids db)]
+    (reach-step {:rows {} :defs {} :methods {} :impls {} :contract {} :tests #{} :refd {} :adj {} :rev {}
+                 :reads #{} :proc #{} :bin #{} :plain {} :own {} :comp-of {} :cd {} :flags {} :next 0
+                 :data-refs data-refs :schemas schemas :live live}
+                db []
+                (into (mapv #(form-row db %) (vals live))
+                      (for [[k text] schemas]
+                        {:id (sid k) :ns k :src text :refs #{} :defines #{}
+                         :schema (keep #(when (contains? schemas %) (sid %)) (names (sedn/decode text)))})))))
+
+(defn reach-update
+  "Graph g (reach-graph's, of another value) for db: the live forms g holds that db does not
+  removed, db's that g does not added (live-ids: index scans, no entity read), and only the
+  components those touch and their ancestors re-folded (reach-step), so a branch's graph is
+  its base's at the cost of what it changed. A schema entry added or changed rebuilds."
+  {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
+  [g db]
+  (if (not= (:schemas g) (schema-texts db))
+    (reach-graph db (:data-refs g))
+    (let [live (live-ids db) was (:live g)]
+      (assoc (reach-step g db (vec (remove live (keys was))) (vec (for [[id e] live :when (not (was id))] (form-row db e))))
+             :live live))))
+
+(defn graph-index
+  "{test {:digest :process? :binary?}} of graph g's tests under inputs (or of each key of
+  roots, {key [var ...]}): a key's digest is of its name, :env, :tree when what it reaches
+  reads the tree, and its starting forms' components' digests (its forms and their
+  namespaces' plain forms); :process? and :binary?, whether one of those components uses a
+  process or a binary var. A root naming a var with no form in g gets none."
+  {:malli/schema [:=> [:cat :map :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]]] :map]}
+  [{:keys [rows defs tests plain comp-of cd flags]} {:keys [env tree]} roots]
+  (let [var-form #(peek (get defs %))
+        answer (fn [k ids]
+                 (let [cs (distinct (map comp-of (into (vec ids) (mapcat #(get plain (:ns (rows %)))) ids)))]
+                   {:digest (error/digest (apply str k "\n" env "\n" (when (some #(:reads (flags %)) cs) tree) (sort (map cd cs))))
+                    :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))}))]
     (if roots
       ;; a root naming a var with no form here (renamed, not imported) gets no digest: its
       ;; caller names it missing, never a digest of :env alone that a stale green matches
-      (into {} (for [[k vars] roots :when (every? var-form vars)] [k (digest-of k (map var-form vars))]))
-      (into {} (for [f forms [k t] (:defines f) :when (and (= :var k) (= :test (:var/kind (d/entity db [:var/name t]))))]
-                 [t (digest-of t [(:id f)])])))))
-
-(defn- reach-digest
-  "Key k's reach digest from what it reached (reach-digests)."
-  {:malli/schema [:=> [:cat :seon.program/inputs :any [:set :any] :map] :string]}
-  [{:keys [env tree]} k reached {:keys [by-id digest]}]
-  (let [reads? (some #(let [f (by-id %)]
-                        (and (some tree-readers (:refs f))
-                             (not (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f))))))
-                     reached)]
-    (error/digest (apply str k "\n" env "\n" (when reads? tree) (sort (map digest reached))))))
+      (into {} (for [[k vars] roots :when (every? var-form vars)] [k (answer k (map var-form vars))]))
+      (into {} (for [t tests :let [id (var-form t)] :when id] [t (answer t [id])])))))
 
 (defn reach-digests
   "{test var -> reach digest} of db's tests (task seon.program/tests-run-by-reach): the
@@ -833,32 +1056,28 @@
   its form names; a var named in data its form reads, inputs' :data-refs: system.edn's procs,
   which root resolves by name), with inputs' :tree when a reached form references a
   tree-reader. A
-  test's digest moves exactly when a form or schema entry it reaches does. Cost: the live
-  forms, contracts and schema entries read once and digested once, then per test its
-  closure. With roots ({key [var ...]}, a bin/check step's mode functions: seon.proofs/
+  test's digest moves when a form or schema entry it reaches does, or the shape of what it
+  reaches (which form calls which): each strongly connected component's Merkle digest
+  (reach-graph). Cost: the live forms, contracts and schema entries read once and digested
+  once, then one pass over the condensed graph (reach-graph, then graph-index). With roots ({key [var ...]}, a bin/check step's mode functions: seon.proofs/
   check-steps), the same digest of each key: what its vars' forms and their namespaces'
   plain forms reach; a key one of whose vars has no form here has none."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol :string]]
                   [:=> [:cat :seon.host/db :seon.program/inputs [:map-of :string [:sequential :qualified-symbol]]] [:map-of :string :string]]]}
   ([db inputs] (reach-digests db inputs nil))
-  ([db inputs roots] (reach-fold db inputs roots (partial reach-digest inputs))))
-
-(defn- reaches-process?
-  "Does what a test reached reference one of vars (:seon.config.source/process-vars)?"
-  {:malli/schema [:=> [:cat [:set :qualified-symbol] [:set :any] :map] :boolean]}
-  [vars reached {:keys [by-id]}] (boolean (some #(some vars (:refs (by-id %))) reached)))
+  ([db inputs roots] (update-vals (graph-index (reach-graph db (:data-refs inputs)) inputs roots) :digest)))
 
 (defn reach-index
-  "{test {:digest :process?}} of db's tests under inputs, from the one walk (reach-fold): its
-  reach digest (reach-digests) and whether it reaches a process of its own (a var of
-  :seon.config.source/process-vars: process-tests). With roots (a bin/check step's mode
-  functions, as reach-digests takes them), the same of each key."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol [:map [:digest :string] [:process? :boolean]]]]
-                  [:=> [:cat :seon.host/db :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]]] [:map-of :any [:map [:digest :string] [:process? :boolean]]]]]}
+  "{test {:digest :process? :binary?}} of db's tests under inputs, from the one graph (reach-graph, graph-index):
+  its reach digest (reach-digests), whether it reaches a process of its own (a var of
+  :seon.config.source/process-vars: process-tests) and whether it uses the built binary (a var of
+  :seon.config.source/binary-vars: bin/test builds target/seon only for these); uses? says what
+  is a use. With roots (a
+  bin/check step's mode functions, as reach-digests takes them), the same of each key."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol [:map [:digest :string] [:process? :boolean] [:binary? :boolean]]]]
+                  [:=> [:cat :seon.host/db :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]]] [:map-of :any [:map [:digest :string] [:process? :boolean] [:binary? :boolean]]]]]}
   ([db inputs] (reach-index db inputs nil))
-  ([db inputs roots]
-   (let [vars (cfg/value :seon.config.source/process-vars)]
-     (reach-fold db inputs roots (fn [k reached ctx] {:digest (reach-digest inputs k reached ctx) :process? (reaches-process? vars reached ctx)})))))
+  ([db inputs roots] (graph-index (reach-graph db (:data-refs inputs)) inputs roots)))
 
 (defn process-tests
   "The keys of index (reach-index's answer) that reach a process of their own (a shell, a

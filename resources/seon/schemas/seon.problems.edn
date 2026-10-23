@@ -8,8 +8,7 @@
                                                 [:causes {:optional true} [:vector :string]]]]
  :seon.db/types-differ [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/types-differ]]
                                                 [:seon.db/attributes [:map-of :qualified-keyword [:map [:stored :keyword] [:declared :keyword]]]]]]
- :seon.db/lease-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/lease-spent]]
-                                              [:lease :int] [:ceiling :int] [:entity-id {:optional true} [:maybe :int]]]]
+ :seon.db/ids-unopened [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/ids-unopened]] [:path :string] [:errno :int]]]
  :seon.root/no-agent [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-agent]] [:agent {:optional true} [:maybe :keyword]]]]
  :seon.agent/last-op [:map [:kind :keyword] [:form {:optional true} [:maybe :string]] [:since-ms {:optional true} [:maybe :int]]]
  :seon.agent/died [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/died]] [:agent :keyword]
@@ -24,6 +23,8 @@
  :seon.agent/stalled [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/stalled]] [:agent :keyword]
                                              [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]
  ;; a resumed agent's branch program that did not load (seon.program/load-diff!): main's ran instead
+ ;; an agent's boot check found its SIGUSR1 handler never ran (seon.agent/interrupt-self-test)
+ :seon.agent/interrupt-unreachable [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/interrupt-unreachable]]]]
  :seon.agent/load-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/load-failed]] [:ns :symbol]]]
  ;; a new agent whose branch or forked image is not at the commit root branched it from
  ;; (the writer's :spawn names main's commit and t on :fork; seon.agent/init! compares)
@@ -45,6 +46,8 @@
  ;; (procedure calls and loop back-edges; never elapsed time): runtime-fixable, the agent's to read
  :seon.repl/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.repl/ticks-spent]] [:ticks :int] [:budget :int]]]
  ;; the agent could not fork its test run (threads were active): no proof ran
+ ;; the test service's prove agent could not load the checkout's tests (seon.prove)
+ :seon.test/prepare [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/prepare]]]]
  :seon.test/fork-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/fork-refused]] [:active-threads :int]]]
  :seon.test/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int]
                                                 [:test {:optional true} :string]]]
@@ -90,6 +93,7 @@
                             [:seon.error/last-agent {:optional true} :seon.error/last-agent]
                             [:seon.error/last-task {:optional true} :seon.error/last-task]
                             [:seon.error/form {:optional true} :seon.error/form]
+                            [:seon.error/subject {:optional true} :seon.error/subject]
                             [:seon.error/example {:optional true} :seon.error/example]]
  ;; one occurrence as its observer sees it (a value; never stored whole)
  :seon.error/occurrence [:map [:error :map] [:class :seon.error/class] [:cause [:vector :any]]
@@ -151,7 +155,13 @@
                          [:seon.fx/cache-hit-tokens {:optional true} :seon.fx/cache-hit-tokens]]
 
  ;; ---- the one read: seon.problems/report ----
- :seon.problems/class [:enum :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict]
+ ;; each class's area, the group root's page and context show it under (docs/health.md),
+ ;; declared once here and read through seon.contract/properties (as a status set is)
+ :seon.problems/class [:enum {:seon.problems/derived #{:dead-citation :unnamed-site :stale-pin}
+                             :seon.problems/areas [[:docs #{:dead-citation :stale-pin}] [:tests #{:red :cost :test-red}]
+                                                    [:laws #{:unnamed-site}] [:merges #{:merge :task-conflict :unrun}] [:tasks #{:failed}]
+                                                    [:agents #{:dead :error :waste}] [:errors #{:platform :eval :agent :effect}]]}
+                       :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :test-red :dead-citation :unnamed-site :stale-pin :unrun]
  :seon.problems/row [:map {:seon.render/ai seon.render.ai/problem-row}
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]

@@ -1,5 +1,5 @@
 (ns seon.fx
-  "Effects (session FX1, ../notes/archive/option3-FX1-effects.md). Every outside effect kind has ONE
+  "Effects (session FX1, notes/archive/option3-FX1-effects.md). Every outside effect kind has ONE
   owner proc in root behind a bounded channel, and `workers` performer procs:
 
     agent --socket--> agent proc --:fx/<kind>--> owner --:work--> worker (performs)
@@ -106,11 +106,14 @@
 (defn config-input
   "The config in force as a test reads it, cfg (seon.config/config: the shipped file, this
   checkout's config/local.edn, the #env values, the profile), as text: the checkout's own path
-  written as <checkout>, and the TCP ports left out (each checkout's own by design, bin/ports;
-  a test's root takes its own). What a result depends on that git does not see."
+  written as <checkout>, and the keys that say where a process runs left out (their schemas'
+  :seon.config/place: its ports, main, store, runs, source tree and results directory: each
+  checkout's and each root's own by design, while :tree covers the source's content). What a
+  result depends on that git does not see, so an agent's root and a checkout on one tree key
+  their results alike (docs/merging.md)."
   {:malli/schema [:=> [:cat :map :string] :string]}
   [cfg checkout]
-  (str/replace (sedn/encode (into (sorted-map) (remove (fn [[k]] (= "TCP port" (get-in cfg/schema-forms [k 1 :seon.config/unit])))) cfg))
+  (str/replace (sedn/encode (into (sorted-map) (remove (fn [[k]] (get-in cfg/schema-forms [k 1 :seon.config/place]))) cfg))
                checkout "<checkout>"))
 
 (defn declared-refs
@@ -140,18 +143,36 @@
       (git! env root ["write-tree"] nil)
       (finally (.delete idx)))))
 
+(defn pin
+  "What a build or a test reads from the checkout at dir (a submodule), by content: its HEAD
+  when its files are HEAD's, else HEAD+ the tree-id of its files as they are, so an
+  uncommitted edit in a dependency is an input like a committed one (bin/build's pin computes
+  the same, and builds it)."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [dir]
+  (let [head (git! {} dir ["rev-parse" "HEAD"] nil)]
+    (if (str/blank? (git! {} dir ["status" "--porcelain" "-uall" "--ignore-submodules=all"] nil))
+      head
+      (str head "+" (tree-id dir)))))
+
 (defn inputs
   "The one producer of the checkout at root's inputs that have no program facts, for bin/test
   and for root's :source read (read-source, which records them for its agents):
   {:tree (tree-id: every file and pin, for a test reading files or running the binary) :env
-  (every test's: the tree's env-input? entries, every submodule's pin, Jolt's included, and
+  (every test's: the tree's env-input? entries, every submodule's pin (its files as they are),
+  Jolt's included, and
   the config in force, config-input) :data-refs (declared-refs of its system.edn)}, by
   relative paths and content, so the same content at another path is the same inputs."
   {:malli/schema [:function [:=> [:cat :string] :seon.program/inputs] [:=> [:cat :string :map :string] :seon.program/inputs]]}
   ([root] (inputs root cfg/config (cfg/checkout)))
   ([root cfg checkout]
    (let [tree (tree-id root)
-         entries (for [l (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil)) :let [[_ p] (str/split l #"\t" 2)] :when (env-input? p)] l)]
+         entries (for [l (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil)) :let [[m p] (str/split l #"\t" 2)] :when (env-input? p)]
+                   ;; a submodule by its pin: its files as they are, an uncommitted edit included
+                   ;; (a clean one's line is its gitlink's, as before; one not checked out has no files to read)
+                   (let [d (str root "/" p)
+                         pn (when (and (str/starts-with? m "160000") (.exists (java.io.File. d ".git"))) (pin d))]
+                     (if (and pn (str/includes? pn "+")) (str l " " pn) l)))]
      {:tree tree
       :env (err/digest (str/join "\n" (concat entries [(config-input cfg checkout)])))
       :data-refs (declared-refs (str root "/resources/seon/system.edn"))})))
@@ -232,6 +253,54 @@
           (step "bin/worktree --at" [(str from "/bin/worktree") "--at" dir commit repo]))
         (step "bin/build seon" ["nice" "-n" "15" (str dir "/bin/build") "seon"])
         {:value {:commit commit :checkout dir :binary (str dir "/target/seon") :ms (profile/ms-since t0)}})))
+(defn test-command
+  "The runner the :tests effect calls in a checkout, as argv, for namespaces nss: prove's one
+  entry (land12, root 2026-10-22), each named namespace's tests with no green at their reach
+  digest run, the rest reused."
+  {:malli/schema [:=> [:cat [:sequential :symbol]] [:vector :string]]}
+  [nss] (into ["nice" "-n" "15" "bin/prove" "--tests"] (map str nss)))
+
+(defn test-results
+  "Each of tests' status from prove's output out and its exit status: :fail or :error where a
+  RED line names it (its counts say which), :pass only when the run reached its tests, exited
+  0 and named it in no RED line (it ran green, or was green at its digest), and :error for
+  every other one: a run that never reached its tests (its plan or its build failed), or that
+  exited non-zero without naming it (a check step, a crash after the shard), says nothing of it
+  passing."
+  {:malli/schema [:=> [:cat :string :int [:sequential :qualified-symbol]] [:map-of :qualified-symbol [:enum :pass :fail :error]]]}
+  [out exit tests]
+  (let [red (into {} (for [[_ t counts] (re-seq #"(?m)^RED (\S+) (\{[^\n]*\})" out)]
+                       [(symbol t) (if (pos? (or (:error (edn/read-string counts)) 0)) :error :fail)]))
+        reached? (boolean (re-find #"(?m)^(SHARD |PROVE OK|prove: .* 0 to run)" out))]
+    (into {} (for [t tests] [t (or (red t) (if (and reached? (zero? exit)) :pass :error))]))))
+
+(defn run-tests
+  "The :tests effect: tests (qualified names) run on a checkout of the merge candidate: a
+  detached worktree of repo at branch's head (bin/worktree --at, as a generation's), files
+  ({relative path text}, the candidate's changed files) written over it, then the runner
+  (test-command) over the tests' namespaces there, niced, in that tree's own environment;
+  the worktree removed after. Answers {:value {:results {test status} :ms :log}}, or
+  :seon.fx/io-error naming the step and its log."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [repo branch files tests]} :req}]
+  (let [t0 (profile/now-ns)
+        sha (str/trim (:out (sh/sh "git" "-C" repo "rev-parse" branch)))
+        dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
+        log (str dir ".tests.log")
+        clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"]
+        at (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo)]
+    (if-not (zero? (:exit at))
+      (error :seon.fx/io-error (str "bin/worktree --at exited " (:exit at) ": " (:err at)) {:path dir})
+      (try
+        (doseq [[p text] files] (let [f (java.io.File. dir p)] (.mkdirs (.getParentFile f)) (spit f text)))
+        (let [r (apply sh/sh (concat clean (test-command (sort (distinct (map (comp symbol namespace) tests)))) [:dir dir]))
+              out (str (:out r) (:err r))]
+          (spit log out)
+          {:value {:results (test-results out (:exit r) tests) :ms (profile/ms-since t0) :log log}})
+        ;; the worktree's removal is recorded in the run's log: a failed one names what it left
+        (finally (let [rm (sh/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
+                   (spit log (str "\nremove-at " dir ": exit " (:exit rm) "\n" (:out rm) (:err rm)) :append true)))))))
+
 ;; ---- the owner -----------------------------------------------------------------------
 
 (defn refill
