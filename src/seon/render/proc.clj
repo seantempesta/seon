@@ -16,7 +16,7 @@
   event carries is its owner's to emit. A pass: an event asks the api for its view; while that request is in
   flight, more events only queue, so a burst becomes one pass (the round trip is the
   coalescing window: no step sleeps). The answer is joined with health, main's tasks and
-  attempts and the events into the system value (:seon.render/system), whose :ai face is
+  runs and the events into the system value (:seon.render/system), whose :ai face is
   root's context. Each page a tab watches is an entity's (seon.render/page: / root's, /agent/{id}
   an agent's in root's boot, /walk/{eid} any entity's), walked on main and, for an agent, on its
   branch as last read, and laid out by seon.render.ui/page into units. Then, per unit: inputs
@@ -65,7 +65,7 @@
 
 (defn system-value
   "The whole system as one value (:seon.render/system), from the render proc's state:
-  root's view (the api's), every proc's health, main (t, datoms, tasks, attempts),
+  root's view (the api's), every proc's health, main (t, datoms, tasks, runs),
   the events, the render's own numbers."
   {:malli/schema [:=> [:cat :map :int :int] :seon.render/system]}
   [st now-ns now-ms]
@@ -80,12 +80,12 @@
      ;; step that threw); no ping, no beat
      :health (proc-health-of st (:root-errors v []))
      ;; merges into main: root's merge! of a branch (its events) and the reconciler's
-     ;; merged attempts (main's facts)
-     :main (assoc (:main st {}) :merges (+ (:merges st 0) (count (filter #(= :merged (:seon.attempt/status %)) (vals (:attempts st))))))
+     ;; merged runs (main's facts)
+     :main (assoc (:main st {}) :merges (+ (:merges st 0) (count (filter #(= :merged (:seon.run/status %)) (vals (:runs st))))))
      :recorded (:recorded st)
-     :tasks (:tasks st {}) :attempts (:attempts st {}) :task-rows (:task-rows st {}) :agent-attempt (:agent-attempt st {})
-     ;; a stop that arrived before main recorded how the attempt ended says so once main does
-     :events (mapv #(ui/ended-as % (:agent %) (:agent-attempt st {})) (:events st [])) :events-seen (:ev-seq st 0)
+     :tasks (:tasks st {}) :runs (:runs st {}) :task-rows (:task-rows st {}) :agent-run (:agent-run st {})
+     ;; a stop that arrived before main recorded how the run ended says so once main does
+     :events (mapv #(ui/ended-as % (:agent %) (:agent-run st {})) (:events st [])) :events-seen (:ev-seq st 0)
      :config (:config st)
      :now-ms now-ms}))
 
@@ -93,26 +93,26 @@
 
 (defn task-rows
   "Each task's row as observed, read from the reconciler's index (`seon.reconcile/task-state`):
-  {id {:state :blocked-by #{id} :needs :attempts n :tokens n :newest attempt :kind :green n
+  {id {:state :blocked-by #{id} :needs :runs n :tokens n :newest run :kind :green n
   :red n :allowed-red n :proofs n}}. The desired execution stays on the task; this is what
   happened."
   {:malli/schema [:=> [:cat :seon.reconcile/index] :map]}
   [idx]
   (into {} (for [[id t] (:tasks idx)
-                 :let [as (sort-by :seon.attempt/start-ms (map (:attempts idx) (get-in idx [:by-task id])))
-                       results (:seon.attempt/results (last as) {})
+                 :let [as (sort-by :seon.run/start-ms (map (:runs idx) (get-in idx [:by-task id])))
+                       results (:seon.run/results (last as) {})
                        own (get-in idx [:acc id] #{})]]
              [id {:state (reconcile/task-state idx id) :blocked-by (reconcile/blocked-by idx id) :needs (:seon.task/needs t)
-                  :attempts (count as)
-                  ;; unknown is not 0: an attempt records its tokens at its end
-                  :tokens (when-let [ts (seq (keep :seon.attempt/tokens as))] (reduce + ts)) :newest (last as) :kind (:seon.task/kind t)
+                  :runs (count as)
+                  ;; unknown is not 0: a run records its tokens at its end
+                  :tokens (when-let [ts (seq (keep :seon.run/tokens as))] (reduce + ts)) :newest (last as) :kind (:seon.task/kind t)
                   ;; its own proofs (red blocks it) apart from other tasks' (an allowed red)
                   :green (count (filter #(= :pass (get results %)) own)) :red (count (filter #(and (contains? results %) (not= :pass (get results %))) own))
                   :allowed-red (count (filter (fn [[p r]] (and (not= :pass r) (not (contains? own p)))) results))
                   :proofs (count own)}])))
 
 (defn- main-info
-  "What the tiles show of main's db value: t, program vars, tasks and attempts, read when
+  "What the tiles show of main's db value: t, program vars, tasks and runs, read when
   main's t moved: O(vars) for the vars (an index count), O(tasks) for the rest, nothing per
   datom of main (seon.render-cost-test/main-info-reads-what-the-page-shows: was a count of
   every datom, 15 ms at 47k datoms, 174 ms on the owner's main). Main's datom count is root's
@@ -121,10 +121,10 @@
   [st db]
   (if (= (:max-tx db) (get-in st [:main :t]))
     st
-    (let [tasks (task/tasks db) idx (reconcile/index db) attempts (:attempts idx)
+    (let [tasks (task/tasks db) idx (reconcile/index db) runs (:runs idx)
           vars (count (d/datoms db :aevt :var/name))]
       (assoc st :main {:t (:max-tx db) :vars vars}
-             :main-db db :tasks tasks :attempts attempts
+             :main-db db :tasks tasks :runs runs
              ;; the config in force, as root wrote it on main's root entity (one pull)
              :config (config/from-db db)
              ;; main's open problems, recorded (D2's one read; ~2.7 ms, costs the problems) and
@@ -133,7 +133,7 @@
              :recorded (problems/health db)
              :task-rows (task-rows idx)
              ;; how each agent's work ended, for the words its card and its events use
-             :agent-attempt (into {} (for [a (sort-by :seon.attempt/start-ms (vals attempts))] [(:seon.attempt/agent a) a]))))))
+             :agent-run (into {} (for [a (sort-by :seon.run/start-ms (vals runs))] [(:seon.run/agent a) a]))))))
 
 ;;; --- units, rendered incrementally ---------------------------------------------------------
 

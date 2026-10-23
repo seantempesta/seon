@@ -16,7 +16,7 @@ Updated 2026-10-23 evening by root. Sessions are grouped so related tasks stay i
 | Session | Working on | Next |
 |---|---|---|
 | **Merge** (main tree) | ``jolt/analysis-lookups`` (Jolt 86f49de8), with the cost proofs a pin bump runs | ``jolt/agent-view`` (chat window), then the freeze |
-| **Vocabulary** | ``jolt/rename-run``: attempt → run and every AGENTS §7a word, one scripted pass and a `bin/laws` check; ready | merges first in the freeze; the standing store is erased once |
+| **Vocabulary** | ``jolt/rename-run``: run → run and every AGENTS §7a word, one scripted pass and a `bin/laws` check; ready | merges first in the freeze; the standing store is erased once |
 | **Agent view** | the context frame and the renders (data, not prose; the printer stays general), on ``jolt/a-page-is-an-entity-and-its-neighbors``, which merges in the freeze | the default HTML value render |
 | ↳ evaluations, page | the context as data (the frame, then the walk), the page entity | through agent view |
 | ↳ embed | similar search by embedding (approved, model download included) | reports to root and merge |
@@ -34,7 +34,7 @@ Ended: shrink (its folder was removed at merge), eval-cost (merged).
 The ones that block THE PLAN; the full list (19) is at the end of [decisions](decisions.md).
 - What a merge carries and who wins a conflict (main wins, `:seon.merge/kept`, or an explicit `:seon.task/carry`), with D6's names and D7's task config.
 - Changed-since: a Datahike tree diff by node address, or a `:seon.tx/changed` stamp? Prototype the tree diff first (task `seon.merge/program-cost-follows-what-changed`).
-- No progress: does a byte-identical repeated reply end the attempt (``jolt/dry-run`` builds `:no-progress`), or is it only recorded?
+- No progress: does a byte-identical repeated reply end the run (``jolt/dry-run`` builds `:no-progress`), or is it only recorded?
 - Where each fork lives: the fork repos named in `.gitmodules` lack the newest pinned commits (they exist only in the main tree's submodule clones); self-contained plans the homes.
 
 ## THE PLAN

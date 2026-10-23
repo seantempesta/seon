@@ -74,13 +74,13 @@
 ;; ---- the shipped file and its schemas ----------------------------------------------------
 
 (deftest the-shipped-file-validates-under-every-profile
-  ;; the scripted stand-in's script is stated only under :scripted (checks and tests)
+  ;; the scripted model's script is stated only under :scripted (checks and tests)
   (doseq [p [:default :scripted :deepseek]]
     (let [c (read-file (config/path (config/checkout)) p (config/checkout))]
       (is (= (set (keys c)) (set (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.source/root :seon.config.source/gate-checkout} (not= :scripted p) (conj :seon.config.ai/script))
                                          (config/keys-declared)))) p)))
   (let [shipped #(read-file (config/path (config/checkout)) % (config/checkout))]
-    (is (= {:kind :none} (config/provider (shipped :default))) "no profile: no provider, never the stand-in")
+    (is (= {:kind :none} (config/provider (shipped :default))) "no profile: no provider, never the scripted model")
     (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider (shipped :scripted))))
     (is (= :openai-compat (:seon.config.ai/provider (shipped :deepseek))))))
 

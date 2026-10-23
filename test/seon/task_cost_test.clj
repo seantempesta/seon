@@ -30,19 +30,19 @@
      ;; 21 KB and 18 -> 21 us. The record a ratchet compares with is this measure's
      :overrun {:task "seon.db/avet-seek-allocates" :measured {:ns 21000.0 :bytes 21400.0}}}))
 
-(def ^:private explicit-attempt-pull
-  "The attempt pull before the wildcard (2026-10-22, research row 20): what the reader read."
-  [:seon.attempt/id {:seon.attempt/task [:seon.task/id]} :seon.attempt/status :seon.attempt/boot {:seon.attempt/agent [:seon.agent/id]}
-   :seon.attempt/pid :seon.attempt/start-ms :seon.attempt/end-ms :seon.attempt/branch :seon.attempt/model
-   :seon.attempt/max-turns :seon.attempt/outcome :seon.attempt/reason :seon.attempt/turns :seon.attempt/model-calls
-   :seon.attempt/tokens :seon.attempt/merged-t :seon.attempt/basis-t :seon.attempt/plan :seon.attempt/uncontracted
-   :seon.attempt/unmerged :seon.attempt/changed
-   {:seon.attempt/results [:seon.proof/test :seon.proof/status]}
-   {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
+(def ^:private explicit-run-pull
+  "The run pull before the wildcard (2026-10-22, research row 20): what the reader read."
+  [:seon.run/id {:seon.run/task [:seon.task/id]} :seon.run/status :seon.run/boot {:seon.run/agent [:seon.agent/id]}
+   :seon.run/pid :seon.run/start-ms :seon.run/end-ms :seon.run/branch :seon.run/model
+   :seon.run/max-turns :seon.run/outcome :seon.run/reason :seon.run/turns :seon.run/model-calls
+   :seon.run/tokens :seon.run/merged-t :seon.run/basis-t :seon.run/plan :seon.run/uncontracted
+   :seon.run/unmerged :seon.run/changed
+   {:seon.run/results [:seon.proof/test :seon.proof/status]}
+   {:seon.run/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
-(defn attempts-db
-  "The input of size n: a main db holding n ended attempts of one task, each with what an
-  ended attempt carries on main: its end members (proof results, a commit) and the problem
+(defn runs-db
+  "The input of size n: a main db holding n ended runs of one task, each with what an
+  ended run carries on main: its end members (proof results, a commit) and the problem
   members the judge writes (the error that ended it, a red test's assertions, a cost report,
   the turns' waste)."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db]]}
@@ -51,33 +51,33 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "t" :seon.task/plan "p"}]))
         report {:rows [{:n 100 :measured {:ns 1200.0 :bytes 900.0} :expected {:ns 1000.0 :bytes 800.0}}] :verdict {:ok? false :over [{:dim :ns :n 100 :ratio 1.2}] :steeper [] :under [] :unmerged []}}]
     [(d/db-with db (vec (for [i (range n) :let [aid (str "demo/t#" i)]
-                              tx (concat (task/attempt-start-tx aid "demo/t" "boot-1" (task/agent-key "boot-1" (keyword (str "a" i))) {:branch :b :model "m" :max-turns 4} 1000 "p")
+                              tx (concat (task/run-start-tx aid "demo/t" "boot-1" (task/agent-key "boot-1" (keyword (str "a" i))) {:branch :b :model "m" :max-turns 4} 1000 "p")
                                          [(assoc (task/end-members {:outcome :error :turns 3 :model-calls 3 :tokens 900 :results {'demo-test/t :fail}
                                                                     :uncontracted #{} :reason "the model failed"} 2000 7)
-                                                 :seon.attempt/id aid :seon.attempt/commit "c0ffee"
-                                                 :seon.attempt/error {:seon.error/type :seon.model/no-provider :seon.error/operation 'seon.model/complete :seon.error/message "no model provider is configured"}
-                                                 :seon.attempt/failures {'demo-test/t [{:type :fail :message "sums" :expected "(= 3 (f 1 2))" :actual "(= 3 4)"}]}
-                                                 :seon.attempt/costs {'demo-test/c report}
-                                                 :seon.attempt/waste {'seon.docs/resolve-ref {:forms 2 :turns 1}})])]
+                                                 :seon.run/id aid :seon.run/commit "c0ffee"
+                                                 :seon.run/error {:seon.error/type :seon.model/no-provider :seon.error/operation 'seon.model/complete :seon.error/message "no model provider is configured"}
+                                                 :seon.run/failures {'demo-test/t [{:type :fail :message "sums" :expected "(= 3 (f 1 2))" :actual "(= 3 4)"}]}
+                                                 :seon.run/costs {'demo-test/c report}
+                                                 :seon.run/waste {'seon.docs/resolve-ref {:forms 2 :turns 1}})])]
                           tx)))]))
 
-(deftest an-attempt-row-is-what-it-was-under-the-wildcard-pull
-  ;; land6 review: the wildcard pull (research row 20) brings every stored attempt member
+(deftest a-run-row-is-what-it-was-under-the-wildcard-pull
+  ;; land6 review: the wildcard pull (research row 20) brings every stored run member
   ;; (its error, failures, cost reports, waste, commit) into the value; the dashboard's row
   ;; reads its nine members, so it renders exactly what the explicit pull's value rendered
-  (let [[db] (attempts-db 3)
-        old (#'task/attempt-value (d/pull db explicit-attempt-pull [:seon.attempt/id "demo/t#1"]))
-        new (task/attempt db "demo/t#1")]
-    (is (contains? new :seon.attempt/error) "the wildcard brings the problem members")
-    (is (= (ui/attempt-row old {}) (ui/attempt-row new {})))))
+  (let [[db] (runs-db 3)
+        old (#'task/run-value (d/pull db explicit-run-pull [:seon.run/id "demo/t#1"]))
+        new (task/run db "demo/t#1")]
+    (is (contains? new :seon.run/error) "the wildcard brings the problem members")
+    (is (= (ui/run-row old {}) (ui/run-row new {})))))
 
-(deftest reading-every-attempt-costs-what-its-datoms-cost
+(deftest reading-every-run-costs-what-its-datoms-cost
   (cost/proof
-    {:of 'seon.task/attempts :input 'seon.task-cost-test/attempts-db
-     :n "ended attempts on main, each with its end and problem members"
-     :work (str "one query for the attempt entities, then one wildcard pull each: every datom of the attempt read "
+    {:of 'seon.task/runs :input 'seon.task-cost-test/runs-db
+     :n "ended runs on main, each with its end and problem members"
+     :work (str "one query for the run entities, then one wildcard pull each: every datom of the run read "
                 "once, its EDN members (error, failures, cost report, waste) decoded, its component results "
-                "pulled, then attempt-value (one contracted call). Measured 2026-10-22 at 100 attempts: 14.9 ms "
+                "pulled, then run-value (one contracted call). Measured 2026-10-22 at 100 runs: 14.9 ms "
                 "and 15.8 MB (149 us, 158 KB each); the explicit 23-attribute pull it replaced read the same "
                 "input in 32.6 ms and 30.1 MB (one lookup per named attribute, absent ones included)")
      :growth :linear

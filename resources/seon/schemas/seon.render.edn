@@ -90,11 +90,11 @@
  :seon.render/no-location [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-location]] [:view :string]]]
  ;; ---- what root's context reads: the whole system as one value ----
  ;; the api's view (agents, writer, fork server, store, boot, root errors) joined with every
- ;; proc's health, main's tasks and attempts, the series and the events. Its AI face is root's
+ ;; proc's health, main's tasks and runs, the series and the events. Its AI face is root's
  ;; context (a budgeted text); the page is root's entity's (seon.render/page), not this value's.
  :seon.render/system [:map {:seon.render/ai seon.render.ai/system}
                       [:agents :map] [:health :map] [:writer :map] [:fork-server :map]
-                      [:main :map] [:tasks :map] [:attempts :map] [:events [:vector :any]]]
+                      [:main :map] [:tasks :map] [:runs :map] [:events [:vector :any]]]
  ;; ---- the parts of a page (seon.render.ui/page): each unit's input, its render declared here ----
  ;; (a unit names its input's schema, never a render function: docs/render.md#the-page-is-units)
  ;; the entity a page is of, its main pane

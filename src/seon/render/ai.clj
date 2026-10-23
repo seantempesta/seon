@@ -5,7 +5,7 @@
   `system` is root's context: the whole system (:seon.render/system) as a compact text
   root reads before it acts. The printer of the same value would spend its budget on the
   first agents' maps; this one focuses: what is wrong first (root's defects, then what
-  main recorded: dead agents, red tests, refused merges among them), then the work (tasks and attempts),
+  main recorded: dead agents, red tests, refused merges among them), then the work (tasks and runs),
   then the load (writer, fork server, main), then what is costly (the functions the
   newest evaluations spent most in), then the newest events. Sections are added in that
   order until the token budget is spent; what did not fit is named, never silently cut.
@@ -13,7 +13,7 @@
   The values agents and root read at the REPL (seon.render/printed) render here too, each a
   few lines that cite what they show and the form that reads the rest (opts
   :handle, the value's result handle or a form that reads it): an error map
-  (`error`), a task (`task`), an attempt (`attempt`) and a problem row (`problem-row`, the
+  (`error`), a task (`task`), a run (`run`) and a problem row (`problem-row`, the
   line root's context and the page's banner lead with)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [seon.config :as config] [seon.print :as print] [seon.print.select :as select] [seon.render.ui :as ui]))
@@ -130,27 +130,27 @@
        (when (seq own) (cat-parts [["also: " false] (value-part own (part-budget) h)]))
        (whole opts)])))
 
-(defn attempt
-  "An attempt in one line: running (its agent, turn and tokens) or ended (its outcome and
+(defn run
+  "A run in one line: running (its agent, turn and tokens) or ended (its outcome and
   reason, whose cut names the form that reads it), and how many of each its end carried
   (conflicts, unmerged entries, what it changed, contract gaps) with the form that reads
   them. Root's context's work lines and the REPL."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :seon.render/text]}
   [a opts]
-  (let [{:seon.attempt/keys [id agent status outcome reason turns tokens]} a
+  (let [{:seon.run/keys [id agent status outcome reason turns tokens]} a
         n (fn [k word] (when-let [xs (seq (get a k))]
                          [(str " · " (count xs) " " word (some->> (read-of opts k) form (str " in "))) true]))]
     (out ""
       [(if outcome
          (cat-parts [[(str "ended " id " " (ui/kname outcome)) false]
-                     (when reason (cat-parts [[": " false] (prose-part reason (line-budget) (read-of opts :seon.attempt/reason) true)]))])
+                     (when reason (cat-parts [[": " false] (prose-part reason (line-budget) (read-of opts :seon.run/reason) true)]))])
          [(str (ui/kname status) " " id (some->> agent ui/kname (str " on ")) (some->> turns (str ", turn ")) (some-> tokens (str " tokens") (->> (str ", ")))) false])
-       (n :seon.attempt/conflicts "conflicts") (n :seon.attempt/unmerged "unmerged") (n :seon.attempt/changed "changed")
-       (n :seon.attempt/uncontracted "without a contract")])))
+       (n :seon.run/conflicts "conflicts") (n :seon.run/unmerged "unmerged") (n :seon.run/changed "changed")
+       (n :seon.run/uncontracted "without a contract")])))
 
 (defn problem-row
   "One problem row (seon.problems/report), :class (and its class's open count :n) assoc'd by
-  its reader, as one line: what it is about (task, attempt, test, attribute), then why: the
+  its reader, as one line: what it is about (task, run, test, attribute), then why: the
   recorded message, the error's message, the failure's reason, or a task conflict's three
   sides; a merge row's conflicts and unmerged keys; its outcome; and what answered it. Each cut reads its rest through opts's handle."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :seon.render/text]}
@@ -162,7 +162,7 @@
         why (or why
                 (when (= :task-conflict (:class r)) (value-part (select-keys ev [:base :ours :theirs]) (line-budget) (read-of opts :evidence)))
                 (some-> (:outcome r) ui/kname (vector false)))
-        what (remove nil? [(:task r) (:attempt r) (some-> (:test r) str) (some-> (:attr r) ui/kname)])]
+        what (remove nil? [(:task r) (:run r) (some-> (:test r) str) (some-> (:attr r) ui/kname)])]
     (out ""
       [[(str (ui/kname (:class r)) (if-let [n (:n r)] (str " " n) (some->> (:count r) (str " ×"))) (when (seq what) (str " " (str/join " " what)))) false]
        (when why (cat-parts [[": " false] why]))
@@ -254,19 +254,19 @@
   [sys] (into [] (mapcat second) (problem-areas sys)))
 
 (defn- section-work {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
-  [{:keys [tasks attempts task-rows]}]
+  [{:keys [tasks runs task-rows]}]
   (if (empty? tasks)
     ["no tasks on main"]
-    (let [running (sort-by :seon.attempt/id (filter #(= :running (:seon.attempt/status %)) (vals attempts)))
-          ended-all (sort-by (comp - #(or (:seon.attempt/end-ms %) 0)) (filter :seon.attempt/outcome (vals attempts)))
-          src '(seon.task/attempts (deref (:conn sys)))
+    (let [running (sort-by :seon.run/id (filter #(= :running (:seon.run/status %)) (vals runs)))
+          ended-all (sort-by (comp - #(or (:seon.run/end-ms %) 0)) (filter :seon.run/outcome (vals runs)))
+          src '(seon.task/runs (deref (:conn sys)))
           [running more-running] (print/bounded running :seon.config.render.list/rows (str "running, all in " (form src)))
           [ended more-ended] (print/bounded ended-all :seon.config.render.list/brief (str "ended, all in " (form src)))
-          line #(:text (attempt % {:handle (list 'get src (:seon.attempt/id %))}))]
+          line #(:text (run % {:handle (list 'get src (:seon.run/id %))}))]
       (vec (concat
              ;; what happened to each task (observed), not its desired execution
              [(str (count tasks) " tasks (" (counts (frequencies (map :state (vals task-rows)))) "); "
-                   (count attempts) " attempts (" (counts (frequencies (map :seon.attempt/status (vals attempts)))) ")")]
+                   (count runs) " runs (" (counts (frequencies (map :seon.run/status (vals runs)))) ")")]
              ;; blocked tasks by what blocks them (ui/waiting-on): each blocker once, with how
              ;; many it holds up (the root cause first), not one line per blocked task
              (when-let [w (seq (ui/waiting-on task-rows))]
@@ -281,8 +281,8 @@
   "The agents by how each is (the page's words: ui/shown-status, ui/ended-as), then the
   load tiles the page shows (ui/load-tiles), each as one line."
   {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
-  [{:keys [agents agent-attempt writer fork-server main]}]
-  (into [(str (count agents) " agents (" (counts (frequencies (for [[id a] agents] (ui/shown-status (ui/ended-as a id (or agent-attempt {})))))) ")")]
+  [{:keys [agents agent-run writer fork-server main]}]
+  (into [(str (count agents) " agents (" (counts (frequencies (for [[id a] agents] (ui/shown-status (ui/ended-as a id (or agent-run {})))))) ")")]
         (for [{:keys [kicker pill big unit rows]} (ui/load-tiles writer fork-server main)]
           (str kicker (when pill (str " " (second pill))) " " big " " unit (str/join (for [[dt dd] rows] (str ", " dt " " dd)))))))
 

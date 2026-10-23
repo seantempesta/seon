@@ -143,7 +143,7 @@
   override, the face's key when v's own key holds a rendered result, its schema's declared render,
   else the one printer's (print-ai, print-html). A walk's provenance (parts). Not a step of
   render-of, which the printer asks of every nested value: a shared step measured three more
-  contracted calls a value (2,254 against 1,947 at 100 attempts,
+  contracted calls a value (2,254 against 1,947 at 100 runs,
   seon.render-cost-test/the-printer-renders-nested-values-in-one-pass)."
   {:malli/schema [:=> [:cat :any :seon.render/face [:maybe :qualified-keyword]] [:or :symbol :keyword]]}
   [v face hint]

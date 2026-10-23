@@ -114,12 +114,12 @@
 (def status-order "Agent statuses in the swarm's order (:seon.agent/status)." (contract/enum-values :seon.agent/status))
 (def live "The live agent statuses (:seon.agent/status)." (:seon.status/live (contract/properties :seon.agent/status)))
 (def ^:private gone (:seon.status/gone (contract/properties :seon.agent/status)))
-(def ^:private finished (:seon.status/finished (contract/properties :seon.attempt/status)))
+(def ^:private finished (:seon.status/finished (contract/properties :seon.run/status)))
 
 (defn shown-status
   "The word for how an agent is: its live status, or how its process ended: :ended when
-  root stopped it after its attempt finished (done or merged), :killed for a kill, :died
-  when its process died on its own (an agent entry carries :ended-as from main's attempt)."
+  root stopped it after its run finished (done or merged), :killed for a kill, :died
+  when its process died on its own (an agent entry carries :ended-as from main's run)."
   {:malli/schema [:=> [:cat :map] :keyword]}
   [a]
   (cond (or (= :ended (:status a)) (:ended-as a)) :ended
@@ -164,10 +164,10 @@
   [rows]
   (vec (sort-by (fn [[b n]] [(- n) (str b)]) (frequencies (for [[_ r] rows b (:blocked-by r)] b)))))
 
-(defn attempt-row
-  "An attempt: its agent, status, turns, tokens and outcome (from main's facts)."
+(defn run-row
+  "A run: its agent, status, turns, tokens and outcome (from main's facts)."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [{:seon.attempt/keys [id agent status turns tokens outcome reason start-ms end-ms env]} _]
+  [{:seon.run/keys [id agent status turns tokens outcome reason start-ms end-ms env]} _]
      [:tr {:class (str "at s-" (kname status) (when outcome (str " o-" (kname outcome))))}
     [:td [:code id]]
     [:td (kname agent)
@@ -175,7 +175,7 @@
     [:td [:span {:class (str "pill s-" (kname status))} (kname status)]]
     [:td (str (or turns "–"))] [:td (group3 tokens)]
     [:td {:title (str reason)} (kname outcome)]
-    [:td {:title "the attempt's wall time, start to end: its fork, every turn (model, evaluations, test runs in forks) and its end; its agent's page shows where it went"}
+    [:td {:title "the run's wall time, start to end: its fork, every turn (model, evaluations, test runs in forks) and its end; its agent's page shows where it went"}
      (if (and start-ms end-ms) (group3 (- end-ms start-ms)) "–")]])
 
 ;;; --- the config ------------------------------------------------------------------
@@ -262,7 +262,7 @@
 ;;; --- events ---------------------------------------------------------------------
 
 (defn event-kind
-  "An event's kind as the stream says it: ended for a stop after its attempt finished."
+  "An event's kind as the stream says it: ended for a stop after its run finished."
   {:malli/schema [:=> [:cat :map] :string]}
   [ev] (if (:ended-as ev) "ended" (kname (:type ev))))
 
@@ -293,9 +293,9 @@
     :ready (str "ready" (when (:start-ms ev) (str " in " (ms-str (:start-ms ev)))))
     :started (str "began " (print/line (or (:form ev) "") 30))
     :tests-started (str "test child forked · pid " (:pid ev))
-    :killed (if (:ended-as ev) (str "stopped by root after its attempt ended " (kname (:ended-as ev))) "KILLED")
-    :ended (str "stopped by root: its attempt ended" (when (:ended-as ev) (str " " (kname (:ended-as ev)))))
-    :dead (if (:ended-as ev) (str "exited after its attempt ended " (kname (:ended-as ev))) "its process died")
+    :killed (if (:ended-as ev) (str "stopped by root after its run ended " (kname (:ended-as ev))) "KILLED")
+    :ended (str "stopped by root: its run ended" (when (:ended-as ev) (str " " (kname (:ended-as ev)))))
+    :dead (if (:ended-as ev) (str "exited after its run ended " (kname (:ended-as ev))) "its process died")
     :ui (str (:call ev) (when (:detail ev) (str " · " (print/line (:detail ev) (cell)))))
     (print/text (dissoc ev :type :at-ms :agent) (cell))))
 
@@ -303,11 +303,11 @@
 
 (defn ended-as
   "Agent id's entry, or an event of its stream (x), with :ended-as when its process ended
-  (its status, or the event's type, is gone) after its attempt finished (main's attempt
+  (its status, or the event's type, is gone) after its run finished (main's run
   done or merged); else x as it is (identical: inputs compare O(1))."
   {:malli/schema [:=> [:cat [:maybe :map] :any :map] [:maybe :map]]}
-  [x id agent-attempt]
-  (let [st (:seon.attempt/status (get agent-attempt id))]
+  [x id agent-run]
+  (let [st (:seon.run/status (get agent-run id))]
     (if (and x (gone (or (:status x) (:type x))) (finished st)) (assoc x :ended-as st) x)))
 
 (defn shell
@@ -342,8 +342,8 @@
                    (if-let [st (:seon.task/state t)] (kname st) (kname (:seon.task/execution t)))))
       [:pre {:class "plan" :title "its plan, accumulated along its needs: theirs first"} plan]
       (when (:seon.task/instructions t) [:p {:class "muted"} (:seon.task/instructions t)])
-      (when-let [{:keys [reason counterexample attempt]} (:seon.task/failure t)]
-        [:p {:class "err"} "failed" (when attempt (str " in " attempt)) ": " reason (when counterexample (list " · counterexample " [:code counterexample]))])
+      (when-let [{:keys [reason counterexample run]} (:seon.task/failure t)]
+        [:p {:class "err"} "failed" (when run (str " in " run)) ": " reason (when counterexample (list " · counterexample " [:code counterexample]))])
       (when (seq (:seon.task/needs t))
         [:p {:class "muted"} "needs "
          ;; met or not, when the producer carries what blocks it (seon.reconcile/blocked-by)
@@ -380,7 +380,7 @@
   "The input at the top of an agent's page, each through root's requests (the server's ops send
   the same): a line evaluates in its REPL (seon.root/submit!, origin :ui); a line that starts with
   > is a message its next turn reads (seon.root/message!); interrupt stops its running form;
-  release runs its task's next attempt when the task is held (seon.root/release!). input {:id
+  release runs its task's next run when the task is held (seon.root/release!). input {:id
   :live? :held}: live, root's view holds its process in this boot."
   {:malli/schema [:=> [:cat :seon.render/agent-input :seon.render/opts] :any]}
   [{:keys [id live? held]} opts]
@@ -396,7 +396,7 @@
                 :seon/call 'seon.root/interrupt! :seon/agent id} "⏹ interrupt"]]
      [:p {:class "text-text-500"} "no process of it in root's view: no REPL to evaluate in, no turn to read a message; what it did is below, read from the store"])
    (when held
-     [:button {:class "self-start rounded border border-base-700 px-2" :title (str "release " held ": the reconciler runs its next attempt (my.root/run!)")
+     [:button {:class "self-start rounded border border-base-700 px-2" :title (str "release " held ": the reconciler runs its next run (my.root/run!)")
                :seon/call 'seon.root/release! :seon/agent id :seon/args {:task held}}
       (str "▶ release " held)])])
 
