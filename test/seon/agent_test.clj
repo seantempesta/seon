@@ -421,3 +421,17 @@
         [type test] (edn/read-string (:printed r))]
     (is (= :seon.test/ticks-spent type) (:printed r))
     (is (= "#'spin-test/spin" test) "naming the test that was running")))
+
+(deftest a-compile-errors-line-and-suggestions-arrive-as-data
+  ;; the exception Jolt's analyzer raises for `(prinltn 1)`, as the one error map: its line,
+  ;; column and symbol are keys, its suggestions the fix, and nothing is a printed copy
+  (let [e (try (eval (read-string "(prinltn 1)")) (catch Throwable e e))
+        em (agent/error-map e)]
+    (is (= :seon.agent/eval-error (:seon.error/type em)))
+    (is (= 1 (:jolt.error/line em)))
+    (is (= 1 (:jolt.error/column em)))
+    (is (= "prinltn" (:jolt.error/symbol em)))
+    (is (some #{"println"} (:jolt.error/suggestions em)))
+    (is (= "did you mean print, printf, println" (:seon.error/fix em)))
+    (is (= "Unable to resolve symbol: prinltn in this context" (:seon.error/message em)) "the suggestions are not in the message too")
+    (is (nil? (:data em)) "no printed copy of the ex-data")))
