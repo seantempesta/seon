@@ -24,7 +24,7 @@ Five worktree sessions, grouped so that related tasks stay in one session's cont
 
 During the freeze the other groups keep working; after it each merges main and re-runs the rename's scripts on its branch (`notes/rename-run/`).
 
-**Waiting on the owner:** task `seon.derive/one-content-keyed-derivation` (reuse of expensive pure results; cold paths are fixed first, and nothing is cached that is fast enough); the type-findings-as-warnings task (on ``jolt/wiki-stale``, not merged yet).
+**Waiting on the owner:** the task one-content-keyed-derivation (on ``jolt/one-content-keyed-derivation``, not merged yet) (reuse of expensive pure results; cold paths are fixed first, and nothing is cached that is fast enough); the type-findings-as-warnings task (on ``jolt/wiki-stale``, not merged yet).
 
 ## Open owner questions
 

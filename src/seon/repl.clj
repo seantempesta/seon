@@ -243,7 +243,7 @@
                        md (when (:ns-form? l) (not-empty (dissoc (meta (second (:repl/form m))) :line :column)))
                        _ (when md (alter-meta! (the-ns (:ns-after l)) merge md))
                        acct (when (and l (= :agent (:mode @agent/state)) (:repl/src m))
-                              (program/account (assoc l :src (:repl/src m) :ran? (contains? m :repl/value))))]
+                              (program/account (assoc l :src (:repl/src m) :form (:repl/form m) :ran? (contains? m :repl/value))))]
                    (when l (vreset! last nil))
                    (if acct
                      (do (when contract/record? (agent/transact! (program/record-tx (agent/db) acct)))

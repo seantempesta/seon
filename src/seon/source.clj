@@ -103,7 +103,7 @@
      :accounts (vec (map-indexed
                       (fn [i {:keys [form src lead ns units ns-form?]}]
                         (let [k (get (vswap! seen update [ns src] (fnil inc -1)) [ns src])
-                              base {:units units :src src :ns ns :ns-after ns :ns-form? ns-form? :ns-meta (when ns-form? (meta (second form))) :before nil :lead lead :order i :k k}]
+                              base {:units units :src src :form form :ns ns :ns-after ns :ns-form? ns-form? :ns-meta (when ns-form? (meta (second form))) :before nil :lead lead :order i :k k}]
                           (or (program/account base)
                               {:id (str ns "/text-" i) :src src :ns ns :lead lead :order i})))
                       forms))}))
@@ -304,13 +304,17 @@
                       (concat (map :v (d/datoms db :aevt :schema/file)) (map :v (d/datoms db :aevt :schema.file/path)))))))
 
 (defn file-text
-  "Namespace nsym's file as db holds it: its live forms in their order, each after its
-  lead (a form recorded at a REPL has none: a blank line, or nothing before the first),
-  then the text after its last form (a newline when it has none)."
+  "Namespace nsym's file as db holds it: its live forms in the order the image loads them
+  (seon.program/load-order), each after its lead (a form recorded at a REPL has none: a
+  blank line, or nothing before the first), then the text after its last form (a newline
+  when it has none). So a helper recorded at a REPL after the function that now calls it is
+  written before that function, and the file loads fresh as the image ran (step E run #10's
+  merge wrote form-of after summary-of, its user); a file already in that order is written
+  as it is, byte for byte."
   {:malli/schema [:=> [:cat :seon.host/db :symbol] :string]}
   [db nsym]
   (let [ne (pdb/eid db :ns/name nsym)
-        fs (sort-by :order (for [dt (d/datoms db :avet :form/ns ne) :when (program/live? db (:e dt))] (program/form-row db (:e dt))))]
+        fs (program/load-order (for [dt (d/datoms db :avet :form/ns ne) :when (program/live? db (:e dt))] (program/form-row db (:e dt))))]
     (str (apply str (map-indexed (fn [i f] (str (or (:lead f) (if (zero? i) "" "\n\n")) (:src f))) fs))
          (or (:ns/tail (d/entity db ne)) "\n"))))
 
