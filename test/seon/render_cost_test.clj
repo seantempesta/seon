@@ -102,9 +102,9 @@
                 "reconciler's index over their own attributes, the config one pull of root's entity, the "
                 "problems their own indexes; a record is never walked")
      :growth :constant
-     ;; the bound is the page's: a pass reads main in under 2 ms on the test store's seed, however
-     ;; much data main holds. Timed 2026-10-23 (direct, before Jolt's tick counter was built
-     ;; here): 1.8 / 1.4 / 1.6 ms at 8k / 35k / 155k datoms, where the count it no longer does
-     ;; took 1.7 / 8.4 / 33.4 ms
-     :per-n {:ns 2000000}
-     :sizes [1000 10000 50000]}))
+     ;; the contracted calls a read of main makes, whatever main holds: 26 (the reconciler's
+     ;; index, the task rows, the config, the problems and their parts), never one per record.
+     ;; Timed 2026-10-23 at 1k / 10k / 50k records (8k / 35k / 155k datoms): 1.8 / 1.4 / 1.6 ms,
+     ;; where the count of every datom it no longer does took 1.7 / 8.4 / 33.4 ms
+     :per-n {:calls 26}
+     :sizes [100 400 1000]}))
