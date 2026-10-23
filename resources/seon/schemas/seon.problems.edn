@@ -107,7 +107,7 @@
  :seon.error/sent [:map [:error :map] [:form [:maybe :string]] [:n pos-int?] [:first-ms :int] [:last-ms :int]]
 
  ;; ---- problem members of an attempt's end (main; the judge writes them) and of the agent's end (branch) ----
- ;; the error that ended the attempt: the agent's death, the turn loop's error, a merge refusal
+ ;; the error that ended the attempt: the agent's death, the turn loop's error, a refused merge
  :seon.attempt/error [:map {:seon.db/data true}]
  ;; failing assertions per red test (at most 8 each, printed by seon.print under :part)
  :seon.problems/assertion [:map [:type [:enum :fail :error]] [:message {:optional true} [:maybe :string]]

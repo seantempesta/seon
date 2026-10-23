@@ -67,23 +67,23 @@
     (testing "declaring it again revives it as held"
       (is (= :held (:seon.task/execution (task/task (load-text db file-a) "demo/index")))))))
 
-(defn- refusal-of
-  "The refusal type of loading text as demo's file onto db, or nil."
+(defn- refused-type
+  "The error type of loading text as demo's file onto db, or nil."
   [db text] (:seon.error/type (task/load-tx db {'demo (task/file-declarations 'demo text)})))
 
 (deftest needs-that-form-a-cycle-or-name-nothing-are-refused
   (let [db (load-text (empty-db) file-a)]
     (is (= :seon.task/refused
-           (refusal-of db "[{:seon.task/name \"parse\" :seon.task/plan \"p\" :seon.task/needs #{\"demo/index\"}}
+           (refused-type db "[{:seon.task/name \"parse\" :seon.task/plan \"p\" :seon.task/needs #{\"demo/index\"}}
                             {:seon.task/name \"index\" :seon.task/plan \"i\" :seon.task/needs #{\"demo/parse\"}}]"))
         "a cycle through a changed entry and a stored one")
     (is (= :seon.task/refused
-           (refusal-of db "[{:seon.task/name \"x\" :seon.task/plan \"p\" :seon.task/needs #{\"demo/nope\"}}]"))
+           (refused-type db "[{:seon.task/name \"x\" :seon.task/plan \"p\" :seon.task/needs #{\"demo/nope\"}}]"))
         "a need that names no task")))
 
 (deftest the-shipped-task-files-load
   ;; task seon.task/the-shipped-task-files-load: every file in the shipped task directory
-  ;; reads and loads onto a test branch with no refusal
+  ;; reads and loads onto a test branch with no error
   (let [files (root/task-files)]
     (is (seq files))
     (is (= [] (vec (for [[ns-sym ds] files :when (:seon.error/type ds)] ns-sym))) "every file reads")

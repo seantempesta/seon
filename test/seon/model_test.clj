@@ -111,7 +111,7 @@
 
 (deftest no-provider-answers-a-typed-error-never-a-reply
   ;; root's ruling, 2026-10-22 (brief 1, item 1): a root whose config names no model provider
-  ;; ran the scripted stand-in (a test fixture) as if it were a model; it answers the first
+  ;; ran the scripted provider (a test fixture) as if it were a model; it answers the first
   ;; turn with the typed :seon.model/no-provider, which ends the attempt naming what to set
   (let [r (model/complete {:kind :none} {:messages [{:role "user" :content "x"}] :task "demo/t" :turn 0})]
     (is (= :seon.model/no-provider (:seon.error/type r)))

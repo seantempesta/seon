@@ -67,21 +67,21 @@
                                                                   :seon.task/proofs #{'demo-test/f-test}}]))
                               "demo/f"))
 
-(deftest a-refusal-and-a-run-error-reach-the-context
+(deftest a-reason-and-a-run-error-reach-the-context
   (let [db (db-with-program)
         t (task-f db)
         ;; the done rule refused beyond the task's own proof: a regression, a stray red, a
         ;; contract gap; the run named one failing assertion of each red test
-        refusals [{:refusal :proof-red :symbol 'demo-test/f-test} {:refusal :regression :symbol 'demo-test/g-test}
-                  {:refusal :stray-red :symbol 'user/scratch-test} {:refusal :contract-gap :symbol 'demo/helper}]
+        reasons [{:reason :proof-red :symbol 'demo-test/f-test} {:reason :regression :symbol 'demo-test/g-test}
+                  {:reason :stray-red :symbol 'user/scratch-test} {:reason :contract-gap :symbol 'demo/helper}]
         reds [{:test 'demo-test/g-test :type :fail :expected "(= 1 (g))" :actual "(not (= 1 0))" :got "(= 1 0)"}]
         block (context/current-state db t {:results {'demo-test/f-test :fail 'demo-test/g-test :fail} :reds reds
-                                           :refusals refusals :turn 1 :max-turns 4
+                                           :reasons reasons :turn 1 :max-turns 4
                                            :run-errors ["namespace app-test did not load: Unable to resolve symbol: g"]})]
-    (testing "every refusal but the task's own red proof (shown with the proofs), each with what explains it"
-      (is (= [{:refusal :regression :test 'demo-test/g-test :failures [{:assert "(= 1 (g))" :got "(= 1 0)"}]}
-              {:refusal :stray-red :test 'user/scratch-test}
-              {:refusal :contract-gap :vars ['demo/helper]}]
+    (testing "every reason but the task's own red proof (shown with the proofs), each with what explains it"
+      (is (= [{:reason :regression :test 'demo-test/g-test :failures [{:assert "(= 1 (g))" :got "(= 1 0)"}]}
+              {:reason :stray-red :test 'user/scratch-test}
+              {:reason :contract-gap :vars ['demo/helper]}]
              (:refused block))))
     (testing "a run that failed as a whole is said, not read as tests not run"
       (is (= {:failed ["namespace app-test did not load: Unable to resolve symbol: g"]} (:test-run block)))
@@ -94,11 +94,11 @@
         (is (re-find #":regression" text))
         (is (re-find #"did not load" text))))
     (testing "a design step that has not improved its plan is told what it lacks and the call that does it"
-      (let [b (context/current-state db t {:results {} :refusals [{:refusal :no-design}] :turn 1 :max-turns 4})]
+      (let [b (context/current-state db t {:results {} :reasons [{:reason :no-design}] :turn 1 :max-turns 4})]
         (is (= [[:no-design :seon.task/plan 'my.task/update!]]
-               (mapv (juxt :refusal :unchanged (comp first :do)) (:refused b))))))
+               (mapv (juxt :reason :unchanged (comp first :do)) (:refused b))))))
     (testing "nothing refused, nothing failed: no section"
-      (let [b (context/current-state db t {:results {'demo-test/f-test :pass} :refusals [] :turn 1 :max-turns 4 :run-errors []})]
+      (let [b (context/current-state db t {:results {'demo-test/f-test :pass} :reasons [] :turn 1 :max-turns 4 :run-errors []})]
         (is (not-any? #(contains? b %) [:refused :test-run :flagged :your-last-reply]))))))
 
 (deftest a-repair-is-shown-next-turn
@@ -219,7 +219,7 @@
                                                    :seon.task/proofs #{'demo-test/f-test}}]))
         observed {:results {'demo-test/f-test :fail} :run-errors []
                   :reds [{:test 'demo-test/f-test :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))" :got "(= 6 4)"}]
-                  :refusals [{:refusal :proof-red :symbol 'demo-test/f-test} {:refusal :contract-gap :symbol 'demo/helper}]}
+                  :reasons [{:reason :proof-red :symbol 'demo-test/f-test} {:reason :contract-gap :symbol 'demo/helper}]}
         basis (fn [db n] {:commit (d/commit-id db) :task "demo/f" :attempt "demo/f#1" :turn n :max-turns 4 :origin :model :observed observed})
         record! (fn [b more] (d/transact conn [(merge {:seon.turn/id (str "demo/f#1/" (:turn b)) :seon.turn/attempt "demo/f#1"
                                                        :seon.turn/n (:turn b) :seon.turn/origin :model :seon.turn/basis b
@@ -380,7 +380,7 @@
       (d/transact conn (program-facts '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))" []]]))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/f``` triple."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-      (let [observed {:results {'demo-test/f-test :fail} :run-errors [] :reds [] :refusals [{:refusal :proof-red :symbol 'demo-test/f-test}]}
+      (let [observed {:results {'demo-test/f-test :fail} :run-errors [] :reds [] :reasons [{:reason :proof-red :symbol 'demo-test/f-test}]}
             request (fn [n] (let [db @conn
                                   b {:commit (d/commit-id db) :task "demo/f" :attempt "demo/f#1" :turn n :max-turns 4 :origin :model :observed observed}
                                   ms (:messages (context/render db b))]

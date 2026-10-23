@@ -184,7 +184,7 @@
                st)
       :tests (let [{:keys [kind merge-branch data-attrs]} (get-in st [:inflight (:id m)])
                    result (:result m)
-                   ;; a run the agent could not fork is its refusal, answered as it is
+                   ;; a run the agent could not fork is its refused answer, answered as it is
                    ran? (not (contract/error? result))
                    green? (and ran? (zero? (:fail result)) (zero? (:error result)))
                    summary (select-keys result [:pass :fail :error :test])

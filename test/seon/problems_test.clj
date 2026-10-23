@@ -9,7 +9,7 @@
             [seon.reconcile :as rec] [seon.sock :as sock]
             [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.cost :as cost]))
 
-(defn- refusal [op v]
+(defn- invalid [op v]
   (contract/error :seon.instrument/contract-error op (str op " invalid-input: its arguments do not satisfy its contract")
                   {:seon.error/member :malli.core/invalid-input
                    :seon.error/problems [{:path [0] :in [0] :expected :int :value (pr-str v)}]}))
@@ -17,8 +17,8 @@
 ;; ---- the signature and the fold (ported from R4's seon.error-test) ----------------------
 
 (deftest one-cause-one-signature
-  (is (= (err/signature (refusal 'app/f nil)) (err/signature (refusal 'app/f 42))) "values never enter it")
-  (is (not= (err/signature (refusal 'app/f nil)) (err/signature (refusal 'app/g nil))) "another producer, another signature")
+  (is (= (err/signature (invalid 'app/f nil)) (err/signature (invalid 'app/f 42))) "values never enter it")
+  (is (not= (err/signature (invalid 'app/f nil)) (err/signature (invalid 'app/g nil))) "another producer, another signature")
   (is (= (err/signature {:seon.error/type :x/y :seon.error/message "slot 17 of 64"})
          (err/signature {:seon.error/type :x/y :seon.error/message "slot 3 of 64"})) "digits are normalised")
   (is (not= (err/signature {:seon.error/type :seon.agent/died :seon.error/message "died" :exit {:signal 9}})
@@ -28,10 +28,10 @@
 (defn- occ [e agent ms] (err/occurrence e :eval {:agent agent :task "t/a" :form "(f 1)"} ms))
 
 (deftest a-storm-is-one-write-per-window
-  (ts/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (concat (for [i (range 1000)] (occ (refusal 'app/f i) (if (even? i) :a1 :a2) (+ 1000 i)))
-                                     (for [i (range 10)] (occ (refusal 'app/g i) :a3 (+ 5000 i)))))
+  (ts/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (concat (for [i (range 1000)] (occ (invalid 'app/f i) (if (even? i) :a1 :a2) (+ 1000 i)))
+                                     (for [i (range 10)] (occ (invalid 'app/g i) :a3 (+ 5000 i)))))
         [f tx] (err/flush-tx f @conn)
-        s (err/signature (refusal 'app/f 0))]
+        s (err/signature (invalid 'app/f 0))]
     (is (= 2 (count tx)) "1,010 occurrences, two signatures, two entities")
     (d/transact conn tx)
     (let [r (err/record @conn s)]
@@ -43,14 +43,14 @@
     (testing "an unchanged window writes nothing"
       (is (= [] (second (err/flush-tx f @conn)))))
     (testing "a written signature's later occurrences count in the fold, not on main; a new observer adds to the stored count"
-      (let [[f tx] (err/flush-tx (reduce err/fold f (for [i (range 5)] (occ (refusal 'app/f i) :a1 3000))) @conn)]
+      (let [[f tx] (err/flush-tx (reduce err/fold f (for [i (range 5)] (occ (invalid 'app/f i) :a1 3000))) @conn)]
         (is (= [] tx))
-        (is (= 1005 (:count (get f (err/cause (refusal 'app/f 0))))) "the fold holds the true count")
+        (is (= 1005 (:count (get f (err/cause (invalid 'app/f 0))))) "the fold holds the true count")
         (is (= 1000 (:seon.error/count (err/record @conn s))) "main still holds the written one")
         (testing "the next write that has a signature to write carries the pending count"
-          (let [[_ tx] (err/flush-tx (err/fold f (occ (refusal 'app/h 0) :a1 3500)) @conn)]
+          (let [[_ tx] (err/flush-tx (err/fold f (occ (invalid 'app/h 0) :a1 3500)) @conn)]
             (is (= #{1005 1} (set (map :seon.error/count tx))))))
-        (let [[_ tx] (err/flush-tx (reduce err/fold {} (for [i (range 7)] (occ (refusal 'app/f i) :a9 4000))) @conn)]
+        (let [[_ tx] (err/flush-tx (reduce err/fold {} (for [i (range 7)] (occ (invalid 'app/f i) :a9 4000))) @conn)]
           (d/transact conn tx)
           (is (= 1007 (:seon.error/count (err/record @conn s)))))))))))
 
@@ -60,13 +60,13 @@
   ;; the window's write is one entity per signature that CHANGED (a-storm-is-one-write-per-window);
   ;; a signature already on main whose only change is one more occurrence is the same fact,
   ;; counted in the observer's fold: transacting its count is what made 41,709 commits in 70 s
-  (ts/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (for [i (range 3)] (occ (refusal 'app/f i) :a1 (+ 1000 i))))
+  (ts/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (for [i (range 3)] (occ (invalid 'app/f i) :a1 (+ 1000 i))))
         [f tx] (err/flush-tx f @conn)]
     (is (= 1 (count tx)) "the first occurrence writes the signature")
     (d/transact conn {:tx-data tx})
-    (let [[_ tx2] (err/flush-tx (reduce err/fold f (for [i (range 1000)] (occ (refusal 'app/f i) :a1 (+ 2000 i)))) @conn)]
+    (let [[_ tx2] (err/flush-tx (reduce err/fold f (for [i (range 1000)] (occ (invalid 'app/f i) :a1 (+ 2000 i)))) @conn)]
       (is (= [] tx2) "1,000 more occurrences of a written signature change no fact")
-      (let [f (reduce err/fold f (for [i (range 1000)] (occ (refusal 'app/f i) :a1 (+ 2000 i))))]
+      (let [f (reduce err/fold f (for [i (range 1000)] (occ (invalid 'app/f i) :a1 (+ 2000 i))))]
         (is (= [3 1003] [(get-in (problems/report @conn) [:classes :eval :rows 0 :count])
                          (get-in (problems/report @conn f) [:classes :eval :rows 0 :count])])
             "the report reads the true count from the fold")))))))
@@ -77,7 +77,7 @@
   ;; it to main as one commit, and that commit is the reconciler's next input. A step that
   ;; throws leaves the proc's state as it was, so it fails on every commit it is handed.
   ;; Main's commits over ten rounds are the first record, and no more.
-  (ts/test-branch! (fn [_ conn] (let [_ (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t 1 :stuck []}}]})
+  (ts/test-branch! (fn [_ conn] (let [_ (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t 1 :root-causes []}}]})
         t0 (:max-tx @conn)
         st (rec/reconciler-proc {:boot "boot-1"})
         round (fn [f i]
@@ -100,8 +100,8 @@
       (is (contract/valid? :seon.agent/eval-error e))
       (is (= 'seon.repl/eval-code (:seon.error/operation e)))
       (is (re-find #"ArithmeticException" (:class e)))))
-  (testing "a contract refusal is its own error map: operation and problems kept"
-    (let [r (refusal 'app/f "x")
+  (testing "a contract's error is its own error map: operation and problems kept"
+    (let [r (invalid 'app/f "x")
           e (agent/error-map (ex-info (:seon.error/message r) r))]
       (is (= r e))))
   (testing "the reply item carries the map, and the stored eval record holds it as data"
@@ -203,7 +203,7 @@
              (written (step (api view) :back {:op :status :agent :a1 :set {:tests red}})))))
     (testing "a task's agent: its attempt records its reds at its end, not root"
       (is (= [] (written (step (api view) :back {:op :status :agent :a2 :set {:tests red}})))))
-    (testing "a merge the writer refused is recorded as the writer's refusal"
+    (testing "a merge the writer refused is recorded as the writer's refused answer"
       (let [r (contract/error :seon.merge/behind 'seon.writer/merge-branch "main changed 2 key(s)" {:tx 1 :behind 2})]
         (is (= [[:agent :seon.merge/behind "main changed 2 key(s)" :a1]]
                (written (step (api view) :from-writer {:dest {:merged :a1 :rid 5} :r r}))))))
@@ -287,7 +287,7 @@
       (is (= :error (get-in e [:evidence :kind])))
       (is (= [] (:answered-by e)))
       (is (some? s)))
-    (testing "a merge: its conflicts, unmerged keys and the writer's refusal, as evidence"
+    (testing "a merge: its conflicts, unmerged keys and the writer's refused answer, as evidence"
       (let [behind (contract/error :seon.merge/behind 'seon.writer/merge-branch "main changed 2 key(s)" {:behind 2})
             db2 (:db-after (d/with db [{:seon.task/id "t/m" :seon.task/ns 't :seon.task/name "m" :seon.task/plan "p" :seon.task/execution :running
                                          :seon.task/branch :b :seon.task/kind :merge}

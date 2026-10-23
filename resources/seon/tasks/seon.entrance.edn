@@ -20,7 +20,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.server-test/the-context-op-answers-the-models-text}}
  {:seon.task/name "attach-writes-nothing-when-it-is-refused"
-  :seon.task/plan "Done: `seon.server/attach!` spawns the agent first (`seon.root/spawn!`) and only once it exists writes the env (model outside), the release and the attempt in one transaction, so a refused spawn writes nothing and the reconciler (`seon.reconcile/reconciler-proc`) never sees a release with no attempt and starts a second agent for it. Before, attach wrote env and :execution :running before spawning, so a refusal left the task's desired state changed, and the reconciler could fork its own agent onto the branch first (attach's spawn then refused: \"branch ... is held by live agent :a1\")."
+  :seon.task/plan "Done: `seon.server/attach!` spawns the agent first (`seon.root/spawn!`) and only once it exists writes the env (model outside), the release and the attempt in one transaction, so a refused spawn writes nothing and the reconciler (`seon.reconcile/reconciler-proc`) never sees a release with no attempt and starts a second agent for it. Before, attach wrote env and :execution :running before spawning, so an error left the task's desired state changed, and the reconciler could fork its own agent onto the branch first (attach's spawn then refused: \"branch ... is held by live agent :a1\")."
   :seon.task/kind :work
   :seon.task/proofs #{seon.server-test/a-refused-attach-writes-nothing}}
  {:seon.task/name "a-door-defect-answers-that-request-alone"
@@ -34,4 +34,4 @@
  {:seon.task/name "health-through-the-server"
   :seon.task/plan "What exists: `seon.server/ops` has :agents :eval :context :attach :done. :agents answers live agents plus every task on main (230+, mostly cancelled), too much for an outside agent's context, and nothing answers health through MCP (v1's runtime_status), which only the dashboard shows. Correct: a :status op (MCP tool seon_status) that answers root's AI render, `seon.render.ai/system`, the text /context.txt serves; :agents lists live agents and running, held or blocked tasks, the rest as `seon.print/bounded`'s count and the form that lists them. One row each in the ops table; nothing new beside it."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.entrance-test/status-is-roots-ai-render seon.entrance-test/agents-lists-live-work}}]
+  :seon.task/proofs #{seon.server-test/status-is-roots-ai-render seon.server-test/agents-lists-live-work}}]
