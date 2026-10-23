@@ -196,7 +196,7 @@ A note (`notes/`) is a working paper. Once its content is filed in one of the ho
 
 ## 7a. Words
 
-**Name things with Clojure's, its libraries' or Jolt's words** (owner, 2026-10-22: "stop using names that aren't clojure or clojure library or jolt or whatever related"; §5, "Use the library's words"). Write the right word in every new text, and **fix an old word wherever you come across it** in what you are already changing (code, docstring, doc, task, commit message). A file or command name and a stored keyword keep their old spelling until the rename task moves them; your prose still uses the new word.
+**Name things with Clojure's, its libraries' or Jolt's words** (owner, 2026-10-22: "stop using names that aren't clojure or clojure library or jolt or whatever related"; §5, "Use the library's words"). Write the right word in every new text, and **fix an old word wherever you come across it** in what you are already changing (code, docstring, doc, task, commit message). A file or command name keeps its old spelling until a rename task moves it; your prose still uses the new word.
 
 | Old house word | Say instead | Whose word |
 |---|---|---|

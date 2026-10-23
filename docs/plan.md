@@ -12,21 +12,13 @@ Honest state, what is solid and what is not: `notes/ASSESSMENT-2026-10-23.md`.
 
 ## In flight
 
-**Merge queue, in order** (each branch reviewed before merge, proven on a frozen tree; root bumps a fork's pin at merge, and each worktree session runs `bin/worktree --sync NAME` after merging main):
-1. `jolt/hold-for-root` (hold-for-root): no automatic retries; a refused attempt is held for root.
-2. `jolt/rename` (rename, ~`5c249e5`): stored names, no migration; when it merges, root erases `runs/store` (owner's go: test data).
-3. `jolt/test-root` (test-root) and `jolt/agent-ready` (agent-ready, with the `bin/test` flag fix).
-4. `jolt/brief3` (in `next-shrink2`): shrink brief 3; agents share greens.
-5. `jolt/printer-eval` (`3620ffb`): blind-scored printer trims, −74.
-6. `jolt/dry-run`: step E, the three test tiers, thinking off by default, `reasoning_content` sent back.
-7. `jolt/wiki-live`: the wiki made current, `bin/check docs`, notes archived, DECISIONS one entry per ruling.
+Merged to main: no automatic retries (``jolt/hold-for-root``), rename pass 2 (stored names; the standing store is erased, not migrated), ``jolt/agent-ready``, ``jolt/printer-eval``, ``jolt/process-tests``, ``jolt/reach-index``.
+
+**Merge queue** (each branch reviewed before merge and proven on a frozen tree; root bumps a fork's pin at merge, and each worktree session runs `bin/worktree --sync NAME` after merging main), next first: ``jolt/health`` (dead citations and other problems as classes of `seon.problems/report`), ``jolt/test-root``, then ``jolt/wiki-live`` (this branch: the wiki made current), then ``jolt/brief3`` (shrink brief 3; agents share greens), ``jolt/dry-run`` (step E: the gate's `:tests`, the three test tiers, thinking off, `reasoning_content` sent back), ``jolt/global-ids`` (content-derived ids, global addressing), ``jolt/pure-tests``, ``jolt/proof-ends``.
 
 **Research and planning:**
-- agent-view, `jolt/agent-view`: design only: the agent debug view, with thinking beside the forms.
-- self-contained, `jolt/self-contained`: the plan to make `next/` the self-contained Seon root, and the fork repos' homes; main-tree steps need root's go.
-- old-cleanup (in `~/src/seon-jolt`): bundles unique nested history into `history-bundles/`, then deletes the untracked bulk of the ARCHIVE dirs (owner approved).
-
-dup-root's work is all on main; its session is open only until the owner archives it.
+- ``jolt/agent-view``: the agent debug view, with thinking beside the forms.
+- ``jolt/self-contained``: `next` as the self-contained Seon root (fork homes are the GitHub forks; the project root is `~/src/seon-next`, worktrees at `.worktrees/NAME`); main-tree steps need root's go.
 
 ## Open owner questions
 
@@ -40,9 +32,9 @@ The ones that block THE PLAN; the full list (19) is at the end of [decisions](de
 
 The destination is **E: a request worked design → implement → merge by Seon agents, end to end, measured as turns to green.** Every step serves E; done steps leave this list (git and the wiki keep them). What blocks E, in order:
 
-1. **The context tells a model what to change, where, and how it will know it is done.** Real task contexts given to fast models with thinking off, scored on their first move; iterate until they act on turn 1; confirm with paid runs (`jolt/dry-run`, `notes/ASSESSMENT-2026-10-23.md` "Recommended next").
-2. **The merge gate merges a model-made change** (`jolt/dry-run`: `:tests`, the three test tiers, `reasoning_content`; `jolt/hold-for-root` first).
-3. **The owner can watch each turn:** the agent debug view (`jolt/agent-view`; `docs/parity.md` "Context, printing, the page").
+1. **The context tells a model what to change, where, and how it will know it is done.** Real task contexts given to fast models with thinking off, scored on their first move; iterate until they act on turn 1; confirm with paid runs (``jolt/dry-run``, `notes/ASSESSMENT-2026-10-23.md` "Recommended next").
+2. **The merge gate merges a model-made change** (``jolt/dry-run``: `:tests`, the three test tiers, `reasoning_content`; ``jolt/hold-for-root`` first).
+3. **The owner can watch each turn:** the agent debug view (``jolt/agent-view``; `docs/parity.md` "Context, printing, the page").
 4. **`src` shrinks:** shrink brief 1, drivers out of `src` (≈ −1,800; task `seon.main/drivers-leave-src`).
 
 Beside E, the missing and partial rows of `docs/parity.md` are the parity backlog, each a task in `resources/seon/tasks/`; the task files hold the rest of the work.

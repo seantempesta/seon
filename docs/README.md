@@ -19,7 +19,7 @@ References and their depths: [references](references.md).
 
 ## The running system
 
-- [root](root.md): the control process: the root graph's procs, boot, attempts and judging, holders and refused spawns, stuck and blocked.
+- [root](root.md): the control process: the root graph's procs, boot, attempts and judging, holders and refused spawns, root causes at quiescence.
 - [processes](processes.md): the fork server and each agent's process: single-threaded, forked from main's db value, one socket to root.
 - [server](server.md): root's request server: its ops, one table, and MCP's `seon_*` tools over it.
 - [dashboard](dashboard.md): the live web page: the render proc, the web proc, callbacks as data.

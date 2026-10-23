@@ -12,11 +12,11 @@ Owner, 2026-10-23: quote not recorded; relayed by root. Stated in: docs/cost.md 
 ### Process tests are not automatic: the reach walk classifies them
 Owner, 2026-10-23: quote not recorded; relayed by root. A test that launches a binary is deferred by what the reach walk finds, not run on every change. Stated in: docs/turn.md#who-runs-which-tests; docs/merging.md#a-merge-runs-what-the-change-reaches.
 ### Ids are derived from content; addressing is global
-Owner, 2026-10-23: quote not recorded; relayed by root ("content-derived ids; global addressing"). Stated in: not yet (owed docs/storage.md, with the `jolt/global-ids` branch).
+Owner, 2026-10-23: quote not recorded; relayed by root ("content-derived ids; global addressing"). Stated in: not yet (owed docs/storage.md, with the ``jolt/global-ids`` branch).
 ### Tests run on change, through Seon
-Owner, 2026-10-23: "I want the testing to happen on demand. When a change happens. When data flows through the system." Root's file watcher sees a change and runs the tests the change reaches at the new digest, reusing greens and recording results as facts (`jolt/health`). Until it lands, `bin/prove` once per finished step, never after each edit, no full runs without root's go ("I want less useless runs. Agents are slowing everything down doing full checks after every little change."). Stated in: AGENTS §3 (Testing); docs/merging.md#a-merge-runs-what-the-change-reaches.
+Owner, 2026-10-23: "I want the testing to happen on demand. When a change happens. When data flows through the system." Root's file watcher sees a change and runs the tests the change reaches at the new digest, reusing greens and recording results as facts (``jolt/health``). Until it lands, `bin/prove` once per finished step, never after each edit, no full runs without root's go ("I want less useless runs. Agents are slowing everything down doing full checks after every little change."). Stated in: AGENTS §3 (Testing); docs/merging.md#a-merge-runs-what-the-change-reaches.
 ### Renders are `(value opts)` functions with auto-render
-Owner, 2026-10-23: quote not recorded; relayed by root. Stated in: not yet (owed docs/render.md, with the `jolt/printer-eval` and renders branches).
+Owner, 2026-10-23: quote not recorded; relayed by root. Stated in: not yet (owed docs/render.md, with the ``jolt/printer-eval`` and renders branches).
 ### Thinking is off by default
 Owner, 2026-10-21, restated 2026-10-23: "if we can't have intuitive function calling based on the context our context is bad and instructions need help". Stated in: docs/model.md#thinking-is-off-by-default; `:seon.config.ai/thinking` in `resources/seon/config/default.edn`.
 ### No automatic retries: a refused or failed attempt is held for root
@@ -24,12 +24,12 @@ Owner, 2026-10-23: "no automatic retries, send it to root to decide if it should
 ### The standing store is test data: erase it, no migration; history within a store is kept
 Owner, 2026-10-23: "why are you migrating 6 facts? isn't it just test data just nuke it and move on". Stated in: AGENTS §9 (the exception to "Runs are kept"); docs/machine.md#disk-stays-bounded; docs/storage.md#history (history kept).
 ### Agents share greens: a test green at its digest never runs again
-Owner, 2026-10-23: "tests that are the same (especially when freshly branched!) should not run again if they are already green". Stated in: AGENTS §5 (results reused by input digest); docs/merging.md#a-merge-runs-what-the-change-reaches (agents' greens are shared once `jolt/brief3` merges).
+Owner, 2026-10-23: "tests that are the same (especially when freshly branched!) should not run again if they are already green". Stated in: AGENTS §5 (results reused by input digest); docs/merging.md#a-merge-runs-what-the-change-reaches (agents' greens are shared once ``jolt/brief3`` merges).
 ### Output quality is decided by blind scoring on real data
 Owner, 2026-10-23: "Those decisions should override any of my decisions. This is up to the agent really". Stated in: docs/render.md#one-printer (the scored result goes there; not yet).
 ### The context speaks Clojure, with the agent's thinking beside its forms
 Owner, 2026-10-23: "We should explain the task in terms of clojure code executing and thinking comments and encourage the agent to do the same." Stated in: no section yet; owed to docs/render.md#the-models-context-a-cached-prefix-then-the-turn and docs/agent.md#your-turn.
-### waste stays (`:seon.attempt/waste`); stuck goes with the budget
+### waste stays (`:seon.attempt/waste`); stuck went with the budget
 Owner, 2026-10-23: quote not recorded; from root's note "Owner answers, 2026-10-23 morning" (archive) and the triage's C5. Stated in: AGENTS §7a ("Waste stays our word"; the stuck row is gone).
 ### The dashboard stays in `src`
 Owner, 2026-10-23: quote not recorded; from root's note "Owner answers, 2026-10-23 morning" (archive). Stated in: no section yet.
