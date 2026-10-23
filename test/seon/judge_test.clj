@@ -43,6 +43,9 @@
   (is (= {:acted false :right-var false :right-test false :waste 0 :uncompiled 0 :green false}
          (move "(clojure.repl/doc my.task/update!)"))
       "reading the plan's writer is no rewrite of the plan")
+  (is (= {:acted true :right-var true :right-test true :waste 1 :uncompiled 0 :green true}
+         (move "(do (clojure.repl/source seon.judge/score) (clojure.test/deftest p (clojure.test/is true)))"))
+      "a form that reads and defines the proof acts")
   (is (= {:acted false :right-var false :right-test false :waste 0 :uncompiled 0 :green false} (move))
       "a reply with no eval call did nothing")
   (is (= {:acted true :right-var false :right-test false :waste 0 :uncompiled 0 :green false}

@@ -80,7 +80,8 @@
   [{:keys [cited shown proofs]} facts]
   (let [ok (remove :error facts)
         read? (fn [f] (boolean (some reads (:refs f))))
-        acts (remove read? ok)
+        ;; a form that defines is an act whatever else it reads
+        acts (filter #(or (seq (:defs %)) (not (read? %))) ok)
         plan? (fn [f] (contains? (:refs f) 'my.task/update!))
         names? (fn [s f] (boolean (some s (concat (:refs f) (:defs f)))))]
     {:acted (boolean (some #(or (seq (:defs %)) (plan? %)) acts))
@@ -98,11 +99,13 @@
   (score subject (into [] (mapcat #(form-facts (:ns subject) %)) calls)))
 
 (defn scorer
-  "The digest of the scoring as main's program records it (the recorded sources of
-  form-facts, reads, score and first-move): a score made by other scoring is made again from
-  its fact's calls, with no model call."
+  "The digest of the scoring as main's program records it: the recorded sources of subject,
+  form-facts, reads, score and first-move (a var with no recorded source digests as nil). A
+  score made by other scoring is made again from its fact's calls, with no model call. It
+  covers these definitions, not what they call (seon.source's reader and analysis), and the
+  program as main records it, which is what the scoring agent forked from main runs."
   {:malli/schema [:=> [:cat :seon.host/db] :string]}
-  [db] (err/digest (sedn/encode (mapv #(context/source-of db %) '[seon.judge/form-facts seon.judge/reads seon.judge/score seon.judge/first-move]))))
+  [db] (err/digest (sedn/encode (mapv #(context/source-of db %) '[seon.judge/subject seon.judge/form-facts seon.judge/reads seon.judge/score seon.judge/first-move]))))
 
 (defn fact
   "The :seon.judge fact of task id's first move: its request's digest, the version that

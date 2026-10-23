@@ -299,34 +299,34 @@
   "Score the first move a model makes on each task of ids (task ids on main): per task, its
   first-turn request (seon.judge/request) and the :seon.judge fact already on main for that
   request's digest; only when there is none, one model call through root's :model owner,
-  whose reply's eval calls are scored from the compiler's facts in one disposable agent the
-  pass spawns (seon.judge/first-move: analysis runs a reply's ns form, so never in root) and
+  whose reply's eval calls are scored from the compiler's facts in a disposable agent of
+  their own (seon.judge/first-move: analysis runs a reply's ns form, so never in root) and
   written on main with its usage and cost. No loop: a call answers one reply, and nothing of
   it runs. A paid call is made only while the pass has spent under
   :seon.config.ai/judge-pass-usd; at the bound the pass stops and writes :seon.judge/stopped
   on the pass's own fact. A reply whose usage cannot be priced, a model error or a scoring
   error ends the pass with :error. A fact held for the request but scored by other scoring
   (seon.judge/scorer) is scored again from its calls, with no model call (:reused?
-  :rescored). Answers {:rows [{:task :acted :right-var :right-test :waste :uncompiled :green
-  :usd :reused?}] :usd :stopped :error}."
+  :rescored?). Answers {:rows [{:task :acted :right-var :right-test :waste :uncompiled :green
+  :usd :reused? :rescored?}] :usd :stopped :error}."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
   (let [bound (config/value :seon.config.ai/judge-pass-usd)
         src (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))
         version (select-keys src [:root :commit])
-        scorer (delay (root/spawn! sys {}))
-        ;; the score of calls against task t's subject, made in the disposable agent: the
-        ;; agent answers it as seon.edn text, which its item prints as a string
+        ;; the score of calls against task t's subject, made in an agent of its own (a reply's
+        ;; ns forms run there, so no task's reading leaks into the next), ended once it answers;
+        ;; the agent answers the score as seon.edn text, which its item prints as a string
         score (fn [db t calls]
-                (let [item (first @(root/submit! sys @scorer (pr-str (list 'seon.edn/encode (list 'seon.judge/first-move (list 'quote (judge/subject db t)) calls)))))]
+                (let [ag (root/spawn! sys {})
+                      item (try (first @(root/submit! sys ag (pr-str (list 'seon.edn/encode (list 'seon.judge/first-move (list 'quote (judge/subject db t)) calls)))))
+                                (finally (root/kill! sys ag)))]
                   (if (= :ret (:tag item))
                     (assoc (sedn/decode (edn/read-string (:printed item))) :scorer (judge/scorer db))
                     (contract/error :seon.judge/unscored 'my.root/first-moves! "the scoring agent answered no score" {:item item}))))
-        row (fn [f reused?] (merge {:task (:seon.judge/task f) :reused? reused?}
-                                   (select-keys (:seon.judge/score f) [:acted :right-var :right-test :waste :uncompiled :green :usd])))
-        end (fn [r] (when (realized? scorer) (root/kill! sys @scorer)) r)]
-    (end
-      (loop [[id & more] ids rows [] spent 0.0]
+        row (fn [f reused?] (merge {:task (:seon.judge/task f) :reused? (boolean reused?)} (when (= :rescored reused?) {:rescored? true})
+                                   (select-keys (:seon.judge/score f) [:acted :right-var :right-test :waste :uncompiled :green :usd])))]
+    (loop [[id & more] ids rows [] spent 0.0]
         (if (nil? id)
           {:rows rows :usd spent}
           (let [db @(:conn sys)
@@ -368,4 +368,4 @@
                       (recur more (conj rows (row f false)) (+ spent usd))
                       {:rows (conj rows (row f false)) :usd spent
                        :error (contract/error :seon.judge/cost-unknown 'my.root/first-moves!
-                                              (str "the reply's usage cannot be priced (model " (:model req) "): the pass stops") {:task id :usage usage})})))))))))))
+                                              (str "the reply's usage cannot be priced (model " (:model req) "): the pass stops") {:task id :usage usage})}))))))))))
