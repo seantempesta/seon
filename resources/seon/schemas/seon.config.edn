@@ -16,7 +16,6 @@
   [:seon.config.root/writer-batch :seon.config.root/writer-batch]
   [:seon.config.root/writer-buf :seon.config.root/writer-buf]
   [:seon.config.root/reconciler-buf :seon.config.root/reconciler-buf]
-  [:seon.config.root/wiki-baseline :seon.config.root/wiki-baseline]
   [:seon.config.root/standby-every :seon.config.root/standby-every]
   [:seon.config.root/gc-sweepers :seon.config.root/gc-sweepers]
   [:seon.config.root/runs-dir :seon.config.root/runs-dir]

@@ -108,26 +108,6 @@
                               {:id (str ns "/text-" i) :src src :ns ns :lead lead :order i})))
                       forms))}))
 
-(def ^:private defining-heads
-  "The heads of the top-level forms that define a var by their second element."
-  '#{def defn defn- defmacro defmulti defonce defprotocol defchecked deftest})
-
-(defn defining-ids
-  "The form id of the form defining each var in text, the file of namespace nsym: {qualified var
-  symbol form-id}, the id seon.program/account gives the form (the namespace and the form's exact
-  text, and its occurrence among the same text), but found by the form's head and name alone,
-  with no analysis and nothing run: what a file at an old commit would have recorded, read without
-  loading it. A head is known by its name whatever its namespace (clojure.core/defn, seon.contract/defn);
-  a form defined by a macro of another name is not found."
-  {:malli/schema [:=> [:cat :symbol :string] [:map-of :qualified-symbol :string]]}
-  [nsym text]
-  (let [seen (volatile! {})]
-    (into {} (keep (fn [{:keys [form src ns]}]
-                     (let [k (get (vswap! seen update [ns src] (fnil inc -1)) [ns src])]
-                       (when (and (seq? form) (symbol? (first form)) (contains? defining-heads (symbol (name (first form)))) (symbol? (second form)))
-                         [(symbol (str ns) (name (second form))) (program/form-id ns src k)]))))
-          (:forms (read-forms nsym text)))))
-
 (defn text-tx
   "The facts of text's forms as namespace nsym's program on db (seon.program/account-tx per
   form, in file order), with the namespace's file (relative path, or nil) and the text after

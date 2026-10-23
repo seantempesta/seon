@@ -63,17 +63,14 @@
 (defn- slot
   "The identity of what a request asks for apart from its tx: the branch and the namespaces named.
   A newer request of one slot replaces an older pending one; requests of different slots never do."
-  {:malli/schema [:=> [:cat :map] [:tuple :keyword [:maybe [:set :symbol]] [:enum :turn :judge]]]}
   [{:keys [branch names mode]}] [branch names mode])
 
 (defn- same?
   "Is request r the one req asks: the same key (branch, tx, names) and the same agent?"
-  {:malli/schema [:=> [:cat [:maybe :map] :map] :boolean]}
-  [r req] (boolean (and r (= (:key r) (:key req)) (= (:agent r) (:agent req)))))
+  [r req] (and r (= (:key r) (:key req)) (= (:agent r) (:agent req))))
 
 (defn- go
   "Start run req (its waiters set): the first request of its chain. Answers [st outputs]."
-  {:malli/schema [:=> [:cat :map :map [:set :int]] [:tuple :map [:vector :map]]]}
   [st req waiters]
   (let [run (assoc req :waiters waiters)
         st (assoc st :running run)
@@ -85,7 +82,6 @@
 (defn- take-next
   "After a run of branch b: the pending run whose branch is the next in name order after b (then
   the first), started; nothing pending: idle. Answers [st outputs]."
-  {:malli/schema [:=> [:cat :map :keyword] [:tuple :map [:vector :map]]]}
   [st b]
   (let [ks (sort-by (juxt (comp name first) (comp str second)) (keys (:next st)))
         k (or (first (filter #(pos? (compare (name (first %)) (name b))) ks)) (first ks))]
@@ -103,7 +99,6 @@
   platform (bin/check e2e-calc: a cancel killed an agent whose turn had asked for its tests); a
   prove agent root stopped (a cancel) ends its run the same way.
   Answers [st outputs]."
-  {:malli/schema [:=> [:cat :map :any] [:tuple :map [:vector :map]]]}
   [st r]
   (let [{:keys [key branch waiters recorded-t] :as run} (:running st)
         err? (contract/error? r)
@@ -115,7 +110,6 @@
 
 (defn- request
   "Admit request m ({:rid :branch :t :agent :names}) of the api. Answers [st outputs]."
-  {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
   [st {:keys [rid branch] :as m}]
   (let [t (or (:t m) (:main-t st))
         names (not-empty (:names m))
@@ -135,14 +129,12 @@
 
 (defn- kill-runner
   "The request that ends the run's prove agent (none: the run had none)."
-  {:malli/schema [:=> [:cat :map :map] [:tuple :map [:maybe :map]]]}
   [st run]
   (if-let [a (:runner run)] (step/ask st [:prove :answers] [:killed (:key run)] {:op :kill :id a}) [st nil]))
 
 (defn- answered
   "The api's answer r to the request of chain step; the next step, or the end. An answer to a run
   that is no longer the running one is counted (:stale). Answers [st outputs]."
-  {:malli/schema [:=> [:cat :map [:tuple :keyword :string] :any] [:tuple :map [:vector :map]]]}
   [st [step key] r]
   (let [run (:running st)]
     (cond

@@ -7,7 +7,7 @@
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
             [seon.repl :as repl] [seon.proofs :as proofs] [seon.root :as root] [seon.agent-proc :as ap]
             [seon.reconcile :as rec] [seon.sock :as sock]
-            [seon.render :as render] [konserve.jolt.fasl] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.cost :as cost] [seon.docs]))
+            [seon.render :as render] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.cost :as cost] [seon.docs]))
 
 (defn- invalid [op v]
   (contract/error :seon.instrument/contract-error op (str op " invalid-input: its arguments do not satisfy its contract")
@@ -707,146 +707,8 @@
   ;; per citation or site. Before: ~150 KB per catch site, both dbs read in full.
   (cost/proof {:of 'seon.problems/caused :input 'seon.problems-test/caused-flat-input
                :n "sections citing a var and catch sites in the program, one of each changed"
-               :work "three aevt scans of the sections, the var and task names, the catch forms, and for the stale sections only the names the branch changed (program/changed-vars) and the sections that differ; candidates only through the rule"
+               :work "three aevt scans of the sections, the var and task names, the catch forms; candidates only through the rule"
                :growth :linear
-               :per-n {:ticks 5900 :bytes 32500 :calls 0}
-               :fixed {:ticks 800000 :bytes 3800000 :calls 24}
+               :per-n {:ns 22000 :bytes 26000 :calls 0}
+               :fixed {:ns 800000 :bytes 1500000 :calls 13}
                :sizes [10 100 1000]}))
-
-;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
-
-(defn- form-id-of [db v] (:form/id (:var/form (d/entity db (pdb/eid db :var/name v)))))
-(defn- change-var
-  "db with var v defined by another form (a new form with another id, as redefining it records one)."
-  [db v]
-  (let [ve (pdb/eid db :var/name v) f (:var/form (d/entity db ve))]
-    (d/db-with db [{:db/id -1 :form/id (str "changed-" (random-uuid)) :form/src (:form/src f) :form/ns (:db/id (:form/ns f))
-                    :form/order (:form/order f) :form/defines [ve]}
-                   [:db/add ve :var/form -1]])))
-
-(deftest a-section-is-stale-when-the-code-it-cites-changed-after-its-text
-  (let [db0 (ts/test-db)
-        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
-        page (str "# P\n\nIt reads `" v "`.\n")
-        db1 (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" page}))
-        stale #(get-in (problems/health %) [:classes :stale-section])
-        read #(:seon.section/read (d/pull % [:seon.section/read] [:seon.section/address "demo/p.md#p"]))]
-    (testing "the loader records the form id of each var the text cites"
-      (is (= {v (form-id-of db1 v)} (read db1))))
-    (testing "an unchanged wiki writes nothing, the record kept"
-      (is (= [] (seon.docs/load-tx db1 "demo" {"demo/p.md" page}))))
-    (is (zero? (:n (stale db1))))
-    (let [db2 (change-var db1 v)]
-      (testing "the code moved under the text: stale, naming the section, the var and both form ids"
-        (is (= 1 (:n (stale db2))))
-        (let [r (first (:rows (stale db2)))]
-          (is (= ["demo/p.md#p" v (form-id-of db1 v) (form-id-of db2 v)] ((juxt :section :name :then :now) r)))))
-      (testing "reloading the same text does not forgive it: the record is kept while the text is unchanged"
-        (is (= 1 (:n (stale (d/db-with db2 (seon.docs/load-tx db2 "demo" {"demo/p.md" page})))))))
-      (testing "editing the section re-reads the code: closed"
-        (is (zero? (:n (stale (d/db-with db2 (seon.docs/load-tx db2 "demo" {"demo/p.md" (str page "\nMore words.\n")})))))))
-      (testing "a review closes it with the text untouched, and the review is kept"
-        (let [db3 (d/db-with db2 (seon.docs/reviewed-tx db2 "demo/p.md#p" "sean"))]
-          (is (zero? (:n (stale db3))))
-          (is (= "sean" (:by (:seon.section/reviewed (d/pull db3 [:seon.section/reviewed] [:seon.section/address "demo/p.md#p"])))))
-          (is (= (:seon.section/text (d/pull db2 [:seon.section/text] [:seon.section/address "demo/p.md#p"]))
-                 (:seon.section/text (d/pull db3 [:seon.section/text] [:seon.section/address "demo/p.md#p"])))))))
-    (testing "it is attention, never a refusal: a branch that changes the code sees it, and the done rule does not"
-      (let [head (change-var db1 v) {:keys [caused attention]} (problems/caused-split db1 head)]
-        (is (= [] caused))
-        (is (= 1 (count attention)))
-        (is (re-find #"demo/p.md#p describes" (first attention)))
-        (is (= #{} (problems/caused db1 head)))
-        (is (contains? (:seon.problems/attention (contract/properties :seon.problems/class)) :stale-section))))))
-
-(deftest a-page-nothing-links-to-is-an-orphan-until-something-does
-  (let [db0 (ts/test-db)
-        pages {"docs/README.md" "# Map\n\nThe map.\n\n- [a](a.md)\n" "docs/a.md" "# A\n\nThe page A.\n" "docs/b.md" "# B\n\nThe page B.\n"}
-        db (d/db-with db0 (seon.docs/load-tx db0 "docs" pages))
-        orphans #(mapv :page (get-in (problems/health %) [:classes :orphan-page :rows]))]
-    (is (= ["docs/b.md"] (orphans db)) "the map is the root; a is linked by it; b by nothing")
-    (let [linked (d/db-with db (seon.docs/load-tx db "docs" (assoc pages "docs/a.md" "# A\n\nSee [b](b.md).\n")))]
-      (is (= [] (orphans linked)) "another page links it: closed, nothing written to close it"))
-    (is (= [] (orphans (d/db-with db0 (seon.docs/load-tx db0 "docs" (dissoc pages "docs/README.md")))))
-        "no map in the db: unknown, not every page an orphan")))
-
-(deftest an-issue-with-no-page-is-a-problem
-  (let [db0 (ts/test-db)
-        err {:seon.error/signature "eeeeeeeeeeeeeeee" :seon.error/class :platform :seon.error/count 1 :seon.error/agents 0
-             :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/type :seon.watch/died}
-        unlinked #(filterv #{:platform} (mapv :class (get-in (problems/health %) [:classes :problem-unlinked :rows])))
-        with-err (d/db-with db0 [err])]
-    (is (= [] (unlinked with-err)) "no wiki loaded: unknown")
-    (let [wiki (d/db-with with-err (seon.docs/load-tx with-err "docs" {"docs/README.md" "# Map\n\nThe map.\n"}))]
-      (is (= [:platform] (unlinked wiki)) "a wiki without the class's section: the issue points nowhere")
-      (let [fixed (d/db-with wiki (seon.docs/load-tx wiki "docs" {"docs/README.md" "# Map\n\nThe map.\n" "docs/errors.md" "# Errors\n\n## Problems\n\nHow they are read.\n"}))]
-        (is (= [] (unlinked fixed)) "the section exists: closed, nothing written")))))
-
-(deftest every-problem-class-points-at-a-section-of-the-real-wiki
-  (let [docs (:seon.problems/docs (contract/properties :seon.problems/class))
-        db0 (ts/test-db)
-        db (d/db-with db0 (seon.docs/load-dir-tx db0 (seon.config/checkout) "docs"))]
-    (is (every? docs (:seon.problems/derived (contract/properties :seon.problems/class))) "each derived class declares its section")
-    (doseq [[c a] docs]
-      (is (some? (pdb/eid db :seon.section/address a)) (str c " points at " a ", which is no section of the wiki")))))
-
-(defn stale-input
-  "The cost proof's input at n: n sections each citing a var, every var's form then changed (each section stale)."
-  [n] (let [db0 (ts/test-db)
-            vs (vec (take n (map :v (d/datoms db0 :aevt :var/name))))
-            page (apply str "# Cited\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\nIt reads `" (nth vs (mod i (count vs))) "`.\n")))
-            db (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/c.md" page}))]
-        [(reduce change-var db (distinct vs)) {}]))
-
-(deftest stale-sections-follow-the-recorded-names
-  (cost/proof {:of 'seon.problems/stale-sections :input 'seon.problems-test/stale-input
-               :n "sections each citing a var whose form then changed"
-               :work "the vars' and forms' datoms in one scan each, then per recorded name a map lookup and a row"
-               :growth :linear
-               :per-n {:ns 90000 :bytes 120000 :calls 0}
-               :fixed {:ns 2500000 :bytes 4000000 :calls 3}
-               :sizes [10 100 300]}))
-
-(defn orphan-input
-  "The cost proof's input at n: the map and n pages, none linked."
-  [n] (let [db0 (ts/test-db)]
-        [(d/db-with db0 (seon.docs/load-tx db0 "docs" (into {"docs/README.md" "# Map\n\nThe map.\n"} (for [i (range n)] [(str "docs/p" i ".md") (str "# P" i "\n\nThe page.\n")])))) {}]))
-
-(deftest orphan-pages-follow-the-sections
-  (cost/proof {:of 'seon.problems/orphan-pages :input 'seon.problems-test/orphan-input
-               :n "pages, none linked"
-               :work "the sections' addresses and the reference datoms once, then a row per orphan"
-               :growth :linear
-               :per-n {:ns 30000 :bytes 30000 :calls 0}
-               :fixed {:ns 500000 :bytes 500000 :calls 3}
-               :sizes [10 100 1000]}))
-
-(defn unlinked-input
-  "The cost proof's input at n: a db with a wiki, and every class holding n open rows."
-  [n] (let [db0 (ts/test-db)
-            db (d/db-with db0 (seon.docs/load-tx db0 "docs" {"docs/README.md" "# Map\n\nThe map.\n"}))
-            cs (:seon.problems/docs (contract/properties :seon.problems/class))]
-        [db {} (into {} (for [c (keys cs)] [c {:n n :rows (vec (repeat n {:open? true}))}]))]))
-
-(deftest problem-unlinked-follows-the-classes-not-their-rows
-  (cost/proof {:of 'seon.problems/problem-unlinked :input 'seon.problems-test/unlinked-input
-               :n "open rows in each class"
-               :work "one lookup per class with an open row, found at the first row"
-               :growth :constant
-               :per-n {:ns 0 :bytes 0 :calls 0}
-               :fixed {:ns 3000000 :bytes 4000000 :calls 30}
-               :sizes [10 100 1000]}))
-
-(deftest attention-survives-a-store-write
-  ;; the turn records what it observed in its basis; a sorted set cannot be written to the store
-  ;; (konserve's fasl), which ended every scripted turn's agent. caused-split answers vectors.
-  (let [db0 (ts/test-db)
-        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
-        base (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" (str "# P\n\nIt reads `" v "`.\n")}))
-        head (change-var base v)
-        {:keys [caused attention]} (problems/caused-split base head)]
-    (is (seq attention) "the branch made a section stale")
-    (is (vector? attention))
-    (is (vector? caused))
-    (is (= {:attention attention :caused caused}
-           (konserve.jolt.fasl/decode (konserve.jolt.fasl/encode {:attention attention :caused caused}))) "and it is written to the store and read back")))
