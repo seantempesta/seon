@@ -144,18 +144,19 @@
       (finally (.delete idx)))))
 
 (defn base-commit
-  "The commit the checkout at root's health is read against (root's ruling, 2026-10-23): its
-  merge base with git's main (:seon.config.source/main); on main's own commit, its first parent
-  (the previous main, which a merge is held to) when the tree is clean, else that commit (what
-  the uncommitted change caused). nil when there is none: no main, or a first commit."
+  "The commit the checkout at root's health is read against (root's ruling, 2026-10-23). With a
+  branch other than git's main checked out (:seon.config.source/main; a detached HEAD too), its
+  merge base with main: a branch with no commits of its own, or one main has passed, has HEAD
+  itself or an older commit, so it caused only what it changes. With main checked out, its first
+  parent (the previous main, which a merge is held to) when the tree is clean, else HEAD (what the
+  uncommitted change caused). nil only for main's first commit, which has no parent; a main git
+  cannot name, or no merge base, throws git's words (git!)."
   {:malli/schema [:=> [:cat :string] [:maybe :string]]}
   [root]
-  (let [head (git! {} root ["rev-parse" "HEAD"] nil)
-        r (sh/sh "git" "-C" root "merge-base" "HEAD" (cfg/value :seon.config.source/main))
-        mb (when (zero? (:exit r)) (str/trim (:out r)))]
-    (cond (nil? mb) nil
-          (not= mb head) mb
-          (not (str/blank? (git! {} root ["status" "--porcelain" "--ignore-submodules=all"] nil))) head
+  (let [main (cfg/value :seon.config.source/main)
+        on (:out (sh/sh "git" "-C" root "symbolic-ref" "--short" "-q" "HEAD"))]
+    (cond (not= main (str/trim on)) (git! {} root ["merge-base" "HEAD" main] nil)
+          (not (str/blank? (git! {} root ["status" "--porcelain" "--ignore-submodules=all"] nil))) (git! {} root ["rev-parse" "HEAD"] nil)
           :else (let [p (sh/sh "git" "-C" root "rev-parse" "--verify" "--quiet" "HEAD^1")]
                   (when (zero? (:exit p)) (str/trim (:out p)))))))
 

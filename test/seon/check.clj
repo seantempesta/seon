@@ -1105,7 +1105,11 @@
   [base head classes]
   (let [{:keys [rows]} (seon.problems/caused-split base head)
         attention? (:seon.problems/attention (contract/properties :seon.problems/class))
-        cs (or (seq classes) (sort (:seon.problems/derived (contract/properties :seon.problems/class))))
+        derived (:seon.problems/derived (contract/properties :seon.problems/class))
+        ;; a class asked for that no verdict judges (not derived, or attention: it never fails a branch) is refused, never a green
+        _ (when-let [bad (seq (remove #(and (derived %) (not (attention? %))) classes))]
+            (throw (ex-info (str "health judges the derived classes that fail a branch, not " (clojure.string/join ", " (map name bad))) {})))
+        cs (or (seq classes) (sort derived))
         made (filterv (comp (set cs) :class) rows)]
     {:caused (filterv (complement (comp attention? :class)) made)
      :attention (filterv (comp attention? :class) made)
@@ -1130,7 +1134,7 @@
   they are (a prose word is a citation when it names something), is the head; the base is that
   db with the base commit's tree loaded by the same loaders (base-db). One line per row the
   branch caused (its class and message), one per row it changed under the wiki (attention), and
-  how many rows the head holds open in all, which are root's to show."
+  how many rows of those classes the head holds open in all, which are root's to show."
   [classes]
   (let [root (seon.config/checkout)
         dirs ["src" "resources/seon/schemas"]]
@@ -1141,9 +1145,13 @@
        (let [head @(:conn sys)
              base (seon.fx/base-commit root)
              _ (when-not base (throw (ex-info (str "no base: " root " has no merge base with " (seon.config/value :seon.config.source/main)) {})))
-             dir (seon.fx/checkout-at root base (into dirs ["docs" (seon.config/value :seon.config.root/tasks-dir)]) (str root "/target/tmp/health-base"))
-             {:keys [caused attention checks]} (branch-health (base-db sys head dir dirs) head classes)
-             open (reduce + 0 (map :n (vals (:classes (seon.problems/health head)))))]
+             ;; the base's tree, removed once read (one health run per checkout: its store branch, check-health, is one too)
+             dir (str root "/target/tmp/health-base-" base)
+             based (try (base-db sys head (seon.fx/checkout-at root base (into dirs ["docs" (seon.config/value :seon.config.root/tasks-dir)]) dir) dirs)
+                        (finally (clojure.java.shell/sh "rm" "-rf" dir)))
+             {:keys [caused attention checks]} (branch-health based head classes)
+             open (reduce + 0 (for [c (or (seq classes) (:seon.problems/derived (contract/properties :seon.problems/class)))]
+                                (get-in (seon.problems/health head) [:classes c :n] 0)))]
          (doseq [r caused] (out! (name (:class r)) " " (:message r)))
          (doseq [r attention] (out! "attention " (name (:class r)) " " (:message r)))
          {:report {:base base :caused (count caused) :attention (count attention) :open-in-head open}

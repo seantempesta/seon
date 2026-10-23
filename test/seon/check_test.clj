@@ -5,7 +5,7 @@
   under that main, and a recovery step reopens the same store on the same main."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d]
-            [seon.db :as pdb] [clojure.core.async :as a] [seon.check] [seon.docs] [seon.problems] [seon.source] [clojure.string] [clojure.string :as str] [seon.lib]))
+            [seon.db :as pdb] [clojure.core.async :as a] [seon.check] [seon.docs] [seon.problems] [seon.fx] [seon.source] [clojure.string] [clojure.string :as str] [seon.lib]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -236,4 +236,35 @@
     (is (= [{:class :dead-citation :message (str "demo/p.md#p cites " v ", which names nothing")}] (:caused h)))
     (is (false? (get-in h [:checks :no-dead-citation])) "its health is red on the class it made")
     (testing "the classes asked for are the ones judged (bin/laws catch asks for :unnamed-site)"
-      (is (every? true? (vals (:checks (seon.check/branch-health base head [:unnamed-site]))))))))
+      (is (= {:no-unnamed-site true} (:checks (seon.check/branch-health base head [:unnamed-site])))))
+    (testing "a class no verdict judges (an attention class never fails a branch) is refused, never a green"
+      (is (thrown? Exception (seon.check/branch-health base head [:stale-section]))))))
+
+(deftest the-base-is-the-merge-base-or-the-previous-main
+  ;; seon.fx/base-commit in a repository of its own: a branch is held to its merge base with main;
+  ;; main's own commit to the previous main when clean, to itself when changed; a branch with no
+  ;; commits of its own to its own start; main's first commit has none
+  (let [dir (str (System/getProperty "user.dir") "/target/runs/check-test-base-" (random-uuid))
+        git (fn [& args] (str/trim (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args))))
+        commit! (fn [f] (spit (str dir "/" f) f) (git "add" "-A") (git "commit" "-qm" f) (git "rev-parse" "HEAD"))]
+    (try
+      (.mkdirs (java.io.File. dir))
+      (git "init" "-q" "-b" "main")
+      (let [a (commit! "a")]
+        (is (nil? (seon.fx/base-commit dir)) "main's first commit has no previous main")
+        (git "checkout" "-q" "-b" "topic")
+        (is (= a (seon.fx/base-commit dir)) "a branch with no commits of its own: its own start, not the commit before it")
+        (commit! "b")
+        (is (= a (seon.fx/base-commit dir)) "a branch: its merge base with main")
+        (git "checkout" "-q" "main")
+        (let [c (commit! "c")]
+          (is (= a (seon.fx/base-commit dir)) "main, clean: the previous main")
+          (spit (str dir "/d") "d")
+          (is (= c (seon.fx/base-commit dir)) "main with an uncommitted change: main itself")))
+      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+
+(deftest bin-tree-names-the-tree-tree-id-names
+  ;; bin/check compares the binary's record (bin/build writes it through bin/tree) with bin/tree;
+  ;; root decides whether its source's inputs are its binary's with seon.fx/tree-id: one tree
+  (let [dir (System/getProperty "user.dir")]
+    (is (= (seon.fx/tree-id dir) (str/trim (:out (clojure.java.shell/sh (str dir "/bin/tree") dir)))))))
