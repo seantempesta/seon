@@ -113,9 +113,11 @@
   read back from its ROOT LISTENING line: bin/root returns at that line or at the root's death,
   never on a clock. runs: its pids, log and port; env: more variables {name value}; args: more
   root arguments. Answers the options with :port, nil when the root died before listening (its
-  log says why). runs is one root's: a root already running there is refused, never answered
-  (bin/root start in it would only report that root, and the test would ask another test's
-  root: task seon.test-store/a-test-root-is-its-own)."
+  log says why). runs is one root's, named per main by its caller: a root still running there
+  is refused, never answered (bin/root start in it would only report that root, and the test
+  would ask another test's root: task seon.test-store/a-test-root-is-its-own). The refusal
+  backs that rule, it is no lock: two starts at once in one runs could both pass it, which a
+  runs per main makes unreachable."
   {:malli/schema [:=> [:cat [:map [:store :string] [:main :string] [:runs :string]
                              [:env {:optional true} [:map-of :string :string]] [:args {:optional true} [:sequential :string]]]]
                   :map]}
