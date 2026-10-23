@@ -65,6 +65,7 @@
   [:seon.config.proofs/jobs :seon.config.proofs/jobs]
   [:seon.config.proofs/seed-salt :seon.config.proofs/seed-salt]
   [:seon.config.proofs/cost-max-n :seon.config.proofs/cost-max-n]
+  [:seon.config.proofs/seeds :seon.config.proofs/seeds]
   ;; effects and the model
   [:seon.config.fx/buf :seon.config.fx/buf]
   [:seon.config.ai/provider :seon.config.ai/provider]
