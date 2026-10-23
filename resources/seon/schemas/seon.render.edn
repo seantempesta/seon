@@ -24,6 +24,20 @@
                     [:unit {:optional true} [:maybe :string]]]
  ;; an :ai render's result: its text, and whether it cut (each cut names what it left and how to read it)
  :seon.render/text [:map [:text :string] [:truncated? {:optional true} :boolean]]
+ ;; ---- the walk (seon.render/walk): an entity, its units one hop away, and what its strings cite ----
+ ;; a neighbour (or the entity's own value) a view of the entity shows: the attribute that reached
+ ;; it, its value as pulled, its entity and its schema (an entity schema, or the attribute's own)
+ :seon.render/unit [:map [:attr :keyword] [:value :any] [:schema [:maybe :qualified-keyword]] [:eid {:optional true} [:maybe pos-int?]]]
+ ;; a citation one of its strings makes, pulled at its depth (seon.docs/cited)
+ :seon.render/cited [:map [:attr :keyword] [:citation :seon.ref/citation] [:view :map]]
+ :seon.render/walk [:map [:eid pos-int?] [:schema [:maybe :qualified-keyword]] [:entity :map]
+                    [:units [:vector :seon.render/unit]] [:cited [:vector :seon.render/cited]]]
+ ;; one part of a walk on both faces, and where it came from: the render that made it per face
+ ;; (a render's symbol, or the face's key for a value's own rendered result), its entity, the
+ ;; attribute that reached it (nil: the entity itself), its schema, a cited part's address
+ :seon.render/part [:map [:as :seon.render/as] [:eid {:optional true} pos-int?] [:attr [:maybe :keyword]]
+                    [:schema [:maybe :qualified-keyword]] [:render [:map [:ai [:or :symbol :keyword]] [:html [:or :symbol :keyword]]]]
+                    [:text :string] [:html :any] [:citation {:optional true} :string]]
 
  ;; ---- what root's dashboard shows: the whole system as one value ----
  ;; the api's view (agents, writer, fork server, store, boot, root errors) joined with every

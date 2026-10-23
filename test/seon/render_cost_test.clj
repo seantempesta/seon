@@ -5,7 +5,7 @@
   root: a cost proof for the recursion). Run: bin/test seon.render-cost-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.web.html]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.task] [seon.repl]))
 
 (def ^:private fan "Children per node: a tree as deep as log3 n (10,000 nodes: 9 levels)." 3)
 
@@ -108,3 +108,31 @@
      ;; where the count of every datom it no longer does took 1.7 / 8.4 / 33.4 ms
      :per-n {:calls 26}
      :sizes [100 400 1000]}))
+
+(defn agent-of
+  "The input of size n: the test store's seed with root, its agent a1 and n evaluations of a1 (one
+  neighbour each, by the reverse ref :seon.cluster.eval/_agent), each evaluation's record as an
+  agent's REPL writes it (seon.repl/record-tx); and a1's eid."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any pos-int?]]}
+  [n]
+  (let [db (reduce d/db-with (ts/test-db)
+                   [[{:seon.root/id :root :seon.root/boot "b1"}]
+                    (seon.task/agent-tx "b1" :a1 {:status :idle})
+                    (seon.repl/record-tx {:seon.agent/key "b1/a1" :seon.agent/id :a1} "a1-7-1"
+                                         (vec (for [i (range n)] {:id i :tag :ret :form "(+ 1 2)" :printed "3"})) nil)])]
+    [db (:db/id (d/entity db [:seon.agent/key "b1/a1"]))]))
+
+(deftest a-walk-reads-its-entity-and-one-hop
+  (cost/proof
+    {:of 'seon.render/walk :input 'seon.render-cost-test/agent-of
+     :n "evaluations of the walked agent (its neighbours by :seon.cluster.eval/_agent)"
+     :work (str "two pulls: the agent's own attributes, then its ref units (its runs, its evaluations, its root), "
+                "each neighbour's own attributes and no further (its refs stay {:db/id}); per evaluation, one unit "
+                "entry: its schema by one map lookup per key (seon.render/entity-schema, one contracted call). The "
+                "strings read for citations are the agent's own, once; a neighbour's are not")
+     :growth :linear
+     :per-n {:calls 1}
+     ;; walk, its schema's, each unit attribute read forward and its ref test, the agent's citations
+     ;; (none); measured 115 / 1,015 calls at 100 / 1,000 evaluations
+     :fixed {:calls 15}
+     :sizes [100 1000 4000]}))

@@ -58,7 +58,7 @@
                                                  :seon.attempt/error {:seon.error/type :seon.model/no-provider :seon.error/operation 'seon.model/complete :seon.error/message "no model provider is configured"}
                                                  :seon.attempt/failures {'demo-test/t [{:type :fail :message "sums" :expected "(= 3 (f 1 2))" :actual "(= 3 4)"}]}
                                                  :seon.attempt/costs {'demo-test/c report}
-                                                 :seon.attempt/waste {'seon.context/resolve-ref {:forms 2 :turns 1}})])]
+                                                 :seon.attempt/waste {'seon.docs/resolve-ref {:forms 2 :turns 1}})])]
                           tx)))]))
 
 (deftest an-attempt-row-is-what-it-was-under-the-wildcard-pull

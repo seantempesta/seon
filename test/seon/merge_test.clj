@@ -9,7 +9,7 @@
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.merge :as pm]
-            [seon.program :as program] [seon.context :as context]
+            [seon.program :as program] [seon.docs]
             [seon.edn :as sedn] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg]
             [my.schema :as schema]
             [seon.source :as source]
@@ -103,7 +103,7 @@
         r (tw ours (base))
         main' (d/db-with (base) (pm/merge-tx (base) (base) ours (keys (:ours r)) #{}))]
     (is (= #{(vk "g") [:form (fid "g" "x")]} (set (keys (:ours r)))) "the definition, and the form it leaves dead")
-    (is (nil? (context/source-of main' 'app/g)))
+    (is (nil? (seon.docs/source-of main' 'app/g)))
     (is (not (program/live? main' (pdb/eid main' :form/id (fid "g" "x")))) "the form is dead on main, as on the branch")
     (is (= [:deleted-by-us] (map :kind (filter #(= :var (first (:key %))) (:conflicts (tw ours (with (base) (var-tx "g" "(dec x)"))))))))))
 
