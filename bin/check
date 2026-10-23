@@ -29,6 +29,7 @@
 # seon.db/delete-main!): a green step's branches when the run ends, a failed step's at that
 # step's next run. Only logs stay, in target/check/<time>/.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+"$ROOT/bin/ports" --write   # the port keys under their current names (bin/ports)
 [[ -z ${1:-} ]] && exec "$ROOT/bin/prove" --checks
 # a full run is niced; full runs from different worktrees run in parallel (no lock: each
 # uses its own stores under its run directory and kernel-assigned ports; owner, 2026-10-21)
@@ -106,7 +107,7 @@ echo "== seed (the one store every step branches from: made when missing)"; step
 read -r STORE KB0 BR0 <<< "$(run store)"
 # the steps' own mains: what a failed earlier run left is deleted before this run's step
 STEPS=(seed fx config system mcp threads instrument record problems smoke robust lifecycle backpressure hotreload drain idle
-       orphan durable window lease e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns e2e-sibling swarm e2e-loop e2e-stuck resume scale)
+       orphan durable window lease e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns e2e-sibling swarm e2e-loop e2e-held resume scale)
 run drop ${STEPS/#/check-} > "$OUT/drop-before.log" 2>&1 || failed "drop-before ($OUT/drop-before.log)"
 
 # ---- the steps, each a unit u-NAME: what it runs, in order, on its own store ----
@@ -194,7 +195,7 @@ u-e2e-calc() { echo "== tasks: calc (6-task graph, cancel)"; step e2e-calc "" ru
 for k in conflict semantic hairy newns sibling; do functions[u-e2e-$k]="echo '== tasks: scenario $k'; step e2e-$k '' run e2e scenario $k"; done
 u-swarm() { echo "== swarm (10 tasks over 5 shared vars, max-running 8)"; step swarm ":merges|:checks|^SWARM " run swarm 10 8 }
 u-e2e-loop() { echo "== loop (Seon's own source is main's program: a task changes seon.fixtures/generation, its merge is written back, committed on a clone's jolt/seon-merges, and live in root and in an agent forked after it, nothing built)"; step e2e-loop ":source|:commits|:live|LOOP" run e2e loop "$OUT/loop" }
-u-e2e-stuck() { echo "== stuck (add always wrong: refinement chains until its budget is spent, then a stuck fact naming what it blocks; the run ends on quiescence)"; step e2e-stuck ":stuck|quiet-after" run e2e stuck }
+u-e2e-held() { echo "== held (add always wrong: refused once and held for root, naming what it blocks; root releases it: one new attempt on its branch, from add#1's evidence, held again; each wait ends on quiescence)"; step e2e-held ":root-causes|:release|quiet-after" run e2e held }
 u-resume() {
   echo "== resume (root SIGKILLed mid-graph; a new root finishes it)"
   want resume && run e2e resume check-resume > "$OUT/resume1.log" 2>&1; step resume "" run e2e resume2 check-resume
@@ -210,7 +211,7 @@ u-resume() {
 JOBS=$(run jobs)
 UNITS=(laws lmdb-kill contracts test-inputs mg-check fx config system mcp threads instrument record problems smoke robust lifecycle
        backpressure hotreload drain idle orphan durable window lease e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns
-       e2e-sibling swarm e2e-loop e2e-stuck resume)
+       e2e-sibling swarm e2e-loop e2e-held resume)
 # the longest first, by the last full run's measured wall seconds (a unit not measured yet first):
 # what orders the queue, never what a step proves
 PREVS=("$ROOT"/target/check/2*(N/)); PREVS=(${PREVS:#$OUT}); PREV=${PREVS[-1]:-}

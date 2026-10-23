@@ -32,7 +32,7 @@
   under (a third of the estimate or less at the largest size: the estimate is loose, a
   finding, not red), unmeasured (a stated dimension with nothing measured)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.profile :as profile]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.profile :as profile] [seon.config :as config]
             [clojure.test :as t] [clojure.string :as str] [seon.print :as print]))
 
 ;; ---- the judge (pure) -----------------------------------------------------------------
@@ -180,13 +180,26 @@
 
 (declare units)
 
+(defn sizes
+  "The sizes a proof measures: its sizes, ascending, up to cap (:seon.config.proofs/cost-max-n),
+  and at least its two smallest, the fewest a growth fit needs ([100 1000 10000] at cap 1000:
+  [100 1000]; [1000 10000 100000]: [1000 10000]). Never a size smaller than the proof states:
+  scaled down to n=10, fixed per-call costs swamp the per-element price its estimate states
+  (print-cost and ref proofs went 1.8-5x over). Building the input at 10k cost 10-19 s per
+  proof in every run (notes/test-time-2026-10-23.md); the full run measures as written."
+  {:malli/schema [:=> [:cat [:sequential pos-int?] pos-int?] [:vector pos-int?]]}
+  [ns cap]
+  ;; a selection of the sizes to measure, one filter by position and size (no output is cut)
+  (vec (keep-indexed (fn [i n] (when (or (< i 2) (<= n cap)) n)) (sort ns))))
+
 (defn run
-  "Estimate e measured: its function on its input at each size, ascending, stopping after
-  the first size over its estimate in an exact dimension. Answers {:rows :verdict}."
+  "Estimate e measured: its function on its input at each size (sizes, under
+  :seon.config.proofs/cost-max-n), ascending, stopping after the first size over its estimate
+  in an exact dimension. Answers {:rows :verdict}."
   {:malli/schema [:=> [:cat :seon.cost/estimate] [:map [:rows [:vector :seon.cost/row]] [:verdict :seon.cost/verdict]]]}
   [e]
   (let [f @(requiring-resolve (:of e)) input @(requiring-resolve (:input e))]
-    (loop [[n & more] (sort (:sizes e)) rows []]
+    (loop [[n & more] (sizes (:sizes e) (config/value :seon.config.proofs/cost-max-n)) rows []]
       (if (nil? n)
         {:rows rows :verdict (judge e rows)}
         (let [row {:n n :measured (measure f (vec (input n))) :expected (expected e units n)}
@@ -282,6 +295,9 @@
    :sort/compare {:ns 13.51 :bytes 39.04 :what "sort of shuffled integers, per n log2 n"}
    :str/append {:ns 9.9 :bytes 36.0 :what "StringBuilder append of one char"}
    :str/seq-char {:ns 29.9 :bytes 272.0 :what "one step of a seq over a String's chars (doseq, reduce)"}
+   ;; worktree session printer-eval, source mode, 2026-10-23, at 10k: the string literal's escape
+   ;; (seon.print.emit/string-literal), 2.5x a char seq's bytes
+   :str/escape {:ns 181.4 :bytes 684.55 :what "clojure.string/escape of a text by char-escape-string, newlines kept, per char"}
    :map/literal {:ns 5.2 :bytes 144.0 :what "a small map literal of 5 keys built per element"}
    :map/seq-step {:ns 28.3 :bytes 127.1 :what "one step of reduce over a hash map's entries (each a map entry)"}
    :map/reduce-kv {:ns 4.7 :bytes 0.0 :what "one step of reduce-kv over a hash map"}

@@ -138,7 +138,7 @@
      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest the-flush-is-continuous-group-commit
-  ;; owner 2026-10-21 (notes/DECISIONS.md, "Durability is batched everywhere", superseded
+  ;; owner 2026-10-21 (../notes/archive/DECISIONS-superseded.md, "Durability is batched everywhere", superseded
   ;; paragraph): no window. A write is answered when committed in memory; the flusher parks
   ;; until something is unflushed, syncs once for everything committed so far, and says what it
   ;; covered; commits during a sync share the next one; an idle system never syncs.
@@ -255,10 +255,10 @@
         (is (= {:ok true} @p))))))
 
 (def ^:private fake-members
-  "Protocol members a refusal must not carry: an eval item's, a test count's, a merge's."
+  "Protocol members a refused answer must not carry: an eval item's, a test count's, a merge's."
   #{:id :tag :ok :merged? :pass :fail :error :reports :applied :conflicts})
 
-(deftest a-refusal-is-the-one-error-map
+(deftest a-refused-answer-is-the-one-error-map
   ;; a request no live agent can take, a function root refuses, and a write the writer refuses
   ;; each answer the one error map (seon.contract/error) and nothing beside it: no eval item
   ;; with id -1, no test count, no :ok or :merged? false
@@ -350,7 +350,7 @@
   ;; after what it sent the tabs), never while a request is out; the web proc puts a
   ;; settled comment on every feed
   (let [st {:events-ch (a/chan 8) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events []
-            :event-rows [] :views {} :zoom {} :merges 0 :main {:t 1}}
+            :views {} :zoom {} :merges 0 :main {:t 1}}
         settled? (fn [outs] (some #(= :settled (:op %)) (:to-web outs)))
         [st o1] (#'seon.render.proc/render-proc st :events {:type :spawned :agent :a1 :at-ms 1})
         tag (:tag (first (filter #(= {:op :state} (:req %)) (:to-api o1))))
@@ -368,7 +368,7 @@
   ;; the coalescing window is the request in flight, not a clock (ASK-BOUND-MS is gone)
   (let [events (a/chan 8)
         st {:events-ch events :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events []
-            :event-rows [] :views {} :zoom {} :merges 0 :main {:t 1}}
+            :views {} :zoom {} :merges 0 :main {:t 1}}
         asks (fn [outs] (filter #(= {:op :state} (:req %)) (:to-api outs)))
         [st o1] (#'seon.render.proc/render-proc st :events {:type :spawned :agent :a1 :at-ms 1})
         [st o2] (#'seon.render.proc/render-proc st :events {:type :ready :agent :a1 :at-ms 2})]

@@ -14,13 +14,22 @@
             [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.source :as source] [seon.system :as system]))
 
 (defn- test-namespaces
-  "Namespace symbols of test/**/*_test.clj(c)."
+  "Namespace symbols of <tree>/test/**/*_test.clj(c): tree the checkout planned (source-tree, or
+  the one a proof names). Never the working directory: a root and its agents run in target/
+  and the agents' scratch dir, where a relative \"test\" is nothing."
+  [tree]
+  (let [prefix (str tree "/test/")]
+    (->> (file-seq (io/file tree "test"))
+         (map #(.getPath %))
+         (filter #(re-find #"_test\.cljc?$" %))
+         (map #(-> % (subs (count prefix)) (str/replace #"\.cljc?$" "") (str/replace "/" ".") (str/replace "_" "-") symbol))
+         sort)))
+
+(defn- source-tree
+  "The tree the config names (:seon.config.source/root, when a root was given one: a clone an
+  agent works on), else the checkout this process runs from."
   []
-  (->> (file-seq (io/file "test"))
-       (map #(.getPath %))
-       (filter #(re-find #"_test\.cljc?$" %))
-       (map #(-> % (str/replace #"^test/" "") (str/replace #"\.cljc?$" "") (str/replace "/" ".") (str/replace "_" "-") symbol))
-       sort))
+  (str (or (get config/config :seon.config.source/root) (config/checkout))))
 
 ;; ---- reach -----------------------------------------------------------------------------
 
@@ -33,14 +42,37 @@
     (d/db-with db (source/import-tx db files))))
 
 (defn- tests-of
-  "{test digest} of the named test namespaces (or every one) on the checkout at root: its
-  program db (program-db) and inputs, and the db itself."
+  "{test digest} of the named test namespaces (or every one) on the checkout at root, the
+  ones among them that reach a process of their own (:process, seon.program/reach-index), its
+  program db (program-db) and inputs."
   [root names]
-  (let [nss (set (if (seq names) (map symbol names) (test-namespaces)))
+  (let [nss (set (if (seq names) (map symbol names) (test-namespaces root)))
         db (program-db root)
-        in (fx/inputs root)]
+        in (fx/inputs root)
+        idx (into {} (filter #(nss (symbol (namespace (key %))))) (program/reach-index db in))]
     {:db db :inputs in
-     :digests (into {} (filter #(nss (symbol (namespace (key %))))) (program/reach-digests db in))}))
+     :digests (update-vals idx :digest)
+     :process (set (keep (fn [[t v]] (when (:process? v) t)) idx))}))
+
+(defn automatic
+  "What a run that names nothing selects from cand ({key digest}): every key but those in
+  process, the tests and bin/check steps that reach a process of their own (a root, an agent,
+  a shell, a fork, the binary: seon.program/reach-index's :process?). Owner, 2026-10-23: tests
+  shouldn't be running agent turns, not automatically at least. Those run when named (bin/test
+  NS, bin/check MODE), in the full run, or by root's gate before a merge that reaches them."
+  {:malli/schema [:=> [:cat [:map-of :any :string] [:set :any]] [:map-of :any :string]]}
+  [cand process] (apply dissoc cand process))
+
+(defn- refused-names
+  "Why the arguments after --plan WHAT OUT [--all] cannot select tests, or nil: a flag this runner
+  does not know (bin/test --reach ran nothing and passed: reach is the default since bin/prove),
+  or a name that is no test namespace of test/."
+  [names]
+  (let [flags (filter #(str/starts-with? % "--") names)
+        nss (set (map str (test-namespaces (source-tree))))
+        unknown (remove #(or (str/starts-with? % "--") (nss %)) names)]
+    (cond (seq flags) (str "no flag " (str/join " " flags) " (bin/test [--all] [NS ...]: --all, the one flag, comes first)")
+          (seq unknown) (str "no test namespace " (str/join " " unknown) " in test/"))))
 
 (defn- write!
   "text to path through the effect owner's file write (seon.fx/write-file); its declared
@@ -127,23 +159,45 @@
                     (quot (- (profile/now-ns) t0) 1000000) " ms"))
       (if (and (zero? red) (empty? unstored)) 0 1))))
 
+(defn plan-of
+  "What bin/prove and bin/test run on the checkout at root (what: tests, checks or both): the
+  tests of names (or all) and the bin/check steps with no green at their digest
+  (seon.proofs/plan; all? every one), less, when nothing is named, the ones that reach a
+  process (automatic). Answers {:run-tests :run-steps :reused :cand :left (the process keys
+  left out) :digests :steps :missing :inputs}."
+  [root what all? names]
+  (let [{:keys [db inputs digests process]} (tests-of root names)
+        dir (config/value :seon.config.source/test-results-dir)
+        tests? (not= what "checks") checks? (not= what "tests")
+        ;; the steps' functions walked once: their digests and which boot a root or a process
+        step-idx (when checks? (program/reach-index db inputs (into {} (filter (comp vector? val)) proofs/check-steps)))
+        {steps :digests missing :missing} (when checks? (proofs/step-digests #(update-vals (select-keys step-idx (keys %)) :digest) inputs))
+        process (into (if tests? process #{}) (keep (fn [[k v]] (when (:process? v) k))) step-idx)
+        named? (or all? (seq names))
+        all-cand (merge (when tests? digests) steps)
+        cand (if named? all-cand (automatic all-cand process))
+        {:keys [run reused]} (proofs/plan nil cand (if all? {} (proofs/greens dir (vec (vals cand)))) #{})
+        {run-steps true run-tests false} (group-by string? run)]
+    {:run-tests (vec run-tests) :run-steps (vec run-steps) :reused reused :cand cand
+     :left (when-not named? (vec (sort-by str (filter all-cand process))))
+     :digests digests :steps steps :missing missing :inputs inputs}))
+
 (defn- prove!
-  "The planning part of bin/prove and bin/test (what is tests, checks or both): the tests of
-  names (or all) with no green at their digest (seon.proofs/plan; all? every one) are dealt
-  into out's shards (write-shards!), and the bin/check steps with none are written to out/steps
+  "The planning part of bin/prove and bin/test (what is tests, checks or both): plan-of's tests
+  are dealt into out's shards (write-shards!), and its bin/check steps are written to out/steps
   (names, one line) and out/steps.edn ({:tree :digests {step digest}}) for bin/prove to run. Answers the exit
   status: 1 when a check step names a function the program does not define."
   [what all? out names]
-  (let [root (System/getProperty "user.dir")
-        t0 (profile/now-ns)
-        {:keys [db inputs digests]} (tests-of root names)
+  (if-let [bad (refused-names names)]
+    (do (println (str "TEST FAILED: " bad)) 1)
+  (let [t0 (profile/now-ns)
         dir (config/value :seon.config.source/test-results-dir)
         tests? (not= what "checks") checks? (not= what "tests")
-        {steps :digests missing :missing} (when checks? (proofs/step-digests #(program/reach-digests db inputs %) inputs))
-        cand (merge (when tests? digests) steps)
-        {:keys [run reused]} (proofs/plan nil cand (if all? {} (proofs/greens dir (vec (vals cand)))) #{})
-        {run-steps true run-tests false} (group-by string? run)
-        n (write-shards! out (vec run-tests) digests (:tree inputs))]
+        {:keys [run-tests run-steps reused cand left digests steps missing inputs]} (plan-of (source-tree) what all? names)
+        n (write-shards! out run-tests digests (:tree inputs))]
+    (when left
+      (println (str "prove: " (count left) " tests and steps that reach a process left out (run them by name:"
+                    " bin/test NS, bin/check MODE, or the full run): " (str/join " " (map str left)))))
     (println (str "prove: " (count cand) " keys (" (if tests? (count digests) 0) " tests, " (count steps) " check steps), "
                   (count reused) " green at their digest (reused), " (count run-tests) " tests to run in " (if (seq run-tests) n 0)
                   " shards, " (count run-steps) " steps to run; selected in " (quot (- (profile/now-ns) t0) 1000000) " ms; results " dir))
@@ -153,7 +207,11 @@
       (when (seq run-steps) (println "prove: check steps to run:" (str/join " " run-steps)))
       (when (seq missing)
         (println "prove: check steps naming a function the program does not define (seon.proofs/check-steps):" (str/join " " missing))))
-    (if (seq missing) 1 0)))
+    (if (seq missing)
+      1
+      (do (when (and (empty? run-tests) (empty? run-steps))
+            (println (str "prove: nothing to run: " (count reused) " reused green at their digest")))
+          0)))))
 
 (defn- store-steps!
   "bin/prove's last part: each step of out/steps.edn that bin/check named green in out/green

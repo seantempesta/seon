@@ -172,7 +172,7 @@
   ;; root's records on main (boot, quiescence, recorded errors) are platform records: with
   ;; all data merged (the writer's :all) they change no key a branch carries; the task
   ;; content an agent may improve (my.task/update!) is carried
-  (let [rooted (with (base) [{:seon.root/id :root :seon.root/quiescent {:t 9 :stuck []}}])
+  (let [rooted (with (base) [{:seon.root/id :root :seon.root/quiescent {:t 9 :root-causes []}}])
         tasked (with (base) [{:seon.task/id "t/x" :seon.task/plan "better"}])
         p #(pm/program % :all)]
     (is (empty? (:theirs (pm/three-way (p (base)) (p (base)) (p rooted)))))

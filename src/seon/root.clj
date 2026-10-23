@@ -1,5 +1,5 @@
 (ns seon.root
-  "Root: the control process (session F2, notes/option3-F1-flow.md; proto/flow f2-final
+  "Root: the control process (session F2, ../notes/archive/option3-F1-flow.md; proto/flow f2-final
   proto.control's api, reader, boot and API). Boots the database
   (Datahike, E4a index), forks the single-threaded fork server before any thread exists,
   then runs ONE root graph of four procs:
@@ -43,7 +43,7 @@
   [id why] (contract/error :seon.root/no-agent 'seon.root/api-proc why {:agent id}))
 
 (defn- refused
-  "Root's API refusing a request, as the one error map; members describe the refusal."
+  "Root's API refusing a request, as the one error map; members describe the refused answer."
   {:malli/schema [:=> [:cat :qualified-symbol :string :map] :seon.root/refused]}
   [op why members] (contract/error :seon.root/refused op why members))
 
@@ -753,7 +753,7 @@
         ]
     (flow/resume g)
     ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is; a root
-    ;; whose boot fact was refused cannot start anything, so its refusal ends the boot
+    ;; whose boot fact was refused cannot start anything, so its error ends the boot
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
           r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running) (into (cfg/facts config cfg/sources))
@@ -827,7 +827,7 @@
   "The op (named as its fn below: spawn! clone! submit! run-tests! kill! merge!
   merge-main!) on agent id with args, as the api request it is: one table for these fns
   and the dashboard's calls (seon.web). a: the agent's entry in root's view, which merge!
-  and merge-main! read; an op the agent cannot take answers its refusal."
+  and merge-main! read; an op the agent cannot take answers its error."
   {:malli/schema [:=> [:cat :symbol [:maybe :seon.agent/id] [:maybe :map] [:maybe :map]] :map]}
   [op id args a]
   (let [live? (boolean (and a (not (gone-statuses (:status a)))))
@@ -852,7 +852,7 @@
 
 (defn- request!
   "Call root's op on agent id with args (request): a promise of its answer, or of its
-  refusal."
+  error."
   {:malli/schema [:=> [:cat :seon.root/sys :symbol [:maybe :seon.agent/id] [:maybe :map]] :seon.host/promise]}
   [sys op id args]
   (let [r (request op id args (when (#{'merge! 'merge-main!} op) (agent-entry sys id)))]
@@ -869,7 +869,7 @@
 
 (defn clone!
   "Fork a live agent into a new agent on a branch of its branch. A promise of
-  {:ok true :id new-id}, or its refusal (the one error map)."
+  {:ok true :id new-id}, or its refused answer (the one error map)."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :map] :seon.host/promise]]}
   ([sys agent-id] (clone! sys agent-id {}))
   ([sys agent-id opts] (request! sys 'clone! agent-id opts)))

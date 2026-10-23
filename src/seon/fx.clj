@@ -1,5 +1,5 @@
 (ns seon.fx
-  "Effects (session FX1, notes/option3-FX1-effects.md). Every outside effect kind has ONE
+  "Effects (session FX1, ../notes/archive/option3-FX1-effects.md). Every outside effect kind has ONE
   owner proc in root behind a bounded channel, and `workers` performer procs:
 
     agent --socket--> agent proc --:fx/<kind>--> owner --:work--> worker (performs)
@@ -263,7 +263,7 @@
 (defn- admit
   "What the owner does with a queued request at now-ms: :run, :wait (no free worker, or its
   bucket holds fewer tokens than the request's estimate :est: a :tick or a worker's :done
-  dispatches again), or the refusal (the task spent its :budget; spend is this proc's live
+  dispatches again), or the error (the task spent its :budget; spend is this proc's live
   counter, keyed by :budget-key)."
   {:malli/schema [:=> [:cat :map :map :int] [:or [:enum :run :wait] :map]]}
   [st {:keys [budget budget-key est]} now-ms]

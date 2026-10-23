@@ -78,13 +78,13 @@
 
 (defn- cited-view
   "What citation c asks to see, at its depth: a wiki section from main's sections, else a file of
-  the checkout read now (never stored), else a namespace; a citation that reaches nothing says
-  so, as an unresolved name does."
+  the checkout read now (never stored), else a task by its ns/name, else a namespace; a
+  citation that reaches nothing says so, as an unresolved name does."
   {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :map]}
   [db {:seon.ref/keys [name path anchor depth]}]
   (let [a (or (some-> name str) (str path (when anchor (str "#" anchor))))]
     (or (some-> (if name
-                  (ref/namespace-view db name depth)
+                  (if (qualified-symbol? name) (ref/task-view db name depth) (ref/namespace-view db name depth))
                   (or (when anchor (docs/view db a depth)) (ref/file-view db (cfg/checkout) path anchor depth)))
                 (assoc :seon.ref/depth depth))
         {:seon.ref/address a :unresolved true :problem (:unresolved ref/problem-messages)})))
@@ -154,13 +154,13 @@
 (defn shown-evals
   "The last evaluations (folded) as the model reads them: each folded item printed by the
   one printer within an equal share of last-evals-budget, its cuts reading through
-  (nth (my.turn/evals) k): [{:times n :text :cuts}] (the printer's answer)."
+  (nth (my.turn/evals) k): [{:times n :text}] (the printer's answer)."
   {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
   [folded]
   (let [share (max 32 (quot last-evals-budget (max 1 (count folded))))]
     (vec (for [{:keys [k item times]} folded
                :let [r (print/print-value (shown-eval item) {:handle (list 'nth '(my.turn/evals) k) :budget share})]]
-           (assoc (if (:text r) r {:text (:seon.error/message r) :cuts []}) :times times)))))
+           (assoc (if (:text r) r {:text (:seon.error/message r)}) :times times)))))
 
 (defn- transcript
   "The shown evaluations as one text, a repeated one headed by how many times it repeated."
@@ -170,27 +170,27 @@
                    (str (when (> times 1) (str ";; " times "x, the same form and answer\n")) text))))
 
 (defn- refused
-  "The done rule's refusals as the agent reads them, beyond its own red proofs (shown with
+  "The done rule's reasons as the agent reads them, beyond its own red proofs (shown with
   the proofs): a red test names its failures, a contract gap its var, a design step that
   has not improved its plan the call that does."
-  {:malli/schema [:=> [:cat [:vector :seon.reconcile/refusal] [:vector :map]] [:vector :map]]}
-  [refusals reds]
-  (let [rs (remove #(= :proof-red (:refusal %)) refusals)
-        gaps (vec (keep #(when (= :contract-gap (:refusal %)) (:symbol %)) rs))
-        unmerged (vec (keep #(when (= :unmerged (:refusal %)) (:key %)) rs))]
+  {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done] [:vector :map]] [:vector :map]]}
+  [reasons reds]
+  (let [rs (remove #(= :proof-red (:reason %)) reasons)
+        gaps (vec (keep #(when (= :contract-gap (:reason %)) (:symbol %)) rs))
+        unmerged (vec (keep #(when (= :unmerged (:reason %)) (:key %)) rs))]
     ;; a contract gap and an unmerged entry say one thing about many names: one entry each,
     ;; its names a list the printer budgets
     (vec (concat
-           (for [{:keys [refusal symbol]} rs :when (not (#{:contract-gap :unmerged} refusal))]
-             (case refusal
-               (:regression :stray-red) (cond-> {:refusal refusal :test symbol}
+           (for [{:keys [reason symbol]} rs :when (not (#{:contract-gap :unmerged} reason))]
+             (case reason
+               (:regression :stray-red) (cond-> {:reason reason :test symbol}
                                           (seq (filter #(= symbol (:test %)) reds))
                                           (assoc :failures (mapv failure (filter #(= symbol (:test %)) reds))))
-               :no-design {:refusal refusal :unchanged :seon.task/plan
+               :no-design {:reason reason :unchanged :seon.task/plan
                            :do '(my.task/update! :seon.task/plan str "\n\n" "<what the implement step must do>")}
-               {:refusal refusal}))
-           (when (seq gaps) [{:refusal :contract-gap :vars gaps}])
-           (when (seq unmerged) [{:refusal :unmerged :keys unmerged}])))))
+               {:reason reason}))
+           (when (seq gaps) [{:reason :contract-gap :vars gaps}])
+           (when (seq unmerged) [{:reason :unmerged :keys unmerged}])))))
 
 (defn- near
   "Where position at of text is: its line's number and its column (1-based), and the
@@ -225,13 +225,14 @@
   branch's unmerged entries (base, ours, theirs); what its merge will carry to main; what
   happened to the last reply; the last evaluations; turns left."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds last-items turn max-turns unmerged truncated? refusals run-errors source repairs will-merge]}]
+  [db t {:keys [results reds last-items turn max-turns unmerged truncated? reasons run-errors source repairs will-merge]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
-        refs (filterv (comp qualified-symbol? :seon.ref/name) cites)
+        task? #(and (qualified-symbol? (:seon.ref/name %)) (ref/task? db (:seon.ref/name %)))
+        refs (filterv #(and (qualified-symbol? (:seon.ref/name %)) (not (task? %))) cites)
         named (into (set proofs) (map :seon.ref/name) refs)
         helpers (found db named (into (mapv :seon.ref/name refs) (sort-by str proofs)))
-        sections (into [] (comp (filter #(or (simple-symbol? (:seon.ref/name %)) (and (:seon.ref/path %) (not (:seon.ref/problem-kind %)))))
+        sections (into [] (comp (filter #(or (simple-symbol? (:seon.ref/name %)) (task? %) (and (:seon.ref/path %) (not (:seon.ref/problem-kind %)))))
                                 (map #(cited-view db %)))
                        cites)]
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])
@@ -259,7 +260,7 @@
       max-turns (assoc :turn (str (inc turn) " of " max-turns))
       (seq sections) (assoc :sections sections)
       (seq helpers) (assoc :found helpers)
-      (seq (refused (vec refusals) (vec reds))) (assoc :refused (refused (vec refusals) (vec reds)))
+      (seq (refused (vec reasons) (vec reds))) (assoc :refused (refused (vec reasons) (vec reds)))
       (seq run-errors) (assoc :test-run {:failed (vec run-errors)})
       (last-reply truncated? source (vec repairs)) (assoc :your-last-reply (last-reply truncated? source (vec repairs)))
       (:seon.task/evidence t) (assoc :evidence (:seon.task/evidence t))
