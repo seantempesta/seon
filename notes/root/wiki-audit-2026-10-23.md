@@ -62,7 +62,7 @@ Question (owner): how in sync is the wiki, and can we pull those docs into the c
   - :28 "Before (2026-10-22) … 82-88%";
   - the dated Cost numbers (:32, :44);
   - "(printer estimate, 2026-10-21)" (:62).
-- **Move to code:** :30's per-depth rule for vars belongs in the `seon.docs/resolve-ref` docstring. The Cost paragraphs belong in `seon.ref-test/one-parse-costs-one-pass` and `seon.docs-cost-test`, which already hold them.
+- **Move to code:** :30's per-depth rule for vars belongs in the `seon.context/resolve-ref` docstring. The Cost paragraphs belong in `seon.ref-test/one-parse-costs-one-pass` and `seon.docs-cost-test`, which already hold them.
 
 ### agent.md (the help page): the healthiest page
 - **In sync:** every key it lists exists:

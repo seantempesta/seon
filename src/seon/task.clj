@@ -122,14 +122,6 @@
      branch (assoc :seon.task/branch branch) model (assoc :seon.task/model model)
      max-turns (assoc :seon.config.agent/max-turns max-turns))])
 
-(defn earlier-agents-tx
-  "A new boot's root is no longer the root of the agents an earlier boot started: their link to
-  root retracted (their processes ended with that boot; history keeps that root started them), so
-  root's agents are this boot's (root's walk, :seon.agent/_root)."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
-  [db] (vec (for [[a r] (d/q '[:find ?a ?r :where [?r :seon.root/id :root] [?a :seon.agent/root ?r]] db)]
-              [:db/retract a :seon.agent/root r])))
-
 (defn boot-tx
   "Root's boot: its id for this process lifetime and its max-running config key (merges at once,
   :seon.config.merge/max-running, is written with the config in force, seon.config/facts)."
@@ -142,57 +134,16 @@
   {:malli/schema [:=> [:cat :seon.task/id pos-int?] :seon.run/id]}
   [id n] (str id "#" n))
 
-(defn agent-key
-  "Agent id's key in root's boot: its entity's identity (:seon.agent/key), one per agent per
-  boot, since an id like :a3 starts again each boot."
-  {:malli/schema [:=> [:cat :string :keyword] :string]}
-  [boot id] (str boot "/" (name id)))
-
-(def ^:private agent-attrs
-  "Each member of root's view of an agent and the attribute recording it (agent-tx)."
-  {:status :seon.agent/status :pid :seon.agent/pid :mem-mb :seon.agent/mem-mb :running :seon.agent/running
-   :task :seon.agent/description :branch :seon.agent/branch :forked-ms :seon.agent/forked-ms :ended-ms :seon.agent/ended-ms})
-
-(defn agent-tx
-  "What root observes of agent id in its boot, as facts on the agent's entity: the root that
-  started it, and each member m holds of root's view (status, pid, memory, the form running,
-  its task's id or description, branch, when it forked and ended); a member m holds as nil is
-  no longer true, and retracted (the form running, once it returned). Root writes it when its
-  view of the agent changes (seon.root/record-agents)."
-  {:malli/schema [:=> [:cat :string :keyword :map] [:vector :any]]}
-  [boot id m]
-  (let [k (agent-key boot id)
-        v (fn [member x] (case member :running (:form x) (:mem-mb :forked-ms) (double x) x))]
-    (into [(into {:seon.agent/key k :seon.agent/id id :seon.agent/root [:seon.root/id :root]}
-                 (for [[member a] agent-attrs :let [x (some->> (get m member) (v member))] :when (some? x)] [a x]))]
-          (for [[member a] agent-attrs :when (and (contains? m member) (nil? (get m member)))]
-            [:db.fn/retractAttribute [:seon.agent/key k] a]))))
-
-(defn message-tx
-  "Message mid from from to run aid, its body: the one message fact, written by root on main
-  and by the turn that takes it on its branch (one entity: both ids are content ids)."
-  {:malli/schema [:=> [:cat :string :string [:maybe :seon.run/id] :any] [:vector :map]]}
-  [mid from aid body]
-  ;; the run its own entity map: only a top-level map takes its content id (Datahike's
-  ;; content-tempids); its tempid is its id, so every ref to it in one transaction is one entity
-  (cond-> [(cond-> {:seon.message/id mid :seon.message/from from :seon.message/body body}
-             aid (assoc :seon.message/to aid))]
-    aid (conj {:db/id aid :seon.run/id aid})))
-
 (defn run-start-tx
-  "A run begins: root observed it spawn its agent (its key, seon.task/agent-key; nil: root
-  refused the spawn, and no agent exists), given the task's accumulated plan."
-  {:malli/schema [:=> [:cat :seon.run/id :seon.task/id :string [:maybe :string] :seon.task/env :int :seon.task/plan] [:vector :map]]}
+  "A run begins: root observed it spawn its agent (nil: root refused the spawn, and no
+  agent exists), given the task's accumulated plan."
+  {:malli/schema [:=> [:cat :seon.run/id :seon.task/id :string [:maybe :keyword] :seon.task/env :int :seon.task/plan] [:vector :map]]}
   [aid task boot agent {:keys [branch model max-turns]} start-ms plan]
-  (filterv some?
   [(cond-> {:seon.run/id aid :seon.run/task [:seon.task/id task] :seon.run/status :running
             :seon.run/boot boot :seon.run/start-ms start-ms
             :seon.run/branch branch :seon.run/max-turns max-turns :seon.run/plan plan}
      agent (assoc :seon.run/agent agent)
-     model (assoc :seon.run/model model))
-   ;; the agent its own entity map, so it takes its content id (Datahike's content-tempids);
-   ;; its tempid is its key, unique in a transaction that starts several runs
-   (when agent {:db/id agent :seon.agent/key agent})]))
+     model (assoc :seon.run/model model))])
 
 (defn status-tx
   "Move run aid from status `from` to `to` (Datahike's compare-and-swap: a racing
@@ -316,7 +267,7 @@
     (some-> (own id) (assoc :seon.task/accumulated (accumulate own id)) (vary-meta assoc :seon.render/schema :seon.task/task))))
 
 (def ^:private run-pull
-  '[* {:seon.run/task [:seon.task/id]} {:seon.run/agent [:seon.agent/id]}
+  '[* {:seon.run/task [:seon.task/id]}
     {:seon.run/results [:seon.proof/test :seon.proof/status]}
     {:seon.run/deferred-results [:seon.proof/test :seon.proof/status]}
    {:seon.run/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
@@ -329,7 +280,6 @@
     (cond-> (-> a (dissoc :db/id :seon.run/branch :seon.run/model :seon.run/max-turns :seon.run/results
                           :seon.run/uncontracted :seon.run/conflicts :seon.run/unmerged)
                 (update :seon.run/task :seon.task/id)
-                (cond-> (:seon.run/agent a) (update :seon.run/agent :seon.agent/id))
                 (assoc :seon.run/env {:branch branch :model model :max-turns max-turns}))
       results (assoc :seon.run/results (into {} (map (juxt :seon.proof/test :seon.proof/status)) results))
       uncontracted (assoc :seon.run/uncontracted (set uncontracted))

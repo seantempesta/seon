@@ -275,7 +275,7 @@
                                          :previous (get-in (peek rows) [:seon.turn/basis :observed :results]))
                             c (assoc :context c)))
                (cond-> cache c (assoc tid c))]))
-          [[] cache] (sort (d/q '[:find [?e ...] :in $ ?a :where [?r :seon.run/id ?a] [?e :seon.turn/run ?r]] db aid))))
+          [[] cache] (sort (d/q '[:find [?e ...] :in $ ?a :where [?e :seon.turn/run ?a]] db aid))))
 
 (defn turn-href
   "Where the turn tid of view's agent serves its whole request (seon.web's route)."
@@ -400,20 +400,6 @@
     [st (when (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:removes patch)))
           (assoc patch :op :patch :view view-id))]))
 
-(defn walk-html
-  "The walk page of entity eid on main as this proc last read it (root's when eid is nil):
-  seon.render/walk rendered on both faces (seon.render/rendered), laid out by
-  seon.render.ui/walk-page; a page saying why when main is not read yet or eid is no entity."
-  {:malli/schema [:=> [:cat :map [:maybe pos-int?]] :string]}
-  [st eid]
-  (let [db (:main-db st)
-        eid (or eid (when db (:db/id (d/entity db [:seon.root/id :root]))))
-        w (when (and db eid) (render/walk db eid))]
-    (h/html (ui/shell (str "walk " eid) "/feed?view=root"
-                      (cond (nil? db) [:p "main is not read yet: reload"]
-                            (:seon.error/type w) [:p (:seon.error/message w)]
-                            :else (ui/walk-page (render/rendered w {}) {}))))))
-
 (defn page-html
   "The composed document of view-id from its retained fragments (renders nothing)."
   {:malli/schema [:=> [:cat :map :any] [:maybe :string]]}
@@ -530,7 +516,7 @@
         detail (if err (render/ai r {}) (:text (render/printed r nil)))]
     (when form
       (let [it (cond-> {:id 0 :tag (if err :err :ret) :form form :origin :ui :printed detail} err (assoc :err r))]
-        (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx {:seon.root/id :root} (str "root-ui-" (profile/now-ns)) [it] nil)}}
+        (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx :root (str "root-ui-" (profile/now-ns)) [it] nil)}}
                               :route [:render :answers] :tag [:web-record]})))
     (ask-state (on-event st {:type :ui :call (str v) :agent agent :at-ms (System/currentTimeMillis) :error err :detail detail}) o)))
 
@@ -604,7 +590,6 @@
                                       (ask-state (update st :kf-wanted conj (:view m)) o))
                           :context (do (step/out! o :to-web {:op :text :k (:k m) :text (:context st "")}) st)
                           :turn-text (do (step/out! o :to-web {:op :text :k (:k m) :text (turn-text st (:agent m) (:turn m))}) st)
-                          :walk (do (step/out! o :to-web {:op :text :k (:k m) :text (walk-html st (:eid m))}) st)
                           :stats (do (step/out! o :to-web {:op :text :k (:k m) :text (sedn/encode (stats st))}) st)
                           st)
               st)]

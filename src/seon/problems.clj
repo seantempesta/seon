@@ -381,7 +381,7 @@
 (def ^:private run-pull
   "What a problem row reads of a run: one pull (its conflicts are read only when it has
   them)."
-  [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/end-ms {:seon.run/agent [:seon.agent/id]}
+  [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/end-ms :seon.run/agent
    :seon.run/unmerged :seon.run/failures :seon.run/costs :seon.run/error :seon.run/waste :seon.run/task-conflicts
    :seon.run/deferred :seon.run/gate-unread {:seon.run/deferred-results [:seon.proof/test :seon.proof/status]}
    {:seon.run/task [:db/id :seon.task/id :seon.task/ns :seon.task/proofs]}
@@ -420,7 +420,7 @@
         status (:seon.run/status p)
         conflicts (mapv pm/conflict-value (:seon.run/conflicts p))
         unmerged (vec (sort (:seon.run/unmerged p)))
-        base {:run aid :task (get-in p [:seon.run/task :seon.task/id]) :agent (get-in p [:seon.run/agent :seon.agent/id]) :status status
+        base {:run aid :task (get-in p [:seon.run/task :seon.task/id]) :agent (:seon.run/agent p) :status status
               :outcome (:seon.run/outcome p) :reason (:seon.run/reason p) :end-ms (:seon.run/end-ms p)
               :open? (not (task-done? db te)) :owner-ns (get-in p [:seon.run/task :seon.task/ns]) :producer nil :proofs []
               :answered-by (get-in ans [:from aid] []) :at-ms (:seon.run/end-ms p)}
