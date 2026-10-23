@@ -5,7 +5,7 @@
   under that main, and a recovery step reopens the same store on the same main."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d]
-            [seon.db :as pdb] [clojure.core.async :as a] [seon.check] [seon.source] [clojure.string]))
+            [seon.db :as pdb] [clojure.core.async :as a] [seon.check] [seon.source] [clojure.string] [clojure.string :as str] [seon.lib]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -125,3 +125,57 @@
                          v))]
     (is (seq files))
     (is (= #{'seon.test-store/root-sh} launchers))))
+
+(deftest a-starter-that-is-gone-leaves-no-fifo-after-the-next-starter
+  ;; task seon.check/a-killed-starter-leaves-no-fifo: a starter removes its own fifo when it ends
+  ;; or is terminated; SIGKILL runs nothing, so the next starter reclaims it (bin/held --reclaim):
+  ;; the fifo of a pid that is no process goes, a live pid's (this test process) and any file not
+  ;; named <who>-starter-<pid>.fifo stay
+  (let [dir (str (.getCanonicalPath (java.io.File. "target/tmp")) "/reclaim-" (random-uuid))
+        _ (.mkdirs (java.io.File. dir))
+        dead-pid (str/trim (:out (ts/binary-sh "sh" "-c" "echo $$")))   ; a process that has ended
+        live-pid (str (seon.lib/c-getpid))
+        mk (fn [n] (let [p (str dir "/" n)] (clojure.java.shell/sh "mkfifo" p) p))
+        dead-check (mk (str "check-starter-" dead-pid ".fifo"))
+        dead-test (mk (str "test-starter-" dead-pid ".fifo"))
+        live (mk (str "test-starter-" live-pid ".fifo"))
+        other (mk "something-else.fifo")
+        exists? #(.exists (java.io.File. ^String %))]
+    (try
+      (clojure.java.shell/sh "bin/held" "--reclaim" dir)
+      (is (not (exists? dead-check)) "a gone check's fifo is reclaimed")
+      (is (not (exists? dead-test)) "a gone test runner's fifo is reclaimed")
+      (is (exists? live) "a live starter's fifo stays")
+      (is (exists? other) "a file not named for a starter stays")
+      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+
+(deftest a-stop-ends-on-its-holders-end-and-a-gone-holder-answers-at-once
+  ;; the first bin/update hung for 10 minutes in `bin/root stop`: it read a fifo it held open
+  ;; read-write itself, so EOF could never come, and a holder that never wrote left it waiting for
+  ;; ever. bin/held --end signals the holder and waits on the fifo the holder keeps open for its
+  ;; life: its status line, or its last writer closing (the holder's end). A holder that is gone
+  ;; has no writer, so the wait ends at once; a path that is not a fifo (a holder from before the
+  ;; done fifo) is refused at once. A hang here is the bug.
+  (let [dir (str (.getCanonicalPath (java.io.File. "target/tmp")) "/end-" (random-uuid))
+        _ (.mkdirs (java.io.File. dir))
+        sh clojure.java.shell/sh
+        held (fn []
+               (let [ready (str dir "/ready-" (random-uuid)) done (str dir "/done-" (random-uuid))]
+                 (sh "mkfifo" ready done)
+                 ;; a command that says it is up, then reads its stdin until the holder closes it
+                 (sh "bin/held" "--detach" "--log" (str dir "/log") "--ready" ready "--done" done
+                     "sh" "-c" "echo ROOT LISTENING 1; exec cat")
+                 (let [[h c] (str/split (str/trim (slurp ready)) #" ")] {:holder h :cmd c :done done})))
+        end (fn [{:keys [holder done]}] (sh "bin/held" "--end" "TERM" holder done "1"))]
+    (try
+      (let [live (held) r (end live)]
+        (is (= [0 "0\n"] [(:exit r) (:out r)]) "a live holder: TERM closes its command's stdin, and the status is its answer"))
+      (let [h (held)]
+        (sh "kill" "-9" (:holder h))
+        (sh "kill" "-9" (:cmd h))
+        (let [r (end h)]
+          (is (= [0 ""] [(:exit r) (:out r)]) "a holder that is gone answers at once, with no status")))
+      (let [f (str dir "/plain")]
+        (spit f "")
+        (is (= 2 (:exit (sh "bin/held" "--end" "TERM" "1" f "1"))) "a path that is no fifo is refused at once"))
+      (finally (sh "rm" "-rf" dir)))))

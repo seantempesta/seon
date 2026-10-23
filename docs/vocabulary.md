@@ -73,7 +73,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **task** | an entity of desired state: plan, instructions, proofs, `:needs`, environment, execution | `seon.task` |
 | **needs** | a task's prerequisites (refs); the only dependency edge, no chain entity | `seon.task/create-tx` |
 | **accumulated** | a task's plan and proofs with its prerequisites', derived along `:needs` | `seon.task/tasks` |
-| **run** (was attempt) | observed state: one agent working one task once (`task#n`); a spawn root refused is a run too (`:refused`, no agent, root's reason), named by `seon.reconcile/root-causes` at quiescence and asked again only once main moves for another reason. Its turns, model calls and tokens are what its end measured: absent when unknown (no end is outcome `:no-end`), never 0 ([root](root.md#runs-and-judging)) | `seon.task/run-start-tx` |
+| **run** (was run) | observed state: one agent working one task once (`task#n`); a spawn root refused is a run too (`:refused`, no agent, root's reason), named by `seon.reconcile/root-causes` at quiescence and asked again only once main moves for another reason. Its turns, model calls and tokens are what its end measured: absent when unknown (no end is outcome `:no-end`), never 0 ([root](root.md#runs-and-judging)) | `seon.task/run-start-tx` |
 | **test run** | one clojure.test run of some tests (a shard, an agent's test fork): its report data is what the proofs read, never a run of an agent | `seon.proofs/run-tests!` |
 | **root's run** | one process of root on a store; what `runs/` keeps (`:seon.config.root/runs-dir`), never a run of an agent | `seon.root/start!` |
 | **template** | a task kind's defaults: work, design, implement, test, merge | `seon.template` |
