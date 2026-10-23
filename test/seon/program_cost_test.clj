@@ -302,3 +302,26 @@
      :per-n {:ticks 1400.0 :bytes 13300.0}
      :fixed {:ticks 20000.0 :bytes 60000.0 :calls 7.0}
      :sizes [100 1000 10000]}))
+
+(defn literals-of
+  "eval's argument: a defn whose body is a vector of n fn literals, each closing over the
+  defn's argument (an agent's evaluation holds a few; the size shows the cost per literal)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any]]}
+  [n] [(list 'defn 'literals-probe '[x] (vec (for [i (range n)] (list 'fn '[y] (list '+ 'x 'y i)))))])
+
+(deftest a-defn-compiles-within-its-estimate
+  ;; task jolt.backend/image-registration-is-opt-in: Seon writes no state image, so its compiles
+  ;; register no fn literal's source for one (bin/env's JOLT_COMPILER_OPTIONS {:image-fn-forms
+  ;; false}); registering rendered each literal's source, read it back, and wrapped it in a maker
+  (cost/proof
+    {:of 'clojure.core/eval :input 'seon.program-cost-test/literals-of
+     :n "fn literals in the defn"
+     :work (str "per literal: its analysis, its emitted lambda and Chez's compile of it; no source "
+                "rendered, read back or registered, no maker")
+     :growth :linear
+     ;; measured 2026-10-23 (Jolt jolt/image-fn-forms-opt-in): 4.59 MB, 43.3 MB, 474 MB at 10, 100,
+     ;; 1,000 literals, ~478 KB and ~52k ticks a literal; registering 11.1 MB, 124 MB, 1,239 MB
+     ;; (~1.24 MB and ~172k ticks a literal)
+     :per-n {:ticks 55000.0 :bytes 480000.0}
+     :fixed {:ticks 100000.0 :bytes 100000.0}
+     :sizes [10 100 1000]}))
