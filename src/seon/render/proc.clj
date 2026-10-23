@@ -25,7 +25,7 @@
   proc serializes each patch once and fans it out; a tab that opened or fell behind gets a
   keyframe composed here from the retained fragments, rendering nothing."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile]
@@ -191,35 +191,49 @@
 
 ;;; --- a location's page ------------------------------------------------------------------------
 
+(defn- boot-of
+  "Root's boot on main db, as its entity records it (:seon.root/boot), or nil before root's boot fact."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :string]]}
+  [db] (:seon.root/boot (d/entity db [:seon.root/id :root])))
+
 (defn- location
-  "The entity view names on main db (root's view st holds its boot): root's for :root, agent id's
-  in root's boot for an agent's id, else the entity id it is; nil when main holds none."
-  {:malli/schema [:=> [:cat :map :seon.host/db :any] [:maybe pos-int?]]}
-  [st db view]
+  "The entity view names on main db: root's for :root, the agent of that id in root's boot (its
+  key, seon.task/agent-key) for an agent's id, else the entity id it is; nil when main names none
+  (no boot fact yet, or no agent of that id in this boot)."
+  {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe pos-int?]]}
+  [db view]
   (cond (= :root view) (:db/id (d/entity db [:seon.root/id :root]))
-        (keyword? view) (when-let [boot (get-in st [:view :boot])] (:db/id (d/entity db [:seon.agent/key (task/agent-key boot view)])))
+        (keyword? view) (when-let [boot (boot-of db)] (:db/id (d/entity db [:seon.agent/key (task/agent-key boot view)])))
         :else view))
 
 (defn- this-boots
-  "Agent entity e's id when it is an agent of root's boot (its key is that boot's), else nil: an
-  id like :a3 starts again each boot, so only this boot's names a process root holds."
-  {:malli/schema [:=> [:cat :map :any] [:maybe :keyword]]}
-  [st e]
+  "Agent entity e's id when it is an agent of root's boot on main db (its key is that boot's),
+  else nil: an id like :a3 starts again each boot, so only this boot's names a process root holds."
+  {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe :keyword]]}
+  [db e]
   ;; e an entity of main (its key: a walk shows only an agent's relevant attributes)
-  (let [id (:seon.agent/id e) boot (get-in st [:view :boot])]
+  (let [id (:seon.agent/id e) boot (boot-of db)]
     (when (and id boot (= (:seon.agent/key e) (task/agent-key boot id))) id)))
 
 (defn- page-value
   "View's page: the entity it names walked on main and, for an agent, its branch as this proc last
   read it (seon.render/page), laid out by seon.render.ui/page with its focus's input at the top
   (root's: spawn and evaluate in every agent, with main's open problems a tile; an agent's: its
-  REPL and its messages) and the rows its view has scrolled to; nil when main is not read yet or
-  names no entity for it, :seon.render/no-entity when it names an entity no db holds."
+  REPL and its messages) and the rows its view has scrolled to; nil when main is not read yet,
+  :seon.render/no-location when main names no entity for it (an agent's id of no agent in this
+  boot), :seon.render/no-entity when it names an entity no db holds."
   {:malli/schema [:=> [:cat :map :any] [:maybe :map]]}
   [st view]
   (let [db (:main-db st)
-        eid (when db (location st db view))]
-    (when eid
+        eid (when db (location db view))]
+    (cond
+     (and db (nil? eid))
+     (contract/error :seon.render/no-location `page-value
+                     (str "no " (if (keyword? view) (str "agent " (ui/kname view) " in root's boot " (boot-of db)) (ui/kname view))
+                          " on main: an agent's id names one of this boot's (ids start again each boot); an earlier boot's agent's page is"
+                          " /walk/<its eid>, linked from its root's page")
+                     {:view (ui/kname view)})
+     eid
       (let [w (render/page (into [db] (keep identity) [(get-in st [:branches view :db])]) eid)
             agent (get-in w [:seon.render/root :seon.render/value])
             task (some #(when (= :seon.task/task-fact (:seon.render/schema %)) (:seon.render/value %)) (:seon.render/nodes w))
@@ -228,7 +242,7 @@
                         {:schema :seon.render/agent-input
                          :value {:id (:seon.agent/id agent)
                                  ;; root's view of it in this boot: an agent of another boot has no process
-                                 :live? (boolean (when-let [id (this-boots st (d/entity db eid))] (ui/live (ui/shown-status (get-in st [:view :agents id] {})))))
+                                 :live? (boolean (when-let [id (this-boots db (d/entity db eid))] (ui/live (ui/shown-status (get-in st [:view :agents id] {})))))
                                  :held (when (= :held (:seon.task/execution task)) (:seon.task/id task))}})
             ;; root's focus: main's open problems, a part of its page by their own render; an agent's
             ;; branch that could not be read: its error, by the error's render
@@ -308,9 +322,13 @@
           ms (profile/ms-since t0)]
       (doseq [p patches] (step/out! o :to-web p))
       (when (not= idx (:index st)) (step/out! o :to-web {:op :index :agents idx}))
-      (doseq [[k v] (:waiting st)] (step/out! o :to-web {:op :page :k k :view v :html (page-html st v)}))
-      (doseq [v (:kf-wanted st)] (step/out! o :to-web {:op :keyframe :view v :html (page-html st v)}))
-      (-> st (assoc :index idx :waiting {} :kf-wanted #{})
+      ;; a page or keyframe is answered once its view is rendered; one asked before main was read
+      ;; waits for the pass main's answer brings
+      (doseq [[k v] (:waiting st) :when (get-in st [:views v])] (step/out! o :to-web {:op :page :k k :view v :html (page-html st v)}))
+      (doseq [v (:kf-wanted st) :when (get-in st [:views v])] (step/out! o :to-web {:op :keyframe :view v :html (page-html st v)}))
+      (-> st (assoc :index idx
+                    :waiting (into {} (remove (fn [[_ v]] (get-in st [:views v]))) (:waiting st))
+                    :kf-wanted (into #{} (remove #(get-in st [:views %])) (:kf-wanted st)))
           (update :passes (fnil inc 0))
           (cond-> (seq patches) (assoc :render-ms (lib/r2 ms) :patches (reduce + (map #(+ (count (:frags %)) (count (:appends %)) (count (:prepends %)) (count (:removes %))) patches))))
           (update :pass-ms #(lib/push-window % ms 200))
@@ -358,9 +376,9 @@
   [st o]
   (let [db (:main-db st)]
     (reduce (fn [st view]
-              (let [e (when-let [eid (when db (location st db view))] (d/entity db eid))
+              (let [e (when-let [eid (when db (location db view))] (d/entity db eid))
                     b (:seon.agent/branch e)
-                    id (when e (this-boots st e))
+                    id (when e (this-boots db e))
                     at [b (get-in st [:view :agents id :t]) (get-in st [:commits id])]
                     kind [:branch view]]
                 (if (and b (not= at (get-in st [:branches view :read])) (not (some #{kind} (vals (:pending st)))))

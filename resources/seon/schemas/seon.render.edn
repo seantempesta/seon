@@ -86,6 +86,8 @@
  :seon.render/cite-state [:map [:refs :seon.render/refs] [:index [:map-of :string nat-int?]] [:next :seon.render/n]]
  :seon.render/walk [:map [:seon.render/root :seon.render/root] [:seon.render/nodes :seon.render/nodes] [:seon.render/refs :seon.render/refs]]
  :seon.render/no-entity [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-entity]] [:seon.render/eid :seon.render/eid]]]
+ ;; a page's location that main names no entity for (seon.render.proc/page-value): an agent's id of no agent in root's boot
+ :seon.render/no-location [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-location]] [:view :string]]]
  ;; ---- what root's context reads: the whole system as one value ----
  ;; the api's view (agents, writer, fork server, store, boot, root errors) joined with every
  ;; proc's health, main's tasks and attempts, the series and the events. Its AI face is root's
