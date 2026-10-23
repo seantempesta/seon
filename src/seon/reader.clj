@@ -189,8 +189,9 @@
                                                    :else (recur (inc k))))
                                tok (subs line i end)]
                            (.append out tok)
-                           ;; a closer after a lone backslash (one ending the line) would be read as its character
-                           (recur end (if lone? st (end! st))))))))))
+                           ;; a closer after a lone backslash (one ending the line) would be read as its
+                           ;; character: it goes right before that backslash, after the rest of the token
+                           (recur end (if lone? (assoc st :code-end (dec (.length out))) (end! st))))))))))
         lines (str/split text #"\n" -1)]
     (loop [k 0 st {:stack [] :repairs [] :delimiters 0 :code-end 0 :in-str false :esc false :fenced nil}]
       (if (= k (count lines))
