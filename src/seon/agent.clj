@@ -337,6 +337,26 @@
         (assoc :digests cd :dir dir
                :process (program/process-tests idx)))))
 
+(declare handle!)
+
+(defn prove!
+  "Ask the test service (seon.prove) to prove this branch at its head, and wait for its answer:
+  the run's (run-tests-forked's answer, with :key). The service runs one run per key whoever
+  asks, so a session's request for this branch at this tx and this ask are one run; when it is
+  this agent's to run, root's :tests request arrives while it waits and is taken here. Other
+  messages wait for the loop. :dead when root is gone (the process then ends)."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (commit!)
+  (let [k (:tx-seq (swap! state update :tx-seq inc))]
+    (when (= :dead (send! {:op :prove :k k :t (:max-tx (db))})) (lib/c-exit 0))
+    (loop []
+      (let [m (recv-raw!)]
+        (cond (= m :dead) (lib/c-exit 0)
+              (and (= :prove-reply (:op m)) (= k (:k m))) (:result m)
+              (= :tests (:op m)) (do (doseq [r (handle! m)] (send! r)) (recur))
+              :else (do (swap! state update :pending conj m) (recur)))))))
+
 (defn- run-tests-here
   "The tests a test-plan runs (var symbols), by the one runner (seon.proofs/run-tests!, nothing
   stored: the parent holds the greens), with the branch's schemas in effect (malli's dynamic
@@ -439,6 +459,7 @@
         (cond-> (seq unstored) (assoc :unstored unstored))
         (update :reports into reused-reports)
         (update :pass + (count reused-reports))
+        (assoc :digests (select-keys digests (keep (comp proofs/test-symbol :var) (:reports res))))
         (assoc :reused (count reused-reports) :ran (count (distinct (keep :var (:reports res))))))))))
 
 ;; ---- the loop ----------------------------------------------------------------------

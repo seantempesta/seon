@@ -304,6 +304,11 @@
                    dest (case (:op req) :merge-main {:merge-main (:agent req) :rid rid} :merge {:merged (:agent req) :rid rid} {:rid rid})]
                (step/out! o :to-writer (assoc (dissoc req :agent) :dest dest))
                (update st :writes (fnil conj #{}) rid)))
+      ;; the test service (seon.prove): the request goes to its proc, the caller (a session, or an
+      ;; agent's turn through its proc) is answered when the run it joined ends
+      :prove (let [[st rid] (pend st p :prove (:agent m))]
+               (step/out! o [:prove :req] (assoc (select-keys m [:branch :t :agent :proofs]) :rid rid))
+               st)
       :kill (cond-> (if (get-in st [:agents id])
                       ;; :ended when root stops it because its attempt ended (the reconciler says so)
                       (-> st (set-agent id {:status (if (:ended m) :ended :killed)}) (to-agent id {:op :kill}))
@@ -388,6 +393,8 @@
 
     :else
     (case (:op m)
+      ;; the test service answered a waiter (seon.prove)
+      :prove-answer (deliver-rid st (:rid m) (:r m))
       :status (set-agent st (:agent m) (:set m))
       :stat (case (:k m)
               :noise (view! st update :stats assoc :noise (:v m) :noise-ordered (:ordered m) :noise-first-bad (:bad m))
@@ -723,7 +730,7 @@
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
-                         :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf)
+                         :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1)
                          :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
                          :web-port (cfg/value :seon.config.web/port)})
         decl (system/read-decl (cfg/value :seon.config.root/system-path))
@@ -899,6 +906,17 @@
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id pos-int?] :seon.host/promise]]}
   ([sys agent-id] (request! sys 'run-tests! agent-id nil))
   ([sys agent-id ticks] (request! sys 'run-tests! agent-id {:ticks ticks})))
+
+(defn prove!
+  "Ask the test service (seon.prove) to prove a branch at a tx: agent id's own branch at its head,
+  or main (agent nil) at its head. A promise of the run's answer ({:key :ran :pass :fail :error
+  :red :reports ...}), the same run for every asker of that key: a session here, and the agent's
+  turn."
+  {:malli/schema [:=> [:cat :seon.root/sys [:maybe :seon.agent/id]] :seon.host/promise]}
+  [sys agent-id]
+  (if-let [b (if agent-id (get-in @(call! sys {:op :state}) [:agents agent-id :branch]) (pdb/conn-main (:conn sys)))]
+    (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx (pdb/head (:conn sys) b))} agent-id (assoc :agent agent-id)))
+    (doto (promise) (deliver (gone agent-id (str "no live agent " agent-id))))))
 
 (defn agent-stats! "A promise of the agent's numbers now." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
   [sys agent-id] (call! sys {:op :stats :id agent-id}))
