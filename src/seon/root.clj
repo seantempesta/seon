@@ -392,7 +392,7 @@
       (cond-> st p (reply! o p (refused 'seon.root/request (str op " is not one of root's requests") {}))))))
 
 (defn- back-op
-  "A message from an agent proc, a fork-server or writer event, or the error reader."
+  "A message from an agent proc, a fork-server or writer event, or Flow's error channel."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :map] :seon.root/api-state]}
   [st o m]
   (cond
@@ -543,7 +543,7 @@
 
 (defn api-proc
   "The api. In :ext (the API's callers, each request with its reply promise: the
-  promises live only here), :back (the agent procs and the error reader),
+  promises live only here), :back (the agent procs and Flow's error channel),
   :from-writer and :from-fs (answers and events). Out :to-writer, :to-fs, :events, and
   [agent :in] for each agent (routed by the resolver).
   Agents are procs of this graph: a step that spawned or ended agents applies ONE
@@ -1096,8 +1096,8 @@
   "Stop root by letting the flow drain: the api closes (later calls answer \"root
   stopped\"); every agent is sent :stop and exits after the requests before it (SIGKILL
   past seon.agent-proc/stop-bound-ms); the writer's in-port closes, it commits and flushes what it
-  took; the fork server is killed and reaped; then flow/stop (every proc exited), the
-  reader, the error reader. Nothing accepted is lost.
+  took; the fork server is killed and reaped; then flow/stop (every proc exited) and the
+  reader. Nothing accepted is lost.
   First the end is a fact on main, durable (:seon.root/stopped {:boot :cause :at-ms}; cause
   :stop! unless the caller names it: :stdin-eof, :signal), so every clean end says why; a
   refused stop fact still stops root, and the answer carries it (:stop-fact-refused).

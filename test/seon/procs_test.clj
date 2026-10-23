@@ -447,7 +447,7 @@
 
 (deftest a-throwing-step-answers-every-pending-request
   ;; Flow's step catch keeps the old state and drops the outputs; its error message carries the
-  ;; message the step took (::flow/msg), which root's error reader forwards as :msg
+  ;; message the step took (::flow/msg), which the pipe from Flow's error channel carries as :msg
   (let [st (api-state)]
     (testing "the api's own step threw on {:op :state}: its caller is answered the defect, not left waiting"
       (let [p (promise)]

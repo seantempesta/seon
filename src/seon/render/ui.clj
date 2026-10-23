@@ -355,7 +355,7 @@
      (if (and start-ms end-ms) (group3 (- end-ms start-ms)) "–")]])
 
 (defn tile-errors
-  "Root's own defects (a step that threw, recorded as data by the error reader), the
+  "Root's own defects (a step that threw, recorded as data from Flow's error channel), the
   boot's numbers and the store."
   {:malli/schema [:=> [:cat :seon.render/root-errors :seon.render/opts] :any]}
   [{:keys [root-errors root-errors-total boot store]} opts]
