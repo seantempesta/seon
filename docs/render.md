@@ -112,5 +112,6 @@ An agent's namespace refers `clojure.pprint`'s `pp` and `pprint` (`seon.agent/ma
 - `seon.context/near`: the whole line a repaired delimiter is on, the printer budgets it.
 - `seon.render.proc/main-info`, `seon.render.proc/system-value`: a sparkline's points, the newest `:seon.config.render.list/series`.
 - `seon.render.proc/pass`: the stream keeps the newest `:seon.config.render.list/stream` events; its header (`seon.render.ui/events-count`) says how many older it did not keep.
+- `seon.render.proc/order`: the grid shows every live agent and the newest `:seon.config.render.list/ended` ended ones; an agent's end is the event that pushes the oldest off, and the tile counts those off it.
 - `seon.render.proc/eval-records`: an agent's page shows its newest `:seon.config.render.list/history` evaluations; `seon.render.ui/history-more` says how many more its branch records.
 - `seon.render.ai/section-costly`: the newest `:seon.config.render.list/top` evaluations of each agent its costliest functions are summed from.

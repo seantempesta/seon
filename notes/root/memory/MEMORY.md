@@ -1,0 +1,7 @@
+- [Kill only verified PIDs](kill-only-verified-pids.md) — check the full command path is my checkout before killing
+- [Sessions go in the seon-jolt group](prefer-background-agents.md) — file every new session under the sidebar group
+- [Serialize heavy runs](serialize-heavy-runs.md) — never fan out parallel bin/prove; root schedules one at a time
+- [Verify gitlink pin bumps](verify-gitlink-pin-bumps.md) — git ls-tree HEAD reference-code/<lib> before reporting a pin
+- [Resume: read the plan first](resume-read-plan-first.md) — after compaction read AGENTS, docs/plan.md, decisions, schedule before replying
+- [Push forks freely](push-forks-freely.md) — no ask needed for seantempesta/* pushes; no force, never main
+- [Root merges without asking](root-merges-without-asking.md) — verified branches merge to main; owner questions are for rulings only

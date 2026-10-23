@@ -31,7 +31,7 @@
 
 (defn- event-cap "Events the stream keeps (:seon.config.render.list/stream)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/stream))
 (defn- series-cap "Points a sparkline keeps, the newest changes (:seon.config.render.list/series)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/series))
-(def RETIRE-MS "An ended agent leaves the grid this long after it ended." 90000)
+(defn- ended-cap "Ended agents the grid keeps beside the live ones (:seon.config.render.list/ended)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/ended))
 (defn- history-cap "Evaluations an agent's page shows (:seon.config.render.list/history)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/history))
 
 ;;; --- requests -------------------------------------------------------------------------
@@ -52,24 +52,27 @@
 ;;; --- the system value ------------------------------------------------------------------
 
 (defn- order
-  "The grid's agents: by id, the ones ended over RETIRE-MS ago left out."
-  {:malli/schema [:=> [:cat :map :int] [:vector :keyword]]}
-  [agents now-ms]
-  ;; each id's key computed once (sort-by would build it per comparison)
-  (mapv peek (sort (for [[id a] agents :when (not (and (:ended-ms a) (> (- now-ms (:ended-ms a)) RETIRE-MS)))
-                         :let [s (str id)]]
-                     [(count s) s id]))))
+  "The grid's agents: by id, every live one and the newest `ended-cap` ended ones (by the
+  :ended-ms root recorded at each end); an agent's end is the event that pushes the oldest
+  ended one off. A function of the agents alone."
+  {:malli/schema [:=> [:cat :map] [:vector :keyword]]}
+  [agents]
+  (let [kept (into #{} (comp (take (ended-cap)) (map key))
+                   (sort-by (comp - :ended-ms val) (filter (comp :ended-ms val) agents)))]
+    ;; each id's key computed once (sort-by would build it per comparison)
+    (mapv peek (sort (for [[id a] agents :when (or (not (:ended-ms a)) (kept id))
+                           :let [s (str id)]]
+                       [(count s) s id])))))
 
 (defn- ordered
   "st with the grid's order current: derived again only when root's agents changed (the
-  view's map is persistent: unchanged means identical) or a second passed (retirement is
-  by time)."
-  {:malli/schema [:=> [:cat :map :int] :map]}
-  [st now-ms]
+  view's map is persistent: unchanged means identical)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
   (let [agents (get-in st [:view :agents] {})]
-    (if (and (identical? agents (:order-agents st)) (< (- now-ms (:order-at st 0)) 1000))
+    (if (identical? agents (:order-agents st))
       st
-      (assoc st :order (order agents now-ms) :order-agents agents :order-at now-ms))))
+      (assoc st :order (order agents) :order-agents agents))))
 
 (defn- proc-health-of
   "Each declared root proc (the built system's, once it is) with the defects root's view
@@ -94,7 +97,7 @@
         n (c/view-numbers v)
         agents (:agents v {})]
     {:agents agents
-     :order (or (:order st) (order agents now-ms))
+     :order (or (:order st) (order agents))
      :writer (:writer n) :fork-server (:fork-server n) :store (:store n)
      :boot (:boot v) :root-errors (:root-errors v []) :root-errors-total (:root-errors-total v 0)
      ;; health is what flows: each declared proc with the defects root recorded of it (a
@@ -113,7 +116,7 @@
      ;; a stop that arrived before main recorded how the run ended says so once main does
      :events (mapv #(ui/ended-as % (:agent %) (:agent-run st {})) (:events st [])) :events-seen (:ev-seq st 0)
      :web {:tabs (:tabs st 0)}
-     :retire-ms RETIRE-MS
+     :ended-kept (ended-cap)
      :config (:config st)
      :now-ms now-ms}))
 
@@ -317,7 +320,7 @@
                (seq evs) (assoc :events (vec (take (event-cap) (concat (reverse evs) (:events st))))
                                 :ev-seq (+ seq0 (count evs)))
                true (assoc :new-events []))
-          st (ordered st now-ms)
+          st (ordered st)
           sys (system-value st t0 now-ms)
           ;; root's context: the system's AI face, also a unit of root's layout
           ctx (render/ai sys {:seon.render/schema :seon.render/system})

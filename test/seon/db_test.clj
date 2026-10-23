@@ -160,6 +160,53 @@
             "a tempid naming an identity the store holds is that entity, refs made before its map included"))
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
+(deftest a-release-commits-what-was-applied
+  ;; a write applied run-ahead (datahike.writer/apply!, an agent's transact!) and not yet
+  ;; committed is committed by the release (the :sync writer's shutdown drains it), never
+  ;; dropped. A store on disk of this test's own, the last resort; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))]
+    (try
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
+        (is (map? (dw/apply! conn {:tx-data [{:note/text "applied, not committed"}] :tx-meta (pdb/tx-meta :db)})))
+        (is (dw/pending? conn))
+        (d/release conn true))
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
+        (is (some #(= "applied, not committed" (:v %)) (d/datoms @conn :aevt :note/text)) "the applied write is in the store")
+        (d/release conn true))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest database-exists-answers-whether-a-store-is-there
+  ;; datahike.api/database-exists? answered through a go block that put! its value on
+  ;; Datahike's throwable-promise, which on Jolt is no channel: the fiber threw and the caller
+  ;; waited for ever (pure-tests' store-release-all-hang, after a store was removed). A store
+  ;; on disk of this test's own, the last resort; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))]
+    (try
+      (is (false? (d/database-exists? (pdb/store-cfg :lmdb path))) "no store at the path")
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)] (d/release conn true))
+      (is (true? (d/database-exists? (pdb/store-cfg :lmdb path))) "a store made there")
+      (clojure.java.shell/sh "rm" "-rf" path)
+      (is (false? (d/database-exists? (pdb/store-cfg :lmdb path))) "and none once it is removed")
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest a-store-made-again-at-a-removed-path-is-a-new-store
+  ;; a store released and removed, then made again at its path in the same process: the
+  ;; process's LMDB env for the path closed with the last store over it
+  ;; (konserve.jolt.lmdb/release-env!), so the new store opens its own files, never the old
+  ;; mapping (which still held :db: "Database already exists"). A store on disk of this
+  ;; test's own, the last resort; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))]
+    (try
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
+        (d/transact conn {:tx-data [{:note/text "the first store's"}] :tx-meta (pdb/tx-meta :db)})
+        (d/release conn true))
+      (clojure.java.shell/sh "rm" "-rf" path)
+      (let [{:keys [conn seeded?]} (pdb/open! :lmdb path 0 :db)]
+        (is (true? seeded?) "made, not found")
+        (is (not-any? #(= "the first store's" (:v %)) (d/datoms @conn :aevt :note/text)) "none of the removed store's facts")
+        (d/release conn true))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
 (deftest a-kept-store-from-before-the-runtime-attribute-opens
   ;; the transaction that installs :seon.tx/runtime cannot carry it in its tx-meta: a kept
   ;; store made before the attribute existed (every store before 2026-10-22) failed to open

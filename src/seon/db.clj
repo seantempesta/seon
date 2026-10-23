@@ -61,15 +61,17 @@
 
 (defn- stored-id
   "The id the store cfg names was made with, read from its :db head's stored config (0.8 ms),
-  or nil when no store is there yet."
+  or nil when no store is there yet. The store it connects for the read is released."
   {:malli/schema [:=> [:cat :seon.db/cfg] [:maybe :uuid]]}
   [cfg]
   (let [{:keys [backend path]} (:store cfg)]
     (when (posix/exists? (if (= backend :lmdb) (str path "/data.mdb") path))
-      (-> (konserve.store/connect-store (:store cfg) {:sync? true})
-          (datahike.store/add-cache-and-handlers (datahike.config/load-config cfg))
-          (datahike.writing/read-head :db)
-          (get-in [:config :store :id])))))
+      (let [store (konserve.store/connect-store (:store cfg) {:sync? true})
+            id (-> (datahike.store/add-cache-and-handlers store (datahike.config/load-config cfg))
+                   (datahike.writing/read-head :db)
+                   (get-in [:config :store :id]))]
+        (konserve.store/release-store (:store cfg) store {:sync? true})
+        id))))
 
 (defn store-cfg
   "Datahike config for the durable store at path; backend :lmdb (default) or :file. A store is

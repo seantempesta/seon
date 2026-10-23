@@ -44,6 +44,7 @@ def convert(text, path):
 changed = {}
 for f in files:
     if not f or f.startswith(('reference-code/', 'notes/')) or os.path.islink(f): continue
+    if f == 'test/seon/docs_test.clj': continue  # names the old word on purpose (no-text-uses-an-old-word)
     if f.endswith(('.zst', '.jpg', '.png', '.ico', '.woff2', '.diff')): continue
     try: s = open(f).read()
     except Exception: continue
