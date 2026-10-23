@@ -153,11 +153,11 @@
                            (assert (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
         put (fn [p t] (.mkdirs (.getParentFile (java.io.File. (str dir "/" p)))) (spit (str dir "/" p) t))]
     (git "init" "-q")
-    (put "src/app/gb.clj" "(ns app.gb)\n\n(defn f [] 1)\n\n(defn g [] 2)\n")
+    (put "src/app/gb.clj" "(ns app.gb)\n\n(defn f [] 1)\n\n(clojure.core/defn g [] 2)\n")
     (put "docs/p.md" "# P\n\nIt reads `app.gb/f`.\n\n## Q\n\nIt reads `app.gb/g`, `app.gb/h` and `app.gl/z`.\n")
     (git "add" ".") (git "commit" "-q" "-m" "first")
     (let [first (git "rev-parse" "HEAD")]
-      (put "src/app/gb.clj" "(ns app.gb)\n\n(defn f [] 11)\n\n(defn g [] 2)\n\n(defn h [] 3)\n")
+      (put "src/app/gb.clj" "(ns app.gb)\n\n(defn f [] 11)\n\n(clojure.core/defn g [] 2)\n\n(defn h [] 3)\n")
       (put "src/app/gl.clj" "(ns app.gl)\n\n(defn z [] 4)\n")
       (git "add" ".") (git "commit" "-q" "-m" "second")
       {:dir dir :first first :second (git "rev-parse" "HEAD")})))
