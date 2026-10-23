@@ -83,8 +83,8 @@
         db (agent/db)
         unc (added-gaps (:base @agent/state) db)
         unmerged (branch/unmerged)
-        {:keys [caused attention]} (problems/caused-split (:base @agent/state) db)]
-    {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :attention attention :task (task/task db id)
+        caused (problems/caused (:base @agent/state) db)]
+    {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :task (task/task db id)
      :will-merge (program/divergence (:base @agent/state) db)
      ;; root's ruling (a): what this turn ran, what the judge will run, what the merge runs
      :tests (when-not (contract/error? run)
@@ -94,7 +94,7 @@
                   (pos? unfinished) (assoc :unfinished unfinished))))
      :reasons (r/done-explain (assoc (r/done-input (r/index db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before
                                                    (if (contract/error? run) #{} (set (:deferred run))))
-                                     :caused (set caused)))}))
+                                     :caused caused))}))
 
 (defn- end!
   "The attempt's end: the live runtime staged onto the branch, the end written there (with
@@ -127,13 +127,13 @@
   done rule, the failing assertions of each test it names, the run's own errors, and what the
   branch's merge will carry to main."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{:keys [run reasons task results will-merge tests attention]}]
+  [{:keys [run reasons task results will-merge tests]}]
   (let [proofs (:proofs (:seon.task/accumulated task))
         named (into (set proofs) (keep :symbol) reasons)]
     {:results results :reasons reasons
      :reds (if (contract/error? run) [] (proofs/red-reports run named))
      :run-errors (if (contract/error? run) [(:seon.error/message run)] (proofs/run-errors run))
-     :will-merge will-merge :tests tests :attention attention}))
+     :will-merge will-merge :tests tests}))
 
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its

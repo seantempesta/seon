@@ -36,7 +36,7 @@
   derived classes, which read the program's names once (a set): their cost follows the
   citations (seon.problems-test/dead-citations-follow-the-citations)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.docs :as docs]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses "Attempt statuses of a death (:seon.attempt/status)." (:seon.status/failed (contract/properties :seon.attempt/status)))
@@ -205,100 +205,6 @@
               :producer nil :owner-ns 'seon.docs :proofs []
               :evidence {:kind :stale-pin :section a :path path :stated sha :recorded g} :answered-by (get-in ans [:signature s] []) :at-ms nil})))))
 
-;; ---- the wiki kept true: code that moved under its text, pages nothing links, issues with no page ----
-
-(defn- current-forms
-  "{var name form id} of every var of db with a form: three aevt scans, no seek."
-  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :qualified-symbol :string]]}
-  [db]
-  (let [ids (into {} (map (juxt :e :v)) (d/datoms db :aevt :form/id))
-        forms (into {} (map (juxt :e :v)) (d/datoms db :aevt :var/form))]
-    (into {} (keep (fn [{:keys [e v]}] (some->> (forms e) ids (vector v)))) (d/datoms db :aevt :var/name))))
-
-(defn stale-sections
-  "Each section whose text cites a var the code has changed since the section was last written, as a
-  :stale-section row: a var's form id (the form's own digest) now differs from the one the section
-  recorded when its text was last loaded (:seon.section/read, seon.docs/load-tx; my.docs/reviewed!
-  records a review). Open until the section is edited or reviewed; attention, never a refusal.
-  A var that is gone is a dead citation, not this. Cost: the vars' and forms' datoms in one scan each
-  and one lookup per recorded name. With only ({:names :sections}: var names and section entity ids)
-  just the recorded names among those names, and every name of those sections, are read: a seek for
-  each, no scan of the vars (what `caused-split` asks, of what a branch changed)."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]
-                  [:=> [:cat :seon.host/db :map [:maybe :map]] [:vector :seon.problems/row]]]}
-  ([db ans] (stale-sections db ans nil))
-  ([db ans only]
-   (let [address (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.section/address))
-         reads (if only
-                 (keep (fn [{:keys [e v]}]
-                         (let [vs (if ((:sections only) e) v (select-keys v (filter (:names only) (keys v))))]
-                           (when (seq vs) {:e e :v vs})))
-                       (d/datoms db :aevt :seon.section/read))
-                 (d/datoms db :aevt :seon.section/read))
-         now (if only (docs/read-map db (into #{} (mapcat (comp keys :v)) reads)) (current-forms db))]
-     (vec (concat
-            (for [{:keys [e v]} reads
-                  [n then] v
-                  :let [cur (now n)] :when (and cur (not= cur then))
-                  :let [a (address e) s (str "stale-section " a " " n)]]
-              {:signature s :section a :name n :then then :now cur :open? true
-               :message (if (= "absent" then)
-                          (str a " cites " n ", which did not exist when the section was last written: it is code now, read it")
-                          (str a " describes " n " as it was (form " then "), and it has changed (form " cur ")"))
-               :producer nil :owner-ns (symbol (namespace n)) :proofs []
-               :evidence {:kind :stale-section :section a :name n :then then :now cur}
-               :answered-by (get-in ans [:signature s] []) :at-ms nil})
-            ;; a section whose baseline git could not give is read as of today: said, as attention
-            (for [{:keys [e v]} (d/datoms db :aevt :seon.section/baseline-unread)
-                  :when (or (nil? only) ((:sections only) e))
-                  :let [a (address e) s (str "stale-section " a " baseline")]]
-              {:signature s :section a :name nil :open? true
-               :message (str a " was recorded as of today: its baseline could not be taken from git (" v ")")
-               :producer nil :owner-ns 'seon.docs :proofs []
-               :evidence {:kind :stale-section :section a :unread v}
-               :answered-by (get-in ans [:signature s] []) :at-ms nil}))))))
-
-(defn orphan-pages
-  "Each page of the wiki that no other page links to, as an :orphan-page row: a page is its sections'
-  common path (docs/x.md#heading); it is linked when a section of another page has a reference to one of
-  its sections. The map (docs/README.md) is the root and is not judged; a db whose wiki has no map
-  has no orphans (unknown). Open until a page or the map links it. Cost: the section and reference
-  datoms, once."
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
-  [db ans]
-  (let [page-of (into {} (map (fn [{:keys [e v]}] [e (first (str/split v #"#" 2))])) (d/datoms db :aevt :seon.section/address))
-        map-page "docs/README.md"]
-    (if-not (some #{map-page} (vals page-of))
-      []
-      (let [linked (into #{} (keep (fn [{:keys [e v]}] (let [from (page-of e) to (page-of v)] (when (and to (not= from to)) to))))
-                         (d/datoms db :aevt :seon.section/references))]
-        (vec (for [p (sort (set (vals page-of))) :when (and (not= p map-page) (not (linked p)))
-                   :let [s (str "orphan-page " p)]]
-               {:signature s :page p :open? true
-                :message (str p " is linked from no other page, not even the map (docs/README.md)")
-                :producer nil :owner-ns 'seon.docs :proofs []
-                :evidence {:kind :orphan-page :page p} :answered-by (get-in ans [:signature s] []) :at-ms nil}))))))
-
-(defn problem-unlinked
-  "Each class of classes ({class {:rows ...}}) with an open row whose wiki section (:seon.problems/docs)
-  is no stored section, or that declares none, as a :problem-unlinked row: an issue that points
-  nowhere is itself a problem. None while the db holds no wiki (unknown). Cost: one lookup per
-  class with rows."
-  {:malli/schema [:=> [:cat :seon.host/db :map :map] [:vector :seon.problems/row]]}
-  [db ans classes]
-  (if (empty? (d/datoms db :aevt :seon.section/address))
-    []
-    (let [docs (:seon.problems/docs (contract/properties :seon.problems/class))]
-      (vec (for [[c {:keys [rows]}] (sort-by (comp str key) classes) :when (some #(not (false? (:open? %))) rows)
-                 :let [page (docs c)] :when (or (nil? page) (nil? (pdb/eid db :seon.section/address page)))
-                 :let [s (str "problem-unlinked " (name c))]]
-             {:signature s :class c :page page :open? true
-              :message (if page
-                         (str (name c) " has open problems, and its section " page " is no section of the wiki")
-                         (str (name c) " has open problems and no section of the wiki declared for it (:seon.problems/docs)"))
-              :producer nil :owner-ns 'seon.problems :proofs []
-              :evidence {:kind :problem-unlinked :class c :page page} :answered-by (get-in ans [:signature s] []) :at-ms nil})))))
-
 ;; ---- caused: what a branch's own work made true -----------------------------------------
 
 (defn- section-state
@@ -326,12 +232,11 @@
         ids (attr :form/id) srcs (attr :form/src)]
     (into {} (for [[e cs] carrying] [(ids e) {:e e :catches cs :src (srcs e)}]))))
 
-(defn caused-split
-  "{:caused :attention}: the derived problems the branch at head has that base (its merge base) had not, by
-  message: what the branch's own work broke (:caused: the done rule refuses while any is open,
-  seon.reconcile/done-explain :open-problem) and what it changed under the wiki (:attention: the
-  sections it made stale, which the agent reads and never a reason to refuse; the classes
-  :seon.problems/attention declares). An evaluation is never refused (AGENTS: get out of an agent's way).
+(defn caused
+  "The derived problems the branch at head has that base (its merge base) had not, by
+  message: what the branch's own work broke. The done rule refuses while any is open
+  (seon.reconcile/done-explain :open-problem), and the agent reads them each turn; an
+  evaluation is never refused (AGENTS: get out of an agent's way).
   Base and head are compared by value, never by tx (a branch's tx counter is its own): the
   sections whose citations or dead links differ, the sections citing a name a var or task lost,
   and the forms carrying a law's fact whose catches or text differ are the candidates, and
@@ -342,7 +247,7 @@
   (seon.problems-test/caused-follows-what-changed). Measured on Seon's own program (300 sections,
   880 citations, 1,735 vars, 30 catch forms) with a var every cite deleted: 11-12 ms against 26-29 ms
   for the two full readings; an unchanged branch 7 ms, the scan's floor."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map [:caused [:vector :string]] [:attention [:vector :string]]]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :string]]}
   [base head]
   (let [bs (section-state base) hs (section-state head)
         removed (set/difference (existing-names base) (existing-names head))
@@ -358,23 +263,12 @@
         lf (memoize (fn [db fact] (law-forms db fact)))
         changed-forms (memoize (fn [fact] (let [h (lf head fact) b (lf base fact)]
                                             (set (for [[id st] h :when (not= (dissoc st :e) (dissoc (b id) :e))] id)))))
-        ;; the stale sections the branch's change can have made: those citing a var it changed, and the sections that differ
-        moved (program/changed-vars base head)
         rows (fn [db state forms-of]
-               (concat (map #(assoc % :class :dead-citation) (dead-citations db {} (eids state)))
-                       (map #(assoc % :class :unnamed-site) (sites db state forms-of))
-                       (map #(assoc % :class :stale-section) (stale-sections db {} {:names moved :sections (eids state)}))))
+               (concat (dead-citations db {} (eids state)) (sites db state forms-of)))
         before (into #{} (map :signature)
                      (rows base bs (fn [fact] (set (keep #(:e ((lf base fact) %)) (changed-forms fact))))))]
-    (let [attention? (:seon.problems/attention (contract/properties :seon.problems/class))
-          made (remove (comp before :signature) (rows head hs (fn [fact] (set (keep #(:e ((lf head fact) %)) (changed-forms fact))))))
-          messages (fn [pred] (vec (sort (into #{} (comp (filter pred) (map :message)) made))))]
-      {:caused (messages (complement (comp attention? :class))) :attention (messages (comp attention? :class))})))
-
-(defn caused
-  "The derived problems the branch at head has that base had not that refuse its done (`caused-split`'s :caused)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :string]]}
-  [base head] (into (sorted-set) (:caused (caused-split base head))))
+    (into (sorted-set) (comp (remove (comp before :signature)) (map :message))
+          (rows head hs (fn [fact] (set (keep #(:e ((lf head fact) %)) (changed-forms fact))))))))
 
 ;; ---- attempts ------------------------------------------------------------------------
 
@@ -520,20 +414,15 @@
 
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the
-  program's facts make true now (`dead-citations`, `unnamed-sites`, `stale-pins`, `stale-sections`,
-  `orphan-pages`, and `problem-unlinked` over all of them). What the page, an agent's context and
+  program's facts make true now (`dead-citations`, `unnamed-sites`, `stale-pins`). What the page, an agent's context and
   the done and merge gates read: computed when read, never stored, never polled."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]
                   [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}
   ([db] (health db {}))
   ([db fold]
-   (let [ans (answers db)
-         derived {:dead-citation (dead-citations db ans) :unnamed-site (unnamed-sites db ans) :stale-pin (stale-pins db ans)
-                  :stale-section (stale-sections db ans) :orphan-page (orphan-pages db ans)}
-         classes (merge (:classes (report db fold)) (update-vals derived (fn [rows] {:n (count rows) :rows rows})))
-         ;; its own class last: a missing section of the unlinked class is one more row
-         unlinked (problem-unlinked db ans classes)
-         unlinked (into unlinked (problem-unlinked db ans (assoc classes :problem-unlinked {:rows unlinked})))
-         unlinked (vec (distinct unlinked))]
-     (vary-meta (assoc {:t (:max-tx db)} :classes (assoc classes :problem-unlinked {:n (count unlinked) :rows unlinked}))
+   (let [ans (answers db) dead (dead-citations db ans) unnamed (unnamed-sites db ans) pinned (stale-pins db ans)]
+     (vary-meta (update (report db fold) :classes assoc
+                        :dead-citation {:n (count dead) :rows dead}
+                        :unnamed-site {:n (count unnamed) :rows unnamed}
+                        :stale-pin {:n (count pinned) :rows pinned})
                 assoc :seon.render/schema :seon.problems/report))))
