@@ -120,18 +120,22 @@
         parked (str "(do (ns parked-proof (:require [clojure.test :refer [deftest is]]))"
                     " (deftest p (let [w (java.io.FileOutputStream. " (pr-str fifo) ")] (.write w 49) (.flush w) (Thread/sleep 60000) (.write w 50) (.flush w)) (is true))"
                     " (seon.agent/run-tests-forked 1000000000 '#{parked-proof/p}))")
-        _ (eval-root (str "(do (c/submit! sys :a1 " (pr-str parked) ") :sent)"))
-        agent-pid (eval-root "(:pid (:a1 (:agents (c/state sys))))")
+        ;; a1 begins the form (its :started event, tapped before the submit); root knows its pid by then
+        _ (eval-root (str "(let [ev (c/events sys)] (c/submit! sys :a1 " (pr-str parked) ") "
+                          "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= :a1 (:agent e))) :began (recur)))))"))
+        pids (eval-root "(into {} (for [[id a] (:agents (c/state sys))] [id (:pid a)]))")
+        agent-pid (get pids :a1)
         in (java.io.FileInputStream. ^String fifo)
         began (.read in)
-        _ (sh/sh "kill" "-9" (str agent-pid))
+        killed (sh/sh "kill" "-9" (str agent-pid))
         ended (.read in)]
     (.close in)
     (ts/kill-root! root)
     (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
     (sh/sh "rm" "-rf" runs fifo)
+    (is (pos-int? agent-pid) (str "the agent's pid, from " (pr-str pids)))
     (is (= 49 began) "the proof run was in its test")
-    (is (= -1 ended) (str "the proof run outlived its agent (byte " ended " after its sleep)"))))
+    (is (= -1 ended) (str "the proof run outlived its agent (byte " ended " after its sleep); agent " (pr-str agent-pid) " kill " (pr-str killed)))))
 
 (deftest a-blocked-agent-ends-with-its-root
   ;; task seon.agent/an-agent-ends-with-its-root, an agent blocked in a wait: its thread in
