@@ -904,16 +904,17 @@
           st1 (#'p/ordered st)]
       (is (identical? (:order st1) (:order (#'p/ordered (assoc st1 :view {:agents agents})))) "unchanged agents: not derived again"))))
 
-;; ---- the walk (task seon.render/the-walk): an entity and the units its schema declares ----
+;; ---- the walk (task seon.render/walk): an entity and the units its schema declares ----
 
 (def ^:private walked-plan
   "A plan citing a var (one backtick: its doc), a namespace and a wiki section (a link)."
   "Make `seon.render/walk` answer the tree; its printer is `seon.print`, and see [no clipping](docs/render.md#no-clipping).")
 
 (defn- walked-db
-  "Main as root writes it: root, a task, root's agent a3, the agent's run of the task, a message
-  to the run, a turn of the run and two evaluations of the agent, each written by its
-  producer's own function, so each link is the ref production makes."
+  "Main as root writes it: root, a task, root's agent a3, the agent's run of the task with a proof
+  result (a component), a message to the run, a turn of the run and two evaluations of the agent,
+  each written by its producer's own function, so each link is the ref production makes. The
+  turn's reply and the message cite what the plan cites."
   []
   (let [k (seon.task/agent-key "b1" :a3)]
     (reduce d/db-with (ts/test-db)
@@ -922,87 +923,124 @@
                :seon.task/branch :task-demo-f :seon.task/kind :work :seon.task/proofs #{'demo/f-test}}]
              (seon.task/agent-tx "b1" :a3 {:status :idle :pid 77 :running {:form "(f 2)"}})
              (seon.task/attempt-start-tx "demo/f#1" "demo/f" "b1" k {:branch :task-demo-f :model "m" :max-turns 8} 0 "p")
-             (seon.task/message-tx "m-1" "owner" "demo/f#1" "check g")
+             [{:seon.attempt/id "demo/f#1" :seon.attempt/results [{:seon.proof/test 'demo/f-test :seon.proof/status :pass}]}]
+             (seon.task/message-tx "m-1" "owner" "demo/f#1" "check g, see `seon.print`")
              [{:db/id "run" :seon.attempt/id "demo/f#1"}
-              {:seon.turn/id "demo/f#1/0" :seon.turn/attempt "run" :seon.turn/n 0 :seon.turn/origin :model :seon.turn/reply "(f 2)"
+              {:seon.turn/id "demo/f#1/0" :seon.turn/attempt "run" :seon.turn/n 0 :seon.turn/origin :model :seon.turn/reply "(f 2), as `seon.render/walk` says"
                :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 0 :seon.turn/ms 5}]
              (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "a3-77-1"
                                   [{:id 1 :tag :ret :form "(f 2)" :printed "4"} {:id 2 :tag :ret :form "(f 3)" :printed "6"}] nil)])))
 
 (defn- eid-of [db ref] (:db/id (d/entity db ref)))
 
+(defn- attr-of [nd] (get-in nd [:seon.render/from :seon.render/attr]))
+
+(defn- values-of
+  "The k of each node of walk w reached by attribute a."
+  [w a k] (into [] (comp (filter #(= a (attr-of %))) (map #(get-in % [:seon.render/value k]))) (:seon.render/nodes w)))
+
 (deftest a-walk-is-its-entity-and-its-units
-  (let [db (walked-db)
-        unit-ids (fn [w a k] (into [] (comp (filter #(= a (:attr %))) (map #(get-in % [:value k]))) (:units w)))]
+  (let [db (walked-db)]
     (testing "an agent: its own attributes, then its units in its schema's order, each a neighbour pulled whole"
-      (let [w (r/walk db (eid-of db [:seon.agent/key "b1/a3"]))]
-        (is (= :seon.db/agent-fact (:schema w)))
+      (let [eid (eid-of db [:seon.agent/key "b1/a3"])
+            w (r/walk db eid)
+            root (:seon.render/root w)]
+        (is (= {:seon.render/kind :entity :seon.render/schema :seon.db/agent-fact :seon.render/eid eid}
+               (select-keys root [:seon.render/kind :seon.render/schema :seon.render/eid :seon.render/from])) "the root came from nowhere")
         (is (= {:seon.agent/id :a3 :seon.agent/status :idle :seon.agent/pid 77 :seon.agent/running "(f 2)"}
-               (select-keys (:entity w) [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/running])))
-        (is (= [:seon.attempt/_agent :seon.cluster.eval/_agent :seon.cluster.eval/_agent :seon.agent/root] (mapv :attr (:units w))))
-        (is (not (contains? (:entity w) :seon.agent/root)) "a unit is shown as its tile, not again in the entity")
-        (is (= ["demo/f#1"] (unit-ids w :seon.attempt/_agent :seon.attempt/id)))
-        (is (= ["a3-77-1/1" "a3-77-1/2"] (unit-ids w :seon.cluster.eval/_agent :seon.cluster.eval/id)))
-        (is (= [:root] (unit-ids w :seon.agent/root :seon.root/id)))
-        (testing "each unit names its entity and its own schema"
-          (is (= [:seon.attempt/attempt-fact :seon.db/eval-fact :seon.db/eval-fact :seon.root/root-fact] (mapv :schema (:units w))))
-          (is (every? pos-int? (map :eid (:units w)))))
-        (testing "one hop: a neighbour's own links are its refs, not pulled"
-          (is (= [:db/id] (keys (get-in (first (:units w)) [:value :seon.attempt/task])))))))
+               (select-keys (:seon.render/value root) [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/running])))
+        (is (not (contains? (:seon.render/value root) :seon.agent/root)) "a unit is its own node, not again in the entity")
+        (is (= [:seon.attempt/_agent :seon.cluster.eval/_agent :seon.cluster.eval/_agent :seon.agent/root] (mapv attr-of (:seon.render/nodes w))))
+        (is (every? #(= eid (get-in % [:seon.render/from :seon.render/eid])) (:seon.render/nodes w)) "each says where it came from")
+        (is (= ["demo/f#1"] (values-of w :seon.attempt/_agent :seon.attempt/id)))
+        (is (= ["a3-77-1/1" "a3-77-1/2"] (values-of w :seon.cluster.eval/_agent :seon.cluster.eval/id)))
+        (is (= [:root] (values-of w :seon.agent/root :seon.root/id)))
+        (testing "each node is an entity with its own schema; an evaluation, with no identity, the one naming the ref that reached it"
+          (is (= [:seon.attempt/attempt-fact :seon.db/eval-fact :seon.db/eval-fact :seon.root/root-fact] (mapv :seon.render/schema (:seon.render/nodes w))))
+          (is (every? #(= :entity (:seon.render/kind %)) (:seon.render/nodes w))))
+        (testing "one hop: a neighbour's refs are {:db/id}, its components whole"
+          (let [run (first (:seon.render/nodes w))]
+            (is (= [:db/id] (keys (get-in run [:seon.render/value :seon.attempt/task]))))
+            (is (= [:pass] (mapv :seon.proof/status (get-in run [:seon.render/value :seon.attempt/results]))))))))
     (testing "a run: its task, its turns, the messages to it"
       (let [w (r/walk db (eid-of db [:seon.attempt/id "demo/f#1"]))]
-        (is (= :seon.attempt/attempt-fact (:schema w)))
-        (is (= [:seon.attempt/task :seon.turn/_attempt :seon.message/_to] (mapv :attr (:units w))))
-        (is (= ["demo/f"] (unit-ids w :seon.attempt/task :seon.task/id)))
-        (is (= ["demo/f#1/0"] (unit-ids w :seon.turn/_attempt :seon.turn/id)))
-        (is (= ["check g"] (unit-ids w :seon.message/_to :seon.message/body)))))
+        (is (= :seon.attempt/attempt-fact (get-in w [:seon.render/root :seon.render/schema])))
+        (is (= [:seon.attempt/task :seon.turn/_attempt :seon.message/_to] (mapv attr-of (:seon.render/nodes w))))
+        (is (= ["demo/f"] (values-of w :seon.attempt/task :seon.task/id)))
+        (is (= ["demo/f#1/0"] (values-of w :seon.turn/_attempt :seon.turn/id)))
+        (is (= ["m-1"] (values-of w :seon.message/_to :seon.message/id)))))
     (testing "root: its agents"
-      (let [w (r/walk db (eid-of db [:seon.root/id :root]))]
-        (is (= [:seon.agent/_root] (mapv :attr (:units w))))
-        (is (= [:a3] (unit-ids w :seon.agent/_root :seon.agent/id)))))
-    (testing "a task: units that are its own values, plan then proofs, with no entity of their own"
-      (let [w (r/walk db (eid-of db [:seon.task/id "demo/f"]))]
-        (is (= [[:seon.task/plan walked-plan] [:seon.task/proofs ['demo/f-test]]] (mapv (juxt :attr :value) (:units w))))
-        (is (= [:seon.task/plan :seon.task/proofs] (mapv :schema (:units w))) "a value's schema is its attribute's")
-        (is (not-any? :eid (:units w)))
-        (is (not (contains? (:entity w) :seon.task/plan)))))))
+      (is (= [:a3] (values-of (r/walk db (eid-of db [:seon.root/id :root])) :seon.agent/_root :seon.agent/id))))
+    (testing "a task: units that are its own values, plan then proofs, each its attribute's schema"
+      (let [eid (eid-of db [:seon.task/id "demo/f"])
+            w (r/walk db eid)]
+        (is (= [[:value :seon.task/plan walked-plan eid] [:value :seon.task/proofs ['demo/f-test] eid]]
+               (mapv (juxt :seon.render/kind :seon.render/schema :seon.render/value :seon.render/eid) (:seon.render/nodes w))))
+        (is (not (contains? (get-in w [:seon.render/root :seon.render/value]) :seon.task/plan)))))
+    (testing "an eid with nothing on db is an error to the asker, not an empty entity"
+      (is (= :seon.render/no-entity (:seon.error/type (r/walk db 99999999)))))
+    (testing "every identity and ref attribute is named by one entity schema (the walk's schema of an entity)"
+      (let [named (frequencies (for [[k form] seon.contract/forms :when (:seon.db/attributes (seon.contract/properties k))
+                                     [a] (filter vector? (rest form))
+                                     :when (#{:seon.agent/key :seon.attempt/id :seon.task/id :seon.root/id :seon.turn/id :seon.message/id
+                                              :seon.attempt/agent :seon.turn/attempt :seon.message/to :seon.agent/root :seon.cluster.eval/agent :seon.attempt/task} a)]
+                                 a))]
+        (is (every? #{1} (vals named)) (pr-str named))))))
 
 (deftest a-walk-pulls-what-its-strings-cite
   (let [db (walked-db)
-        w (r/walk db (eid-of db [:seon.task/id "demo/f"]))
-        by (into {} (map (juxt (comp str (some-fn :seon.ref/name :seon.ref/path) :citation) identity)) (:cited w))]
-    (is (= #{"seon.render/walk" "seon.print" "docs/render.md"} (set (keys by))) "each citation once, in the plan's words")
-    (is (every? #(= :seon.task/plan (:attr %)) (:cited w)) "named by the attribute that cites it")
-    (testing "each pulled at the depth its delimiter asks, as the model's context pulls it (seon.docs/cited)"
-      (is (= :doc (get-in by ["seon.render/walk" :citation :seon.ref/depth])))
-      (is (= 'seon.render/walk (get-in by ["seon.render/walk" :view :symbol])))
-      (is (string? (get-in by ["seon.render/walk" :view :doc])))
-      (is (= "seon.print" (get-in by ["seon.print" :view :seon.ref/address])))
-      (is (= "docs/render.md#no-clipping" (get-in by ["docs/render.md" :view :seon.ref/address])))
-      (doseq [{:keys [citation view]} (:cited w)]
-        (is (= (seon.docs/cited db citation) view))))
-    (testing "a text that cites nothing pulls nothing"
-      (is (= [] (:cited (r/walk db (eid-of db [:seon.attempt/id "demo/f#1"]))))))))
+        task (eid-of db [:seon.task/id "demo/f"])
+        w (r/walk db task)
+        refs (:seon.render/refs w)]
+    (testing "the plan's citations, each pulled once at its delimiter's depth (seon.docs/cited, the context's pull), numbered"
+      (is (= [[1 :var "seon.render/walk" :doc] [2 :namespace "seon.print" :doc] [3 :section "docs/render.md#no-clipping" :doc]]
+             (mapv (juxt :seon.render/n :seon.render/kind :seon.render/address :seon.render/depth) refs)))
+      (is (= 'seon.render/walk (get-in refs [0 :seon.render/value :symbol])))
+      (is (string? (get-in refs [0 :seon.render/value :doc])))
+      (is (= "docs/render.md#no-clipping" (get-in refs [2 :seon.render/value :seon.ref/address])))
+      (is (= [{:seon.render/eid task :seon.render/attr :seon.task/plan :seon.render/line 1}] (get-in refs [0 :seon.render/cited-at])))
+      (is (= [1 2 3] (get-in w [:seon.render/nodes 0 :seon.render/cites])) "the plan's node cites them by number"))
+    (testing "only prose cites: an id names its entity, and a value that is no prose is data"
+      (is (not-any? #(= "demo/f" (:seon.render/address %)) refs))
+      (is (nil? (get-in w [:seon.render/root :seon.render/cites]))))
+    (testing "a citation repeated across the walk is one ref, cited by its number at each place"
+      (let [run (r/walk db (eid-of db [:seon.attempt/id "demo/f#1"]))
+            by (into {} (map (juxt attr-of :seon.render/cites)) (:seon.render/nodes run))]
+        (is (= 3 (count (:seon.render/refs run))))
+        (is (= {:seon.attempt/task [1 2 3] :seon.turn/_attempt [1] :seon.message/_to [2]} by))
+        (is (= [:seon.task/plan :seon.turn/reply] (mapv :seon.render/attr (get-in run [:seon.render/refs 0 :seon.render/cited-at]))))))
+    (testing "refs a context has already seen keep their numbers: the run's turn and message cite 1 and 2 of the task's walk"
+      (let [run (r/walk db (eid-of db [:seon.attempt/id "demo/f#1"]) refs)]
+        (is (= (mapv :seon.render/value refs) (mapv :seon.render/value (:seon.render/refs run))))
+        (is (= [1] (:seon.render/cites (second (:seon.render/nodes run)))))
+        (is (= 3 (count (get-in run [:seon.render/refs 0 :seon.render/cited-at]))) "the task's place, then the run's task's and its turn's")))))
 
 (deftest a-walk-names-the-render-of-each-part
   (let [db (walked-db)
         run (eid-of db [:seon.attempt/id "demo/f#1"])
-        ps (r/parts (r/walk db run) {})
-        prov #(select-keys % [:as :eid :attr :schema :render])]
-    (is (= [:block :tile :tile :tile] (mapv :as ps)) "the entity as its block, each unit as its tile")
-    (is (= {:as :block :eid run :attr nil :schema :seon.attempt/attempt-fact
-            :render {:ai 'seon.render/print-ai :html 'seon.render/print-html}}
-           (prov (first ps))) "no render declared: the one printer, named")
-    (is (= {:as :tile :eid (eid-of db [:seon.turn/id "demo/f#1/0"]) :attr :seon.turn/_attempt :schema :seon.turn/turn-fact
-            :render {:ai 'seon.render/print-ai :html 'seon.render.ui/turn-row}}
-           (prov (nth ps 2))) "a turn by its schema's declared render")
-    (testing "both faces from the one walk"
-      (is (every? (comp string? :text) ps))
-      (is (every? (comp vector? :html) ps))
-      (is (str/includes? (:text (first ps)) "demo/f#1"))
-      (is (str/includes? (:text (nth ps 3)) "check g")))
-    (testing "a citation is a part too, named by what cites it"
-      (let [cps (filter :citation (r/parts (r/walk db (eid-of db [:seon.task/id "demo/f"])) {}))]
-        (is (= 3 (count cps)))
-        (is (every? #(= :seon.task/plan (:attr %)) cps))
-        (is (every? (comp string? :text) cps))))))
+        w (r/rendered (r/walk db run) {})
+        [task-node turn msg] (:seon.render/nodes w)
+        by (juxt :seon.render/as :seon.render/ai-by :seon.render/html-by)]
+    (is (= [:block 'seon.render/print-ai 'seon.render/print-html] (by (:seon.render/root w))) "no render declared: the one printer, named")
+    (is (= [:tile 'seon.render/print-ai 'seon.render.ui/turn-row] (by turn)) "a turn by its schema's declared render")
+    (is (= (r/render-of (:seon.render/value turn) :html :seon.turn/turn-fact) @(requiring-resolve (:seon.render/html-by turn))) "the named render is the one that ran")
+    (is (every? #(= :tile (:seon.render/as %)) (concat [task-node msg] (:seon.render/refs w))))
+    (testing "both faces from the one walk, each saying whether it was cut"
+      (is (str/includes? (:seon.render/ai-text (:seon.render/root w)) "demo/f#1"))
+      (is (false? (:seon.render/truncated? (:seon.render/root w))))
+      (is (str/includes? (h/html (:seon.render/hiccup turn)) "as `seon.render/walk` says") "the turn row shows the turn's reply")
+      (is (str/includes? (:seon.render/ai-text msg) "check g"))
+      (is (str/includes? (:seon.render/ai-text (first (:seon.render/refs w))) "seon.render/walk")))))
+
+(deftest render-name-names-what-render-of-picks
+  ;; render-name repeats render-of's selection (a shared step would cost the printer three calls a
+  ;; nested value): every outcome agrees
+  (doseq [[v face hint] [[{:k 1} :ai nil] [{:k 1} :html nil]
+                         [{:seon.attempt/id "x#1"} :ai nil] [{:seon.attempt/id "x#1"} :html nil]
+                         [{:k 1 :seon.render/html 'seon.render.ui/task-box} :html nil]
+                         [{:k 1 :seon.render/html [:b "mine"]} :html nil]
+                         [{:k 1} :html :seon.turn/turn-fact] [{:k 1} :ai :seon.task/task]]
+          :let [f (r/render-of v face hint) n (r/render-name v face hint)]]
+    (if f
+      (is (= f @(requiring-resolve n)) (pr-str v face hint))
+      (is (contains? #{'seon.render/print-ai 'seon.render/print-html (r/faces face)} n) (pr-str v face hint)))))
