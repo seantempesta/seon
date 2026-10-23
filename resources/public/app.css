@@ -490,3 +490,7 @@ details.fns summary { cursor: pointer; font-size: 10.5px; color: var(--text-500)
 .zhead .stats { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; }
 .zhead .stats em { font-style: normal; color: var(--text-500); margin-right: 5px; }
 .hr pre.lead { margin: 0; color: var(--text-400); font-style: italic; white-space: pre-wrap; font-size: 10.5px; }
+li.turn .tfoot { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 10.5px; color: var(--text-500); }
+li.turn p.lead { margin: 0; color: var(--text-200); font-style: normal; font-size: 12px; }
+li.turn p.reply { margin: 0; color: var(--text-100); }
+.zhead p.lead { margin: 4px 0; color: var(--text-100); font-size: 13px; }

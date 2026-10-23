@@ -917,7 +917,7 @@
                                    :outside "an outside agent evaluated, through root's server"
                                    :context "an outside agent read its context, through root's server"
                                    "root's request: the agent evaluated it (its turn loop, when the form is seon.turn/work!)")]
-      (when (:lead e) [:pre {:class "lead"} (prose (:lead e) (form-budget))])
+      (when (:lead e) [:p {:class "lead"} (prose (str/replace (:lead e) #"(?m)^\s*;+ ?" "") (form-budget))])
       [:div {:class "hf"} [:code (prose (:form e) (form-budget))]]
       [:div {:class "hv"} (eval-out e (or (:budget opts) (config/value :seon.config.render/value-budget)) (part) nil true)]
       (when (and (seq (:out e)) (not (context-read? e))) [:pre {:class "out"} (prose (:out e) (part))])
@@ -936,7 +936,7 @@
   now), how its attempt stands or ended (outcome and reason), and its task held for root (the
   failure). From root's view entry, main's attempt and task; an agent neither knows says so."
   {:malli/schema [:=> [:cat :map [:maybe :map] [:maybe :map] nat-int?] [:vector :string]]}
-  [ag attempt task turns]
+  [ag attempt task model-turns]
   (let [st (when (:status ag) (shown-status ag))
         {:seon.attempt/keys [id status outcome reason env]} attempt
         max-turns (:max-turns env)
@@ -948,7 +948,7 @@
       (:error ag) (conj (str "root recorded: " (:seon.error/message (:error ag))))
       (and st (live st) (not (:running ag)) (not outside?)) (conj (str (kname st) ": waits for its next request"))
       (and st (live st) outside?) (conj "worked from outside (model outside): waits for its outside agent's next request through root's server")
-      (= :running status) (conj (str "attempt " id " running: " turns " turn" (when (not= 1 turns) "s") " recorded"
+      (= :running status) (conj (str "attempt " id " running: " model-turns " model turn" (when (not= 1 model-turns) "s") " recorded"
                                      (when max-turns (str " of at most " max-turns))
                                      (when (and (:running ag) (not outside?)) "; the turn after the last recorded is in flight (model, then its evaluations)")))
       (and status (not= :running status)) (conj (str "attempt " id " " (kname status) (when outcome (str ", outcome " (kname outcome))) (when reason (str ": " reason))))
@@ -971,14 +971,26 @@
         {:keys [model branch]} (:seon.attempt/env attempt)]
          [:section {:id "z-head" :class (str "zhead cb s-" st)}
       [:h1 [:span {:class (str "dot s-" st)}] (kname (:id agent)) " " (status-pill agent st)
-       [:span {:class "branch"} (str " branch " (kname (or (:branch agent) branch)))]]
+       [:span {:class "branch" :title (str "the store names it " (kname (or (:branch agent) branch)) " (under root's main)")} (str " branch " (kname (or branch (:branch agent))))]]
+      ;; the one sentence: what it worked, how that went, what it took
+      (when attempt
+        [:p {:class "lead"}
+         (str (:seon.attempt/task attempt) ": " (kname (:seon.attempt/status attempt))
+              (when-let [o (:seon.attempt/outcome attempt)] (str ", " (kname o)))
+              " · " (:model turns) " model turn" (when (not= 1 (:model turns)) "s")
+              (when (pos? (:reads turns)) (str ", " (:reads turns) " reads"))
+              (when (and start-ms end-ms) (str " · " (ms-str (- end-ms start-ms))))
+              (when (:tokens turns) (str " · " (group3 (:tokens turns)) " tokens")))])
       (when-let [t (or (:task agent) (:seon.attempt/task attempt))] [:p {:class "task"} (str t)])
-      [:ul {:class "why"} (for [l (why agent attempt task (:n turns))] [:li l])]
+      [:ul {:class "why"} (for [l (why agent attempt task (:model turns))] [:li l])]
+      ;; its evaluations: every one its branch records (the card's count is this boot's process's)
       (agent-stats agent (:evals turns) nil)
       [:div {:class "stats"}
        [:span [:em "attempt"] (or (:seon.attempt/id attempt) "–")]
        [:span {:title "the task's model, else root's (:seon.config.ai/model)"} [:em "model"]
-        (cond model model attempt (str (config/value :seon.config.ai/model) " (root's default)") :else "–")]
+        (cond model model
+              (= :scripted (config/value :seon.config.ai/provider)) "scripted (a test fixture, no model)"
+              attempt (str (config/value :seon.config.ai/model) " (root's default)") :else "–")]
        [:span {:title "the attempt's start, local time (:seon.config.web/utc-offset)"} [:em "started"] (str (clock start-ms) " UTC" (config/value :seon.config.web/utc-offset))]
        (when end-ms [:span {:title "the attempt's end, local time"} [:em "ended"] (str (clock end-ms) " UTC" (config/value :seon.config.web/utc-offset))])
        (when (and start-ms end-ms) [:span {:title "wall time, the attempt's start to its end: its fork, every turn and its judging"} [:em "took (wall)"] (ms-str (- end-ms start-ms))])
@@ -988,7 +1000,7 @@
        [:span {:title "at the model's configured prices, off-peak (the provider charges twice at peak); a turn whose provider did not split cached from uncached prompt tokens, or whose model has no prices, is not priced"}
         [:em "cost"] (cond (and (:usd turns) (pos? (:unpriced turns))) (str (cost-str (:usd turns)) " + " (:unpriced turns) " turns not priced")
                            (:usd turns) (cost-str (:usd turns))
-                           (pos? (:unpriced turns)) (str "not priced: " (:unpriced turns) " turns without a cache split or prices")
+                           (pos? (:unpriced turns)) (str "unknown: " (:unpriced turns) " turns whose provider gave no cached/uncached split, or a model with no prices")
                            :else "none spent")]]]))
 
 (defn agent-input
@@ -1039,65 +1051,66 @@
   (let [budget (config/value :seon.config.render/turn-text-budget)
         prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
         obs (:observed basis)]
-         [:li {:id (str "turn-" (dom-id id)) :class (str "turn o-" (kname origin) (when (and errors (pos? errors)) " has-err"))}
-      [:header
-       [:b (if (= :outside origin) (str "read " n) (str "turn " (inc n)))]
-       (when (= :outside origin) [:span {:class "muted"} " · a context read through root's server, no model call"])
-       [:span {:class "muted"} (str " " id)]
-       (when tokens [:span {:title "prompt and completion tokens, as the provider counted them"} (str " · " (group3 tokens) " tokens")])
-       (when prompt [:span {:title "the share of the prompt the provider served from its prefix cache"}
-                     (str " · " (if (pos? prompt) (long (* 100 (/ cache-hit-tokens prompt))) 0) "% cached")])
-       (when usd [:span {:title "at the model's configured prices, off-peak"} (str " · " (cost-str usd))])
-       (when finish [:span {:title "how the reply stopped"} (str " · " finish)])
-       (when model [:span {:class "muted"} (str " · " model)])
-       (when truncated [:span {:class "bad"} " · cut at the token limit"])
-       ;; an outside read records no forms, errors or red: it evaluated nothing
-       (when forms [:span (str " · " forms " forms") (when (pos? errors) [:span {:class "bad"} (str ", " errors " errors")])])
-       (when (and red (pos? red)) [:span {:class "bad"} (str " · " red " own proofs red")])]
+    [:li {:id (str "turn-" (dom-id id)) :class (str "turn o-" (kname origin) (when (and errors (pos? errors)) " has-err"))}
+     ;; the conversation first: who spoke, what it was told, what it thought and did
+     [:header
+      [:b (if (= :outside origin) (str "read " n) (str "turn " (inc n)))]
+      (when (= :outside origin) [:span {:class "muted"} " · a context read through root's server, no model call"])
+      (when truncated [:span {:class "bad"} " · cut at the token limit"])
+      (when (and errors (pos? errors)) [:span {:class "bad"} (str " · " errors " of " forms " forms failed")])]
+     (when (seq messages)
+       [:div {:class "msgs"} [:em "it was told "]
+        (for [{:keys [from body]} messages] [:p [:b (kname from)] " " (prose (print/text body budget) budget)])])
+     (when-not (str/blank? reasoning)
+       [:details {:class "reasoning"} [:summary "its reasoning"] [:pre (prose reasoning budget)]])
+     (when-not (str/blank? reply) [:p {:class "reply"} (prose reply budget)])
+     (when (seq calls)
+       [:ol {:class "calls"}
+        (for [{call-id :id :keys [code evals thinking records]} calls]
+          [:li {:class "call"}
+           (when thinking [:p {:class "thinking"} (prose thinking budget)])
+           (if (seq records)
+             ;; each form as it ran: the thought its writer put before it (as prose), the form,
+             ;; its result or error
+             (for [r records]
+               [:div {:class (str "form tag-" (kname (:tag r)))}
+                (when (:lead r) [:p {:class "lead"} (prose (str/replace (:lead r) #"(?m)^\s*;+ ?" "") budget)])
+                [:pre {:class "code"} [:code (prose (:form r) budget)]]
+                [:div {:class "result"} (eval-out r (config/value :seon.config.render/history-row-budget) (part) nil true)
+                 [:span {:class "muted"} " " (ms-str (:ms r))]]])
+             ;; a call recorded before its items were: its code as the model wrote it
+             [:pre {:class "code"} [:code (prose code budget)]])
+           [:details {:class "answered"} [:summary (str "what " call-id " answered, as the model read it next turn")] [:pre (prose evals budget)]]])])
+     ;; then what it cost and what it started from, in one quiet line each
+     [:div {:class "tfoot"}
+      (when tokens [:span {:title "prompt and completion tokens, as the provider counted them"} (str (group3 tokens) " tokens")])
+      (when prompt [:span {:title "the share of the prompt the provider served from its prefix cache"}
+                    (str (if (pos? prompt) (long (* 100 (/ cache-hit-tokens prompt))) 0) "% cached")])
+      (when usd [:span {:title "at the model's configured prices, off-peak"} (cost-str usd)])
+      (when finish [:span {:title "how the reply stopped"} finish])
+      (when model [:span model])
       (when split
-        [:div {:class "split" :title "where the turn's time went, as the agent measured it"}
-         (for [[k label] [[:tests-ms "tests"] [:context-ms "context"] [:model-ms "model"] [:eval-ms "evals"] [:record-ms "record"]]
-               :when (get split k)]
-           [:span [:em label] (ms-str (get split k))])])
-      (when (seq (:results obs))
-        [:div {:class "seen"} [:em "proofs when it began "] (proof-counts (:results obs))
-         (when-let [changed (seq (for [[p r] (sort-by (comp str key) (:results obs)) :let [was (get previous p)] :when (and previous (not= was r))] [p was r]))]
-           [:span {:class "changed"} " · since the last turn: "
-            (interpose ", " (for [[p was r] changed] (str (name (symbol (str p))) " " (kname was) " → " (kname r))))])])
-      (when (seq messages)
-        [:div {:class "msgs"} [:em "messages it took "]
-         (for [{:keys [from body]} messages] [:p [:b (kname from)] " " (prose (print/text body budget) budget)])])
-      (when context
-        [:details {:class "ctx"}
-         [:summary (str "the context it read · ≈" (group3 (reduce + 0 (map :tokens (:sections context)))) " tokens: ")
-          (interpose " · " (for [{:keys [part tokens]} (:sections context)] (str part " " (group3 tokens))))]
-         [:table {:class "sections"}
-          [:tbody (for [{:keys [part tokens keys]} (:sections context)]
-                    (list [:tr [:th part] [:td {:class "n"} (group3 tokens)]]
-                          (for [[k t] keys] [:tr {:class "key"} [:td [:code (str k)]] [:td {:class "n"} (group3 t)]])))]]
-         [:p {:class "muted"} "its attempt and turn sections, as it read them (the help page is "
-          [:code "docs/agent.md"] "; the scrollback is the earlier turns above); "
-          [:a {:href (:href context)} "the whole request"]]
-         [:pre {:class "ctx"} (prose (:text context) budget {:href (:href context)})]])
-      (when-not (str/blank? reasoning)
-        [:details {:class "reasoning"} [:summary "reasoning"] [:pre (prose reasoning budget)]])
-      (when-not (str/blank? reply) [:div {:class "reply"} [:em "reply "] [:pre (prose reply budget)]])
-      (when (seq calls)
-        [:ol {:class "calls"}
-         (for [{call-id :id :keys [code evals thinking records]} calls]
-           [:li {:class "call"}
-            (when thinking [:p {:class "thinking"} [:em "thinking "] (prose thinking budget)])
-            (if (seq records)
-              ;; each form as it ran: the thought before it, the form, its result or error
-              (for [r records]
-                [:div {:class (str "form tag-" (kname (:tag r)))}
-                 (when (:lead r) [:pre {:class "lead"} (prose (:lead r) budget)])
-                 [:pre {:class "code"} [:code (prose (:form r) budget)]]
-                 [:div {:class "result"} (eval-out r (config/value :seon.config.render/history-row-budget) (part) nil true)
-                  [:span {:class "muted"} " " (ms-str (:ms r))]]])
-              ;; a call recorded before its items were: its code as the model wrote it
-              [:pre {:class "code"} [:code (prose code budget)]])
-            [:details {:class "answered"} [:summary (str "what " call-id " answered, as the model read it")] [:pre (prose evals budget)]]])])]))
+        (for [[k label] [[:tests-ms "tests"] [:context-ms "context"] [:model-ms "model"] [:eval-ms "evals"] [:record-ms "record"]]
+              :when (get split k)]
+          [:span {:title "where the turn's time went, as the agent measured it"} (str label " " (ms-str (get split k)))]))
+      [:span {:class "muted"} id]]
+     (when (seq (:results obs))
+       [:div {:class "seen tfoot"} [:span "proofs when it began, before its forms ran: " (proof-counts (:results obs))]
+        (when-let [changed (seq (for [[p r] (sort-by (comp str key) (:results obs)) :let [was (get previous p)] :when (and previous (not= was r))] [p was r]))]
+          [:span {:class "changed"} "since the turn before: "
+           (interpose ", " (for [[p was r] changed] (str (name (symbol (str p))) " " (kname was) " → " (kname r))))])])
+     (when context
+       [:details {:class "ctx"}
+        [:summary (str "the context it read · ≈" (group3 (reduce + 0 (map :tokens (:sections context)))) " tokens: ")
+         (interpose " · " (for [{:keys [part tokens]} (:sections context)] (str part " " (group3 tokens))))]
+        [:table {:class "sections"}
+         [:tbody (for [{:keys [part tokens keys]} (:sections context)]
+                   (list [:tr [:th part] [:td {:class "n"} (group3 tokens)]]
+                         (for [[k t] keys] [:tr {:class "key"} [:td [:code (str k)]] [:td {:class "n"} (group3 t)]])))]]
+        [:p {:class "muted"} "its attempt and turn sections, as it read them (the help page is "
+         [:code "docs/agent.md"] "; the scrollback is the earlier turns above); "
+         [:a {:href (:href context)} "the whole request"]]
+        [:pre {:class "ctx"} (prose (:text context) budget {:href (:href context)})]])]))
 
 (defn turns-list
   "The agent's conversation, oldest first: its turns (each by its declared render, turn-row) and

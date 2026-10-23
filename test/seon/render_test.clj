@@ -687,7 +687,7 @@
           (is (str/includes? t0 "I will make f triple."))
           (is (str/includes? t0 "The plan says triple"))
           (is (str/includes? t0 "redefine f, then the proof runs") "the call's thinking")
-          (is (re-find #"(?s);; work in demo.*\(in-ns 'demo\).*#namespace\[demo\].*;; triple, as the plan says.*\(defn f \[x\] \(\* 3 x\)\).*#'demo/f" t0)
+          (is (re-find #"(?s)<p class=\"lead\">work in demo</p>.*\(in-ns 'demo\).*#namespace\[demo\].*<p class=\"lead\">triple, as the plan says</p>.*\(defn f \[x\] \(\* 3 x\)\).*#'demo/f" t0)
               "per form, in order: its thought, the form, its result")
           (is (str/includes? t0 "what call-0 answered, as the model read it")))
         (testing "the evaluations outside the turns are in the conversation in the order they were written: the owner's (f 2), not the turn's forms again"
@@ -698,7 +698,7 @@
           (is (str/includes? t0 "0/1 pass"))
           (is (str/includes? t0 "✕ <code>f-test</code>"))
           (is (str/includes? t1 "1/1 pass"))
-          (is (str/includes? t1 "since the last turn: f-test fail → pass") "what changed since the turn before")
+          (is (str/includes? t1 "since the turn before: f-test fail → pass") "what changed since the turn before")
           (is (str/includes? t1 "check demo/g too")))
         (testing "the head: totals over the turns, priced where the provider split its cache"
           (is (= {:n 2 :model 2 :reads 0 :evals 3 :tokens 8460 :unpriced 0} (dissoc (:totals page) :usd)))
@@ -736,7 +736,7 @@
   (testing "a live agent evaluating its turn loop"
     (let [w (ui/why {:id :a3 :status :running :running {:form "(seon.turn/work! '{:task \"demo/f\"})"}} attempt1 nil 2)]
       (is (some #(str/starts-with? % "evaluating (seon.turn/work!") w))
-      (is (some #(str/includes? % "attempt demo/f#1 running: 2 turns recorded of at most 8; the turn after the last recorded is in flight") w))))
+      (is (some #(str/includes? % "attempt demo/f#1 running: 2 model turns recorded of at most 8; the turn after the last recorded is in flight") w))))
   (testing "an ended agent, read from the store, and its task held for root"
     (let [w (ui/why {:id :a3} (assoc attempt1 :seon.attempt/status :ended :seon.attempt/outcome :cap :seon.attempt/reason "turns ran out: demo-test/f-test red")
                     {:seon.task/id "demo/f" :seon.task/execution :held :seon.task/failure {:reason "refused: demo-test/f-test red" :counterexample ""}} 8)]
