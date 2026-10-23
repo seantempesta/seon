@@ -263,3 +263,82 @@ The Malli seed bump (jolt/mg-seed) comes with pure-tests' branch. Until it merge
 - The `tests` branch is not kept in step with main: a main run imports the checkout's tests each time (`seon.agent/load-tests!`). Keep it current through the one loader once the Flow work (`:load`) lands.
 - The burst behaviour (200 requests, one run) has a test but no cost proof. Add one with the commit-stream work.
 - Next commit: `seon.problems/caused` O(changed), by diffing base and head by value (section text, names and dead links; var and task name sets; catch forms), not by tx id.
+
+
+## One trigger path: events become facts, and commits drive the reactions (2026-10-23)
+
+
+The owner, 2026-10-23: "events trigger the database updates and then it all goes through one system… make sure it's clear where it's going with the multi branch and multi agent setups". This revises the trigger of the test service and of "every write is checked" (notes/health-design-2026-10-23.md). It goes into that note after jolt/health's first merge.
+
+### Three layers
+1. **Edges: events become facts.** Only what is not yet in the store needs an event:
+   - a file changed on disk (the FSEvents watcher);
+   - a process exited;
+   - a test run finished;
+   - a model answered.
+
+   Each edge transacts what happened, on the right branch, and does nothing else. The watcher loads files; it no longer asks for checks.
+2. **Commits drive the reactions.** Every write, by an agent's eval, a watcher load, a merge or a task edit, is a commit through the one writer, so the writer is the one stream.
+   - Each commit is published on a bounded channel as {:branch :t :tx-meta} (tx-meta already names the runtime: agent, task, checkout).
+   - A consumer that lags reads what changed since the last t it saw from the history db, so nothing is lost and no buffer grows.
+   - The `:prove` proc consumes this stream. It is the one place that decides "a function's definition changed, so check it and run what it reaches".
+3. **Derived reads stay lazy.** seon.problems/health is computed when someone looks: the page, an agent's context, the done rule.
+
+### Branches and agents
+- **Each reaction runs on the branch the commit was on.** The prove agent is forked onto that branch, or the agent's own fork for its own branch, so a check sees exactly that branch's program. Main's commits are checked on the `tests` branch, which follows main.
+- **Results are shared by digest across branches.** A result is a fact keyed by the digest of what it covers, so two agents on two branches with the same function at the same digest share one result, and one run. A digest already running is joined, never run twice.
+- **Admission is per checkout:** one run at a time, the latest change per branch wins. A burst from one agent never starves another branch, since each branch keeps its own latest pending change. Runs take turns across branches.
+- **Attribution comes from the commit.** A problem a check finds names the commit's tx-meta (agent, task), so it lands in that agent's context as `caused`, and in the done rule for that agent's attempt only.
+- **Merging is a commit on main** like any other: main's reactions run, and a red on main names the merge's attempt and task.
+- **Across checkouts** (other worktrees, other roots): each root reacts to its own store. Results are shared only through the digest file log, which is temporary, until global-ids makes facts visible across stores.
+
+### What it replaces
+- The watcher's call to `:prove`, and seon.repl/wrap-instrument as a trigger: the producers no longer ask.
+- The reconciler's sliding-1 `:main` input becomes a reader of the same commit stream. It is the one stream with two consumers, not a second mechanism.
+
+
+## The wiki kept true: three derived classes (2026-10-23, root approved)
+
+Root's rulings: :stale-section is attention, never a refusal; "reviewed" is a recorded fact (`my.docs/reviewed!`, naming who reviewed and the form ids it was reviewed at); :problem-unlinked's class-level case first.
+
+
+The owner: "how are we organizing things so every wiki markdown article is useful and doesn't go stale and we cross link issues". These are derived classes in seon.problems, so each is a read when someone looks: the banner groups them by area, and an agent's context shows them through `caused`. This goes into notes/health-design-2026-10-23.md after the current prove slot. The build comes after the test service and `caused` O(changed).
+
+### 1. :stale-section (area docs): code changed under the text that describes it
+- **The rule is by value, not tx order.** A branch's tx counter is independent of main's, so after a merge datoms carry tx ids out of order. That was found while building `caused`.
+- When a section's text changes, the loader records the form id of each var the section then cites: `:seon.section/read` {name form-id}. The form id is already a digest of the form's text.
+- While the text is unchanged, the load keeps the stored map. So the map records the code as it stood when the section was last written.
+- **Stale** means a cited var's current form id differs from the recorded one. The row names the section, the var, and the form ids then and now.
+- **It closes** when the section is edited, or when someone marks it reviewed: `my.docs/reviewed!` writes the current ids without changing the text, and the fact is kept.
+- **It is attention, never a refusal.** Every var edit stales the sections that cite it, and refusing done for that would force a doc edit with every code edit (ruling 3 of the first design).
+- **In context:** a branch that changes a var sees, through `caused`, the sections it made stale: the docs to read and probably fix.
+- **Cost:** one lookup per cited name, the same walk as :dead-citation. With O(changed), `caused` checks only sections citing the vars the branch changed.
+
+### 2. :orphan-page (area docs): a page nothing links to
+- A page is its first section, `docs/x.md#…`. It is an orphan when no section of another page and no section of docs/README.md (the map) has a reference to any section of it.
+- References are already refs to section entities (`:seon.section/references`), so this is one pass over the reference datoms: O(references).
+- It closes when any page or the map links to it.
+
+### 3. :problem-unlinked (area health itself): an issue that points nowhere
+- Each problem class declares, on `:seon.problems/class`'s properties (where areas and derived already live), the docs section that explains it and how it is fixed: `:seon.problems/docs {:dead-citation "docs/health.md#a-dead-citation" …}`.
+- A row then carries its class's section, and the banner and context show the link. A row can name its owning task through `:answered-by` (the evidence tasks), which exists today.
+- **:problem-unlinked** has two cases:
+  - a class with open rows whose declared section is missing, or no longer a stored section (a dead link from health to the wiki);
+  - a row of a counted class (recorded errors) that no task answers and whose owner-ns has no task file.
+
+  The first is cheap: one AVET per class. The second is per row and reads the tasks' `:seon.task/ns` index.
+- So every issue points at its page, and at its task when it has one. A class without one is itself a problem.
+
+### The rule, in docs/README.md's "How the wiki is kept"
+Three new rules, each enforced by a class:
+- A section that describes code is re-read when that code changes (:stale-section).
+- Every page is reachable from the map or another page (:orphan-page).
+- Every problem class links the section that explains its fix (:problem-unlinked).
+
+### Size
+About +70 src: three classes and the loader's `:seon.section/read`. Add `my.docs/reviewed!` (~10 lines), one schema attribute, the class properties, three cost proofs and their tests. It deletes nothing, because nothing checks these today.
+
+### Rulings (recommendation first)
+1. **:stale-section is attention, never a refusal.** Or refuse done only for a section whose page the branch's task owns.
+2. **"Reviewed" is a recorded fact** (`my.docs/reviewed!`). Or a stale section closes only when its text is edited.
+3. **:problem-unlinked's second case (a row no task answers) comes later.** Ship the class-level case first.

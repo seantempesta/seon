@@ -704,7 +704,7 @@
 (deftest caused-follows-what-changed
   ;; the program grows (n sections citing, n catch sites); the change is fixed (one section, one
   ;; site): the work is the scan of the attributes' datoms, a few bytes each, never a pull or a rule
-  ;; per citation or site. Before: ~150 KB per catch site (caused-reads-both-dbs-in-full).
+  ;; per citation or site. Before: ~150 KB per catch site, both dbs read in full.
   (cost/proof {:of 'seon.problems/caused :input 'seon.problems-test/caused-flat-input
                :n "sections citing a var and catch sites in the program, one of each changed"
                :work "three aevt scans of the sections, the var and task names, the catch forms; candidates only through the rule"
