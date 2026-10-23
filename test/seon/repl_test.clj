@@ -285,33 +285,25 @@
   "How many times the ticks proof's form ran."
   (atom 0))
 
-(contract/defn inc1
-  "One contracted call, for the calls proof."
-  {:malli/schema [:=> [:cat :int] :int]}
-  [x] (inc x))
-
 (deftest an-evals-record-carries-its-ticks
   ;; task seon.turn/a-turn-shows-its-cost-against-its-budget (1), owner 2026-10-23 (the model sees
   ;; cost, stable across turns): the work a form did is taken once, when it ran
-  ;; (jolt.host/ticks-of, contracted calls, bytes), and the reply item and the stored record carry
+  ;; (jolt.host/ticks-of, bytes), and the reply item and the stored record carry
   ;; the same values, so nothing is measured again in a later turn.
   (let [old @agent/state
         run! (fn [code] (let [answers (volatile! [])]
                           (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
                           ((repl/handler) {"op" "eval" "code" code :reply #(vswap! answers conj %)})
                           (first (repl/fold @answers))))
-        cost [:ms :alloc-bytes :ticks :calls]]
+        cost [:ms :alloc-bytes :ticks]]
     (try
       (let [small (run! "(reduce + (range 100))")
             big (run! "(reduce + (range 1000000))")
-            bad (run! "(/ 1 0)")
-            calls (run! "(+ (seon.repl-test/inc1 1) (seon.repl-test/inc1 1) (seon.repl-test/inc1 1))")]
+            bad (run! "(/ 1 0)")]
         (is (pos? (:ticks small)) (pr-str small))
         (is (> (:ticks big) (* 10 (:ticks small))) "ticks are the work done: 10,000x the loop is >10x the ticks (the form's compile is a constant)")
         (is (pos? (:ticks bad)) "a form that threw still did work")
-        (when contract/on?
-          (is (= 3 (:calls calls)) "contracted calls are counted, as a cost proof counts them"))
-        (doseq [it [small big bad calls]
+        (doseq [it [small big bad]
                 :let [rec (-> (repl/record-tx :a "run" [(assoc it :id 0)] nil) first :seon.cluster.eval/record)]]
           (is (= (select-keys it cost) (select-keys rec cost)) "the record stores the values the reply shows")))
       (finally (reset! agent/state old)))))
