@@ -18,10 +18,10 @@ REHEARSE=${REHEARSE:-}
 [ -n "$REHEARSE" ] || [ -z "$(git -C $OUTER status --porcelain)" ] || { git -C $OUTER add -A && git -C $OUTER commit -q -m "Checkpoint before the cutover"; }
 # D2 the outer repo's history as one tag, then the nested repos from the bundles old-cleanup made (the Chez, Jolt, Datahike, konserve and
 #    persistent-sorted-set bundles are fork-family: they went to their modules as attic/* in step B, not here)
-git -C $OLD rev-parse -q --verify refs/tags/history/prototype >/dev/null || git -C $OLD fetch $OUTER refs/heads/main:refs/tags/history/prototype
+git -C $OLD rev-parse -q --verify refs/tags/history/prototype >/dev/null || git -C $OLD fetch --no-tags $OUTER refs/heads/main:refs/tags/history/prototype
 B=$OUTER/history-bundles
 for f in proto__core proto__flow pf1__core-fixed r3__next l3__next r5__next fx1__next e4__rust e9__datahike-jolt-src e9__konserve-jolt-src; do
-  [ -n "$(git -C $OLD tag -l "history/${f//__//}/*")" ] || git -C $OLD fetch $B/$f.bundle "refs/heads/*:refs/tags/history/${f//__//}/*"       # l3__next -> history/l3/next/<branch>
+  [ -n "$(git -C $OLD tag -l "history/${f//__//}/*")" ] || git -C $OLD fetch --no-tags $B/$f.bundle "refs/heads/*:refs/tags/history/${f//__//}/*"       # l3__next -> history/l3/next/<branch>
 done
 # D3 nothing lost: every bundle branch tip is now a tag
 lost=$(for f in proto__core proto__flow pf1__core-fixed r3__next l3__next r5__next fx1__next e4__rust e9__datahike-jolt-src e9__konserve-jolt-src; do
@@ -38,10 +38,10 @@ git -C $OLD rev-parse -q --verify refs/tags/history/prototype >/dev/null   # ste
 ! grep -qE '^\s*url = (/|\.)' $OLD/.gitmodules               # step C: no local-path URL is left
 gh auth status >/dev/null                                    # the two private forks need it
 # every pin resolves on its GitHub fork (a pin that is not there makes the clone fail late)
-git -C $OLD ls-tree $BR reference-code/ | awk '$2=="commit"{print $3, $4}' | while read sha path; do
-  url=$(git -C $OLD config -f .gitmodules --get "submodule.$path.url")
-  case $url in https://github.com/*) repo=${url#https://github.com/} ;; *) echo "not a github url: $path $url"; exit 1 ;; esac
-  gh api "repos/${repo%.git}/commits/$sha" --jq .sha >/dev/null || { echo "MISSING $path $sha on $repo"; exit 1; }
+git -C $OLD ls-tree $BR reference-code/ | awk '$2=="commit"{print $3, $4}' | while read sha sub; do
+  url=$(git -C $OLD config -f .gitmodules --get "submodule.$sub.url")
+  case $url in https://github.com/*) repo=${url#https://github.com/} ;; *) echo "not a github url: $sub $url"; exit 1 ;; esac
+  gh api "repos/${repo%.git}/commits/$sha" --jq .sha >/dev/null || { echo "MISSING $sub $sha on $repo"; exit 1; }
 done
 # no live worktree holds uncommitted work (a worktree's changes are not in any branch): list the dirty ones, each owner commits first
 dirty=$(git -C $OLD worktree list --porcelain | awk '/^worktree /{print $2}' | while read w; do [ -n "$(git -C $w status --porcelain --untracked-files=no -- . ':!reference-code' 2>/dev/null)" ] && echo $w; done)
