@@ -42,7 +42,7 @@ if [[ -f $LOCAL ]]; then
   while IFS= read -r line; do
     case $line in
       *:seon.config.root/entrance-port*|*:seon.config.root/server-port*|*:seon.config.web/port*) ;;
-      ";; This checkout's own config layer"*|";; under the command line's --config"*|";; ../worktree-ports"*|";; the main tree's config/worktree-ports"*) ;;
+      ";; This checkout's own config layer"*|";; under the command line's --config"*|";; "*"worktree-ports"*) ;;
       *";; root's entrance (bin/root, bin/mcp)"|*";; root's server (bin/root, bin/mcp)"|*";; the dashboard; bin/check and bin/test set"*) ;;
       *) [[ -n ${line//[[:space:]]/} ]] && others+=("$line") ;;
     esac
