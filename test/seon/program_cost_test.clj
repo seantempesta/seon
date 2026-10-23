@@ -128,3 +128,27 @@
      :per-n {:ns 160000 :bytes 200000}
      :fixed {:ns 60000000 :bytes 78000000}
      :sizes [100 1000 10000]}))
+
+(defn changed-top
+  "reach-update's arguments: the reach graph of a branch holding n forms (app.pc/f0..fn-1,
+  each calling the one before) and that branch with the last redefined, which nothing reaches."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db]]}
+  [n]
+  (let [[db] (branch-of n)
+        g (program/reach-graph db nil)]
+    [g (d/db-with db (program/record-tx db (acct (dec n) "(dec x)")))]))
+
+(deftest a-change-re-folds-only-what-reaches-it
+  (cost/proof
+    {:of 'seon.program/reach-update :input 'seon.program-cost-test/changed-top
+     :n "forms the graph already holds"
+     :work (str "four index scans of the forms and their definitions' pointers (live-ids, no entity read), "
+                "then the changed form only: its row, its var's facts, its neighbours, and the components "
+                "of it and of what reaches it (nothing, here) re-folded; every other form's neighbours and "
+                "component digest kept. Measured 2026-10-23: 2.1 ms / 2.7 MB at 100, 3.9 ms / 6.5 MB at 1,000, "
+                "11.5 ms / 16 MB at 3,000, one form re-folded each time; the per-form part is the scan "
+                "(~3 us, ~5 KB a form), the re-fold is the change's")
+     :growth :linear
+     :per-n {:ns 4000 :bytes 5000}
+     :fixed {:ns 3000000 :bytes 4000000}
+     :sizes [100 1000 10000]}))
