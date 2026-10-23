@@ -13,7 +13,7 @@
   breaks its forks; docs/failure-points.md, "Physics". Agent code calls the functions of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
+  (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.source :as source] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
             [malli.registry :as mr]))
 
@@ -285,7 +285,7 @@
            other (not-empty (into {} (remove (every-pred (comp qualified-keyword? key) diag?)) d))
            sym (:jolt.error/symbol jd)
            unresolved? (and sym (= :analyze/unresolved-symbol (:jolt.error/kind jd)))
-           m (if unresolved? (unresolved-message sym) (or (ex-message e) (str (type e))))
+           m (if unresolved? (unresolved-message sym) (step/error-msg e))
            causes (mapv #(str (type %) ": " (ex-message %)) (take-while some? (rest (iterate ex-cause e))))]
        (contract/error :seon.agent/eval-error op m
                        (cond-> (assoc jd :class (str (type e)))

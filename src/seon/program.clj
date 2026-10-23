@@ -24,7 +24,7 @@
   - A file is read form by form and analyzed without running (`analyze-facts`), so the
     platform's own source has the same facts (seon.source)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]
+  (:require [seon.step :as step] [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]
             [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [seon.error :as error] [seon.db :as pdb] [seon.config :as cfg] [clojure.string :as str] [hasch.core :as hasch]))
 
 (defn scratch-ns?
@@ -729,7 +729,7 @@
               (let [r (contract/arm! v)]
                 (when (contract/error? r) {:ns ns :message (:seon.error/message r)}))))
           defines)
-    (catch Throwable e {:ns ns :message (or (ex-message e) (str (type e)))})))
+    (catch Throwable e {:ns ns :message (step/error-msg e)})))
 
 ;; ---- schema entries: the program's schemas (seon.source imports them, my.schema/register!
 ;; changes them, seon.merge carries them per key) ----------------------------------------

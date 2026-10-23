@@ -5,7 +5,7 @@
   resolved on the db (a link to a section, a name to a var), so its backlinks are who cites
   it. Loading writes only what differs from what main holds, as task files do."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.ref :as ref] [seon.source :as source] [seon.task :as task] [seon.db :as pdb]
+  (:require [seon.step :as step] [seon.contract :refer [defn defn-]] [seon.ref :as ref] [seon.source :as source] [seon.task :as task] [seon.db :as pdb]
             [datahike.api :as d] [clojure.string :as str] [clojure.java.io :as io]))
 
 ;; ---- one page, parsed into sections ----------------------------------------------------
@@ -290,7 +290,7 @@
                            r (cond (get errors [sha file]) {:error (str file " at " (subs sha 0 8) " could not be read from git: " (get errors [sha file]))}
                                    (nil? text) {:ids {}}
                                    :else (try {:ids (source/defining-ids nsym text) :text text}
-                                              (catch Throwable e {:error (str file " at " (subs sha 0 8) " does not read: " (or (ex-message e) (str (type e))))})))]
+                                              (catch Throwable e {:error (str file " at " (subs sha 0 8) " does not read: " (step/error-msg e))})))]
                        (vswap! cache assoc [sha file] r)
                        r)))
         mentioned? (fn [text n] (boolean (re-find (re-pattern (str "[\\s(\\[{'#]" (java.util.regex.Pattern/quote (name n)) "[\\s)\\]}]")) text)))]

@@ -6,7 +6,7 @@
   unchanged context is never asked twice. my.root/first-moves! runs a pass; the reply is
   analyzed in a disposable agent (first-move), since analysis runs a reply's ns form."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.context :as context] [seon.source :as source]
+  (:require [seon.step :as step] [seon.contract :as contract :refer [defn defn-]] [seon.context :as context] [seon.source :as source]
             [seon.reader :as reader] [seon.ref :as ref] [seon.edn :as sedn] [seon.error :as err] [seon.config :as config]
             [datahike.api :as d]))
 
@@ -54,7 +54,7 @@
   (docs/failure-points.md)."
   {:malli/schema [:=> [:cat :symbol :string] [:vector :map]]}
   [nsym code]
-  (let [uncompiled (fn [e] {:error (contract/error :seon.judge/uncompiled 'seon.judge/form-facts (or (ex-message e) (str (type e))) {})})]
+  (let [uncompiled (fn [e] {:error (contract/error :seon.judge/uncompiled 'seon.judge/form-facts (step/error-msg e) {})})]
     (try
       (vec (for [{:keys [form ns]} (:forms (binding [*read-eval* false] (source/read-forms nsym (:text (reader/forgive code)))))]
              (try (let [{:keys [units]} (source/analyze-form (if (and (seq? form) (= 'ns (first form))) nsym (or ns nsym)) form)]

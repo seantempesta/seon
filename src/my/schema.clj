@@ -6,7 +6,7 @@
   carries it per key, and write-back rewrites only its entry of its resource (seon.source).
   Platform code compiled into the binary keeps the built schemas until the next generation."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.agent :as agent] [seon.program :as program] [seon.db :as pdb] [seon.config :as config]
+  (:require [seon.step :as step] [seon.contract :as contract :refer [defn defn-]] [seon.agent :as agent] [seon.program :as program] [seon.db :as pdb] [seon.config :as config]
             [datahike.api :as d] [seon.edn :as sedn] [malli.core :as m]))
 
 (defn- refused
@@ -24,7 +24,7 @@
   [db k forms]
   ;; interop edge: malli, the EDN reader and seon.schema.datahike throw their errors
   (try (let [reg (contract/registry-of forms)] {:registry reg :decls (program/schema-declarations db reg)})
-       (catch Exception e (refused k (if (:seon.schema/reason (ex-data e)) :unstorable :invalid) (or (ex-message e) (str (type e)))))))
+       (catch Exception e (refused k (if (:seon.schema/reason (ex-data e)) :unstorable :invalid) (step/error-msg e)))))
 
 (defn- new-key-file
   "The resource a new key k goes to: the one holding most keys of k's namespace on db (ties

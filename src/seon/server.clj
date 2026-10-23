@@ -13,7 +13,7 @@
   printf '{:op :agents}\\n' | nc -w 5 127.0.0.1 PORT
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.reconcile :as r]
+  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.reconcile :as r]
             [seon.lib :as lib] [seon.edn :as sedn] [seon.repl :as repl] [seon.print :as print] [seon.render :as render] [seon.render.ai :as rai] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str]))
 
 (defn- refused
@@ -207,7 +207,7 @@
            (some-> (mcp-reply sys (vreset! msg (json/read-str line))) json/write-str)
            (sedn/encode (answer sys (edn/read-string line))))
          (catch Throwable e
-           (let [cause (or (ex-message e) (str (type e)))
+           (let [cause (step/error-msg e)
                  d (contract/error :seon.server/defect 'seon.server/answer
                                    (if (and mcp? (nil? @msg)) (str "a line opening {\" is MCP's JSON-RPC, and an EDN request a keyword-keyed map; this one is not JSON: " cause) cause)
                                    (cond-> {:line line} (ex-data e) (assoc :data (sedn/encode (ex-data e)))))]
