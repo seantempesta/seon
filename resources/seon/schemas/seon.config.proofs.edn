@@ -6,4 +6,5 @@
  :seon.config.proofs/max-assertions [:int {:min 1 :seon.config/unit "assertions" :description "Failing assertions a red test keeps in its run's facts, the first ones (seon.proofs/failures)."}]
  :seon.config.proofs/seed-salt [:int {:seon.config/unit "a salt (integer)" :description "Salt of every generative check's seed (seon.proofs/seed); 0 normally, changed to re-roll every seed once."}]
  :seon.config.proofs/seeds [:int {:min 1 :seon.config/unit "seeds (a count)" :description "How many seeds a randomized property test draws in this run (its test-seed and the next ones); the full run draws 5."}]
- :seon.config.proofs/cost-max-n [:int {:min 1 :seon.config/unit "n (a cost proof's input size)" :description "The largest input a cost proof measures in this run (seon.cost/sizes); the full run measures as written."}]}
+ :seon.config.proofs/cost-max-n [:int {:min 1 :seon.config/unit "n (a cost proof's input size)" :description "The largest input a cost proof measures in this run (seon.cost/sizes); the full run measures as written."}]
+ :seon.config.proofs/tick-quantum [:int {:min 0 :seon.config/unit "engine ticks" :description "What one measure of a call's ticks may be off by (a 1,000-tick timer chunk and ~50): seon.cost/judge allows it in the bound and in the growth fit."}]}
