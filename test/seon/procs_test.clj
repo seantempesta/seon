@@ -32,9 +32,9 @@
         t0 (:max-tx @conn)]
     (testing "a main transaction: committed once, its report to the reconciler, its commit to the fork server, its answer by dest"
       (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})]
-        (is (= (inc t0) (:max-tx @conn)))
+        (is (< t0 (:max-tx @conn)) "main's t moves past its last")
         (is (= [:tx] (map :op (:to-fork-server outs))))
-        (is (= [(inc t0)] (map :t (:main outs))))
+        (is (= [(:max-tx @conn)] (map :t (:main outs))))
         (is (= {:rid 1} (:dest (first (:to-api outs)))))
         (is (true? (:ok (:r (first (:to-api outs))))))
         (testing "group commit: three queued transactions, one step, one commit"
@@ -98,6 +98,21 @@
         (is (= :seon.agent/fork-misaligned (get-in problem [:error :seon.error/type])) "is recorded as the agent's problem")
         (is (= at (get-in problem [:error :commit])))
         (remote/close! end) (sock/close! a'))))))
+
+(deftest an-agent-root-cannot-interrupt-is-a-problem-and-memory-rides-its-commits
+  ;; shrink brief 3, rows 19 and 34: an agent whose boot check found root's interrupt cannot
+  ;; reach it says so in its hello, and root records :seon.agent/interrupt-unreachable (the
+  ;; answer nothing read before); its memory reaches root's view on its commits, never on each
+  ;; eval reply
+  (let [[r a'] (sock/socketpair)
+        end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
+        st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+        problems (fn [ok] (filter #(= :problem (:op %)) (:to-api (second (step #'ap/agent-proc st :from {:op :hello :t 1 :start-ms 1.0 :mem-mb 1.0 :interrupt-ok ok})))))
+        sets (fn [m] (keep #(when (= :status (:op %)) (:set %)) (:to-api (second (step #'ap/agent-proc st :from m)))))]
+    (is (= [:seon.agent/interrupt-unreachable] (map #(get-in % [:error :seon.error/type]) (problems false))))
+    (is (empty? (problems true)) "a reachable agent records nothing")
+    (is (= [{:mem-mb 12.5}] (sets {:op :committed :t 2 :txs 1 :mem-mb 12.5})) "a commit carries its memory to the view")
+    (remote/close! end) (sock/close! a')))
 
 (deftest a-fork-names-the-commit-its-agent-starts-at
   ;; task seon.agent/an-agents-base-is-its-merge-base: :spawn branches the agent from main's
@@ -482,3 +497,34 @@
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'seon.procs-test)]
     (System/exit (if (zero? (+ fail error)) 0 1))))
+
+(deftest the-writer-keeps-the-union-current
+  ;; seon.union through the writer: built at the first :union, then every main commit and
+  ;; every agent's commit notice add their datoms, so one query over its answer sees both
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        main (:branch cfg)
+        ab (pdb/on-main main :a1)
+        union-of (fn [st] (let [[st outs] (step #'writer/writer-proc st :in {:op :union :dest {:rid 9}})] [st (:r (first (:to-api outs)))]))
+        bodies (fn [db] (set (d/q '[:find ?b ?br :where [?m :seon.message/body ?b ?tx] [?tx :seon.tx/branch ?br]] db)))]
+    (d/branch! conn main ab)
+    (let [[st r] (union-of st)
+          _ (is (true? (:ok r)))
+          [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:seon.message/id "m1" :seon.message/from "root" :seon.message/to "a1" :seon.message/body "from main"}] :dest {:rid 1}})
+          bc (d/connect (assoc cfg :branch ab))
+          _ (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from "a1" :seon.message/reply-to "m1" :seon.message/body "from a1"}] :tx-meta (pdb/tx-meta ab)})
+          _ (d/release bc)
+          [st _] (step #'writer/writer-proc st :in {:op :agent-commit :branch :a1})
+          [_ r2] (union-of st)]
+      (is (= #{["from main" main] ["from a1" ab]} (bodies (:db r2))) "a main commit and an agent's commit, each under its branch"))))))
+
+(deftest the-fork-servers-stop-ends-every-child-before-it-answers
+  ;; bin/check lifecycle's :left (notes/pure-tests/lifecycle.md): root SIGKILLed the fork
+  ;; server while an agent that had closed its socket was still exiting, and launchd
+  ;; inherited it, alive after stop!. Now the server's stop kills and reaps its children
+  ;; before it answers, so root's wait for the server is the end of every one of them.
+  (let [p (.start (ProcessBuilder. ^java.util.List ["sleep" "600"]))
+        pid (.pid p)]
+    (is (zero? (seon.lib/c-kill pid 0)) "the child is running")
+    (server/server-step {:children #{pid} :status-buf (jolt.ffi/alloc 4)} ::flow/stop)
+    (is (= -1 (seon.lib/c-kill pid 0)) "and gone when the stop answers: killed and reaped")))

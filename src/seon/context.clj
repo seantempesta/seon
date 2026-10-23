@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg]))
+            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [clojure.edn]))
 
 (def help-page
   "The help page, docs/agent.md: what every agent reads first (its system message, the same
@@ -76,6 +76,40 @@
         [shown more] (print/bounded hits :seon.config.render/found "(my.agent/callees 'ns/f) of each cited var")]
     (cond-> (mapv #(resolve-ref db % :doc) shown) more (conj more))))
 
+(defn- summary-of
+  "Var sym's first doc sentence: its runtime doc, else the docstring of its recorded form;
+  nil when it has none."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :string]]}
+  [db sym]
+  (some-> (or (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))) meta :doc)
+              (let [f (binding [*read-eval* false] (read-string (or (source-of db sym) "nil")))]
+                (when (and (seq? f) (string? (nth f 2 nil))) (nth f 2))))
+          ref/lead-sentence))
+
+(defn ns-map
+  "The map of the namespaces syms live in (the proofs and the vars the plan cites): each
+  namespace's functions as a line (name, arglists, first doc sentence), most referenced by the
+  program first, within an equal share of :seon.config.render/map-tokens, and the form that
+  lists them all (root's research, lever 1: aider's ranked map; v1 R4's helper naming)."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :qualified-symbol]] [:vector :map]]}
+  [db syms]
+  (let [nss (vec (distinct (map (comp symbol namespace) syms)))
+        share (quot (cfg/value :seon.config.render/map-tokens) (max 1 (count nss)))
+        uses #(count (d/datoms db :avet :form/refs %))
+        line (fn [s] (let [m (some-> (find-ns (symbol (namespace s))) ns-interns (get (symbol (name s))) meta)
+                           sm (summary-of db s)]
+                       (cond-> {:symbol s}
+                         (:arglists m) (assoc :arglists (:arglists m))
+                         sm (assoc :summary sm))))]
+    (vec (for [ns nss
+               :let [vs (d/q '[:find [?n ...] :in $ ?ns :where [?e :ns/name ?ns] [?v :var/ns ?e] [?v :var/name ?n] [?v :var/form _]] db ns)
+                     lines (map line (sort-by (juxt (comp - uses) str) vs))
+                     shown (reduce (fn [[acc spent] l] (let [s (+ spent (:tokens (print/print-value l {:budget share}) share))]
+                                                         (if (<= s share) [(conj acc l) s] (reduced [acc spent]))))
+                                   [[] 0] lines)]
+               :when (seq vs)]
+           {:ns ns :vars (first shown) :all (list 'clojure.repl/dir ns)}))))
+
 (defn- cited-view
   "What citation c asks to see, at its depth: a wiki section from main's sections, else a file of
   the checkout read now (never stored), else a task by its ns/name, else a namespace; a
@@ -99,24 +133,18 @@
     (:message r) (assoc :message (:message r))))
 
 (defn callees
-  "The program functions proof p calls directly (one level), each at summary level: its
-  arglists, contract and doc, never its body. Read from p's source by the reader and
-  resolved in p's namespace; a var is program when db holds it."
+  "The program functions proof p calls directly (one level: its recorded form's :form/refs,
+  the compiler's resolved references), each at summary level from its own facts on db: its
+  contract and doc, never its body; a var is program when db holds it (a branch's callee
+  this process never loaded included)."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :map]]}
   [db p]
-  (let [nsx (find-ns (symbol (namespace p)))
-        src (source-of db p)]
-    (if-not (and nsx src)
-      []
-      (vec (for [sym (distinct (filter symbol? (tree-seq coll? seq (reader/read-text src (ns-name nsx)))))
-                 :let [v (ns-resolve nsx sym)]
-                 :when (and (var? v) (not (:test (meta v))))
-                 :let [q (symbol (str (ns-name (:ns (meta v)))) (str (:name (meta v))))]
-                 :when (and (not= q p) (pdb/eid db :var/name q))]
-             (cond-> {:var q}
-               (:arglists (meta v)) (assoc :arglists (:arglists (meta v)))
-               (:malli/schema (meta v)) (assoc :contract (:malli/schema (meta v)))
-               (:doc (meta v)) (assoc :doc (:doc (meta v)))))))))
+  (vec (for [q (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db p)) p))
+             :let [v (d/entity db [:var/name q])]
+             :when (and v (not= :test (:var/kind v)))]
+         (cond-> {:var q}
+           (:var/contract v) (assoc :contract (clojure.edn/read-string (:var/contract v)))
+           (:var/doc v) (assoc :doc (:var/doc v))))))
 
 ;; ---- the last evaluations: folded, each an equal share --------------------------------
 
@@ -141,14 +169,16 @@
 (defn- shown-eval
   "One evaluation as the transcript shows it: its form, its live value (else its printed
   answer: a value whose producer named its render shows that render's text, as the REPL
-  answered it), its output; an error keeps :tag :err. A sub-map of the item, so every cut's
-  path reads the item itself."
+  answered it), its output; an error keeps :tag :err and shows its error map (:err: a
+  contract's problems and fix, an exception's class and causes) in place of its message. A
+  sub-map of the item, so every cut's path reads the item itself."
   {:malli/schema [:=> [:cat :map] :map]}
   [item]
   (let [rendered? (and (contains? item :value) (render/rendered? (:value item)))]
-    (cond-> (select-keys item [:form :tag :value :printed :out])
+    (cond-> (select-keys item [:form :tag :value :printed :out :err])
       rendered? (dissoc :value)
       (and (contains? item :value) (not rendered?)) (dissoc :printed)
+      (contains? item :err) (dissoc :printed)
       (= :ret (:tag item)) (dissoc :tag))))
 
 (defn shown-evals
@@ -190,6 +220,11 @@
                                           (assoc :failures (mapv failure (filter #(= symbol (:test %)) reds))))
                :no-design {:reason reason :unchanged :seon.task/plan
                            :do '(my.task/update! :seon.task/plan str "\n\n" "<what the implement step must do>")}
+               ;; no result: never written, or never run; what writes and runs it
+               :proof-unknown {:reason reason :test symbol
+                               :do (list 'do (list 'in-ns (list 'quote (clojure.core/symbol (namespace symbol))))
+                                         (list 'clojure.test/deftest (clojure.core/symbol (name symbol)) '(clojure.test/is false "write the assertion: the behaviour, on data"))
+                                         (list 'clojure.test/run-test-var (list 'var symbol)))}
                {:reason reason}))
            (when (seq gaps) [{:reason :contract-gap :vars gaps}])
            (when (seq unmerged) [{:reason :unmerged :keys unmerged}])
@@ -228,13 +263,14 @@
   branch's unmerged entries (base, ours, theirs); what its merge will carry to main; what
   happened to the last reply; the last evaluations; turns left."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds last-items turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge]}]
+  [db t {:keys [results reds last-items turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge tests]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
         task? #(and (qualified-symbol? (:seon.ref/name %)) (ref/task? db (:seon.ref/name %)))
         refs (filterv #(and (qualified-symbol? (:seon.ref/name %)) (not (task? %))) cites)
         named (into (set proofs) (map :seon.ref/name) refs)
         helpers (found db named (into (mapv :seon.ref/name refs) (sort-by str proofs)))
+        nsmap (ns-map db (into (vec (sort-by str proofs)) (map :seon.ref/name) refs))
         sections (into [] (comp (filter #(or (simple-symbol? (:seon.ref/name %)) (task? %) (and (:seon.ref/path %) (not (:seon.ref/problem-kind %)))))
                                 (map #(cited-view db %)))
                        cites)]
@@ -263,6 +299,7 @@
       max-turns (assoc :turn (str (inc turn) " of " max-turns))
       (seq sections) (assoc :sections sections)
       (seq helpers) (assoc :found helpers)
+      (seq nsmap) (assoc :map nsmap)
       (seq (refused (vec reasons) (vec reds))) (assoc :refused (refused (vec reasons) (vec reds)))
       (seq test-run-errors) (assoc :test-run {:failed (vec test-run-errors)})
       (last-reply truncated? source (vec repairs)) (assoc :your-last-reply (last-reply truncated? source (vec repairs)))
@@ -271,6 +308,13 @@
       ;; owner D4 (2026-10-22): every change the branch's merge carries to main, every turn
       ;; measured and empty ({}) says so; absent only when not measured (a basis before D4)
       (some? will-merge) (assoc :will-merge will-merge)
+      ;; root's ruling (a), 2026-10-22: the tests this turn ran (the proofs and the tests the
+      ;; branch changed), those the judge runs at the run's end, the process tests run only
+      ;; when root asks (owner, 2026-10-23); a run its bound ended leaves the rest unknown, never red
+      tests (assoc :tests (cond-> tests
+                            (:unfinished tests) (assoc :unfinished-run '(my.agent/prove))
+                            (pos? (:at-judge tests 0)) (assoc :judge-runs '(my.agent/prove))
+                            (pos? (:when-asked tests 0)) (assoc :root-runs '(my.agent/deferred))))
       (seq last-items) (assoc :last-evals (transcript (fold-evals last-items))))))
 
 (defn evaluations-text
@@ -294,13 +338,15 @@
          first rseq vec)))
 
 (defn- turn-messages
-  "One earlier turn as the conversation holds it: the model's reply with its eval calls, then
+  "One earlier turn as the conversation holds it: the model's reply with its eval calls (and
+  its reasoning, which a thinking provider needs back), then
   each call's answer as a tool message (what the REPL answered, before the model's next call).
   A reply that called nothing is followed by a user message saying so (last? false), so two
   replies never meet."
   {:malli/schema [:=> [:cat [:map [:reply :string] [:calls [:vector :map]]] :boolean] [:vector :seon.model/message]]}
-  [{:keys [reply calls]} last?]
+  [{:keys [reply calls reasoning]} last?]
   (into [(cond-> {:role "assistant" :content reply}
+           reasoning (assoc :reasoning reasoning)
            (seq calls) (assoc :tool-calls (mapv #(select-keys % [:id :code]) calls)))]
         (if (seq calls)
           (map (fn [{:keys [id evals]}] {:role "tool" :tool-call-id id :content evals}) calls)
@@ -309,7 +355,7 @@
 (def run-keys
   "The block's run sections: what the task is and what it cites, the same each turn of an
   run (made from its first turn's basis), so they are sent once, in the cached prefix."
-  [:task :references :found :sections :evidence])
+  [:task :references :found :map :sections :evidence])
 
 (defn- run-message
   "The run sections of block, printed by the one printer under the context's budget."
@@ -360,7 +406,7 @@
   "The turn entity e on db, its facts."
   {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
   [db e]
-  (d/pull db [:db/id :seon.turn/id :seon.turn/n :seon.turn/origin :seon.turn/basis :seon.turn/reply :seon.turn/calls :seon.turn/truncated] e))
+  (d/pull db [:db/id :seon.turn/id :seon.turn/n :seon.turn/origin :seon.turn/basis :seon.turn/reply :seon.turn/calls :seon.turn/truncated :seon.turn/reasoning] e))
 
 (defn- model-turns
   "The model turns of run on db before turn n, oldest first."
@@ -404,10 +450,11 @@
         block (cond-> (current-state db (task/task db task)
                                      (cond-> (assoc observed :truncated? (:seon.turn/truncated lst)
                                                     :source text :repairs (vec repairs)
-                                                    :unmerged (when merge? (pm/unmerged db (pm/program db #{}))))
+                                                    :unmerged (when merge? (pm/unmerged db)))
                                        (= :model origin) (assoc :turn turn :max-turns max-turns)))
                 last-evals (assoc :last-evals last-evals))
         turns (vec (map-indexed (fn [i r] (cond-> {:reply (:seon.turn/reply r) :calls (vec (:seon.turn/calls r))}
+                                             (:seon.turn/reasoning r) (assoc :reasoning (:seon.turn/reasoning r))
                                              (zero? i) (assoc :run (run-text db (:db/id r)))))
                                 prev))]
     {:block block :messages (if (seq turns) (messages (help-text db) block turns) (messages (help-text db) block))}))

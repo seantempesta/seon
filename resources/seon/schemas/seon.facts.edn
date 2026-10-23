@@ -6,7 +6,7 @@
  ;; definition (var, multimethod method, protocol extension, namespace) points to the form
  ;; that last made it; what a form defines, declares and references comes from Jolt's
  ;; analyzer (jolt.analyzer/*unit-tap*, or analysis-only for a file), never from text.
- :form/id [:and {:seon.db/identity true} :string]
+ :form/id [:and {:seon.db/identity true :seon.db/content-id true} :string]
  ;; the exact text as written, and the whitespace and comments before it in its file
  :form/src :string
  :form/lead :string
@@ -34,14 +34,14 @@
  ;; :answers :constant|:rethrows|:expr}: the facts the guard detectors query
  :form/timeouts [:set {:seon.db/index true} :qualified-symbol]
  :form/catches [:set :string]
- :ns/name [:and {:seon.db/identity true} :symbol]
+ :ns/name [:and {:seon.db/identity true :seon.db/content-id true} :symbol]
  :ns/doc :string
  :ns/form :seon.db/ref
  ;; the file it was imported from, relative to the source tree's root (seon.source)
  :ns/file :string
  ;; the text after its file's last form
  :ns/tail :string
- :var/name [:and {:seon.db/identity true} :symbol]
+ :var/name [:and {:seon.db/identity true :seon.db/content-id true} :symbol]
  :var/ns :seon.db/ref
  :var/form :seon.db/ref
  :var/doc :string
@@ -50,11 +50,11 @@
  ;; :ctor) and its declared contract, as text
  :var/kind :keyword
  :var/contract :string
- :method/key [:and {:seon.db/identity true} :string]
+ :method/key [:and {:seon.db/identity true :seon.db/content-id true} :string]
  :method/multi :qualified-symbol
  :method/dispatch :string
  :method/form :seon.db/ref
- :impl/key [:and {:seon.db/identity true} :string]
+ :impl/key [:and {:seon.db/identity true :seon.db/content-id true} :string]
  :impl/protocol :qualified-symbol
  :impl/type :string
  :impl/form :seon.db/ref
@@ -63,11 +63,11 @@
  ;; EDN text, the resource it is written back to, and whether the binary holds it (imported
  ;; from the tree a generation was built from; an entry an agent registers or a merge
  ;; carries never does). The resource's text as imported is the base write-back edits.
- :schema/key [:and {:seon.db/identity true} :qualified-keyword]
+ :schema/key [:and {:seon.db/identity true :seon.db/content-id true} :qualified-keyword]
  :schema/form :string
  :schema/file [:and {:seon.db/index true} :string]
  :schema/source :boolean
- :schema.file/path [:and {:seon.db/identity true} :string]
+ :schema.file/path [:and {:seon.db/identity true :seon.db/content-id true} :string]
  :schema.file/text :string
  :seon.db/schema-fact [:map {:seon.db/attributes true} [:schema/key :schema/key] [:schema/form :schema/form]
                         [:schema/file :schema/file] [:schema/source {:optional true} :schema/source]]
@@ -140,6 +140,9 @@
                       [:unmerged [:vector :string]] [:red [:vector :qualified-symbol]]
                       ;; why the run failed: its reasons or its death, as the reconciler stated it
                       [:problem {:optional true} :string]]
+ ;; root's go (my.root/gate!): the process tests this task's change reaches run on the gate
+ ;; checkout before it merges; without it they are never run automatically (owner, 2026-10-23)
+ :seon.task/gate? :boolean
  ;; the task held for root with a failure: a run the reconciler refused, whose agent died or
  ;; whose merge was refused (seon.reconcile/hold-tx: why, the run), or marked failed
  ;; (my.task/fail!, root or a check: why, the value that shows it, the run); root's judge
@@ -157,6 +160,7 @@
                           [:seon.task/instructions {:optional true} :seon.task/instructions]
                           [:seon.task/model {:optional true} :seon.task/model]
                           [:seon.task/evidence {:optional true} :seon.task/evidence]
+                          [:seon.task/gate? {:optional true} :seon.task/gate?]
                           [:seon.task/failure {:optional true} :seon.task/failure]
                           [:seon.task/declared {:optional true} :seon.task/declared]
                           [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
@@ -176,7 +180,7 @@
  :seon.run/branch :keyword
  :seon.run/model :string
  :seon.run/max-turns :int
- :seon.run/outcome [:enum :green :red :waiting :cap :failed :merge-failed :error :no-end]
+ :seon.run/outcome [:enum :green :red :waiting :cap :failed :merge-failed :error :no-end :no-progress]
  :seon.run/reason :string
  :seon.run/turns :int
  :seon.run/model-calls :int
@@ -199,8 +203,17 @@
  :seon.run/conflicts [:set {:seon.db/component true} :seon.db/ref]
  :seon.run/unmerged [:set :string]
  ;; measured at the run's end from the branch (seon.merge/three-way's :ours): the printed
- ;; program keys the branch changed since its merge base; the octopus merge admits on them
- :seon.run/changed [:set :string]
+ ;; program keys the branch changed since its merge base (each seon.edn/encode of a
+ ;; :seon.merge/program-key, so generated ones are too); the octopus merge admits on them
+ :seon.run/changed [:set [:string {:gen/elements ["[:var app/a]" "[:var app.b/c]" "[:form \"app/1-2\"]" "[:ns app]"]}]]
+ ;; measured at the run's end (the reach walk's :process?): the process tests its change reaches,
+ ;; which its merge runs on a checkout (root's ruling, 2026-10-22), never an agent's fork
+ :seon.run/deferred [:set :qualified-symbol]
+ ;; the merge gate's run of them on a checkout (seon.fx/run-tests): each test's status, as proofs'
+ :seon.run/deferred-results [:set {:seon.db/component true} :seon.db/ref]
+ ;; the changed namespaces the merge gate could not read from the branch, each with why: its
+ ;; run tested another tree than the one that merges, so none of its results counts as a pass
+ :seon.run/gate-unread [:vector {:seon.db/data true} [:map [:ns :symbol] [:reason :string]]]
  ;; measured at the run's end from the branch (seon.problems/caused): the derived problems
  ;; its work made true since its merge base, by message; the done rule refuses while any is open
  :seon.run/caused [:set :string]
@@ -221,6 +234,9 @@
                              [:seon.run/conflicts {:optional true} :seon.run/conflicts]
                              [:seon.run/unmerged {:optional true} :seon.run/unmerged]
                              [:seon.run/changed {:optional true} :seon.run/changed]
+                             [:seon.run/deferred {:optional true} :seon.run/deferred]
+                             [:seon.run/deferred-results {:optional true} :seon.run/deferred-results]
+                             [:seon.run/gate-unread {:optional true} :seon.run/gate-unread]
                              [:seon.run/caused {:optional true} :seon.run/caused]
                              [:seon.run/commit {:optional true} :seon.run/commit]
                              [:seon.run/commit-error {:optional true} :seon.run/commit-error]]
@@ -288,7 +304,25 @@
  ;; the runtime that made it, as its compiled units are keyed (jolt.host/runtime-fingerprint:
  ;; Jolt's version, its runtime fingerprint, its trace tag; docs/storage.md#history)
  :seon.tx/runtime :string
- :seon.tx/meta [:map {:seon.db/attributes true} [:seon.tx/runtime {:optional true} :seon.tx/runtime]]
+ ;; the branch the transaction was written on: it travels with a merged datom, so the union
+ ;; of every branch's history names who wrote what (seon.union)
+ :seon.tx/branch [:and {:seon.db/index true} :keyword]
+ :seon.tx/meta [:map {:seon.db/attributes true} [:seon.tx/runtime {:optional true} :seon.tx/runtime]
+                [:seon.tx/branch {:optional true} :seon.tx/branch]]
+ ;; a message between root and an agent, as a fact on the sender's branch: root's on main, an
+ ;; agent's reply on its own; the union of every branch's history joins a conversation in one
+ ;; query (seon.union). from and to name a run (its :seon.run/id, "demo/f#1") or
+ ;; "root": an agent id starts again every boot, a run's names one worker for good.
+ ;; reply-to is the replied message's id, a value, since that message may be on a branch the
+ ;; reply's is not
+ :seon.message/id [:and {:seon.db/identity true} :string]
+ :seon.message/from [:and {:seon.db/index true} :string]
+ :seon.message/to [:and {:seon.db/index true} :string]
+ :seon.message/body :string
+ :seon.message/reply-to [:and {:seon.db/index true} :string]
+ :seon.message/fact [:map {:seon.db/attributes true} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
+                     [:seon.message/to {:optional true} :seon.message/to] [:seon.message/body :seon.message/body]
+                     [:seon.message/reply-to {:optional true} :seon.message/reply-to]]
  ;; ---- written by an agent on its own branch; they reach main with its merge ----
  :seon.turn/id [:and {:seon.db/identity true} :string]
  :seon.turn/run [:and {:seon.db/index true} :string]

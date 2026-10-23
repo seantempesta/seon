@@ -105,8 +105,7 @@
                         (let [k (get (vswap! seen update [ns src] (fnil inc -1)) [ns src])
                               base {:units units :src src :ns ns :ns-after ns :ns-form? ns-form? :ns-meta (when ns-form? (meta (second form))) :before nil :lead lead :order i :k k}]
                           (or (program/account base)
-                              {:id (str ns "/text-" i) :src src :ns ns :ns-form? false :defs [] :declares #{} :methods [] :impls []
-                               :refs #{} :requires #{} :banned #{} :inline-defs #{} :timeouts #{} :catches #{} :lead lead :order i})))
+                              {:id (str ns "/text-" i) :src src :ns ns :lead lead :order i})))
                       forms))}))
 
 (defn text-tx

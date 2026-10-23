@@ -19,6 +19,7 @@
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
+;; :walks (test-plan's last reach walks, each keyed by the db value it walked: walks)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 (defonce state (atom nil))
 
@@ -85,6 +86,13 @@
         :else (do (swap! state update :pending conj m) (recur))))))
 
 
+(defn mem-mb
+  "Real MB of this process, read now (lib/real-mb walks the VM regions, ~1.5 ms): on the
+  events that report the agent's state (its hello, each commit, a :tests reply, :stats),
+  never per evaluation and never kept for a time."
+  {:malli/schema [:=> [:cat] :seon.lib/mb]}
+  [] (lib/r2 (lib/real-mb)))
+
 (defn commit!
   "Commit the writes this agent applied (run-ahead) to its branch, once, through its own
   store handle, and tell root (its flush makes the commit durable). nil when nothing waits."
@@ -96,7 +104,7 @@
     ;; them across agents
     (let [errs (:errors @state)]
       (when errs (swap! state dissoc :errors))
-      (send! (cond-> {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c)} errs (assoc :errors (vec (vals errs))))))))
+      (send! (cond-> {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c) :mem-mb (mem-mb)} errs (assoc :errors (vec (vals errs))))))))
 
 (defn transact!
   "Write tx-data to this agent's branch: applied at once to the value ahead of the
@@ -110,9 +118,7 @@
     (let [r (d/with (db) tx-data)]
       (swap! state assoc :db (:db-after r))
       {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
-    (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta)})]
-      ;; past this process's block of entity ids: the typed error, nothing applied
-      (when-let [e (and (not (map? r)) (pdb/lease-spent r (:lease @state)))] (throw (ex-info (:seon.error/message e) e)))
+    (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state))})]
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
       (swap! state assoc :db (:db-after r) :dirty? true)
       (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
@@ -199,13 +205,12 @@
         main-b (pdb/main-branch (:cfg @state))
         main (pdb/head conn main-b)
         head @conn
-        r (pm/three-way (pm/program (:base @state) data-attrs) (pm/program head data-attrs) (pm/program main data-attrs))]
+        r (pm/delta-three-way (:base @state) head main data-attrs)]
     (if (empty? (:theirs r))
       {:ok true :applied [] :conflicts [] :t (:max-tx head)}
-      (let [theirs (pm/program main data-attrs)
-            rep (d/merge-db conn #{main-b} (into (pm/apply-tx head (into {} (for [k (:apply r)] [k (get theirs k)])))
+      (let [rep (d/merge-db conn #{main-b} (into (pm/merge-tx head (:base @state) main (:apply r) data-attrs)
                                               (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
-                             (pdb/tx-meta))
+                             (pdb/tx-meta (:branch @state)))
             ops (pdb/report->tx rep)
             errs (program/load-changes! (:db-after rep) ops)]
         ;; the merge base is now main's head: what main changed is not this branch's change
@@ -292,20 +297,31 @@
       (assoc :got (print/text (second (:actual m)) (:part print/budgets)))
       (contract/valid? :seon.cost/report cost) (assoc :cost cost))))
 
-(defn results-dir
-  "Where this root's agents keep their test results: beside its store, under its main (this
-  root's agents only), never the results directory bin/test and every checkout share: an agent's REPL can
-  change live state its recorded forms do not show (until the owner rules that agents share)."
-  {:malli/schema [:=> [:cat] :string]}
-  [] (str (cfg/value :seon.config.root/store-path) "-results/" (cfg/value :seon.config.root/main)))
+(defn- walk
+  "(f db inputs), reused while db is the very value walked last for role (:branch, :base): a
+  value never changes, so neither does its walk (AGENTS §5, results reused by input). An
+  run's base stays one value until merge-main! replaces it, so its digests are walked once
+  per base, not once per observe; root's :tests after the last observe reuses the branch's.
+  Measured 2026-10-23: a reach walk ~1.2-1.4 s, 1.7-1.9 GB on Seon's program (2144 forms)."
+  {:malli/schema [:=> [:cat [:enum :branch :base] :seon.host/db :seon.program/inputs :seon.host/fn] :map]}
+  [role db inputs f]
+  (let [w (get-in @state [:walks role])]
+    (if (and w (identical? db (:db w)) (= inputs (:inputs w)))
+      (:value w)
+      (let [v (f db inputs)]
+        (swap! state assoc-in [:walks role] {:db db :inputs inputs :value v})
+        v))))
 
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/reach-digests) against base's (main at its merge base), the greens stored at
   those digests and proofs. The digests' inputs with no program facts are this boot's
   :inputs on root's :seon.root/source fact (seon.root/import-source!: present only when root's
-  binary is built from its source tree), so an agent's results are kept by digest in
-  results-dir; a root with no such fact this boot shares nothing and reuses nothing (the
+  binary is built from its source tree), so an agent's results are kept by digest in the one
+  results directory every checkout shares (:seon.config.source/test-results-dir: owner,
+  2026-10-23, a test that is the same is not run again once green, \"especially when freshly
+  branched\"; every eval is a recorded form, so the digest covers what ran); a root with no
+  such fact this boot shares nothing and reuses nothing (the
   inputs then are blank, which keys nothing stored: it only selects). A test is selected when
   it is a proof or reaches what the branch changed since base (a var, method, fixture, ns form,
   macro or schema entry), and runs when no green is stored at its digest
@@ -314,7 +330,7 @@
   one with a var but no program facts (loaded, never recorded) has no digest: it always runs.
   With no base (a tree with nothing to diff against: root's on-change runs), the proofs and
   every test with no green at its digest (seon.proofs/plan's own rule). Answers the plan with
-  :digests {test digest}, :dir (results-dir when shared) and :process, the tests that reach a
+  :digests {test digest}, :dir (the results directory when shared) and :process, the tests that reach a
   process of their own (seon.program/reach-index, the same walk as the digests): never run
   automatically, only when named (owner's ruling, 2026-10-23)."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] [:set :qualified-symbol]]
@@ -325,13 +341,13 @@
         source (:seon.root/source root)
         shared (when (= (:boot source) (:seon.root/boot root)) (:inputs source))
         in (or shared {:env "" :tree "" :data-refs (fx/declared-refs (cfg/value :seon.config.root/system-path))})
-        dir (when shared (results-dir))
+        dir (when shared (cfg/value :seon.config.source/test-results-dir))
         judges? (fn [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
                           (and (:test m) (not (program/scratch-ns? (:ns m))))))
-        idx (into {} (filter (comp judges? key)) (program/reach-index db in))
+        idx (into {} (filter (comp judges? key)) (walk :branch db in program/reach-index))
         cd (update-vals idx :digest)
         unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))]
-    (-> (proofs/plan (some-> base (program/reach-digests in)) cd (if dir (proofs/greens dir (vec (vals cd))) {}) proofs)
+    (-> (proofs/plan (when base (walk :base base in program/reach-digests)) cd (if dir (proofs/greens dir (vec (vals cd))) {}) proofs)
         (update :selected into unrecorded)
         (update :run into unrecorded)
         (assoc :digests cd :dir dir
@@ -398,12 +414,30 @@
   Each test that ran green is stored at its digest in test-plan's :dir through root's :file
   owner (seon.proofs/store-greens!); a write refused is named under :unstored, and that test
   runs again. :ran is how many tests reported. (forked pid) runs here once the child exists.
-  A fork refused (threads active) is :seon.test/fork-refused: no test ran."
-  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol]] [:or :seon.test/result :seon.test/fork-refused]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]]}
-  ([ticks proofs] (run-tests-forked ticks proofs (fn [_] nil)))
-  ([ticks proofs forked]
-  (let [{:keys [selected run reused digests dir]} (test-plan (db) (:base @state) proofs)
+  A fork refused (threads active) is :seon.test/fork-refused: no test ran.
+  Root's ruling (a), 2026-10-22: mode :turn (a turn's observation) selects the proofs and the
+  tests the branch itself changed or added; mode :judge (root's judge at the run's end)
+  selects the plan's tests. Either way a process test (the plan's :process: it reaches a shell,
+  a fork, a root or the binary), a proof among them, never runs here: the owner's ruling,
+  2026-10-23, runs those only when named (root's gate, my.root/gate!). The answer names them
+  (:deferred) and how many the judge runs (:at-judge)."
+  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge]] [:or :seon.test/result :seon.test/fork-refused]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]]}
+  ([ticks proofs mode] (run-tests-forked ticks proofs mode (fn [_] nil)))
+  ([ticks proofs mode forked]
+  (let [plan (test-plan (db) (:base @state) proofs)
+        proc (:process plan)
+        keep? #(not (proc %))
+        judge (filterv keep? (:selected plan))
+        deferred (vec (remove keep? (:selected plan)))
+        selected (if (= :judge mode)
+                   judge
+                   ;; the proofs as the plan selects them (one loaded but never recorded has
+                   ;; no digest and is selected all the same), and the tests the branch changed
+                   (vec (sort-by str (filter keep? (into (set (filter proofs (:selected plan)))
+                                                         (filter (:digests plan) (program/changed-vars (:base @state) (db))))))))
+        {:keys [reused digests dir]} plan
+        run (filterv #(not (reused %)) selected)
         reused-reports (vec (for [t selected :when (reused t)] {:type :pass :var (str "#'" t) :reused true}))
         [r w] (lib/pipe) t0 (profile/now-ns)
         res (lib/fork!
@@ -439,7 +473,8 @@
         (cond-> (seq unstored) (assoc :unstored unstored))
         (update :reports into reused-reports)
         (update :pass + (count reused-reports))
-        (assoc :reused (count reused-reports) :ran (count (distinct (keep :var (:reports res))))))))))
+        (assoc :reused (count reused-reports) :ran (count (distinct (keep :var (:reports res))))
+               :selected selected :deferred deferred :at-judge (count judge)))))))
 
 ;; ---- the loop ----------------------------------------------------------------------
 
@@ -468,17 +503,6 @@
       (alias 'str 'clojure.string))
     nsx))
 
-(defn mem-mb
-  "Real MB of this process (lib/real-mb walks the VM regions, ~1.5 ms), refreshed at most
-  once a second, or now when fresh?."
-  {:malli/schema [:function [:=> [:cat] :seon.lib/mb] [:=> [:cat :boolean] :seon.lib/mb]]}
-  ([] (mem-mb false))
-  ([fresh?]
-   (let [{:keys [mem-at mem]} @state now (profile/now-ns)]
-     (if (and (not fresh?) mem-at (< (- now mem-at) 1000000000))
-       mem
-       (let [m (lib/r2 (lib/real-mb))] (swap! state assoc :mem m :mem-at now) m)))))
-
 (declare clone!)
 
 (defn handle!
@@ -491,6 +515,7 @@
     ;; root hears the test child's pid once it is forked (its agent proc's :tests-started event)
     :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
                                                               (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
+                                                              :judge
                                                               #(send! {:op :tests-started :id (:id m) :pid %}))
              :mem-mb (mem-mb)}]
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
@@ -500,9 +525,8 @@
     ;; root asks this agent to merge main into its branch (it owns the branch's writes)
     :merge-main [{:op :merged-main :id (:id m) :result (merge-main! (:data-attrs m #{}))}]
     :clone (do (clone! m) nil)
-    :stats [{:op :stats :id (:id m) :result {:mem-mb (mem-mb true) :t (:max-tx (db)) :pid (lib/c-getpid)
+    :stats [{:op :stats :id (:id m) :result {:mem-mb (mem-mb) :t (:max-tx (db)) :pid (lib/c-getpid)
                                               :results (count (:results @state)) :evals (:n @state)
-                                              :ids (pdb/lease-use (db) (:lease @state))
                                               :heap-mb (lib/r2 (/ (lib/bytes-in-heap) 1048576.0))}}]
     ;; a message (session F2): it waits in :inbox until the agent's code takes it ((messages));
     ;; root hears that it arrived
@@ -559,12 +583,12 @@
                     (let [parent (:id @state)]
                       ;; the parent's socket closed on fork (FD_CLOFORK); this clone's came with the request
                       (sock/clofork! fd)
-                      ;; the clone opens the store itself, on its own branch, with its own lease
-                      (pdb/after-fork! (:cfg r) (:lease r))
+                      ;; the clone opens the store itself, on its own branch
+                      (pdb/after-fork! (:cfg r))
                       (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
                       (let [store-conn (d/connect (assoc (:cfg r) :branch (:branch m)))]
                         (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn (sock/conn fd) :mode :agent :tx-seq 0
-                               :lease (:lease r) :pending clojure.lang.PersistentQueue/EMPTY :mem-at nil :fx-pending {}
+                               :pending clojure.lang.PersistentQueue/EMPTY :fx-pending {}
                                :store-conn store-conn :db @store-conn))
                       (let [unwatched (sock/signal-at-input! fd)]
                         (hello! t0 (cond-> {:cloned-from parent} unwatched (assoc :unwatched unwatched))))
@@ -583,7 +607,7 @@
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
-  [fd {id :agent branch :branch task :task run :run cfg :cfg lease :lease resumed :resumed commit :commit t :t} db0 serve]
+  [fd {id :agent branch :branch task :task run :run cfg :cfg resumed :resumed commit :commit t :t} db0 serve]
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
   (sock/clofork! fd)
@@ -592,7 +616,7 @@
   (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)))
   (stderr-to-file! (stderr-path (pdb/agents-dir cfg) id))
   ;; this agent owns its branch's writes: it opens the store itself (seon.db/after-fork!)
-  (pdb/after-fork! cfg lease)
+  (pdb/after-fork! cfg)
   ;; the model's API key is root's alone (its :model owner calls the model; session FX1)
   (lib/c-unsetenv (cfg/value :seon.config.ai/api-key-variable))
   (let [nsx (make-ns! id)
@@ -611,7 +635,7 @@
      ;; forked); a resumed one's is older than main, and comparing against main's head would
      ;; read main's later changes as the branch's (seon.program/divergence, changed-vars)
      (reset! state {:id id :branch branch :task task :run run :fd fd :conn c :db @store-conn
-                   :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
+                   :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :interrupt-ok intr-ok :serve serve})

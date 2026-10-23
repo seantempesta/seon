@@ -75,7 +75,7 @@
   ;; the scripted stand-in's script is stated only under :scripted (checks and tests)
   (doseq [p [:default :scripted :deepseek]]
     (let [c (read-file (config/path (config/checkout)) p (config/checkout))]
-      (is (= (set (keys c)) (set (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.source/root} (not= :scripted p) (conj :seon.config.ai/script))
+      (is (= (set (keys c)) (set (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.source/root :seon.config.source/gate-checkout} (not= :scripted p) (conj :seon.config.ai/script))
                                          (config/keys-declared)))) p)))
   (let [shipped #(read-file (config/path (config/checkout)) % (config/checkout))]
     (is (= {:kind :none} (config/provider (shipped :default))) "no profile: no provider, never the stand-in")
@@ -109,8 +109,8 @@
     (is (every? #(= :invalid (:problem %)) (:seon.config/problems r)))))
 
 (deftest a-missing-required-key-refuses-and-nil-is-absent
-  (let [r (refused #(config/resolved (assoc config/config :seon.config.store/eid-lease nil)))]
-    (is (= [{:key :seon.config.store/eid-lease :problem :missing-key :value "nil"}] (:seon.config/problems r))))
+  (let [r (refused #(config/resolved (assoc config/config :seon.config.store/branching-factor nil)))]
+    (is (= [{:key :seon.config.store/branching-factor :problem :missing-key :value "nil"}] (:seon.config/problems r))))
   ;; an optional key resolving nil is absent, not a stored nil
   (is (not (contains? (config/resolved (assoc config/config :seon.config.ai/thinking nil)) :seon.config.ai/thinking)))
   (is (= :disabled (:seon.config.ai/thinking (config/resolved (assoc config/config :seon.config.ai/thinking :disabled))))))

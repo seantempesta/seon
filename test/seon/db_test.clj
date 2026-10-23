@@ -41,35 +41,43 @@
       (is (nil? (resolve 'seon.db/mem-cfg))))
     (d/release seed)))))))
 
-(deftest minting-past-the-lease-is-refused-not-shared
-  ;; this process takes a lease on a test branch as a forked agent does (seon.db/after-fork!
-  ;; -> lease!), mints all but two of its ids, then asks for five more
-  (ts/test-branch! (fn [c conn] (let [sid (get-in c [:store :id])
-        lease (pdb/lease-block! @conn)
-        ceiling (+ lease (cfg/value :seon.config.store/eid-lease))
-        notes (fn [n tag] (vec (for [i (range n)] {:note/text (str tag i)})))]
+(deftest each-id-is-issued-once-across-branches
+  ;; the store's one page of ids (seon.db/ids!): two branches forked at one commit each take
+  ;; their own entity ids and transaction ids, and an id carried in tx-data moves the page past it
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (keyword (str (name (:branch cfg)) "-ids"))
+           _ (d/branch! conn (:branch cfg) b)
+           bc (d/connect (assoc cfg :branch b))
+           write (fn [c tag] (let [r (d/transact c [{:db/id "n" :note/text tag}])]
+                               [(get-in r [:tempids "n"]) (get-in r [:tempids :db/current-tx])]))]
+       (try
+         (let [[ea ta] (write conn "a") [eb tb] (write bc "b")]
+           (testing "two branches of one commit: different entity ids, different transaction ids"
+             (is (not= ea eb))
+             (is (not= ta tb))
+             (is (= ta (:max-tx @conn)) "a branch's t is its last transaction's id")
+             (is (< ta tb) "issued in order across branches"))
+           (testing "an explicit id is never issued again"
+             (let [far (+ 1000 (max ea eb))]
+               (d/transact bc [[:db/add far :note/text "carried"]])
+               (is (< far (first (write conn "after")))))))
+         (finally (d/release bc) (d/delete-branch! conn b)))))))
+
+(deftest a-reopened-store-issues-past-every-head
+  ;; the page is reseeded from the heads when it opens, so a page lost (a crash, a deleted
+  ;; file) re-issues no id a committed head holds; a store on disk of its own, removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
     (try
-      (pdb/lease! c lease)
-      (let [r1 (dw/apply! conn {:tx-data (notes (- (cfg/value :seon.config.store/eid-lease) 2) "a")})
-            before (:db-after r1)
-            r2 (dw/apply! conn {:tx-data (notes 5 "b")})
-            e (pdb/lease-spent r2 lease)]
-        (testing "the lease mints up to its end"
-          (is (map? r1))
-          (is (= (- ceiling 2) (:max-eid before)))
-          (is (= {:from lease :used (- (cfg/value :seon.config.store/eid-lease) 2) :of (cfg/value :seon.config.store/eid-lease)} (pdb/lease-use before lease))))
-        (testing "past it the transaction is refused with the typed error, nothing applied"
-          (is (not (map? r2)))
-          (is (= :seon.db/lease-spent (:seon.error/type e)))
-          (is (contract/valid? :seon.db/lease-spent e))
-          (is (= {:lease lease :ceiling ceiling} (select-keys e [:lease :ceiling])))
-          (is (string? (:seon.error/fix e)))
-          (is (nil? (pdb/lease-spent r2 nil)) "a process without a lease (root) is never refused this way"))
-        (testing "the next lease's ids were never minted"
-          (let [run-ahead (:db-after (dw/apply! conn {:tx-data []}))]
-            (is (= (- ceiling 2) (:max-eid run-ahead)))
-            (is (empty? (d/datoms run-ahead :eavt ceiling))))))
-      (finally (dbt/set-eid-ceiling! sid nil)))))))
+      (let [r (d/transact conn [{:db/id "n" :note/text "before"}])
+            e (get-in r [:tempids "n"]) t (:max-tx (:db-after r))]
+        (clojure.java.shell/sh "rm" (str path "/ids"))
+        (pdb/ids! conn)
+        (let [r2 (d/transact conn [{:db/id "n" :note/text "after"}])]
+          (is (< e (get-in r2 [:tempids "n"])))
+          (is (< t (:max-tx (:db-after r2))))))
+      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest the-store-reports-its-map-use
   ;; a store on disk of this test's own, the last resort: what is proved is how an LMDB
@@ -85,24 +93,6 @@
         (is (< used-bytes (:used-bytes (pdb/map-use cfg))) "it grows as the store does"))
       (is (nil? (pdb/map-use (ts/test-branch! (fn [c _] c)))) "an in-memory store has no map")
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
-
-(deftest a-lease-mints-in-its-own-block-after-a-merge
-  ;; main merged into the branch brings entities minted in a later agent's block (ids past
-  ;; this lease's ceiling): this process still mints inside its own block, never above them
-  (ts/test-branch! (fn [c conn] (let [sid (get-in c [:store :id])
-        lease (pdb/lease-block! @conn)
-        ceiling (+ lease (cfg/value :seon.config.store/eid-lease))
-        theirs (+ ceiling 10)
-        new-id (fn [r] (d/q '[:find ?e . :in $ ?t :where [?e :note/text ?t]] (:db-after r) "mine"))]
-    (try
-      (pdb/lease! c lease)
-      (let [r0 (dw/apply! conn {:tx-data [[:db/add theirs :note/text "theirs"]]})
-            r1 (dw/apply! conn {:tx-data [{:note/text "mine"}]})]
-        (is (map? r0))
-        (is (<= theirs (:max-eid (:db-after r0))) "the branch holds the later block's entity")
-        (is (map? r1) "minting goes on")
-        (is (< lease (new-id r1) ceiling) "inside its own block"))
-      (finally (dbt/set-eid-ceiling! sid nil)))))))
 
 (deftest two-processes-branch-one-store
   ;; two processes at once each make 50 branches of one store (two roots on one store, as
@@ -146,6 +136,30 @@
         (d/release c2))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
+(deftest a-kept-store-gains-content-ids-and-keeps-its-entities
+  ;; a store seeded before content ids (its identities without :db/contentId): opening it
+  ;; gives them their content ids; an entity it holds keeps its id, a new identity takes its
+  ;; content id. A store on disk of this test's own, the last resort; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))
+        cfg (pdb/store-cfg :lmdb path)
+        _ (d/create-database (pdb/made-cfg cfg))
+        c0 (d/connect cfg)
+        _ (d/transact c0 {:tx-data (mapv #(dissoc % :db/contentId) pdb/schema)})
+        old (get-in (d/transact c0 [{:db/id "f" :form/id "app.k/old" :form/src "(def old 1)" :form/ns "n"} {:db/id "n" :ns/name 'app.k}]) [:tempids "f"])
+        old-ns (pdb/eid @c0 :ns/name 'app.k)
+        _ (d/release c0)
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
+    (try
+      (is (< old datahike.constants/tx0) "minted before: a counter id")
+      (is (true? (get-in (d/schema @conn) [:form/id :db/contentId])) "the identity gained its content id")
+      (is (= old (pdb/eid @conn :form/id "app.k/old")) "the entity it held keeps its id")
+      (let [r (d/transact conn [{:db/id "f" :form/id "app.k/new" :form/src "(def new 1)" :form/ns "n"} {:db/id "n" :ns/name 'app.k}])
+            new (get-in r [:tempids "f"])]
+        (is (= (datahike.db.transaction/content-eid :form/id "app.k/new") new) "a new identity takes its content id")
+        (is (= old-ns (get-in r [:tempids "n"]) (:db/id (:form/ns (d/entity @conn new))))
+            "a tempid naming an identity the store holds is that entity, refs made before its map included"))
+      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+
 (deftest a-kept-store-from-before-the-runtime-attribute-opens
   ;; the transaction that installs :seon.tx/runtime cannot carry it in its tx-meta: a kept
   ;; store made before the attribute existed (every store before 2026-10-22) failed to open
@@ -158,7 +172,7 @@
       (let [c0 (d/connect made)] (d/transact c0 {:tx-data (vec (remove #(= :seon.tx/runtime (:db/ident %)) pdb/schema))}) (d/release c0))
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
         (is (= :seon.tx/runtime (:db/ident (get (d/schema @conn) :seon.tx/runtime))) "the attribute is installed")
-        (let [r (d/transact conn {:tx-data [{:note/text "after"}] :tx-meta (pdb/tx-meta)})]
+        (let [r (d/transact conn {:tx-data [{:note/text "after"}] :tx-meta (pdb/tx-meta :db)})]
           (is (string? (:seon.tx/runtime (d/entity @conn (:db/current-tx (:tempids r))))) "and the next transaction names its runtime"))
         (d/release conn))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
@@ -270,7 +284,7 @@
   than real turn text and made LZ4 look like the fix (2026-10-22)."
   [k]
   [{:seon.turn/id (str "att/" k) :seon.turn/run "att" :seon.turn/n k :seon.turn/origin :model
-    :seon.turn/basis {:commit (random-uuid) :task "t/x" :run "att" :turn k :max-turns 8 :origin :model
+    :seon.turn/basis {:commit (java.util.UUID. 0 k) :task "t/x" :run "att" :turn k :max-turns 8 :origin :model
                                        :observed {:results {'t-test/x :fail} :test-run-errors [] :reasons [{:reason :proof-red :symbol 't-test/x}]
                                                   :reds [{:test 't-test/x :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))"}]}}
     :seon.turn/reply (slice @prose k 1500)
@@ -376,23 +390,44 @@
       (d/branch! conn :db :early)
       (on :early #(d/transact % {:tx-data [{:seon.turn/id "att/e" :seon.turn/reply (slice @prose 3 3000)}]}))
       (d/delete-branch! conn :early)
-      (let [r1 (record! (pdb/collect! conn))]
+      (let [r1 (record! (pdb/collect! conn true))]
         (is (= #{:db} (:branches r1)) "the first collection records the branches it saw")
         (is (zero? (:swept r1)) "and sweeps nothing: a new main must not hold its first work behind a full sweep"))
-      (is (:skipped (pdb/collect! conn)) "the same branches: nothing to reclaim, nothing written")
+      (is (:skipped (pdb/collect! conn true)) "the same branches: nothing to reclaim, nothing written")
       (d/branch! conn :db :gone)
       (on :gone #(d/transact % {:tx-data [{:seon.turn/id "att/0" :seon.turn/reply reply}]}))
-      (let [r (record! (pdb/collect! conn))]
+      (let [r (record! (pdb/collect! conn true))]
         (is (= {:swept 0 :gone 0 :branches #{:db :gone}} (select-keys r [:swept :gone :branches]))
             "a branch made since: recorded as seen, nothing swept"))
       (is (k/exists? (:store @conn) vk {:sync? true}))
       (d/delete-branch! conn :gone)
-      (let [r2 (record! (pdb/collect! conn))]
+      (let [r2 (record! (pdb/collect! conn true))]
         (is (pos? (:swept r2)) "the gone branch's nodes are swept")
         (is (= 1 (:gone r2)))
         (is (= #{:db} (:branches r2))))
       (is (not (k/exists? (:store @conn) vk {:sync? true})) "and its value out of line")
       (is (= #{"main's"} (notes @conn)) "main reads as before")
+      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+
+;; the rule a collection keeps beside "no agent live" (docs/storage.md#collection)
+(deftest a-root-that-shares-its-store-never-collects
+  ;; seon.db/collect! with sole? false (:seon.config.store/sole-writer?, false where roots share
+  ;; one store: bin/test's shards, bin/check's steps) sweeps nothing, though a branch is gone:
+  ;; another process's commit could be reusing a value the sweep would delete (Datahike's
+  ;; collection sees only its own process's commits). A store on disk of this test's own, the
+  ;; last resort: the in-memory store has no nodes to collect; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-shared-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        reply (slice @prose 11 3000)
+        vk (hasch.core/uuid reply)]
+    (try
+      (d/branch! conn :db :gone)
+      (let [c (d/connect (assoc (:config @conn) :branch :gone))]
+        (try (d/transact c {:tx-data [{:seon.turn/id "att/0" :seon.turn/reply reply}]}) (finally (d/release c))))
+      (d/delete-branch! conn :gone)
+      (is (= {:skipped true :shared true} (pdb/collect! conn false)) "a shared store: nothing swept, nothing recorded")
+      (is (k/exists? (:store @conn) vk {:sync? true}) "the gone branch's value out of line is kept")
+      (is (not (:skipped (pdb/collect! conn true))) "while the sole writer's collection of the same store runs")
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest a-commit-costs-what-it-writes
@@ -423,15 +458,94 @@
                  ", so the bound is " bound " (" (format "%.1f" (/ (double per-turn) bound)) "x over)")))
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
-(deftest root-mints-past-every-reserved-block-after-a-merge
-  ;; task seon.db/root-mints-in-a-block-of-its-own: an agent's block is reserved from the one
-  ;; counter root's own writes mint from (seon.db/lease-block!), so after a merge brings an
-  ;; entity from inside that block onto main, root's next id still lies past the block
-  (ts/test-branch! (fn [_ conn]
-    (let [lease (pdb/lease-block! @conn)
-          end (+ lease (cfg/value :seon.config.store/eid-lease))
-          merged (d/transact conn [[:db/add (+ lease 5) :note/text "the agent's, merged"]])
-          root (d/transact conn [{:note/text "root's"}])
-          e (d/q '[:find ?e . :where [?e :note/text "root's"]] (:db-after root))]
-      (is (= (+ lease 5) (:max-eid (:db-after merged))) "main holds an id inside the agent's block")
-      (is (>= e end) (str "root's id " e " lies past the block ending at " end))))))
+(deftest two-branches-diff-by-what-each-wrote
+  ;; datoms-diff walks both trees and skips every subtree they share (Jolt's HashSet needs
+  ;; retainAll for that), so a branch's own writes are its side of the diff against its fork
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [fork @conn
+           b (keyword (str (name (:branch cfg)) "-b"))
+           _ (d/branch! conn (:branch cfg) b)
+           bc (d/connect (assoc cfg :branch b))]
+       (try
+         (d/transact bc [{:note/text "b's 1"} {:note/text "b's 2"}])
+         (d/transact conn [{:note/text "main's"}])
+         (let [[only-fork only-b] (d/datoms-diff fork @bc :eavt [])
+               [only-b' only-main] (d/datoms-diff @bc @conn :eavt [])]
+           (is (empty? only-fork) "the branch only added")
+           (is (= #{"b's 1" "b's 2"} (set (keep #(when (= :note/text (:a %)) (:v %)) only-b))))
+           (is (= #{"b's 1" "b's 2"} (set (keep #(when (= :note/text (:a %)) (:v %)) only-b'))))
+           (is (= #{"main's"} (set (keep #(when (= :note/text (:a %)) (:v %)) only-main)))))
+         (finally (d/release bc) (d/delete-branch! conn b)))))))
+
+(deftest a-planned-query-reads-every-version-in-the-history
+  ;; the planner's history path opens sorted-set cursors with a java.util.Comparator
+  ;; (datahike.query.execute/history-versions!); every version of a replaced value answers
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [e (get-in (d/transact conn [{:db/id "f" :form/id "h/f" :form/src "(defn f [] 0)" :form/order 1}]) [:tempids "f"])]
+       (d/transact conn [[:db/add e :form/order 2]])
+       (d/transact conn [[:db/add e :form/order 3]])
+       (is (= #{[1 true] [1 false] [2 true] [2 false] [3 true]}
+              (set (d/q '[:find ?o ?added :in $ ?id :where [?f :form/id ?id] [?f :form/order ?o _ ?added]]
+                        (d/history @conn) "h/f"))))
+       (is (= #{[3]} (d/q '[:find ?o :in $ ?id :where [?f :form/id ?id] [?f :form/order ?o]] @conn "h/f")))))))
+
+(deftest an-identity-names-its-entity-on-every-branch
+  ;; a :db/contentId attribute's value is its entity's id (datahike.db.transaction/content-eid):
+  ;; two branches minting one identity mint one entity, so their datoms coincide; a ref to the
+  ;; tempid made before its map takes it; the identity is never replaced on its entity
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (keyword (str (name (:branch cfg)) "-ce"))
+           _ (d/branch! conn (:branch cfg) b)
+           bc (d/connect (assoc cfg :branch b))
+           mint (fn [c] (let [r (d/transact c [{:db/id "f" :form/id "app.ce/f" :form/src "(defn f [])" :form/ns "n" :form/defines ["v"]}
+                                               {:db/id "v" :var/name 'app.ce/f :var/form "f"}
+                                               {:db/id "n" :ns/name 'app.ce}])]
+                          (mapv #(get-in r [:tempids %]) ["f" "v" "n"])))]
+       (try
+         (let [[fa va na] (mint conn) [fb vb nb] (mint bc)]
+           (testing "one identity, one entity id, on both branches"
+             (is (= [fa va na] [fb vb nb]))
+             (is (= fa (datahike.db.transaction/content-eid :form/id "app.ce/f")))
+             (is (<= datahike.constants/ce0 fa datahike.constants/emax)))
+           (testing "the ref named the tempid before its map: it holds the content id"
+             (is (= va (:db/id (first (:form/defines (d/entity @conn fa)))))))
+           (testing "a counter entity is no content entity"
+             (is (< (get-in (d/transact conn [{:db/id "x" :note/text "counter"}]) [:tempids "x"]) datahike.constants/tx0)))
+           (testing "an identity is never replaced on its entity: a rename is refused"
+             (is (= :entity-id/collision
+                    (try (d/transact conn [[:db/add fa :form/id "app.ce/g"]]) nil
+                         (catch Exception e (some (comp :error ex-data) (take-while some? (iterate ex-cause e)))))))))
+         (finally (d/release bc) (d/delete-branch! conn b)))))))
+
+(deftest content-ids-cost-the-writes-the-model-says
+  ;; content eids scatter a commit's new identities over the indexes (notes/content-eids-2026-10-23.md
+  ;; §3): nodes written per commit against counter eids, the ratio the model priced (1.3-1.7x at
+  ;; 2 new identities, 2.3-5.1x at 10), red when steeper. Measured 2026-10-23 at 110k datoms:
+  ;; 0.97x at 1, 1.51x at 2, 4.50x at 10. A store on disk of this test's own, the last resort:
+  ;; the in-memory store writes no nodes to count
+  (let [nodes (fn [content?]
+                (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))
+                      cfg (pdb/made-cfg (pdb/store-cfg :lmdb path))
+                      _ (d/create-database cfg)
+                      conn (d/connect (dissoc cfg :keep-history?))
+                      ent (fn [k] (into {:w/id (str "entity " k)} (for [i (range 10)] [(keyword "w" (str "a" i)) (str "value " i " of " k)])))]
+                  (try
+                    (pdb/ids! conn)
+                    (d/transact conn (into [(cond-> {:db/ident :w/id :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+                                              content? (assoc :db/contentId true))]
+                                           (for [i (range 10)] {:db/ident (keyword "w" (str "a" i)) :db/valueType :db.type/string :db/cardinality :db.cardinality/one})))
+                    (doseq [part (partition-all 1000 (range 3000))] (d/transact conn (mapv ent part)))
+                    (let [writes #(:writes @(:stats (-> @conn :store :storage)))]
+                      (into {} (for [m [2 10]]
+                                 (let [w0 (writes)]
+                                   (doseq [c (range 10)] (d/transact conn (mapv #(ent (str "new " m " " c " " %)) (range m))))
+                                   [m (/ (- (writes) w0) 10.0)]))))
+                    (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+        counter (nodes false) content (nodes true)
+        ratio (fn [m] (/ (content m) (counter m)))]
+    (is (< (ratio 2) 2.0) (str "2 new identities: " (ratio 2) "x the counter's nodes"))
+    (is (< (ratio 10) 6.0) (str "10 new identities: " (ratio 10) "x the counter's nodes"))
+    (is (< (ratio 2) (ratio 10)) "more new identities per commit scatter more")))

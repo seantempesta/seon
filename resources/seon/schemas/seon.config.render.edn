@@ -14,6 +14,7 @@
  :seon.config.render/history-budget [:int {:min 0 :seon.config/unit "tokens" :description "Earlier turns the model reads, whole, newest kept first."}]
  :seon.config.render/reference-tokens [:int {:min 1 :seon.config/unit "tokens" :description "A cited var's source in the context; past it the context shows its doc and the form that reads the source."}]
  :seon.config.render/found [:int {:min 0 :seon.config/unit "vars" :description "Helpers the plan does not name, shown in the context."}]
+ :seon.config.render/map-tokens [:int {:min 0 :seon.config/unit "tokens" :description "The run's map of the namespaces its proofs and cited vars live in: each namespace's functions within an equal share."}]
  :seon.config.render.list/rows [:int {:min 1 :seon.config/unit "items" :description "A long list's rows shown: running and newest runs, root's context's newest events."}]
  :seon.config.render.list/newest [:int {:min 1 :seon.config/unit "items" :description "A tile's or card's newest shown: root's defects on the page, a card's evaluations."}]
  :seon.config.render.list/brief [:int {:min 1 :seon.config/unit "items" :description "A secondary list in root's context: ended runs, costliest functions."}]

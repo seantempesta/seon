@@ -158,7 +158,7 @@
   "The observed members of a run's end (proto.agents/end), as attributes: a count
   nobody measured (no end written, a reply without usage) is absent, never 0."
   {:malli/schema [:=> [:cat :seon.turn/end :int :int] :map]}
-  [{:keys [outcome turns model-calls tokens results uncontracted reason conflicts unmerged changed caused]} end-ms basis-t]
+  [{:keys [outcome turns model-calls tokens results uncontracted reason conflicts unmerged changed deferred caused]} end-ms basis-t]
   (cond-> {:seon.run/outcome outcome :seon.run/basis-t basis-t :seon.run/end-ms end-ms
            :seon.run/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s}))}
     turns (assoc :seon.run/turns turns)
@@ -168,6 +168,7 @@
     (seq conflicts) (assoc :seon.run/conflicts (mapv pm/conflict-tx conflicts))
     (seq unmerged) (assoc :seon.run/unmerged (vec unmerged))
     (seq changed) (assoc :seon.run/changed (vec changed))
+    (seq deferred) (assoc :seon.run/deferred (vec deferred))
     (seq caused) (assoc :seon.run/caused (vec caused))
     reason (assoc :seon.run/reason reason)))
 
@@ -268,6 +269,7 @@
 (def ^:private run-pull
   '[* {:seon.run/task [:seon.task/id]}
     {:seon.run/results [:seon.proof/test :seon.proof/status]}
+    {:seon.run/deferred-results [:seon.proof/test :seon.proof/status]}
    {:seon.run/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
 (defn- run-value
@@ -283,6 +285,8 @@
       uncontracted (assoc :seon.run/uncontracted (set uncontracted))
       unmerged (assoc :seon.run/unmerged (vec (sort unmerged)))
       (:seon.run/changed a) (update :seon.run/changed set)
+      (:seon.run/deferred a) (update :seon.run/deferred set)
+      (:seon.run/deferred-results a) (update :seon.run/deferred-results #(into {} (map (juxt :seon.proof/test :seon.proof/status)) %))
       (:seon.run/caused a) (update :seon.run/caused set)
       conflicts (assoc :seon.run/conflicts
                        (vec (sort-by (comp str :key) (map pm/conflict-value conflicts)))))))
@@ -301,12 +305,15 @@
   (some-> (d/pull db run-pull [:seon.run/id aid]) run-value))
 
 (defn root
-  "Root's boot and config keys on db: {:boot :max-running :max-merging}, nil before the first boot."
-  {:malli/schema [:=> [:cat :seon.host/db] [:maybe [:map [:boot :string] [:max-running :int] [:max-merging {:optional true} :int]]]]}
+  "Root's boot and config keys on db: {:boot :max-running :max-merging :gate-checkout}, nil
+  before the first boot."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe [:map [:boot :string] [:max-running :int] [:max-merging {:optional true} :int]
+                                                     [:gate-checkout {:optional true} :string]]]]}
   [db]
-  (when-let [r (d/pull db [:seon.root/boot :seon.config.agent/max-running :seon.config.merge/max-running] [:seon.root/id :root])]
+  (when-let [r (d/pull db [:seon.root/boot :seon.config.agent/max-running :seon.config.merge/max-running :seon.config.source/gate-checkout] [:seon.root/id :root])]
     (cond-> {:boot (:seon.root/boot r) :max-running (:seon.config.agent/max-running r)}
-      (:seon.config.merge/max-running r) (assoc :max-merging (:seon.config.merge/max-running r)))))
+      (:seon.config.merge/max-running r) (assoc :max-merging (:seon.config.merge/max-running r))
+      (:seon.config.source/gate-checkout r) (assoc :gate-checkout (:seon.config.source/gate-checkout r)))))
 
 (defn entity-value
   "The task, run or root that entity e of db is now, as the reconciler's index holds it:

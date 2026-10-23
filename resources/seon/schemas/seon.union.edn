@@ -1,0 +1,3 @@
+;; U, the union of every branch's history (seon.union, docs/storage.md#the-union).
+{;; U's db, and per branch the commit whose datoms it holds
+ :seon.union/union [:map [:db :seon.host/db] [:applied [:map-of :keyword :uuid]]]}

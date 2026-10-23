@@ -39,7 +39,7 @@
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses "Run statuses of a death (:seon.run/status)." (:seon.status/failed (contract/properties :seon.run/status)))
 (def ^:private finished "Run statuses that make its task done (:seon.run/status, as seon.reconcile/finished)." (:seon.status/finished (contract/properties :seon.run/status)))
-(def run-classes [:red :cost :merge :dead :error :waste :task-conflict])
+(def run-classes [:red :cost :merge :dead :error :waste :task-conflict :unrun])
 
 (defn- es
   "The entities carrying attribute a (its aevt index: only the entities that have it)."
@@ -209,6 +209,7 @@
   them)."
   [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/end-ms :seon.run/agent
    :seon.run/unmerged :seon.run/failures :seon.run/costs :seon.run/error :seon.run/waste :seon.run/task-conflicts
+   :seon.run/deferred :seon.run/gate-unread {:seon.run/deferred-results [:seon.proof/test :seon.proof/status]}
    {:seon.run/task [:db/id :seon.task/id :seon.task/ns :seon.task/proofs]}
    {:seon.run/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
@@ -282,7 +283,17 @@
       (and err (not merge?) (not (death-statuses status)))
       (assoc :error [(assoc base :error err :producer (:seon.error/operation err) :evidence {:from aid :error err})])
       (seq waste)
-      (assoc :waste [(assoc base :waste waste :evidence {:from aid :waste waste})]))))
+      (assoc :waste [(assoc base :waste waste :evidence {:from aid :waste waste})])
+      ;; owner's ruling, 2026-10-23: merged with its deferred process tests unasked (or no
+      ;; gate checkout declared): open until each is recorded passing (my.root/gate!)
+      (and (= :merged status) (seq (:seon.run/deferred p))
+           (not-every? (into #{} (keep #(when (= :pass (:seon.proof/status %)) (:seon.proof/test %))) (:seon.run/deferred-results p))
+                       (:seon.run/deferred p)))
+      (assoc :unrun [(cond-> (assoc base :open? true :tests (vec (sort-by str (:seon.run/deferred p)))
+                            :reason (str "merged with " (count (:seon.run/deferred p)) " process tests unrun")
+                            :evidence {:from aid :deferred (vec (sort-by str (:seon.run/deferred p)))})
+                       ;; the changed namespaces its gate could not read, and why
+                       (:seon.run/gate-unread p) (assoc :unread (:seon.run/gate-unread p)))]))))
 
 (defn report
   "Every problem recorded on main db, by class: {:t :classes {class {:n :rows}}}. Counted
@@ -299,7 +310,7 @@
         errors (group-by :class (map #(let [r (error-row db ans %)] (update r :count max (get live (:signature r) 0)))
                                      (es db :seon.error/signature)))
         runs (into (sorted-set)
-                       (concat (mapcat #(es db %) [:seon.run/failures :seon.run/costs :seon.run/error :seon.run/waste
+                       (concat (mapcat #(es db %) [:seon.run/failures :seon.run/costs :seon.run/error :seon.run/waste :seon.run/deferred
                                                    :seon.run/conflicts :seon.run/unmerged :seon.run/task-conflicts])
                                (mapcat (fn [s] (map :e (d/datoms db :avet :seon.run/status s))) (conj death-statuses :behind))))
         by-class (apply merge-with into (map #(run-rows db ans %) runs))

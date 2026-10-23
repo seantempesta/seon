@@ -13,9 +13,11 @@
             [seon.merge :as pm]
             [seon.program :as program]
             [seon.source :as source]
-            [seon.program-test :as pt]))
+            [seon.program-test :as pt] [seon.stage :as stage]))
 
 (defn- empty-db [] (ts/test-db))
+
+(declare hold!)
 
 (def ^:private here (System/getProperty "user.dir"))
 
@@ -93,7 +95,7 @@
   [main & forms]
   (let [branch (apply pt/record main forms)
         r (pm/three-way (pm/program main #{}) (pm/program branch #{}) (pm/program main #{}))]
-    [(d/db-with main (pm/apply-tx main (into {} (for [[k [_ o]] (:ours r)] [k o])))) (:ours r)]))
+    [(d/db-with main (pm/merge-tx main main branch (keys (:ours r)) #{})) (:ours r)]))
 
 (deftest a-merged-change-rewrites-only-its-form
   (let [main (main-with-file)]
@@ -137,14 +139,15 @@
 (deftest an-agent-runs-its-branchs-change-to-imported-source
   (let [main (main-with-file)
         branch (pt/record main 'app.pt-src "(defn twice [x] (* 2 x))")]
-    ;; the process holds the imported namespace, as a binary built from that source does
-    (remove-ns 'app.pt-src)
-    (create-ns 'app.pt-src)
-    (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! main))
-        "main's imported text whose namespace this process holds is the binary's: never evaluated (the example program is)")
-    (is (= [] (program/load-diff! main branch)))
-    (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
-    (is (nil? (resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again")))
+    ;; the process holds the imported namespace, as a binary built from that source does:
+    ;; every var it defines bound
+    (hold! 'app.pt-src pt-text)
+    (let [add0 @(resolve 'app.pt-src/add)]
+      (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! main))
+          "main's imported text whose namespace this process holds is the binary's: never evaluated (the example program is)")
+      (is (= [] (program/load-diff! main branch)))
+      (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
+      (is (identical? add0 @(resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again"))))
 
 (deftest an-imported-namespace-the-process-does-not-hold-is-loaded
   ;; task seon.agent/an-agent-holds-mains-tests: test/ is imported but not built into the
@@ -371,7 +374,7 @@
   (let [branch (apply pt/record main forms)
         _ (hold! nsym text)
         r (pm/three-way (pm/program main #{}) (pm/program branch #{}) (pm/program main #{}))
-        rep (d/with main (pm/apply-tx main (into {} (for [[k [_ o]] (:ours r)] [k o]))))]
+        rep (d/with main (pm/merge-tx main main branch (keys (:ours r)) #{}))]
     [(:db-after rep) (program/load-changes! (:db-after rep) (pdb/report->tx rep))]))
 
 (deftest a-merge-to-imported-source-loads-in-place
@@ -401,6 +404,22 @@
     (is (= 6 ((resolve 'app.mm-src/g) 5)) "the new record")
     (is (true? ((resolve 'app.mm-src/box?) ((resolve 'app.mm-src/->Box) 1))) "an instance? test held by the binary sees the redefined record")))
 
+(deftest a-form-imported-into-a-loaded-namespace-is-loaded-not-unmapped
+  ;; the step E dry run (2026-10-22): a root restarted on a tree whose test namespace gained a
+  ;; deftest imported it onto main, but held? read the namespace's existence as "the binary
+  ;; holds it", so neither root nor the fork server loaded it; the next agent's harvest read
+  ;; the missing var as an unmap and the merge deleted the deftest from main
+  (let [nsym (symbol (str "app.imported-" (random-uuid)))
+        path (str "test/app/" (str/replace (name nsym) "-" "_") ".clj")
+        a-text (str "(ns " nsym ")\n\n(defn a [] 1)\n")
+        db (d/db-with (empty-db) (source/import-tx (empty-db) {path a-text}))
+        _ (program/load-all! db)
+        rep (d/with db (source/replace-tx db {path (str a-text "\n(defn b [] 2)\n")}))
+        errs (program/load-changes! (:db-after rep) (pdb/report->tx rep))]
+    (is (= [] errs))
+    (is (= 2 (some-> (resolve (symbol (str nsym) "b")) deref (apply []))) "the imported form is loaded where main's program runs")
+    (is (= [] (stage/stage-tx (:db-after rep))) "so staging this runtime unmaps nothing")))
+
 (deftest the-source-read-carries-each-reference-code-pin
   ;; land6 review, must-fix 4: a cited reference-code file shows the revision main's source
   ;; pins it at; the :source effect reads each gitlink once, at import, so no render runs git
@@ -417,20 +436,30 @@
   ;; reaches none. Step E's run 4: a change to seon.problems/report reached tests that boot a
   ;; root, and an agent's proof run spun for minutes in its fork
   (let [text (str "(ns app.proc-test (:require [clojure.java.shell :as sh] [clojure.test :refer [deftest is]] [app.proc :as p]"
-                  " [seon.lib :as lib] [seon.test-store :as ts] [seon.agent-test :as at]))\n\n"
+                  " [seon.lib :as lib] [seon.test-store :as ts] [seon.agent-test :as at] [seon.program :as sp]))\n\n"
                   "(defn- shell-ok? [] (zero? (:exit (sh/sh \"true\"))))\n\n"
                   "(deftest via-shell (is (shell-ok?)) (is (= 2 (p/twice 1))))\n\n"
                   "(deftest via-fork (is (lib/fork! (fn [] 0))))\n\n"
                   "(deftest via-binary (is (ts/binary-sh \"./seon\" \"version\")))\n\n"
                   "(deftest via-root (is (at/in-agent [\"1\"])))\n\n"
+                  ;; tree-readers names binary-sh and a shell as quoted data: a test that only reaches that list
+                  ;; uses neither (the reach walk's own tests read it)
+                  "(deftest via-names (is (seq sp/tree-readers)))\n\n"
                   "(deftest pure (is (= 2 (p/twice 1))))\n")
         db (d/db-with (empty-db) (source/import-tx (empty-db) {"src/app/proc.clj" "(ns app.proc)\n\n(defn twice [x] (* 2 x))\n"
+                                                               "src/seon/program.clj" "(ns seon.program)\n\n(def tree-readers '#{seon.test-store/binary-sh clojure.java.shell/sh})\n"
                                                                "test/app/proc_test.clj" text}))
         idx (program/reach-index db {:env "" :tree ""})
         mine (into {} (filter #(= "app.proc-test" (namespace (key %)))) idx)]
     (is (= {'app.proc-test/via-shell true 'app.proc-test/via-fork true 'app.proc-test/via-binary true
-            'app.proc-test/via-root true 'app.proc-test/pure false}
+            'app.proc-test/via-root true 'app.proc-test/via-names false 'app.proc-test/pure false}
            (update-vals mine :process?))
         "each process var marks the test that reaches it, and only that")
     (is (= #{'app.proc-test/via-shell 'app.proc-test/via-fork 'app.proc-test/via-binary 'app.proc-test/via-root}
-           (set (filter #(= "app.proc-test" (namespace %)) (program/process-tests idx)))))))
+           (set (filter #(= "app.proc-test" (namespace %)) (program/process-tests idx)))))
+    ;; only seon.test-store/binary-sh runs target/seon (:seon.config.source/binary-vars): a shell
+    ;; or a fork is a process, not the binary, so a run of only those builds nothing (via-root
+    ;; reaches the binary through the real program's start-root!, which this program lacks)
+    (is (= {'app.proc-test/via-shell false 'app.proc-test/via-fork false 'app.proc-test/via-binary true
+            'app.proc-test/via-root false 'app.proc-test/via-names false 'app.proc-test/pure false}
+           (update-vals mine :binary?)))))

@@ -1,8 +1,9 @@
 ;; The durable store (new in next; :seon.config.store/flush-ms is the owner's 2026-10-20 name).
 {:seon.config.store/backend [:enum {:seon.config/unit "backend" :description "The durable store's konserve backend."} :lmdb :file]
- :seon.config.store/eid-lease [:int {:min 1 :seon.config/unit "entity ids" :description "Entity ids each agent may mint on its own branch (a block per agent)."}]
  :seon.config.store/lmdb-map-bytes [:int {:min 1048576 :seon.config/unit "bytes" :description "LMDB's map size: the store's largest size; a write past it is refused."}]
  :seon.config.store/keep-history? [:boolean {:seon.config/unit "boolean" :description "Whether a store is made keeping history (temporal indexes, tx-meta); fixed when the store is made."}]
  :seon.config.store/value-out-of-line-bytes [:or {:seon.db/data true :seon.config/unit "bytes" :description "A datom value at least this large is stored once under its own key, the index holding a reference; :never keeps values inline."} [:= :never] [:int {:min 1}]]
  :seon.config.store/compressor [:enum {:seon.config/unit "codec" :description "How konserve compresses each stored value (index nodes, values out of line, commits): :zstd or :lz4 frames, or :none."} :none :lz4 :zstd]
- :seon.config.store/branching-factor [:int {:min 4 :seon.config/unit "children" :description "Index node branching factor: a commit rewrites the nodes it touched."}]}
+ :seon.config.store/sole-writer? [:boolean {:seon.config/unit "boolean" :description "Whether this root is its store's only writer process, so it may collect the store."}]
+ :seon.config.store/branching-factor [:int {:min 4 :seon.config/unit "children" :description "Index node branching factor: a commit rewrites the nodes it touched."}]
+ :seon.config.store/node-cache-bytes [:int {:min 4096 :seon.config/unit "bytes" :description "The node cache each process shares across every connection to the store: index nodes read back, by address, least recently used out first."}]}

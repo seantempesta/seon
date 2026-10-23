@@ -3,6 +3,10 @@
   :seon.task/kind :work
   :seon.task/needs #{"jolt.ns/a-built-binary-requires-a-stdlib-namespace-it-did-not-compile"}
   :seon.task/proofs #{seon.fx-test/a-dependency-is-resolved-through-its-owner}}
+ {:seon.task/name "the-merge-gate-runs-through-prove"
+  :seon.task/plan "Done in part (worktree dry-run, 2026-10-23): the merge gate runs a merge's deferred process tests, only when root asks (`my.root/gate!`), through the `:tests` effect, `seon.fx/run-tests`, whose `seon.fx/test-command` is prove's entry (`bin/prove --tests` of exactly those tests); `seon.fx/test-results` reads its RED lines, and a run that exits non-zero without naming a test says :error for it, never :pass. Also open: the candidate's files are its changed namespaces' only; a changed schema resource is not written over the checkout. Proof: the gate's run names exactly the deferred tests to prove's entry."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.fx-test/the-merge-gate-runs-exactly-the-deferred-tests}}
  {:seon.task/name "deps-at-the-repl"
   :seon.task/plan "What exists: the :deps effect (`seon.fx/resolve-deps`) resolves a deps map through Jolt's `jolt.deps/resolve-deps` and answers the source roots or :seon.fx/unresolved; there is no add-lib or sync-deps at the REPL and no checksum (docs/source.md#dependencies; seon.fx/a-dependency-is-fetched-through-its-owner left them out). Correct, with Clojure's names (clojure.repl.deps): add-lib, add-libs and sync-deps ask the :deps effect through `my.fx/call`, load the answered roots in the agent's process and record the coordinate on its branch; a resolved jar or git tree is checked against a sha256 recorded at its first resolve, and a mismatch is the effect's typed error."
   :seon.task/kind :work

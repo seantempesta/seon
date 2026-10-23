@@ -8,7 +8,8 @@
   Run: bin/test seon.agent-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
-            [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]))
+            [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
+            [seon.fx :as fx] [test-runner :as runner]))
 
 (defn in-agent
   "A root on the checkout's src (its source root), one agent on a task of its own, each of
@@ -174,14 +175,16 @@
   ;; task seon.proofs/prove-runs-what-a-change-reaches (and seon.agent/a-wide-reach-stays-cheap):
   ;; root's boot records its source tree's inputs on its :seon.root/source fact (its binary is
   ;; built from that tree: bin/test built it), the agent keys its digests by them and selects
-  ;; against the main it forked from, and each green goes to its root's results directory
-  ;; through root's :file owner, so the next run (the next turn's observe, the judge's :tests,
-  ;; the merge gate) of an unchanged branch reruns nothing and answers the same results
-  (let [proof 'seon.reader-test/prose-without-a-fence-is-a-comment
+  ;; against the main it forked from, and each green goes to the shared results directory (a
+  ;; fresh one here, so nothing an earlier run stored is reused) through root's :file owner,
+  ;; so the next run (the next turn's observe, the judge's :tests, the merge gate) of an
+  ;; unchanged branch reruns nothing and answers the same results
+  (let [dir (str (System/getProperty "user.dir") "/target/tmp/reach-" (random-uuid))
+        proof 'seon.reader-test/prose-without-a-fence-is-a-comment
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
         run "(let [r @(seon.root/run-tests! sys :a1)] [(seon.proofs/results r) (:ran r) (:reused r)])"
         own "(select-keys (prove) [:results :ran :reused])"
-        stored "(count (filter #(.endsWith (.getName %) \".edn\") (.listFiles (java.io.File. (seon.agent/results-dir)))))"
+        stored "(count (filter #(.endsWith (.getName %) \".edn\") (.listFiles (java.io.File. (seon.config/value :seon.config.source/test-results-dir)))))"
         [_ inputs first-run files judged second-run]
         (in-agent ["(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent.a1)"
                    {:op :eval :agent "root" :code "(let [r (datahike.api/entity @(:conn sys) [:seon.root/id :root])] [(set (keys (:inputs (:seon.root/source r)))) (= (:boot (:seon.root/source r)) (:seon.root/boot r))])"}
@@ -189,12 +192,36 @@
                    {:op :eval :agent "root" :code stored}
                    {:op :eval :agent "root" :code run}
                    own]
-                  {:dirs ["src" "test"] :proofs #{proof}})]
+                  {:dirs ["src" "test"] :proofs #{proof} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})]
+    (sh/sh "rm" "-rf" dir)
     (is (= [#{:env :tree :data-refs} true] (edn/read-string (:printed inputs))) "root's boot recorded its source tree's inputs, this boot's")
     (is (= {:results {proof :pass reached :pass} :ran 2 :reused 0} (edn/read-string (:printed first-run))) "the agent's own run runs the proof and the reached test")
-    (is (= 2 (edn/read-string (:printed files))) "and stores both through root's :file owner, in its root's results directory")
+    (is (= 2 (edn/read-string (:printed files))) "and stores both through root's :file owner, in the results directory")
     (is (= [{proof :pass reached :pass} 0 2] (edn/read-string (:printed judged))) "root's :tests (the judge's) runs nothing: both reused from it, the same results")
     (is (= {:results {proof :pass reached :pass} :ran 0 :reused 2} (edn/read-string (:printed second-run))) "and so does the agent's next run")))
+
+(deftest an-agents-greens-and-a-checkouts-are-one-store
+  ;; owner, 2026-10-23: a test that is the same is not run again once green, "especially when
+  ;; freshly branched": an agent's greens and a checkout's (bin/test's) are one store, keyed by
+  ;; the same digests. The checkout stores p1 green; an agent on the same tree reuses it and
+  ;; runs p2, storing it; the checkout's plan then reuses the agent's p2
+  (let [here (System/getProperty "user.dir")
+        dir (str here "/target/tmp/one-store-" (random-uuid))
+        p1 'seon.reader-test/prose-without-a-fence-is-a-comment
+        p2 'seon.reader-test/a-fenced-reply-reads-only-its-code
+        digests (program/reach-digests (runner/program-db here) (fx/inputs here))
+        _ (.mkdirs (java.io.File. ^String dir))
+        ;; the checkout's green for p1, as bin/test stores one (a run nested in this test's run
+        ;; would report through it)
+        unstored (proofs/store-greens! #(fx/write-file {:req %}) dir {p1 {:test p1 :digest (digests p1) :pass 1 :fail 0 :error 0}})
+        stored (proofs/greens dir [(digests p1)])
+        [r] (in-agent ["(select-keys (prove) [:results :ran :reused])"]
+                      {:dirs ["src" "test"] :proofs #{p1 p2} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})
+        checkout (proofs/plan nil (select-keys digests [p2]) (proofs/greens dir [(digests p2)]) #{})]
+    (sh/sh "rm" "-rf" dir)
+    (is (and (empty? unstored) (seq stored)) "the checkout stored its green for p1")
+    (is (= {:results {p1 :pass p2 :pass} :ran 1 :reused 1} (edn/read-string (:printed r))) "the agent reuses the checkout's p1 and runs p2")
+    (is (= [] (:run checkout)) "the checkout reuses the agent's p2")))
 
 (deftest a-previous-roots-inputs-are-not-shared
   ;; re-review 2026-10-22: the :root entity outlives its root, so a restart (or a root with no
@@ -260,12 +287,13 @@
 
 (deftest an-agent-that-throws-ends-with-its-cause
   ;; task seon.agent/a-death-names-its-cause: a defect that no request's own boundary
-  ;; catches (here the agent redefined a function its own loop calls, as a real REPL may)
+  ;; catches (here the agent redefines, at its REPL as an agent changes the platform, a
+  ;; function its own loop calls after each request: seon.agent/db)
   ;; ends the process at its entrant boundary: the cause is the run's end on its branch,
   ;; written before the process exits, and root answers the request it died in with the
   ;; exit status the fork server reaped
   (let [[_ died end] (in-agent [{:op :context :agent "a1"}
-                                "(intern 'seon.agent 'mem-mb (fn [& _] (throw (ex-info \"boom: the loop's own function\" {:x 1}))))"
+                                "(in-ns 'seon.agent) (clojure.core/defn db [] (throw (ex-info \"boom: the loop's own function\" {:x 1})))"
                                 {:op :eval :agent "root"
                                  :code (str "(let [a (first (filter #(= :a1 (:seon.run/agent %)) (vals (seon.task/runs @(:conn sys)))))]"
                                             " (seon.reconcile/pull-end (:db @(seon.root/branch-db sys (seon.task/default-branch \"demo/t\"))) (:seon.run/id a)))")}])
@@ -335,7 +363,7 @@
            [a b] (sock/socketpair)
            old @agent/state]
        (try
-         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :db @store-conn :lease 0})
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :db @store-conn})
          (let [{:keys [t]} (agent/transact! [{:note/text "the agent's"}])]
            (agent/commit!)
            (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @store-conn t)))))
@@ -356,29 +384,16 @@
                        :decls [{:seon.task/name "m" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= [:error :seon.model/no-provider [:seon.model/no-provider]] (edn/read-string (:printed r))) (pr-str r))))
 
-(deftest no-entity-of-main-is-inside-an-agents-lease
-  ;; bin/check lease, nondeterministic (2026-10-22): agent a's db held id lease+50, its
-  ;; ceiling, which no agent mints. Root handed out leases from a base it read once at boot,
-  ;; before its own writes to main (the source import's program, later facts) went on minting
-  ;; from under that base, through the agents' blocks: an agent's "new" ids are main's
-  ;; entities. With eid-lease 50, root writes 150 entities after a1 holds its lease, clones a1
-  ;; (the writer's :clone-branch reserves the clone's block too) and writes 150 more: no
-  ;; entity of main lies in either block, and the two blocks are apart
-  (let [w "@(seon.root/transact-main! sys (vec (for [i (range 150)] {:note/text (str \"root-\" i)})))"
-        [r] (in-agent [{:op :eval :agent "root"
-                        :code (str "(do " w
-                                   " (let [c @(seon.root/clone! sys :a1)] " w
-                                   " (let [db @(:conn sys) es (into #{} (map :e) (datahike.api/datoms db :eavt))"
-                                   " block (fn [a] (let [ids (:ids @(seon.root/agent-stats! sys a))] [(:from ids) (+ (:from ids) (:of ids))]))"
-                                   " inside (fn [[lo hi]] (count (filter #(< lo % hi) es)))"
-                                   " a (block :a1) b (block (:id c))]"
-                                   " [(- (second a) (first a)) (inside a) (inside b) (or (<= (second a) (first b)) (<= (second b) (first a)))])))")}]
-                      {:sets [":seon.config.store/eid-lease=50"]})
-        [of in-a1 in-clone apart] (edn/read-string (:printed r))]
-    (is (= 50 of) (pr-str r))
-    (is (= 0 in-a1) "main's entities stay out of the agent's block")
-    (is (= 0 in-clone) "and out of its clone's")
-    (is (true? apart) "the clone's block is not its parent's")))
+(deftest a-turn-that-repeats-the-last-from-the-same-state-ends-the-run
+  ;; root's research, lever 2 (2026-10-22): loops took 45% of tokens, and the step E dry run's
+  ;; first real design made one pair of calls 18 times from an unchanged state. A turn whose
+  ;; calls repeat the last turn's, from the same observed state, ends the run as
+  ;; :no-progress, naming the code; the judge refines from that evidence
+  (let [[end] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#loop\" :max-turns 5})"]
+                        {:sets [":seon.config.ai/script=seon.fixtures/same-call"]})
+        end (edn/read-string {:default tagged-literal} (:printed end))]
+    (is (= [:no-progress 2] [(:outcome end) (:model-calls end)]) (pr-str end))
+    (is (str/includes? (str (:reason end)) "(+ 1 1)") "the reason names the repeated code")))
 
 (deftest a-proof-run-ends-at-its-budget-though-its-tests-run-bounded-evals
   ;; Jolt jolt/nested-tick-budget: a tick budget covers all the work inside it, nested
@@ -387,7 +402,7 @@
   ;; Here a proof that loops over bounded evals for ever ends at the run's budget, named
   (let [[_ r] (in-agent ["(do (ns spin-test (:require [clojure.test :refer [deftest is]]))
                               (deftest spin (loop [] (seon.intr/run 100000 #(reduce + (range 1000))) (recur))))"
-                         "(let [r (seon.agent/run-tests-forked 100000000 #{'spin-test/spin})] [(:seon.error/type (first (filter :seon.error/type (:reports r)))) (some :var (:reports r))])"])
+                         "(let [r (seon.agent/run-tests-forked 100000000 #{'spin-test/spin} :turn)] [(:seon.error/type (first (filter :seon.error/type (:reports r)))) (some :var (:reports r))])"])
         [type test] (edn/read-string (:printed r))]
     (is (= :seon.test/ticks-spent type) (:printed r))
     (is (= "#'spin-test/spin" test) "naming the test that was running")))

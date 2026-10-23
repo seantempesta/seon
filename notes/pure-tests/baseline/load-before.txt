@@ -1,0 +1,4 @@
+ 5:23  up 20 days, 20:12, 2 users, load averages: 11.40 12.87 12.11
+18
+ 5:31  up 20 days, 20:20, 2 users, load averages: 30.12 22.99 17.38
+ 5:49  up 20 days, 20:37, 2 users, load averages: 41.55 30.60 24.50

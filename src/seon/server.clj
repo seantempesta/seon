@@ -105,7 +105,7 @@
           :required ["agent" "code"]
           :answer (fn [sys ag req]
                     (let [r (if (= :root ag) (root-eval sys (:code req)) @(c/submit! sys ag (:code req) {:origin :outside}))]
-                      (if (contract/error? r) r {:items (mapv #(select-keys % [:tag :form :printed :out :recorded :handle]) r)})))}
+                      (if (contract/error? r) r {:items (mapv #(select-keys % [:tag :form :printed :out :err :recorded :handle]) r)})))}
    ;; the block's text as the model reads it: printed to the agent's output, not as a
    ;; value (a value comes back as a string literal, escaped, under the reply's budget);
    ;; recorded with origin :context, a context read, which renders refer to, not repeat

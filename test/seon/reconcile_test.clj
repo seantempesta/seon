@@ -24,7 +24,7 @@
 (defn- run
   "A run fact of task nm: status, plus members (results as {test status}; conflicts
   as :seon.merge/conflict values; unmerged as printed keys)."
-  [nm n status & {:keys [boot model results outcome conflicts unmerged changed caused plan] :or {boot "boot-1" plan (str "Make " nm " true.")}}]
+  [nm n status & {:keys [boot model results outcome conflicts unmerged changed caused plan deferred deferred-results] :or {boot "boot-1" plan (str "Make " nm " true.")}}]
   (let [id (str "demo/" nm) aid (str id "#" n)]
     (into (task/run-start-tx aid id boot (keyword (str "a-" nm n))
                                  {:branch (task/default-branch id) :model model :max-turns (cfg/value :seon.config.agent/max-turns)} 1000 plan)
@@ -34,7 +34,9 @@
              conflicts (assoc :seon.run/conflicts (mapv pm/conflict-tx conflicts))
              unmerged (assoc :seon.run/unmerged unmerged)
              changed (assoc :seon.run/changed changed)
-             caused (assoc :seon.run/caused caused))])))
+             caused (assoc :seon.run/caused caused)
+             deferred (assoc :seon.run/deferred (vec deferred))
+             deferred-results (assoc :seon.run/deferred-results (vec (for [[t s] deferred-results] {:seon.proof/test t :seon.proof/status s}))))])))
 
 (defn- db-of
   "A main db: decls written, the ids in `released` released (all when :all), root's boot,
@@ -282,8 +284,9 @@
     (is (= :hold (:op (first (r/reconcile (db-of two :extra (concat merged-x (y 150))))))))))
 
 (deftest contracts-are-checked
-  ;; dev/test.clj arms every contract before the tests run: a call outside its contract is
-  ;; refused at entry with the one error map
+  ;; with the contracts on (:seon.config.contract/guarantees, config: in every digest), a call
+  ;; outside its contract is refused at entry with the one error map. (It read an inherited
+  ;; PROTO_GUARANTEES, an input no digest held; pure-tests 2026-10-23.)
   (when contract/on?
     (is (= :seon.instrument/contract-error
            (:seon.error/type (try (task/task-id "not-a-symbol" "x") (catch Exception e (ex-data e))))))))
@@ -318,7 +321,7 @@
     (testing "the done rule judges every accumulated proof"
       (is (= [[:proof-red (t "a")]]
              (mapv (juxt :reason :symbol)
-                   (r/done-explain (r/done-input (r/index db) "demo/b-merge" {(t "b") :pass (t "a") :fail} #{} [] nil nil))))))))
+                   (r/done-explain (r/done-input (r/index db) "demo/b-merge" {(t "b") :pass (t "a") :fail} #{} [] nil nil #{}))))))))
 
 (deftest with-merge-chains-work-through-merges
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])])]
@@ -339,6 +342,39 @@
                                                        (run "a-merge" 1 :ended :outcome :green :results {(t "a") :pass}))))))
   ;; (the run helper names branches by task id; only the action matters here)
   )
+
+(deftest a-merge-with-deferred-tests-is-gated-only-when-root-asks
+  ;; root's rulings (2026-10-22/23) and the owner's (2026-10-23: process tests never run
+  ;; automatically): with root's go on the task (my.root/gate!, :seon.task/gate?) the process
+  ;; tests a branch's change reaches run before its merge, on a worktree of the root's declared
+  ;; gate checkout, and gate it like proofs: unrun, the member is gated first (alone); all
+  ;; passing, it merges; a red, or a run that could not run them (:error), is refused as a red
+  ;; proof is, never hidden. Unasked, or with no gate checkout declared, it merges with them
+  ;; unrun (an open problem until they run)
+  (let [gate {:seon.root/id :root :seon.config.source/gate-checkout "/the/merges/tree"}
+        asked {:seon.task/id "demo/a-merge" :seon.task/gate? true}
+        judged (fn [root go & kv] (r/reconcile (mdb [(decl "a")] :extra (concat (run "a" 1 :done)
+                                                                             (apply run "a-merge" 1 :ended :outcome :green :results {(t "a") :pass}
+                                                                                    :deferred ['seon.root-test/boots] kv)
+                                                                             (when go [go])
+                                                                             (when root [root])))))
+        octopus [{:op :octopus-merge :run "demo/a-merge#1" :members [{:run "demo/a-merge#1" :task "demo/a-merge"}]}]]
+    (is (= [{:op :gate :run "demo/a-merge#1" :task "demo/a-merge" :tests ['seon.root-test/boots]}] (judged gate asked)))
+    (is (= octopus (judged gate asked :deferred-results {'seon.root-test/boots :pass})))
+    (is (= [:hold] (map :op (judged gate asked :deferred-results {'seon.root-test/boots :fail}))))
+    (is (= [:hold] (map :op (judged gate asked :deferred-results {'seon.root-test/boots :error}))) "a run that could not run them is no pass")
+    (is (str/includes? (:problem (first (judged gate asked :deferred-results {'seon.root-test/boots :fail}))) "seon.root-test/boots"))
+    (is (= octopus (judged gate nil)) "unasked: it merges, the deferred tests unrun")
+    (is (= octopus (judged nil asked)) "no gate checkout declared: it merges, the deferred tests unrun")))
+
+(deftest a-deferred-proof-is-neither-red-nor-unknown
+  ;; owner's ruling (2026-10-23): a process test never runs in an agent's turn or root's judge,
+  ;; a proof among them; the done rule reads it as deferred to root's gate, and still refuses a
+  ;; proof that is neither green nor deferred
+  (let [in {:proofs #{'app/p 'app/q} :results {'app/p :pass} :main-green #{} :allowed-red #{} :uncontracted #{}}]
+    (is (= [{:reason :proof-unknown :symbol 'app/q}] (r/done-explain in)))
+    (is (= [] (r/done-explain (assoc in :deferred #{'app/q}))))
+    (is (= [{:reason :proof-red :symbol 'app/p}] (r/done-explain (assoc in :results {'app/p :fail} :deferred #{'app/q}))))))
 
 (deftest merges-run-one-at-a-time
   ;; git's merge queue: a merge agent's last merge-main and root's merge see the same main,
@@ -399,6 +435,10 @@
     {:kind :design :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{} :plan "B" :plan-before "A"} []
     {:kind :design :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{'app/f} :plan "B" :plan-before "A"} [:contract-gap]
     {:kind :design :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{} :plan "A" :plan-before "A"} [:no-design]
+    ;; red is a design's to leave; a proof with no result was never written (or never ran):
+    ;; the step E dry run's first real design ended at its plan with its proof undefined, and
+    ;; implement spent 25 turns looking for it
+    {:kind :design :proofs #{'p/a} :results {} :main-green #{} :allowed-red #{} :uncontracted #{} :plan "B" :plan-before "A"} [:proof-unknown]
     {:kind :work :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{}} [:proof-red]))
 
 (defn- design-db
@@ -416,7 +456,7 @@
     (let [db (design-db (run "a" 1 :running))]
       (is (= [:no-design]
              (mapv :reason (r/done-explain (r/done-input (r/index db) "demo/a" {(t "a") :fail} #{} []
-                                                           nil (:seon.run/plan (task/run db "demo/a#1")))))))))
+                                                           nil (:seon.run/plan (task/run db "demo/a#1")) #{})))))))
   (testing "ended green with the plan unchanged: refused, so it is held for root, never accepted"
     (is (= [{:op :hold :run "demo/a#1" :task "demo/a" :problem "run demo/a#1 ended green: no-design"}]
            (r/reconcile (design-db (run "a" 1 :ended :outcome :green :results {(t "a") :fail})))))))

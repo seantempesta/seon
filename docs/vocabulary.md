@@ -15,7 +15,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **api** | root's request server proc: callers' reply promises, routing by request id | `seon.root/api-proc` |
 | **writer** | root's writes to main (group commit), `d/branch!`, and every merge into main | `seon.writer/writer-proc` |
 | **run-ahead write** | an agent's own write on its own branch: applied at once, committed when idle or at a turn's end, and synced by the next group commit | `seon.agent/transact!`, `seon.agent/commit!`, `datahike.writer/apply!` |
-| **lease** | the block of entity ids an agent process mints on its branch, reserved from root's one counter ([storage](storage.md#leases)) | `:seon.config.store/eid-lease`, `seon.db/lease-block!`, `seon.db/after-fork!` |
+| **ids** | the store's entity ids and transaction ids, each issued once across every branch and process, from one shared page ([storage](storage.md#ids)) | `seon.db/ids!`, `datahike.ids`, `native/ids.c` |
 | **group commit** | one Datahike commit per branch per writer step; every write is answered when committed in memory; the flusher syncs everything unflushed at once, then again, so commits arriving during a sync share the next one; `:flush?` waits for the sync that covers it | `seon.writer/commit-batch`, `seon.writer/flusher-proc` |
 | **flusher** | the proc that syncs everything unflushed, continuously, with no window | `seon.writer/flusher-proc` |
 | **fork server** | the single-threaded process holding main's db value that forks agents ([processes](processes.md#the-fork-server)) | `seon.fork-server` |
@@ -85,7 +85,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **reconciler** | the pure function of main's db to actions, and the proc that carries them out | `seon.reconcile/reconcile`, `reconciler-proc` |
 | **flight** | one action carried out as a chain of requests and answers in the reconciler proc | `seon.reconcile/advance` |
 | **turn loop** | inside an agent: observe, then end or act (context to the model, forms through the REPL path) | `seon.turn/work!` |
-| **three-way** | git's merge of program maps (base, ours, theirs) keyed `[:var sym]`, `[:form id]`, `[:schema k]` (a schema entry) | `seon.merge/three-way` |
+| **three-way** | git's merge of program maps (base, ours, theirs) keyed `[:var sym]`, `[:form id]`, `[:schema k]` (a schema entry), read only where the dbs differ ([storage](storage.md#merges-read-what-changed)) | `seon.merge/three-way`, `seon.merge/delta-three-way` |
 | **unmerged entry** | a conflict kept on the branch (base, ours, theirs) until re-defn or `resolve!` | `seon.merge/unmerged` |
 | **stage** (was harvest) | staging the live runtime onto the branch (unmaps, plain defs as values, aliases) | `seon.stage/stage!` |
 | **failure point** (was dragon) | a place where the outside world can fail us, met by one named edge function | `docs/failure-points.md` |

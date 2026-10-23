@@ -11,19 +11,20 @@
   F2): the same process contract as root's Flow procs, with pause, resume, stop and ping
   as messages on its pipe."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program]
+  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program] [seon.db :as pdb]
             [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]
             [jolt.deps] [clojure.edn :as edn]))
 
 (defn- reap
-  "Every child that exited, as :exit events (non-blocking waitpid)."
-  {:malli/schema [:=> [:cat :map] [:vector :seon.fork-server/event]]}
+  "Every child that exited, as :exit events (non-blocking waitpid), and st without them in
+  its :children. Answers [st events]."
+  {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :seon.fork-server/event]]]}
   [st]
-  (loop [evs []]
+  (loop [st st evs []]
     (let [pid (lib/c-waitpid-nb -1 (:status-buf st) 1)]
       (if (pos? pid)
-        (recur (conj evs {:ev :exit :pid pid :status (lib/decode-status (ffi/read (:status-buf st) :int))}))
-        evs))))
+        (recur (update st :children disj pid) (conj evs {:ev :exit :pid pid :status (lib/decode-status (ffi/read (:status-buf st) :int))}))
+        [st evs]))))
 
 (declare main)
 
@@ -44,16 +45,24 @@
   ([] {:ins {:cmd "main's commits and fork requests, FIFO; :tick when idle"} :outs {:ev "events for root"}
        :workload :io
        :ping-map-fn (fn [st] {:t (:max-tx (:db st)) :mismatch (:mismatch st)})})
-  ([{:keys [db conn]}] {:db db :mismatch 0 :conn conn :status-buf (ffi/alloc 4)})
-  ([st _] st)
+  ([{:keys [db conn]}] {:db db :mismatch 0 :conn conn :status-buf (ffi/alloc 4) :children #{}})
+  ;; stop (root closed its end, or died): every child (agents, the standby) killed and reaped
+  ;; before this process exits, so root's waitpid of this server is the end of every one of
+  ;; them. An agent that had closed its socket but not yet exited was handed to launchd when
+  ;; root SIGKILLed the server first, and outlived stop! (bin/check lifecycle's :left,
+  ;; notes/pure-tests/lifecycle.md)
+  ([st tr]
+   (when (= tr ::flow/stop)
+     (doseq [pid (:children st)] (lib/c-kill pid 9) (lib/c-waitpid pid (:status-buf st) 0)))
+   st)
   ([st _ m]
    (case (:op m)
-     :tick [st {:ev (reap st)}]
+     :tick (let [[st evs] (reap st)] [st {:ev evs}])
      :tx (if (<= (:t m) (:max-tx (:db st)))
            [st nil] ; already in the db this server was forked with
            (let [t0 (profile/now-ns)
-                 ;; main's transaction facts as this transaction's own (seon.db/report->tx-meta)
-                 db' (:db-after (d/with (:db st) {:tx-data (:tx-data m) :tx-meta (:tx-meta m {})}))
+                 ;; main's commit as main's own transaction t (seon.db/replay)
+                 db' (pdb/replay (:db st) (:t m) (:tx-data m) (:tx-meta m {}))
                  st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled
                  errs (seq (program/load-changes! db' (:tx-data m)))]
@@ -63,9 +72,10 @@
      :fork (let [t0 (profile/now-ns)]
              (fork-carrying! st #(repl/run! % m (:db st) (:ns m))
                              (fn [n] [st {:ev [{:ev :fork-failed :agent (:agent m) :active-threads n}]}])
-                             (fn [pid] [st {:ev (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
-                                                        :fork-ms (profile/ms-since t0) :t (:max-tx (:db st))}]
-                                                      (reap st))}])))
+                             (fn [pid] (let [[st evs] (reap (update st :children conj pid))]
+                                         [st {:ev (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
+                                                          :fork-ms (profile/ms-since t0) :t (:max-tx (:db st))}]
+                                                        evs)}]))))
      :stats [st {:ev [{:ev :stats :t (:max-tx (:db st)) :datoms (count (d/datoms (:db st) :eavt))
                        :mismatch (:mismatch st) :mem-mb (lib/r2 (lib/real-mb)) :os-threads (lib/nthreads)
                        :active-threads (lib/active-threads)}]}]
@@ -76,8 +86,8 @@
      :standby (fork-carrying! st #(main (:db st) % false)
                               (fn [n] [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads n}]}])
                               (fn [pid] (when-let [old (:standby-pid st)] (lib/c-kill old 9))
-                                [(assoc st :standby-pid pid)
-                                 {:ev (into [{:ev :standby :gen (:gen m) :pid pid :t (:max-tx (:db st))}] (reap st))}]))
+                                (let [[st evs] (reap (-> st (assoc :standby-pid pid) (update :children conj pid)))]
+                                  [st {:ev (into [{:ev :standby :gen (:gen m) :pid pid :t (:max-tx (:db st))}] evs)}])))
      [st nil])))
 
 (defn- dev-classpath!
@@ -162,14 +172,16 @@
     (sock/close! (:fd sb))))
 
 (defn- release!
-  "Release what init opened: kill the server and its standbys, join the event reader, and
-  reap the server when it is root's child (the boot server; a promoted one is not). nil."
+  "Release what init opened: its standbys killed; the server's socket closed for writing,
+  so the server reads EOF, kills and reaps every child (server-step's stop) and exits; its
+  exit awaited when it is root's child (the boot server; a promoted one is not); then the
+  event reader joined, whose EOF follows. nil."
   {:malli/schema [:=> [:cat :map] :nil]}
-  [{:keys [pid reader] :as st}]
-  (some-> pid (lib/c-kill 9))
+  [{:keys [pid fd reader] :as st}]
   (drop-standby (:standby st)) (drop-standby (:standby-pending st))
-  (some-> ^Thread reader (.join 5000))
+  (lib/c-shutdown fd 1) ; SHUT_WR
   (some-> pid (lib/c-waitpid (ffi/alloc 4) 0))
+  (some-> ^Thread reader (.join 5000))
   nil)
 
 (defn- promote
