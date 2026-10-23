@@ -46,10 +46,6 @@
 	url = https://github.com/LMDB/lmdb.git
 	ignore = dirty
 	branch = mdb.master3
-[submodule "reference-code/mistral.rs"]
-	path = reference-code/mistral.rs
-	url = https://github.com/ericlbuehler/mistral.rs.git
-	ignore = dirty
 [submodule "reference-code/llama.cpp"]
 	path = reference-code/llama.cpp
 	url = https://github.com/ggml-org/llama.cpp.git
