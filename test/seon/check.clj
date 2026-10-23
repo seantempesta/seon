@@ -1,21 +1,18 @@
 (ns seon.check
   "End-to-end checks of seon.root through the same API the dashboard uses (proto/flow
-  f2-final proto.smoke). bin/check runs them; target/seon <check> [args] runs one.
+  f2-final proto.smoke). bin/check runs them; target/seon <check> [args] runs one. A driver,
+  outside src (task seon.main/drivers-leave-src): the binary's -main (seon.main/-main) serves
+  root and ports and loads this driver from the checkout's test/ for every other mode.
   usage: target/seon smoke        3 agents: define, test, transact; merge one; kill one mid-eval
          target/seon scale N      N agents spawned at once, each eval + transact + test
   A mode is its body: run-check boots root, runs it, prints its report and checks, stops
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
   reference (await-ref, seon.e2e/await-db), never a poll or a deadline."
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs]))
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.main :refer [out! shown]]))
 
-(defn- out! [& xs] (println (apply str xs)) (flush))
 
 ;; ---- the harness: one frame, one verdict, one way to wait ------------------------------
-
-(defn- shown
-  "A value a person reads on the console, whole, by the one printer (its layout, no budget)."
-  [v] (print/text (vary-meta v assoc :seon.print/full true)))
 
 (defn- verdict!
   "The one verdict: NAME OK or NAME FAILED as the last line, and the exit status, 0 only
@@ -257,7 +254,10 @@
   []
   (run-check "TEST-INPUTS" {:datoms 2000}
    (fn [sys]
-    (let [files (into {} (filter #(clojure.string/ends-with? (key %) ".clj")) (:value (seon.fx/read-source {:req {:root (seon.config/checkout) :dirs ["test"]}})))
+    ;; the tests' files: this driver lives in test/ too (outside src) but is no test, and its
+    ;; waits are a check's measurement, named in docs/clocks.md
+    (let [files (into {} (filter #(and (clojure.string/ends-with? (key %) ".clj") (not (clojure.string/ends-with? (key %) "seon/check.clj"))))
+                      (:value (seon.fx/read-source {:req {:root (seon.config/checkout) :dirs ["test"]}})))
           ;; test/'s forms analyzed onto main's value (d/db-with: nothing transacted)
           db (let [db (d/db (:conn sys))] (d/db-with db (seon.source/import-tx db files)))
           found (set (d/q '[:find ?v ?r :in $ [?r ...] :where [?f :form/refs ?r] [?f :form/defines ?d] [?d :var/name ?v]] db (vec hidden-inputs)))
@@ -1026,7 +1026,7 @@
     (let [;; the procs that answered a graph ping within :seon.config.check/ping-ms (an expected one that did not is blocked or absent)
           pids (fn [] (set (keys (flow/ping (:graph sys) :timeout-ms (seon.config/value :seon.config.check/ping-ms)))))
         booted (pids)
-        expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/source :fx.source/0 :fx/git :fx.git/0 :fx/deps :fx.deps/0 :fx/build :fx.build/0 :fx/model}
+        expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/source :fx.source/0 :fx/git :fx.git/0 :fx/deps :fx.deps/0 :fx/build :fx.build/0 :fx/tests :fx.tests/0 :fx/model}
                      (for [i (range (seon.config/value :seon.config.ai/max-in-flight))] (keyword "fx.model" (str i))))
         dir (str (:agents-dir (:store (c/state sys))) "/system") ; this root's own run dir
         _ (.mkdirs (java.io.File. dir))
@@ -1072,37 +1072,6 @@
        (doseq [c cs r (get-in h [:classes c :rows])] (out! (name c) " " (:message r)))
        {:report {:open (into (sorted-map) (for [c cs] [c (get-in h [:classes c :n] 0)]))}
         :checks (into {} (for [c cs] [(keyword (str "no-" (name c))) (zero? (get-in h [:classes c :n] 0))]))}))))
-
-(defn root-serve
-  "A root with its server on 127.0.0.1:(:seon.config.root/server-port) (seon.server),
-  until stdin closes (bin/root stop) or SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks):
-  what an outside agent's MCP relay (bin/mcp) talks to. It watches its checkout
-  (my.root/watch!: every writer's changes loaded as they happen). Its end is a fact on main
-  naming that cause (seon.root/stop!). A checkout whose config names no server port (0)
-  serves none, and says so; -1 asks the kernel for a free port. ROOT LISTENING names the port
-  it bound (what bin/root and seon.test-store/start-root! read), never one picked beforehand."
-  []
-  (let [port (seon.config/value :seon.config.root/server-port)
-        _ (when (zero? port)
-            (out! "ROOT REFUSED: :seon.config.root/server-port is 0 (no server); bin/worktree --ports writes config/local.edn with this checkout's ports")
-            (lib/c-exit 1))
-        sys (c/start! {})]
-    ;; the first cause stops root, once; a signal's hook waits for that stop, then Jolt exits
-    (let [cause (promise) stopped (promise)
-          end! (fn [why] (deliver cause why)
-                 (when (= why @cause) (out! "ROOT STOPPED " (shown (select-keys (c/stop! sys why) [:cause :ms :stop-fact-refused]))) (deliver stopped true))
-                 @stopped)]
-      (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (end! :signal))))
-      ;; the key's three values, read here only: -1 the kernel assigns a port (0 to bind), >0 that
-      ;; port (0, none, refused above); the port bound is the fact, printed for bin/root to record
-      (let [bound (.getLocalPort ^java.net.ServerSocket (seon.server/serve! sys (if (= -1 port) 0 port)))]
-        ;; the watcher ends with this process (target/watch exits on its parent's exit)
-        (let [w (my.root/watch! sys)]
-          (out! "ROOT WATCHING " (if (contract/error? w) (str "nothing: " (:seon.error/message w)) "the checkout and its refs")))
-        (out! "ROOT LISTENING " bound))
-      (loop [] (when (read-line) (recur)))
-      (end! :stdin-eof))
-    (lib/c-exit 0)))
 
 (defn- eval-records
   "The evaluation records on db of agent id: [{:form :origin ...}]."
@@ -1200,36 +1169,25 @@
        :checks {:each-forking-process-one-thread (= 1 (:fork-server res) (:agent res) (:clone res))
                 :its-test-passed (= 1 (:pass tests)) :the-clone-evaluates (= "42" cl-eval)}}))))
 
-(defn lease
-  "Under eid-lease 50 (bin/check sets it, alone or in the run): agent a writes 60 new entities in one transaction, past its
-  lease: refused with :seon.db/lease-spent, nothing applied. A refused transaction keeps the
-  ids it reserved (Datahike's store counter), so a's lease is spent: its next write is
-  refused too, and the record of its evals, which cannot be written on its branch, is
-  recorded on main as its problem. Agent b, the next lease, writes 10: its ids lie past a's
-  lease, never shared."
+(defn ids
+  "Two agents, each a process of its own on a branch of its own forked at one main commit,
+  write 10 notes each: every entity id and every transaction id is issued once across them
+  (one store-wide page of ids, seon.db/ids!), so a datom names the same entity and the same
+  transaction wherever a merge or a union carries it. Per-branch tx ids gave both their
+  first transaction one id."
   []
-  (run-check "LEASE" {}
+  (run-check "IDS" {}
    (fn [sys]
-    (let [[a b] (spawn-ready! sys "past its lease" "the next lease")
+    (let [[a b] (spawn-ready! sys "ids a" "ids b")
         notes (fn [tag n] (str "(transact! (vec (for [i (range " n ")] {:note/text (str \"" tag "\" i)})))"))
-        r-past (first @(c/submit! sys a (notes "a" 60)))
-        r-count (first @(c/submit! sys a "(count (q '[:find ?n :where [?n :note/text]]))"))
-        r-next (first @(c/submit! sys a (notes "a" 1)))
-        stats @(c/agent-stats! sys a)
-        _ @(c/submit! sys b (notes "b" 10))
-        b-min (read-string (:printed (first @(c/submit! sys b "(q '[:find (min ?n) . :where [?n :note/text]])"))))
-        ;; the reply says whether its record was written: when it was not (:unrecorded), root
-        ;; was told before the reply came and its fact is on its way to main, so this parks on
-        ;; main's commits until it arrives; a record that was written is the answer, now
-        lease-q '[:find ?c . :where [?e :seon.error/type :seon.db/lease-spent] [?e :seon.error/count ?c]]
-        recorded (when (:unrecorded r-past) (d/q lease-q (seon.e2e/await-db sys #(d/q lease-q %))))
-        spent? #(and (= :err (:tag %)) (re-find #"entity ids are spent" (str (:printed %))))]
-      {:report {:past-its-lease (select-keys r-past [:tag :printed :err]) :notes-after (:printed r-count)
-                :next-write (select-keys r-next [:tag :printed]) :ids (:ids stats) :unrecorded (:unrecorded r-past) :recorded-on-main recorded :b-lowest-id b-min}
-       :checks {:past-its-lease-refused (spent? r-past) :nothing-applied (= "0" (:printed r-count)) :next-write-refused (spent? r-next)
-                :its-lease-was-50 (= 50 (get-in stats [:ids :of])) :its-record-was-refused (true? (:unrecorded r-past)) :recorded-on-main (pos-int? recorded)
-                :used-under-the-lease (< (get-in stats [:ids :used] 0) 50)
-                :b's-ids-past-a's-lease (>= b-min (+ (get-in stats [:ids :from]) 50))}}))))
+        _ (doall (pmap #(deref (c/submit! sys %1 (notes %2 10))) [a b] ["a" "b"]))
+        ids-of (fn [ag] (read-string (:printed (first @(c/submit! sys ag "(vec (q '[:find ?n ?tx :where [?n :note/text _ ?tx]]))")))))
+        ia (ids-of a) ib (ids-of b)
+        es (fn [xs] (set (map first xs))) txs (fn [xs] (set (map second xs)))]
+      {:report {:a (count ia) :b (count ib) :a-txs (sort (txs ia)) :b-txs (sort (txs ib))}
+       :checks {:each-wrote-10 (= 10 (count ia) (count ib))
+                :entity-ids-issued-once (not-any? (es ia) (es ib))
+                :tx-ids-issued-once (not-any? (txs ia) (txs ib))}}))))
 
 (defn- fork-server-caught-up
   "A FIFO barrier through the fork server: {:op :stats} goes to the server process on the
@@ -1394,20 +1352,18 @@
      "instrument" (fn [n more] (instrument))
      "record" (fn [n more] (record))
      "orphan" (fn [n more] (orphan))
-     "lease" (fn [n more] (lease))
+     "ids" (fn [n more] (ids))
      "fx" (fn [n more] (fx (n-or n "20")))
      "system" (fn [n more] (system-check))
      "config" (fn [n more] (config-check))
      "problems" (fn [n more] (problems-check))
      "health" (fn [n more] (health-check (map keyword (remove nil? (cons n more)))))
      "threads" (fn [n more] (threads-check))
-     "root" (fn [n more] (root-serve))
      ;; this checkout's ports as the config resolves them, "SERVER WEB" (bin/ports)
      ;; bin/check's step names, the one list (seon.proofs/check-steps), space separated
      ;; jobs: how many steps or shards a proof run runs at once (:seon.config.proofs/jobs), for bin/check
      "jobs" (fn [n more] (do (println (seon.config/value :seon.config.proofs/jobs)) (lib/c-exit 0)))
      "steps" (fn [n more] (do (println (clojure.string/join " " (sort (keys seon.proofs/check-steps)))) (lib/c-exit 0)))
-     "ports" (fn [n more] (do (println (seon.config/value :seon.config.root/server-port) (seon.config/value :seon.config.web/port)) (lib/c-exit 0)))
      "mcp-proof" (fn [n more] (mcp-proof))
      "hotreload" (fn [n more] (hotreload))
      "idle" (fn [n more] (idle (n-or n "2000")))

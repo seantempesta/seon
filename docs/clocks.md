@@ -25,9 +25,14 @@ way in [failure points](failure-points.md).
 
 ## Time decides (a check's measurement, and a check's ping)
 
-`bin/laws clocks` reads the check harness too (`seon.check`, `seon.e2e`): a wait there that stands for an event is the event instead ([machine](machine.md#builds-and-checks)).
+`bin/laws clocks` reads `src` and `test`: the check harness (`seon.check`, a driver in `test/`, and `seon.e2e`) and every test, so a wait there that stands for an event is the event instead ([machine](machine.md#builds-and-checks)).
 - `seon.check/backpressure`, `seon.check/scale`, `seon.check/idle`: the window over which a check measures that something does not happen or what it costs (`:seon.config.check/hold-ms`: a paused agent's request unanswered, a paused proc's flood and a paused writer's commits held; `:seon.config.check/pages-ms`: memory the kernel returns after the kill; idle's window, bin/check's argument). The measurement, never a dependency: load only makes what it measures likelier.
 - `seon.check/ping`, `seon.check/system-check`: Flow's ping takes a bound (`:seon.config.check/ping-ms`); a proc that has not taken its control message by then is mid-step that long, and the check records it `:blocked` (an expected proc missing from a graph ping is reported under `:no-answer`), never reads it as nil.
+
+## Time decides (a test's subject)
+
+- `seon.lib-test/in-child`: what it tests is a timeout in a forked child (core.async's `timeout` fires there; the child's wait has a bound so a child whose runtime threads are gone ends).
+- `seon.profile-test/allocating-thread`: the window over which it measures another thread's allocation, and a call that sleeps to show ticks count work, not waiting.
 
 ## Time decides, owed its owner's fix
 
@@ -37,6 +42,7 @@ site is red, and a fixed one leaves this list in the fix's commit.
 - `seon.root/api-proc` (the stall timer): with `seon.root/back-op` (its `:stall-check`, a clock read compared to the bound) and `seon.agent-proc/agent-proc` (the `:last-frame-ms` the stall compares), task `seon.fences/a-stall-is-past-the-requests-own-bound`.
 - `seon.render.proc/RETIRE-MS`, `seon.render.proc/order` (an ended agent leaves the grid by elapsed time; the order is re-derived when a second passed), and `seon.render.proc/system-value` (carries the bound to the tile's caption): task `seon.render/an-ended-agent-leaves-the-grid-by-an-event`.
 - `seon.web/web-proc` (the HTTP adapter's keep-alive and write timeouts, literals): task `seon.web/web-server-threads-are-joined-at-stop`.
+- `seon.model-test/chunks`: a `Thread/sleep` between a streamed reply's chunks (each `>!!` is its own write without it): task `seon.model/a-streamed-reply-test-sleeps-not`.
 
 ## Decides by time, unmarked
 
@@ -47,6 +53,7 @@ A bound passed under another name, which the marks do not see; each is owed its 
 
 ## Time decides nothing here: clock reads named as data
 
+- `seon.program-test/var-row` (the form after it records a guarded function's source, `Thread/sleep` and a timed `deref` as text) and `seon.render-test/long-text` (the test after it names the removed `SAMPLE-MS` to show it is gone): clock reads quoted as data.
 - `seon.check/hidden-inputs`, `seon.check/named-test-inputs`: the lists the `test-inputs` check step reads test forms against (a clock read, a sleep, a timeout among the names they hold); they name those vars as data and read no clock.
 
 ## Time orders a queue (measured workload)
@@ -58,10 +65,10 @@ A measured time chooses which work goes first, never whether a result is green (
 ## Time measured (recorded, never compared to decide)
 
 - `seon.profile/now-ns`, `seon.profile/ms-since`: the one clock read ([machine](machine.md#the-clock)); their callers are judged here one by one.
-- `seon.step/event`, `seon.agent-proc/agent-in`, `seon.root/end-agent`, `seon.root/record-death`, `seon.root/set-agent`, `seon.root/previous-end`, `seon.reconcile/judge-tx`, `seon.reconcile/start`, `seon.reconcile/dead-tx`, `seon.server/attach!`, `seon.writer/main-commit`, `seon.writer/writer-proc` (the `:since` on its dirty notice), `seon.repl/wrap-caught`, `seon.web/render-in`: a wall-clock stamp on an event, an attempt, a death, a root's end, a problem, an error, a commit or a dashboard chunk.
+- `seon.step/event`, `seon.agent-proc/agent-in`, `seon.root/end-agent`, `seon.root/record-death`, `seon.root/set-agent`, `seon.root/previous-end`, `seon.reconcile/judge-tx`, `seon.reconcile/start`, `seon.reconcile/dead-tx`, `seon.server/attach!`, `seon.writer/main-commit`, `seon.writer/stored!`, `seon.writer/writer-proc` (the `:since` on its dirty notice), `seon.repl/wrap-caught`, `seon.web/render-in`: a wall-clock stamp on an event, an attempt, a death, a root's end, a problem, an error, a commit or a dashboard chunk.
 - `seon.repl/record!`: a record's id made unique by the clock read.
 - `seon.render.proc/web-answered`: a UI call's answer, its record's id made unique by the clock read and its stream event stamped.
-- `seon.turn/act!`, `seon.turn/work!`, `seon.turn/observe`, `seon.turn/context-block`, `seon.model/openai-compat`, `seon.model/scripted`, `seon.fx/build`, `seon.fx/worker-proc`, `seon.contract/instrument!`, `seon.repl/wrap-cost`, `seon.agent/clone!`, `seon.agent/run-tests-forked`, `seon.proofs/run-tests!`, `seon.db/collect!`, `seon.fork-server/server-step`, `seon.root/import-source!`, `seon.server/root-eval`: a duration recorded on the work's own fact or reply.
+- `seon.turn/act!`, `seon.turn/work!`, `seon.turn/observe`, `seon.turn/context-block`, `seon.model/openai-compat`, `seon.model/scripted`, `seon.fx/build`, `seon.fx/run-tests`, `seon.fx/worker-proc`, `seon.contract/instrument!`, `seon.repl/wrap-cost`, `seon.agent/clone!`, `seon.agent/run-tests-forked`, `seon.proofs/run-tests!`, `seon.db/collect!`, `seon.fork-server/server-step`, `seon.root/import-source!`, `seon.server/root-eval`: a duration recorded on the work's own fact or reply.
 - `my.root/watch!`: the time a file watcher's death was seen, stamped on its `:platform` error ([health](health.md#every-writer-root-loads-what-changed)).
 - `seon.root/state`: the writer's transactions per second over the last second, shown.
 - `seon.render.proc/pass`: a render pass's duration and the events' age, shown on the dashboard.

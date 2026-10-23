@@ -6,8 +6,8 @@
   (BAGGAGE.md)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-] :as contract] [seon.schema.datahike :as sd] [seon.config :as cfg]
-            [datahike.connections] [datahike.writing] [datahike.config] [datahike.store] [konserve.store] [datahike.db.transaction :as dbt] [hasch.core :as hasch] [datahike.api :as d] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
-            [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix]))
+            [datahike.connections] [datahike.writing] [datahike.config] [datahike.store] [konserve.store] [hasch.core :as hasch] [datahike.api :as d] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
+            [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix] [seon.lib :as lib] [jolt.ffi :as ffi] [datahike.ids] [datahike.core]))
 
 (def schema
   "The Datahike schema, derived from the registry's entity schemas (resources/seon/schemas,
@@ -87,6 +87,7 @@
                       (#{:lz4 :zstd} (cfg/value :seon.config.store/compressor)) (assoc-in [:config :compressor] {:type (cfg/value :seon.config.store/compressor)})
                       (= backend :file) (assoc :config {:defer-immutable-sync? true}))
              :schema-flexibility :write
+             :store-cache-bytes (cfg/value :seon.config.store/node-cache-bytes)
              :writer writer-cfg
              :index-config (let [n (cfg/value :seon.config.store/value-out-of-line-bytes)]
                              (cond-> {:branching-factor (cfg/value :seon.config.store/branching-factor)}
@@ -112,11 +113,22 @@
   "The tx-meta of every transaction Seon makes: the runtime that made it
   (:seon.tx/runtime, jolt.host/runtime-fingerprint). A runtime Jolt cannot identify (nil)
   is refused by this contract, never recorded as no runtime."
-  {:malli/schema [:=> [:cat] [:map [:seon.tx/runtime :string]]]}
-  [] {:seon.tx/runtime (jolt.host/runtime-fingerprint)})
+  {:malli/schema [:=> [:cat :seon.db/branch] [:map [:seon.tx/runtime :string] [:seon.tx/branch :seon.db/branch]]]}
+  [branch] {:seon.tx/runtime (jolt.host/runtime-fingerprint) :seon.tx/branch branch})
+
+(defn main-branch
+  "The branch the root holding cfg works on as its main: cfg's :branch, :db when none."
+  {:malli/schema [:=> [:cat :seon.db/cfg] :seon.db/branch]}
+  [cfg] (:branch cfg :db))
+
+(defn conn-main
+  "The main of the root holding conn (its connection to main): the branch conn is on."
+  {:malli/schema [:=> [:cat :seon.host/conn] :seon.db/branch]}
+  [conn] (main-branch (:config @conn)))
 
 (defn- install-missing!
-  "Transact the attributes of `schema` the db under conn lacks and answer how many: first
+  "Transact the attributes of `schema` the db under conn lacks, or holds without their
+  declared :db/contentId, and answer how many: first
   :seon.tx/runtime alone when it is missing (the one transaction that cannot name its
   runtime, since it installs the attribute), then the rest in one transaction carrying
   tx-meta (an attribute it holds as another value type is refused, :seon.db/types-differ:
@@ -136,10 +148,14 @@
                                     {:seon.db/attributes differ
                                      :seon.error/fix "An attribute's value type is fixed once installed: open a store made with this schema (a fresh one), or keep running the build that made this store."})]
               (throw (ex-info (:seon.error/message e) e))))
-        missing (vec (remove #(contains? have (:db/ident %)) schema))]
-    (let [[runtime others] ((juxt filter remove) #(= :seon.tx/runtime (:db/ident %)) missing)]
-      (when (seq runtime) (d/transact conn {:tx-data (vec runtime)}))
-      (when (seq others) (d/transact conn {:tx-data (vec others) :tx-meta (tx-meta)})))
+        ;; an identity a kept store holds without its content id gains it (Datahike admits
+        ;; adding :db/contentId: its entities keep their ids, new ones mint at content ids)
+        missing (vec (remove #(and (contains? have (:db/ident %))
+                                   (= (:db/contentId %) (get-in have [(:db/ident %) :db/contentId])))
+                             schema))]
+    (let [[tx-attrs others] ((juxt filter remove) #(#{:seon.tx/runtime :seon.tx/branch} (:db/ident %)) missing)]
+      (when (seq tx-attrs) (d/transact conn {:tx-data (vec tx-attrs)}))
+      (when (seq others) (d/transact conn {:tx-data (vec others) :tx-meta (tx-meta (conn-main conn))})))
     (count missing)))
 
 (defn seed!
@@ -147,7 +163,7 @@
   {:malli/schema [:=> [:cat :seon.host/conn :int] :any]}
   [conn n]
   (install-missing! conn)
-  (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx :tx-meta (tx-meta)})))
+  (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx :tx-meta (tx-meta (conn-main conn))})))
 
 ;; ---- one store, many branches, as in production (owner, 2026-10-21) ------------
 ;; A store holds one seed on :db. Every root works on a main of its own, a branch of :db
@@ -155,16 +171,6 @@
 ;; branch), and its agents' and tasks' branches are named under that main, so roots
 ;; sharing a store never share a branch. A branch is one pointer write (~1 ms measured,
 ;; 2026-10-21) where a fresh seeded store was ~200 ms and ~2 MB.
-
-(defn main-branch
-  "The branch the root holding cfg works on as its main: cfg's :branch, :db when none."
-  {:malli/schema [:=> [:cat :seon.db/cfg] :seon.db/branch]}
-  [cfg] (:branch cfg :db))
-
-(defn conn-main
-  "The main of the root holding conn (its connection to main): the branch conn is on."
-  {:malli/schema [:=> [:cat :seon.host/conn] :seon.db/branch]}
-  [conn] (main-branch (:config @conn)))
 
 (defn on-main
   "Branch b of the root whose main is `main`, as the store names it: :db names main itself;
@@ -231,6 +237,37 @@
   (count (d/datoms db :aevt)) (count (d/datoms db :avet))
   (count (d/datoms db :eavt)))
 
+(lib/defc c-ids-open "seon_ids_open" [:string] :pointer {:capture-native-error true})
+(lib/defc c-ids-take "seon_ids_take" [:pointer :int] :uint64)
+(lib/defc c-ids-reach "seon_ids_reach" [:pointer :int :uint64] :void)
+
+(defn ids!
+  "Make the store of conn take its entity ids and transaction ids from one page every
+  process writing it shares (native/ids.c): the file `ids` beside a durable store, or an
+  anonymous page for a store in memory; a process forked from this one maps the same page.
+  Each id is issued once across every branch and process, so a datom keeps its e and tx
+  wherever it travels (notes/global-ids/MEASURED.md §6: 28-34 ns an id, 200-240 ns with 10
+  processes contending). The page is moved past every branch head's ids
+  (datahike.writing/set-ids!), so an id issued but never committed is a gap, never reused,
+  and a page lost in a crash is reseeded from the heads. A page the OS refuses is
+  :seon.db/ids-unopened (docs/failure-points.md). nil."
+  {:malli/schema [:=> [:cat :seon.host/conn] :nil]}
+  [conn]
+  (let [{:keys [backend path]} (get-in @conn [:config :store])
+        file (if (= :memory backend) "" (str path "/ids"))
+        [page errno] (c-ids-open file)]
+    (when (zero? (ffi/address page))
+      (let [e (contract/error :seon.db/ids-unopened 'seon.db/ids!
+                              (str "the store's ids page " file " was refused: " (ffi/errno-message errno))
+                              {:path file :errno errno
+                               :seon.error/fix "Make the store's directory writable (the ids page lives beside data.mdb), then open the store again."})]
+        (throw (ex-info (:seon.error/message e) e))))
+    (datahike.writing/set-ids! (:store @conn) (get-in @conn [:config :store :id])
+                               (reify datahike.ids/IIds
+                                 (-take! [_ kind] (c-ids-take page (if (= :eid kind) 0 1)))
+                                 (-reach! [_ kind id] (c-ids-reach page (if (= :eid kind) 0 1) id) nil)))
+    nil))
+
 (defn store?
   "Does a durable LMDB store exist at path (its data file)?"
   {:malli/schema [:=> [:cat :string] :boolean]}
@@ -249,6 +286,7 @@
       (d/create-database (made-cfg cfg))
       (let [conn (d/connect cfg)] (seed! conn n) (d/release conn)))
     (let [[conn existed?] (open-main! cfg main)
+          _ (ids! conn)
           added (install-missing! conn)
           cfg (cond-> cfg (not= :db main) (assoc :branch main))]
       ;; durable before root runs: the seed, the new branch or the added attributes (an
@@ -262,15 +300,17 @@
   :seon.root/collected): the record to write, {:swept :ms :branches :gone}. With no record yet
   (a new main) or none gone but branches made since, the record of what is here, nothing swept,
   so a branch seen at one quiescence and gone at a later one is reclaimed; {:skipped true} when
-  the branches are the ones recorded. Only while no
-  other process writes the store (owner, 2026-10-22, simplest first): root's writer runs it
-  (:collect) and root refuses it while an agent is live (docs/storage.md#collection)."
-  {:malli/schema [:=> [:cat :seon.host/conn] [:or [:map [:skipped :boolean]] :seon.root/collected]]}
-  [conn]
+  the branches are the ones recorded. Only while no other process writes the store (owner,
+  2026-10-22, simplest first): root's writer runs it (:collect), root refuses it while an agent
+  is live, and sole? (:seon.config.store/sole-writer?) says no other root writes it; when not,
+  {:skipped true :shared true} (docs/storage.md#collection)."
+  {:malli/schema [:=> [:cat :seon.host/conn :boolean] [:or [:map [:skipped :boolean] [:shared {:optional true} :boolean]] :seon.root/collected]]}
+  [conn sole?]
   (let [last (:seon.root/collected (d/pull @conn [:seon.root/collected] [:seon.root/id :root]))
         now (set (d/branches conn))
         gone (count (remove now (:branches last)))]
     (cond
+      (not sole?) {:skipped true :shared true}
       (and last (zero? gone) (= now (:branches last))) {:skipped true}
       ;; no record yet (a new main: every check step's) or nothing gone: record what is here,
       ;; sweep nothing; a full sweep on a store of hundreds of branches held a check step's
@@ -281,46 +321,15 @@
             swept @(d/gc-storage conn (java.util.Date. 0))]
         {:swept (count swept) :ms (profile/ms-since t0) :branches now :gone gone}))))
 
-(defn lease!
-  "Make this process mint the store's entity ids from its lease: from lease, up to (not
-  including) lease + EID-LEASE; past it a transaction is refused (lease-spent), never
-  minting the next agent's ids. nil."
-  {:malli/schema [:=> [:cat :seon.db/cfg :int] :nil]}
-  [cfg lease]
-  (.put ^java.util.concurrent.ConcurrentHashMap @#'datahike.writing/eid-allocators
-        (get-in cfg [:store :id]) (java.util.concurrent.atomic.AtomicLong. lease))
-  (dbt/set-eid-ceiling! (get-in cfg [:store :id]) (+ lease (cfg/value :seon.config.store/eid-lease))))
-
 (defn after-fork!
   "Make this forked process (an agent, a clone) open the store itself: an LMDB env and the
   connections inherited from its parent must not be used across fork(), so they are
-  forgotten (not closed: they are the parent's), and the store's entity-id allocator starts
-  at this process's lease and stops at its end (lease!). Physics, not a guard: fork shares
-  the parent's handles."
-  {:malli/schema [:=> [:cat :seon.db/cfg :int] :any]}
-  [cfg lease]
+  forgotten (not closed: they are the parent's). The store's ids page stays: fork maps the
+  parent's page (ids!). Physics, not a guard: fork shares the parent's handles."
+  {:malli/schema [:=> [:cat :seon.db/cfg] :any]}
+  [cfg]
   (swap! @#'konserve.jolt.lmdb/envs dissoc (get-in cfg [:store :path]))
-  (reset! datahike.connections/*connections* {})
-  (lease! cfg lease))
-
-(defn lease-spent
-  "The typed error :seon.db/lease-spent when x (what a transaction answered) is Datahike's
-  error to mint past this process's ceiling (after-fork!), for the agent whose lease
-  starts at lease; else nil."
-  {:malli/schema [:=> [:cat :any [:maybe :int]] [:maybe :seon.db/lease-spent]]}
-  [x lease]
-  (let [d (ex-data x)]
-    (when (and lease (= :entity-id/lease-spent (:error d)))
-      (contract/error :seon.db/lease-spent 'seon.agent/transact!
-                      (str "this agent's entity ids are spent: its lease is " (cfg/value :seon.config.store/eid-lease) " ids from " lease)
-                      {:lease lease :ceiling (:ceiling d) :entity-id (:entity-id d)
-                       :seon.error/fix "Write fewer new entities in this agent (retract or reuse), or raise :seon.config.store/eid-lease for the run (--set); the transaction was not applied."}))))
-
-(defn lease-use
-  "How much of the lease starting at lease db's branch has minted: {:from :used :of}."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe :int]] [:maybe [:map [:from :int] [:used :int] [:of :int]]]]}
-  [db lease]
-  (when lease {:from lease :used (max 0 (- (:max-eid db) lease)) :of (cfg/value :seon.config.store/eid-lease)}))
+  (reset! datahike.connections/*connections* {}))
 
 (defn map-use
   "The LMDB store's use of its map: {:used-bytes (data.mdb's length: LMDB grows the file as it
@@ -330,15 +339,6 @@
   (when (= :lmdb (get-in cfg [:store :backend]))
     {:used-bytes (.length (java.io.File. (str (get-in cfg [:store :path]) "/data.mdb")))
      :map-bytes (get-in cfg [:store :lmdb :map-size])}))
-
-(defn lease-block!
-  "Reserve the next block of eid-lease entity ids from this process's one counter for db's
-  store (the counter its own writes mint from, seeded past every branch head): answers the
-  block's lease, its ids lease+1 up to lease+eid-lease (exclusive, lease!). The process's
-  later ids start past it, so a block and the writes to main never meet."
-  {:malli/schema [:=> [:cat :seon.host/db] :int]}
-  [db]
-  (.getAndAdd ^java.util.concurrent.atomic.AtomicLong (datahike.writing/eid-allocator db) (cfg/value :seon.config.store/eid-lease)))
 
 (defn head
   "Branch b's committed value, read from the store (another process may have committed it)."
@@ -353,17 +353,16 @@
   [conn main branch]
   (d/commit-as-db conn (d/merge-base conn branch main)))
 
-;; ---- tx-data that replays exactly -----------------------------------------------
-;; Seon's Datahike fork issues entity ids from one store-wide counter, so ids are unique
-;; across branches: a branch's new entity keeps its id on main, and a replica (the fork
-;; server's main, an agent's branch copy) applies the writer's RESOLVED datoms rather
-;; than re-resolving tempids with its own counter.
+;; ---- tx-data with explicit ids ----------------------------------------------------
+;; The store issues every entity id and transaction id once (ids!), so ids are unique
+;; across branches: a branch's new entity keeps its id on main. The fork server's replica
+;; of main reads each commit from the store (seon.fork-server, d/commit-as-db); these name
+;; a commit's datoms for the program's loader and main's readers.
 
 (defn report->tx-meta
   "The transaction entity's own facts in the writer's tx-report ({attribute value}: its
-  :db/txInstant and any tx-meta; empty without history): what a replica of the branch
-  applies as its own transaction's :tx-meta, so its transaction entity holds main's facts
-  (a transaction's id is its branch's own, so they cannot travel as datoms on it)."
+  :db/txInstant and any tx-meta; empty without history): a commit's own facts, as main's
+  readers receive them beside its datoms."
   {:malli/schema [:=> [:cat :seon.db/tx-report] :map]}
   [rep]
   (into {} (for [dt (:tx-data rep) :when (and (= (:e dt) (:tx dt)) (:added dt))] [(:a dt) (:v dt)])))
