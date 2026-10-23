@@ -32,9 +32,9 @@
         t0 (:max-tx @conn)]
     (testing "a main transaction: committed once, its report to the reconciler, its commit to the fork server, its answer by dest"
       (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})]
-        (is (= (inc t0) (:max-tx @conn)))
+        (is (< t0 (:max-tx @conn)) "main's t moves past its last")
         (is (= [:tx] (map :op (:to-fork-server outs))))
-        (is (= [(inc t0)] (map :t (:main outs))))
+        (is (= [(:max-tx @conn)] (map :t (:main outs))))
         (is (= {:rid 1} (:dest (first (:to-api outs)))))
         (is (true? (:ok (:r (first (:to-api outs))))))
         (testing "group commit: three queued transactions, one step, one commit"

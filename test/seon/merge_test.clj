@@ -91,10 +91,11 @@
       (is (= '[app/u] (pm/uncontracted (:ours (tw (with (base) u (var-tx "f" "(inc x)")) (base)))))))))
 
 (deftest identical-defs-on-two-branches-merge-clean
-  ;; one side makes an unrelated entity first, so app/n gets a different entity id on each
+  ;; one side makes an unrelated entity first; app/n is still one entity on both, at its
+  ;; content id (docs/storage.md#ids)
   (let [o (with (base) [{:note/text "scratch"}] (var-tx "n" "(* 2 x)"))
         t (with (base) (var-tx "n" "(* 2 x)"))]
-    (is (not= (d/q '[:find ?e . :where [?e :var/name app/n]] o) (d/q '[:find ?e . :where [?e :var/name app/n]] t)))
+    (is (= (d/q '[:find ?e . :where [?e :var/name app/n]] o) (d/q '[:find ?e . :where [?e :var/name app/n]] t)))
     (is (= {:apply [] :conflicts []} (select-keys (tw o t) [:apply :conflicts])))))
 
 (deftest unmap-merges-as-delete

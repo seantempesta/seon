@@ -253,7 +253,7 @@
         [page errno] (c-ids-open file)]
     (when (zero? (ffi/address page))
       (let [e (contract/error :seon.db/ids-unopened 'seon.db/ids!
-                              (str "the store's ids page " (pr-str file) " was refused: " (ffi/errno-message errno))
+                              (str "the store's ids page " file " was refused: " (ffi/errno-message errno))
                               {:path file :errno errno
                                :seon.error/fix "Make the store's directory writable (the ids page lives beside data.mdb), then open the store again."})]
         (throw (ex-info (:seon.error/message e) e))))

@@ -6,7 +6,7 @@
  ;; definition (var, multimethod method, protocol extension, namespace) points to the form
  ;; that last made it; what a form defines, declares and references comes from Jolt's
  ;; analyzer (jolt.analyzer/*unit-tap*, or analysis-only for a file), never from text.
- :form/id [:and {:seon.db/identity true} :string]
+ :form/id [:and {:seon.db/identity true :seon.db/content-id true} :string]
  ;; the exact text as written, and the whitespace and comments before it in its file
  :form/src :string
  :form/lead :string
@@ -34,14 +34,14 @@
  ;; :answers :constant|:rethrows|:expr}: the facts the guard detectors query
  :form/timeouts [:set {:seon.db/index true} :qualified-symbol]
  :form/catches [:set :string]
- :ns/name [:and {:seon.db/identity true} :symbol]
+ :ns/name [:and {:seon.db/identity true :seon.db/content-id true} :symbol]
  :ns/doc :string
  :ns/form :seon.db/ref
  ;; the file it was imported from, relative to the source tree's root (seon.source)
  :ns/file :string
  ;; the text after its file's last form
  :ns/tail :string
- :var/name [:and {:seon.db/identity true} :symbol]
+ :var/name [:and {:seon.db/identity true :seon.db/content-id true} :symbol]
  :var/ns :seon.db/ref
  :var/form :seon.db/ref
  :var/doc :string
@@ -50,11 +50,11 @@
  ;; :ctor) and its declared contract, as text
  :var/kind :keyword
  :var/contract :string
- :method/key [:and {:seon.db/identity true} :string]
+ :method/key [:and {:seon.db/identity true :seon.db/content-id true} :string]
  :method/multi :qualified-symbol
  :method/dispatch :string
  :method/form :seon.db/ref
- :impl/key [:and {:seon.db/identity true} :string]
+ :impl/key [:and {:seon.db/identity true :seon.db/content-id true} :string]
  :impl/protocol :qualified-symbol
  :impl/type :string
  :impl/form :seon.db/ref
@@ -63,11 +63,11 @@
  ;; EDN text, the resource it is written back to, and whether the binary holds it (imported
  ;; from the tree a generation was built from; an entry an agent registers or a merge
  ;; carries never does). The resource's text as imported is the base write-back edits.
- :schema/key [:and {:seon.db/identity true} :qualified-keyword]
+ :schema/key [:and {:seon.db/identity true :seon.db/content-id true} :qualified-keyword]
  :schema/form :string
  :schema/file [:and {:seon.db/index true} :string]
  :schema/source :boolean
- :schema.file/path [:and {:seon.db/identity true} :string]
+ :schema.file/path [:and {:seon.db/identity true :seon.db/content-id true} :string]
  :schema.file/text :string
  :seon.db/schema-fact [:map {:seon.db/attributes true} [:schema/key :schema/key] [:schema/form :schema/form]
                         [:schema/file :schema/file] [:schema/source {:optional true} :schema/source]]

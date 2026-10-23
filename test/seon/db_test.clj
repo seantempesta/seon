@@ -445,3 +445,62 @@
               (set (d/q '[:find ?o ?added :in $ ?id :where [?f :form/id ?id] [?f :form/order ?o _ ?added]]
                         (d/history @conn) "h/f"))))
        (is (= #{[3]} (d/q '[:find ?o :in $ ?id :where [?f :form/id ?id] [?f :form/order ?o]] @conn "h/f")))))))
+
+(deftest an-identity-names-its-entity-on-every-branch
+  ;; a :db/contentId attribute's value is its entity's id (datahike.db.transaction/content-eid):
+  ;; two branches minting one identity mint one entity, so their datoms coincide; a ref to the
+  ;; tempid made before its map takes it; the identity is never replaced on its entity
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (keyword (str (name (:branch cfg)) "-ce"))
+           _ (d/branch! conn (:branch cfg) b)
+           bc (d/connect (assoc cfg :branch b))
+           mint (fn [c] (let [r (d/transact c [{:db/id "f" :form/id "app.ce/f" :form/src "(defn f [])" :form/ns "n" :form/defines ["v"]}
+                                               {:db/id "v" :var/name 'app.ce/f :var/form "f"}
+                                               {:db/id "n" :ns/name 'app.ce}])]
+                          (mapv #(get-in r [:tempids %]) ["f" "v" "n"])))]
+       (try
+         (let [[fa va na] (mint conn) [fb vb nb] (mint bc)]
+           (testing "one identity, one entity id, on both branches"
+             (is (= [fa va na] [fb vb nb]))
+             (is (= fa (datahike.db.transaction/content-eid :form/id "app.ce/f")))
+             (is (<= datahike.constants/ce0 fa datahike.constants/emax)))
+           (testing "the ref named the tempid before its map: it holds the content id"
+             (is (= va (:db/id (first (:form/defines (d/entity @conn fa)))))))
+           (testing "a counter entity is no content entity"
+             (is (< (get-in (d/transact conn [{:db/id "x" :note/text "counter"}]) [:tempids "x"]) datahike.constants/tx0)))
+           (testing "an identity is never replaced on its entity: a rename is refused"
+             (is (= :entity-id/collision
+                    (try (d/transact conn [[:db/add fa :form/id "app.ce/g"]]) nil
+                         (catch Exception e (some (comp :error ex-data) (take-while some? (iterate ex-cause e)))))))))
+         (finally (d/release bc) (d/delete-branch! conn b)))))))
+
+(deftest content-ids-cost-the-writes-the-model-says
+  ;; content eids scatter a commit's new identities over the indexes (notes/content-eids-2026-10-23.md
+  ;; §3): nodes written per commit against counter eids, the ratio the model priced (1.3-1.7x at
+  ;; 2 new identities, 2.3-5.1x at 10), red when steeper. Measured 2026-10-23 at 110k datoms:
+  ;; 0.97x at 1, 1.51x at 2, 4.50x at 10. A store on disk of this test's own, the last resort:
+  ;; the in-memory store writes no nodes to count
+  (let [nodes (fn [content?]
+                (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))
+                      cfg (pdb/made-cfg (pdb/store-cfg :lmdb path))
+                      _ (d/create-database cfg)
+                      conn (d/connect (dissoc cfg :keep-history?))
+                      ent (fn [k] (into {:w/id (str "entity " k)} (for [i (range 10)] [(keyword "w" (str "a" i)) (str "value " i " of " k)])))]
+                  (try
+                    (pdb/ids! conn)
+                    (d/transact conn (into [(cond-> {:db/ident :w/id :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+                                              content? (assoc :db/contentId true))]
+                                           (for [i (range 10)] {:db/ident (keyword "w" (str "a" i)) :db/valueType :db.type/string :db/cardinality :db.cardinality/one})))
+                    (doseq [part (partition-all 1000 (range 3000))] (d/transact conn (mapv ent part)))
+                    (let [writes #(:writes @(:stats (-> @conn :store :storage)))]
+                      (into {} (for [m [2 10]]
+                                 (let [w0 (writes)]
+                                   (doseq [c (range 10)] (d/transact conn (mapv #(ent (str "new " m " " c " " %)) (range m))))
+                                   [m (/ (- (writes) w0) 10.0)]))))
+                    (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+        counter (nodes false) content (nodes true)
+        ratio (fn [m] (/ (content m) (counter m)))]
+    (is (< (ratio 2) 2.0) (str "2 new identities: " (ratio 2) "x the counter's nodes"))
+    (is (< (ratio 10) 6.0) (str "10 new identities: " (ratio 10) "x the counter's nodes"))
+    (is (< (ratio 2) (ratio 10)) "more new identities per commit scatter more")))

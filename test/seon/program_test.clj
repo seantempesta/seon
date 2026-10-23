@@ -397,16 +397,16 @@
         main (d/db-with base [{:db/id (e base 'app/f) :var/form "f2"} {:db/id "f2" :form/id "(def f 2)" :form/src "(def f 2)"}
                               {:db/id "g" :var/name 'app/g :var/form "g1"} {:db/id "g1" :form/id "(def g 1)" :form/src "(def g 1)"}
                               {:schema/key :app/k :schema/form ":string"}])
-        ;; the branch first writes entities of its own, so its ids differ from main's
+        ;; the branch first writes entities of its own; identities still take their content ids
         own (d/db-with base (vec (for [i (range 5)] {:db/id (str "x" i) :form/id (str "(comment " i ")") :form/src "x"})))
-        ;; it adds h, then merges main: main's forms by content, under the branch's own ids
+        ;; it adds h, then merges main: main's forms by content, at the same content ids
         merged (d/db-with own [{:db/id "h" :var/name 'app/h :var/form "h1"} {:db/id "h1" :form/id "(def h 1)" :form/src "(def h 1)"}
                                {:db/id (e own 'app/f) :var/form "bf2"} {:db/id "bf2" :form/id "(def f 2)" :form/src "(def f 2)"}
                                {:db/id "bg" :var/name 'app/g :var/form "bg1"} {:db/id "bg1" :form/id "(def g 1)" :form/src "(def g 1)"}
                                {:schema/key :app/k :schema/form ":string"}])
         form-e (fn [db v] (:db/id (:var/form (d/entity db (e db v)))))]
-    (is (not= (form-e main 'app/f) (form-e merged 'app/f)) "f's form is another entity on each side")
-    (is (not= (e main 'app/g) (e merged 'app/g)) "and so is g")
+    (is (= (form-e main 'app/f) (form-e merged 'app/f)) "f's form is one entity on both sides")
+    (is (= (e main 'app/g) (e merged 'app/g)) "and so is g")
     (is (= {:added ['app/h]} (program/divergence main merged)) "only h, the branch's own")
     (is (= #{'app/h} (program/changed-vars main merged)) "and the tests it reaches are h's")))
 

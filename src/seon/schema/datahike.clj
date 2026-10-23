@@ -19,7 +19,9 @@
 
   - An attribute is a registered qualified keyword whose schema is its stored value.
   - `[:and {:seon.db/identity true} :string]` is an upsert key; `:seon.db/unique` a value key;
-    `:seon.db/index`, `:seon.db/component`, `:seon.db/no-history?` as named.
+    `:seon.db/index`, `:seon.db/component`, `:seon.db/no-history?` as named;
+    `{:seon.db/identity true :seon.db/content-id true}` an upsert key whose value names its
+    entity's id in every branch (Datahike's `:db/contentId`, docs/storage.md#ids).
   - `:seon.db/ref` is a reference (entity id, tempid, lookup ref or nested map); `[:set X]`
     is cardinality many.
   - A map with `{:seon.db/attributes true}` declares its members as attributes.
@@ -47,7 +49,7 @@
 
 (def ^:private storage-properties
   "An attribute schema carrying one of these is a declared attribute even where no entity map lists it."
-  #{:seon.db/identity :seon.db/unique :seon.db/index :seon.db/component :seon.db/no-history?})
+  #{:seon.db/identity :seon.db/unique :seon.db/index :seon.db/component :seon.db/no-history? :seon.db/content-id})
 
 ;; ---- what one schema stores -------------------------------------------------------
 ;; Seon folds the whole schema with `m/walk` (children first, cached per compiled schema).
@@ -76,7 +78,7 @@
           ;; identity belongs to the attribute being declared: an attribute that reuses an
           ;; identity's value shape by name (:seon.task/id as a need) is not an upsert key
           (let [target (storage (m/deref node) (cond-> active r (conj r)))]
-            (assoc target :props (merge (dissoc (:props target) :seon.db/identity :seon.db/unique) props)))))
+            (assoc target :props (merge (dissoc (:props target) :seon.db/identity :seon.db/unique :seon.db/content-id) props)))))
 
       (= :and t) (assoc (storage (first (m/children node)) active) :props props)
 
@@ -140,7 +142,8 @@
         (:seon.db/unique props) (assoc :db/unique :db.unique/value)
         (:seon.db/index props) (assoc :db/index true)
         (:seon.db/component props) (assoc :db/isComponent true)
-        (:seon.db/no-history? props) (assoc :db/noHistory true)))))
+        (:seon.db/no-history? props) (assoc :db/noHistory true)
+        (:seon.db/content-id props) (assoc :db/contentId true)))))
 
 ;; ---- which attributes -------------------------------------------------------------
 
