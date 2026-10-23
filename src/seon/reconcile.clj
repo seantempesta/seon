@@ -468,16 +468,6 @@
 
 ;; ---- queries, over one index (list it once: (index db)) -----------------------------
 
-(defn reconcile
-  "The actions that move db's observed state toward its desired state (index, then actions)."
-  {:malli/schema [:=> [:cat :seon.host/db] :seon.reconcile/actions]}
-  [db] (actions (index db)))
-
-(defn running
-  "The runs running now (in this boot), by id."
-  {:malli/schema [:=> [:cat :seon.reconcile/index] [:set :seon.run/id]]}
-  [idx] (:live idx))
-
 (defn done?
   "Is task id done (merged into its target, or accepted on its branch)?"
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}

@@ -208,8 +208,8 @@
       {:boot boot :ok (fn [{:keys [sys d]}] (assoc (all-done d) :recovered (get-in (c/state sys) [:store :recovered-branches])))}
       {:boot boot :specs fx/calc :tns 'calc
        :during (fn [sys _]
-                 (await/await-db sys #(let [idx (r/index %)] (and (r/done? idx "calc/add-merge") (seq (r/running idx)))))
-                 (println :running-at-kill (r/running (r/index (db sys))))
+                 (await/await-db sys #(let [idx (r/index %)] (and (r/done? idx "calc/add-merge") (seq (:live idx)))))
+                 (println :running-at-kill (:live (r/index (db sys))))
                  (flush)
                  (lib/c-kill (lib/c-getpid) 9))})))
 
