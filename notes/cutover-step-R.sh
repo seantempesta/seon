@@ -69,7 +69,7 @@ echo "R2 ok: $(git branch --list 'jolt/*' 'claude/*' | wc -l) branches, listed i
 
 ### R2b Each live session's new worktree path (print only; sessions move after R8, each running the one command in the right column)
 echo "SESSION WORKTREES: old path -> new path (branch)   | in the new root: cd $NEW && bin/worktree NAME"
-git -C $OLD worktree list --porcelain | awk '/^worktree /{w=$2} /^branch refs\/heads\//{b=substr($2,12); print w, b} /^detached/{print w, "(detached)"}' | while read w b; do
+git -C $OLD worktree list --porcelain | awk '/^worktree /{w=$2} /^branch refs\/heads\//{b=substr($2,12); print w, b}' | while read w b; do
   [ "$w" = "$OLD" ] && continue
   n=${b#jolt/}; n=${n#claude/}
   printf '%-60s -> %s/.worktrees/%s  (%s)\n' "$w" "$NEW" "$n" "$b"
