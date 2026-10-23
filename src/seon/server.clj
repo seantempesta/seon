@@ -139,10 +139,13 @@
                       ;; the end first, as a turn loop's end is written, so the judge reads it
                       (let [r @(c/submit! sys ag (sedn/encode (list 'seon.turn/hand-back! task run)) {:origin :outside})
                             item (when-not (contract/error? r) (last r))]
+                        ;; judged only on the end written: an error or no answer is answered as it is,
+                        ;; and the run stays the agent's to hand back again
                         (cond (contract/error? r) r
+                              (= :ret (:tag item)) (do (c/judge! sys {:run run :task task :env env :agent ag})
+                                                       {:judging run})
                               (= :err (:tag item)) (:err item)
-                              :else (do (c/judge! sys {:run run :task task :env env :agent ag})
-                                        {:judging run})))
+                              :else (refused (str ag " answered no end for " run))))
                       (refused (str ag " works no task"))))}))
 
 (defn answer
