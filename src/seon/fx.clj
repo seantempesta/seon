@@ -253,6 +253,54 @@
           (step "bin/worktree --at" [(str from "/bin/worktree") "--at" dir commit repo]))
         (step "bin/build seon" ["nice" "-n" "15" (str dir "/bin/build") "seon"])
         {:value {:commit commit :checkout dir :binary (str dir "/target/seon") :ms (profile/ms-since t0)}})))
+(defn test-command
+  "The runner the :tests effect calls in a checkout, as argv, for namespaces nss: prove's one
+  entry (land12, root 2026-10-22), each named namespace's tests with no green at their reach
+  digest run, the rest reused."
+  {:malli/schema [:=> [:cat [:sequential :symbol]] [:vector :string]]}
+  [nss] (into ["nice" "-n" "15" "bin/prove" "--tests"] (map str nss)))
+
+(defn test-results
+  "Each of tests' status from prove's output out and its exit status: :fail or :error where a
+  RED line names it (its counts say which), :pass only when the run reached its tests, exited
+  0 and named it in no RED line (it ran green, or was green at its digest), and :error for
+  every other one: a run that never reached its tests (its plan or its build failed), or that
+  exited non-zero without naming it (a check step, a crash after the shard), says nothing of it
+  passing."
+  {:malli/schema [:=> [:cat :string :int [:sequential :qualified-symbol]] [:map-of :qualified-symbol [:enum :pass :fail :error]]]}
+  [out exit tests]
+  (let [red (into {} (for [[_ t counts] (re-seq #"(?m)^RED (\S+) (\{[^\n]*\})" out)]
+                       [(symbol t) (if (pos? (or (:error (edn/read-string counts)) 0)) :error :fail)]))
+        reached? (boolean (re-find #"(?m)^(SHARD |PROVE OK|prove: .* 0 to run)" out))]
+    (into {} (for [t tests] [t (or (red t) (if (and reached? (zero? exit)) :pass :error))]))))
+
+(defn run-tests
+  "The :tests effect: tests (qualified names) run on a checkout of the merge candidate: a
+  detached worktree of repo at branch's head (bin/worktree --at, as a generation's), files
+  ({relative path text}, the candidate's changed files) written over it, then the runner
+  (test-command) over the tests' namespaces there, niced, in that tree's own environment;
+  the worktree removed after. Answers {:value {:results {test status} :ms :log}}, or
+  :seon.fx/io-error naming the step and its log."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [repo branch files tests]} :req}]
+  (let [t0 (profile/now-ns)
+        sha (str/trim (:out (sh/sh "git" "-C" repo "rev-parse" branch)))
+        dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
+        log (str dir ".tests.log")
+        clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"]
+        at (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo)]
+    (if-not (zero? (:exit at))
+      (error :seon.fx/io-error (str "bin/worktree --at exited " (:exit at) ": " (:err at)) {:path dir})
+      (try
+        (doseq [[p text] files] (let [f (java.io.File. dir p)] (.mkdirs (.getParentFile f)) (spit f text)))
+        (let [r (apply sh/sh (concat clean (test-command (sort (distinct (map (comp symbol namespace) tests)))) [:dir dir]))
+              out (str (:out r) (:err r))]
+          (spit log out)
+          {:value {:results (test-results out (:exit r) tests) :ms (profile/ms-since t0) :log log}})
+        ;; the worktree's removal is recorded in the run's log: a failed one names what it left
+        (finally (let [rm (sh/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
+                   (spit log (str "\nremove-at " dir ": exit " (:exit rm) "\n" (:out rm) (:err rm)) :append true)))))))
+
 ;; ---- the owner -----------------------------------------------------------------------
 
 (defn refill

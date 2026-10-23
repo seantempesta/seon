@@ -1,0 +1,12 @@
+;; branch :hist of :db: every form's :form/order replaced 3 times over 30 commits (card-one: temporal datoms)
+(require '[datahike.api :as d] '[seon.db :as pdb])
+(def path "/Users/sean/src/seon-jolt/next-global-ids/target/m/big")
+(def cfg (pdb/store-cfg :lmdb path))
+(def conn (d/connect cfg))
+(d/branch! conn :db :hist)
+(def hc (d/connect (assoc cfg :branch :hist)))
+(def fs (vec (map :e (d/datoms @hc :aevt :form/id))))
+(doseq [r (range 3), part (partition-all 1000 fs)]
+  (d/transact hc {:tx-data (vec (for [f part] [:db/add f :form/order (+ 1000 (* 10 r) (mod f 7))])) :tx-meta (pdb/tx-meta)}))
+(pdb/sync! cfg)
+(println "hist current" (count (d/datoms @hc :eavt)) "history" (count (d/datoms (d/history @hc) :eavt)))

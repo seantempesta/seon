@@ -83,8 +83,9 @@
                 "with no neighbors costs its visit alone; nothing per node already queued (the frontier "
                 "was copied on every visit before: 446 KB at 100 leaves, quadratic)")
      :growth :linear
-     :per-n {:ns 400 :bytes 1100 :calls 0}
-     :fixed {:ns 2000 :bytes 2000 :calls 1}
+     ;; ticks measured 2026-10-23 (seon.cost's once): 12.9k at 100, 153k at 1,000
+     :per-n {:ticks 160 :bytes 1100 :calls 0}
+     :fixed {:ticks 2000 :bytes 2000 :calls 1}
      :sizes [100 1000 10000]}))
 
 (defn knotted
@@ -102,8 +103,9 @@
                 "each node popped into its component once. Measured 2026-10-23: 145 us / 214 KB at 100 "
                 "nodes, 1.6 ms / 2.2 MB at 1,000, 21 ms / 21.7 MB at 10,000 (~2 us, ~2.2 KB a node)")
      :growth :linear
-     :per-n {:ns 2000 :bytes 2000 :calls 0}
-     :fixed {:ns 2000 :bytes 2000 :calls 1}
+     ;; ticks measured 2026-10-23 (seon.cost's once): 54k at 100, 559k at 1,000
+     :per-n {:ticks 560 :bytes 2000 :calls 0}
+     :fixed {:ticks 2000 :bytes 2000 :calls 1}
      :sizes [100 1000 10000]}))
 
 (defn keyed-chain
@@ -125,6 +127,32 @@
                 "quadratic here). Measured 2026-10-23: 81 ms / 94 MB at 100, 244 ms / 270 MB at 1,000, "
                 "557 ms / 665 MB at 3,000; the fixed part is the test store's example program")
      :growth :linear
-     :per-n {:ns 160000 :bytes 200000}
-     :fixed {:ns 60000000 :bytes 78000000}
+     ;; ticks measured 2026-10-23 (seon.cost's once): 31.7M at 100, 95.1M at 1,000
+     :per-n {:ticks 71000 :bytes 200000}
+     :fixed {:ticks 25000000 :bytes 78000000}
+     :sizes [100 1000 10000]}))
+
+(defn changed-top
+  "reach-update's arguments: the reach graph of a branch holding n forms (app.pc/f0..fn-1,
+  each calling the one before) and that branch with the last redefined, which nothing reaches."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db]]}
+  [n]
+  (let [[db] (branch-of n)
+        g (program/reach-graph db nil)]
+    [g (d/db-with db (program/record-tx db (acct (dec n) "(dec x)")))]))
+
+(deftest a-change-re-folds-only-what-reaches-it
+  (cost/proof
+    {:of 'seon.program/reach-update :input 'seon.program-cost-test/changed-top
+     :n "forms the graph already holds"
+     :work (str "four index scans of the forms and their definitions' pointers (live-ids, no entity read), "
+                "then the changed form only: its row, its var's facts, its neighbours, and the components "
+                "of it and of what reaches it (nothing, here) re-folded; every other form's neighbours and "
+                "component digest kept. Measured 2026-10-23: 2.1 ms / 2.7 MB at 100, 3.9 ms / 6.5 MB at 1,000, "
+                "11.5 ms / 16 MB at 3,000, one form re-folded each time; the per-form part is the scan "
+                "(~3 us, ~5 KB a form), the re-fold is the change's")
+     :growth :linear
+     ;; ticks measured 2026-10-23 (seon.cost's once): 0.50M at 100, 1.24M at 1,000; calls 16
+     :per-n {:ticks 850 :bytes 5000 :calls 0}
+     :fixed {:ticks 420000 :bytes 4000000 :calls 16}
      :sizes [100 1000 10000]}))

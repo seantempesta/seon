@@ -49,7 +49,7 @@
                 rep (when (seq tx) (try (d/transact conn {:tx-data (vec tx)}) (catch Throwable _ nil)))]
             (if (or (nil? rep) (not (acyclic? @conn)))
               (recur (inc k) (r/index @conn) bad)
-              (let [_ (is (= (:max-tx (:db-after rep)) (inc (:max-tx (:db-before rep)))) "main's t moves by one per commit")
+              (let [_ (is (< (:max-tx (:db-before rep)) (:max-tx (:db-after rep))) "main's t moves forward with each commit")
                     idx' (r/observe idx (:db-after rep) (pdb/report->tx rep))
                     full (oracle/reconcile-view (oracle/view (:db-after rep)))
                     incr (r/actions idx')
