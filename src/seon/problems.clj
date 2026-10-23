@@ -226,15 +226,26 @@
   [db ans]
   (let [now (current-forms db)
         address (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.section/address))]
-    (vec (for [{:keys [e v]} (d/datoms db :aevt :seon.section/read)
-               [n then] v
-               :let [cur (now n)] :when (and cur (not= cur then))
-               :let [a (address e) s (str "stale-section " a " " n)]]
-           {:signature s :section a :name n :then then :now cur :open? true
-            :message (str a " describes " n " as it was (form " then "), and it has changed (form " cur ")")
-            :producer nil :owner-ns (symbol (namespace n)) :proofs []
-            :evidence {:kind :stale-section :section a :name n :then then :now cur}
-            :answered-by (get-in ans [:signature s] []) :at-ms nil}))))
+    (vec (concat
+           (for [{:keys [e v]} (d/datoms db :aevt :seon.section/read)
+                 [n then] v
+                 :let [cur (now n)] :when (and cur (not= cur then))
+                 :let [a (address e) s (str "stale-section " a " " n)]]
+             {:signature s :section a :name n :then then :now cur :open? true
+              :message (if (= "absent" then)
+                         (str a " cites " n ", which did not exist when the section was last written: it is code now, read it")
+                         (str a " describes " n " as it was (form " then "), and it has changed (form " cur ")"))
+              :producer nil :owner-ns (symbol (namespace n)) :proofs []
+              :evidence {:kind :stale-section :section a :name n :then then :now cur}
+              :answered-by (get-in ans [:signature s] []) :at-ms nil})
+           ;; a section whose baseline git could not give is read as of today: said, as attention
+           (for [{:keys [e v]} (d/datoms db :aevt :seon.section/baseline-unread)
+                 :let [a (address e) s (str "stale-section " a " baseline")]]
+             {:signature s :section a :name nil :open? true
+              :message (str a " was recorded as of today: its baseline could not be taken from git (" v ")")
+              :producer nil :owner-ns 'seon.docs :proofs []
+              :evidence {:kind :stale-section :section a :unread v}
+              :answered-by (get-in ans [:signature s] []) :at-ms nil})))))
 
 (defn orphan-pages
   "Each page of the wiki that no other page links to, as an :orphan-page row: a page is its sections'

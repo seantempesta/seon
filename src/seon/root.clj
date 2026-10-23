@@ -629,14 +629,32 @@
   {:malli/schema [:=> [:cat :seon.host/db :map :int] [:vector :any]]}
   [db e ms] (second (err/flush-tx (err/fold {} (err/occurrence e :platform {} ms)) db)))
 
+(defn wiki-baseline
+  "What each wiki section lacking a :seon.section/read was last written against, from git (the
+  :history effect, seon.fx/wiki-history), as the loader takes it: {address {:read :unread}} (seon.docs/baseline-reads).
+  {} when every section has one. The history asked, the effect owner does the git; when it cannot be
+  asked every section is read as of today and says why."
+  {:malli/schema [:=> [:cat :seon.root/sys :string :string] :map]}
+  [sys checkout dir]
+  (let [db @(:conn sys)
+        plan (docs/baseline-plan db (docs/pages checkout dir))]
+    (if (or (empty? plan) (not (cfg/value :seon.config.root/wiki-baseline)))
+      {}
+      (let [r @(call! sys {:op :fx :kind :history :req {:root checkout :sections plan}})]
+        (if (contract/error? r)
+          (docs/baseline-failed db plan (:seon.error/message r))
+          (docs/baseline-reads db plan (:value r)))))))
+
 (defn wiki-tx
   "The wiki (the checkout's docs/) onto main db, written in the boot fact's own commit so main
   holds it before any agent forks: the help page every agent reads first is one of its pages
   (seon.context/help-text). An unchanged wiki writes nothing. A link to no section is kept on
-  its section and shows as a dead citation (seon.problems/health), never refuses the load."
-  {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :any]]}
-  [db checkout]
-  (docs/load-dir-tx db checkout "docs"))
+  its section and shows as a dead citation (seon.problems/health), never refuses the load.
+  baseline: what the sections with no record were last written against (wiki-baseline)."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:vector :any]]
+                  [:=> [:cat :seon.host/db :string :map] [:vector :any]]]}
+  ([db checkout] (wiki-tx db checkout {}))
+  ([db checkout baseline] (docs/load-dir-tx db checkout "docs" baseline)))
 
 (defn- previous-end
   "How the root before this boot on main ended: the stop fact it wrote, or, when it wrote
@@ -767,7 +785,7 @@
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
           r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running) (into (cfg/facts config cfg/sources))
-                                                                                  (into (wiki-tx db (cfg/checkout))))
+                                                                                  (into (wiki-tx db (cfg/checkout) (wiki-baseline sys (cfg/checkout) "docs"))))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev}))}})]
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
     (when source (import-source! sys source))

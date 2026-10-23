@@ -6,7 +6,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.docs :as docs] [seon.ref] [seon.problems :as problems]
+            [seon.docs :as docs] [seon.source] [seon.fx] [seon.ref] [seon.problems :as problems]
             [seon.config :as config]))
 
 (defn- empty-db [] (ts/test-db))
@@ -137,3 +137,66 @@
     (is (contains? words "refusal") "no row is still stored under its old name: the table is read whole")
     (is (empty? (for [n names w words :when (and (uses? w (str n)) (not (kept n)) (not (and (qualified-symbol? n) (kept (symbol (namespace n))))))] [w n]))
         "every name uses Clojure's, a library's or Jolt's word")))
+
+;; ---- the baseline: what a section was written against, from git ---------------------------
+
+(defn- git-fixture
+  "A git repository in a new directory: src/app/gb.clj with a function f and docs/p.md citing it,
+  committed together; then a second commit that changes f. Answers {:dir :first :second}."
+  []
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "user.dir") "/target/tmp/git-fixture-" (random-uuid))) (.mkdirs)))
+        git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args)]
+                           (assert (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
+        put (fn [p t] (.mkdirs (.getParentFile (java.io.File. (str dir "/" p)))) (spit (str dir "/" p) t))]
+    (git "init" "-q")
+    (put "src/app/gb.clj" "(ns app.gb)\n\n(defn f [] 1)\n\n(defn g [] 2)\n")
+    (put "docs/p.md" "# P\n\nIt reads `app.gb/f`.\n\n## Q\n\nIt reads `app.gb/g` and `app.gb/h`.\n")
+    (git "add" ".") (git "commit" "-q" "-m" "first")
+    (let [first (git "rev-parse" "HEAD")]
+      (put "src/app/gb.clj" "(ns app.gb)\n\n(defn f [] 11)\n\n(defn g [] 2)\n\n(defn h [] 3)\n")
+      (git "add" ".") (git "commit" "-q" "-m" "second")
+      {:dir dir :first first :second (git "rev-parse" "HEAD")})))
+
+(defn- db-of-fixture
+  "A db holding the fixture's current source (src, as the second commit has it) and its wiki
+  loaded with the baseline git gives, and the baseline."
+  [dir src-path]
+  (let [src (slurp (str dir "/" src-path))
+        db0 (empty-db)
+        db1 (d/db-with db0 (seon.source/import-tx db0 {src-path src}))
+        pages (seon.docs/pages dir "docs")
+        plan (seon.docs/baseline-plan db1 pages)
+        answer (seon.fx/wiki-history {:req {:root dir :sections plan}})
+        baseline (seon.docs/baseline-reads db1 plan (:value answer))]
+    {:db1 db1 :plan plan :answer answer :baseline baseline :pages pages
+     :db (d/db-with db1 (seon.docs/load-tx db1 "docs" pages baseline))}))
+
+(deftest a-sections-baseline-is-the-code-as-of-its-last-commit
+  (let [{:keys [dir first second]} (git-fixture)
+        {:keys [db plan answer baseline]} (db-of-fixture dir "src/app/gb.clj")
+        read #(:seon.section/read (d/pull db [:seon.section/read] [:seon.section/address %]))
+        form-id #(:form/id (:var/form (d/entity db (pdb/eid db :var/name %))))
+        stale (get-in (problems/health db) [:classes :stale-section :rows])]
+    (is (= 2 (count plan)) "both sections cite code")
+    (is (= {:commit first} (get-in answer [:value :sections "docs/p.md#p"])) "the section was last changed in the first commit")
+    (testing "f was changed by the second commit, after the section: the recorded id is not today's"
+      (is (not= (form-id 'app.gb/f) (get (read "docs/p.md#p") 'app.gb/f)))
+      (is (some? (get (read "docs/p.md#p") 'app.gb/f))))
+    (testing "g is unchanged since: recorded as it is now"
+      (is (= (form-id 'app.gb/g) (get (read "docs/p.md#q") 'app.gb/g))))
+    (testing "h did not exist at the commit: recorded absent, stale now that it does (a citation ahead of the code)"
+      (is (= "absent" (get (read "docs/p.md#q") 'app.gb/h))))
+    (testing "so the sections stale today are exactly those two, one name each"
+      (is (= #{["docs/p.md#p" 'app.gb/f] ["docs/p.md#q" 'app.gb/h]} (set (map (juxt :section :name) stale)))))
+    (testing "an unchanged reload keeps the baseline: nothing is rewritten, nothing forgiven"
+      (is (= [] (seon.docs/load-tx db "docs" (seon.docs/pages dir "docs")))))))
+
+(deftest a-baseline-git-cannot-give-is-today-and-says-so
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "user.dir") "/target/tmp/not-git-" (random-uuid))) (.mkdirs)))
+        _ (doseq [[p t] {"src/app/gn.clj" "(ns app.gn)\n\n(defn f [] 1)\n" "docs/p.md" "# P\n\nIt reads `app.gn/f`.\n"}]
+            (.mkdirs (.getParentFile (java.io.File. (str dir "/" p)))) (spit (str dir "/" p) t))
+        {:keys [db baseline]} (db-of-fixture dir "src/app/gn.clj")
+        rows (get-in (problems/health db) [:classes :stale-section :rows])]
+    (is (some? (:unread (get baseline "docs/p.md#p"))) "not a git checkout: the section is unread")
+    (is (= #{nil} (set (map :name rows))) "its record is today's, so no var is stale")
+    (is (re-find #"recorded as of today: its baseline could not be taken from git" (:message (first rows))) "and it says so, as attention")))

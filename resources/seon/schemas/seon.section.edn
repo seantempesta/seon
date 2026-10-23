@@ -25,6 +25,9 @@
  ;; (seon.docs/load-tx keeps it while the text is unchanged): a var whose form id now differs leaves the
  ;; section stale (seon.problems, class :stale-section)
  :seon.section/read [:map-of {:seon.db/data true} :qualified-symbol :string]
+ ;; why the baseline of :read could not be taken from git (seon.docs/baseline-reads): the section's :read is as of
+ ;; the load, shown as attention (seon.problems, :stale-section) until the section is edited
+ :seon.section/baseline-unread :string
  ;; the last review that read the section as it is though its code changed (my.docs/reviewed!): who, and
  ;; the form ids it read at. The older reviews stay in the history
  :seon.section/reviewed [:map {:seon.db/data true} [:by :string] [:forms [:map-of :qualified-symbol :string]]]
@@ -38,6 +41,7 @@
                      [:seon.section/names {:optional true} :seon.section/names]
                      [:seon.section/dead-links {:optional true} :seon.section/dead-links]
                      [:seon.section/read {:optional true} :seon.section/read]
+                     [:seon.section/baseline-unread {:optional true} :seon.section/baseline-unread]
                      [:seon.section/reviewed {:optional true} :seon.section/reviewed]]
  ;; a section as one parse reads it, before it is stored: its fact's values, its parent's
  ;; address, and the citations of its own text

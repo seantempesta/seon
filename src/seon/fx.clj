@@ -210,6 +210,51 @@
           (finally (.delete (java.io.File. ^String index)))))
       (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path dir})))))
 
+;; ---- the wiki's history: what each section was last written against -----------------------
+
+(defn- blame
+  "{final line number {:sha :time}} of the file at path in the repository at root, from git blame
+  --porcelain (an uncommitted line is sha 000...)."
+  {:malli/schema [:=> [:cat :string :string] [:map-of :int :map]]}
+  [root path]
+  (let [out (git! {} root ["blame" "--porcelain" "--" path] nil)]
+    (loop [ls (str/split-lines out) cur nil times {} acc {}]
+      (if-let [l (first ls)]
+        (if-let [[_ sha line] (re-matches #"([0-9a-f]{40}) \d+ (\d+)(?: \d+)?" l)]
+          (recur (rest ls) {:sha sha :line (parse-long line)} times (assoc acc (parse-long line) {:sha sha}))
+          (if-let [[_ t] (re-matches #"committer-time (\d+)" l)]
+            (recur (rest ls) cur (assoc times (:sha cur) (parse-long t)) acc)
+            (recur (rest ls) cur times acc)))
+        (update-vals acc (fn [{:keys [sha]}] {:sha sha :time (get times sha 0)}))))))
+
+(defn wiki-history
+  "For each requested wiki section ({:path :address :lines [from to] :files {name {:file :ns}}}) the
+  commit that last changed its lines (git blame of its page, the newest committer time among its
+  lines; nil when a line is not committed yet) and, for each (commit, file) the sections' cited
+  vars live in, the file's text at that commit (nil: the file did not exist then), read from
+  git once. Answers {:value {:sections {address {:commit sha}} :files {[sha file] text-or-nil}
+  :errors {address message}}}: a page git cannot blame (not a git checkout, an untracked file)
+  names its sections under :errors, never an exception; or :seon.fx/io-error. The wiki's loader
+  records a section whose history is unread as of today and says so (seon.docs/baseline-reads)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [root sections]} :req}]
+  (try
+    (let [by-path (group-by :path sections)
+          blamed (into {} (for [p (keys by-path)]
+                            [p (try (blame root p) (catch Throwable e {:error (or (ex-message e) (str (type e)))}))]))
+          infos (into {} (for [{:keys [path address lines]} sections
+                               :let [b (blamed path)]]
+                           [address (if (:error b)
+                                      {:error (:error b)}
+                                      (let [ls (keep b (range (first lines) (inc (second lines))))
+                                            newest (when (seq ls) (apply max-key :time ls))]
+                                        {:commit (when (and newest (not (re-matches #"0+" (:sha newest)))) (:sha newest))}))]))
+          needed (distinct (for [{:keys [address files]} sections :let [c (:commit (infos address))] :when c [_ {:keys [file]}] files] [c file]))
+          texts (into {} (for [[c f] needed]
+                           [[c f] (let [r (sh/sh "git" "-C" root "show" (str c ":" f))] (when (zero? (:exit r)) (:out r)))]))]
+      {:value {:sections infos :files texts}})
+    (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path root}))))
+
 ;; Dependencies: fetching is an outside-world effect with one owner (the PKG plan), and
 ;; the resolver is Jolt's own: no resolver of ours.
 

@@ -46,6 +46,8 @@ export SEON_STORE=${SEON_STORE:-$ROOT/target/check-store}
 # step's root that found it free took it (the owner's browser then showed a throwaway check
 # root). A run that wants one names its port: SEON_WEB_PORT=7790 bin/root
 export SEON_WEB_PORT=${SEON_WEB_PORT:-0}
+# every check root has a store of its own: its wiki's baseline from git (4 s) is not what a check asks
+export SEON_WIKI_BASELINE=${SEON_WIKI_BASELINE:-false}
 # idle watches a tab on its root's dashboard, so its root serves one: on this run's own port, in a
 # full run and a single mode alike
 IDLE_WEB_PORT=$((20000 + $$ % 20000))
