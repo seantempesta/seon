@@ -37,6 +37,15 @@ How we keep the first version's spirit: run, then right, then fast; the demo is 
 - **Worktree sessions** are Claude sessions each in its own git worktree on its own branch, working one task (§3): they write the proofs, the code and the wiki edit, prove their change, and report. One that has found no cause or clearly correct fix after about fifteen minutes stops and reports what it measured. One whose code contradicts its plan stops and sends the plan back with the evidence; nobody redesigns on the fly.
 - **Seon agents** are forked processes working tasks through the same server, tasks and context (§6). What our worktree sessions find missing from that context is a task for Seon.
 
+### Root's working rules (what a fresh root needs; the owner's rulings behind them are in docs/decisions.md)
+- **On resume, read before replying to anything:** this file, `docs/plan.md` (Now, In flight, THE PLAN), `docs/decisions.md`, and `notes/merge-log.md`. Then `git log --oneline -15`, `uptime`, and the sessions list, and write the owner a five-line state summary before acting.
+- **Sessions:** Claude sessions are filed in the sidebar group seon-jolt, with titles that say their current work. Model by task: Opus for design and dependencies, Sonnet for mechanical work, reviews and the merge session, Haiku or Sonnet for browser testers. Archive a session once its branch has merged and it holds nothing else.
+- **The app caps one session's cross-session messages at about 10 per owner message.** So standing rules go in this file, not in messages. Batch what must be sent, most important first. Sessions report ready to the merge session, not to root.
+- **Heavy runs** (`bin/prove`, full checks, builds of a changed tree): up to three at once while `uptime` load stays under ~8 on the 18-core machine. Never tell every session to run at the same moment. Two runs never share one checkout (their shard files collide), and the main tree's runs belong to the merge session.
+- **Root acts without asking** on merges of verified branches (the merge session does them), pushes of pinned fork commits, and cleanup of verified garbage: a leftover process or a merged worktree, checked by PID, path and cwd. A worktree any config names is live, as `../next-merges` is for main. Owner questions are for rulings: a new mechanism, format or rule; priorities; spending.
+- **Kill only verified PIDs:** read the full command and cwd (`lsof -a -p PID -d cwd`) first, never `pkill` or `pgrep -f` patterns. `./seon` runs from `target/` with a relative command line.
+- **A pin bump is verified** with `git ls-tree HEAD reference-code/<lib>` and `gh api repos/seantempesta/<lib>/commits/<sha>` before it is reported.
+
 ### Briefing an agent
 
 A brief is complete, or the agent spends its turns rediscovering. Every brief states:
