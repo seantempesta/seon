@@ -136,6 +136,14 @@
   (let [f (java.io.File. (str runs "/root.port"))]
     (when (.exists f) (parse-long (clojure.string/trim (slurp f))))))
 
+(defn drop-main!
+  "Delete main and every branch under it from the store at store (seon.check/drop-mains, through
+  the binary), once the root that made them has stopped: what a test's root made leaves the one
+  store with the test."
+  {:malli/schema [:=> [:cat :string :string] :map]}
+  [store main]
+  (binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target"))
+
 (defn start-root!
   "A built root (bin/root start, this checkout's binary) on store and main, both named and never
   inherited (a caller's SEON_STORE or SEON_MAIN, a bin/check run's, opened a store another run

@@ -36,8 +36,7 @@
       (let [e (is (thrown? ExceptionInfo (ts/start-root! {:store store :main (str "own-b-" (random-uuid)) :runs runs})))]
         (is (= :seon.test-store/runs-in-use (:seon.error/type (ex-data e)))))
       (finally (ts/stop-root! a) (sh/sh "rm" "-rf" runs)
-               ;; its main and its branches leave the one store (as root_test's drop-main!)
-               (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")))))
+               (ts/drop-main! store main)))))
 
 (deftest a-kept-store-is-keyed-by-its-schema
   ;; task seon.test-store/a-kept-store-is-keyed-by-its-schema: the page merge changed three

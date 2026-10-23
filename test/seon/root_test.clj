@@ -8,12 +8,6 @@
 (defn- test-store "The one store these tests' roots take a branch of (seon.test-store/process-store)." []
   (ts/process-store))
 
-(defn- drop-main!
-  "Delete main and every branch under it from the test store (seon.check/drop-mains), once
-  the root that made them has stopped."
-  [main]
-  (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str (test-store))) :dir "target"))
-
 (deftest root-threads-are-what-root-declares
   ;; three start!/stop! cycles in one process: while running (three agents just
   ;; evaluated) and after each stop!, every thread is one seon.check/declared-threads
@@ -25,7 +19,7 @@
   (let [main (str "root-test-" (random-uuid))
         {:keys [exit out err]} (ts/binary-sh "env" "SEON_WEB_PORT=0" (str "SEON_STORE=" (test-store)) (str "SEON_MAIN=" main)
                                       "./seon" "threads-declared" "3" :dir "target")
-        _ (drop-main! main)
+        _ (ts/drop-main! (test-store) main)
         res (edn/read-string (last (str/split-lines out)))]
     (is (= 0 exit) (str out err))
     (is (= 3 (count (:running res)) (count (:stopped res))))
@@ -47,7 +41,7 @@
                               :args ["--set" (str ":seon.config.source/root=" (pr-str checkout))
                                      "--set" ":seon.config.source/dirs=[\"src\" \"test\"]"]})
         {:keys [exit log] :as stopped} (ts/stop-root! root)]
-    (drop-main! main)
+    (ts/drop-main! (test-store) main)
     (sh/sh "rm" "-rf" runs)
     (is (some? (:port root)) "the root boots with src and test imported, and listens")
     (is (= 0 exit) (str "and stops cleanly: " (pr-str stopped)))
@@ -186,7 +180,7 @@
         answer (try (edn/read-string {:default tagged-literal} (first (str/split-lines out))) (catch Exception _ nil))]
     (try
       (is (= "\"src/a.clj\"" (:printed (first (:items answer)))) out)
-      (finally (drop-main! main) (sh/sh "rm" "-f" (str path "-in") (str path ".log"))))))
+      (finally (ts/drop-main! (test-store) main) (sh/sh "rm" "-f" (str path "-in") (str path ".log"))))))
 
 (deftest a-build-without-whole-program-inference-reads-with-tools-reader
   ;; task jolt.ns/a-build-without-whole-program-inference-compiles-tools-reader: with
@@ -255,4 +249,4 @@
         (is (and (nil? (:inputs (:fact two))) (re-find #"binary was built from" (str (:unshared (:fact two)))))
             "the running binary is not built from this tree: no inputs to key agents' results by, and why")
         (is (= b (:text three))))
-      (finally (drop-main! main) (sh/sh "rm" "-rf" tree tasks (str path "-in") (str path ".log"))))))
+      (finally (ts/drop-main! (test-store) main) (sh/sh "rm" "-rf" tree tasks (str path "-in") (str path ".log"))))))
