@@ -51,7 +51,13 @@ The owner's assessment, 2026-10-23: "this is pretty rough and isn't well tested"
 - `bin/prove` on `8c9abd5` (after the pin restore): 394 tests, 1 red (`main-info`'s proof stated only ns); laws `measures` red (`seon.root/deliver-message` unnamed). Both fixed in `5f38b08`.
 - `bin/prove` on `20dee62`: **PROVE OK**. 357 tests ran, all green; 37 reused; 2 check steps green.
 - Browser rounds 1–5 (Haiku facts, Sonnet usefulness) found 7 → 6 → 5 → 3 → 10 small window mismatches. All were fixed.
-- **Round 6 (Haiku, facts plus the message-fact and tile-split checks) was running at hand-over.** Its report is the next thing to read.
+- **Round 6 (Haiku, on the new build): 4 window mismatches, none yet fixed.** The message-fact flow and the `;;` thought above its form both checked out live: the owner's message is a fact on main, from `"owner"` to `calc/abs#1`, and it shows under "it was told". The 4:
+  1. Turns are labeled "turn 1/2" while their ids are `…/0` and `…/1`. Say the label is the context's 1-based count, or show the id.
+  2. A scripted turn's prose is in its call's code as `;;` leads, and `:seon.turn/reply` is `""`. The page shows the leads as thoughts, but the tester read them as the reply. Label thoughts as thoughts, and show "no reply" when it is empty.
+  3. The proofs tile says "0 pass · 3 fail" (assertions) beside "0/2 pass" (proofs). Name the unit: "2 proofs fail (3 assertions)".
+  4. Branch moved above proofs after a read, though both changed. The rule (the last changed is first, ties by written order) is right but not visible. Mark the changed tile, or say the rule.
+  
+  Its usefulness notes: the alloc vs mem numbers are unexplained; "ui", "outside", "t …" and "fork" are unlabeled; a turn's total ms isn't shown; and observers' context reads count as reads.
 - **The full run (`bin/test --all` + `bin/check 100`) has not run.** Root's order: after the Haiku verdict, once, at the end. Report each verdict to root.
 
 ## Updates the code and docs still owe (none done yet)
