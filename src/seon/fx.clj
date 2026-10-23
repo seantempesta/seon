@@ -131,7 +131,7 @@
 (defn tree-id
   "git's id of the tree at root as it is on disk: HEAD's tree (none before a first commit)
   with every changed and untracked unignored file added, in an index of its own (the
-  repository's index untouched). bin/build records the same id for the tree it builds
+  repository's index untouched). bin/tree computes the same, which bin/build records for the tree it builds
   (target/seon.tree), so a root can tell whether its binary is built from its source."
   {:malli/schema [:=> [:cat :string] :string]}
   [root]
@@ -142,6 +142,39 @@
       (git! env root ["add" "-A"] nil)
       (git! env root ["write-tree"] nil)
       (finally (.delete idx)))))
+
+(defn base-commit
+  "The commit the checkout at root's health is read against (root's ruling, 2026-10-23): its
+  merge base with git's main (:seon.config.source/main); on main's own commit, its first parent
+  (the previous main, which a merge is held to) when the tree is clean, else that commit (what
+  the uncommitted change caused). nil when there is none: no main, or a first commit."
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [root]
+  (let [head (git! {} root ["rev-parse" "HEAD"] nil)
+        r (sh/sh "git" "-C" root "merge-base" "HEAD" (cfg/value :seon.config.source/main))
+        mb (when (zero? (:exit r)) (str/trim (:out r)))]
+    (cond (nil? mb) nil
+          (not= mb head) mb
+          (not (str/blank? (git! {} root ["status" "--porcelain" "--ignore-submodules=all"] nil))) head
+          :else (let [p (sh/sh "git" "-C" root "rev-parse" "--verify" "--quiet" "HEAD^1")]
+                  (when (zero? (:exit p)) (str/trim (:out p)))))))
+
+(defn tree-of
+  "The id of commit rev's tree in the repository at root."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [root rev] (git! {} root ["rev-parse" (str rev "^{tree}")] nil))
+
+(defn checkout-at
+  "Commit rev's files under paths, as git holds them, extracted into dir (made empty first), for a
+  reader that reads a checkout's files (the :source read, the wiki's and the tasks' loaders).
+  Answers dir; a failure throws git's or tar's stderr, as git! does."
+  {:malli/schema [:=> [:cat :string :string [:sequential :string] :string] :string]}
+  [root rev paths dir]
+  (let [r (apply sh/sh "zsh" "-c" "setopt pipefail; rm -rf \"$1\" && mkdir -p \"$1\" && git -C \"$2\" archive \"$3\" -- \"${@:4}\" | tar -x -C \"$1\""
+                 "checkout-at" dir root rev paths)]
+    (when-not (zero? (:exit r))
+      (throw (ex-info (str "checkout-at " rev ": " (str/trim (str (:err r) (:out r)))) {})))
+    dir))
 
 (defn pin
   "What a build or a test reads from the checkout at dir (a submodule), by content: its HEAD

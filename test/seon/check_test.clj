@@ -5,7 +5,7 @@
   under that main, and a recovery step reopens the same store on the same main."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d]
-            [seon.db :as pdb] [clojure.core.async :as a] [seon.check] [seon.source] [clojure.string] [clojure.string :as str] [seon.lib]))
+            [seon.db :as pdb] [clojure.core.async :as a] [seon.check] [seon.docs] [seon.problems] [seon.source] [clojure.string] [clojure.string :as str] [seon.lib]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -179,3 +179,61 @@
         (spit f "")
         (is (= 2 (:exit (sh "bin/held" "--end" "TERM" "1" f "1"))) "a path that is no fifo is refused at once"))
       (finally (sh "rm" "-rf" dir)))))
+
+;; ---- task seon.check/health-is-what-a-branch-caused ------------------------------------------
+
+(deftest a-failed-seed-says-failed
+  ;; a single mode's seed that fails (its store a regular file, which no store opens) prints why
+  ;; and the mode's verdict line; before, `run seed 2000 > /dev/null || exit 1` exited 1 with nothing
+  (let [dir (System/getProperty "user.dir")
+        path (str dir "/target/runs/check-test-not-a-store-" (random-uuid))
+        _ (spit path "not a store")
+        run (ts/binary-sh "env" (str "SEON_STORE=" path) "SEON_WEB_PORT=0" "bin/check" "config" :dir dir)
+        lines (str/split-lines (str (:out run) (:err run)))]
+    (try
+      (is (not= 0 (:exit run)))
+      (is (= "CONFIG FAILED (seed)" (last lines)) (:out run))
+      (is (< 1 (count lines)) "the seed's own output says why")
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest a-stale-binary-is-refused
+  ;; bin/check runs no binary built from another tree: run from a checkout of its own (this one's
+  ;; bin/, a git repository of its own) whose target/seon.tree names another tree, a mode is
+  ;; refused, naming both trees, before the binary runs (main's binary in a worktree whose config
+  ;; differs died reading that config, unseen)
+  (let [dir (System/getProperty "user.dir")
+        tmp (str dir "/target/runs/check-test-stale-" (random-uuid))]
+    (try
+      (clojure.java.shell/sh "zsh" "-c" (str "mkdir -p '" tmp "/target' && cp -R '" dir "/bin' '" tmp "/' && git -C '" tmp "' init -q"
+                                            " && ln -s '" dir "/target/seon' '" tmp "/target/seon' && print -n not-this-tree > '" tmp "/target/seon.tree'"))
+      (let [run (ts/binary-sh "env" "SEON_WEB_PORT=0" (str tmp "/bin/check") "config" :dir tmp)
+            out (str (:out run) (:err run))]
+        (is (not= 0 (:exit run)))
+        (is (str/includes? out "target/seon was built from tree not-this-tree; this checkout is tree ") out)
+        (is (= "CONFIG FAILED (stale binary)" (last (str/split-lines out))) out))
+      (finally (clojure.java.shell/sh "rm" "-rf" tmp)))))
+
+(defn- cited-db
+  "The test store's seed with a wiki page citing two vars of its program and one name that names
+  nothing (a dead citation the base already has), as seon.problems-test's caused fixture; and the two vars."
+  []
+  (let [db0 (ts/test-db)
+        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
+        page (str "# P\n\nIt reads `" v "`, `" w "` and `" (symbol (namespace v) "no-such-var") "`.\n")]
+    [(d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" page})) v]))
+
+(deftest a-problem-the-base-had-is-not-the-branchs
+  (let [[base] (cited-db)
+        h (seon.check/branch-health base base nil)]
+    (is (pos? (get-in (seon.problems/health base) [:classes :dead-citation :n])) "the base has an open problem")
+    (is (= [] (:caused h)) "the branch changed nothing, so it caused none")
+    (is (every? true? (vals (:checks h))) "and its health is green")))
+
+(deftest a-problem-the-branch-made-fails-it
+  (let [[base v] (cited-db)
+        head (d/db-with base [[:db/retractEntity (pdb/eid base :var/name v)]])
+        h (seon.check/branch-health base head nil)]
+    (is (= [{:class :dead-citation :message (str "demo/p.md#p cites " v ", which names nothing")}] (:caused h)))
+    (is (false? (get-in h [:checks :no-dead-citation])) "its health is red on the class it made")
+    (testing "the classes asked for are the ones judged (bin/laws catch asks for :unnamed-site)"
+      (is (every? true? (vals (:checks (seon.check/branch-health base head [:unnamed-site]))))))))

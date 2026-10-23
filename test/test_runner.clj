@@ -174,7 +174,9 @@
         tests? (not= what "checks") checks? (not= what "tests")
         ;; the steps' functions read from the tests' graph: their digests and which boot a root or a process
         step-idx (when checks? (program/graph-index graph inputs (into {} (filter (comp vector? val)) proofs/check-steps)))
-        {steps :digests missing :missing} (when checks? (proofs/step-digests #(update-vals (select-keys step-idx (keys %)) :digest) inputs))
+        ;; the health step's base: the tree this checkout's caused problems are read against
+        base (some->> (fx/base-commit root) (fx/tree-of root))
+        {steps :digests missing :missing} (when checks? (proofs/step-digests #(update-vals (select-keys step-idx (keys %)) :digest) (assoc inputs :base base)))
         process (into (if tests? process #{}) (keep (fn [[k v]] (when (:process? v) k))) step-idx)
         named? (or all? (seq names))
         all-cand (merge (when tests? digests) steps)
