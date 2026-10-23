@@ -445,8 +445,11 @@
 (def error-shown
   "The keys an error's renders show in their own lines (seon.render.ai/error, `error-box`);
   every other key of the error map is printed after them, so both faces show the same facts.
-  :jolt.error/suggestions is the fix's own line (\"did you mean ...\"), so it is not printed twice."
-  [:seon.error/type :seon.error/operation :seon.error/message :seon.error/fix :seon.error/problems :jolt.error/suggestions])
+  :jolt.error/suggestions is the fix's own line (\"did you mean ...\"), and :seon.error/in and
+  :seon.error/at the \"at ns/f 3:6\" line, so none is printed twice; the request-relative
+  :jolt.error/ and :clojure.error/ line and column stay in the data and out of the text."
+  [:seon.error/type :seon.error/operation :seon.error/message :seon.error/fix :seon.error/problems :jolt.error/suggestions
+   :seon.error/in :seon.error/at :jolt.error/line :jolt.error/column :clojure.error/line :clojure.error/column])
 
 (defn error-box
   "An error map (:seon.error/base, every variant): its message first, then its type and where

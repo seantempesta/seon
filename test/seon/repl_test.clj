@@ -219,3 +219,21 @@
       (is (str/starts-with? (:printed item) "boom"))
       (is (= 1 (count (re-seq #"boom" (:printed item)))) (:printed item))
       (is (= {:k 1} (:data (:err item))) "an ordinary ex-data stays data"))))
+
+(deftest an-eval-error-says-where-in-its-forms-own-text
+  ;; positions are the form's own (what (source f) prints), not the request's: a form on lines
+  ;; 5-7 of a request whose line 7 fails is line 3 of it, whichever request ran it
+  (let [defs "(def ok 1)\n(defn f [x]\n  (+ x\n     (prinltn 2)))\n(defn g [x]\n  (inc x)\n  (+ 1 (first :k)))"
+        answers (volatile! [])
+        old @agent/state]
+    (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.where)})
+    (try ((repl/handler) {"op" "eval" "code" (str defs "\n(g 1)") :reply #(vswap! answers conj %)})
+         (finally (reset! agent/state old)))
+    (let [[_ compile-err _ run-err] (repl/fold @answers)]
+      (is (= {:line 3 :column 6} (:seon.error/at (:err compile-err))) (pr-str (:err compile-err)))
+      (is (nil? (:seon.error/in (:err compile-err))))
+      (is (= 'seon.repl-test.where/g (:seon.error/in (:err run-err))) (pr-str (:err run-err)))
+      (is (= {:line 3} (:seon.error/at (:err run-err))))
+      (is (= 1 (count (re-seq #"3" (:printed compile-err)))) "the position prints once, not also as the request's 4:6")
+      (is (str/includes? (:printed run-err) "at seon.repl-test.where/g 3") (:printed run-err))
+      (is (not (str/includes? (:printed compile-err) ":jolt.error/line"))))))
