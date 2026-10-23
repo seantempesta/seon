@@ -16,8 +16,11 @@
 
 (def ^:private program-store-path
   "This process's store of kept program dbs, one branch per git tree (test-runner/program-db),
-  under target/tmp: a test process's own, so shards running at once never share one."
-  (delay (str (System/getProperty "user.dir") "/target/tmp/program-store-" (random-uuid))))
+  under target/tmp: a test process's own, so shards running at once never share one; removed
+  when the process ends (a shutdown hook)."
+  (delay (let [path (str (System/getProperty "user.dir") "/target/tmp/program-store-" (random-uuid))]
+           (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (sh/sh "rm" "-rf" path))))
+           path)))
 
 (defn program-store
   "The path of this process's store of kept program dbs (program-store-path)."

@@ -6,7 +6,7 @@
   stored."
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d]
             [seon.test-store :as ts] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
-            [seon.program-test :refer [record]] [seon.fx :as fx] [seon.config] [seon.profile :as profile] [test-runner :as runner]))
+            [seon.program-test :refer [record]] [seon.source :as source] [seon.fx :as fx] [seon.config] [seon.profile :as profile] [test-runner :as runner]))
 
 (defn- prog []
   (record (ts/test-db)
@@ -265,7 +265,24 @@
     (spit (str d "/src/app/kc_calc.clj") calc)
     (let [back (calls-of plan)]
       (is (nil? (back 'seon.source/refresh-tx)) "the first tree again: its kept branch")
-      (is (= (:digests p1) (:digests (plan)))))))
+      (is (= (:digests p1) (:digests (plan)))))
+    (testing "a moved file and a deleted one: the kept program is what a whole import of the tree gives"
+      (let [store-of #(str (scratch-dir) "/fresh")
+            files-of (fn [db] (source/source-files db))]
+        ;; a namespace moved to a new file and renamed, its body kept: git's rename detection would
+        ;; list only the new path, and the old namespace would stay in the kept program
+        (let [body (apply str (for [i (range 40)] (str "(deftest t" i " (is (= " i " " i ")))\n")))]
+          (spit (str d "/test/app/kc_big_test.clj") (str "(ns app.kc-big-test (:require [clojure.test :refer [deftest is]]))\n" body))
+          (runner/program-db d store)
+          (.delete (java.io.File. (str d "/test/app/kc_big_test.clj")))
+          (spit (str d "/test/app/kc_bigger_test.clj") (str "(ns app.kc-bigger-test (:require [clojure.test :refer [deftest is]]))\n" body)))
+        (let [kept (runner/program-db d store) fresh (runner/program-db d (store-of))]
+          (is (= (files-of fresh) (files-of kept)))
+          (is (nil? (seon.db/eid kept :ns/name 'app.kc-big-test)) "the old namespace is gone"))
+        (.delete (java.io.File. (str d "/test/app/kc_bigger_test.clj")))
+        (let [kept (runner/program-db d store) fresh (runner/program-db d (store-of))]
+          (is (= (files-of fresh) (files-of kept)))
+          (is (not (some #{"test/app/kc_bigger_test.clj"} (files-of kept))) "a deleted file is gone"))))))
 
 (defn kept-checkout-of
   "program-db's arguments for a checkout whose src holds n functions (app.kp-big) and a store

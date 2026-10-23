@@ -46,21 +46,31 @@
   "Is relative path p one of the program's files: a .clj under src or test (what the import reads)?"
   [p] (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))))
 
-(defn- changed-files
-  "The program files of the checkout at root that differ between git trees a and b (both in
-  root's repository: git diff --name-only), each {path text-now}, a removed one's text nil."
+(defn- changed-paths
+  "The program files that differ between git trees a and b of root's repository (git diff
+  --name-only --no-renames: a moved file is its old path removed and its new one added)."
   [root a b]
-  (into {} (for [p (str/split-lines (:out (sh/sh "git" "-C" root "diff" "--name-only" a b)))
-                 :when (program-file? p) :let [f (io/file root p)]]
-             [p (when (.isFile f) (slurp f))])))
+  (filterv program-file? (str/split-lines (:out (sh/sh "git" "-C" root "diff" "--name-only" "--no-renames" a b)))))
 
-(defn- bounded!
-  "The store under conn within :seon.config.proofs/program-store-max-bytes on disk: past it,
-  every kept tree but keep is deleted and the store collected. Deterministic: no clock, no counts."
-  [conn store keep]
-  (when (> (.length (io/file store "data.mdb")) (config/value :seon.config.proofs/program-store-max-bytes))
-    (doseq [b (d/branches conn) :when (and (branch-tree b) (not= b keep))] (d/delete-branch! conn b))
-    (d/gc-storage conn)))
+(defn- tree-files
+  "{path text} of the program files of git tree t in root's repository, read from git's objects,
+  never the working tree (an edit after t was taken cannot be kept under t): paths' (nil for one
+  t does not hold), or every program file under src and test. Through git archive into a
+  directory of its own, removed after."
+  [root t paths]
+  (let [dir (str (System/getProperty "java.io.tmpdir") "/seon-tree-" (random-uuid))
+        tar (str dir ".tar")
+        ;; what t holds of what is asked (git archive refuses a path it does not hold)
+        held (filterv seq (str/split-lines (:out (apply sh/sh "git" "-C" root "ls-tree" (concat (when paths ["-r"]) ["--name-only" t "--"] (or paths ["src" "test"]))))))]
+    (.mkdirs (io/file dir))
+    (when (seq held)
+      (apply sh/sh "git" "-C" root "archive" "--format=tar" "-o" tar t "--" held)
+      (sh/sh "tar" "-x" "-f" tar "-C" dir))
+    (let [files (if paths
+                  (into {} (for [p paths :let [f (io/file dir p)]] [p (when (.isFile f) (slurp f))]))
+                  (into {} (filter #(program-file? (key %))) (:value (fx/read-source {:req {:root dir :dirs ["src" "test"]}}))))]
+      (sh/sh "rm" "-rf" dir tar)
+      files)))
 
 (defn program-db
   "The db holding src and test of the checkout at root as program facts (seon.source: analyzed,
@@ -68,27 +78,31 @@
   tree-id): the same tree reads its branch; a tree never seen is branched from the kept tree of
   the fewest changed program files (one in root's repository) and brought current by
   seon.source/refresh-tx; a store keeping no tree imports the whole program (seon.source/
-  import-tx). Its connections stay open for the process: the db value reads the store."
+  import-tx). Every text is read from the tree's git objects (tree-files). One writer at a time
+  per store (two runs never share a checkout, AGENTS section 3). A store past
+  :seon.config.proofs/program-store-max-bytes on disk (an LMDB file never shrinks) is removed
+  before it is opened, and starts again from this tree. The branch's connection stays open for
+  the process (the db value reads the store); the store's main connection is released."
   [root store]
+  (when (> (.length (io/file store "data.mdb")) (config/value :seon.config.proofs/program-store-max-bytes))
+    (sh/sh "rm" "-rf" store))
   (let [tree (fx/tree-id root)
         b (tree-branch tree)
         {:keys [conn cfg]} (pdb/open! :lmdb store 0 :db)
-        here (fn [] @(d/connect (assoc cfg :branch b)))]
-    (if (contains? (set (d/branches conn)) b)
-      (here)
-      (let [kept (for [k (d/branches conn) :let [t (branch-tree k)]
-                       :when (and t (zero? (:exit (sh/sh "git" "-C" root "cat-file" "-e" t))))]
-                   [k (changed-files root t tree)])
-            [from files] (first (sort-by (comp count second) kept))
+        branches (d/branches conn)]
+    (when-not (contains? (set branches) b)
+      (let [[from paths] (->> (for [k branches :let [t (branch-tree k)]
+                                     :when (and t (zero? (:exit (sh/sh "git" "-C" root "cat-file" "-e" t))))]
+                                 [k (changed-paths root t tree)])
+                               (sort-by (comp count second))
+                               first)
             _ (d/branch! conn (or from :db) b)
-            c (d/connect (assoc cfg :branch b))
-            tx (if from
-                 (source/refresh-tx @c files)
-                 (source/import-tx @c (into {} (filter #(program-file? (key %)))
-                                             (:value (fx/read-source {:req {:root root :dirs ["src" "test"]}})))))]
-        (d/transact c {:tx-data tx})
-        (bounded! conn store b)
-        @c))))
+            c (d/connect (assoc cfg :branch b))]
+        (d/transact c {:tx-data (if from
+                                  (source/refresh-tx @c (tree-files root tree paths))
+                                  (source/import-tx @c (tree-files root tree nil)))})))
+    (d/release conn)
+    @(d/connect (assoc cfg :branch b))))
 
 (defn- tests-of
   "{test digest} of the named test namespaces (or every one) on the checkout at root, the
