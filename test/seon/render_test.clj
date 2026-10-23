@@ -180,7 +180,7 @@
         db (-> db (d/db-with (seon.task/create-tx db [(decl "a" #{'p/x}) (decl "b" #{'p/z} "t/a") (decl "c" #{'p/w})]))
                (d/db-with (seon.task/execution-tx ["t/a" "t/b"] :running))
                (d/db-with (seon.task/execution-tx ["t/c"] :cancelled))
-               (d/db-with (conj (seon.task/attempt-start-tx "t/a#1" "t/a" "boot-1" :a1 {:branch :task-t-a :model nil :max-turns 40} 1 "Make a.")
+               (d/db-with (conj (seon.task/attempt-start-tx "t/a#1" "t/a" "boot-1" (seon.task/agent-key "boot-1" :a1) {:branch :task-t-a :model nil :max-turns 40} 1 "Make a.")
                                 {:seon.attempt/id "t/a#1" :seon.attempt/tokens 7
                                  :seon.attempt/results [{:seon.proof/test 'p/x :seon.proof/status :pass} {:seon.proof/test 'p/y :seon.proof/status :fail}]})))
         rows (p/task-rows (seon.reconcile/index db))]
