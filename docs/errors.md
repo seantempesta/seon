@@ -20,6 +20,15 @@ Its classes are the recorded errors counted by signature (`seon.problems/counted
 
 `my.root/problems` is `seon.problems/health` for root, with the api's fold; root's context and the dashboard's problems banner read it rather than re-deriving problems from the live view ([render](render.md#health-is-what-flows)). `bin/check problems` provokes every class through the paths agents and root use and reads them back.
 
+## Jolt's own diagnostics
+
+An eval's compile error carries what Jolt's analyzer knows: `:jolt.error/{line,column,symbol,suggestions,kind}` in its ex-data and "(did you mean a, b?)" in its message, so a mistyped symbol shows its suggestion with no code of ours. Jolt's other diagnostic switches are deliberately not used:
+- `JOLT_DIAG=edn` only changes the command line's uncaught-error report, and an eval catches every throwable before that report runs; the same data is already in the exception.
+- `JOLT_CHECK` prints success-type findings to stderr, which an agent's reads see only after its death. The checker itself, `jolt.passes.types/check-form`, is public: showing its findings as an eval's data is task `seon.repl/type-findings-are-an-evals-warnings`.
+- `JOLT_DEBUG` prints build and cache diagnostics (why an AOT cache missed): a builder's aid, not an eval's.
+- Jolt's nREPL server would be a second request path beside `seon.server`, bypassing the recording, the tick budget and the contracts the one path gives ([server](server.md#ops), [processes](processes.md)); the REPL speaks nREPL's message model over the server instead, and `jolt.nrepl` is used as a library for its error message and frames.
+- clj-kondo would flood on `seon.contract/defn`, which the compiler and `bin/check contracts` already check better.
+
 ## Learn
 
 An attempt's overrun is charged to the producer of what the agent was shown: ```seon.learn/waste``` (stored as `:seon.attempt/waste`, reported as the `:waste` class).
