@@ -723,7 +723,7 @@
         db @conn
         ;; physics: the fork server is forked while this is the one active thread (Jolt's carriers,
         ;; timer and watcher parked: the child resets them, seon.lib/fork!; docs/failure-points.md, Physics)
-        {:keys [pid fd]} (fs/fork-server db)
+        {:keys [pid fd]} (fs/fork-server db store-cfg)
         ;; then the GC's sweeper threads, a declared number (Chez would grow them by timing)
         sweepers (lib/gc-sweepers! (cfg/value :seon.config.root/gc-sweepers))
         events-in (a/chan (a/sliding-buffer 8192))
