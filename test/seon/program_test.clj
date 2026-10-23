@@ -33,7 +33,7 @@
         form (binding [*ns* nsx] (read-string src))
         acc (volatile! {:nodes [] :before {}})
         after (binding [*ns* nsx jolt.analyzer/*unit-tap* (program/tap acc)] (eval form) (ns-name *ns*))]
-    (program/account (assoc @acc :src src :ns nsym :ns-after after :ns-form? (ns-form? form nsx) :ran? true
+    (program/account (assoc @acc :src src :form form :ns nsym :ns-after after :ns-form? (ns-form? form nsx) :ran? true
                             :ns-meta (when (ns-form? form nsx) (meta (second form)))))))
 
 (defn record

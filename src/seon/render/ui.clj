@@ -899,7 +899,7 @@
 (defn proofs-box
   "The agent's last test run: every report, the red ones first, cost proofs with their
   measurements. input {:tests :results} (results: main's attempt results by proof)."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
+  {:malli/schema [:=> [:cat :seon.render/proofs :seon.render/opts] :any]}
   [{:keys [tests results own owners seen seen-turn]} opts]
      [:section {:class "box" :id "z-proofs"}
     (kicker "proofs" (cond (seq results) (str "judged on main: " (count (filter #(= :pass (val %)) results)) "/" (count results) " proofs pass")
@@ -1144,7 +1144,7 @@
   "What the branch's merge will carry to main (:will-merge, as its newest turn measured it
   against the branch's merge base) and the merge's conflicts and unmerged entries (the
   attempt's), each by the printer. input {:will-merge :turn :conflicts :unmerged :branch}."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
+  {:malli/schema [:=> [:cat :seon.render/branch :seon.render/opts] :any]}
   [{:keys [will-merge turn conflicts unmerged branch]} _]
   (let [budget (config/value :seon.config.render/value-budget)]
          [:section {:id "z-branch" :class "box"}
@@ -1160,7 +1160,7 @@
   "The problems main recorded of this agent or its task, each in the words root's context
   uses (seon.render.ai/problem-row's text) with its evidence by the printer. input {:rows [{:line
   :evidence}] :t}."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
+  {:malli/schema [:=> [:cat :seon.render/agent-problems :seon.render/opts] :any]}
   [{:keys [rows]} _]
      [:section {:id "z-problems" :class (str "box problems " (if (seq rows) "bad" "ok"))}
     (kicker "problems" (if (seq rows) (str (count rows) " recorded on main") "none recorded on main of this agent or its task"))

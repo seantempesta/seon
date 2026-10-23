@@ -7,7 +7,7 @@
   pulled here at its depth (cited: a var, a section, a file, a task or a namespace), for the
   model's context and every walk (seon.render/walk) alike."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.ref :as ref] [seon.task :as task] [seon.db :as pdb]
+  (:require [seon.contract :refer [defn defn-]] [seon.ref :as ref] [seon.source :as source] [seon.task :as task] [seon.db :as pdb]
             [datahike.api :as d] [clojure.string :as str] [clojure.java.io :as io]
             [seon.print.select :as select] [seon.config :as cfg]))
 
@@ -68,10 +68,45 @@
       (assoc :seon.section/dead-links (into #{} (comp (filter (comp #{:missing} first)) (map second)) targets)))))
 
 (def ^:private section-attrs
-  "A stored section's stated attributes (seon.task/entity-tx makes them exactly what its text says)."
-  [:seon.section/heading :seon.section/lead :seon.section/text :seon.section/parent :seon.section/references :seon.section/names :seon.section/dead-links])
+  "A stored section's stated attributes (seon.task/entity-tx makes them exactly what its text says).
+  :seon.section/read is stated too, but by the load: it keeps the stored value while the text is unchanged."
+  [:seon.section/heading :seon.section/lead :seon.section/text :seon.section/parent :seon.section/references :seon.section/names :seon.section/dead-links :seon.section/read :seon.section/baseline-unread])
+
+(defn read-map
+  "The form id of each of names that is a var of db with a form, {name form-id}: the code as it
+  stands, which a section citing the names describes (:seon.section/read). The form id is the form's
+  own digest, so it moves exactly when the form's text does."
+  {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-symbol]] [:map-of :qualified-symbol :string]]}
+  [db names]
+  (into {} (keep (fn [n] (when-let [e (pdb/eid db :var/name n)]
+                           (when-let [id (some-> (d/entity db e) :var/form :form/id)] [n id]))))
+        names))
+
+(defn review-message
+  "The message of the empty commit that records a review in git: a line, and the trailer
+  `Reviewed: <address>` the wiki's baseline finds with one git log (seon.fx/wiki-history), so the
+  review survives an erased store and a fresh clone."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [address who]
+  (str "Review " address " (" who ")\n\nReviewed: " address "\n"))
+
+(defn reviewed-tx
+  "The transaction recording that who read section address as it is though its code changed: its
+  :seon.section/read made the current form ids, the text untouched, and the review (who, and the form
+  ids it read at) kept as a fact. nil when no such section."
+  {:malli/schema [:=> [:cat :seon.host/db :string :string] [:maybe [:vector :map]]]}
+  [db address who]
+  (when-let [e (pdb/eid db :seon.section/address address)]
+    (let [now (read-map db (set (:seon.section/names (d/pull db [:seon.section/names] e))))]
+      [{:db/id e :seon.section/read now :seon.section/reviewed {:by who :forms now}}])))
 
 ;; ---- the load ---------------------------------------------------------------------------
+
+(defn- section-names
+  "The qualified names section s (parsed) cites that name something on db (seon.ref/kept)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.section/parsed] [:set :qualified-symbol]]}
+  [db s]
+  (into #{} (comp (map :seon.ref/name) (filter qualified-symbol?)) (ref/kept db (:seon.ref/citations s))))
 
 (defn load-tx
   "The transaction making db hold exactly the sections of pages (path -> text), the wiki
@@ -79,9 +114,12 @@
   section under dir that no page holds. A section that already states it writes nothing, so
   an unchanged wiki answers []. A link (or cited path#anchor) that reaches no section is kept
   on its section as :seon.section/dead-links, and the rest of the wiki loads as it is."
-  {:malli/schema [:=> [:cat :seon.host/db :string [:map-of :string :string]] [:vector :any]]}
-  [db dir pages]
-  (let [by-page (into [] (map (fn [[p t]] [p (page-sections p t)])) (sort pages))
+  {:malli/schema [:function [:=> [:cat :seon.host/db :string [:map-of :string :string]] [:vector :any]]
+                  [:=> [:cat :seon.host/db :string [:map-of :string :string] :map] [:vector :any]]]}
+  ([db dir pages] (load-tx db dir pages {}))
+  ([db dir pages baseline]
+  (let [baseline (fn [a] (get baseline a))
+        by-page (into [] (map (fn [[p t]] [p (page-sections p t)])) (sort pages))
         parsed (into [] (mapcat second) by-page)
         loaded (into {} (map (juxt :seon.section/address identity)) parsed)
         firsts (into {} (for [[p ss] by-page :when (seq ss)] [p (:seon.section/address (first ss))]))
@@ -91,14 +129,28 @@
                             (into [] (keep #(citation-target db dir stored loaded firsts %)) (:seon.ref/citations s))]))]
     (vec (concat
            (mapcat (fn [s]
-                     (let [a (:seon.section/address s) want (wanted stored s (targets a)
-                                          (into #{} (comp (map :seon.ref/name) (filter qualified-symbol?)) (ref/kept db (:seon.ref/citations s))))]
-                       (if-let [e (stored a)]
+                     (let [a (:seon.section/address s)
+                           names (section-names db s)
+                           e (stored a)
+                           held (when e (d/pull db [:seon.section/text :seon.section/read :seon.section/baseline-unread] e))
+                           keep? (and held (= (:seon.section/text s) (:seon.section/text held)) (:seon.section/read held))
+                           base (when-not keep? (when (nil? (:seon.section/read held)) (baseline a)))
+                           ;; what the section read is kept while its text is unchanged (the code as it stood when it was
+                           ;; written); a section with none yet takes the baseline git gives (the code as of the commit that last
+                           ;; changed it), else today's
+                           read (cond keep? (:seon.section/read held)
+                                      (:read base) (:read base)
+                                      :else (read-map db names))
+                           unread (cond keep? (:seon.section/baseline-unread held) :else (:unread base))
+                           want (cond-> (wanted stored s (targets a) names)
+                                  (seq read) (assoc :seon.section/read read)
+                                  unread (assoc :seon.section/baseline-unread unread))]
+                       (if e
                          (task/entity-tx db e section-attrs want)
                          [(assoc want :db/id a :seon.section/address a)])))
                    parsed)
            (for [[a e] stored :when (and (under? dir a) (not (loaded a)))]
-             [:db/retractEntity e])))))
+             [:db/retractEntity e]))))))
 
 ;; ---- reading ----------------------------------------------------------------------------
 
@@ -177,8 +229,90 @@
   "The one load of the wiki under dir of the checkout onto db: load-tx over its pages (an
   unchanged wiki answers [], a link to no section kept on its section as a dead link). Root's
   boot and my.root/load-docs! both write it."
-  {:malli/schema [:=> [:cat :seon.host/db :string :string] [:vector :any]]}
-  [db checkout dir] (load-tx db dir (pages checkout dir)))
+  {:malli/schema [:function [:=> [:cat :seon.host/db :string :string] [:vector :any]]
+                  [:=> [:cat :seon.host/db :string :string :map] [:vector :any]]]}
+  ([db checkout dir] (load-dir-tx db checkout dir {}))
+  ([db checkout dir baseline] (load-tx db dir (pages checkout dir) baseline)))
+
+;; ---- the baseline: what a section was written against, from git ---------------------------
+
+(defn section-lines
+  "{address [from to]} of the page at path: the lines each section's own text spans, from its heading
+  to the line before the next heading (1-based, inclusive)."
+  {:malli/schema [:=> [:cat :string :string] [:map-of :string [:tuple :int :int]]]}
+  [path text]
+  (let [ss (vec (:seon.ref/sections (ref/parse path text)))
+        n (count (str/split-lines text))]
+    (into {} (map-indexed (fn [i s] [(:seon.ref/address s)
+                                     [(:seon.ref/line s) (if-let [nx (get ss (inc i))] (max (:seon.ref/line s) (dec (:seon.ref/line nx))) n)]]))
+          ss)))
+
+(defn baseline-plan
+  "What the wiki's history must answer (the :history effect, seon.fx/wiki-history): for each section
+  of pages (path -> text) with no :seon.section/read stored on db, its page, its address, its lines
+  and the file and namespace of each var it cites that db has a file for. A section citing none is
+  left out: nothing to record."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] [:vector :map]]}
+  [db pages]
+  (let [stored (into {} (map (juxt :v :e)) (d/datoms db :avet :seon.section/address))]
+    (vec (for [[p t] (sort pages) :let [lines (section-lines p t)] s (page-sections p t)
+               :let [a (:seon.section/address s) e (stored a)]
+               :when (not (and e (:seon.section/read (d/pull db [:seon.section/read] e))))
+               :let [files (into {} (keep (fn [n] (when-let [ve (pdb/eid db :var/name n)]
+                                                    (let [nsx (:var/ns (d/entity db ve))]
+                                                      (when (:ns/file nsx) [n {:file (:ns/file nsx) :ns (:ns/name nsx)}])))))
+                                 (section-names db s))]
+               :when (seq files)]
+           {:path p :address a :lines (lines a) :files files}))))
+
+(defn baseline-failed
+  "The baseline of plan when the history could not be asked at all (the :history effect failed with
+  message): every section read as of today, with why."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map] :string] :map]}
+  [db plan message]
+  (into {} (for [{:keys [address files]} plan] [address {:read (read-map db (set (keys files))) :unread message}])))
+
+(defn baseline-reads
+  "The baseline of the sections of plan (baseline-plan) from the history answer (seon.fx/wiki-history's
+  value {:sections :files :errors}): {address {:read {name form-id} :unread reason}}. A section's :read
+  is each cited var's form id in its file as of the commit that last changed the section (found by
+  seon.source/defining-ids, the id seon.program/account would record), or \"absent\" for a var the
+  file at that commit does not mention at all, or a file that did not exist: a citation that was ahead
+  of the code, stale once the code exists. A section with an uncommitted line is read as of today
+  (:read, nothing unread): its text is newer than git's. A section git could not answer for, whose
+  old file git could not show or does not read, or that cites a var the old file mentions but no form
+  this reading knows (defining-ids finds a form by its head) defines, is read as of today with :unread
+  naming why (attention, seon.problems/stale-sections), never a guess of \"absent\". The failure
+  point: an old file that does not read."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map] :map] :map]}
+  [db plan {:keys [sections files errors]}]
+  (let [cache (volatile! {})
+        ids-at (fn [sha file nsym]
+                 (or (@cache [sha file])
+                     (let [text (get files [sha file])
+                           r (cond (get errors [sha file]) {:error (str file " at " (subs sha 0 8) " could not be read from git: " (get errors [sha file]))}
+                                   (nil? text) {:ids {}}
+                                   :else (try {:ids (source/defining-ids nsym text) :text text}
+                                              (catch Throwable e {:error (str file " at " (subs sha 0 8) " does not read: " (or (ex-message e) (str (type e))))})))]
+                       (vswap! cache assoc [sha file] r)
+                       r)))
+        mentioned? (fn [text n] (boolean (re-find (re-pattern (str "[\\s(\\[{'#]" (java.util.regex.Pattern/quote (name n)) "[\\s)\\]}]")) text)))]
+    (into {}
+          (keep (fn [{:keys [address] :as r}]
+                  (let [info (get sections address) sha (:commit info)
+                        today (read-map db (set (keys (:files r))))]
+                    (cond
+                      (and info (not (:error info)) (nil? sha)) [address {:read today}]
+                      (or (nil? info) (:error info)) [address {:read today :unread (or (:error info) "git gave no history for the section")}]
+                      :else (let [per (for [[n {:keys [file ns]}] (:files r)] [n (ids-at sha file ns)])
+                                  bad (or (some :error (map second per))
+                                          (some (fn [[n res]] (when (and (not (contains? (:ids res) n)) (:text res) (mentioned? (:text res) n))
+                                                                (str n " is in its file at " (subs sha 0 8) ", but no form this reading knows (one by its head) defines it")))
+                                                per))]
+                              (if bad
+                                [address {:read today :unread bad}]
+                                [address {:read (into {} (for [[n res] per] [n (get (:ids res) n "absent")]))}]))))))
+          plan)))
 
 ;; ---- a citation as its depth shows it (docs/references.md#the-delimiter-picks-the-depth): ----
 ;; what the model's context and every walk (seon.render/walk) pull of what a text cites

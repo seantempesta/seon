@@ -84,7 +84,8 @@
 (defn- nested
   "The printer's :render: a nested value whose schema declares a render, as that render's one
   line ({:text, its :ai render inline; :html, a call of its :html render inline}), else nil.
-  One lookup per map (seon.render/schema-of)."
+  Each face's render is looked up by render-of (seon.render/schema-of: one metadata read or
+  one map lookup per key, never a validation)."
   {:malli/schema [:=> [:cat :any] [:maybe [:map [:text :string] [:html :any]]]]}
   [v]
   (let [h (render-of v :html nil) a (render-of v :ai nil)]
@@ -117,7 +118,7 @@
   {:malli/schema [:=> [:cat :any :seon.render/opts] :seon.render/text]}
   [v opts]
   (if (= :inline (:as opts))
-    (let [t (print/line v (or (:budget opts) (config/value :seon.config.render/line-budget)) (:handle opts))] {:text t :truncated? false})
+    (select-keys (print/line-prose v (or (:budget opts) (config/value :seon.config.render/line-budget)) (:handle opts)) [:text :truncated?])
     (let [r (print/print-value v (printer-opts opts))]
       {:text (or (:text r) (:seon.error/message r)) :truncated? (boolean (:truncated? r))})))
 

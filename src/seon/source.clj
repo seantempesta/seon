@@ -91,10 +91,30 @@
      :accounts (vec (map-indexed
                       (fn [i {:keys [form src lead ns units ns-form?]}]
                         (let [k (get (vswap! seen update [ns src] (fnil inc -1)) [ns src])
-                              base {:units units :src src :ns ns :ns-after ns :ns-form? ns-form? :ns-meta (when ns-form? (meta (second form))) :before nil :lead lead :order i :k k}]
+                              base {:units units :src src :form form :ns ns :ns-after ns :ns-form? ns-form? :ns-meta (when ns-form? (meta (second form))) :before nil :lead lead :order i :k k}]
                           (or (program/account base)
                               {:id (str ns "/text-" i) :src src :ns ns :lead lead :order i})))
                       forms))}))
+
+(def ^:private defining-heads
+  "The heads of the top-level forms that define a var by their second element."
+  '#{def defn defn- defmacro defmulti defonce defprotocol defchecked deftest})
+
+(defn defining-ids
+  "The form id of the form defining each var in text, the file of namespace nsym: {qualified var
+  symbol form-id}, the id seon.program/account gives the form (the namespace and the form's exact
+  text, and its occurrence among the same text), but found by the form's head and name alone,
+  with no analysis and nothing run: what a file at an old commit would have recorded, read without
+  loading it. A head is known by its name whatever its namespace (clojure.core/defn, seon.contract/defn);
+  a form defined by a macro of another name is not found."
+  {:malli/schema [:=> [:cat :symbol :string] [:map-of :qualified-symbol :string]]}
+  [nsym text]
+  (let [seen (volatile! {})]
+    (into {} (keep (fn [{:keys [form src ns]}]
+                     (let [k (get (vswap! seen update [ns src] (fnil inc -1)) [ns src])]
+                       (when (and (seq? form) (symbol? (first form)) (contains? defining-heads (symbol (name (first form)))) (symbol? (second form)))
+                         [(symbol (str ns) (name (second form))) (program/form-id ns src k)]))))
+          (:forms (read-forms nsym text)))))
 
 (defn text-tx
   "The facts of text's forms as namespace nsym's program on db (seon.program/account-tx per
@@ -272,13 +292,17 @@
                       (concat (map :v (d/datoms db :aevt :schema/file)) (map :v (d/datoms db :aevt :schema.file/path)))))))
 
 (defn file-text
-  "Namespace nsym's file as db holds it: its live forms in their order, each after its
-  lead (a form recorded at a REPL has none: a blank line, or nothing before the first),
-  then the text after its last form (a newline when it has none)."
+  "Namespace nsym's file as db holds it: its live forms in the order the image loads them
+  (seon.program/load-order), each after its lead (a form recorded at a REPL has none: a
+  blank line, or nothing before the first), then the text after its last form (a newline
+  when it has none). So a helper recorded at a REPL after the function that now calls it is
+  written before that function, and the file loads fresh as the image ran (step E run #10's
+  merge wrote form-of after summary-of, its user); a file already in that order is written
+  as it is, byte for byte."
   {:malli/schema [:=> [:cat :seon.host/db :symbol] :string]}
   [db nsym]
   (let [ne (pdb/eid db :ns/name nsym)
-        fs (sort-by :order (for [dt (d/datoms db :avet :form/ns ne) :when (program/live? db (:e dt))] (program/form-row db (:e dt))))]
+        fs (program/load-order (for [dt (d/datoms db :avet :form/ns ne) :when (program/live? db (:e dt))] (program/form-row db (:e dt))))]
     (str (apply str (map-indexed (fn [i f] (str (or (:lead f) (if (zero? i) "" "\n\n")) (:src f))) fs))
          (or (:ns/tail (d/entity db ne)) "\n"))))
 

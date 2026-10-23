@@ -27,7 +27,7 @@
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.docs :as docs] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
-            [seon.turn] [my.fx] [my.task] [my.turn] [my.branch] [clojure.core.async.flow :as flow] [clojure.test]
+            [seon.turn] [my.fx] [my.task] [my.turn] [my.branch] [my.docs] [clojure.core.async.flow :as flow] [clojure.test]
             [taoensso.trove :as trove]))
 
 
@@ -719,14 +719,32 @@
   {:malli/schema [:=> [:cat :seon.host/db :map :int] [:vector :any]]}
   [db e ms] (second (err/flush-tx (err/fold {} (err/occurrence e :platform {} ms)) db)))
 
+(defn wiki-baseline
+  "What each wiki section lacking a :seon.section/read was last written against, from git (the
+  :history effect, seon.fx/wiki-history), as the loader takes it: {address {:read :unread}} (seon.docs/baseline-reads).
+  {} when every section has one. The history asked, the effect owner does the git; when it cannot be
+  asked every section is read as of today and says why."
+  {:malli/schema [:=> [:cat :seon.root/sys :string :string] :map]}
+  [sys checkout dir]
+  (let [db @(:conn sys)
+        plan (docs/baseline-plan db (docs/pages checkout dir))]
+    (if (or (empty? plan) (not (cfg/value :seon.config.root/wiki-baseline)))
+      {}
+      (let [r @(call! sys {:op :fx :kind :history :req {:root checkout :sections plan}})]
+        (if (contract/error? r)
+          (docs/baseline-failed db plan (:seon.error/message r))
+          (docs/baseline-reads db plan (:value r)))))))
+
 (defn wiki-tx
   "The wiki (the checkout's docs/) onto main db, written in the boot fact's own commit so main
   holds it before any agent forks: the help page every agent reads first is one of its pages
   (seon.context/help-text). An unchanged wiki writes nothing. A link to no section is kept on
-  its section and shows as a dead citation (seon.problems/health), never refuses the load."
-  {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :any]]}
-  [db checkout]
-  (docs/load-dir-tx db checkout "docs"))
+  its section and shows as a dead citation (seon.problems/health), never refuses the load.
+  baseline: what the sections with no record were last written against (wiki-baseline)."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:vector :any]]
+                  [:=> [:cat :seon.host/db :string :map] [:vector :any]]]}
+  ([db checkout] (wiki-tx db checkout {}))
+  ([db checkout baseline] (docs/load-dir-tx db checkout "docs" baseline)))
 
 (defn- previous-end
   "How the root before this boot on main ended: the stop fact it wrote, or, when it wrote
@@ -857,7 +875,7 @@
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
           r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running) (into (task/earlier-agents-tx db)) (into (cfg/facts config cfg/sources))
-                                                                                  (into (wiki-tx db (cfg/checkout))))
+                                                                                  (into (wiki-tx db (cfg/checkout) (wiki-baseline sys (cfg/checkout) "docs"))))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev}))}})]
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
     (when source (import-source! sys source))
@@ -867,7 +885,7 @@
 ;; The API: callers outside the graph. Each call puts one request on :ext.
 ;; ====================================================================================
 
-(defn- call!
+(defn call!
   "Put m (with a fresh reply promise) on the api; a promise. After stop! the
   api is closed and the promise answers :seon.root/no-agent (\"root stopped\")."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.root/request] :seon.host/promise]}
@@ -1028,9 +1046,6 @@
     (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx (pdb/head (:conn sys) b)) :mode (if agent-id :turn :judge)} agent-id (assoc :agent agent-id) (seq names) (assoc :names names)))
     (doto (promise) (deliver (absent (get-in @(call! sys {:op :state}) [:agents agent-id]) agent-id))))))
 
-(defn agent-stats! "A promise of the agent's numbers now." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
-  [sys agent-id] (call! sys {:op :stats :id agent-id}))
-
 (defn- write! {:malli/schema [:=> [:cat :seon.root/sys :seon.writer/request] :seon.host/promise]}
   [sys req] (call! sys {:op :write :req req}))
 
@@ -1114,9 +1129,6 @@
 
 (defn kill! "SIGKILL the agent's process (through its agent proc). nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
   [sys agent-id] (request! sys 'kill! agent-id nil) nil)
-
-(defn fs-call! "Ask the fork server for {:op :stats} or {:op :static}." {:malli/schema [:=> [:cat :seon.root/sys :seon.root/request] :any]}
-  [sys msg] @(call! sys {:op :fs :req msg}))
 
 (defn stop!
   "Stop root by letting the flow drain: the api closes (later calls answer \"root

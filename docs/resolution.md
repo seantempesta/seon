@@ -12,7 +12,7 @@ facts are read; a Var's root changes only when its contract is armed.
 `ns-resolve`, `resolve` on a quoted symbol, `intern`, `alter-var-root` or `with-redefs`
 (strings and comments left out), and fails on one not named here; a name a list item gives
 before its first colon whose site is gone leaves the page in the same commit. An agent's own program
-is judged from the compiler's facts at merge (`seon.program/banned`), not by this check.
+is judged from the compiler's facts at merge (the vars of `seon.program/banned` and an inline definition, found by `seon.merge/mutations`), not by this check. `bin/laws resolution` reads `src/` without `seon.check` and `seon.e2e`, the check drivers, which redefine a Var on purpose in `bin/check hotreload`.
 
 ## Sanctioned
 

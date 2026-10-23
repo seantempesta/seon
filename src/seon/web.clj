@@ -133,6 +133,8 @@
         (cond
           (and (= m :get) (= uri "/")) (html-response (ask! ch {:op :page :view :root}))
           ;; the whole request an agent's turn read, made again from its basis (its window links it)
+          (and (= m :get) (= uri "/turn") (not (and (get q "view") (get q "id"))))
+          {:status 400 :headers {"Content-Type" "text/plain"} :body "/turn names its view and the turn's id: /turn?view=a3&id=demo%2Ff%231%2F0"}
           (and (= m :get) (= uri "/turn"))
           {:status 200 :headers {"Content-Type" "text/plain; charset=utf-8" "Cache-Control" "no-store"}
            :body (str (ask! ch {:op :turn-text :agent (view-of (get q "view")) :turn (get q "id")}))}

@@ -367,8 +367,6 @@
      {:agent agent :attempt attempt :task task
       :tiles (vec (for [[k {:keys [input schema seq]}] (sort-by (comp - :seq val) tiles)]
                     {:id (str "tile-" (name k) "-" seq) :input {:value input :schema schema} :schema :seon.render/window-tile}))
-      ;; each proof's task, to tell a blocking red from an allowed one
-      :owners (into {} (for [[tid t] (:tasks st) p (:seon.task/proofs t)] [p tid]))
       ;; the conversation: its turns and its evaluations outside them, in the order they were
       ;; written, each a unit of the window by its schema's render (rendered when its value changes)
       :conv (mapv second (sort-by first (concat (for [t turns] [(:tx t) {:id (str "c-" (ui/dom-id (:seon.turn/id t))) :input t :schema :seon.turn/turn-fact}])
@@ -380,7 +378,6 @@
                :tokens (when-let [ts (seq (keep :seon.turn/tokens turns))] (reduce + ts))
                :usd (when-let [us (seq (keep :usd turns))] (reduce + us))
                :unpriced (count (filter #(and (:seon.turn/tokens %) (nil? (:usd %))) turns))}
-      :branch branch :problems problems
       :history-total (or (:total (meta records)) (count records)) :history-shown (count records)}]))
 
 ;;; --- the pass ------------------------------------------------------------------------------------
