@@ -1026,7 +1026,7 @@
     (let [;; the procs that answered a graph ping within :seon.config.check/ping-ms (an expected one that did not is blocked or absent)
           pids (fn [] (set (keys (flow/ping (:graph sys) :timeout-ms (seon.config/value :seon.config.check/ping-ms)))))
         booted (pids)
-        expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/source :fx.source/0 :fx/git :fx.git/0 :fx/deps :fx.deps/0 :fx/build :fx.build/0 :fx/model}
+        expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/source :fx.source/0 :fx/git :fx.git/0 :fx/deps :fx.deps/0 :fx/build :fx.build/0 :fx/tests :fx.tests/0 :fx/model}
                      (for [i (range (seon.config/value :seon.config.ai/max-in-flight))] (keyword "fx.model" (str i))))
         dir (str (:agents-dir (:store (c/state sys))) "/system") ; this root's own run dir
         _ (.mkdirs (java.io.File. dir))
@@ -1200,36 +1200,25 @@
        :checks {:each-forking-process-one-thread (= 1 (:fork-server res) (:agent res) (:clone res))
                 :its-test-passed (= 1 (:pass tests)) :the-clone-evaluates (= "42" cl-eval)}}))))
 
-(defn lease
-  "Under eid-lease 50 (bin/check sets it, alone or in the run): agent a writes 60 new entities in one transaction, past its
-  lease: refused with :seon.db/lease-spent, nothing applied. A refused transaction keeps the
-  ids it reserved (Datahike's store counter), so a's lease is spent: its next write is
-  refused too, and the record of its evals, which cannot be written on its branch, is
-  recorded on main as its problem. Agent b, the next lease, writes 10: its ids lie past a's
-  lease, never shared."
+(defn ids
+  "Two agents, each a process of its own on a branch of its own forked at one main commit,
+  write 10 notes each: every entity id and every transaction id is issued once across them
+  (one store-wide page of ids, seon.db/ids!), so a datom names the same entity and the same
+  transaction wherever a merge or a union carries it. Per-branch tx ids gave both their
+  first transaction one id."
   []
-  (run-check "LEASE" {}
+  (run-check "IDS" {}
    (fn [sys]
-    (let [[a b] (spawn-ready! sys "past its lease" "the next lease")
+    (let [[a b] (spawn-ready! sys "ids a" "ids b")
         notes (fn [tag n] (str "(transact! (vec (for [i (range " n ")] {:note/text (str \"" tag "\" i)})))"))
-        r-past (first @(c/submit! sys a (notes "a" 60)))
-        r-count (first @(c/submit! sys a "(count (q '[:find ?n :where [?n :note/text]]))"))
-        r-next (first @(c/submit! sys a (notes "a" 1)))
-        stats @(c/agent-stats! sys a)
-        _ @(c/submit! sys b (notes "b" 10))
-        b-min (read-string (:printed (first @(c/submit! sys b "(q '[:find (min ?n) . :where [?n :note/text]])"))))
-        ;; the reply says whether its record was written: when it was not (:unrecorded), root
-        ;; was told before the reply came and its fact is on its way to main, so this parks on
-        ;; main's commits until it arrives; a record that was written is the answer, now
-        lease-q '[:find ?c . :where [?e :seon.error/type :seon.db/lease-spent] [?e :seon.error/count ?c]]
-        recorded (when (:unrecorded r-past) (d/q lease-q (seon.e2e/await-db sys #(d/q lease-q %))))
-        spent? #(and (= :err (:tag %)) (re-find #"entity ids are spent" (str (:printed %))))]
-      {:report {:past-its-lease (select-keys r-past [:tag :printed :err]) :notes-after (:printed r-count)
-                :next-write (select-keys r-next [:tag :printed]) :ids (:ids stats) :unrecorded (:unrecorded r-past) :recorded-on-main recorded :b-lowest-id b-min}
-       :checks {:past-its-lease-refused (spent? r-past) :nothing-applied (= "0" (:printed r-count)) :next-write-refused (spent? r-next)
-                :its-lease-was-50 (= 50 (get-in stats [:ids :of])) :its-record-was-refused (true? (:unrecorded r-past)) :recorded-on-main (pos-int? recorded)
-                :used-under-the-lease (< (get-in stats [:ids :used] 0) 50)
-                :b's-ids-past-a's-lease (>= b-min (+ (get-in stats [:ids :from]) 50))}}))))
+        _ (doall (pmap #(deref (c/submit! sys %1 (notes %2 10))) [a b] ["a" "b"]))
+        ids-of (fn [ag] (read-string (:printed (first @(c/submit! sys ag "(vec (q '[:find ?n ?tx :where [?n :note/text _ ?tx]]))")))))
+        ia (ids-of a) ib (ids-of b)
+        es (fn [xs] (set (map first xs))) txs (fn [xs] (set (map second xs)))]
+      {:report {:a (count ia) :b (count ib) :a-txs (sort (txs ia)) :b-txs (sort (txs ib))}
+       :checks {:each-wrote-10 (= 10 (count ia) (count ib))
+                :entity-ids-issued-once (not-any? (es ia) (es ib))
+                :tx-ids-issued-once (not-any? (txs ia) (txs ib))}}))))
 
 (defn- fork-server-caught-up
   "A FIFO barrier through the fork server: {:op :stats} goes to the server process on the
@@ -1394,7 +1383,7 @@
      "instrument" (fn [n more] (instrument))
      "record" (fn [n more] (record))
      "orphan" (fn [n more] (orphan))
-     "lease" (fn [n more] (lease))
+     "ids" (fn [n more] (ids))
      "fx" (fn [n more] (fx (n-or n "20")))
      "system" (fn [n more] (system-check))
      "config" (fn [n more] (config-check))

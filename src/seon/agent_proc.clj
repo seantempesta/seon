@@ -76,6 +76,8 @@
   {:malli/schema [:=> [:cat :map :map] [:tuple :map :seon.step/outputs]]}
   [st m]
   (case (:op m)
+    ;; the test service's answer to this agent's ask (seon.prove, the api's reply route)
+    nil [(to-proc! st {:op :prove-reply :k (:tag m) :result (:r m)}) nil]
     :req (let [{:keys [rid msg kind]} m]
            (let [st (cond-> (to-proc! st (assoc msg (if (= kind :clone) :k :id) rid))
                       ;; a clone's socket follows in its own frame once the agent asks
@@ -150,7 +152,6 @@
                  (cond-> st (:cloned-from m) (assoc :pid (:pid m))))
       ;; its eval's record could not be written on its branch (its entity ids are spent):
       ;; the typed error is recorded on main as its problem
-      :unrecorded (do (step/out! o :to-api {:op :problem :class :agent :agent id :error (:error m)}) st)
       :fd-ready (send-fd! st (:k m) (get-in st [:inflight (:k m) :pass-fd]))
       :branch-me (let [branch (get-in st [:inflight (:k m) :branch])]
                    (step/out! o :to-writer {:op :clone-branch :from (:branch st) :branch branch
@@ -223,6 +224,10 @@
               (to-proc! (update st :fx-out dec)
                         (merge {:op :fx-reply :k (:k m)}
                                (contract/error :seon.fx/unknown-kind 'seon.fx/call (str "no effect kind " (:kind m)))))))
+      ;; the agent's turn asks the test service to prove its branch at t (seon.prove): one run for
+      ;; whoever asked for that key; the answer comes back on this proc's :in
+      :prove (do (step/out! o :to-api {:op :request :req {:op :prove :agent id :branch (:branch st) :t (:t m) :mode (:mode m)} :route [id :in] :tag (:k m)})
+                 st)
       :merged-main (let [st (answer-rid st o (:id m) (:result m))]
                      (step/out! o :events (step/event {:type :merged-main :agent id :result (:result m)}))
                      (step/out! o :to-api (status st {:status (busy st)}))
