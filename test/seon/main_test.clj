@@ -53,7 +53,7 @@
   ;; task seon.main/docstrings-carry-no-dates-and-no-old-words: a docstring says what a var or
   ;; namespace is now; when a ruling was made and what a measurement read that day are git's and
   ;; DECISIONS'. Read from the compiler's facts of src (:var/doc, :ns/doc), so a new one is red
-  (let [db (runner/program-db (System/getProperty "user.dir"))
+  (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
         dated (fn [s] (re-find #"\b20\d\d-\d\d-\d\d\b" (or s "")))
         rows (concat (d/q '[:find ?n ?doc :where [?v :var/name ?n] [?v :var/doc ?doc] [?v :var/form ?f] [?f :form/ns ?ns] [?ns :ns/file ?file]
                             [(clojure.string/starts-with? ?file "src/")]] db)
