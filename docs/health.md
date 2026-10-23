@@ -32,7 +32,7 @@ A law the compiler's facts answer exactly is a derived class too: `seon.problems
 ## What a branch caused
 
 `seon.problems/caused` is the set of derived problems a branch's head has that its merge base had not: what the branch's own work broke.
-- The agent's turn computes it each turn (`seon.turn`'s observe), so its context lists them with the done rule's other refusals.
+- The agent's turn computes it each turn (`seon.turn`'s observe), so its context lists them with the done rule's other reasons.
 - Root's judge records it at the attempt's end (`:seon.attempt/caused`, from the writer's `:branch-diff`).
 - `seon.reconcile/done-explain` gives `:open-problem` as a reason while any is open, so the task is held for root naming it ([tasks](tasks.md#the-done-rule)).
 
@@ -47,12 +47,14 @@ Root watches its checkout and its repository's refs, so whoever writes (a Claude
   - a path by its loader: a page under docs/, a task file, Seon's source;
   - a moved ref (a commit or merge on any branch): the source;
   - a rescan or a moved root, where FSEvents coalesced or dropped events under a subtree: every kind.
-- `my.root/load-paths!` and its kinds' loads load each kind once; a batch no loader reads writes nothing, so root's own store writes never feed back. Batches, paths and rescans are counted in root's `:seon.root/watch` fact.
+- `my.root/watch!` loads each kind once (`load-kinds!`); a batch no loader reads writes nothing, so root's own store writes never feed back. Batches, paths and rescans are counted in root's `:seon.root/watch` fact.
 - What changed while root was down is boot's to load, as it always was: the wiki (`seon.root/wiki-tx`) and the source (`seon.root/import-source!`). Task files load on their change or by `my.root/load-tasks!`, never at boot.
 - A watcher that cannot start or dies is a `:platform` error on main (`seon.root/platform-tx`), shown on the banner; root goes on unwatched, never polling ([failure points](failure-points.md)).
 
-`load-paths!` answers the problems a load made true (`seon.problems/caused`, of main before and after).
+`load-kinds!` answers the problems a load made true (`seon.problems/caused`, of main before and after), kept as `:last-opened` in the watch fact; a loader's typed error (a refused task file) is recorded as a `:platform` error (`my.root/load-errors`), and a throw in a batch's handler is the watcher's recorded death.
 
 ## Cost
 
 Measured on 2026-10-23 (`seon.problems-test/dead-citations-follow-the-citations`, every citation dead, the worst case): 68 us, 68 KB and 4 contracted calls per cited name at n=1000, against an estimate of 90 us, 170 KB and 6. A citation that names something costs one set lookup. On root's own store (152 sections, 1,280 vars), a set built from main's var names and read for 1,712 names took 0.37 ms, against 18 ms for one AVET seek per name; that is why the class reads a set.
+
+`unnamed-sites` costs about 75 us and 75 KB per catch form (measured at n=10, 100 and 1000: linear, two contracted calls per site, `seon.problems-test/unnamed-sites-follow-the-catch-forms`); `stale-pins`, `health` and `caused` have their own cost proofs in the same file. `caused` reads both derived classes over base and over head, so it is O(the program's citations and catch forms) twice, never O(changed): at Seon's 26 catch sites that is about 4 MB per turn and per merge. Narrowing it to what the branch changed is not built; the proof bounds it.

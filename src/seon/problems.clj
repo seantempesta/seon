@@ -193,7 +193,9 @@
   "The derived problems the branch at head has that base (its merge base) had not, by
   message: what the branch's own work broke. The done rule refuses while any is open
   (seon.reconcile/done-explain :open-problem), and the agent reads them each turn; an
-  evaluation is never refused (AGENTS: get out of an agent's way)."
+  evaluation is never refused (AGENTS: get out of an agent's way). Cost: the two derived reads
+  over base and over head, O(the program's citations and catch forms) twice, not O(changed): about
+  75 KB per catch site per read (seon.problems-test/caused-reads-both-dbs-in-full bounds it)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :string]]}
   [base head]
   (let [derived #(concat (dead-citations % {}) (unnamed-sites % {}))

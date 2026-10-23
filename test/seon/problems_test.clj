@@ -567,3 +567,70 @@
     (is (seq literal))
     (is (= #{} (clojure.set/difference literal class)) "no literal site dropped")
     (is (= (set (keys extras)) (clojure.set/difference class literal)) "every extra is listed with its reason")))
+
+;; ---- cost proofs of the derived classes beyond dead-citations ---------------------------------
+
+(defn catch-forms
+  "db0 with n more live forms in a src namespace, each defining one var and carrying a catch the
+  law page does not name (so each is an :unnamed-site)."
+  [db0 n]
+  (let [ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :aevt :var/name))))))]
+    (d/db-with db0 (into [[:db/add ns-e :ns/file "src/app/m.clj"]]
+                         (mapcat (fn [i] [{:db/id (- (inc (* 2 i))) :form/id (str "cost-form-" i) :form/ns ns-e :form/order i :form/src "(defn f [])"
+                                           :form/catches #{"{:class Exception, :answers :expr}"} :form/defines [(- (* 2 i))]}
+                                          {:db/id (- (* 2 i)) :var/name (symbol "app.cost" (str "v" i)) :var/ns ns-e :var/form (- (inc (* 2 i)))}]))
+                         (range 1 (inc n))))))
+
+(defn catch-input "The cost proof's input at n: n unnamed catch sites." [n] [(catch-forms (ts/test-db) n) {}])
+
+(defn health-input "The cost proof's input at n: the db of n unnamed catch sites." [n] [(catch-forms (ts/test-db) n)])
+
+(defn caused-input
+  "The cost proof's input at n: [base head], base holding n catch sites, head one more."
+  [n] (let [base (catch-forms (ts/test-db) n)] [base (d/db-with base [{:db/id -1 :form/id "cost-head" :form/ns (:db/id (:var/ns (d/entity base (:e (first (d/datoms base :aevt :var/name))))))
+                                                                        :form/order 0 :form/src "(defn g [])" :form/catches #{"{:class Exception, :answers :expr}"} :form/defines [-2]}
+                                                                       {:db/id -2 :var/name 'app.cost/head :var/form -1}])]))
+
+(defn pins-input
+  "The cost proof's input at n: docs/forks.md of n sections each stating a pin, root's import
+  recording a different gitlink for every one (so each is a :stale-pin)."
+  [n] (let [db0 (ts/test-db)
+            page (apply str "# Forks\n\nThe pins.\n" (for [i (range n)] (str "\n## F" i "\n\n`reference-code/lib" i "` pinned at `abc" i "`.\n")))
+            db (d/db-with db0 (seon.docs/load-tx db0 "docs" {"docs/forks.md" page}))]
+        [(d/db-with db [{:seon.root/id :root :seon.root/source {:pins (into {} (for [i (range n)] [(str "reference-code/lib" i) (str "def" i)]))}}]) {}]))
+
+(deftest unnamed-sites-follow-the-catch-forms
+  (cost/proof {:of 'seon.problems/unnamed-sites :input 'seon.problems-test/catch-input
+               :n "live forms carrying a catch, each defining one var, none named by the page"
+               :work "once: the page's cited names as a set, the method and impl owners; per site: its form entity, its defines and one row"
+               :growth :linear
+               :per-n {:ns 76000 :bytes 74500 :calls 2}
+               :fixed {:ns 50000 :bytes 50000 :calls 1}
+               :sizes [10 100 1000]}))
+
+(deftest stale-pins-follow-the-pin-page
+  (cost/proof {:of 'seon.problems/stale-pins :input 'seon.problems-test/pins-input
+               :n "sections of docs/forks.md, each stating one stale pin"
+               :work "one AVET range of addresses, then per section a pull of its text, one regex scan and one row"
+               :growth :linear
+               :per-n {:ns 30000 :bytes 30000 :calls 2}
+               :fixed {:ns 600000 :bytes 600000 :calls 5}
+               :sizes [10 100 1000]}))
+
+(deftest health-follows-what-is-recorded-and-cited
+  (cost/proof {:of 'seon.problems/health :input 'seon.problems-test/health-input
+               :n "unnamed catch sites (the derived classes dominate; the recorded part is the seed's)"
+               :work "report once, then the three derived reads; the sites dominate"
+               :growth :linear
+               :per-n {:ns 80000 :bytes 80000 :calls 2}
+               :fixed {:ns 3000000 :bytes 3000000 :calls 60}
+               :sizes [10 100 1000]}))
+
+(deftest caused-reads-both-dbs-in-full
+  (cost/proof {:of 'seon.problems/caused :input 'seon.problems-test/caused-input
+               :n "unnamed catch sites in the base (the head has one more)"
+               :work "the two derived reads (citations, sites) over base and over head: today O(program) twice, not O(changed)"
+               :growth :linear
+               :per-n {:ns 150000 :bytes 155000 :calls 4}
+               :fixed {:ns 1500000 :bytes 1500000 :calls 10}
+               :sizes [10 100 1000]}))
