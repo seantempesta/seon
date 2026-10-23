@@ -103,8 +103,12 @@
 (def options
   "What every contract compiles against: the built registry, under malli's dynamic registry,
   so an evaluation that binds malli.registry/*registry* (an agent's REPL, to its branch's
-  schemas: seon.program/schema-registry) compiles against that population instead."
-  {:registry (mr/composite-registry (mr/dynamic-registry) registry)})
+  schemas: seon.program/schema-registry) compiles against that population instead; and the
+  predicate pack's types, as total (their validators never throw)."
+  {:registry (mr/composite-registry (mr/dynamic-registry) registry)
+   ;; the predicate pack's tests are type checks that answer for any value, so an arm built
+   ;; of them is checked without a try per call (malli's -total?)
+   ::m/total-types (set (keys host-schemas))})
 
 (clojure.core/defn schema
   "The compiled schema of a form or a registered name, in the platform registry."
