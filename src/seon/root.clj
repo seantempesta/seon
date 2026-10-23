@@ -63,19 +63,16 @@
   {:malli/schema [:=> [:cat :qualified-symbol :string :map] :seon.root/refused]}
   [op why members] (contract/error :seon.root/refused op why members))
 
-(def ^:private tail-bytes
-  "How much of a dead agent's stderr its death records: the last bytes of its file."
-  2048)
 
 (defn stderr-tail
-  "The last tail-bytes of the stderr file at path (seon.agent/stderr-path), or nil: no path
+  "The last :seon.config.root/death-stderr-bytes of the stderr file at path (seon.agent/stderr-path), or nil: no path
   (an in-memory store), the file gone, or nothing written."
   {:malli/schema [:=> [:cat [:maybe :string]] [:maybe :string]]}
   [path]
   (let [f (some-> path (java.io.File.))]
     (when (and f (.exists f) (pos? (.length f)))
       (with-open [r (java.io.RandomAccessFile. f "r")]
-        (let [n (.length r) k (min n tail-bytes) b (byte-array k)]
+        (let [n (.length r) k (min n (cfg/value :seon.config.root/death-stderr-bytes)) b (byte-array k)]
           (.seek r (- n k))
           (.readFully r b)
           (String. b "UTF-8"))))))
@@ -183,7 +180,7 @@
   (if-let [a (get-in st [:view :agents id])]
     (let [a' (cond-> (merge a (dissoc m :ready :evals-add))
                (and (:ready m) (= :spawning (:status a))) (assoc :status :idle)
-               (:evals-add m) (update :evals #(vec (take-last 20 (into (or % []) (:evals-add m))))))
+               (:evals-add m) (update :evals #(reduce (fn [v x] (lib/push-window v x (cfg/value :seon.config.root/view-window))) % (:evals-add m))))
           e (failed id a m)]
       (cond-> (assoc-in st [:view :agents id] (if (and (stopped-statuses (:status a)) (not (gone-statuses (:status a')))) (assoc a' :status (:status a)) a'))
         e (problem (err/occurrence e :agent {:agent id :task (:task a)} (System/currentTimeMillis)))
@@ -488,9 +485,9 @@
                        (:data m)
                        (contract/error :seon.root/proc-defect (proc-sym st (:pid m)) (or (:message m) "a defect with no message") {:pid (:pid m)}))
                    taken (distinct (cond-> (if (= :api (:pid m)) (::lost st) []) (:msg m) (conj (:msg m))))]
-               ;; the view keeps the newest 20 and counts them all (renders say how many it left)
+               ;; the view keeps the newest :seon.config.root/view-window and counts them all (renders say how many it left)
                (-> (reduce (fn [st x] (answer-taken st o (:pid m) x e)) (cond-> st (= :api (:pid m)) (dissoc ::lost)) taken)
-                   (view! update :root-errors (fnil #(vec (take-last 20 (conj % %2))) []) (merge {:pid (:pid m) :message (:message m)} (:data m)))
+                   (view! update :root-errors #(lib/push-window %1 %2 (cfg/value :seon.config.root/view-window)) (merge {:pid (:pid m) :message (:message m)} (:data m)))
                    (view! update :root-errors-total (fnil inc 0))
                    (problem (err/occurrence e :platform {} (System/currentTimeMillis)))))
       ;; an agent's eval errors since its last commit (seon.error/note), counted across agents

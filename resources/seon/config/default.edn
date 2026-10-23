@@ -29,6 +29,15 @@
  ;; first version forked a thousand agents at ~1.4 MB each, AGENTS.md).
  ;; At the bound: a spawn is refused (:seon.root/refused "too many live agents").
  :seon.config.root/max-agents 1024
+ ;; Unit: bytes. How much of a dead agent's stderr its death records: the last bytes of its
+ ;; file. Provenance: the value seon.root held as a literal (shrink). At the bound: earlier
+ ;; output is not recorded; the file itself is kept.
+ :seon.config.root/death-stderr-bytes 2048
+ ;; Unit: entries. The newest entries root's view keeps of a list it grows: an agent's
+ ;; evaluations and root's own defects; the view counts them all, and a render says how many it
+ ;; left. Provenance: the value seon.root held as a literal twice (shrink). At the bound: the
+ ;; oldest entry leaves the view; the facts on main keep everything.
+ :seon.config.root/view-window 20
 
  ;; Unit: writer requests from the api in flight. Provenance: f2-final. At the bound the api
  ;; stops reading its server (Flow's input filter) and reads only answers, so callers are
@@ -327,6 +336,10 @@
  ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected. bin/check
  ;; runs this many steps at once too, and mg-check in this many shards (pure-tests 2026-10-23).
  :seon.config.proofs/jobs 4
+ ;; Unit: assertions. The failing assertions a red test keeps in its run's facts, the first ones;
+ ;; the rest are counted in the report, not kept. Provenance: the value seon.proofs held as a
+ ;; literal (shrink: a bound is a config key). At the bound: later failures of that test go unkept.
+ :seon.config.proofs/max-assertions 8
  ;; Unit: path. The plan's store of kept program dbs (test-runner/program-db): one LMDB store
  ;; per checkout, a branch per git tree id holding that tree's program as facts. A tree never
  ;; seen is branched from the kept tree with the fewest changed files and brought current by
@@ -481,6 +494,10 @@
  :seon.config.render.agent/sort-bound 64
  ;; Unit: characters per printed line (session P1's printer, matching v1's corpus output).
  :seon.config.render/width 72
+ ;; Unit: levels. Nesting levels the printer indents; a deeper level prints at the last
+ ;; indent. Provenance: the value seon.print.emit held as a literal (shrink). At the bound:
+ ;; deeper structure is laid out flush with its parent, never cut.
+ :seon.config.render/nest-depth 6
  ;; Unit: tokens for a value shown inside another: a refused argument, a test's expected and
  ;; actual, ex-data (session P1).
  :seon.config.render/part-budget 256

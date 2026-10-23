@@ -31,3 +31,11 @@ Later layers win, key by key, and the merged map is validated once (```seon.conf
 ## Facts on main
 
 At boot root writes the config in force on main's root entity, with its sources, and an entity per provider and per model (```seon.config/facts```). These are platform records, which a merge never carries. ```seon.config/from-db``` reads the config back on main or on any branch made from it (every declared key the root entity holds, a set-valued key read back as the set it was), so an agent, the dashboard and the context read it there; the dashboard shows it through the schema's declared render, `seon.render.ui/config-panel` ([dashboard](dashboard.md)). `bin/check config` proves that an agent reads it from its branch.
+
+## Constants
+
+Every limit, bound or default is a config key (AGENTS §5). A number left in src is one of the kinds below, each named here with its reason, and `seon.main-test/a-bound-is-a-config-key` is red on any other. It reads src's forms from the compiler's facts and flags every top-level `def` of a number and every literal count over 2 given to `take`, `take-last`, `drop` or `drop-last`. A foreign interface's constant, named in upper case as its C header names it (a socket flag such as `seon.sock/AF-UNIX`, LMDB's `seon.db/MDB_NOSYNC`, the page size `seon.lib/PAGE`), is the interface's value, not a bound, and is not listed.
+
+- `seon.agent-proc/stop-bound-ms`, `seon.agent-proc/stall-ms`: clocks standing in for an exit or a reply, which their tasks delete rather than make config (`seon.root/shutdown-and-death-are-dataflow`, `seon.root/a-stall-is-past-the-requests-own-bound`; [clocks](clocks.md)).
+- `seon.cost/tick-allowance`, `seon.cost/steeper-by`, `seon.cost/ratchet`: the cost judge's own definitions of a proof's tolerance, which task `seon.cost/cost-tolerances-are-derived` derives from measurement instead ([cost](cost.md)).
+- `seon.error/digest`: its 8 bytes are the 16 hex digits its contract and `:seon.error/signature`'s schema state, the identity's width, not a bound.

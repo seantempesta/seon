@@ -263,7 +263,7 @@
 (defn tile-health
   "Every declared root proc, the effect owners (FX1) among them, healthy unless a problem
   was recorded of it: what flows, no ping (a proc's defect arrives when it happens; root's
-  view keeps the newest 20). input {:health {pid {:defects :newest}}}."
+  view keeps the newest :seon.config.root/view-window). input {:health {pid {:defects :newest}}}."
   {:malli/schema [:=> [:cat :seon.render/procs-health :seon.render/opts] :any]}
   [{:keys [health]} opts]
   (let [bad (count (filter (comp pos? :defects val) health))]

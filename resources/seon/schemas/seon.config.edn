@@ -11,6 +11,8 @@
         :description "The resolved config: every limit, bound and default of the platform, one key each."}
   ;; root and its procs
   [:seon.config.root/max-agents :seon.config.root/max-agents]
+  [:seon.config.root/death-stderr-bytes :seon.config.root/death-stderr-bytes]
+  [:seon.config.root/view-window :seon.config.root/view-window]
   [:seon.config.root/api-writes :seon.config.root/api-writes]
   [:seon.config.root/api-batch :seon.config.root/api-batch]
   [:seon.config.root/writer-batch :seon.config.root/writer-batch]
@@ -70,6 +72,7 @@
   [:seon.config.source/tests-dir :seon.config.source/tests-dir]
   [:seon.config.source/test-results-dir :seon.config.source/test-results-dir]
   [:seon.config.proofs/jobs :seon.config.proofs/jobs]
+  [:seon.config.proofs/max-assertions :seon.config.proofs/max-assertions]
   [:seon.config.proofs/program-store :seon.config.proofs/program-store]
   [:seon.config.proofs/program-store-max-bytes :seon.config.proofs/program-store-max-bytes]
   [:seon.config.proofs/seed-salt :seon.config.proofs/seed-salt]
@@ -96,6 +99,7 @@
   [:seon.config.render.agent/max-number-digits :seon.config.render.agent/max-number-digits]
   [:seon.config.render.agent/sort-bound :seon.config.render.agent/sort-bound]
   [:seon.config.render/width :seon.config.render/width]
+  [:seon.config.render/nest-depth :seon.config.render/nest-depth]
   [:seon.config.render/part-budget :seon.config.render/part-budget]
   [:seon.config.render/form-budget :seon.config.render/form-budget]
   [:seon.config.render/context-budget :seon.config.render/context-budget]
