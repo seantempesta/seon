@@ -131,7 +131,7 @@
         shown (when (= :characters (:seon.print/elision-unit node)) prefix)
         ;; a string's label is its cut's words (the text after its prefix's literal)
         label (if shown (cut-words (:seon.print/omitted node) (:seon.print/lines node) (:seon.print/continuation node)) text)
-        reason (when-not (:seon.print/continuation node) (:seon.print/requery-refusal node))
+        reason (when-not (:seon.print/continuation node) (:seon.print/requery-refused node))
         marker [:span (cond-> {:class (css-class :seon.print/elision)} reason (assoc :title reason)) label]]
     (if shown
       [:span [:span {:class (css-class :seon.print/string)} shown] marker]

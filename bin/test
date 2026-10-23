@@ -10,6 +10,7 @@
 # bin/test --plan|--shard|--store-steps ... are test/test_runner.clj's parts (bin/prove's).
 # On the runtime bin/build made (target/jolt/jolt), with dependencies cached in target/home.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+"$ROOT/bin/ports" --write   # the port keys under their current names (bin/ports)
 JOLT=$ROOT/target/jolt/jolt
 [[ -x $JOLT ]] || { echo "test: no target/jolt/jolt; run bin/build jolt first" >&2; exit 1 }
 . "$ROOT/bin/env"
@@ -19,6 +20,8 @@ export SEON_WEB_PORT=${SEON_WEB_PORT:-0}
 # agents' turns are the scripted provider's (a test fixture; a root with no profile has no model provider)
 export SEON_PROFILE=${SEON_PROFILE:-scripted}
 runner() { HOME=$ROOT/target/home JOLT_PWD=$ROOT "$JOLT" -A:test run -m test-runner "$@" }
+# the full run measures each cost proof at the sizes it states (:seon.config.proofs/cost-max-n)
+[[ " $* " == *" --all "* ]] && export SEON_COST_MAX_N=100000
 case ${1:-} in
   --plan|--shard|--store-steps) runner "$@"; exit $? ;;
   --prove) WHAT=$2 OUT=$3; shift 3 ;;

@@ -255,10 +255,10 @@
         (is (= {:ok true} @p))))))
 
 (def ^:private fake-members
-  "Protocol members a refusal must not carry: an eval item's, a test count's, a merge's."
+  "Protocol members a refused answer must not carry: an eval item's, a test count's, a merge's."
   #{:id :tag :ok :merged? :pass :fail :error :reports :applied :conflicts})
 
-(deftest a-refusal-is-the-one-error-map
+(deftest a-refused-answer-is-the-one-error-map
   ;; a request no live agent can take, a function root refuses, and a write the writer refuses
   ;; each answer the one error map (seon.contract/error) and nothing beside it: no eval item
   ;; with id -1, no test count, no :ok or :merged? false
