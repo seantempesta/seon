@@ -55,7 +55,7 @@
         (is (= "8955050" (:printed (first items))) (pr-str items))
         (is (= {'seon.profile-test/branch 1 'seon.profile-test/leaf 300}
                (into {} (map (juxt :var :calls)) fns)))
-        (is (= fns (:fns (:seon.cluster.eval/record (first (repl/record-tx :a "r" items nil))))))))))
+        (is (= fns (:fns (:seon.cluster.eval/record (first (repl/record-tx {:seon.agent/key "b/a" :seon.agent/id :a} "r" items nil))))))))))
 
 ;; the system's clock read directly (macOS clock_gettime_nsec_np, CLOCK_UPTIME_RAW = 8), the
 ;; one every process on the machine reads

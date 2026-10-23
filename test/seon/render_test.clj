@@ -331,7 +331,7 @@
             b {:commit (d/commit-id @conn) :task "t/x" :attempt "t/x#1" :turn 1 :max-turns 1 :origin :outside
                :observed {:results {} :reds [] :run-errors []
                           :reasons (vec (for [i (range 360)] {:reason :contract-gap :symbol (symbol "app.m" (str "f" i))}))}}
-            _ (d/transact conn [{:seon.turn/id "t/x#1/read-1" :seon.turn/attempt "t/x#1" :seon.turn/n 1
+            _ (d/transact conn [{:seon.turn/id "t/x#1/read-1" :seon.turn/attempt {:seon.attempt/id "t/x#1"} :seon.turn/n 1
                                  :seon.turn/origin :outside :seon.turn/basis b}])
             db @conn
             page (zoom db :a14 {:seon.attempt/id "t/x#1" :seon.attempt/task "t/x" :seon.attempt/agent :a14 :seon.attempt/status :running}
@@ -435,7 +435,7 @@
   ;; live (:printed) or recorded (:shown), for an error too: never its error map printed as text
   (let [e (seon.contract/error :seon.agent/eval-error 'seon.repl/eval-code "Divide by zero" {:class "ArithmeticException"})
         it {:id 1 :tag :err :form "(/ 1 0)" :err e :printed "ArithmeticException: Divide by zero" :ms 0.1}
-        rec (some :seon.cluster.eval/record (seon.repl/record-tx :a1 "r-1" [it] nil))]
+        rec (some :seon.cluster.eval/record (seon.repl/record-tx {:seon.agent/key "b/a1" :seon.agent/id :a1} "r-1" [it] nil))]
     (doseq [[what x] [["live" it] ["recorded" rec]]
             :let [html (h/html (ui/history-row x {}))]]
       (is (str/includes? html "Divide by zero") what)
@@ -657,7 +657,7 @@
                      :reasons [{:reason :proof-red :symbol 'demo-test/f-test}] :will-merge {}}
            turn! (fn [n obs reply calls usage]
                    (let [b {:commit (d/commit-id @conn) :task "demo/f" :attempt "demo/f#1" :turn n :max-turns 8 :origin :model :observed obs}]
-                     (d/transact conn [(merge usage {:seon.turn/id (str "demo/f#1/" n) :seon.turn/attempt "demo/f#1" :seon.turn/n n
+                     (d/transact conn [(merge usage {:seon.turn/id (str "demo/f#1/" n) :seon.turn/attempt {:seon.attempt/id "demo/f#1"} :seon.turn/n n
                                                      :seon.turn/origin :model :seon.turn/basis b :seon.turn/calls calls :seon.turn/reply reply
                                                      :seon.turn/forms (count calls) :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 2300
                                                      :seon.turn/finish "tool_calls" :seon.turn/model "deepseek-v4-flash"})])
@@ -666,17 +666,17 @@
            u (fn [p c hit] (seon.turn/usage {:prompt-tokens p :completion-tokens c :cache-hit-tokens hit :cache-miss-tokens (- p hit)}))]
        ;; turn 0's call evaluated two forms, each with its thought, as seon.repl/record-tx records
        ;; them in the agent's process (pid 77); and the owner evaluated one form from the page
-       (d/transact conn (seon.repl/record-tx :a3 "a3-77-1000" [{:id 4 :tag :ret :form "(in-ns 'demo)" :lead ";; work in demo" :printed "#namespace[demo]" :ms 0.2}
+       (d/transact conn (seon.repl/record-tx {:seon.agent/key "b/a3" :seon.agent/id :a3} "a3-77-1000" [{:id 4 :tag :ret :form "(in-ns 'demo)" :lead ";; work in demo" :printed "#namespace[demo]" :ms 0.2}
                                                               {:id 5 :tag :ret :form "(defn f [x] (* 3 x))" :lead ";; triple, as the plan says" :printed "#'demo/f" :ms 1.1}] nil))
        (turn! 0 observed "I will make f triple."
               [{:id "call-0" :code ";; work in demo\n(in-ns 'demo)\n;; triple, as the plan says\n(defn f [x] (* 3 x))" :items ["a3-77-1000/4" "a3-77-1000/5"] :thinking "redefine f, then the proof runs"
                 :evals (seon.context/evaluations-text [{:id 5 :tag :ret :form "(defn f [x] (* 3 x))" :printed "#'demo/f"}])}]
               (assoc (u 3900 120 0) :seon.turn/reasoning "The plan says triple; the proof checks (f 2) is 6."))
-       (d/transact conn (seon.repl/record-tx :a3 "a3-77-2000" [{:id 6 :tag :ret :form "(f 2)" :printed "6" :ms 0.1 :origin :ui}] nil))
+       (d/transact conn (seon.repl/record-tx {:seon.agent/key "b/a3" :seon.agent/id :a3} "a3-77-2000" [{:id 6 :tag :ret :form "(f 2)" :printed "6" :ms 0.1 :origin :ui}] nil))
        (d/transact conn (program "(defn f \"Triples.\" [x] (* 3 x))"))
        ;; the owner's message as seon.turn/basis! takes it: the fact root wrote on main, written on
        ;; the branch before the turn's commit, and named by id in the basis
-       (d/transact conn [{:seon.message/id "m-1" :seon.message/from "owner" :seon.message/to "demo/f#1" :seon.message/body "check demo/g too"}])
+       (d/transact conn [{:seon.message/id "m-1" :seon.message/from "owner" :seon.message/to {:seon.attempt/id "demo/f#1"} :seon.message/body "check demo/g too"}])
        (turn! 1 (assoc observed :results {'demo-test/f-test :pass} :reds [] :reasons [] :will-merge {:changed ['demo/f]}
                        :message-ids ["m-1"])
               "Done; checking g." [{:id "call-1" :code "(my.turn/wait)" :evals ""}] (u 4400 40 3800))

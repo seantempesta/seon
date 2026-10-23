@@ -107,7 +107,7 @@
   (testing "the reply item carries the map, and the stored eval record holds it as data"
     (let [em (agent/error-map (ArithmeticException. "Divide by zero"))
           it (first (repl/fold [{"status" ["eval-error"] :tag :err :err em :printed (:seon.error/message em) :id 0 :form "(/ 1 0)"}]))
-          rec (some :seon.cluster.eval/record (repl/record-tx :a1 "r1" [it] nil))]
+          rec (some :seon.cluster.eval/record (repl/record-tx {:seon.agent/key "b/a1" :seon.agent/id :a1} "r1" [it] nil))]
       (is (= em (:err it)))
       (is (= "Divide by zero" (:printed it)))
       (is (= em (:error rec)) "grouped by type and producer without parsing text")))
@@ -140,7 +140,7 @@
 ;; ---- root's observations: deaths, stalls, platform errors, effect errors ----------------
 
 (defn- api [& [view]]
-  (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 64)
+  (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 64)
                     :view (merge {:agents {}} view) :graph (promise)
                     :system (doto (promise) (deliver {:procs {} :conns [] :parts {[:proc :api] [{:proc 'seon.root/api-proc} nil]}}))}))
 
@@ -251,7 +251,7 @@
                                                                   :seon.error/message (str "Unable to resolve symbol: s" (char (+ 97 (mod i 26))) i) :class "x"}
                                                                  :eval {:agent :a1 :task "t/x0"} 100)))
         [_ tx] (err/flush-tx f @conn)
-        att (fn [tid aid m] (merge {:seon.attempt/id aid :seon.attempt/task [:seon.task/id tid] :seon.attempt/boot "b" :seon.attempt/agent :a1
+        att (fn [tid aid m] (merge {:seon.attempt/id aid :seon.attempt/task [:seon.task/id tid] :seon.attempt/boot "b" :seon.attempt/agent {:seon.agent/key "b/a1" :seon.agent/id :a1}
                                     :seon.attempt/start-ms 1 :seon.attempt/end-ms 2 :seon.attempt/branch :b :seon.attempt/max-turns 2} m))
         task (fn [tid] {:seon.task/id tid :seon.task/ns 't :seon.task/name (subs tid 2) :seon.task/plan "p" :seon.task/execution :running
                         :seon.task/branch :b :seon.task/kind :work})]
@@ -291,7 +291,7 @@
       (let [behind (contract/error :seon.merge/behind 'seon.writer/merge-branch "main changed 2 key(s)" {:behind 2})
             db2 (:db-after (d/with db [{:seon.task/id "t/m" :seon.task/ns 't :seon.task/name "m" :seon.task/plan "p" :seon.task/execution :running
                                          :seon.task/branch :b :seon.task/kind :merge}
-                                        {:seon.attempt/id "t/m#1" :seon.attempt/task [:seon.task/id "t/m"] :seon.attempt/boot "b" :seon.attempt/agent :a2
+                                        {:seon.attempt/id "t/m#1" :seon.attempt/task [:seon.task/id "t/m"] :seon.attempt/boot "b" :seon.attempt/agent {:seon.agent/key "b/a2" :seon.agent/id :a2}
                                          :seon.attempt/start-ms 1 :seon.attempt/end-ms 9 :seon.attempt/branch :b :seon.attempt/max-turns 2
                                          :seon.attempt/status :behind :seon.attempt/unmerged ["[:var app/g]"]
                                          :seon.attempt/conflicts [{:seon.merge/key [:var 'app/f] :seon.merge/kind :both-modified}]
@@ -386,7 +386,7 @@
   (ts/test-branch! (fn [_ conn]
     (d/transact conn [{:seon.task/id "t/a" :seon.task/ns 't :seon.task/name "a" :seon.task/plan "p" :seon.task/execution :running
                        :seon.task/branch :b :seon.task/kind :work :seon.task/proofs #{'app.t/a-test}}])
-    (d/transact conn [{:seon.attempt/id "t/a#1" :seon.attempt/task [:seon.task/id "t/a"] :seon.attempt/boot "b" :seon.attempt/agent :a1
+    (d/transact conn [{:seon.attempt/id "t/a#1" :seon.attempt/task [:seon.task/id "t/a"] :seon.attempt/boot "b" :seon.attempt/agent {:seon.agent/key "b/a1" :seon.agent/id :a1}
                        :seon.attempt/start-ms 1 :seon.attempt/end-ms 2 :seon.attempt/branch :b :seon.attempt/max-turns 2
                        :seon.attempt/status :ended :seon.attempt/outcome :red
                        :seon.attempt/failures {'app.t/a-test [{:type :fail :expected "1" :actual "2"}]
@@ -399,7 +399,7 @@
   (let [db (:db-after (d/with (seeded 1 5)
                               [{:seon.task/id "t/l" :seon.task/ns 't :seon.task/name "l" :seon.task/plan "p" :seon.task/execution :running
                                 :seon.task/branch :l :seon.task/kind :work}
-                               {:seon.attempt/id "t/l#1" :seon.attempt/task [:seon.task/id "t/l"] :seon.attempt/boot "b" :seon.attempt/agent :a9
+                               {:seon.attempt/id "t/l#1" :seon.attempt/task [:seon.task/id "t/l"] :seon.attempt/boot "b" :seon.attempt/agent {:seon.agent/key "b/a9" :seon.agent/id :a9}
                                 :seon.attempt/start-ms 1 :seon.attempt/end-ms 9 :seon.attempt/branch :l :seon.attempt/max-turns 2
                                 :seon.attempt/status :lost}]))
         rows (get-in (problems/report db) [:classes :dead :rows])]
@@ -413,7 +413,7 @@
   (let [att (fn [extra] (:db-after (d/with (seeded 1 5)
                                            [{:seon.task/id "t/u" :seon.task/ns 't :seon.task/name "u" :seon.task/plan "p" :seon.task/execution :running
                                              :seon.task/branch :u :seon.task/kind :merge}
-                                            (merge {:seon.attempt/id "t/u#1" :seon.attempt/task [:seon.task/id "t/u"] :seon.attempt/boot "b" :seon.attempt/agent :a9
+                                            (merge {:seon.attempt/id "t/u#1" :seon.attempt/task [:seon.task/id "t/u"] :seon.attempt/boot "b" :seon.attempt/agent {:seon.agent/key "b/a9" :seon.agent/id :a9}
                                                     :seon.attempt/start-ms 1 :seon.attempt/end-ms 9 :seon.attempt/branch :u :seon.attempt/max-turns 2
                                                     :seon.attempt/status :merged :seon.attempt/deferred ['seon.root-test/boots 'seon.check-test/clean]}
                                                    extra)])))

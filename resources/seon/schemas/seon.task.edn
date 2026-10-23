@@ -104,7 +104,7 @@
                     [:seon.task/branch :seon.task/branch]]
  :seon.attempt/pulled [:map [:seon.attempt/id :seon.attempt/id] [:seon.attempt/task [:map [:seon.task/id :seon.task/id]]]
                        [:seon.attempt/status :seon.attempt/status] [:seon.attempt/boot :string]
-                       [:seon.attempt/agent {:optional true} :keyword] [:seon.attempt/start-ms :int]
+                       [:seon.attempt/agent {:optional true} [:map [:seon.agent/id :keyword]]] [:seon.attempt/start-ms :int]
                        [:seon.attempt/branch :keyword] [:seon.attempt/max-turns pos-int?]]
  :seon.reconcile/done-input [:map {:closed true}
                              [:proofs :seon.task/proofs] [:results :seon.proof/results]

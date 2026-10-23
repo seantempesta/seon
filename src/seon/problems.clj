@@ -275,7 +275,7 @@
 (def ^:private attempt-pull
   "What a problem row reads of an attempt: one pull (its conflicts are read only when it has
   them)."
-  [:seon.attempt/id :seon.attempt/status :seon.attempt/outcome :seon.attempt/reason :seon.attempt/end-ms :seon.attempt/agent
+  [:seon.attempt/id :seon.attempt/status :seon.attempt/outcome :seon.attempt/reason :seon.attempt/end-ms {:seon.attempt/agent [:seon.agent/id]}
    :seon.attempt/unmerged :seon.attempt/failures :seon.attempt/costs :seon.attempt/error :seon.attempt/waste :seon.attempt/task-conflicts
    :seon.attempt/deferred :seon.attempt/gate-unread {:seon.attempt/deferred-results [:seon.proof/test :seon.proof/status]}
    {:seon.attempt/task [:db/id :seon.task/id :seon.task/ns :seon.task/proofs]}
@@ -314,7 +314,7 @@
         status (:seon.attempt/status p)
         conflicts (mapv pm/conflict-value (:seon.attempt/conflicts p))
         unmerged (vec (sort (:seon.attempt/unmerged p)))
-        base {:attempt aid :task (get-in p [:seon.attempt/task :seon.task/id]) :agent (:seon.attempt/agent p) :status status
+        base {:attempt aid :task (get-in p [:seon.attempt/task :seon.task/id]) :agent (get-in p [:seon.attempt/agent :seon.agent/id]) :status status
               :outcome (:seon.attempt/outcome p) :reason (:seon.attempt/reason p) :end-ms (:seon.attempt/end-ms p)
               :open? (not (task-done? db te)) :owner-ns (get-in p [:seon.attempt/task :seon.task/ns]) :producer nil :proofs []
               :answered-by (get-in ans [:from aid] []) :at-ms (:seon.attempt/end-ms p)}

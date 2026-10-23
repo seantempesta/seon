@@ -75,7 +75,7 @@
  :seon.test/result [:map [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]
  ;; root's API
  :seon.root/sys [:map [:graph :any] [:ext :seon.host/chan] [:conn :seon.host/conn]]
- :seon.root/api-state [:map [:agents :map] [:pending :map] [:rid :int]]
+ :seon.root/api-state [:map [:agents :map] [:pending :map] [:rid :int] [:boot :string]]
  :seon.root/request [:map [:op :keyword]]
  ;; root's system declaration (resources/seon/system.edn, seon.system): procs by id, effect
  ;; kinds, the conns between them

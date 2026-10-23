@@ -32,7 +32,7 @@
 
 (def ^:private explicit-attempt-pull
   "The attempt pull before the wildcard (2026-10-22, research row 20): what the reader read."
-  [:seon.attempt/id {:seon.attempt/task [:seon.task/id]} :seon.attempt/status :seon.attempt/boot :seon.attempt/agent
+  [:seon.attempt/id {:seon.attempt/task [:seon.task/id]} :seon.attempt/status :seon.attempt/boot {:seon.attempt/agent [:seon.agent/id]}
    :seon.attempt/pid :seon.attempt/start-ms :seon.attempt/end-ms :seon.attempt/branch :seon.attempt/model
    :seon.attempt/max-turns :seon.attempt/outcome :seon.attempt/reason :seon.attempt/turns :seon.attempt/model-calls
    :seon.attempt/tokens :seon.attempt/merged-t :seon.attempt/basis-t :seon.attempt/plan :seon.attempt/uncontracted

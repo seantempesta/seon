@@ -475,7 +475,7 @@
                                              "   :leads (mapv #(:lead (:seon.cluster.eval/record (datahike.api/entity db [:seon.cluster.eval/id %]))) (:items (first (:seon.turn/calls t))))})")
                                         {:op :eval :agent "root"
                                          :code (str "(datahike.api/q '[:find ?id ?f ?to ?b :where [?m :seon.message/id ?id] [?m :seon.message/from ?f]"
-                                                    " [?m :seon.message/to ?to] [?m :seon.message/body ?b]] @(:conn sys))")}]
+                                                    " [?m :seon.message/to ?r] [?r :seon.attempt/id ?to] [?m :seon.message/body ?b]] @(:conn sys))")}]
                                        {:sets [":seon.config.ai/script=seon.fixtures/thinking-call"]})
         end (edn/read-string {:default tagged-literal} (:printed end))
         {:keys [calls ids committed leads]} (edn/read-string {:default tagged-literal} (:printed turn))

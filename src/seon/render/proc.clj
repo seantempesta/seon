@@ -275,7 +275,7 @@
                                          :previous (get-in (peek rows) [:seon.turn/basis :observed :results]))
                             c (assoc :context c)))
                (cond-> cache c (assoc tid c))]))
-          [[] cache] (sort (d/q '[:find [?e ...] :in $ ?a :where [?e :seon.turn/attempt ?a]] db aid))))
+          [[] cache] (sort (d/q '[:find [?e ...] :in $ ?a :where [?r :seon.attempt/id ?a] [?e :seon.turn/attempt ?r]] db aid))))
 
 (defn turn-href
   "Where the turn tid of view's agent serves its whole request (seon.web's route)."
@@ -519,7 +519,7 @@
         detail (if err (render/ai r {}) (:text (render/printed r nil)))]
     (when form
       (let [it (cond-> {:id 0 :tag (if err :err :ret) :form form :origin :ui :printed detail} err (assoc :err r))]
-        (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx :root (str "root-ui-" (profile/now-ns)) [it] nil)}}
+        (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx {:seon.root/id :root} (str "root-ui-" (profile/now-ns)) [it] nil)}}
                               :route [:render :answers] :tag [:web-record]})))
     (ask-state (on-event st {:type :ui :call (str v) :agent agent :at-ms (System/currentTimeMillis) :error err :detail detail}) o)))
 

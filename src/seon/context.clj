@@ -429,7 +429,7 @@
   "The model turns of attempt on db before turn n, oldest first."
   {:malli/schema [:=> [:cat :seon.host/db :seon.attempt/id :int] [:vector :map]]}
   [db attempt n]
-  (->> (d/q '[:find ?e ?k :in $ ?a ?n :where [?e :seon.turn/attempt ?a] [?e :seon.turn/origin :model] [?e :seon.turn/n ?k] [(< ?k ?n)]]
+  (->> (d/q '[:find ?e ?k :in $ ?a ?n :where [?r :seon.attempt/id ?a] [?e :seon.turn/attempt ?r] [?e :seon.turn/origin :model] [?e :seon.turn/n ?k] [(< ?k ?n)]]
             db attempt n)
        (sort-by second) (mapv #(turn-record db (first %)))))
 
@@ -515,6 +515,6 @@
   :turn}, or nil. The page shows it; nothing stores the text."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe [:map [:text :string] [:origin :keyword] [:turn :string]]]]}
   [db attempt]
-  (when-let [e (last (sort (d/q '[:find [?e ...] :in $ ?a :where [?e :seon.turn/attempt ?a] [?e :seon.turn/basis _]] db attempt)))]
+  (when-let [e (last (sort (d/q '[:find [?e ...] :in $ ?a :where [?r :seon.attempt/id ?a] [?e :seon.turn/attempt ?r] [?e :seon.turn/basis _]] db attempt)))]
     (let [r (turn-record db e)]
       {:text (turn-text db e) :origin (:seon.turn/origin r) :turn (:seon.turn/id r)})))

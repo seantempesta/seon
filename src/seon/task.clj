@@ -134,16 +134,55 @@
   {:malli/schema [:=> [:cat :seon.task/id pos-int?] :seon.attempt/id]}
   [id n] (str id "#" n))
 
+(defn agent-key
+  "Agent id's key in root's boot: its entity's identity (:seon.agent/key), one per agent per
+  boot, since an id like :a3 starts again each boot."
+  {:malli/schema [:=> [:cat :string :keyword] :string]}
+  [boot id] (str boot "/" (name id)))
+
+(def ^:private agent-attrs
+  "Each member of root's view of an agent and the attribute recording it (agent-tx)."
+  {:status :seon.agent/status :pid :seon.agent/pid :mem-mb :seon.agent/mem-mb :running :seon.agent/running
+   :task :seon.agent/description :branch :seon.agent/branch :forked-ms :seon.agent/forked-ms :ended-ms :seon.agent/ended-ms})
+
+(defn agent-tx
+  "What root observes of agent id in its boot, as facts on the agent's entity: the root that
+  started it, and each member m holds of root's view (status, pid, memory, the form running,
+  its task's id or description, branch, when it forked and ended); a member m holds as nil is
+  no longer true, and retracted (the form running, once it returned). Root writes it when its
+  view of the agent changes (seon.root/record-agents)."
+  {:malli/schema [:=> [:cat :string :keyword :map] [:vector :any]]}
+  [boot id m]
+  (let [k (agent-key boot id)
+        v (fn [member x] (case member :running (:form x) (:mem-mb :forked-ms) (double x) x))]
+    (into [(into {:seon.agent/key k :seon.agent/id id :seon.agent/root [:seon.root/id :root]}
+                 (for [[member a] agent-attrs :let [x (some->> (get m member) (v member))] :when (some? x)] [a x]))]
+          (for [[member a] agent-attrs :when (and (contains? m member) (nil? (get m member)))]
+            [:db.fn/retractAttribute [:seon.agent/key k] a]))))
+
+(defn message-tx
+  "Message mid from from to run aid, its body: the one message fact, written by root on main
+  and by the turn that takes it on its branch (one entity: both ids are content ids)."
+  {:malli/schema [:=> [:cat :string :string [:maybe :seon.attempt/id] :any] [:vector :map]]}
+  [mid from aid body]
+  ;; the run its own entity map: only a top-level map takes its content id (Datahike's content-tempids)
+  (cond-> [(cond-> {:seon.message/id mid :seon.message/from from :seon.message/body body}
+             aid (assoc :seon.message/to "run"))]
+    aid (conj {:db/id "run" :seon.attempt/id aid})))
+
 (defn attempt-start-tx
-  "An attempt begins: root observed it spawn its agent (nil: root refused the spawn, and no
-  agent exists), given the task's accumulated plan."
-  {:malli/schema [:=> [:cat :seon.attempt/id :seon.task/id :string [:maybe :keyword] :seon.task/env :int :seon.task/plan] [:vector :map]]}
+  "An attempt begins: root observed it spawn its agent (its key, seon.task/agent-key; nil: root
+  refused the spawn, and no agent exists), given the task's accumulated plan."
+  {:malli/schema [:=> [:cat :seon.attempt/id :seon.task/id :string [:maybe :string] :seon.task/env :int :seon.task/plan] [:vector :map]]}
   [aid task boot agent {:keys [branch model max-turns]} start-ms plan]
+  (filterv some?
   [(cond-> {:seon.attempt/id aid :seon.attempt/task [:seon.task/id task] :seon.attempt/status :running
             :seon.attempt/boot boot :seon.attempt/start-ms start-ms
             :seon.attempt/branch branch :seon.attempt/max-turns max-turns :seon.attempt/plan plan}
-     agent (assoc :seon.attempt/agent agent)
-     model (assoc :seon.attempt/model model))])
+     agent (assoc :seon.attempt/agent "agent")
+     model (assoc :seon.attempt/model model))
+   ;; the agent its own entity map, so it takes its content id (Datahike's content-tempids)
+   (when agent {:db/id "agent" :seon.agent/key agent})]))
 
 (defn status-tx
   "Move attempt aid from status `from` to `to` (Datahike's compare-and-swap: a racing
@@ -267,7 +306,7 @@
     (some-> (own id) (assoc :seon.task/accumulated (accumulate own id)) (vary-meta assoc :seon.render/schema :seon.task/task))))
 
 (def ^:private attempt-pull
-  '[* {:seon.attempt/task [:seon.task/id]}
+  '[* {:seon.attempt/task [:seon.task/id]} {:seon.attempt/agent [:seon.agent/id]}
     {:seon.attempt/results [:seon.proof/test :seon.proof/status]}
     {:seon.attempt/deferred-results [:seon.proof/test :seon.proof/status]}
    {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
@@ -280,6 +319,7 @@
     (cond-> (-> a (dissoc :db/id :seon.attempt/branch :seon.attempt/model :seon.attempt/max-turns :seon.attempt/results
                           :seon.attempt/uncontracted :seon.attempt/conflicts :seon.attempt/unmerged)
                 (update :seon.attempt/task :seon.task/id)
+                (cond-> (:seon.attempt/agent a) (update :seon.attempt/agent :seon.agent/id))
                 (assoc :seon.attempt/env {:branch branch :model model :max-turns max-turns}))
       results (assoc :seon.attempt/results (into {} (map (juxt :seon.proof/test :seon.proof/status)) results))
       uncontracted (assoc :seon.attempt/uncontracted (set uncontracted))

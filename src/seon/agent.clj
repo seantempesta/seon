@@ -97,6 +97,12 @@
   []
   (inbox)
   (let [[old _] (swap-vals! state assoc :inbox [])] (:inbox old)))
+
+(defn taken!
+  "The first n messages of the inbox leave it: their reader recorded them (seon.turn/basis!
+  takes them once their facts are committed on this branch). nil."
+  {:malli/schema [:=> [:cat nat-int?] :nil]}
+  [n] (swap! state update :inbox #(vec (drop n %))) nil)
 (defn send-message
   "Send body to the agents tos (ids); root delivers it by id. nil."
   {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
@@ -615,6 +621,12 @@
       (alias 'str 'clojure.string))
     nsx))
 
+(defn- key-of
+  "Agent id's key (seon.task/agent-key) in the boot of the root that forked it, as main held it
+  at the fork (its root's :seon.root/boot)."
+  {:malli/schema [:=> [:cat :seon.host/db :keyword] :string]}
+  [db id] (task/agent-key (:seon.root/boot (d/pull db [:seon.root/boot] [:seon.root/id :root])) id))
+
 (declare clone!)
 
 (defn handle!
@@ -700,7 +712,7 @@
                       (pdb/after-fork! (:cfg r))
                       (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
                       (let [store-conn (d/connect (assoc (:cfg r) :branch (:branch m)))]
-                        (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn (sock/conn fd) :mode :agent :tx-seq 0
+                        (swap! state assoc :id (:agent m) :key (key-of @store-conn (:agent m)) :branch (:branch m) :fd fd :conn (sock/conn fd) :mode :agent :tx-seq 0
                                :pending clojure.lang.PersistentQueue/EMPTY :fx-pending {}
                                :store-conn store-conn :db @store-conn))
                       (let [unwatched (sock/signal-at-input! fd)]
@@ -747,7 +759,7 @@
      ;; :base is the branch's merge base with main: a new branch's is the image (main as it
      ;; forked); a resumed one's is older than main, and comparing against main's head would
      ;; read main's later changes as the branch's (seon.program/divergence, changed-vars)
-     (reset! state (cond-> {:id id :branch branch :task task :attempt attempt :fd fd :conn c :db @store-conn
+     (reset! state (cond-> {:id id :key (key-of @store-conn id) :branch branch :task task :attempt attempt :fd fd :conn c :db @store-conn
                    :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :pending clojure.lang.PersistentQueue/EMPTY :inbox [] :tx-seq 0 :mode :agent

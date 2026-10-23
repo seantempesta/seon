@@ -147,13 +147,13 @@
   message as it was sent."
   {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id :int :int :seon.turn/origin :map :boolean] :seon.turn/basis]}
   [task attempt turn max-turns origin observed take?]
-  (let [msgs (if take? (agent/messages) (agent/inbox))
+  (let [msgs (agent/inbox)
         {facts true others false} (if take? (group-by (comp some? :id) msgs) {false msgs})
         _ (when (seq facts)
-            (agent/transact! (vec (for [{:keys [id from to body]} facts]
-                                    (cond-> {:seon.message/id id :seon.message/from (name from) :seon.message/body body}
-                                      to (assoc :seon.message/to to))))))
+            (agent/transact! (into [] (mapcat (fn [{:keys [id from to body]}] (task/message-tx id (name from) to body))) facts)))
         _ (agent/commit!)
+        ;; taken once their facts are committed: a refused write leaves them in the inbox
+        _ (when take? (agent/taken! (count msgs)))
         items (when (or (= :outside origin) (zero? turn)) (last-evals))
         ev (when (seq items) (context/evaluations-text items))]
     (cond-> {:commit (d/commit-id (agent/db)) :task task :attempt attempt :turn turn :max-turns max-turns
@@ -201,7 +201,8 @@
         ;; what the model read, as its basis (seon.context/render makes the text from it), what
         ;; it answered and how it stopped, what its forms evaluated to as the next turns show it,
         ;; and where the turn's time went as this agent saw it
-        (agent/transact! [(cond-> (merge (usage c) {:seon.turn/id (str attempt "/" turn) :seon.turn/attempt attempt :seon.turn/n turn
+        (agent/transact! [{:db/id "run" :seon.attempt/id attempt}
+                          (cond-> (merge (usage c) {:seon.turn/id (str attempt "/" turn) :seon.turn/attempt "run" :seon.turn/n turn
                                    :seon.turn/origin :model :seon.turn/basis basis
                                    :seon.turn/calls (mapv (fn [{:keys [id code thinking items]}]
                                                             (cond-> {:id id :code code :evals (context/evaluations-text items) :items (vec (keep :record items))}
@@ -243,7 +244,8 @@
         basis (basis! task attempt n 1 :outside (assoc (observed obs) :merge? true) take?)
         text (context/reader-text (:messages (context/render (agent/db) basis)))]
     ;; the read is a turn of this attempt, as a model turn is: what it was built from and what it cost
-    (agent/transact! [{:seon.turn/id (str attempt "/read-" n) :seon.turn/attempt attempt :seon.turn/n n
+    (agent/transact! [{:db/id "run" :seon.attempt/id attempt}
+                      {:seon.turn/id (str attempt "/read-" n) :seon.turn/attempt "run" :seon.turn/n n
                        :seon.turn/origin :outside :seon.turn/basis basis
                        :seon.turn/split (cond-> {:context-ms (long (profile/ms-since t0))} tests-ms (assoc :tests-ms tests-ms))}])
     text))
