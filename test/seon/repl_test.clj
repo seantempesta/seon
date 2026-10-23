@@ -285,10 +285,6 @@
   "How many times the ticks proof's form ran."
   (atom 0))
 
-(def spin-n
-  "How many loops the reply proof's form spins, times 1000 each run."
-  (atom 1))
-
 (deftest an-evals-record-carries-its-ticks
   ;; task seon.turn/a-turn-shows-its-cost-against-its-budget (1): the work a form did is
   ;; recorded once, when it ran (jolt.host/ticks-of), beside :ms and :alloc-bytes, and the
@@ -314,20 +310,24 @@
           (is (= 1 @evals-run) "and runs the form no more than once")))
       (finally (reset! agent/state old)))))
 
-(deftest a-reply-carries-no-cost-the-model-would-read
-  ;; owner, 2026-10-23: no cost numbers in the context or the reply; a number that moves between
-  ;; runs breaks the byte-stable prefix the provider caches. Two runs of one form that do very
-  ;; different work: their costs differ (recorded), their replies are the same bytes.
+(deftest an-evals-cost-is-one-fact-shown-the-same-in-every-later-turn
+  ;; owner, 2026-10-23: the model sees each eval's cost, stable across turns so the prompt cache
+  ;; holds. The reply carries the value the record stores, taken once when the form ran; an eval of
+  ;; a later turn, doing far more work, leaves the earlier one's rendered cost byte for byte.
   (let [old @agent/state
-        run! (fn [] (let [answers (volatile! [])]
-                      (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
-                      ((repl/handler) {"op" "eval" "code" "(do (dotimes [_ (swap! seon.repl-test/spin-n * 1000)]) :done)" :reply #(vswap! answers conj %)})
-                      (repl/fold @answers)))]
+        run! (fn [code] (let [answers (volatile! [])]
+                          (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
+                          ((repl/handler) {"op" "eval" "code" code :reply #(vswap! answers conj %)})
+                          (first (repl/fold @answers))))
+        record #(-> (repl/record-tx :a "r" [(assoc % :id 0)] nil) first :seon.cluster.eval/record)
+        shown #(pr-str (h/html (:seon.render/html (ui/history-row (record %) {}))))]
     (try
-      (reset! spin-n 1)
-      (let [a (run!) b (run!)]
-        (is (< (* 10 (:ticks (:cost (first a)))) (:ticks (:cost (first b)))) "the second run did far more work, and the record says so")
-        (is (= (pr-str (repl/reply-items a)) (pr-str (repl/reply-items b))) "yet the replies are byte-identical")
-        (is (not-any? #(contains? % :cost) (repl/reply-items a)))
-        (is (every? #(contains? (first (repl/record-tx :a "r" [(assoc % :id 0)] nil)) :seon.cluster.eval/record) a)))
+      (let [turn-1 (run! "(reduce + (range 100))")
+            at-1 (shown turn-1)
+            turn-2 (run! "(reduce + (range 3000000))")]
+        (is (< (:ticks (:cost turn-1)) (:ticks (:cost turn-2))) "the later eval did more work")
+        (is (not= at-1 (shown turn-2)) "and its cost shows differently, so the render is sensitive to it")
+        (is (= (select-keys (:cost turn-1) [:ticks :ms :alloc-bytes]) (select-keys (record turn-1) [:ticks :ms :alloc-bytes]))
+            "the reply's cost is the value the record stores")
+        (is (= at-1 (shown turn-1)) "turn 1's rendered cost is the same bytes after turn 2 ran"))
       (finally (reset! agent/state old)))))

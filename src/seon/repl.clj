@@ -182,10 +182,10 @@
   jolt.host/ticks-of, read in its own finally so a form that threw is counted) and the
   form's costliest contracted functions (each with its exact calls and estimated ms:
   seon.profile), measured around the per-form eval fn. They are recorded once, when the
-  form ran, under the answer's one key :cost: a fact for the record (record-tx), never part
-  of the reply the model reads (eval-string drops it), so a number that moves between runs
-  cannot break the prefix the provider caches. Reading them costs the functions the form
-  called, not the program's size."
+  form ran, under the answer's one key :cost: the one value the record (record-tx) stores and
+  the reply shows, so it is shown from that fact and never measured again (the provider's
+  prompt cache holds while the context repeats it byte for byte). Reading them costs the
+  functions the form called, not the program's size."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
@@ -371,18 +371,18 @@
           items)
       items)))
 
-(defn eval-items
+(defn eval-string
   "Evaluate code through the one REPL path: the handler and its middleware, its answers
   folded into reply items, each with who asked (:origin, when not the agent's own :model),
   and recorded (an agent's, on its branch). From inside an agent, the turn loop's forms; req
   adds to the request (root's: seon.server's namespace, origin, budget and eval fn; root's
   requests to an agent: agent-step's). The request's entrant boundary: a defect past a
   form's own (a middleware's, the printer's) ends the request with the answers so far and
-  one :err item, its error map, recorded with them. The items still carry each form's :cost
-  (seon.repl/wrap-cost), which the recording takes: a caller that records them itself (root's
-  outside evals) uses this, and eval-string answers without it."
+  one :err item, its error map, recorded with them. Each item carries its form's :cost
+  (seon.repl/wrap-cost): the one value the recording stores and the reply shows, taken once
+  when the form ran, so what the model reads of it never changes in a later turn."
   {:malli/schema [:function [:=> [:cat :string] :seon.agent/items] [:=> [:cat :string :map] :seon.agent/items]]}
-  ([code] (eval-items code {:origin :model}))
+  ([code] (eval-string code {:origin :model}))
   ([code req]
    (let [answers (volatile! [])
          o (:origin req)]
@@ -392,21 +392,6 @@
               (vswap! answers conj {:tag :err :id (dec (:n (swap! agent/state update :n (fnil inc 0))))
                                     :err em :printed (:seon.error/message em) :err-text (nrepl/err->msg e)}))))
      (record! (cond->> (fold @answers) (and o (not= :model o)) (mapv #(assoc % :origin o)))))))
-
-(defn reply-items
-  "Items as the model reads them: without :cost, the work the recording took. A number that
-  moves between runs would break the byte-stable prefix the provider caches (owner,
-  2026-10-23, docs/decisions.md)."
-  {:malli/schema [:=> [:cat :seon.agent/items] :seon.agent/items]}
-  [items]
-  (mapv #(dissoc % :cost) items))
-
-(defn eval-string
-  "eval-items, answered as the reply the model reads (reply-items): the same forms, recorded
-  with their cost, answered without it."
-  {:malli/schema [:function [:=> [:cat :string] :seon.agent/items] [:=> [:cat :string :map] :seon.agent/items]]}
-  ([code] (reply-items (eval-items code)))
-  ([code req] (reply-items (eval-items code req))))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 
