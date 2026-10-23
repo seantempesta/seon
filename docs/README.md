@@ -29,6 +29,7 @@ References and their depths: [references](references.md).
 - [errors](errors.md): the one error map, recorded once per cause; every problem read by one report; overrun charged to its producer.
 - [flow](flow.md): what core.async.flow is on Jolt, the proc contract every component follows, and its hazards. Read [core-async](core-async.md) first: channels, buffers, `go` and fibers as Jolt implements them.
 - [config](config.md): every limit, bound and default is one documented key in one aero file, read through one resolver.
+- [vectors](vector.md): semantic search native to the store: each form, section and plan embedded once in root (llama.cpp), `seon.vector/near` a Datalog function over a two-level C search, fused with the call graph into the context's helpers.
 - [storage](storage.md): one store of Datahike index trees on LMDB; what a commit writes, history, node compression, large values out of line, and collection.
 - [failure points](failure-points.md): every place the outside world can fail, its one catching edge and its declared error; nothing else catches.
 - [health](health.md): the open problems, recorded or derived from the program's facts, read when looked at and never polled; what a branch caused refuses its done.

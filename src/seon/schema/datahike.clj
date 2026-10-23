@@ -37,7 +37,7 @@
    :keyword :db.type/keyword :qualified-keyword :db.type/keyword :boolean :db.type/boolean
    :uuid :db.type/uuid :symbol :db.type/symbol :qualified-symbol :db.type/symbol
    'inst? :db.type/instant :inst :db.type/instant
-   'pos-int? :db.type/long 'nat-int? :db.type/long 'int? :db.type/long})
+   'pos-int? :db.type/long 'nat-int? :db.type/long 'int? :db.type/long 'bytes? :db.type/bytes})
 
 (defn- literal-type
   "The Datahike value type of a Malli literal (`[:= x]`), or nil (Seon's `literal->datahike-value-type`)."

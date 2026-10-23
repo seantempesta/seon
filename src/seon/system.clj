@@ -1,10 +1,11 @@
 (ns seon.system
   "Root's system procs as a declaration (resources/seon/system.edn, read with aero), built
-  into a flow config with the values root's boot step holds. Owner, 2026-10-20: the
-  definition lives in a file and starting is explicit: seon.root/start! builds the graph
-  from it at once, seon.root/apply! re-reads it and update!s only what changed. A built
-  proc is reused while its declaration is equal, so update! (which keeps procs whose
-  :proc, :args and :chan-opts are unchanged, with their queued messages) leaves it running."
+  into a flow config with the values root's boot step holds (DECISIONS, Flow is the one
+  model: every component is a step-fn proc, declared in one file): the definition lives in a
+  file and starting is explicit: seon.root/start! builds the graph from it at once,
+  seon.root/apply! re-reads it and update!s only what changed. A built proc is reused while
+  its declaration is equal, so update! (which keeps procs whose :proc, :args and :chan-opts
+  are unchanged, with their queued messages) leaves it running."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [aero.core :as aero] [clojure.walk :as walk]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.fx :as fx]))
@@ -39,10 +40,10 @@
   {pid (cond-> {:proc (flow/process (step-fn proc)) :args (or args {})} chan-opts (assoc :chan-opts chan-opts))})
 
 (defn- build-fx
-  "One effect kind's owner and workers (seon.fx/procs), its perform resolved."
+  "One effect kind's owner and workers (seon.fx/procs), its perform and open resolved."
   {:malli/schema [:=> [:cat :keyword :map :seon.host/chan] :map]}
   [kind spec back]
-  (fx/procs {kind (cond-> (update spec :perform step-fn) (nil? (:rate spec)) (dissoc :rate))} back))
+  (fx/procs {kind (cond-> (update spec :perform step-fn) (:open spec) (update :open step-fn) (nil? (:rate spec)) (dissoc :rate))} back))
 
 (defn build
   "The flow config of decl under bindings: {:procs :conns :parts}, :parts being each

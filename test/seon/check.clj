@@ -9,7 +9,7 @@
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
   reference (await-ref, seon.await/await-db), never a poll or a deadline."
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.await] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.main :refer [out! shown]]))
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.await] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.vector] [seon.main :refer [out! shown]] [seon.fx] [seon.source] [seon.docs]))
 
 
 ;; ---- the harness: one frame, one verdict, one way to wait ------------------------------
@@ -546,16 +546,21 @@
   declaration (Flow runs :io procs, agent procs included, on the carriers), its two edge
   readers (Flow's error channel, the fork server's socket) and, while the web proc listens,
   the web server's acceptor and sweeper (ring-chez-adapter's, each a future of Jolt's agent
-  pool; task seon.web/web-server-threads-are-joined-at-stop)."
+  pool; task seon.web/web-server-threads-are-joined-at-stop), and :foreign, threads outside Jolt's
+  roster: the model's (:seon.config.vector/model-threads) while an :embed worker holds it."
   ([] {:roster {"main" 1 "jolt-shutdown" 1 "jolt-timer" 1 "jolt-io-poller" 1 "jolt-carrier" (fiber-carriers)}
        :gc-sweepers (seon.config/value :seon.config.root/gc-sweepers)})
   ([sys]
-   (let [procs (vals (:procs @(get-in sys [:bindings :system])))
+   (let [pm (:procs @(get-in sys [:bindings :system]))
+         procs (vals pm)
          mixed (count (filter #(= :mixed (or (:workload (clojure.core.async.flow.spi/describe (:proc %))) :mixed)) procs))
-         web? (true? (get-in (c/state sys) [:web :listening]))]
-     (update (declared-threads) :roster merge
-             (cond-> {"async-mixed" mixed "seon-flow-errors" 1 "seon-fs-events" 1}
-               web? (assoc "clojure-agent-pool" 2))))))
+         web? (true? (get-in (c/state sys) [:web :listening]))
+         ;; an :embed worker holding the model: Metal's own threads, outside Jolt's roster
+         model? (some #(get-in (ping sys %) [:state :open?]) (filter #(= "fx.embed" (namespace %)) (keys pm)))]
+     (cond-> (update (declared-threads) :roster merge
+                     (cond-> {"async-mixed" mixed "seon-flow-errors" 1 "seon-fs-events" 1}
+                       web? (assoc "clojure-agent-pool" 2)))
+       model? (assoc :foreign (seon.config/value :seon.config.vector/model-threads))))))
 
 (defn- threads
   "The threads this process runs now, measured as declared-threads declares them, and :os,
@@ -567,12 +572,12 @@
   "Where measured threads (threads) differ from declared ones
   (declared-threads): {} when they are exactly what is declared, else each
   differing name with [declared measured], :gc-sweepers likewise, and :os when the OS
-  counts threads beyond the roster and the sweepers."
+  counts threads beyond the roster, the sweepers and the declared :foreign ones."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [decl got]
   (let [names (into (set (keys (:roster decl))) (keys (:roster got)))
         roster (into {} (for [n names :let [d (get-in decl [:roster n] 0) g (get-in got [:roster n] 0)] :when (not= d g)] [n [d g]]))
-        expect-os (+ (reduce + 0 (vals (:roster got))) (:gc-sweepers got))]
+        expect-os (+ (reduce + 0 (vals (:roster got))) (:gc-sweepers got) (:foreign decl 0))]
     (cond-> roster
       (not= (:gc-sweepers decl) (:gc-sweepers got)) (assoc :gc-sweepers [(:gc-sweepers decl) (:gc-sweepers got)])
       (not= expect-os (:os got)) (assoc :os [expect-os (:os got)]))))
@@ -582,7 +587,11 @@
 (defn scale [n]
   (run-check "SCALE" {:datoms 2000}
    (fn [sys]
-    (let [mem0 (lib/sysmem)
+    (let [;; with embedding on, main's texts embedded first (seon.await/await-db: nothing due), so
+          ;; the threads counted are the open model's steady ones, not its load's or an encode's
+          _ (when (pos? (seon.config/value :seon.config.vector/texts))
+              (seon.await/await-db sys #(empty? (seon.vector/due % (seon.vector/model-id (seon.config/value :seon.config.vector/model))))))
+          mem0 (lib/sysmem)
         th-boot (thread-diff (declared-threads sys) (threads))
         t0 (profile/now-ns)
         ids (ready! sys #(vec (pmap (fn [i] (c/spawn! sys {:task (str "scale " i)})) (range n))))
@@ -638,9 +647,14 @@
                 :root-threads {:declared (declared-threads sys) :os (lib/nthreads)
                                :diff {:boot th-boot :all-ready th-ready :after-work th-work :after-kill th-end}}}
        ;; root's threads exactly as declared once agents run (at boot Jolt's io poller has not
-       ;; started yet: it starts at the first socket wait, an agent's)
+       ;; started yet: it starts at the first socket wait, an agent's). With the model open, its
+       ;; foreign threads (the :os count) are judged only where root has settled, after the work and
+       ;; after the kill: right after the last encode, Metal's GCD idle workers are still parked
+       ;; until libdispatch's idle timeout ends them, and waiting that out would need a clock
+       ;; (root's ruling, 2026-10-23); Jolt's own roster is judged at every sample
        :checks {:every-eval-and-test-passed (every? :ok results) :ten-merges-went-in (every? :merged? merged)
-                :root-threads-as-declared (every? empty? [th-ready th-work th-end]) :fits-the-machine (<= need budget)}}))))
+                :root-threads-as-declared (every? empty? [(cond-> th-ready (:foreign (declared-threads sys)) (dissoc :os)) th-work th-end])
+                :fits-the-machine (<= need budget)}}))))
 
 (defn orphan
   "Root dies while its agents are busy (one in a loop, one in a forever test, one clone):
@@ -1097,24 +1111,65 @@
                 :remove-stops-only-it (and (= #{:probe2} (set (:stopped r3))) (empty? (:started r3)))
                 :running-set-after (= (conj expect :probe) after)}}))))
 
+(defn branch-health
+  "A branch's health (root's ruling, 2026-10-23): what head caused that base had not, the done rule's
+  own reading (seon.problems/caused-split), judged on classes (every derived class when nil).
+  {:caused [{:class :message}] :attention [{:class :message}] :checks {:no-<class> bool}}: a
+  problem base already had is not the branch's, and is root's to show (its context and page)."
+  [base head classes]
+  (let [{:keys [rows]} (seon.problems/caused-split base head)
+        attention? (:seon.problems/attention (contract/properties :seon.problems/class))
+        derived (:seon.problems/derived (contract/properties :seon.problems/class))
+        ;; a class asked for that no verdict judges (not derived, or attention: it never fails a branch) is refused, never a green
+        _ (when-let [bad (seq (remove #(and (derived %) (not (attention? %))) classes))]
+            (throw (ex-info (str "health judges the derived classes that fail a branch, not " (clojure.string/join ", " (map name bad))) {})))
+        cs (or (seq classes) (sort derived))
+        made (filterv (comp (set cs) :class) rows)]
+    {:caused (filterv (complement (comp attention? :class)) made)
+     :attention (filterv (comp attention? :class) made)
+     :checks (into {} (for [c cs :when (not (attention? c))]
+                        [(keyword (str "no-" (name c))) (not-any? #(= c (:class %)) made)]))}))
+
+(defn- base-db
+  "db as the tree at dir holds it: its program (the :source read of dirs, seon.source/replace-tx),
+  its wiki (seon.docs/load-dir-tx) and its tasks (seon.task/load-tx), each by root's own loader."
+  [sys db dir dirs]
+  (let [r @(c/call! sys {:op :fx :kind :source :req {:root dir :dirs dirs}})
+        _ (when (contract/error? r) (throw (ex-info (:seon.error/message r) r)))
+        db (d/db-with db (seon.source/replace-tx db (:value r)))
+        db (d/db-with db (seon.docs/load-dir-tx db dir "docs" {}))]
+    (d/db-with db (seon.task/load-tx db (my.root/task-files (str dir "/" (seon.config/value :seon.config.root/tasks-dir)))))))
+
 (defn health-check
-  "Seon's own health, read by Seon (seon.problems/health), for bin/check and bin/laws: a root
-  booted on this checkout's source (src and the schemas) and its task files (a task is a name
-  the wiki may cite), its wiki loaded once they are (my.root/load-docs!: a prose word is a
-  citation when it names something), red on each open
-  row of the derived classes named, every derived class when none is (:dead-citation, the
-  docs; :unnamed-site, the laws the compiler's facts answer: seon.problems/laws). One line per
-  row: its class and message."
+  "The health step (root's ruling, 2026-10-23): what this checkout caused since its base
+  (seon.fx/base-commit: its merge base with git's main; on main, the previous main), the done
+  rule's reading (branch-health) of classes (every derived class when none is named). A root
+  booted on this checkout's source (src and the schemas) and its task files, its wiki loaded once
+  they are (a prose word is a citation when it names something), is the head; the base is that
+  db with the base commit's tree loaded by the same loaders (base-db). One line per row the
+  branch caused (its class and message), one per row it changed under the wiki (attention), and
+  how many rows of those classes the head holds open in all, which are root's to show."
   [classes]
-  (run-check "HEALTH" {:datoms 0 :source {:root (seon.config/checkout) :dirs ["src" "resources/seon/schemas"]}}
-   (fn [sys]
-     (my.root/load-tasks! sys)
-     (my.root/load-docs! sys)
-     (let [h (seon.problems/health @(:conn sys))
-           cs (or (seq classes) (sort (:seon.problems/derived (contract/properties :seon.problems/class))))]
-       (doseq [c cs r (get-in h [:classes c :rows])] (out! (name c) " " (:message r)))
-       {:report {:open (into (sorted-map) (for [c cs] [c (get-in h [:classes c :n] 0)]))}
-        :checks (into {} (for [c cs] [(keyword (str "no-" (name c))) (zero? (get-in h [:classes c :n] 0))]))}))))
+  (let [root (seon.config/checkout)
+        dirs ["src" "resources/seon/schemas"]]
+    (run-check "HEALTH" {:datoms 0 :source {:root root :dirs dirs}}
+     (fn [sys]
+       (my.root/load-tasks! sys)
+       (my.root/load-docs! sys)
+       (let [head @(:conn sys)
+             base (seon.fx/base-commit root)
+             _ (when-not base (throw (ex-info (str "no base: " root " has no commit before this one on " (seon.config/value :seon.config.source/main) ", or no commit, or no branch of that name") {})))
+             ;; the base's tree, removed once read (one health run per checkout: its store branch, check-health, is one too)
+             dir (str root "/target/tmp/health-base-" base)
+             based (try (base-db sys head (seon.fx/checkout-at root base (into dirs ["docs" (seon.config/value :seon.config.root/tasks-dir)]) dir) dirs)
+                        (finally (clojure.java.shell/sh "rm" "-rf" dir)))
+             {:keys [caused attention checks]} (branch-health based head classes)
+             open (reduce + 0 (for [c (or (seq classes) (:seon.problems/derived (contract/properties :seon.problems/class)))]
+                                (get-in (seon.problems/health head) [:classes c :n] 0)))]
+         (doseq [r caused] (out! (name (:class r)) " " (:message r)))
+         (doseq [r attention] (out! "attention " (name (:class r)) " " (:message r)))
+         {:report {:base base :caused (count caused) :attention (count attention) :open-in-head open}
+          :checks checks})))))
 
 (defn- eval-records
   "The evaluation records on db of agent id: [{:form :origin ...}]."
@@ -1231,6 +1286,39 @@
        :checks {:each-wrote-10 (= 10 (count ia) (count ib))
                 :entity-ids-issued-once (not-any? (es ia) (es ib))
                 :tx-ids-issued-once (not-any? (txs ia) (txs ib))}}))))
+
+(defn vectors
+  "Semantic search on Seon's own text (docs/vector.md): a root booted on this checkout's source,
+  task files and wiki embeds every form, section and plan through its :vectors proc and :embed
+  effect (the model in process), awaited on main (seon.await/await-db: nothing due), no clock;
+  then 200 of those vectors, each a query, have their top 10 by the pyramid's default levels
+  compared with an exact search of every vector (seon.vector/near with a shortlist of all).
+  Red below a recall of 0.99, or when the model is missing."
+  []
+  (run-check "VECTORS" {:datoms 0 :source {:root (seon.config/checkout) :dirs ["src" "resources/seon/schemas"]}}
+   (fn [sys]
+     (let [path (seon.config/value :seon.config.vector/model)
+           model (seon.vector/model-id path)]
+       (if (or (not (.exists (java.io.File. path))) (zero? (seon.config/value :seon.config.vector/texts)))
+         {:report {:model path :texts (seon.config/value :seon.config.vector/texts)}
+          :checks {:model-present (.exists (java.io.File. path)) :embedding-on (pos? (seon.config/value :seon.config.vector/texts))}}
+         (let [t0 (System/currentTimeMillis)
+               _ (my.root/load-tasks! sys)
+               _ (my.root/load-docs! sys)
+               db (seon.await/await-db sys #(empty? (seon.vector/due % model)))
+               embed-ms (- (System/currentTimeMillis) t0)
+               es (sort (map :e (d/datoms db :aevt :seon.vector/f16)))
+               qs (take-nth (max 1 (quot (count es) 200)) es)
+               found (fn [q opts] (set (map first (seon.vector/near db q 10 opts))))
+               exact (into {} (for [q qs] [q (found q {:shortlist (count es)})]))
+               recall-of (fn [opts] (/ (reduce + (for [q qs] (count (filter (exact q) (found q opts))))) (* 10.0 (count qs))))
+               recall (recall-of {})]
+           {:report {:vectors (count es) :queries (count qs) :recall10 recall :embed-ms embed-ms
+                     ;; what each shortlist would give: the default's evidence, measured here every run
+                     :by-shortlist (into (sorted-map) (for [k [50 100 200 400]] [k (recall-of {:shortlist k})]))
+                     :forms (count (d/datoms db :aevt :form/id)) :sections (count (d/datoms db :aevt :seon.section/address))}
+            :checks {:model-present true :every-text-embedded (empty? (seon.vector/due db model))
+                     :pyramid-recall-at-least-0.99 (>= recall 0.99)}}))))))
 
 (defn- fork-server-caught-up
   "A FIFO barrier through the fork server: {:op :stats} goes to the server process on the
@@ -1396,6 +1484,7 @@
      "record" (fn [n more] (record))
      "orphan" (fn [n more] (orphan))
      "ids" (fn [n more] (ids))
+     "vectors" (fn [n more] (vectors))
      "fx" (fn [n more] (fx (n-or n "20")))
      "system" (fn [n more] (system-check))
      "config" (fn [n more] (config-check))

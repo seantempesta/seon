@@ -14,8 +14,8 @@
     per call, no Clojure dispatch. Estimate 1-2 ns per call; probe 0.9 ns (9.5 vs 8.6 ns
     for a bare inc).
   - The clock is the machine's CLOCK_UPTIME_RAW (clock_gettime_nsec_np), a foreign
-    procedure called from Scheme: 9.5 ns a read, nothing allocated, 41 ns resolution
-    (2026-10-22), where Chez's `current-time` was 28 ns, 48 bytes and 1 us, counted from
+    procedure called from Scheme: 9.5 ns a read, nothing allocated, 41 ns resolution,
+    where Chez's `current-time` was 28 ns, 48 bytes and 1 us, counted from
     this process's start. It is Seon's one clock (`now-ns`, docs/machine.md#the-clock):
     every process reads the same timeline, so one process's stamp is another's t0.
   - The sample rate is a power of two, so the test is one fxand. Amortized clock cost: two
@@ -150,6 +150,25 @@
                      (conj! acc {:var sym :calls calls
                                  :ms (if (pos? samples) (/ (* (/ (double ns) samples) calls) 1e6) 0.0)}))
                    (transient []))))
+
+(defn measure!
+  "f called and measured, its value answered: the engine ticks it ran (the work it did, the exact
+  measure: jolt.host/ticks-of arms the tick timer, and the count is read in a finally inside it,
+  so a call that throws is counted), the bytes this thread allocated, its wall ns (now-ns) and
+  its thread's CPU ns (cpu-ns), and the contracted calls of the epoch it opens (begin!). What it
+  measured goes to done, {:ticks :bytes :wall-ns :cpu-ns :calls}, from a finally: a call that
+  throws is measured too, and its exception goes on to the caller. The one measurement of a call:
+  the REPL's per-form cost (seon.repl/wrap-cost) and a cost proof's (seon.cost/measure) read it."
+  {:malli/schema [:=> [:cat :seon.host/fn :seon.host/fn] :any]}
+  [f done]
+  (let [a0 (alloc-bytes) _ (begin!) w0 (now-ns) c0 (cpu-ns)
+        v (volatile! nil) k (volatile! 0)]
+    (try (jolt.host/ticks-of (fn [] (let [k0 (jolt.host/ticks)]
+                                      (try (vreset! v (f))
+                                           (finally (vreset! k (- (jolt.host/ticks) k0)))))))
+         @v
+         (finally (let [c1 (cpu-ns) w1 (now-ns) n (calls) a1 (alloc-bytes)]
+                    (done {:ticks @k :bytes (- a1 a0) :wall-ns (- w1 w0) :cpu-ns (- c1 c0) :calls n}))))))
 
 (defn top
   "The k costliest of fns (by estimated ms, then calls), costliest first."

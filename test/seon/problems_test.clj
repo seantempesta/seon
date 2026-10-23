@@ -653,7 +653,10 @@
                :work "report once, then the three derived reads; the sites dominate"
                :growth :linear
                :per-n {:ns 80000 :bytes 80000 :calls 2}
-               :fixed {:ns 3000000 :bytes 3000000 :calls 60}
+               ;; fixed bytes re-derived 2026-10-23 (jolt/similar-finds-helpers-by-embedding): 3.01 MB at 10,
+               ;; 10.0 MB at 100, 80.2 MB at 1,000 sites; a fixed part near the smallest size's whole cost read
+               ;; as steeper growth (task seon.cost/a-speedup-never-reads-as-steeper)
+               :fixed {:ns 3000000 :bytes 2500000 :calls 60}
                :sizes [10 100 1000]}))
 
 ;; ---- caused reads what changed (diff by value), and agrees with the full reading ---------------

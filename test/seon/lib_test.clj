@@ -10,12 +10,12 @@
     (nth ts 4)))
 
 (deftest the-memory-probe-costs-what-the-process-holds-not-what-it-maps
-  ;; lib/mp-probe asked the kernel for each region's extended info, which walks every page of
-  ;; the region: an agent maps the store's LMDB file twice at :seon.config.store/lmdb-map-bytes
-  ;; (64 GiB), so one probe took ~1.25 s and 100 agents probing at their start serialized on
-  ;; the file's object (100 ready in 18 s, 640 ms before the map grew; session spawn-regression,
-  ;; 2026-10-22). Its cost must not grow with what the process maps: a probe with a 64 GiB map
-  ;; open costs about what it costs with a 1 GiB map. Two LMDB envs on disk of this test's own,
+  ;; lib/mp-probe once asked the kernel for each region's extended info, which walks every page
+  ;; of the region: an agent maps the store's LMDB file twice at :seon.config.store/lmdb-map-bytes
+  ;; (64 GiB), so one probe took ~1.25 s and 100 agents probing at their start serialized on the
+  ;; file's object (session spawn-regression, 2026-10-22). It reads the kernel's ledger now (one
+  ;; task_info call), and its cost must not grow with what the process maps: a probe with a
+  ;; 64 GiB map open costs about what it costs with a 1 GiB map. Two LMDB envs on disk of this test's own,
   ;; the last resort: what is proved is a mapping's size; removed at the end
   (let [dir (str (System/getProperty "user.dir") "/target/lib-test-" (random-uuid))
         _ (doseq [d ["-small" "-large"]] (.mkdirs (java.io.File. (str dir d))))
@@ -25,9 +25,9 @@
         t-large (probe-ms)]
     (try
       (is (< t-large (+ 1.0 (* 2 t-small))) (str "probe " t-small " ms with 1 GiB mapped, " t-large " ms with 64 GiB more"))
-      (testing "and it answers this process's own memory, in MB"
-        (let [p (lib/mp-probe) mb (lib/real-mb p)]
-          (is (< 1.0 mb (* 1.05 (:phys-fp p 0))) (str "real " mb " MB, footprint " (:phys-fp p)))))
+      (testing "and it answers this process's own memory, in MB: what it holds resident at most, a little more"
+        (let [p (lib/mp-probe)]
+          (is (< 1.0 (lib/real-mb p) (+ (:resident p) (:compressed p) 1.0)) (pr-str p))))
       (finally (lmdb/close-env small) (lmdb/close-env large)
                (clojure.java.shell/sh "rm" "-rf" (str dir "-small") (str dir "-large"))))))
 
@@ -49,6 +49,28 @@
   [f]
   (lib/fork! {:child #(lib/c-exit (let [r (deref (future (f)) 5000 ::hung)] (cond (= ::hung r) 2 (true? r) 0 :else 1)))
               :refused (fn [n] {:refused n}) :parent lib/wait-status}))
+
+(deftest the-memory-gauge-reads-what-macos-charges-across-a-fork
+  ;; task seon.lib/real-mb-reads-what-macos-charges: the gauge is the task's phys_footprint, what
+  ;; macOS charges (Activity Monitor, jetsam). It counted a process's private and shared-now-private
+  ;; resident pages, and a fork turns the parent's pages copy-on-write: a parent holding 730 MB read
+  ;; 76 MB after forking a child (measured 2026-10-23), so root, which forks the fork server, read a
+  ;; quarter of what it holds. A forked child is charged what it writes, not what it shares.
+  ;; the largest block a test allocates (one process, no fan-out: AGENTS section 8); Chez keeps a
+  ;; bytevector this large in place (a large object is never copied by a collection)
+  (System/gc)
+  (let [before (lib/real-mb)
+        block (byte-array (* 300 1024 1024))]
+    (java.util.Arrays/fill block (byte 7))
+    (let [held (lib/real-mb)]
+      (is (< 285 (- held before) 330) (str "a 300 MB block written: " before " -> " held " MB"))
+      (is (= {:exit 0} (in-child (fn [] (let [b0 (lib/real-mb)]
+                                          ;; one byte a 16 KB page: 30 MB of pages written, ~1,900 writes
+                                          (doseq [i (range 0 (* 30 1024 1024) 16384)] (aset block i (byte 1)))
+                                          (< 28 (- (lib/real-mb) b0) 60)))))
+          "a forked child is charged the 30 MB it writes")
+      (is (< (* 0.95 held) (lib/real-mb)) (str "the parent still holds its block after the fork: " held " MB before"))
+      (aget block 0))))
 
 (deftest a-forked-child-runs-go-blocks-and-makes-a-store
   ;; fork(2) copies only the calling thread: jolt's carriers, timer and shutdown watcher

@@ -19,3 +19,9 @@ To refresh a branch after main moves: merge main, take main's side of each confl
 `bin/check health` (dead citations must read 0) and the docs and task-files tests.
 By hand, after a merge: a `run` local in code main added that means a test run (step1 patches turn.clj's
 `observe` and `observed`; the build catches an unresolved symbol, not a destructure that is now nil).
+
+## For a branch cut before the rename
+
+From the branch's checkout, tree committed: `sh /path/to/main-checkout/notes/rename-run/merge-main.sh`. It renames the merge base and
+the branch alike with `all.sh` (the three scripts in order), merges main three-way, and commits the merge; on conflicts it prints them and
+stops (resolve against main's side, never `--theirs` over your own work). `all.sh` alone renames the checkout it is run from.

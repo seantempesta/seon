@@ -53,6 +53,9 @@ export SEON_WIKI_BASELINE=${SEON_WIKI_BASELINE:-false}
 IDLE_WEB_PORT=$((20000 + $$ % 20000))
 # agents' turns are the scripted provider's (a test fixture; a root with no profile has no model provider)
 export SEON_PROFILE=${SEON_PROFILE:-scripted}
+# a step's root embeds no text (:seon.config.vector/texts 0), but the vectors step's (run-embedding, and
+# bin/check vectors alone): none other searches, and each would load the 0.9 GB model (docs/vector.md)
+[[ ${1:-} == vectors ]] || export SEON_EMBED_TEXTS=${SEON_EMBED_TEXTS:-0}
 # --steps DIR: a full run of the steps DIR/steps names, its greens written to DIR/green
 SEL=
 [[ ${1:-} == --steps ]] && { SEL=$2; shift 2; set -- 100 }
@@ -61,6 +64,17 @@ S=$ROOT/target/seon
 # laws, lmdb-kill) seeds no store, starts no root and wants no build
 NEEDS=1; [[ -n $SEL && ! -s $SEL/steps-binary ]] && NEEDS=
 (( NEEDS )) && { [[ -x $S ]] || { echo "check: no target/seon; run bin/build seon" >&2; exit 1 } }
+# VERDICT: the line a refused run ends on, its mode's (CONFIG FAILED) or the run's (CHECK FAILED)
+VERDICT=CHECK; [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]] && VERDICT=${(U)1}
+# a binary built from another tree checks another program (and may refuse this tree's config
+# before it says anything): bin/build records the tree it built from, bin/tree names this one
+if (( NEEDS )); then
+  BUILT=$(cat "$ROOT/target/seon.tree" 2>/dev/null) HERE=$("$ROOT/bin/tree" "$ROOT")
+  if [[ -z $BUILT || $BUILT != $HERE ]]; then
+    echo "check: target/seon was built from tree ${BUILT:-unknown}; this checkout is tree ${HERE:-unknown}: run bin/build seon"
+    echo "$VERDICT FAILED (stale binary)"; exit 1
+  fi
+fi
 # what this run starts ends with it (bin/held): a fifo of its own, held open read-write while
 # bin/check lives, named to every step; its EOF, bin/check gone however it ended, ends them
 STARTER=$ROOT/target/tmp/check-starter-$$.fifo
@@ -72,13 +86,17 @@ trap 'rm -f "$STARTER"' EXIT
 trap 'exit 143' TERM INT HUP
 # (fd 7, the fifo's write end, stays bin/check's own: a child holding it would keep the fifo open)
 run() { (cd "$ROOT/target" && "$ROOT/bin/held" ./seon "$@" 2>&1 7>&- 3>&-) }
+run-embedding() { SEON_EMBED_TEXTS=64 run "$@" }
 # a single mode: on its own branch check-<mode> of the given store, deleted when it is green
 if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then
   M=check-$1
-  [[ $1 == seed ]] || run seed 2000 > /dev/null || exit 1
-  run drop $M > /dev/null || exit 1
+  # quiet when it works; a seed or a drop that fails prints its own output and the mode's verdict
+  # line (AGENTS section 9: a step never ends without one)
+  quiet() { local what=$1 o; shift; o=$("$@") || { print -r -- "$o"; echo "$VERDICT FAILED ($what)"; exit 1 } }
+  [[ $1 == seed ]] || quiet seed run seed 2000
+  quiet drop run drop $M
   if [[ $1 == idle ]]; then SEON_WEB_PORT=$IDLE_WEB_PORT SEON_MAIN=$M run "$@"; else SEON_MAIN=$M run "$@"; fi; st=$?
-  (( st == 0 )) && { run drop $M > /dev/null || exit 1 }
+  (( st == 0 )) && quiet drop run drop $M
   exit $st
 fi
 N=${1:-100}
@@ -123,7 +141,7 @@ echo "== seed (the one store every step branches from: made when missing)"; step
 read -r STORE KB0 BR0 <<< "$(run store)"
 # the steps' own mains: what a failed earlier run left is deleted before this run's step
 STEPS=(seed health fx config system mcp threads instrument record problems smoke robust lifecycle backpressure hotreload drain idle
-       orphan durable window ids e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns e2e-sibling swarm e2e-loop e2e-held resume scale)
+       orphan durable window ids vectors e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns e2e-sibling swarm e2e-loop e2e-held resume scale)
 run drop ${STEPS/#/check-} > "$OUT/drop-before.log" 2>&1 || failed "drop-before ($OUT/drop-before.log)"
 fi
 
@@ -213,6 +231,7 @@ u-window() {
   step window-read "" run window-read check-window
   is-green window-write && is-green window-read && green window
 }
+u-vectors() { echo "== vectors (the checkout's forms and wiki embedded by the model in root, then the pyramid's top 10 against an exact search of every vector)"; step vectors "" run-embedding vectors }
 u-ids() { echo "== ids (two agents' processes issue every entity id and transaction id once: the store's one page of ids)"; step ids "" run ids }
 u-e2e-calc() { echo "== tasks: calc (6-task graph, cancel)"; step e2e-calc "" run e2e calc }
 for k in conflict semantic hairy newns sibling; do functions[u-e2e-$k]="echo '== tasks: scenario $k'; step e2e-$k '' run e2e scenario $k"; done
@@ -234,7 +253,7 @@ u-resume() {
 if (( NEEDS )); then JOBS=$(run jobs); else JOBS=2; fi
 UNITS=(laws lmdb-kill health contracts test-inputs mg-check fx config system mcp threads instrument record problems smoke robust lifecycle
        backpressure hotreload drain idle orphan durable window ids e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns
-       e2e-sibling swarm e2e-loop e2e-held resume)
+       e2e-sibling swarm e2e-loop e2e-held resume vectors)
 # the longest first, by the last full run's measured wall seconds (a unit not measured yet first):
 # what orders the queue, never what a step proves
 # the last full run: the latest that ran scale (a selected run's times cover only its steps)

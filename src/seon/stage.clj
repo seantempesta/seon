@@ -1,6 +1,7 @@
 (ns seon.stage
-  "Stage the LIVE runtime onto the branch (owner, 2026-10-20: REPL semantics, no replay;
-  git add -A of the runtime). Each form an agent evaluates is recorded on its branch as it
+  "Stage the LIVE runtime onto the branch (DECISIONS, It's a REPL into a real session; branches are
+  true branches, merged per definition, never replayed; git add -A of the runtime). Each form an
+  agent evaluates is recorded on its branch as it
   runs (seon.repl/wrap-record: the compiler's account of it), so what is left for staging
   is what only the live runtime knows: a var unmapped from a program namespace, and a
   multimethod's method removed. Their definitions stop pointing to a form, so the forms

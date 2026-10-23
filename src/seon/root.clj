@@ -23,7 +23,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
-            [seon.writer :as writer] [seon.prove] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
+            [seon.writer :as writer] [seon.prove] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.docs :as docs] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
@@ -731,12 +731,12 @@
 
 (defn start!
   "Boot the control process, the fork server and the root graph on its main, a branch of
-  the one store (owner, 2026-10-21: one store, many branches, as in production). opts:
+  the one store (DECISIONS, Branches as in production). opts:
   {:path dir (the store, created when missing, holding the schema and, given :datoms n,
    about n datoms of an example program on :db; a root holds no program it was not given)
    :main branch (root's main; an existing branch is resumed; :db is the seed itself)
    :backend :lmdb|:file :log? true :max-running n (parallel runs) :provider p (the
-   runs' model) :stall-ms (a guard, seon.agent-proc/stall-ms, for the checks that
+   runs' model) :stall-ms (the stall bound, seon.agent-proc/stall-ms, for the checks that
    move it) :source s}. s: Seon's own source
    is the program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: main's program follows
    root's dirs at boot (import-source!: replaced when they read otherwise than main's last
@@ -753,7 +753,7 @@
         ;; agents write their own branches, so the store is shared: the one durable store
         ;; (the kept runs store, bin/check's, a test's). This root resumes its main, a branch
         ;; of the store's seed, and names its agents' branches under it; a run's record is
-        ;; main's commit history (owner, 2026-10-22: one main, resumed)
+        ;; main's commit history (owner: one main, resumed)
         path (or path (cfg/value :seon.config.root/store-path))
         main (or main (keyword (cfg/value :seon.config.root/main)))
         backend (or backend (cfg/value :seon.config.store/backend))
@@ -813,7 +813,10 @@
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
                          :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1)
                          :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
-                         :web-port (cfg/value :seon.config.web/port)})
+                         :web-port (cfg/value :seon.config.web/port)
+                         :vectors-main-buf (a/sliding-buffer 1) :embed-batch (cfg/value :seon.config.vector/batch)
+                         :embed-model (vector/model-id (cfg/value :seon.config.vector/model))
+                         :embed-texts (cfg/value :seon.config.vector/texts)})
         decl (system/read-decl (cfg/value :seon.config.root/system-path))
         built (system/build decl bindings nil)
         root-procs (:procs built) root-conns (:conns built)

@@ -132,7 +132,7 @@
 (defn tree-id
   "git's id of the tree at root as it is on disk: HEAD's tree (none before a first commit)
   with every changed and untracked unignored file added, in an index of its own (the
-  repository's index untouched). bin/build records the same id for the tree it builds
+  repository's index untouched). bin/tree computes the same, which bin/build records for the tree it builds
   (target/seon.tree), so a root can tell whether its binary is built from its source."
   {:malli/schema [:=> [:cat :string] :string]}
   [root]
@@ -143,6 +143,44 @@
       (git! env root ["add" "-A"] nil)
       (git! env root ["write-tree"] nil)
       (finally (.delete idx)))))
+
+(defn base-commit
+  "The commit the checkout at root's health is read against (health is what a branch caused,
+  docs/health.md#checks-are-callers-of-seon). With a
+  branch other than git's main checked out (:seon.config.source/main; a detached HEAD too), its
+  merge base with main: a branch with no commits of its own, or one main has passed, has HEAD
+  itself or an older commit, so it caused only what it changes. With main checked out, its first
+  parent (the previous main, which a merge is held to) when the tree is clean, else HEAD (what the
+  uncommitted change caused). nil when there is no base: main's first commit (no parent), or a
+  repository with no commit or no branch named main (the health step then says which, and its
+  digest is missing); a merge base git cannot find throws git's words (git!)."
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [root]
+  (let [main (cfg/value :seon.config.source/main)
+        on (:out (sh/sh "git" "-C" root "symbolic-ref" "--short" "-q" "HEAD"))
+        named? (fn [rev] (zero? (:exit (sh/sh "git" "-C" root "rev-parse" "--verify" "--quiet" (str rev "^{commit}")))))]
+    (cond (not (and (named? "HEAD") (named? main))) nil
+          (not= main (str/trim on)) (git! {} root ["merge-base" "HEAD" main] nil)
+          (not (str/blank? (git! {} root ["status" "--porcelain" "--ignore-submodules=all"] nil))) (git! {} root ["rev-parse" "HEAD"] nil)
+          :else (let [p (sh/sh "git" "-C" root "rev-parse" "--verify" "--quiet" "HEAD^1")]
+                  (when (zero? (:exit p)) (str/trim (:out p)))))))
+
+(defn tree-of
+  "The id of commit rev's tree in the repository at root."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [root rev] (git! {} root ["rev-parse" (str rev "^{tree}")] nil))
+
+(defn checkout-at
+  "Commit rev's files under paths, as git holds them, extracted into dir (made empty first), for a
+  reader that reads a checkout's files (the :source read, the wiki's and the tasks' loaders).
+  Answers dir; a failure throws git's or tar's stderr, as git! does."
+  {:malli/schema [:=> [:cat :string :string [:sequential :string] :string] :string]}
+  [root rev paths dir]
+  (let [r (apply sh/sh "zsh" "-c" "setopt pipefail; rm -rf \"$1\" && mkdir -p \"$1\" && git -C \"$2\" archive \"$3\" -- \"${@:4}\" | tar -x -C \"$1\""
+                 "checkout-at" dir root rev paths)]
+    (when-not (zero? (:exit r))
+      (throw (ex-info (str "checkout-at " rev ": " (str/trim (str (:err r) (:out r)))) {})))
+    dir))
 
 (defn pin
   "What a build or a test reads from the checkout at dir (a submodule), by content: its HEAD
@@ -333,7 +371,7 @@
         {:value {:commit commit :checkout dir :binary (str dir "/target/seon") :ms (profile/ms-since t0)}})))
 (defn test-command
   "The runner the :tests effect calls in a checkout, as argv, for namespaces nss: prove's one
-  entry (land12, root 2026-10-22), each named namespace's tests with no green at their reach
+  entry, each named namespace's tests with no green at their reach
   digest run, the rest reused."
   {:malli/schema [:=> [:cat [:sequential :symbol]] [:vector :string]]}
   [nss] (into ["nice" "-n" "15" "bin/prove" "--tests"] (map str nss)))
@@ -389,29 +427,35 @@
   [{:keys [tokens cap per-ms at] :as b} now-ms]
   (assoc b :tokens (min cap (+ tokens (* per-ms (max 0 (- now-ms at))))) :at (max at now-ms)))
 
+(defn- spent?
+  "Whether request m's task has spent its :budget (spend is the owner's live counter, keyed by
+  :budget-key)."
+  {:malli/schema [:=> [:cat :map :map] :boolean]}
+  [st {:keys [budget budget-key]}] (boolean (and budget (>= (get-in st [:spent budget-key] 0) budget))))
+
 (defn- admit
   "What the owner does with a queued request at now-ms: :run, :wait (no free worker, or its
   bucket holds fewer tokens than the request's estimate :est: a :tick or a worker's :done
   dispatches again), or the error (the task spent its :budget; spend is this proc's live
   counter, keyed by :budget-key)."
   {:malli/schema [:=> [:cat :map :map :int] [:or [:enum :run :wait] :map]]}
-  [st {:keys [budget budget-key est]} now-ms]
+  [st {:keys [budget budget-key est] :as m} now-ms]
   (cond
-    (and budget (>= (get-in st [:spent budget-key] 0) budget))
+    (spent? st m)
     (error :seon.fx/budget-spent "the request's budget is spent" {:budget budget :spent (get-in st [:spent budget-key])})
     (>= (:busy st) (:workers st)) :wait
     (and (:bucket st) (< (:tokens (refill (:bucket st) now-ms)) (or est 0))) :wait
     :else :run))
 
-(defn- settle
-  "The owner at a worker's outcome m: the worker is free; the task's spend grows by the actual
-  cost; the bucket gets back (or pays) the difference from the estimate; a rate-limit outcome
-  (the provider's 429, the named failure point of this edge) halves the bucket's rate, and each
-  other outcome raises it by a twentieth back toward the configured rate (AIMD, TCP's congestion rule)."
+(defn- charge
+  "The owner at one request's outcome: the task's spend grows by the actual cost; the bucket gets
+  back (or pays) the difference from the estimate; a rate-limit outcome (the provider's 429, the
+  named failure point of this edge) halves the bucket's rate, and each other outcome raises it by
+  a twentieth back toward the configured rate (AIMD, TCP's congestion rule)."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [st {:keys [budget-key cost est outcome]}]
   (let [limited? (= :seon.model/rate-limited (:seon.error/type outcome))]
-    (cond-> (-> st (update :busy dec) (update :done inc))
+    (cond-> (update st :done inc)
       ;; a call that states no cost is not charged: the spend grows only by what was
       ;; measured, and the bucket keeps the estimate it reserved
       (and budget-key cost) (update-in [:spent budget-key] (fnil + 0) cost)
@@ -426,6 +470,28 @@
   [o dest r]
   (step/out! o :out {:dest dest :r r}))
 
+;; root counts every failed effect across agents (seon.error, class :effect); the asker records
+;; its own outcome on its branch
+(defn- outcome
+  "The owner at one request's outcome r (a worker frees once per work item, before this): its
+  asker is answered, a failure is root's problem, and its request is charged. A rate-limited
+  request is not answered: it goes back on the queue, and the bucket is emptied."
+  {:malli/schema [:=> [:cat :map :seon.host/volatile :map] :map]}
+  [st o r]
+  (let [limited? (= :seon.model/rate-limited (:seon.error/type (:outcome r)))]
+    (when-not limited? (reply! o (:dest r) (:outcome r)))
+    (when (contract/error? (:outcome r))
+      (step/out! o :out {:op :problem :class :effect :error (dissoc (:outcome r) :seon.fx/us :seon.fx/queue-us)
+                         :agent (get-in r [:dest :agent])}))
+    (let [st (charge st r)]
+      (if (and limited? (:request r))
+        (let [q (:request r)
+              qk (or (::qk q) [(- (:prio q 0)) (inc (:seq st))])]
+          (cond-> (-> st (assoc :seq (max (:seq st) (if (vector? qk) (second qk) 0)))
+                      (assoc-in [:queue qk] (dissoc q :taken-ns ::qk)))
+            (:bucket st) (update :bucket assoc :tokens 0.0)))
+        st))))
+
 (defn- wake-later
   "The clock (session R3's :tick): when the head request waits on the bucket alone (a worker is
   free), one :tick is due on the owner's :tick port once the bucket refills to its estimate.
@@ -439,9 +505,19 @@
       (assoc st :tick-due true))
     st))
 
+(defn- batch
+  "With the head request m admitted, the requests queued behind it that ride in its worker's
+  step, up to the kind's :batch (one when it has none): each in priority order, its budget
+  unspent. Answers [st' [m ...]] with those taken out of the queue."
+  {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
+  [st m]
+  (let [more (->> (:queue st) (remove (fn [[_ r]] (spent? st r))) (take (dec (:batch st 1))))]
+    [(update st :queue #(apply dissoc % (map key more))) (into [m] (map val) more)]))
+
 (defn- dispatch
   "Take queued requests in priority order while workers are free; a refused one is answered
-  at once. Answers st."
+  at once. A kind with :batch gives a free worker its head request and those queued behind it,
+  as one work item {:batch [m ...]}. Answers st."
   {:malli/schema [:=> [:cat :map :seon.host/volatile] :map]}
   [st o]
   (loop [st st]
@@ -450,9 +526,11 @@
             d (admit st m now)]
         (cond
           (= :wait d) (wake-later st m now)
-          (= :run d) (do (step/out! o :to-workers (assoc m :taken-ns (profile/now-ns) ::qk qk))
-                         (recur (cond-> (-> st (update :queue dissoc qk) (update :busy inc))
-                                  (:bucket st) (update :bucket #(update (refill % now) :tokens - (or (:est m) 0))))))
+          (= :run d) (let [[st ms] (batch (update st :queue dissoc qk) (assoc m ::qk qk))
+                           t (profile/now-ns)]
+                       (step/out! o :to-workers (if (:batch st) {:batch (mapv #(assoc % :taken-ns t) ms)} (assoc (first ms) :taken-ns t)))
+                       (recur (cond-> (update st :busy inc)
+                                (:bucket st) (update :bucket #(update (refill % now) :tokens - (transduce (map (fn [r] (or (:est r) 0))) + ms))))))
           :else (do (reply! o (:dest m) (assoc d :seon.fx/kind (:kind st)))
                     (recur (update st :queue dissoc qk)))))
       st)))
@@ -471,12 +549,13 @@
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:kind "the effect kind" :workers "performers, its concurrency"
                 :rate "tokens per second the provider admits (nil: no bucket)"
+                :batch "the most requests one worker step takes from the queue (nil: one, as itself)"
                 :tick "its clock's channel (external in-port, with :rate): a :tick when the bucket refilled"}
        :ins {:in "requests, addressed [:fx/<kind> :in] by any proc" :done "its workers' outcomes"} :outs {}
        ;; admission and routing only: never blocks, never computes long
        :workload :io
        :ping-map-fn (fn [st] (-> (select-keys st [:kind :workers :busy :done]) (assoc :queued (count (:queue st)) :spent (:spent st))))})
-  ([args] (assoc (select-keys args [:kind :workers]) :busy 0 :done 0 :seq 0 :queue (sorted-map) :spent {}
+  ([args] (assoc (select-keys args [:kind :workers :batch]) :busy 0 :done 0 :seq 0 :queue (sorted-map) :spent {}
                  :bucket (when-let [r (:rate args)]
                            {:tokens (double r) :cap (double r) :per-ms (/ r 1000.0) :rate-ms (/ r 1000.0) :at (quot (profile/now-ns) 1000000)})
                  :tick (:tick args)
@@ -490,52 +569,56 @@
        (case in
          :in (let [n (inc (:seq st))]
                [(bound (dispatch (-> st (assoc :seq n) (assoc-in [:queue [(- (:prio m 0)) n]] (assoc m :in-ns (profile/now-ns)))) o)) @o])
-         :done (let [limited? (= :seon.model/rate-limited (:seon.error/type (:outcome m)))]
-                 (when-not limited? (reply! o (:dest m) (:outcome m)))
-                   ;; root counts every failed effect across agents (seon.error, class :effect);
-                   ;; the asker records its own outcome on its branch
-                   (when (contract/error? (:outcome m))
-                     (step/out! o :out {:op :problem :class :effect :error (dissoc (:outcome m) :seon.fx/us :seon.fx/queue-us)
-                                        :agent (get-in m [:dest :agent])}))
-                   (let [st (settle st m)
-                         st (if (and limited? (:request m))
-                              (let [r (:request m)
-                                    qk (or (::qk r) [(- (:prio r 0)) (inc (:seq st))])]
-                                (cond-> (-> st (assoc :seq (max (:seq st) (if (vector? qk) (second qk) 0)))
-                                            (assoc-in [:queue qk] (dissoc r :taken-ns ::qk)))
-                                  (:bucket st) (update :bucket assoc :tokens 0.0)))
-                              st)]
-                     [(bound (dispatch st o)) @o]))
+         :done [(bound (dispatch (reduce #(outcome %1 o %2) (update st :busy dec) (or (:batch m) [m])) o)) @o]
          :tick [(bound (dispatch (dissoc st :tick-due) o)) @o])))))
 
 (defn worker-proc
-  "One performer of an effect kind: takes a request from its owner's shared channel,
-  performs it with the kind's Var, and gives the owner the outcome (with its timing).
-  The entrant boundary for a defect in the perform Var: the defect is the outcome, as an
-  error map, so its asker is always answered."
+  "One performer of an effect kind: takes a work item from its owner's shared channel,
+  performs it with the kind's Var, and gives the owner the outcome (with its timing). A batch
+  item {:batch [m ...]} is performed in one call, {:batch [m ...] :ctx :handle}, whose answer
+  is one outcome per request, in order. A kind with :open holds a host object (a model): the
+  worker makes it on its first item, (open ctx), keeps it in its own state, and gives it to
+  perform as :handle; an open that answers an error is every request's outcome, and the next
+  item opens again. The entrant boundary for a defect in the perform Var: the defect is the
+  outcome, as an error map, so its asker is always answered."
   {:malli/schema :seon.step/step-fn}
-  ([] {:params {:perform "the kind's perform Var"} :ins {} :outs {}
+  ([] {:params {:perform "the kind's perform Var" :open "the Var that makes the kind's host object from :ctx (nil: none)"} :ins {} :outs {}
        ;; the effect blocks in native IO (an HTTP read, a file write). Jolt runs :io procs
        ;; on fibers bound to their carrier thread for life, and a blocking FFI call pins the
        ;; carrier, stranding every other fiber placed on it (inv2: replies 4-15 s late).
        ;; :mixed gives each worker its own thread: the declared workload is true, and the
        ;; worker count already bounds the threads
        :workload :mixed
-       :ping-map-fn (fn [st] (select-keys st [:n]))})
-  ([args] {:perform (:perform args) :kind (:kind args) :ctx (:ctx args) :n 0
+       ;; :open?: it holds its kind's host object (a model's foreign threads run while it does)
+       :ping-map-fn (fn [st] (-> (select-keys st [:n]) (assoc :open? (some? (:handle st)))))})
+  ([args] {:perform (:perform args) :open (:open args) :kind (:kind args) :ctx (:ctx args) :n 0
            :owner (:owner args) ::flow/in-ports {:work (:work args)}})
   ([st _] st)
   ([st _ m]
    (if (nil? m)
      [st nil]
-     (let [t0 (profile/now-ns)
-           r (try ((:perform st) (assoc m :ctx (:ctx st)))
-                  (catch Throwable e (error :seon.fx/defect (or (ex-message e) (str (type e))) {})))
+     (let [ms (or (:batch m) [m])
+           t0 (profile/now-ns)
+           ;; the host object, kept once made even when perform then throws
+           hv (volatile! (:handle st))
+           rs (try (let [h (or @hv (when-let [open (:open st)] (open (:ctx st))))]
+                     (when-not (contract/error? h) (vreset! hv h))
+                     (cond (contract/error? h) (repeat (count ms) h)
+                           (:batch m) ((:perform st) {:batch ms :ctx (:ctx st) :handle h})
+                           :else [((:perform st) (cond-> (assoc m :ctx (:ctx st)) h (assoc :handle h)))]))
+                   (catch Throwable e (repeat (count ms) (error :seon.fx/defect (or (ex-message e) (str (type e))) {}))))
+           ;; one outcome per request taken, or each asker would wait for ever
+           rs (if (= (count ms) (count rs)) rs
+                  (repeat (count ms) (error :seon.fx/defect (str "the batch perform answered " (count rs) " outcomes for " (count ms) " requests") {})))
+           st (cond-> st @hv (assoc :handle @hv))
            t1 (profile/now-ns)
-           outcome (assoc r :seon.fx/kind (:kind st) :seon.fx/queue-us (quot (- (:taken-ns m) (:in-ns m)) 1000)
-                          :seon.fx/us (quot (- t1 t0) 1000))]
-       [(update st :n inc) {[(:owner st) :done] [(cond-> {:dest (:dest m) :request m :outcome outcome :budget-key (:budget-key m) :est (:est m 0)}
-                                     (:cost r) (assoc :cost (:cost r)))]}]))))
+           done (mapv (fn [m r]
+                        (cond-> {:dest (:dest m) :request m :budget-key (:budget-key m) :est (:est m 0)
+                                 :outcome (assoc r :seon.fx/kind (:kind st) :seon.fx/queue-us (quot (- (:taken-ns m) (:in-ns m)) 1000)
+                                                 :seon.fx/us (quot (- t1 t0) 1000))}
+                          (:cost r) (assoc :cost (:cost r))))
+                      ms rs)]
+       [(update st :n + (count ms)) {[(:owner st) :done] [(if (:batch m) {:batch done} (first done))]}]))))
 
 (defn model
   "The model call (seon.model/complete) under root's provider (:ctx, which names the API
@@ -555,14 +638,15 @@
   {:malli/schema [:=> [:cat :map :seon.host/chan] :map]}
   [kinds back]
   (reduce-kv
-    (fn [acc kind {:keys [perform workers ctx rate]}]
+    (fn [acc kind {:keys [perform open workers ctx rate batch]}]
       (let [work (a/chan workers) owner (keyword "fx" (name kind))]
         (-> acc
             (assoc owner {:proc (flow/process #'owner-proc)
                           :chan-opts {:in {:buf-or-n (cfg/value :seon.config.fx/buf)} :done {:buf-or-n (* 2 workers)}}
                           :args (cond-> {:kind kind :workers workers :work work :back back}
-                                  rate (assoc :rate rate :tick (a/chan 1)))})
+                                  rate (assoc :rate rate :tick (a/chan 1))
+                                  batch (assoc :batch batch))})
             (into (for [i (range workers)]
                     [(keyword (str "fx." (name kind)) (str i))
-                     {:proc (flow/process #'worker-proc) :args {:kind kind :perform perform :ctx ctx :work work :owner owner}}])))))
+                     {:proc (flow/process #'worker-proc) :args {:kind kind :perform perform :open open :ctx ctx :work work :owner owner}}])))))
     {} kinds))

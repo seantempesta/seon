@@ -8,7 +8,7 @@
  :seon.ffi/address [:any {:description "A foreign address (jolt.ffi's pointer or long, or ffi/null)."}]
  :seon.lib/ns-time :int
  :seon.lib/mb number?
- :seon.lib/probe [:map [:regions [:map-of :keyword :map]]]
+ :seon.lib/probe [:map [:phys-fp number?] [:internal number?] [:compressed number?] [:resident number?]]
  :seon.lib/sysmem [:map [:free-mb number?] [:internal-mb number?]]
  :seon.lib/exit-status [:or [:map [:exit :int]] [:map [:signal :int]]]
  :seon.lib/pipe [:tuple :seon.lib/fd :seon.lib/fd]

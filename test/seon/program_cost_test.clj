@@ -133,9 +133,12 @@
        ;; unrelated datoms written first, read 411-597 KB at 100 forms and 548-594 KB at 1,000
        ;; (2026-10-23, 12 layouts each). Three schema attributes added at the health merge
        ;; (ac7d3fb2) moved this input from 410 KB to 592 KB with divergence unchanged. The fixed
-       ;; bytes are the bound over those layouts, not one layout's
+       ;; bytes are the bound over those layouts, not one layout's. The seven vector attributes
+       ;; (jolt/similar-finds-helpers-by-embedding) moved it to 416 KB / 594 KB / 732 KB at 100 / 1,000 /
+       ;; 10,000, a fixed part of 375 KB then reading as steeper growth (task
+       ;; seon.cost/a-speedup-never-reads-as-steeper): the fixed bytes re-derived below the smallest layout
        :per-n {:ticks 7700.0 :bytes 34000.0}
-       :fixed {:ticks 53000.0 :bytes 375000.0 :calls 3}
+       :fixed {:ticks 53000.0 :bytes 300000.0 :calls 3}
        :sizes divergence-sizes})
     (finally
       ;; each store made, released whatever holds it (release-all) and removed

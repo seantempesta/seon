@@ -123,3 +123,16 @@
     (is (>= wall 20000000) (str "wall " wall " ns: the wait is real"))
     (is (< measured 2000000) (str "measured " measured " ns: what the call did, not its wait"))))
 
+(deftest a-call-is-measured-one-way
+  ;; task seon.profile/a-call-is-measured-one-way: one measurement of a call, which the REPL's
+  ;; per-form cost and the cost proof both read
+  (let [m (volatile! nil)]
+    (testing "the call's value is answered; what it measured goes to the callback"
+      (is (= 328350 (profile/measure! #(branch 100) #(vreset! m %))))
+      (is (= #{:ticks :bytes :wall-ns :cpu-ns :calls} (set (keys @m))))
+      (is (pos? (:ticks @m)) "its work, in engine ticks")
+      (is (= 101 (:calls @m)) "branch and its 100 leaf calls, the epoch's contracted calls"))
+    (testing "a call that throws is measured too, and its exception goes on"
+      (vreset! m nil)
+      (is (thrown-with-msg? Exception #"boom" (profile/measure! #(do (branch 10) (throw (ex-info "boom" {}))) #(vreset! m %))))
+      (is (= 11 (:calls @m))))))

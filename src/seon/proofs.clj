@@ -83,17 +83,18 @@
   seon.check mode functions its body runs, whose reach is the step's (seon.program/
   reach-digests with roots), with the checkout's :env (bin/, native/, resources/, the pins:
   the binary's other inputs) in every digest. laws (bin/laws) reads the whole tree and has no
-  functions: its key is the tree's digest (step-digests). health (seon.problems/health over the
-  program and the wiki, booted on the checkout's source) is keyed by the tree the same way: a moved var
-  leaves the citations of docs/ dead, which no function's reach shows."
-  '{"laws" :tree "health" :tree "lmdb-kill" [] "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
+  functions: its key is the tree's digest (step-digests). health (what the checkout caused since its
+  base, seon.problems/caused-split over the program and the wiki, booted on the checkout's source)
+  is keyed by the tree and its base's tree (:caused): a moved var leaves the citations of docs/
+  dead, which no function's reach shows, and the same tree against another base is another answer."
+  '{"laws" :tree "health" :caused "lmdb-kill" [] "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
     "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]
     "problems" [seon.check/problems-check] "smoke" [seon.check/smoke] "robust" [seon.check/robust]
     "lifecycle" [seon.check/lifecycle] "backpressure" [seon.check/backpressure] "hotreload" [seon.check/hotreload]
     "drain" [seon.check/drain] "idle" [seon.check/idle] "orphan" [seon.check/orphan]
     "durable" [seon.check/durable-write seon.check/durable-read] "window" [seon.check/window-write seon.check/window-read]
-    "ids" [seon.check/ids] "e2e-calc" [seon.e2e/run] "e2e-conflict" [seon.e2e/run] "e2e-semantic" [seon.e2e/run]
+    "ids" [seon.check/ids] "vectors" [seon.check/vectors] "e2e-calc" [seon.e2e/run] "e2e-conflict" [seon.e2e/run] "e2e-semantic" [seon.e2e/run]
     "e2e-hairy" [seon.e2e/run] "e2e-newns" [seon.e2e/run] "e2e-sibling" [seon.e2e/run] "swarm" [seon.e2e/run]
     "e2e-loop" [seon.e2e/run] "e2e-held" [seon.e2e/run] "resume" [seon.e2e/run] "scale" [seon.check/scale]})
 
@@ -110,15 +111,18 @@
 
 (defn step-digests
   "Of check-steps, {:digests {step digest} :missing [step ...]}: the reach digests (digests-of,
-  seon.program/reach-digests over the steps' functions) and, for a step reading the whole tree, the
-  digest of its name and :tree; missing, the steps naming a function the program does not
-  define (renamed, not imported), which a run reports red rather than keying by :env alone."
-  {:malli/schema [:=> [:cat :seon.host/fn [:map [:env :string] [:tree :string]]]
+  seon.program/reach-digests over the steps' functions); for a step reading the whole tree, the
+  digest of its name and :tree; for one reading what the tree caused, of its name, :tree and
+  :base (the base's tree, seon.fx/base-commit; none: the step is missing, never keyed by the tree
+  alone); missing, the steps naming a function the program does not define (renamed, not
+  imported) or a base there is none of, which a run reports red rather than keying by :env alone."
+  {:malli/schema [:=> [:cat :seon.host/fn [:map [:env :string] [:tree :string] [:base {:optional true} [:maybe :string]]]]
                   [:map [:digests [:map-of :string :string]] [:missing [:vector :string]]]]}
-  [digests-of {:keys [tree]}]
+  [digests-of {:keys [tree base]}]
   (let [fns (into {} (filter (comp vector? val)) check-steps)
         ds (merge (digests-of fns)
-                  (into {} (for [[k v] check-steps :when (= :tree v)] [k (error/digest (str k "\n" tree))])))]
+                  (into {} (for [[k v] check-steps :when (= :tree v)] [k (error/digest (str k "\n" tree))]))
+                  (when base (into {} (for [[k v] check-steps :when (= :caused v)] [k (error/digest (str k "\n" tree "\n" base))]))))]
     {:digests ds :missing (vec (sort (remove ds (keys check-steps))))}))
 
 (defn green? "Is result r green: no failing or erroring assertion?" {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}

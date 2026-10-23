@@ -272,7 +272,7 @@
       (into tx (program/schema-declarations onto (program/schema-registry (program/schema-changes (d/db-with onto tx)))))
       tx)))
 
-;; ---- what program code does not do (owner, 2026-10-21) ------------------------------
+;; ---- what program code does not do ----------------------------------------------------
 
 (defn mutations
   "What the forms a branch adds (ours: its changes since base) do that program code does

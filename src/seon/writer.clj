@@ -229,11 +229,12 @@
                (reply st (refused (str "no branch " (:branch m)) {})))
       ;; one derivation (seon.merge/three-way) for the dashboard, the done rule and merges
       :branch-diff (reply st (if (exists? (:branch m))
-                               (let [[head r] (branch-merge st (:branch m) (:data-attrs m #{}))]
-                                 {:ok true :ours (vec (sort-by str (keys (:ours r)))) :theirs (count (:theirs r))
+                               (let [[head r base] (branch-merge st (:branch m) (:data-attrs m #{}))]
+                                 {:ok true :db head :base base :base-t (:max-tx base)
+                                  :ours (vec (sort-by str (keys (:ours r)))) :theirs (count (:theirs r))
                                   :conflicts (count (:conflicts r))
                                   :unmerged (mapv :key (pm/unmerged head)) :uncontracted (pm/uncontracted (:ours r))
-                                  :caused (vec (problems/caused (pdb/branch-base conn main (:branch m)) head))
+                                  :caused (vec (problems/caused base head))
                                   :vars (into (sorted-set) (keep (fn [[k s]] (when (= :var k) s))) (keys (:ours r)))})
                                (refused (str "no branch " (:branch m)) {})))
       ;; root's read of a branch (or main): its committed value from the store; :base is the
@@ -246,10 +247,6 @@
                                (exists? b) (let [base (pdb/branch-base conn main b)]
                                              {:ok true :db (pdb/head conn b) :base base :base-t (:max-tx base)})
                                :else (refused (str "no branch " b) {}))))
-      :branch-info (let [b (pdb/on-main main (:branch m))]
-                     (reply st (if (exists? b)
-                                 (let [h (pdb/head conn b)] {:ok true :datoms (count (d/datoms h :eavt)) :t (:max-tx h)})
-                                 (refused (str "no branch " b) {}))))
       ;; root's collection of the store (seon.db/collect!), asked at quiescence: swept when a
       ;; branch the last one saw is gone, and recorded on main through the batch
       :collect (let [r (pdb/collect! conn (cfg/value :seon.config.store/sole-writer?))]
@@ -287,7 +284,8 @@
   commits and forks, FIFO), :to-api (answers {:dest :r}, after the batch's flush, and
   {:op :writer :tx-count :p50-ms :commits}), :main (main's commits), :events.
   A closed :in is the end of the flow: everything taken is committed and flushed, then
-  {:op :drained} goes out. Continuous group commit (owner, 2026-10-21: no window): answers
+  {:op :drained} goes out. Continuous group commit (DECISIONS, Durability is continuous group
+  commit): answers
   leave when their batch is committed in memory; a dirty store with no notice out tells the
   flusher {:op :dirty :commits n}, and its {:op :flushed :commits n} makes the store clean
   when n is still the commit count, else the flusher is told again. A :flush? request (an

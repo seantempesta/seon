@@ -36,11 +36,10 @@
   derived classes, which read the program's names once (a set): their cost follows the
   citations (seon.problems-test/dead-citations-follow-the-citations)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.docs :as docs]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.docs :as docs] [seon.task :as task]))
 
 (def counted-classes [:platform :eval :agent :effect])
-(def ^:private death-statuses "Run statuses of a death (:seon.run/status)." (:seon.status/failed (contract/properties :seon.run/status)))
-(def ^:private finished "Run statuses that make its task done (:seon.run/status, as seon.reconcile/finished)." (:seon.status/finished (contract/properties :seon.run/status)))
+(def ^:private death-statuses task/failed)
 (def run-classes [:red :cost :merge :dead :error :waste :task-conflict :unrun])
 
 (defn- es
@@ -327,8 +326,8 @@
     (into {} (for [[e cs] carrying] [(ids e) {:e e :catches cs :src (srcs e)}]))))
 
 (defn caused-split
-  "{:caused :attention}: the derived problems the branch at head has that base (its merge base) had not, by
-  message: what the branch's own work broke (:caused: the done rule refuses while any is open,
+  "{:caused :attention :rows}: the derived problems the branch at head has that base (its merge base) had not, by
+  message (:rows: each with its class, both kinds): what the branch's own work broke (:caused: the done rule refuses while any is open,
   seon.reconcile/done-explain :open-problem) and what it changed under the wiki (:attention: the
   sections it made stale, which the agent reads and never a reason to refuse; the classes
   :seon.problems/attention declares). An evaluation is never refused (AGENTS: get out of an agent's way).
@@ -342,7 +341,8 @@
   (seon.problems-test/caused-follows-what-changed). Measured on Seon's own program (300 sections,
   880 citations, 1,735 vars, 30 catch forms) with a var every cite deleted: 11-12 ms against 26-29 ms
   for the two full readings; an unchanged branch 7 ms, the scan's floor."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map [:caused [:vector :string]] [:attention [:vector :string]]]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map [:caused [:vector :string]] [:attention [:vector :string]]
+                                                             [:rows [:vector [:map [:class :keyword] [:message :string]]]]]]}
   [base head]
   (let [bs (section-state base) hs (section-state head)
         removed (set/difference (existing-names base) (existing-names head))
@@ -369,7 +369,8 @@
     (let [attention? (:seon.problems/attention (contract/properties :seon.problems/class))
           made (remove (comp before :signature) (rows head hs (fn [fact] (set (keep #(:e ((lf head fact) %)) (changed-forms fact))))))
           messages (fn [pred] (vec (sort (into #{} (comp (filter pred) (map :message)) made))))]
-      {:caused (messages (complement (comp attention? :class))) :attention (messages (comp attention? :class))})))
+      {:caused (messages (complement (comp attention? :class))) :attention (messages (comp attention? :class))
+       :rows (vec (sort-by (juxt (comp str :class) :message) (into #{} (map #(select-keys % [:class :message])) made)))})))
 
 (defn caused
   "The derived problems the branch at head has that base had not that refuse its done (`caused-split`'s :caused)."
@@ -386,13 +387,6 @@
    :seon.run/deferred :seon.run/gate-unread {:seon.run/deferred-results [:seon.proof/test :seon.proof/status]}
    {:seon.run/task [:db/id :seon.task/id :seon.task/ns :seon.task/proofs]}
    {:seon.run/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
-
-(defn- task-done?
-  "Has task te a run finished (`finished`)? One avet seek, then its runs."
-  {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
-  [db te]
-  (boolean (some #(finished (:seon.run/status (d/pull db [:seon.run/status] (:e %))))
-                 (d/datoms db :avet :seon.run/task te))))
 
 ;; ---- tasks held for root -----------------------------------------------------------------
 
@@ -422,7 +416,7 @@
         unmerged (vec (sort (:seon.run/unmerged p)))
         base {:run aid :task (get-in p [:seon.run/task :seon.task/id]) :agent (:seon.run/agent p) :status status
               :outcome (:seon.run/outcome p) :reason (:seon.run/reason p) :end-ms (:seon.run/end-ms p)
-              :open? (not (task-done? db te)) :owner-ns (get-in p [:seon.run/task :seon.task/ns]) :producer nil :proofs []
+              :open? (not (task/done? db te)) :owner-ns (get-in p [:seon.run/task :seon.task/ns]) :producer nil :proofs []
               :answered-by (get-in ans [:from aid] []) :at-ms (:seon.run/end-ms p)}
         ;; a red proof is this run's problem when the task itself states it: an inherited
         ;; proof was green on main when the task started (its needs were done), so red now it
@@ -458,8 +452,8 @@
       (assoc :error [(assoc base :error err :producer (:seon.error/operation err) :evidence {:from aid :error err})])
       (seq waste)
       (assoc :waste [(assoc base :waste waste :evidence {:from aid :waste waste})])
-      ;; owner's ruling, 2026-10-23: merged with its deferred process tests unasked (or no
-      ;; gate checkout declared): open until each is recorded passing (my.root/gate!)
+      ;; merged with its deferred process tests unasked (or no gate checkout declared): open until
+      ;; each is recorded passing (my.root/gate!; DECISIONS, Process tests are not automatic)
       (and (= :merged status) (seq (:seon.run/deferred p))
            (not-every? (into #{} (keep #(when (= :pass (:seon.proof/status %)) (:seon.proof/test %))) (:seon.run/deferred-results p))
                        (:seon.run/deferred p)))

@@ -5,8 +5,9 @@
 # exits 1 when one is not named. Kinds (default: all), each a mark over code with strings
 # and comments stripped, and the doc (and section) that sanctions it:
 #   catch       `(catch `                                         docs/failure-points.md
-#               read by Seon, not here: the :unnamed-site class of seon.problems/health over
-#               the compiler's facts (seon.problems/laws), which bin/check health prints
+#               read by Seon, not here: the :unnamed-site class over the compiler's facts
+#               (seon.problems/laws) that this checkout caused since its base, which
+#               bin/check health prints (docs/health.md#checks-are-callers-of-seon)
 #   clocks      time decides: sleep, timeout, deadline, *-MS      docs/clocks.md "## Time decides"
 #   measures    a clock read (currentTimeMillis, nanoTime, now-ns) docs/clocks.md
 #   resolution  requiring-resolve, ns-resolve, (resolve '..),

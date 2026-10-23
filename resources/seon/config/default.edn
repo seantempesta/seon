@@ -269,11 +269,13 @@
  ;; Unit: paths under the root, read in this order. Their .clj files are namespaces; the .edn
  ;; files under resources/seon/schemas are schema resources (schemas are program: an agent
  ;; changes one with my.schema/register!, and the merge writes it back; owner 2026-10-21).
- ;; test/ is left out by default: a root importing it re-evaluates every test form at each
- ;; boot (+5 s a restart, measured 2026-10-22; task seon.source/test-namespaces-built-into-the-binary).
- ;; The owner's standing root adds it (the main tree's config/local.edn), and
- ;; seon.source-test/a-restart-catches-up-and-a-new-generation-resumes boots with those dirs.
- :seon.config.source/dirs ["src" "resources/seon/schemas"]
+ ;; test/ is in: a task's proofs and their fixtures live there, and an agent holds main's
+ ;; tests only when main imported them (step E run #11, 2026-10-23: a worktree root without
+ ;; test/ forked a design whose proof namespace did not exist, 27 turns of no progress). Only
+ ;; a root with a source root imports (bin/root's: SEON_SOURCE_ROOT); a test's root states its
+ ;; own dirs. It costs each boot the test forms' evaluation (+5 s a restart, measured
+ ;; 2026-10-22; task seon.source/test-namespaces-built-into-the-binary).
+ :seon.config.source/dirs ["src" "test" "resources/seon/schemas"]
  ;; Unit: qualified var names. A test whose reach (seon.program/reach-index, the compiler's
  ;; facts) references one of these reaches a process of its own: a shell, a fork, a root booted
  ;; for it, the binary. Such tests never run automatically, only when named (owner, 2026-10-23;
@@ -291,6 +293,10 @@
  :seon.config.source/binary-vars #{seon.test-store/binary-sh}
  ;; Unit: branch. Merges are committed here, never on main and never pushed (owner).
  :seon.config.source/branch "jolt/seon-merges"
+ ;; Unit: branch. Git's main, which worktree branches merge into: a branch's health step reads
+ ;; what it caused since its merge base with it (seon.fx/base-commit; root's ruling,
+ ;; 2026-10-23). At the bound: n/a.
+ :seon.config.source/main "main"
  ;; Unit: a git identity. Seon authors and commits its merges (the message names the merged
  ;; tasks and runs). Stated here because a root's HOME is its checkout's target/home, which
  ;; holds no git identity (bin/check loop, 2026-10-21: "Author identity unknown").
@@ -321,6 +327,20 @@
  ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected. bin/check
  ;; runs this many steps at once too, and mg-check in this many shards (pure-tests 2026-10-23).
  :seon.config.proofs/jobs 4
+ ;; Unit: path. The plan's store of kept program dbs (test-runner/program-db): one LMDB store
+ ;; per checkout, a branch per git tree id holding that tree's program as facts. A tree never
+ ;; seen is branched from the kept tree with the fewest changed files and brought current by
+ ;; seon.source/refresh-tx, so a plan imports the whole program only into an empty store.
+ ;; Provenance: owner via root, 2026-10-23 (option B of notes/test-fork-main-2026-10-23.md).
+ ;; Every text is read from the tree's git objects, never the working tree. One writer at a time
+ ;; (two runs never share a checkout, AGENTS section 3). Derived data: deleting it costs one
+ ;; import. At the bound: see program-store-max-bytes.
+ :seon.config.proofs/program-store #seon/checkout "target/program-store"
+ ;; Unit: bytes. The kept program dbs' store on disk (its data.mdb). Measured 2026-10-23: 12 MB
+ ;; for the whole program (118 files), about 2 MB more a kept tree that changed a file. At the
+ ;; bound: the store is removed before it is opened and starts again from the run's tree (one
+ ;; import); an LMDB file never shrinks, so collecting would not bring it under.
+ :seon.config.proofs/program-store-max-bytes 268435456
  ;; Unit: a salt (integer), 0 normally. Salt of every generative check's seed (seon.proofs/seed): a
  ;; seed is derived from what its check reaches (a test's reach digest, a contract's var and the
  ;; binary's tree), so the same digest draws the same cases and a result is a function of its
@@ -493,11 +513,63 @@
  ;; the plan's cited vars and the proofs call. 0 shows none. Provenance: R4's k = 5
  ;; (notes/option3-R4-learning.md 5: 14 of 16 needed helpers in the top 5).
  :seon.config.render/found 5
+ ;; Unit: forms. The program forms nearest the task's plan (seon.vector/near over the plan's
+ ;; vector), fused with the call graph's helpers by reciprocal rank (seon.context/found). 0 fuses
+ ;; none. Measured 2026-10-23 on 283 pairs from main's history (each commit's message, the
+ ;; functions its diff touched less those it names; docs/vector.md#fused-with-the-call-graph): recall@10 call graph
+ ;; 0.042, embeddings 0.495, fused 0.451; 30 covers every rank a top-5 can come from.
+ :seon.config.render/found-near 30
  ;; Unit: tokens (seon.print.select/estimate). The run's map of the namespaces its proofs and
  ;; cited vars live in (seon.context/ns-map): each namespace's functions, most referenced first,
  ;; within an equal share. Provenance: root's research (2026-10-22, lever 1), aider's default
  ;; --map-tokens 1k. At the bound a namespace's rest is (clojure.repl/dir ns).
  :seon.config.render/map-tokens 1000
+ ;; Semantic search's pyramid (seon.vector/near, docs/vector.md#the-pyramid), measured against an
+ ;; exact 768-dim search, recall@10 (EmbeddingGemma-2):
+ ;; - bin/check vectors, Seon's whole text (2,681: 1,783 forms with the schemas, 321 sections, the
+ ;;   task plans), 207 queries, coarse 128: shortlist 50 0.946, 100 0.979, 200 0.990, 400 0.998;
+ ;; - the 1,393 src forms alone: coarse 64 + 100 0.945, coarse 128 + 100 0.9975, fine 256 at most 0.83.
+ ;; near in Jolt on 1,737 vectors: shortlist 100 1.9 ms, 200 3.0 ms, 400 4.6 ms (the datom reads);
+ ;; the C levels alone 0.08 ms at 1.4k, 0.31 ms at 100k.
+ ;; Unit: dims. Stored per vector (seon.vector/pack): a change re-packs every vector.
+ :seon.config.vector/coarse-dims 128
+ ;; Unit: vectors. At the bound the rest of the coarse ranking is never reranked.
+ :seon.config.vector/shortlist 400
+ ;; Unit: dims. 768 is the whole vector; fewer reads less and ranks a prefix.
+ :seon.config.vector/fine-dims 768
+ ;; The embedding model (docs/vector.md#the-model): EmbeddingGemma-2, ggml-org's Q8_0 GGUF, in
+ ;; process through llama.cpp v0.7.0 (bin/build embed fetches it once by its sha256 into the main
+ ;; tree's target/cache; bin/env alone names it, so its pin is written once). Measured on Seon's 1,393 forms (M5 Max, Metal, load ~10):
+ ;; 12 ms one text, 37k tokens/s batched (175 texts/s), 0.86 GB RSS; the BF16 file no faster (34k).
+ :seon.config.vector/model #env SEON_EMBED_MODEL
+ :seon.config.vector/lib #or [#env SEON_EMBED_LIB #seon/checkout "target/lib/libseon-embed.dylib"]
+ ;; Unit: tokens. One encode's context and micro-batch: 4096 measured best of 512-4096 (512 texts/s
+ ;; 122, 1024 167, 2048 173, 4096 176), as v1 found (cap tokens, not texts).
+ :seon.config.vector/batch-tokens 4096
+ ;; Unit: texts. One encode's sequences; at the bound the next text starts the next encode.
+ :seon.config.vector/batch-texts 64
+ ;; Unit: threads. ggml's CPU pool in root's :embed worker: Metal does the encode, so 1 measured as
+ ;; fast as 18 (139 vs 140 texts/s, 2026-10-23). Whatever it is, the open model keeps 4 threads of
+ ;; its own (Metal's), and loading it runs ~32 that end when it has loaded.
+ :seon.config.vector/threads 1
+ ;; Unit: threads. The open model's own threads, outside Jolt's roster (Metal's), which root
+ ;; declares while its :embed worker holds the model (seon.check/declared-threads). Measured
+ ;; 2026-10-23 on an M5 Max: 4 at every :seon.config.vector/threads from 1 to 18. Its load runs
+ ;; ~32 more for ~4 s, which end when it has loaded (a thread count taken then reads them).
+ :seon.config.vector/model-threads 4
+ ;; Unit: tokens. A text past it keeps its first max-tokens (the count cut is recorded). Provenance:
+ ;; v1's 2,048 (forms p99 1,766 tokens); at 512, 148 of Seon's 1,393 forms were cut.
+ :seon.config.vector/max-tokens 2048
+ ;; Unit: texts. One request of main's backlog (seon.vector/vectors-proc): at 175 texts/s a round
+ ;; holds the worker ~0.4 s, so a query waits behind at most one round. 0 embeds nothing and the
+ ;; model never loads: bin/test's and bin/check's roots (SEON_EMBED_TEXTS), which never search.
+ :seon.config.vector/texts #long #or [#env SEON_EMBED_TEXTS 64]
+ ;; Unit: requests. What one :embed step takes from the queue (seon.fx :batch): queries queued
+ ;; behind a round are embedded together.
+ :seon.config.vector/batch 16
+ ;; Unit: ranks. Reciprocal rank fusion's k (Cormack et al. 2009 use 60; v1 used 10): measured on
+ ;; the 283 pairs, 10 gave recall@10 0.451 and 60 0.448.
+ :seon.config.vector/rrf-k 10
  ;; Unit: items. A list shown in part (seon.print/bounded) shows this many, then `+N more:
  ;; where` (docs/render.md#bounded-lists). Provenance: the literals each list carried before
  ;; (render.ui and render.ai, 2026-10-22), kept as they were.

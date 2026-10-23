@@ -52,7 +52,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.reconcile-test/an-unreached-change-refuses-at-the-merge}}
  {:seon.task/name "the-judge-reads-its-branch-in-one-request"
-  :seon.task/plan "What exists: after :tested, `seon.reconcile/advance` asks the writer :branch-db (step :read), then :branch-diff (step :diffed), and judge-tx reads both (reconcile.clj:636-652). The writer's :branch-diff already reads the branch head (`seon.writer/branch-merge` answers [head result]). Correct: :branch-diff's answer carries the head db and base t; the judge asks once and the :read step goes. Deletes one round trip per run and the :read arm."
+  :seon.task/plan "Done (2026-10-23, shrink): the judge asks the writer once; :branch-diff's answer carries the head db, its merge base and main's t there (seon.writer, from the base branch-merge already read), and the :read step and its arm went; judge-tx takes that one answer. Was: after :tested, `seon.reconcile/advance` asked the writer :branch-db (step :read), then :branch-diff (step :diffed), and judge-tx read both. The writer's :branch-diff already reads the branch head (`seon.writer/branch-merge` answers [head result]). Correct: :branch-diff's answer carries the head db and base t; the judge asks once and the :read step goes. Deletes one round trip per run and the :read arm."
   :seon.task/kind :work
   :seon.task/proofs #{seon.reconcile-test/the-judge-reads-its-branch-in-one-request}}
  {:seon.task/name "octopus-merges-off-as-decided"
