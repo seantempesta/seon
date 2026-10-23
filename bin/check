@@ -120,6 +120,7 @@ u-lmdb-kill() {
   is-green lmdb-kill && rm -f "$OUT/lmdb-kill.mdb" "$OUT/lmdb-kill.mdb-lock"
 }
 u-contracts() { echo "== contracts"; step contracts ":contracted|:uncontracted|^CONTRACTS " run contracts }
+u-test-inputs() { echo "== test-inputs (every test read of a clock, random, environment, sleep or deadline is named with its reason)"; step test-inputs ":unnamed|:named-not-read|^TEST-INPUTS " run test-inputs }
 u-mg-check() {
   echo "== mg-check (no [:fn] without :gen; mg/check on every pure contract, in the release binary)"
   want mg-check || return 0
@@ -205,7 +206,7 @@ u-resume() {
 # seeded store (its data file; LMDB makes its lock file), the same content as a branch of it,
 # deleted when the unit is green. scale runs alone after them: it measures the machine's memory.
 JOBS=$(run jobs)
-UNITS=(laws lmdb-kill contracts mg-check fx config system mcp threads instrument record problems smoke robust lifecycle
+UNITS=(laws lmdb-kill contracts test-inputs mg-check fx config system mcp threads instrument record problems smoke robust lifecycle
        backpressure hotreload drain idle orphan durable window lease e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns
        e2e-sibling swarm e2e-loop e2e-stuck resume)
 # the longest first, by the last full run's measured wall seconds (a unit not measured yet first):

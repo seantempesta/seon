@@ -212,6 +212,59 @@
 (defn- platform-nss "Every loaded platform namespace (seon.*, my.*), this check driver left out." []
   (sort (remove #{'seon.check 'seon.e2e} (filter #(re-find #"^(seon|my)\." (str %)) (map ns-name (all-ns))))))
 
+;; ---- test inputs: a test reads no input its digest misses (pure-tests 2026-10-23) --------
+
+(def hidden-inputs
+  "Reads whose answer no reach digest holds: a clock, an unseeded random, the inherited
+  environment, a sleep or a deadline. A test form that references one is named in
+  named-test-inputs with why its verdict does not depend on it."
+  '#{seon.profile/now-ns seon.profile/ms-since seon.profile/cpu-ns System/currentTimeMillis System/nanoTime
+     System/getenv clojure.core/rand clojure.core/rand-int clojure.core/rand-nth clojure.core/shuffle
+     Thread/sleep clojure.core.async/timeout})
+
+(def named-test-inputs
+  "{[test-namespace var, the read] why its verdict is a function of its digest anyway}."
+  '{[seon.db-test/a-commit-costs-what-it-writes seon.profile/now-ns] "printed ms per turn; the verdict is on bytes"
+    [seon.db-test/a-commit-costs-what-it-writes seon.profile/ms-since] "printed ms per turn; the verdict is on bytes"
+    [seon.lib-test/a-forked-child-runs-go-blocks-and-makes-a-store clojure.core.async/timeout] "a go block's timeout is the behaviour forked; its child's verdict is its exit status"
+    [seon.lib-test/probe-ms seon.profile/now-ns] "the probe's cost as a wall ratio of medians: open, FINDINGS (no counted stand-in for kernel time)"
+    [seon.lib-test/probe-ms seon.profile/ms-since] "the same"
+    [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it Thread/sleep] "the stream's pacing is the subject: a deadline can only turn it red (FINDINGS #13)"
+    [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it clojure.core/rand-int] "a port: a collision can only turn it red (FINDINGS #14)"
+    [seon.problems-test/a-defect-in-the-reconciler-does-not-feed-itself seon.profile/now-ns] "a message's :ns stamp, data the verdict does not read"
+    [seon.problems-test/an-agent-death-is-recorded-with-its-cause seon.profile/now-ns] "a fresh directory's name"
+    [seon.procs-test/reconciler seon.profile/now-ns] "a message's :ns stamp, data the verdict does not read"
+    [seon.profile-test/a-measures-time-is-what-its-thread-does Thread/sleep] "the wait whose absence from CPU time is the subject (1000x margin)"
+    [seon.profile-test/a-measures-time-is-what-its-thread-does seon.profile/now-ns] "the same"
+    [seon.profile-test/a-threads-allocation-is-its-own Thread/sleep] "a window in which bytes are counted; the verdict is on bytes"
+    [seon.profile-test/reading-the-clock-allocates-nothing seon.profile/now-ns] "the clock read is the subject; the verdict is on bytes"
+    [seon.profile-test/the-clock-is-the-one-every-process-reads seon.profile/now-ns] "the clock's identity is the subject"
+    [seon.reconcile-test/a-refused-spawn-writes-a-refused-attempt seon.profile/now-ns] "a message's :ns stamp"
+    [seon.reconcile-test/a-refused-task-asks-again-when-main-moves seon.profile/now-ns] "a message's :ns stamp"
+    [seon.reconcile-test/quiescence-is-reported-when-nothing-can-move seon.profile/now-ns] "a message's :ns stamp"
+    [seon.source-test/a-restart-catches-up-and-a-new-generation-resumes Thread/sleep] "polls a killed pid's end: can only make it slower"
+    [test-runner/prove! seon.profile/now-ns] "the runner's printed selection time"
+    [test-runner/shard! seon.profile/now-ns] "the runner's printed shard time"})
+
+(defn test-inputs
+  "The compiler's facts of the checkout's test/ (each defining form's :form/refs): every read
+  of a hidden input (hidden-inputs) is named in named-test-inputs with why its test's verdict
+  is a function of its digest anyway, and every named one is still read. A new clock read,
+  random, environment read, sleep or deadline in a test is red, naming it. A check step, not
+  a deftest: it reads the checkout's files, which an agent's gate does not have (as a deftest
+  it went red in an agent, a stray red that blocked a merge)."
+  []
+  (run-check "TEST-INPUTS" {:datoms 2000}
+   (fn [sys]
+    (let [files (into {} (filter #(clojure.string/ends-with? (key %) ".clj")) (:value (seon.fx/read-source {:req {:root (seon.config/checkout) :dirs ["test"]}})))
+          ;; test/'s forms analyzed onto main's value (d/db-with: nothing transacted)
+          db (let [db (d/db (:conn sys))] (d/db-with db (seon.source/import-tx db files)))
+          found (set (d/q '[:find ?v ?r :in $ [?r ...] :where [?f :form/refs ?r] [?f :form/defines ?d] [?d :var/name ?v]] db (vec hidden-inputs)))
+          unnamed (vec (sort-by str (remove named-test-inputs found)))
+          gone (vec (sort-by str (remove found (keys named-test-inputs))))]
+      {:report {:test-files (count files) :reads (count found) :unnamed unnamed :named-not-read gone}
+       :checks {:every-hidden-input-named (empty? unnamed) :every-named-one-read (empty? gone)}}))))
+
 (defn contracts
   "In this binary (a release build direct-links and inlines app defs): every function var
   of the platform carries a contract; every contracted var holds its checked function
@@ -1306,6 +1359,7 @@
      "drain" (fn [n more] (drain (n-or n "8")))
      "backpressure" (fn [n more] (backpressure (n-or n "8")))
      "contracts" (fn [n more] (contracts))
+     "test-inputs" (fn [n more] (test-inputs))
      "mg-check" (fn [n more] (mg-check n (first more)))
      "e2e" (fn [n more] (lib/c-exit (if (seon.e2e/run n more) 0 1)))
      ;; swarm N M: seon.e2e's swarm row (N tasks over 5 shared vars, max-running M), SWARM OK/FAILED

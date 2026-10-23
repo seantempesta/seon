@@ -84,7 +84,7 @@
   reach-digests with roots), with the checkout's :env (bin/, native/, resources/, the pins:
   the binary's other inputs) in every digest. laws (bin/laws) reads the whole tree and has no
   functions: its key is the tree's digest (step-digests)."
-  '{"laws" :tree "lmdb-kill" [] "contracts" [seon.check/contracts] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
+  '{"laws" :tree "lmdb-kill" [] "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
     "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]
     "problems" [seon.check/problems-check] "smoke" [seon.check/smoke] "robust" [seon.check/robust]
