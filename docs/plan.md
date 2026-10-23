@@ -17,7 +17,7 @@ Pins: see docs/forks.md · `src` 17,391 lines (19,304 this morning; aim ~10k) ·
 3. ``jolt/health`` (7 review fixes, review trailers from HEAD only, `bin/check health` as a prove step), then ``jolt/wiki-stale`` (76 of 81 stale sections fixed, Jolt-diagnostics triage).
 4. ``jolt/calc-stop`` (e2e-calc: an ended agent answered at the producer) and ``jolt/dry-run`` (act-first instructions, code-depth citations).
 5. ``jolt/proof-ends``, ``claude/eval-diagnostics-75a04b`` (eval errors as data, did-you-mean), ``jolt/agent-view`` (chat window, renders as `(value opts)` functions, messages as facts, per-tile updates; its full run first).
-6. **Cutover to `~/src/seon-next`** (owner, 2026-10-23: a clean repo before the account changes): root holds main still, then ``jolt/rename-run`` (attempt → run) merges, then ``jolt/self-contained`` (step A, the results folder inside the root; step C, GitHub URLs). Then step R: a fresh clone into `~/src/seon-next`, build, prove, a grep for `~/src/seon-jolt` that finds nothing, and the full run. Unmerged branches are fetched into the new repo.
+6. **Cutover to `~/src/seon-next`** (owner, 2026-10-23: a clean repo before the account changes): root holds main still, then ``jolt/rename-run`` (attempt → run) merges, then ``jolt/self-contained`` (step A, the results folder inside the root; step C, GitHub URLs). Then step R: a fresh clone into `~/src/seon-next`, build, prove, a grep for the old prototype folder's name that finds nothing, and the full run. Unmerged branches are fetched into the new repo.
 
 **Working, each on its own branch:**
 - the write-back puts a new form before its first user (dry-run; it blocks every merge that adds a helper), then a second paid real task;
