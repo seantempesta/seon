@@ -84,6 +84,7 @@
   [:seon.config.ai/thinking {:optional true} :seon.config.ai/thinking]
   [:seon.config.ai/reasoning-effort {:optional true} :seon.config.ai/reasoning-effort]
   [:seon.config.ai/max-in-flight :seon.config.ai/max-in-flight]
+  [:seon.config.ai/judge-pass-usd :seon.config.ai/judge-pass-usd]
   [:seon.config.ai/providers :seon.config.ai/providers]
   [:seon.config.ai/models :seon.config.ai/models]
   [:seon.config.ai/rate :seon.config.ai/rate]
