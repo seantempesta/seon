@@ -27,9 +27,13 @@
 ;;; --- the files it serves ------------------------------------------------------------
 
 (def public-dir
-  "Where app.css and datastar.js are read (:seon.config.web/public-dir; read per request, so
-  a style edit shows on reload)."
+  "Where datastar.js is read (:seon.config.web/public-dir)."
   (config/value :seon.config.web/public-dir))
+
+(def stylesheet
+  "The page's stylesheet, bin/build's css step's output (:seon.config.web/stylesheet; read per
+  request, so a build's new stylesheet shows on reload)."
+  (config/value :seon.config.web/stylesheet))
 
 ;;; --- SSE framing ------------------------------------------------------------------------
 
@@ -115,12 +119,12 @@
     {:status 503 :headers {"Content-Type" "text/plain"} :body "not rendered yet: reload"}))
 
 (defn- view-of
-  "The view a path names: :root, an agent's id, or a run (run:<id>, its id's agent
-  window as that run ran: agent ids start again each boot, a run's never does)."
+  "The view a path names, each a location the render proc resolves to an entity on main: :root, an
+  agent's id in root's boot (a keyword), or an entity's id (a number)."
   {:malli/schema [:=> [:cat [:maybe :string]] :any]}
   [s]
   (cond (or (str/blank? s) (= "root" s)) :root
-        (str/starts-with? s "run:") (keyword "run" (str/replace-first s "run:" ""))
+        (re-matches #"\d+" s) (parse-long s)
         :else (keyword s)))
 
 (defn handler
@@ -132,21 +136,21 @@
       (let [uri (:uri req) m (:request-method req) q (form-params (:query-string req))]
         (cond
           (and (= m :get) (= uri "/")) (html-response (ask! ch {:op :page :view :root}))
-          ;; the whole request an agent's turn read, made again from its basis (its window links it)
-          (and (= m :get) (= uri "/turn") (not (and (get q "view") (get q "id"))))
-          {:status 400 :headers {"Content-Type" "text/plain"} :body "/turn names its view and the turn's id: /turn?view=a3&id=demo%2Ff%231%2F0"}
-          (and (= m :get) (= uri "/turn"))
-          {:status 200 :headers {"Content-Type" "text/plain; charset=utf-8" "Cache-Control" "no-store"}
-           :body (str (ask! ch {:op :turn-text :agent (view-of (get q "view")) :turn (get q "id")}))}
+          ;; every page is an entity's (seon.render/page): an agent's by its id in root's boot, any
+          ;; entity's by its id
           (and (= m :get) (str/starts-with? uri "/agent/")) (html-response (ask! ch {:op :page :view (view-of (subs uri 7))}))
-          (and (= m :get) (str/starts-with? uri "/run/"))
-          (html-response (ask! ch {:op :page :view (view-of (str "run:" (java.net.URLDecoder/decode (subs uri 9) "UTF-8")))}))
+          (and (= m :get) (re-matches #"/walk/\d+" uri)) (html-response (ask! ch {:op :page :view (view-of (subs uri 6))}))
+          ;; a page's list end scrolled into view: its next rows
+          (and (= m :post) (= uri "/more")) (do (a/>!! ch {:op :more :view (view-of (get q "view"))}) {:status 204 :headers {}})
           (and (= m :get) (= uri "/feed"))
           (let [out (a/chan 64)]
             (a/>!! ch {:op :open :view (view-of (get q "view")) :ch out})
             {:status 200 :headers {"Content-Type" "text/event-stream" "Cache-Control" "no-cache"} :body out})
           (and (= m :get) (= uri "/datastar.js")) {:status 200 :headers {"Content-Type" "text/javascript" "Cache-Control" "max-age=3600"} :body @js}
-          (and (= m :get) (= uri "/app.css")) {:status 200 :headers {"Content-Type" "text/css" "Cache-Control" "no-cache"} :body (slurp (str public-dir "/app.css"))}
+          (and (= m :get) (= uri "/app.css"))
+          (if (.exists (java.io.File. ^String stylesheet))
+            {:status 200 :headers {"Content-Type" "text/css" "Cache-Control" "no-cache"} :body (slurp stylesheet)}
+            {:status 404 :headers {"Content-Type" "text/plain"} :body (str stylesheet " is not built: bin/build css")})
           (and (= m :get) (= uri "/context.txt"))
           {:status 200 :headers {"Content-Type" "text/plain; charset=utf-8" "Cache-Control" "no-store"} :body (str (ask! ch {:op :context}))}
           (and (= m :get) (= uri "/render.edn"))
@@ -207,7 +211,7 @@
   [view body]
   (when body
     (str "<!doctype html>"
-         (h/html (ui/shell (if (= :root view) "Seon on Jolt · root" (str "Seon on Jolt · " (name view)))
+         (h/html (ui/shell (if (= :root view) "Seon on Jolt · root" (str "Seon on Jolt · " (ui/kname view)))
                            (str "/feed?view=" (ui/view-param view))
                            (h/raw body))))))
 
@@ -232,11 +236,11 @@
     :page (let [[st k] (step/pend st [(:p m) (:view m)])]
             (step/out! o :to-render {:op :page :view (:view m) :k k})
             st)
-    (:context :render-stats :turn-text)
+    (:context :render-stats)
              (let [[st k] (step/pend st [(:p m) :text])]
-               (step/out! o :to-render (merge {:op ({:context :context :render-stats :stats :turn-text :turn-text} (:op m)) :k k}
-                                              (select-keys m [:agent :turn])))
+               (step/out! o :to-render {:op ({:context :context :render-stats :stats} (:op m)) :k k})
                st)
+    :more (do (step/out! o :to-render {:op :more :view (:view m)}) st)
     :stats (do (deliver (:p m) (stats st)) st)
     :call (let [c (:call m)
                 reqs (requests c (:index st {}))]

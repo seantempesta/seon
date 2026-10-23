@@ -5,7 +5,7 @@
   root: a cost proof for the recursion). Run: bin/test seon.render-cost-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.web.html]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.render.ui] [seon.config] [seon.task] [seon.repl]))
 
 (def ^:private fan "Children per node: a tree as deep as log3 n (10,000 nodes: 9 levels)." 3)
 
@@ -111,3 +111,122 @@
      ;; where the count of every datom it no longer does took 1.7 / 8.4 / 33.4 ms
      :per-n {:calls 31 :bytes 4000000}
      :sizes [100 400 1000]}))
+
+(defn agent-of
+  "The input of size n: the test store's seed with root, its agent a1 and n evaluations of a1 (one
+  neighbour each, by the reverse ref :seon.cluster.eval/_agent), each evaluation's record as an
+  agent's REPL writes it (seon.repl/record-tx); and a1's eid."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any pos-int?]]}
+  [n]
+  (let [db (reduce d/db-with (ts/test-db)
+                   [[{:seon.root/id :root :seon.root/boot "b1"}]
+                    (seon.task/agent-tx "b1" :a1 {:status :idle})
+                    (seon.repl/record-tx {:seon.agent/key "b1/a1" :seon.agent/id :a1} "a1-7-1"
+                                         (vec (for [i (range n)] {:id i :tag :ret :form "(+ 1 2)" :printed "3"})) nil)])]
+    [db (:db/id (d/entity db [:seon.agent/key "b1/a1"]))]))
+
+(deftest a-walk-reads-its-entity-and-one-hop
+  (cost/proof
+    {:of 'seon.render/walk :input 'seon.render-cost-test/agent-of
+     :n "evaluations of the walked agent (its neighbours by :seon.cluster.eval/_agent)"
+     :work (str "two pulls: the agent's own attributes, then its ref units (its runs, its evaluations, its root), "
+                "each neighbour's own attributes and no further (its refs stay {:db/id}); per evaluation, one node: "
+                "its schema by one map lookup per key (seon.render/entity-schema), its prose (texts: prose? of its one "
+                "string, its id, which is no prose, so nothing is parsed) and the citation pass over none (cite). "
+                "Not sized here: card-many forward refs and components (pulled whole, as pull gives them); "
+                "citations: a-walk-pulls-each-citation-once")
+     :growth :linear
+     ;; entity-schema, relevant (its declared keys), texts, prose? of :seon.cluster.eval/id, cite: measured 512 calls at 100
+     :per-n {:calls 5}
+     ;; walk, the root's schema, its prose and citations, each unit attribute read forward and its ref test
+     :fixed {:calls 19}
+     :sizes [100 1000 4000]}))
+
+(def ^:private cited-vars
+  "Vars to cite, in a fixed order: the publics of namespaces this test loads (a citation that
+  names nothing loaded is no reference, seon.ref/kept), a plain name each."
+  (vec (sort-by str (for [nsym '[clojure.core clojure.string seon.render seon.print seon.ref seon.docs seon.task seon.contract seon.program seon.repl]
+                          [k _] (ns-publics nsym) :when (re-matches #"[a-z][a-z0-9-]*[?!]?" (name k))]
+                      (symbol (str nsym) (name k))))))
+
+(defn cited-of
+  "The input of size n: the test store's seed with a task whose plan cites n vars (one backtick
+  each, cited-vars), and a run of it whose own plan is the same text; and the run's eid. Walking
+  the run, its own plan pulls each var, and its task's plan cites the same n again."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any pos-int?]]}
+  [n]
+  (let [plan (apply str (for [v (take n cited-vars)] (str "Use `" v "`. ")))
+        db (reduce d/db-with (ts/test-db)
+                   [[{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan plan :seon.task/execution :running
+                      :seon.task/branch :task-demo-f :seon.task/kind :work}]
+                    (seon.task/run-start-tx "demo/f#1" "demo/f" "b1" nil {:branch :task-demo-f :model "m" :max-turns 8} 0 plan)])]
+    [db (:db/id (d/entity db [:seon.run/id "demo/f#1"]))]))
+
+(deftest a-walk-pulls-each-citation-once
+  (cost/proof
+    {:of 'seon.render/walk :input 'seon.render-cost-test/cited-of
+     :n "distinct vars a run's plan cites, each cited again by its task's plan"
+     :work (str "the run's plan parsed once (seon.ref/references), each name pulled once at its depth "
+                "(seon.docs/cited: its kind, then resolve-ref, at doc depth its arglists, doc and contract); its task's plan "
+                "parsed once, each name found by its address in the walk's index (one map lookup) and only its "
+                "place added. No ref is pulled twice and no list of refs is scanned")
+     :growth :linear
+     ;; per var: seon.ref's parse and keep of its two mentions, its kind and its one pull
+     ;; (citation-kind, resolve-ref, source-of), its second place an index lookup: 22 contracted
+     ;; calls, measured 2,236 / 6,636 / 17,636 at 100 / 300 / 800 vars (not itemized)
+     :per-n {:calls 22}
+     ;; walk, its pulls' setup, each node's prose and citation pass, the run's two plans parsed
+     :fixed {:calls 36}
+     ;; the fixed list holds 837 vars (cited-vars)
+     :sizes [100 300 800]}))
+
+(defn paged-of
+  "The input of size n: agent a1's page walk (seon.render/page) with n evaluations of a1, none in a
+  turn (each its own row), and the layout's opts: the first page of rows."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any :map]]}
+  [n]
+  (let [[db eid] (agent-of n)]
+    [(seon.render/page [db] eid) {:shown (seon.config/value :seon.config.render.list/history) :view "a1"}]))
+
+(deftest a-page-renders-only-its-first-rows
+  (cost/proof
+    {:of 'seon.render.ui/page :input 'seon.render-cost-test/paged-of
+     :n "evaluations on the page's list"
+     :work (str "per node, how its schema shows it (shown-as: one properties lookup), its row (grouped by the "
+                "turns that name it: none here) and the sort of the rows by the transaction that made them; then "
+                "units for the first :seon.config.render.list/history rows only: what is rendered does not grow with "
+                "the list, only its count does (seon.render.ui/more)")
+     ;; the sort is n log n comparisons of one number, uncounted beside a node's two armed calls:
+     ;; measured 206 / 2,006 calls and 510 KB / 5.2 MB at 100 / 1,000 (2026-10-23)
+     :growth :linear
+     ;; shown-as twice a node (the list, then the tiles), each armed (~353 B), and the node's row:
+     ;; a map, its parts' vector, its sort key (newest, then id) and its place in the sort
+     :per-n {:calls 2 :bytes 5300}
+     ;; page, rows, and a slot per shown row and the list's end; what the first page's units hold
+     :fixed {:calls 6 :bytes 30000}
+     :sizes [100 1000 4000]}))
+
+(defn walked-of
+  "The input of size n: main and agent a1's branch with n evaluations of a1 on the branch (main
+  holds none), and a1's eid: what an agent's page reads."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple [:vector :any] pos-int?]]}
+  [n]
+  (let [[branch eid] (agent-of n)
+        main (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx "b1" :a1 {:status :busy})])]
+    [[main branch] eid]))
+
+(deftest a-page-walks-each-db-once
+  (cost/proof
+    {:of 'seon.render/page :input 'seon.render-cost-test/walked-of
+     :n "evaluations of the agent, on its branch"
+     :work (str "the walk on each db (main, then the branch: seon.render/walk, measured alone at 5 contracted calls "
+                "and 27 KB an evaluation, its pull of the evaluation and its record), per node one index read of "
+                "its own datoms for the transaction that made it (:seon.render/t, uncounted), one map entry to keep "
+                "it once, and the sort of the nodes by unit and transaction: about 14 KB a node beside the walk. "
+                "Every pass walks every row, though the page renders only the first: the walk pulling only the rows "
+                "shown is owed (task seon.render/page-walks-only-the-rows-shown)")
+     :growth :linear
+     ;; measured 2026-10-23: 526 / 5,026 calls and 4.19 / 41.1 MB at 100 / 1,000 evaluations
+     :per-n {:calls 5 :bytes 42000}
+     :fixed {:calls 30 :bytes 100000}
+     :sizes [100 1000 4000]}))

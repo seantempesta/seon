@@ -221,7 +221,7 @@
                   :reds [{:test 'demo-test/f-test :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))" :got "(= 6 4)"}]
                   :reasons [{:reason :proof-red :symbol 'demo-test/f-test} {:reason :contract-gap :symbol 'demo/helper}]}
         basis (fn [db n] {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4 :origin :model :observed observed})
-        record! (fn [b more] (d/transact conn [(merge {:seon.turn/id (str "demo/f#1/" (:turn b)) :seon.turn/run "demo/f#1"
+        record! (fn [b more] (d/transact conn [(merge {:seon.turn/id (str "demo/f#1/" (:turn b)) :seon.turn/run {:seon.run/id "demo/f#1"}
                                                        :seon.turn/n (:turn b) :seon.turn/origin :model :seon.turn/basis b
                                                        :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1 :seon.turn/tokens 1}
                                                       more)]))
@@ -273,7 +273,7 @@
 (deftest an-unresolved-citation-says-what-to-do
   ;; task seon.task/a-task-cites-what-it-needs: a name the plan cites that resolves to
   ;; nothing tells the agent what that means and what to do, not only that it is unresolved
-  (let [r (context/resolve-ref (db-with-program) 'demo/nowhere :doc)]
+  (let [r (seon.docs/resolve-ref (db-with-program) 'demo/nowhere :doc)]
     (is (:unresolved r))
     (is (string? (:problem r)) "a message beside the name")))
 
@@ -366,7 +366,7 @@
 (defn- turn-of
   "A recorded model turn n of run demo/f#1 with basis b: one call and its answer."
   [b n]
-  {:seon.turn/id (str "demo/f#1/" n) :seon.turn/run "demo/f#1" :seon.turn/n n :seon.turn/origin :model
+  {:seon.turn/id (str "demo/f#1/" n) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/n n :seon.turn/origin :model
    :seon.turn/basis b :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1
    :seon.turn/reply (str "reply " n) :seon.turn/calls [{:id (str "call-" n) :code (str "(+ " n " 1)") :evals (str (inc n))}]})
 
@@ -444,8 +444,8 @@
     (eval '(defn big "Does much." {:malli/schema [:=> [:cat] :int]} [] 1)))
   (let [src (str "(defn big \"Does much.\" [] " (str/join " " (repeat 4000 "(inc 1)")) ")")
         db (d/db-with (db-with-program) (program-facts [['ctx-big/big src []]]))
-        r (context/resolve-ref db 'ctx-big/big :code)]
-    (is (< context/reference-tokens (select/estimate src)) "the source is over the cap")
+        r (seon.docs/resolve-ref db 'ctx-big/big :code)]
+    (is (< seon.docs/reference-tokens (select/estimate src)) "the source is over the cap")
     (is (= "Does much." (:doc r)) "the doc instead")
     (is (nil? (:source r)) "no source cut short")
     (is (= '(clojure.repl/source ctx-big/big) (:read r)) "the form that reads the rest")
@@ -646,7 +646,7 @@
   ;; root's ruling (2026-10-23): a message is a fact. Root writes the owner's on main; the turn
   ;; that takes it writes the same fact on its branch and names it in its basis by id, so its
   ;; block (and every later reading of that turn) reads the text from the commit
-  (let [db (d/db-with (db-with-program) [{:seon.message/id "m-1" :seon.message/from "owner" :seon.message/to "demo/f#1"
+  (let [db (d/db-with (db-with-program) [{:seon.message/id "m-1" :seon.message/from "owner" :seon.message/to {:seon.run/id "demo/f#1"}
                                           :seon.message/body "use demo/g, not a new helper"}])
         b (context/current-state db (task-f db) {:turn 1 :max-turns 4 :message-ids ["m-1"]})]
     (is (= [{:from "owner" :body "use demo/g, not a new helper"}] (:messages b)))
