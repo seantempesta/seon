@@ -236,18 +236,15 @@
 
 (deftest a-run-whose-agent-ended-is-answered-not-a-platform-problem
   ;; bin/check e2e-calc (2026-10-23): a cancel killed an agent whose turn had asked prove for its
-  ;; tests; the api answered that agent gone, and the run recorded a :platform problem, so the
-  ;; scenario read a defect. The agent's end is its attempt's record; the run ends with it
-  (let [gone (seon.contract/error :seon.root/no-agent 'seon.root/api-proc "no live agent :a3" {:agent :a3})
+  ;; tests; root answers a request to an agent that ended :seon.root/ended (its producer knows
+  ;; ended from never-was), the run's waiter is answered with it, and nothing is recorded as a
+  ;; :platform problem: the agent's end is its attempt's record
+  (let [ended (seon.contract/error :seon.root/ended 'seon.root/api-proc "agent a3 ended" {:agent :a3})
         [st outs] (feed (prove/prove-proc {}) [(req 1 :agent-3 7 :a3)])
-        [st all] (run-through st outs gone)]
+        [st all] (run-through st outs ended)]
     (is (= [1] (waiters-answered all)) "its waiter is answered with the error")
     (is (not-any? #(= :problem (:op %)) all) "and no :platform problem is recorded")
-    (is (empty? (:done st)) "nothing remembered")
-    (testing "another agent gone (not the run's own) is still recorded"
-      (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :agent-3 7 :a3)])
-            [_ all] (run-through st outs (assoc gone :agent :a9))]
-        (is (some #(and (= :problem (:op %)) (= :platform (:class %))) all))))))
+    (is (empty? (:done st)) "nothing remembered")))
 
 (deftest a-spawn-failure-and-a-prove-agent-that-dies-are-answered-and-recorded
   (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :main 1) (req 2 :main 1)])

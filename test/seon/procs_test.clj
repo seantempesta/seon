@@ -291,6 +291,27 @@
             [_ _] (step #'root/api-proc st :from-writer {:dest {:rid rid} :r {:ok true}})]
         (is (= {:ok true} @p))))))
 
+(deftest an-agent-that-ended-is-answered-ended-one-never-had-no-agent
+  ;; bin/check e2e-calc (2026-10-23): root's answer says whether the agent ended (its view
+  ;; records :ended-ms: a kill, its attempt's end, a death) or root never had it, so a reader
+  ;; (seon.prove) tells a cancel from a defect by the type alone
+  (let [st (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                             :view {:agents {:a7 {:status :killed :ended-ms 1}}} :graph (promise)
+                             :system (doto (promise) (deliver {:procs {} :conns []}))})
+        ask (fn [m] (let [p (promise)] (step #'root/api-proc st :ext (assoc m :p p)) @p))]
+    (doseq [op [:eval :tests :stats :merge-main]]
+      (is (= [:seon.root/ended :a7] ((juxt :seon.error/type :agent) (ask {:op op :id :a7 :forms "1"}))) (str op " to an agent that ended"))
+      (is (= :seon.root/no-agent (:seon.error/type (ask {:op op :id :nope :forms "1"}))) (str op " to one root never had")))
+    (is (= :seon.root/ended (:seon.error/type (ask {:op :clone :parent :a7}))) "a clone of an agent that ended")
+    (testing "a request in flight when root stopped its agent is answered ended"
+      (let [p (promise)
+            st (-> st (assoc-in [:agents :a1] {:branch :b1}) (assoc-in [:view :agents :a1] {:status :killed}))
+            [st rid] (#'root/pend st p :eval :a1)
+            st (#'root/end-agent st (volatile! {}) {:agent :a1 :inflight [rid]})]
+        (is (= [:seon.root/ended :a1] ((juxt :seon.error/type :agent) @p)))
+        (is (get-in st [:view :agents :a1 :ended-ms]) "and its view records the end")))
+    (is (= :seon.root/ended (:seon.error/type (root/request 'merge-main! :a7 nil {:status :killed :ended-ms 1}))) "request's merge-main! to an agent that ended")))
+
 (def ^:private fake-members
   "Protocol members a refused answer must not carry: an eval item's, a test count's, a merge's."
   #{:id :tag :ok :merged? :pass :fail :error :reports :applied :conflicts})
