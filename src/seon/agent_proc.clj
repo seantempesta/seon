@@ -227,7 +227,7 @@
                                (contract/error :seon.fx/unknown-kind 'seon.fx/call (str "no effect kind " (:kind m)))))))
       ;; the agent's turn asks the test service to prove its branch at t (seon.prove): one run for
       ;; whoever asked for that key; the answer comes back on this proc's :in
-      :prove (do (step/out! o :to-api {:op :request :req {:op :prove :agent id :branch (:branch st) :t (:t m)} :route [id :in] :tag (:k m)})
+      :prove (do (step/out! o :to-api {:op :request :req {:op :prove :agent id :branch (:branch st) :t (:t m) :mode (:mode m)} :route [id :in] :tag (:k m)})
                  st)
       :merged-main (let [st (answer-rid st o (:id m) (:result m))]
                      (step/out! o :events (step/event {:type :merged-main :agent id :result (:result m)}))

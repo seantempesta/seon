@@ -51,6 +51,9 @@
   :deps {:perform seon.fx/resolve-deps :workers 1}
   ;; the next generation (my.root/build!): bin/build seon of the last merges commit, niced, ~25-45 s
   :build {:perform seon.fx/build :workers 1}
+  ;; a merge's deferred process tests, run only when root asks (owner, 2026-10-23): prove's entry
+  ;; (bin/prove --tests) on a worktree of the merge candidate, niced; one at a time
+  :tests {:perform seon.fx/run-tests :workers 1}
   ;; the model provider is only root's: the agents never hold the key
   :model {:perform seon.fx/model :workers :bind/model-workers :ctx {:provider :bind/provider} :rate :bind/model-rate}}
  :conns

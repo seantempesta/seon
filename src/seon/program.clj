@@ -25,7 +25,7 @@
     platform's own source has the same facts (seon.source)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]
-            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [seon.error :as error] [seon.db :as pdb] [seon.config :as cfg]))
+            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [seon.error :as error] [seon.db :as pdb] [seon.config :as cfg] [clojure.string :as str]))
 
 (defn scratch-ns?
   "Is namespace nsx scratch (never program): `user`, or declared ^:scratch."
@@ -458,17 +458,21 @@
   (let [ds (:form/defines (d/entity db e))]
     (or (empty? ds) (boolean (some #(= e (form-of db (:db/id %))) ds)))))
 
+(defn- definition-key
+  "Definition entity x's program key ([:var sym], [:method ...], [:impl ...], [:ns sym])."
+  {:malli/schema [:=> [:cat :any] [:maybe :seon.merge/program-key]]}
+  [x] (cond (:var/name x) [:var (:var/name x)]
+            (:method/key x) (into [:method] (sedn/decode (:method/key x)))
+            (:impl/key x) (into [:impl] (sedn/decode (:impl/key x)))
+            (:ns/name x) [:ns (:ns/name x)]))
+
 (defn form-row
   "Form entity e as the loader and the merge read it."
   {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
   [db e]
-  (let [f (d/entity db e)
-        def-key (fn [x] (cond (:var/name x) [:var (:var/name x)]
-                              (:method/key x) (into [:method] (sedn/decode (:method/key x)))
-                              (:impl/key x) (into [:impl] (sedn/decode (:impl/key x)))
-                              (:ns/name x) [:ns (:ns/name x)]))]
+  (let [f (d/entity db e)]
     (cond-> (into {:e e :id (:form/id f) :src (:form/src f) :ns (:ns/name (:form/ns f)) :order (:form/order f)
-                   :defines (into #{} (keep def-key) (:form/defines f))
+                   :defines (into #{} (keep definition-key) (:form/defines f))
                    :declares (into #{} (map :var/name) (:form/declares f))}
                   (for [[a k] form-sets] [k (set (get f a))]))
       (:form/lead f) (assoc :lead (:form/lead f)))))
@@ -510,6 +514,35 @@
           (recur q (inc i) seen))
         (subvec q k)))))
 
+(defn components
+  "The strongly connected components of nodes under (neighbors node), each a vector, in
+  reverse topological order: each after every component it reaches. Tarjan's, with a stack
+  of frames rather than recursion (any depth of graph); one visit per node and edge."
+  {:malli/schema [:=> [:cat [:sequential :any] ifn?] [:vector [:vector :any]]]}
+  [nodes neighbors]
+  (let [index (volatile! (transient {})) low (volatile! (transient {})) on (volatile! (transient #{}))
+        stack (volatile! (transient [])) out (volatile! (transient [])) n (volatile! 0)
+        enter! (fn [v] (vswap! index assoc! v @n) (vswap! low assoc! v @n) (vswap! n inc)
+                 (vswap! stack conj! v) (vswap! on conj! v))]
+    (doseq [root nodes :when (nil? (get @index root))]
+      (enter! root)
+      (loop [frames [[root (vec (neighbors root)) 0]]]
+        (when-let [[v ns i] (peek frames)]
+          (if (< i (count ns))
+            (let [w (nth ns i) frames (conj (pop frames) [v ns (inc i)])]
+              (cond (nil? (get @index w)) (do (enter! w) (recur (conj frames [w (vec (neighbors w)) 0])))
+                    (get @on w) (do (vswap! low assoc! v (min (get @low v) (get @index w))) (recur frames))
+                    :else (recur frames)))
+            (let [frames (pop frames)]
+              (when-let [[u] (peek frames)] (vswap! low assoc! u (min (get @low u) (get @low v))))
+              (when (= (get @low v) (get @index v))
+                (vswap! out conj! (loop [c []]
+                                    (let [w (nth @stack (dec (count @stack)))]
+                                      (vswap! stack pop!) (vswap! on disj! w)
+                                      (if (= w v) (conj c w) (recur (conj c w)))))))
+              (recur frames))))))
+    (persistent! @out)))
+
 (defn load-order
   "forms (form rows) in the order to load them: namespaces in dependency order (after each
   namespace among them that their forms require or whose vars they reference; ties by
@@ -548,9 +581,16 @@
 
 (defn- held?
   "Does this process already hold form row f compiled: imported from the source tree, in a
-  namespace it holds (the binary's own; test/ is imported but not built in)?"
+  namespace it holds (the binary's own; test/ is imported but not built in), every var it
+  defines bound there? A form imported into a namespace loaded earlier (a test namespace
+  loaded at boot, then a re-import adding a deftest) defines a var this process does not
+  hold yet: it is loaded, never read as an unmap (seon.stage/stage-tx)."
   {:malli/schema [:=> [:cat :seon.host/db :map] :boolean]}
-  [db f] (boolean (and (:form/source (d/entity db (:e f))) (find-ns (:ns f)))))
+  [db f]
+  (boolean (and (:form/source (d/entity db (:e f)))
+                (when-let [n (find-ns (:ns f))]
+                  (every? (fn [[k s]] (or (not= :var k) (some-> (get (ns-interns n) (symbol (name s))) bound?)))
+                          (:defines f))))))
 
 (defn- requiring
   "The form entities of namespace nsym and of every namespace a form requires it from: where
@@ -677,17 +717,6 @@
     :method (when-let [v (find-var a)] (when (instance? clojure.lang.MultiFn @v) (remove-method @v (read-string b))))
     nil))
 
-(defn- definitions
-  "{program key -> form id} of db's definitions that point to a form."
-  {:malli/schema [:=> [:cat :seon.host/db] :map]}
-  [db]
-  (into {} (for [f (live-forms db) k (:defines f) :let [e (case (first k) :var (pdb/eid db :var/name (second k))
-                                                             :method (pdb/eid db :method/key (method-key (second k) (nth k 2)))
-                                                             :impl (pdb/eid db :impl/key (impl-key (second k) (nth k 2)))
-                                                             :ns (pdb/eid db :ns/name (second k)))]
-             :when (and e (= (:e f) (form-of db e)))]
-         [k (:id f)])))
-
 (defn- load!
   "Load changed (form rows this binary does not hold), the forms a changed macro expanded
   in (dependents) and the forms whose contracts the changed schema keys reach
@@ -709,14 +738,20 @@
   "Make this process run db-to's program where it holds db-from's: each live form db-to
   has that db-from had not is loaded (but the binary's own), with what it reaches (load!),
   and each definition db-from had that db-to has none of is removed. Answers the load
-  errors."
+  errors. Cost: each db's form ids and definition pointers, read as datoms; a form row is
+  built only for a form db-to has live that db-from had not (measured 2026-10-23 on Seon's
+  program: four live-forms reads, ~1.4 s, before)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.program/error]]}
   [db-from db-to]
-  (let [from (set (map :id (live-forms db-from)))
-        to-defs (definitions db-to)
+  (let [live-ids (fn [db] (into #{} (for [dt (d/datoms db :aevt :form/id) :when (live? db (:e dt))] (:v dt))))
+        def-keys (fn [db] (into #{} (for [a (vals pointer) dt (d/datoms db :aevt a)] (definition-key (d/entity db (:e dt))))))
+        from (live-ids db-from)
+        to-defs (def-keys db-to)
         sc-from (schema-changes db-from)]
-    (doseq [k (keys (definitions db-from)) :when (not (contains? to-defs k))] (remove-definition! k))
-    (load! db-to (filterv #(not (or (from (:id %)) (held? db-to %))) (live-forms db-to))
+    (doseq [k (sort-by str (def-keys db-from)) :when (not (contains? to-defs k))] (remove-definition! k))
+    (load! db-to (filterv #(not (held? db-to %))
+                          (for [dt (d/datoms db-to :aevt :form/id) :when (and (not (from (:v dt))) (live? db-to (:e dt)))]
+                            (form-row db-to (:e dt))))
            (set (for [[k v] (schema-changes db-to) :when (not= v (get sc-from k))] k)))))
 
 (defn load-changes!
@@ -797,14 +832,40 @@
      seon.web/handler ;; web/public, in :env
      seon.proofs/greens}) ;; the results directory, outside the tree, by digest
 
+(defn- tree-reading?
+  "Does form f read the tree (a tree-reader referenced, by a form defining no env-reader)?"
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [f] (boolean (and (some tree-readers (:refs f))
+                    (not (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f)))))))
+
+(def ^:private names-only
+  "The vars whose forms only name other vars, as quoted data (the reach walk follows a quoted
+  name): reaching one is not using what it names."
+  '#{seon.program/tree-readers seon.program/env-readers})
+
+(defn- uses?
+  "Does form f use one of vars (:seon.config.source/process-vars or -binary-vars)? A form uses
+  a var it references and does not define (a var's own form names itself), and not when it
+  only names vars as data (names-only: tree-readers lists the binary-sh that the reach walk's
+  own tests never run)."
+  {:malli/schema [:=> [:cat [:set :qualified-symbol] :map] :boolean]}
+  [vars f]
+  (let [own (set (keep (fn [[k s]] (when (= :var k) s)) (:defines f)))]
+    (boolean (and (not-any? names-only own) (some #(and (vars %) (not (own %))) (:refs f))))))
+
 (defn- reach-fold
-  "(f key reached {:by-id :digest}) of each of db's tests (or each of roots' keys), reached the
-  form ids its closure reaches (reach-digests' walk: its own form and its namespace's plain
+  "(f key {:digest :process? :binary?}) of each of db's tests (or each of roots' keys) under inputs: the
+  key's reach digest and whether what it reaches uses one of :seon.config.source/process-vars
+  (:process?) or -binary-vars (:binary?). What a key reaches (its own form and its namespace's plain
   forms, then every reference, method, extension, contract's schema entry and inputs'
-  :data-refs, a test's form never walked on to): {key (f ...)}. The one walk reach-digests and
-  process-tests read."
+  :data-refs, a test's form never walked on to) is a graph whose strongly connected
+  components (components) each get, once and sinks first, a Merkle digest of their forms' own
+  digests and the digests of the components they reach, and whether they or those read the
+  tree, use a process var or use a binary var (uses?); a key's answer is of its starting forms' components. One pass over
+  the condensed graph, O(forms + edges), whatever the number of keys: the one walk
+  reach-digests and reach-index read."
   {:malli/schema [:=> [:cat :seon.host/db :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]] :seon.host/fn] :map]}
-  [db {:keys [data-refs]} roots f]
+  [db {:keys [env tree data-refs]} roots f]
   (let [schemas (into {} (for [dt (d/datoms db :aevt :schema/key)] [(:v dt) (:schema/form (d/entity db (:e dt)))]))
         sid #(str "schema " %)
         named (fn [text] (keep #(when (contains? schemas %) (sid %)) (names (sedn/decode text))))
@@ -815,7 +876,6 @@
         var-form (into {} (for [[s ids] (by-def :var)] [s (peek ids)]))
         methods (by-def :method) impls (by-def :impl)
         by-id (into {} (map (juxt :id identity)) forms)
-        digest (into {} (for [f forms] [(:id f) (error/digest (str (:ns f) "\n" (:src f)))]))
         ;; a test's form is reached only as the root it is: another form naming a test (its
         ;; name quoted as data, a proof list) never runs it, clojure.test does
         test-ids (set (for [dt (d/datoms db :aevt :var/kind) :when (= :test (:v dt)) :let [id (var-form (:var/name (d/entity db (:e dt))))] :when id] id))
@@ -824,35 +884,33 @@
                                     id (concat (methods s) (impls s) (contract s) (keep var-form (get data-refs s)))]
                                 id)))
         plain (update-vals (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) live)) #(mapv :id %))
-        ;; each form's neighbours, built once per call: every test's walk reads them, and
-        ;; rebuilding a form's edges per test that reaches it cost 7.4 GB a call on Seon's own
-        ;; program (pure-tests' measure, 2026-10-23)
         adj (into {} (map (juxt :id #(vec (edges %)))) forms)
-        ;; key k reaching from the forms ids, with their namespaces' plain forms: a stack
-        ;; (peek/pop), never a copy of the front per step
-        digest-of (fn [k ids]
-                    (f k (loop [stack (into (vec ids) (mapcat #(plain (:ns (by-id %)))) ids) seen #{}]
-                           (if (empty? stack)
-                             seen
-                             (let [id (peek stack) stack (pop stack)]
-                               (if (seen id) (recur stack seen) (recur (into stack (adj id)) (conj seen id))))))
-                       {:by-id by-id :digest digest}))]
+        pvars (cfg/value :seon.config.source/process-vars)
+        bvars (cfg/value :seon.config.source/binary-vars)
+        ;; one pass over the condensed graph, sinks first (Bazel's and Nix's action keys)
+        [comp-of cd rd pd bd] (reduce (fn [[comp-of cd rd pd bd] c]
+                                     (let [ms (set c)
+                                           fs (map by-id c)
+                                           kids (distinct (for [id c w (adj id) :when (not (ms w))] (get comp-of w)))]
+                                       [(reduce #(assoc! %1 %2 (count cd)) comp-of c)
+                                        (conj cd (error/digest (str (str/join " " (sort (map #(error/digest (str (:ns %) "\n" (:src %))) fs)))
+                                                                    "|" (str/join " " (sort (map cd kids))))))
+                                        (conj rd (boolean (or (some tree-reading? fs) (some rd kids))))
+                                        (conj pd (boolean (or (some #(uses? pvars %) fs) (some pd kids))))
+                                        (conj bd (boolean (or (some #(uses? bvars %) fs) (some bd kids))))]))
+                                   [(transient {}) [] [] [] []]
+                                   (components (mapv :id forms) adj))
+        ;; key k from the forms ids, with their namespaces' plain forms
+        answer (fn [k ids]
+                 (let [cs (distinct (map #(get comp-of %) (into (vec ids) (mapcat #(plain (:ns (by-id %)))) ids)))]
+                   (f k {:digest (error/digest (apply str k "\n" env "\n" (when (some rd cs) tree) (sort (map cd cs))))
+                         :process? (boolean (some pd cs)) :binary? (boolean (some bd cs))})))]
     (if roots
       ;; a root naming a var with no form here (renamed, not imported) gets no digest: its
       ;; caller names it missing, never a digest of :env alone that a stale green matches
-      (into {} (for [[k vars] roots :when (every? var-form vars)] [k (digest-of k (map var-form vars))]))
+      (into {} (for [[k vars] roots :when (every? var-form vars)] [k (answer k (map var-form vars))]))
       (into {} (for [f forms [k t] (:defines f) :when (and (= :var k) (= :test (:var/kind (d/entity db [:var/name t]))))]
-                 [t (digest-of t [(:id f)])])))))
-
-(defn- reach-digest
-  "Key k's reach digest from what it reached (reach-digests)."
-  {:malli/schema [:=> [:cat :seon.program/inputs :any [:set :any] :map] :string]}
-  [{:keys [env tree]} k reached {:keys [by-id digest]}]
-  (let [reads? (some #(let [f (by-id %)]
-                        (and (some tree-readers (:refs f))
-                             (not (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f))))))
-                     reached)]
-    (error/digest (apply str k "\n" env "\n" (when reads? tree) (sort (map digest reached))))))
+                 [t (answer t [(:id f)])])))))
 
 (defn reach-digests
   "{test var -> reach digest} of db's tests (task seon.program/tests-run-by-reach): the
@@ -864,33 +922,16 @@
   its form names; a var named in data its form reads, inputs' :data-refs: system.edn's procs,
   which root resolves by name), with inputs' :tree when a reached form references a
   tree-reader. A
-  test's digest moves exactly when a form or schema entry it reaches does. Cost: the live
-  forms, contracts and schema entries read once and digested once, then per test its
-  closure. With roots ({key [var ...]}, a bin/check step's mode functions: seon.proofs/
+  test's digest moves when a form or schema entry it reaches does, or the shape of what it
+  reaches (which form calls which): each strongly connected component's Merkle digest
+  (reach-fold). Cost: the live forms, contracts and schema entries read once and digested
+  once, then one pass over the condensed graph (reach-fold). With roots ({key [var ...]}, a bin/check step's mode functions: seon.proofs/
   check-steps), the same digest of each key: what its vars' forms and their namespaces'
   plain forms reach; a key one of whose vars has no form here has none."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol :string]]
                   [:=> [:cat :seon.host/db :seon.program/inputs [:map-of :string [:sequential :qualified-symbol]]] [:map-of :string :string]]]}
   ([db inputs] (reach-digests db inputs nil))
-  ([db inputs roots] (reach-fold db inputs roots (partial reach-digest inputs))))
-
-(def ^:private names-only
-  "The vars whose forms only name other vars, as quoted data (the reach walk follows a quoted
-  name): reaching one is not using what it names."
-  '#{seon.program/tree-readers seon.program/env-readers})
-
-(defn- uses?
-  "Does what a test reached use one of vars (:seon.config.source/process-vars or -binary-vars)?
-  A form uses a var it references and does not define (a var's own form names itself), and not
-  when it only names vars as data (names-only: tree-readers lists the binary-sh that the reach
-  walk's own tests never run)."
-  {:malli/schema [:=> [:cat [:set :qualified-symbol] [:set :any] :map] :boolean]}
-  [vars reached {:keys [by-id]}]
-  (boolean (some (fn [id] (let [f (by-id id)
-                                own (set (keep (fn [[k s]] (when (= :var k) s)) (:defines f)))]
-                            (and (not-any? names-only own)
-                                 (some #(and (vars %) (not (own %))) (:refs f)))))
-                 reached)))
+  ([db inputs roots] (reach-fold db inputs roots (fn [_ a] (:digest a)))))
 
 (defn reach-index
   "{test {:digest :process? :binary?}} of db's tests under inputs, from the one walk (reach-fold):
@@ -903,10 +944,7 @@
                   [:=> [:cat :seon.host/db :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]]] [:map-of :any [:map [:digest :string] [:process? :boolean] [:binary? :boolean]]]]]}
   ([db inputs] (reach-index db inputs nil))
   ([db inputs roots]
-   (let [vars (cfg/value :seon.config.source/process-vars)
-         binary (cfg/value :seon.config.source/binary-vars)]
-     (reach-fold db inputs roots (fn [k reached ctx] {:digest (reach-digest inputs k reached ctx) :process? (uses? vars reached ctx)
-                                                      :binary? (uses? binary reached ctx)})))))
+   (reach-fold db inputs roots (fn [_ a] a))))
 
 (defn process-tests
   "The keys of index (reach-index's answer) that reach a process of their own (a shell, a

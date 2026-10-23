@@ -290,7 +290,7 @@
         (let [[st rid] (pend st p op id)
               msg (case op
                     :eval (cond-> {:op :eval :forms (:forms m)} (:ticks m) (assoc :ticks (:ticks m)) (:origin m) (assoc :origin (:origin m)))
-                    (:tests :merge-tests) (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)) (:names m) (assoc :names (:names m))
+                    (:tests :merge-tests) (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)) (:names m) (assoc :names (:names m)) (:mode m) (assoc :mode (:mode m))
                                             (get-in st [:view :agents id :task]) (assoc :task (get-in st [:view :agents id :task])))
                     :stats {:op :stats}
                     :merge-main {:op :merge-main :data-attrs (:data-attrs m)})]
@@ -307,7 +307,7 @@
       ;; the test service (seon.prove): the request goes to its proc, the caller (a session, or an
       ;; agent's turn through its proc) is answered when the run it joined ends
       :prove (let [[st rid] (pend st p :prove (:agent m))]
-               (step/out! o [:prove :req] (assoc (select-keys m [:branch :t :agent :proofs :names]) :rid rid))
+               (step/out! o [:prove :req] (assoc (select-keys m [:branch :t :agent :proofs :names :mode]) :rid rid))
                st)
       :kill (cond-> (if (get-in st [:agents id])
                       ;; :ended when root stops it because its attempt ended (the reconciler says so)

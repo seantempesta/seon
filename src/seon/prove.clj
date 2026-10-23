@@ -22,9 +22,10 @@
             [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
 (defn run-key
-  "The key of the run of branch at tx t, of the tests of namespaces names (nil: all it selects)."
-  {:malli/schema [:=> [:cat :keyword :int [:maybe [:set :symbol]]] :string]}
-  [branch t names] (str (name branch) "@" t (when (seq names) (str ":" (str/join "," (sort names))))))
+  "The key of the run of branch at tx t, of the tests of namespaces names (nil: all it selects), in
+  mode (:judge: the plan's tests; :turn: the proofs and what the branch changed, an agent's turn)."
+  {:malli/schema [:=> [:cat :keyword :int [:maybe [:set :symbol]] [:enum :turn :judge]] :string]}
+  [branch t names mode] (str (name branch) "@" t (when (seq names) (str ":" (str/join "," (sort names)))) (when (= :turn mode) "!turn")))
 
 ;; ---- the facts of a run ------------------------------------------------------------------
 
@@ -41,7 +42,7 @@
     (into [(cond-> {:seon.proof.run/id (:key run) :seon.proof.run/branch (name (:branch run)) :seon.proof.run/t (:t run)
             :seon.proof.run/pass (:pass answer 0) :seon.proof.run/fail (:fail answer 0) :seon.proof.run/error (:error answer 0)
             :seon.proof.run/ms (long (:ms answer 0))}
-             (seq (:skipped-process answer)) (assoc :seon.proof.run/skipped-process (vec (:skipped-process answer))))]
+             (seq (:deferred answer)) (assoc :seon.proof.run/skipped-process (vec (:deferred answer))))]
           (mapcat (fn [[t s]]
                     (when-let [dg (get-in answer [:digests t])]
                       (let [fact (cond-> {:seon.proof/status s :seon.proof/run (:key run) :seon.proof/branch (name (:branch run))
@@ -59,7 +60,7 @@
 (defn- slot
   "The identity of what a request asks for apart from its tx: the branch and the namespaces named.
   A newer request of one slot replaces an older pending one; requests of different slots never do."
-  [{:keys [branch names]}] [branch names])
+  [{:keys [branch names mode]}] [branch names mode])
 
 (defn- same?
   "Is request r the one req asks: the same key (branch, tx, names) and the same agent?"
@@ -71,7 +72,7 @@
   (let [run (assoc req :waiters waiters)
         st (assoc st :running run)
         [st m] (if (:agent req)
-                 (step/ask st [:prove :answers] [:tests (:key req)] (cond-> {:op :tests :id (:agent req)} (:names req) (assoc :names (:names req))))
+                 (step/ask st [:prove :answers] [:tests (:key req)] (cond-> {:op :tests :id (:agent req) :mode (:mode req)} (:names req) (assoc :names (:names req))))
                  (step/ask st [:prove :answers] [:spawn (:key req)] {:op :spawn :opts {:branch :tests}}))]
     [(assoc-in st [:running :stage] (if (:agent req) :tests :spawn)) [m]]))
 
@@ -104,8 +105,9 @@
   [st {:keys [rid branch] :as m}]
   (let [t (or (:t m) (:main-t st))
         names (not-empty (:names m))
-        key (run-key branch t names)
-        req (-> m (select-keys [:branch :agent :proofs]) (assoc :key key :t t :names names))
+        mode (or (:mode m) :judge)
+        key (run-key branch t names mode)
+        req (-> m (select-keys [:branch :agent :proofs]) (assoc :key key :t t :names names :mode mode))
         k (slot req)
         done (get-in st [:done k])]
     (cond
@@ -143,7 +145,7 @@
                                                                          (str "the prove agent could not load the tests: " (:printed (last r))) {}))]
                     (if e
                       (let [[st fin] (finish st e) [st kill] (kill-runner st run)] [st (conj fin kill)])
-                      (let [[st m] (step/ask st [:prove :answers] [:tests key] (cond-> {:op :tests :id (:runner run)} (:names run) (assoc :names (:names run))))]
+                      (let [[st m] (step/ask st [:prove :answers] [:tests key] (cond-> {:op :tests :id (:runner run) :mode (:mode run)} (:names run) (assoc :names (:names run))))]
                         [(assoc-in st [:running :stage] :tests) [m]])))
         :tests (let [st (assoc-in st [:running :answer] r)
                      [st kill] (kill-runner st run)]

@@ -111,6 +111,22 @@
     (vec (sort-by str (for [[[k sym] [_ ov]] ours :when (and (= :var k) (= :fn (:kind ov)) (nil? (:contract ov)))] sym)))
     []))
 
+(defn uncontracted-since
+  "The functions branch db adds or redefines without a contract since its merge base base:
+  uncontracted's answer for the branch's own changes, read from what changed
+  (seon.program/divergence's vars and their facts), never the whole program. Measured
+  2026-10-23 on Seon's program: divergence ~4 ms, against two program reads ~1 s. None while
+  contracts are off (seon.contract/on?)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :qualified-symbol]]}
+  [base db]
+  (if contract/on?
+    (let [{:keys [added changed]} (program/divergence base db)]
+      (vec (sort-by str (for [sym (concat added changed)
+                              :let [x (some->> (pdb/eid db :var/name sym) (d/entity db))]
+                              :when (and (= :fn (:var/kind x)) (nil? (:var/contract x)))]
+                          sym))))
+    []))
+
 (defn- conflict-kind
   {:malli/schema [:=> [:cat :any :any :any] :seon.merge/conflict-kind]}
   [b o t]
@@ -255,10 +271,16 @@
 
 (defn unmerged
   "The entries of db still unmerged, given db's program prog: not resolved, and the
-  branch's content for the key still equal to ours (a re-defn resolves by itself)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program] [:vector :seon.merge/entry-value]]}
-  [db prog]
-  (filterv #(and (not (:resolved? %)) (same? (:key %) (:ours %) (get prog (:key %)))) (entries db)))
+  branch's content for the key still equal to ours (a re-defn resolves by itself). Without
+  prog, the program is read only when an entry is still open (a branch with none, the usual
+  case, reads its entries alone: the whole program costs ~0.5 s on Seon's own)."
+  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :seon.merge/entry-value]]
+                  [:=> [:cat :seon.host/db :seon.merge/program] [:vector :seon.merge/entry-value]]]}
+  ([db] (let [open (filterv (complement :resolved?) (entries db))
+              prog (delay (program db #{}))]
+          (filterv #(same? (:key %) (:ours %) (get @prog (:key %))) open)))
+  ([db prog]
+   (filterv #(and (not (:resolved? %)) (same? (:key %) (:ours %) (get prog (:key %)))) (entries db))))
 
 (defn resolve-tx
   "Mark the entry for key resolved (git add): the branch keeps what it holds now."

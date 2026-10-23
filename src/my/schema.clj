@@ -74,9 +74,12 @@
 
 (defn forms
   "The schema population this agent's branch sees, {key form}: the binary's forms with the
-  branch's registrations. (get (forms) k) is k's form; (keys (forms)) are every key."
-  {:malli/schema [:=> [:cat] [:map-of :qualified-keyword :any]]}
-  [] (merge contract/forms (program/schema-changes (agent/db))))
+  branch's registrations; (keys (forms)) are every key. With a key, that key's form, or nil
+  (agents asked (forms k) four times in step E's paid runs, 2026-10-22)."
+  {:malli/schema [:function [:=> [:cat] [:map-of :qualified-keyword :any]]
+                  [:=> [:cat :qualified-keyword] :any]]}
+  ([] (merge contract/forms (program/schema-changes (agent/db))))
+  ([k] (get (forms) k)))
 
 (defn register!
   "Register form v as schema k on this agent's branch. Answers {:seon.schema/key k

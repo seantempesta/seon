@@ -86,3 +86,45 @@
      :per-n {:ns 400 :bytes 1100 :calls 0}
      :fixed {:ns 2000 :bytes 2000 :calls 1}
      :sizes [100 1000 10000]}))
+
+(defn knotted
+  "components' arguments of size n: n nodes, each pointing to the next and to the one five back
+  when it is a multiple of seven (cycles of a few nodes along a chain)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple [:vector :int] :map]]}
+  [n]
+  [(vec (range n)) (into {} (for [i (range n)] [i (cond-> (if (< (inc i) n) [(inc i)] []) (and (pos? i) (zero? (mod i 7))) (conj (max 0 (- i 5))))]))])
+
+(deftest the-strongly-connected-components-are-one-visit-per-node-and-edge
+  (cost/proof
+    {:of 'seon.program/components :input 'seon.program-cost-test/knotted
+     :n "nodes (each with one or two edges)"
+     :work (str "Tarjan's: each node entered once (an index, a low link, a push), each edge followed once, "
+                "each node popped into its component once. Measured 2026-10-23: 145 us / 214 KB at 100 "
+                "nodes, 1.6 ms / 2.2 MB at 1,000, 21 ms / 21.7 MB at 10,000 (~2 us, ~2.2 KB a node)")
+     :growth :linear
+     :per-n {:ns 2000 :bytes 2000 :calls 0}
+     :fixed {:ns 2000 :bytes 2000 :calls 1}
+     :sizes [100 1000 10000]}))
+
+(defn keyed-chain
+  "reach-index's arguments: a branch holding n forms (app.pc/f0..fn-1, each calling the one
+  before) and a key for every tenth, each reaching every form below it: n/10 keys whose
+  walks would share most of the program."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :map]]}
+  [n]
+  (let [[db] (branch-of n)]
+    [db {:env "e" :tree "t"} (into {} (for [i (range 0 n 10)] [(str "k" i) [(symbol "app.pc" (str "f" i))]]))]))
+
+(deftest the-reach-walk-is-one-pass-whatever-the-keys
+  (cost/proof
+    {:of 'seon.program/reach-index :input 'seon.program-cost-test/keyed-chain
+     :n "forms (and n/10 keys, each reaching the forms below it)"
+     :work (str "the live forms read and digested once, each form's neighbours once, the components once "
+                "(Tarjan's) and each one's Merkle digest once, sinks first; then per key its starting "
+                "components' digests: linear in the forms, never forms x keys (a walk per key was "
+                "quadratic here). Measured 2026-10-23: 81 ms / 94 MB at 100, 244 ms / 270 MB at 1,000, "
+                "557 ms / 665 MB at 3,000; the fixed part is the test store's example program")
+     :growth :linear
+     :per-n {:ns 160000 :bytes 200000}
+     :fixed {:ns 60000000 :bytes 78000000}
+     :sizes [100 1000 10000]}))

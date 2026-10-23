@@ -17,6 +17,8 @@ All three check out design's branch, so implement holds design's schemas, stubs 
 
 `seon.template/with-merge` makes a linked set the same way: it follows each declared work task (the task files, `my.root/load-tasks!`) with its merge task; a task file's tasks are written held (`seon.task/load-tx` over `seon.task/create-tx`: new entries created held, changed ones updated, removed ones cancelled), so nothing loaded from a file runs until root releases it with `my.root/run!`.
 
+A merge whose branch's change reaches process tests (```seon.program/process-tests```, recorded as `:seon.attempt/deferred`) is gated first only when root asked (```my.root/gate!```, `:seon.task/gate?`; owner, 2026-10-23), and otherwise merges with them unrun, an open `:unrun` problem: the reconciler's `:gate` writes the changed namespaces' files over a worktree of the merges head and runs those tests there (the `:tests` effect, ```seon.fx/run-tests```; prove's entry, `bin/prove --tests`, through ```seon.fx/test-command```), records `:seon.attempt/deferred-results`, and a red is refused as a red proof is. An agent's turn and root's judge run only the in-process tests, in a fork of the agent, never a process test, a proof among them ([merging](merging.md#a-merge-runs-what-the-change-reaches)).
+
 ## The agent knows its task
 
 An agent holds the task and attempt root forked it for from its first form: `my.task/current` reads the task through `seon.turn/current-task`. Both ride `seon.root/spawn!`'s opts into the writer's `:spawn` request and the fork server's `:fork` message, and `seon.agent/init!` keeps them in the agent's state. A turn loop, a context read and an attached outside agent read it the same way.
