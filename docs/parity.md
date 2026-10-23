@@ -55,7 +55,7 @@ The server's ops, the MCP tools and root's evaluation path are [server](server.m
 | main wins a conflict | ours is kept | missing |
 | a changed function no test reaches refuses the branch (``:seon.test/unreached``, ``:seon.source/unreached``) | none: `seon.reconcile/done-explain` has no coverage reason | missing |
 | one done rule shared with merge | `seon.reconcile/done-explain` (a proof that never ran is `:proof-unknown`, not red; [tasks](tasks.md#the-done-rule)) | present |
-| tests selected by reach; results reused by reach digest | `seon.proofs/plan` over `seon.program/reach-digests`: `bin/prove`, `bin/test` and `bin/check` reuse greens in `../test-results` (check steps keyed too); agents' runs select and reuse by the same plan (`seon.agent/test-plan`) | present; agents' greens are kept per root ([merging](merging.md#a-merge-runs-what-the-change-reaches)) |
+| tests selected by reach; results reused by reach digest | `seon.proofs/plan` over `seon.program/reach-digests`: `bin/prove`, `bin/test` and `bin/check` reuse greens in the main tree's `test-results/` (check steps keyed too); agents' runs select and reuse by the same plan (`seon.agent/test-plan`) | present; agents' greens are kept per root ([merging](merging.md#a-merge-runs-what-the-change-reaches)) |
 | contracts armed at definition; cost proofs; per-function profile | `seon.contract`, `seon.cost`, `seon.profile` | present |
 | turns-to-green report (median, p90) | `seon.learn` charges overrun per run (stored as ``:seon.run/waste``) | partial |
 | scheduled work (``seon.schedule``) | none (AGENTS names a cron proc; `resources/seon/system.edn` has none) | missing |
@@ -90,6 +90,6 @@ The server's ops, the MCP tools and root's evaluation path are [server](server.m
 
 | v1 | next | Status |
 |---|---|---|
-| `CLAUDE.md` (the laws) | `CLAUDE.md` is `AGENTS.md` | present |
+| `CLAUDE.md` (the laws) | `AGENTS.md` alone: Claude Code reads it when the folder has no `CLAUDE.md` | present |
 | 13 skills in ``.agents/skills`` | the task's context and this wiki | dropped |
 | architecture pages | topic pages and the [map](README.md), loaded into the store as sections (`seon.docs`); no check fails on a dangling citation (task `seon.docs/the-wiki-stays-true-and-healthy`) | partial |

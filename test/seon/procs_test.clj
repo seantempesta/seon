@@ -53,13 +53,14 @@
 
 (deftest the-writers-transactions-name-their-runtime
   ;; task seon.db/each-commit-names-its-runtime: main's transactions through the writer's group
-  ;; commit carry the runtime that made them, and the fork server's replica applies it too
+  ;; commit carry the runtime that made them, and so does the stored commit the fork server's replica reads
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
         [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
         fp (jolt.host/runtime-fingerprint)]
     (is (= fp (:seon.tx/runtime (d/entity @conn (:max-tx @conn)))) "main's transaction names it")
-    (is (= fp (get-in (first (:to-fork-server outs)) [:tx-meta :seon.tx/runtime])) "and so does what the replica applies")))))
+    (let [m (first (:to-fork-server outs))]
+      (is (= fp (:seon.tx/runtime (d/entity (d/commit-as-db conn (:commit m)) (:t m)))) "and so does the stored commit the replica reads"))))))
 
 (deftest a-writers-merge-names-its-runtime
   ;; task seon.db/each-commit-names-its-runtime: a branch merged into main through the writer
@@ -79,6 +80,27 @@
     (is (:merged? (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))) "the branch merges")
     (is (< t0 (:max-tx @conn)))
     (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @conn (:max-tx @conn)))) "and its merge names the runtime")))))
+
+(deftest the-fork-servers-replica-is-main-at-each-commit
+  ;; the fork server's replica reads each main commit from the store (d/commit-as-db of the
+  ;; commit the writer names), never replaying its datoms: replaying the boot's 42,942-datom
+  ;; source import took 3.5 s and the first fork waited behind it (2026-10-23). After a large
+  ;; commit the replica is main at that t exactly: the same commit, the same datoms
+  (ts/test-branch! (fn [cfg conn]
+    (let [in (a/chan 16)
+          wst (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+          before @conn
+          [_ outs] (step #'writer/writer-proc wst :in {:op :tx :branch :db :tx-data (vec (for [i (range 2000)] {:note/text (str "n" i)})) :dest {:rid 1}})
+          m (first (filter #(= :tx (:op %)) (:to-fork-server outs)))
+          fst (#'server/server-step {:db before :cfg cfg :store conn :conn nil})
+          [fst' fouts] (step #'server/server-step fst :cmd m)
+          replica (:db fst')]
+      (is (= (d/commit-id @conn) (:commit m)) "the writer names the commit it made")
+      (is (= (:max-tx @conn) (:max-tx replica) (:t m)) "the replica is main at t")
+      (is (= (d/commit-id @conn) (d/commit-id replica)))
+      (is (= (vec (d/datoms @conn :eavt)) (vec (d/datoms replica :eavt))) "with main's datoms, every one")
+      (is (= 0 (:mismatch fst')))
+      (is (= [:applied] (mapv :ev (:ev fouts))))))))
 
 (deftest a-fork-at-another-commit-is-recorded-misaligned
   ;; task seon.agent/an-agents-base-is-its-merge-base: a new agent whose branch is not at the
@@ -269,6 +291,27 @@
             [_ _] (step #'root/api-proc st :from-writer {:dest {:rid rid} :r {:ok true}})]
         (is (= {:ok true} @p))))))
 
+(deftest an-agent-that-ended-is-answered-ended-one-never-had-no-agent
+  ;; bin/check e2e-calc (2026-10-23): root's answer says whether the agent ended (its view
+  ;; records :ended-ms: a kill, its run's end, a death) or root never had it, so a reader
+  ;; (seon.prove) tells a cancel from a defect by the type alone
+  (let [st (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                             :view {:agents {:a7 {:status :killed :ended-ms 1}}} :graph (promise)
+                             :system (doto (promise) (deliver {:procs {} :conns []}))})
+        ask (fn [m] (let [p (promise)] (step #'root/api-proc st :ext (assoc m :p p)) @p))]
+    (doseq [op [:eval :tests :stats :merge-main]]
+      (is (= [:seon.root/ended :a7] ((juxt :seon.error/type :agent) (ask {:op op :id :a7 :forms "1"}))) (str op " to an agent that ended"))
+      (is (= :seon.root/no-agent (:seon.error/type (ask {:op op :id :nope :forms "1"}))) (str op " to one root never had")))
+    (is (= :seon.root/ended (:seon.error/type (ask {:op :clone :parent :a7}))) "a clone of an agent that ended")
+    (testing "a request in flight when root stopped its agent is answered ended"
+      (let [p (promise)
+            st (-> st (assoc-in [:agents :a1] {:branch :b1}) (assoc-in [:view :agents :a1] {:status :killed}))
+            [st rid] (#'root/pend st p :eval :a1)
+            st (#'root/end-agent st (volatile! {}) {:agent :a1 :inflight [rid]})]
+        (is (= [:seon.root/ended :a1] ((juxt :seon.error/type :agent) @p)))
+        (is (get-in st [:view :agents :a1 :ended-ms]) "and its view records the end")))
+    (is (= :seon.root/ended (:seon.error/type (root/request 'merge-main! :a7 nil {:status :killed :ended-ms 1}))) "request's merge-main! to an agent that ended")))
+
 (def ^:private fake-members
   "Protocol members a refused answer must not carry: an eval item's, a test count's, a merge's."
   #{:id :tag :ok :merged? :pass :fail :error :reports :applied :conflicts})
@@ -440,6 +483,53 @@
             (is (empty? (:pending rs2)))
             (is (= (:view rs) (:view rs2)))))))))
 
+(defn- spawning-api
+  "(f st) on an api state that can spawn: its main a branch of the test store, its graph a stub
+  that takes the update! a spawn makes (the agent's proc), so the api's step runs alone."
+  [f]
+  (ts/test-branch! (fn [_ conn]
+    (f (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 8) :conn conn
+                         :view {:agents {}} :system (doto (promise) (deliver {:procs {} :conns []}))
+                         :graph (doto (promise) (deliver (reify clojure.core.async.flow.impl.graph/Update (update-flow [_ _] {}))))})))))
+
+(deftest a-spawn-is-answered-at-its-agents-ready
+  ;; task seon.root/a-spawn-answers-at-its-agents-ready: never at once, while the agent is
+  ;; :spawning, but at its hello, so what is sent to it next reaches a ready agent
+  (spawning-api (fn [st]
+    (let [p (promise)
+          [st _] (step #'root/api-proc st :ext {:op :spawn :opts {} :p p})]
+      (is (= :unanswered (answer p)) "spawning: not answered")
+      (let [[st _] (step #'root/api-proc st :back {:op :status :agent :a1 :set {:forked-ms 1.0 :mem-mb 1.0 :t 1}})]
+        (is (= :unanswered (answer p)) "a status that is not its hello: still not")
+        (step #'root/api-proc st :back {:op :status :agent :a1 :set {:ready true}})
+        (is (= {:id :a1} (answer p)) "its hello answers it"))))))
+
+(deftest a-spawn-whose-agent-dies-first-answers-the-death
+  ;; the end the agent met before its hello is the answer: died, with the exit status the fork
+  ;; server reaped (the process's exit, never a timeout); stopped first, the stop
+  (spawning-api (fn [st]
+    (let [p (promise)
+          [st _] (step #'root/api-proc st :ext {:op :spawn :opts {} :p p})
+          [st _] (step #'root/api-proc st :from-fs {:ev :forked :agent :a1 :pid 4242 :fork-ms 1.0})
+          [st _] (step #'root/api-proc st :back {:op :ended :agent :a1 :pid 4242 :inflight []})]
+      (is (= :unanswered (answer p)) "its death waits for the exit status")
+      (let [[st _] (step #'root/api-proc st :from-fs {:ev :exit :pid 4242 :status {:exit 3}})
+            first-answer (answer p)]
+        (is (= :seon.agent/died (:seon.error/type first-answer)))
+        (is (= {:exit 3} (:exit first-answer)) "with the status it exited with")
+        (is (= :a1 (:agent first-answer)))
+        ;; exactly one answer: the spawn's entry is gone once answered, so a later hello or end
+        ;; has no caller to answer (a promise ignores a second delivery, so the entry is the proof)
+        (is (not (contains? (:seon.root/spawning st) :a1)) "answered: no spawn is held for the agent")
+        (let [[st _] (step #'root/api-proc st :back {:op :status :agent :a1 :set {:ready true}})]
+          (is (not (contains? (:seon.root/spawning st) :a1)))
+          (is (= first-answer (answer p))))))))
+  (spawning-api (fn [st]
+    (let [p (promise)
+          [st _] (step #'root/api-proc st :ext {:op :spawn :opts {} :p p})]
+      (step #'root/api-proc st :back {:op :ended :agent :a1 :pid nil :inflight []})
+      (is (= :seon.agent/died (:seon.error/type (answer p))) "never forked: its death at once, no status to wait for")))))
+
 (defn- answering-sys
   "(f sys), sys's server answering every request with r (a stub for the api), on a
   branch of the test store deleted when f returns."
@@ -475,24 +565,23 @@
     (is (= [[:in 4]] @inbox) "nothing is taken after stop")))
 
 (deftest the-fork-server-step
-  (ts/test-branch! (fn [_ conn] (let [db @conn
-        st (#'server/server-step {:db db :conn nil})]
-    (testing "a main commit is applied to its replica"
-      (let [rep (d/with db [{:note/text "z"}])
-            ops (pdb/report->tx rep)
-            [st outs] (step #'server/server-step st :cmd {:op :tx :t (:max-tx (:db-after rep)) :ns 0 :tx-data ops})]
-        (is (= (:max-tx (:db-after rep)) (:max-tx (:db st))))
+  (ts/test-branch! (fn [cfg conn] (let [st (#'server/server-step {:db @conn :cfg cfg :store conn :conn nil})
+        stored (fn [rep] {:op :tx :t (:max-tx @conn) :commit (d/commit-id @conn) :ns 0 :tx-data (pdb/report->tx rep)})]
+    (testing "a main commit is read into its replica from the store"
+      (let [m (stored (d/transact conn [{:note/text "z"}]))
+            [st outs] (step #'server/server-step st :cmd m)]
+        (is (= (:max-tx @conn) (:max-tx (:db st))))
         (is (= [:applied] (map :ev (:ev outs))))
         (testing "and a commit it already holds is skipped"
-          (is (= [st nil] (#'server/server-step st :cmd {:op :tx :t (:max-tx (:db st)) :tx-data ops}))))))
-    (testing "the replica's transaction holds main's transaction facts (its instant, its tx-meta): seon.db/report->tx-meta"
-      (let [rep (d/with db {:tx-data [{:note/text "w"}] :tx-meta {:note/text "the commit's own fact"}})
-            t (:max-tx (:db-after rep))
-            [st2 _] (step #'server/server-step st :cmd {:op :tx :t t :ns 0 :tx-data (pdb/report->tx rep) :tx-meta (pdb/report->tx-meta rep)})
-            instant (fn [d] (:db/txInstant (d/entity d t)))]
-        (is (inst? (instant (:db-after rep))) "main's transaction has its instant (history is kept)")
-        (is (= (instant (:db-after rep)) (instant (:db st2))))
-        (is (= "the commit's own fact" (:note/text (d/entity (:db st2) t))) "and its tx-meta")))))))
+          (is (= [st nil] (#'server/server-step st :cmd m))))
+        (testing "the replica's transaction holds main's transaction facts (its instant, its tx-meta), as stored"
+          (let [m2 (stored (d/transact conn {:tx-data [{:note/text "w"}] :tx-meta {:note/text "the commit's own fact"}}))
+                t (:t m2)
+                [st2 _] (step #'server/server-step st :cmd m2)
+                instant (fn [d] (:db/txInstant (d/entity d t)))]
+            (is (inst? (instant @conn)) "main's transaction has its instant (history is kept)")
+            (is (= (instant @conn) (instant (:db st2))))
+            (is (= "the commit's own fact" (:note/text (d/entity (:db st2) t))) "and its tx-meta")))))))))
 
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'seon.procs-test)]

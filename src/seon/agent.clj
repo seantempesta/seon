@@ -19,7 +19,7 @@
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
-;; :walks (test-plan's last reach walks, each keyed by the db value it walked: walks)
+;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 (defonce state (atom nil))
 
@@ -222,23 +222,40 @@
 ;; ---- evaluation -----------------------------------------------------------------
 
 
+(defn- unresolved-message
+  "An unresolved symbol's message without the \"(did you mean ...)\" suffix (the suggestions are
+  the error's fix). Its words are copied from `jolt.nrepl/err->msg`'s cause (jolt-core/jolt/nrepl.clj
+  at the Jolt pin, reference-code/jolt e0351af8), which builds it inline from the same ex-data and
+  cannot be called alone; a pin bump that rewords it is a wording change here."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [sym] (str "Unable to resolve symbol: " sym " in this context"))
+
 (defn error-map
   "An exception caught at one of the agent's entrant boundaries (operation: the REPL's
   seon.repl/eval-code by default) as the one error map: its ex-data when that already is
   one (a contract's error names its operation, member and problems), else the
-  :seon.agent/eval-error variant, with the exception's class, its ex-data printed by the one
-  printer, and its cause chain (each cause's class and message)."
+  :seon.agent/eval-error variant, with the exception's class, its ex-data's diagnostic keys
+  (Jolt's :jolt.error/* : line, column, symbol, ns, kind, suggestions; and
+  :clojure.error/*) as keys, the suggestions as the fix, any other ex-data as :data, and its cause chain (each cause's class
+  and message)."
   {:malli/schema [:function [:=> [:cat :seon.host/throwable] :seon.error/base]
                   [:=> [:cat :seon.host/throwable :qualified-symbol] :seon.error/base]]}
   ([e] (error-map e 'seon.repl/eval-code))
   ([^Throwable e op]
    (if (contract/error? (ex-data e))
      (ex-data e)
-     (let [m (or (ex-message e) (str (type e)))
+     (let [d (ex-data e)
+           diag? (comp #{"jolt.error" "clojure.error"} namespace key)
+           jd (into {} (filter (every-pred (comp qualified-keyword? key) diag?)) d)
+           other (not-empty (into {} (remove (every-pred (comp qualified-keyword? key) diag?)) d))
+           sym (:jolt.error/symbol jd)
+           unresolved? (and sym (= :analyze/unresolved-symbol (:jolt.error/kind jd)))
+           m (if unresolved? (unresolved-message sym) (or (ex-message e) (str (type e))))
            causes (mapv #(str (type %) ": " (ex-message %)) (take-while some? (rest (iterate ex-cause e))))]
        (contract/error :seon.agent/eval-error op m
-                       (cond-> {:class (str (type e))}
-                         (ex-data e) (assoc :data (print/text (ex-data e) (:part print/budgets)))
+                       (cond-> (assoc jd :class (str (type e)))
+                         (seq (:jolt.error/suggestions jd)) (assoc :seon.error/fix (str "did you mean " (str/join ", " (:jolt.error/suggestions jd))))
+                         other (assoc :data other)
                          (seq causes) (assoc :causes causes)))))))
 
 (defn write-end!
@@ -297,19 +314,25 @@
       (assoc :got (print/text (second (:actual m)) (:part print/budgets)))
       (contract/valid? :seon.cost/report cost) (assoc :cost cost))))
 
-(defn- walk
-  "(f db inputs), reused while db is the very value walked last for role (:branch, :base): a
-  value never changes, so neither does its walk (AGENTS §5, results reused by input). An
-  run's base stays one value until merge-main! replaces it, so its digests are walked once
-  per base, not once per observe; root's :tests after the last observe reuses the branch's.
-  Measured 2026-10-23: a reach walk ~1.2-1.4 s, 1.7-1.9 GB on Seon's program (2144 forms)."
-  {:malli/schema [:=> [:cat [:enum :branch :base] :seon.host/db :seon.program/inputs :seon.host/fn] :map]}
-  [role db inputs f]
-  (let [w (get-in @state [:walks role])]
-    (if (and w (identical? db (:db w)) (= inputs (:inputs w)))
+(defn- base-graph
+  "The reach graph of base under inputs, with its index ({:graph :index}: seon.program/
+  graph-index), reused while base is the very value it was made for: a value never changes,
+  so neither does its graph (AGENTS §5, results reused by input). A new base (merge-main!, a
+  resumed branch's older one) is the graph held updated to it (seon.program/reach-update, in
+  either direction), never built again: the graph held is the one this process was forked
+  with, main's, kept by the fork server (:graph), and built here only when there is none or
+  its :data-refs are not inputs'. Measured 2026-10-23 on Seon's program (2,616 forms): the
+  graph 640 ms, 816 MB; a one-form change's update and index 20-45 ms."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.program/inputs] :map]}
+  [base inputs]
+  (let [{w-db :db g0 :graph :as w} (:base-graph @state)]
+    (if (and w (identical? base w-db) (= inputs (:inputs w)))
       (:value w)
-      (let [v (f db inputs)]
-        (swap! state assoc-in [:walks role] {:db db :inputs inputs :value v})
+      (let [g (cond (not (and g0 (= (:data-refs inputs) (:data-refs g0)))) (program/reach-graph base (:data-refs inputs))
+                    (identical? base w-db) g0
+                    :else (program/reach-update g0 base))
+            v {:graph g :index (program/graph-index g inputs nil)}]
+        (swap! state assoc :base-graph {:db base :graph g :inputs inputs :value v})
         v))))
 
 (defn test-plan
@@ -344,10 +367,12 @@
         dir (when shared (cfg/value :seon.config.source/test-results-dir))
         judges? (fn [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
                           (and (:test m) (not (program/scratch-ns? (:ns m))))))
-        idx (into {} (filter (comp judges? key)) (walk :branch db in program/reach-index))
+        b (when base (base-graph base in))
+        g (if b (program/reach-update (:graph b) db) (program/reach-graph db (:data-refs in)))
+        idx (into {} (filter (comp judges? key)) (program/graph-index g in nil))
         cd (update-vals idx :digest)
         unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))]
-    (-> (proofs/plan (when base (walk :base base in program/reach-digests)) cd (merge (if dir (proofs/greens dir (vec (vals cd))) {}) (proofs/stored-greens db (vec (vals cd)))) proofs)
+    (-> (proofs/plan (some-> b :index (update-vals :digest)) cd (merge (if dir (proofs/greens dir (vec (vals cd))) {}) (proofs/stored-greens db (vec (vals cd)))) proofs)
         (update :selected into unrecorded)
         (update :run into unrecorded)
         (assoc :digests cd :dir dir
@@ -490,15 +515,21 @@
         {:keys [reused digests dir]} plan
         run (filterv #(not (reused %)) selected)
         reused-reports (vec (for [t selected :when (reused t)] {:type :pass :var (str "#'" t) :reused true}))
-        [r w] (lib/pipe) t0 (profile/now-ns)
+        [r w] (sock/socketpair) t0 (profile/now-ns)
         res (lib/fork!
               {:refused (fn [n] (lib/c-close r) (lib/c-close w)
                           (contract/error :seon.test/fork-refused 'seon.agent/run-tests-forked
                                           (str "cannot fork the tests: " n " Chez threads active (a running future?)") {:active-threads n}))
                :child (fn []
                         (lib/c-close r)
-                        ;; the run ends by its budget; if the agent dies first, the next write to the
-                        ;; pipe ends this child (EPIPE). The agent's socket is FD_CLOFORK: not held here.
+                        ;; the run ends by its budget, or with its agent: the agent's end of this socket
+                        ;; pair closing raises SIGIO here and ends the child, whatever the test is
+                        ;; doing (task seon.agent/a-proof-run-ends-with-its-agent; the agent's own
+                        ;; socket to root is FD_CLOFORK: not held here, so its handler is replaced)
+                        (when-let [unwatched (sock/signal-at-input! w)]
+                          (sock/write-line! w (sedn/encode {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (:seon.error/message unwatched)}]}))
+                          (lib/c-exit 0))
+                        (intr/exit-at-eof! #(sock/peer-gone? w))
                         (lib/set-trip! (* 16 1048576))
                         (swap! state assoc :mode :test :evaluating false)
                         (let [res (try (run-tests-here w ticks run)
@@ -660,7 +691,7 @@
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
-  [fd {id :agent branch :branch task :task run :run cfg :cfg resumed :resumed commit :commit t :t} db0 serve]
+  [fd {id :agent branch :branch task :task run :run cfg :cfg resumed :resumed commit :commit t :t graph :graph} db0 serve]
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
   (sock/clofork! fd)
@@ -687,12 +718,16 @@
      ;; :base is the branch's merge base with main: a new branch's is the image (main as it
      ;; forked); a resumed one's is older than main, and comparing against main's head would
      ;; read main's later changes as the branch's (seon.program/divergence, changed-vars)
-     (reset! state {:id id :branch branch :task task :run run :fd fd :conn c :db @store-conn
+     (reset! state (cond-> {:id id :branch branch :task task :run run :fd fd :conn c :db @store-conn
                    :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
-                   :ns nsx :interrupt-ok intr-ok :serve serve})
+                   :ns nsx :interrupt-ok intr-ok :serve serve}
+                   ;; main's reach graph as the fork server keeps it, for db0: test-plan's base
+                   ;; graph starts from it (base-graph), never built in this process
+                   graph (assoc :base-graph {:db db0 :graph graph})))
      ;; a kept branch, resumed (root released its held task: seon.reconcile/hold-tx), takes
-     ;; its task from main, with the failure and evidence the last run left there
-     (when-let [tx (when resumed (not-empty (task/onto-tx db0 @store-conn task)))]
+     ;; its task from main, with the failure and evidence the last run left there; an
+     ;; agent with no task (a fresh one on a kept branch) takes none
+     (when-let [tx (when (and resumed task) (not-empty (task/onto-tx db0 @store-conn task)))]
        (transact! tx)))))

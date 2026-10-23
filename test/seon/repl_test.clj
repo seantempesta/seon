@@ -3,7 +3,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [seon.agent-test :as at]
             [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]
             [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.docs :as docs]
-            [seon.config :as cfg] [seon.test-store :as ts] [datahike.api :as d]))
+            [seon.config :as cfg] [seon.render :as render] [seon.test-store :as ts] [datahike.api :as d]))
 
 (deftest an-agent-repl-answers-what-a-clojure-repl-answers
   ;; owner, 2026-10-21: "Whatever intuitions agents have we need to make sure we are matching a
@@ -191,3 +191,92 @@
     (is (int? (:id bad)) "an id, so record-tx records it")
     (is (= 2 (count (filter :seon.cluster.eval/record (repl/record-tx :a1 "r" items nil))))
         "both items are recorded: the form that ran and the defect")))
+
+(defn- eval-item
+  "The one reply item of `code` asked of the REPL's own handler in this process, as a scratch session."
+  {:malli/schema [:=> [:cat :string] :map]}
+  [code]
+  (let [answers (volatile! [])
+        old @agent/state]
+    (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
+    (try ((repl/handler) {"op" "eval" "code" code :reply #(vswap! answers conj %)})
+         (finally (reset! agent/state old)))
+    (last (repl/fold @answers))))
+
+(deftest an-eval-errors-data-is-printed-once
+  ;; a compile error's Jolt diagnostics (:jolt.error/*, ex-data) are keys of the error map, the
+  ;; suggestions its fix, and the item prints each once
+  (let [item (eval-item "(prinltn 1)")
+        em (:err item)]
+    (is (= :seon.agent/eval-error (:seon.error/type em)))
+    (is (= 1 (:jolt.error/line em)))
+    (is (= "prinltn" (:jolt.error/symbol em)) "Jolt answers the symbol as a string, as the schema says")
+    (is (= ["print" "printf" "println"] (:jolt.error/suggestions em)) (pr-str em))
+    (is (str/includes? (str (:seon.error/fix em)) "println"))
+    (is (nil? (:data em)) "no printed copy of the ex-data")
+    (is (contract/valid? :seon.agent/eval-error em) "the error is the declared variant")
+    (is (= 1 (count (re-seq #"did you mean" (:printed item)))) (:printed item))
+    (is (= 1 (count (re-seq #"println" (:printed item)))) (:printed item))
+    (is (str/includes? (:printed item) "fix: did you mean print, printf, println") (:printed item))))
+
+(deftest an-ordinary-exception-renders-its-message
+  (let [item (eval-item "(+ 1 :a)")]
+    (is (= :err (:tag item)))
+    (is (str/includes? (:seon.error/message (:err item)) "cannot be cast") (pr-str (:err item)))
+    (is (= "class java.lang.ClassCastException" (:class (:err item))))
+    (is (str/starts-with? (:printed item) (:seon.error/message (:err item))))
+    (is (nil? (:seon.error/fix (:err item))))
+    ;; on main :data was the printed string "{:k 1}": the map assertion below is the one that fails there
+    (let [item (eval-item "(throw (ex-info \"boom\" {:k 1}))")]
+      (is (str/starts-with? (:printed item) "boom"))
+      (is (= 1 (count (re-seq #"boom" (:printed item)))) (:printed item))
+      (is (= {:k 1} (:data (:err item))) "an ordinary ex-data stays data"))
+    (let [em (agent/error-map (ex-info "x" {:my/id 1 :seon.error/message "shadow" :jolt.error/line 7}))]
+      (is (= "x" (:seon.error/message em)) "a qualified key of someone else's cannot shadow the error's own")
+      (is (= {:my/id 1 :seon.error/message "shadow"} (:data em)))
+      (is (= 7 (:jolt.error/line em)) "Jolt's own keys are keys"))))
+
+(deftest an-eval-error-says-where-in-its-forms-own-text
+  ;; positions are the form's own (what (source f) prints), not the request's: a form on lines
+  ;; 5-7 of a request whose line 7 fails is line 3 of it, whichever request ran it
+  (let [defs "(def ok 1)\n(defn f [x]\n  (+ x\n     (prinltn 2)))\n(defn g [x]\n  (inc x)\n  (+ 1 (first :k)))"
+        answers (volatile! [])
+        old @agent/state]
+    (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.where)})
+    (try ((repl/handler) {"op" "eval" "code" (str defs "\n(g 1)") :reply #(vswap! answers conj %)})
+         (finally (reset! agent/state old)))
+    (let [[_ compile-err _ run-err] (repl/fold @answers)]
+      (is (= {:line 3 :column 6} (:seon.error/at (:err compile-err))) (pr-str (:err compile-err)))
+      (is (nil? (:seon.error/in (:err compile-err))))
+      (is (= 'seon.repl-test.where/g (:seon.error/in (:err run-err))) (pr-str (:err run-err)))
+      (is (= {:line 3} (:seon.error/at (:err run-err))))
+      (is (some #{"at line 3:6"} (str/split-lines (:printed compile-err))) "the form's own position, once")
+      (is (not (str/includes? (:printed compile-err) "4")) "not also the request's 4:6")
+      (is (some #{"at line 3 of seon.repl-test.where/g"} (str/split-lines (:printed run-err))) (:printed run-err))
+      (is (not (str/includes? (:printed compile-err) ":jolt.error/line"))))))
+
+(deftest an-error-in-an-anonymous-fn-is-in-the-fn-around-it
+  ;; what Jolt names for a frame inside an anonymous fn: the var that holds it when the call is
+  ;; inside that var, nothing when the fn runs from the top of a request (never a core var)
+  (let [answers (volatile! [])
+        old @agent/state]
+    (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.anon)})
+    (try ((repl/handler) {"op" "eval" :reply #(vswap! answers conj %)
+                          "code" "(defn h [x]\n  ((fn [y]\n     (inc y))\n   x))\n(h \"a\")\n(doall (map (fn [y] (inc y)) [\"a\"]))\n(first :k)"})
+         (finally (reset! agent/state old)))
+    (let [[_ in-fn lazy top] (repl/fold @answers)]
+      (is (= 'seon.repl-test.anon/h (:seon.error/in (:err in-fn))) (pr-str (:err in-fn)))
+      (is (= 2 (:line (:seon.error/at (:err in-fn)))) "the line in h that runs the anonymous fn, as Jolt frames it")
+      (doseq [item [lazy top]]
+        (is (nil? (:seon.error/in (:err item))) (pr-str (:err item)))
+        (is (not (re-find #"clojure\.core" (str (:seon.error/in (:err item))))))
+        (is (not (str/includes? (:printed item) "\nat ")) "no position is claimed that Jolt did not give")))))
+
+(deftest a-request-relative-position-shows-unless-the-forms-own-does
+  ;; when located cannot move a position into the form's terms (no :seon.error/at), the
+  ;; request's own is printed rather than none; with :seon.error/at it is hidden
+  (let [em (contract/error :seon.agent/eval-error 'seon.repl/eval-code "m" {:class "c" :jolt.error/line 4 :jolt.error/column 6})]
+    (is (str/includes? (render/ai em {}) ":jolt.error/line 4") (render/ai em {}))
+    (let [r (render/ai (assoc em :seon.error/at {:line 3 :column 6}) {})]
+      (is (not (str/includes? r ":jolt.error/line")) r)
+      (is (some #{"at line 3:6"} (str/split-lines r))))))

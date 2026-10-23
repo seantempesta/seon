@@ -16,16 +16,23 @@
   multimethod no longer has, stops pointing to its form."
   {:malli/schema [:=> [:cat :seon.host/db] :seon.db/tx-data]}
   [db]
+  ;; one pass over the recorded vars' names and one ns-interns per namespace (it builds the
+  ;; namespace's whole map), never one per var
+  (let [names (into {} (map (juxt :e :v)) (d/datoms db :aevt :var/name))
+        vars (for [dt (d/datoms db :aevt :var/form)] [dt (names (:e dt))])
+        interns (into {} (for [nsym (distinct (map (comp symbol namespace second) vars))
+                               :let [n (find-ns nsym)] :when n]
+                           [nsym (ns-interns n)]))]
   (vec (concat
-         (for [dt (d/datoms db :aevt :var/form)
-               :let [sym (:var/name (d/entity db (:e dt))) n (find-ns (symbol (namespace sym)))]
-               :when (and n (not (get (ns-interns n) (symbol (name sym)))))]
+         (for [[dt sym] vars
+               :let [in (interns (symbol (namespace sym)))]
+               :when (and in (not (get in (symbol (name sym)))))]
            [:db/retract (:e dt) :var/form (:v dt)])
          (for [dt (d/datoms db :aevt :method/form)
                :let [m (d/entity db (:e dt)) v (find-var (:method/multi m))]
                :when (and v (instance? clojure.lang.MultiFn @v)
                           (not (contains? (methods @v) (read-string (:method/dispatch m)))))]
-           [:db/retract (:e dt) :method/form (:v dt)]))))
+           [:db/retract (:e dt) :method/form (:v dt)])))))
 
 (defn stage!
   "Stage the live runtime onto this agent's branch (one transaction). Answers the tx-data

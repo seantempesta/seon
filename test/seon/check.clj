@@ -1,21 +1,18 @@
 (ns seon.check
   "End-to-end checks of seon.root through the same API the dashboard uses (proto/flow
-  f2-final proto.smoke). bin/check runs them; target/seon <check> [args] runs one.
+  f2-final proto.smoke). bin/check runs them; target/seon <check> [args] runs one. A driver,
+  outside src (task seon.main/drivers-leave-src): the binary's -main (seon.main/-main) serves
+  root and ports and loads this driver from the checkout's test/ for every other mode.
   usage: target/seon smoke        3 agents: define, test, transact; merge one; kill one mid-eval
          target/seon scale N      N agents spawned at once, each eval + transact + test
   A mode is its body: run-check boots root, runs it, prints its report and checks, stops
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
   reference (await-ref, seon.e2e/await-db), never a poll or a deadline."
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs]))
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.main :refer [out! shown]]))
 
-(defn- out! [& xs] (println (apply str xs)) (flush))
 
 ;; ---- the harness: one frame, one verdict, one way to wait ------------------------------
-
-(defn- shown
-  "A value a person reads on the console, whole, by the one printer (its layout, no budget)."
-  [v] (print/text (vary-meta v assoc :seon.print/full true)))
 
 (defn- verdict!
   "The one verdict: NAME OK or NAME FAILED as the last line, and the exit status, 0 only
@@ -257,7 +254,10 @@
   []
   (run-check "TEST-INPUTS" {:datoms 2000}
    (fn [sys]
-    (let [files (into {} (filter #(clojure.string/ends-with? (key %) ".clj")) (:value (seon.fx/read-source {:req {:root (seon.config/checkout) :dirs ["test"]}})))
+    ;; the tests' files: this driver lives in test/ too (outside src) but is no test, and its
+    ;; waits are a check's measurement, named in docs/clocks.md
+    (let [files (into {} (filter #(and (clojure.string/ends-with? (key %) ".clj") (not (clojure.string/ends-with? (key %) "seon/check.clj"))))
+                      (:value (seon.fx/read-source {:req {:root (seon.config/checkout) :dirs ["test"]}})))
           ;; test/'s forms analyzed onto main's value (d/db-with: nothing transacted)
           db (let [db (d/db (:conn sys))] (d/db-with db (seon.source/import-tx db files)))
           found (set (d/q '[:find ?v ?r :in $ [?r ...] :where [?f :form/refs ?r] [?f :form/defines ?d] [?d :var/name ?v]] db (vec hidden-inputs)))
@@ -524,9 +524,48 @@
                 (and (= "7" (:printed (first r7))) (= "360" (:printed (first r8)))
                      (= :seon.repl/ticks-spent (get-in (second r8) [:err :seon.error/type])) (= ":after" (:printed (nth r8 2))))}}))))
 
+;; ---- root's threads: a declared number (session THREADS) --------------------------------
+
+(defn- fiber-carriers
+  "The fiber carrier threads Jolt runs (or will run, before the first fiber): its pool size."
+  [] (jolt.scheme/eval-string "(if jolt-fiber-carriers (vector-length jolt-fiber-carriers) (jolt-fiber-carrier-count))"))
+
+(defn- thread-roster
+  "This process's Jolt threads by name, a numbered name folded to its stem
+  (\"jolt-carrier-3\" -> \"jolt-carrier\"): {stem count}. A thread nobody named shows as
+  \"Thread\". The GC's sweepers are C threads, not here: (- (nthreads) this sum)."
+  []
+  (frequencies (map #(clojure.string/replace (.getName ^Thread %) #"-\d+$" "") (keys (Thread/getAllStackTraces)))))
+
+(defn- declared-threads
+  "The threads root runs, as {:roster {name-stem n} :gc-sweepers n} (stems as thread-roster
+  folds them). Without a system, the process's own: main, Jolt's shutdown watcher, timer, io
+  poller and fiber carriers, and the GC sweepers fixed at boot. The timer starts at the
+  first timeout and the io poller at the first socket wait (an agent's), so a root has both
+  once its first agent runs. With a running sys, also one thread per :mixed proc of its
+  declaration (Flow runs :io procs, agent procs included, on the carriers), its two edge
+  readers (Flow's error channel, the fork server's socket) and, while the web proc listens,
+  the web server's acceptor and sweeper (ring-chez-adapter's, each a future of Jolt's agent
+  pool; task seon.web/web-server-threads-are-joined-at-stop)."
+  ([] {:roster {"main" 1 "jolt-shutdown" 1 "jolt-timer" 1 "jolt-io-poller" 1 "jolt-carrier" (fiber-carriers)}
+       :gc-sweepers (seon.config/value :seon.config.root/gc-sweepers)})
+  ([sys]
+   (let [procs (vals (:procs @(get-in sys [:bindings :system])))
+         mixed (count (filter #(= :mixed (or (:workload (clojure.core.async.flow.spi/describe (:proc %))) :mixed)) procs))
+         web? (true? (get-in (c/state sys) [:web :listening]))]
+     (update (declared-threads) :roster merge
+             (cond-> {"async-mixed" mixed "seon-flow-errors" 1 "seon-fs-events" 1}
+               web? (assoc "clojure-agent-pool" 2))))))
+
+(defn- threads
+  "The threads this process runs now, measured as declared-threads declares them, and :os,
+  the OS's count (seon.lib/nthreads): the roster's sum plus the sweepers when nothing else runs."
+  []
+  {:roster (thread-roster) :gc-sweepers (lib/gc-sweepers! -1) :os (lib/nthreads)})
+
 (defn thread-diff
-  "Where measured threads (seon.root/threads) differ from declared ones
-  (seon.root/declared-threads): {} when they are exactly what is declared, else each
+  "Where measured threads (threads) differ from declared ones
+  (declared-threads): {} when they are exactly what is declared, else each
   differing name with [declared measured], :gc-sweepers likewise, and :os when the OS
   counts threads beyond the roster and the sweepers."
   {:malli/schema [:=> [:cat :map :map] :map]}
@@ -544,11 +583,11 @@
   (run-check "SCALE" {:datoms 2000}
    (fn [sys]
     (let [mem0 (lib/sysmem)
-        th-boot (thread-diff (c/declared-threads sys) (c/threads))
+        th-boot (thread-diff (declared-threads sys) (threads))
         t0 (profile/now-ns)
         ids (ready! sys #(vec (pmap (fn [i] (c/spawn! sys {:task (str "scale " i)})) (range n))))
         t-ready (profile/ms-since t0)
-        th-ready (thread-diff (c/declared-threads sys) (c/threads))
+        th-ready (thread-diff (declared-threads sys) (threads))
         _ (out! "ready in " (lib/r2 t-ready) " ms: " (frequencies (map #(get-in (c/state sys) [:agents % :status]) ids)))
         work (fn [id]
                (let [k (subs (name id) 1)
@@ -564,7 +603,7 @@
                   :eval-ms (/ (- t2 t1) 1e6) :tests-ms (/ (- t3 t2) 1e6)}))
         results (vec (pmap work ids))
         t-done (profile/ms-since t0)
-        th-work (thread-diff (c/declared-threads sys) (c/threads))
+        th-work (thread-diff (declared-threads sys) (threads))
         st (c/state sys)
         mem1 (lib/sysmem)
         agent-mb (keep #(get-in st [:agents % :mem-mb]) ids)
@@ -576,7 +615,7 @@
         _ (doseq [id ids] (c/kill! sys id))
         _ (await-agents ev ids #{:killed})
         mem2 (do (Thread/sleep (seon.config/value :seon.config.check/pages-ms)) (lib/sysmem))
-        th-end (thread-diff (c/declared-threads sys) (c/threads))
+        th-end (thread-diff (declared-threads sys) (threads))
         ;; the target machine (a 16 GB M1, owner 2026-10-22): root, the fork server and the default
         ;; number of agents at once fit :seon.config.machine/memory-mb, each agent charged what the
         ;; system's free memory dropped per agent (its own pages, its page tables, the kernel's share)
@@ -596,7 +635,7 @@
                 :all-ended (every? #(get-in (c/state sys) [:agents % :ended-ms]) ids)
                 :gc (lib/gc-stats) :gc-sweepers (lib/gc-sweepers! -1)
                 :memory-at-max-running {:agents (seon.config/value :seon.config.agent/max-running) :need-mb (lib/r2 need) :budget-mb budget}
-                :root-threads {:declared (c/declared-threads sys) :os (lib/nthreads)
+                :root-threads {:declared (declared-threads sys) :os (lib/nthreads)
                                :diff {:boot th-boot :all-ready th-ready :after-work th-work :after-kill th-end}}}
        ;; root's threads exactly as declared once agents run (at boot Jolt's io poller has not
        ;; started yet: it starts at the first socket wait, an agent's)
@@ -754,7 +793,7 @@
                ids (apply spawn-ready! sys (map #(str "lc " %) (range 3)))
                ok? (every? #(= "4" (:printed (first @(c/submit! sys % "(+ 2 2)")))) ids)
                health (mapv #(let [p (ping sys %)] (:status p p)) [:api :writer :fork-server :flusher :reconciler])
-               running (thread-diff (c/declared-threads sys) (c/threads))
+               running (thread-diff (declared-threads sys) (threads))
                pids (vec (cons (get-in (c/state sys) [:fork-server :pid]) (keep #(get-in (c/state sys) [:agents % :pid]) ids)))
                st (c/stop! sys)]
            ;; after stop!, the named roster and the sweepers are what stop! answers for; the OS's
@@ -762,7 +801,7 @@
            ;; kernel's count for a while (164 of 200 trials; macOS removes it after even a
            ;; pthread_join), and nothing can await its removal (notes/pure-tests/lifecycle.md). A
            ;; thread that does not end shows in the next cycle's :running, which keeps :os
-           (let [stopped (thread-diff (c/declared-threads) (c/threads))]
+           (let [stopped (thread-diff (declared-threads) (threads))]
              {:cycle i :ok ok? :boot-ms (lib/r2 boot-ms) :stop st :left (vec (filter alive? pids))
               :health (set health)
               :running running :stopped (dissoc stopped :os) :stopped-os (:os stopped)})))))
@@ -772,7 +811,7 @@
 (defn lifecycle
   "n cycles (cycles): each stop! must answer with every proc exited (:graph true) and no
   agent or fork-server process left, and root's threads must be exactly what it declares
-  (seon.root/declared-threads): while running by name and by the OS's count, after every
+  (declared-threads): while running by name and by the OS's count, after every
   stop! by name (the OS's count after a stop recorded: cycles). Then pause/resume: a paused agent's request is held (no answer), and answered after
   resume, in order."
   [n]
@@ -790,7 +829,7 @@
             held-state (= :paused (:status (ping sys a)))
             _ (flow/resume-proc (:graph sys) a)
             r1 @p1 r2 @p2]
-        {:report {:threads {:declared-running (c/declared-threads sys) :declared-stopped (c/declared-threads)}
+        {:report {:threads {:declared-running (declared-threads sys) :declared-stopped (declared-threads)}
                   :cycles (mapv #(select-keys % [:cycle :boot-ms :running :stopped :stopped-os :left :health]) rows)
                   :stop-ms (lib/summ (map #(get-in % [:stop :ms]) rows))
                   :gc (lib/gc-stats) :gc-sweepers (lib/gc-sweepers! -1)}
@@ -1072,37 +1111,6 @@
        (doseq [c cs r (get-in h [:classes c :rows])] (out! (name c) " " (:message r)))
        {:report {:open (into (sorted-map) (for [c cs] [c (get-in h [:classes c :n] 0)]))}
         :checks (into {} (for [c cs] [(keyword (str "no-" (name c))) (zero? (get-in h [:classes c :n] 0))]))}))))
-
-(defn root-serve
-  "A root with its server on 127.0.0.1:(:seon.config.root/server-port) (seon.server),
-  until stdin closes (bin/root stop) or SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks):
-  what an outside agent's MCP relay (bin/mcp) talks to. It watches its checkout
-  (my.root/watch!: every writer's changes loaded as they happen). Its end is a fact on main
-  naming that cause (seon.root/stop!). A checkout whose config names no server port (0)
-  serves none, and says so; -1 asks the kernel for a free port. ROOT LISTENING names the port
-  it bound (what bin/root and seon.test-store/start-root! read), never one picked beforehand."
-  []
-  (let [port (seon.config/value :seon.config.root/server-port)
-        _ (when (zero? port)
-            (out! "ROOT REFUSED: :seon.config.root/server-port is 0 (no server); bin/worktree --ports writes config/local.edn with this checkout's ports")
-            (lib/c-exit 1))
-        sys (c/start! {})]
-    ;; the first cause stops root, once; a signal's hook waits for that stop, then Jolt exits
-    (let [cause (promise) stopped (promise)
-          end! (fn [why] (deliver cause why)
-                 (when (= why @cause) (out! "ROOT STOPPED " (shown (select-keys (c/stop! sys why) [:cause :ms :stop-fact-refused]))) (deliver stopped true))
-                 @stopped)]
-      (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (end! :signal))))
-      ;; the key's three values, read here only: -1 the kernel assigns a port (0 to bind), >0 that
-      ;; port (0, none, refused above); the port bound is the fact, printed for bin/root to record
-      (let [bound (.getLocalPort ^java.net.ServerSocket (seon.server/serve! sys (if (= -1 port) 0 port)))]
-        ;; the watcher ends with this process (target/watch exits on its parent's exit)
-        (let [w (my.root/watch! sys)]
-          (out! "ROOT WATCHING " (if (contract/error? w) (str "nothing: " (:seon.error/message w)) "the checkout and its refs")))
-        (out! "ROOT LISTENING " bound))
-      (loop [] (when (read-line) (recur)))
-      (end! :stdin-eof))
-    (lib/c-exit 0)))
 
 (defn- eval-records
   "The evaluation records on db of agent id: [{:form :origin ...}]."
@@ -1390,13 +1398,11 @@
      "problems" (fn [n more] (problems-check))
      "health" (fn [n more] (health-check (map keyword (remove nil? (cons n more)))))
      "threads" (fn [n more] (threads-check))
-     "root" (fn [n more] (root-serve))
      ;; this checkout's ports as the config resolves them, "SERVER WEB" (bin/ports)
      ;; bin/check's step names, the one list (seon.proofs/check-steps), space separated
      ;; jobs: how many steps or shards a proof run runs at once (:seon.config.proofs/jobs), for bin/check
      "jobs" (fn [n more] (do (println (seon.config/value :seon.config.proofs/jobs)) (lib/c-exit 0)))
      "steps" (fn [n more] (do (println (clojure.string/join " " (sort (keys seon.proofs/check-steps)))) (lib/c-exit 0)))
-     "ports" (fn [n more] (do (println (seon.config/value :seon.config.root/server-port) (seon.config/value :seon.config.web/port)) (lib/c-exit 0)))
      "mcp-proof" (fn [n more] (mcp-proof))
      "hotreload" (fn [n more] (hotreload))
      "idle" (fn [n more] (idle (n-or n "2000")))

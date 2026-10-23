@@ -623,7 +623,7 @@
 (defn- dead-tx
   "Run aid's death on main: the end its agent wrote on its branch before it exited (its
   reason, and its error as the cause), beside e, the death root observed (:seon.agent/died:
-  exit status, stderr tail, last op; or :seon.root/no-agent). A silent death wrote no end."
+  exit status, stderr tail, last op; or :seon.root/no-agent or :seon.root/ended). A silent death wrote no end."
   {:malli/schema [:=> [:cat :seon.run/id :seon.error/base [:maybe :map]] [:vector :any]]}
   [aid e end]
   (cas-tx aid :running :dead {:seon.run/end-ms (System/currentTimeMillis)
@@ -638,7 +638,7 @@
         done (fn [st] [(update st :flights dissoc aid) []])
         one (fn [[st o]] [st [o]])
         ;; its agent died: the one error map root answered with (:seon.agent/died: exit
-        ;; status, last op, stderr tail; or :seon.root/no-agent), and the end the agent wrote
+        ;; status, last op, stderr tail; or :seon.root/no-agent or :seon.root/ended), and the end the agent wrote
         ;; on its branch before it exited, read from the branch
         dead (fn [st e] (one (request (assoc-in st [:flights aid :died] e) aid :dead-read
                                       {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}})))
@@ -652,8 +652,14 @@
       :ignored [st []]
       :done (done st)
       :dead-read (one (write st aid :done (dead-tx aid (:died f) (some-> (:db r) (pull-end aid)))))
-      :spawned (if-let [ag (:id r)]
-                 (one (write (assoc-in st [:flights aid :agent] ag) aid :started
+      ;; root answers a spawn at its agent's hello, or at the end the agent met first: a death,
+      ;; a failed spawn or a stop (each names the agent) is this run's death, its row
+      ;; started first; the flight keeps the error's base and exit status, which `dead` records
+      :spawned (if-let [ag (or (:id r) (when (#{:seon.agent/died :seon.agent/failed :seon.root/no-agent :seon.root/ended} (:seon.error/type r)) (:agent r)))]
+                 (one (write (cond-> (assoc-in st [:flights aid :agent] ag)
+                               (:seon.error/type r) (assoc-in [:flights aid :died-at-spawn]
+                                                              (select-keys r [:seon.error/type :seon.error/operation :seon.error/message :exit :agent])))
+                             aid :started
                              (task/run-start-tx aid (:task act) (:boot st) ag (:env act) (System/currentTimeMillis)
                                                    (:plan (task/accumulate (get-in st [:idx :tasks]) (:task act))))))
                  ;; root refused it (the branch is held, or too many live agents): the refused answer
@@ -666,8 +672,11 @@
                                     (assoc :seon.run/status :refused :seon.run/end-ms now
                                            :seon.run/reason (:seon.error/message r) :seon.run/error r)))])))
       ;; an outside agent works this run (seon.server): no turn loop; it hands it back
-      :started (if (= "outside" (get-in act [:env :model]))
+      :started (cond
+                 (:died-at-spawn f) (dead st (:died-at-spawn f))
+                 (= "outside" (get-in act [:env :model]))
                  (done st)
+                 :else
                  (one (request st aid :worked
                                {:op :eval :id agent
                                 :forms (sedn/encode (list 'seon.turn/work! (list 'quote (cond-> {:task (:task act) :run aid :max-turns (get-in act [:env :max-turns])}

@@ -100,6 +100,44 @@
     (is (not (contains? left (:a1 agents))) "the idle agent ended")
     (is (not (contains? left (:a2 agents))) "the busy agent ended")))
 
+(deftest a-proof-run-ends-with-its-agent
+  ;; task seon.agent/a-proof-run-ends-with-its-agent: the agent's proof run (a fork of it) holds
+  ;; the write end of a fifo and sleeps, a test that never writes to the agent's pipe; the
+  ;; agent is killed (its task cancelled); the proof run ends with it, on the kernel's word that
+  ;; the reader of its pipe is gone (SIGIO). The test reads the fifo: its first byte says the
+  ;; proof run is in its test, its EOF that nothing holds the fifo any more, the proof run gone.
+  ;; No clock decides: a run that outlives its agent wakes from its sleep (a minute) and writes a
+  ;; second byte, which fails the test.
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        main (str "proof-ended-" (random-uuid))
+        store (str checkout "/target/runs/test-store")
+        runs (str checkout "/target/runs/" main "-runs")
+        fifo (str checkout "/target/runs/" main ".fifo")
+        _ (sh/sh "mkfifo" fifo)
+        root (ts/start-root! {:store store :main main :runs runs})
+        eval-root (fn [code] (let [r (ts/ask root {:op :eval :agent "root" :code code})]
+                               (if (:error r) r (edn/read-string (:printed (first (:items r)))))))
+        _ (eval-root "(c/spawn! sys {})")
+        parked (str "(do (ns parked-proof (:require [clojure.test :refer [deftest is]]))"
+                    " (deftest p (let [w (java.io.FileOutputStream. " (pr-str fifo) ")] (.write w 49) (.flush w) (Thread/sleep 60000) (.write w 50) (.flush w)) (is true))"
+                    " (seon.agent/run-tests-forked 1000000000 '#{parked-proof/p}))")
+        ;; a1 begins the form (its :started event, tapped before the submit); root knows its pid by then
+        _ (eval-root (str "(let [ev (c/events sys)] (c/submit! sys :a1 " (pr-str parked) ") "
+                          "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= :a1 (:agent e))) :began (recur)))))"))
+        pids (eval-root "(into {} (for [[id a] (:agents (c/state sys))] [id (:pid a)]))")
+        agent-pid (get pids :a1)
+        in (java.io.FileInputStream. ^String fifo)
+        began (.read in)
+        killed (sh/sh "kill" "-9" (str agent-pid))
+        ended (.read in)]
+    (.close in)
+    (ts/kill-root! root)
+    (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
+    (sh/sh "rm" "-rf" runs fifo)
+    (is (pos-int? agent-pid) (str "the agent's pid, from " (pr-str pids)))
+    (is (= 49 began) "the proof run was in its test")
+    (is (= -1 ended) (str "the proof run outlived its agent (byte " ended " after its sleep); agent " (pr-str agent-pid) " kill " (pr-str killed)))))
+
 (deftest a-blocked-agent-ends-with-its-root
   ;; task seon.agent/an-agent-ends-with-its-root, an agent blocked in a wait: its thread in
   ;; Chez's condition-wait reaches no safe point, so no signal handler runs (SIGIO, root's
@@ -238,6 +276,21 @@
   ;; or context read begins (it was nil: root kept the task in its view only)
   (let [[id] (in-agent ["(:seon.task/id (my.task/current))"])]
     (is (= (pr-str "demo/t") (:printed id)))))
+
+(deftest an-agent-with-no-task-resumes-a-kept-branch
+  ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
+  ;; store already holds (a kept branch; e2e's fresh agent on a store an earlier run left)
+  ;; died in its init, giving seon.task/onto-tx a nil task, and a wait for its :ready never
+  ;; ended. A kept branch takes its task from main only when the agent has one
+  (let [[r] (in-agent [{:op :eval :agent "root"
+                        :code (str "(let [ev (seon.root/events sys) m (seon.db/conn-main (:conn sys))]"
+                                   " (datahike.api/branch! (:conn sys) m (seon.db/on-main m :kept))"
+                                   " (let [ag (seon.root/spawn! sys {:branch :kept})]"
+                                   " (loop [] (let [e (clojure.core.async/<!! ev)]"
+                                   " (cond (not= ag (:agent e)) (recur)"
+                                   " (#{:ready :dead :ended :killed} (:type e)) (:type e)"
+                                   " :else (recur))))))")}])]
+    (is (= ":ready" (:printed r)) (pr-str r))))
 
 (deftest a-failure-marked-through-the-server-holds-the-task
   ;; owner, 2026-10-22: a failure is task data and root reacts to it. The agent marks its
@@ -406,3 +459,17 @@
         [type test] (edn/read-string (:printed r))]
     (is (= :seon.test/ticks-spent type) (:printed r))
     (is (= "#'spin-test/spin" test) "naming the test that was running")))
+
+(deftest a-compile-errors-line-and-suggestions-arrive-as-data
+  ;; the exception Jolt's analyzer raises for `(prinltn 1)`, as the one error map: its line,
+  ;; column and symbol are keys, its suggestions the fix, and nothing is a printed copy
+  (let [e (try (eval (read-string "(prinltn 1)")) (catch Throwable e e))
+        em (agent/error-map e)]
+    (is (= :seon.agent/eval-error (:seon.error/type em)))
+    (is (= 1 (:jolt.error/line em)))
+    (is (= 1 (:jolt.error/column em)))
+    (is (= "prinltn" (:jolt.error/symbol em)))
+    (is (some #{"println"} (:jolt.error/suggestions em)))
+    (is (= "did you mean print, printf, println" (:seon.error/fix em)))
+    (is (= "Unable to resolve symbol: prinltn in this context" (:seon.error/message em)) "the suggestions are not in the message too")
+    (is (nil? (:data em)) "no printed copy of the ex-data")))

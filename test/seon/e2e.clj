@@ -116,13 +116,13 @@
 
 (defn loop-turn!
   "The loop's turn on root sys, whose Seon source is on: a task redefines a platform
-  function (seon.fixtures/generation, 1 -> 2) on its branch, its merge task merges it, the
+  function (seon.generation/generation, 1 -> 2) on its branch, its merge task merges it, the
   reconciler commits main's file on the merges branch, and the merge loads in place: root
   and every agent forked after it run the new definition, with no build and no restart
   (BUILD plan P4). Waits for quiescence. Answers {:commit sha (the merged run's)
   :commits [[run sha]] :commit-errors [[run message]] :turn-ms (release to quiet) :spans [[run start end] ms
   from release]
-  :root (seon.fixtures/generation in root) :agent (in an agent forked after the merge)
+  :root (seon.generation/generation in root) :agent (in an agent forked after the merge)
   :quiescent q}. k: the scenario (fixtures/scenarios), :loop by default; :loop-2 is the
   second turn."
   ([sys] (loop-turn! sys :loop))
@@ -139,7 +139,7 @@
      :turn-ms turn-ms
      :spans (vec (sort (for [[a s e] (d/q '[:find ?a ?s ?e :where [?x :seon.run/id ?a] [?x :seon.run/start-ms ?s] [?x :seon.run/end-ms ?e]] d)]
                          [a (- s t0) (- e t0)])))
-     :root (seon.fixtures/generation) :agent (first (fresh sys "(seon.fixtures/generation)"))
+     :root (seon.generation/generation) :agent (first (fresh sys "(seon.generation/generation)"))
      :quiescent q})))
 
 (defn loop-run
@@ -163,11 +163,11 @@
     (let [{:keys [commits commit-errors turn-ms spans root agent] sha :commit} (loop-turn! sys)
           d (db sys)
           files (when sha (git "diff" "--name-only" head sha))
-          diff (when sha (git "diff" "-U0" head sha "--" "src/seon/fixtures.clj"))
+          diff (when sha (git "diff" "-U0" head sha "--" "src/seon/generation.clj"))
           changed (when diff (filterv #(and (#{\+ \-} (first %)) (not (str/starts-with? % "+++")) (not (str/starts-with? % "---"))) (str/split-lines diff)))
           ok (and (zero? (:exit cloned)) src (nil? (:error src)) (< 1000 (:forms src))
                   (= 1 (count commits)) (empty? commit-errors)
-                  (= "src/seon/fixtures.clj" files)
+                  (= "src/seon/generation.clj" files)
                   (= ["-  [] 1)" "+  [] 2)"] changed)
                   (= head (git "rev-parse" "jolt/seon-merges~1"))
                   (= head (git "rev-parse" "HEAD"))

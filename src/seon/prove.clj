@@ -91,14 +91,19 @@
   "The running run ended with answer r: every waiter answered once, the next run started. A run
   that answered is remembered under its slot (a key asked again gets that answer, nothing runs);
   an error is never remembered, so asking again retries, and it is recorded as a :platform problem
-  (the api's :problem) as well as answered. Answers [st outputs]."
+  (the api's :problem) as well as answered, but for :seon.root/ended: the agent it asked ended (a
+  cancel, its run's end, its run's record), and the run ends with it, no fault of the
+  platform (bin/check e2e-calc: a cancel killed an agent whose turn had asked for its tests); a
+  prove agent root stopped (a cancel) ends its run the same way.
+  Answers [st outputs]."
   [st r]
   (let [{:keys [key branch waiters recorded-t] :as run} (:running st)
         err? (contract/error? r)
+        ended? (= :seon.root/ended (:seon.error/type r))
         st (cond-> (-> st (dissoc :running) (assoc :last branch))
              (not err?) (assoc-in [:done (slot run)] {:key key :r r :after recorded-t}))
         [st more] (take-next st branch)]
-    [st (cond-> (into (reply [] waiters r) more) err? (conj {:op :problem :class :platform :error r}))]))
+    [st (cond-> (into (reply [] waiters r) more) (and err? (not ended?)) (conj {:op :problem :class :platform :error r}))]))
 
 (defn- request
   "Admit request m ({:rid :branch :t :agent :names}) of the api. Answers [st outputs]."

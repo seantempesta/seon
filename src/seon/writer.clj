@@ -33,16 +33,27 @@
                                (map #(pdb/on-main main %) (pdb/of-main main (set (d/branches conn)))))))))
 
 (defn- main-commit
-  "Main moved to t: the fork server's replica gets the commit (FIFO with fork requests),
-  the reconciler the report, and root loads the program change (a restarted fork server
-  forks from root). Answers st."
+  "Main moved to t: the reconciler gets the report, and root loads the program change (a
+  restarted fork server forks from root). The fork server hears of it per stored commit
+  (stored!). Answers st."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/t :seon.db/resolved-tx :map :seon.host/db] :seon.writer/state]}
   [st o t ops tx-meta db]
-  (step/out! o :to-fork-server {:op :tx :t t :ns (profile/now-ns) :tx-data ops :tx-meta tx-meta})
   (step/out! o :main {:t t :ops ops :db db :ns (profile/now-ns)})
   (when-let [errs (seq (program/load-changes! db ops))]
     (step/out! o :events (step/event {:type :load-errors :errors (vec errs)})))
   (union-caught-up st (pdb/conn-main (:conn st)) db))
+
+(defn- stored!
+  "Main's stored commit, made of ops (its transactions' resolved datoms, in order): the fork
+  server's replica reads that commit from the store (d/commit-as-db; FIFO with fork
+  requests) and loads the program they change, never replaying the datoms. A group commit
+  is one stored commit, so one notice covers its batch. The env is MDB_NOSYNC: a committed
+  write is readable by another process before the flusher's sync."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/resolved-tx] :nil]}
+  [st o ops]
+  (let [db @(:conn st)]
+    (step/out! o :to-fork-server {:op :tx :t (:max-tx db) :commit (d/commit-id db) :ns (profile/now-ns) :tx-data ops})
+    nil))
 
 (defn- branch-merge
   "seon.merge/three-way of branch b against main, from their merge base over Datahike's
@@ -127,7 +138,8 @@
                             (vec (mapcat (fn [{:keys [r head base]}] (pm/merge-tx main base head (keys (:ours r)) data-attrs)) ok))
                             (pdb/tx-meta (pdb/conn-main conn)))
             t (:max-tx (:db-after rep))
-            ops (pdb/report->tx rep)]
+            ops (pdb/report->tx rep)
+            _ (stored! st o ops)]
         [(main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep))
          {:tx t :datoms (count ops)
           ;; :files, the source files (namespaces' and schema resources') its changes touch: what a write-back rewrites
@@ -160,14 +172,16 @@
                     (catch Throwable e e))]
       (cond
         (sequential? reps)
-        (reduce (fn [st [m rep]]
-                  (if-not (map? rep)
-                    (do (answer o (:dest m) (refused (step/error-msg rep) {})) st)
-                    (let [t (:max-tx (:db-after rep)) ops (pdb/report->tx rep)]
-                      (answer o (:dest m) {:ok true :t t :datoms (count ops)})
-                      (main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep)))))
-                (-> st (dissoc :pend) (update :commits inc))
-                (map vector ms reps))
+        (let [ok (filter (comp map? second) (map vector ms reps))]
+          (when (seq ok) (stored! st o (vec (mapcat (comp pdb/report->tx second) ok))))
+          (reduce (fn [st [m rep]]
+                    (if-not (map? rep)
+                      (do (answer o (:dest m) (refused (step/error-msg rep) {})) st)
+                      (let [t (:max-tx (:db-after rep)) ops (pdb/report->tx rep)]
+                        (answer o (:dest m) {:ok true :t t :datoms (count ops)})
+                        (main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep)))))
+                  (-> st (dissoc :pend) (update :commits inc))
+                  (map vector ms reps)))
         (next ms) (reduce (fn [st m] (commit-batch (assoc st :pend [m]) o)) (dissoc st :pend) ms)
         :else (do (answer o (:dest (first ms)) (refused (step/error-msg reps) {})) (dissoc st :pend))))
     st))
