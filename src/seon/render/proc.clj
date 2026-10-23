@@ -16,17 +16,19 @@
   event carries is its owner's to emit. A pass: an event asks the api for its view; while that request is in
   flight, more events only queue, so a burst becomes one pass (the round trip is the
   coalescing window: no step sleeps). The answer is joined with health, main's tasks and
-  attempts, and the series (one point per change) into the system value (:seon.render/system); its declared
-  render (seon.render.ui/system-page) answers the layout and its units. Then, per unit:
-  inputs before render (an unchanged input renders nothing), bytes before send (an
-  unchanged fragment sends nothing). The web proc serializes each patch once and fans it
-  out; a tab that opened or fell behind gets a keyframe composed here from the retained
-  fragments, rendering nothing."
+  attempts, and the series into the system value (:seon.render/system), whose :ai face is
+  root's context. Each page a tab watches is an entity's (seon.render/page: / root's, /agent/{id}
+  an agent's in root's boot, /walk/{eid} any entity's), walked on main and, for an agent, on its
+  branch as last read, and laid out by seon.render.ui/page into units. Then, per unit: inputs
+  before render (an unchanged input renders nothing), bytes before send (an unchanged fragment
+  sends nothing); a page renders only the rows a tab has scrolled to (:more raises them). The web
+  proc serializes each patch once and fans it out; a tab that opened or fell behind gets a
+  keyframe composed here from the retained fragments, rendering nothing."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
-            [seon.web.html :as h] [seon.model :as model] [seon.task :as task] [seon.reconcile :as reconcile] [seon.context :as context] [seon.print :as print]
+            [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile]
             [seon.config :as config] [seon.step :as step]))
 
 (defn- event-cap "Events the stream keeps (:seon.config.render.list/stream)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/stream))
@@ -171,38 +173,37 @@
 ;;; --- units, rendered incrementally ---------------------------------------------------------
 
 (defn- render-unit
-  "A unit's HTML: its input rendered (an agent's card takes the entry with its id), by its
-  render when it names one, else by the render its schema declares, shown as the unit says
-  (:as), its unit named (its element's id: :unit)."
+  "A unit's HTML: its input by the render its schema declares, its unit named (its element's id: :unit)."
   {:malli/schema [:=> [:cat :map] :string]}
-  [{:keys [id input render schema agent as]}]
-  (let [v (if agent (assoc input :id agent) input)
-        opts (cond-> {:schema schema :unit id} as (assoc :as as))]
-    (h/html (if render
-              ((requiring-resolve render) v opts)
-              (render/html v opts)))))
+  [{:keys [id input schema]}]
+  (h/html (render/html input {:schema schema :unit id})))
 
 (defn- step-units
-  "Run a layout's units against what the view retained: a unit whose input is unchanged is
-  skipped; one whose bytes are unchanged sends nothing; a new one with a container is added
-  to it (appended, or prepended when the unit says so: a stream's row, newest first), within
-  its shell when it has one (an agent's card). Answers [view' patch counts]."
+  "Run a layout's units, in the order the layout shows them, against what the view retained: a
+  unit whose input is unchanged is skipped; one whose bytes are unchanged sends nothing; a new one
+  with a container is added to it, before what the container holds when a unit after it in the
+  layout is already there (a list's newest row), else after (a list's older rows, loaded as they
+  scroll into view). Answers [view' patch counts]."
   {:malli/schema [:=> [:cat [:maybe :map] [:sequential :map]] [:tuple :map :map :map]]}
   [view units]
-  (reduce (fn [[view patch n] {:keys [id input shell container prepend?] :as u}]
-            (let [old (get-in view [:units id])]
-              (if (and old (= input (:input old)))
-                [view patch n]
-                (let [html (render-unit u)
-                      view (assoc-in view [:units id] (cond-> {:input input :html html} container (assoc :container container :shell shell)))
-                      view (cond-> view (and shell (not (get-in view [:units shell])))
-                                   (assoc-in [:units shell] {:html (h/html (ui/card-shell (:agent u)))}))]
-                  (cond
-                    (= html (:html old)) [view patch (update n :same inc)]
-                    (and container (nil? old)) [view (update patch (if prepend? :prepends :appends) conj [container (or shell id)]) (update n :rendered inc)]
-                    :else [view (update patch :frags conj [id html]) (update n :rendered inc)])))))
-          [(or view {}) {:frags [] :appends [] :prepends [] :removes []} {:rendered 0 :same 0}]
-          units))
+  (let [held (:units (or view {}))
+        ;; for each unit, whether a unit after it in its container is held already
+        before? (second (reduce (fn [[seen acc] {:keys [id container]}]
+                                  [(cond-> seen (and container (contains? held id)) (conj container))
+                                   (assoc acc id (contains? seen container))])
+                                [#{} {}] (rseq (vec units))))]
+    (reduce (fn [[view patch n] {:keys [id input container] :as u}]
+              (let [old (get-in view [:units id])]
+                (if (and old (= input (:input old)))
+                  [view patch n]
+                  (let [html (render-unit u)
+                        view (assoc-in view [:units id] (cond-> {:input input :html html} container (assoc :container container)))]
+                    (cond
+                      (= html (:html old)) [view patch (update n :same inc)]
+                      (and container (nil? old)) [view (update patch (if (before? id) :prepends :appends) conj [container id]) (update n :rendered inc)]
+                      :else [view (update patch :frags conj [id html]) (update n :rendered inc)])))))
+            [(or view {}) {:frags [] :appends [] :prepends [] :removes []} {:rendered 0 :same 0}]
+            units)))
 
 (defn compose
   "html with every slot marker replaced by its unit's retained HTML, recursively."
@@ -211,211 +212,81 @@
   (str/replace html #"<!--s:([^>]*?)-->" (fn [[_ id]] (compose (get-in units [id :html] "") units))))
 
 (defn- finish-patch
-  "A patch's appends and prepends composed (a new card's shell with its body; a container's
-  new rows as one prepend, newest first), and the removes of the contained units the layout
-  no longer has."
+  "A patch's appends and prepends as HTML (a container's new rows before what it holds as one
+  prepend, in the layout's order), and the removes of the contained units the layout no longer has."
   {:malli/schema [:=> [:cat :map :map [:set :string]] [:tuple :map :map]]}
   [view patch live-ids]
-  (let [gone (for [[id u] (:units view) :when (and (:container u) (not (live-ids id)))] [id (or (:shell u) id)])
-        view (update view :units #(apply dissoc % (mapcat identity gone)))
+  (let [gone (for [[id u] (:units view) :when (and (:container u) (not (live-ids id)))] id)
+        view (update view :units #(apply dissoc % gone))
         html #(compose (get-in view [:units % :html]) (:units view))]
     [view (-> patch
               (update :appends (fn [as] (vec (for [[c el] as] [c (html el)]))))
               (update :prepends (fn [ps] (vec (for [[c group] (group-by first ps)] [c (apply str (map (comp html second) group))]))))
-              (assoc :removes (mapv second gone)))]))
+              (assoc :removes (vec gone)))]))
 
-;;; --- one agent, zoomed ------------------------------------------------------------------------
+;;; --- a location's page ------------------------------------------------------------------------
 
-(defn- record-ord
-  "An evaluation record's id (<run>/<item id>) as its item's id: its order in the request that
-  ran it (what a turn's call names, :items)."
-  {:malli/schema [:=> [:cat :string] :int]}
-  [eid]
-  (parse-long (peek (str/split eid #"/"))))
+(defn- location
+  "The entity view names on main db (root's view st holds its boot): root's for :root, agent id's
+  in root's boot for an agent's id, else the entity id it is; nil when main holds none."
+  {:malli/schema [:=> [:cat :map :seon.host/db :any] [:maybe pos-int?]]}
+  [st db view]
+  (cond (= :root view) (:db/id (d/entity db [:seon.root/id :root]))
+        (keyword? view) (when-let [boot (get-in st [:view :boot])] (:db/id (d/entity db [:seon.agent/key (task/agent-key boot view)])))
+        :else view))
 
-(defn- eval-records
-  "The evaluations recorded on branch db for agent id, in the order they were written:
-  {:all [[eval-id record tx]] :by-id {eval-id record}}, the second what a turn's calls are read
-  through."
-  {:malli/schema [:=> [:cat :seon.host/db :keyword] [:map [:all [:vector :any]] [:by-id :map]]]}
-  [db id]
-  (let [rows (sort-by (fn [[eid _ tx]] [tx (record-ord eid)])
-                      (d/q '[:find ?eid ?r ?tx :in $ ?id :where [?a :seon.agent/id ?id] [?e :seon.cluster.eval/agent ?a]
-                             [?e :seon.cluster.eval/id ?eid ?tx] [?e :seon.cluster.eval/record ?r]] db id))]
-    {:all (vec rows) :by-id (into {} (for [[eid r] rows] [eid r]))}))
+(defn- this-boots
+  "Agent entity e's id when it is an agent of root's boot (its key is that boot's), else nil: an
+  id like :a3 starts again each boot, so only this boot's names a process root holds."
+  {:malli/schema [:=> [:cat :map :any] [:maybe :keyword]]}
+  [st e]
+  (let [id (:seon.agent/id e) boot (get-in st [:view :boot])]
+    (when (and id boot (= (:seon.agent/key e) (task/agent-key boot id))) id)))
 
-(defn messages-of
-  "The messages turn entity e took, read from e's db by seon.context/taken-messages."
-  {:malli/schema [:=> [:cat :any] [:vector :map]]}
-  [e]
-  (context/taken-messages (d/entity-db e) (:observed (:seon.turn/basis e))))
-
-(defn- turn-rows
-  "The turns of attempt on branch db, oldest first (as written), each its facts with its cost
-  at model's prices (seon.model/cost) and the context it read, made again from its basis
-  (seon.context/remade: its sections' tokens and its reader text; a basis never changes, so
-  made once per turn id, in cache), linking the whole request at href-of its id, each call with
-  the evaluation records it names (record-of: record id -> record). [rows cache']."
-  {:malli/schema [:=> [:cat :seon.host/db :string [:maybe :string] :map :seon.host/fn :map] [:tuple [:vector :map] :map]]}
-  [db aid model cache href-of record-of]
-  (reduce (fn [[rows cache] e]
-            (let [t (-> (d/pull db '[*] e) (dissoc :db/id)
-                        ;; the transaction it was written in: its place in the conversation
-                        (assoc :tx (:tx (first (d/datoms db :eavt e :seon.turn/id))))
-                        ;; each call's forms as they ran, by the ids it names
-                        (update :seon.turn/calls (fn [cs] (mapv (fn [c] (assoc c :records (vec (keep record-of (:items c))))) cs)))
-                        (assoc :messages (messages-of (d/entity db e))))
-                  tid (:seon.turn/id t)
-                  c (or (get cache tid)
-                        (when (:seon.turn/basis t)
-                          (let [r (context/remade db e)]
-                            {:sections (context/sections r) :text (context/reader-text (:messages r)) :href (href-of tid)})))]
-              [(conj rows (cond-> (assoc t :usd (model/cost model t)
-                                         ;; the proofs the turn before it saw: what changed since
-                                         :previous (get-in (peek rows) [:seon.turn/basis :observed :results]))
-                            c (assoc :context c)))
-               (cond-> cache c (assoc tid c))]))
-          [[] cache] (sort (d/q '[:find [?e ...] :in $ ?a :where [?r :seon.attempt/id ?a] [?e :seon.turn/attempt ?r]] db aid))))
-
-(defn turn-href
-  "Where the turn tid of view's agent serves its whole request (seon.web's route)."
-  {:malli/schema [:=> [:cat :keyword :string] :string]}
-  [view tid] (str "/turn?view=" (ui/view-param view) "&id=" (java.net.URLEncoder/encode ^String tid "UTF-8")))
-
-(defn turn-text
-  "The whole request turn tid of view's agent read (seon.context/request-text), made again from
-  its basis on the agent's branch as this proc last read it, or why it cannot be."
-  {:malli/schema [:=> [:cat :map :keyword :string] :string]}
-  [st view tid]
-  (let [db (get-in st [:zoom view :db])
-        e (when db (d/q '[:find ?e . :in $ ?t :where [?e :seon.turn/id ?t]] db tid))]
-    (cond (nil? db) (str "the branch of " (ui/kname view) " is not read: open its window first, which reads it")
-          (nil? e) (str "no turn " tid " on the branch of " (ui/kname view))
-          :else (context/request-text (:messages (context/remade db e))))))
-
-(defn- problem-rows
-  "The problems main recorded (seon.problems/report) of agent id or its task, each as root's
-  context words it (seon.render.ai/problem-row) with its evidence."
-  {:malli/schema [:=> [:cat [:maybe :map] :keyword [:maybe :string]] [:vector :map]]}
-  [report id task]
-  (vec (for [[c {:keys [n rows]}] (sort-by key (:classes report))
-             r rows
-             :when (or (= id (:agent r)) (= id (:last-agent r)) (and task (or (= task (:task r)) (= task (:last-task r)))))]
-         {:line (:text (ai/problem-row (assoc r :class c :n n) {})) :evidence (:evidence r)})))
-
-(defn- zoom-value
-  "The agent page's value (:seon.render/agent-page) for agent id, and the zoom's state: root's
-  view entry while it lives, else nothing; its newest attempt and task on main; from the
-  attempt's branch (read from the store, kept after the agent ends) its turns, each row
-  rendered once while its facts are unchanged, and its evaluations."
-  {:malli/schema [:=> [:cat :map :keyword] [:tuple :map :map]]}
+(defn- page-value
+  "View's page: the entity it names walked on main and, for an agent, its branch as this proc last
+  read it (seon.render/page), laid out by seon.render.ui/page with its focus's input at the top
+  (root's: spawn and evaluate in every agent, with main's open problems a tile; an agent's: its
+  REPL and its messages) and the rows its view has scrolled to; nil when main is not read yet or
+  holds no such entity."
+  {:malli/schema [:=> [:cat :map :any] [:maybe :map]]}
   [st view]
-  (let [;; an attempt's window (agent ids start again each boot), or an agent's newest attempt
-        ;; (main-info's index of each agent's newest)
-        attempt (if (= "attempt" (namespace view)) (get (:attempts st) (name view)) (get-in st [:agent-attempt view]))
-        id (if (= "attempt" (namespace view)) (:seon.attempt/agent attempt) view)
-        ;; root's view entry, while the agent it names works this attempt
-        live? (= (:seon.attempt/id attempt) (:seon.attempt/id (get-in st [:agent-attempt id])))
-        ag (assoc (if (or live? (not= "attempt" (namespace view))) (get-in st [:view :agents id] {}) {}) :id id)
-        z (get-in st [:zoom view] {})
-        task (when attempt (get (:tasks st) (:seon.attempt/task attempt)))
-        db (:db z)
-        {:keys [all by-id]} (if db (eval-records db id) {:all (vec (map-indexed (fn [i e] [(str "v/" i) e i]) (:evals ag))) :by-id {}})
-        model (or (get-in attempt [:seon.attempt/env :model]) (config/value :seon.config.ai/model))
-        [turns cache] (if (and db attempt)
-                        (turn-rows db (:seon.attempt/id attempt) model (:turn-ctx z {}) #(turn-href view %) by-id)
-                        [[] (:turn-ctx z {})])
-        ;; the evaluations outside the turns (the owner's, an outside agent's, root's): the turns
-        ;; show their own forms; the newest :seon.config.render.list/history
-        in-turns (set (for [t turns c (:seon.turn/calls t) i (:items c)] i))
-        ;; a context read's own evaluation is its read's row (the turn), never a second one
-        outside (vec (remove (fn [[eid r]] (or (in-turns eid) (= :context (:origin r)))) all))
-        records (with-meta (vec (take-last (history-cap) outside)) {:total (count outside)})
-        newest (peek turns)
-        agent (ui/ended-as ag id (:agent-attempt st {}))
-        branch {:branch (or (get-in attempt [:seon.attempt/env :branch]) (:branch ag)) :turn (:seon.turn/id newest)
-                :will-merge (get-in newest [:seon.turn/basis :observed :will-merge])
-                :conflicts (:seon.attempt/conflicts attempt) :unmerged (:seon.attempt/unmerged attempt)}
-        problems (problem-rows (:recorded st) id (:seon.attempt/task attempt))
-        ;; the right column: each value the window shows as its tile, renumbered when its value
-        ;; changes, so the last changed is first
-        ;; each tile renumbered when its value changes: its unit's id carries the number, so a
-        ;; change is the old element removed and the new one prepended, the last changed first
-        tiles (reduce (fn [acc [k v schema]]
-                        (let [old (get acc k)]
-                          (cond (nil? v) (dissoc acc k)
-                                (= v (:input old)) acc
-                                :else (assoc acc k {:input v :schema schema :seq (inc (reduce max 0 (map :seq (vals acc))))}))))
-                      (:tiles z {})
-                      [[:task (when task (assoc task :seon.task/state (get-in st [:task-rows (:seon.task/id task) :state])
-                                                :seon.task/blocked-by (set (get-in st [:task-rows (:seon.task/id task) :blocked-by]))))
-                        :seon.task/task]
-                       [:proofs {:tests (:tests agent) :results (:seon.attempt/results attempt)
-                                 :seen (not-empty (get-in newest [:seon.turn/basis :observed :results])) :seen-turn (:seon.turn/id newest)
-                                 :own (get-in task [:seon.task/accumulated :proofs])
-                                 :owners (into {} (for [[tid t] (:tasks st) p (:seon.task/proofs t)] [p tid]))} :seon.render/proofs]
-                       [:branch branch :seon.render/branch]
-                       [:problems {:rows problems} :seon.render/agent-problems]])
-        why-none (cond (nil? attempt) (str "no attempt on main: spawned by hand"
-                                           (when (:task ag) (str " with the description \"" (:task ag) "\""))
-                                           ", not for a task, so no model works it and it has no turns;"
-                                           " its REPL and evaluations are below. A task's agent is started by the reconciler"
-                                           " (my.root/run! sys [task-id]) or attached through root's server ({:op :attach :task id}).")
-                       (nil? db) (if (:db-error z) (str "its branch could not be read: " (:db-error z)) "its branch is being read")
-                       :else (str "no turn recorded yet in attempt " (:seon.attempt/id attempt)))]
-    [(assoc-in st [:zoom view] (assoc z :turn-ctx cache :tiles tiles))
-     {:agent agent :attempt attempt :task task
-      :tiles (vec (for [[k {:keys [input schema seq]}] (sort-by (comp - :seq val) tiles)]
-                    {:id (str "tile-" (name k) "-" seq) :input {:value input :schema schema} :schema :seon.render/window-tile}))
-      ;; each proof's task, to tell a blocking red from an allowed one
-      :owners (into {} (for [[tid t] (:tasks st) p (:seon.task/proofs t)] [p tid]))
-      ;; the conversation: its turns and its evaluations outside them, in the order they were
-      ;; written, each a unit of the window by its schema's render (rendered when its value changes)
-      :conv (mapv second (sort-by first (concat (for [t turns] [(:tx t) {:id (str "c-" (ui/dom-id (:seon.turn/id t))) :input t :schema :seon.turn/turn-fact}])
-                                                (for [[eid r tx] records] [tx {:id (str "c-" (ui/dom-id eid)) :input r :schema :seon.agent/item}]))))
-      :turns-why why-none
-      :totals {:n (count turns) :model (count (filter #(= :model (:seon.turn/origin %)) turns))
-               :reads (count (remove #(= :model (:seon.turn/origin %)) turns)) :evals (count all) :read? (some? db)
-               ;; unknown is not 0: no turn that reported its tokens, no total
-               :tokens (when-let [ts (seq (keep :seon.turn/tokens turns))] (reduce + ts))
-               :usd (when-let [us (seq (keep :usd turns))] (reduce + us))
-               :unpriced (count (filter #(and (:seon.turn/tokens %) (nil? (:usd %))) turns))}
-      :branch branch :problems problems
-      :history-total (or (:total (meta records)) (count records)) :history-shown (count records)}]))
+  (let [db (:main-db st)
+        eid (when db (location st db view))]
+    (when eid
+      (let [w (render/page (into [db] (keep identity) [(get-in st [:branches view :db])]) eid)
+            agent (get-in w [:seon.render/root :seon.render/value])
+            task (some #(when (= :seon.task/task-fact (:seon.render/schema %)) (:seon.render/value %)) (:seon.render/nodes w))
+            input (cond (= :root view) {:schema :seon.render/root-input :value {}}
+                        (:seon.agent/id agent)
+                        {:schema :seon.render/agent-input
+                         :value {:id (:seon.agent/id agent)
+                                 ;; root's view of it in this boot: an agent of another boot has no process
+                                 :live? (boolean (when-let [id (this-boots st agent)] (ui/live (ui/shown-status (get-in st [:view :agents id] {})))))
+                                 :held (when (= :held (:seon.task/execution task)) (:seon.task/id task))}})
+            ;; root's focus: main's open problems, a part of its page by their own render
+            w (cond-> w (= :root view) (update :seon.render/nodes conj {:seon.render/kind :value :seon.render/value (:recorded st)
+                                                                        :seon.render/schema :seon.problems/report :seon.render/eid eid}))]
+        (when-not (:seon.error/type w)
+          (ui/page w {:shown (get-in st [:shown view] (history-cap)) :view (ui/view-param view) :input input}))))))
 
 ;;; --- the pass ------------------------------------------------------------------------------------
 
 (defn- pass-view
-  "One view rendered: [st' patch-message-or-nil]."
-  {:malli/schema [:=> [:cat :map :any :map] [:tuple :map [:maybe :map]]]}
-  [st view-id sys]
-  (let [[st value schema] (if (= :root view-id)
-                            [st sys :seon.render/system]
-                            (let [[st v] (zoom-value st view-id)] [st v :seon.render/agent-page]))
-        out (render/html value {:schema schema})
-        units (:seon.render/units out)
-        skeleton (h/html (:seon.render/html out))
-        [view patch n] (step-units (get-in st [:views view-id]) units)
-        [view patch] (finish-patch view patch (set (map :id units)))
-        view (assoc view :skeleton skeleton)
-        st (-> st (assoc-in [:views view-id] view)
-               (update-in [:counts :rendered] (fnil + 0) (:rendered n)) (update-in [:counts :same] (fnil + 0) (:same n)))]
-    [st (when (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:removes patch)))
-          (assoc patch :op :patch :view view-id))]))
-
-(defn walk-html
-  "The walk page of entity eid on main as this proc last read it (root's when eid is nil):
-  seon.render/walk rendered on both faces (seon.render/rendered), laid out by
-  seon.render.ui/walk-page; a page saying why when main is not read yet or eid is no entity."
-  {:malli/schema [:=> [:cat :map [:maybe pos-int?]] :string]}
-  [st eid]
-  (let [db (:main-db st)
-        eid (or eid (when db (:db/id (d/entity db [:seon.root/id :root]))))
-        w (when (and db eid) (render/walk db eid))]
-    (h/html (ui/shell (str "walk " eid) "/feed?view=root"
-                      (cond (nil? db) [:p "main is not read yet: reload"]
-                            (:seon.error/type w) [:p (:seon.error/message w)]
-                            :else (ui/walk-page (render/rendered w {}) {}))))))
+  "One view rendered: [st' patch-message-or-nil]; a view whose entity main does not hold yet renders nothing."
+  {:malli/schema [:=> [:cat :map :any] [:tuple :map [:maybe :map]]]}
+  [st view-id]
+  (if-let [out (page-value st view-id)]
+    (let [units (:seon.render/units out)
+          skeleton (h/html (:seon.render/html out))
+          [view patch n] (step-units (get-in st [:views view-id]) units)
+          [view patch] (finish-patch view patch (set (map :id units)))
+          view (assoc view :skeleton skeleton)
+          st (-> st (assoc-in [:views view-id] view)
+                 (update-in [:counts :rendered] (fnil + 0) (:rendered n)) (update-in [:counts :same] (fnil + 0) (:same n)))]
+      [st (when (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:removes patch)))
+            (assoc patch :op :patch :view view-id))])
+    [st nil]))
 
 (defn page-html
   "The composed document of view-id from its retained fragments (renders nothing)."
@@ -454,7 +325,7 @@
           st (assoc st :context ctx)
           views (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st)))
           [st patches] (reduce (fn [[st ps] v]
-                                 (let [[st p] (pass-view st v sys)]
+                                 (let [[st p] (pass-view st v)]
                                    [st (cond-> ps p (conj p))]))
                                [st []] (sort-by str views))
           idx (index-of (:agents sys))
@@ -493,34 +364,34 @@
   [x ch n] (loop [acc [x]] (if-let [y (and (< (count acc) n) (a/poll! ch))] (recur (conj acc y)) acc)))
 
 (defn- on-event
-  "An event: kept for the stream (merges counted), and the view asked for. A watched agent's
-  commit moves its branch: the page reads it again (its turns are written there)."
+  "An event: kept for the stream (merges counted), and the view asked for; an agent's commit
+  recorded by its id (ask-branches reads its branch again)."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [st ev]
   (cond-> (update st :new-events conj ev)
     (and (= :merged (:type ev)) (get-in ev [:result :merged?])) (update :merges (fnil inc 0))
-    (and (= :commit (:type ev)) (contains? (:watch st) (:agent ev))) (assoc-in [:zoom (:agent ev) :commit-t] (:t ev))))
+    ;; an agent's commit moves its branch: a page of it reads the branch again (its turns and evaluations are written there)
+    (and (= :commit (:type ev)) (:agent ev)) (assoc-in [:commits (:agent ev)] (:t ev))))
 
 (defn- ask-branches
-  "Ask for each watched agent's branch db when it moved since this proc read it: its branch is
-  root's view's while it lives, else its newest attempt's on main (kept in the store after it
-  ended); it moved when its t in root's view or its last commit event changed. A read in
-  flight is left: its answer's pass asks again."
+  "Ask for the branch db of each watched view's agent when it moved since this proc read it: the
+  branch main records of the agent its view names (:seon.agent/branch; kept in the store after it
+  ended); it moved when its t in root's view or its last commit event changed. A read in flight is
+  left: its answer's pass asks again."
   {:malli/schema [:=> [:cat :map :seon.host/volatile] :map]}
   [st o]
-  (reduce (fn [st view]
-            (let [att? (= "attempt" (namespace view))
-                  attempt (if att? (get-in st [:attempts (name view)]) (get-in st [:agent-attempt view]))
-                  id (if att? (:seon.attempt/agent attempt) view)
-                  a (when-not att? (get-in st [:view :agents id]))
-                  b (or (:branch a) (get-in attempt [:seon.attempt/env :branch]))
-                  at [b (:t a) (get-in st [:zoom view :commit-t])]
-                  kind [:branch view]]
-              (if (and b (not= at (get-in st [:zoom view :read])) (not (some #{kind} (vals (:pending st)))))
-                (-> st (assoc-in [:zoom view :read] at) (ask o kind {:op :write :req {:op :branch-db :branch b}}))
-                st)))
-          ;; the views a tab watches, and a page or keyframe waiting for its pass
-          st (filter keyword? (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st))))))
+  (let [db (:main-db st)]
+    (reduce (fn [st view]
+              (let [e (when-let [eid (when db (location st db view))] (d/entity db eid))
+                    b (:seon.agent/branch e)
+                    id (when e (this-boots st e))
+                    at [b (get-in st [:view :agents id :t]) (get-in st [:commits id])]
+                    kind [:branch view]]
+                (if (and b (not= at (get-in st [:branches view :read])) (not (some #{kind} (vals (:pending st)))))
+                  (-> st (assoc-in [:branches view :read] at) (ask o kind {:op :write :req {:op :branch-db :branch b}}))
+                  st)))
+            ;; the views a tab watches, and a page or keyframe waiting for its pass
+            st (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st))))))
 
 (defn- web-answered
   "The web proc's call (tag [:web var agent form?]) answered r: shown in the stream; root's
@@ -554,7 +425,7 @@
     (= :main kind) (if (seon.contract/error? r) st (pass (ask-branches (main-info st (:db r)) o) o))
     ;; an agent's branch db; a branch that is gone (merged and removed) is recorded as such
     (and (vector? kind) (= :branch (first kind)))
-    (let [z [:zoom (second kind)]
+    (let [z [:branches (second kind)]
           st (assoc-in st (conj z :db-error) (:seon.error/message r))]
       (pass (if (seon.contract/error? r) st (assoc-in st (conj z :db) (:db r))) o))
     :else st))
@@ -577,7 +448,7 @@
    (let [events (a/chan (a/sliding-buffer 4096))]
      (a/tap (:events-mult args) events)
      {:events-ch events :mult (:events-mult args) :system-p (:system args) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{}
-      :new-events [] :events [] :views {} :zoom {} :merges 0
+      :new-events [] :events [] :views {} :branches {} :merges 0
       ::flow/in-ports {:events events}}))
   ([st tr]
    (when (= tr ::flow/stop)
@@ -606,8 +477,8 @@
                                       (do (step/out! o :to-web {:op :keyframe :view (:view m) :html (page-html st (:view m))}) st)
                                       (ask-state (update st :kf-wanted conj (:view m)) o))
                           :context (do (step/out! o :to-web {:op :text :k (:k m) :text (:context st "")}) st)
-                          :turn-text (do (step/out! o :to-web {:op :text :k (:k m) :text (turn-text st (:agent m) (:turn m))}) st)
-                          :walk (do (step/out! o :to-web {:op :text :k (:k m) :text (walk-html st (:eid m))}) st)
+                          ;; the end of a view's list scrolled into view: the next rows are rendered
+                          :more (pass (update-in st [:shown (:view m)] (fnil + (history-cap)) (history-cap)) o)
                           :stats (do (step/out! o :to-web {:op :text :k (:k m) :text (sedn/encode (stats st))}) st)
                           st)
               st)]

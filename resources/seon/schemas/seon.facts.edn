@@ -128,12 +128,12 @@
  :seon.agent/forked-ms :double
  :seon.agent/ended-ms :int
  :seon.agent/answered-t :int
- :seon.db/eval-fact [:map {:seon.db/attributes true}
+ :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/as :row :seon.render/html seon.render.ui/evaluation}
                      [:seon.cluster.eval/id :seon.cluster.eval/id] [:seon.cluster.eval/agent :seon.cluster.eval/agent]
                      [:seon.cluster.eval/record :seon.cluster.eval/record]]
  ;; an entity's units (seon.render/walk): the neighbours a view of it shows, one hop, as pull's
  ;; attributes (a leading _ the reverse ref), each rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/ai seon.render.ai/agent-fact :seon.render/html seon.render.ui/walk-line :seon.render/units [:seon.attempt/_agent :seon.cluster.eval/_agent :seon.agent/root]}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/ai seon.render.ai/agent-fact :seon.render/html seon.render.ui/walk-line :seon.render/units [:seon.attempt/_agent :seon.cluster.eval/_agent :seon.agent/root] :seon.render/parts [:seon.attempt/_agent]}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/id {:optional true} :seon.agent/id]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status] [:seon.agent/pid {:optional true} :seon.agent/pid]
@@ -314,7 +314,7 @@
  :seon.root/stopped :seon.root/end
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
  :seon.root/previous-end :seon.root/end
- :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/ai seon.render.ai/root-fact :seon.render/html seon.render.ui/walk-line :seon.render/units [:seon.agent/_root]}
+ :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/ai seon.render.ai/root-fact :seon.render/html seon.render.ui/walk-line :seon.render/units [:seon.agent/_root :seon.cluster.eval/_agent]}
                           [:seon.root/id :seon.root/id] [:seon.root/boot :seon.root/boot]
                           [:seon.root/stopped {:optional true} :seon.root/stopped]
                           [:seon.root/previous-end {:optional true} :seon.root/previous-end]
@@ -348,7 +348,7 @@
  :seon.message/to [:and {:seon.db/index true} :seon.db/ref]
  :seon.message/body [:string {:seon.render/prose true}]
  :seon.message/reply-to [:and {:seon.db/index true} :string]
- :seon.message/fact [:map {:seon.db/attributes true} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
+ :seon.message/fact [:map {:seon.db/attributes true :seon.render/as :row :seon.render/html seon.render.ui/message} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
                      [:seon.message/to {:optional true} :seon.message/to] [:seon.message/body :seon.message/body]
                      [:seon.message/reply-to {:optional true} :seon.message/reply-to]]
  ;; ---- written by an agent on its own branch; they reach main with its merge ----
@@ -396,7 +396,7 @@
  :seon.end/reason :string
  :seon.end/turns :int
  :seon.end/tokens :int
- :seon.turn/turn-fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/turn-row}
+ :seon.turn/turn-fact [:map {:seon.db/attributes true :seon.render/as :row :seon.render/html seon.render.ui/turn}
                           [:seon.turn/id :seon.turn/id] [:seon.turn/attempt :seon.turn/attempt] [:seon.turn/n :seon.turn/n]
                           [:seon.turn/reply :seon.turn/reply] [:seon.turn/forms :seon.turn/forms] [:seon.turn/errors :seon.turn/errors]
                           [:seon.turn/red :seon.turn/red] [:seon.turn/ms :seon.turn/ms] [:seon.turn/tokens {:optional true} :seon.turn/tokens]

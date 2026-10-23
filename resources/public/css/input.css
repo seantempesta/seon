@@ -1,0 +1,95 @@
+/* The page's stylesheet: Tailwind v4, CSS-first. Every directive, token and source glob is here
+   (no config file); bin/build's css step runs Tailwind's standalone binary over it into
+   target/css/app.css, reused while this file and the scanned sources are unchanged
+   (docs/render.md#tailwind). Ported from v1's resources/public/css/input.css.
+
+   `source(none)` turns automatic source detection off: it walks the whole checkout, the
+   reference-code/ tree included (v1 measured ~42 s against ~1 s). Classes live in src/'s
+   hiccup, scanned by the @source globs below. */
+@import "tailwindcss" source(none);
+@plugin "@tailwindcss/typography";
+
+@source "../../../src/**/*.clj";
+
+/* The safelist: the utility vocabulary an agent may use. Tailwind emits only the classes it
+   scanned at build time, and a render an agent defines at its REPL is in no scanned file, so a
+   class outside this list does not exist on the page until a build scans it. Semantic hiccup
+   ([:table], [:ul], [:pre]) needs none of these: the base layer styles it. */
+@source inline("flex flex-col flex-row flex-wrap flex-1 shrink-0 inline-flex hidden block inline");
+@source inline("grid grid-cols-{1,2,3,4} sm:grid-cols-{2,3} md:grid-cols-{2,3,4} lg:grid-cols-{3,4}");
+@source inline("items-{center,start,baseline} justify-{between,end,center} gap-{1,2,3,4} w-full min-w-0");
+@source inline("p-{0,1,2,3,4} px-{1,2,3,4} py-{1,2,3,4} mt-{1,2,3} mb-{1,2,3}");
+@source inline("text-{2xs,xs,sm,base,lg} text-{left,center,right} font-mono font-semibold font-bold");
+@source inline("italic uppercase tracking-wider tabular-nums whitespace-pre-wrap break-words truncate");
+@source inline("text-text-{50,100,200,300,400,500} text-{signal,success,error,warning,info,eval}");
+@source inline("bg-base-{800,850,900,950} border border-t border-b border-l-2 border-base-{700,800} rounded rounded-md");
+@source inline("border-{signal,success,error,warning,info} divide-y divide-base-800 overflow-hidden overflow-auto overflow-x-auto");
+@source inline("prose prose-sm prose-invert max-w-none");
+
+/* The Phosphor theme: warm blacks, cream text, amber accents; light when the system asks. */
+@theme {
+  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Monaco, 'Cascadia Mono', monospace;
+  --font-sans: var(--font-mono);
+  /* the dense label size: Tailwind v4 has no 2xs */
+  --text-2xs: 0.625rem;
+  --text-2xs--line-height: 0.9rem;
+  --color-base-950: #0d0d0c;
+  --color-base-900: #1a1918;
+  --color-base-850: #252422;
+  --color-base-800: #302e2b;
+  --color-base-700: #3d3a36;
+  --color-text-50: #faf9f7;
+  --color-text-100: #ece9e3;
+  --color-text-200: #d4d0c8;
+  --color-text-300: #b0aa9e;
+  --color-text-400: #8a8478;
+  --color-text-500: #6b665d;
+  --color-signal: #f0b429;
+  --color-success: #34d399;
+  --color-error: #f87171;
+  --color-warning: #fbbf24;
+  --color-info: #60a5fa;
+  --color-eval: #c084fc;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --color-base-950: #f7f4ee; --color-base-900: #fffdf9; --color-base-850: #f1ece3; --color-base-800: #e4ddd1; --color-base-700: #d3cabb;
+    --color-text-50: #17140f; --color-text-100: #221e18; --color-text-200: #3a352d; --color-text-300: #5c564b; --color-text-400: #7d766a; --color-text-500: #a29a8c;
+    --color-signal: #b7791f; --color-success: #0f8a5f; --color-error: #c53030; --color-warning: #b7791f; --color-info: #2563eb; --color-eval: #7c3aed;
+  }
+}
+
+@layer base {
+  html, body { background: var(--color-base-950); color: var(--color-text-200); }
+  body { font: 12px/1.45 var(--font-mono); min-height: 100vh; }
+  a { color: var(--color-info); }
+  a:hover { text-decoration: underline; }
+  pre, code { font-family: var(--font-mono); }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  table { border-collapse: collapse; }
+  th, td { padding: 0.15rem 0.4rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--color-base-800); }
+  th { color: var(--color-text-400); font-weight: 500; }
+  summary { cursor: pointer; color: var(--color-text-300); }
+  input, textarea { background: var(--color-base-900); color: var(--color-text-100); border: 1px solid var(--color-base-700);
+                    border-radius: 4px; padding: 6px 9px; outline: none; font: inherit; }
+  input:focus, textarea:focus { border-color: var(--color-signal); }
+  button { cursor: pointer; }
+}
+
+/* The one printer's structural HTML (seon.print.emit): its classes are the printer's, so they are
+   styled here by name rather than as utilities in its hiccup. */
+.seon-print-root, .seon-print-node { color: var(--color-text-200); font-family: var(--font-mono); }
+.seon-print-summary { color: var(--color-text-300); cursor: pointer; overflow-wrap: anywhere; }
+.seon-print-node[open] > .seon-print-summary::marker { color: var(--color-signal); }
+.seon-print-node[open] > .seon-print-content { display: inline; }
+.seon-print-content { overflow-wrap: anywhere; }
+.seon-print-delimiter, .seon-print-separator { color: var(--color-text-500); }
+.seon-print-keyword { color: var(--color-info); }
+.seon-print-string, .seon-print-char { color: var(--color-success); white-space: pre-wrap; }
+.seon-print-string::before, .seon-print-string::after { content: '"'; opacity: .6; }
+.seon-print-number, .seon-print-boolean, .seon-print-nil { color: var(--color-eval); }
+.seon-print-symbol, .seon-print-tag { color: var(--color-text-100); }
+.seon-print-elision, .seon-print-whole-text, .seon-print-prune { color: var(--color-warning); }
+.seon-print-table { max-width: 100%; overflow-x: auto; }
+.seon-data-panel { display: inline; }

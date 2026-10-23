@@ -29,4 +29,4 @@
  :seon.config.render.list/stream [:int {:min 1 :seon.config/unit "events" :description "Events the dashboard's stream keeps, newest first; its header says how many older it did not keep."}]
  :seon.config.render.list/ended [:int {:min 1 :seon.config/unit "agents" :description "Ended agents the grid keeps beside every live one, the newest ended first; an agent's end pushes the oldest off."}]
  :seon.config.render.list/series [:int {:min 2 :seon.config/unit "points" :description "Points a tile's sparkline keeps: the newest changes."}]
- :seon.config.render.list/history [:int {:min 1 :seon.config/unit "evaluations" :description "Evaluations an agent's page shows, newest first; the rest are named with where they are recorded."}]}
+ :seon.config.render.list/history [:int {:min 1 :seon.config/unit "rows" :description "Rows a page renders at first, newest first (an evaluation, or a turn with its evaluations), and how many more each time its last row scrolls into view; the rest are counted, unrendered."}]}
