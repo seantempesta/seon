@@ -20,7 +20,7 @@ Your context comes in two parts: the run's, sent once and unchanged while you wo
 The run's part:
 - `:task`: its id, kind and instructions, and its plan as it accumulated along its needs, prerequisites first.
 - `:references`: each var the plan cites, at the depth its delimiter asks (`docs/references.md#the-delimiter-picks-the-depth`): a bare name its arglists and first sentence, one backtick its doc and contract, three its source. A source past the cap shows `:left-out` and `:read`, the form that reads it.
-- `:found`: program functions the cited vars and your proofs call that the plan does not name; often the helpers the task needs.
+- `:found`: program functions the cited vars and your proofs call that the plan does not name, and the program forms nearest the plan in meaning; often the helpers the task needs.
 - `:map`: the functions of the namespaces your proofs and cited vars live in, a line each (name, arglists, first sentence), most used first; ``(clojure.repl/dir the.ns)`` lists them all. Before writing a helper, look here for one.
 - `:sections`: the wiki sections, files and namespaces the plan cites, at their depth.
 - `:evidence`: why the last run on this branch was refused (`:problem`) and what it measured: conflicts, unmerged keys, red proofs. Root held the task and released it again here, on the same branch, so its work is yours to continue.
@@ -33,7 +33,7 @@ The turn's part:
 - `:unmerged`: on a merge task, the entries to resolve.
 - `:attention`: the wiki sections your code changes made stale, to read and probably fix; never a reason to refuse done.
 - `:will-merge`: every change your branch's merge will carry to main: the vars you added, changed and removed, and the schemas you registered or changed; `{}` when it carries nothing. Anything listed that the task does not need, put back.
-- `:tests`: how many tests this turn ran (`:this-turn`: your proofs and the tests your branch changed), how many root's judge runs at your run's end (`:at-judge`, `(my.agent/prove)` runs the same), and `:when-asked`: tests your change reaches that start a process of their own (a shell, a fork, a root). Those never run in your turn or the judge, a proof among them; root runs them when it asks, and a proof among them is read as deferred, not unknown. `(my.agent/deferred)` lists them.
+- `:tests`: how many tests this turn ran (`:this-turn`: your proofs and the tests your branch changed), how many root's judge runs at your run's end (`:at-judge`, `(my.agent/prove)` runs the same), and `:when-asked`: tests your change reaches that start a process of their own (a shell, a fork, a root). Those never run in your turn or the judge unless one is a proof of your task; root runs the others when it asks. `(my.agent/deferred)` lists them.
 - `:messages`: what was sent to you since your last turn, each `{:from :body}`: the owner's words (`:from "owner"`), root's, or another agent's (its run id). The owner's is a fact (`:seon.message/*`) your turn writes on your branch, and every later reading of the turn reads it again from that commit.
 - Your last evaluations, when no earlier turn shows them.
 

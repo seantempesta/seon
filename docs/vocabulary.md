@@ -10,7 +10,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 |---|---|---|
 | **proc** | a Flow process: one step-fn Var with four arities (describe, init, transition, transform) | `seon.step` |
 | **step-fn** | the four-arity function a proc runs; the one process abstraction | `seon.step` |
-| **root** | the control process: one Flow graph of eight procs (api, writer, fork-server, flusher, reconciler, prove, render, web), one worker proc per effect kind (`:fx` in `resources/seon/system.edn`), and one proc per agent ([root](root.md#the-root-graph)) | `seon.root` |
+| **root** | the control process: one Flow graph of nine procs (api, writer, fork-server, flusher, reconciler, prove, vectors, render, web), one worker proc per effect kind (`:fx` in `resources/seon/system.edn`), and one proc per agent ([root](root.md#the-root-graph)) | `seon.root` |
 | **root graph** | that one Flow graph, changed in place by `flow/update!` | `seon.root/start!` |
 | **api** | root's request server proc: callers' reply promises, routing by request id | `seon.root/api-proc` |
 | **writer** | root's writes to main (group commit), `d/branch!`, and every merge into main; an agent commits its own branch | `seon.writer/writer-proc` |
@@ -64,7 +64,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **recording** | an eval request's evaluations (on its agent entity, one EDN `:seon.cluster.eval/record` each) and its defs, written by the agent on its own branch | `seon.repl/record-tx` |
 | **observation** | data on the branch that observed it (evaluations, answered t), never carried by a merge: every `seon.*` attribute but the carried task content is a platform record | `seon.merge/carried-platform-attrs` |
 | **generation** | a build of Seon's own source: the running binary is one, and the next is the merges commit built by the `:build` effect, recorded on main (`:seon.root/generation`) and started on the same store by `bin/root next` ([source](source.md#the-next-generation)) | `seon.fx/build`, `my.root/generation`, `my.root/next-generation` |
-| **prove** | run what a change reaches and reuse every test and check step green at its reach digest: `bin/prove` in a checkout, ``(my.agent/prove)`` in an agent (the process tests it reaches run only when root asks; [merging](merging.md#a-merge-runs-what-the-change-reaches)) | `seon.proofs/plan`, `my.agent/prove` |
+| **prove** | run what a change reaches and reuse every test and check step green at its reach digest: `bin/prove` in a checkout, ``(my.agent/prove)`` in an agent (the process tests it reaches run only when root asks, or when they are a proof; [merging](merging.md#a-merge-runs-what-the-change-reaches)) | `seon.proofs/plan`, `my.agent/prove` |
 
 ## Tasks (TASK-CHAIN's words)
 
@@ -84,7 +84,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **done rule** | why a run's measured facts do not make its task done; empty means done | `seon.reconcile/done-explain` |
 | **reconciler** | the pure function of main's db to actions, and the proc that carries them out | `seon.reconcile/index` then `seon.reconcile/actions`, and `reconciler-proc` |
 | **flight** | one action carried out as a chain of requests and answers in the reconciler proc | `seon.reconcile/advance` |
-| **turn loop** | inside an agent: observe, then end (green, or stopped with the outcome and reason) or act (context to the model, forms through the REPL path); a merge task merges main first and again until main brings nothing new | `seon.turn/work!` |
+| **turn loop** | inside an agent: observe, then end (green, or stopped with the outcome and reason) or act (context to the model, forms through the REPL path); every run merges main first, and a merge task again at each green until main brings nothing new | `seon.turn/work!` |
 | **three-way** | git's merge of program maps (base, ours, theirs) keyed `[:var sym]`, `[:form id]`, `[:schema k]` (a schema entry), read only where the dbs differ ([storage](storage.md#merges-read-what-changed)) | `seon.merge/three-way`, `seon.merge/delta-three-way` |
 | **unmerged entry** | a conflict kept on the branch (base, ours, theirs) until re-defn or `resolve!` | `seon.merge/unmerged` |
 | **stage** (was harvest) | staging the live runtime onto the branch (unmaps, plain defs as values, aliases) | `seon.stage/stage!` |
