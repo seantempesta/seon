@@ -234,8 +234,8 @@
   "An exception caught at one of the agent's entrant boundaries (operation: the REPL's
   seon.repl/eval-code by default) as the one error map: its ex-data when that already is
   one (a contract's error names its operation, member and problems), else the
-  :seon.agent/eval-error variant, with the exception's class, its ex-data's qualified keys
-  (Jolt's :jolt.error/* diagnostics: line, column, symbol, ns, kind, suggestions; and
+  :seon.agent/eval-error variant, with the exception's class, its ex-data's diagnostic keys
+  (Jolt's :jolt.error/* : line, column, symbol, ns, kind, suggestions; and
   :clojure.error/*) as keys, the suggestions as the fix, any other ex-data as :data, and its cause chain (each cause's class
   and message)."
   {:malli/schema [:function [:=> [:cat :seon.host/throwable] :seon.error/base]
@@ -245,8 +245,9 @@
    (if (contract/error? (ex-data e))
      (ex-data e)
      (let [d (ex-data e)
-           jd (into {} (filter (comp qualified-keyword? key)) d)
-           other (not-empty (into {} (remove (comp qualified-keyword? key)) d))
+           diag? (comp #{"jolt.error" "clojure.error"} namespace key)
+           jd (into {} (filter (every-pred (comp qualified-keyword? key) diag?)) d)
+           other (not-empty (into {} (remove (every-pred (comp qualified-keyword? key) diag?)) d))
            sym (:jolt.error/symbol jd)
            unresolved? (and sym (= :analyze/unresolved-symbol (:jolt.error/kind jd)))
            m (if unresolved? (unresolved-message sym) (or (ex-message e) (str (type e))))

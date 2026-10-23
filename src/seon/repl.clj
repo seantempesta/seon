@@ -143,17 +143,20 @@
   :seon.error/at {:line :column} and, for a runtime error, the fn it was in as :seon.error/in.
   Jolt's positions are the request's text's; a compile error is in the form being read (its
   start is m's), a runtime error in the form that defined the fn (its var's :line). Nothing
-  when the error names no position or that form has none."
-  {:malli/schema [:=> [:cat :seon.host/throwable :map] :map]}
+  (an empty map) when the error names no position, that form has none, or it lies before the form's start.
+  Only an eval item gets it: the form's start is the item's, so the agent's other error boundaries
+  (`seon.agent/error-map` alone) carry Jolt's keys without it."
+  {:malli/schema [:=> [:cat :seon.host/throwable :map]
+                  [:map [:seon.error/at {:optional true} :seon.error/at] [:seon.error/in {:optional true} :qualified-symbol]]]}
   [e m]
   (let [d (merge (clojure.main/ex-triage (assoc (Throwable->map e) :clojure.error/phase :execution)) (ex-data e))
         compile? (:jolt.error/line d)
         line (or (:jolt.error/line d) (:clojure.error/line d))
         sym (when-not compile? (:clojure.error/symbol d))
         {start :line col0 :column} (meta (if compile? (:repl/form m) (some-> sym var-of)))]
-    (if (and line start)
+    (if (and line start (<= start line))
       (let [n (inc (- line start))
-            col (some-> (:jolt.error/column d) (- (if (= 1 n) (dec col0) 0)))]
+            col (some-> (:jolt.error/column d) (- (if (and col0 (= 1 n)) (dec col0) 0)))]
         (cond-> {:seon.error/at (cond-> {:line n} col (assoc :column col))}
           sym (assoc :seon.error/in sym)))
       {})))

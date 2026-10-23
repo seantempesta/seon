@@ -222,13 +222,19 @@
 (deftest an-ordinary-exception-renders-its-message
   (let [item (eval-item "(+ 1 :a)")]
     (is (= :err (:tag item)))
+    (is (str/includes? (:seon.error/message (:err item)) "cannot be cast") (pr-str (:err item)))
+    (is (= "class java.lang.ClassCastException" (:class (:err item))))
     (is (str/starts-with? (:printed item) (:seon.error/message (:err item))))
     (is (nil? (:seon.error/fix (:err item))))
     ;; on main :data was the printed string "{:k 1}": the map assertion below is the one that fails there
     (let [item (eval-item "(throw (ex-info \"boom\" {:k 1}))")]
       (is (str/starts-with? (:printed item) "boom"))
       (is (= 1 (count (re-seq #"boom" (:printed item)))) (:printed item))
-      (is (= {:k 1} (:data (:err item))) "an ordinary ex-data stays data"))))
+      (is (= {:k 1} (:data (:err item))) "an ordinary ex-data stays data"))
+    (let [em (agent/error-map (ex-info "x" {:my/id 1 :seon.error/message "shadow" :jolt.error/line 7}))]
+      (is (= "x" (:seon.error/message em)) "a qualified key of someone else's cannot shadow the error's own")
+      (is (= {:my/id 1 :seon.error/message "shadow"} (:data em)))
+      (is (= 7 (:jolt.error/line em)) "Jolt's own keys are keys"))))
 
 (deftest an-eval-error-says-where-in-its-forms-own-text
   ;; positions are the form's own (what (source f) prints), not the request's: a form on lines
