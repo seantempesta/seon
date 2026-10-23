@@ -426,7 +426,7 @@
   ;; Here a proof that loops over bounded evals for ever ends at the run's budget, named
   (let [[_ r] (in-agent ["(do (ns spin-test (:require [clojure.test :refer [deftest is]]))
                               (deftest spin (loop [] (seon.intr/run 100000 #(reduce + (range 1000))) (recur))))"
-                         "(let [r (seon.agent/run-tests-forked 100000000 #{'spin-test/spin})] [(:seon.error/type (first (filter :seon.error/type (:reports r)))) (some :var (:reports r))])"])
+                         "(let [r (seon.agent/run-tests-forked 100000000 #{'spin-test/spin} :turn)] [(:seon.error/type (first (filter :seon.error/type (:reports r)))) (some :var (:reports r))])"])
         [type test] (edn/read-string (:printed r))]
     (is (= :seon.test/ticks-spent type) (:printed r))
     (is (= "#'spin-test/spin" test) "naming the test that was running")))
