@@ -239,6 +239,18 @@ git -C next ls-files | grep -v '^notes/' | xargs grep -nE '\.\./|/Users/sean|seo
   - `bin/root` restarts on the same store.
 - Doing F after every running worktree session has merged and been removed makes it a plain `mv`.
 
+## After merging land14 (3f28d3e), 2026-10-23
+
+land14 brought new references, none fixable before step E, so they are listed here and nothing was changed for them:
+- `src/seon/{fx,intr,problems,render,root,writer}.clj` docstrings and `test/seon/procs_test.clj:141` cite `../notes/archive/...` (land14 moved the in-next notes into `notes/archive/`, and the parent's `notes/archive/` is to be copied beside them in step E; the citations then drop the `../`). They are `src` edits, so they move reach digests: do them in step E's commit, with one `bin/prove`.
+- `docs/forks.md` "Fork repo: ~/src/seon-jolt/..." (9 lines, 11 and 18 to 182): step C's rewrite.
+- `resources/seon/tasks/seon.merge.edn:2` (`~/src/seon-jolt/l3/next`, `libs/datahike`), `seon.root.edn:55` (`flowlab/r7_cron_door_merge.clj`), `seon.context.edn:50` (`em1`), `seon.fx.edn:2` (the absolute PKG plan path), `seon.main.edn` shrink-dead-code plan (the AUDIT path): their code now lives in history tags and bundles; step E points each at `history/...` or `notes/archive`. `seon.merge`'s `0823517` is in `history-bundles/l3__next.bundle` and, after step D, tag `history/l3/next/*`.
+- `web/bench/sweep.sh:5` comment (`~/src/seon-jolt/bench.lock`).
+- `AGENTS.md:9,24,191,192` and `BAGGAGE.md:5`: RESUME and DECISIONS (step E).
+- Fixed in the merge: `docs/source.md:47` (test-results path).
+
+The parent folder has changed under this plan: `old-cleanup` bundled the nested repos into `~/src/seon-jolt/history-bundles/` (MANIFEST.md lists them) and deleted `l2/`, `jolt-l1/`, `e4/datahike-b` and others. Step D can fetch tags from those bundles instead of the live repos (same commits), and `history-bundles/uncommitted/` holds the outer repo's uncommitted work.
+
 ## What this branch did not do
 
 - It changed no main-tree repo, `.gitmodules`, module store or parent-folder file.
