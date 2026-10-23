@@ -89,7 +89,7 @@
         similar (when task
                   (into [] (comp (mapcat (fn [[f _]] (map :var/name (:var/_form (d/entity db f)))))
                                  (remove #(or (named %) (macro? %))) (distinct))
-                        (vector/near db task (cfg/value :seon.config.render/found-near) {:of :form/id})))
+                        (vector/near db task (+ (cfg/value :seon.config.render/found-near) (count named)) {:of :form/id})))
         hits (if (seq similar) (rrf [calls similar]) calls)
         [shown more] (print/bounded hits :seon.config.render/found "(my.agent/callees 'ns/f) of each cited var, (my.agent/similar \"text\")")]
     (cond-> (mapv #(resolve-ref db % :doc) shown) more (conj more))))

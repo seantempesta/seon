@@ -518,9 +518,9 @@
  :seon.config.vector/fine-dims 768
  ;; The embedding model (docs/vector.md#the-model): EmbeddingGemma-2, ggml-org's Q8_0 GGUF, in
  ;; process through llama.cpp v0.7.0 (bin/build embed fetches it once by its sha256 into the main
- ;; tree's target/cache; bin/env names it). Measured on Seon's 1,393 forms (M5 Max, Metal, load ~10):
+ ;; tree's target/cache; bin/env alone names it, so its pin is written once). Measured on Seon's 1,393 forms (M5 Max, Metal, load ~10):
  ;; 12 ms one text, 37k tokens/s batched (175 texts/s), 0.86 GB RSS; the BF16 file no faster (34k).
- :seon.config.vector/model #or [#env SEON_EMBED_MODEL #seon/checkout "target/cache/models/2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135.gguf"]
+ :seon.config.vector/model #env SEON_EMBED_MODEL
  :seon.config.vector/lib #or [#env SEON_EMBED_LIB #seon/checkout "target/lib/libseon-embed.dylib"]
  ;; Unit: tokens. One encode's context and micro-batch: 4096 measured best of 512-4096 (512 texts/s
  ;; 122, 1024 167, 2048 173, 4096 176), as v1 found (cap tokens, not texts).

@@ -559,12 +559,18 @@
      [st nil]
      (let [ms (or (:batch m) [m])
            t0 (profile/now-ns)
-           [h rs] (try (let [h (or (:handle st) (when-let [open (:open st)] (open (:ctx st))))]
-                         [h (cond (contract/error? h) (repeat (count ms) h)
-                                  (:batch m) ((:perform st) {:batch ms :ctx (:ctx st) :handle h})
-                                  :else [((:perform st) (cond-> (assoc m :ctx (:ctx st)) h (assoc :handle h)))])])
-                       (catch Throwable e [nil (repeat (count ms) (error :seon.fx/defect (or (ex-message e) (str (type e))) {}))]))
-           st (cond-> st (and h (not (contract/error? h))) (assoc :handle h))
+           ;; the host object, kept once made even when perform then throws
+           hv (volatile! (:handle st))
+           rs (try (let [h (or @hv (when-let [open (:open st)] (open (:ctx st))))]
+                     (when-not (contract/error? h) (vreset! hv h))
+                     (cond (contract/error? h) (repeat (count ms) h)
+                           (:batch m) ((:perform st) {:batch ms :ctx (:ctx st) :handle h})
+                           :else [((:perform st) (cond-> (assoc m :ctx (:ctx st)) h (assoc :handle h)))]))
+                   (catch Throwable e (repeat (count ms) (error :seon.fx/defect (or (ex-message e) (str (type e))) {}))))
+           ;; one outcome per request taken, or each asker would wait for ever
+           rs (if (= (count ms) (count rs)) rs
+                  (repeat (count ms) (error :seon.fx/defect (str "the batch perform answered " (count rs) " outcomes for " (count ms) " requests") {})))
+           st (cond-> st @hv (assoc :handle @hv))
            t1 (profile/now-ns)
            done (mapv (fn [m r]
                         (cond-> {:dest (:dest m) :request m :budget-key (:budget-key m) :est (:est m 0)

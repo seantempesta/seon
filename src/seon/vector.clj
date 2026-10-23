@@ -83,6 +83,9 @@
      (if (or (empty? rows) (empty? qv) (zero? k))
        []
        (let [n (count rows) w (count (:v (first rows))) cd (- w 4) dims (count qv)
+             stored-dims (quot (count (stored db (:e (first rows)) :seon.vector/f16)) 2)
+             _ (when (not= dims stored-dims)
+                 (throw (ex-info (str "seon.vector/near: a query of " dims " dims over vectors of " stored-dims) {:dims dims :stored stored-dims})))
              sl (min n (max k (or shortlist (cfg/value :seon.config.vector/shortlist))))
              fd (min dims (or fine-dims (cfg/value :seon.config.vector/fine-dims)))]
          (ffi/with-arena [a]
@@ -114,21 +117,25 @@
 
 (defn due
   "The texts on db whose vector is due for model: each form's source, wiki section's text and
-  task's plan with no vector, a vector older than its text (its f16 written before the text's
-  last change), or another model's. [[e text] ...] in entity order."
-  {:malli/schema [:=> [:cat :seon.host/db :string] [:vector [:tuple :int :string]]]}
+  task's plan with no vector, a vector made from an earlier text (its :seon.vector/text-t is not
+  the text's transaction), or another model's. [[e text t] ...] in entity order, t the text's
+  transaction."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:vector [:tuple :int :string :int]]]}
   [db model]
-  (let [made (into {} (map (juxt :e :tx)) (d/datoms db :aevt :seon.vector/f16))
+  (let [made (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.vector/text-t))
         of (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.vector/model))]
     (vec (sort (for [[a text-of] texts
                      {:keys [e v tx]} (d/datoms db :aevt a)
-                     :when (or (not= model (of e)) (< (made e -1) tx))]
-                 [e (text-of v)])))))
+                     :when (or (not= model (of e)) (not= tx (made e)))]
+                 [e (text-of v) tx])))))
 
 (defn tx-data
-  "The facts of embedded texts: entity es[i]'s vector vs[i], made by model."
-  {:malli/schema [:=> [:cat [:sequential :int] [:sequential [:vector {:min 1} number?]] :string] [:vector :map]]}
-  [es vs model] (mapv (fn [e v] (assoc (pack v) :db/id e :seon.vector/model model)) es vs))
+  "The facts of embedded texts: entity es[i]'s vector vs[i] of the text at transaction ts[i], that
+  text's whole tokens ns[i] (past :seon.config.vector/max-tokens its first were embedded), made by
+  model."
+  {:malli/schema [:=> [:cat [:sequential :int] [:sequential :int] [:sequential [:vector {:min 1} number?]] [:sequential :int] :string] [:vector :map]]}
+  [es ts vs ns model]
+  (mapv (fn [e t v n] (assoc (pack v) :db/id e :seon.vector/model model :seon.vector/text-t t :seon.vector/tokens n)) es ts vs ns))
 
 ;; ---- the model (native/embed.c over llama.cpp: root's :embed worker alone loads it) ------
 ;; Bound here, resolved on the first call: the library is loaded by `open`, in the worker, so an
@@ -136,7 +143,7 @@
 
 (lib/defc c-open "seon_embed_open" [:pointer :int :int :int] :pointer {:blocking true})
 (lib/defc c-dims "seon_embed_dims" [:pointer] :int)
-(lib/defc c-batch "seon_embed_batch" [:pointer :pointer :pointer :int :int :pointer] :long {:blocking true})
+(lib/defc c-batch "seon_embed_batch" [:pointer :pointer :pointer :int :int :pointer :pointer] :int {:blocking true})
 
 (defn model-id
   "The id of the model file at path, on every vector it makes: its name, which bin/build makes its
@@ -162,34 +169,38 @@
               {:handle h :model (model-id path) :dims (c-dims h)}))))))
 
 (defn- embed-texts
-  "texts embedded by the model m in one call: their unit vectors, in order (seon_embed_batch packs
-  them into encodes; a text over :seon.config.vector/max-tokens keeps its first tokens).
-  Answers {:vectors :cut} or the encode's failure."
+  "texts embedded by the model m in one call: their unit vectors and each one's whole token count,
+  in order (seon_embed_batch packs them into encodes; a text over :seon.config.vector/max-tokens
+  keeps its first tokens). Answers {:vectors :tokens} or the encode's failure."
   {:malli/schema [:=> [:cat :map [:vector :string]] :map]}
   [{:keys [handle dims]} texts]
   (let [bs (mapv #(.getBytes ^String % "UTF-8") texts)
         offs (long-array (reductions + 0 (map count bs)))
         n (count texts)]
     (ffi/with-arena [a]
-      (let [tp (ffi/alloc a (max 1 (aget offs n))) op (ffi/alloc a (* 8 (inc n))) out (ffi/alloc a (max 4 (* 4 n dims)))]
+      (let [tp (ffi/alloc a (max 1 (aget offs n))) op (ffi/alloc a (* 8 (inc n)))
+            out (ffi/alloc a (max 4 (* 4 n dims))) np (ffi/alloc a (max 4 (* 4 n)))]
         (dotimes [i n] (ffi/write-bytes (ffi/slice tp (aget offs i)) (nth bs i)))
         (ffi/write-array op :int64 offs 0)
-        (let [r (c-batch handle tp op n (cfg/value :seon.config.vector/max-tokens) out)]
+        (let [r (c-batch handle tp op n (cfg/value :seon.config.vector/max-tokens) out np)]
           (if (neg? r)
             (contract/error :seon.vector/encode-failed 'seon.vector/embed (str "llama.cpp's encode answered " r) {:code r})
-            {:vectors (mapv #(vec (ffi/read-array out :float dims (* 4 dims %))) (range n)) :cut r}))))))
+            {:vectors (mapv #(vec (ffi/read-array out :float dims (* 4 dims %))) (range n))
+             :tokens (vec (ffi/read-array np :int32 n 0))}))))))
 
 (defn embed
   "The :embed effect, a batch kind: every request's :texts embedded in one call, each request
-  answered {:value {:model :vectors}}, its vectors in its texts' order; :cost is its texts."
+  answered {:value {:model :vectors :tokens}}, its vectors and each text's whole token count in its
+  texts' order; :cost is its texts."
   {:malli/schema [:=> [:cat [:map [:batch [:vector :map]] [:handle :map]]] [:vector :map]]}
   [{:keys [batch handle]}]
   (let [ns (mapv #(count (get-in % [:req :texts])) batch)
         r (embed-texts handle (into [] (mapcat #(get-in % [:req :texts])) batch))]
     (if (contract/error? r)
       (vec (repeat (count batch) r))
-      (first (reduce (fn [[acc vs] n] [(conj acc {:value {:model (:model handle) :vectors (subvec vs 0 n)} :cost n}) (subvec vs n)])
-                     [[] (:vectors r)] ns)))))
+      (first (reduce (fn [[acc vs ts] n] [(conj acc {:value {:model (:model handle) :vectors (subvec vs 0 n) :tokens (subvec ts 0 n)} :cost n})
+                                          (subvec vs n) (subvec ts n)])
+                     [[] (:vectors r) (:tokens r)] ns)))))
 
 ;; ---- keeping main's vectors current -------------------------------------------------------
 
@@ -198,10 +209,10 @@
   Answers [st outputs]; nothing due, nothing asked."
   {:malli/schema [:=> [:cat :map :seon.host/db] [:tuple :map [:vector :map]]]}
   [st db]
-  (let [due (take (cfg/value :seon.config.vector/texts) (due db (:model st)))]
+  (let [due (take (cfg/value :seon.config.vector/texts) (remove (comp (:unembeddable st) first) (due db (:model st))))]
     (if (empty? due)
-      [(assoc st :running false :due 0) []]
-      (let [[st m] (step/ask st [:vectors :answers] [:embedded (mapv first due)]
+      [(assoc st :running false) []]
+      (let [[st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due)]]
                              {:op :fx :kind :embed :req {:texts (mapv second due)}})]
         [(assoc st :running true) [m]]))))
 
@@ -212,14 +223,16 @@
   starts the next round, so a backlog is embedded round by round and an idle main asks nothing.
   One round at a time: a notice during one is kept, and the round after the write reads the
   latest notice at or after it. A failed embedding is root's problem (seon.fx/outcome) and the
-  next notice tries again."
+  next notice tries again, except texts llama.cpp could not encode (:seon.vector/encode-failed):
+  those are kept out of later rounds (:unembeddable, shown in its ping), so they never hold back
+  the texts due after them."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:model "the model id its vectors are made by (seon.vector/model-id)"}
        :ins {:main "main's commit notice {:t :db}, a sliding buffer of one" :answers "the api's answers"}
        :outs {:to-api "its requests to the api: the :embed effect, the write to main"}
        :workload :io
-       :ping-map-fn (fn [st] (select-keys st [:running :embedded :written-t]))})
-  ([args] {:rid 0 :pending {} :model (:model args) :running false :embedded 0 :written-t -1})
+       :ping-map-fn (fn [st] (-> (select-keys st [:running :embedded :written-t]) (assoc :unembeddable (count (:unembeddable st)))))})
+  ([args] {:rid 0 :pending {} :model (:model args) :running false :embedded 0 :written-t -1 :unembeddable #{}})
   ([st _] st)
   ([st in m]
    (let [[st outs]
@@ -229,12 +242,15 @@
                    (round (dissoc st :latest) (:db m)))
            :answers (let [[st [step es]] (step/answered st (:tag m)) r (:r m)]
                       (case step
-                        :embedded (if (contract/error? r)
-                                    [(assoc st :running false) []]
-                                    (let [{:keys [model vectors]} (:value r)
-                                          [st w] (step/ask st [:vectors :answers] [:written (count es)]
-                                                           {:op :write :req {:op :tx :branch :db :tx-data (tx-data es vectors model)}})]
-                                      [st [w]]))
+                        :embedded (let [[es ts] es]
+                                    (if (contract/error? r)
+                                      [(cond-> (assoc st :running false)
+                                         (= :seon.vector/encode-failed (:seon.error/type r)) (update :unembeddable into es))
+                                       []]
+                                      (let [{:keys [model vectors tokens]} (:value r)
+                                            [st w] (step/ask st [:vectors :answers] [:written (count es)]
+                                                             {:op :write :req {:op :tx :branch :db :tx-data (tx-data es ts vectors tokens model)}})]
+                                        [st [w]])))
                         :written (let [st (cond-> (assoc st :running false)
                                             (not (contract/error? r)) (-> (update :embedded + es) (assoc :written-t (:t r))))
                                        l (:latest st)]

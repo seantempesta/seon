@@ -26,6 +26,10 @@
   [vs]
   (d/db-with (ts/test-db) (vec (map-indexed (fn [i v] (assoc (vector/pack v) :db/id (str "f" i) :form/id (str "f" i) :seon.vector/model "m")) vs))))
 
+(defn- embedded
+  "The facts of due texts [[e text t] ...] embedded as vs, each text of 10 tokens, by model."
+  [due vs model] (vector/tx-data (map first due) (map peek due) vs (repeat (count due) 10) model))
+
 (defn- exact
   "The k entities nearest q by the full cosine of each stored vector, computed here without the
   kernel."
@@ -51,6 +55,7 @@
         hits (fn [opts] (for [q queries]
                           (count (filter (set (exact db q 10)) (map first (vector/near db q 10 opts))))))]
     (is (= (* 10 (count queries)) (reduce + (hits {:shortlist 600}))) "a shortlist of every vector ranks them all exactly")
+    (is (thrown? Exception (vector/near db (vec (repeat 64 0.125)) 10)) "a query of another width is refused, never read past")
     (is (<= 0.99 (/ (reduce + (hits {})) (* 10.0 (count queries)))) "the default levels find the exact top 10")
     (is (> 0.99 (/ (reduce + (hits {:shortlist 10 :fine-dims 64})) (* 10.0 (count queries))))
         "a shortlist of k ranked on a short prefix misses some: the levels are what keeps the recall")))
@@ -73,13 +78,17 @@
   (let [db (d/db-with (ts/test-db) [{:db/id "f" :form/id "x/1" :form/src "(defn g [])"}
                                      {:db/id "s" :seon.section/address "p.md#a" :seon.section/heading "a" :seon.section/text "old"}])
         due (vector/due db "m")
-        f (some #(when (= "title: none | text: (defn g [])" (second %)) (first %)) due)
-        s (some #(when (= "title: none | text: old" (second %)) (first %)) due)
-        db (d/db-with db (vector/tx-data [f s] (vectors 3 2 2 768) "m"))]
+        mine (filterv #(#{"title: none | text: (defn g [])" "title: none | text: old"} (second %)) due)
+        [f s] (map first mine)
+        db (d/db-with db (embedded mine (vectors 3 2 2 768) "m"))]
     (is (and f s) "a form and a section with no vector are due, as the model reads them")
     (is (not-any? (comp #{f s} first) (vector/due db "m")) "embedded, they are not due again")
     (let [db (d/db-with db [[:db/add s :seon.section/text "new"]])]
-      (is (= [[s "title: none | text: new"]] (filterv (comp #{f s} first) (vector/due db "m"))) "a changed text is due again, and only it"))
+      (is (= [[s "title: none | text: new"]] (mapv pop (filterv (comp #{f s} first) (vector/due db "m")))) "a changed text is due again, and only it"))
+    (let [[_ _ t] (first (filter (comp #{s} first) mine))
+          db (d/db-with db [[:db/add s :seon.section/text "changed while its round was out"]])
+          db (d/db-with db (vector/tx-data [s] [t] (vectors 4 1 1 768) [10] "m"))]
+      (is (= [s] (map first (filter (comp #{s} first) (vector/due db "m")))) "a vector of the text before is no vector of the text now"))
     (is (= #{f s} (set (filter #{f s} (map first (vector/due db "m2"))))) "another model's vectors are due again")))
 
 (defn- db-due-only
@@ -87,7 +96,7 @@
   []
   (let [db (ts/test-db)
         seeded (vector/due db "m")
-        db (d/db-with db (vector/tx-data (map first seeded) (vectors 2 (count seeded) 8 768) "m"))]
+        db (d/db-with db (embedded seeded (vectors 2 (count seeded) 8 768) "m"))]
     (d/db-with db [{:db/id "f" :form/id "x/1" :form/src "(defn g [])"}])))
 
 (deftest the-proc-asks-for-what-is-due-and-writes-it
@@ -99,7 +108,7 @@
     (is (= ["title: none | text: (defn g [])"] (get-in ask [:req :req :texts])) "for the texts due, as the model reads them")
     (let [[st o2] (vector/vectors-proc st :main {:t 11 :db db})
           _ (is (empty? (:to-api o2)) "one round at a time: a notice during one is kept")
-          [st o3] (vector/vectors-proc st :answers {:tag (:tag ask) :r {:value {:model "m" :vectors (vectors 1 1 1 768)}}})
+          [st o3] (vector/vectors-proc st :answers {:tag (:tag ask) :r {:value {:model "m" :vectors (vectors 1 1 1 768) :tokens [5]}}})
           w (first (:to-api o3))]
       (is (= {:op :tx :branch :db} (select-keys (get-in w [:req :req]) [:op :branch])) "the vectors go to main through the writer")
       (let [db2 (d/db-with db (get-in w [:req :req :tx-data]))
@@ -115,4 +124,9 @@
         e (contract/error :seon.vector/model-unopened 'seon.vector/open "no model file" {:path "m.gguf"})
         [st o2] (vector/vectors-proc st :answers {:tag (:tag (first (:to-api o))) :r e})]
     (is (empty? (:to-api o2)) "nothing is written")
-    (is (seq (:to-api (second (vector/vectors-proc st :main {:t 11 :db db})))) "the next notice tries again")))
+    (let [[st o4] (vector/vectors-proc st :main {:t 11 :db db})
+          _ (is (seq (:to-api o4)) "the next notice tries again")
+          e (contract/error :seon.vector/encode-failed 'seon.vector/embed "llama.cpp's encode answered -2" {:code -2})
+          [st _] (vector/vectors-proc st :answers {:tag (:tag (first (:to-api o4))) :r e})
+          [_ o5] (vector/vectors-proc st :main {:t 12 :db db})]
+      (is (empty? (:to-api o5)) "texts the model could not encode are set aside: nothing else is due, so nothing is asked"))))

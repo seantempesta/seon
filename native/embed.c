@@ -13,7 +13,8 @@ typedef struct {
   struct llama_context *ctx;
   const struct llama_vocab *vocab;
   int n_ctx, n_seq, dims;
-  llama_token *toks;   // one text's tokens, n_ctx long
+  llama_token *toks;   // one text's tokens, grown to the longest text's
+  int cap;
 } seon_embed;
 
 static void quiet(enum ggml_log_level level, const char *text, void *ud) { (void)level; (void)text; (void)ud; }
@@ -38,7 +39,7 @@ void *seon_embed_open(const char *path, int n_ctx, int n_seq, int verbose) {
   seon_embed *h = calloc(1, sizeof *h);
   h->model = model; h->ctx = ctx; h->vocab = llama_model_get_vocab(model);
   h->n_ctx = n_ctx; h->n_seq = n_seq; h->dims = llama_model_n_embd_out(model);
-  h->toks = malloc(sizeof(llama_token) * n_ctx);
+  h->cap = n_ctx; h->toks = malloc(sizeof(llama_token) * h->cap);
   return h;
 }
 
@@ -62,21 +63,25 @@ static int flush(seon_embed *h, struct llama_batch *b, int first, int n, float *
   return 0;
 }
 
-// Embeds n texts (texts[off[i]..off[i+1]) as UTF-8) into out (n x dims floats). A text longer
-// than max_tokens keeps its first max_tokens, and the answer is how many were cut, so the
-// caller records what it left. Texts are packed, each
-// its own sequence, into encodes of at most n_ctx tokens and n_seq sequences. Negative on a
-// failed encode: -2 the encode, -3 a missing pooled vector.
-long seon_embed_batch(void *hv, const char *texts, const long *off, int n, int max_tokens, float *out) {
+// Embeds n texts (texts[off[i]..off[i+1]) as UTF-8) into out (n x dims floats), and writes each
+// text's whole token count into tokens[i]; a text longer than max_tokens keeps its first
+// max_tokens, so the caller records what it left. Special-token text in a text is read as text.
+// Texts are packed, each its own sequence, into encodes of at most n_ctx tokens and n_seq
+// sequences. 0, or negative on a failed encode: -2 the encode, -3 a missing pooled vector.
+int seon_embed_batch(void *hv, const char *texts, const long *off, int n, int max_tokens, float *out, int *tokens) {
   seon_embed *h = hv;
   if (max_tokens > h->n_ctx) max_tokens = h->n_ctx;
   struct llama_batch b = llama_batch_init(h->n_ctx, 0, 1);
-  long cut = 0; int first = 0, seqs = 0;
+  int first = 0, seqs = 0;
   for (int i = 0; i < n; i++) {
     int len = (int)(off[i + 1] - off[i]);
-    int nt = llama_tokenize(h->vocab, texts + off[i], len, h->toks, h->n_ctx, true, true);
-    if (nt < 0) { nt = h->n_ctx; }               // more tokens than n_ctx: the first n_ctx were written
-    if (nt > max_tokens) { nt = max_tokens; cut++; }
+    int nt = llama_tokenize(h->vocab, texts + off[i], len, h->toks, h->cap, true, false);
+    if (nt < 0) {                                  // the buffer was short: -nt tokens are needed
+      h->cap = -nt; h->toks = realloc(h->toks, sizeof(llama_token) * h->cap);
+      nt = llama_tokenize(h->vocab, texts + off[i], len, h->toks, h->cap, true, false);
+    }
+    tokens[i] = nt;
+    if (nt > max_tokens) nt = max_tokens;
     if (b.n_tokens + nt > h->n_ctx || seqs == h->n_seq) {
       int r = flush(h, &b, first, seqs, out);
       if (r) { llama_batch_free(b); return r; }
@@ -90,7 +95,7 @@ long seon_embed_batch(void *hv, const char *texts, const long *off, int n, int m
   }
   int r = flush(h, &b, first, seqs, out);
   llama_batch_free(b);
-  return r ? r : cut;
+  return r;
 }
 
 void seon_embed_close(void *hv) {

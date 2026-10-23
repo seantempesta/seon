@@ -475,9 +475,8 @@
         task-e (:db/id (d/entity db [:seon.task/id "geo/v"]))
         found-of (fn [db] (mapv :symbol (filter map? (:found (context/current-state db (task/task db "geo/v") {:turn 0 :max-turns 4})))))
         _ (is (= ['geo/sq] (found-of db)) "without vectors the call graph names only what vol calls")
-        db (d/db-with db (into (seon.vector/tx-data [task-e (form db 'geo/clamp-radius) (form db 'geo/unrelated) (form db 'geo/sq)]
-                                                    [plan near-plan (made-vector 7) (made-vector 9)] "m")
-                               []))
+        db (d/db-with db (seon.vector/tx-data [task-e (form db 'geo/clamp-radius) (form db 'geo/unrelated) (form db 'geo/sq)] [1 1 1 1]
+                                              [plan near-plan (made-vector 7) (made-vector 9)] [10 10 10 10] "m"))
         fs (found-of db)]
     (is (some #{'geo/clamp-radius} fs) "the helper nearest the plan is found, though nothing cited calls it")
     (is (some #{'geo/sq} fs) "the call graph's helper stays")
