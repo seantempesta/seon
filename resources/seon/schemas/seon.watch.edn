@@ -1,0 +1,7 @@
+;; Root's file watcher (seon.watch): target/watch (native/watch.c, FSEvents) as an OS child,
+;; read on one edge thread (docs/failure-points.md).
+{;; the watcher could not start, or its stream ended while root still watched: its exit status
+ ;; and stderr; recorded as a :platform error (seon.root/platform-tx), and root goes on unwatched
+ :seon.watch/died [:and :seon.error/base [:map [:seon.error/type [:= :seon.watch/died]]
+                                          [:bin :string] [:roots [:vector :string]]
+                                          [:exit [:maybe :int]] [:stderr [:maybe :string]]]]}

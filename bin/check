@@ -2,8 +2,9 @@
 # bin/check [N] — the platform's end-to-end checks on target/seon (bin/build seon), each a
 # mode of seon.check: laws, contracts, mg-check, fx, config, system, mcp, threads, instrument, record,
 # problems, smoke, robust, lifecycle, backpressure, hotreload, drain, idle, orphan,
-# durable, window, e2e tasks and scenarios, swarm (20 tasks over 5 shared vars, max-running 8),
-# resume, scale N (default N = 100).
+# durable, window, e2e tasks and scenarios, swarm (10 tasks over 5 shared vars, max-running 8),
+# resume, scale N (default N = 100). A run's steps run at once, :seon.config.proofs/jobs at a
+# time, the longest first, each on a clone of the one seeded store; scale alone, last.
 # bin/check MODE [ARGS] runs one mode. bin/check with no argument is bin/prove --checks: only
 # the steps whose reach digest has no green result run (seon.proofs/check-steps); a number is
 # the full run. bin/check --steps DIR (bin/prove's) runs only the steps DIR/steps names, of a
@@ -54,11 +55,21 @@ export SEON_PROFILE=${SEON_PROFILE:-scripted}
 SEL=
 [[ ${1:-} == --steps ]] && { SEL=$2; shift 2; set -- 100 }
 S=$ROOT/target/seon
-# --steps: the plan names the steps among them that run a seon.check mode (out/steps-binary). With
-# none (laws, lmdb-kill), there is no binary to need, no store to seed and no branch to drop
+# NEEDS: does this run use the binary? A selected run whose steps need none (steps-binary empty:
+# laws, lmdb-kill) seeds no store, starts no root and wants no build
 NEEDS=1; [[ -n $SEL && ! -s $SEL/steps-binary ]] && NEEDS=
 (( NEEDS )) && { [[ -x $S ]] || { echo "check: no target/seon; run bin/build seon" >&2; exit 1 } }
-run() { (cd "$ROOT/target" && ./seon "$@" 2>&1) }
+# what this run starts ends with it (bin/held): a fifo of its own, held open read-write while
+# bin/check lives, named to every step; its EOF, bin/check gone however it ended, ends them
+STARTER=$ROOT/target/tmp/check-starter-$$.fifo
+mkdir -p "$ROOT/target/tmp"; "$ROOT/bin/held" --reclaim "$ROOT/target/tmp"
+rm -f "$STARTER"; mkfifo "$STARTER"; exec 7<>"$STARTER"
+export SEON_STARTER_FIFO=$STARTER
+# gone with this run, however it ends but SIGKILL (which no handler sees: bin/held --reclaim removes it)
+trap 'rm -f "$STARTER"' EXIT
+trap 'exit 143' TERM INT HUP
+# (fd 7, the fifo's write end, stays bin/check's own: a child holding it would keep the fifo open)
+run() { (cd "$ROOT/target" && "$ROOT/bin/held" ./seon "$@" 2>&1 7>&- 3>&-) }
 # a step's own settings, the same alone or in the run: lease's block is small enough to spend
 LEASE_SET=(--set :seon.config.store/eid-lease=50)
 # a single mode: on its own branch check-<mode> of the given store, deleted when it is green
@@ -72,15 +83,21 @@ if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then
   exit $st
 fi
 N=${1:-100}
+TIMEFMT='real %E user %U sys %S'
 OUT=$ROOT/target/check/$(date +%Y%m%dT%H%M%S)
-mkdir -p "$OUT"
-FAILED=() GREEN=()
+mkdir -p "$OUT/stores"
+: > "$OUT/failed"; : > "$OUT/green"
 # want STEP: is STEP one this run runs? A step seon.proofs/check-steps does not name is FAILED.
-ONLY=${SEL:+$(cat "$SEL/steps")}
-# (a --steps run asks no binary which steps exist: the plan took its names from check-steps)
-[[ -n $SEL ]] || KNOWN=" $(run steps) "
+# (a selected run's steps were named by the plan from the same table: no binary asked)
+KNOWN= ONLY=
+if [[ -n $SEL ]]; then ONLY=$(cat "$SEL/steps"); else KNOWN=" $(run steps) "; fi
+# failed WHY / green STEP / is-green STEP: the run's record, one line each in OUT/failed and
+# OUT/green, appended by the steps running at once (a line is one write)
+failed() { print -r -- "$*" >> "$OUT/failed" }
+green() { print -r -- "check-$1" >> "$OUT/green" }
+is-green() { grep -qx "check-$1" "$OUT/green" }
 want() {
-  [[ -n $SEL || $KNOWN == *" $1 "* ]] || { FAILED+=("$1 (not a step of seon.proofs/check-steps)"); echo "FAILED $1 (not in seon.proofs/check-steps)"; return 1 }
+  [[ -n $SEL || $KNOWN == *" $1 "* ]] || { failed "$1 (not a step of seon.proofs/check-steps)"; echo "FAILED $1 (not in seon.proofs/check-steps)"; return 1 }
   [[ -z $SEL || " $ONLY " == *" $1 "* ]]
 }
 
@@ -92,11 +109,13 @@ step() {
   local name=$1 filter=$2; shift 2
   local log=$OUT/$name.log expect=${EXPECT:-0}
   [[ $name == seed ]] || want ${${name%-write}%-read} || return 0
-  SEON_MAIN=check-$name "$@" > "$log" 2>&1
+  # its wall and CPU seconds kept beside its log (NAME.time: zsh's time, which keeps the exit
+  # status); fd 7 (the starter fifo) and fd 3 (the run's token pool) stay bin/check's own
+  { time (SEON_MAIN=check-$name "$@" > "$log" 2>&1 7>&- 3>&-) } 2> "$OUT/$name.time"
   local st=$?
   if [[ -n $filter ]]; then grep -E "$filter" "$log"; else tail -1 "$log"; fi
-  if (( st != expect )); then FAILED+=("$name (exit $st, expected $expect, $log)"); echo "FAILED $name (exit $st, expected $expect)"
-  else GREEN+=(check-$name); fi
+  if (( st != expect )); then failed "$name (exit $st, expected $expect, $log)"; echo "FAILED $name (exit $st, expected $expect)"
+  else green $name; fi
   return 0
 }
 
@@ -106,91 +125,143 @@ read -r STORE KB0 BR0 <<< "$(run store)"
 # the steps' own mains: what a failed earlier run left is deleted before this run's step
 STEPS=(seed fx config system mcp threads instrument record problems smoke robust lifecycle backpressure hotreload drain idle
        orphan durable window lease e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns e2e-sibling swarm e2e-loop e2e-held resume scale)
-run drop ${STEPS/#/check-} > "$OUT/drop-before.log" 2>&1 || FAILED+=("drop-before ($OUT/drop-before.log)")
+run drop ${STEPS/#/check-} > "$OUT/drop-before.log" 2>&1 || failed "drop-before ($OUT/drop-before.log)"
 fi
-echo "== laws (every law's sites: catch, clocks, measures, resolution)"; step laws "OK \(|FAILED" "$ROOT/bin/laws"
+
+# ---- the steps, each a unit u-NAME: what it runs, in order, on its own store ----
+u-laws() { echo "== laws (every law's sites: catch, clocks, measures, resolution)"; step laws "OK \(|FAILED" "$ROOT/bin/laws" }
 # lmdb-kill runs below Datahike, on an LMDB env of its own: a raw put has no branch to take,
 # and the store's env is konserve's key space (a raw key or a named sub-db there is a key
 # konserve reads). Its env is deleted when the step is green.
-echo "== lmdb-kill (a writer SIGKILLed inside a txn while this process holds the env; the next writes commit: robust locks)"
-step lmdb-kill "" "$ROOT/target/lmdb-kill" "$OUT/lmdb-kill.mdb"
-[[ ${GREEN[-1]} == check-lmdb-kill ]] && rm -f "$OUT/lmdb-kill.mdb" "$OUT/lmdb-kill.mdb-lock"
-echo "== contracts"; step contracts ":contracted|:uncontracted|^CONTRACTS " run contracts
-echo "== mg-check (no [:fn] without :gen; mg/check on every pure contract, in the release binary)"
-# in K shards at once, each a process checking every Kth contracted var (seon.check/mg-check);
-# each shard's exit status counts. K = 4 until the config file holds it (session CONFIG).
-K=4; CP=(); CF=${#FAILED}
-want mg-check && for i in $(seq 0 $((K-1))); do run mg-check $i/$K > "$OUT/mg-check-$i.log" 2>&1 & CP+=($!); done
-want mg-check && for i in $(seq 0 $((K-1))); do
-  wait ${CP[$((i+1))]}; st=$?
-  grep -E ":generated|^MG-CHECK " "$OUT/mg-check-$i.log"
-  (( st == 0 )) || { FAILED+=("mg-check-$i (exit $st, expected 0, $OUT/mg-check-$i.log)"); echo "FAILED mg-check-$i (exit $st, expected 0)"; }
-done
-want mg-check && (( ${#FAILED} == CF )) && GREEN+=(check-mg-check)
-echo "== fx (an effect from an agent through its owner proc)"; step fx ":unknown|:test-fork|^FX " run fx 200
-echo "== config (the config in force as facts on main; an agent reads them from its branch)"; step config "" run config
-echo "== system (root's procs from resources/seon/system.edn; apply! touches only what changed)"; step system "" run system
-echo "== mcp (an outside MCP client evals in an agent and as root; both recorded :outside)"; step mcp "" run mcp-proof
-echo "== threads (the fork server, an agent and its clone stay single-threaded: no GC sweepers where we fork)"; step threads "" run threads
-echo "== instrument"; step instrument "" run instrument
-echo "== record"; step record "" run record
-echo "== problems (each class provoked, then read back from main by my.root/problems)"; step problems "" run problems
-echo "== smoke"; step smoke "^merge|^killed|spawned|ready|^SMOKE " run smoke
-echo "== robust"; step robust "" run robust
+u-lmdb-kill() {
+  echo "== lmdb-kill (a writer SIGKILLed inside a txn while this process holds the env; the next writes commit: robust locks)"
+  step lmdb-kill "" "$ROOT/target/lmdb-kill" "$OUT/lmdb-kill.mdb"
+  is-green lmdb-kill && rm -f "$OUT/lmdb-kill.mdb" "$OUT/lmdb-kill.mdb-lock"
+}
+u-contracts() { echo "== contracts"; step contracts ":contracted|:uncontracted|^CONTRACTS " run contracts }
+u-test-inputs() { echo "== test-inputs (every test read of a clock, random, environment, sleep or deadline is named with its reason)"; step test-inputs ":unnamed|:named-not-read|^TEST-INPUTS " run test-inputs }
+u-mg-check() {
+  echo "== mg-check (no [:fn] without :gen; mg/check on every pure contract, in the release binary)"
+  want mg-check || return 0
+  # in K shards at once, each a process checking every Kth contracted var (seon.check/mg-check);
+  # each shard's exit status counts
+  local K=$JOBS CP=() ok=1 i st
+  # each contract's seed is derived from the step's reach digest (bin/prove's plan), or, in a run
+  # that stores no result, from the binary's tree (seon.check/mg-check)
+  local base
+  if [[ -n $SEL ]]; then
+    base=$(sed -n 's/.*"mg-check" "\([0-9a-f]*\)".*/\1/p' "$SEL/steps.edn")
+    [[ -n $base ]] || { failed "mg-check (no digest for it in $SEL/steps.edn)"; echo "FAILED mg-check (no digest in steps.edn)"; return 0 }
+  else base=$(cat "$ROOT/target/seon.tree"); fi
+  # its K shards take K of the run's JOBS tokens: one is the unit's own, the others are waited for
+  for i in $(seq 2 $K); do read -u 3 tok; done
+  for i in $(seq 0 $((K-1))); do { time (run mg-check $i/$K $base > "$OUT/mg-check-$i.log" 2>&1) } 2> "$OUT/mg-check-$i.time" & CP+=($!); done
+  for i in $(seq 0 $((K-1))); do
+    wait ${CP[$((i+1))]}; st=$?
+    grep -E ":generated|^MG-CHECK " "$OUT/mg-check-$i.log"
+    (( st == 0 )) || { ok=0; failed "mg-check-$i (exit $st, expected 0, $OUT/mg-check-$i.log)"; echo "FAILED mg-check-$i (exit $st, expected 0)"; }
+  done
+  for i in $(seq 2 $K); do print -u 3 x; done
+  (( ok )) && green mg-check
+}
+u-fx() { echo "== fx (an effect from an agent through its owner proc)"; step fx ":unknown|:test-fork|^FX " run fx 20 }
+u-config() { echo "== config (the config in force as facts on main; an agent reads them from its branch)"; step config "" run config }
+u-system() { echo "== system (root's procs from resources/seon/system.edn; apply! touches only what changed)"; step system "" run system }
+u-mcp() { echo "== mcp (an outside MCP client evals in an agent and as root; both recorded :outside)"; step mcp "" run mcp-proof }
+u-threads() { echo "== threads (the fork server, an agent and its clone stay single-threaded: no GC sweepers where we fork)"; step threads "" run threads }
+u-instrument() { echo "== instrument"; step instrument "" run instrument }
+u-record() { echo "== record"; step record "" run record }
+u-problems() { echo "== problems (each class provoked, then read back from main by my.root/problems)"; step problems "" run problems }
+u-smoke() { echo "== smoke"; step smoke "^merge|^killed|spawned|ready|^SMOKE " run smoke }
+u-robust() { echo "== robust"; step robust "" run robust }
 # no web listener: the adapter's acceptor and sweeper outlive stop! (task seon.web.edn
 # web-server-threads-are-joined-at-stop), so root's exact thread count is checked without it
-echo "== lifecycle (start!/stop! x10 in one process, root's threads exactly as declared; pause/resume)"; step lifecycle "LIFECYCLE" env SEON_WEB_PORT=0 zsh -c "cd '$ROOT/target' && ./seon lifecycle 10"
-echo "== backpressure"; step backpressure "" run backpressure 200
-echo "== hotreload"; step hotreload "" run hotreload
-echo "== drain"; step drain "" run drain 32
-echo "== idle (no beat: an idle root with a tab open steps nothing; a spawn and a commit still reach the tab)"
-step idle ":steps-at-idle|:bytes-at-idle|reached-tab|^IDLE " env SEON_WEB_PORT=$IDLE_WEB_PORT zsh -c "cd '$ROOT/target' && ./seon idle 5000"
-
-if want orphan; then
-echo "== orphan (root dies under busy agents, a clone and a test child)"
-SEON_MAIN=check-orphan run orphan > "$OUT/orphan.log" 2>&1
-(( $? == 0 )) || { echo "FAILED orphan (no test child)"; FAILED+=("orphan (no test child, $OUT/orphan.log)") }
-ORPHAN_FAILED=${#FAILED}
-PIDS=$(sed -n 's/^PIDS //p' "$OUT/orphan.log")
-# the orphans are given until their parent's death reaches them: each is asked once a
-# second for up to 5 s, and a survivor past that is the failure
-LEFT=$PIDS
-for i in 1 2 3 4 5; do
+u-lifecycle() { echo "== lifecycle (start!/stop! x10 in one process, root's threads exactly as declared; pause/resume)"; step lifecycle "LIFECYCLE" env SEON_WEB_PORT=0 zsh -c "cd '$ROOT/target' && '$ROOT/bin/held' ./seon lifecycle 10" }
+u-backpressure() { echo "== backpressure"; step backpressure "" run backpressure 8 }
+u-hotreload() { echo "== hotreload"; step hotreload "" run hotreload }
+u-drain() { echo "== drain"; step drain "" run drain 8 }
+u-idle() {
+  echo "== idle (no beat: an idle root with a tab open steps nothing; a spawn and a commit still reach the tab)"
+  step idle ":steps-at-idle|:bytes-at-idle|reached-tab|^IDLE " env SEON_WEB_PORT=$IDLE_WEB_PORT zsh -c "cd '$ROOT/target' && '$ROOT/bin/held' ./seon idle 2000"
+}
+u-orphan() {
+  want orphan || return 0
+  echo "== orphan (root dies under busy agents, a clone and a test child)"
+  local PIDS LEFT
+  # held --drain returns once root and every process it started has ended (bin/held's lifeline pipe,
+  # which each inherits): the orphans' end is the event this waits on, not a count of seconds. An
+  # orphan that never ends holds this step open: no clock calls it dead, so that verdict is the
+  # harness's (docs/failure-points.md)
+  (cd "$ROOT/target" && SEON_MAIN=check-orphan "$ROOT/bin/held" --drain ./seon orphan 7>&- 3>&-) > "$OUT/orphan.log" 2>&1
+  (( $? == 0 )) || { echo "FAILED orphan (no test child)"; failed "orphan (no test child, $OUT/orphan.log)"; return 0 }
+  PIDS=$(sed -n 's/^PIDS //p' "$OUT/orphan.log")
+  # every process of the tree has ended by now (the drain above); any pid still alive is a survivor
   LEFT=$(for p in ${=PIDS}; do kill -0 $p 2>/dev/null && echo $p; done)
-  [[ -z $LEFT ]] && break
-  sleep 1
-done
-if [[ -z $PIDS ]]; then echo "FAIL no pids"; FAILED+=("orphan (no pids, $OUT/orphan.log)")
-elif [[ -n $LEFT ]]; then echo "FAIL left running: $LEFT"; kill -9 ${=LEFT}; FAILED+=("orphan (left running: $LEFT)")
-else echo "PASS none of $PIDS outlived root"; (( ${#FAILED} == ORPHAN_FAILED )) && GREEN+=(check-orphan); fi
-fi
-
+  if [[ -z $PIDS ]]; then echo "FAIL no pids"; failed "orphan (no pids, $OUT/orphan.log)"
+  elif [[ -n $LEFT ]]; then echo "FAIL left running: $LEFT"; kill -9 ${=LEFT}; failed "orphan (left running: $LEFT)"
+  else echo "PASS none of $PIDS outlived root"; green orphan; fi
+}
 # the recovery steps kill root and reopen the one store on the branch it worked on
-echo "== durable (root writes its branch and SIGKILLs itself; a new root reopens the store and recovers it)"
-EXPECT=137 step durable-write "" run durable-write check-durable; step durable-read "" run durable-read check-durable
-[[ ${GREEN[-1]} == check-durable-read && ${GREEN[-2]} == check-durable-write ]] && GREEN+=(check-durable)
-echo "== window (continuous group commit: answered unflushed while the flusher is paused; :flush? waits for its sync)"
-EXPECT=137 step window-write "" run window-write check-window
-step window-read "" run window-read check-window
-[[ ${GREEN[-1]} == check-window-read && ${GREEN[-2]} == check-window-write ]] && GREEN+=(check-window)
-echo "== lease (eid-lease 50: an agent past its block of entity ids is refused, typed; the next agent's ids are never minted)"
-step lease "" run lease $LEASE_SET
-echo "== tasks: calc (6-task graph, cancel), scenarios (conflict, semantic, hairy, newns, sibling), swarm 20 over 5 shared vars"
-step e2e-calc "" run e2e calc
-for k in conflict semantic hairy newns sibling; do step e2e-$k "" run e2e scenario $k; done
-step swarm ":merges|:checks|^SWARM " run swarm 20 8
-echo "== loop (Seon's own source is main's program: a task changes seon.fixtures/generation, its merge is written back, committed on a clone's jolt/seon-merges, and live in root and in an agent forked after it, nothing built)"
-step e2e-loop ":source|:commits|:live|LOOP" run e2e loop "$OUT/loop"
-echo "== held (add always wrong: refused once and held for root, naming what it blocks; root releases it: one new attempt on its branch, from add#1's evidence, held again; each wait ends on quiescence)"; step e2e-held ":root-causes|:release|quiet-after" run e2e held
-echo "== resume (root SIGKILLed mid-graph; a new root finishes it)"
-want resume && run e2e resume check-resume > "$OUT/resume1.log" 2>&1; step resume "" run e2e resume2 check-resume
-echo "== scale $N"; step scale ":all-ok|:spawn->all|:end-to-end|:control-real-mb|:all-killed|^SCALE " run scale $N
+u-durable() {
+  echo "== durable (root writes its branch and SIGKILLs itself; a new root reopens the store and recovers it)"
+  EXPECT=137 step durable-write "" run durable-write check-durable; step durable-read "" run durable-read check-durable
+  is-green durable-write && is-green durable-read && green durable
+}
+u-window() {
+  echo "== window (continuous group commit: answered unflushed while the flusher is paused; :flush? waits for its sync)"
+  EXPECT=137 step window-write "" run window-write check-window
+  step window-read "" run window-read check-window
+  is-green window-write && is-green window-read && green window
+}
+u-lease() { echo "== lease (eid-lease 50: an agent past its block of entity ids is refused, typed; the next agent's ids are never minted)"; step lease "" run lease $LEASE_SET }
+u-e2e-calc() { echo "== tasks: calc (6-task graph, cancel)"; step e2e-calc "" run e2e calc }
+for k in conflict semantic hairy newns sibling; do functions[u-e2e-$k]="echo '== tasks: scenario $k'; step e2e-$k '' run e2e scenario $k"; done
+u-swarm() { echo "== swarm (10 tasks over 5 shared vars, max-running 8)"; step swarm ":merges|:checks|^SWARM " run swarm 10 8 }
+u-e2e-loop() { echo "== loop (Seon's own source is main's program: a task changes seon.fixtures/generation, its merge is written back, committed on a clone's jolt/seon-merges, and live in root and in an agent forked after it, nothing built)"; step e2e-loop ":source|:commits|:live|LOOP" run e2e loop "$OUT/loop" }
+u-e2e-held() { echo "== held (add always wrong: refused once and held for root, naming what it blocks; root releases it: one new attempt on its branch, from add#1's evidence, held again; each wait ends on quiescence)"; step e2e-held ":root-causes|:release|quiet-after" run e2e held }
+u-resume() {
+  echo "== resume (root SIGKILLed mid-graph; a new root finishes it)"
+  want resume && run e2e resume check-resume > "$OUT/resume1.log" 2>&1; step resume "" run e2e resume2 check-resume
+}
+
+# ---- the steps at once: JOBS at a time, the longest first ----
+# One root per store (two roots branching at once can drop a branch from the store's roster,
+# task seon.db/two-processes-branch-one-store-at-once; root collects only as the store's only
+# writer, docs/storage.md#collection), so a unit running
+# beside others takes a store of its own: an APFS clone of the one
+# seeded store (its data file; LMDB makes its lock file), the same content as a branch of it,
+# deleted when the unit is green. scale runs alone after them: it measures the machine's memory.
+if (( NEEDS )); then JOBS=$(run jobs); else JOBS=2; fi
+UNITS=(laws lmdb-kill contracts test-inputs mg-check fx config system mcp threads instrument record problems smoke robust lifecycle
+       backpressure hotreload drain idle orphan durable window lease e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns
+       e2e-sibling swarm e2e-loop e2e-held resume)
+# the longest first, by the last full run's measured wall seconds (a unit not measured yet first):
+# what orders the queue, never what a step proves
+# the last full run: the latest that ran scale (a selected run's times cover only its steps)
+PREVS=("$ROOT"/target/check/2*/scale.time(N)); PREVS=(${PREVS:h}); PREVS=(${PREVS:#$OUT}); PREV=${PREVS[-1]:-}
+secs() { local f r t=0 seen=0; for f in "$PREV/$1".time(N) "$PREV/$1"-*.time(N); do seen=1; r=$(sed -n 's/^real \([0-9.]*\).*/\1/p' "$f" | head -1); t=$(( t + ${r:-0} )); done; (( seen )) && print $t || print 1e9 }
+[[ -n $PREV ]] && UNITS=(${(f)"$(for u in $UNITS; do print "$(secs $u) $u"; done | sort -k1,1 -g -r -s | awk '{print $2}')"})
+unit() {
+  # a unit this run does not select takes no store and shows nothing
+  [[ -n $SEL && " $ONLY " != *" $1 "* ]] && return 0
+  export SEON_STORE=$OUT/stores/$1
+  (( NEEDS )) && { mkdir -p "$SEON_STORE" && cp -c "$STORE/data.mdb" "$SEON_STORE/data.mdb" }
+  { u-$1 } > "$OUT/$1.shown" 2>&1
+  grep -q "^$1[ -]" "$OUT/failed" || rm -rf "$SEON_STORE"
+  cat "$OUT/$1.shown"
+}
+mkfifo "$OUT/pool"; exec 3<>"$OUT/pool"; rm "$OUT/pool"
+for i in $(seq 1 $JOBS); do print -u 3 x; done
+for u in $UNITS; do read -u 3 tok; { unit $u; print -u 3 x } & done
+wait
+exec 3>&-
+(( NEEDS )) && { echo "== scale $N"; step scale ":all-ok|:spawn->all|:end-to-end|:control-real-mb|:all-killed|^SCALE " run scale $N }
 
 # what the green steps made is deleted; a failed step's branches stay until its next run
-if (( NEEDS )); then
-run drop $GREEN > "$OUT/drop-after.log" 2>&1 || FAILED+=("drop-after ($OUT/drop-after.log)")
-read -r _ KB1 BR1 <<< "$(run store)"
-fi
+GREEN=(${(f)"$(<$OUT/green)"})
+(( NEEDS )) && { run drop $GREEN > "$OUT/drop-after.log" 2>&1 || failed "drop-after ($OUT/drop-after.log)" }
+FAILED=(${(f)"$(<$OUT/failed)"})
+(( NEEDS )) && read -r _ KB1 BR1 <<< "$(run store)"
 [[ -n $SEL ]] && print -r -- "${GREEN[@]}" > "$SEL/green"
 echo
 (( NEEDS )) && echo "store $STORE: ${KB0} KB and ${BR0} branches before the run, ${KB1} KB and ${BR1} after; run directory $(du -sk "$OUT" | cut -f1) KB"

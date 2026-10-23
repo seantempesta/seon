@@ -152,8 +152,10 @@
              :main-db db :tasks tasks :attempts attempts
              ;; the config in force, as root wrote it on main's root entity (one pull)
              :config (config/from-db db)
-             ;; the problems recorded on main (D2's one read; ~2.7 ms, costs the problems)
-             :recorded (problems/report db)
+             ;; main's open problems, recorded (D2's one read; ~2.7 ms, costs the problems) and
+             ;; derived (dead citations: a set of var names and a lookup per cited name,
+             ;; docs/health.md#cost), read when main moved
+             :recorded (problems/health db)
              :task-rows (task-rows idx)
              ;; how each agent's work ended, for the words its card and its events use
              :agent-attempt (into {} (for [a (sort-by :seon.attempt/start-ms (vals attempts))] [(:seon.attempt/agent a) a]))))))
@@ -319,7 +321,7 @@
           sys (system-value st t0 now-ms)
           ;; root's context: the system's AI face, also a unit of root's layout
           ctx (render/ai sys {:seon.render/schema :seon.render/system})
-          sys (assoc sys :context {:text ctx :tokens (select/estimate ctx)} :problems (ai/problems sys))
+          sys (assoc sys :context {:text ctx :tokens (select/estimate ctx)} :problem-areas (ai/problem-areas sys))
           st (assoc st :context ctx)
           views (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st)))
           [st patches] (reduce (fn [[st ps] v]
