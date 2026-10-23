@@ -79,6 +79,14 @@
                            (when-let [id (some-> (d/entity db e) :var/form :form/id)] [n id]))))
         names))
 
+(defn review-message
+  "The message of the empty commit that records a review in git: a line, and the trailer
+  `Reviewed: <address>` the wiki's baseline finds with one git log (seon.fx/wiki-history), so the
+  review survives an erased store and a fresh clone."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [address who]
+  (str "Review " address " (" who ")\n\nReviewed: " address "\n"))
+
 (defn reviewed-tx
   "The transaction recording that who read section address as it is though its code changed: its
   :seon.section/read made the current form ids, the text untouched, and the review (who, and the form
