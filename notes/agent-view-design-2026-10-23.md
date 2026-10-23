@@ -167,7 +167,17 @@ The unit table prices a node at 7.9 KB, and the call count is exact. Wall time i
 
 This paragraph opens docs/render.md.
 
-**Still to build: the printer's auto-render, both faces.** The printer walks the value, and for a nested value whose schema it can name, it emits that value's render: `[render-fn v {:as :inline :budget share}]` in the hiccup, and that render's `:ai` text in the text. Both happen in the printer's one pass, with no second expander. It is written once jolt/printer-eval (its rewrite of `seon.print.emit` and `select`) is on main. A cost proof will go beside the printer's own.
+**The printer's auto-render, both faces (built on land14's printer).** `seon.print/print-value` takes `:render`, and `seon.render`'s default renders pass `nested`. Where `seon.print.select/classify` meets a nested map whose schema declares a render, it makes a `:seon.print/rendered` leaf, sized by that render's one-line `:ai` text. `seon.print.emit` writes the text in the text output, and `[html-render v {:as :inline}]` in the hiccup, which the serializer expands. Both happen in the printer's one pass, with no second expander. For example, `{:newest <attempt> :count 3}` prints `{:count 3, :newest ended calc/square#1 green}`.
+
+Cost proof, `seon.render-cost-test/the-printer-renders-nested-values-in-one-pass`:
+
+| Attempts | Calls | Per attempt |
+|---|---|---|
+| 100 | 1,947 | 8.3 µs, 18.9 KB |
+| 1,000 | 19,047 | 8.7 µs, 18.4 KB |
+| 4,000 | 76,047 | 8.6 µs, 18.4 KB |
+
+That is 19 contracted calls an attempt plus 47 fixed, linear.
 
 ### 4.3 The pages
 

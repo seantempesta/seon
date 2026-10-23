@@ -830,3 +830,17 @@
     (testing "the page, composed, holds every row, oldest first"
       (let [page (p/page-html st2 :a1)]
         (is (< (str/index-of page "(+ 0 1)") (str/index-of page "(+ 1 1)") (str/index-of page "(+ 2 1)")))))))
+
+(deftest the-printer-renders-each-nested-value-by-its-own-render
+  ;; owner, 2026-10-23: the default render auto-renders. A value inside the printed one whose
+  ;; schema declares a render shows as that render, one line, in its place: the attempt's :ai
+  ;; render in the text, a call of its :html render in the hiccup (expanded by the serializer);
+  ;; the printed value itself is the printer's, never its own render again
+  (let [a {:seon.attempt/id "calc/square#1" :seon.attempt/agent :a4 :seon.attempt/status :done :seon.attempt/outcome :green}
+        v {:newest a :count 3}]
+    (is (= "{:count 3, :newest ended calc/square#1 green}" (r/ai v {})) "the text: the attempt's own one line")
+    (let [html (h/html (r/html v {}))]
+      (is (str/includes? html "<tr class=\"at s-done o-green\">") "the hiccup: the attempt's own render")
+      (is (str/includes? html "seon-print-keyword\">:count") "around it, the printer's map"))
+    (is (= "{:k [1 2 3]}" (r/ai {:k [1 2 3]} {})) "a value with no render of its own prints as data")
+    (is (str/includes? (r/ai a {}) "calc/square#1") "the value itself by its render, as before")))

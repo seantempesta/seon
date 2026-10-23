@@ -50,3 +50,30 @@
      ;; html itself, the root's write! and its StringBuilder
      :fixed {:calls 3}
      :sizes [100 1000 10000]}))
+
+(defn attempts
+  "The input of size n: a vector of n attempts (each a value whose schema declares a render),
+  printed by the default render under a budget that shows them all."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any :map]]}
+  [n] [(vec (for [i (range n)] {:seon.attempt/id (str "t/x#" i) :seon.attempt/status :done :seon.attempt/outcome :green}))
+       {:budget 200000}])
+
+(deftest the-printer-renders-nested-values-in-one-pass
+  ;; the printer's auto-render: each nested value with a render is named in one lookup per key
+  ;; (seon.render/schema-of, no validation) and rendered once, in the printer's one pass
+  (cost/proof
+    {:of 'seon.render/ai :input 'seon.render-cost-test/attempts
+     :n "attempts in a vector, each shown by its own :ai render in the printer's text"
+     :work (str "one pass: per attempt, the printer classifies it once and asks its render once: one "
+                "identity lookup over its three keys, its :ai render (seon.render.ai/attempt's line), cut "
+                "to one line by seon.print/line, then the printer lays the line out as a leaf. Nothing per "
+                "attempt is done twice and no attempt is printed as data")
+     :growth :linear
+     ;; nineteen contracted calls an attempt, along the path above: seon.render's nested, render-of
+     ;; for each face with own-key, schema-of and declared (its parents) each, render and print-ai's
+     ;; own call for the :ai face, the attempt's render and its parts, print/line and its prose;
+     ;; measured 1,947 / 19,047 / 76,047 calls at 100 / 1k / 4k (8.3-8.6 us, 18.4-18.9 KB an
+     ;; attempt), the 47 the print's own whatever its size
+     :per-n {:calls 19}
+     :fixed {:calls 47}
+     :sizes [100 1000 4000]}))

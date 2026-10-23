@@ -78,11 +78,26 @@
           (if (contains? contract/forms t) t :seon.error/base)
           (some by-identity (keys v))))))
 
+(declare render-of render)
+
+(defn- nested
+  "The printer's :render: a nested value whose schema declares a render, as that render's one
+  line ({:text, its :ai render inline; :html, a call of its :html render inline}), else nil.
+  One lookup per map (seon.render/schema-of)."
+  {:malli/schema [:=> [:cat :any] [:maybe [:map [:text :string] [:html :any]]]]}
+  [v]
+  (let [h (render-of v :html nil) a (render-of v :ai nil)]
+    (when (or h a)
+      ;; one line, as the printer's row needs it: a render that ignores :inline is cut to one by the printer
+      (let [text (print/line (:text (render v {:face :ai :as :inline :budget (config/value :seon.config.render/line-budget)}))
+                             (config/value :seon.config.render/line-budget))]
+        {:text text :html (if h [h v {:as :inline}] text)}))))
+
 (defn- printer-opts
-  "The printer's options for a render's opts: its budget (else :seon.config.render/value-budget)
-  and its handle."
+  "The printer's options for a render's opts: its budget (else :seon.config.render/value-budget),
+  its handle, and its nested values' own renders (nested)."
   {:malli/schema [:=> [:cat :seon.render/opts] :map]}
-  [opts] {:budget (or (:budget opts) (config/value :seon.config.render/value-budget)) :handle (:handle opts)})
+  [opts] {:budget (or (:budget opts) (config/value :seon.config.render/value-budget)) :handle (:handle opts) :render nested})
 
 (defn print-html
   "The one value printer as the default :html render: v's structural hiccup under opts' budget,
