@@ -197,11 +197,36 @@
                 "units for the first :seon.config.render.list/history rows only: what is rendered does not grow with "
                 "the list, only its count does (seon.render.ui/more)")
      ;; the sort is n log n comparisons of one number, uncounted beside a node's two armed calls:
-     ;; measured 208 / 2,008 calls and 390 KB / 3.5 MB at 100 / 1,000 (2026-10-23)
+     ;; measured 206 / 2,006 calls and 510 KB / 5.2 MB at 100 / 1,000 (2026-10-23)
      :growth :linear
      ;; shown-as twice a node (the list, then the tiles), each armed (~353 B), and the node's row:
-     ;; a map, its parts' vector, its place in the sort
-     :per-n {:calls 2 :bytes 3600}
+     ;; a map, its parts' vector, its sort key (newest, then id) and its place in the sort
+     :per-n {:calls 2 :bytes 5300}
      ;; page, rows, and a slot per shown row and the list's end; what the first page's units hold
-     :fixed {:calls 8 :bytes 30000}
+     :fixed {:calls 6 :bytes 30000}
+     :sizes [100 1000 4000]}))
+
+(defn walked-of
+  "The input of size n: main and agent a1's branch with n evaluations of a1 on the branch (main
+  holds none), and a1's eid: what an agent's page reads."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple [:vector :any] pos-int?]]}
+  [n]
+  (let [[branch eid] (agent-of n)
+        main (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx "b1" :a1 {:status :busy})])]
+    [[main branch] eid]))
+
+(deftest a-page-walks-each-db-once
+  (cost/proof
+    {:of 'seon.render/page :input 'seon.render-cost-test/walked-of
+     :n "evaluations of the agent, on its branch"
+     :work (str "the walk on each db (main, then the branch: seon.render/walk, measured alone at 5 contracted calls "
+                "and 27 KB an evaluation, its pull of the evaluation and its record), per node one index read of "
+                "its own datoms for the transaction that made it (:seon.render/t, uncounted), one map entry to keep "
+                "it once, and the sort of the nodes by unit and transaction: about 14 KB a node beside the walk. "
+                "Every pass walks every row, though the page renders only the first: the walk pulling only the rows "
+                "shown is owed (task seon.render/page-walks-only-the-rows-shown)")
+     :growth :linear
+     ;; measured 2026-10-23: 526 / 5,026 calls and 4.19 / 41.1 MB at 100 / 1,000 evaluations
+     :per-n {:calls 5 :bytes 42000}
+     :fixed {:calls 30 :bytes 100000}
      :sizes [100 1000 4000]}))

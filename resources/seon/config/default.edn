@@ -517,8 +517,8 @@
  ;; Unit: tokens of root's context, the system's AI face (seon.render.ai/system); past it the
  ;; later sections are named, not shown. Provenance: render.ai's and the render proc's 700.
  :seon.config.render/root-context-budget 700
- ;; Unit: tokens of a message or reason shown in one line (root's context, a tile's or card's
- ;; line, a declared AI render's line); past it the line's cut names the form that reads the
+ ;; Unit: tokens of a message or reason shown in one line (root's context, a page's tile or row,
+ ;; a declared AI render's line); past it the line's cut names the form that reads the
  ;; rest. Provenance: the literals 40-60 render.ui and render.ai carried (2026-10-22), as one.
  :seon.config.render/line-budget 50
  ;; Unit: tokens of a table cell or a stream row's field (a form, a value, a reason); past it the

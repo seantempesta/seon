@@ -591,6 +591,12 @@
       (let [by-eid (#'p/page-value (assoc-in st [:branches eid :db] branch) eid)
             same #(for [u (:seon.render/units %) :when (not= :seon.render/page-more (:schema u))] (:input u))]
         (is (= (same agent) (same by-eid)))))
+    (testing "a location naming no entity is that error, never an empty page; a branch that could not be read is shown as its error"
+      (is (= :seon.render/no-entity (:seon.error/type (#'p/page-value st 99999999))))
+      (let [err (seon.contract/error :seon.writer/refused 'seon.writer/writer-proc "no branch :task-demo-f" {})
+            l (#'p/page-value (-> st (update-in [:branches :a3] dissoc :db) (assoc-in [:branches :a3 :error] err)) :a3)]
+        (is (some #(= err (get-in % [:input :seon.render/value])) (:seon.render/units l)))
+        (is (empty? (rows-of (assoc l :seon.render/units (remove #(= :seon.render/page-row (:schema %)) (:seon.render/units l))))))))
     (testing "an agent of another boot is not live: its id names no process of this one"
       (is (false? (:live? (:input (second (:seon.render/units (#'p/page-value (assoc-in st [:view :boot] "b2") eid)))))))
       (is (nil? (#'p/page-value (assoc-in st [:view :boot] "b2") :a3)) "and its id in that boot names no entity"))))
@@ -607,10 +613,8 @@
       (is (= 1 (count (filter #(= eid (:seon.render/eid %)) (cons (:seon.render/root w) (:seon.render/nodes w)))))))
     (testing "the run's prose cites into the agent page's one numbered list"
       (is (= ["seon.render/walk" "seon.print" "docs/render.md#no-clipping"] (mapv :seon.render/address (:seon.render/refs w)))))
-    (testing "no separate run window: its route is gone"
-      (let [ch (a/chan 1)
-            res ((seon.web/handler ch) {:uri "/attempt/demo%2Ff%231" :request-method :get})]
-        (is (= 404 (:status res)))))))
+    (testing "no separate run window: a location names root, an agent of this boot, or an entity"
+      (is (= [:root :root :a3 474] (mapv #'seon.web/view-of ["" "root" "a3" "474"]))))))
 
 (deftest a-units-change-rerenders-that-unit
   (let [[main branch eid] (paged-dbs)
@@ -647,7 +651,13 @@
           (is (= 21 (get-in st2 [:shown :a3])) "one more page of rows (:seon.config.render.list/history)")
           (is (= 3 (rows st2)))
           (is (= ["#p-rows" "#p-rows" "#p-foot"] (mapv first (:appends p))) "the older rows after what the list holds, then the list's new end")
-          (is (= ["p-more-1"] (:removes p)) "the old end goes: a new element, watched anew"))))))
+          (is (= ["p-more-1"] (:removes p)) "the old end goes: a new element, watched anew"))))
+    (testing "a view no tab watches keeps nothing: its page, its branch read, its rows"
+      (let [[st2 _] (#'p/render-proc (assoc st1 :shown {:a3 21}) :from-web {:op :views :views #{:root} :tabs 1})]
+        (is (nil? (get-in st2 [:views :a3])))
+        (is (nil? (get-in st2 [:branches :a3])))
+        (is (nil? (get-in st2 [:shown :a3])))
+        (is (= st2 (first (#'p/render-proc st2 :from-web {:op :more :view :a3}))) "and its end scrolling into view asks for nothing")))))
 
 (deftest a-walk-is-data-a-model-reads
   ;; the owner, 2026-10-23: what a model reads is data, improved at its producer. The walk as one

@@ -344,7 +344,7 @@
                                 attr-of #(get-in % [:seon.render/from :seon.render/attr])
                                 order (into {} (map-indexed (fn [i a] [a i])) (:seon.render/units (contract/properties (:seon.render/schema (:seon.render/root (first ws))))))]
                             ;; each unit's nodes in its attribute's declared place, entities in the order they were made
-                            (vec (sort-by (fn [nd] [(order (attr-of nd) 0) (:seon.render/t nd 0)]) (vals first-of))))
+                            (vec (sort-by (fn [nd] [(order (attr-of nd) 0) (:seon.render/t nd 0) (:seon.render/eid nd)]) (vals first-of))))
        :seon.render/refs (:seon.render/refs (peek ws))})))
 
 (defn page
@@ -364,9 +364,11 @@
                   (let [p (merged dbs (:seon.render/eid nd) (:seon.render/refs w))]
                     (if (:seon.error/type p)
                       w
-                      (-> w
-                          (update :seon.render/nodes into (remove #(= eid (:seon.render/eid %))) (:seon.render/nodes p))
-                          (assoc :seon.render/refs (:seon.render/refs p))))))
+                      (let [held (set (map :seon.render/eid (:seon.render/nodes w)))]
+                        ;; a part's entity the page holds already (two runs' one task) is shown once
+                        (-> w
+                            (update :seon.render/nodes into (remove #(or (= eid (:seon.render/eid %)) (and (= :entity (:seon.render/kind %)) (held (:seon.render/eid %))))) (:seon.render/nodes p))
+                            (assoc :seon.render/refs (:seon.render/refs p)))))))
                 w
                 (filter #(and (= :entity (:seon.render/kind %)) (parts (get-in % [:seon.render/from :seon.render/attr]))) (:seon.render/nodes w)))))))
 

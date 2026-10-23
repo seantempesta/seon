@@ -214,7 +214,7 @@
   read it (seon.render/page), laid out by seon.render.ui/page with its focus's input at the top
   (root's: spawn and evaluate in every agent, with main's open problems a tile; an agent's: its
   REPL and its messages) and the rows its view has scrolled to; nil when main is not read yet or
-  holds no such entity."
+  names no entity for it, :seon.render/no-entity when it names an entity no db holds."
   {:malli/schema [:=> [:cat :map :any] [:maybe :map]]}
   [st view]
   (let [db (:main-db st)
@@ -230,10 +230,17 @@
                                  ;; root's view of it in this boot: an agent of another boot has no process
                                  :live? (boolean (when-let [id (this-boots st (d/entity db eid))] (ui/live (ui/shown-status (get-in st [:view :agents id] {})))))
                                  :held (when (= :held (:seon.task/execution task)) (:seon.task/id task))}})
-            ;; root's focus: main's open problems, a part of its page by their own render
-            w (cond-> w (= :root view) (update :seon.render/nodes conj {:seon.render/kind :value :seon.render/value (:recorded st)
-                                                                        :seon.render/schema :seon.problems/report :seon.render/eid eid}))]
-        (when-not (:seon.error/type w)
+            ;; root's focus: main's open problems, a part of its page by their own render; an agent's
+            ;; branch that could not be read: its error, by the error's render
+            berr (get-in st [:branches view :error])
+            w (cond-> w
+                (and (= :root view) (not (:seon.error/type w)))
+                (update :seon.render/nodes conj {:seon.render/kind :value :seon.render/value (:recorded st)
+                                                 :seon.render/schema :seon.problems/report :seon.render/eid eid})
+                (and berr (not (:seon.error/type w)))
+                (update :seon.render/nodes conj {:seon.render/kind :value :seon.render/value berr :seon.render/eid eid}))]
+        (if (:seon.error/type w)
+          w
           (ui/page w {:shown (get-in st [:shown view] (history-cap)) :view (ui/view-param view) :input input}))))))
 
 ;;; --- the pass ------------------------------------------------------------------------------------
@@ -242,7 +249,12 @@
   "One view rendered: [st' patch-message-or-nil]; a view whose entity main does not hold yet renders nothing."
   {:malli/schema [:=> [:cat :map :any] [:tuple :map [:maybe :map]]]}
   [st view-id]
-  (if-let [out (page-value st view-id)]
+  (let [out (page-value st view-id)]
+   (cond
+    (nil? out) [st nil]
+    ;; a location naming no entity: its page is that error, by its render
+    (:seon.error/type out) [(assoc-in st [:views view-id] {:skeleton (h/html (render/html out {})) :units {}}) nil]
+    :else
     (let [units (:seon.render/units out)
           skeleton (h/html (:seon.render/html out))
           [view patch n] (step-units (get-in st [:views view-id]) units)
@@ -251,8 +263,7 @@
           st (-> st (assoc-in [:views view-id] view)
                  (update-in [:counts :rendered] (fnil + 0) (:rendered n)) (update-in [:counts :same] (fnil + 0) (:same n)))]
       [st (when (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:removes patch)))
-            (assoc patch :op :patch :view view-id))])
-    [st nil]))
+            (assoc patch :op :patch :view view-id))]))))
 
 (defn page-html
   "The composed document of view-id from its retained fragments (renders nothing)."
@@ -390,9 +401,11 @@
     (= :main kind) (if (seon.contract/error? r) st (pass (ask-branches (main-info st (:db r)) o) o))
     ;; an agent's branch db; a branch that is gone (merged and removed) is recorded as such
     (and (vector? kind) (= :branch (first kind)))
-    (let [z [:branches (second kind)]
-          st (assoc-in st (conj z :db-error) (:seon.error/message r))]
-      (pass (if (seon.contract/error? r) st (assoc-in st (conj z :db) (:db r))) o))
+    (let [z [:branches (second kind)]]
+      (pass (if (seon.contract/error? r)
+              (-> st (update-in z dissoc :db) (assoc-in (conj z :error) r))
+              (-> st (update-in z dissoc :error) (assoc-in (conj z :db) (:db r))))
+            o))
     :else st))
 
 (defn render-proc
@@ -432,7 +445,10 @@
                            (and (vector? (:tag m)) (= :web (first (:tag m)))) (web-answered st o (:tag m) r)
                            :else st))
               :from-web (case (:op m)
-                          :views (ask-state (assoc st :watch (:views m) :tabs (:tabs m)) o)
+                          :views (let [w (:views m)
+                                       ;; a view no tab watches keeps nothing: its retained page, its branch read, its rows
+                                       drop #(into {} (filter (fn [[v]] (contains? w v))) %)]
+                                   (ask-state (-> st (assoc :watch w :tabs (:tabs m)) (update :views drop) (update :branches drop) (update :shown drop)) o))
                           ;; a UI call root refused before it became a request: answered as root's are
                           :refused (web-answered st o (:tag m) (:r m))
                           :page (if (and (get-in st [:views (:view m)]) (contains? (:watch st) (:view m)))
@@ -443,7 +459,7 @@
                                       (ask-state (update st :kf-wanted conj (:view m)) o))
                           :context (do (step/out! o :to-web {:op :text :k (:k m) :text (:context st "")}) st)
                           ;; the end of a view's list scrolled into view: the next rows are rendered
-                          :more (pass (update-in st [:shown (:view m)] (fnil + (history-cap)) (history-cap)) o)
+                          :more (if (contains? (:watch st) (:view m)) (pass (update-in st [:shown (:view m)] (fnil + (history-cap)) (history-cap)) o) st)
                           :stats (do (step/out! o :to-web {:op :text :k (:k m) :text (sedn/encode (stats st))}) st)
                           st)
               st)]

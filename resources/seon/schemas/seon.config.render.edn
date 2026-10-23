@@ -21,7 +21,7 @@
  :seon.config.render/big-alloc [:int {:min 1 :seon.config/unit "bytes" :description "An evaluation that allocated more is flagged on the page."}]
  :seon.config.render/value-budget [:int {:min 1 :seon.config/unit "tokens" :description "A rendered value whose env names no budget."}]
  :seon.config.render/root-context-budget [:int {:min 1 :seon.config/unit "tokens" :description "Root's context, the system's AI face; later sections past it are named."}]
- :seon.config.render/line-budget [:int {:min 1 :seon.config/unit "tokens" :description "A message or reason in one line: root's context, a tile's or card's line, a declared AI render's line."}]
+ :seon.config.render/line-budget [:int {:min 1 :seon.config/unit "tokens" :description "A message or reason in one line: root's context, a page's tile or row, a declared AI render's line."}]
  :seon.config.render/cell-budget [:int {:min 1 :seon.config/unit "tokens" :description "A table cell or a stream row's field: a form, a value, a reason in a row."}]
  :seon.config.render.list/stream [:int {:min 1 :seon.config/unit "events" :description "Events the dashboard's stream keeps, newest first; its header says how many older it did not keep."}]
  :seon.config.render.list/history [:int {:min 1 :seon.config/unit "rows" :description "Rows a page renders at first, newest first (an evaluation, or a turn with its evaluations), and how many more each time its last row scrolls into view; the rest are counted, unrendered."}]}

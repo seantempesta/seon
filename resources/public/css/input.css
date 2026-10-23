@@ -77,6 +77,20 @@
   button { cursor: pointer; }
 }
 
+/* The words values' own renders use (a task, an error, a cost verdict, the config: seon.render.ui,
+   seon.cost): their classes name what a part is, styled here once, so each render stays data. */
+@layer components {
+  .muted, .sub { color: var(--color-text-500); }
+  .kicker { text-transform: uppercase; letter-spacing: .14em; font-size: 0.625rem; color: var(--color-text-400); }
+  .err, .bad, .red, .verdict.red { color: var(--color-error); }
+  .warn, .big-alloc { color: var(--color-warning); }
+  .ok, .verdict.ok { color: var(--color-success); }
+  .fix { color: var(--color-info); }
+  .box, .tile { display: block; border: 1px solid var(--color-base-800); border-radius: 6px; padding: 0.5rem; }
+  .pill { display: inline-block; padding: 0 0.4rem; border: 1px solid var(--color-base-700); border-radius: 999px; font-size: 0.625rem; }
+  .costrows td, .cfg td { font-variant-numeric: tabular-nums; }
+}
+
 /* The one printer's structural HTML (seon.print.emit): its classes are the printer's, so they are
    styled here by name rather than as utilities in its hiccup. */
 .seon-print-root, .seon-print-node { color: var(--color-text-200); font-family: var(--font-mono); }

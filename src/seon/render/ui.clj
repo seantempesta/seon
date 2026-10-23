@@ -311,7 +311,7 @@
     (if (and x (gone (or (:status x) (:type x))) (finished st)) (assoc x :ended-as st) x)))
 
 (defn shell
-  "The document around a view's body: head, theme, Datastar, and the feed of that view's
+  "The document around a view's body: head, the stylesheet, Datastar, and the feed of that view's
   patches (outside every morph target, so no patch can strip it)."
   {:malli/schema [:=> [:cat :string :string :any] :any]}
   [title feed body]
@@ -322,15 +322,12 @@
     [:title title]
     [:link {:rel "icon" :href "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%23f0b429'/%3E%3C/svg%3E"}]
     [:link {:rel "stylesheet" :href "/app.css"}]
-    [:script (h/raw "try{var t=localStorage.getItem('seon-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}")]
-    [:script {:type "module" :src "/datastar.js"}]
-    ;; Esc goes back to root's view from a zoomed agent
-    [:script (h/raw "document.addEventListener('keydown',function(e){if(e.key==='Escape'&&location.pathname!=='/')location='/'})")]]
-   [:body {:data-signals "{sel:'', dense:false}" (keyword "data-class:dense") "$dense"}
+    [:script {:type "module" :src "/datastar.js"}]]
+   [:body
     body
     [:div {:style "display:none" :data-init (str "@get('" feed "', {retryMaxCount: Infinity, openWhenHidden: true})")}]]])
 
-;;; --- one agent, zoomed -----------------------------------------------------------------
+;;; --- values' own renders: a task, a verdict, a cost report ---------------------------------
 
 (defn task-box
   "A task: its kind and execution, its plan (accumulated along its needs), instructions, what
@@ -446,7 +443,7 @@
        (when-not (str/blank? (:out r)) [:pre {:class "text-text-400"} (prose (:out r) (part))])
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
-        [:span (get asked-by (:origin r) "its own turn")]
+        [:span (if (:origin r) (get asked-by (:origin r) (kname (:origin r))) "its own turn")]
         (when (seq (:fns r))
           [:details [:summary (str "costliest: " (:var (first (:fns r))) " · " (count (:fns r)) " functions")]
            [:table [:tbody (for [{:keys [var calls ms]} (:fns r)]
@@ -467,8 +464,8 @@
        [:div {:class "flex flex-wrap items-baseline gap-3 text-xs"}
         [:b {:class "text-signal"} head]
         (when tokens [:span {:class "tabular-nums text-text-400"} (str (group3 tokens) " tokens")])
-        (when prompt [:span {:class "tabular-nums text-text-400" :title "the share of the prompt its provider served from its prefix cache"}
-                      (str (if (pos? prompt) (long (* 100 (/ cache-hit-tokens prompt))) 0) "% of the prompt cached")])
+        (when (and prompt (pos? prompt)) [:span {:class "tabular-nums text-text-400" :title "the share of the prompt its provider served from its prefix cache"}
+                      (str (long (* 100 (/ cache-hit-tokens prompt))) "% of the prompt cached")])
         (when finish [:span {:class "text-text-500" :title "how its reply stopped"} (str "stopped: " finish)])
         (when model [:span {:class "text-text-500"} model])
         (when truncated [:span {:class "text-error"} "cut at the token limit"])
@@ -507,7 +504,7 @@
         row (fn [parts] {:id (str "r-" (:seon.render/eid (first parts))) :parts parts :newest (reduce max (map #(:seon.render/t % 0) parts))})]
     (->> (concat (for [t turns] (row (into [t] (in-turn t))))
                  (for [nd nds :when (and (not= :seon.turn/turn-fact (:seon.render/schema nd)) (not (taken (:seon.render/eid nd))))] (row [nd])))
-         (sort-by (comp - :newest))
+         (sort-by (juxt (comp - :newest) :id))
          vec)))
 
 (defn row
