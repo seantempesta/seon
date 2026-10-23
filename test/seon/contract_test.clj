@@ -1,0 +1,56 @@
+(ns seon.contract-test
+  "What a contract costs a call and what it still reports (task
+  seon.contract/an-armed-call-costs-its-checks): an arm built of types that answer for any value
+  (malli's -total?, the predicate pack named total in seon.contract/options) is checked without a
+  try per call, and an arm that can throw keeps its try, so a throwing validator is still
+  reported as the schema's fault, never taken for the function's error."
+  (:refer-clojure :exclude [defn defn-])
+  (:require [clojure.test :refer [deftest is testing]] [malli.core :as m]
+            [seon.contract :as contract :refer [defn defn-]] [seon.cost :as cost]))
+
+(defn- armed-inc
+  "One int in, one out: the shape of the unit table's :fn/armed-call row."
+  {:malli/schema [:=> [:cat :int] :int]}
+  [x] (inc x))
+
+(defn armed-calls
+  "n calls of a contracted function: what an armed call costs, n times."
+  {:malli/schema [:=> [:cat [:vector :int]] :int]}
+  [xs] (reduce (fn [acc x] (+ acc (armed-inc x))) 0 xs))
+
+(defn ints-of
+  "armed-calls' argument: n integers."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple [:vector :int]]]}
+  [n] [(vec (range n))])
+
+(deftest an-armed-call-costs-its-checks-not-a-try
+  (cost/proof
+    {:of 'seon.contract-test/armed-calls :input 'seon.contract-test/ints-of
+     :n "contracted calls"
+     :work (str "per call the int checked going in and coming out, each a predicate answering for any "
+                "value, and the call counted: no allocation (each check was a try, ~176 B, before)")
+     :growth :linear
+     ;; measured 2026-10-23: 0.02 B and ~10 ticks a call (seon.cost/units :fn/armed-call); 353 B before
+     :per-n {:bytes 16.0 :calls 1.0}
+     :fixed {:bytes 2000.0 :calls 1.0}
+     :sizes [100 1000 10000]}))
+
+(deftest an-arm-that-can-throw-is-still-reported-as-the-schemas
+  (testing "which arms are total"
+    (is (m/-total? (contract/schema [:cat :seon.host/db :int [:map [:a :string]] [:vector :keyword]]) contract/options))
+    (is (m/-total? (contract/schema [:maybe [:or :int :seon.host/fn]]) contract/options))
+    (is (not (m/-total? (m/schema [:cat [:fn int?]]) nil)) "a :fn calls user code (malli's validator catches its throw, at a try per call)")
+    (is (not (m/-total? (m/schema [:cat [:> 0]]) nil)) "a comparator compares whatever it is given")
+    (is (not (m/-total? (m/schema [:cat [:ref ::absent]] {:registry (merge (m/default-schemas) {::absent :int})}) nil)) "a :ref resolves lazily")
+    (is (not (m/-total? (m/schema [:cat (m/-simple-schema {:type ::mine :pred int?})]) nil)) "a predicate no option names"))
+  (let [reports (volatile! [])
+        report (fn [kind _] (vswap! reports conj kind))
+        armed (fn [schema] (m/-instrument {:schema schema :scope #{:input :output} :report report} (fn [x] x)))]
+    (testing "an arm that can throw keeps its try: the throw is the schema's report, the call goes on"
+      (let [lazy {:registry (assoc (m/default-schemas) :lazy-ref (m/-ref-schema {:lazy true}))}]
+        ((m/-instrument {:schema [:=> [:cat [:schema [:lazy-ref ::absent]]] :int] :scope #{:input} :report report} identity lazy) 1))
+      (is (= [::m/invalid-schema-at-call] @reports)))
+    (testing "a total arm checked bare still reports what is invalid"
+      (vreset! reports [])
+      ((armed (m/schema [:=> [:cat :int] :int])) "not an int")
+      (is (= [::m/invalid-input ::m/invalid-output] @reports)))))
