@@ -32,6 +32,11 @@ if [[ ${1:-} == run ]]; then
   G=$2; P=$3; W=$4; shift 4
   # SEON_RUN_CHECKOUT: the tree a root reads its checkout's files from (docs, config) when it is
   # not the build's own (a test's: seon.test-store/start-root!)
+  # the checkout's config/local.edn (its ports, the standing root's source) is this root's layer,
+  # named on its command line (seon.config reads no layer implicitly); a root started under a
+  # starter (SEON_STARTER_FIFO: a test's or a check step's) takes only the config it is given
+  L=${SEON_RUN_CHECKOUT:-$G}/config/local.edn
+  [[ -z ${SEON_STARTER_FIFO:-} && -f $L ]] && set -- --config "$L" "$@"
   cd "$G/target" && SEON_CHECKOUT=${SEON_RUN_CHECKOUT:-$G} HOME=$G/target/home JOLT_LMDB_LIB=$G/target/lib/liblmdb.dylib \
     JOLT_LZ4_LIB=$G/target/lib/liblz4.dylib JOLT_ZSTD_LIB=$G/target/lib/libzstd.dylib \
     SEON_SERVER_PORT=$P SEON_WEB_PORT=$W exec ./seon root "$@"
