@@ -16,7 +16,7 @@
   (`error`), a task (`task`), an attempt (`attempt`) and a problem row (`problem-row`, the
   line root's context and the page's banner lead with)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [seon.config :as config] [seon.print :as print] [seon.print.select :as select] [seon.render.ui :as ui]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [seon.config :as config] [seon.print :as print] [seon.print.select :as select] [seon.render.ui :as ui] [seon.render :as render]))
 
 (defn- line-budget {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render/line-budget))
 (defn- part-budget {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render/part-budget))
@@ -328,38 +328,30 @@
                             [head []] (remove (comp empty? second) sections))]
     {:text (cond-> text (seq left) (str "\n(not shown, over the budget: " (str/join ", " left) ")"))}))
 
-;; ---- the walk's entities, focused: what an agent or the owner acts on, not every attribute ----
+;; ---- the walk's entities, focused: the attributes an agent or the owner acts on, as data ----
+
+(defn- projected
+  "v with only the attributes ks it holds, printed as data by the one printer (seon.render/print-ai):
+  a focused render keeps an entity's own keys, so a reader can query them, and leaves the rest out."
+  {:malli/schema [:=> [:cat :map [:sequential :keyword] :seon.render/opts] :seon.render/text]}
+  [v ks opts] (render/print-ai (select-keys v ks) opts))
 
 (defn root-fact
-  "Root as a neighbour in a walk, one line: its boot and generation, and how it last stopped.
-  Its config is not shown: a config key reaches a context when the task's code reads it, never
-  as root's whole map (the owner, 2026-10-23: the config dump)."
+  "Root in a walk: its id, boot, generation and how it last stopped, as data. Its config is not
+  shown: a config key reaches a context when the task's code reads it, never as root's whole map
+  (the owner, 2026-10-23: the config dump)."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :seon.render/text]}
-  [r _]
-  {:text (str "root " (ui/kname (:seon.root/id r)) ", boot " (:seon.root/boot r)
-              (some->> (get-in r [:seon.root/generation :commit]) (str ", generation "))
-              (some->> (get-in r [:seon.root/stopped :cause]) ui/kname (str ", last stopped "))
-              (when (:seon.root/quiescent r) ", quiescent"))})
+  [r opts] (projected r [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/stopped :seon.root/quiescent] opts))
 
 (defn agent-fact
-  "An agent in a walk, one line: its id, status, process and the form it runs; its description
-  only for one no run started (a run's agent is described by its run)."
+  "An agent in a walk: its id, status, pid, branch, the form it runs, and its description (only
+  an agent no run started records one), as data."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :seon.render/text]}
-  [a _]
-  {:text (str "agent " (ui/kname (:seon.agent/id a)) " " (some-> (:seon.agent/status a) ui/kname)
-              (some->> (:seon.agent/pid a) (str ", pid "))
-              (some->> (:seon.agent/branch a) ui/kname (str ", branch "))
-              (some->> (:seon.agent/running a) (str ", running "))
-              (some->> (:seon.agent/description a) (str ": ")))})
+  [a opts] (projected a [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] opts))
 
 (defn attempt-fact
-  "A run in a walk, one line: its id, status or outcome and reason, model, turns and branch.
+  "A run in a walk: its id, status, outcome and reason, model, turns of its max, branch, as data.
   Its plan is its task's, shown by the task; its boot is root's."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :seon.render/text]}
-  [a _]
-  (let [{:seon.attempt/keys [id status outcome reason model max-turns turns branch]} a]
-    {:text (str "run " id " " (ui/kname (or outcome status))
-                (some->> reason (str ": "))
-                (some->> model (str ", model "))
-                (when max-turns (str ", turn " (or turns 0) " of " max-turns))
-                (some->> branch ui/kname (str ", branch ")))}))
+  [a opts] (projected a [:seon.attempt/id :seon.attempt/status :seon.attempt/outcome :seon.attempt/reason :seon.attempt/model
+                         :seon.attempt/turns :seon.attempt/max-turns :seon.attempt/branch] opts))

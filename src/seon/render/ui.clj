@@ -1230,6 +1230,17 @@
   [x]
   [:div {:class (str "walk-part as-" (kname (:seon.render/as x)))} (walk-head x) [:div {:class "walk-body"} (:seon.render/hiccup x)]])
 
+(defn walk-text
+  "One rendered part of a walk as a model reads it: a comment line saying what it is (its kind
+  and schema, or its citation's number, address and depth), where it came from (the eid and
+  attribute that reached it) and which render made it, then its :ai text."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.render/keys [kind schema eid from n address depth ai-by ai-text cites]}]
+  (str ";; " (if n (str "[" n "] " (kname kind) " " address " at " (kname depth)) (str (kname kind) " " schema " eid " eid))
+       (when from (str ", reached by " (:seon.render/attr from) " from eid " (:seon.render/eid from)))
+       (when (seq cites) (str ", cites " (str/join " " (map #(str "[" % "]") cites))))
+       ", rendered by " ai-by "\n" ai-text))
+
 (defn walk-page
   "A rendered walk (seon.render/rendered) as a page: the entity's block, its units as tiles and
   what its prose cites, each by its own :html render and saying what it is, where it came from
@@ -1244,12 +1255,10 @@
     (when (seq refs) (list [:h2 (str "what its prose cites · " (count refs))] [:div {:class "walk-grid"} (map walk-part refs)]))]
    [:section {:class "walk-text"}
     [:h2 "what a model reads"]
-    [:pre (str/join "\n\n" (concat [(:seon.render/ai-text root)]
-                                   (map :seon.render/ai-text nodes)
-                                   (map #(str "[" (:seon.render/n %) "] " (:seon.render/address %) "\n" (:seon.render/ai-text %)) refs)))]]])
+    [:pre (str/join "\n\n" (map walk-text (concat [root] nodes refs)))]]])
 
 (defn walk-line
   "An entity a walk shows in one line, as html: its :ai render's text (seon.render.ai/root-fact,
   agent-fact, attempt-fact) in a line of the page."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [v opts] [:p {:class "walk-line"} (:text (render/render v (assoc opts :face :ai)))])
+  [v opts] [:pre {:class "walk-line"} (:text (render/render v (assoc opts :face :ai)))])
