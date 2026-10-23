@@ -29,6 +29,13 @@
   :reconciler {:proc seon.reconcile/reconciler-proc
                :chan-opts {:main {:buf-or-n :bind/reconciler-buf}}
                :args {:boot :bind/boot :judge :bind/judge :source :bind/source}}
+;; the test service (seon.prove): one run at a time per checkout, whoever asks. :main is the writer's
+  ;; commit notice, a sliding buffer of one beside the reconciler's (a reader catches up from main's head)
+;; :req and :answers are lossless and bounded by the reconciler's size (a full one parks the api); a run's
+  ;; waiters are answered one message each through the api's own from-writer buffer
+  :prove {:proc seon.prove/prove-proc
+          :chan-opts {:req {:buf-or-n :bind/reconciler-buf} :answers {:buf-or-n :bind/reconciler-buf}
+                      :main {:buf-or-n :bind/prove-main-buf}}}
   ;; root's web (session W2): the render proc renders what changed into patches per view
   ;; (:compute, never waits); the web proc owns the listener and the tabs (:io). Port:
   ;; 127.0.0.1 only, :seon.config.web/port; 0 serves nothing
@@ -54,6 +61,8 @@
   [[:writer :to-api] [:api :from-writer]]
   [[:reconciler :to-api] [:api :from-writer]]
   [[:writer :main] [:reconciler :main]]
+  [[:writer :main] [:prove :main]]
+  [[:prove :to-api] [:api :from-writer]]
   [[:fork-server :to-api] [:api :from-fs]]
   [[:api :to-fs] [:fork-server :ext]]
   [[:writer :to-flusher] [:flusher :in]]
