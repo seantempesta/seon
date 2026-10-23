@@ -1,5 +1,12 @@
 # Handoff: jolt/health (2026-10-23, the session's end)
 
+**First, read this.** The merge session merged jolt/health (9d9f55dc), saw prove go red, and REVERTED it on main (1ef9f0e9). The failure: 8 seon.prove-test tests, "seon.prove/reply invalid-input … :expected [:sequential :int] :value #{1}". Our 972b4775 had changed reply's schema to [:sequential :int], while main's callers pass a set. This branch already carries the fix: 6e08af63 makes reply take a set or a sequence. It is untested.
+To land again:
+1. Merge main (1ef9f0e9 or later) into jolt/health. That merge brings the REVERT, which undoes our changes on this branch too.
+2. Then `git revert 1ef9f0e9` on this branch (reverting the revert) to restore them, resolving conflicts in favour of our changes plus whatever main added since.
+3. Keep main's Datahike gitlink, bae7c3e.
+4. Rebuild with synced pins, then run bin/prove (it must be OK) plus seon.prove-test, seon.agent-test, seon.root-test and bin/check health. Then report to the merge session.
+
 **State.** Nearly all of jolt/health is on main: merge aac06296 "Merge jolt/health: bin/prove runs health; problem facts, wiki baseline", plus the earlier land16 and later merges. The branch tip differs from main by one line, `seon.prove/reply`, which takes the waiters as a set or a sequence (6e08af63). That line is proved only by the tests of the session that made it, not by a full `bin/prove` on this tip. Nothing of health's is running.
 
 ## What is on main and verified (bin/prove OK at each merge, the named process tests green)
