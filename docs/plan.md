@@ -7,7 +7,7 @@ What is in flight, what the owner has not yet ruled, and the steps from here to 
 Pins: Jolt `e0351af8`, Datahike `b4596cf`, persistent-sorted-set `1cae7f2`, Malli `0762fb6b`, Chez `80e4b9f` (docs/forks.md) · `src` ~18.5k lines (aim ~10k) · paid runs $0.144 of the $50 budget · standing root on 7888/7777 (`runs/store`, test data, erased at each rename pass).
 
 **Goal:** real Seon agents fixing problems in the system (THE PLAN's step E). The loop turn is measured at 11.4 s (112 s this morning); the cold automatic test run is ~54–62 s (26 min this morning); a warm one is its plan only.
-**Root's working schedule:** `notes/root-schedule-2026-10-23.md` in root's worktree (the queue, the rules, what was rescheduled).
+**Root's working schedule:** root's schedule note (notes/root-schedule-2026-10-23.md in root's worktree, not yet on main) (the queue, the rules, what was rescheduled).
 
 ## In flight
 
