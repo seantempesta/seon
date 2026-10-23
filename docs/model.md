@@ -20,7 +20,7 @@ Every request declares one tool, `eval` (`seon.model/eval-tool`): its code is th
 
 `:seon.config.ai/thinking` is `:disabled`: a task whose next step needs long reasoning is a context or instruction defect to fix, not a cost to pay every turn (owner: "if we can't have intuitive function calling based on the context our context is bad and instructions need help"). A model or a task turns it on through the resolver ([config](config.md#the-resolver)), with `:seon.config.ai/reasoning-effort`.
 
-With thinking on, DeepSeek answers a `reasoning_content` beside the reply, and a reply that spent all of `:seon.config.ai/max-tokens` on reasoning is `:seon.model/reasoning-ate-reply` (```seon.model/reply-of```). DeepSeek also requires each earlier assistant message's `reasoning_content` sent back on the next request; ```seon.model/request-body``` does not send it on main, so a second call with thinking on is refused (the fix is on branch ``jolt/dry-run``).
+With thinking on, DeepSeek answers a `reasoning_content` beside the reply, and a reply that spent all of `:seon.config.ai/max-tokens` on reasoning is `:seon.model/reasoning-ate-reply` (```seon.model/reply-of```). DeepSeek also requires each earlier assistant message's `reasoning_content` sent back on the next request, so a turn's recorded reasoning goes back with its reply (`seon.model/request-body`, from `seon.context`'s messages).
 
 ## Usage is recorded, never assumed
 

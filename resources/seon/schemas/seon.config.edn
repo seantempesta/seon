@@ -63,12 +63,15 @@
   [:seon.config.source/process-vars :seon.config.source/process-vars]
   [:seon.config.source/binary-vars :seon.config.source/binary-vars]
   [:seon.config.source/branch :seon.config.source/branch]
+  [:seon.config.source/main :seon.config.source/main]
   [:seon.config.source/committer-name :seon.config.source/committer-name]
   [:seon.config.source/committer-email :seon.config.source/committer-email]
   [:seon.config.source/generations-dir :seon.config.source/generations-dir]
   [:seon.config.source/tests-dir :seon.config.source/tests-dir]
   [:seon.config.source/test-results-dir :seon.config.source/test-results-dir]
   [:seon.config.proofs/jobs :seon.config.proofs/jobs]
+  [:seon.config.proofs/program-store :seon.config.proofs/program-store]
+  [:seon.config.proofs/program-store-max-bytes :seon.config.proofs/program-store-max-bytes]
   [:seon.config.proofs/seed-salt :seon.config.proofs/seed-salt]
   [:seon.config.proofs/cost-max-n :seon.config.proofs/cost-max-n]
   [:seon.config.proofs/seeds :seon.config.proofs/seeds]
@@ -125,8 +128,8 @@
   [:seon.config.contract/instrument :seon.config.contract/instrument]
   [:seon.config.native/probe-lib :seon.config.native/probe-lib]]
 
- ;; which layer each key came from (seon.config/sources): the shipped file, config/local.edn,
- ;; a --config file or --set; written beside the config on main's root entity, as EDN text
+ ;; which layer each key came from (seon.config/sources): the shipped file, a --config file
+ ;; (the standing root's config/local.edn among them) or --set; written beside the config on main's root entity, as EDN text
  :seon.config/sources [:map-of {:seon.db/data true} :qualified-keyword :string]
  :seon.config/sources-fact [:map {:seon.db/attributes true} [:seon.config/sources :seon.config/sources]]
 

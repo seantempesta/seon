@@ -11,7 +11,7 @@
     out :to-api  requests ({:op :request :req .. :route [:render :answers] :tag ..})
     out :to-web  patches per view, keyframes, pages, the agents' index
 
-  No beat and no ping (owner, 2026-10-21: "a reactive system where we know if there's a
+  No beat and no ping (owner: "a reactive system where we know if there's a
   problem with the proc"): health is what flows, each proc's recorded defects; a value no
   event carries is its owner's to emit. A pass: an event asks the api for its view; while that request is in
   flight, more events only queue, so a burst becomes one pass (the round trip is the

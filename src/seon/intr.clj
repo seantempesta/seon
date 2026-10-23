@@ -4,8 +4,8 @@
 
   Stopping a running eval in a single-threaded agent with Jolt's own mechanism,
   `jolt.host/run-interruptible`: by root's interrupt (a signal), or by the work the form
-  did (its tick budget: procedure calls and loop back-edges, never elapsed time; owner,
-  2026-10-21: no clocks or timers).
+  did (its tick budget: procedure calls and loop back-edges, never elapsed time; DECISIONS,
+  If nothing has changed, we do nothing; no clock or timer decides (three exceptions)).
 
   Each eval runs under its own interrupt token (`jolt.host/make-interrupt`) and pushes
   it on this process's stack. SIGUSR1, root's interrupt, sets every token on the stack

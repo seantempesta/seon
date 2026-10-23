@@ -62,7 +62,8 @@
 
 (defn gate!
   "Root's go for tasks ids: the process tests each one's change reaches (a shell, a fork, a
-  root, the binary: never run automatically, owner's ruling 2026-10-23) run on the gate
+  root, the binary: never run automatically, DECISIONS, Process tests are not automatic) run on
+  the gate
   checkout (:seon.config.source/gate-checkout). Before the merge task's run is judged,
   its deferred tests run before it merges and a red holds it (:seon.task/gate?). A run
   that already merged unasked (its open :unrun problem) has them run now, through the

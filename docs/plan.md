@@ -20,14 +20,15 @@ Updated 2026-10-23 evening by root. Sessions are grouped so related tasks stay i
 | **Agent view** | the context frame and the renders (data, not prose; the printer stays general), on ``jolt/a-page-is-an-entity-and-its-neighbors``, which merges in the freeze | the default HTML value render |
 | ↳ evaluations, page | the context as data (the frame, then the walk), the page entity | through agent view |
 | ↳ embed | similar search by embedding (approved, model download included) | reports to root and merge |
-| **Walk** | health holds a branch to the problems it caused (one `bin/prove` step; no silent `bin/check`), and the divergence bytes regression from health's merge | |
+| **Walk** | shrink `src` (THE PLAN step 4), one small branch per deletion; its health branch is with merge | reconcile's duplication |
+| **Wiki** (was eval-cost) | main's 35 dead citations and 167 stale sections | |
 | **Agent loop** | ``jolt/resumed-branch`` (a resumed branch keeps what main gained; `test/` in every root's dirs) | the first-move judge: ten real tasks, one call each, scored from compiler facts |
 | **Store** (covering shrink) | the reach-update regression from Jolt 0d39edc3 (n^1.96) | a check's roots take explicit config, not the checkout's `config/local.edn` |
 | **Reuse** | option B: `bin/test` branches a kept program db per git tree | the memo is paused until the data context is measured (two attacks: `notes/reuse/`) |
 
 Ended: shrink (its folder was removed at merge), eval-cost (merged).
 
-**For the owner when he's back:** does `src`'s ~10k aim count code lines (as cloc does: no docstrings, comments, blanks or contracts; ~10.45k now) or every line (18.5k)? Walk measured it on main 450c3fb8; the remaining shrink rows are about −300 lines, which is right under either reading. Root's pick: code lines, with docstrings kept as each var's home (AGENTS §7).
+**src size** (owner, 2026-10-23): not a line target; resistance to growth, so agents reuse and improve the core rather than add one-offs. Shrink work goes on only where it removes duplication or improves a core part.
 
 **The freeze**, on root's word: ``jolt/rename-run``, then ``jolt/a-page-is-an-entity-and-its-neighbors``, then the store is erased; then ``jolt/self-contained`` and step R (`~/src/seon-next`). Other sessions keep working, and afterwards re-run the rename's scripts on their branches (`notes/rename-run/` on ``jolt/rename-run``).
 
@@ -46,6 +47,6 @@ The destination is **E: a request worked design → implement → merge by Seon 
 1. **The context tells a model what to change, where, and how it will know it is done.** Real task contexts given to fast models with thinking off, scored on their first move; iterate until they act on turn 1; confirm with paid runs (``jolt/dry-run``, `notes/ASSESSMENT-2026-10-23.md` "Recommended next").
 2. **The merge gate merges a model-made change** (``jolt/dry-run``: `:tests`, the three test tiers, `reasoning_content`; ``jolt/hold-for-root`` first).
 3. **The owner can watch each turn:** the agent debug view (``jolt/agent-view``; `docs/parity.md` "Context, printing, the page").
-4. **`src` shrinks:** shrink brief 1, drivers out of `src` (≈ −1,800; task `seon.main/drivers-leave-src`).
+4. **`src` resists growth:** duplication removed and core parts improved, so new work reuses them (drivers out of `src`, task `seon.main/drivers-leave-src`).
 
 Beside E, the missing and partial rows of `docs/parity.md` are the parity backlog, each a task in `resources/seon/tasks/`; the task files hold the rest of the work.

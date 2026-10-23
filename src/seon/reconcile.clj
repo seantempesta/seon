@@ -40,9 +40,9 @@
   branch's work made true (seon.problems/caused: a citation of a var it deleted). A :design task readies
   the interface and plan for its implement step, so its own proofs may stay red but not
   unknown (each written and run), and it is refused :no-design until its plan differs from
-  the one its run began with (or that one is unknown). A deferred proof (a process test:
-  run only when root asks, owner's ruling 2026-10-23) is neither red nor unknown here; while
-  unrun it is the merge's open :unrun problem."
+  the one its run began with (or that one is unknown). A deferred proof (a process test, run
+  only when root asks: DECISIONS, Process tests are not automatic) is neither red nor unknown
+  here; while unrun it is the merge's open :unrun problem."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
   [{:keys [proofs results main-green allowed-red uncontracted unmerged caused kind plan plan-before deferred]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
@@ -313,7 +313,8 @@
         reaps (for [aid (sort (:reap idx))] {:op :reap :run aid})
         kills (for [[aid r] (sort-by key (:kill idx))] {:op :kill :run aid :reason r})
         ;; a failed run (refused by the done rule, or its agent died) holds its task for
-        ;; root, which decides whether it runs again (owner, 2026-10-23: no automatic retries)
+        ;; root, which decides whether it runs again (DECISIONS, No automatic retries: a refused
+        ;; or failed run is held for root)
         failed (fn [aid id problem] {:op :hold :run aid :task id :problem problem})
         judged (for [aid (sort (:judge idx))
                      :let [a (att aid) id (:seon.run/task a) t (get-in idx [:tasks id])
@@ -329,12 +330,12 @@
                                                       :caused (:seon.run/caused a #{})))]
                      (cond
                        ;; the process tests the branch's change reaches run before its merge
-                       ;; only when root asked (:seon.task/gate?, my.root/gate!; owner's ruling
-                       ;; 2026-10-23), on a checkout (:gate, seon.fx/run-tests)
+                       ;; only when root asked (:seon.task/gate?, my.root/gate!; DECISIONS,
+                       ;; Process tests are not automatic), on a checkout (:gate, seon.fx/run-tests)
                        (and (empty? rs) merge?)
                        (let [deferred (sort-by str (:seon.run/deferred a #{})) dres (:seon.run/deferred-results a)
                              red (for [t deferred :let [s (get dres t)] :when (not= :pass s)] [t (or s :unknown)])]
-                         ;; unasked, or with no checkout declared (root's ruling (a), 2026-10-23),
+                         ;; unasked, or with no checkout declared (root's ruling (a)),
                          ;; the merge goes on, its deferred tests unrun: an open :unrun problem
                          (cond (or (empty? deferred) (not (:seon.task/gate? t)) (nil? (get-in idx [:root :gate-checkout])))
                                {:op :ready-to-merge :run aid :task id}
@@ -436,7 +437,8 @@
   its task held for root with the failure (problem, the run) and the measured evidence,
   exactly as my.task/fail!'s failure holds it, and the run closed, in one write. Root
   decides: release it again (my.root/run!: the next run continues its branch, from the
-  evidence), edit it, or cancel it (owner, 2026-10-23: no automatic retries). The hold is a
+  evidence), edit it, or cancel it (DECISIONS, No automatic retries: a refused or failed run is
+  held for root). The hold is a
   compare-and-swap from :running, so a cancel! that merged first refuses it (the run is
   then closed by the judged rule, its task not running)."
   {:malli/schema [:=> [:cat :seon.run/run :string] [:vector :any]]}
@@ -467,16 +469,6 @@
   (:seon.root/generation (d/pull db [:seon.root/generation] [:seon.root/id :root])))
 
 ;; ---- queries, over one index (list it once: (index db)) -----------------------------
-
-(defn reconcile
-  "The actions that move db's observed state toward its desired state (index, then actions)."
-  {:malli/schema [:=> [:cat :seon.host/db] :seon.reconcile/actions]}
-  [db] (actions (index db)))
-
-(defn running
-  "The runs running now (in this boot), by id."
-  {:malli/schema [:=> [:cat :seon.reconcile/index] [:set :seon.run/id]]}
-  [idx] (:live idx))
 
 (defn done?
   "Is task id done (merged into its target, or accepted on its branch)?"
@@ -568,13 +560,14 @@
 
 (defn- judge-tx
   "Run aid's end on main from MEASURED facts: the end its agent wrote on the branch,
-  root's own proof results, the branch's merge entries, and diff, the writer's diff of the
-  branch (:branch-diff: the keys it changed, its unmerged keys, its contract gaps); the
+  root's own proof results, the branch's merge entries, and diff, the writer's one read of the
+  branch (:branch-diff: its head db, its merge base and main's t there, the keys it changed,
+  its unmerged keys, its contract gaps); the
   task content the branch changed carried to main, or its conflicts with main's recorded on
   the run for root (seon.task/carry-tx); and a failure it marked (my.task/fail!)
   carried with the task held."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db]] [:map [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:vector :any]]}
-  [st {:keys [act run-problems worked-error deferred]} results {:keys [db base base-t]} diff]
+  {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db] [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:vector :any]]}
+  [st {:keys [act run-problems worked-error deferred]} results {:keys [db base base-t] :as diff}]
   (let [main (:db st)
         aid (:run act) id (:task act)
         end (pull-end db aid)
@@ -684,18 +677,15 @@
                 (one (request (-> st (assoc-in [:flights aid :results] (proofs/results r))
                                   (assoc-in [:flights aid :deferred] (:deferred r))
                                   (assoc-in [:flights aid :run-problems] {:failures (proofs/failures r) :costs (proofs/costs r)}))
-                              aid :read {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}})))
-      ;; what the branch changed since its merge base (three-way's :ours), measured for the octopus merge
-      :read (if (contract/error? r)
-              (refused st r)
-              (one (request (assoc-in st [:flights aid :branch-db] r) aid :diffed
-                            {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}})))
+                              ;; the branch read once: its head, its merge base, and what it changed
+                              ;; since (three-way's :ours, measured for the octopus merge)
+                              aid :diffed {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}})))
       ;; every run is a new agent: none is reused
       ;; root stops it because its run ended: its view says :ended, not :killed
       :diffed (if (contract/error? r)
                 (refused st r)
                 (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
-                      [st o2] (write st aid :done (judge-tx st f (:results f) (:branch-db f) r))]
+                      [st o2] (write st aid :done (judge-tx st f (:results f) r))]
                   [st [o1 o2]]))
       ;; each member's answer, as one write: merged at the octopus merge's t, behind (its merge task
       ;; runs again, a new agent), or refused: a failed run like any other (held for root)
