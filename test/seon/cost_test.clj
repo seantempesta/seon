@@ -27,6 +27,17 @@
   (is (< 9.96 (cost/work :log 1000) 9.97))
   (is (< 9965.0 (cost/work :n-log-n 1000) 9966.0)))
 
+(deftest a-measure-takes-a-count-of-samples-never-a-time
+  ;; task seon.cost/ticks-are-exact: measure repeated a call until 20 ms of CPU time or 25 calls,
+  ;; so a fast call took 25 samples and a slow or loaded one 3, and the minimum moved with the
+  ;; machine; it takes a warm call and then seon.cost/repeats, whatever a call costs
+  (let [n (atom 0)]
+    (cost/measure (fn [] (swap! n inc) nil) [])
+    (is (= (inc cost/repeats) @n) "a fast call: one warm call and the repeats"))
+  (let [n (atom 0)]
+    (cost/measure (fn [] (swap! n inc) (reduce + (range 200000))) [])
+    (is (= (inc cost/repeats) @n) "a slow call: the same count")))
+
 (deftest exponent-is-the-log-log-slope
   (is (< 0.99 (cost/exponent [[10 30] [100 300] [1000 3000]]) 1.01))
   (is (< 1.99 (cost/exponent [[10 1] [100 100] [1000 10000]]) 2.01))
