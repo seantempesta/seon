@@ -1,6 +1,6 @@
 # Health
 
-Health is the set of open problems: a value computed when something reads it (`seon.problems/health`). It is never stored, never precomputed and never polled. Root's page, an agent's context and the done rule each read it on the db they hold. It is the recorded classes (`seon.problems/report`) beside the derived ones (`:dead-citation`, `:unnamed-site`, `:stale-pin`, `:stale-section`, `:orphan-page`, `:problem-unlinked`), one value by class (`:seon.problems/report`).
+Health is the set of open problems: a value computed when something reads it (`seon.problems/health`). It is never stored, never precomputed and never polled. Root's page, an agent's context and the done rule each read it on the db they hold. It is the recorded classes (`seon.problems/report`) beside the derived ones (`:dead-citation`, `:unnamed-site`, `:stale-pin`, `:stale-section`, `:orphan-page`, `:uncited-task`, `:problem-unlinked`), one value by class (`:seon.problems/report`).
 
 ## Two kinds of problem
 
@@ -45,6 +45,10 @@ While root has recorded no import there is nothing to compare, and the class has
 ## An orphan page
 
 A page of the wiki that no other page links to, the map (docs/README.md) included as a linker, is an `:orphan-page` (`seon.problems/orphan-pages`): a section of another page has a reference to one of its sections, or it is orphaned. The map is the root and is not judged, and a db whose wiki has no map has no orphans (unknown). Adding a link anywhere closes it, with nothing written.
+
+## A task that cites nothing
+
+A work task that is ready (not done, every task it needs done) and whose plan cites no var, attribute or section, or that names no proof, is an `:uncited-task` (`seon.problems/uncited-tasks`, reason `:no-references` or `:no-proofs`). The context pulls what the plan cites ([references](references.md#task-references)), so a plan in prose alone gives the agent nothing to read. It closes when the plan cites a name (one backtick, [references](references.md#the-delimiter-picks-the-depth)) or the task names a proof, with nothing written to close it. A task waiting on another is judged when it is ready. The fix is in the task entry (`resources/seon/tasks/`): rewrite the prose that names a function, attribute or page into a citation. Cost: the task, reference, proof and kind datoms once, then one run lookup per row.
 
 ## A problem with no page
 

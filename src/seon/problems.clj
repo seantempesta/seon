@@ -396,6 +396,37 @@
   (boolean (some #(finished (:seon.run/status (d/pull db [:seon.run/status] (:e %))))
                  (d/datoms db :avet :seon.run/task te))))
 
+(defn- task-ready?
+  "Is task te one not done whose needs are all done? A task waiting on another is judged when it
+  is ready (its plan may yet be written by what it waits for)."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
+  [db te]
+  (and (not (task-done? db te))
+       (every? #(task-done? db (:v %)) (d/datoms db :eavt te :seon.task/needs))))
+
+(defn uncited-tasks
+  "Each ready work task whose plan cites nothing (no :seon.task/references: the context pulls no
+  var, attribute or section for it) or that names no proof, as an :uncited-task row with its
+  reason (:no-references, :no-proofs). Closed when the plan cites a name or the task names a proof.
+  Cost: the task, reference, proof and kind datoms once, then a run lookup per row."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (let [has (fn [a] (into #{} (map :e) (d/datoms db :aevt a)))
+        cited (has :seon.task/references) proofed (has :seon.task/proofs)
+        kinds (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.task/kind))]
+    (vec (for [{:keys [e v]} (sort-by :v (d/datoms db :aevt :seon.task/id))
+               :when (= :work (kinds e))
+               :let [reasons (cond-> [] (not (cited e)) (conj :no-references) (not (proofed e)) (conj :no-proofs))]
+               :when (and (seq reasons) (task-ready? db e))
+               reason reasons
+               :let [s (str "uncited-task " v " " (name reason))]]
+           {:signature s :task v :reason reason :open? true
+            :message (case reason
+                       :no-references (str v " is ready and its plan cites no var, attribute or section: the context pulls nothing for it")
+                       :no-proofs (str v " is ready and names no proof"))
+            :producer nil :owner-ns 'seon.task :proofs []
+            :evidence {:kind :uncited-task :task v :reason reason} :answered-by (get-in ans [:signature s] []) :at-ms nil}))))
+
 ;; ---- tasks held for root -----------------------------------------------------------------
 
 (defn- failed-row
@@ -523,7 +554,7 @@
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the
   program's facts make true now (`dead-citations`, `unnamed-sites`, `stale-pins`, `stale-sections`,
-  `orphan-pages`, and `problem-unlinked` over all of them). What the page, an agent's context and
+  `orphan-pages`, `uncited-tasks`, and `problem-unlinked` over all of them). What the page, an agent's context and
   the done and merge gates read: computed when read, never stored, never polled."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]
                   [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}
@@ -531,7 +562,8 @@
   ([db fold]
    (let [ans (answers db)
          derived {:dead-citation (dead-citations db ans) :unnamed-site (unnamed-sites db ans) :stale-pin (stale-pins db ans)
-                  :stale-section (stale-sections db ans) :orphan-page (orphan-pages db ans)}
+                  :stale-section (stale-sections db ans) :orphan-page (orphan-pages db ans)
+                  :uncited-task (uncited-tasks db ans)}
          classes (merge (:classes (report db fold)) (update-vals derived (fn [rows] {:n (count rows) :rows rows})))
          ;; its own class last: a missing section of the unlinked class is one more row
          unlinked (problem-unlinked db ans classes)

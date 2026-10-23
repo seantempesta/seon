@@ -7,7 +7,7 @@
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
             [seon.repl :as repl] [seon.proofs :as proofs] [seon.root :as root] [seon.agent-proc :as ap]
             [seon.reconcile :as rec] [seon.sock :as sock]
-            [seon.render :as render] [konserve.jolt.fasl] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.cost :as cost] [seon.docs]))
+            [seon.render :as render] [konserve.jolt.fasl] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.task] [seon.cost :as cost] [seon.docs]))
 
 (defn- invalid [op v]
   (contract/error :seon.instrument/contract-error op (str op " invalid-input: its arguments do not satisfy its contract")
@@ -850,3 +850,23 @@
     (is (vector? caused))
     (is (= {:attention attention :caused caused}
            (konserve.jolt.fasl/decode (konserve.jolt.fasl/encode {:attention attention :caused caused}))) "and it is written to the store and read back")))
+
+(deftest a-ready-task-that-cites-nothing-or-names-no-proof-is-a-problem
+  ;; the context is only as good as the task it is built from: a task whose plan cites no var,
+  ;; attribute or section reaches no reference, so the walk pulls nothing (task
+  ;; seon.render/spend-has-a-render, 2026-10-23)
+  (let [db0 (ts/test-db)
+        v (:v (first (d/datoms db0 :aevt :var/name)))
+        decl (fn [n plan & {:as more}]
+               (merge {:seon.task/ns 'app :seon.task/name n :seon.task/plan plan :seon.task/kind :work
+                       :seon.task/proofs #{'app-test/a-proof}} more))
+        db (d/db-with db0 (seon.task/create-tx db0 [(decl "cites" (str "It changes `" v "`."))
+                                                    (decl "prose-only" "Something should be shown somewhere.")
+                                                    (decl "no-proof" (str "It changes `" v "`.") :seon.task/proofs #{})
+                                                    (decl "waits" "Nothing named yet." :seon.task/needs #{"app/cites"})]))
+        rows #(into {} (map (juxt (comp :task :evidence) (comp :reason :evidence))) (get-in (problems/health %) [:classes :uncited-task :rows]))]
+    (is (= {"app/prose-only" :no-references "app/no-proof" :no-proofs} (rows db))
+        "a task that cites nothing, and one with no proof; app/waits cites nothing too, but waits on a task not done: judged when it is ready, not before")
+    (let [db1 (d/db-with db (seon.task/load-tx db {'app [(decl "prose-only" (str "Show `" v "` somewhere.")) (decl "cites" (str "It changes `" v "`.")) (decl "no-proof" (str "It changes `" v "`.") :seon.task/proofs #{}) (decl "waits" "Nothing named yet." :seon.task/needs #{"app/cites"})]}))]
+      (is (not (contains? (rows db1) "app/prose-only")) "citing a name closes it, with nothing written to close it"))
+    (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :uncited-task))))
