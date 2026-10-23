@@ -4,7 +4,7 @@ Root's server is one socket on 127.0.0.1 where outside agents (a Claude session 
 
 A line opening `{"` is MCP's JSON-RPC; every other line is an EDN request, a keyword-keyed map `{:op k ...}` (```seon.server/respond```, the protocol rule). Both reach the same table of ops, so MCP and EDN callers get the same answers. The server is an outside caller of root's API, as `bin/check` is: each op calls `seon.root` functions (`seon.root/submit!`, `seon.root/spawn!`, `seon.root/judge!`), which put requests on the api proc's `:ext` channel ([root](root.md#the-root-graph)).
 
-```seon.server/serve!``` listens on `:seon.config.root/entrance-port` (`bin/ports` gives each checkout its own; 0 serves none): the accept loop and each connection run on edge threads, because accept and reads block ([failure points](failure-points.md)). `seon.check/root-serve` is what `bin/root run` starts: root booted, the server listening, until stdin closes or a signal arrives ([root](root.md#boot)).
+```seon.server/serve!``` listens on `:seon.config.root/server-port` (`bin/ports` gives each checkout its own; 0 serves none): the accept loop and each connection run on edge threads, because accept and reads block ([failure points](failure-points.md)). ```seon.main/root-serve``` is what `bin/root run` starts: root booted, the server listening, until stdin closes or a signal arrives ([root](root.md#boot)).
 
 ## Ops
 
