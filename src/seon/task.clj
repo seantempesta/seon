@@ -174,7 +174,8 @@
 
 (defn carry-tx
   "The task content (seon.merge/carried-platform-attrs) branch changed since base, carried
-  onto main (owner, 2026-10-22, D4): a member the branch changed and main did not overwrites
+  onto main (DECISIONS, A task edited on two live branches is a conflict for root (D4)): a member
+  the branch changed and main did not overwrites
   main's, so the next agents start from it; one main also changed since base, to another
   value, is a conflict for root (never resolved here). Tasks main does not hold are left.
   Answers {:tx :conflicts [{:task :attr :base :ours :theirs}]}. Cost: the carried datoms of
@@ -233,7 +234,7 @@
     (:seon.task/references t) (update :seon.task/references set)))
 
 (defn accumulate
-  "Task id's accumulated plan and proofs over its needs (owner, 2026-10-20: a task
+  "Task id's accumulated plan and proofs over its needs (owner: a task
   inherits its prerequisites' plan and proofs and adds its own, so a refinement only
   tightens): {:plan text :proofs set}. own: id -> own task value."
   {:malli/schema [:=> [:cat ifn? :seon.task/id] [:map [:plan :string] [:proofs :seon.task/proofs]]]}

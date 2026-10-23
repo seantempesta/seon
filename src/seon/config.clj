@@ -1,5 +1,5 @@
 (ns seon.config
-  "The one config system (owner, 2026-10-21: only documented config schemas stay). Every
+  "The one config system (DECISIONS, Only documented config). Every
   limit, bound and default of the platform is a key in one aero file,
   resources/seon/config/default.edn, documented there beside its value (unit, provenance,
   what happens at the bound) and validated by its schema (resources/seon/schemas/
@@ -127,7 +127,7 @@
   [op msg] (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation op :seon.error/message msg})))
 
 ;; ---- the layers: the shipped file, the checkout's own file, the command line ------------------
-;; Owner, 2026-10-21: "Hand out different edn config files that each agent can load and control
+;; Owner: "Hand out different edn config files that each agent can load and control
 ;; separately or do command line overrides." Later layers win, key by key; the merged map is
 ;; validated once, and every key remembers the layer it came from (`sources`).
 
@@ -209,7 +209,7 @@
   (:sources loaded))
 
 ;; ---- reading a setting: the one resolver ------------------------------------------------------
-;; Owner, 2026-10-21: settings are per model, per provider and per task; "a principle and not just
+;; Owner: settings are per model, per provider and per task; "a principle and not just
 ;; a hack": every reader resolves through `resolve-in` (task -> model -> its provider -> the
 ;; config's own key), and the server shows each value with where it came from.
 

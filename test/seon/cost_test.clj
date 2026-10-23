@@ -75,6 +75,41 @@
     (is (< 1.9 (:exponent (first (:steeper v))) 2.1))
     (is (not (:ok? v)))))
 
+(deftest a-speedup-never-reads-as-steeper
+  ;; task seon.cost/a-speedup-never-reads-as-steeper: reach-update on Jolt 0d39edc3, cheaper at
+  ;; both sizes than its estimate; with the stated :fixed (420k) taken off, 7k was left at n=100
+  ;; and the fit read n^1.96 (two sizes, as a run capped at 1,000 measures)
+  (let [e (assoc linear :per-n {:ticks 850.0} :fixed {:ticks 420000.0} :sizes [100 1000 10000])
+        rs [{:n 100 :measured {:ticks 427200.0} :expected (cost/expected e cost/units 100)}
+            {:n 1000 :measured {:ticks 1070000.0} :expected (cost/expected e cost/units 1000)}]]
+    (is (empty? (:over (cost/judge e rs))))
+    (is (empty? (:steeper (cost/judge e rs))) "under the estimate at both sizes, and linear"))
+  (testing "a change that makes every size cheaper by one amount leaves the growth verdict as it was"
+    (let [e (assoc linear :per-n {:bytes 100.0} :fixed {:bytes 50000.0} :sizes [10 100 1000])
+          at (fn [f] (rows e (fn [n] {:bytes (f n)})))
+          quad (fn [n] (+ 50000.0 (* 0.09 n n)))]
+      (doseq [d [0.0 20000.0 49000.0]]
+        (is (= [:bytes] (map :dim (:steeper (cost/judge e (at #(- (quad %) d))))))
+            (str "a second pass, " d " cheaper at every size, is still steeper")))
+      (doseq [d [0.0 20000.0 49000.0]]
+        (is (empty? (:steeper (cost/judge e (at #(- (+ 50000.0 (* 90.0 %)) d)))))
+            (str "one pass, " d " cheaper at every size, is not steeper"))))))
+
+(deftest growth-takes-the-basis-the-rows-allow
+  (let [e (assoc linear :per-n {:bytes 100.0} :fixed {:bytes 50000.0} :sizes [10 100 1000])
+        g #(cost/growth %1 (rows %1 (fn [n] {:bytes (%2 n)})) :bytes)]
+    (is (= :increments (:basis (g e #(+ 50000.0 (* 90.0 %))))) "three sizes that grow: increments")
+    (is (< 0.95 (:exponent (g e #(+ 50000.0 (* 90.0 %)))) 1.05))
+    (testing "a smallest size that costs more than the next leaves no two increments: the bounded fixed part judges"
+      (let [r (g e #(if (= 10 %) 1000000.0 (+ 50000.0 (* 0.09 % %))))]
+        (is (= :bounded-fixed (:basis r)))))
+    (testing "constant work: its cost itself, which a creep of a few percent barely moves"
+      (let [c (assoc linear :growth :constant :per-n {} :fixed {:bytes 1290000.0} :sizes [10 100 1000])
+            r (g c {10 1230000.0 100 1290000.0 1000 1430000.0})]
+        (is (= :total (:basis r)))
+        (is (< (:exponent r) (:allowed r)))))
+    (is (nil? (cost/growth e [(first (rows e (fn [n] {:bytes (* 90.0 n)})))] :bytes)) "one size has no growth")))
+
 (deftest n-log-n-under-a-linear-estimate-is-not-steeper
   (let [e (assoc linear :per-n {:ns 1000.0} :fixed {})]
     (is (empty? (:steeper (cost/judge e (rows e (fn [n] {:ns (cost/work :n-log-n n)}))))))))
