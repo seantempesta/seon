@@ -224,23 +224,37 @@
 ;; ---- evaluation -----------------------------------------------------------------
 
 
+(defn- unresolved-message
+  "An unresolved symbol's message as Jolt's nREPL words it (jolt.nrepl/err->msg), without the
+  \"(did you mean ...)\" suffix: the suggestions are the error's fix."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [sym] (str "Unable to resolve symbol: " sym " in this context"))
+
 (defn error-map
   "An exception caught at one of the agent's entrant boundaries (operation: the REPL's
   seon.repl/eval-code by default) as the one error map: its ex-data when that already is
   one (a contract's error names its operation, member and problems), else the
-  :seon.agent/eval-error variant, with the exception's class, its ex-data printed by the one
-  printer, and its cause chain (each cause's class and message)."
+  :seon.agent/eval-error variant, with the exception's class, its ex-data's qualified keys
+  (Jolt's :jolt.error/* diagnostics: line, column, symbol, ns, kind, suggestions; and
+  :clojure.error/*) as keys, the suggestions as the fix, any other ex-data as :data, and its cause chain (each cause's class
+  and message)."
   {:malli/schema [:function [:=> [:cat :seon.host/throwable] :seon.error/base]
                   [:=> [:cat :seon.host/throwable :qualified-symbol] :seon.error/base]]}
   ([e] (error-map e 'seon.repl/eval-code))
   ([^Throwable e op]
    (if (contract/error? (ex-data e))
      (ex-data e)
-     (let [m (or (ex-message e) (str (type e)))
+     (let [d (ex-data e)
+           jd (into {} (filter (comp qualified-keyword? key)) d)
+           other (not-empty (into {} (remove (comp qualified-keyword? key)) d))
+           sym (:jolt.error/symbol jd)
+           unresolved? (and sym (= :analyze/unresolved-symbol (:jolt.error/kind jd)))
+           m (if unresolved? (unresolved-message sym) (or (ex-message e) (str (type e))))
            causes (mapv #(str (type %) ": " (ex-message %)) (take-while some? (rest (iterate ex-cause e))))]
        (contract/error :seon.agent/eval-error op m
-                       (cond-> {:class (str (type e))}
-                         (ex-data e) (assoc :data (print/text (ex-data e) (:part print/budgets)))
+                       (cond-> (assoc jd :class (str (type e)))
+                         (seq (:jolt.error/suggestions jd)) (assoc :seon.error/fix (str "did you mean " (str/join ", " (:jolt.error/suggestions jd))))
+                         other (assoc :data other)
                          (seq causes) (assoc :causes causes)))))))
 
 (defn write-end!

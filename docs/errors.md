@@ -12,6 +12,17 @@ The signature is the digest of the error's cause (```seon.error/cause```: its ty
 
 The observers: root's api proc (Flow's error channel, an agent's death or stall, an effect's error outcome; `seon.root/errors` answers its fold, with the true counts); an agent, which folds its own eval errors (`seon.error/note`) and sends them with its next commit, recorded at root as `:eval` (`seon.error/sent->occurrence`); and boot, when the wiki refuses to load (`seon.root/wiki-tx`). `seon.error/record` reads one back.
 
+### An eval error's diagnostics
+
+An exception from an evaluated form is the `:seon.agent/eval-error` map (`seon.agent/error-map`). Its ex-data is data on that map: every qualified key stays a key (Jolt's `:jolt.error/line`, `/column`, `/symbol`, `/ns`, `/kind`, `/type`, `/suggestions`, and `:clojure.error/*`; the schema is in `seon.problems.edn`), any other ex-data is `:data`, a map. Jolt's "did you mean" suggestions are `:seon.error/fix`, and an unresolved symbol's message is built from `:jolt.error/symbol` as Jolt's nREPL words it (`jolt.nrepl/err->msg`), so the suggestions are not in it twice. `(prinltn 1)` reads `Unable to resolve symbol: prinltn in this context`, `fix: did you mean print, printf, println`, then the type, the operation and the remaining keys (line, column). The one render prints each fact once (`seon.render.ui/error-shown` names the keys the fix line already carries); proofs `seon.repl-test/an-eval-errors-data-is-printed-once` and `an-ordinary-exception-renders-its-message`.
+
+Deliberately unused (researched in the notes' `jolt-debug-features` paper), so nobody proposes them again:
+- `JOLT_DIAG`: read only by the CLI's top-level uncaught handler, which our eval's catch never reaches; the same data is already in the exception's ex-data.
+- `JOLT_CHECK`: warnings go to the process's stderr (read only on death), and the variable is a Scheme global with no Clojure setter. `jolt.passes.types/check-form` over the node the REPL's tap holds would need no variable; measured silent on all of `src` (3397 forms, 0 findings, `notes/check-form-measure-2026-10-23.md`) but a new item key waits for an owner ruling.
+- `JOLT_DEBUG`: stderr traces of the builder (AOT cache misses, dependency fetches); not an eval's concern.
+- `jolt.nrepl` as a server: a second request path beside `seon.server`'s `:eval`, bypassing recording, ticks and the middleware, on a second port. Its `err->msg` is used as a library.
+- `clj-kondo`: it only knows Jolt's `jolt.ffi` macros, our `seon.contract/defn` would flood it with unresolved symbols, and the compiler already reports those with suggestions.
+
 ## Problems
 
 Every problem Seon recorded is read by one function, ```seon.problems/report```: main's db in, one report out, by class.

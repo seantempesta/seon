@@ -182,3 +182,40 @@
     (is (int? (:id bad)) "an id, so record-tx records it")
     (is (= 2 (count (filter :seon.cluster.eval/record (repl/record-tx :a1 "r" items nil))))
         "both items are recorded: the form that ran and the defect")))
+
+(defn- eval-item
+  "The one reply item of `code` asked of the REPL's own handler in this process, as a scratch session."
+  {:malli/schema [:=> [:cat :string] :map]}
+  [code]
+  (let [answers (volatile! [])
+        old @agent/state]
+    (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
+    (try ((repl/handler) {"op" "eval" "code" code :reply #(vswap! answers conj %)})
+         (finally (reset! agent/state old)))
+    (last (repl/fold @answers))))
+
+(deftest an-eval-errors-data-is-printed-once
+  ;; a compile error's Jolt diagnostics (:jolt.error/*, ex-data) are keys of the error map, the
+  ;; suggestions its fix, and the item prints each once
+  (let [item (eval-item "(prinltn 1)")
+        em (:err item)]
+    (is (= :seon.agent/eval-error (:seon.error/type em)))
+    (is (= 1 (:jolt.error/line em)))
+    (is (= "prinltn" (str (:jolt.error/symbol em))))
+    (is (some #{"println"} (map str (:jolt.error/suggestions em))) (pr-str em))
+    (is (str/includes? (str (:seon.error/fix em)) "println"))
+    (is (nil? (:data em)) "no printed copy of the ex-data")
+    (is (contract/valid? :seon.agent/eval-error em) "the error is the declared variant")
+    (is (= 1 (count (re-seq #"did you mean" (:printed item)))) (:printed item))
+    (is (= 1 (count (re-seq #"println" (:printed item)))) (:printed item))
+    (is (str/includes? (:printed item) "fix: did you mean print, printf, println") (:printed item))))
+
+(deftest an-ordinary-exception-renders-its-message
+  (let [item (eval-item "(+ 1 :a)")]
+    (is (= :err (:tag item)))
+    (is (str/starts-with? (:printed item) (:seon.error/message (:err item))))
+    (is (nil? (:seon.error/fix (:err item))))
+    (let [item (eval-item "(throw (ex-info \"boom\" {:k 1}))")]
+      (is (str/starts-with? (:printed item) "boom"))
+      (is (= 1 (count (re-seq #"boom" (:printed item)))) (:printed item))
+      (is (= {:k 1} (:data (:err item))) "an ordinary ex-data stays data"))))
