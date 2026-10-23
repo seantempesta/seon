@@ -528,6 +528,10 @@
  :seon.config.vector/batch-tokens 4096
  ;; Unit: texts. One encode's sequences; at the bound the next text starts the next encode.
  :seon.config.vector/batch-texts 64
+ ;; Unit: threads. ggml's CPU pool in root's :embed worker: Metal does the encode, so 1 measured as
+ ;; fast as 18 (139 vs 140 texts/s, 2026-10-23). Whatever it is, the open model keeps 4 threads of
+ ;; its own (Metal's), and loading it runs ~32 that end when it has loaded.
+ :seon.config.vector/threads 1
  ;; Unit: tokens. A text past it keeps its first max-tokens (the count cut is recorded). Provenance:
  ;; v1's 2,048 (forms p99 1,766 tokens); at 512, 148 of Seon's 1,393 forms were cut.
  :seon.config.vector/max-tokens 2048

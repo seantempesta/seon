@@ -113,6 +113,7 @@
   [:seon.config.vector/texts :seon.config.vector/texts]
   [:seon.config.vector/batch :seon.config.vector/batch]
   [:seon.config.vector/rrf-k :seon.config.vector/rrf-k]
+  [:seon.config.vector/threads :seon.config.vector/threads]
   [:seon.config.render.list/rows :seon.config.render.list/rows]
   [:seon.config.render.list/newest :seon.config.render.list/newest]
   [:seon.config.render.list/brief :seon.config.render.list/brief]

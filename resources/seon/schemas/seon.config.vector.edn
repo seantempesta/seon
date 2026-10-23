@@ -9,4 +9,5 @@
  :seon.config.vector/max-tokens [:int {:min 1 :seon.config/unit "tokens" :description "A text's tokens embedded; past it the text keeps its first ones."}]
  :seon.config.vector/texts [:int {:min 0 :seon.config/unit "texts" :description "The texts one :embed request of main's vectors carries; 0 embeds none, so the model never loads."}]
  :seon.config.vector/batch [:int {:min 1 :seon.config/unit "requests" :description "The :embed requests one worker step takes from the queue."}]
- :seon.config.vector/rrf-k [:int {:min 1 :seon.config/unit "ranks" :description "Reciprocal rank fusion's k: an item scores the sum of 1/(k + rank) over the rankings it is in."}]}
+ :seon.config.vector/rrf-k [:int {:min 1 :seon.config/unit "ranks" :description "Reciprocal rank fusion's k: an item scores the sum of 1/(k + rank) over the rankings it is in."}]
+ :seon.config.vector/threads [:int {:min 1 :seon.config/unit "threads" :description "ggml's CPU thread pool in the :embed worker (Metal does the encode)."}]}

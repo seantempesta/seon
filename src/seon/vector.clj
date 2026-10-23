@@ -141,7 +141,7 @@
 ;; Bound here, resolved on the first call: the library is loaded by `open`, in the worker, so an
 ;; agent or the fork server never maps it (ggml starts threads; docs/failure-points.md#physics).
 
-(lib/defc c-open "seon_embed_open" [:pointer :int :int :int] :pointer {:blocking true})
+(lib/defc c-open "seon_embed_open" [:pointer :int :int :int :int] :pointer {:blocking true})
 (lib/defc c-dims "seon_embed_dims" [:pointer] :int)
 (lib/defc c-batch "seon_embed_batch" [:pointer :pointer :pointer :int :int :pointer :pointer] :int {:blocking true})
 
@@ -154,7 +154,7 @@
 (defn open
   "The :embed kind's host object: the model at :seon.config.vector/model, loaded in this process
   with a context of :seon.config.vector/batch-tokens tokens and :seon.config.vector/batch-texts
-  texts (seon_embed_open), {:handle :model :dims}; a missing file or a model llama.cpp cannot load
+  texts and ggml's CPU pool of :seon.config.vector/threads (seon_embed_open), {:handle :model :dims}; a missing file or a model llama.cpp cannot load
   is :seon.vector/model-unopened (its cause is in llama.cpp's log)."
   {:malli/schema [:=> [:cat :any] :map]}
   [_ctx]
@@ -163,7 +163,7 @@
       (contract/error :seon.vector/model-unopened 'seon.vector/open (str "no model file at " path " (bin/build embed fetches it)") {:path path})
       (do (ffi/load-library (cfg/value :seon.config.vector/lib))
           (let [h (ffi/with-arena [a] (c-open (ffi/string->ptr a path) (cfg/value :seon.config.vector/batch-tokens)
-                                              (cfg/value :seon.config.vector/batch-texts) 0))]
+                                              (cfg/value :seon.config.vector/batch-texts) (cfg/value :seon.config.vector/threads) 0))]
             (if (zero? (ffi/address h))
               (contract/error :seon.vector/model-unopened 'seon.vector/open (str "llama.cpp could not load " path) {:path path})
               {:handle h :model (model-id path) :dims (c-dims h)}))))))

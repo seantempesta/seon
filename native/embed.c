@@ -19,9 +19,10 @@ typedef struct {
 
 static void quiet(enum ggml_log_level level, const char *text, void *ud) { (void)level; (void)text; (void)ud; }
 
-// The handle, or NULL when the model or its context cannot be made (the caller reads errno-free:
+// The handle, or NULL when the model or its context cannot be made; n_threads bounds ggml's CPU
+// thread pool (root declares them: docs/vector.md#the-model) (the caller reads errno-free:
 // a NULL is the one failure, its cause in llama's log, which a nonzero `verbose` keeps).
-void *seon_embed_open(const char *path, int n_ctx, int n_seq, int verbose) {
+void *seon_embed_open(const char *path, int n_ctx, int n_seq, int n_threads, int verbose) {
   if (!verbose) llama_log_set(quiet, NULL);
   llama_backend_init();
   struct llama_model_params mp = llama_model_default_params();
@@ -33,6 +34,7 @@ void *seon_embed_open(const char *path, int n_ctx, int n_seq, int verbose) {
   cp.pooling_type = LLAMA_POOLING_TYPE_MEAN;
   cp.n_ctx = n_ctx; cp.n_batch = n_ctx; cp.n_ubatch = n_ctx;
   cp.n_seq_max = n_seq;
+  cp.n_threads = n_threads; cp.n_threads_batch = n_threads;   // ggml's CPU pool: Metal does the encode
   cp.kv_unified = true;
   struct llama_context *ctx = llama_init_from_model(model, cp);
   if (!ctx) { llama_model_free(model); return NULL; }
