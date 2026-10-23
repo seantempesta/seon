@@ -1,0 +1,72 @@
+[
+ {
+  "section": 1,
+  "answer": "No. The shown text ends in section 5 (\"Procs follow the step-fn contract\"), so section 8 (\"The machine\") is not shown. 7279 characters are not shown.",
+  "left_out": "7279 characters of AGENTS.md, from the end of the shown text onward, including section 8",
+  "read_form": "(subs result/h3 19523)",
+  "confident": true
+ },
+ {
+  "section": 2,
+  "answer": "The total is not stated. The shown datoms are 365 rows by count (lines 187-551), and the marker says 36 members are not shown. Taken together that is 401, but the marker and the count disagree: the drop form (drop 364) would overlap the last shown row by one. So the count is uncertain.",
+  "left_out": "36 datoms, per the marker; the shown rows are 365 by count, so the marker and the count do not agree",
+  "read_form": "(drop 364 result/h3)",
+  "confident": false
+ },
+ {
+  "section": 3,
+  "answer": "The value holds 2 turns: 1 is shown and the marker says 1 more is not shown. The first turn's :seon.turn/calls is not shown in full (1 member is left out), so the eval calls are read with the form given.",
+  "left_out": "In the first turn, :seon.turn/calls has 1 member not shown and :seon.turn/basis has 2 members not shown. At the top level, 1 more turn is not shown.",
+  "read_form": "(get-in result/h3 [0 :seon.turn/calls])",
+  "confident": true
+ },
+ {
+  "section": 4,
+  "answer": "Not shown. calc/neg is rendered as {\u202611 \u00ab5\u00bb}, so its :seon.task/execution is not in the text.",
+  "left_out": "11 members of the calc/neg task map",
+  "read_form": "(val (nth (seq result/h3) 4))",
+  "confident": true
+ },
+ {
+  "section": 5,
+  "answer": "Not shown. Which task is stuck, and why, is not in the text. The :stuck and :red classes are each rendered as a placeholder.",
+  "left_out": ":stuck has 2 members not shown and :red has 2 members not shown; 1 more class under :classes is not shown",
+  "read_form": "(get-in result/h3 [:classes :stuck])",
+  "confident": true
+ },
+ {
+  "section": 6,
+  "answer": "The provider answered HTTP 400. The body's first paragraph is shown, and 10964 characters of the response body are not shown.",
+  "left_out": "10964 characters of the response body, from offset 289",
+  "read_form": "(subs (get-in result/h3 [:seon.error/data :body]) 289)",
+  "confident": true
+ },
+ {
+  "section": 7,
+  "answer": "Not shown. :seon.config.root/max-agents is not among the 17 keys shown. 73 more config keys are not shown.",
+  "left_out": "73 config keys",
+  "read_form": "(drop 17 result/h3)",
+  "confident": true
+ },
+ {
+  "section": 8,
+  "answer": "Not shown. The status of calc/neg#1 is not in the text; the attempt is rendered as {\u202610 (val (nth (seq result/h3) 2))}.",
+  "left_out": "10 members of the calc/neg#1 attempt map",
+  "read_form": "(val (nth (seq result/h3) 2))",
+  "confident": true
+ },
+ {
+  "section": 9,
+  "answer": "The d/datoms evaluation returned 400 datoms in total: 66 are shown and the marker says 334 are not shown. The rows shown are 66 by count, which agrees with the drop form.",
+  "left_out": "334 datoms",
+  "read_form": "(drop 66 (get-in (nth (my.turn/evals) 2) [:value]))",
+  "confident": true
+ },
+ {
+  "section": 10,
+  "answer": "The evaluation that raised an error is the one with :tag :err and form (seon.model/call provider request). Its message is: The provider answered HTTP 400: the request's messages exceed the model's context window.",
+  "left_out": "5524 characters of the error's response body, from offset 5729",
+  "read_form": "(subs (get-in (nth (my.turn/evals) 2) [:value :seon.error/data :body]) 5729)",
+  "confident": true
+ }
+]

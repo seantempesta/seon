@@ -16,7 +16,7 @@
     (case (.nextInt rng 9)
       0 (when t (task/execution-tx [t] (pick [:running :held :cancelled :running])))
       1 (when t (let [aid (str t "#x" k)] (task/attempt-start-tx aid t (pick ["r3-boot" "old-boot"]) :ax (env t) 0 "p")))
-      2 (when a [{:seon.attempt/id (:seon.attempt/id a) :seon.attempt/status (pick [:ended :dead :done :merged :closed :bailed :running])
+      2 (when a [{:seon.attempt/id (:seon.attempt/id a) :seon.attempt/status (pick [:ended :dead :done :merged :closed :running])
                   :seon.attempt/merged-t (+ 900 (.nextInt rng 300)) :seon.attempt/basis-t (+ 900 (.nextInt rng 300))
                   :seon.attempt/results [{:seon.proof/test (symbol "app.proofs" (str "p" (.nextInt rng 30) "-test"))
                                           :seon.proof/status (pick [:pass :fail :pass])}]}])

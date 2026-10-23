@@ -25,8 +25,10 @@
      :fixed {:ns 1000 :bytes 600 :calls 1}
      :sizes [100 1000 10000]
      ;; measured 2026-10-20 (was a Datalog query: 99 us, 108 KB): the seek itself allocates
-     ;; 23-32 KB in our Datahike / persistent-sorted-set on Jolt
-     :overrun {:task "seon.db/avet-seek-allocates" :measured {:ns 17000.0 :bytes 33200.0}}}))
+     ;; 23-32 KB in our Datahike / persistent-sorted-set on Jolt, on the whole process's count.
+     ;; Re-measured 2026-10-23 on the proof's own thread (18b0774; Chez 80e4b9f, load 17): 17 ->
+     ;; 21 KB and 18 -> 21 us. The record a ratchet compares with is this measure's
+     :overrun {:task "seon.db/avet-seek-allocates" :measured {:ns 21000.0 :bytes 21400.0}}}))
 
 (def ^:private explicit-attempt-pull
   "The attempt pull before the wildcard (2026-10-22, research row 20): what the reader read."
