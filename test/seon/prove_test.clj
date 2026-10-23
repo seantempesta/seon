@@ -51,7 +51,7 @@
   ;; the session's seon_prove for agent a3's branch at tx 7, and a3's turn asking for the same
   (let [[st outs] (feed (prove/prove-proc {}) [(req 10 :agent-3 7 :a3) (req 11 :agent-3 7 :a3)])]
     (is (= 1 (count (asks outs :tests))) "one tests request, to the agent that holds the branch")
-    (is (= {:op :tests :id :a3} (:req (first (asks outs :tests)))))
+    (is (= {:op :tests :id :a3 :mode :judge} (:req (first (asks outs :tests)))))
     (is (empty? (asks outs :spawn)) "the agent runs its own branch: no prove agent")
     (let [[_ all] (run-through st outs run-answer)]
       (is (= [10 11] (waiters-answered all)))
@@ -62,9 +62,9 @@
         ;; while main@1 runs: 200 requests on one branch (the burst), then one on another
         [st more] (feed st (concat (for [i (range 200)] (req (+ 100 i) :agent-3 (+ 10 i) :a3)) [(req 500 :agent-5 3 :a5)]))]
     (is (empty? more) "nothing starts while a run is in flight")
-    (is (= #{[:agent-3 nil] [:agent-5 nil]} (set (keys (:next st)))) "one pending change per branch")
-    (is (= 209 (get-in st [:next [:agent-3 nil] :t])) "the latest of the burst")
-    (is (= 200 (count (get-in st [:next [:agent-3 nil] :waiters]))) "the replaced requests' askers follow the latest")
+    (is (= #{[:agent-3 nil :judge] [:agent-5 nil :judge]} (set (keys (:next st)))) "one pending change per branch")
+    (is (= 209 (get-in st [:next [:agent-3 nil :judge] :t])) "the latest of the burst")
+    (is (= 200 (count (get-in st [:next [:agent-3 nil :judge] :waiters]))) "the replaced requests' askers follow the latest")
     (let [[st all] (run-through st outs run-answer)]
       (is (= 3 (count (asks all :tests))) "main, then agent-3 once, then agent-5 once: one run each")
       (is (= 202 (count (waiters-answered all))) "every asker answered")
@@ -132,7 +132,7 @@
         [r] (at/in-agent [{:op :eval :agent "root" :code code}])
         v (clojure.edn/read-string (clojure.edn/read-string (:printed r)))]
     (is (map? v) (pr-str r))
-    (is (re-find #"@\d+$" (:key (:session v))) "the key is the agent's branch at its tx")
+    (is (re-find #"@\d+!turn$" (:key (:session v))) "the key is the agent's branch at its tx")
     (is (= (:key (:session v)) (:key (:again v))) "asked again at the same tx: the same run's answer")
     (is (re-find (re-pattern (java.util.regex.Pattern/quote (:key (:session v)))) (:agent v)) "the agent's turn got the same run")
     (is (= [(:key (:session v))] (:runs v)) "ONE run fact for the three askers")))
@@ -214,8 +214,8 @@
         [st more] (feed st [(names 2 '#{a.x-test}) (names 3 '#{a.y-test}) (names 4 '#{a.x-test})])]
     (is (empty? more))
     (is (= 2 (count (:next st))) "two slots pending: the namespaces named differ")
-    (is (= #{2 4} (get-in st [:next [:main '#{a.x-test}] :waiters])) "the same slot joins")
-    (is (= #{3} (get-in st [:next [:main '#{a.y-test}] :waiters])) "the other keeps its own")
+    (is (= #{2 4} (get-in st [:next [:main '#{a.x-test} :judge] :waiters])) "the same slot joins")
+    (is (= #{3} (get-in st [:next [:main '#{a.y-test} :judge] :waiters])) "the other keeps its own")
     (let [[_ all] (run-through st outs run-answer)]
       (is (= 3 (count (asks all :spawn))) "three runs: main, x, y, each its own")
       (is (= [1 2 3 4] (waiters-answered all))))))

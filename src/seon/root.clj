@@ -909,7 +909,7 @@
 
 (defn prove!
   "Ask the test service (seon.prove) to prove a branch at a tx: agent id's own branch at its head,
-  or main (agent nil) at its head, the tests of namespaces names (a set of symbols; none: all it selects). A promise of the run's answer ({:key :ran :pass :fail :error
+  or main (agent nil) at its head (an agent's branch is proved as its turn proves it, mode :turn, so a session's request and the agent's turn are one run; main as the judge does), the tests of namespaces names (a set of symbols; none: all it selects). A promise of the run's answer ({:key :ran :pass :fail :error
   :red :reports ...}), the same run for every asker of that key: a session here, and the agent's
   turn."
   {:malli/schema [:function [:=> [:cat :seon.root/sys [:maybe :seon.agent/id]] :seon.host/promise]
@@ -917,7 +917,7 @@
   ([sys agent-id] (prove! sys agent-id #{}))
   ([sys agent-id names]
   (if-let [b (if agent-id (get-in @(call! sys {:op :state}) [:agents agent-id :branch]) (pdb/conn-main (:conn sys)))]
-    (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx (pdb/head (:conn sys) b))} agent-id (assoc :agent agent-id) (seq names) (assoc :names names)))
+    (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx (pdb/head (:conn sys) b)) :mode (if agent-id :turn :judge)} agent-id (assoc :agent agent-id) (seq names) (assoc :names names)))
     (doto (promise) (deliver (gone agent-id (str "no live agent " agent-id)))))))
 
 (defn agent-stats! "A promise of the agent's numbers now." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
