@@ -14,7 +14,7 @@
     `request-tx` writes the whole linked set released in one transaction (owner,
     2026-10-22): the reconciler forks only from a committed main, so every agent of the
     set starts from the same graph.
-  A failed attempt attaches no tasks: its task is held for root (seon.reconcile/hold-tx)."
+  A failed run attaches no tasks: its task is held for root (seon.reconcile/hold-tx)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.task :as task] [clojure.string :as str]))
 
@@ -38,7 +38,7 @@
                "Make every proof pass on the combined program. Record what you learn in the plan, then wait.")
    :design (str "Turn the plan, however rough (it may be one line from a user: \"store my workouts\"), into a plan an implement step can "
                 "follow without exploring. Explore first: find the owners of what it touches, their callers, the schemas on the data's "
-                "path and the library functions that already do the work, and try the idea at the REPL. If an earlier attempt failed, "
+                "path and the library functions that already do the work, and try the idea at the REPL. If an earlier run failed, "
                 "start from its evidence. Leave on this branch: (1) the plan rewritten with `my.task/update!`: what must become true, each owner, "
                 "library function and schema it touches cited as a backticked fully qualified name, and what you found; (2) each new or changed "
                 "schema registered; (3) each function's defn with its contract and a stub body; (4) the proofs, written and red, asserting "

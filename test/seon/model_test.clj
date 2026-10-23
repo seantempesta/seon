@@ -92,7 +92,7 @@
   (model/parse-reply (json/write-str {:model "m" :choices [{:message {:content "(+ 1 2)"} :finish_reason "stop"}] :usage u}) 1.0 2048))
 
 (deftest a-reply-reports-its-cache-hit-and-miss-tokens
-  ;; task seon.model/a-reply-records-its-cached-tokens: whether an attempt cost ~$0.01 or
+  ;; task seon.model/a-reply-records-its-cached-tokens: whether a run cost ~$0.01 or
   ;; ~$0.58 is the provider's cache share, so the completion keeps what the provider reported
   (is (= [64 56] ((juxt :cache-hit-tokens :cache-miss-tokens)
                   (usage-of {:prompt_tokens 120 :completion_tokens 3 :prompt_cache_hit_tokens 64 :prompt_cache_miss_tokens 56})))
@@ -112,7 +112,7 @@
 (deftest no-provider-answers-a-typed-error-never-a-reply
   ;; root's ruling, 2026-10-22 (brief 1, item 1): a root whose config names no model provider
   ;; ran the scripted provider (a test fixture) as if it were a model; it answers the first
-  ;; turn with the typed :seon.model/no-provider, which ends the attempt naming what to set
+  ;; turn with the typed :seon.model/no-provider, which ends the run naming what to set
   (let [r (model/complete {:kind :none} {:messages [{:role "user" :content "x"}] :task "demo/t" :turn 0})]
     (is (= :seon.model/no-provider (:seon.error/type r)))
     (is (seon.contract/valid? :seon.model/failure r))

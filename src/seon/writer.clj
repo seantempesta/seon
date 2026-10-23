@@ -165,14 +165,14 @@
       :agent-commit (-> st (assoc :dirty true) (update :commits inc))
       ;; the agent's branch (new: a pointer to main's head), then its fork: the agent opens
       ;; the branch itself and owns its writes (run-ahead, committed by the agent), and holds
-      ;; the task and attempt it works from its first form
+      ;; the task and run it works from its first form
       ;; its block of entity ids is reserved here, from the counter main's writes mint from
       :spawn (let [{:keys [agent branch]} m
                    resumed? (exists? branch)
                    lease (pdb/lease-block! @conn)]
                (when-not resumed? (d/branch! conn main branch))
                ;; main's commit and t, which this branch starts at and the image it forks from holds
-               (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :task (:task m) :attempt (:attempt m) :ns (:ns m) :fd (:fd m)
+               (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :task (:task m) :run (:run m) :ns (:ns m) :fd (:fd m)
                                               :cfg (:cfg st) :lease lease :resumed resumed?
                                               :commit (d/commit-id @conn) :t (:max-tx @conn)})
                (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))

@@ -58,4 +58,4 @@ Seon's own merges (a branch into main, main into a branch) are git's three-way m
 
 ## Not built: a merge queue on root
 
-Root's merges of worktree branches are git merges, batched by hand as above. Seon's own merges are merge tasks judged by the reconciler, one at a time: an octopus merge of several merge attempts is built and off (`:seon.config.merge/max-running` 1, until one combined test run of all its members is proven). No queue on root merges main into each candidate, proves the merged result and batches the disjoint ones, and builds, tests and checks are not tasks on root (task ``seon.reconcile/a-check-step-is-a-task``).
+Root's merges of worktree branches are git merges, batched by hand as above. Seon's own merges are merge tasks judged by the reconciler, one at a time: an octopus merge of several merge runs is built and off (`:seon.config.merge/max-running` 1, until one combined test run of all its members is proven). No queue on root merges main into each candidate, proves the merged result and batches the disjoint ones, and builds, tests and checks are not tasks on root (task ``seon.reconcile/a-check-step-is-a-task``).

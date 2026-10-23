@@ -22,8 +22,8 @@
     (is (= 'seon.render.ui/task-box (r/declared :seon.task/task :html)))
     (is (str/includes? (h/html (r/html task {:seon.render/schema :seon.task/task})) "task · calc/add")))
   (testing "a pulled entity's schema is the one its identity attribute names"
-    (is (= :seon.attempt/attempt (r/schema-of {:seon.attempt/id "x#1"} nil)))
-    (is (str/includes? (h/html (r/html {:seon.attempt/id "calc/add#1" :seon.attempt/agent :a3 :seon.attempt/status :running} {}))
+    (is (= :seon.run/run (r/schema-of {:seon.run/id "x#1"} nil)))
+    (is (str/includes? (h/html (r/html {:seon.run/id "calc/add#1" :seon.run/agent :a3 :seon.run/status :running} {}))
                        "href=\"/agent/a3\"")))
   (testing "no declaration: the one value printer's hiccup"
     (let [out (r/html {:k [1 2 3]} {})]
@@ -38,7 +38,7 @@
             :a3 {:status :killed :tests {:pass 0 :fail 3 :error 0}}}
    :health {:api {:defects 0} :render {:defects 1 :newest "boom"}}
    :writer {:tx-count 4 :tx-per-s 2.0} :fork-server {:status :up :pid 7} :main {:t 9 :datoms 100}
-   :tasks {} :attempts {} :events [] :root-errors [{:pid :render :message "boom"}] :now-ms 0
+   :tasks {} :runs {} :events [] :root-errors [{:pid :render :message "boom"}] :now-ms 0
    ;; what main recorded (seon.problems/report): root records an agent's death and a red run
    :recorded {:classes {:agent {:n 3 :rows [{:signature "s1" :count 2 :message "tests red: agent.a1/c"}
                                             {:signature "s2" :count 1 :message "agent a2 died: signal 9"}]}
@@ -136,11 +136,11 @@
         (is (= #{"ev-1" "ev-2"} (set (filter #(str/starts-with? % "ev-") (:removes patch)))))))))
 
 (deftest end-words
-  (testing "an agent stopped after its attempt finished ended; a kill is a kill; a death with no finished attempt died"
-    (is (= :ended (ui/shown-status (ui/ended-as {:status :killed} :a1 {:a1 {:seon.attempt/status :merged}}))))
-    (is (= :killed (ui/shown-status (ui/ended-as {:status :killed} :a1 {:a1 {:seon.attempt/status :running}}))))
+  (testing "an agent stopped after its run finished ended; a kill is a kill; a death with no finished run died"
+    (is (= :ended (ui/shown-status (ui/ended-as {:status :killed} :a1 {:a1 {:seon.run/status :merged}}))))
+    (is (= :killed (ui/shown-status (ui/ended-as {:status :killed} :a1 {:a1 {:seon.run/status :running}}))))
     (is (= :died (ui/shown-status (ui/ended-as {:status :dead} :a1 {}))))
-    (is (= :idle (ui/shown-status (ui/ended-as {:status :idle} :a1 {:a1 {:seon.attempt/status :merged}})))))
+    (is (= :idle (ui/shown-status (ui/ended-as {:status :idle} :a1 {:a1 {:seon.run/status :merged}})))))
   (testing "its card says how it ended, not KILLED"
     (let [html (h/html (:seon.render/html (ui/agent-card {:id :a1 :status :killed :ended-as :merged :evals []} {})))]
       (is (str/includes? html "ended · merged"))
@@ -167,9 +167,9 @@
       (is (str/includes? html "area-docs"))
       (is (= 2 (count (ai/problems (assoc sys :root-errors [] :recorded {:classes {:dead-citation {:n 1 :rows [{:signature "s" :message "m" :open? true}]}
                                                                                       :agent {:n 1 :rows [{:signature "s1" :count 1 :message "a"}]}}})))))))
-  (testing "a dead agent whose attempt finished is not a problem"
+  (testing "a dead agent whose run finished is not a problem"
     (is (empty? (ai/problems (assoc sys :agents {:a2 {:status :dead}} :health {} :root-errors [] :recorded {}
-                                    :agent-attempt {:a2 {:seon.attempt/status :done}}))))))
+                                    :agent-run {:a2 {:seon.run/status :done}}))))))
 
 (deftest observed-task-states
   (let [decl (fn [nm proofs & needs] (cond-> {:seon.task/ns 't :seon.task/name nm :seon.task/plan (str "Make " nm ".") :seon.task/proofs proofs}
@@ -178,26 +178,26 @@
         db (-> db (d/db-with (seon.task/create-tx db [(decl "a" #{'p/x}) (decl "b" #{'p/z} "t/a") (decl "c" #{'p/w})]))
                (d/db-with (seon.task/execution-tx ["t/a" "t/b"] :running))
                (d/db-with (seon.task/execution-tx ["t/c"] :cancelled))
-               (d/db-with (conj (seon.task/attempt-start-tx "t/a#1" "t/a" "boot-1" :a1 {:branch :task-t-a :model nil :max-turns 40} 1 "Make a.")
-                                {:seon.attempt/id "t/a#1" :seon.attempt/tokens 7
-                                 :seon.attempt/results [{:seon.proof/test 'p/x :seon.proof/status :pass} {:seon.proof/test 'p/y :seon.proof/status :fail}]})))
+               (d/db-with (conj (seon.task/run-start-tx "t/a#1" "t/a" "boot-1" :a1 {:branch :task-t-a :model nil :max-turns 40} 1 "Make a.")
+                                {:seon.run/id "t/a#1" :seon.run/tokens 7
+                                 :seon.run/results [{:seon.proof/test 'p/x :seon.proof/status :pass} {:seon.proof/test 'p/y :seon.proof/status :fail}]})))
         rows (p/task-rows (seon.reconcile/index db))]
     (testing "what happened, not the desired execution: running, blocked by its need, cancelled"
       (is (= :running (get-in rows ["t/a" :state])))
       (is (= :blocked (get-in rows ["t/b" :state])))
       (is (= #{"t/a"} (get-in rows ["t/b" :blocked-by])))
       (is (= :cancelled (get-in rows ["t/c" :state]))))
-    (testing "its own proofs on its newest attempt (another task's red is allowed), attempts so far, tokens"
-      (is (= [1 0 1 1 7] ((juxt :green :red :allowed-red :attempts :tokens) (get rows "t/a")))))))
+    (testing "its own proofs on its newest run (another task's red is allowed), runs so far, tokens"
+      (is (= [1 0 1 1 7] ((juxt :green :red :allowed-red :runs :tokens) (get rows "t/a")))))))
 
 (deftest stop-row-says-how-it-ended-once-main-knows
   (let [[st1 _] (answer (fresh-state) view0)
         [st2 out2] (answer (assoc st1 :new-events [{:type :killed :agent :a7 :at-ms 1}]) view0)
         row (second (first (:prepends (first (filter #(= :patch (:op %)) (:to-web out2))))))
-        _ (is (str/includes? row "KILLED") "before main records the attempt's end, a stop reads as a kill")
-        [_ out] (answer (assoc st2 :agent-attempt {:a7 {:seon.attempt/status :merged}}) view0)
+        _ (is (str/includes? row "KILLED") "before main records the run's end, a stop reads as a kill")
+        [_ out] (answer (assoc st2 :agent-run {:a7 {:seon.run/status :merged}}) view0)
         frag (some #(when (= "ev-1" (first %)) (second %)) (:frags (first (filter #(= :patch (:op %)) (:to-web out)))))]
-    (is (str/includes? frag "stopped by root after its attempt ended merged"))
+    (is (str/includes? frag "stopped by root after its run ended merged"))
     (is (str/includes? frag "e-ended"))))
 
 ;; ---- no clipping: every cut on the page and in root's context says what it left -------------
@@ -228,12 +228,12 @@
           {:keys [shown omitted]} (seon.print/prose s 40)]
       (is (= (count s) (+ (count shown) omitted)))
       (is (str/includes? (h/html (ui/prose s 40)) (str "…+" omitted " chars")))))
-  (testing "tasks are all listed; the attempts table says how many more main holds"
-    (let [rows (into {} (for [i (range 50)] [(str "t/x" i) {:state :done :blocked-by #{} :green 1 :red 0 :proofs 1 :attempts 1 :tokens 0}]))
-          attempts (into {} (for [i (range 12)] [(str "t/x" i "#1") {:seon.attempt/id (str "t/x" i "#1") :seon.attempt/status :done :seon.attempt/start-ms i}]))
-          html (h/html (:seon.render/html (ui/tile-tasks {:rows rows :attempts attempts} {})))]
+  (testing "tasks are all listed; the runs table says how many more main holds"
+    (let [rows (into {} (for [i (range 50)] [(str "t/x" i) {:state :done :blocked-by #{} :green 1 :red 0 :proofs 1 :runs 1 :tokens 0}]))
+          runs (into {} (for [i (range 12)] [(str "t/x" i "#1") {:seon.run/id (str "t/x" i "#1") :seon.run/status :done :seon.run/start-ms i}]))
+          html (h/html (:seon.render/html (ui/tile-tasks {:rows rows :runs runs} {})))]
       (is (str/includes? html ">t/x49<") "the 50th task is listed")
-      (is (str/includes? html "+4 more: older, on main: (seon.task/attempts (deref (:conn sys))) at root's REPL"))))
+      (is (str/includes? html "+4 more: older, on main: (seon.task/runs (deref (:conn sys))) at root's REPL"))))
   (testing "root's defects: the count is every one recorded, not the ones the view keeps"
     (let [html (h/html (:seon.render/html (ui/tile-errors {:root-errors (vec (for [i (range 20)] {:pid :render :message (str "boom " i)}))
                                                            :root-errors-total 31 :boot {} :store {}} {})))]
@@ -242,17 +242,17 @@
       (is (< (str/index-of html "boom 19") (str/index-of html "boom 14")) "newest first"))))
 
 (deftest root-context-names-what-each-list-left
-  (let [attempts (into {} (for [i (range 12)] [(str "t/x" i "#1") {:seon.attempt/id (str "t/x" i "#1") :seon.attempt/status :done
-                                                                     :seon.attempt/outcome :green :seon.attempt/end-ms i
-                                                                     :seon.attempt/reason (if (= i 11) (long-text 200) "ok")}]))
-        s (assoc sys :tasks {"t/x0" {}} :attempts attempts :task-rows {}
+  (let [runs (into {} (for [i (range 12)] [(str "t/x" i "#1") {:seon.run/id (str "t/x" i "#1") :seon.run/status :done
+                                                                     :seon.run/outcome :green :seon.run/end-ms i
+                                                                     :seon.run/reason (if (= i 11) (long-text 200) "ok")}]))
+        s (assoc sys :tasks {"t/x0" {}} :runs runs :task-rows {}
                  :root-errors [{:pid :render :message (long-text 300)}] :root-errors-total 4
                  :events (vec (for [i (range 30)] {:type :ready :agent :a1 :at-ms i})))
         text (r/ai s {:seon.render/schema :seon.render/system :seon.render/budget 2000})]
-    (testing "five ended attempts shown, seven more named with the form that reads them"
-      (is (str/includes? text "+7 more: ended, all in (seon.task/attempts (deref (:conn sys)))")))
+    (testing "five ended runs shown, seven more named with the form that reads them"
+      (is (str/includes? text "+7 more: ended, all in (seon.task/runs (deref (:conn sys)))")))
     (testing "a long reason is elided with the form that reads its rest"
-      (is (re-find #"…\+\d+ chars \(subs \(:seon.attempt/reason \(get \(seon.task/attempts" text)))
+      (is (re-find #"…\+\d+ chars \(subs \(:seon.run/reason \(get \(seon.task/runs" text)))
     (testing "root's defects: the shown one, its cut's form, and how many more"
       (is (re-find #"defect in render: word0 .*…\+\d+ chars \(subs \(:message \(nth \(:root-errors \(seon.root/state sys\)\) 0\)\) \d+\)" text))
       (is (str/includes? text "+3 more: (:root-errors (seon.root/state sys))")))
@@ -327,23 +327,23 @@
       (is (str/includes? (h/html (:seon.render/html (ui/event-row {:type :reply :agent :a14 :at-ms 0 :items [read]} {})))
                          "read its current-state block")))
     (testing "the agent page's panel is the text it read, as recorded (seon.context/recorded), and one copy of it"
-      (let [ctxv (#'p/context-of nil {:seon.attempt/task "t/x"} {:evals [{:tag :ret :form "(+ 1 2)" :printed "3"} read]})]
+      (let [ctxv (#'p/context-of nil {:seon.run/task "t/x"} {:evals [{:tag :ret :form "(+ 1 2)" :printed "3"} read]})]
         (is (= :why (first (keys ctxv))) "no db: why, not a rebuild"))
       (ts/test-branch! (fn [_ conn] (let [;; the wiki, as root's boot loads it: the help page every render reads
                                           _ (d/transact conn (seon.docs/load-tx @conn "docs" (seon.docs/pages (seon.config/checkout) "docs")))
                                           _ (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "p"}]))
             ;; an outside read whose done rule refused 360 contract gaps: its basis, never its text
-            b {:commit (d/commit-id @conn) :task "t/x" :attempt "t/x#1" :turn 1 :max-turns 1 :origin :outside
+            b {:commit (d/commit-id @conn) :task "t/x" :run "t/x#1" :turn 1 :max-turns 1 :origin :outside
                :observed {:results {} :reds [] :test-run-errors []
                           :reasons (vec (for [i (range 360)] {:reason :contract-gap :symbol (symbol "app.m" (str "f" i))}))}}
-            _ (d/transact conn [{:seon.turn/id "t/x#1/read-1" :seon.turn/attempt "t/x#1" :seon.turn/n 1
+            _ (d/transact conn [{:seon.turn/id "t/x#1/read-1" :seon.turn/run "t/x#1" :seon.turn/n 1
                                  :seon.turn/origin :outside :seon.turn/basis b}])
             db @conn
-            ctxv (#'p/context-of db {:seon.attempt/id "t/x#1" :seon.attempt/task "t/x"} {:evals [read]})]
+            ctxv (#'p/context-of db {:seon.run/id "t/x#1" :seon.run/task "t/x"} {:evals [read]})]
         (is (= {:text (seon.context/reader-text (:messages (seon.context/render db b))) :origin :outside} (select-keys ctxv [:text :origin]))
             "the text it read, made again from its basis")
         (is (str/includes? (:text ctxv) "app.m/f0") "what the read showed")
-        (is (:why (#'p/context-of db {:seon.attempt/id "t/x#2" :seon.attempt/task "t/x"} {:evals []})) "an attempt that read nothing says why")))))))
+        (is (:why (#'p/context-of db {:seon.run/id "t/x#2" :seon.run/task "t/x"} {:evals []})) "a run that read nothing says why")))))))
 
 (deftest a-hand-spawned-agent-says-why-it-has-no-context
   (let [{:keys [why]} (#'p/context-of nil nil {:task "index rows by id (#0)"})]
@@ -354,20 +354,20 @@
   (testing "an ended card's reds are said to be other tasks' proofs"
     (let [html (h/html (:seon.render/html (ui/agent-card {:id :a6 :status :killed :ended-as :merged :evals []
                                                           :tests {:pass 2 :fail 7 :error 0}} {})))]
-      (is (str/includes? html "its attempt ended merged: its own proofs passed; these reds are other tasks' proofs, allowed"))))
+      (is (str/includes? html "its run ended merged: its own proofs passed; these reds are other tasks' proofs, allowed"))))
   (testing "the count pills say what each state is; held says why"
-    (let [html (h/html (:seon.render/html (ui/tile-tasks {:rows {"t/a" {:state :held :blocked-by #{} :green 0 :red 0 :proofs 1 :attempts 0 :tokens 0}}
-                                                          :attempts {}} {})))]
+    (let [html (h/html (:seon.render/html (ui/tile-tasks {:rows {"t/a" {:state :held :blocked-by #{} :green 0 :red 0 :proofs 1 :runs 0 :tokens 0}}
+                                                          :runs {}} {})))]
       (is (re-find #"pill s-held\" title=\"held: declared in a task file" html))))
   (testing "boot's program count is definitions, and the agents tile names its retire window"
     (is (str/includes? (h/html (:seon.render/html (ui/tile-errors {:root-errors [] :boot {:program {:loaded 360}} :store {}} {}))) "360 defs"))
     (is (str/includes? (h/html (:seon.render/html (ui/tile-agents {:cells [] :off 3 :retire-ms 90000} {}))) "+3 ended over 90 s ago, off it"))))
 
 (deftest an-ended-agent-reads-ended-and-offers-no-live-buttons
-  (testing "root's own word for an agent it stopped because its attempt ended"
+  (testing "root's own word for an agent it stopped because its run ended"
     (is (= :ended (ui/shown-status {:status :ended})))
     (is (str/includes? (h/html (:seon.render/html (ui/event-row {:type :ended :agent :a6 :at-ms 0 :ended-as :merged} {})))
-                       "stopped by root: its attempt ended merged")))
+                       "stopped by root: its run ended merged")))
   (testing "its live buttons and REPL box are marked live, which an ended card hides; history stays"
     (let [shell (h/html (ui/card-shell :a6))]
       (is (= 6 (count (re-seq #"class=\"act live" shell))) "tests, merge, main, clone, interrupt, kill")
@@ -483,7 +483,7 @@
   (assoc task :seon.task/execution :held :seon.task/needs #{"calc/sub"}
          :seon.task/accumulated {:plan (str/join "\n" (cons "Make `app.calc/add` pass." (for [i (range 400)] (str "Step " i ": read `app.calc/f" i "` and its proof."))))
                                  :proofs (set (for [i (range 12)] (symbol "app.proofs" (str "add-" i "-test"))))}
-         :seon.task/failure {:reason "add cannot be total over longs" :counterexample "(add Long/MAX_VALUE 1)" :attempt "calc/add#2"}
+         :seon.task/failure {:reason "add cannot be total over longs" :counterexample "(add Long/MAX_VALUE 1)" :run "calc/add#2"}
          :seon.task/evidence {:from "calc/add#2" :conflicts [] :unmerged [] :red ['app.proofs/add-0-test] :problem "red"}))
 
 (deftest a-task-reads-its-state-plan-proofs-and-failure
@@ -505,16 +505,16 @@
     (let [html (h/html (r/html failed-task {:seon.render/schema :seon.task/task}))]
       (is (str/includes? html "failed in calc/add#2: add cannot be total over longs")))))
 
-(deftest an-attempt-reads-in-one-line
+(deftest a-run-reads-in-one-line
   (is (= "running calc/add#1 on a3, turn 2, 1840 tokens"
-         (r/ai {:seon.attempt/id "calc/add#1" :seon.attempt/status :running :seon.attempt/agent :a3 :seon.attempt/turns 2 :seon.attempt/tokens 1840} {})))
-  (let [line (r/ai {:seon.attempt/id "calc/add#2" :seon.attempt/status :failed :seon.attempt/outcome :merge-failed
-                    :seon.attempt/reason (str "merge refused: " (:seon.error/message behind))
-                    :seon.attempt/conflicts [{:key "var app.calc/add" :kind :var :base "a" :ours "b" :theirs "c"}]
-                    :seon.attempt/unmerged ["var app.calc/add"]}
+         (r/ai {:seon.run/id "calc/add#1" :seon.run/status :running :seon.run/agent :a3 :seon.run/turns 2 :seon.run/tokens 1840} {})))
+  (let [line (r/ai {:seon.run/id "calc/add#2" :seon.run/status :failed :seon.run/outcome :merge-failed
+                    :seon.run/reason (str "merge refused: " (:seon.error/message behind))
+                    :seon.run/conflicts [{:key "var app.calc/add" :kind :var :base "a" :ours "b" :theirs "c"}]
+                    :seon.run/unmerged ["var app.calc/add"]}
                    {:seon.render/handle '(get atts "calc/add#2")})]
     (is (str/starts-with? line "ended calc/add#2 merge-failed: merge refused: main changed 3 key(s)"))
-    (is (str/includes? line " · 1 conflicts in (:seon.attempt/conflicts (get atts \"calc/add#2\")) · 1 unmerged in (:seon.attempt/unmerged (get atts \"calc/add#2\"))"))))
+    (is (str/includes? line " · 1 conflicts in (:seon.run/conflicts (get atts \"calc/add#2\")) · 1 unmerged in (:seon.run/unmerged (get atts \"calc/add#2\"))"))))
 
 (defn- row
   "A problem row as seon.problems/report makes it: every row's members, then its class's."
@@ -524,22 +524,22 @@
   ;; rows as seon.problems/report makes them, one per class that had no line of its own
   (let [line #(r/ai (row (assoc %2 :class %1)) {:seon.render/schema :seon.problems/row})]
     (is (= "task-conflict calc/add calc/add#3 plan: {:base \"Make add.\", :ours \"Make add total.\", :theirs \"Make add pass.\"}"
-           (line :task-conflict {:task "calc/add" :attempt "calc/add#3" :attr :plan :open? true
+           (line :task-conflict {:task "calc/add" :run "calc/add#3" :attr :plan :open? true
                                  :evidence {:task "calc/add" :attr :plan :base "Make add." :ours "Make add total." :theirs "Make add pass." :from "calc/add#3"}})))
-    (is (= "failed calc/add calc/add#2: attempt calc/add#2 ended cap: proof-red app.proofs/add-test"
-           (line :failed {:task "calc/add" :attempt "calc/add#2" :reason "attempt calc/add#2 ended cap: proof-red app.proofs/add-test"}))
-        "a refused attempt's hold: a reason and no counterexample")
+    (is (= "failed calc/add calc/add#2: run calc/add#2 ended cap: proof-red app.proofs/add-test"
+           (line :failed {:task "calc/add" :run "calc/add#2" :reason "run calc/add#2 ended cap: proof-red app.proofs/add-test"}))
+        "a refused run's hold: a reason and no counterexample")
     (is (= "failed calc/add calc/add#2: add cannot be total over longs"
-           (line :failed {:task "calc/add" :attempt "calc/add#2" :reason "add cannot be total over longs" :counterexample "(add Long/MAX_VALUE 1)"})))
+           (line :failed {:task "calc/add" :run "calc/add#2" :reason "add cannot be total over longs" :counterexample "(add Long/MAX_VALUE 1)"})))
     (is (= "merge calc/add calc/add#2: main changed 3 key(s) since the branch's merge base: merge main into the branch first · 1 conflicts · unmerged var app.calc/add"
-           (line :merge {:task "calc/add" :attempt "calc/add#2" :error behind :conflicts 1 :unmerged ["var app.calc/add"]})))
+           (line :merge {:task "calc/add" :run "calc/add#2" :error behind :conflicts 1 :unmerged ["var app.calc/add"]})))
     (is (= "red calc/add calc/add#1 app.proofs/add-test: tests-red"
-           (line :red {:task "calc/add" :attempt "calc/add#1" :test 'app.proofs/add-test :outcome :tests-red})))
+           (line :red {:task "calc/add" :run "calc/add#1" :test 'app.proofs/add-test :outcome :tests-red})))
     (is (= "platform ×4: Datahike transact refused (answered by calc/fix-store)"
            (line :platform {:signature "s" :message "Datahike transact refused" :count 4 :answered-by ["calc/fix-store"]}))))
   (testing "the whole report at root's REPL: by class, each row by its render, closed rows marked"
     (let [rep (with-meta {:t 90 :classes {:failed {:n 1 :rows [(row {:task "calc/add" :reason "not total" :open? true})]}
-                                          :merge {:n 1 :rows [(row {:task "calc/sub" :attempt "calc/sub#1" :error behind :open? false})]}
+                                          :merge {:n 1 :rows [(row {:task "calc/sub" :run "calc/sub#1" :error behind :open? false})]}
                                           :red {:n 0 :rows []}}}
                 {:seon.render/schema :seon.problems/report})
           text (:text (r/printed rep 'result/h1))]
@@ -632,7 +632,7 @@
 
 (deftest every-part-names-its-inputs-schema
   (testing "a unit names its input's schema, whose declared render shows it, never a render function (docs/render.md#the-frame-and-its-units)"
-    (let [units (concat (:seon.render/units (r/render-face :html (assoc sys :order [:a1] :series {} :agent-attempt {}) {:seon.render/schema :seon.render/system}))
+    (let [units (concat (:seon.render/units (r/render-face :html (assoc sys :order [:a1] :series {} :agent-run {}) {:seon.render/schema :seon.render/system}))
                         (:seon.render/units (r/render-face :html {:agent {:id :a1 :status :idle} :context {:why "none"}}
                                                            {:seon.render/schema :seon.render/agent-page})))]
       (is (= #{"z-history-more"} (set (map :id (filter :render units))))

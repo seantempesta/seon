@@ -59,37 +59,37 @@
     (mapv #(task/task-id tns (:seon.task/name %)) ds)))
 
 (defn agents-reused
-  "Agent ids that more than one attempt used (must be empty: every attempt is a new agent)."
-  [d] (vec (for [[ag n] (frequencies (map :seon.attempt/agent (vals (task/attempts d)))) :when (> n 1)] ag)))
+  "Agent ids that more than one run used (must be empty: every run is a new agent)."
+  [d] (vec (for [[ag n] (frequencies (map :seon.run/agent (vals (task/runs d)))) :when (> n 1)] ag)))
 
 (defn- merge-counts [d]
   (let [ts (task/tasks d)
-        merge-as (filter #(= :merge (get-in ts [(:seon.attempt/task %) :seon.task/kind])) (vals (task/attempts d)))]
-    {:merge-attempts (frequencies (map :seon.attempt/status merge-as))
-     :behind-reattempts (count (filter #(= :behind (:seon.attempt/status %)) merge-as))
-     :conflicts-measured (reduce + (map #(count (:seon.attempt/conflicts % [])) merge-as))
+        merge-as (filter #(= :merge (get-in ts [(:seon.run/task %) :seon.task/kind])) (vals (task/runs d)))]
+    {:merge-runs (frequencies (map :seon.run/status merge-as))
+     :behind-reruns (count (filter #(= :behind (:seon.run/status %)) merge-as))
+     :conflicts-measured (reduce + (map #(count (:seon.run/conflicts % [])) merge-as))
      :held-tasks (count (filter #(= :held (:seon.task/execution %)) (vals ts)))
-     :model-calls-in-merges (reduce + (map #(:seon.attempt/model-calls % 0) merge-as))}))
+     :model-calls-in-merges (reduce + (map #(:seon.run/model-calls % 0) merge-as))}))
 
 (defn turns-per-merged-task
-  "Turns spent per task that reached main on d: for each task with a :merged attempt (a
-  merge task, 0 turns of its own), the turns of every attempt of the other tasks on its
+  "Turns spent per task that reached main on d: for each task with a :merged run (a
+  merge task, 0 turns of its own), the turns of every run of the other tasks on its
   branch (the work it merged), averaged; nil when none merged."
   [d]
   (let [ts (task/tasks d)
-        by-task (group-by :seon.attempt/task (vals (task/attempts d)))
-        merged (filter #(some (comp #{:merged} :seon.attempt/status) (by-task %)) (keys ts))
+        by-task (group-by :seon.run/task (vals (task/runs d)))
+        merged (filter #(some (comp #{:merged} :seon.run/status) (by-task %)) (keys ts))
         work (fn [id] (for [[wid w] ts :when (and (not= wid id) (= (:seon.task/branch w) (:seon.task/branch (ts id)))) a (by-task wid)] a))]
     (when (seq merged)
-      (lib/r2 (/ (double (reduce + (for [id merged a (concat (work id) (by-task id))] (:seon.attempt/turns a 0)))) (count merged))))))
+      (lib/r2 (/ (double (reduce + (for [id merged a (concat (work id) (by-task id))] (:seon.run/turns a 0)))) (count merged))))))
 
 (defn- numbers [sys t0]
-  (let [as (vals (task/attempts (db sys)))
-        merged (filter #(= :merged (:seon.attempt/status %)) as)]
-    {:wall-ms (- (now) t0) :attempts (count as) :merged (count merged)
+  (let [as (vals (task/runs (db sys)))
+        merged (filter #(= :merged (:seon.run/status %)) as)]
+    {:wall-ms (- (now) t0) :runs (count as) :merged (count merged)
      :turns-per-merged-task (turns-per-merged-task (db sys))
-     :model-calls (reduce + (map #(:seon.attempt/model-calls % 0) as))
-     :tokens (reduce + (map #(:seon.attempt/tokens % 0) as))
+     :model-calls (reduce + (map #(:seon.run/model-calls % 0) as))
+     :tokens (reduce + (map #(:seon.run/tokens % 0) as))
      :root-real-mb (lib/r2 (lib/real-mb)) :writer (:writer (c/state sys))
      :root-errors (vec (take 3 (:root-errors (c/state sys))))}))
 
@@ -119,8 +119,8 @@
   function (seon.fixtures/generation, 1 -> 2) on its branch, its merge task merges it, the
   reconciler commits main's file on the merges branch, and the merge loads in place: root
   and every agent forked after it run the new definition, with no build and no restart
-  (BUILD plan P4). Waits for quiescence. Answers {:commit sha (the merged attempt's)
-  :commits [[attempt sha]] :commit-errors [[attempt message]] :turn-ms (release to quiet) :spans [[attempt start end] ms
+  (BUILD plan P4). Waits for quiescence. Answers {:commit sha (the merged run's)
+  :commits [[run sha]] :commit-errors [[run message]] :turn-ms (release to quiet) :spans [[run start end] ms
   from release]
   :root (seon.fixtures/generation in root) :agent (in an agent forked after the merge)
   :quiescent q}. k: the scenario (fixtures/scenarios), :loop by default; :loop-2 is the
@@ -133,11 +133,11 @@
         q (quiet! sys)
         turn-ms (- (now) t0)
         d (db sys)
-        commits (vec (d/q '[:find ?a ?c :where [?e :seon.attempt/commit ?c] [?e :seon.attempt/id ?a]] d))]
+        commits (vec (d/q '[:find ?a ?c :where [?e :seon.run/commit ?c] [?e :seon.run/id ?a]] d))]
     {:commit (second (first commits)) :commits commits
-     :commit-errors (vec (d/q '[:find ?a ?m :where [?e :seon.attempt/commit-error ?m] [?e :seon.attempt/id ?a]] d))
+     :commit-errors (vec (d/q '[:find ?a ?m :where [?e :seon.run/commit-error ?m] [?e :seon.run/id ?a]] d))
      :turn-ms turn-ms
-     :spans (vec (sort (for [[a s e] (d/q '[:find ?a ?s ?e :where [?x :seon.attempt/id ?a] [?x :seon.attempt/start-ms ?s] [?x :seon.attempt/end-ms ?e]] d)]
+     :spans (vec (sort (for [[a s e] (d/q '[:find ?a ?s ?e :where [?x :seon.run/id ?a] [?x :seon.run/start-ms ?s] [?x :seon.run/end-ms ?e]] d)]
                          [a (- s t0) (- e t0)])))
      :root (seon.fixtures/generation) :agent (first (fresh sys "(seon.fixtures/generation)"))
      :quiescent q})))
@@ -146,9 +146,9 @@
   "The self-improvement loop, first turn: root boots on a clone of this repository (its
   committed HEAD, under the run's directory: never the live tree) with Seon's own source as
   main's program, and runs loop-turn!. Passes when the commit holds exactly that form's
-  change, the merged attempt records its sha, and the merged definition is live in root and
+  change, the merged run records its sha, and the merged definition is live in root and
   in an agent forked after the merge, with nothing built. The turn's time is printed with
-  each attempt's span: under a second needs seon.merge/program-cost-follows-what-changed."
+  each run's span: under a second needs seon.merge/program-cost-follows-what-changed."
   [dir]
   (let [t0 (now)
         repo (.getParent (java.io.File. (System/getProperty "user.dir")))
@@ -206,7 +206,7 @@
   quiescence; a row without :specs only boots and waits (a restart's second phase). Then a
   fresh agent runs :check on what main runs, which must print :expect, and (:ok run) judges
   the rest from {:sys :q (the quiescence report) :d (main)}, answering {:ok bool & what it
-  measured}, printed as :checks. No agent may serve two attempts of one boot (a row without
+  measured}, printed as :checks. No agent may serve two runs of one boot (a row without
   :specs spans two boots, whose agent ids both start at a1). Answers the verdict, printed
   under the row's :label (E2E when it names none)."
   [{:keys [boot specs during check expect ok label] :as row}]
@@ -229,8 +229,8 @@
 
 (defn- restart
   "A restart on main nm of the one store: phase 1 works the calc graph and SIGKILLs root
-  once add has merged with attempts still running; phase 2 (a new root on the same store
-  and main) reaps the lost attempts and finishes the graph."
+  once add has merged with runs still running; phase 2 (a new root on the same store
+  and main) reaps the lost runs and finishes the graph."
   [phase2? nm]
   (let [boot {:max-running 2 :main (keyword nm)}]
     (if phase2?
@@ -253,7 +253,7 @@
    :during (fn [sys ev]
              (loop [ready #{}]
                (let [e (a/<!! ev) ready (cond-> ready (= :ready (:type e)) (conj (:agent e)))]
-                 (when-not (some #(and (ready (:seon.attempt/agent %)) (= "calc/neg" (:seon.attempt/task %))) (vals (task/attempts (db sys))))
+                 (when-not (some #(and (ready (:seon.run/agent %)) (= "calc/neg" (:seon.run/task %))) (vals (task/runs (db sys))))
                    (recur ready))))
              (println :cancel-neg (select-keys (root/cancel! sys ["calc/neg"]) [:ok])))
    :check "(app.calc/sum-sq 3 4)\n(count (my.db/q '[:find ?e :where [?e :seon.turn/id]]))" :expect ["25" "0"]
@@ -324,9 +324,9 @@
 (defn- held
   "A task that always fails is held for root, and root's release runs it again on its branch,
   from the evidence: add (always wrong) is refused once and held (its failure, its
-  evidence, the attempt closed); nothing else starts, no task is created, and the reconciler
+  evidence, the run closed); nothing else starts, no task is created, and the reconciler
   reports quiescence naming add as the root cause of twice and the merges; the problems read
-  lists it. Root releases add (my.root/run!): one new attempt, on add's branch, whose agent
+  lists it. Root releases add (my.root/run!): one new run, on add's branch, whose agent
   took the task from main with add#1's evidence (seon.task/onto-tx), refused and held again.
   Each wait ends on the reconciler's quiescence report, with no deadline."
   []
@@ -336,30 +336,30 @@
                [row & more] (:root-causes q)
                ts (task/tasks d)
                add (get ts "calc/add")
-               first? (and (nil? more) (= "calc/add" (:task row)) (= "calc/add#1" (:attempt row)) (= blocks (:blocks row))
-                           (= :held (:seon.task/execution add)) (= "calc/add#1" (:attempt (:seon.task/failure add)))
+               first? (and (nil? more) (= "calc/add" (:task row)) (= "calc/add#1" (:run row)) (= blocks (:blocks row))
+                           (= :held (:seon.task/execution add)) (= "calc/add#1" (:run (:seon.task/failure add)))
                            (= "calc/add#1" (:from (:seon.task/evidence add)))
                            (= #{"calc/add" "calc/add-merge" "calc/twice" "calc/twice-merge"} (set (keys ts)))
-                           (= [[:closed]] (mapv (comp vector :seon.attempt/status) (vals (task/attempts d)))))
+                           (= [[:closed]] (mapv (comp vector :seon.run/status) (vals (task/runs d)))))
                problems (get-in (root/problems sys) [:classes :failed :rows])
                ;; root decides: run it again
                _ (println :release (select-keys (root/run! sys ["calc/add"]) [:ok]))
                q2 (quiet! sys)
                d2 (db sys)
-               a2 (task/attempt d2 "calc/add#2")
+               a2 (task/run d2 "calc/add#2")
                branch (task/default-branch "calc/add")
                on-branch (task/task (:db @(c/branch-db sys branch)) "calc/add")
-               second? (and (= branch (get-in a2 [:seon.attempt/env :branch]))
+               second? (and (= branch (get-in a2 [:seon.run/env :branch]))
                             ;; the agent took its task from main: add#1's evidence
                             (= "calc/add#1" (:from (:seon.task/evidence on-branch)))
-                            (= "calc/add#2" (:attempt (:seon.task/failure (task/task d2 "calc/add"))))
+                            (= "calc/add#2" (:run (:seon.task/failure (task/task d2 "calc/add"))))
                             (= :held (:seon.task/execution (task/task d2 "calc/add")))
-                            (= 2 (count (task/attempts d2))) (= 4 (count (task/tasks d2)))
+                            (= 2 (count (task/runs d2))) (= 4 (count (task/tasks d2)))
                             (= ["calc/add"] (mapv :task (:root-causes q2))))]
            {:ok (and first? second? (= 1 (count (filter :open? problems))))
             :first-hold first? :release-on-the-same-branch second?
             :root-causes (:root-causes q) :root-causes-after-release (:root-causes q2)
-            :quiet-after-last-end-ms (- (now) (apply max 0 (keep :seon.attempt/end-ms (vals (task/attempts d2)))))
+            :quiet-after-last-end-ms (- (now) (apply max 0 (keep :seon.run/end-ms (vals (task/runs d2)))))
             :problems-failed (count problems)}))})
 
 (defn run

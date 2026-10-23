@@ -212,8 +212,8 @@
         observed {:results {'demo-test/f-test :fail} :test-run-errors []
                   :reds [{:test 'demo-test/f-test :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))" :got "(= 6 4)"}]
                   :reasons [{:reason :proof-red :symbol 'demo-test/f-test} {:reason :contract-gap :symbol 'demo/helper}]}
-        basis (fn [db n] {:commit (d/commit-id db) :task "demo/f" :attempt "demo/f#1" :turn n :max-turns 4 :origin :model :observed observed})
-        record! (fn [b more] (d/transact conn [(merge {:seon.turn/id (str "demo/f#1/" (:turn b)) :seon.turn/attempt "demo/f#1"
+        basis (fn [db n] {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4 :origin :model :observed observed})
+        record! (fn [b more] (d/transact conn [(merge {:seon.turn/id (str "demo/f#1/" (:turn b)) :seon.turn/run "demo/f#1"
                                                        :seon.turn/n (:turn b) :seon.turn/origin :model :seon.turn/basis b
                                                        :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1 :seon.turn/tokens 1}
                                                       more)]))
@@ -233,18 +233,18 @@
         {:keys [text repairs]} (reader/forgive code0)
         sent1 (context/reader-text (context/messages "H" (context/current-state db1 (task/task db1 "demo/f")
                                                                             (assoc observed :turn 1 :max-turns 4 :truncated? true :source text :repairs repairs))
-                                                     [{:reply "f triples." :calls calls0 :attempt (:content (second msgs0))}]))
+                                                     [{:reply "f triples." :calls calls0 :run (:content (second msgs0))}]))
         _ (record! b1 {:seon.turn/reply "" :seon.turn/calls [{:id "call-1" :code "(my.turn/wait)" :evals ""}]})
         _ (d/transact conn (program "(defn f \"Later.\" [x] x)"))
         db @conn
         e-of (fn [id] (d/q '[:find ?e . :in $ ?id :where [?e :seon.turn/id ?id]] db id))]
     (is (str/includes? sent0 "Doubles.") "turn 0 read the program as it stood")
-    (is (not (str/includes? sent1 "Triples.")) "turn 1's attempt sections are turn 0's: the prefix stays")
+    (is (not (str/includes? sent1 "Triples.")) "turn 1's run sections are turn 0's: the prefix stays")
     (is (= sent0 (context/turn-text db (e-of "demo/f#1/0"))) "turn 0's text, made again from its basis")
     (is (= sent1 (context/turn-text db (e-of "demo/f#1/1"))) "turn 1's text, its scrollback included")
     (is (= sent1 (context/reader-text (:messages (context/render db1 b1)))) "the turn loop's own render is the same text")
     (is (= {:text sent1 :origin :model :turn "demo/f#1/1"} (context/recorded db "demo/f#1")) "the page reads the last turn's")
-    (is (nil? (context/recorded db "c#1")) "an attempt that read nothing has no context")
+    (is (nil? (context/recorded db "c#1")) "a run that read nothing has no context")
     (is (< (count (seon.edn/encode b1)) 600) "the basis is small: no text the db already holds")))))
 
 (deftest a-context-read-as-a-value-does-not-grow-the-next-context
@@ -323,7 +323,7 @@
   ;; context showed only the previous turn's evaluations (2026-10-21); a REPL keeps its
   ;; scrollback. Owner, 2026-10-22: a turn is native tool calls, so each eval call's answer is
   ;; its own tool message, read before the next call
-  (let [turns [{:attempt "C0" :reply "R0" :calls [{:id "a" :code "(def x 41)" :evals "E0"}]}
+  (let [turns [{:run "C0" :reply "R0" :calls [{:id "a" :code "(def x 41)" :evals "E0"}]}
                {:reply "" :calls [{:id "b" :code "(inc x)" :evals "E1"} {:id "c" :code "(dec x)" :evals "E2"}]}
                {:reply "R2" :calls []}]
         ms (context/messages "H" {:task "t"} turns)]
@@ -335,7 +335,7 @@
     (is (not (contains? (nth ms 7) :tool-calls)) "a reply that called nothing carries no calls")
     (is (str/starts-with? (:content (peek ms)) "The current state") "the current state comes last"))
   (testing "a reply that called nothing is followed by a user message, so two replies never meet"
-    (let [ms (context/messages "H" {:task "t"} [{:attempt "C0" :reply "R0" :calls []} {:reply "R1" :calls []}])]
+    (let [ms (context/messages "H" {:task "t"} [{:run "C0" :reply "R0" :calls []} {:reply "R1" :calls []}])]
       (is (= ["system" "user" "assistant" "user" "assistant" "user"] (mapv :role ms)))))
   (testing "the history budget keeps whole turns, the newest always"
     (let [turns [{:reply (apply str (repeat 400 "a")) :calls []} {:reply "R1" :calls [{:id "b" :code "(f)" :evals "E1"}]} {:reply "R2" :calls []}]]
@@ -356,9 +356,9 @@
                defs)))
 
 (defn- turn-of
-  "A recorded model turn n of attempt demo/f#1 with basis b: one call and its answer."
+  "A recorded model turn n of run demo/f#1 with basis b: one call and its answer."
   [b n]
-  {:seon.turn/id (str "demo/f#1/" n) :seon.turn/attempt "demo/f#1" :seon.turn/n n :seon.turn/origin :model
+  {:seon.turn/id (str "demo/f#1/" n) :seon.turn/run "demo/f#1" :seon.turn/n n :seon.turn/origin :model
    :seon.turn/basis b :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1
    :seon.turn/reply (str "reply " n) :seon.turn/calls [{:id (str "call-" n) :code (str "(+ " n " 1)") :evals (str (inc n))}]})
 
@@ -374,7 +374,7 @@
                                                :seon.task/proofs #{'demo-test/f-test}}]))
       (let [observed {:results {'demo-test/f-test :fail} :test-run-errors [] :reds [] :reasons [{:reason :proof-red :symbol 'demo-test/f-test}]}
             request (fn [n] (let [db @conn
-                                  b {:commit (d/commit-id db) :task "demo/f" :attempt "demo/f#1" :turn n :max-turns 4 :origin :model :observed observed}
+                                  b {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4 :origin :model :observed observed}
                                   ms (:messages (context/render db b))]
                               (d/transact conn [(turn-of b n)])
                               ms))
@@ -386,11 +386,11 @@
         (is (= (pop r1) (subvec r2 0 (dec (count r1)))) "turn 2 starts with turn 1's request but its turn sections")
         (is (= (context/help-text @conn) (:content (first r0))) "the system message is the help page as main holds it")
         (is (str/starts-with? (:content (first r0)) "# The agent\n\nYou are a Seon agent") "the page, from its sections")
-        (is (str/includes? (:content (second r2)) "Doubles.") "the attempt sections are the first turn's")
+        (is (str/includes? (:content (second r2)) "Doubles.") "the run sections are the first turn's")
         (is (str/starts-with? (:content (peek r2)) "The current state") "the turn sections come last")
         (is (str/includes? (:content (peek r2)) ":turn \"3 of 4\"") "a model turn says which of its most it is")
         (let [db @conn
-              read (:messages (context/render db {:commit (d/commit-id db) :task "demo/f" :attempt "demo/f#1" :turn 2 :max-turns 1
+              read (:messages (context/render db {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn 2 :max-turns 1
                                                   :origin :outside :observed observed}))]
           (is (not (str/includes? (:content (peek read)) ":turn")) "an outside agent's read has no turn count"))))))
 
@@ -401,12 +401,12 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/g``` exact."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
         block (context/current-state db (task/task db "demo/f") {:results {'demo-test/f-test :fail} :turn 1 :max-turns 4})
-        ms (context/messages "H" block [{:attempt (:content (second (context/messages "H" block))) :reply "R0" :calls [{:id "a" :code "(g 2)" :evals "1"}]}])
+        ms (context/messages "H" block [{:run (:content (second (context/messages "H" block))) :reply "R0" :calls [{:id "a" :code "(g 2)" :evals "1"}]}])
         times (fn [s] (count (filter #(str/includes? (str (:content %)) s) ms)))]
     (is (= 1 (times "Make ```demo/g``` exact.")) "the plan once")
     (is (= 1 (times "(defn g \\\"Halves.\\\"")) "a cited source once")
     (is (= 1 (times ":test demo-test/f-test")) "the proofs once, in the turn sections")
-    (is (not (str/includes? (:content (peek ms)) ":references")) "the turn sections hold no attempt section")))
+    (is (not (str/includes? (:content (peek ms)) ":references")) "the turn sections hold no run section")))
 
 (deftest a-cited-var-shows-at-its-citations-depth
   ;; task seon.context/a-cited-var-shows-at-its-citation-depth: the delimiter picks the depth
@@ -480,7 +480,7 @@
         ms (context/messages "H" (context/current-state db (task-f db) {:turn 1 :max-turns 4 :will-merge will}))]
     (is (str/includes? (:content (peek ms)) ":will-merge") "in the turn sections")
     (is (str/includes? (:content (peek ms)) "demo/h"))
-    (is (not (str/includes? (:content (second ms)) ":will-merge")) "not in the attempt sections")
+    (is (not (str/includes? (:content (second ms)) ":will-merge")) "not in the run sections")
     (is (= {} (:will-merge (context/current-state db (task-f db) {:turn 1 :max-turns 4 :will-merge {}})))
         "measured and nothing to carry says so")
     (is (not (contains? (context/current-state db (task-f db) {:turn 1 :max-turns 4}) :will-merge))

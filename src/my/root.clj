@@ -55,7 +55,7 @@
       (seq refused) (assoc :not-held refused))))
 
 (defn cancel!
-  "Cancel tasks ids: a live attempt is killed; tasks that need them stay blocked."
+  "Cancel tasks ids: a live run is killed; tasks that need them stay blocked."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
   [sys ids] @(root/transact-main! sys (task/execution-tx ids :cancelled)))
 
@@ -100,7 +100,7 @@
 
 (defn problems
   "Every open problem on main, by class (seon.problems/health): recorded errors counted
-  by signature (:platform :eval :agent :effect) and attempts' red proofs, cost verdicts,
+  by signature (:platform :eval :agent :effect) and runs' red proofs, cost verdicts,
   merges, deaths, errors and waste, each row with its producer, owning namespace, evidence
   as data, reproducing proofs and the tasks already answering it; and what the program's
   facts make true now (:dead-citation). Reads main and the api's fold (the true counts of

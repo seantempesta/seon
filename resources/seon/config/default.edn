@@ -155,15 +155,15 @@
  ;; returns (:system-free-returned-mb-per-agent, reported, not checked). Provenance: the
  ;; window it replaced. At the bound: the free memory is read.
  :seon.config.check/pages-ms 500
- ;; Unit: attempts running at once (v1's :seon.config.agent/max-running, same value and
+ ;; Unit: runs running at once (v1's :seon.config.agent/max-running, same value and
  ;; reason): four agents beside the user's work fit a 16 GB machine. A ready task beyond it
  ;; waits for an end; 0 starts nothing new while running work finishes. root's start! may
  ;; pass :max-running for one run; the fact on main says what the run used.
  :seon.config.agent/max-running 4
- ;; Unit: turns an attempt may take when its task sets none (a task's own
- ;; :seon.config.agent/max-turns wins). At the bound the attempt ends and the done rule judges it.
+ ;; Unit: turns a run may take when its task sets none (a task's own
+ ;; :seon.config.agent/max-turns wins). At the bound the run ends and the done rule judges it.
  ;; Provenance: v1's live runs measured turns-to-green median 14-40, run 11's p90 32
- ;; (2026-10-18); R4's DeepSeek runs p90 6 with good context. 8 cut ordinary attempts below
+ ;; (2026-10-18); R4's DeepSeek runs p90 6 with good context. 8 cut ordinary runs below
  ;; v1's median (owner, 2026-10-21: "8 turn cap? wtf? make sensible defaults!"), so the bound
  ;; sits above the measured p90. Tokens are the paid resource; task
  ;; seon.model/budgets-are-data-and-spend-is-measured makes them the budget.
@@ -205,17 +205,17 @@
 
  ;; ==== merges =================================================================================
 
- ;; Unit: merge attempts at once. They run together only when the definitions they change are
+ ;; Unit: merge runs at once. They run together only when the definitions they change are
  ;; disjoint (an octopus merge); 1 is git's one-at-a-time merge queue. Provenance: DECISIONS (root's
  ;; calls on R3's questions): octopus merges stay off until one combined test run of all octopus
  ;; members, the par-200 hang and root memory growth with concurrent merges are fixed. The code
  ;; default had become 8 (b7459c3) with nothing writing the fact (FENCES active bug 1); boot now
  ;; writes this. An octopus merge is turned on by stating more here (or on main's root entity).
  :seon.config.merge/max-running 1
- ;; Unit: conflicts. A merge attempt whose merge of main has more is refused
+ ;; Unit: conflicts. A merge run whose merge of main has more is refused
  ;; (:too-many-conflicts); a task's own :seon.config.merge/max-conflicts wins.
  :seon.config.merge/max-conflicts 3
- ;; Unit: merge turns without green. Past it the merge attempt ends (:merge-turns); a task's
+ ;; Unit: merge turns without green. Past it the merge run ends (:merge-turns); a task's
  ;; own :seon.config.merge/max-merge-turns wins.
  :seon.config.merge/max-merge-turns 2
 
@@ -250,7 +250,7 @@
  ;; Unit: branch. Merges are committed here, never on main and never pushed (owner).
  :seon.config.source/branch "jolt/seon-merges"
  ;; Unit: a git identity. Seon authors and commits its merges (the message names the merged
- ;; tasks and attempts). Stated here because a root's HOME is its checkout's target/home, which
+ ;; tasks and runs). Stated here because a root's HOME is its checkout's target/home, which
  ;; holds no git identity (bin/check loop, 2026-10-21: "Author identity unknown").
  :seon.config.source/committer-name "Seon"
  :seon.config.source/committer-email "seon@localhost"
@@ -288,7 +288,7 @@
  :seon.config.fx/buf 1024
 
  ;; Who answers agents' turns. With no profile, none: the first turn answers the typed
- ;; :seon.model/no-provider and the attempt ends on it (root's ruling 2026-10-22: production
+ ;; :seon.model/no-provider and the run ends on it (root's ruling 2026-10-22: production
  ;; ran the scripted test fixture as if it were a model). SEON_PROFILE=deepseek (or
  ;; SEON_AI_PROVIDER=openai-compat) uses the endpoint below; SEON_PROFILE=scripted, the
  ;; scripted provider (a test fixture) bin/check and bin/test run under, no paid call: it needs
@@ -305,7 +305,7 @@
  ;; (2,048) before this file. At the bound the reply is cut (:truncated?), or
  ;; the reasoning ate the reply (:seon.model/reasoning-ate-reply). v1 ships 65,536 for Flash
  ;; with thinking on (its 4,096 and 8,192 starved reasoning). Ported 2026-10-21 after the first
- ;; DeepSeek agent on Seon's own code: two refinement attempts answered empty, reasoning took all
+ ;; DeepSeek agent on Seon's own code: two refinement runs answered empty, reasoning took all
  ;; 2,048. Billed by use, so the ceiling costs nothing unspent.
  :seon.config.ai/max-tokens #long #or [#env SEON_AI_MAX_TOKENS 65536]
  ;; DeepSeek's thinking mode (:enabled | :disabled). Off (owner, 2026-10-21: "if we can't have
@@ -316,7 +316,7 @@
  :seon.config.ai/thinking :disabled
  ;; Unit: model calls in flight at once, cluster-wide: our admission cap, the :model owner's
  ;; workers (session FX1). At the bound turns queue in the owner, by priority. Our choice, small:
- ;; eight is twice the attempts running at once (:seon.config.agent/max-running 4), so a
+ ;; eight is twice the runs running at once (:seon.config.agent/max-running 4), so a
  ;; merge's or a judge's call never waits behind the work, while a runaway loop spends at most
  ;; eight calls' tokens at a time. The provider's own ceiling, per account across all keys
  ;; (api-docs.deepseek.com/quick_start/rate_limit, read 2026-10-21): 2,500 concurrent for
@@ -409,7 +409,7 @@
  ;; the form that reads its rest. Provenance: seon.context's literal last-evals-budget (6000),
  ;; 2026-10-21 it was raised to 24000 (a live agent reading four Datahike functions got ~1500
  ;; tokens each and re-read them); with 256000 of history that sent ~300k tokens a turn (an
- ;; attempt of 13 turns spent 4.1M), so 8000: a long read is cut with the form that reads its rest.
+ ;; run of 13 turns spent 4.1M), so 8000: a long read is cut with the form that reads its rest.
  :seon.config.render/evals-budget 8000
  ;; Unit: tokens of earlier turns (each the model's reply and what its forms evaluated to) the
  ;; model reads before the current state, whole turns, the newest kept first; the task's first
@@ -431,11 +431,11 @@
  ;; Unit: items. A list shown in part (seon.print/bounded) shows this many, then `+N more:
  ;; where` (docs/render.md#bounded-lists). Provenance: the literals each list carried before
  ;; (render.ui and render.ai, 2026-10-22), kept as they were.
- ;; rows: running and newest attempts, root's context's newest events.
+ ;; rows: running and newest runs, root's context's newest events.
  :seon.config.render.list/rows 8
  ;; newest: a tile's or card's newest (root's defects on the page, a card's evaluations).
  :seon.config.render.list/newest 6
- ;; brief: a secondary list in root's context (ended attempts, costliest functions).
+ ;; brief: a secondary list in root's context (ended runs, costliest functions).
  :seon.config.render.list/brief 5
  ;; top: root's context's defects, the evaluations its costliest functions come from, a
  ;; card's top functions.

@@ -2,11 +2,11 @@
 
 An agent works its task in a loop inside its own process: observe the branch, end if the done rule refuses nothing, otherwise send the context to the model and evaluate its reply, then observe again.
 
-## One attempt, from release to judge
+## One run, from release to judge
 
-Root's reconciler forks an agent for a released task and evaluates ```seon.turn/work!``` in it, naming the task, the attempt and `:seon.config.agent/max-turns`. The loop ends on the first of:
+Root's reconciler forks an agent for a released task and evaluates ```seon.turn/work!``` in it, naming the task, the run and `:seon.config.agent/max-turns`. The loop ends on the first of:
 - the done rule refuses nothing (`:green`; all green at the start ends it with no model call);
-- a function asked to stop: `my.turn/wait` (`:waiting`) or `my.task/fail!` (`:failed`, the task held for root: [tasks](tasks.md#a-refused-attempt-is-held-for-root));
+- a function asked to stop: `my.turn/wait` (`:waiting`) or `my.task/fail!` (`:failed`, the task held for root: [tasks](tasks.md#a-refused-run-is-held-for-root));
 - the turns run out (`:cap`, with the done rule's reasons as its reason);
 - a merge task's merge of main is too hairy (`:merge-failed`, [below](#a-merge-tasks-loop));
 - the model call fails (`:error`: [model](model.md#failures)).
@@ -23,7 +23,7 @@ Each turn starts from facts measured now, never remembered: `seon.turn/observe` 
 
 ## Who runs which tests
 
-Tests run three times in an attempt's life, each on what it needs:
+Tests run three times in a run's life, each on what it needs:
 - **each turn**, in the agent: the task's proofs, in a fork, under `:seon.config.agent/test-ticks` (above);
 - **the judge**, in root: when the loop ends, root asks the agent's REPL for its test results (`:tests`) and judges the end from them, the writer's diff of the branch and the branch's end (`seon.reconcile/judge-tx`);
 - **the merge**: the writer's merge gate takes the branch only when its contract gaps are none, the same `seon.merge/uncontracted` answer ([merging](merging.md)).
@@ -34,4 +34,4 @@ A merge task's agent first merges main into its branch with no model call, and m
 
 ## An outside agent
 
-A Claude session works a task through the same path: `seon_attach` and `seon_done` on the server. ```seon.turn/context-block``` gives it the block a model would read, observed now, and records the read as a turn of the attempt with origin `:outside`.
+A Claude session works a task through the same path: `seon_attach` and `seon_done` on the server. ```seon.turn/context-block``` gives it the block a model would read, observed now, and records the read as a turn of the run with origin `:outside`.

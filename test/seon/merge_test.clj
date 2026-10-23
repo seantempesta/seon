@@ -144,7 +144,7 @@
       ;; resolve! keeping ours: marked
       (d/db-with b1 (pm/resolve-tx b1 (vk "f"))) [])
     (is (= 42 (:main-t (first (pm/entries b1)))))
-    (testing "an attempt's conflict evidence (the same members, no :main-t) is not an entry"
+    (testing "a run's conflict evidence (the same members, no :main-t) is not an entry"
       (is (= [(vk "f")] (mapv :key (pm/entries (d/db-with b1 [(pm/conflict-tx (first cs))]))))))
     (testing "a second conflict on the same key replaces the entry"
       (let [b2 (d/db-with b1 (pm/unmerged-tx b1 cs 43))]
@@ -163,7 +163,7 @@
         "mg/check: every input its contract generates states a conflict")))
 
 (deftest behind-means-main-program-moved
-  (let [observed (with (base) [{:seon.agent/id :root :seon.agent/answered-t 9} {:note/text "attempt facts"}])]
+  (let [observed (with (base) [{:seon.agent/id :root :seon.agent/answered-t 9} {:note/text "run facts"}])]
     (is (empty? (:theirs (tw (base) observed))))
     (is (seq (:theirs (tw (base) (with (base) (var-tx "f" "(dec x)"))))))))
 
@@ -198,23 +198,23 @@
         main (let [db (empty-db)] (d/db-with db (source/import-tx db {facts-path text})))
         ;; the entry's line as the file has it (a property added to the entry moves with it), and
         ;; its form with :paused added, read from that text
-        status-line (some #(when (str/starts-with? % " :seon.attempt/status ") %) (str/split-lines text))
-        status (edn/read-string (str/replace (subs status-line (count " :seon.attempt/status ")) ":closed :refused]]" ":closed :refused :paused]]"))
-        ours (-> main (registered :seon.attempt/status status) (registered :user/qty :int))
-        theirs (registered main :seon.attempt/pid [:int {:min 1}])
+        status-line (some #(when (str/starts-with? % " :seon.run/status ") %) (str/split-lines text))
+        status (edn/read-string (str/replace (subs status-line (count " :seon.run/status ")) ":closed :refused]]" ":closed :refused :paused]]"))
+        ours (-> main (registered :seon.run/status status) (registered :user/qty :int))
+        theirs (registered main :seon.run/pid [:int {:min 1}])
         prog #(pm/program % #{})
         r (pm/three-way (prog main) (prog ours) (prog theirs))]
-    (is (= [[:schema :seon.attempt/status]] (keys (:ours r)))
+    (is (= [[:schema :seon.run/status]] (keys (:ours r)))
         "the branch's change is its key; a scratch key is no program")
-    (is (= {:form (binding [*print-namespace-maps* false] (sedn/encode status)) :file facts-path} (second (get (:ours r) [:schema :seon.attempt/status]))))
-    (is (= [[:schema :seon.attempt/pid]] (:apply r)) "a key only the other side changed applies")
+    (is (= {:form (binding [*print-namespace-maps* false] (sedn/encode status)) :file facts-path} (second (get (:ours r) [:schema :seon.run/status]))))
+    (is (= [[:schema :seon.run/pid]] (:apply r)) "a key only the other side changed applies")
     (is (= [] (:conflicts r)) "different keys of one resource do not conflict")
     (testing "one key changed two ways conflicts at its key"
-      (let [r2 (pm/three-way (prog main) (prog ours) (prog (registered main :seon.attempt/status [:enum :running])))]
-        (is (= [[:schema :seon.attempt/status] :both-modified] ((juxt :key :kind) (first (:conflicts r2)))))))
+      (let [r2 (pm/three-way (prog main) (prog ours) (prog (registered main :seon.run/status [:enum :running])))]
+        (is (= [[:schema :seon.run/status] :both-modified] ((juxt :key :kind) (first (:conflicts r2)))))))
     (testing "merged into main: the entry is main's, no longer the binary's, and write-back changes only its bytes"
       (let [main2 (d/db-with main (pm/apply-tx main (into {} (for [[k [_ o]] (:ours r)] [k o]))))]
-        (is (= #{:seon.attempt/status} (set (keys (program/schema-changes main2)))))
+        (is (= #{:seon.run/status} (set (keys (program/schema-changes main2)))))
         (is (= [facts-path] (source/changed-files main2 (:ours r))))
         (is (= {facts-path (str/replace text status-line (str/replace status-line ":closed :refused]]" ":closed :refused :paused]]"))}
                (source/files main2 (source/changed-files main2 (:ours r)))))))))

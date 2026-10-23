@@ -8,17 +8,17 @@
   "One random write a root or observer makes on main (tx-data), drawn with rng."
   [db ^java.util.Random rng k]
   (let [ts (vec (sort (keys (task/tasks db))))
-        as (vec (sort-by :seon.attempt/id (vals (task/attempts db))))
+        as (vec (sort-by :seon.run/id (vals (task/runs db))))
         pick (fn [v] (when (seq v) (nth v (.nextInt rng (count v)))))
         t (pick ts) a (pick as)
         env (fn [id] (r/desired-env (task/task db id)))
         t0 (:max-tx db)]
     (case (.nextInt rng 9)
       0 (when t (task/execution-tx [t] (pick [:running :held :cancelled :running])))
-      1 (when t (let [aid (str t "#x" k)] (task/attempt-start-tx aid t (pick ["r3-boot" "old-boot"]) :ax (env t) 0 "p")))
-      2 (when a [{:seon.attempt/id (:seon.attempt/id a) :seon.attempt/status (pick [:ended :dead :done :merged :closed :running])
-                  :seon.attempt/merged-t (+ 900 (.nextInt rng 300)) :seon.attempt/basis-t (+ 900 (.nextInt rng 300))
-                  :seon.attempt/results [{:seon.proof/test (symbol "app.proofs" (str "p" (.nextInt rng 30) "-test"))
+      1 (when t (let [aid (str t "#x" k)] (task/run-start-tx aid t (pick ["r3-boot" "old-boot"]) :ax (env t) 0 "p")))
+      2 (when a [{:seon.run/id (:seon.run/id a) :seon.run/status (pick [:ended :dead :done :merged :closed :running])
+                  :seon.run/merged-t (+ 900 (.nextInt rng 300)) :seon.run/basis-t (+ 900 (.nextInt rng 300))
+                  :seon.run/results [{:seon.proof/test (symbol "app.proofs" (str "p" (.nextInt rng 30) "-test"))
                                           :seon.proof/status (pick [:pass :fail :pass])}]}])
       3 (let [nm (str "n" k) needs (set (remove nil? [t (pick ts)]))]
           (into (task/create-tx db [(cond-> {:seon.task/ns 'r3 :seon.task/name nm :seon.task/plan "p"
@@ -57,7 +57,7 @@
                     live-merge? (some (:live idx') (:merging idx'))
                     ok (and (= (remove #(= :merge (:op %)) full) (remove #(= :octopus-merge (:op %)) incr))
                             (if octopus
-                              (= (mapv #(select-keys % [:attempt :task]) merges) (:members octopus))
+                              (= (mapv #(select-keys % [:run :task]) merges) (:members octopus))
                               (or (empty? merges) live-merge?)))]
                 (when-not ok
                   (println :seed seed :k k :tx (pr-str tx))

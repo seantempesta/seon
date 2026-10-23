@@ -325,8 +325,8 @@
       {:report {:replies (mapv short-items [r1 r2 r3])
                 :counts (into (sorted-map) (for [[k v] (:classes p)] [k (:n v)]))
                 :died (select-keys (:example died) [:exit :stderr :last-op])
-                :red (select-keys red [:attempt :test :assertions :evidence])
-                :cost (select-keys cost-row [:attempt :test :verdict])
+                :red (select-keys red [:run :test :assertions :evidence])
+                :cost (select-keys cost-row [:run :test :verdict])
                 :ms (- (System/currentTimeMillis) t0)}
        :checks {:eval (every? (types :eval) [:seon.agent/eval-error :seon.instrument/contract-error])
                 :effect (contains? (types :effect) :seon.fx/io-error)

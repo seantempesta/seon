@@ -261,7 +261,7 @@
   (let [i (mod (* k n) (- (count text) n))] (subs text i (+ i n))))
 
 (defn- turn-facts
-  "Turn k of an attempt as seon.turn/act! records it: the basis its context was built from
+  "Turn k of a run as seon.turn/act! records it: the basis its context was built from
   (the commit, its red assertion; the text is made again from it, seon.context/render), its
   reply (1,500 bytes) and its eval call with what it evaluated to as the next turn shows it
   (2,000). The reply is real prose and the evaluated value real source, each turn its own
@@ -269,8 +269,8 @@
   printed data: a slurp, a source, a test's report): a repeated letter compressed ~3x better
   than real turn text and made LZ4 look like the fix (2026-10-22)."
   [k]
-  [{:seon.turn/id (str "att/" k) :seon.turn/attempt "att" :seon.turn/n k :seon.turn/origin :model
-    :seon.turn/basis {:commit (random-uuid) :task "t/x" :attempt "att" :turn k :max-turns 8 :origin :model
+  [{:seon.turn/id (str "att/" k) :seon.turn/run "att" :seon.turn/n k :seon.turn/origin :model
+    :seon.turn/basis {:commit (random-uuid) :task "t/x" :run "att" :turn k :max-turns 8 :origin :model
                                        :observed {:results {'t-test/x :fail} :test-run-errors [] :reasons [{:reason :proof-red :symbol 't-test/x}]
                                                   :reds [{:test 't-test/x :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))"}]}}
     :seon.turn/reply (slice @prose k 1500)

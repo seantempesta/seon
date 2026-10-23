@@ -45,7 +45,7 @@
     (is (= t (get (task/tasks db) "demo/t")))))
 
 (deftest a-resumed-branch-takes-its-needs-from-main
-  ;; a kept branch resumed for an attempt may have been forked before main held the tasks its
+  ;; a kept branch resumed for a run may have been forked before main held the tasks its
   ;; task needs (the step E dry run read its task on its branch as nil and threw).
   ;; onto-tx puts the task and what it needs there, as main holds them, and leaves another
   ;; task the branch already holds as the branch has it
@@ -63,14 +63,14 @@
     (is (= [] (task/onto-tx main after "demo/store")) "nothing when the branch holds them")))
 
 (deftest a-released-branch-takes-its-task-from-main
-  ;; owner, 2026-10-23: a refused attempt holds its task for root, and root's release runs it
+  ;; owner, 2026-10-23: a refused run holds its task for root, and root's release runs it
   ;; again on the same, kept branch; root's judge wrote the failure and the evidence on main
   ;; after the branch last moved, so the resumed agent takes its task as main holds it
   (let [db0 (ts/test-db)
         branch (d/db-with db0 (task/create-tx db0 [{:seon.task/ns 'demo :seon.task/name "a" :seon.task/plan "Make a true."}]))
         ev {:from "demo/a#1" :conflicts [] :unmerged [] :red ['demo-test/a-test] :problem "proof-red demo-test/a-test"}
-        main (d/db-with branch [{:seon.task/id "demo/a" :seon.task/evidence ev :seon.task/failure {:reason "proof-red demo-test/a-test" :attempt "demo/a#1"}}])
+        main (d/db-with branch [{:seon.task/id "demo/a" :seon.task/evidence ev :seon.task/failure {:reason "proof-red demo-test/a-test" :run "demo/a#1"}}])
         after (d/db-with branch (task/onto-tx main branch "demo/a"))]
     (is (= ev (:seon.task/evidence (task/task after "demo/a"))) "the evidence")
-    (is (= "demo/a#1" (:attempt (:seon.task/failure (task/task after "demo/a")))) "and the failure it answers")
+    (is (= "demo/a#1" (:run (:seon.task/failure (task/task after "demo/a")))) "and the failure it answers")
     (is (= [] (task/onto-tx main after "demo/a")) "nothing when the branch holds it as main does")))

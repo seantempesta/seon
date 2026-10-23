@@ -1,7 +1,7 @@
 (ns seon.turn
   "The agent's turn loop, inside its own process (sessions R1 and M1's proto.agents.turn). A
   turn observes the branch (the proofs run in a fork of this agent, the done rule), and
-  either ends the attempt or acts: the context goes to the model (one interop edge), each of
+  either ends the run or acts: the context goes to the model (one interop edge), each of
   the reply's calls of the one tool, eval, goes through the one REPL path
   (seon.repl/eval-string: read, evaluate, record) and its answer is that call's result, which
   the next model call reads, and the turn's facts are written on the branch. The loop repeats until the done
@@ -13,7 +13,7 @@
   merge is too hairy (seon.reconcile/hairy). Either way the live runtime is staged onto the
   branch at the end (seon.stage/stage!), so the next agent on the branch holds it.
 
-  Root starts it by evaluating (seon.turn/work! '{...}) in the agent; the attempt's end is
+  Root starts it by evaluating (seon.turn/work! '{...}) in the agent; the run's end is
   a fact on the branch (:seon.end/*), which root's judge reads."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.intr :as intr] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str]
@@ -22,7 +22,7 @@
             [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
             [datahike.api :as d]))
 
-;; The turn loop's own facts live in the agent's one state map, under :turn: the attempt it
+;; The turn loop's own facts live in the agent's one state map, under :turn: the run it
 ;; works, and a stop a function requested.
 
 (defn current-task
@@ -32,15 +32,15 @@
   [] (:task @agent/state))
 
 (defn- begin!
-  "This process works task as attempt: the turn state, begun once per attempt with the
+  "This process works task as run: the turn state, begun once per run with the
   task's accumulated plan as the branch held it (a design step answers for improving it).
   The turn loop and an outside agent's context read begin it the same way."
-  {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id] :map]}
-  [task attempt]
-  (if (= attempt (get-in @agent/state [:turn :attempt]))
+  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :map]}
+  [task run]
+  (if (= run (get-in @agent/state [:turn :run]))
     (:turn @agent/state)
     (let [db (agent/db)]
-      (:turn (swap! agent/state assoc :turn {:attempt attempt
+      (:turn (swap! agent/state assoc :turn {:run run
                                              :plan-before (:plan (:seon.task/accumulated (task/task db task)))})))))
 
 (defn last-evals
@@ -88,13 +88,13 @@
                                      :caused caused))}))
 
 (defn- end!
-  "The attempt's end: the live runtime staged onto the branch, the end written there (with
+  "The run's end: the live runtime staged onto the branch, the end written there (with
   the error that ended it and the turns' waste, as data: session D2), and the branch committed
   (a turn's end commits the agent's run-ahead writes)."
-  {:malli/schema [:=> [:cat :map :seon.attempt/outcome [:maybe :string] [:maybe :map]] :seon.turn/end]}
-  [{:keys [turn tokens t0 attempt log]} outcome reason error]
+  {:malli/schema [:=> [:cat :map :seon.run/outcome [:maybe :string] [:maybe :map]] :seon.turn/end]}
+  [{:keys [turn tokens t0 run log]} outcome reason error]
   (stage/stage!)
-  (agent/write-end! attempt {:outcome outcome :turns turn :tokens tokens :reason reason :error error
+  (agent/write-end! run {:outcome outcome :turns turn :tokens tokens :reason reason :error error
                              :waste (learn/summary (learn/waste (or log []) (learn/final-symbols (or log []))))})
   (cond-> {:outcome outcome :turns turn :model-calls turn :results {} :uncontracted #{}
            :ms (profile/ms-since t0)}
@@ -129,14 +129,14 @@
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its
   basis, not its prompt): the commit it reads (the run-ahead writes committed now, as the
-  model call's wait would), the task, attempt and turn, the observations no db holds, and
+  model call's wait would), the task, run and turn, the observations no db holds, and
   the last evaluations' transcript while no earlier turn shows them."
-  {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id :int :int :seon.turn/origin :map] :seon.turn/basis]}
-  [task attempt turn max-turns origin observed]
+  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id :int :int :seon.turn/origin :map] :seon.turn/basis]}
+  [task run turn max-turns origin observed]
   (agent/commit!)
   (let [items (when (or (= :outside origin) (zero? turn)) (last-evals))
         ev (when (seq items) (context/evaluations-text items))]
-    (cond-> {:commit (d/commit-id (agent/db)) :task task :attempt attempt :turn turn :max-turns max-turns
+    (cond-> {:commit (d/commit-id (agent/db)) :task task :run run :turn turn :max-turns max-turns
              :origin origin :observed (dissoc observed :merge?)}
       (:merge? observed) (assoc :merge? true)
       ev (assoc :last-evals ev))))
@@ -147,11 +147,11 @@
   provider error. The model call is an effect (my.fx :model, session FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
   {:malli/schema [:=> [:cat :map :map [:maybe :string]] [:or :map :map]]}
-  [{:keys [turn tokens max-turns merge? attempt] :as st} {:keys [results tests-ms] :as obs} model-name]
+  [{:keys [turn tokens max-turns merge? run] :as st} {:keys [results tests-ms] :as obs} model-name]
   (let [t (:task obs)
         proofs (:proofs (:seon.task/accumulated t))
         t0 (profile/now-ns)
-        basis (basis! (:seon.task/id t) attempt turn max-turns :model
+        basis (basis! (:seon.task/id t) run turn max-turns :model
                       (cond-> (observed obs) merge? (assoc :merge? true)))
         {:keys [block messages]} (context/render (agent/db) basis)
         context-ms (long (profile/ms-since t0))
@@ -177,7 +177,7 @@
         ;; what the model read, as its basis (seon.context/render makes the text from it), what
         ;; it answered and how it stopped, what its forms evaluated to as the next turns show it,
         ;; and where the turn's time went as this agent saw it
-        (agent/transact! [(cond-> (merge (usage c) {:seon.turn/id (str attempt "/" turn) :seon.turn/attempt attempt :seon.turn/n turn
+        (agent/transact! [(cond-> (merge (usage c) {:seon.turn/id (str run "/" turn) :seon.turn/run run :seon.turn/n turn
                                    :seon.turn/origin :model :seon.turn/basis basis
                                    :seon.turn/calls (mapv (fn [{:keys [id code items]}] {:id id :code code :evals (context/evaluations-text items)}) calls)
                                    :seon.turn/reply (:text c) :seon.turn/forms (count items)
@@ -188,7 +188,7 @@
                             (:finish-reason c) (assoc :seon.turn/finish (:finish-reason c))
                             (:model c) (assoc :seon.turn/model (:model c))
                             (:reasoning c) (assoc :seon.turn/reasoning (:reasoning c)))])
-        (agent/transact! [{:seon.turn/id (str attempt "/" turn)
+        (agent/transact! [{:seon.turn/id (str run "/" turn)
                            :seon.turn/split (cond-> {:context-ms context-ms :model-ms model-ms :eval-ms eval-ms
                                                      :record-ms (long (profile/ms-since t3))}
                                               tests-ms (assoc :tests-ms tests-ms))}])
@@ -203,38 +203,38 @@
 
 (defn context-block
   "The current-state block of task, as the model sees it on this branch now (the proofs run
-  again): what an outside agent working the task reads, recorded as a turn of the attempt
-  (origin :outside). It also makes this process work task as attempt, so the my.* functions act
+  again): what an outside agent working the task reads, recorded as a turn of the run
+  (origin :outside). It also makes this process work task as run, so the my.* functions act
   on it."
-  {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id] :string]}
-  [task attempt]
-  (let [{:keys [plan-before]} (begin! task attempt)
+  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :string]}
+  [task run]
+  (let [{:keys [plan-before]} (begin! task run)
         {:keys [tests-ms] :as obs} (observe task plan-before)
         n (get-in (swap! agent/state update-in [:turn :reads] (fnil inc 0)) [:turn :reads])
         t0 (profile/now-ns)
-        basis (basis! task attempt n 1 :outside (assoc (observed obs) :merge? true))
+        basis (basis! task run n 1 :outside (assoc (observed obs) :merge? true))
         text (context/reader-text (:messages (context/render (agent/db) basis)))]
-    ;; the read is a turn of this attempt, as a model turn is: what it was built from and what it cost
-    (agent/transact! [{:seon.turn/id (str attempt "/read-" n) :seon.turn/attempt attempt :seon.turn/n n
+    ;; the read is a turn of this run, as a model turn is: what it was built from and what it cost
+    (agent/transact! [{:seon.turn/id (str run "/read-" n) :seon.turn/run run :seon.turn/n n
                        :seon.turn/origin :outside :seon.turn/basis basis
                        :seon.turn/split (cond-> {:context-ms (long (profile/ms-since t0))} tests-ms (assoc :tests-ms tests-ms))}])
     text))
 
 (defn work!
-  "Work task `task` as attempt `attempt` (the model `model` when set, else root's), at most
+  "Work task `task` as run `run` (the model `model` when set, else root's), at most
   max-turns model calls.
   Answers the end ({:outcome :turns :model-calls :tokens :ms}); the same end is written on
   the branch."
-  {:malli/schema [:=> [:cat [:map [:task :seon.task/id] [:attempt :seon.attempt/id] [:model {:optional true} :string]
+  {:malli/schema [:=> [:cat [:map [:task :seon.task/id] [:run :seon.run/id] [:model {:optional true} :string]
                              [:max-turns pos-int?]]]
                   :seon.turn/end]}
-  [{:keys [task attempt model max-turns]}]
-  (let [{:keys [plan-before]} (begin! task attempt)
+  [{:keys [task run model max-turns]}]
+  (let [{:keys [plan-before]} (begin! task run)
         t0-task (task/task (agent/db) task)
         merge? (= :merge (:seon.task/kind t0-task))
         merge-cfg (r/merge-limits t0-task)]
     (when merge? (branch/merge-main!))
-    (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (profile/now-ns) :attempt attempt
+    (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (profile/now-ns) :run run
                :max-turns max-turns :merge? merge?}]
       (let [{:keys [reasons unmerged] :as obs} (observe task plan-before)
             stop (get-in @agent/state [:turn :stop])

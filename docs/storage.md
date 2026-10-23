@@ -25,7 +25,7 @@ Inline values were the cause. Every commit rewrites the tail leaf of `:eavt` and
 
 ## Entity ids
 
-The entity whose unique attribute holds a value is found by `seon.db/eid`: one seek in that attribute's AVET index, never a Datalog query (a query planned per call cost ~95 µs and 100 KB at 100 tasks). It is the one lookup; every namespace that needs an entity id by value calls it. Reading an entity's facts needs no id first: a pull by lookup ref (`(d/pull db attrs [:seon.root/id :root])`) answers nil when no entity holds the value, so root's facts, a task, an attempt or an error record are pulled directly.
+The entity whose unique attribute holds a value is found by `seon.db/eid`: one seek in that attribute's AVET index, never a Datalog query (a query planned per call cost ~95 µs and 100 KB at 100 tasks). It is the one lookup; every namespace that needs an entity id by value calls it. Reading an entity's facts needs no id first: a pull by lookup ref (`(d/pull db attrs [:seon.root/id :root])`) answers nil when no entity holds the value, so root's facts, a task, a run or an error record are pulled directly.
 
 ## Leases
 
@@ -75,7 +75,7 @@ Thresholds measured at 20 turns with LZ4: 4,096 B moves nothing (a turn's values
 
 ## Plain values
 
-A value that is plain data (a map, vector, set or list of strings, numbers, keywords, symbols, uuids and instants) is stored as data: its attribute is ``:db.type/data`` in [our Datahike](forks.md), and the store's serializer (jfasl) writes it with no text in between. Seon marks such an attribute `{:seon.db/data true}` on its schema (```seon.schema.datahike/declaration```): a turn's basis, calls and split, a task's evidence, an attempt's failures and errors, the config's maps, merge entries. `datahike.datom/compare-value` gives plain data a total order consistent with `=`, so such values sit in an index like any other. A kept store that holds an attribute as another value type is refused at open with `:seon.db/types-differ`, naming the attributes, because a value type is fixed once installed. Proofs: `seon.db-test/a-kept-store-whose-types-differ-is-refused`, and every test that writes these attributes.
+A value that is plain data (a map, vector, set or list of strings, numbers, keywords, symbols, uuids and instants) is stored as data: its attribute is ``:db.type/data`` in [our Datahike](forks.md), and the store's serializer (jfasl) writes it with no text in between. Seon marks such an attribute `{:seon.db/data true}` on its schema (```seon.schema.datahike/declaration```): a turn's basis, calls and split, a task's evidence, a run's failures and errors, the config's maps, merge entries. `datahike.datom/compare-value` gives plain data a total order consistent with `=`, so such values sit in an index like any other. A kept store that holds an attribute as another value type is refused at open with `:seon.db/types-differ`, naming the attributes, because a value type is fixed once installed. Proofs: `seon.db-test/a-kept-store-whose-types-differ-is-refused`, and every test that writes these attributes.
 
 Measured on 5,006 real eval records: jfasl is the same size as EDN text (4.65 vs 4.67 MB). A record reads in 1.3 µs instead of 11 µs and writes in 1.6 µs instead of 14.4 µs, and instants, uuids and keywords come back as themselves. It compresses about 10% less well than EDN text without a dictionary (zstd-3: 1.84× vs 2.05×), 4% less with one.
 

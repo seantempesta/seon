@@ -18,7 +18,7 @@
             [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
-;; :id :branch :task :attempt (the task and attempt root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
+;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 (defonce state (atom nil))
 
@@ -237,12 +237,12 @@
                          (seq causes) (assoc :causes causes)))))))
 
 (defn write-end!
-  "Attempt's end on this branch (:seon.end/*, which root's judge reads), committed: its
+  "Run's end on this branch (:seon.end/*, which root's judge reads), committed: its
   outcome, and when known its reason, the error that ended it (as data), its turns, tokens
   and waste. The turn loop's end and the process's death write it the same way."
-  {:malli/schema [:=> [:cat :seon.attempt/id [:map [:outcome :seon.attempt/outcome]]] :any]}
-  [attempt {:keys [outcome reason error turns tokens waste]}]
-  (transact! [(cond-> {:seon.end/attempt attempt :seon.end/outcome outcome}
+  {:malli/schema [:=> [:cat :seon.run/id [:map [:outcome :seon.run/outcome]]] :any]}
+  [run {:keys [outcome reason error turns tokens waste]}]
+  (transact! [(cond-> {:seon.end/run run :seon.end/outcome outcome}
                 turns (assoc :seon.end/turns turns)
                 tokens (assoc :seon.end/tokens tokens)
                 reason (assoc :seon.end/reason reason)
@@ -253,13 +253,13 @@
 (defn died!
   "The process's death by defect e, caught at its entrant boundary (seon.repl/serve!): the
   cause, printed by the one printer, to stderr (root records its tail with the death, even
-  when the end cannot be written), then the end of the attempt this process works, written
+  when the end cannot be written), then the end of the run this process works, written
   on its branch. Root names the death by the exit status that follows."
   {:malli/schema [:=> [:cat :seon.host/throwable] :any]}
   [e]
   (let [em (error-map e 'seon.repl/serve!)]
     (sock/write-line! 2 (print/text em (:part print/budgets)))
-    (when-let [a (get-in @state [:turn :attempt])]
+    (when-let [a (get-in @state [:turn :run])]
       (write-end! a {:outcome :error :reason (str "the agent's process died: " (:seon.error/message em)) :error em}))))
 
 (defn- interrupt-self-test
@@ -279,7 +279,7 @@
   "One clojure.test report as the run keeps it: its type, test var and message; a failing
   assertion's expected and actual printed by the one printer under :part; a cost proof's
   rows and verdict (seon.cost/proof's :actual) kept as data under :cost (session W2's agent
-  page renders them; the judge persists them on the attempt)."
+  page renders them; the judge persists them on the run)."
   {:malli/schema [:=> [:cat :map [:maybe :string]] :map]}
   [m var]
   (let [cost (when (map? (:actual m)) (select-keys (:actual m) [:rows :verdict]))]
@@ -583,7 +583,7 @@
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
-  [fd {id :agent branch :branch task :task attempt :attempt cfg :cfg lease :lease resumed :resumed commit :commit t :t} db0 serve]
+  [fd {id :agent branch :branch task :task run :run cfg :cfg lease :lease resumed :resumed commit :commit t :t} db0 serve]
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
   (sock/clofork! fd)
@@ -610,12 +610,12 @@
      ;; :base is the branch's merge base with main: a new branch's is the image (main as it
      ;; forked); a resumed one's is older than main, and comparing against main's head would
      ;; read main's later changes as the branch's (seon.program/divergence, changed-vars)
-     (reset! state {:id id :branch branch :task task :attempt attempt :fd fd :conn c :db @store-conn
+     (reset! state {:id id :branch branch :task task :run run :fd fd :conn c :db @store-conn
                    :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :interrupt-ok intr-ok :serve serve})
      ;; a kept branch, resumed (root released its held task: seon.reconcile/hold-tx), takes
-     ;; its task from main, with the failure and evidence the last attempt left there
+     ;; its task from main, with the failure and evidence the last run left there
      (when-let [tx (when resumed (not-empty (task/onto-tx db0 @store-conn task)))]
        (transact! tx)))))
