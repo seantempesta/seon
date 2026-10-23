@@ -44,13 +44,13 @@ running() { [[ -f $PIDS ]] && read T R < "$PIDS" && kill -0 $R 2>/dev/null }
 # launch CHECKOUT [ARGS]: `run` detached (double fork), until its listening line or its death
 launch() {
   : > "$LOG"
-  rm -f "$PIDS" "$PORTF" "$READY"; mkfifo "$READY"
+  rm -f "$PIDS" "$PORTF" "$READY" "$DONE"; mkfifo "$READY" "$DONE"
   # the one holder (bin/held, detached) owns the root's stdin and output and waits on it: it
   # copies the output to the log; at the root's ROOT LISTENING line it writes "HOLDER ROOT PORT"
   # (the port the root bound) on the ready fifo this shell is reading, and at the root's death
   # before that it closes the fifo (EOF): the root's own facts end the wait, never a poll. stop
   # sends it TERM: the root's stdin closes (it stops cleanly), and held writes its exit status
-  # on the done fifo stop reads. A root started with SEON_STARTER_FIFO (a test's) ends with its
+  # on the done fifo (made here, held keeps it open) that bin/held --end reads. A root started with SEON_STARTER_FIFO (a test's) ends with its
   # starter. (A `tail -f /dev/null | root` holder outlived every root that crashed or was killed.)
   "$ROOT/bin/held" --detach --drain --log "$LOG" --pids "$PIDS" --ready "$READY" --done "$DONE" \
     "$ROOT/bin/root" run "$1" "$PORT" "$WEB" "${@:2}"
@@ -59,24 +59,31 @@ launch() {
   if [[ -n ${P:-} ]]; then print $P > "$PORTF"; "$ROOT/bin/root" status
   else print -u2 "root failed to start; its log:"; tail -20 "$LOG" >&2; exit 1; fi
 }
+# stop: TERM to the holder (the root's stdin closes, it stops cleanly), answered at the holder's end
+# with the root's exit status. bin/held --end opens the done fifo before it signals and waits on it:
+# a holder that is gone or died without writing ends the wait at once ("unknown"). A root held
+# before the done fifo existed has no fifo: it is told to stop and nothing is awaited.
 stop() {
   read T R < "$PIDS"
-  # the done fifo held open read-write before the holder is told: its write never waits on a
-  # reader, and this read ends at the root's exit, which the holder reaped
-  rm -f "$DONE"; mkfifo "$DONE"; exec 3<>"$DONE"
-  kill -TERM $T                              # the holder: the root's stdin closes, it stops cleanly
-  read -r -u 3 st; exec 3<&-
-  rm -f "$PIDS" "$PORTF" "$DONE"; print "root $R stopped (exit $st)"
+  if [[ -p $DONE ]]; then
+    st=$("$ROOT/bin/held" --end TERM $T "$DONE" 1)
+    rm -f "$PIDS" "$PORTF" "$DONE"; print "root $R stopped (exit ${st:-unknown: its holder ended without a status})"
+  else
+    kill -TERM $T 2>/dev/null
+    rm -f "$PIDS" "$PORTF"; print "root $R told to stop (exit unknown: its holder predates the status channel)"
+  fi
 }
 # kill: SIGKILL the root (a crash, as a test makes one); answered when it and everything it started
 # is gone (bin/held's "drained"), where stop is answered at the root's exit
 kill_root() {
   read T R < "$PIDS"
-  rm -f "$DONE"; mkfifo "$DONE"; exec 3<>"$DONE"
-  kill -9 $R
-  # its status line, then "drained": every process the root started is gone (bin/held --drain)
-  read -r -u 3 st; read -r -u 3 drained; exec 3<&-
-  rm -f "$PIDS" "$PORTF" "$DONE"; print "root $R killed (${drained:-not drained})"
+  if [[ -p $DONE ]]; then
+    ends=("${(@f)$("$ROOT/bin/held" --end KILL $R "$DONE" 2)}")
+    rm -f "$PIDS" "$PORTF" "$DONE"; print "root $R killed (${ends[2]:-not drained})"
+  else
+    kill -9 $R 2>/dev/null
+    rm -f "$PIDS" "$PORTF"; print "root $R killed (not drained: its holder predates the status channel)"
+  fi
 }
 case ${1:-start} in
   status)
