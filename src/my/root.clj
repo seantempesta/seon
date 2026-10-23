@@ -4,7 +4,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
             [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.watch :as watch] [datahike.api :as d]
-            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn]))
+            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib]))
 
 (defn- write-declared!
   "Declared state's tx written on main: the error that built it as it is; an empty tx
@@ -103,10 +103,9 @@
   ([] (task-files (config/value :seon.config.root/tasks-dir)))
   ([dir]
    (let [read (into (sorted-map)
-                    (for [f (sort-by #(.getName %) (or (seq (.listFiles (io/file dir))) []))
-                          :let [n (.getName f)] :when (.endsWith n ".edn")
+                    (for [[n text] (lib/dir-texts dir ".edn")
                           :let [ns-sym (symbol (subs n 0 (- (count n) 4)))]]
-                      [ns-sym (task/file-declarations ns-sym (slurp f))]))
+                      [ns-sym (task/file-declarations ns-sym text)]))
          refused (into {} (filter (comp contract/error? val)) read)]
      (if (seq refused)
        read
