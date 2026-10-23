@@ -27,6 +27,8 @@
                                     never written, so it is open exactly while it is true
     :unnamed-site                   a site of a law (`laws`: a catch) its page does not name:
                                     derived from the compiler's facts and the page's names
+    :test-red                       a test whose newest result the test service recorded is red
+                                    (seon.prove): closed by a later green, written by nothing
     :stale-pin                      a pin the wiki states (`pins`: docs/forks.md) that is not
                                     the gitlink root's source import recorded
 
@@ -291,6 +293,25 @@
       (seq waste)
       (assoc :waste [(assoc base :waste waste :evidence {:from aid :waste waste})]))))
 
+(defn- test-reds
+  "Each test whose newest recorded result (the test service's, seon.prove/result-tx: the last
+  result fact written for it) is red, as a :test-red row naming the test, the branch and tx it
+  ran at and the change that asked. A later green at a new digest is a newer result, so it
+  closes the row with nothing written. Cost: one pull per result fact."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (let [newest (reduce (fn [m {:keys [e]}] (update m (:seon.proof/test (d/entity db e)) #(max e (or % 0)))) {} (d/datoms db :aevt :seon.proof/digest))]
+    (vec (for [[t e] newest
+               :let [r (d/pull db '[*] e)] :when (not= :pass (:seon.proof/status r))
+               :let [s (str "test-red " t)]]
+           {:signature s :test t :status (:seon.proof/status r) :open? true :branch (:seon.proof/branch r) :t (:seon.proof/t r)
+            :run (:seon.proof/run r) :change (:seon.proof/change r) :failures (:seon.proof/failures r)
+            :message (str t " is " (name (:seon.proof/status r)) " at " (:seon.proof/branch r) " t " (:seon.proof/t r)
+                          (when-let [a (get-in r [:seon.proof/change :agent])] (str ", asked by " (name a))))
+            :producer nil :owner-ns (symbol (namespace t)) :proofs [t]
+            :evidence {:kind :test-red :test t :digest (:seon.proof/digest r) :run (:seon.proof/run r) :failures (:seon.proof/failures r)}
+            :answered-by (get-in ans [:signature s] []) :at-ms nil}))))
+
 (defn report
   "Every problem recorded on main db, by class: {:t :classes {class {:n :rows}}}. Counted
   classes' :n is their occurrences and their rows run by count; attempt classes' :n is
@@ -310,14 +331,16 @@
                                                    :seon.attempt/conflicts :seon.attempt/unmerged :seon.attempt/task-conflicts])
                                (mapcat (fn [s] (map :e (d/datoms db :avet :seon.attempt/status s))) (conj death-statuses :behind))))
         by-class (apply merge-with into (map #(attempt-rows db ans %) attempts))
-        failed (mapv #(failed-row db ans %) (es db :seon.task/failure))]
+        failed (mapv #(failed-row db ans %) (es db :seon.task/failure))
+        reds (test-reds db ans)]
     ^{:seon.render/schema :seon.problems/report}
     {:t (:max-tx db)
      :classes (merge (into {} (for [c counted-classes :let [rows (vec (sort-by (comp - :count) (get errors c)))]]
                                 [c {:n (reduce + 0 (map :count rows)) :rows rows}]))
                      (into {} (for [c attempt-classes :let [rows (vec (sort-by #(- (or (:end-ms %) 0)) (get by-class c)))]]
                                 [c {:n (count rows) :rows rows}]))
-                     {:failed {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))}})})))
+                     {:failed {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))}
+                      :test-red {:n (count reds) :rows reds}})})))
 
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the

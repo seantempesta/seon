@@ -23,7 +23,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
-            [seon.writer :as writer] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
+            [seon.writer :as writer] [seon.prove] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.docs :as docs] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
@@ -290,7 +290,7 @@
         (let [[st rid] (pend st p op id)
               msg (case op
                     :eval (cond-> {:op :eval :forms (:forms m)} (:ticks m) (assoc :ticks (:ticks m)) (:origin m) (assoc :origin (:origin m)))
-                    (:tests :merge-tests) (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m))
+                    (:tests :merge-tests) (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)) (:names m) (assoc :names (:names m))
                                             (get-in st [:view :agents id :task]) (assoc :task (get-in st [:view :agents id :task])))
                     :stats {:op :stats}
                     :merge-main {:op :merge-main :data-attrs (:data-attrs m)})]
@@ -307,7 +307,7 @@
       ;; the test service (seon.prove): the request goes to its proc, the caller (a session, or an
       ;; agent's turn through its proc) is answered when the run it joined ends
       :prove (let [[st rid] (pend st p :prove (:agent m))]
-               (step/out! o [:prove :req] (assoc (select-keys m [:branch :t :agent :proofs]) :rid rid))
+               (step/out! o [:prove :req] (assoc (select-keys m [:branch :t :agent :proofs :names]) :rid rid))
                st)
       :kill (cond-> (if (get-in st [:agents id])
                       ;; :ended when root stops it because its attempt ended (the reconciler says so)
@@ -909,14 +909,16 @@
 
 (defn prove!
   "Ask the test service (seon.prove) to prove a branch at a tx: agent id's own branch at its head,
-  or main (agent nil) at its head. A promise of the run's answer ({:key :ran :pass :fail :error
+  or main (agent nil) at its head, the tests of namespaces names (a set of symbols; none: all it selects). A promise of the run's answer ({:key :ran :pass :fail :error
   :red :reports ...}), the same run for every asker of that key: a session here, and the agent's
   turn."
-  {:malli/schema [:=> [:cat :seon.root/sys [:maybe :seon.agent/id]] :seon.host/promise]}
-  [sys agent-id]
+  {:malli/schema [:function [:=> [:cat :seon.root/sys [:maybe :seon.agent/id]] :seon.host/promise]
+                  [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol]] :seon.host/promise]]}
+  ([sys agent-id] (prove! sys agent-id #{}))
+  ([sys agent-id names]
   (if-let [b (if agent-id (get-in @(call! sys {:op :state}) [:agents agent-id :branch]) (pdb/conn-main (:conn sys)))]
-    (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx (pdb/head (:conn sys) b))} agent-id (assoc :agent agent-id)))
-    (doto (promise) (deliver (gone agent-id (str "no live agent " agent-id))))))
+    (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx (pdb/head (:conn sys) b))} agent-id (assoc :agent agent-id) (seq names) (assoc :names names)))
+    (doto (promise) (deliver (gone agent-id (str "no live agent " agent-id)))))))
 
 (defn agent-stats! "A promise of the agent's numbers now." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
   [sys agent-id] (call! sys {:op :stats :id agent-id}))

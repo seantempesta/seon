@@ -14,7 +14,7 @@
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
+            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.source :as source] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
             [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
@@ -302,7 +302,7 @@
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/reach-digests) against base's (main at its merge base), the greens stored at
-  those digests and proofs. The digests' inputs with no program facts are this boot's
+  those digests (files in results-dir, and the test service's result facts in db: seon.proofs/stored-greens) and proofs. The digests' inputs with no program facts are this boot's
   :inputs on root's :seon.root/source fact (seon.root/import-source!: present only when root's
   binary is built from its source tree), so an agent's results are kept by digest in
   results-dir; a root with no such fact this boot shares nothing and reuses nothing (the
@@ -331,13 +331,30 @@
         idx (into {} (filter (comp judges? key)) (program/reach-index db in))
         cd (update-vals idx :digest)
         unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))]
-    (-> (proofs/plan (some-> base (program/reach-digests in)) cd (if dir (proofs/greens dir (vec (vals cd))) {}) proofs)
+    (-> (proofs/plan (some-> base (program/reach-digests in)) cd (merge (if dir (proofs/greens dir (vec (vals cd))) {}) (proofs/stored-greens db (vec (vals cd)))) proofs)
         (update :selected into unrecorded)
         (update :run into unrecorded)
         (assoc :digests cd :dir dir
                :process (program/process-tests idx)))))
 
 (declare handle!)
+
+(defn load-tests!
+  "Make the checkout's tests (the files under dirs, read here by the :source performer: the tree
+  is megabytes, more than a frame to root carries) part of this
+  agent's program: their namespaces loaded here and their forms recorded on its branch
+  (seon.source/import-tx), so test-plan finds them and their reach digests. What the test
+  service's prove agent does before it runs (seon.prove). Answers the files loaded, or the
+  :source effect's error."
+  {:malli/schema [:=> [:cat [:sequential :string]] [:or :int :map]]}
+  [dirs]
+  (let [r (fx/read-source {:req {:root (cfg/checkout) :dirs (vec dirs)}})]
+    (if (:value r)
+      (let [files (:value r)]
+        (doseq [[_ _ text] (source/load-order files)] (load-string text))
+        (transact! (source/import-tx (db) files))
+        (count files))
+      r)))
 
 (defn prove!
   "Ask the test service (seon.prove) to prove this branch at its head, and wait for its answer:
@@ -420,10 +437,17 @@
   runs again. :ran is how many tests reported. (forked pid) runs here once the child exists.
   A fork refused (threads active) is :seon.test/fork-refused: no test ran."
   {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol]] [:or :seon.test/result :seon.test/fork-refused]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]]}
+                  [:=> [:cat pos-int? [:set :qualified-symbol] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused]]]}
   ([ticks proofs] (run-tests-forked ticks proofs (fn [_] nil)))
-  ([ticks proofs forked]
-  (let [{:keys [selected run reused digests dir]} (test-plan (db) (:base @state) proofs)
+  ([ticks proofs forked] (run-tests-forked ticks proofs forked nil))
+  ([ticks proofs forked names]
+  (let [{:keys [selected run reused digests dir]} (let [p (test-plan (db) (:base @state) proofs)]
+                                                    ;; only the tests of the namespaces named, when any are
+                                                    (if (seq names)
+                                                      (let [in? #(contains? names (symbol (namespace %)))]
+                                                        (-> p (update :selected #(filterv in? %)) (update :run #(filterv in? %))))
+                                                      p))
         reused-reports (vec (for [t selected :when (reused t)] {:type :pass :var (str "#'" t) :reused true}))
         [r w] (lib/pipe) t0 (profile/now-ns)
         res (lib/fork!
@@ -512,7 +536,8 @@
     ;; root hears the test child's pid once it is forked (its agent proc's :tests-started event)
     :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
                                                               (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
-                                                              #(send! {:op :tests-started :id (:id m) :pid %}))
+                                                              #(send! {:op :tests-started :id (:id m) :pid %})
+                                                              (some-> (:names m) set))
              :mem-mb (mem-mb)}]
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [r (dissoc m :op :k)]

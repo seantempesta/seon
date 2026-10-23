@@ -45,6 +45,8 @@
  ;; (procedure calls and loop back-edges; never elapsed time): runtime-fixable, the agent's to read
  :seon.repl/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.repl/ticks-spent]] [:ticks :int] [:budget :int]]]
  ;; the agent could not fork its test run (threads were active): no proof ran
+ ;; the test service's prove agent could not load the checkout's tests (seon.prove)
+ :seon.test/prepare [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/prepare]]]]
  :seon.test/fork-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/fork-refused]] [:active-threads :int]]]
  :seon.test/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int]
                                                 [:test {:optional true} :string]]]
@@ -155,10 +157,10 @@
  ;; each class's area, the group root's page and context show it under (docs/health.md),
  ;; declared once here and read through seon.contract/properties (as a status set is)
  :seon.problems/class [:enum {:seon.problems/derived #{:dead-citation :unnamed-site :stale-pin}
-                             :seon.problems/areas [[:docs #{:dead-citation :stale-pin}] [:tests #{:red :cost}]
+                             :seon.problems/areas [[:docs #{:dead-citation :stale-pin}] [:tests #{:red :cost :test-red}]
                                                     [:laws #{:unnamed-site}] [:merges #{:merge :task-conflict}] [:tasks #{:failed}]
                                                     [:agents #{:dead :error :waste}] [:errors #{:platform :eval :agent :effect}]]}
-                       :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :dead-citation :unnamed-site :stale-pin]
+                       :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :test-red :dead-citation :unnamed-site :stale-pin]
  :seon.problems/row [:map {:seon.render/ai seon.render.ai/problem-row}
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]

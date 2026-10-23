@@ -153,6 +153,18 @@
         (for [[k v] (sort-by (comp str key) (sedn/decode text))]
           {:schema/key k :schema/form (binding [*print-namespace-maps* false] (sedn/encode v)) :schema/file path :schema/source true})))
 
+(defn load-order
+  "The Clojure files ({relative path text}) with an ns form, as [ns path text] in the order loading
+  them takes: each after the files it requires, ties by path (the order import-tx analyzes them in,
+  so a namespace the process never loaded is set up before a file that requires it)."
+  {:malli/schema [:=> [:cat [:map-of :string :string]] [:vector [:tuple :symbol :string :string]]]}
+  [files]
+  (let [by-ns (into {} (for [[path text] files :when (str/ends-with? path ".clj") :let [nsym (file-ns text)] :when nsym] [nsym [path text]]))
+        reqs (into {} (for [[nsym [_ text]] by-ns] [nsym (file-requires nsym text)]))]
+    (vec (for [nsym (program/topo (vec (keys by-ns)) #(reqs %) #(first (by-ns %)))
+               :let [[path text] (by-ns nsym)]]
+           [nsym path text]))))
+
 (defn import-tx
   "The facts of files ({relative path text}) as program on db: each namespace's file's forms
   with their exact text and the compiler's account (text-tx), its namespace carrying the
@@ -162,13 +174,10 @@
   form, not a schema resource) is left out."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] :seon.db/tx-data]}
   [db files]
-  (let [by-ns (into {} (for [[path text] files :when (str/ends-with? path ".clj") :let [nsym (file-ns text)] :when nsym] [nsym [path text]]))
-        reqs (into {} (for [[nsym [_ text]] by-ns] [nsym (file-requires nsym text)]))]
-    (vec (concat (for [nsym (program/topo (vec (keys by-ns)) #(reqs %) #(first (by-ns %)))
-                       :let [[path text] (by-ns nsym)]
-                       op (text-tx db nsym text path)]
-                   op)
-                 (for [[path text] (sort-by key files) :when (schema-resource? path) op (schema-tx path text)] op)))))
+  (vec (concat (for [[nsym path text] (load-order files)
+                     op (text-tx db nsym text path)]
+                 op)
+               (for [[path text] (sort-by key files) :when (schema-resource? path) op (schema-tx path text)] op))))
 
 (defn source-files
   "The files db holds as program: each imported namespace's file (:ns/file) and each schema
