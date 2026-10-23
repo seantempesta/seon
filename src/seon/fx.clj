@@ -39,7 +39,7 @@
         staged (try (.mkdirs (.getParentFile (java.io.File. ^String tmp))) (spit tmp text) nil
                     (catch Throwable e
                       (.delete (java.io.File. tmp))
-                      (error :seon.fx/io-error (str "staging " tmp ": " (or (ex-message e) (str (type e)))) {:path path :tmp tmp})))]
+                      (error :seon.fx/io-error (str "staging " tmp ": " (step/error-msg e)) {:path path :tmp tmp})))]
     (or staged
         (let [[r errno] (lib/c-rename tmp path)]
           (if (zero? r)
@@ -80,7 +80,7 @@
                                                   [p sha])))
         (and binary-tree (zero? (:exit head))) (assoc :inputs (inputs base)
                            :binary (let [f (java.io.File. ^String binary-tree)] (when (.isFile f) (str/trim (slurp f)))))))
-    (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path root}))))
+    (catch Throwable e (error :seon.fx/io-error (step/error-msg e) {:path root}))))
 
 (defn- git!
   "git in dir with args, under the environment variables env adds ({name value}), its
@@ -248,7 +248,7 @@
             (git! {} dir ["update-ref" ref sha (if have? parent "0000000000000000000000000000000000000000")] nil)
             {:value {:sha sha :files (count files)}})
           (finally (.delete (java.io.File. ^String index)))))
-      (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path dir})))))
+      (catch Throwable e (error :seon.fx/io-error (step/error-msg e) {:path dir})))))
 
 ;; ---- the wiki's history: what each section was last written against -----------------------
 
@@ -305,7 +305,7 @@
     (let [by-path (group-by :path sections)
           reviewed (reviews root)
           blamed (into {} (for [p (keys by-path)]
-                            [p (try (blame root p) (catch Throwable e {:error (or (ex-message e) (str (type e)))}))]))
+                            [p (try (blame root p) (catch Throwable e {:error (step/error-msg e)}))]))
           infos (into {} (for [{:keys [path address lines]} sections
                                :let [b (blamed path)]]
                            [address (if (:error b)
@@ -320,11 +320,11 @@
                            [[c f] (try (if (str/blank? (git! {} root ["ls-tree" c "--" f] nil))
                                          {:text nil}
                                          {:text (git! {} root ["show" (str c ":" f)] nil)})
-                                       (catch Throwable e {:error (or (ex-message e) (str (type e)))}))]))]
+                                       (catch Throwable e {:error (step/error-msg e)}))]))]
       {:value {:sections infos
                :files (into {} (keep (fn [[k r]] (when (contains? r :text) [k (:text r)]))) shown)
                :errors (into {} (keep (fn [[k r]] (when (:error r) [k (:error r)]))) shown)}})
-    (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path root}))))
+    (catch Throwable e (error :seon.fx/io-error (step/error-msg e) {:path root}))))
 
 ;; Dependencies: fetching is an outside-world effect with one owner (the PKG plan), and
 ;; the resolver is Jolt's own: no resolver of ours.
@@ -340,7 +340,7 @@
     {:value {:roots (:roots (deps/resolve-deps deps "."))}}
     (catch Throwable e
       (let [u (:unresolved (ex-data e))]
-        (error :seon.fx/unresolved (or (ex-message e) (str (type e)))
+        (error :seon.fx/unresolved (step/error-msg e)
                {:deps (vec (or (seq (map :coord u)) (keys deps))) :unresolved (vec u)})))))
 
 (defn build
@@ -606,7 +606,7 @@
                      (cond (contract/error? h) (repeat (count ms) h)
                            (:batch m) ((:perform st) {:batch ms :ctx (:ctx st) :handle h})
                            :else [((:perform st) (cond-> (assoc m :ctx (:ctx st)) h (assoc :handle h)))]))
-                   (catch Throwable e (repeat (count ms) (error :seon.fx/defect (or (ex-message e) (str (type e))) {}))))
+                   (catch Throwable e (repeat (count ms) (error :seon.fx/defect (step/error-msg e) {}))))
            ;; one outcome per request taken, or each asker would wait for ever
            rs (if (= (count ms) (count rs)) rs
                   (repeat (count ms) (error :seon.fx/defect (str "the batch perform answered " (count rs) " outcomes for " (count ms) " requests") {})))

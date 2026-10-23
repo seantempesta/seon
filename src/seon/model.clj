@@ -17,7 +17,7 @@
   Root loads the HTTP transport and JSON before it forks anything, so every agent holds them
   compiled."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [seon.reader :as reader] [jolt.http.core :as http] [clojure.data.json :as json] [seon.config :as config] [seon.print.select :as select] [seon.lib :as lib]))
+  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [seon.reader :as reader] [jolt.http.core :as http] [clojure.data.json :as json] [seon.config :as config] [seon.print.select :as select] [seon.lib :as lib]))
 
 (defn- provider-error
   "The declared failure of a model call, as the one error map: the provider's HTTP 429 is
@@ -85,7 +85,7 @@
             (let [r (http/read-response s nil "POST" nil true true)]
               {:status (:status r) :headers (:header-pairs r) :body (body-text r)})
             (finally (http/s-close s))))
-        (catch Throwable e (transport-error (or (ex-message e) (str (type e))) {:url url}))))))
+        (catch Throwable e (transport-error (step/error-msg e) {:url url}))))))
 
 (def eval-tool
   "The model's one tool (v1's): its code is the REPL's input, read as reply text is."

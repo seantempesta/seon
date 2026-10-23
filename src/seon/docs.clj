@@ -7,7 +7,7 @@
   pulled here at its depth (cited: a var, a section, a file, a task or a namespace), for the
   model's context and every walk (seon.render/walk) alike."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.ref :as ref] [seon.source :as source] [seon.task :as task] [seon.db :as pdb]
+  (:require [seon.step :as step] [seon.contract :refer [defn defn-]] [seon.ref :as ref] [seon.source :as source] [seon.task :as task] [seon.db :as pdb]
             [datahike.api :as d] [clojure.string :as str] [clojure.java.io :as io]
             [seon.print.select :as select] [seon.config :as cfg]))
 
@@ -293,7 +293,7 @@
                            r (cond (get errors [sha file]) {:error (str file " at " (subs sha 0 8) " could not be read from git: " (get errors [sha file]))}
                                    (nil? text) {:ids {}}
                                    :else (try {:ids (source/defining-ids nsym text) :text text}
-                                              (catch Throwable e {:error (str file " at " (subs sha 0 8) " does not read: " (or (ex-message e) (str (type e))))})))]
+                                              (catch Throwable e {:error (str file " at " (subs sha 0 8) " does not read: " (step/error-msg e))})))]
                        (vswap! cache assoc [sha file] r)
                        r)))
         mentioned? (fn [text n] (boolean (re-find (re-pattern (str "[\\s(\\[{'#]" (java.util.regex.Pattern/quote (name n)) "[\\s)\\]}]")) text)))]

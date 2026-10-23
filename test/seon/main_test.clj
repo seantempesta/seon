@@ -144,3 +144,21 @@
                                      (tree-seq coll? seq f))]
                      nsn))]
     (is (= #{'seon.step} puts))))
+
+(deftest an-errors-message-is-read-one-way
+  ;; task seon.step/an-errors-message-is-read-one-way: an exception's message, or its class, is
+  ;; seon.step/error-msg; no src form outside seon.step writes (or (ex-message e) (str (type e)))
+  ;; again. src's forms read as data from the compiler's facts. Not covered: the same read written
+  ;; another way ((.getMessage e), (str (class e)), the two in the other order)
+  (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
+        forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
+                     [(clojure.string/starts-with? ?file "src/")]] db)
+        read-in (fn [nsn src] (require nsn)
+                  (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))
+        shape? (fn [x] (and (seq? x) (= 'or (first x))
+                            (let [[a b] (rest x)]
+                              (and (seq? a) (symbol? (first a)) (= "ex-message" (name (first a)))
+                                   (seq? b) (symbol? (first b)) (= "str" (name (first b)))
+                                   (seq? (second b)) (symbol? (first (second b))) (= "type" (name (first (second b))))))))
+        writers (into (sorted-set) (for [[nsn src] forms :when (some shape? (tree-seq coll? seq (read-in nsn src)))] nsn))]
+    (is (= #{'seon.step} writers))))
