@@ -1,3 +1,4 @@
 ;; Proof runs by reach digest (seon.proofs/prove: bin/prove, bin/test, bin/check without a run
 ;; size, an agent's test run). Values, units and provenance: resources/seon/config/default.edn.
-{:seon.config.proofs/jobs [:int {:min 1 :seon.config/unit "processes" :description "Shards a worktree session's or root's proof run (bin/prove, bin/test) runs its selected tests in at once."}]}
+{:seon.config.proofs/jobs [:int {:min 1 :seon.config/unit "processes" :description "Shards a worktree session's or root's proof run (bin/prove, bin/test) runs its selected tests in at once."}]
+ :seon.config.proofs/cost-max-n [:int {:min 1 :seon.config/unit "n (a cost proof's input size)" :description "The largest input a cost proof measures in this run (seon.cost/sizes); the full run measures as written."}]}

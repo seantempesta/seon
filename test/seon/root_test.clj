@@ -45,7 +45,7 @@
         ;; a kernel-assigned port, never the checkout's: its standing root may hold that one
         port (let [sock (java.net.ServerSocket. 0)] (try (.getLocalPort sock) (finally (.close sock))))
         {:keys [exit out err]} (ts/binary-sh "env" "SEON_WEB_PORT=0" "./seon" "root"
-                                      "--set" (str ":seon.config.root/entrance-port=" port)
+                                      "--set" (str ":seon.config.root/server-port=" port)
                                       "--set" (str ":seon.config.source/root=" (pr-str checkout))
                                       "--set" ":seon.config.source/dirs=[\"src\" \"test\"]"
                                       "--set" (str ":seon.config.root/store-path=" (pr-str (test-store)))
@@ -67,7 +67,7 @@
         ask (fn [m] (str "printf '%s\\n' " (pr-str (pr-str m)) " | nc -w 30 127.0.0.1 " port ";"))
         script (str "mkfifo '" path "-in'; " env "./seon root"
                     " --set ':seon.config.root/store-path=" (pr-str path) "' " (str/join " " args)
-                    " --set ':seon.config.root/entrance-port=" port "' --set ':seon.config.web/port=0'"
+                    " --set ':seon.config.root/server-port=" port "' --set ':seon.config.web/port=0'"
                     " < '" path "-in' > '" path ".log' 2>&1 & R=$!; exec 3>'" path "-in';"
                     " until grep -q 'ROOT LISTENING' '" path ".log' || ! kill -0 $R 2>/dev/null; do sleep 0.1; done;"
                     (apply str (map ask requests))
@@ -93,7 +93,7 @@
         _ (doseq [tx (pdb/seed-tx 110)] (d/transact c {:tx-data tx}))
         _ (d/branch! c :db :old-run)
         c2 (d/connect (assoc cfg :branch :old-run))
-        _ (d/transact c2 {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t 536870914 :stuck []}}]})
+        _ (d/transact c2 {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t 536870914 :root-causes []}}]})
         _ (pdb/sync! cfg)
         _ (do (d/release c2) (d/release c))
         out (root-answers path ["--set ':seon.config.root/main=\"old-run\"'"]
@@ -139,7 +139,7 @@
 (deftest a-refused-wiki-is-a-recorded-problem-and-the-boot-goes-on
   ;; root's boot loads the wiki (seon.root/wiki-tx) in its boot fact's commit; one link to no
   ;; section in any page used to end the boot (bin/root start and next with it). Now the
-  ;; refusal is a recorded :platform error my.root/problems shows, and the root boots. A
+  ;; error is a recorded :platform error my.root/problems shows, and the root boots. A
   ;; checkout of this test's own: this one's files, its docs/ with one broken page more
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         tmp (str checkout "/target/runs/root-test-wiki-" (random-uuid))

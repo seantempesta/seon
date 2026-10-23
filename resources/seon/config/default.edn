@@ -219,6 +219,7 @@
  ;; own :seon.config.merge/max-merge-turns wins.
  :seon.config.merge/max-merge-turns 2
 
+
  ;; ==== Seon's own source ======================================================================
 
  ;; Unit: path. The repository whose source is the program (session LOOP, resources/seon/tasks/
@@ -279,6 +280,12 @@
  ;; responsive beside a standing root and other worktree sessions (measured in docs/merging.md#a-merge-runs-what-the-change-reaches).
  ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected.
  :seon.config.proofs/jobs 4
+ ;; Unit: the size n of a cost proof's input (seon.cost/sizes). A proof measures its sizes up to
+ ;; this, and at least its two smallest (a growth fit needs two). Provenance: root, 2026-10-23
+ ;; (notes/test-time-2026-10-23.md: building inputs at 10k took 10-19 s per proof in every run).
+ ;; bin/test --all sets SEON_COST_MAX_N=100000, so the full run measures each proof as written.
+ ;; At the bound: the proof measures no size past this but its two smallest.
+ :seon.config.proofs/cost-max-n #long #or [#env SEON_COST_MAX_N 1000]
 
  ;; ==== effects and the model ==================================================================
 
@@ -353,7 +360,7 @@
    :seon.ai.model/input-usd-per-mtok 0.15
    :seon.ai.model/cached-input-usd-per-mtok 0.003
    :seon.ai.model/output-usd-per-mtok 0.6
-   :seon.ai.model/thinking-dials #{:enabled :disabled}
+   :seon.ai.model/thinking-modes #{:enabled :disabled}
    :seon.ai.model/provider-max-in-flight 2500
    :seon.ai.model/source "api-docs.deepseek.com/quick_start/pricing and /rate_limit, read 2026-10-21"}
   "deepseek-v4-pro"
@@ -364,7 +371,7 @@
    :seon.ai.model/input-usd-per-mtok 0.66
    :seon.ai.model/cached-input-usd-per-mtok 0.022
    :seon.ai.model/output-usd-per-mtok 1.98
-   :seon.ai.model/thinking-dials #{:enabled :disabled}
+   :seon.ai.model/thinking-modes #{:enabled :disabled}
    :seon.ai.model/provider-max-in-flight 500
    :seon.ai.model/source "api-docs.deepseek.com/quick_start/pricing and /rate_limit, read 2026-10-21"}}
  ;; Unit: tokens per second the provider admits, cluster-wide: the :model owner's token bucket
@@ -481,9 +488,9 @@
  ;; Unit: TCP port on 127.0.0.1: root's server (seon.server), which bin/mcp and outside
  ;; agents reach. 0 (the shipped value): `seon root` refuses to serve. config/local.edn names
  ;; the checkout's own (main 7888, worktree k 7900+10k).
- ;; bin/root PORT WEB, bin/mcp PORT and the mcp check set SEON_ENTRANCE_PORT, which local.edn
+ ;; bin/root PORT WEB, bin/mcp PORT and the mcp check set SEON_SERVER_PORT, which local.edn
  ;; honours (until a built binary's top-level code sees its argv, so --set can say it).
- :seon.config.root/entrance-port #long #or [#env SEON_ENTRANCE_PORT 0]
+ :seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 0]
  ;; app.css and datastar.js, read per request so a style edit shows on reload.
  :seon.config.web/public-dir #seon/checkout "resources/public"
  ;; Unit: +hhmm. Jolt has no time zones: clocks on the page add this offset (`date +%z`).
@@ -493,7 +500,7 @@
  ;; Contracts and their recording (session G1): :on, :contracts (wrappers, no recording
  ;; transaction: the two measured apart), :off (no wrapper, no recording: the same binary
  ;; measured with instrumentation off; test/r3's benches).
- :seon.config.contract/guarantees #keyword #or [#env SEON_GUARANTEES "on"]
+ :seon.config.contract/instrument #keyword #or [#env SEON_INSTRUMENT "on"]
 
  ;; native/probe.c's library (bin/build native): Mach memory probes and qfork. T5 points it at
  ;; next's build from a snapshot that has none.

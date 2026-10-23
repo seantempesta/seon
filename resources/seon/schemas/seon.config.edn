@@ -64,6 +64,7 @@
   [:seon.config.source/generations-dir :seon.config.source/generations-dir]
   [:seon.config.source/test-results-dir :seon.config.source/test-results-dir]
   [:seon.config.proofs/jobs :seon.config.proofs/jobs]
+  [:seon.config.proofs/cost-max-n :seon.config.proofs/cost-max-n]
   ;; effects and the model
   [:seon.config.fx/buf :seon.config.fx/buf]
   [:seon.config.ai/provider :seon.config.ai/provider]
@@ -107,10 +108,10 @@
   [:seon.config.render.list/history :seon.config.render.list/history]
   ;; the web, instrumentation, the native probe
   [:seon.config.web/port :seon.config.web/port]
-  [:seon.config.root/entrance-port :seon.config.root/entrance-port]
+  [:seon.config.root/server-port :seon.config.root/server-port]
   [:seon.config.web/public-dir :seon.config.web/public-dir]
   [:seon.config.web/utc-offset :seon.config.web/utc-offset]
-  [:seon.config.contract/guarantees :seon.config.contract/guarantees]
+  [:seon.config.contract/instrument :seon.config.contract/instrument]
   [:seon.config.native/probe-lib :seon.config.native/probe-lib]]
 
  ;; which layer each key came from (seon.config/sources): the shipped file, config/local.edn,
