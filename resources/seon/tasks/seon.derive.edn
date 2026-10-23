@@ -1,0 +1,72 @@
+[{:seon.task/name "one-content-keyed-derivation"
+  :seon.task/plan "The owner's ruling (docs/decisions.md, main 0ac25d38): \"I want reuse of all unique and immutable data we are sure is the same and is expensive to render\". Filed by worktree session agent-view, 2026-10-23, with root's design choices. It is a new mechanism, so it goes through root's gate (AGENTS §3), and it must meet AGENTS §5: \"Results are reused by input digest\" and \"Content-keyed reuse is allowed for units measured as expensive; no other caches, and never one keyed by time.\"
+
+The owner's second ruling (docs/decisions.md): \"caching isn't an excuse for writing shitty code. If the cold version ... is fuckign slow as shit it's still not okay\", and \"can we return whether there was a cache hit in repl evals?\". So:
+1. Cold first. Every derived kind's own computation carries a cost proof measured cold, with no reuse, at the work it needs. Reuse goes on top of a fast cold path, never instead of one.
+2. Before test_runner's per-file analysis becomes a kind, find out why it takes 8-15 s cold (program-db's whole re-import, test_runner.clj:36-43, 165-190). If the cold path is slow because of a defect (a whole re-import where a delta would do, an O(n²) pass, the planner's :in-scalar), that defect is fixed first at its cause, and the reuse is sized on the fixed numbers.
+3. Hits are recorded where they happen. A REPL eval's reply item and its record, and a turn's record, say which results were reused and which were computed, and each miss's cost in ticks and calls. It is recording, not gating, and it renders through the one printer: the agent window shows it beside each form.
+
+The owner's third ruling (2026-10-23): \"if it's fast enough we don't need caching then don't use caching.\" So the task's first step is fixing the cold paths, measured. A kind is admitted only by its measured cost after that fix: what is still expensive cold gets reuse, and what is fast gets none. If test_runner's analysis and plan become fast cold, this task shrinks to results as facts plus the hit and miss recording, or to nothing; the task says which, with the numbers.
+
+Scope: every pure, immutable result that is proven the same by content and measured as expensive, in src, test or bin. A render of an immutable value is pure, so renders count too. A result is not reused when its work reads the clock, the network or a model, or launches a process; the reach walk's own classification refuses it (what it marks as reaching a process), never a hand list.
+
+The key is the digest of exactly what the work reads: content ids (global-ids), reach digests (seon.program/reach-digests: one Merkle digest per strongly connected component), and a file's content digest. It comes from the machinery we already compute; there is no second hasher.
+
+Where a result lives:
+- Across checkouts, sessions and worktrees: the shared directory, generalized. It is already content-addressed (git's objects and Bazel's CAS are the same idea): a test result's file is named by its reach digest, is immutable, and every checkout reads it with no coordination. It becomes the tier for every kind, at <dir>/<kind>/<digest>.edn, written once by an atomic rename and never rewritten. A digest names exactly one value, so concurrent writers cannot conflict; a race costs one duplicate computation, never a wrong answer. Its path stays a config key (:seon.config.source/test-results-dir, renamed :seon.config.derive/dir), since self-contained's step A moves it into the main tree.
+- Inside one root: results are also facts, so agents query them (the store's job; :seon.proof/digest is the first). An agent reads main's head directly after its fork. Measured by global-ids: a fact read is 222 µs warm and 1.2 ms cold, and a raw key 24-146 µs.
+- The end state (the owner's): once worktree sessions are Seon agents on branches of one store, the directory goes and facts alone carry every result.
+- Rejected (agent-view and root, 2026-10-23): reading main's store and writing through main root's server makes every bin/test depend on main's root; one shared Datahike results store races its branch head across writers and needs the union for every read. Both need more code than files already handle.
+
+Joining. Concurrent requests for one key inside a root are joined by extending the prove proc's join, a duplicate parking on the first's answer; there is no second joiner. Across checkouts, the first atomic rename wins.
+
+The space is bounded by a config key in bytes, and eviction is by size, never by time. Reclaiming the directory is the owner's act, as for runs.
+
+Net size, counted over src, test and bin together. It must replace the per-case reuse it covers. If the total still grows, the task states by how much, and the time and calls it saves, so the owner weighs it with numbers. Today's per-case reuse in src (agent-view's count, 2026-10-23):
+
+| what | where | lines |
+|---|---|---|
+| the ../test-results file store (result-path, greens, result-file, store-greens!) | proofs.clj:121-131, 142-158 | 28 |
+| its callers | | ~12 |
+| stored-greens | proofs.clj:132-141 | 10 |
+| result-tx's digest part | prove.clj:32-56 | ~8 |
+| :turn-ctx | | ~8 |
+| ordered's 1000 ms term (a reuse keyed by time, which §5 forbids) | | 3 |
+
+The file store becomes the general one (its 28 lines generalized, not deleted). In test/test_runner.clj, program-db re-imports src and test on every run (lines 36-43), and the plan's digests and selection run every time (165-190): the 8-15 s and 7-12 s. Those are the 8-15 s.
+
+The cold costs, measured by pure-tests on 2026-10-23 (main 1343c920 with Datahike 7de92bb, in-process, niced, load 6-8). These are what the cold path costs before any reuse:
+
+| phase | time | alloc | note |
+|---|---|---|---|
+| program-db's read of src and test (113 files, 1.9 MB) | 9 ms | | |
+| ts/test-db | 566 ms | 675 MB | |
+| seon.source/import-tx | 2.2 s | 3.5 GB | 626k contracted calls (analyze 2,489, quoted-vars 137k); about 1.3 MB a form, where Jolt's analyzer is about 0.1 ms a form: a defect suspect |
+| d/db-with of its 11,860 ops (75,683 datoms) | 5.4-6.3 s | 3.6 GB | linear, about 24.7k ticks and 48 KB a datom: a defect suspect |
+| program/reach-index | 650 ms each | 0.9 GB each | runs twice a plan, once for tests (533 keys) and once for check steps; one walk could serve both |
+| the greens lookup / fx/inputs | 2 ms / 29 ms | | |
+
+Inside an agent's turn, test-plan computed reach-digests twice a turn (3.1 s and 7.4 GB each), before brief3 and reach-update; this was not re-measured on main.
+
+The reuse code in test and bin today is the result store by digest (proofs/greens, store-greens!, ../test-results) plus target/prove/ms: about 25 lines, of test_runner's 257, bin/prove's 28 and bin/test's 55. Nothing caches the analysis or the plan.
+
+So the cold defects come first, each fixed at its cause by its owner, then measured again:
+- the 48 KB a datom in d/db-with;
+- import-tx's allocation;
+- reach-index run twice a plan.
+
+pure-tests is on the first two now. Its tasks the-plan-reuses-each-files-analysis-by-its-digest (on no branch, dropped from jolt/divergence) and the test-plan caching (in its notes only) fold into this one. Only what is still expensive after those fixes is admitted as a kind.
+
+First slice (one worktree session): measure test_runner's cold path and fix its defects (rule 2), then admit only what the fixed numbers still show expensive; if that is the per-file analysis, it becomes a derived kind keyed by the file's content digest, in the directory. That is the 8-15 s a run. Then the base test plan, the 7-12 s. Report the lines across src, test and bin, and the time saved per run, measured. Later kinds (an attempt's sections, built twice per later turn by seon.context/attempt-text; the help page, 2,132 tokens reassembled per turn of every agent; a turn's remade context) each come with their own measured miss cost and line count.
+
+Correctness: a changed input changes the key (sensitivity), and an input the work does not read leaves it (precision)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.derive-test/a-changed-input-changes-the-key
+                      seon.derive-test/an-unread-input-leaves-the-key
+                      seon.derive-test/a-second-request-at-a-key-does-no-work
+                      seon.derive-test/a-concurrent-duplicate-waits-on-the-first
+                      seon.derive-test/work-reaching-a-process-is-refused
+                      seon.derive-test/a-file-analysis-is-read-from-the-directory-in-another-checkout
+                      seon.derive-test/the-lines-across-src-test-and-bin-are-stated
+                      seon.derive-test/each-kind-is-fast-cold
+                      seon.derive-test/an-eval-says-what-it-reused-and-what-it-computed}}]

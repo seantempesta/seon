@@ -35,7 +35,7 @@ The server's ops, the MCP tools and root's evaluation path are [server](server.m
 | `my.program/search`, `similar` (embeddings) | none; decided (DECISIONS, "Embeddings join the context"), not built; the context's `:found` finds helpers by the call graph meanwhile (`seon.context/found`) | missing |
 | `my.program/diff`, `sizes`, `breaks` | `seon.root/branch-diff` (root only) | partial |
 | `my.program/write-branch!` | write-back at merge (`seon.source`, the `:git` effect) | present, better |
-| `my.message/inbox`, `send` (stored facts) | `my.agent/messages`, `send-message`, held in the agent's process | partial |
+| `my.message/inbox`, `send` (stored facts) | `my.agent/messages`, `send-message`: the owner's message a fact on main and on the taking agent's branch (`:seon.message/*`); another agent's send held in the agent's process | partial |
 | `my.test/run`, `check` | proofs run by themselves after each evaluation, and `my.agent/prove` runs the same selection at the REPL ([turn](turn.md#who-runs-which-tests)) | present |
 | removal that refuses while a referrer remains (`my.program/unmap-subject!`) | plain `ns-unmap`, nothing checked | missing |
 | `my.web/fetch`, `search` | none (no `:web` effect) | missing |
@@ -70,8 +70,9 @@ The server's ops, the MCP tools and root's evaluation path are [server](server.m
 | one printer with a budget and runnable continuations; renders on schemas | `seon.print`, `seon.render` | present |
 | wiki sections in the context | `seon.docs` | new |
 | Datastar pages: `/`, `/agent/{id}` | `seon.web` | present |
-| `/ns/{ns}` and its debug pages; `/agent/{id}/debug`; `/data`; `/chains`; `/health` | none (the routes here: [dashboard](dashboard.md)) | missing |
-| `/agent/{id}/message` (the owner's input bar) | none | missing |
+| `/agent/{id}/debug`: each model call, what it was sent (remade from its basis), its tokens | `/agent/{id}` is the debug view ([render](render.md#the-agents-window)): each turn a row (`seon.render.ui/turn-row`), its context remade by `seon.context/remade` with each part's tokens, the whole request at `/turn?view=&id=`; `/attempt/{id}`, stable across boots | present |
+| `/agent/{id}/message` (the owner's input bar) | the page's message bar and the server's `:message` op, both `seon.root/message!`: root's one delivery into the agent's inbox, which its next turn takes into its basis (`:messages` in the block) | present: a fact on main (from `"owner"`, to the attempt), and on the agent's branch when its turn takes it, named by id in the turn's basis |
+| `/ns/{ns}` and its debug pages; `/data`; `/chains`; `/health` | none (task `seon.render/namespace-agent-debug-and-data-pages`; the routes here: [dashboard](dashboard.md)) | missing |
 | POSTs refuse a cross-origin request (``::same-origin``) | `POST /call` reads no Origin or Sec-Fetch-Site (`seon.web/handler`): any page open in the owner's browser can post calls to every live agent | missing |
 
 ## Storage, config, errors

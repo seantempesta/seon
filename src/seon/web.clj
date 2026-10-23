@@ -78,7 +78,10 @@
   (let [one (fn [op id args] [[(c/request op id args (get index id)) id]])]
     (case f
       seon.root/spawn! (vec (repeat (min 100 (max 1 (or (:n args) 1))) [(c/request 'spawn! nil (cond-> {} (not (str/blank? (:task args))) (assoc :task (:task args))) nil) nil]))
+      ;; a line that starts with > is a message to the agent (read at its next turn), not a form
       seon.root/submit! (cond (str/blank? forms) []
+                              (and (not= :all agent) (str/starts-with? (str/triml forms) ">"))
+                              (one 'message! agent {:body (str/trim (str/replace-first (str/triml forms) #"^>" ""))})
                               (= :all agent) (vec (for [[id a] (sort-by (comp str key) index) :when (not (c/gone-statuses (:status a)))] [(c/request 'submit! id {:forms forms :origin :ui} a) id]))
                               :else (one 'submit! agent {:forms forms :origin :ui}))
       ;; seon.root/interrupt! is no request: an effect on a process, performed by this proc
@@ -112,9 +115,13 @@
     {:status 503 :headers {"Content-Type" "text/plain"} :body "not rendered yet: reload"}))
 
 (defn- view-of
-  "The view a path names: :root, or an agent's id."
+  "The view a path names: :root, an agent's id, or an attempt (attempt:<id>, its id's agent
+  window as that attempt ran: agent ids start again each boot, an attempt's never does)."
   {:malli/schema [:=> [:cat [:maybe :string]] :any]}
-  [s] (if (or (str/blank? s) (= "root" s)) :root (keyword s)))
+  [s]
+  (cond (or (str/blank? s) (= "root" s)) :root
+        (str/starts-with? s "attempt:") (keyword "attempt" (str/replace-first s "attempt:" ""))
+        :else (keyword s)))
 
 (defn handler
   "The routes, as an edge in front of the proc's :http in-port."
@@ -125,7 +132,15 @@
       (let [uri (:uri req) m (:request-method req) q (form-params (:query-string req))]
         (cond
           (and (= m :get) (= uri "/")) (html-response (ask! ch {:op :page :view :root}))
+          ;; the whole request an agent's turn read, made again from its basis (its window links it)
+          (and (= m :get) (= uri "/turn") (not (and (get q "view") (get q "id"))))
+          {:status 400 :headers {"Content-Type" "text/plain"} :body "/turn names its view and the turn's id: /turn?view=a3&id=demo%2Ff%231%2F0"}
+          (and (= m :get) (= uri "/turn"))
+          {:status 200 :headers {"Content-Type" "text/plain; charset=utf-8" "Cache-Control" "no-store"}
+           :body (str (ask! ch {:op :turn-text :agent (view-of (get q "view")) :turn (get q "id")}))}
           (and (= m :get) (str/starts-with? uri "/agent/")) (html-response (ask! ch {:op :page :view (view-of (subs uri 7))}))
+          (and (= m :get) (str/starts-with? uri "/attempt/"))
+          (html-response (ask! ch {:op :page :view (view-of (str "attempt:" (java.net.URLDecoder/decode (subs uri 9) "UTF-8")))}))
           (and (= m :get) (= uri "/feed"))
           (let [out (a/chan 64)]
             (a/>!! ch {:op :open :view (view-of (get q "view")) :ch out})
@@ -193,7 +208,7 @@
   (when body
     (str "<!doctype html>"
          (h/html (ui/shell (if (= :root view) "Seon on Jolt · root" (str "Seon on Jolt · " (name view)))
-                           (str "/feed?view=" (if (= :root view) "root" (name view)))
+                           (str "/feed?view=" (ui/view-param view))
                            (h/raw body))))))
 
 (defn- stats
@@ -217,9 +232,10 @@
     :page (let [[st k] (step/pend st [(:p m) (:view m)])]
             (step/out! o :to-render {:op :page :view (:view m) :k k})
             st)
-    (:context :render-stats)
+    (:context :render-stats :turn-text)
              (let [[st k] (step/pend st [(:p m) :text])]
-               (step/out! o :to-render {:op (if (= :context (:op m)) :context :stats) :k k})
+               (step/out! o :to-render (merge {:op ({:context :context :render-stats :stats :turn-text :turn-text} (:op m)) :k k}
+                                              (select-keys m [:agent :turn])))
                st)
     :stats (do (deliver (:p m) (stats st)) st)
     :call (let [c (:call m)

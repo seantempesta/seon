@@ -160,8 +160,11 @@
   its leaf already."
   {:malli/schema [:=> [:cat :any :seon.print/context] :map]}
   [x context]
-  (let [c (class x) limit (:max-children context)]
+  (let [c (class x) limit (:max-children context)
+        ;; a nested map whose schema declares a render shows as that render, one line, in its place
+        rendered (when (and (:render context) (map-classes c) (not (identical? x (:root context)))) ((:render context) x))]
     (cond
+      rendered (assoc (scalar :seon.print/rendered x (:text rendered)) :seon.print/html (:html rendered))
       (nil? x) (scalar :seon.print/nil nil "nil")
       (identical? c Boolean) (scalar :seon.print/boolean x (str x))
       (integer-classes c) (scalar :seon.print/number x (str x))
@@ -733,7 +736,7 @@
   `:outputs`. A value whose metadata holds `:seon.print/full true` prints whole, and
   `:seon.print/budget n` raises its own budget."
   {:malli/schema [:=> [:cat :any :seon.print/opts] :seon.print/result]}
-  [value {:keys [handle budget max-depth width outputs]}]
+  [value {:keys [handle budget max-depth width outputs render]}]
   (let [requery (if (or (and (qualified-symbol? handle) (= "result" (namespace handle))) (seq? handle))
                   {:seon.print/requery-id handle}
                   {:seon.print/requery-refused "the value has no result handle"})
@@ -744,7 +747,8 @@
         chars (estimate-chars budget-tokens)
         context (cond-> (merge limits
                                {:breaks? (pos? width) :requery requery :requery-id (:seon.print/requery-id requery)
-                                :width width :budget chars :max-children (inc (quot chars 2)) :max-depth max-depth})
+                                :width width :budget chars :max-children (inc (quot chars 2)) :max-depth max-depth}
+                               (when render {:render render :root value}))
                   full? (assoc :budget Long/MAX_VALUE :max-children Long/MAX_VALUE :max-depth Long/MAX_VALUE
                                :max-name Long/MAX_VALUE))
         {root :root :as state} (select value context)]
