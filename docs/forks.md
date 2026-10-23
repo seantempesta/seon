@@ -83,7 +83,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 ## datahike
 
-`reference-code/datahike` pinned at `b4596cf`, the tip of ``jolt/global-ids`` (``jolt/gc-cache-epoch`` `700c473` merged in).
+`reference-code/datahike` pinned at `9cd6e7b`, the tip of ``jolt/release-drains`` (on ``jolt/global-ids`` `b4596cf`, ``jolt/gc-cache-epoch`` `700c473` merged in).
 
 - Fork repo: ``~/src/seon-jolt/libs/datahike``. Upstream: ``replikativ/datahike``.
 - Base: `ad9fc97` "baseline", a history-less snapshot of Seon's fork ``seantempesta/datahike`` `ccba220b` (unknown: that commit is not in the repo, so the snapshot cannot be checked against it).
@@ -97,6 +97,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
   - `9c38f95` Fressian read handlers for a JVM-written store (Jolt), writer start poll timeout 0, schema attribute classes as sets.
   - `fde9f89` the `:sync` writer with `transact-batch!` group commit. Jolt (our design).
 - Ours, above ``jolt/main``:
+  - `9cd6e7b` a `:sync` writer's shutdown commits its run-ahead value before it answers, so a release never drops a write applied and not committed. Jolt (our writer).
   - `deee8c2` freshly written index nodes are not put in the node cache. Generic.
   - `21bc8cd`, `0f1b619` the query result cache is off by default; its tests bind it on. Jolt (measured on our workload).
   - `c0f9149` the branch roster is a konserve append log, O(1) per `branch!`. Generic.
@@ -127,7 +128,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 ## konserve
 
-`reference-code/konserve` pinned at `3dbd4d5`, the tip of ``jolt/lz4-ffi``.
+`reference-code/konserve` pinned at `84d8bc0`, the tip of ``jolt/lmdb-env-release`` (on ``jolt/lz4-ffi`` `3dbd4d5`).
 
 - Fork repo: ``~/src/seon-jolt/libs/konserve``. Upstream: ``replikativ/konserve``.
 - Base: `4991e67` "baseline", a history-less snapshot of Seon's fork `af35a97` (unknown: that commit is not in the repo, so the snapshot cannot be checked against it).
@@ -143,6 +144,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
   - `39ce147` `konserve.jolt.lmdb-ffi/compact-copy!`, a compacted copy of the env that returns a sweep's freed pages. Jolt.
   - `849d87d` jfasl: a stable tagged format in place of raw Chez fasl. Jolt.
 - Ours, above ``jolt/main``:
+  - `84d8bc0` an LMDB env lives as long as a store of the process holds it (acquired by `connect-lmdb-store`, given back by `-release-store :lmdb`, closed by the last): a store made again at a removed path opens its own files. Generic.
   - `b110d99` an append is one transaction on a store that runs them (`PTransactBackingStore`, the LMDB store's one write transaction), so two processes appending one log never lose an element. Generic in shape, LMDB-only in effect.
   - `37a28e4`, `7c462af` `konserve.jolt.lz4`, LZ4 frames through liblz4's frame API over `jolt.ffi` (the JVM Lz4Compressor's format), loaded from `JOLT_LZ4_LIB` ([storage](storage.md#compression)). Jolt.
   - `3dbd4d5` `konserve.jolt.zstd` and `ZstdCompressor` (header byte 2, `:zstd`), libzstd's simple API, one frame per value at level 3, loaded from `JOLT_ZSTD_LIB` ([storage](storage.md#compression)). Jolt.
