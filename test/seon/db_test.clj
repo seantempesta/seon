@@ -175,6 +175,20 @@
         (d/release conn true))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
+(deftest database-exists-answers-whether-a-store-is-there
+  ;; datahike.api/database-exists? answered through a go block that put! its value on
+  ;; Datahike's throwable-promise, which on Jolt is no channel: the fiber threw and the caller
+  ;; waited for ever (pure-tests' store-release-all-hang, after a store was removed). A store
+  ;; on disk of this test's own, the last resort; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))]
+    (try
+      (is (false? (d/database-exists? (pdb/store-cfg :lmdb path))) "no store at the path")
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)] (d/release conn true))
+      (is (true? (d/database-exists? (pdb/store-cfg :lmdb path))) "a store made there")
+      (clojure.java.shell/sh "rm" "-rf" path)
+      (is (false? (d/database-exists? (pdb/store-cfg :lmdb path))) "and none once it is removed")
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
 (deftest a-store-made-again-at-a-removed-path-is-a-new-store
   ;; a store released and removed, then made again at its path in the same process: the
   ;; process's LMDB env for the path closed with the last store over it

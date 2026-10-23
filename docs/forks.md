@@ -83,7 +83,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 ## datahike
 
-`reference-code/datahike` pinned at `9cd6e7b`, the tip of ``jolt/release-drains`` (on ``jolt/global-ids`` `b4596cf`, ``jolt/gc-cache-epoch`` `700c473` merged in).
+`reference-code/datahike` pinned at `b6ae683`, the tip of ``jolt/release-drains`` (on ``jolt/global-ids`` `b4596cf`, ``jolt/gc-cache-epoch`` `700c473` merged in).
 
 - Fork repo: ``~/src/seon-jolt/libs/datahike``. Upstream: ``replikativ/datahike``.
 - Base: `ad9fc97` "baseline", a history-less snapshot of Seon's fork ``seantempesta/datahike`` `ccba220b` (unknown: that commit is not in the repo, so the snapshot cannot be checked against it).
@@ -98,6 +98,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
   - `fde9f89` the `:sync` writer with `transact-batch!` group commit. Jolt (our design).
 - Ours, above ``jolt/main``:
   - `9cd6e7b` a `:sync` writer's shutdown commits its run-ahead value before it answers, so a release never drops a write applied and not committed. Jolt (our writer).
+  - `b6ae683` `database-exists?` delivers its answer by calling the throwable-promise on Jolt (put! on it threw in the fiber and the caller hung). Jolt.
   - `deee8c2` freshly written index nodes are not put in the node cache. Generic.
   - `21bc8cd`, `0f1b619` the query result cache is off by default; its tests bind it on. Jolt (measured on our workload).
   - `c0f9149` the branch roster is a konserve append log, O(1) per `branch!`. Generic.
