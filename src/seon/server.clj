@@ -58,10 +58,10 @@
     (binding [*ns* (create-ns 'root.repl)] (refer-clojure) (require '[my.root :as root] '[seon.root :as c] '[datahike.api :as d])))
   (let [items (mapv #(assoc % :origin :outside)
                     (binding [*sys* sys]
-                      (repl/eval-string code {"ns" "root.repl" :origin :outside :ticks 0
+                      (repl/eval-items code {"ns" "root.repl" :origin :outside :ticks 0
                                               :repl/eval-fn (fn [form] (eval (list 'let '[sys seon.server/*sys*] form)))})))]
     @(c/transact-main! sys (repl/record-tx :root (str "root-outside-" (profile/now-ns)) items nil))
-    items))
+    (repl/reply-items items)))
 
 (defn- attach!
   "Start an outside attempt of task id: its desired model is \"outside\", so the

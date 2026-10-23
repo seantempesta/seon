@@ -66,7 +66,7 @@
       (is (= :h0 (:handle d)))
       (is (= :uncontracted-definition (:seon.repl/finding (first (:warnings d)))) "the warning, a map")
       (is (= ['seon.repl-test.scratch/uncontracted-g] (:uncontracted (first (:warnings d)))))
-      (is (every? number? (map :ms [d e])))
+      (is (every? number? (map (comp :ms :cost) [d e])))
       (is (= :seon.agent/eval-error (:seon.error/type (:err e))) "the error map itself")
       (testing "its text is the error's render: the message first, then its type and where it was raised"
         (is (str/starts-with? (:printed e) (:seon.error/message (:err e))))
@@ -285,6 +285,10 @@
   "How many times the ticks proof's form ran."
   (atom 0))
 
+(def spin-n
+  "How many loops the reply proof's form spins, times 1000 each run."
+  (atom 1))
+
 (deftest an-evals-record-carries-its-ticks
   ;; task seon.turn/a-turn-shows-its-cost-against-its-budget (1): the work a form did is
   ;; recorded once, when it ran (jolt.host/ticks-of), beside :ms and :alloc-bytes, and the
@@ -300,12 +304,30 @@
             [big] (run! "(reduce + (range 1000000))")
             [bad] (run! "(/ 1 0)")
             [once] (run! "(swap! seon.repl-test/evals-run inc)")]
-        (is (pos? (:ticks small)) (pr-str small))
-        (is (> (:ticks big) (* 10 (:ticks small))) "ticks are the work done: 10,000x the loop is >10x the ticks (the form's compile is a constant)")
-        (is (pos? (:ticks bad)) "a form that threw still did work")
+        (is (pos? (:ticks (:cost small))) (pr-str small))
+        (is (> (:ticks (:cost big)) (* 10 (:ticks (:cost small)))) "ticks are the work done: 10,000x the loop is >10x the ticks (the form's compile is a constant)")
+        (is (pos? (:ticks (:cost bad))) "a form that threw still did work")
         (let [rec (-> (repl/record-tx :a "run" [(assoc once :id 0)] nil) first :seon.cluster.eval/record)
               render #(pr-str (h/html (:seon.render/html (ui/history-row rec {}))))]
-          (is (= (:ticks once) (:ticks rec)) "the stored record carries the ticks")
+          (is (= (:ticks (:cost once)) (:ticks rec)) "the stored record carries the ticks")
           (is (= (render) (render)) "rendering one record twice gives the same bytes")
           (is (= 1 @evals-run) "and runs the form no more than once")))
+      (finally (reset! agent/state old)))))
+
+(deftest a-reply-carries-no-cost-the-model-would-read
+  ;; owner, 2026-10-23: no cost numbers in the context or the reply; a number that moves between
+  ;; runs breaks the byte-stable prefix the provider caches. Two runs of one form that do very
+  ;; different work: their costs differ (recorded), their replies are the same bytes.
+  (let [old @agent/state
+        run! (fn [] (let [answers (volatile! [])]
+                      (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
+                      ((repl/handler) {"op" "eval" "code" "(do (dotimes [_ (swap! seon.repl-test/spin-n * 1000)]) :done)" :reply #(vswap! answers conj %)})
+                      (repl/fold @answers)))]
+    (try
+      (reset! spin-n 1)
+      (let [a (run!) b (run!)]
+        (is (< (* 10 (:ticks (:cost (first a)))) (:ticks (:cost (first b)))) "the second run did far more work, and the record says so")
+        (is (= (pr-str (repl/reply-items a)) (pr-str (repl/reply-items b))) "yet the replies are byte-identical")
+        (is (not-any? #(contains? % :cost) (repl/reply-items a)))
+        (is (every? #(contains? (first (repl/record-tx :a "r" [(assoc % :id 0)] nil)) :seon.cluster.eval/record) a)))
       (finally (reset! agent/state old)))))
