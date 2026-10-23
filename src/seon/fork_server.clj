@@ -47,7 +47,7 @@
        :ping-map-fn (fn [st] {:t (:max-tx (:db st)) :mismatch (:mismatch st)})})
   ;; :graph, main's reach graph (seon.program/reach-graph) for :db as of the last fork, handed
   ;; to every agent forked (seon.agent/base-graph); a standby inherits it
-  ([{:keys [db conn graph]}] (cond-> {:db db :mismatch 0 :conn conn :status-buf (ffi/alloc 4) :children #{}} graph (assoc :graph graph)))
+  ([{:keys [db cfg store conn graph]}] (cond-> {:db db :cfg cfg :store store :mismatch 0 :conn conn :status-buf (ffi/alloc 4) :children #{}} graph (assoc :graph graph)))
   ;; stop (root closed its end, or died): every child (agents, the standby) killed and reaped
   ;; before this process exits, so root's waitpid of this server is the end of every one of
   ;; them. An agent that had closed its socket but not yet exited was handed to launchd when
@@ -63,8 +63,10 @@
      :tx (if (<= (:t m) (:max-tx (:db st)))
            [st nil] ; already in the db this server was forked with
            (let [t0 (profile/now-ns)
-                 ;; main's commit as main's own transaction t (seon.db/replay)
-                 db' (pdb/replay (:db st) (:t m) (:tx-data m) (:tx-meta m {}))
+                 ;; main at t is the commit the writer made, read from the store (lazy over its
+                 ;; persistent indexes), never its datoms replayed here: replaying a 42,942-datom
+                 ;; import took 3.5 s, and the first fork waited behind it (2026-10-23)
+                 db' (d/commit-as-db (:store st) (:commit m))
                  st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled
                  errs (seq (program/load-changes! db' (:tx-data m)))]
@@ -90,7 +92,7 @@
      ;; a standby (session F2): a fork of this server, idle on its own named pipes until root
      ;; promotes it, so that no fork after boot ever comes from root (multithreaded).
      ;; The previous standby is killed: one standby at a time.
-     :standby (fork-carrying! st #(main (:db st) % false (:graph st))
+     :standby (fork-carrying! st #(main (:db st) (:cfg st) % false (:graph st))
                               (fn [n] [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads n}]}])
                               (fn [pid] (when-let [old (:standby-pid st)] (lib/c-kill old 9))
                                 (let [[st evs] (reap (-> st (assoc :standby-pid pid) (update :children conj pid)))]
@@ -115,17 +117,21 @@
   that every agent, test child and clone inherits; a standby (boot? false) stays in it.
   EOF on the socket is root's death: the server kills the group, itself included. Never
   returns."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.lib/fd :boolean] :any] [:=> [:cat :seon.host/db :seon.lib/fd :boolean [:maybe :map]] :any]]}
-  ([db0 fd boot?] (main db0 fd boot? nil))
-  ([db0 fd boot? graph]
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd :boolean] :any] [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd :boolean [:maybe :map]] :any]]}
+  ([db0 cfg fd boot?] (main db0 cfg fd boot? nil))
+  ([db0 cfg fd boot? graph]
   ;; every agent forked from here works in the scratch dir, with no repository above it: an
   ;; agent changes code through its REPL and git finds nothing (owner, 2026-10-22)
   (when boot? (lib/c-setpgid 0 0) (dev-classpath!)
     (let [dir (get cfg/config :seon.config.agent/cwd)] (.mkdirs (java.io.File. dir)) (lib/c-chdir dir)))
+  ;; it reads main's commits from the store itself, opened as an agent opens it
+  ;; (seon.db/after-fork!): the parent's handles are not used across fork
+  (pdb/after-fork! cfg)
   (let [conn (sock/conn fd)
+        store (d/connect (assoc cfg :branch (pdb/main-branch cfg)))
         recv! (fn [] (let [m (sock/recv-within! conn 100)]
                        (case m :eof nil :timeout [:cmd {:op :tick}] [:cmd m])))]
-    (step/run-loop #'server-step {:db db0 :conn conn :graph graph}
+    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :graph graph}
                    recv! (fn [_ m] (sock/send! fd m)))
     (lib/c-kill 0 9)
     (lib/c-exit 0))))
@@ -149,12 +155,13 @@
     (.setDaemon true) (.start)))
 
 (defn fork-server
-  "Fork the boot fork server holding db (lib/fork!: boot has one active thread; another is
-  a defect, thrown). In the child it never returns; here answers {:pid :fd}."
-  {:malli/schema [:=> [:cat :seon.host/db] :seon.fork-server/forked]}
-  [db]
+  "Fork the boot fork server holding db, on the store cfg names (lib/fork!: boot has one
+  active thread; another is a defect, thrown). In the child it never returns; here answers
+  {:pid :fd}."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.db/cfg] :seon.fork-server/forked]}
+  [db cfg]
   (let [[r s] (sock/socketpair)]
-    (lib/fork! {:fd s :child #(do (sock/close! r) (main db s true))
+    (lib/fork! {:fd s :child #(do (sock/close! r) (main db cfg s true))
                 :refused #(throw (ex-info "the fork server cannot fork: root boots with more than one thread"
                                           {:seon.error/type ::not-single-threaded :active-threads %}))
                 :parent (fn [pid] {:pid pid :fd r})})))

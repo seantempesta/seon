@@ -353,34 +353,19 @@
   [conn main branch]
   (d/commit-as-db conn (d/merge-base conn branch main)))
 
-;; ---- tx-data that replays exactly -----------------------------------------------
+;; ---- tx-data with explicit ids ----------------------------------------------------
 ;; The store issues every entity id and transaction id once (ids!), so ids are unique
-;; across branches: a branch's new entity keeps its id on main, and a replica (the fork
-;; server's main) applies the writer's RESOLVED datoms as main's own transaction (replay)
-;; rather than re-resolving tempids or taking an id of its own.
+;; across branches: a branch's new entity keeps its id on main. The fork server's replica
+;; of main reads each commit from the store (seon.fork-server, d/commit-as-db); these name
+;; a commit's datoms for the program's loader and main's readers.
 
 (defn report->tx-meta
   "The transaction entity's own facts in the writer's tx-report ({attribute value}: its
-  :db/txInstant and any tx-meta; empty without history): what a replica of the branch
-  applies as its transaction's :tx-meta (replay), so its transaction entity holds main's facts."
+  :db/txInstant and any tx-meta; empty without history): a commit's own facts, as main's
+  readers receive them beside its datoms."
   {:malli/schema [:=> [:cat :seon.db/tx-report] :map]}
   [rep]
   (into {} (for [dt (:tx-data rep) :when (and (= (:e dt) (:tx dt)) (:added dt))] [(:a dt) (:v dt)])))
-
-(defn replay
-  "db with main's commit t applied as main's transaction t: tx-data (report->tx) and the
-  transaction's facts (report->tx-meta) under main's own transaction id, so a replica's t
-  is main's (the fork server's replica: seon.agent/misaligned compares them). A speculation
-  of the replica's own (d/with) would take the next id after its own, which the store has
-  issued to another transaction. Explicit-id tx-data mints no entity id."
-  {:malli/schema [:=> [:cat :seon.host/db :int :seon.db/resolved-tx :map] :seon.host/db]}
-  [db t tx-data tx-meta]
-  (:db-after (datahike.core/with db tx-data tx-meta
-                                 (reify datahike.ids/IIds
-                                   (-take! [_ kind]
-                                     (if (= :tx kind) t
-                                         (throw (ex-info "a replayed commit names its entity ids (report->tx)" {:t t}))))
-                                   (-reach! [_ _ _] nil)))))
 
 (defn report->tx
   "The writer's tx-report as explicit-id tx-data (the transaction entity's own datoms left
