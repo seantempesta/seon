@@ -53,6 +53,8 @@ function. The same site check judges the other laws: [clocks](clocks.md) and [re
 
 | failure point | edge | answer |
 |---|---|---|
+| The embedding model is missing or llama.cpp cannot load it (no file at `:seon.config.vector/model`, a file it cannot read) | `seon.vector/open`, the `:embed` worker's `:open` | `:seon.vector/model-unopened` (`:path`) as every queued request's outcome; the worker holds nothing and opens again on its next request; `seon.vector/vectors-proc` tries again at main's next commit, and `bin/check vectors` is red |
+| llama.cpp's encode fails (`seon_embed_batch` answers negative) | `seon.vector/embed` (its `embed-texts`) | `:seon.vector/encode-failed` (`:code`) for each request of the batch |
 | A peer's socket is gone (EOF, or its end frame) | root: `jolt.async.remote`'s reader pump; agents and the fork server: `seon.sock/fill!`, `seon.sock/recv!` | root: the end's `:in` closes, the agent proc's `:from` reads nil and becomes `{:op :dead}`; elsewhere `:eof` |
 | A write to a dead peer (EPIPE) | `seon.sock/send-frame!` | `:epipe`; the agent exits, root reads EOF |
 | `fork()` refused (another Chez thread active, the OS) | `seon.lib/fork!`, the one spawning skeleton (the fork server's agents and standby, an agent's test child and clone) | its `refused` branch with the active Chez threads, checked once, never waited out: `:fork-failed` / `:standby-failed` with `:active-threads`; the test run's `:seon.test/fork-refused` (no test ran); the clone's `:clone-failed` |

@@ -495,7 +495,7 @@
  ;; Unit: forms. The program forms nearest the task's plan (seon.vector/near over the plan's
  ;; vector), fused with the call graph's helpers by reciprocal rank (seon.context/found). 0 fuses
  ;; none. Measured 2026-10-23 on 283 pairs from main's history (each commit's message, the
- ;; functions its diff touched less those it names; notes/vector-recall.md): recall@10 call graph
+ ;; functions its diff touched less those it names; docs/vector.md#fused-with-the-call-graph): recall@10 call graph
  ;; 0.042, embeddings 0.495, fused 0.451; 30 covers every rank a top-5 can come from.
  :seon.config.render/found-near 30
  ;; Unit: tokens (seon.print.select/estimate). The attempt's map of the namespaces its proofs and
@@ -503,14 +503,17 @@
  ;; within an equal share. Provenance: root's research (2026-10-22, lever 1), aider's default
  ;; --map-tokens 1k. At the bound a namespace's rest is (clojure.repl/dir ns).
  :seon.config.render/map-tokens 1000
- ;; Semantic search's pyramid (seon.vector/near, docs/vector.md#the-pyramid). Measured on Seon's
- ;; own 1,393 forms (EmbeddingGemma-2, every form a query, against exact 768-dim search):
- ;; coarse 128 int8 + shortlist 100 + fine 768 f16 gave recall@10 0.9975, 0.08 ms a query;
- ;; coarse 64 0.9445, shortlist 50 0.9745, fine 256 at most 0.83. At 100k vectors 0.31 ms.
+ ;; Semantic search's pyramid (seon.vector/near, docs/vector.md#the-pyramid), measured against an
+ ;; exact 768-dim search, recall@10 (EmbeddingGemma-2):
+ ;; - bin/check vectors, Seon's whole text (2,681: 1,783 forms with the schemas, 321 sections, the
+ ;;   task plans), 207 queries, coarse 128: shortlist 50 0.946, 100 0.979, 200 0.990, 400 0.998;
+ ;; - the 1,393 src forms alone: coarse 64 + 100 0.945, coarse 128 + 100 0.9975, fine 256 at most 0.83.
+ ;; near in Jolt on 1,737 vectors: shortlist 100 1.9 ms, 200 3.0 ms, 400 4.6 ms (the datom reads);
+ ;; the C levels alone 0.08 ms at 1.4k, 0.31 ms at 100k.
  ;; Unit: dims. Stored per vector (seon.vector/pack): a change re-packs every vector.
  :seon.config.vector/coarse-dims 128
  ;; Unit: vectors. At the bound the rest of the coarse ranking is never reranked.
- :seon.config.vector/shortlist 100
+ :seon.config.vector/shortlist 400
  ;; Unit: dims. 768 is the whole vector; fewer reads less and ranks a prefix.
  :seon.config.vector/fine-dims 768
  ;; The embedding model (docs/vector.md#the-model): EmbeddingGemma-2, ggml-org's Q8_0 GGUF, in

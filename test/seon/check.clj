@@ -9,7 +9,7 @@
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
   reference (await-ref, seon.await/await-db), never a poll or a deadline."
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.await] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.main :refer [out! shown]]))
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.await] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.vector] [seon.main :refer [out! shown]]))
 
 
 ;; ---- the harness: one frame, one verdict, one way to wait ------------------------------
@@ -1232,6 +1232,38 @@
                 :entity-ids-issued-once (not-any? (es ia) (es ib))
                 :tx-ids-issued-once (not-any? (txs ia) (txs ib))}}))))
 
+(defn vectors
+  "Semantic search on Seon's own text (docs/vector.md): a root booted on this checkout's source,
+  task files and wiki embeds every form, section and plan through its :vectors proc and :embed
+  effect (the model in process), awaited on main (seon.await/await-db: nothing due), no clock;
+  then 200 of those vectors, each a query, have their top 10 by the pyramid's default levels
+  compared with an exact search of every vector (seon.vector/near with a shortlist of all).
+  Red below a recall of 0.99, or when the model is missing."
+  []
+  (run-check "VECTORS" {:datoms 0 :source {:root (seon.config/checkout) :dirs ["src" "resources/seon/schemas"]}}
+   (fn [sys]
+     (let [path (seon.config/value :seon.config.vector/model)
+           model (seon.vector/model-id path)]
+       (if-not (.exists (java.io.File. path))
+         {:report {:model path} :checks {:model-present false}}
+         (let [t0 (System/currentTimeMillis)
+               _ (my.root/load-tasks! sys)
+               _ (my.root/load-docs! sys)
+               db (seon.await/await-db sys #(empty? (seon.vector/due % model)))
+               embed-ms (- (System/currentTimeMillis) t0)
+               es (sort (map :e (d/datoms db :aevt :seon.vector/f16)))
+               qs (take-nth (max 1 (quot (count es) 200)) es)
+               found (fn [q opts] (set (map first (seon.vector/near db q 10 opts))))
+               exact (into {} (for [q qs] [q (found q {:shortlist (count es)})]))
+               recall-of (fn [opts] (/ (reduce + (for [q qs] (count (filter (exact q) (found q opts))))) (* 10.0 (count qs))))
+               recall (recall-of {})]
+           {:report {:vectors (count es) :queries (count qs) :recall10 recall :embed-ms embed-ms
+                     ;; what each shortlist would give: the default's evidence, measured here every run
+                     :by-shortlist (into (sorted-map) (for [k [50 100 200 400]] [k (recall-of {:shortlist k})]))
+                     :forms (count (d/datoms db :aevt :form/id)) :sections (count (d/datoms db :aevt :seon.section/address))}
+            :checks {:model-present true :every-text-embedded (empty? (seon.vector/due db model))
+                     :pyramid-recall-at-least-0.99 (>= recall 0.99)}}))))))
+
 (defn- fork-server-caught-up
   "A FIFO barrier through the fork server: {:op :stats} goes to the server process on the
   socket that carries main's commits (seon.fork-server/fork-server-proc), the process takes
@@ -1396,6 +1428,7 @@
      "record" (fn [n more] (record))
      "orphan" (fn [n more] (orphan))
      "ids" (fn [n more] (ids))
+     "vectors" (fn [n more] (vectors))
      "fx" (fn [n more] (fx (n-or n "20")))
      "system" (fn [n more] (system-check))
      "config" (fn [n more] (config-check))
