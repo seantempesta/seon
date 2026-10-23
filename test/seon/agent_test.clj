@@ -476,7 +476,7 @@
                                              "      ids (get-in t [:seon.turn/basis :observed :message-ids])]"
                                              "  {:calls (mapv #(select-keys % [:code :thinking :items]) (:seon.turn/calls t)) :ids ids"
                                              "   :committed (seon.context/taken-messages (datahike.api/commit-as-db db (get-in t [:seon.turn/basis :commit])) {:message-ids ids})"
-                                             "   :leads (mapv #(:lead (:seon.cluster.eval/record (datahike.api/entity db [:seon.cluster.eval/id %]))) (:items (first (:seon.turn/calls t))))})")
+                                             "   :leads (mapv #(:lead (datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.cluster.eval/id ?i] [?e :seon.cluster.eval/record ?r]] db %)) (:items (first (:seon.turn/calls t))))})")
                                         {:op :eval :agent "root"
                                          :code (str "(datahike.api/q '[:find ?id ?f ?to ?b :where [?m :seon.message/id ?id] [?m :seon.message/from ?f]"
                                                     " [?m :seon.message/to ?to] [?m :seon.message/body ?b]] @(:conn sys))")}]
@@ -486,7 +486,7 @@
         [[mid from to body] :as facts] (vec (edn/read-string (:printed on-main)))]
     (is (= 1 (:model-calls end)) (pr-str end))
     (is (= [["owner" "demo/t#1" "use demo/g"]] (mapv #(subvec % 1) facts)) "one fact on main: from the owner, to the attempt a1 works")
-    (is (= [mid] ids) (str "the turn's basis names the fact root wrote, by its id: " (pr-str turn)))
+    (is (= [mid] ids) "the turn's basis names the fact root wrote, by its id")
     (is (= [{:id mid :from "owner" :body "use demo/g"}] committed) "and its text is read from the commit the turn read")
     (is (= "check the sum before the proof" (:thinking (first calls))) "the call's thinking, recorded with it")
     (is (= 1 (count (:items (first calls)))) "the call names its one evaluation's record")
