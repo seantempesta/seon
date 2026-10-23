@@ -11,12 +11,12 @@
 
 (defn request
   "Task id's first-turn model request on db, as seon.turn/act! sends it: the messages
-  seon.context/render makes for turn 0 of a fresh attempt whose proofs have no result yet
+  seon.context/render makes for turn 0 of a fresh run whose proofs have no result yet
   (the turn loop runs them first; an unwritten proof reads :undefined either way), and the
   model and thinking mode in force."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:map [:messages [:vector :seon.model/message]] [:model :string]]]}
   [db id]
-  {:messages (:messages (context/render db {:commit (d/commit-id db) :task id :attempt (str id "#first-move") :turn 0
+  {:messages (:messages (context/render db {:commit (d/commit-id db) :task id :run (str id "#first-move") :turn 0
                                             :max-turns (config/value :seon.config.agent/max-turns) :origin :model
                                             :observed {:results {} :reds []}}))
    :model (config/value :seon.config.ai/model)
