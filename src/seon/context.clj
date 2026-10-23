@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg]))
+            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [clojure.edn]))
 
 (def help-page
   "The help page, docs/agent.md: what every agent reads first (its system message, the same
@@ -99,24 +99,18 @@
     (:message r) (assoc :message (:message r))))
 
 (defn callees
-  "The program functions proof p calls directly (one level), each at summary level: its
-  arglists, contract and doc, never its body. Read from p's source by the reader and
-  resolved in p's namespace; a var is program when db holds it."
+  "The program functions proof p calls directly (one level: its recorded form's :form/refs,
+  the compiler's resolved references), each at summary level from its own facts on db: its
+  contract and doc, never its body; a var is program when db holds it (a branch's callee
+  this process never loaded included)."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :map]]}
   [db p]
-  (let [nsx (find-ns (symbol (namespace p)))
-        src (source-of db p)]
-    (if-not (and nsx src)
-      []
-      (vec (for [sym (distinct (filter symbol? (tree-seq coll? seq (reader/read-text src (ns-name nsx)))))
-                 :let [v (ns-resolve nsx sym)]
-                 :when (and (var? v) (not (:test (meta v))))
-                 :let [q (symbol (str (ns-name (:ns (meta v)))) (str (:name (meta v))))]
-                 :when (and (not= q p) (pdb/eid db :var/name q))]
-             (cond-> {:var q}
-               (:arglists (meta v)) (assoc :arglists (:arglists (meta v)))
-               (:malli/schema (meta v)) (assoc :contract (:malli/schema (meta v)))
-               (:doc (meta v)) (assoc :doc (:doc (meta v)))))))))
+  (vec (for [q (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db p)) p))
+             :let [v (d/entity db [:var/name q])]
+             :when (and v (not= :test (:var/kind v)))]
+         (cond-> {:var q}
+           (:var/contract v) (assoc :contract (clojure.edn/read-string (:var/contract v)))
+           (:var/doc v) (assoc :doc (:var/doc v))))))
 
 ;; ---- the last evaluations: folded, each an equal share --------------------------------
 

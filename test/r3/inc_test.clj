@@ -2,7 +2,7 @@
   "The incremental reconciler equals the full one: after every commit of a random history,
   (actions (observe idx db ops)) = (reconcile-view (view db)) and = (actions (index db))."
   (:require [clojure.test :refer [deftest is testing]] [r3.fx :as fx] [seon.reconcile :as r] [r3.oracle :as oracle] [seon.task :as task]
-            [seon.db :as pdb] [datahike.api :as d] [seon.proofs :as proofs]))
+            [seon.db :as pdb] [datahike.api :as d] [seon.proofs :as proofs] [seon.config :as config]))
 
 (defn- rand-step
   "One random write a root or observer makes on main (tx-data), drawn with rng."
@@ -37,7 +37,8 @@
 (defn- acyclic? [db] (some? (try (r/reconcile db) (catch Throwable _ nil))))
 
 (deftest incremental-equals-full
-  (doseq [seed (let [s (proofs/test-seed)] (map #(+ s %) (range 5)))]
+  ;; one seed in the automatic run, five in the full one (:seon.config.proofs/seeds)
+  (doseq [seed (let [s (proofs/test-seed)] (map #(+ s %) (range (config/value :seon.config.proofs/seeds))))]
     (fx/load! 30 6 (fn [conn] (let [rng (java.util.Random. seed)
                     ;; one merge at a time: the octopus merge degenerates to M1's merge queue, the oracle's rule
           _ (d/transact conn {:tx-data [{:seon.root/id :root :seon.config.merge/max-running 1}]})]

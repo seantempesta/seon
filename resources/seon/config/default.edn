@@ -287,6 +287,12 @@
  ;; bin/test --all sets SEON_COST_MAX_N=100000, so the full run measures each proof as written.
  ;; At the bound: the proof measures no size past this but its two smallest.
  :seon.config.proofs/cost-max-n #long #or [#env SEON_COST_MAX_N 1000]
+ ;; Unit: seeds (a count). How many seeds a randomized property test draws in this run, each
+ ;; from its own test-seed (seon.proofs/test-seed) and the next ones after it. Provenance: root,
+ ;; 2026-10-23 (notes/test-time-2026-10-23.md: r3.inc-test's 5 seeds x 150 steps took 47 s, the
+ ;; automatic run's critical path). bin/test --all sets SEON_SEEDS=5, so the full run draws as
+ ;; many as before. At the bound: the test draws this many and no more.
+ :seon.config.proofs/seeds #long #or [#env SEON_SEEDS 1]
 
  ;; ==== effects and the model ==================================================================
 

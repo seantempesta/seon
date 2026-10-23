@@ -99,6 +99,21 @@
         (is (= at (get-in problem [:error :commit])))
         (remote/close! end) (sock/close! a'))))))
 
+(deftest an-agent-root-cannot-interrupt-is-a-problem-and-memory-rides-its-commits
+  ;; shrink brief 3, rows 19 and 34: an agent whose boot check found root's interrupt cannot
+  ;; reach it says so in its hello, and root records :seon.agent/interrupt-unreachable (the
+  ;; answer nothing read before); its memory reaches root's view on its commits, never on each
+  ;; eval reply
+  (let [[r a'] (sock/socketpair)
+        end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
+        st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+        problems (fn [ok] (filter #(= :problem (:op %)) (:to-api (second (step #'ap/agent-proc st :from {:op :hello :t 1 :start-ms 1.0 :mem-mb 1.0 :interrupt-ok ok})))))
+        sets (fn [m] (keep #(when (= :status (:op %)) (:set %)) (:to-api (second (step #'ap/agent-proc st :from m)))))]
+    (is (= [:seon.agent/interrupt-unreachable] (map #(get-in % [:error :seon.error/type]) (problems false))))
+    (is (empty? (problems true)) "a reachable agent records nothing")
+    (is (= [{:mem-mb 12.5}] (sets {:op :committed :t 2 :txs 1 :mem-mb 12.5})) "a commit carries its memory to the view")
+    (remote/close! end) (sock/close! a')))
+
 (deftest a-fork-names-the-commit-its-agent-starts-at
   ;; task seon.agent/an-agents-base-is-its-merge-base: :spawn branches the agent from main's
   ;; head and asks the fork server, whose image holds main at that head (the FIFO), to fork it;

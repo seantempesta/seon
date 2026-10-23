@@ -2,7 +2,7 @@
 ;; next's task config key; the rest are new in next, where an agent is a forked process).
 {:seon.config.agent/max-running [:int {:min 0 :seon.config/unit "attempts" :description "Attempts running at once; a ready task beyond it waits for an end. 0 starts nothing new."}]
  :seon.config.agent/max-turns [:int {:min 1 :seon.config/unit "turns" :description "Turns an attempt may take when its task sets none."}]
- :seon.config.agent/cwd [:string {:min 1 :seon.config/unit "path" :description "Every agent process's working directory, with no repository above it."}]
+ :seon.config.agent/cwd [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "Every agent process's working directory, with no repository above it."}]
  :seon.config.agent/inbox-size [:int {:min 1 :seon.config/unit "messages" :description "Each agent channel's buffer; a full channel pushes back on its sender."}]
  :seon.config.agent/trip-bytes [:int {:min 65536 :seon.config/unit "bytes" :description "Chez's collect-trip-bytes in an agent: allocation between collections."}]
  :seon.config.agent/heap-extra-bytes [:int {:min 1048576 :seon.config/unit "bytes" :description "How far an agent's heap may grow past what it inherited; past it an allocation throws OutOfMemoryError."}]

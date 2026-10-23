@@ -7,9 +7,9 @@
  :seon.config.root/writer-buf [:int {:min 1 :seon.config/unit "requests" :description "The writer's in-port; beyond it senders park."}]
  :seon.config.root/reconciler-buf [:int {:min 1 :seon.config/unit "commits" :description "Main's commits queued for the reconciler; a full buffer parks the writer."}]
  :seon.config.root/standby-every [:int {:min 1 :seon.config/unit "commits" :description "Main commits after which the fork server forks a fresh standby."}]
- :seon.config.root/runs-dir [:string {:min 1 :seon.config/unit "path" :description "Where kept runs live (never deleted)."}]
- :seon.config.root/store-path [:string {:min 1 :seon.config/unit "path" :description "The one store every root works in, on its own main branch."}]
- :seon.config.root/main [:string {:min 1 :seon.config/unit "branch" :description "Root's main branch, resumed at every boot; made from :db when the store has none."}]
+ :seon.config.root/runs-dir [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "Where kept runs live (never deleted)."}]
+ :seon.config.root/store-path [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "The one store every root works in, on its own main branch."}]
+ :seon.config.root/main [:string {:seon.config/place true :min 1 :seon.config/unit "branch" :description "Root's main branch, resumed at every boot; made from :db when the store has none."}]
  :seon.config.root/system-path [:string {:min 1 :seon.config/unit "path" :description "Root's system declaration (system.edn), read with aero."}]
  :seon.config.root/tasks-dir [:string {:min 1 :seon.config/unit "path" :description "The task files my.root/task-files reads."}]
  :seon.config.root/gc-sweepers [:int {:min 0 :seon.config/unit "threads" :description "Chez parallel-collector sweepers in root, fixed at boot after the fork server is forked; 0: collect on the triggering thread."}]}
