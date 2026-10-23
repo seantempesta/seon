@@ -293,24 +293,24 @@
       (seq waste)
       (assoc :waste [(assoc base :waste waste :evidence {:from aid :waste waste})]))))
 
-(defn- test-reds
-  "Each test whose newest recorded result (the test service's, seon.prove/result-tx: the last
-  result fact written for it) is red, as a :test-red row naming the test, the branch and tx it
-  ran at and the change that asked. A later green at a new digest is a newer result, so it
-  closes the row with nothing written. Cost: one pull per result fact."
+(defn test-reds
+  "Each test whose newest result on main (the test service's, seon.prove/result-tx: the entity per
+  test under :seon.proof/latest) is red, as a :test-red row naming the test, the branch and tx it
+  ran at and the change that asked. A later green is the newer result of that entity, so it closes
+  the row with nothing written; the older result stays in the history. A red on an agent's branch is
+  not on main, so it is not here. Cost: one datom per test, and a pull per red one."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
-  (let [newest (reduce (fn [m {:keys [e]}] (update m (:seon.proof/test (d/entity db e)) #(max e (or % 0)))) {} (d/datoms db :aevt :seon.proof/digest))]
-    (vec (for [[t e] newest
-               :let [r (d/pull db '[*] e)] :when (not= :pass (:seon.proof/status r))
-               :let [s (str "test-red " t)]]
-           {:signature s :test t :status (:seon.proof/status r) :open? true :branch (:seon.proof/branch r) :t (:seon.proof/t r)
-            :run (:seon.proof/run r) :change (:seon.proof/change r) :failures (:seon.proof/failures r)
-            :message (str t " is " (name (:seon.proof/status r)) " at " (:seon.proof/branch r) " t " (:seon.proof/t r)
-                          (when-let [a (get-in r [:seon.proof/change :agent])] (str ", asked by " (name a))))
-            :producer nil :owner-ns (symbol (namespace t)) :proofs [t]
-            :evidence {:kind :test-red :test t :digest (:seon.proof/digest r) :run (:seon.proof/run r) :failures (:seon.proof/failures r)}
-            :answered-by (get-in ans [:signature s] []) :at-ms nil}))))
+  (vec (for [{:keys [e v]} (d/datoms db :aevt :seon.proof/latest)
+             :when (not= :pass (:v (first (d/datoms db :eavt e :seon.proof/status))))
+             :let [r (d/pull db '[*] e) t (symbol v) s (str "test-red " v)]]
+         {:signature s :test t :status (:seon.proof/status r) :open? true :branch (:seon.proof/branch r) :t (:seon.proof/t r)
+          :run (:seon.proof/run r) :change (:seon.proof/change r) :failures (:seon.proof/failures r)
+          :message (str t " is " (name (:seon.proof/status r)) " at " (:seon.proof/branch r) " t " (:seon.proof/t r)
+                        (when-let [a (get-in r [:seon.proof/change :agent])] (str ", asked by " (name a))))
+          :producer nil :owner-ns (symbol (namespace t)) :proofs [t]
+          :evidence {:kind :test-red :test t :run (:seon.proof/run r) :failures (:seon.proof/failures r)}
+          :answered-by (get-in ans [:signature s] []) :at-ms nil})))
 
 (defn report
   "Every problem recorded on main db, by class: {:t :classes {class {:n :rows}}}. Counted

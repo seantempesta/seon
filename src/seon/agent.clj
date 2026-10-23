@@ -429,6 +429,19 @@
                           :message (str "test process died: " status (when var (str " while " var " ran")))}
                    var (assoc :var var))]})))
 
+(defn run-selection
+  "What a test-plan p runs when a request names namespaces (names; none: every test it selects). A
+  test that reaches a process of its own (p's :process) runs only when asked for: its namespace
+  is named, or it is one of the proofs; otherwise it is left out of :selected and :run and listed
+  under :skipped (owner, 2026-10-23: tests shouldn't be running agent turns, not automatically)."
+  {:malli/schema [:=> [:cat :map [:maybe [:set :symbol]] [:set :qualified-symbol]] :map]}
+  [p names proofs]
+  (let [in? #(contains? names (symbol (namespace %)))
+        p (if (seq names) (-> p (update :selected #(filterv in? %)) (update :run #(filterv in? %))) p)
+        skip? (fn [t] (and (contains? (:process p) t) (not (seq names)) (not (contains? proofs t))))]
+    (-> p (assoc :skipped (vec (sort-by str (filter skip? (:selected p)))))
+        (update :selected #(filterv (complement skip?) %)) (update :run #(filterv (complement skip?) %)))))
+
 (defn run-tests-forked
   "Fork this agent; the child runs what test-plan runs for proofs (the selected tests with no
   green held at their digest) within ticks engine ticks of work, writing each test var as it
@@ -445,12 +458,7 @@
   ([ticks proofs] (run-tests-forked ticks proofs (fn [_] nil)))
   ([ticks proofs forked] (run-tests-forked ticks proofs forked nil))
   ([ticks proofs forked names]
-  (let [{:keys [selected run reused digests dir]} (let [p (test-plan (db) (:base @state) proofs)]
-                                                    ;; only the tests of the namespaces named, when any are
-                                                    (if (seq names)
-                                                      (let [in? #(contains? names (symbol (namespace %)))]
-                                                        (-> p (update :selected #(filterv in? %)) (update :run #(filterv in? %))))
-                                                      p))
+  (let [{:keys [selected run reused digests dir skipped]} (run-selection (test-plan (db) (:base @state) proofs) names proofs)
         reused-reports (vec (for [t selected :when (reused t)] {:type :pass :var (str "#'" t) :reused true}))
         [r w] (lib/pipe) t0 (profile/now-ns)
         res (lib/fork!
@@ -486,7 +494,8 @@
         (cond-> (seq unstored) (assoc :unstored unstored))
         (update :reports into reused-reports)
         (update :pass + (count reused-reports))
-        (assoc :digests (select-keys digests (keep (comp proofs/test-symbol :var) (:reports res))))
+        (cond-> (seq skipped) (assoc :skipped-process skipped))
+        (assoc :digests (select-keys digests (concat (keep (comp proofs/test-symbol :var) (:reports res)) (filter reused selected))))
         (assoc :reused (count reused-reports) :ran (count (distinct (keep :var (:reports res))))))))))
 
 ;; ---- the loop ----------------------------------------------------------------------

@@ -11,12 +11,20 @@
  :seon.proof/branch :string
  :seon.proof/t :int
  :seon.proof/change [:map {:seon.db/data true}]
+ ;; the newest result of a test on main, one entity per test (the test's name): what :test-red reads, so
+ ;; the class costs the tests and never the results ever recorded. Its history is the older results.
+ ;; Only main's runs write it: a red on an agent's branch is that agent's, never a problem of main
+ :seon.proof/latest [:and {:seon.db/identity true} :string]
  :seon.proof/result-fact [:map {:seon.db/attributes true}
                           [:seon.proof/digest :seon.proof/digest] [:seon.proof/test :seon.proof/test] [:seon.proof/status :seon.proof/status]
                           [:seon.proof/run :seon.proof/run] [:seon.proof/branch :seon.proof/branch] [:seon.proof/t :seon.proof/t]
                           [:seon.proof/ms {:optional true} :seon.proof/ms] [:seon.proof/failures {:optional true} :seon.proof/failures]
                           [:seon.proof/change {:optional true} :seon.proof/change]]
  ;; one fact per run: its key is (branch, tx), so one request per digest is one run
+ :seon.proof/latest-fact [:map {:seon.db/attributes true}
+                          [:seon.proof/latest :seon.proof/latest] [:seon.proof/status :seon.proof/status] [:seon.proof/run :seon.proof/run]
+                          [:seon.proof/branch :seon.proof/branch] [:seon.proof/t :seon.proof/t] [:seon.proof/change {:optional true} :seon.proof/change]
+                          [:seon.proof/failures {:optional true} :seon.proof/failures]]
  :seon.proof.run/id [:and {:seon.db/identity true} :string]
  :seon.proof.run/branch :string
  :seon.proof.run/t :int
@@ -24,10 +32,13 @@
  :seon.proof.run/fail :int
  :seon.proof.run/error :int
  :seon.proof.run/ms :int
+ ;; the tests that reach a process of their own and were not named: left out of the run, shown here
+ :seon.proof.run/skipped-process [:vector {:seon.db/data true} :qualified-symbol]
  :seon.proof.run/run-fact [:map {:seon.db/attributes true}
                            [:seon.proof.run/id :seon.proof.run/id] [:seon.proof.run/branch :seon.proof.run/branch] [:seon.proof.run/t :seon.proof.run/t]
                            [:seon.proof.run/pass :seon.proof.run/pass] [:seon.proof.run/fail :seon.proof.run/fail]
-                           [:seon.proof.run/error :seon.proof.run/error] [:seon.proof.run/ms {:optional true} :seon.proof.run/ms]]
+                           [:seon.proof.run/error :seon.proof.run/error] [:seon.proof.run/ms {:optional true} :seon.proof.run/ms]
+                           [:seon.proof.run/skipped-process {:optional true} :seon.proof.run/skipped-process]]
  ;; the request a session or an agent's turn makes of the service, and its answer
  :seon.prove/request [:map [:branch :keyword] [:t :int] [:agent {:optional true} [:maybe :keyword]] [:proofs {:optional true} [:set :qualified-symbol]]]
  :seon.prove/answer [:map [:key :string] [:ran :boolean] [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]}

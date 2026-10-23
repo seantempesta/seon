@@ -4,7 +4,7 @@
   (greens and reds by digest) and the :test-red class they make true and a later green closes.
   Run: bin/test seon.prove-test"
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
-            [seon.test-store :as ts] [seon.agent-test :as at] [clojure.edn] [seon.prove :as prove] [seon.problems :as problems] [seon.proofs :as proofs]))
+            [seon.test-store :as ts] [seon.agent-test :as at] [clojure.edn] [seon.prove :as prove] [seon.agent] [seon.cost] [seon.problems :as problems] [seon.proofs :as proofs]))
 
 (defn- feed
   "State st after the messages ([in m] ...) in order, with every output it made (the :to-api messages)."
@@ -62,9 +62,9 @@
         ;; while main@1 runs: 200 requests on one branch (the burst), then one on another
         [st more] (feed st (concat (for [i (range 200)] (req (+ 100 i) :agent-3 (+ 10 i) :a3)) [(req 500 :agent-5 3 :a5)]))]
     (is (empty? more) "nothing starts while a run is in flight")
-    (is (= #{:agent-3 :agent-5} (set (keys (:next st)))) "one pending change per branch")
-    (is (= 209 (get-in st [:next :agent-3 :t])) "the latest of the burst")
-    (is (= 200 (count (get-in st [:next :agent-3 :waiters]))) "the replaced requests' askers follow the latest")
+    (is (= #{[:agent-3 nil] [:agent-5 nil]} (set (keys (:next st)))) "one pending change per branch")
+    (is (= 209 (get-in st [:next [:agent-3 nil] :t])) "the latest of the burst")
+    (is (= 200 (count (get-in st [:next [:agent-3 nil] :waiters]))) "the replaced requests' askers follow the latest")
     (let [[st all] (run-through st outs run-answer)]
       (is (= 3 (count (asks all :tests))) "main, then agent-3 once, then agent-5 once: one run each")
       (is (= 202 (count (waiters-answered all))) "every asker answered")
@@ -97,24 +97,24 @@
   (let [db0 (ts/test-db)
         red {:pass 0 :fail 1 :error 0 :ms 7 :digests {'a.b-test/t "dred"}
              :reports [{:type :fail :var "#'a.b-test/t" :message "boom" :expected "1" :actual "2"}]}
-        run {:key "agent-3@7" :branch :agent-3 :t 7 :agent :a3}
+        run {:key "main@7" :branch :main :t 7 :agent :a3}
         db1 (d/db-with db0 (prove/result-tx run red))
         reds #(get-in (problems/report %) [:classes :test-red :rows])]
     (testing "a red result is a fact keyed by its digest, and an open :test-red row naming the test, the branch, the tx and who asked"
       (is (= "dred" (:seon.proof/digest (d/pull db1 [:seon.proof/digest] [:seon.proof/digest "dred"]))))
       (is (= ['a.b-test/t] (mapv :test (reds db1))))
-      (is (re-find #"a.b-test/t is fail at agent-3 t 7, asked by a3" (:message (first (reds db1))))))
+      (is (re-find #"a.b-test/t is fail at main t 7, asked by a3" (:message (first (reds db1))))))
     (testing "a red digest is no green: the test runs again"
       (is (= {} (proofs/stored-greens db1 ["dred"]))))
     (let [green (assoc red :pass 1 :fail 0 :digests {'a.b-test/t "dgreen"} :reports [{:type :pass :var "#'a.b-test/t"}])
-          db2 (d/db-with db1 (prove/result-tx (assoc run :key "agent-3@8" :t 8) green))]
+          db2 (d/db-with db1 (prove/result-tx (assoc run :key "main@8" :t 8) green))]
       (testing "a later green at a new digest closes the red: nothing written, the row is gone, the red fact is kept"
         (is (= [] (reds db2)))
         (is (some? (d/pull db2 [:seon.proof/digest] [:seon.proof/digest "dred"]))))
       (testing "a digest that holds a green is never run again: the lookup finds it in the store"
         (is (= ["dgreen"] (keys (proofs/stored-greens db2 ["dgreen" "dred" "dnone"])))))
       (testing "the run is a fact too"
-        (is (= 1 (:seon.proof.run/fail (d/pull db2 [:seon.proof.run/fail] [:seon.proof.run/id "agent-3@7"]))))))))
+        (is (= 1 (:seon.proof.run/fail (d/pull db2 [:seon.proof.run/fail] [:seon.proof.run/id "main@7"]))))))))
 
 ;; ---- the proof root asks for: one run for a session and an agent's turn ----------------------
 
@@ -139,22 +139,121 @@
 
 (deftest a-session-prove-of-main-runs-in-a-prove-agent-and-leaves-facts
   ;; main has no agent: the service spawns one on the tests branch, loads the checkout's tests there,
-  ;; runs the namespace asked for, kills the agent, and records a fact per test digest on main
-  (let [code (str "(let [r @(c/prove! sys nil '#{seon.patterns-test})"
-                  "      again @(c/prove! sys nil '#{seon.patterns-test})"
-                  "      facts (d/q '[:find ?t ?s ?dg :where [?e :seon.proof/digest ?dg] [?e :seon.proof/test ?t] [?e :seon.proof/status ?s]] @(:conn sys))"
+  ;; runs the namespace asked for, kills the agent, and records a fact per test digest on main.
+  ;; The facts are read by a form of their own: a form reads the db as it began.
+  (let [ask (str "(let [r @(c/prove! sys nil '#{seon.patterns-test})"
+                 "      again @(c/prove! sys nil '#{seon.patterns-test})]"
+                 "  (pr-str {:pass (:pass r) :fail (:fail r) :error (:error r) :ran (:ran r) :key (:key r) :again (:key again) :red (:red r)}))")
+        read (str "(let [facts (d/q '[:find ?t ?s ?dg :where [?e :seon.proof/digest ?dg] [?e :seon.proof/test ?t] [?e :seon.proof/status ?s]] @(:conn sys))"
                   "      runs (d/q '[:find [?id ...] :where [?r :seon.proof.run/id ?id]] @(:conn sys))"
-                  "      green (seon.proofs/stored-greens @(:conn sys) (map last facts))"
-                  "      statuses (map :status (vals (:agents (c/state sys))))]"
-                  "  (pr-str {:pass (:pass r) :fail (:fail r) :error (:error r) :ran (:ran r) :key (:key r) :again (:key again) :red (:red r)"
-                  "           :facts (vec (sort (map (juxt first second) facts))) :runs (vec runs) :green (count green) :prove-agent-gone (not-any? #{:busy} statuses)}))")
-        [r] (at/in-agent [{:op :eval :agent "root" :code code}])
-        v (clojure.edn/read-string (clojure.edn/read-string (:printed r)))]
-    (is (map? v) (pr-str r))
+                  "      green (seon.proofs/stored-greens @(:conn sys) (map last facts))]"
+                  "  (pr-str {:facts (vec (sort (map (juxt first second) facts))) :runs (vec runs) :green (count green)"
+                  "           :latest (vec (sort (map first (d/q '[:find ?l :where [?e :seon.proof/latest ?l]] @(:conn sys)))))}))")
+        [r1 r2] (at/in-agent [{:op :eval :agent "root" :code ask} {:op :eval :agent "root" :code read}])
+        v (merge (clojure.edn/read-string (clojure.edn/read-string (:printed r1))) (clojure.edn/read-string (clojure.edn/read-string (:printed r2))))]
+    (is (map? v) (pr-str r1 r2))
     (is (= [0 0 true []] ((juxt :fail :error :ran :red) v)))
     (is (pos? (:pass v)))
     (is (= (:key v) (:again v)) "asked again: the same run's answer, nothing runs")
     (is (= [(:key v)] (:runs v)) "one run fact")
     (is (= '[[seon.patterns-test/a-backlog-is-the-unread-queue :pass] [seon.patterns-test/workers-compete-for-one-shared-in-port :pass]] (:facts v))
         "a result fact per test, by digest")
+    (is (= '["seon.patterns-test/a-backlog-is-the-unread-queue" "seon.patterns-test/workers-compete-for-one-shared-in-port"] (:latest v)) "and main's newest result per test")
     (is (= 2 (:green v)) "and each digest now holds a green: test-plan finds it in the store")))
+
+(deftest a-run-naming-nothing-leaves-out-the-process-tests-and-a-run-naming-them-runs-them
+  (let [plan {:selected '[a.b-test/plain a.p-test/proc a.p-test/other] :run '[a.b-test/plain a.p-test/proc a.p-test/other]
+              :process '#{a.p-test/proc}}
+        sel (fn [names proofs] (let [r (seon.agent/run-selection plan names proofs)] (select-keys r [:selected :run :skipped])))]
+    (testing "naming nothing: the process test is skipped, and listed"
+      (is (= '{:selected [a.b-test/plain a.p-test/other] :run [a.b-test/plain a.p-test/other] :skipped [a.p-test/proc]} (sel nil #{}))))
+    (testing "naming its namespace: it runs"
+      (is (= '{:selected [a.p-test/proc a.p-test/other] :run [a.p-test/proc a.p-test/other] :skipped []} (sel '#{a.p-test} #{}))))
+    (testing "naming another namespace: it is not in the run"
+      (is (= '{:selected [a.b-test/plain] :run [a.b-test/plain] :skipped []} (sel '#{a.b-test} #{}))))
+    (testing "a task's proof that reaches a process is named by the task: it runs"
+      (is (= '[a.b-test/plain a.p-test/proc a.p-test/other] (:run (sel nil '#{a.p-test/proc})))))
+    (testing "the run fact lists what was skipped"
+      (let [tx (prove/result-tx {:key "main@1" :branch :main :t 1} {:pass 1 :reports [] :skipped-process '[a.p-test/proc]})]
+        (is (= '[a.p-test/proc] (:seon.proof.run/skipped-process (first tx))))))))
+
+(deftest a-red-on-an-agents-branch-is-not-a-problem-of-main
+  (let [db0 (ts/test-db)
+        red {:pass 0 :fail 1 :error 0 :ms 7 :digests {'a.b-test/t "dagent"}
+             :reports [{:type :fail :var "#'a.b-test/t" :message "boom" :expected "1" :actual "2"}]}
+        db (d/db-with db0 (prove/result-tx {:key "agent-3@7" :branch :agent-3 :t 7 :agent :a3} red))]
+    (is (some? (d/pull db [:seon.proof/digest] [:seon.proof/digest "dagent"])) "the result is kept by digest")
+    (is (= [] (get-in (problems/report db) [:classes :test-red :rows])) "and is not main's problem")))
+
+(defn reds-input
+  "The cost proof's input at n: n tests with a newest result on main, a tenth of them red, each
+  with nine older results in the history (kept by digest): the class must cost the tests."
+  [n] (let [db0 (ts/test-db)
+            tx (vec (mapcat (fn [i] (prove/result-tx {:key (str "main@" i) :branch :main :t i}
+                                                      {:pass (if (zero? (mod i 10)) 0 1) :fail (if (zero? (mod i 10)) 1 0) :ms 1
+                                                       :digests {(symbol "a.b-test" (str "t" i)) (str "d" i)}
+                                                       :reports [{:type (if (zero? (mod i 10)) :fail :pass) :var (str "#'a.b-test/t" i)
+                                                                  :message "m" :expected "1" :actual "2"}]}))
+                            (range n)))]
+        [(d/db-with db0 tx) {}]))
+
+(deftest test-reds-follow-the-tests-not-the-results
+  (seon.cost/proof {:of 'seon.problems/test-reds :input 'seon.prove-test/reds-input
+                    :n "tests with a newest result on main, a tenth red"
+                    :work "one datom per test (the latest attribute), a status read each, and a pull and a row per red one"
+                    :growth :linear
+                    :per-n {:ns 30000 :bytes 30000 :calls 1}
+                    :fixed {:ns 100000 :bytes 100000 :calls 2}
+                    :sizes [10 100 1000]}))
+
+;; ---- admission details ----------------------------------------------------------------------
+
+(deftest a-request-naming-other-tests-never-takes-over-a-pending-run
+  (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :main 1)])
+        names (fn [rid ns] [:req {:rid rid :branch :main :t 2 :names ns}])
+        [st more] (feed st [(names 2 '#{a.x-test}) (names 3 '#{a.y-test}) (names 4 '#{a.x-test})])]
+    (is (empty? more))
+    (is (= 2 (count (:next st))) "two slots pending: the namespaces named differ")
+    (is (= #{2 4} (get-in st [:next [:main '#{a.x-test}] :waiters])) "the same slot joins")
+    (is (= #{3} (get-in st [:next [:main '#{a.y-test}] :waiters])) "the other keeps its own")
+    (let [[_ all] (run-through st outs run-answer)]
+      (is (= 3 (count (asks all :spawn))) "three runs: main, x, y, each its own")
+      (is (= [1 2 3 4] (waiters-answered all))))))
+
+(deftest an-error-is-answered-recorded-and-never-remembered
+  (let [err (seon.contract/error :seon.root/no-agent 'seon.root/run-tests! "no live agent" {})
+        [st outs] (feed (prove/prove-proc {}) [(req 1 :agent-3 7 :a3)])
+        [st all] (run-through st outs err)]
+    (is (= [1] (waiters-answered all)))
+    (is (some #(and (= :problem (:op %)) (= :platform (:class %))) all) "recorded as a :platform problem, as well as answered")
+    (is (empty? (:done st)) "nothing remembered")
+    (testing "asking again runs again"
+      (let [[st outs] (feed st [(req 2 :agent-3 7 :a3)])
+            [_ all] (run-through st outs run-answer)]
+        (is (= 1 (count (asks outs :tests))))
+        (is (= [2] (waiters-answered all)))
+        (is (not (seon.contract/error? (:r (first (filter #(= :prove-answer (:op %)) all))))))))))
+
+(deftest a-spawn-failure-and-a-prove-agent-that-dies-are-answered-and-recorded
+  (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :main 1) (req 2 :main 1)])
+        spawn (first (asks outs :spawn))
+        refused (seon.contract/error :seon.root/refused 'seon.root/spawn! "too many live agents" {})
+        [st o] (feed st [(answer-of spawn refused)])]
+    (is (= [1 2] (waiters-answered o)) "a spawn refused: both waiters answered the error")
+    (is (some #(= :problem (:op %)) o))
+    (is (nil? (:running st))))
+  (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :main 1)])
+        [st o] (feed st [(answer-of (first (asks outs :spawn)) {:id :p1})])
+        [st o2] (feed st [(answer-of (first (asks o :eval)) [{:tag :ret}])])
+        died (seon.contract/error :seon.agent/died 'seon.root/api-proc "agent p1 died" {:agent :p1})
+        [st o3] (feed st [(answer-of (first (asks o2 :tests)) died)])]
+    (is (= [1] (waiters-answered o3)) "the prove agent died mid-run: its waiter is answered the error")
+    (is (some #(and (= :problem (:op %)) (= :seon.agent/died (get-in % [:error :seon.error/type]))) o3))
+    (is (= 1 (count (asks o3 :kill))) "and its agent is killed")
+    (is (empty? (:done st)))))
+
+(deftest a-stale-answer-is-counted
+  (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :main 1)])
+        [st _] (feed st [[:answers {:tag 99 :r {}}]])]
+    (is (= 1 (:stale st)))
+    (is (= 1 (:stale-answers ((:ping-map-fn (prove/prove-proc)) st))))))
