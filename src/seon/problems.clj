@@ -36,7 +36,7 @@
   derived classes, which read the program's names once (a set): their cost follows the
   citations (seon.problems-test/dead-citations-follow-the-citations)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.docs :as docs]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.task :as task] [seon.docs :as docs]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses "Run statuses of a death (:seon.run/status)." (:seon.status/failed (contract/properties :seon.run/status)))
@@ -397,17 +397,14 @@
                  (d/datoms db :avet :seon.run/task te))))
 
 (defn- task-ready?
-  "Is task te one not done whose needs are all done? A task waiting on another is judged when it
-  is ready (its plan may yet be written by what it waits for)."
+  "Is task te one not done whose needs are all done? Here ready deliberately means only that: the
+  question is whether its plan can be worked, not whether the reconciler would start it now
+  (seon.reconcile's index also asks for a release and no live run, which a db alone does not
+  hold). A task waiting on another is judged when its needs are done."
   {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
   [db te]
   (and (not (task-done? db te))
        (every? #(task-done? db (:v %)) (d/datoms db :eavt te :seon.task/needs))))
-
-(def ^:private placeholder-proof
-  "What seon.context writes as a missing proof's test (its :proof-unknown `do`): a proof still
-  holding it asserts nothing."
-  "write the assertion")
 
 (defn uncited-tasks
   "Each ready :implement task, which holds its design step's plan along :needs (seon.task/accumulate),
@@ -426,7 +423,7 @@
                     (reduce chain (conj seen e) (map :v (d/datoms db :eavt e :seon.task/needs)))))
         vals-of (fn [es a] (into #{} (mapcat #(map :v (d/datoms db :eavt % a))) es))
         placeholder? (fn [sym] (some-> (pdb/eid db :var/name sym) (->> (d/entity db)) :var/form :form/src
-                                      (str/includes? placeholder-proof)))]
+                                      (str/includes? task/placeholder-assertion)))]
     (vec (for [{:keys [e v]} (sort-by :v (d/datoms db :aevt :seon.task/id))
                :when (and (= :implement (kinds e)) (task-ready? db e))
                :let [es (chain #{} e)
@@ -441,7 +438,7 @@
             :message (case reason
                        :no-references (str v " is ready and its plan cites no var, attribute or section: the context pulls nothing for it")
                        :no-proofs (str v " is ready and names no proof")
-                       :placeholder-proof (str v " is ready and a proof of it is still the placeholder (" placeholder-proof ")"))
+                       :placeholder-proof (str v " is ready and a proof of it is still the placeholder assertion (seon.task/placeholder-assertion)"))
             :producer nil :owner-ns 'seon.task :proofs []
             :evidence {:kind :uncited-task :task v :reason reason} :answered-by (get-in ans [:signature s] []) :at-ms nil}))))
 
