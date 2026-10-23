@@ -335,7 +335,7 @@
         (update :selected into unrecorded)
         (update :run into unrecorded)
         (assoc :digests cd :dir dir
-               :process (into #{} (keep (fn [[t {:keys [process?]}]] (when process? t))) idx)))))
+               :process (program/process-tests idx)))))
 
 (defn- run-tests-here
   "The tests a test-plan runs (var symbols), by the one runner (seon.proofs/run-tests!, nothing

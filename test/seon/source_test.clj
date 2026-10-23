@@ -424,19 +424,26 @@
 
 (deftest a-test-that-reaches-a-process-is-found-by-the-reach-walk
   ;; root's ruling (2026-10-22, owner 2026-10-23): a test that reaches a process (a shell, a
-  ;; fork, a root of its own) never runs automatically, only when named; it is found by the
-  ;; compiler's facts (the one reach walk), never a marker. Step E's
-  ;; run 4: a change to seon.problems/report reached tests that boot a root, and an agent's
-  ;; proof run spun for minutes in its fork
-  (let [text (str "(ns app.proc-test (:require [clojure.java.shell :as sh] [clojure.test :refer [deftest is]] [app.proc :as p]))\n\n"
+  ;; fork, a root of its own, the binary) never runs automatically, only when named; it is
+  ;; found by the compiler's facts (the one reach walk, :seon.config.source/process-vars),
+  ;; never a marker. Each process var, reached directly or through a helper, and a test that
+  ;; reaches none. Step E's run 4: a change to seon.problems/report reached tests that boot a
+  ;; root, and an agent's proof run spun for minutes in its fork
+  (let [text (str "(ns app.proc-test (:require [clojure.java.shell :as sh] [clojure.test :refer [deftest is]] [app.proc :as p]"
+                  " [seon.lib :as lib] [seon.test-store :as ts] [seon.agent-test :as at]))\n\n"
                   "(defn- shell-ok? [] (zero? (:exit (sh/sh \"true\"))))\n\n"
                   "(deftest via-shell (is (shell-ok?)) (is (= 2 (p/twice 1))))\n\n"
+                  "(deftest via-fork (is (lib/fork! (fn [] 0))))\n\n"
+                  "(deftest via-binary (is (ts/binary-sh \"./seon\" \"version\")))\n\n"
+                  "(deftest via-root (is (at/in-agent [\"1\"])))\n\n"
                   "(deftest pure (is (= 2 (p/twice 1))))\n")
         db (d/db-with (empty-db) (source/import-tx (empty-db) {"src/app/proc.clj" "(ns app.proc)\n\n(defn twice [x] (* 2 x))\n"
-                                                               "test/app/proc_test.clj" text}))]
-    (is (= #{'app.proc-test/via-shell} (set (filter #(= "app.proc-test" (namespace %)) (program/process-tests db {:env "" :tree ""})))))
-    (is (= {'app.proc-test/via-shell true 'app.proc-test/pure false}
-           (into {} (for [[t {:keys [process?]}] (program/reach-index db {:env "" :tree ""}) :when (= "app.proc-test" (namespace t))] [t process?])))
-        "the one walk says it beside each test's digest")
-    (is (= (program/reach-digests db {:env "" :tree ""}) (update-vals (program/reach-index db {:env "" :tree ""}) :digest))
-        "and the digests are reach-digests' own")))
+                                                               "test/app/proc_test.clj" text}))
+        idx (program/reach-index db {:env "" :tree ""})
+        mine (into {} (filter #(= "app.proc-test" (namespace (key %)))) idx)]
+    (is (= {'app.proc-test/via-shell true 'app.proc-test/via-fork true 'app.proc-test/via-binary true
+            'app.proc-test/via-root true 'app.proc-test/pure false}
+           (update-vals mine :process?))
+        "each process var marks the test that reaches it, and only that")
+    (is (= #{'app.proc-test/via-shell 'app.proc-test/via-fork 'app.proc-test/via-binary 'app.proc-test/via-root}
+           (set (filter #(= "app.proc-test" (namespace %)) (program/process-tests idx)))))))
