@@ -110,7 +110,7 @@
  ;; Observations: data on the branch that recorded them, never carried by a merge ----
  :seon.cluster.eval/id :string
  :seon.cluster.eval/agent :seon.db/ref
- ;; the evaluation's details as one EDN value: {:tag :form :shown|:error :out :ms :alloc-bytes :fns}
+ ;; the evaluation's details as one EDN value: {:tag :form :shown|:error :out :ms :alloc-bytes :ticks :fns}
  ;; (:fns: its 10 costliest contracted functions, [{:var :calls :ms}], seon.profile)
  :seon.cluster.eval/record [:map {:seon.db/data true :seon.render/html seon.render.ui/history-row} [:tag [:enum :ret :err]]]
  :seon.agent/id [:and {:seon.db/identity true} :keyword]
