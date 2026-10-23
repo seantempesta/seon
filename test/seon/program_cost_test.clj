@@ -23,6 +23,31 @@
         db (d/db-with db (vec (mapcat #(program/account-tx db (acct % "x") %) (range n))))]
     [db (acct (quot n 2) "(inc x)")]))
 
+(defn probed-of
+  "d/q's arguments: a query reaching one form through its var's name, then two of that form's
+  attributes (a group on ?f probed by the one ?f the first group binds), on a branch db holding n
+  forms (branch-of's)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any :seon.host/db :symbol]]}
+  [n]
+  ['[:find ?src ?o :in $ ?n :where [?v :var/name ?n] [?v :var/form ?f] [?f :form/src ?src] [?f :form/order ?o]]
+   (first (branch-of n)) (symbol "app.pc" (str "f" (quot n 2)))])
+
+(deftest a-probed-entity-is-sought-not-scanned
+  ;; task datahike.query/a-probed-entity-is-sought-not-scanned
+  (cost/proof
+    {:of 'datahike.api/q :input 'seon.program-cost-test/probed-of
+     :n "forms the db holds"
+     :work (str "one AVET seek for the var, its :var/form, then one EAVT seek per attribute of the one form "
+                "it names: log n each; nothing scans an attribute's datoms (the group on ?f scanned all of "
+                ":form/src before)")
+     :growth :log
+     ;; measured 2026-10-23: 47.4k ticks / 208 KB at 100 forms, 49.2k / 211 KB at 1,000, 54.7k /
+     ;; 218 KB at 10,000; on Datahike before jolt/in-scalar 220k / 793 KB, 507k / 1.7 MB, 3.24M /
+     ;; 10.2 MB (the :form/src scan)
+     :per-n {:ticks 1150.0 :bytes 1400.0}
+     :fixed {:ticks 41000.0 :bytes 200000.0}
+     :sizes [100 1000 10000]}))
+
 (deftest recording-a-form-is-flat-in-the-program
   (cost/proof
     {:of 'seon.program/record-tx :input 'seon.program-cost-test/branch-of

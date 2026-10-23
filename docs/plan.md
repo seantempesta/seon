@@ -2,28 +2,31 @@
 
 What is in flight, what the owner has not yet ruled, and the steps from here to the goal (Seon agents fixing problems in the system); [AGENTS.md](../AGENTS.md) says who does what and the method, the [map](README.md) how the system works, [decisions](decisions.md) the owner's standing rulings, and git the history.
 
-## Now (2026-10-23, evening)
+## Now (2026-10-23, afternoon)
 
-Pins: Jolt `e0351af8`, Datahike `b4596cf`, persistent-sorted-set `1cae7f2`, Malli `0762fb6b`, Chez `80e4b9f` (docs/forks.md) · `src` ~18.5k lines (aim ~10k) · paid runs $0.144 of the $50 budget · standing root on 7888/7777 (`runs/store`, test data, erased at each rename pass).
+Pins: see docs/forks.md · `src` 17,391 lines (19,304 this morning; aim ~10k) · paid runs ~$0.16 of the $50 budget · standing root on 7888/7777 (`runs/store`, test data), loading main's source from `../next-merges` (root's write-back tree: live, never remove).
 
-**Goal:** real Seon agents fixing problems in the system (THE PLAN's step E). The loop turn is measured at 11.4 s (112 s this morning); the cold automatic test run is ~54–62 s (26 min this morning); a warm one is its plan only.
-**Root's working schedule:** `notes/root-schedule-2026-10-23.md` in root's worktree (the queue, the rules, what was rescheduled).
+**Goal:** real Seon agents fixing problems in the system (THE PLAN's step E). **Reached once:** paid run #10, DeepSeek flash with thinking off, carried `seon.context/the-map-reads-the-program-not-the-process` through design (3 turns), implement (7) and merge, for about $0.004. The lever was act-first design instructions. Seon's own per-turn time is ~1.8 s; the model's ~16–18 s now dominates.
+**How work moves now:** sessions self-review, then report ready to the merge session ("Merge: integrate ready branches into main"), which merges, proves and updates. Its log is `notes/merge-log.md`. A session that finishes claims its next task by creating its branch (AGENTS §3). Root keeps THE PLAN, rulings, briefs and docs (AGENTS §2, "Root's working rules").
 
 ## In flight
 
-Merged today, in order: ``jolt/hold-for-root``, ``jolt/agent-ready``, ``jolt/printer-eval``, ``jolt/wiki-live``, ``jolt/reach-index``, ``jolt/process-tests``, rename pass 2, ``jolt/health`` part 1 (problem classes, the watcher, the done refusal), ``jolt/test-root``, ``jolt/starter-fifo`` (and the stop-hang fix), ``jolt/pure-tests``, ``jolt/brief3`` (shared greens), ``jolt/shard-time``, ``jolt/ticks-cost``, ``jolt/no-idle-build``, ``jolt/reach-scc2``, ``jolt/dry-run`` (the gate on demand, turn-cost fixes), ``jolt/global-ids`` (the store-wide counter, content ids, delta and verbatim merges, the all-branches union `seon.union`, the store-gc fix).
+**Merge queue,** worked by the merge session in this order:
+1. ``jolt/in-scalar``: the planner seeks a probed entity instead of scanning (3.24M → 55k ticks at 10k forms), Datahike `7de92bb`.
+2. ``jolt/store-release``: a release drains pending writes (a data-loss fix), and LMDB envs are released (Datahike `9cd6e7b`, konserve `84d8bc0`). It combines its Datahike pin with in-scalar's first.
+3. ``jolt/health`` (7 review fixes, review trailers from HEAD only, `bin/check health` as a prove step), then ``jolt/wiki-stale`` (76 of 81 stale sections fixed, Jolt-diagnostics triage).
+4. ``jolt/calc-stop`` (e2e-calc: an ended agent answered at the producer) and ``jolt/dry-run`` (act-first instructions, code-depth citations).
+5. ``jolt/proof-ends``, ``claude/eval-diagnostics-75a04b`` (eval errors as data, did-you-mean), ``jolt/agent-view`` (chat window, renders as `(value opts)` functions, messages as facts, per-tile updates; its full run first).
+6. **Cutover to `~/src/seon-next`** (owner, 2026-10-23: a clean repo before the account changes): root holds main still, then ``jolt/rename-run`` (attempt → run) merges, then ``jolt/self-contained`` (step A, the results folder inside the root; step C, GitHub URLs). Then step R: a fresh clone into `~/src/seon-next`, build, prove, a grep for `~/src/seon-jolt` that finds nothing, and the full run. Unmerged branches are fetched into the new repo.
 
-**Merge queue,** one heavy run at a time, root scheduling it; each branch merges main, does the revert check, runs one `bin/prove` plus the named process tests it reaches, and gets a §9 review:
-1. ``jolt/health``: the test service (`seon_prove`, one runner for every agent), proving now; then `caused` at O(changed), the Flow loader and commit stream, every write checked by `mg/check`.
-2. ``jolt/reach-update``: the incremental reach graph (a plan ~20–45 ms after one build per base).
-3. ``jolt/refresh``: the incremental re-import (re-reads only changed files; the per-form diff is in progress).
-4. ``jolt/divergence``: the turn's divergence from deltas.
-5. dry-run's fork-server fix: the replica reads main's head instead of replaying (first spawn 2.4 s → ~0.4 s).
-6. ``jolt/proof-ends``: proof forks end with their agent.
-7. ``jolt/agent-view``: the chat window, renders as (value opts) functions with auto-render, and messages as facts through the union; then its full run.
-8. ``jolt/rename-run``: rename pass 3, attempt → run (a script, refreshed over each main).
-9. ``jolt/self-contained``: step A (test-results inside the root), the fork pushes, step C (GitHub URLs), step R (a fresh clone into `~/src/seon-next`, prove, grep clean), then move the sessions.
-Then the first full run, and step E with paid DeepSeek runs.
+**Working, each on its own branch:**
+- the write-back puts a new form before its first user (dry-run; it blocks every merge that adds a helper), then a second paid real task;
+- the context render on Seon's own program, then Datahike's per-datom add path (~7k ticks a datom, so a 5.4 s import where ~0.35 s is due) (pure-tests);
+- `src` audits for dead code and second mechanisms (shrink);
+- every call kind recording ticks, bytes and calls, and each REPL eval saying what it reused (agent-view, after its merge);
+- the clocks still deciding: render's 90 s retire timer and the fork server's 100 ms idle poll (check-events).
+
+**Waiting on the owner:** task `seon.derive/one-content-keyed-derivation` (reuse of expensive pure results; cold paths are fixed first, and nothing is cached that is fast enough); task `seon.repl/type-findings-are-an-evals-warnings`.
 
 ## Open owner questions
 
