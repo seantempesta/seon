@@ -182,27 +182,22 @@
   "The attributes that name a program entity (seon.facts.edn)."
   [:form/id :var/name :ns/name :method/key :impl/key :schema/key :schema.file/path])
 
-(defn replace-tx
-  "The facts that make db's program the files' ({relative path text}), extending import-tx:
-  the import read against db without the forms of the namespaces imported before or now (so
-  each form takes its file's order and lead), and every program entity of those namespaces
-  and of the schema resources that the import no longer makes retracted (a removed
-  function's form and var, a removed file's namespace). Data, and the program of a namespace
-  no file holds, are untouched; a form or schema entry db holds already keeps its
-  :form/source or :schema/source as it is (one merged in is not the binary's). On a db
-  holding no import, this is import-tx."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] :seon.db/tx-data]}
-  [db files]
-  (let [nss (into (set (map :e (d/datoms db :aevt :ns/file)))
-                  (for [[p t] files :when (str/ends-with? p ".clj") :let [n (file-ns t)] :when n
-                        :let [e (pdb/eid db :ns/name n)] :when e]
-                    e))
-        forms (set (for [e nss dt (d/datoms db :avet :form/ns e)] (:e dt)))
+(defn- replace-nss-tx
+  "The facts that make the program of namespaces nss (entity ids) and of schema resources
+  paths the files' ({relative path text}): the import read against db without those
+  namespaces' forms (so each form takes its file's order and lead), and every program entity
+  of them that the import no longer makes retracted (a removed function's form and var, a
+  removed file's namespace). Everything else on db is untouched; a form or schema entry db
+  holds already keeps its :form/source or :schema/source as it is (one merged in is not the
+  binary's)."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string] [:set :int] [:set :string]] :seon.db/tx-data]}
+  [db files nss paths]
+  (let [forms (set (for [e nss dt (d/datoms db :avet :form/ns e)] (:e dt)))
         of (fn [a s] (for [dt (d/datoms db :aevt a) :when (s (:v dt))] (:e dt)))
         owned (concat nss forms (of :var/ns nss) (of :method/form forms) (of :impl/form forms)
-                      (map :e (d/datoms db :aevt :schema/file)) (map :e (d/datoms db :aevt :schema.file/path)))
+                      (of :schema/file paths) (of :schema.file/path paths))
         bare-forms (set (for [f forms :let [x (d/entity db f)] :when (not (:form/source x))] (str "form " (:form/id x))))
-        bare-schema (into {} (for [dt (d/datoms db :aevt :schema/file) :let [x (d/entity db (:e dt))] :when (not (:schema/source x))]
+        bare-schema (into {} (for [e (of :schema/file paths) :let [x (d/entity db e)] :when (not (:schema/source x))]
                                [(:schema/key x) (:schema/form x)]))
         new (into [] (keep (fn [op]
                              (cond (and (map? op) (:form/source op) (bare-forms (:db/id op))) nil
@@ -216,6 +211,21 @@
                  [:db/retractEntity e]))
           new)))
 
+(defn replace-tx
+  "The facts that make db's program the files' ({relative path text}), extending import-tx:
+  every namespace db holds a file of, and every one the files declare, read again from the
+  files (replace-nss-tx), and so every schema resource; the program of one no file holds any
+  more is retracted (a removed file's namespace). Data, and the program of a namespace no file
+  holds, are untouched. On a db holding no import, this is import-tx."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] :seon.db/tx-data]}
+  [db files]
+  (replace-nss-tx db files
+                  (into (set (map :e (d/datoms db :aevt :ns/file)))
+                        (for [[p t] files :when (str/ends-with? p ".clj") :let [n (file-ns t)] :when n
+                              :let [e (pdb/eid db :ns/name n)] :when e]
+                          e))
+                  (into (set (map :v (d/datoms db :aevt :schema/file))) (map :v (d/datoms db :aevt :schema.file/path)))))
+
 (defn file-text
   "Namespace nsym's file as db holds it: its live forms in their order, each after its
   lead (a form recorded at a REPL has none: a blank line, or nothing before the first),
@@ -226,6 +236,36 @@
         fs (sort-by :order (for [dt (d/datoms db :avet :form/ns ne) :when (program/live? db (:e dt))] (program/form-row db (:e dt))))]
     (str (apply str (map-indexed (fn [i f] (str (or (:lead f) (if (zero? i) "" "\n\n")) (:src f))) fs))
          (or (:ns/tail (d/entity db ne)) "\n"))))
+
+(defn refresh-tx
+  "The facts that bring db's program up to date with the files that changed ({relative path
+  text}, a removed file's text nil), and only those: each changed file's namespace, and every
+  namespace that requires one of them, directly or through others (their forms may expand a
+  changed macro or name a changed var), read again (replace-nss-tx; a dependent's text is the
+  file db holds, file-text), and each changed schema resource. A removed file's namespace or
+  schema entries are retracted. The same program as replace-tx of the whole tree, at the cost
+  of what changed and what requires it, not of the program (task
+  seon.source/an-import-reads-only-changed-files)."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]]] :seon.db/tx-data]}
+  [db changed]
+  (let [ns-of-path (fn [p] (some #(when (= p (:v %)) (:ns/name (d/entity db (:e %)))) (d/datoms db :aevt :ns/file)))
+        changed-nss (set (for [[p t] changed :when (str/ends-with? p ".clj") :let [n (if t (file-ns t) (ns-of-path p))] :when n] n))
+        ;; {required namespace #{namespaces whose ns form requires it}}, from the forms' facts
+        required-by (reduce (fn [m dt] (let [n (some-> (d/entity db (:e dt)) :form/ns :ns/name)]
+                                         (cond-> m n (update (:v dt) (fnil conj #{}) n))))
+                            {} (d/datoms db :aevt :form/requires))
+        reach (loop [front (vec changed-nss) seen changed-nss]
+                (if-let [n (peek front)]
+                  (let [new (remove seen (required-by n))]
+                    (recur (into (pop front) new) (into seen new)))
+                  seen))
+        dependents (remove changed-nss reach)
+        files (into (into {} (for [[p t] changed :when t] [p t]))
+                    (for [n dependents :let [x (d/entity db [:ns/name n])] :when (:ns/file x)]
+                      [(:ns/file x) (file-text db n)]))]
+    (replace-nss-tx db files
+                    (set (keep #(pdb/eid db :ns/name %) reach))
+                    (set (filter schema-resource? (keys changed))))))
 
 ;; ---- a schema resource, entry by entry (v1 seon.cluster.source: same-value?, relaid,
 ;; schema-entry-edit, schema-file-text; rewrite-clj keeps every node it is not told to change)

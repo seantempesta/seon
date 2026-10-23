@@ -8,7 +8,7 @@
             [clojure.java.shell :as sh]
             [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
             [datahike.api :as d]
-            [seon.db :as pdb]
+            [seon.db :as pdb] [seon.cost :as cost]
             [seon.fx :as fx]
             [seon.merge :as pm]
             [seon.program :as program]
@@ -463,3 +463,54 @@
     (is (= {'app.proc-test/via-shell false 'app.proc-test/via-fork false 'app.proc-test/via-binary true
             'app.proc-test/via-root false 'app.proc-test/via-names false 'app.proc-test/pure false}
            (update-vals mine :binary?)))))
+
+;; ---- a changed file re-imports only what reaches it (task seon.source/an-import-reads-only-changed-files)
+
+(defn- program-of
+  "db's live forms as the reach walk reads them: by id, their text, refs, requires and lead."
+  [db] (into (sorted-map) (for [f (program/live-forms db)] [(:id f) (select-keys f [:src :refs :requires :ns :lead])])))
+
+(deftest a-refresh-is-the-whole-trees-replace-at-the-cost-of-what-changed
+  ;; root's ruling (2026-10-23): the test service's branch follows main by re-importing what a
+  ;; change reaches, not the program: a namespace whose file changed, and every one requiring it
+  (let [files {"src/rf/mac.clj" "(ns rf.mac)\n\n(defmacro twice [x] `(* 2 ~x))\n"
+               "src/rf/use.clj" "(ns rf.use (:require [rf.mac :refer [twice]]))\n\n(defn f [x] (twice x))\n"
+               "src/rf/other.clj" "(ns rf.other)\n\n(defn g [x] (inc x))\n"}
+        db (empty-db)
+        db (d/db-with db (source/import-tx db files))]
+    (testing "a changed macro: its namespace and the one using it read again, as the whole tree's replace reads them"
+      (let [mac "(ns rf.mac)\n\n(defmacro twice [x] `(+ ~x ~x))\n"]
+        (is (= (program-of (d/db-with db (source/replace-tx db (assoc files "src/rf/mac.clj" mac))))
+               (program-of (d/db-with db (source/refresh-tx db {"src/rf/mac.clj" mac})))))))
+    (testing "a removed file: its namespace's program is retracted, the others kept"
+      (let [after (d/db-with db (source/refresh-tx db {"src/rf/other.clj" nil}))]
+        (is (nil? (seon.db/eid after :var/name 'rf.other/g)))
+        (is (some? (seon.db/eid after :var/name 'rf.use/f)))
+        (is (= (program-of (d/db-with db (source/replace-tx db (dissoc files "src/rf/other.clj"))))
+               (program-of after)))))
+    (testing "an unchanged tree: nothing to do"
+      (is (= [] (source/refresh-tx db {}))))))
+
+(defn refresh-of
+  "refresh-tx's arguments: a program of n independent namespaces (one function each) and the
+  change of one of them."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:map-of :string :string]]]}
+  [n]
+  (let [fs (into {} (for [i (range n)] [(str "src/rfc/n" i ".clj") (str "(ns rfc.n" i ")\n\n(defn f [x] (inc x))\n")]))
+        db (empty-db)]
+    [(d/db-with db (source/import-tx db fs)) {"src/rfc/n0.clj" "(ns rfc.n0)\n\n(defn f [x] (dec x))\n"}]))
+
+(deftest a-leaf-files-refresh-costs-that-file
+  (cost/proof
+    {:of 'seon.source/refresh-tx :input 'seon.source-test/refresh-of
+     :n "namespaces in the program; one leaf (no namespace requires it) changed"
+     :work (str "the changed file read and analyzed once (its forms' accounts) and its namespace's facts retracted "
+                "and made again; per other namespace only a datom read where the dependents and the owned entities "
+                "are looked up (its :form/requires and :var/ns datoms): nothing else of the program is analyzed")
+     :growth :linear
+     ;; measured 2026-10-23 (REPL, load ~8): 822k ticks / 3.14 MB / 120 calls at 10 namespaces,
+     ;; 870k / 3.30 MB at 100, 1.17M / 4.28 MB at 1,000: one file's analysis, and ~350 ticks and
+     ;; ~1.1 KB per other namespace for the scans
+     :fixed {:ticks 830000 :bytes 3150000 :calls 120}
+     :per-n {:ticks 350.0 :bytes 1150.0}
+     :sizes [10 100 1000]}))
