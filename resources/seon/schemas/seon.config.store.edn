@@ -5,4 +5,5 @@
  :seon.config.store/keep-history? [:boolean {:seon.config/unit "boolean" :description "Whether a store is made keeping history (temporal indexes, tx-meta); fixed when the store is made."}]
  :seon.config.store/value-out-of-line-bytes [:or {:seon.db/data true :seon.config/unit "bytes" :description "A datom value at least this large is stored once under its own key, the index holding a reference; :never keeps values inline."} [:= :never] [:int {:min 1}]]
  :seon.config.store/compressor [:enum {:seon.config/unit "codec" :description "How konserve compresses each stored value (index nodes, values out of line, commits): :zstd or :lz4 frames, or :none."} :none :lz4 :zstd]
+ :seon.config.store/sole-writer? [:boolean {:seon.config/unit "boolean" :description "Whether this root is its store's only writer process, so it may collect the store."}]
  :seon.config.store/branching-factor [:int {:min 4 :seon.config/unit "children" :description "Index node branching factor: a commit rewrites the nodes it touched."}]}

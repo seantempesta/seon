@@ -122,6 +122,14 @@
  ;; same ~1.9 ms a commit. A trained dictionary (7.3x on the records) waits for a representative
  ;; corpus (owner, 2026-10-22).
  :seon.config.store/compressor :zstd
+ ;; Boolean: whether this root is its store's only writer process, so it may collect the store
+ ;; (seon.db/collect!; docs/storage.md#collection): Datahike's collection sees only its own
+ ;; process's in-flight commits (datahike.gc/gc-storage!), so a commit of another process can
+ ;; reuse a value the sweep is deleting. False: root never collects, and the store keeps its
+ ;; garbage. Provenance, 2026-10-23 (notes/store-gc-bug-2026-10-23.md): the :scripted profile is
+ ;; bin/test's and bin/check's, whose roots (a shard's, a step's) share one store; production
+ ;; runs one root per store (task seon.db/two-processes-branch-one-store-at-once).
+ :seon.config.store/sole-writer? #profile {:default true :scripted false}
 
  ;; ==== agents =================================================================================
 
