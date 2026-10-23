@@ -71,8 +71,12 @@
   (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
         forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
                      [(clojure.string/starts-with? ?file "src/")]] db)
-        ;; read in the form's own namespace, so its alias keywords (::flow/in-ports) resolve
+        ;; read in the form's own namespace, so its alias keywords (::flow/in-ports) resolve, and its
+        ;; reader conditionals as the compiler reads them (:clj); a call of either schema reader
+        ;; (properties, enum-values) on :seon.run/status. Not covered: a call built by syntax-quote
         reads? (fn [nsn src] (require nsn)
-                 (some #(and (seq? %) (symbol? (first %)) (= "properties" (name (first %))) (= :seon.run/status (second %)))
-                       (tree-seq coll? seq (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow} src)))))]
+                 (some #(and (seq? %) (symbol? (first %)) (#{"properties" "enum-values"} (name (first %)))
+                             (= :seon.run/status (second %)))
+                       (tree-seq coll? seq (binding [*read-eval* false *ns* (the-ns nsn)]
+                                             (read-string {:read-cond :allow :features #{:clj}} src)))))]
     (is (= #{'seon.task} (into #{} (keep (fn [[nsn src]] (when (reads? nsn src) nsn))) forms)))))
