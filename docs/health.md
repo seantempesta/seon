@@ -36,6 +36,12 @@ A section with no record yet (every section the day this landed, and the first l
 
 It is attention, never a refusal (root's ruling, 2026-10-23): every edit of a var stales the sections that cite it, and refusing done for that would force a doc edit with every code edit. A branch that changes a var sees, in its context under `:attention`, the sections it made stale (`seon.problems/caused-split`), the docs to read and probably fix; `seon.problems/caused` and the done rule do not carry them.
 
+## A stale pin
+
+A pin the wiki states is stale when it is not the gitlink root's last source import recorded (`seon.problems/stale-pins`, class `:stale-pin`). The page that states pins is `docs/forks.md`: each line of the form "`reference-code/<name>` pinned at `<sha>`" (`seon.problems/pins` holds the page and the line's shape). Root records the gitlinks of `reference-code/` when it imports its source (`:seon.root/source`, its `:pins`); the class compares the stated sha, as a prefix, with that record.
+
+While root has recorded no import there is nothing to compare, and the class has no rows: unknown is not a mismatch. A row names the section, the path, the sha stated and the gitlink recorded; fixing the page, or bumping the pin and rewriting the line in the same commit, closes it. Cost: the page's sections (one range of addresses) and their text.
+
 ## An orphan page
 
 A page of the wiki that no other page links to, the map (docs/README.md) included as a linker, is an `:orphan-page` (`seon.problems/orphan-pages`): a section of another page has a reference to one of its sections, or it is orphaned. The map is the root and is not judged, and a db whose wiki has no map has no orphans (unknown). Adding a link anywhere closes it, with nothing written.
