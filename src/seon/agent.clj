@@ -622,8 +622,10 @@
     nsx))
 
 (defn- key-of
-  "Agent id's key (seon.task/agent-key) in the boot of the root that forked it, as main held it
-  at the fork (its root's :seon.root/boot)."
+  "Agent id's key (seon.task/agent-key) in the boot of the root that forked it: main's
+  :seon.root/boot, read from main (db: main as the agent forked, or main's head), never from the
+  agent's branch, whose root fact is as old as the branch (a resumed branch's names an earlier
+  boot, and its agent's records went to that boot's agent)."
   {:malli/schema [:=> [:cat :seon.host/db :keyword] :string]}
   [db id] (task/agent-key (:seon.root/boot (d/pull db [:seon.root/boot] [:seon.root/id :root])) id))
 
@@ -712,7 +714,7 @@
                       (pdb/after-fork! (:cfg r))
                       (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
                       (let [store-conn (d/connect (assoc (:cfg r) :branch (:branch m)))]
-                        (swap! state assoc :id (:agent m) :key (key-of @store-conn (:agent m)) :branch (:branch m) :fd fd :conn (sock/conn fd) :mode :agent :tx-seq 0
+                        (swap! state assoc :id (:agent m) :key (key-of (pdb/head store-conn (pdb/main-branch (:cfg r))) (:agent m)) :branch (:branch m) :fd fd :conn (sock/conn fd) :mode :agent :tx-seq 0
                                :pending clojure.lang.PersistentQueue/EMPTY :fx-pending {}
                                :store-conn store-conn :db @store-conn))
                       (let [unwatched (sock/signal-at-input! fd)]
@@ -759,7 +761,7 @@
      ;; :base is the branch's merge base with main: a new branch's is the image (main as it
      ;; forked); a resumed one's is older than main, and comparing against main's head would
      ;; read main's later changes as the branch's (seon.program/divergence, changed-vars)
-     (reset! state (cond-> {:id id :key (key-of @store-conn id) :branch branch :task task :run run :fd fd :conn c :db @store-conn
+     (reset! state (cond-> {:id id :key (key-of db0 id) :branch branch :task task :run run :fd fd :conn c :db @store-conn
                    :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :pending clojure.lang.PersistentQueue/EMPTY :inbox [] :tx-seq 0 :mode :agent
