@@ -111,22 +111,6 @@
     (vec (sort-by str (for [[[k sym] [_ ov]] ours :when (and (= :var k) (= :fn (:kind ov)) (nil? (:contract ov)))] sym)))
     []))
 
-(defn uncontracted-since
-  "The functions branch db adds or redefines without a contract since its merge base base:
-  uncontracted's answer for the branch's own changes, read from what changed
-  (seon.program/divergence's vars and their facts), never the whole program. Measured
-  2026-10-23 on Seon's program: divergence ~4 ms, against two program reads ~1 s. None while
-  contracts are off (seon.contract/on?)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :qualified-symbol]]}
-  [base db]
-  (if contract/on?
-    (let [{:keys [added changed]} (program/divergence base db)]
-      (vec (sort-by str (for [sym (concat added changed)
-                              :let [x (some->> (pdb/eid db :var/name sym) (d/entity db))]
-                              :when (and (= :fn (:var/kind x)) (nil? (:var/contract x)))]
-                          sym))))
-    []))
-
 (defn- conflict-kind
   {:malli/schema [:=> [:cat :any :any :any] :seon.merge/conflict-kind]}
   [b o t]
@@ -150,6 +134,142 @@
                        (cond-> {:key k :kind (conflict-kind b o t)}
                          b (assoc :base b) o (assoc :ours o) t (assoc :theirs t))))}))
 
+;; ---- the program where it changed: cost follows the change, not the program ------------
+
+(defn- entity-keys
+  "The program keys entity e bears on db: a form's own and those of the definitions it
+  makes (their content holds its text), a definition's own and that of the form it points
+  to (whose liveness it decides), a schema entry's, and e's declared data."
+  {:malli/schema [:=> [:cat :seon.host/db [:set :keyword] :int [:set :keyword]] [:set :seon.merge/program-key]]}
+  [db many e data-attrs]
+  ;; one seek reads the entity's datoms; an entity that bears no key (a turn's facts, a
+  ;; transaction) costs only that seek
+  (let [ds (d/datoms db :eavt e)
+        x (into {} (for [dt ds :when (not (many (:a dt)))] [(:a dt) (:v dt)]))
+        form-key (fn [f] (when-let [id (:form/id f)] [:form id]))
+        pointed (fn [a] (when-let [f (get x a)] (form-key (d/entity db f))))
+        def-key (:defines (when (:form/id x) (program/form-row db e)))
+        own-def (cond (:var/name x) [:var (:var/name x)]
+                      (:method/key x) (into [:method] (sedn/decode (:method/key x)))
+                      (:impl/key x) (into [:impl] (sedn/decode (:impl/key x)))
+                      (:ns/name x) [:ns (:ns/name x)])]
+    (into #{}
+          (concat (when-let [k (form-key x)] (cons k def-key))
+                  (when own-def (remove nil? [own-def (pointed (program/pointer (first own-def)))]))
+                  (when-let [k (:schema/key x)] [[:schema k]])
+                  (for [dt (when (seq data-attrs) ds) :when (data-attrs (:a dt))]
+                    (if (many (:a dt))
+                      [:datum e (:a dt) (:v dt)]
+                      [:datum e (:a dt)]))))))
+
+(defn- key-content
+  "Key k's content on db, as `program` holds it, or nil when db's program lacks k."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key [:set :keyword]] :any]}
+  [db [kind a b c :as k] data-attrs]
+  (case kind
+    :form (when-let [e (pdb/eid db :form/id a)]
+            (when (program/live? db e) (dissoc (program/form-row db e) :e :id)))
+    (:var :method :impl :ns)
+    (when-let [e (program/def-eid db k)]
+      (when-let [f (:db/id (get (d/entity db e) (program/pointer kind)))]
+        (let [row (program/form-row db f)]
+          (when (and (program/live? db f) (contains? (:defines row) k)) (def-content db k e row)))))
+    :schema (when-let [e (pdb/eid db :schema/key a)]
+              (let [x (d/entity db e)] (when (:schema/file x) {:form (:schema/form x) :file (:schema/file x)})))
+    :datum (when (data-attrs b)
+             (if (= 4 (count k))
+               (when (seq (d/datoms db :eavt a b c)) true)
+               (:v (first (d/datoms db :eavt a b)))))))
+
+(defn program-of
+  "The part of db's program at keys ks: `program` restricted to them, read key by key."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.merge/program-key] :seon.merge/data-attrs] :seon.merge/program]}
+  [db ks data-attrs]
+  (let [das (data-attr-set db data-attrs)]
+    (into {} (for [k ks :let [c (key-content db k das)] :when (some? c)] [k c]))))
+
+(defn touched-keys
+  "Every program key whose content may differ between base and any of dbs: the keys borne,
+  on base or on that db, by each entity a datom of which one holds and the other does not
+  (datahike.api/datoms-diff, which skips the subtrees they share). Cost: the datoms that
+  differ, not the program."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/db] :seon.merge/data-attrs] [:set :seon.merge/program-key]]}
+  [base dbs data-attrs]
+  (let [read (fn [db] [db (get-in db [:rschema :db.cardinality/many] #{}) (data-attr-set db data-attrs)])
+        b (read base)]
+    (into #{} (for [db dbs
+                    :let [[gone added] (d/datoms-diff base db :eavt [])
+                          d (read db)]
+                    e (into #{} (map :e) (concat gone added))
+                    [side many das] [b d]
+                    k (entity-keys side many e das)]
+                k))))
+
+(defn delta-three-way
+  "`three-way` of base, ours and theirs read only where they differ (touched-keys): the
+  same answer, at the cost of what changed on each side since base, not of the program
+  (task seon.merge/program-cost-follows-what-changed)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/data-attrs] :seon.merge/result]}
+  [base ours theirs data-attrs]
+  (let [ks (vec (touched-keys base [ours theirs] data-attrs))]
+    (three-way (program-of base ks data-attrs) (program-of ours ks data-attrs) (program-of theirs ks data-attrs))))
+
+(defn delta-changes
+  "`changes` from db from to db to, read only where they differ (touched-keys)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs] :seon.merge/changes]}
+  [from to data-attrs]
+  (let [ks (vec (touched-keys from [to] data-attrs))]
+    (changes (program-of from ks data-attrs) (program-of to ks data-attrs))))
+
+;; ---- verbatim merges: a merged datom is the same datom ------------------------------
+
+(defn- key-entity
+  "The entity bearing program key k on db, or nil."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key] [:maybe :int]]}
+  [db [kind a :as k]]
+  (case kind
+    :form (pdb/eid db :form/id a)
+    (:var :method :impl :ns) (program/def-eid db k)
+    :schema (pdb/eid db :schema/key a)
+    :datum a))
+
+(defn carried-tx
+  "The datoms src's changes since base carry for program keys ks, as they are (e, a, v and
+  tx): the retractions src made of the keys' entities' datoms base holds, then the datoms
+  src added to them, then the facts of the transactions that made them. Ids are the
+  store's, issued once (docs/storage.md#ids), so on any other branch they name the same
+  entities and transactions: a merge adds what the branch wrote, never a copy. Platform
+  records ride on no key, so they stay where they were written. Datahike keeps a carried
+  datom's own tx (datahike.db.transaction, transact-add and transact-retract-datom)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:sequential :seon.merge/program-key] :seon.merge/data-attrs] :seon.db/tx-data]}
+  [base src ks data-attrs]
+  (let [es (into #{} (for [k ks db [base src] :let [e (key-entity db k)] :when e] e))
+        das (data-attr-set src data-attrs)
+        carry? (fn [d] (and (es (:e d)) (let [a (:a d)] (or (das a) (program-ns-attrs (namespace a))))))
+        [gone added] (d/datoms-diff base src :eavt [])
+        added (filterv carry? added)
+        retracted (vec (for [d gone :when (carry? d)
+                             :let [r (last (filter #(and (not (:added %)) (> (:tx %) (:tx d)))
+                                                   (d/datoms (d/history src) :eavt (:e d) (:a d) (:v d))))]
+                             :when r]
+                         r))
+        txs (into (sorted-set) (map :tx) (concat retracted added))]
+    (-> []
+        (into retracted)
+        (into added)
+        (into (for [t txs d (d/datoms src :eavt t)] d)))))
+
+(defn merge-tx
+  "The tx-data merging src's changes since base for program keys ks onto db onto: the
+  datoms src wrote, as they are (carried-tx), and the Datahike declarations a merged schema
+  entry's population needs on onto (as a registration installs them)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db [:sequential :seon.merge/program-key] :seon.merge/data-attrs] :seon.db/tx-data]}
+  [onto base src ks data-attrs]
+  (let [tx (carried-tx base src ks data-attrs)]
+    (if (some #(= :schema (first %)) ks)
+      (into tx (program/schema-declarations onto (program/schema-registry (program/schema-changes (d/db-with onto tx)))))
+      tx)))
+
 ;; ---- what program code does not do (owner, 2026-10-21) ------------------------------
 
 (defn mutations
@@ -167,59 +287,6 @@
              finding (concat (for [c (sort-by str (:banned f))] {:call c})
                              (for [v (sort-by str (:inline-defs f))] {:inline-def v}))]
          (merge {:form id :ns (:ns f) :defines (vec (sort-by sedn/encode (:defines f)))} finding))))
-
-;; ---- tx-data: setting keys on a db ---------------------------------------------------
-
-
-(defn- set-form-tx
-  {:malli/schema [:=> [:cat :seon.host/db :string [:maybe :map]] :seon.db/tx-data]}
-  [db id content]
-  (let [e (pdb/eid db :form/id id)]
-    (if (nil? content)
-      (if e [[:db/retractEntity e]] [])
-      (let [eid-of #(program/def-eid db %)]
-        (into [{:db/id (program/ns-tid (:ns content)) :ns/name (:ns content)} (program/form-tx id content eid-of)]
-              (concat (map #(program/def-ref % (eid-of %)) (:defines content))
-                      (for [s (:declares content)] (program/def-ref [:var s] (eid-of [:var s])))))))))
-
-(defn- set-datum-tx
-  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key :any] :seon.db/tx-data]}
-  [db [_ e a v :as k] content]
-  (if (= 4 (count k))
-    (if content [[:db/add e a v]] (if (seq (d/datoms db :eavt e a v)) [[:db/retract e a v]] []))
-    (let [old (:v (first (d/datoms db :eavt e a)))]
-      (cond (some? content) [[:db/add e a content]]
-            (some? old) [[:db/retract e a old]]
-            :else []))))
-
-(defn- set-schema-tx
-  "tx-data making schema entry k hold content on db: upserted by its key, no longer the
-  binary's (:schema/source retracted), or retracted."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword [:maybe :seon.merge/schema-entry]] :seon.db/tx-data]}
-  [db k content]
-  (let [e (pdb/eid db :schema/key k)]
-    (cond (nil? content) (if e [[:db/retractEntity e]] [])
-          :else (cond-> [{:schema/key k :schema/form (:form content) :schema/file (:file content)}]
-                  (and e (:schema/source (d/entity db e))) (conj [:db/retract e :schema/source true])))))
-
-(defn apply-tx
-  "tx-data making each key of m ({key content}, nil content: absent) hold its content on
-  db: forms upserted by id (or retracted), definitions pointed at their forms by identity
-  (entity ids never matter), schema entries by key with the Datahike declarations their
-  population needs, data by entity id."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :seon.merge/program-key :any]] :seon.db/tx-data]}
-  [db m]
-  (let [tx (vec (distinct
-                  (mapcat (fn [[k content]]
-                            (case (first k)
-                              :form (set-form-tx db (second k) content)
-                              (:var :method :impl :ns) (program/def-tx db k (program/def-eid db k) content)
-                              :schema (set-schema-tx db (second k) content)
-                              :datum (set-datum-tx db k content)))
-                          (sort-by (comp sedn/encode key) m))))]
-    (if (some #(= :schema (ffirst %)) m)
-      (let [db' (d/db-with db tx)] (into tx (program/schema-declarations db (program/schema-registry (program/schema-changes db')))))
-      tx)))
 
 ;; ---- unmerged entries (git's index stages 1, 2, 3), on the branch ------------------------
 
@@ -270,17 +337,14 @@
           (for [c conflicts] (assoc (conflict-tx c) :seon.merge/main-t main-t :seon.merge/resolved? false)))))
 
 (defn unmerged
-  "The entries of db still unmerged, given db's program prog: not resolved, and the
-  branch's content for the key still equal to ours (a re-defn resolves by itself). Without
-  prog, the program is read only when an entry is still open (a branch with none, the usual
-  case, reads its entries alone: the whole program costs ~0.5 s on Seon's own)."
-  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :seon.merge/entry-value]]
-                  [:=> [:cat :seon.host/db :seon.merge/program] [:vector :seon.merge/entry-value]]]}
-  ([db] (let [open (filterv (complement :resolved?) (entries db))
-              prog (delay (program db #{}))]
-          (filterv #(same? (:key %) (:ours %) (get @prog (:key %))) open)))
-  ([db prog]
-   (filterv #(and (not (:resolved? %)) (same? (:key %) (:ours %) (get prog (:key %)))) (entries db))))
+  "The entries of db still unmerged: not resolved, and the branch's content for the key
+  still equal to ours (a re-defn resolves by itself). Reads the program at the entries'
+  keys only (program-of)."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.merge/entry-value]]}
+  [db]
+  (let [es (entries db)
+        prog (program-of db (mapv :key es) #{})]
+    (filterv #(and (not (:resolved? %)) (same? (:key %) (:ours %) (get prog (:key %)))) es)))
 
 (defn resolve-tx
   "Mark the entry for key resolved (git add): the branch keeps what it holds now."

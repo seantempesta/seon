@@ -150,7 +150,6 @@
                  (cond-> st (:cloned-from m) (assoc :pid (:pid m))))
       ;; its eval's record could not be written on its branch (its entity ids are spent):
       ;; the typed error is recorded on main as its problem
-      :unrecorded (do (step/out! o :to-api {:op :problem :class :agent :agent id :error (:error m)}) st)
       :fd-ready (send-fd! st (:k m) (get-in st [:inflight (:k m) :pass-fd]))
       :branch-me (let [branch (get-in st [:inflight (:k m) :branch])]
                    (step/out! o :to-writer {:op :clone-branch :from (:branch st) :branch branch

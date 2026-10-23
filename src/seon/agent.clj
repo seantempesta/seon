@@ -118,9 +118,7 @@
     (let [r (d/with (db) tx-data)]
       (swap! state assoc :db (:db-after r))
       {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
-    (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta)})]
-      ;; past this process's block of entity ids: the typed error, nothing applied
-      (when-let [e (and (not (map? r)) (pdb/lease-spent r (:lease @state)))] (throw (ex-info (:seon.error/message e) e)))
+    (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state))})]
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
       (swap! state assoc :db (:db-after r) :dirty? true)
       (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
@@ -207,13 +205,12 @@
         main-b (pdb/main-branch (:cfg @state))
         main (pdb/head conn main-b)
         head @conn
-        r (pm/three-way (pm/program (:base @state) data-attrs) (pm/program head data-attrs) (pm/program main data-attrs))]
+        r (pm/delta-three-way (:base @state) head main data-attrs)]
     (if (empty? (:theirs r))
       {:ok true :applied [] :conflicts [] :t (:max-tx head)}
-      (let [theirs (pm/program main data-attrs)
-            rep (d/merge-db conn #{main-b} (into (pm/apply-tx head (into {} (for [k (:apply r)] [k (get theirs k)])))
+      (let [rep (d/merge-db conn #{main-b} (into (pm/merge-tx head (:base @state) main (:apply r) data-attrs)
                                               (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
-                             (pdb/tx-meta))
+                             (pdb/tx-meta (:branch @state)))
             ops (pdb/report->tx rep)
             errs (program/load-changes! (:db-after rep) ops)]
         ;; the merge base is now main's head: what main changed is not this branch's change
@@ -530,7 +527,6 @@
     :clone (do (clone! m) nil)
     :stats [{:op :stats :id (:id m) :result {:mem-mb (mem-mb) :t (:max-tx (db)) :pid (lib/c-getpid)
                                               :results (count (:results @state)) :evals (:n @state)
-                                              :ids (pdb/lease-use (db) (:lease @state))
                                               :heap-mb (lib/r2 (/ (lib/bytes-in-heap) 1048576.0))}}]
     ;; a message (session F2): it waits in :inbox until the agent's code takes it ((messages));
     ;; root hears that it arrived
@@ -587,12 +583,12 @@
                     (let [parent (:id @state)]
                       ;; the parent's socket closed on fork (FD_CLOFORK); this clone's came with the request
                       (sock/clofork! fd)
-                      ;; the clone opens the store itself, on its own branch, with its own lease
-                      (pdb/after-fork! (:cfg r) (:lease r))
+                      ;; the clone opens the store itself, on its own branch
+                      (pdb/after-fork! (:cfg r))
                       (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
                       (let [store-conn (d/connect (assoc (:cfg r) :branch (:branch m)))]
                         (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn (sock/conn fd) :mode :agent :tx-seq 0
-                               :lease (:lease r) :pending clojure.lang.PersistentQueue/EMPTY :fx-pending {}
+                               :pending clojure.lang.PersistentQueue/EMPTY :fx-pending {}
                                :store-conn store-conn :db @store-conn))
                       (let [unwatched (sock/signal-at-input! fd)]
                         (hello! t0 (cond-> {:cloned-from parent} unwatched (assoc :unwatched unwatched))))
@@ -611,7 +607,7 @@
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
-  [fd {id :agent branch :branch task :task attempt :attempt cfg :cfg lease :lease resumed :resumed commit :commit t :t} db0 serve]
+  [fd {id :agent branch :branch task :task attempt :attempt cfg :cfg resumed :resumed commit :commit t :t} db0 serve]
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
   (sock/clofork! fd)
@@ -620,7 +616,7 @@
   (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)))
   (stderr-to-file! (stderr-path (pdb/agents-dir cfg) id))
   ;; this agent owns its branch's writes: it opens the store itself (seon.db/after-fork!)
-  (pdb/after-fork! cfg lease)
+  (pdb/after-fork! cfg)
   ;; the model's API key is root's alone (its :model owner calls the model; session FX1)
   (lib/c-unsetenv (cfg/value :seon.config.ai/api-key-variable))
   (let [nsx (make-ns! id)
@@ -639,7 +635,7 @@
      ;; forked); a resumed one's is older than main, and comparing against main's head would
      ;; read main's later changes as the branch's (seon.program/divergence, changed-vars)
      (reset! state {:id id :branch branch :task task :attempt attempt :fd fd :conn c :db @store-conn
-                   :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
+                   :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :interrupt-ok intr-ok :serve serve})

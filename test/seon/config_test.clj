@@ -109,8 +109,8 @@
     (is (every? #(= :invalid (:problem %)) (:seon.config/problems r)))))
 
 (deftest a-missing-required-key-refuses-and-nil-is-absent
-  (let [r (refused #(config/resolved (assoc config/config :seon.config.store/eid-lease nil)))]
-    (is (= [{:key :seon.config.store/eid-lease :problem :missing-key :value "nil"}] (:seon.config/problems r))))
+  (let [r (refused #(config/resolved (assoc config/config :seon.config.store/branching-factor nil)))]
+    (is (= [{:key :seon.config.store/branching-factor :problem :missing-key :value "nil"}] (:seon.config/problems r))))
   ;; an optional key resolving nil is absent, not a stored nil
   (is (not (contains? (config/resolved (assoc config/config :seon.config.ai/thinking nil)) :seon.config.ai/thinking)))
   (is (= :disabled (:seon.config.ai/thinking (config/resolved (assoc config/config :seon.config.ai/thinking :disabled))))))

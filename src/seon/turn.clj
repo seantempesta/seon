@@ -61,9 +61,10 @@
 
 (defn- added-gaps
   "The functions branch db defines without a contract since its merge base base (the
-  branch's own changes, seon.merge/uncontracted-since): what root's judge and the merge gate ask."
+  branch's own changes, seon.merge/uncontracted over seon.merge/delta-changes): what root's judge and
+  the merge gate ask."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :qualified-symbol]]}
-  [base db] (set (pm/uncontracted-since base db)))
+  [base db] (set (pm/uncontracted (pm/delta-changes base db #{}))))
 
 (defn- observe
   "What a turn starts from, measured now: the proofs run in a fork of this agent (a run it
