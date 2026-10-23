@@ -33,7 +33,29 @@ Net size, counted over src, test and bin together. It must replace the per-case 
 | :turn-ctx | | ~8 |
 | ordered's 1000 ms term (a reuse keyed by time, which §5 forbids) | | 3 |
 
-The file store becomes the general one (its 28 lines generalized, not deleted). In test/test_runner.clj, program-db re-imports src and test on every run (lines 36-43), and the plan's digests and selection run every time (165-190): the 8-15 s and 7-12 s. The lines that would go there are pure-tests' count, owed.
+The file store becomes the general one (its 28 lines generalized, not deleted). In test/test_runner.clj, program-db re-imports src and test on every run (lines 36-43), and the plan's digests and selection run every time (165-190): the 8-15 s and 7-12 s. Those are the 8-15 s.
+
+The cold costs, measured by pure-tests on 2026-10-23 (main 1343c920 with Datahike 7de92bb, in-process, niced, load 6-8). These are what the cold path costs before any reuse:
+
+| phase | time | alloc | note |
+|---|---|---|---|
+| program-db's read of src and test (113 files, 1.9 MB) | 9 ms | | |
+| ts/test-db | 566 ms | 675 MB | |
+| seon.source/import-tx | 2.2 s | 3.5 GB | 626k contracted calls (analyze 2,489, quoted-vars 137k); about 1.3 MB a form, where Jolt's analyzer is about 0.1 ms a form: a defect suspect |
+| d/db-with of its 11,860 ops (75,683 datoms) | 5.4-6.3 s | 3.6 GB | linear, about 24.7k ticks and 48 KB a datom: a defect suspect |
+| program/reach-index | 650 ms each | 0.9 GB each | runs twice a plan, once for tests (533 keys) and once for check steps; one walk could serve both |
+| the greens lookup / fx/inputs | 2 ms / 29 ms | | |
+
+Inside an agent's turn, test-plan computed reach-digests twice a turn (3.1 s and 7.4 GB each), before brief3 and reach-update; this was not re-measured on main.
+
+The reuse code in test and bin today is the result store by digest (proofs/greens, store-greens!, ../test-results) plus target/prove/ms: about 25 lines, of test_runner's 257, bin/prove's 28 and bin/test's 55. Nothing caches the analysis or the plan.
+
+So the cold defects come first, each fixed at its cause by its owner, then measured again:
+- the 48 KB a datom in d/db-with;
+- import-tx's allocation;
+- reach-index run twice a plan.
+
+pure-tests is on the first two now. Its tasks the-plan-reuses-each-files-analysis-by-its-digest (on no branch, dropped from jolt/divergence) and the test-plan caching (in its notes only) fold into this one. Only what is still expensive after those fixes is admitted as a kind.
 
 First slice (one worktree session): measure test_runner's cold path and fix its defects (rule 2), then admit only what the fixed numbers still show expensive; if that is the per-file analysis, it becomes a derived kind keyed by the file's content digest, in the directory. That is the 8-15 s a run. Then the base test plan, the 7-12 s. Report the lines across src, test and bin, and the time saved per run, measured. Later kinds (an attempt's sections, built twice per later turn by seon.context/attempt-text; the help page, 2,132 tokens reassembled per turn of every agent; a turn's remade context) each come with their own measured miss cost and line count.
 
