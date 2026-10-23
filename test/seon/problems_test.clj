@@ -751,7 +751,7 @@
           (is (= "sean" (:by (:seon.section/reviewed (d/pull db3 [:seon.section/reviewed] [:seon.section/address "demo/p.md#p"])))))
           (is (= (:seon.section/text (d/pull db2 [:seon.section/text] [:seon.section/address "demo/p.md#p"]))
                  (:seon.section/text (d/pull db3 [:seon.section/text] [:seon.section/address "demo/p.md#p"])))))))
-    (testing "it is attention, never a refusal: a branch that changes the code sees it, and the done rule does not"
+    (testing "it is attention, never a reason to refuse done: a branch that changes the code sees it, and the done rule does not"
       (let [head (change-var db1 v) {:keys [caused attention]} (problems/caused-split db1 head)]
         (is (= [] caused))
         (is (= 1 (count attention)))

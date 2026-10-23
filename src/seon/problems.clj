@@ -219,7 +219,7 @@
   "Each section whose text cites a var the code has changed since the section was last written, as a
   :stale-section row: a var's form id (the form's own digest) now differs from the one the section
   recorded when its text was last loaded (:seon.section/read, seon.docs/load-tx; my.docs/reviewed!
-  records a review). Open until the section is edited or reviewed; attention, never a refusal.
+  records a review). Open until the section is edited or reviewed; attention, never a reason to refuse done.
   A var that is gone is a dead citation, not this. Cost: the vars' and forms' datoms in one scan each
   and one lookup per recorded name. With only ({:names :sections}: var names and section entity ids)
   just the recorded names among those names, and every name of those sections, are read: a seek for

@@ -51,6 +51,10 @@ REPLACE = [
     ('resources/seon/tasks/seon.e2e.edn', 'reads a refusal as a reuse', 'reads a refused spawn as a reuse'),
     ('resources/seon/tasks/seon.e2e.edn', 'two agentless refusals', 'two agentless refused spawns'),
     ('resources/seon/tasks/seon.merge.edn', '(`seon.writer` merge-refusal)', '(`seon.writer` merge-refused)'),
+    ('docs/health.md', 'attention, never a refusal (', 'attention, never a reason to refuse done ('),
+    ('resources/seon/schemas/seon.problems.edn', 'never a reason for a refusal', 'never a reason to refuse done'),
+    ('src/seon/problems.clj', 'attention, never a refusal.', 'attention, never a reason to refuse done.'),
+    ('test/seon/problems_test.clj', 'attention, never a refusal:', 'attention, never a reason to refuse done:'),
     ('test/seon/source_test.clj', "the next agent's harvest read", "the next agent's stage read"),
 ]
 
