@@ -40,7 +40,16 @@
     (is (m/-total? (contract/schema [:cat :seon.host/db :int [:map [:a :string]] [:vector :keyword]]) contract/options))
     (is (m/-total? (contract/schema [:maybe [:or :int :seon.host/fn]]) contract/options))
     (is (not (m/-total? (m/schema [:cat [:fn int?]]) nil)) "a :fn calls user code (malli's validator catches its throw, at a try per call)")
-    (is (not (m/-total? (m/schema [:cat [:> 0]]) nil)) "a comparator compares whatever it is given")
+    (is (m/-total? (m/schema [:cat [:> 0] [:= :a]]) nil) "a comparator answers through malli's -safe-pred")
+    (is (m/-total? (m/schema [:cat int? string? [:vector keyword?]]) nil) "malli's predicate schemas")
+    (is (not (m/-total? (m/schema [:cat pos?]) nil)) "but pos?, registered bare, throws on a string")
+    (is (not (m/-total? (m/schema [:cat (m/-simple-schema {:type 'mine? :pred (fn [_] (throw (ex-info "x" {})))})]) nil))
+        "a symbol-typed schema malli does not register is no predicate of its")
+    (is (not (m/-total? (contract/schema [:cat :seon.host/db]) (dissoc contract/options ::m/total-types)))
+        "the predicate pack is total because seon.contract/options names it")
+    (is (m/-total? (m/schema [:cat [:=> [:cat :int] :int]]) nil) "a function schema checks fn?")
+    (is (not (m/-total? (m/schema [:cat [:=> [:cat :int] :int]]) {::m/function-checker (fn [_ _] nil)}))
+        "unless a function checker is set: it runs the function")
     (is (not (m/-total? (m/schema [:cat [:ref ::absent]] {:registry (merge (m/default-schemas) {::absent :int})}) nil)) "a :ref resolves lazily")
     (is (not (m/-total? (m/schema [:cat (m/-simple-schema {:type ::mine :pred int?})]) nil)) "a predicate no option names"))
   (let [reports (volatile! [])
@@ -53,4 +62,10 @@
     (testing "a total arm checked bare still reports what is invalid"
       (vreset! reports [])
       ((armed (m/schema [:=> [:cat :int] :int])) "not an int")
+      (is (= [::m/invalid-input ::m/invalid-output] @reports)))
+    (testing "and so does the generic wrapper (a variadic arity)"
+      (vreset! reports [])
+      ((m/-instrument {:schema (m/schema [:=> [:cat :int [:* :int]] :int]) :scope #{:input :output} :report report}
+                      (fn [& xs] (last xs)))
+       1 2 "three")
       (is (= [::m/invalid-input ::m/invalid-output] @reports)))))
