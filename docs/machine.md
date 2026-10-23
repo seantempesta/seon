@@ -36,8 +36,8 @@ Leave nothing running when you finish, and say so in your report. Kill only PIDs
 
 ## Disk stays bounded
 
-Disk stays bounded by these rules:
-- a worktree session's worktree is removed in the merge that merges it (`bin/worktree --remove NAME`, run by root after the merge; the branch stays in git);
+Disk stays bounded by these rules, and by everyone cleaning up garbage when they see it, whoever left it: a merged worktree, a leftover process or a finished experiment's output is removed on sight, after checking nothing live uses it (by PID, path and working directory, never by pattern), and what went is said (AGENTS §8, the machine). The rules:
+- a worktree session's worktree is removed in the merge that merges it (`bin/worktree --remove NAME`, run by root after the merge; the branch stays in git); one found merged and clean later is removed then (`bin/worktree --remove-at DIR`), unless a live session works in it;
 - a worktree session's scratch lives inside its worktree (`target/`, `runs/`) and goes with it; nobody creates a new top-level directory in `~/src/seon-jolt` (the fork repositories [forks](forks.md) lists, `notes/`, `bin/`, `test-results/` (test results by reach digest, shared by every checkout) and the worktrees are the only ones);
 - what is kept is what git and the store record (commits, task facts, notes); a store holds its history. Until Seon holds a user's data, the standing store (`runs/store`) is test data: when its schema changes it is erased on the owner's go, never migrated. Build output, compile caches and finished experiments' stores are regenerable and are deleted when their checkout or experiment ends;
 - no code prunes ``target/check/`` (each run's logs) or a root's old generations (each a tree and a binary, ~200 MB): deleting them is a manual act, keeping the generation running and the one before it.
