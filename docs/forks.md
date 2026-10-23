@@ -88,7 +88,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 ## datahike
 
-`reference-code/datahike` pinned at `d89be47`, the tip of ``jolt/datom-cost``: `6db7188` and ``jolt/nested-call-refused`` (`ae35add`, `dda24c0`), each on ``jolt/release-drains`` `bae7c3e` (``jolt/in-scalar`` `1880fcc` merged into it; both on ``jolt/global-ids`` `b4596cf`, ``jolt/gc-cache-epoch`` `700c473` merged in).
+`reference-code/datahike` pinned at `6b668f0`, the tip of ``jolt/a-predicate-that-throws-is-an-error``, on `d89be47` (the tip of ``jolt/datom-cost``: `6db7188` and ``jolt/nested-call-refused`` (`ae35add`, `dda24c0`), each on ``jolt/release-drains`` `bae7c3e` (``jolt/in-scalar`` `1880fcc` merged into it; both on ``jolt/global-ids`` `b4596cf`, ``jolt/gc-cache-epoch`` `700c473` merged in)).
 
 - Fork repo: ``https://github.com/seantempesta/datahike``. Upstream: ``replikativ/datahike``.
 - Base: `ad9fc97` "baseline", a history-less snapshot of Seon's fork ``seantempesta/datahike`` `ccba220b` (unknown: that commit is not in the repo, so the snapshot cannot be checked against it).
@@ -122,6 +122,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
   - `7de92bb`, `a9adc83`, `1880fcc` `probe-driven-threshold` 18, Jolt's measured break-even (a probe's seek and merge ~5.6k ticks, a scanned datom ~316), not the JVM's 2500 (a JVM build must set 2500); `datahike.test.query-planner-test/test-a-probed-group-answers-the-same-either-side-of-the-seek-threshold`. Jolt.
   - `6db7188` a datom's add path costs its index inserts: a card-one attribute's current datom by one `:eavt` descent (`di/-lookup`, `dd/cmp-datoms-ea`), not a slice's seq; the temporal indexes untouched by a first value; no per-datom record copies, closures or concat the op does not need. A plain datom 12.5k ticks and 18.2 KB before (with Jolt `e0351af8`), 6.7k and 11.1 KB after, its floor ~6.8k and ~10.5 KB (`seon.db-test/a-datom-costs-its-index-inserts`). Generic.
   - `ae35add`, `dda24c0` a nested call in a predicate or function clause, `[(f (g ?x))]`, is refused when the query is parsed, naming the clause (`datahike.query/refuse-nested-calls`, `:query/nested-call`): no engine evaluates it, the parser read it as a constant list and a predicate throwing on it read as false, so the query answered nothing (Datomic refuses it; upstream answers the empty set). A quoted form passes only as `q`'s query (`'#{a}` elsewhere is the list `(quote #{a})`, refused). Proof: `datahike.query-test/a-nested-call-in-a-predicate-is-refused`. Generic.
+  - `6b668f0` a where clause's call that throws is an error of the query (`:query/call-threw`, its clause, its values, the call's throw as cause); before, a predicate's ClassCastException or IllegalArgumentException read as false, and the query answered nothing. The built-in `<` `>` `<=` `>=` order every value by `datahike.datom/compare-value` (values of different kinds by their type, as the indexes do) and never throw. Proof: `datahike.query-test/a-predicate-that-throws-is-an-error`. Generic.
 - Open: the fork repo's ``jolt/main`` is at `fe50764`; `4b93a1b`..`fd0c065` are only in the submodule clone, not yet in the fork repo.
 
 ## persistent-sorted-set

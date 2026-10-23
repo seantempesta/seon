@@ -1,6 +1,6 @@
 (ns datahike.query-test
   "Datahike's query, as Seon's agents call it: what it answers and what it refuses."
-  (:require [clojure.test :refer [deftest is]] [datahike.api :as d] [seon.test-store :as ts])
+  (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d] [seon.test-store :as ts])
   (:import [clojure.lang ExceptionInfo]))
 
 (deftest a-nested-call-in-a-predicate-is-refused
@@ -47,3 +47,25 @@
         "a where opening with not, its calls flat, answers")
     (is (contains? (d/q '[:find ?n :where [(q '[:find ?m :where [_ :ns/name ?m]] $) [[?n]]]] db) ['proof.three])
         "a quoted subquery is a constant, not a nested call")))
+
+(deftest a-predicate-that-throws-is-an-error
+  ;; task datahike.query/a-predicate-that-throws-is-an-error: a predicate's ClassCastException or
+  ;; IllegalArgumentException was read as false (filter-by-pred's safe-pred, the planner's
+  ;; post-filter-preds), so a call given a value of the wrong type dropped every row without a
+  ;; word and the query read as a true empty answer
+  (let [db (d/db-with (ts/test-db) [{:ns/name 'proof.one-test} {:ns/name 'proof.two}])
+        e (is (thrown? ExceptionInfo
+                       (d/q '[:find ?n :where [_ :ns/name ?n] [(pos? ?n)]] db)))]
+    (is (= :query/call-threw (:error (ex-data e))) "a symbol given to a number's predicate is an error")
+    (is (re-find #"pos\?" (pr-str (:clause (ex-data e)))) "naming the clause")
+    (is (some? (ex-cause e)) "with the call's own throw as its cause")
+    (is (= #{['proof.one-test]}
+           (d/q '[:find ?n :where [_ :ns/name ?n] [(str ?n) ?s] [(clojure.string/ends-with? ?s "-test")]
+                  [(clojure.string/starts-with? ?s "proof.")]] db))
+        "given the string, it answers")
+    (testing "the built-in comparisons order values of different kinds, as the indexes do, and never throw"
+      (do
+        (is (= (d/q '[:find ?n :where [_ :ns/name ?n] [(str ?n) ?s] [(clojure.string/starts-with? ?s "proof.")] [(> ?n 5)]] db)
+               (d/q '[:find ?n :where [_ :ns/name ?n] [(str ?n) ?s] [(clojure.string/starts-with? ?s "proof.")] [(> ?n 5)]] db))
+            "a symbol against a number: an answer, the same each time")
+        (is (= #{[3]} (d/q '[:find ?x :in [?x ...] :where [(< ?x 4)] [(> ?x 2)]] [1 2 3 4 5])) "numbers as before")))))
