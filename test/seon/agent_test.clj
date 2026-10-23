@@ -292,6 +292,23 @@
                                    " :else (recur))))))")}])]
     (is (= ":ready" (:printed r)) (pr-str r))))
 
+(deftest a-resumed-branch-holds-what-main-gained
+  ;; step E run #11 (2026-10-23): a kept branch made before main imported test/ was resumed,
+  ;; and its agent held seon.context-test with no vars (seon.agent/init! unmapped every
+  ;; definition main had that the branch did not), so the design never reached its proof's
+  ;; fixtures. A resumed agent runs main with the branch's own changes since its merge base
+  (let [[r] (in-agent [{:op :eval :agent "root"
+                        :code (str "(let [ev (seon.root/events sys) m (seon.db/conn-main (:conn sys))]"
+                                   " (datahike.api/branch! (:conn sys) m (seon.db/on-main m :kept))"
+                                   " @(seon.root/transact-main! sys (seon.source/text-tx @(:conn sys) 'demo.gained \"(ns demo.gained)\\n\\n(defn g [] 7)\\n\" nil))"
+                                   " (let [ag (seon.root/spawn! sys {:branch :kept})]"
+                                   " (loop [] (let [e (clojure.core.async/<!! ev)]"
+                                   " (cond (not= ag (:agent e)) (recur)"
+                                   " (= :ready (:type e)) (:printed (first @(seon.root/submit! sys ag \"(demo.gained/g)\")))"
+                                   " (#{:dead :ended :killed} (:type e)) (:type e)"
+                                   " :else (recur))))))")}])]
+    (is (= (pr-str "7") (:printed r)) (pr-str r))))
+
 (deftest a-failure-marked-through-the-server-holds-the-task
   ;; owner, 2026-10-22: a failure is task data and root reacts to it. The agent marks its
   ;; task failed on its branch, hands the attempt back (seon_done), and root, at the
