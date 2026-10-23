@@ -50,6 +50,7 @@ REPLACE = [
     ('resources/seon/tasks/seon.stage.edn', '(which harvests first)', '(which stages first)'),
     ('resources/seon/tasks/seon.e2e.edn', 'reads a refusal as a reuse', 'reads a refused spawn as a reuse'),
     ('resources/seon/tasks/seon.e2e.edn', 'two agentless refusals', 'two agentless refused spawns'),
+    ('resources/seon/tasks/seon.merge.edn', '(`seon.writer` merge-refusal)', '(`seon.writer` merge-refused)'),
     ('test/seon/source_test.clj', "the next agent's harvest read", "the next agent's stage read"),
 ]
 

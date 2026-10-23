@@ -17,7 +17,7 @@ names = sorted(names, key=len, reverse=True)
 ID = re.compile(r'(?<![\w.-])((?:seon|my|clojure|jolt)[\w.]*(?<!-test)/(?:' + '|'.join(map(re.escape, names)) + r'))(?![\w-])') if names else None
 NAMEQ = re.compile(r'((?::seon\.task/name|:name) )"(' + '|'.join(map(re.escape, names)) + r')"') if names else None
 OWNER = re.compile(r'([Oo]wner,? [^"]{0,40}?)(\\"(?:[^"\\]|\\[^"])*\\"|"[^"\\]*")')
-KEEP = [re.compile(r'Attempting to call unbound fn'), re.compile(r'zoom-a8-attempt-calc-neg\.jpg')]
+KEEP = [re.compile(r'\(was attempt\)'), re.compile(r'Attempting to call unbound fn'), re.compile(r'zoom-a8-attempt-calc-neg\.jpg')]
 
 RULES = [
     (r'Reattempt', 'Rerun'), (r'reattempt', 'rerun'),

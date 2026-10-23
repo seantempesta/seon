@@ -142,7 +142,8 @@
 
 (def ^:private text-kept
   "Files where an old word of section 7a's table is the subject or another sense, each with its reason.
-  A line quoting the owner is kept too (the quote is what he said)."
+  The quoted span of an owner's sentence is kept too (the quote is what he said), and the Jolt message
+  and image name that hold the old word."
   {"AGENTS.md" "the table names the old words"
    "docs/vocabulary.md" "its rows say `(was X)`"
    "docs/decisions.md" "the owner's rulings quote his words, and their titles stay as stated"
@@ -168,12 +169,12 @@
   and \"land\" are also plain English and Seon's admission, so only names are read for them."
   [agents]
   (for [w (old-words agents) :when (not (#{"admit" "land"} w))]
-    [w (re-pattern (str "(?i)(?<![\\w-])" (if (= w "merge-train") "merge[ -]train" w) "s?(?![\\w-])"))]))
+    [w (re-pattern (str "(?i)(?<!\\w)" (if (= w "merge-train") "merge[ -]train" w) "s?(?!\\w)"))]))
 
 (deftest no-text-uses-an-old-word
   (let [root (config/checkout)
         patterns (old-word-patterns (slurp (str root "/AGENTS.md")))
-        kept-line #"(?i)owner,? [^\"]{0,40}?\"|Attempting to call unbound fn|zoom-a8-attempt"
+        kept-span #"(?i)owner,? [^\"]{0,40}?\"[^\"]*\"|Attempting to call unbound fn|zoom-a8-attempt|\(was attempt\)"
         text? (fn [^String p] (or (str/starts-with? p "bin/") (re-find #"\.(clj|edn|md|html|js|css|c|h)$" p)))
         paths (for [dir ["bin" "docs" "resources" "src" "test" "web" "config" "native"]
                     f (file-seq (java.io.File. (str root "/" dir))) :when (.isFile ^java.io.File f)
@@ -181,7 +182,7 @@
                 p)
         hits (for [p (concat ["AGENTS.md" "BAGGAGE.md" "README.md"] paths) :when (not (text-kept p))
                    :let [lines (str/split-lines (slurp (str root "/" p)))]
-                   [i line] (map-indexed vector lines) :when (not (re-find kept-line line))
+                   [i line0] (map-indexed vector lines) :let [line (str/replace line0 kept-span "")]
                    [w re] patterns :when (re-find re line)]
                [p (inc i) w])]
     (is (contains? (set (map first patterns)) "attempt") "the table is read, the run row included")
