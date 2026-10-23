@@ -554,7 +554,7 @@
          mixed (count (filter #(= :mixed (or (:workload (clojure.core.async.flow.spi/describe (:proc %))) :mixed)) procs))
          web? (true? (get-in (c/state sys) [:web :listening]))]
      (update (declared-threads) :roster merge
-             (cond-> {"async-mixed" mixed "seon-flow-errors" 1 "seon-fs-events" 1}
+             (cond-> {"async-mixed" mixed "seon-fs-events" 1}
                web? (assoc "clojure-agent-pool" 2))))))
 
 (defn- threads
