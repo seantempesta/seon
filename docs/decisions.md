@@ -3,6 +3,20 @@
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in notes/archive/DECISIONS-superseded.md.
 
 ## Tonight's rulings (2026-10-23, with the 2026-10-21/22 rulings they rest on)
+### Fork URLs are the GitHub forks
+Owner, 2026-10-23: quote not recorded; relayed by root. `.gitmodules` names the forks at `seantempesta/*` over https, not a local path or the module store. Stated in: docs/forks.md (owed its rewrite when the URLs change).
+### The project root is `~/src/seon-next`; worktrees live inside it at `.worktrees/NAME`; nothing refers to `~/src/seon-jolt`
+Owner, 2026-10-23: quote not recorded; relayed by root. The self-contained plan (notes/archive of the outer repo, `self-contained-plan-2026-10-23`) is how `next` stops reaching outside itself. Stated in: not yet (owed AGENTS §3, docs/merging.md#a-worktree-session-works-in-a-checkout-of-its-own and `bin/worktree` when the move lands).
+### Cost is work done: ticks, bytes and calls, never wall time
+Owner, 2026-10-23: quote not recorded; relayed by root. Stated in: docs/cost.md (ticks, bytes and calls are exact; wall time is not a measure).
+### Process tests are not automatic: the reach walk classifies them
+Owner, 2026-10-23: quote not recorded; relayed by root. A test that launches a binary is deferred by what the reach walk finds, not run on every change. Stated in: docs/turn.md#who-runs-which-tests; docs/merging.md#a-merge-runs-what-the-change-reaches.
+### Ids are derived from content; addressing is global
+Owner, 2026-10-23: quote not recorded; relayed by root ("content-derived ids; global addressing"). Stated in: not yet (owed docs/storage.md, with the `jolt/global-ids` branch).
+### Tests run on change, through Seon
+Owner, 2026-10-23: "I want the testing to happen on demand. When a change happens. When data flows through the system." Root's file watcher sees a change and runs the tests the change reaches at the new digest, reusing greens and recording results as facts (`jolt/health`). Until it lands, `bin/prove` once per finished step, never after each edit, no full runs without root's go ("I want less useless runs. Agents are slowing everything down doing full checks after every little change."). Stated in: AGENTS §3 (Testing); docs/merging.md#a-merge-runs-what-the-change-reaches.
+### Renders are `(value opts)` functions with auto-render
+Owner, 2026-10-23: quote not recorded; relayed by root. Stated in: not yet (owed docs/render.md, with the `jolt/printer-eval` and renders branches).
 ### Thinking is off by default
 Owner, 2026-10-21, restated 2026-10-23: "if we can't have intuitive function calling based on the context our context is bad and instructions need help". Stated in: docs/model.md#thinking-is-off-by-default; `:seon.config.ai/thinking` in `resources/seon/config/default.edn`.
 ### No automatic retries: a refused or failed attempt is held for root
