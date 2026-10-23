@@ -234,12 +234,13 @@
                                  (throw (ex-info (str "git blame gave no committer time for " sha) {})))))))
 
 (defn- reviews
-  "{section address {:sha :time}}: the newest commit of the repository at root (any ref) whose message
-  carries the trailer `Reviewed: <address>` for it, from ONE git log (an empty review commit touches
+  "{section address {:sha :time}}: the newest commit of the repository at root (reachable from HEAD) whose message
+  carries the trailer `Reviewed: <address>` for it, in the checkout's own history (HEAD: a review that
+  never reached it is not a review here), from ONE git log (an empty review commit touches
   no file, so no per-file log finds it). Each address is one trailer line."
   {:malli/schema [:=> [:cat :string] [:map-of :string :map]]}
   [root]
-  (let [out (git! {} root ["log" "--all" "--grep=^Reviewed: " "--format=%x01%H%x00%ct%x00%(trailers:key=Reviewed,valueonly)"] nil)]
+  (let [out (git! {} root ["log" "HEAD" "--grep=^Reviewed: " "--format=%x01%H%x00%ct%x00%(trailers:key=Reviewed,valueonly)"] nil)]
     (reduce (fn [m rec]
               (let [[sha ct trailers] (str/split rec #"\x00" 3)
                     t (parse-long (str/trim ct))]

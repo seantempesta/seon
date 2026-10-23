@@ -709,8 +709,8 @@
                :n "sections citing a var and catch sites in the program, one of each changed"
                :work "three aevt scans of the sections, the var and task names, the catch forms, and for the stale sections only the names the branch changed (program/changed-vars) and the sections that differ; candidates only through the rule"
                :growth :linear
-               :per-n {:ns 25000 :bytes 30000 :calls 0}
-               :fixed {:ns 1800000 :bytes 3000000 :calls 24}
+               :per-n {:ticks 5900 :bytes 32500 :calls 0}
+               :fixed {:ticks 800000 :bytes 3800000 :calls 24}
                :sizes [10 100 1000]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
