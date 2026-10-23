@@ -460,8 +460,8 @@
       (assoc :error [(assoc base :error err :producer (:seon.error/operation err) :evidence {:from aid :error err})])
       (seq waste)
       (assoc :waste [(assoc base :waste waste :evidence {:from aid :waste waste})])
-      ;; owner's ruling, 2026-10-23: merged with its deferred process tests unasked (or no
-      ;; gate checkout declared): open until each is recorded passing (my.root/gate!)
+      ;; merged with its deferred process tests unasked (or no gate checkout declared): open until
+      ;; each is recorded passing (my.root/gate!; DECISIONS, Process tests are not automatic)
       (and (= :merged status) (seq (:seon.run/deferred p))
            (not-every? (into #{} (keep #(when (= :pass (:seon.proof/status %)) (:seon.proof/test %))) (:seon.run/deferred-results p))
                        (:seon.run/deferred p)))
