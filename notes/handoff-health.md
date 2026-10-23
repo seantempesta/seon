@@ -16,19 +16,25 @@
 - **The test service:** the `:prove` proc (one run per checkout, a running key joined, the latest wins), `seon_prove`, results as `:seon.proof/` facts by digest, process tests only when named, and `:test-red`.
 - **Checks:** `bin/check health` is the one check of the derived classes. `bin/prove` runs it when docs/ or src/ changed. `bin/laws catch` calls it.
 
-## Not verified
-- A live `my.docs/reviewed!` commit made by a real agent. The real-git proof covers the mechanism in a temp repo.
-- The last root review items, which a fresh session should check on main:
-  1. **Contracts:** seon.prove/* had no contracts (bin/check contracts red).
-  2. **System:** the system check's expected set lacked `:prove`.
-  3. **MCP:** the mcp check's literal "five tools", now that `seon_prove` makes six.
-  4. **Ticks:** fix 4's cost proof should state its estimates in ticks, not ns.
-  5. **Reviews:** a review must count only from HEAD's history (`git log HEAD --grep`), not `--all`.
-
-  These were briefed to a subagent when the session ended. Check whether main already has them (bin/check contracts, bin/check system, bin/check mcp; grep `--all` in seon.fx's wiki-history). Any that's missing is the next task.
+## Not verified (the subagent's final report, the session's last minutes)
+- **Root's last five review items are done** and were green when run, as far as main merged them:
+  - contracts on every seon.prove fn;
+  - the system check's expected set read from system.edn;
+  - mcp-proof comparing the tools with seon.server/ops;
+  - fix 4's cost proof priced in ticks;
+  - reviews counted from HEAD's history only.
+- **The last bin/prove had 3 reds, none re-run on 6a326234:**
+  1. `seon.prove-test`: 9 tests, because `reply`'s contract rejected a set. Fixed in 6e08af63 (a set or a sequence), untested.
+  2. `seon.program-cost-test/a-probed-entity-is-sought-not-scanned` was over its estimate. It's probably a stale Datahike pin: the checkout has since moved to main's bae7c3ec.
+  3. The new `health` step said HEALTH FAILED; its cause was not read.
+- **To re-verify:** sync the pins, rebuild, then run `bin/prove`, `bin/test seon.prove-test seon.program-cost-test` and `bin/check health`.
+- **Pin sync:** `bin/worktree --sync health` no longer finds this worktree, because worktrees now live at `next/.worktrees/NAME`. Sync by `git -C` on the submodules, or make a fresh worktree.
+- **Not exercised:** a live `my.docs/reviewed!` commit by a real agent. The real-git proof covers the mechanism.
+- **AGENTS.md §6** should list `seon_prove` among the MCP tools; root's to edit.
+- **Possible duplicates:** main merged an earlier jolt/health tip, so check the late changes for duplicates when merging.
 
 ## Next steps, in order
-1. On main, run `bin/check contracts`, `bin/check system` and `bin/check mcp`, and grep seon.fx for `--all`. Fix what's red (items 1–5 above).
+1. Re-verify the tip as above: prove-test, program-cost-test and the health step. Read the cause of HEALTH FAILED (`bin/check health` prints each open row).
 2. **Incremental health** (root approved, low priority): health(db') from health(db) by caused's candidates. The render proc keeps its previous value and db, and the full read happens once per process. A cost proof is flat at a fixed change. No cache.
    - Work-in-progress copies are in notes/handoff-health-wip/ (src/seon/problems.clj, src/seon/render/proc.clj, test/seon/problems_test.clj, saved with a .txt suffix).
    - They are whole files from an OLDER base: re-apply the idea by hand, never copy them over.
