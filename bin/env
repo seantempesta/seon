@@ -36,3 +36,9 @@ export JOLT_BUILD_CACHE_DIR JOLT_RUNTIME_CACHE_DIR JOLT_CACHE_DIR JOLT_CACHE_GEN
 # Test results by reach digest (:seon.config.source/test-results-dir) are shared the same way:
 # one directory in the main tree (gitignored), the same for every worktree and generation worktree
 export SEON_TEST_RESULTS=${SEON_TEST_RESULTS:-$MAIN_TREE/test-results}
+# The embedding model (bin/build embed, seon.vector): EmbeddingGemma-2 as ggml-org's Q8_0 GGUF, one copy
+# in the main tree's target/cache for every checkout, named by its sha256 (bin/build checks it).
+# :seon.config.vector/model reads SEON_EMBED_MODEL; its file name is the model's id on every vector.
+SEON_EMBED_MODEL_URL=${SEON_EMBED_MODEL_URL:-https://huggingface.co/ggml-org/embeddinggemma-2-GGUF/resolve/58faf90940886df2d62be555c8765d00dac362c5/embeddinggemma-2-Q8_0.gguf}
+SEON_EMBED_MODEL=${SEON_EMBED_MODEL:-$MAIN_TREE/target/cache/models/2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135.gguf}
+export SEON_EMBED_MODEL_URL SEON_EMBED_MODEL

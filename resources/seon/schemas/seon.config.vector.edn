@@ -1,0 +1,12 @@
+;; Semantic search (seon.vector, docs/vector.md): the pyramid's levels.
+{:seon.config.vector/coarse-dims [:int {:min 8 :max 768 :seon.config/unit "dims" :description "The coarse level: each vector's first dims, renormalized, as int8. Stored per vector: a change re-packs every vector."}]
+ :seon.config.vector/shortlist [:int {:min 1 :seon.config/unit "vectors" :description "The coarse level's best, reranked at the fine level."}]
+ :seon.config.vector/fine-dims [:int {:min 8 :max 768 :seon.config/unit "dims" :description "The fine level: each shortlisted vector's first dims, f16, renormalized."}]
+ :seon.config.vector/model [:string {:min 1 :seon.config/unit "path" :description "The embedding model's GGUF file (bin/env's SEON_EMBED_MODEL); its name is the id on every vector it makes."}]
+ :seon.config.vector/lib [:string {:min 1 :seon.config/unit "path" :description "native/embed.c over llama.cpp (bin/build embed), loaded by root's :embed worker alone."}]
+ :seon.config.vector/batch-tokens [:int {:min 64 :seon.config/unit "tokens" :description "One encode's tokens: the model's context and micro-batch."}]
+ :seon.config.vector/batch-texts [:int {:min 1 :seon.config/unit "texts" :description "One encode's texts (llama.cpp's sequences)."}]
+ :seon.config.vector/max-tokens [:int {:min 1 :seon.config/unit "tokens" :description "A text's tokens embedded; past it the text keeps its first ones."}]
+ :seon.config.vector/texts [:int {:min 1 :seon.config/unit "texts" :description "The texts one :embed request of main's vectors carries."}]
+ :seon.config.vector/batch [:int {:min 1 :seon.config/unit "requests" :description "The :embed requests one worker step takes from the queue."}]
+ :seon.config.vector/rrf-k [:int {:min 1 :seon.config/unit "ranks" :description "Reciprocal rank fusion's k: an item scores the sum of 1/(k + rank) over the rankings it is in."}]}

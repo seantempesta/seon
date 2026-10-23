@@ -37,9 +37,9 @@
 
 (defn found-of
   "seon.context/found's arguments: program-of n, nothing named, and every one of its functions
-  as a source, so each has a hit to score."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:set :qualified-symbol] [:vector :qualified-symbol]]]}
-  [n] [(program-of n) #{} (vec (for [i (range n)] (symbol "app.pc" (str "f" i))))])
+  as a source, so each has a hit to score; no task vector (the call graph's cost alone)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:set :qualified-symbol] [:vector :qualified-symbol] :nil]]}
+  [n] [(program-of n) #{} (vec (for [i (range n)] (symbol "app.pc" (str "f" i)))) nil])
 
 (deftest found-scores-each-hit-once
   (cost/proof

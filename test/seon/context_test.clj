@@ -451,6 +451,39 @@
     (is (= '(clojure.repl/source ctx-big/big) (:read r)) "the form that reads the rest")
     (is (str/includes? (:left-out r) (str (select/estimate src) " tokens")) "and how much it left out")))
 
+;; a made unit vector, dim i weighted as a Matryoshka model's are (seon.vector-test/vectors)
+(defn- made-vector [seed]
+  (let [v (mapv (fn [i] (* (Math/exp (/ (- i) 96.0)) (Math/sin (* (inc seed) (inc i) 0.37)))) (range 768))
+        n (Math/sqrt (reduce + (map #(* % %) v)))]
+    (mapv #(/ % n) v)))
+
+(deftest similar-finds-a-helper-the-call-graph-misses
+  ;; task seon.context/similar-finds-helpers-by-embedding: a helper nothing cited calls is found by
+  ;; its meaning, the program form nearest the plan, fused with the call graph's own
+  (let [plan (made-vector 1)
+        near-plan (let [v (mapv + plan (map #(* 0.1 %) (made-vector 2)))
+                        n (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % n) v))
+        db (d/db-with (ts/test-db)
+                      (program-facts [['geo/vol "(defn vol [r h] (* h (sq r)))" '[geo/sq]]
+                                      ['geo/sq "(defn sq [x] (* x x))" []]
+                                      ['geo/clamp-radius "(defn clamp-radius [r] (max 0 r))" []]
+                                      ['geo/unrelated "(defn unrelated [] :x)" []]
+                                      ['geo-test/vol-test "(deftest vol-test (is (= 2 (vol 1 1))))" '[geo/vol]]]))
+        form (fn [db sym] (:db/id (:var/form (d/entity db [:var/name sym]))))
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'geo :seon.task/name "v" :seon.task/plan "Make `geo/vol` refuse a negative radius."
+                                               :seon.task/proofs #{'geo-test/vol-test}}]))
+        task-e (:db/id (d/entity db [:seon.task/id "geo/v"]))
+        found-of (fn [db] (mapv :symbol (filter map? (:found (context/current-state db (task/task db "geo/v") {:turn 0 :max-turns 4})))))
+        _ (is (= ['geo/sq] (found-of db)) "without vectors the call graph names only what vol calls")
+        db (d/db-with db (into (seon.vector/tx-data [task-e (form db 'geo/clamp-radius) (form db 'geo/unrelated) (form db 'geo/sq)]
+                                                    [plan near-plan (made-vector 7) (made-vector 9)] "m")
+                               []))
+        fs (found-of db)]
+    (is (some #{'geo/clamp-radius} fs) "the helper nearest the plan is found, though nothing cited calls it")
+    (is (some #{'geo/sq} fs) "the call graph's helper stays")
+    (is (= ['geo/clamp-radius 'geo/unrelated] (filterv #{'geo/clamp-radius 'geo/unrelated} fs)) "nearer the plan ranks first")
+    (is (not-any? #{'geo/vol 'geo-test/vol-test} fs) "what the plan names is no helper")))
+
 (deftest found-names-the-helpers-the-plan-does-not
   ;; task seon.context/the-context-names-the-helpers-a-task-needs: R4's lever, from the call
   ;; graph: what the cited vars and the proofs call, most-called first, the named left out
@@ -475,7 +508,7 @@
         fs (:found (context/current-state db (task/task db "geo/v") {:turn 0 :max-turns 4}))]
     (is (= ['geo/pi 'geo/sq 'geo/h0 'geo/h1 'geo/h2] (mapv :symbol (butlast fs)))
         "pi (called by area and the proof) and sq (by area and vol) first, then the most specific; area and vol are named")
-    (is (= "+2 more: (my.agent/callees 'ns/f) of each cited var" (last fs))
+    (is (= "+2 more: (my.agent/callees 'ns/f) of each cited var, (my.agent/similar \"text\")" (last fs))
         "what it left and how to read it: wrap and plumb (called by three of the sources, and across the program) rank after the specific helpers")
     (is (not-any? #{'geo/defg} (map :symbol (butlast fs))) "a macro is no helper")
     (is (not-any? #{'clojure.core/*} (map :symbol (butlast fs))) "only program functions")))

@@ -14,6 +14,7 @@
                                                 [:seon.db/attributes [:map-of :qualified-keyword [:map [:stored :keyword] [:declared :keyword]]]]]]
  :seon.db/ids-unopened [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/ids-unopened]] [:path :string] [:errno :int]]]
  :seon.vector/model-unopened [:and :seon.error/base [:map [:seon.error/type [:= :seon.vector/model-unopened]] [:path :string]]]
+ :seon.vector/encode-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.vector/encode-failed]] [:code :int]]]
  :seon.root/no-agent [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-agent]] [:agent {:optional true} [:maybe :keyword]]]]
  ;; a request to an agent after it ended (root stopped it, or it died): not gone, it was
  :seon.root/ended [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/ended]] [:agent :keyword]]]

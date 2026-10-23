@@ -492,11 +492,50 @@
  ;; the plan's cited vars and the proofs call. 0 shows none. Provenance: R4's k = 5
  ;; (notes/option3-R4-learning.md 5: 14 of 16 needed helpers in the top 5).
  :seon.config.render/found 5
+ ;; Unit: forms. The program forms nearest the task's plan (seon.vector/near over the plan's
+ ;; vector), fused with the call graph's helpers by reciprocal rank (seon.context/found). 0 fuses
+ ;; none. Measured 2026-10-23 on 283 pairs from main's history (each commit's message, the
+ ;; functions its diff touched less those it names; notes/vector-recall.md): recall@10 call graph
+ ;; 0.042, embeddings 0.495, fused 0.451; 30 covers every rank a top-5 can come from.
+ :seon.config.render/found-near 30
  ;; Unit: tokens (seon.print.select/estimate). The attempt's map of the namespaces its proofs and
  ;; cited vars live in (seon.context/ns-map): each namespace's functions, most referenced first,
  ;; within an equal share. Provenance: root's research (2026-10-22, lever 1), aider's default
  ;; --map-tokens 1k. At the bound a namespace's rest is (clojure.repl/dir ns).
  :seon.config.render/map-tokens 1000
+ ;; Semantic search's pyramid (seon.vector/near, docs/vector.md#the-pyramid). Measured on Seon's
+ ;; own 1,393 forms (EmbeddingGemma-2, every form a query, against exact 768-dim search):
+ ;; coarse 128 int8 + shortlist 100 + fine 768 f16 gave recall@10 0.9975, 0.08 ms a query;
+ ;; coarse 64 0.9445, shortlist 50 0.9745, fine 256 at most 0.83. At 100k vectors 0.31 ms.
+ ;; Unit: dims. Stored per vector (seon.vector/pack): a change re-packs every vector.
+ :seon.config.vector/coarse-dims 128
+ ;; Unit: vectors. At the bound the rest of the coarse ranking is never reranked.
+ :seon.config.vector/shortlist 100
+ ;; Unit: dims. 768 is the whole vector; fewer reads less and ranks a prefix.
+ :seon.config.vector/fine-dims 768
+ ;; The embedding model (docs/vector.md#the-model): EmbeddingGemma-2, ggml-org's Q8_0 GGUF, in
+ ;; process through llama.cpp v0.7.0 (bin/build embed fetches it once by its sha256 into the main
+ ;; tree's target/cache; bin/env names it). Measured on Seon's 1,393 forms (M5 Max, Metal, load ~10):
+ ;; 12 ms one text, 37k tokens/s batched (175 texts/s), 0.86 GB RSS; the BF16 file no faster (34k).
+ :seon.config.vector/model #or [#env SEON_EMBED_MODEL #seon/checkout "target/cache/models/2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135.gguf"]
+ :seon.config.vector/lib #or [#env SEON_EMBED_LIB #seon/checkout "target/lib/libseon-embed.dylib"]
+ ;; Unit: tokens. One encode's context and micro-batch: 4096 measured best of 512-4096 (512 texts/s
+ ;; 122, 1024 167, 2048 173, 4096 176), as v1 found (cap tokens, not texts).
+ :seon.config.vector/batch-tokens 4096
+ ;; Unit: texts. One encode's sequences; at the bound the next text starts the next encode.
+ :seon.config.vector/batch-texts 64
+ ;; Unit: tokens. A text past it keeps its first max-tokens (the count cut is recorded). Provenance:
+ ;; v1's 2,048 (forms p99 1,766 tokens); at 512, 148 of Seon's 1,393 forms were cut.
+ :seon.config.vector/max-tokens 2048
+ ;; Unit: texts. One request of main's backlog (seon.vector/vectors-proc): at 175 texts/s a round
+ ;; holds the worker ~0.4 s, so a query waits behind at most one round.
+ :seon.config.vector/texts 64
+ ;; Unit: requests. What one :embed step takes from the queue (seon.fx :batch): queries queued
+ ;; behind a round are embedded together.
+ :seon.config.vector/batch 16
+ ;; Unit: ranks. Reciprocal rank fusion's k (Cormack et al. 2009 use 60; v1 used 10): measured on
+ ;; the 283 pairs, 10 gave recall@10 0.451 and 60 0.448.
+ :seon.config.vector/rrf-k 10
  ;; Unit: items. A list shown in part (seon.print/bounded) shows this many, then `+N more:
  ;; where` (docs/render.md#bounded-lists). Provenance: the literals each list carried before
  ;; (render.ui and render.ai, 2026-10-22), kept as they were.
