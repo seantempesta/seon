@@ -13,8 +13,10 @@
 (def ^:private dir (str (config/checkout) "/test/seon/config"))
 
 (defn- read-file
-  "A config file at p read with aero under profile prof, resolved and validated (or the error, thrown)."
-  [p prof dir] (config/resolved (aero/read-config p {:profile prof ::config/checkout dir})))
+  "A config file at p read with aero under profile prof, resolved and validated (or the error, thrown).
+  Its #include is read relative to p (aero/relative-resolver): aero's default looks the path up as a
+  classpath resource first, and from a worktree's test/ root ../../../ climbs into the main tree."
+  [p prof dir] (config/resolved (aero/read-config p {:profile prof ::config/checkout dir :resolver aero/relative-resolver})))
 
 (defn- tags
   "test/seon/config/tags.edn read with aero under profile p (default :default)."
