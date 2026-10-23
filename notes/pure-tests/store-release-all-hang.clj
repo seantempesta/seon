@@ -1,0 +1,10 @@
+(require 'seon.program-cost-test '[seon.db :as pdb] '[datahike.api :as d] '[clojure.java.shell :as sh] 'datahike.connections)
+(let [n 100 path (#'seon.program-cost-test/on-disk-path n)]
+  (seon.program-cost-test/on-disk-diverged-of n)
+  (println "conns before:" (into {} (for [[k v] @datahike.connections/*connections*] [k (:count v)])))
+  (doseq [b [:db :branch]] (d/release (d/connect (assoc (pdb/store-cfg :lmdb path) :branch b)) true))
+  (println "conns after:" (into {} (for [[k v] @datahike.connections/*connections*] [k (:count v)])))
+  (sh/sh "rm" "-rf" path)
+  (println "exists after rm:" (d/database-exists? (pdb/store-cfg :lmdb path)))
+  (println "cfg" (pdb/store-cfg :lmdb path)))
+(System/exit 0)
