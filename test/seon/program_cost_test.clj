@@ -228,3 +228,60 @@
      :per-n {:ticks 850 :bytes 5000 :calls 0}
      :fixed {:ticks 420000 :bytes 4000000 :calls 16}
      :sizes [100 1000 10000]}))
+
+(defn- calls-form
+  "A defn whose body is n calls (str :k<i> \"s<i>\"): two scalar constants per call, the
+  shape most of a program's constants have (keywords and strings)."
+  {:malli/schema [:=> [:cat pos-int?] :any]}
+  [n]
+  (apply list 'defn 'g [] (for [i (range n)] (list 'str (keyword (str "k" i)) (str "s" i)))))
+
+(defn- app-acct
+  "Namespace app.acct, referring clojure.core, as a file's ns form would set it up."
+  {:malli/schema [:=> [:cat] :seon.host/namespace]}
+  [] (let [nsx (program/ensure-ns! 'app.acct)] (binding [*ns* nsx] (refer-clojure)) nsx))
+
+(defn calls-node-of
+  "unit-account's argument: the analyzed node of calls-form n in app.acct."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  [n]
+  (let [nsx (app-acct)]
+    [(binding [*ns* nsx] (jolt.analyzer/analyze (jolt.host/ctx-for-ns "app.acct") (calls-form n)))]))
+
+(deftest a-scalar-constant-costs-no-walk
+  ;; task seon.program/an-import-reads-each-form-once
+  (cost/proof
+    {:of 'seon.program/unit-account :input 'seon.program-cost-test/calls-node-of
+     :n "calls in the body, each (str :k \"s\")"
+     :work (str "one visit per IR node (an invoke, its var and two constants): the var's ref conj'd; a scalar "
+                "constant names no var, so it is not walked (quoted-vars walked every constant: tree-seq, "
+                "a set, its contract, 3.5 KB each)")
+     :growth :linear
+     ;; measured 2026-10-23 (n 10 -> 10,000): 2.79 KB, 352 ticks and 5 contracted calls a call (vsym,
+     ;; invoked twice, datum twice: 354 B each armed, seon.cost/units :fn/armed-call); 6.31 KB, 645
+     ;; ticks and 7 calls before
+     :per-n {:ticks 360.0 :bytes 2800.0 :calls 5.0}
+     :fixed {:ticks 2000.0 :bytes 10000.0 :calls 7.0}
+     :sizes [100 1000 10000]}))
+
+(defn account-of
+  "account's argument: calls-form n in app.acct as read, its text and its unit's account."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  [n]
+  (let [[node] (calls-node-of n) form (calls-form n)]
+    [{:units [(program/unit-account node)] :src (pr-str form) :form form :ns 'app.acct :ns-after 'app.acct :order 0 :k 0}]))
+
+(deftest an-account-reads-its-form-once
+  ;; task seon.program/an-import-reads-each-form-once
+  (cost/proof
+    {:of 'seon.program/account :input 'seon.program-cost-test/account-of
+     :n "calls in the body, each (str :k \"s\")"
+     :work (str "the form as read walked once for the macros it calls (macro-uses: tree-seq, 1.1 KB a "
+                "node on Jolt), and its text hashed once (form-id); the text is never read again (it was "
+                "read a second time, 1.8 KB a call)")
+     :growth :linear
+     ;; measured 2026-10-23 (n 100 -> 10,000): 5.35 KB and 600 ticks a call, 7 contracted calls; 7.14 KB
+     ;; and 970 ticks before
+     :per-n {:ticks 620.0 :bytes 5400.0}
+     :fixed {:ticks 12000.0 :bytes 70000.0 :calls 7.0}
+     :sizes [100 1000 10000]}))
