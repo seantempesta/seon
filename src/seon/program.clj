@@ -412,6 +412,16 @@
           (for [a attrs :let [old (get x a)] :when (and (some? old) (not (contains? now a)))]
             [:db/retract e a (if ((set (vals pointer)) a) (:db/id old) old)]))))
 
+(defn- def-keys
+  "The definition keys account acct makes: its vars, methods, extensions and, for an ns
+  form, its namespace."
+  {:malli/schema [:=> [:cat :map] [:vector :any]]}
+  [{:keys [ns ns-form? defs methods impls]}]
+  (vec (concat (for [{v :var} defs] [:var v])
+               (for [{:keys [multi dispatch]} methods] [:method multi dispatch])
+               (for [{:keys [protocol type]} impls] [:impl protocol type])
+               (when ns-form? [[:ns ns]]))))
+
 (defn account-tx
   "The facts of a form's account on db: the form (keeping its order when it is already
   there, else taking the place of the forms it supersedes, else after every form: order
@@ -419,12 +429,9 @@
   retracted (each whose every definition it redefines). An account names no definition it
   lacks: a text form's is its id, text, namespace, lead and order."
   {:malli/schema [:=> [:cat :seon.host/db :map :int] :seon.db/tx-data]}
-  [db {:keys [id ns ns-form? defs declares methods impls order] :as acct} next-order]
+  [db {:keys [id ns ns-form? defs declares order] :as acct} next-order]
   (let [fe (pdb/eid db :form/id id)
-        dkeys (vec (concat (for [{v :var} defs] [:var v])
-                           (for [{:keys [multi dispatch]} methods] [:method multi dispatch])
-                           (for [{:keys [protocol type]} impls] [:impl protocol type])
-                           (when ns-form? [[:ns ns]])))
+        dkeys (def-keys acct)
         eids (into {} (for [k (into dkeys (map #(vector :var %)) declares)] [k (def-eid db k)]))
         des (set (keep eids dkeys))
         olds (disj (set (keep #(form-of db %) des)) fe nil)
@@ -484,6 +491,38 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]]}
   [db]
   (vec (for [dt (d/datoms db :aevt :form/id) :when (live? db (:e dt))] (form-row db (:e dt)))))
+
+(defn account-diff-tx
+  "account-tx of acct at its own order and lead (a file's), less what db holds already:
+  nothing for a form db holds with the same facts (its text, what it defines, declares and
+  names, each definition pointing to it with the same kind, contract and doc), only its
+  order and lead for one that only moved, and otherwise account-tx with the form's facts
+  the account no longer names retracted. A file read again writes what changed in it, not
+  the file (task seon.source/an-import-reads-only-changed-files)."
+  {:malli/schema [:=> [:cat :seon.host/db :map] :seon.db/tx-data]}
+  [db {:keys [id order lead defs declares] :as acct}]
+  (let [fe (pdb/eid db :form/id id)
+        dkeys (def-keys acct)
+        now (into {:id id :src (:src acct) :ns (:ns acct) :defines (set dkeys) :declares (set declares)}
+                  (for [[_ k] form-sets] [k (set (get acct k))]))
+        row (when fe (form-row db fe))
+        held? (and row (= now (select-keys row (keys now)))
+                   (every? #(= fe (some->> (def-eid db %) (form-of db))) dkeys)
+                   (every? (fn [{v :var :keys [kind contract doc]}]
+                             (let [x (d/entity db (def-eid db [:var v]))]
+                               (and (= kind (:var/kind x)) (= contract (:var/contract x)) (= doc (:var/doc x)))))
+                           defs))]
+    (cond
+      (and held? (= order (:order row)) (= lead (:lead row))) []
+      held? [(cond-> {:db/id fe :form/order order} lead (assoc :form/lead lead))]
+      :else (into (vec (for [op (account-tx db acct order)]
+                         (if (and (map? op) (= (form-tid id) (:db/id op)) (:form/src op))
+                           (cond-> (assoc op :form/order order) lead (assoc :form/lead lead))
+                           op)))
+                  (when row
+                    (concat (for [[a k] form-sets v (get row k) :when (not (contains? (get now k) v))] [:db/retract fe a v])
+                            (for [k (:defines row) :when (not (contains? (:defines now) k))] [:db/retract fe :form/defines (def-eid db k)])
+                            (for [v (:declares row) :when (not (contains? (:declares now) v))] [:db/retract fe :form/declares (def-eid db [:var v])])))))))
 
 ;; ---- load order ----------------------------------------------------------------------
 
