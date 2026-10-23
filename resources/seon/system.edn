@@ -16,7 +16,7 @@
         :chan-opts {:from-writer {:buf-or-n :bind/api-from-writer-buf}}
         :args {:view :bind/view :ext :bind/ext :back :bind/back :graph :bind/graph
                :system :bind/system :conn :bind/conn :stall-ms :bind/stall-ms
-               :to-writer :bind/to-writer :events :bind/events}}
+               :to-writer :bind/to-writer :events :bind/events :boot :bind/boot}}
   :writer {:proc seon.writer/writer-proc
            :args {:conn :bind/conn :cfg :bind/store-cfg :durable? :bind/durable?
                   :to-writer :bind/to-writer :events :bind/events}}

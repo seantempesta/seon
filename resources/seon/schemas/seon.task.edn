@@ -104,7 +104,7 @@
                     [:seon.task/branch :seon.task/branch]]
  :seon.run/pulled [:map [:seon.run/id :seon.run/id] [:seon.run/task [:map [:seon.task/id :seon.task/id]]]
                        [:seon.run/status :seon.run/status] [:seon.run/boot :string]
-                       [:seon.run/agent {:optional true} :keyword] [:seon.run/start-ms :int]
+                       [:seon.run/agent {:optional true} [:map [:seon.agent/id :keyword]]] [:seon.run/start-ms :int]
                        [:seon.run/branch :keyword] [:seon.run/max-turns pos-int?]]
  :seon.reconcile/done-input [:map {:closed true}
                              [:proofs :seon.task/proofs] [:results :seon.proof/results]

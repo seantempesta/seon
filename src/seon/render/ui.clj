@@ -1206,3 +1206,42 @@
       (map #(assoc % :container "#z-conv") conv)
       ;; each tile, prepended when it is new or changed (a new id): one change sends one tile
       (map #(assoc % :container "#z-tiles" :prepend? true) (:tiles page))))}))
+
+;;; --- the walk page (seon.render/walk, rendered) ----------------------------------
+
+(defn- walk-head
+  "One rendered part's line: what it is, its eid (a link that walks it), where it came from,
+  and which renders made its faces."
+  {:malli/schema [:=> [:cat :map] :any]}
+  [{:seon.render/keys [kind schema eid from address n ai-by html-by cites]}]
+  [:div {:class "walk-head muted"}
+   (when n [:b (str "[" n "] ")])
+   [:span (kname (or kind :entity))]
+   (when schema [:code " " (str schema)])
+   (when address [:code " " address])
+   (when (and eid (not address)) [:a {:href (str "/walk/" eid)} (str " eid " eid)])
+   (when from [:span (str " · from " (:seon.render/eid from) " " (:seon.render/attr from))])
+   (when (seq cites) [:span (str " · cites " (str/join " " cites))])
+   [:span {:class "walk-by"} (str " · ai " ai-by " · html " html-by)]])
+
+(defn- walk-part
+  "One rendered part of a walk: its line, then its :html face."
+  {:malli/schema [:=> [:cat :map] :any]}
+  [x]
+  [:div {:class (str "walk-part as-" (kname (:seon.render/as x)))} (walk-head x) [:div {:class "walk-body"} (:seon.render/hiccup x)]])
+
+(defn walk-page
+  "A rendered walk (seon.render/rendered) as a page: the entity's block, its units as tiles and
+  what its prose cites, each by its own :html render and saying what it is, where it came from
+  and which renders made it; beside them the walk as the data a model reads (seon.render/data)."
+  {:malli/schema [:=> [:cat :seon.render/walk :seon.render/opts] :any]}
+  [{:seon.render/keys [root nodes refs] :as w} _]
+  [:main {:class "walk"}
+   [:section {:class "walk-parts"}
+    [:h2 "the entity"] (walk-part root)
+    [:h2 (str "its units · " (count nodes))] [:div {:class "walk-grid"} (map walk-part nodes)]
+    (when (seq refs) (list [:h2 (str "what its prose cites · " (count refs))] [:div {:class "walk-grid"} (map walk-part refs)]))]
+   [:section {:class "walk-text"}
+    [:h2 "what a model reads"]
+    [:pre (:text (render/print-ai (render/data w) {}))]]])
+

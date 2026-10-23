@@ -196,7 +196,7 @@ Who counts, read from the code, not measured:
 
 ### 4. The render: a var shows its status
 
-No var render is declared: `resources/seon/schemas/*.edn` holds `:var/*` fact attributes only (`seon.facts.edn:44-51`), and `seon.context/resolve-ref` (`context.clj:~50-60`) builds an ad hoc map for a cited var. The render is a `(value opts)` function (agent-view design, 4.2), declared on a new schema `:seon.var/var` with `:seon.render/html` and `:seon.render/ai`. Its value is a pull, `{:var/name :var/doc :var/contract :status :references :tests}`:
+No var render is declared: `resources/seon/schemas/*.edn` holds `:var/*` fact attributes only (`seon.facts.edn:44-51`), and `seon.docs/resolve-ref` (`context.clj:~50-60`) builds an ad hoc map for a cited var. The render is a `(value opts)` function (agent-view design, 4.2), declared on a new schema `:seon.var/var` with `:seon.render/html` and `:seon.render/ai`. Its value is a pull, `{:var/name :var/doc :var/contract :status :references :tests}`:
 - **status:** `green` (digest-matched pass), `counterexample` with the smallest case and the reproduction form, `needs a schema`, `over budget`, `not generated`, or `unchecked`;
 - **references:** from the reach walk, the vars it reaches and the vars that reach it (`:form/refs` avet, `context/found`'s query);
 - **tests that reach it:** the tests whose reach contains the var, from the same fold (`reach-fold` can answer it; today `reach-digests` keeps only the digest, so the tests-of-var index is a small addition).

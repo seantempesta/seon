@@ -651,7 +651,7 @@
                                (:seon.error/type r) (assoc-in [:flights aid :died-at-spawn]
                                                               (select-keys r [:seon.error/type :seon.error/operation :seon.error/message :exit :agent])))
                              aid :started
-                             (task/run-start-tx aid (:task act) (:boot st) ag (:env act) (System/currentTimeMillis)
+                             (task/run-start-tx aid (:task act) (:boot st) (task/agent-key (:boot st) ag) (:env act) (System/currentTimeMillis)
                                                    (:plan (task/accumulate (get-in st [:idx :tasks]) (:task act))))))
                  ;; root refused it (the branch is held, or too many live agents): the refused answer
                  ;; is the run, written on main with root's reason; the task starts again,
