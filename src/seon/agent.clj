@@ -223,8 +223,10 @@
 
 
 (defn- unresolved-message
-  "An unresolved symbol's message as Jolt's nREPL words it (jolt.nrepl/err->msg), without the
-  \"(did you mean ...)\" suffix: the suggestions are the error's fix."
+  "An unresolved symbol's message without the \"(did you mean ...)\" suffix (the suggestions are
+  the error's fix). Its words are copied from `jolt.nrepl/err->msg`'s cause (jolt-core/jolt/nrepl.clj
+  at the Jolt pin, reference-code/jolt e0351af8), which builds it inline from the same ex-data and
+  cannot be called alone; a pin bump that rewords it is a wording change here."
   {:malli/schema [:=> [:cat :string] :string]}
   [sym] (str "Unable to resolve symbol: " sym " in this context"))
 

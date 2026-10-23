@@ -132,6 +132,12 @@
                  (assoc m :printed (render/ai pv {}) :printer-error pv)))
              m))))))
 
+(defn- var-of
+  "The var a qualified symbol names, nil when its namespace is not loaded or it has no such var."
+  {:malli/schema [:=> [:cat :qualified-symbol] [:maybe :seon.host/var]]}
+  [sym]
+  (when (some-> (namespace sym) symbol find-ns) (find-var sym)))
+
 (defn- located
   "Where an eval error is, as data in the form's own terms (what `(source v)` prints, 1-based):
   :seon.error/at {:line :column} and, for a runtime error, the fn it was in as :seon.error/in.
@@ -144,7 +150,7 @@
         compile? (:jolt.error/line d)
         line (or (:jolt.error/line d) (:clojure.error/line d))
         sym (when-not compile? (:clojure.error/symbol d))
-        {start :line col0 :column} (meta (if compile? (:repl/form m) (some-> sym find-var)))]
+        {start :line col0 :column} (meta (if compile? (:repl/form m) (some-> sym var-of)))]
     (if (and line start)
       (let [n (inc (- line start))
             col (some-> (:jolt.error/column d) (- (if (= 1 n) (dec col0) 0)))]
