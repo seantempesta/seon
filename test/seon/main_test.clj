@@ -72,3 +72,22 @@
                        [?f :form/ns ?ns] [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]]
                      db ['jolt.host/ticks-of 'jolt.host/ticks])]
     (is (= ['seon.profile/measure!] (vec callers)))))
+
+(deftest an-edge-asks-one-way
+  ;; task seon.step/an-edge-asks-one-way: an edge asks a proc one way, seon.step/ask-edge, which
+  ;; answers a closed channel at once; no src form outside seon.step puts a request carrying its
+  ;; promise (:p) on a channel itself. src's forms read as data from the compiler's facts
+  (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
+        forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
+                     [(clojure.string/starts-with? ?file "src/")]] db)
+        read-in (fn [nsn src] (require nsn)
+                  (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))
+        carries-p? (fn [x] (or (and (map? x) (contains? x :p))
+                               (and (seq? x) (symbol? (first x)) (= "assoc" (name (first x))) (some #{:p} (take-nth 2 (drop 2 x))))))
+        puts (into (sorted-set)
+                   (for [[nsn src] forms
+                         :let [f (read-in nsn src)]
+                         :when (some #(and (seq? %) (symbol? (first %)) (#{">!!" "put!" ">!"} (name (first %))) (carries-p? (nth % 2 nil)))
+                                     (tree-seq coll? seq f))]
+                     nsn))]
+    (is (= #{'seon.step} puts))))

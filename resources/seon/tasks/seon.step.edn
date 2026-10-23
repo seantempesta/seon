@@ -4,4 +4,8 @@
              :kind :work,
              :proofs
              #{seon.step-test/a-reload-retries-the-held-message
-               seon.step-test/a-throw-holds-the-message-and-records-the-cause}}]
+               seon.step-test/a-throw-holds-the-message-and-records-the-cause}}
+ {:seon.task/name "an-edge-asks-one-way"
+  :seon.task/plan "Found by the one-offs survey (notes/one-offs-2026-10-23.md, item 8; owner, 2026-10-23: src resists growth so agents reuse and improve the core parts rather than making one-offs, DECISIONS). What existed: an edge's request to a proc written three times: seon.root/call! (a promise put with the request, a closed :ext answered root stopped), seon.web's ask! (the same, but a closed channel left its HTTP thread waiting forever) and seon.root/stop!'s :shutdown (a closed :ext waited out both of stop!'s bounds, about 18 s, on a promise nothing would deliver). Correct: seon.step/ask-edge, beside the asker's side every proc shares (pend, ask, answered), puts the request with a fresh promise and answers a closed channel at once with the caller's closed value; the three call it. A law: no src form outside seon.step puts a request carrying :p on a channel (read as data from the compiler's facts)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.step-test/an-edge-asks-one-way seon.main-test/an-edge-asks-one-way}}]

@@ -865,11 +865,7 @@
   "Put m (with a fresh reply promise) on the api; a promise. After stop! the
   api is closed and the promise answers :seon.root/no-agent (\"root stopped\")."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.root/request] :seon.host/promise]}
-  [sys m]
-  (let [p (promise)]
-    (when-not (a/>!! (:ext sys) (assoc m :p p))
-      (deliver p (gone nil "root stopped")))
-    p))
+  [sys m] (step/ask-edge (:ext sys) m (gone nil "root stopped")))
 
 (defn view-numbers
   "Root's view v (the api's :state answer) with its windows as the numbers shown: the
@@ -1122,8 +1118,8 @@
   (let [fact @(transact-main! sys [{:seon.root/id :root :seon.root/stopped {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)}}]
                               {:flush? true})
         t0 (profile/now-ns)
-        p (promise)]
-    (a/>!! (:ext sys) {:op :shutdown :p p})
+        ;; a root already stopped (its api closed) answers at once that it is
+        p (step/ask-edge (:ext sys) {:op :shutdown} (gone nil "root stopped"))]
     (a/close! (:ext sys))
     (when (= ::late (deref p (+ ap/stop-bound-ms 1000) ::late))
       (a/>!! (:back sys) {:op :kill-all}))
