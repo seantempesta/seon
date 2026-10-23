@@ -11,12 +11,14 @@ Every limit, bound and default of the platform is one key in one aero file, docu
 Later layers win, key by key, and the merged map is validated once (```seon.config/load-layers``` reads them, ```seon.config/layered``` merges them):
 
 1. the shipped file;
-2. the checkout's own `config/local.edn` (gitignored), which `bin/ports` writes with the checkout's ports from ``../worktree-ports`` (main 7888/7777, worktree k 7900+10k/7901+10k; `bin/worktree --remove` frees the block);
+2. the checkout's own `config/local.edn` (gitignored), which `bin/ports` writes with the checkout's ports from ``../worktree-ports`` (main 7888/7777, worktree k 7900+10k/7901+10k; `bin/worktree --remove` frees the block); `bin/ports` owns the port keys and writes them on
+   every run under their current names, keeping the ports and every other entry, and
+   `bin/build`, `bin/test` and `bin/check` run `bin/ports --write` first;
 3. the command line: `--config FILE` and `--set :ns/key=edn` (```seon.config/overrides```), read from `*command-line-args*` while namespaces load (Jolt's jolt/argv binds it in a built binary), taken out of the mode's own args.
 
-```seon.config/sources``` names the layer of every key (the `:seon.config/sources` fact on main). `#env` appears only where a script sets one. No port is listened on unless the config says so: `:seon.config.web/port` and `:seon.config.root/entrance-port` ship 0.
+```seon.config/sources``` names the layer of every key (the `:seon.config/sources` fact on main). `#env` appears only where a script sets one. No port is listened on unless the config says so: `:seon.config.web/port` and `:seon.config.root/server-port` ship 0.
 
-**A value one run needs goes on that run's command line, never in the environment**: the checkout's `config/local.edn` is a later layer than the shipped file's `#env` defaults, so a port handed to a client through `SEON_ENTRANCE_PORT` is overridden by a stale local file, and the client dials a port nothing listens on. `--set :seon.config.root/entrance-port=N` is the top layer and always wins. Not this: a new `#env` read for a per-run value.
+**A value one run needs goes on that run's command line, never in the environment**: the checkout's `config/local.edn` is a later layer than the shipped file's `#env` defaults, so a port handed to a client through `SEON_SERVER_PORT` is overridden by a stale local file, and the client config keys a port nothing listens on. `--set :seon.config.root/server-port=N` is the top layer and always wins. Not this: a new `#env` read for a per-run value.
 
 ## The resolver
 

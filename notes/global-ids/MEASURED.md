@@ -165,7 +165,7 @@ How: `bench/split.clj` at the REPL, niced, with the machine at load ~30.
 |---|---|---|---|
 | `seon.merge/program`, one db | 488 ms | (not called) | the program |
 | `:branch-diff`: three-way + unmerged | 1,466 + 488 ≈ 1,950 ms | 7.9 + 0.09 ≈ 8 ms | Δ (and log N per seek) |
-| `:merge` decision: three-way + merge-refusal's unmerged | ≈ 1,950 ms | ≈ 8 ms | Δ |
+| `:merge` decision: three-way + merge-refused's unmerged | ≈ 1,950 ms | ≈ 8 ms | Δ |
 | `:merge` tx-data | `apply-tx`: ~66 ms (MEASURED §5, 115k) | `merge-tx` (verbatim): 1.7 ms | Δ |
 | `:merge` commit (`d/merge-db`) | (the same Datahike commit) | 8.2 ms for the 29 carried datoms | Δ + log N paths |
 | `:tx`, 55 datoms on main | | 3.8 ms | Δ + log N paths |

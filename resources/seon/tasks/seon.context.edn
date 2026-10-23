@@ -3,9 +3,9 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.context-test/a-contract-gap-names-each-var-and-its-fix}}
  {:seon.task/name "the-agent-sees-what-the-judge-sees"
-  :seon.task/plan "The context is built from the turn's whole observation (`seon.turn/observe`): the done rule's refusals, test-run errors that name no var (a timeout or dead test fork, which once read as :none), the reader's repairs, and flagged definitions reach `seon.context/current-state`, so an agent cannot loop to its cap with every visible proof green. Tests run program namespaces and proofs only, never scratch."
+  :seon.task/plan "The context is built from the turn's whole observation (`seon.turn/observe`): the done rule's errors, test-run errors that name no var (a timeout or dead test fork, which once read as :none), the reader's repairs, and flagged definitions reach `seon.context/current-state`, so an agent cannot loop to its cap with every visible proof green. Tests run program namespaces and proofs only, never scratch."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.context-test/a-refusal-and-a-run-error-reach-the-context
+  :seon.task/proofs #{seon.context-test/a-reason-and-a-run-error-reach-the-context
                       seon.context-test/a-repair-is-shown-next-turn}}
  {:seon.task/name "last-evals-fold-and-are-budgeted"
   :seon.task/plan "Done: `seon.context/fold-evals` folds identical form and answer into one item with :times n; `seon.context/shown-evals` gives each folded item an equal share of `:seon.config.render/evals-budget` (8000), every cut naming `(nth (my.turn/evals) k)`, with :out printed inside the item's share; a failure reads as {:assert form :got value}. The last evaluations are turn content, sent after the stable prefix. Why: every measured context overrun was last-evals (one turn 259 items, 11 distinct, 101k tokens uncut; `(pp/pprint (code-of 10000))` x3 = 10.7k tokens of :out). Open from the plan: red proofs' program callees shown one level."
@@ -56,7 +56,7 @@
   :seon.task/needs #{"seon.merge/program-cost-follows-what-changed"}
   :seon.task/proofs #{seon.context-test/a-turn-names-mains-coming-conflict}}
  {:seon.task/name "an-unrun-proof-is-unknown-in-the-context"
-  :seon.task/plan "What exists: `seon.context` labels a proof with no result :no-assertions unless the run failed as a whole (the :proofs entry, `(get results p (cond ... :else :no-assertions))`), and docs/agent.md#what-you-read tells the agent that means it ran and asserted nothing. A result is absent whenever no report named the test (`seon.agent/run-tests-forked`): one not selected or not loaded as well as one with no assertion. Root's judge reads the same absence as :proof-unknown (`seon.reconcile/done-refusals`), so agent and judge disagree on one fact. Reproduction (audit): 263 of 265 contexts showed every proof :no-assertions while none had run; agents then loosened a contract. Correct: the context says :unknown, the judge's word. Deletes: the :no-assertions default."
+  :seon.task/plan "What exists: `seon.context` labels a proof with no result :no-assertions unless the run failed as a whole (the :proofs entry, `(get results p (cond ... :else :no-assertions))`), and docs/agent.md#what-you-read tells the agent that means it ran and asserted nothing. A result is absent whenever no report named the test (`seon.agent/run-tests-forked`): one not selected or not loaded as well as one with no assertion. Root's judge reads the same absence as :proof-unknown (`seon.reconcile/done-explain`), so agent and judge disagree on one fact. Reproduction (audit): 263 of 265 contexts showed every proof :no-assertions while none had run; agents then loosened a contract. Correct: the context says :unknown, the judge's word. Deletes: the :no-assertions default."
   :seon.task/kind :work
   :seon.task/proofs #{seon.context-test/a-proof-with-no-result-reads-unknown}}
  {:seon.task/name "old-evaluations-collapse-in-chunks"

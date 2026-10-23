@@ -213,7 +213,7 @@ A note (`notes/`) is a working paper. Once its content is filed in one of the ho
 | stand-in | proc | core.async Flow |
 | dial | config key | Clojure map, Datahike config |
 | admit, guarantees | instrument | Malli `malli.instrument` |
-| refusal | invalid, explained (a contract's); refused (a merge's) | Malli `m/explain` (stored as `:seon.reconcile/refusal`, its `:refusal` kinds, until the rename task's branch merges) |
+| refusal | invalid, explained (a contract's); a reason (the done rule's); refused (a merge's) | Malli `m/explain` |
 
 Library words stay: proc, step-fn, transact, branch, merge, schema, registry, contract (a Malli function schema), flusher, group commit, fork server, lease, generation. **Waste** stays our word for the turns and tokens an attempt spent past what its work needed (`:seon.attempt/waste`; owner, 2026-10-23). A stored keyword is renamed by erasing the store, never by a migration (DECISIONS).
 

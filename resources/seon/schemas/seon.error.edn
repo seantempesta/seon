@@ -15,6 +15,6 @@
                    [:seon.error/fix {:optional true} :seon.error/fix]
                    [:seon.error/member {:optional true} :seon.error/member]
                    [:seon.error/problems {:optional true} :seon.error/problems]]
- ;; the instrumented wrapper's refusals (Seon's variant names)
+ ;; the instrumented wrapper's errors (Seon's variant names)
  :seon.instrument/contract-error [:and :seon.error/base [:map [:seon.error/type [:enum :seon.instrument/contract-error]]]]
  :seon.instrument/arity-error [:and :seon.error/base [:map [:seon.error/type [:enum :seon.instrument/arity-error]]]]}

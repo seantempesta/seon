@@ -7,7 +7,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.repl-test/a-failing-form-is-recorded-whole}}
  {:seon.task/name "source-reads-the-program"
-  :seon.task/plan "What exists: `(clojure.repl/source seon.reconcile/stuck)` and `clojure.repl/source-fn` answer, in an agent's REPL, a platform or program var's recorded form text (:form/src, imported by `seon.source`) from the agent's branch db, its own redefinition if it made one, the way `doc` does, through the one reader `seon.context/source-of`. Before, a compiled platform var had no source file the agent could read, and the first DeepSeek agent on Seon's own code spent 8 turns exploring around the error."
+  :seon.task/plan "What exists: `(clojure.repl/source seon.reconcile/root-causes)` and `clojure.repl/source-fn` answer, in an agent's REPL, a platform or program var's recorded form text (:form/src, imported by `seon.source`) from the agent's branch db, its own redefinition if it made one, the way `doc` does, through the one reader `seon.context/source-of`. Before, a compiled platform var had no source file the agent could read, and the first DeepSeek agent on Seon's own code spent 8 turns exploring around the error."
   :seon.task/kind :work
   :seon.task/proofs #{seon.repl-test/an-agent-repl-answers-what-a-clojure-repl-answers}}
  {:seon.task/name "an-eval-error-never-ends-the-attempt"

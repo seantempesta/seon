@@ -5,7 +5,7 @@
   no environment read anywhere in src but the loader (asked of Jolt's analyzer, by resolved
   host reference, never by text)."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
-            [clojure.java.io :as io] [clojure.string :as str] [clojure.edn :as edn]
+            [clojure.java.io :as io] [clojure.string :as str] [clojure.edn :as edn] [clojure.java.shell]
             [aero.core :as aero] [datahike.api :as d]
             [jolt.scheme :as scm] [jolt.analyzer :as an] [jolt.ir :as ir]
             [seon.config :as config] [seon.contract :as contract] [seon.db :as pdb] [seon.task :as task]))
@@ -13,7 +13,7 @@
 (def ^:private dir (str (config/checkout) "/test/seon/config"))
 
 (defn- read-file
-  "A config file at p read with aero under profile prof, resolved and validated (or the refusal, thrown)."
+  "A config file at p read with aero under profile prof, resolved and validated (or the error, thrown)."
   [p prof dir] (config/resolved (aero/read-config p {:profile prof ::config/checkout dir})))
 
 (defn- tags
@@ -194,7 +194,7 @@
   (let [o (config/overrides ["scale" "100" "--set" ":seon.config.web/port=7791" "--config" "x.edn" "more"])]
     (is (= ["scale" "100" "more"] (:rest o)))
     (is (= [["--set" {:seon.config.web/port 7791}] ["--config x.edn" "x.edn"]] (:layers o))))
-  (is (= ["root"] (config/without-overrides ["root" "--set" ":seon.config.root/entrance-port=7898"]))))
+  (is (= ["root"] (config/without-overrides ["root" "--set" ":seon.config.root/server-port=7898"]))))
 
 (deftest a-bad-set-refuses-naming-it
   (doseq [bad ["port=1" ":seon.config.web/port" "seon.config.web/port=1" ":seon.config.web/port=("]]
@@ -205,9 +205,9 @@
   (let [ls (config/load-layers (config/checkout) :default
                                ["--config" (str dir "/local-ports.edn") "--set" ":seon.config.web/port=7999"])
         {c :config srcs :sources} (config/layered ls)]
-    (is (= 7910 (:seon.config.root/entrance-port c)))
+    (is (= 7910 (:seon.config.root/server-port c)))
     (is (= 7999 (:seon.config.web/port c)))
-    (is (= (str "--config " dir "/local-ports.edn") (srcs :seon.config.root/entrance-port)))
+    (is (= (str "--config " dir "/local-ports.edn") (srcs :seon.config.root/server-port)))
     (is (= "--set" (srcs :seon.config.web/port)))
     (is (= "resources/seon/config/default.edn" (srcs :seon.config.root/max-agents)))
     (is (= (set (keys c)) (set (keys srcs))))))
@@ -221,7 +221,7 @@
 (deftest no-port-is-listened-on-unless-the-config-says-so
   (let [c (:config (config/layered [(first (config/load-layers (config/checkout) :default []))]))]
     (is (= 0 (:seon.config.web/port c)))
-    (is (= 0 (:seon.config.root/entrance-port c)))))
+    (is (= 0 (:seon.config.root/server-port c)))))
 
 (deftest the-loader-reads-the-command-line-as-the-process-has-it
   (binding [*command-line-args* '("ports" "--set" ":seon.config.web/port=7998")]
@@ -264,3 +264,28 @@
     (is (contains? config/schema-forms :seon.config/config))
     (is (contains? config/schema-forms :seon.task/id))
     (is (every? #(contains? config/schema-forms %) (config/keys-declared)))))
+
+(deftest bin-ports-writes-its-keys-under-their-current-names
+  ;; task seon.db/stored-attributes-take-the-new-words: bin/ports owns the port keys of a
+  ;; checkout's local layer and writes them on every run under their current names, so a file
+  ;; written before :seon.config.root/entrance-port became server-port boots after one run,
+  ;; with its ports and every other entry kept
+  (let [root (config/checkout)
+        f (str root "/target/ports-test-" (random-uuid) ".edn")]
+    (try
+      (spit f (str ";; ../worktree-ports (x); edit it to move this checkout's ports.\n"
+                   "{;; root's entrance (bin/root, bin/mcp)\n"
+                   " :seon.config.root/entrance-port #long #or [#env SEON_ENTRANCE_PORT 7920]\n"
+                   " :seon.config.web/port #long #or [#env SEON_WEB_PORT 7921]\n"
+                   " ;; the merges tree\n"
+                   " :seon.config.source/root \"../next-merges\"}\n"))
+      (let [r (clojure.java.shell/sh "env" "-u" "SEON_WEB_PORT" "-u" "SEON_SERVER_PORT" (str root "/bin/ports") f)
+            text (slurp f)]
+        (is (= 0 (:exit r)) (:err r))
+        (is (= "7920 7921" (str/trim (:out r))) "it boots, on the ports the file held")
+        (is (str/includes? text ":seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 7920]"))
+        (is (not (str/includes? text "entrance-port")) "the old name is gone")
+        (is (str/includes? text " ;; the merges tree\n :seon.config.source/root \"../next-merges\"}") "every other entry is kept")
+        (is (= text (do (clojure.java.shell/sh "env" "-u" "SEON_WEB_PORT" (str root "/bin/ports") f) (slurp f))) "a second run writes the same file"))
+      (finally (clojure.java.io/delete-file f true)))))
+
