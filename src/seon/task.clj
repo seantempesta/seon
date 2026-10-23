@@ -375,13 +375,14 @@
 (defn entity-value
   "The task, run or root that entity e of db is now, as the reconciler's index holds it:
   [:task own-value] (no accumulation), [:run run-value], [:root (root db)], or nil
-  when e is none of them (retracted, or another kind). One pull of e."
+  when e is none of them (retracted, another kind, or a run a branch only names). One pull of e."
   {:malli/schema [:=> [:cat :seon.host/db :int]
                   [:maybe [:or [:tuple [:= :task] :seon.task/own] [:tuple [:= :run] :seon.run/run] [:tuple [:= :root] :map]]]]}
   [db e]
-  (let [k (d/pull db [:seon.task/id :seon.run/id :seon.root/id] e)]
+  (let [k (d/pull db [:seon.task/id :seon.run/status :seon.root/id] e)]
     (cond (:seon.task/id k) [:task (task-value (d/pull db task-pull e))]
-          (:seon.run/id k) [:run (run-value (d/pull db run-pull e))]
+          ;; a run its start recorded (runs): a branch's stub, its id alone, is none
+          (:seon.run/status k) [:run (run-value (d/pull db run-pull e))]
           (:seon.root/id k) [:root (root db)])))
 
 (defn entity-ids
