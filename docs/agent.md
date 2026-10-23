@@ -33,7 +33,7 @@ The turn's part:
 - `:unmerged`: on a merge task, the entries to resolve.
 - `:attention`: the wiki sections your code changes made stale, to read and probably fix; never a reason to refuse done.
 - `:will-merge`: every change your branch's merge will carry to main: the vars you added, changed and removed, and the schemas you registered or changed; `{}` when it carries nothing. Anything listed that the task does not need, put back.
-- `:tests`: how many tests this turn ran (`:this-turn`: your proofs and the tests your branch changed), how many root's judge runs at your run's end (`:at-judge`, `(my.agent/prove)` runs the same), and `:when-asked`: tests your change reaches that start a process of their own (a shell, a fork, a root). Those never run in your turn or the judge, a proof among them; root runs them when it asks, and a proof among them is read as deferred, not unknown. `(my.agent/deferred)` lists them.
+- `:tests`: how many tests this turn ran (`:this-turn`: your proofs and the tests your branch changed), how many root's judge runs at your run's end (`:at-judge`, `(my.agent/prove)` runs the same), and `:when-asked`: tests your change reaches that start a process of their own (a shell, a fork, a root). Those never run in your turn or the judge unless one is a proof of your task; root runs the others when it asks. `(my.agent/deferred)` lists them.
 - `:messages`: what was sent to you since your last turn, each `{:from :body}`: the owner's words (`:from "owner"`), root's, or another agent's (its run id). The owner's is a fact (`:seon.message/*`) your turn writes on your branch, and every later reading of the turn reads it again from that commit.
 - Your last evaluations, when no earlier turn shows them.
 
