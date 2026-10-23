@@ -1,39 +1,35 @@
-# next — Seon on Jolt
+# Seon on Jolt
 
-The clean home for the Jolt version of Seon: one runtime (Chez + Jolt, our forks),
-Datahike on Jolt, every process a Flow proc. Local only; never pushed.
+Seon is where many agents do real work for their user, each in its own process on its own branch, and the good changes accrete into one program that gets smaller, faster and more certain as it grows. This is the version that runs on [Jolt](https://github.com/jolt-lang/jolt) (Clojure on Chez Scheme): Datahike for the store, every component a core.async Flow proc, every agent a forked process with a real REPL.
+
+## Start here
+
+- **Working here, as a person or an agent:** [AGENTS.md](AGENTS.md) is how work is handed out and done, and the laws. Then the wiki's map, [docs/README.md](docs/README.md): one page a concept, each section addressed `page#section` and citable from any task.
+- **What is in flight:** [docs/plan.md](docs/plan.md) (the plan and what is running). **What was ruled:** [docs/decisions.md](docs/decisions.md).
+- **What v1 did and where this stands:** [docs/parity.md](docs/parity.md); what was left behind on purpose: [BAGGAGE.md](BAGGAGE.md).
 
 ## Clone and build
 
 ```sh
-git -c protocol.file.allow=always clone --recurse-submodules PATH/TO/next
-cd next
-bin/build        # Chez (our fork) -> Jolt (our fork) -> target/hello; all output in target/
-target/hello     # => hello: (datahike hello)
-bin/test         # test/'s deftests on target/jolt/jolt
-bin/check        # the end-to-end suite on target/seon (smoke ... scale 100)
+git clone --recurse-submodules https://github.com/seantempesta/seon-next   # or the folder you were given
+cd seon-next
+nice -n 15 bin/build     # Chez (our fork) -> Jolt (our fork) -> LMDB, LZ4, zstd -> target/seon; all output in target/
+bin/root start           # a root on this checkout's own ports (bin/ports); bin/root status | stop
+bin/prove                # run exactly the tests and checks the change reaches
 ```
 
-`protocol.file.allow=always` is needed while the submodule URLs are local paths.
-
-**Prerequisites** (not installed by the build): a C compiler and make (macOS: the Xcode
-command line tools), git, network access to GitHub and Maven Central on the first build,
-and OpenSSL 3 at run time (Homebrew `openssl@3` on macOS; jolt-lang/crypto loads it).
-LMDB's source is the `reference-code/lmdb` submodule (branch `mdb.master3`): `bin/build lmdb`
-builds it with robust locks into `target/lib/liblmdb.dylib`, which `bin/env` points
-`JOLT_LMDB_LIB` at.
-
-**Working here as an agent:** start with `AGENTS.md` (also `CLAUDE.md`). next/ replaces
-`~/src/seon`; `docs/parity.md` tracks each v1 capability.
+**Prerequisites** (not installed by the build): a C compiler and make (macOS: the Xcode command line tools), git, network access to GitHub and Maven Central on the first build, and OpenSSL 3 at run time (Homebrew `openssl@3` on macOS). The fork submodules are on GitHub; two of them (`persistent-sorted-set`, `jolt-overlay`) are private, so the clone needs your GitHub login (`gh auth login`).
 
 ## Layout
 
-- `reference-code/` — our forks as submodules on their `jolt/main` branches (`docs/forks.md`)
-- `deps.edn` — `:local/root` only into `reference-code/`; everything else pinned
-- `bin/` — `build`, `test`, `check`, `env`, `worktree`, `root`, `agy-agent` (Gemini reviewers)
-- `native/` — `probe.c` (Mach memory accounting), built into `target/lib`
-- `src/`, `web/`, `resources/` — the platform, arriving by need (see each README)
-- `test/` — deftests; `test/build/` holds the build's smoke binary
-- `docs/` — `forks.md` (provenance), `vocabulary.md` (the words), `failure-points.md` (the named catch sites)
-- `AGENTS.md` — how work is handed out and done; `resources/seon/tasks/` — the work itself, as task files
-- `BAGGAGE.md` — what we left behind, and why
+| Path | What it is |
+|---|---|
+| `src/`, `resources/`, `web/` | the platform: the root, the agents, the store, the reconciler, the printer and the dashboard; `resources/seon/tasks/` is the work itself, as task files |
+| `test/` | the deftests (`bin/test NS`); `bin/check MODE` is the end-to-end suite |
+| `bin/` | `build`, `root`, `prove`, `test`, `check`, `worktree`, `ports`, `laws`, `mcp`, `agy-agent` |
+| `docs/` | the wiki, and the only place documentation lives ([how it is kept](docs/README.md#how-the-wiki-is-kept)) |
+| `reference-code/` | our forks of Chez, Jolt, Datahike, Konserve, Malli and others, as submodules ([forks](docs/forks.md)), and upstream sources we read |
+| `native/` | C for the native libraries |
+| `.worktrees/` | a worktree per piece of work, each on its own branch with its own root and stores (`bin/worktree NAME`; gitignored) |
+
+Everything else (`target/`, `runs/`, `test-results/`, `config/local.edn`) is a checkout's own state and is gitignored.

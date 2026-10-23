@@ -211,8 +211,8 @@ Expected: +20 MiB in next/.git. A tag is a record, so it is never deleted (AGENT
 
 **E. [root] Content moves into next (one commit):**
 - `RESUME.md` → `docs/plan.md` and `notes/DECISIONS.md` → `docs/decisions.md`: **done by `wiki-live` (ed8218a, 68eb8ec)**, not here; `notes/archive/DECISIONS-superseded.md` is copied with the archive below (the docstrings and tests that cite it say `notes/archive/`);
-- `notes/archive/` → `notes/archive/`; `notes/upstream/` → `notes/upstream/`;
-- `flowlab/` → `notes/flowlab/`;
+- **Docs only (owner, 2026-10-23): the parent's `notes/archive/` and `notes/upstream/` are not copied into next.** They stay reachable in history, `git show history/seon-jolt:notes/archive/<file>` (step D), and task `seon.docs/docs-are-the-only-documentation` folds their lasting facts into docs sections and repoints the citations. Until that task has run, the citations of `notes/archive/...` in `src`, tests and task plans name a path that is not in the tree: so step E repoints them to the tag form `history/seon-jolt:notes/archive/<file>` (a path git reads, no file needed), in the same commit as the one `bin/prove`;
+- `flowlab/`: its checks (`docs_check.clj`) become tests or are dropped by the same task; until then `docs/flow.md` and `docs/core-async.md` cite `history/seon-jolt:flowlab/docs_check.clj`;
 - the citations fixed: AGENTS.md:9/:24/:32/:36, BAGGAGE.md:3/:27, docs/forks.md:4/:23, docs/flow.md:3/:71, docs/core-async.md:3, the 21 `notes/...` citations in task plans (to `notes/archive/...`), seon.fx.edn's absolute path;
 - optionally `tmp/agy/` → `runs/agy/`.
 Each running session's brief names `../RESUME.md`; they read the new path after merging main.
