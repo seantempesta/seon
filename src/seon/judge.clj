@@ -1,6 +1,6 @@
 (ns seon.judge
-  "The first-move judge (owner, 2026-10-23: no live agent runs until the context has a
-  format agents respond well to): a task's first-turn context sent to the model once, and
+  "The first-move judge (DECISIONS, No live agent runs until the context has a format agents
+  respond well to): a task's first-turn context sent to the model once, and
   the reply's first move scored from the compiler's facts, never by another model. A score
   is a :seon.judge fact on main keyed by the digest of the request it answers, so an
   unchanged context is never asked twice. my.root/first-moves! runs a pass; the reply is
