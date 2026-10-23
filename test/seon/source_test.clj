@@ -603,8 +603,10 @@
               :n "forms in the program's other files"
               :work "transact: one form's facts and its var's pointer, into the indexes of the program (log n per datom)"
               :growth :log
-              ;; measured 2026-10-23: 561k -> 635k ticks, 1.38 -> 1.59 MB from 10 to 1,000 (1.9 ms CPU)
-              :fixed {:ticks 530000 :bytes 1290000} :per-n {:ticks 11500.0 :bytes 31000.0}
+              ;; measured 2026-10-23: 561k -> 635k ticks, 1.38 -> 1.59 MB from 10 to 1,000 (1.9 ms CPU); on
+              ;; jolt/similar-finds-helpers-by-embedding 394k -> 459k ticks, 1.24 -> 1.43 MB: the fixed part
+              ;; re-derived, as a cheaper fixed part read as steeper growth (task seon.cost/a-speedup-never-reads-as-steeper)
+              :fixed {:ticks 370000 :bytes 1100000} :per-n {:ticks 11500.0 :bytes 31000.0}
               :sizes refresh-sizes}
              {:of 'seon.source/refresh-tx :input 'seon.source-test/refresh-of
               :n "forms in the program's other files; a body edit in a file no namespace requires"
