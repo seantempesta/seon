@@ -7,7 +7,7 @@ An agent works its task in a loop inside its own process: observe the branch, en
 Root's reconciler forks an agent for a released task and evaluates ```seon.turn/work!``` in it, naming the task, the attempt and `:seon.config.agent/max-turns`. The loop ends on the first of:
 - the done rule refuses nothing (`:green`; all green at the start ends it with no model call);
 - a function asked to stop: `my.turn/wait` (`:waiting`) or `my.task/fail!` (`:failed`, the task held for root: [tasks](tasks.md#a-refused-attempt-is-held-for-root));
-- the turns run out (`:cap`, with the done rule's refusals as its reason);
+- the turns run out (`:cap`, with the done rule's reasons as its reason);
 - a merge task's merge of main is too hairy (`:merge-failed`, [below](#a-merge-tasks-loop));
 - the model call fails (`:error`: [model](model.md#failures)).
 
@@ -15,7 +15,7 @@ Its end is written on the branch (`seon.turn/end!`: outcome, turns, tokens, the 
 
 ## Observe
 
-Each turn starts from facts measured now, never remembered: `seon.turn/observe` runs the task's accumulated proofs in a fork of the agent, bounded by `:seon.config.agent/test-ticks` (a run it could not fork ran no proof, so every proof is unknown), the contract gaps the branch adds since its merge base (`seon.merge/uncontracted`, the question root's judge and the merge gate ask), its unmerged entries, and the done rule over them (`seon.reconcile/done-refusals`: [tasks](tasks.md#the-done-rule)). `:will-merge` is everything the branch's merge would carry to main.
+Each turn starts from facts measured now, never remembered: `seon.turn/observe` runs the task's accumulated proofs in a fork of the agent, bounded by `:seon.config.agent/test-ticks` (a run it could not fork ran no proof, so every proof is unknown), the contract gaps the branch adds since its merge base (`seon.merge/uncontracted`, the question root's judge and the merge gate ask), its unmerged entries, and the done rule over them (`seon.reconcile/done-explain`: [tasks](tasks.md#the-done-rule)). `:will-merge` is everything the branch's merge would carry to main.
 
 ## Act
 

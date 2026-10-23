@@ -51,7 +51,7 @@
                                  "(status-of :paused)\n"
                                  "(seon.contract/valid? :seon.attempt/attempt-fact {:seon.attempt/id \"a#1\" :seon.attempt/task 1 :seon.attempt/status :paused :seon.attempt/boot \"b\" :seon.attempt/agent :a :seon.attempt/start-ms 0})\n"
                                  "(:seon.error/type (my.schema/register! :x.schema-test/thing [:map [:x.schema-test/part :x.schema-test/nowhere]]))\n"
-                                 "(:seon.schema/key (my.schema/register! :seon.attempt/refusal :string))\n"
+                                 "(:seon.schema/key (my.schema/register! :seon.attempt/invalid :string))\n"
                                  "(:seon.schema/key (my.schema/register! :user/qty :int))\n"
                                  "(seon.contract/valid? :user/qty 3)\n"))
         entity (fn [k] (d/q '[:find (pull ?e [:schema/form :schema/file :schema/source]) . :in $ ?k :where [?e :schema/key ?k]] db k))]
@@ -63,14 +63,14 @@
     (testing "the registration is program on the agent's branch: no longer the binary's, in the resource it came from"
       (is (= {:schema/form paused-status :schema/file "resources/seon/schemas/seon.facts.edn"} (entity :seon.attempt/status))))
     (testing "a new key goes to the resource holding most keys of its namespace (owner, 2026-10-21)"
-      (is (= {:schema/form ":string" :schema/file "resources/seon/schemas/seon.facts.edn"} (entity :seon.attempt/refusal))))
+      (is (= {:schema/form ":string" :schema/file "resources/seon/schemas/seon.facts.edn"} (entity :seon.attempt/invalid))))
     (testing "a key in a scratch namespace is seen at the REPL but is no program: it has no resource"
       (is (= ":user/qty" (nth printed 8)))
       (is (= "true" (nth printed 9)))
       (is (= {:schema/form ":int"} (entity :user/qty))))
     (is (nil? (d/q '[:find ?e . :where [?e :schema/key :x.schema-test/thing]] db)) "nothing of a refused registration is written")
     (testing "the branch's population, as the next eval reads it"
-      (is (= #{:seon.attempt/status :seon.attempt/refusal :user/qty}
+      (is (= #{:seon.attempt/status :seon.attempt/invalid :user/qty}
              (set (keys (program/schema-changes db))))))))
 
 (deftest a-registration-counts-the-stored-values-it-refuses

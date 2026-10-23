@@ -33,7 +33,7 @@ Every dashboard tile is `seon.render.ui/metric-tile` over a map (`:kicker`, `:su
 - **How an agent is:** `seon.render.ui/shown-status` and `seon.render.ui/ended-as` (an agent's card and its stream's stop events alike); its newest events are the stream's own words (`seon.render.ui/event-detail`); a cost verdict's lines are `seon.cost/verdict-lines`.
 - **A proc's defect line** is `seon.render.ui/proc-health`: the health tile lists every proc by it, the effect owners among them.
 - **Runs, merges and evaluations:** a test run's words are `seon.render.ui/run-words` and its redness `seon.proofs/red?`; a merge's result is `seon.render.ui/merge-words`; an evaluation's arrow and value are one render for a card's row and a history row, its text a reply item's `:printed` or a record's `:shown` (an error's too: `seon.repl/record-tx`).
-- **Errors:** a refusal or failure shown reads `:seon.error/message` of the one error map ([errors](errors.md#errors)), never a second `{:error "text"}` shape.
+- **Errors:** an error or failure shown reads `:seon.error/message` of the one error map ([errors](errors.md#errors)), never a second `{:error "text"}` shape.
 - **Numbers:** root's view numbers (p50s, transactions per commit) are `seon.root/view-numbers`, read by `seon.root/state` and the render proc alike.
 - One-line text in a row or the context is `seon.print/line`. A root function called from the page is recorded on main by the render proc when root answers it (origin `:ui`), with that answer ([dashboard](dashboard.md)).
 

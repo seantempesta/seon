@@ -14,8 +14,8 @@
   ;; seon.repl/source-reads-the-program: a compiled platform var's form from the program facts,
   ;; a library var's from its :file and :line; a live agent spent all 8 turns on
   ;; (source datahike.connector/connect), 2026-10-21).
-  (let [rows [["(source seon.reconcile/stuck)" :out "(defn stuck"]
-              ["(clojure.repl/source-fn 'seon.reconcile/stuck)" :printed "(defn stuck"]
+  (let [rows [["(source seon.reconcile/root-causes)" :out "(defn root-causes"]
+              ["(clojure.repl/source-fn 'seon.reconcile/root-causes)" :printed "(defn root-causes"]
               ["(do (require 'datahike.connector) (source datahike.connector/connect))" :out "(defn connect"]
               ["(defn twice [x] (* 2 x))" :printed "twice"]
               ["(source twice)" :out "(defn twice [x] (* 2 x))"]
@@ -29,7 +29,7 @@
               ["(some? *e)" :printed "true"]
               ["(pst)" :out "Divide by zero"]
               ["(in-ns 'seon.reconcile)" :printed "seon.reconcile"]
-              ["(clojure.repl/source stuck)" :out "(defn stuck"]
+              ["(clojure.repl/source root-causes)" :out "(defn root-causes"]
               ;; a value its producer names the schema of reads by its declared render, and
               ;; shows whole as data without that metadata; a map that only holds a key is data
               ["(my.task/current)" :printed "task demo/t · work"]
@@ -148,7 +148,7 @@
 
 (deftest an-interrupt-stops-only-the-request-it-arrives-in
   ;; research row 7: no client sends nREPL's `interrupt` op, so it cannot be what clears an
-  ;; interrupt; root's SIGUSR1 stops the request running, and one that lands while the agent
+  ;; interrupt; root's SIGUSR1 stops the request running, and one that merges while the agent
   ;; is idle stops nothing that comes after it
   (let [[_ after-idle stopped after-stop]
         (at/in-agent [{:op :eval :agent "root" :code "(seon.root/interrupt! sys :a1)"}
@@ -161,7 +161,7 @@
 
 (deftest an-interrupt-after-the-request-began-stops-it
   ;; land6 review, must-fix 1: root waits on the agent's :started, then sends SIGUSR1. One that
-  ;; lands after :started and before the first form runs finds no eval on intr's stack, so it
+  ;; merges after :started and before the first form runs finds no eval on intr's stack, so it
   ;; is pending; the request it was meant for must start stopped, never have it cleared
   (intr/clear-pending!)
   (#'intr/on-usr1)
