@@ -566,7 +566,7 @@
         (is (false? (:open? (row (d/db-with err [{:db/id e :var/doc "changed"}])))))))))
 
 (defn- literal-catch-sites
-  "The old bin/laws rule over text: each line of each src file but check.clj and e2e.clj, strings
+  "The old bin/laws rule over text: each line of each src file but e2e.clj (check.clj is test/'s now), strings
   and comments stripped, holding `(catch ` is a site of the last top-level def before it, as
   ns/name."
   [files]

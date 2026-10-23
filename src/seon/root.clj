@@ -98,6 +98,8 @@
 
 (declare deliver-rid answer-taken)
 
+(declare answer-spawn)
+
 (defn- record-death
   "Agent aid's death, folded, and answered to the requests it died in (inflight): its died
   map completed with the exit status the fork server reaped (nil: never known, for a clone
@@ -107,7 +109,8 @@
   (let [e (assoc died :exit exit :seon.error/message (str "agent " (name aid) " died" (exit-text exit)))
         st (problem st (err/occurrence e :agent {:agent aid :task (get-in st [:view :agents aid :task]) :form (get-in e [:last-op :form])}
                                        (System/currentTimeMillis)))]
-    (reduce (fn [st r] (deliver-rid st r e)) st inflight)))
+    ;; a spawn whose agent died before its hello is answered that death
+    (reduce (fn [st r] (deliver-rid st r e)) (answer-spawn st aid e) inflight)))
 
 (defn- reply!
   "Answer a caller: an outside caller's promise is delivered; a proc's reply route
@@ -118,6 +121,15 @@
   (if (map? p)
     (update st ::replies (fnil conj []) [(:route p) {:tag (:tag p) :r r}])
     (do (deliver p r) st)))
+
+(defn- answer-spawn
+  "Answer the caller of agent id's spawn (held under ::spawning since its :spawn) with r: {:id}
+  at its hello, or the end it met first. Answers st."
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.agent/id :any] :seon.root/api-state]}
+  [st id r]
+  (if-let [p (get-in st [::spawning id])]
+    (-> (reply! st p r) (update ::spawning dissoc id))
+    st))
 
 (defn- deliver-rid
   "Answer the caller waiting on rid; answers st."
@@ -159,6 +171,8 @@
           e (failed id a m)]
       (cond-> (assoc-in st [:view :agents id] (if (and (stopped-statuses (:status a)) (not (gone-statuses (:status a')))) (assoc a' :status (:status a)) a'))
         e (problem (err/occurrence e :agent {:agent id :task (:task a)} (System/currentTimeMillis)))
+        ;; its hello: the spawn is answered now, the agent ready
+        (and (:ready m) (= :spawning (:status a))) (answer-spawn id {:id id})
         ;; the agents with an eval in flight: the stall check's set
         (contains? m :running) (update ::busy (fnil (if (:running m) conj disj) #{}) id)))
     st))
@@ -197,7 +211,7 @@
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.agent/id :string [:maybe :seon.error/base]] :seon.root/api-state]}
   [st id why cause]
   (let [e (contract/error :seon.agent/failed 'seon.root/spawn! why (cond-> {:agent id} cause (assoc :cause cause)))]
-    (-> st (set-agent id {:error e}) (to-agent id {:op :failed :error e}))))
+    (-> st (set-agent id {:error e}) (answer-spawn id e) (to-agent id {:op :failed :error e}))))
 
 (def ^:private agent-launcher
   "One launcher for every agent's proc (its step is the Var #'agent-proc)."
@@ -248,10 +262,10 @@
         e (or died (gone agent "agent stopped"))]
     (step/out! o :events (step/event {:type (or stop :dead) :agent agent}))
     (let [st (cond
-               (nil? died) (reduce (fn [st r] (deliver-rid st r e)) st inflight)
+               (nil? died) (reduce (fn [st r] (deliver-rid st r e)) (answer-spawn st agent e) inflight)
                ;; the exit status is known (reaped first), or never will be (a clone, an
-               ;; orphan of a server that went down): now
-               (or (:exit v) (:cloned-from v) (:orphan v)) (record-death st agent (:exit v) died inflight)
+               ;; orphan of a server that went down, a process never forked): now
+               (or (:exit v) (:cloned-from v) (:orphan v) (nil? (or pid (:pid v)))) (record-death st agent (:exit v) died inflight)
                ;; else when the fork server reaps it (:exit): the requests it died in are
                ;; answered then, with the status that names the death
                :else (assoc-in st [::dying (or pid (:pid v))] [agent died inflight]))
@@ -291,7 +305,8 @@
                  :else (let [[st aid fd] (start-agent st opts)
                              branch (get-in st [:agents aid :branch])]
                          (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :attempt (:attempt opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}})
-                         (reply! st p {:id aid}))))
+                         ;; answered at its hello (set-agent's :ready), or the end it meets first
+                         (assoc-in st [::spawning aid] p))))
       :clone (let [parent (:parent m)]
                (cond
                  (nil? (get-in st [:agents parent])) (reply! st p (gone parent (str "no live agent " parent)))
@@ -903,9 +918,10 @@
     (if (contract/error? r) (doto (promise) (deliver r)) (call! sys r))))
 
 (defn spawn!
-  "Fork an agent from the fork server onto a new branch of main; answers its id at once
-  (status :spawning until its hello). opts {:branch kw :task string}; an existing :branch
-  is resumed."
+  "Fork an agent from the fork server onto a new branch of main; answers its id once it is
+  ready (its hello), so what is sent to it next reaches a live agent; an agent that ends first
+  (refused, stopped, or died, with its exit status) throws that end. opts {:branch kw :task
+  string}; an existing :branch is resumed."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.root/spawn-opts] :seon.agent/id]}
   [sys opts]
   (let [r @(request! sys 'spawn! nil opts)]
