@@ -284,24 +284,17 @@
                       (concat (map :v (d/datoms db :aevt :schema/file)) (map :v (d/datoms db :aevt :schema.file/path)))))))
 
 (defn file-text
-  "Namespace nsym's file as db holds it: its live forms in their order, each after its
-  lead (a form recorded at a REPL has none: a blank line, or nothing before the first),
-  then the text after its last form (a newline when it has none). A form comes after the
-  forms of its namespace that define what it references (seon.program/topo over :order),
-  unless an earlier form declares it: a helper recorded at a REPL after the function that
-  now calls it is written before that function, so the file loads fresh as the image ran
-  (step E run #10's merge wrote form-of after summary-of, its user). A file already in that
-  order is written as it is, byte for byte."
+  "Namespace nsym's file as db holds it: its live forms in the order the image loads them
+  (seon.program/load-order), each after its lead (a form recorded at a REPL has none: a
+  blank line, or nothing before the first), then the text after its last form (a newline
+  when it has none). So a helper recorded at a REPL after the function that now calls it is
+  written before that function, and the file loads fresh as the image ran (step E run #10's
+  merge wrote form-of after summary-of, its user); a file already in that order is written
+  as it is, byte for byte."
   {:malli/schema [:=> [:cat :seon.host/db :symbol] :string]}
   [db nsym]
   (let [ne (pdb/eid db :ns/name nsym)
-        rows (for [dt (d/datoms db :avet :form/ns ne) :when (program/live? db (:e dt))] (program/form-row db (:e dt)))
-        definer (into {} (for [f rows [k s] (:defines f) :when (= :var k)] [s f]))
-        declared (reduce (fn [m f] (reduce #(update %1 %2 (fnil min (:order f)) (:order f)) m (:declares f))) {} rows)
-        needs (fn [f] (for [r (:refs f) :let [d (definer r)]
-                            :when (and d (not= d f) (not (some-> (declared r) (< (:order f)))))]
-                        d))
-        fs (program/topo (sort-by :order rows) needs :order)]
+        fs (program/load-order (for [dt (d/datoms db :avet :form/ns ne) :when (program/live? db (:e dt))] (program/form-row db (:e dt))))]
     (str (apply str (map-indexed (fn [i f] (str (or (:lead f) (if (zero? i) "" "\n\n")) (:src f))) fs))
          (or (:ns/tail (d/entity db ne)) "\n"))))
 

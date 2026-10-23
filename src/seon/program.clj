@@ -475,7 +475,8 @@
             (:ns/name x) [:ns (:ns/name x)]))
 
 (defn form-row
-  "Form entity e as the loader and the merge read it."
+  "Form entity e as the loader and the merge read it (:source when it was read from a file:
+  seon.source, :form/source)."
   {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
   [db e]
   (let [f (d/entity db e)]
@@ -483,7 +484,8 @@
                    :defines (into #{} (keep definition-key) (:form/defines f))
                    :declares (into #{} (map :var/name) (:form/declares f))}
                   (for [[a k] form-sets] [k (set (get f a))]))
-      (:form/lead f) (assoc :lead (:form/lead f)))))
+      (:form/lead f) (assoc :lead (:form/lead f))
+      (:form/source f) (assoc :source true))))
 
 (defn live-forms
   "Every live form of db, as form-row. Cost: the program's forms and their definitions,
@@ -529,7 +531,7 @@
 (defn topo
   "nodes in dependency order: each after the nodes among them it needs (deps), the rest in
   the order of k; a cycle is broken at the node first by k. One visit per node and edge."
-  {:malli/schema [:=> [:cat [:sequential :any] ifn? ifn?] [:vector :any]]}
+  {:malli/schema [:=> [:cat [:sequential :any] :seon.host/fn :seon.host/fn] [:vector :any]]}
   [nodes deps k]
   (let [in? (set nodes)]
     (:order (reduce (fn visit [st n]
@@ -587,8 +589,10 @@
   "forms (form rows) in the order to load them: namespaces in dependency order (after each
   namespace among them that their forms require or whose vars they reference; ties by
   name), and within a namespace by order, each form after the earliest form among them
-  that interns (defines or declares) a var it references. A file's own order is kept: it
-  already loads. Cost: one pass over the forms and their references."
+  that interns (defines or declares) a var it references, unless both were read from a file
+  (:source): a file's own order is kept, since it already loads, though a form's :refs name
+  the vars its quoted data names too (seon.db/install-missing! names 'seon.db/open!, defined
+  after it). Cost: one pass over the forms and their references."
   {:malli/schema [:=> [:cat [:sequential :map]] [:vector :map]]}
   [forms]
   (let [by-id (into {} (map (juxt :id identity)) forms)
@@ -601,7 +605,9 @@
         ns-deps (into {} (for [[n fs] by-ns]
                            [n (into (set (mapcat :requires fs))
                                     (for [f fs r (:refs f) :let [g (interns r)] :when g] (:ns (by-id g))))]))
-        deps (fn [f] (for [r (:refs f) :let [g (interns r)] :when (and g (not= g (:id f)) (= (:ns f) (:ns (by-id g))))] g))]
+        deps (fn [f] (for [r (:refs f) :let [g (interns r)]
+                           :when (and g (not= g (:id f)) (= (:ns f) (:ns (by-id g))) (not (and (:source f) (:source (by-id g)))))]
+                       g))]
     (vec (for [n (topo nss #(disj (ns-deps %) %) str)
                id (topo (map :id (by-ns n)) #(deps (by-id %)) #(:order (by-id %)))]
            (by-id id)))))
