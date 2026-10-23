@@ -188,9 +188,8 @@
   seon.profile), measured around the per-form eval fn. They are recorded once, when the
   form ran, beside the answer's value: the one value the record (record-tx) stores and the
   reply shows, so it is shown from that fact and never measured again (the provider's prompt
-  cache holds while the context repeats it byte for byte). jolt.host/ticks-of arms the timer
-  (root's unbounded forms have no budget to), and its count is read in a finally inside it, so
-  a form that threw is counted. Reading them costs the
+  cache holds while the context repeats it byte for byte). The one measurement of a call,
+  seon.profile/measure!, takes them, so a form that threw is counted. Reading them costs the
   functions the form called, not the program's size."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
@@ -199,16 +198,10 @@
           ef (:repl/eval-fn req eval)]
       (h (-> req
              (assoc :repl/eval-fn (fn [form]
-                                    (let [a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/now-ns)
-                                          v (volatile! nil) k (volatile! 0)]
-                                      (try (jolt.host/ticks-of
-                                             (fn [] (let [k0 (jolt.host/ticks)]
-                                                      (try (vreset! v (ef form))
-                                                           (finally (vreset! k (- (jolt.host/ticks) k0)))))))
-                                           @v
-                                           (finally (let [t1 (profile/now-ns) a1 (profile/alloc-bytes)]
-                                                      (vreset! last {:ms (/ (quot (- t1 t0) 1000) 1000.0) :alloc-bytes (- a1 a0) :ticks @k
-                                                                     :fns (profile/top (profile/touched) (cfg/value :seon.config.agent/form-top-fns))})))))))
+                                    (profile/measure! #(ef form)
+                                                      (fn [{:keys [ticks bytes wall-ns]}]
+                                                        (vreset! last {:ms (/ (quot wall-ns 1000) 1000.0) :alloc-bytes bytes :ticks ticks
+                                                                       :fns (profile/top (profile/touched) (cfg/value :seon.config.agent/form-top-fns))})))))
              (around-reply (fn [m]
                              (if-let [{:keys [fns] :as c} (when (or (contains? m :repl/value) (contains? m :repl/ex)) @last)]
                                (do (vreset! last nil)
