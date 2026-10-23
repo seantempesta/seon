@@ -1,61 +1,40 @@
 [{:seon.task/name "one-content-keyed-derivation"
-  :seon.task/plan "Filed by worktree session agent-view, 2026-10-23, at the owner's question: one universal cache, with easy rules for when to recompute, shared by every worker. Root's points of 2026-10-23 are folded in. It is a new mechanism, so it goes through root's gate (AGENTS §3) before it is built. It must meet AGENTS §5: \"Results are reused by input digest\" and \"Content-keyed reuse is allowed for units measured as expensive; no other caches, and never one keyed by time.\"
+  :seon.task/plan "Filed by worktree session agent-view, 2026-10-23, at the owner's question: one universal cache, with easy rules for when to recompute, shared by every worker. Root's points and global-ids' measurements are folded in. It is a new mechanism, so it goes through root's gate (AGENTS §3). It must meet AGENTS §5: \"Results are reused by input digest\" and \"Content-keyed reuse is allowed for units measured as expensive; no other caches, and never one keyed by time.\"
 
-What exists. There are about a dozen separate reuse mechanisms, sharing nothing but `seon.error/digest`:
-- test and check results by reach digest, in ../test-results and as :seon.proof/digest facts (`seon.proofs/plan`, `seon.prove`);
-- main's reach graph, kept by the fork server and inherited copy-on-write (`seon.agent/base-graph`);
-- Jolt's compile and AOT caches;
-- bin/build stamps;
-- the source-import digest;
-- the render proc's per-unit input equality and its `:turn-ctx`;
-- `seon.render.proc/ordered`, reused by identity or for 1000 ms: a reuse keyed by time, which §5 forbids;
-- Datahike's node cache;
-- small `delay`s.
+The owner's condition (2026-10-23, through root): it must simplify the code, a net loss of src lines, measured at merge. That is this task's first proof.
 
-v1's answer (~/src/seon/src/seon/cache.clj) was one per-process cache at about 84 sites:
-- keyed [kind content-key], nothing invalidated;
-- evicted by size under 512 MB;
-- compute-once per key;
-- a hit cost 150-220 ns, and the misses it saved averaged 90-650 ms;
-- JVM-only (Caffeine), and never shared across processes.
+Verdict of the line count (2026-10-23, src/ only, reading, nothing run): the general mechanism, as first designed, does NOT meet it.
 
-The design: one mechanism, one tier, one store.
-1. The key is the reach digest of what f reads (seon.program/reach-digests: one Merkle digest per strongly connected component, over content ids from global-ids). It comes from the reach machinery we already compute; no second hasher.
-2. A result is a fact on main keyed by that digest (`:seon.derived/key`). Every branch and agent sees it the moment any one computes it: tests reused across sessions and worktrees. A large value lives in the store by content (konserve: \"a large value lives once under its own key\"), the fact pointing at it. Every process reads it through the same LMDB pages.
-3. One tier. Datahike's and konserve's in-process caches over the store are the per-process tier. A second one is added only when a measured miss says the store read is the cost (§5).
-4. Concurrent requests for one key are joined by the prove proc's join on one digest, extended rather than duplicated: a request is a message, and a duplicate parks on the first's answer.
-5. The space is bounded by a config key in bytes (:seon.config.derive/max-bytes). Eviction is by size, never by time.
-6. Only pure work derives. A process test, or anything that reads the clock, the network or a model, is refused, by the reach walk's own classification (what it marks as reaching a process), never by a hand list.
+| reuse in src today | file:lines | lines | deleted by a derivation |
+|---|---|---|---|
+| ../test-results file store: result-path, greens, result-file, store-greens! | proofs.clj:121-131, 142-158 | 28 | yes |
+| its callers: test-plan's :dir, the greens merge, the unstored write, :seon.config.proofs/test-results-dir, allow-lists | agent.clj:371, 379, 546-550; default.edn:305; check.clj:409; program.clj:873 | ~12 | ~10 |
+| fact reader stored-greens | proofs.clj:132-141 | 10 | replaced by a lookup of the same size: net 0 |
+| fact writer result-tx (its digest part) | prove.clj:32-56 | 25 | ~8 |
+| prove's join (slot, same?, request) | prove.clj:60-67, 103-120 | ~28 | no: a run-admission join keyed by branch@t; extending it grows it |
+| fork server reach graph, base-graph | fork_server.clj:38-56, 122-126; agent.clj:321-340 | ~33 | no: an incremental update (816 MB), not a lookup |
+| import-source!'s digest skip | root.clj:636-643 | ~5 | ~3 |
+| the render proc's :turn-ctx, ordered's 1000 ms term | proc.clj:257-283, 330, 370; 63-72 | ~18 | ~9 |
+| **total deleted** | | | **~38-45** |
 
-The store is fast enough to be the cache. Measured by global-ids, 2026-10-23 (REPL, LMDB, zstd, a fresh process reading a store another wrote):
+The general mechanism would add a schema entry (4-6), a lookup (~10), a store function (10-12), a size bound with eviction (15-25, no precedent in src), a digest join beside prove's (10-15), the purity check (5-10) and a config key with an entry function (5-8): **~50-90 lines, a net GAIN of ~15-50.** The large repeated work it named (per-file analysis, 8-15 s a run; the base test plan per run, 7-12 s) is in test/test_runner.clj (program-db and tests-of on every run, lines 36-43 and 165-190), not in src.
 
-| Read | First | After |
-|---|---|---|
-| raw konserve key, 1 KB | 42 µs | 24 µs |
-| raw konserve key, 100 KB | 120 µs | ~146 µs |
-| fact by lookup ref, 1 KB | 1.2 ms (index nodes load) | 222 µs |
-| fact by lookup ref, 100 KB | 330-400 µs | |
+**So: do not build the general mechanism.** Build its first, net-negative step:
 
-- An agent reads it itself after seon.db/after-fork!. LMDB readers do not block, so a hit never touches root. Main's head opens in about 1 ms, then seeks.
-- A result is a fact, not a raw key: a raw key outside any branch is swept by seon.db/collect!. The derived entity's identity attribute is flagged {:seon.db/identity true :seon.db/content-id true}, so one derivation on two branches is one entity, and a value of 1,024 B or more is stored once under its content key (seon.db-test/a-large-value-lives-once-under-its-own-key).
-- A result every agent shares goes on main through root's writer (group commit). A per-attempt one stays on the attempt's branch.
-- The union (about 0.6-0.75 ms a query, but a round trip to root's writer) is for joining what several branches wrote. A derivation reads main's head directly.
+1. Test results are facts only. Main's :seon.proof/digest facts (seon.prove/result-tx; read by seon.proofs/stored-greens) already hold every green by its reach digest, and every process reads them from the one LMDB store directly. A fact read is about 222 µs warm and 1.2 ms cold (global-ids, 2026-10-23), and an agent reads main's head without root. Delete the ../test-results file store and its callers: about -38 lines, about 0 added. It also removes self-contained's step A, which only moves that directory.
+2. Delete seon.render.proc/ordered's 1000 ms term (a reuse keyed by time, which §5 forbids). Its retirement by time belongs to `order`. About -3.
+3. A second derived kind is filed only when its own count is net negative too. The help page, the attempt sections built twice per later turn (seon.context/attempt-text) and a turn's remade context each need a measured miss cost and their lines first.
 
-It replaces and deletes, in order of measured cost; each first user is a proof that a second request at the same digest does no work, measured in calls and ticks:
-- (a) the ../test-results directory: results become facts. This also removes self-contained's step A, which only moves that directory.
-- (b) per-file analysis in the plan: pure-tests' (c), 8-15 s a run.
-- (c) the base test plan per run: pure-tests' (b); bin/test's selection takes 7-12 s on an unchanged tree.
-- (d) the fork server's reach-graph cache, if it fits: 640 ms and 816 MB for a full graph.
+The rules stay as designed, for every step:
+- the key is the existing reach digest (no second hasher);
+- a result is a fact with a content-id identity, never a raw key, which seon.db/collect! sweeps;
+- results every agent shares go on main through root's writer;
+- pure work only, by the reach walk's classification;
+- a size bound, never a time bound.
 
-Then, measured first: an attempt's sections (built twice per later turn, by `seon.context/attempt-text`), the help page (2,132 tokens reassembled per turn of every agent), a turn's remade context (`seon.render.proc/turn-text`), and `seon.render.proc/ordered`'s time window (deleted). pure-tests holds two caching tasks for this one and sends their numbers.
-
-Correctness: a mutation in any input f reads changes the key (sensitivity), and a change in an input f does not read leaves it (precision).
-
-Order: measure each candidate's miss cost (REPL, n ≤ 100); build the key and the fact with user (a); extend the prove proc's join; add (b)-(d) one at a time, each with its proof. Sized for one worktree session."
-  :seon.task/kind :design
-  :seon.task/proofs #{seon.derive-test/a-mutated-input-changes-the-key
-                      seon.derive-test/an-unread-input-leaves-the-key
-                      seon.derive-test/a-second-request-at-a-digest-does-no-work
-                      seon.derive-test/concurrent-requests-for-one-key-run-once
-                      seon.derive-test/work-reaching-a-process-is-refused
-                      seon.derive-test/the-space-is-bounded-by-size}}]
+Sized for one worktree session."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.derive-test/src-is-smaller-at-merge
+                      seon.proofs-test/a-green-is-read-from-its-fact-in-any-checkout
+                      seon.proofs-test/an-unchanged-tree-runs-nothing-and-reuses-everything
+                      seon.render-test/the-grid-order-is-reused-by-identity-only}}]
