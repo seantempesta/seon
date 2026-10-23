@@ -62,7 +62,7 @@ Root reads every merge's `src` diff stat before merging, against the goal of abo
 
 ## Conflicts and pins
 
-A conflict is resolved by copying each side's lines, never retyping; the lines after `>>>>>>>` may belong to both sides; each resolved file's forms must balance as its parents' do. Submodule pin bumps happen only in root's merges into main, never in a worktree session's merge of main. Commits in the forks ([forks](forks.md): Jolt, Chez, Datahike, konserve) carry no AI trailers. After a merge, root archives the worktree session first (its `bin/mcp` holds the worktree open), then removes its worktree ([machine](machine.md#disk-stays-bounded)).
+A conflict is resolved by copying each side's lines, never retyping; the lines after `>>>>>>>` may belong to both sides; each resolved file's forms must balance as its parents' do. Submodule pin bumps happen only in root's merges into main, never in a worktree session's merge of main. A pin bump reaches everything, so its merge also runs the cost proofs `bin/prove` leaves out (`bin/test seon.program-cost-test seon.record-cost-test`): Jolt 0d39edc3 passed prove and still made reach-update grow n^1.96. Commits in the forks ([forks](forks.md): Jolt, Chez, Datahike, konserve) carry no AI trailers. After a merge, root archives the worktree session first (its `bin/mcp` holds the worktree open), then removes its worktree ([machine](machine.md#disk-stays-bounded)).
 
 ## Seon's merge is a three-way merge of the program
 
