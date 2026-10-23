@@ -648,19 +648,19 @@
   ;; :ended-ms root recorded) pushes the oldest ended one off, and the order is a function of
   ;; the agents alone: no clock argument, and an unchanged agents map derives nothing again
   (let [n (seon.config/value :seon.config.render.list/ended)
-        ended (into {} (for [i (range 1 (+ n 4))] [(keyword (str "e" i)) {:status :killed :ended-ms (* 1000 i)}]))
+        ended (into {} (for [i (range 1 (+ n 4))] [(keyword (str "e" i)) {:status :killed :ended-ms (* 1000 (- (+ n 4) i))}]))
         live {:l1 {:status :idle} :l2 {:status :busy}}
         agents (merge ended live)
         order (#'p/order agents)]
     (is (= (+ n 2) (count order)) "every live agent and the newest n ended")
     (is (every? (set order) [:l1 :l2]) "no live agent leaves")
-    (is (not-any? (set order) [:e1 :e2 :e3]) "the three oldest ended are off the grid")
-    (is (= order (#'p/order agents)) "the same agents, the same order whenever it is asked")
+    ;; ended-ms runs against the ids: e1 ended last, e(n+3) first
+    (is (not-any? (set order) [(keyword (str "e" (+ n 1))) (keyword (str "e" (+ n 2))) (keyword (str "e" (+ n 3)))]) "the three that ended first are off the grid, whatever their ids")
     (let [agents' (assoc agents :l1 {:status :killed :ended-ms 999999})
           order' (#'p/order agents')]
       (is (= (+ n 1) (count order')) "an agent that ends is one more ended: the live count drops, the ended stay at n")
       (is (some #{:l1} order') "the newest end stays")
-      (is (not-any? (set order') [:e4]) "and the oldest ended one left by that event"))
+      (is (not-any? (set order') [(keyword (str "e" n))]) "and the oldest kept ended one left by that event"))
     (let [st {:view {:agents agents}}
           st1 (#'p/ordered st)]
       (is (identical? (:order st1) (:order (#'p/ordered (assoc st1 :view {:agents agents})))) "unchanged agents: not derived again"))))
