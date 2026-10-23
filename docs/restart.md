@@ -12,6 +12,8 @@ Nothing else does: no Claude session, its sidebar group, a running agent or a qu
 
 ## The first steps of a fresh root
 
+Start the root session in the main folder itself (`~/src/seon-jolt/next`, or `~/src/seon-next` after the cutover), not in an app-made worktree. Root edits main's docs and owns the merges, and an app worktree's hook blocks writes outside it. Worktree sessions get their worktree from `bin/worktree NAME`, not from the app.
+
 1. Read AGENTS.md whole, then `docs/plan.md`, `docs/decisions.md`, this page, and the tail of `notes/merge-log.md`.
 2. Look at the state, without changing anything:
    - `git log --oneline -20`;
@@ -29,10 +31,10 @@ The queue order first; anything not listed is merged or old.
 
 | Branch | Worktree | State and next step |
 |---|---|---|
-| ``jolt/health`` | `../next-health` | Nearly all of it is on main (aac06296). The branch adds one src line (seon.prove/reply, not re-proved) and `notes/handoff-health.md` (6a326234), which names five items to check on main first: contracts for seon.prove/*, :prove in the system check, the mcp tool count, the cost proof in ticks, and reviews read from HEAD rather than --all. |
+| ``jolt/health`` | `../next-health` | Not on main: the merge session merged it, the merged prove went red (a narrowed `seon.prove/reply` contract), and it reverted the merge (1ef9f0e9). Tip b2afabe1 is **not ready**: `notes/handoff-health.md` says what's left. Merging it again needs a revert of the revert. |
 | ``jolt/wiki-stale`` | `../next-wiki-stale` | Ready; merges right after health. |
-| ``jolt/rename-run`` | `../next-rename` | attempt → run, ready at the freeze: `notes/rename-run/HANDOFF.md`. Erase the standing store after it merges. |
-| ``jolt/self-contained`` | `../next-self-contained` | Step A, step C (GitHub URLs) and step R (the fresh clone into `~/src/seon-next`), after rename-run: `notes/handoff-self-contained.md`. |
+| ``jolt/rename-run`` | `../next-rename` | attempt → run, tip ebbfc94b; main has moved ahead of it. At the freeze, follow `notes/rename-run/HANDOFF.md` (merge main, take main's side of conflicts, the two scripts, sync the submodules, build, prove, health, self-review, merge), then erase the standing store. |
+| ``jolt/self-contained`` | `../next-self-contained` | Tip 1b3968e7, reported to the merge session. The order is in `notes/handoff-self-contained.md`: after rename-run, step A, then step D (history tags; the outer repo's uncommitted work committed first), then step R (`notes/cutover-step-R-2026-10-23.md`). Keep its grep-clean rewording of AGENTS.md's sidebar line and plan.md's cutover line. |
 | ``jolt/agent-view`` | `../next-agent-view` | The chat window, renders, messages as facts. Self-review, then its full run, then merge. Then the work-done recording task. |
 | ``jolt/writeback-order`` | `../next-writeback-order` | Seon's write-back puts a new form before its first user, which blocks every merge that adds a helper. Then step E's second paid real task: `notes/handoff-step-e.md` if it was written. Its session failed at the handover with 3 files uncommitted in the worktree, so start with `git -C ../next-writeback-order status` and `diff`. |
 | ``jolt/datom-cost`` | `.worktrees/datom-cost` | Datahike's add path costs ~7k ticks per datom (a 5.4 s import where ~0.35 s is due): `notes/handoff-store.md`. |
