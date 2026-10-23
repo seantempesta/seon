@@ -100,6 +100,44 @@
     (is (not (contains? left (:a1 agents))) "the idle agent ended")
     (is (not (contains? left (:a2 agents))) "the busy agent ended")))
 
+(deftest a-proof-run-ends-with-its-agent
+  ;; task seon.agent/a-proof-run-ends-with-its-agent: the agent's proof run (a fork of it) holds
+  ;; the write end of a fifo and sleeps, a test that never writes to the agent's pipe; the
+  ;; agent is killed (its task cancelled); the proof run ends with it, on the kernel's word that
+  ;; the reader of its pipe is gone (SIGIO). The test reads the fifo: its first byte says the
+  ;; proof run is in its test, its EOF that nothing holds the fifo any more, the proof run gone.
+  ;; No clock decides: a run that outlives its agent wakes from its sleep (a minute) and writes a
+  ;; second byte, which fails the test.
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        main (str "proof-ended-" (random-uuid))
+        store (str checkout "/target/runs/test-store")
+        runs (str checkout "/target/runs/" main "-runs")
+        fifo (str checkout "/target/runs/" main ".fifo")
+        _ (sh/sh "mkfifo" fifo)
+        root (ts/start-root! {:store store :main main :runs runs})
+        eval-root (fn [code] (let [r (ts/ask root {:op :eval :agent "root" :code code})]
+                               (if (:error r) r (edn/read-string (:printed (first (:items r)))))))
+        _ (eval-root "(c/spawn! sys {})")
+        parked (str "(do (ns parked-proof (:require [clojure.test :refer [deftest is]]))"
+                    " (deftest p (let [w (java.io.FileOutputStream. " (pr-str fifo) ")] (.write w 49) (.flush w) (Thread/sleep 60000) (.write w 50) (.flush w)) (is true))"
+                    " (seon.agent/run-tests-forked 1000000000 '#{parked-proof/p}))")
+        ;; a1 begins the form (its :started event, tapped before the submit); root knows its pid by then
+        _ (eval-root (str "(let [ev (c/events sys)] (c/submit! sys :a1 " (pr-str parked) ") "
+                          "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= :a1 (:agent e))) :began (recur)))))"))
+        pids (eval-root "(into {} (for [[id a] (:agents (c/state sys))] [id (:pid a)]))")
+        agent-pid (get pids :a1)
+        in (java.io.FileInputStream. ^String fifo)
+        began (.read in)
+        killed (sh/sh "kill" "-9" (str agent-pid))
+        ended (.read in)]
+    (.close in)
+    (ts/kill-root! root)
+    (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
+    (sh/sh "rm" "-rf" runs fifo)
+    (is (pos-int? agent-pid) (str "the agent's pid, from " (pr-str pids)))
+    (is (= 49 began) "the proof run was in its test")
+    (is (= -1 ended) (str "the proof run outlived its agent (byte " ended " after its sleep); agent " (pr-str agent-pid) " kill " (pr-str killed)))))
+
 (deftest a-blocked-agent-ends-with-its-root
   ;; task seon.agent/an-agent-ends-with-its-root, an agent blocked in a wait: its thread in
   ;; Chez's condition-wait reaches no safe point, so no signal handler runs (SIGIO, root's
