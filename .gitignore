@@ -4,6 +4,9 @@
 .cache/
 runs/
 /config/local.edn
+# bin/ports writes it through this temp file and renames it: a test run reading the tree beside a
+# root starting (bin/root runs bin/ports) must not see it
+/config/local.edn.new
 # shared by every checkout, kept in the main tree: test results by reach digest (bin/env) and the
 # worktrees' port blocks (bin/ports)
 /test-results/

@@ -9,8 +9,7 @@
 # the main tree's config/worktree-ports (gitignored; one line per worktree, "DIRNAME K"; server 7900+10K, web 7901+10K), allocated
 # once under a lock and freed by bin/worktree --remove. No two checkouts share a port, so every
 # worktree session can run its own root beside the owner's. This owns the port keys: each run
-# writes them under their current names, keeping the ports the file holds (under a key's
-# earlier name too: :seon.config.root/entrance-port), and leaves every other entry as it is.
+# keeps the ports the file holds and leaves every other entry as it is.
 # Edit the numbers to move this checkout's ports; this reads what the config resolves.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 NAME=${ROOT:t}
@@ -19,7 +18,7 @@ WRITE=; [[ ${1:-} == --write ]] && { WRITE=1; shift }
 LOCAL=${1:-$ROOT/config/local.edn}
 [[ -n $WRITE && ! -f $LOCAL ]] && exit 0
 port_of() { [[ -f $LOCAL ]] && sed -nE "s#.*$1 .*[^0-9]([0-9]+)\].*#\1#p" "$LOCAL" | head -1 }
-E=$(port_of ':seon\.config\.root/server-port'); E=${E:-$(port_of ':seon\.config\.root/entrance-port')}
+E=$(port_of ':seon\.config\.root/server-port')
 W=$(port_of ':seon\.config\.web/port')
 if [[ -z $E || -z $W ]]; then
   if [[ ${ROOT:A} == ${MAIN_TREE:A} ]]; then E=7888 W=7777
@@ -41,9 +40,9 @@ others=()
 if [[ -f $LOCAL ]]; then
   while IFS= read -r line; do
     case $line in
-      *:seon.config.root/entrance-port*|*:seon.config.root/server-port*|*:seon.config.web/port*) ;;
+      *:seon.config.root/server-port*|*:seon.config.web/port*) ;;
       ";; This checkout's own config layer"*|";; under the command line's --config"*|";; "*"worktree-ports"*) ;;
-      *";; root's entrance (bin/root, bin/mcp)"|*";; root's server (bin/root, bin/mcp)"|*";; the dashboard; bin/check and bin/test set"*) ;;
+      *";; root's server (bin/root, bin/mcp)"|*";; the dashboard; bin/check and bin/test set"*) ;;
       *) [[ -n ${line//[[:space:]]/} ]] && others+=("$line") ;;
     esac
   done < "$LOCAL"
@@ -66,5 +65,5 @@ mkdir -p "${LOCAL:h}"
 if cmp -s "$LOCAL.new" "$LOCAL"; then rm -f "$LOCAL.new"; else mv "$LOCAL.new" "$LOCAL"; fi
 [[ -n $WRITE ]] && exit 0
 . "$ROOT/bin/env"
-layer=(); [[ -n ${1:-} ]] && layer=(--config "$LOCAL")
-cd "$ROOT/target" && exec ./seon ports $layer
+# the layer is named: no process reads config/local.edn unless its command line does
+cd "$ROOT/target" && exec ./seon ports --config "$LOCAL"
