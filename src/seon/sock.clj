@@ -26,6 +26,7 @@
 (lib/defc c-recvmsg "recvmsg" [:int :pointer :int] :ssize_t {:blocking true})
 (lib/defc c-recvmsg-nb "recvmsg" [:int :pointer :int] :ssize_t)
 (lib/defc c-recv-nb "recv" [:int :pointer :size_t :int] :ssize_t)
+(lib/defc c-poll "poll" [:pointer :int :int] :int {:blocking true})
 
 (defmacro ^:private with-mem
   "Allocate n bytes for body, freed after it (jolt.ffi's caller-owned form)."
@@ -195,6 +196,14 @@
       (if (= :end b) :eof (codec/decode b))
       (if (= :eof (fill! c true)) :eof (recur)))))
 
+(defn- c-poll1
+  "poll(2) one fd for input, up to ms: > 0 when readable (or at EOF)."
+  {:malli/schema [:=> [:cat :seon.lib/fd :int] :int]}
+  [fd ms]
+  (with-mem [p 8]
+    (ffi/write p :int fd 0) (ffi/write p :int16 1 4) (ffi/write p :int16 0 6)
+    (c-poll p 1 ms)))
+
 (defn close-pending-fds!
   "Close every descriptor received on c and not yet taken (a forked child does this: they
   belong to its parent's later frames)."
@@ -218,6 +227,15 @@
         :eof :eof
         :again :none
         (recur)))))
+
+(defn recv-within!
+  "Blocking up to ms: the next frame's value, :timeout, or :eof."
+  {:malli/schema [:=> [:cat :seon.sock/conn :int] :any]}
+  [c ms]
+  (let [v (next-frame! c)]
+    (if (= :none v)
+      (if (pos? (c-poll1 (:fd c) ms)) (recur c 0) :timeout)
+      v)))
 
 ;; ---- writing ----------------------------------------------------------------
 
