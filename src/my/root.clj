@@ -2,11 +2,11 @@
   "Root's functions on tasks (from proto.agents.root): write desired state on main;
   the reconciler proc does the rest. Each takes root's system (seon.root/start!)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [seon.config :as config]
-            [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [datahike.api :as d]))
+  (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
+            [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.watch :as watch] [datahike.api :as d]))
 
 (defn- write-declared!
-  "Declared state's tx written on main: the refusal that built it as it is; an empty tx
+  "Declared state's tx written on main: the error that built it as it is; an empty tx
   writes nothing ({:ok true :changed 0}); else the writer's answer, with counts, the datoms
   written and the citation problems of decls (seon.task/citation-problems) when any."
   {:malli/schema [:=> [:cat :seon.root/sys :any :map [:maybe [:sequential :any]]] :map]}
@@ -17,7 +17,7 @@
                 (cond-> (merge @(root/transact-main! sys tx) counts {:datoms (count tx)}) (seq ps) (assoc :problems ps)))))
 
 (defn create!
-  "Write task declarations as held tasks. Answers the writer's answer, or the refusal."
+  "Write task declarations as held tasks. Answers the writer's answer, or the error."
   {:malli/schema [:=> [:cat :seon.root/sys [:vector :seon.task/declaration]] :map]}
   [sys decls] (write-declared! sys (task/create-tx @(:conn sys) decls) {} decls))
 
@@ -25,7 +25,7 @@
   "Work request decl (seon.template/request: design -> implement -> merge on one branch):
   the linked set written released in one transaction on main (seon.template/request-tx),
   so no agent forks before every task of it is set. Answers the writer's answer with the
-  set's ids, or the refusal."
+  set's ids, or the error."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.task/declaration] :map]}
   [sys decl]
   (let [tx (tpl/request-tx @(:conn sys) decl)]
@@ -59,9 +59,41 @@
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
   [sys ids] @(root/transact-main! sys (task/execution-tx ids :cancelled)))
 
+(defn gate!
+  "Root's go for tasks ids: the process tests each one's change reaches (a shell, a fork, a
+  root, the binary: never run automatically, owner's ruling 2026-10-23) run on the gate
+  checkout (:seon.config.source/gate-checkout). Before the merge task's attempt is judged,
+  its deferred tests run before it merges and a red holds it (:seon.task/gate?). An attempt
+  that already merged unasked (its open :unrun problem) has them run now, through the
+  :tests effect on the merges branch's head, which holds its change; their results are
+  recorded on it (:seon.attempt/deferred-results), which closes the problem when each passed.
+  Answers {:asked ids :ran {attempt {test status}}}; without a gate checkout declared, the
+  merged ones' tests are each :error, with :seon.root/no-gate-checkout on the attempt."
+  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
+  [sys ids]
+  @(root/transact-main! sys (vec (for [id ids] {:seon.task/id id :seon.task/gate? true})))
+  (let [want (set ids)
+        unrun (for [[aid a] (sort-by key (task/attempts @(:conn sys)))
+                    :when (and (want (:seon.attempt/task a)) (= :merged (:seon.attempt/status a))
+                               (seq (:seon.attempt/deferred a))
+                               (not-every? #(= :pass (get (:seon.attempt/deferred-results a) %)) (:seon.attempt/deferred a)))]
+                [aid (vec (sort-by str (:seon.attempt/deferred a)))])
+        ran (into {} (for [[aid tests] unrun
+                           :let [repo (config/value :seon.config.source/gate-checkout)
+                                 r (if repo
+                                     @(root/effect! sys :tests {:repo repo :branch (config/value :seon.config.source/branch) :files {} :tests tests})
+                                     (contract/error :seon.root/no-gate-checkout 'my.root/gate!
+                                                     "no gate checkout declared (:seon.config.source/gate-checkout): the process tests cannot run here" {:tests tests}))
+                                 rs (if (contract/error? r) (zipmap tests (repeat :error)) (get-in r [:value :results]))]]
+                       (do @(root/transact-main! sys (cond-> [{:seon.attempt/id aid
+                                                               :seon.attempt/deferred-results (vec (for [[t st] rs] {:seon.proof/test t :seon.proof/status st}))}]
+                                                       (contract/error? r) (conj {:seon.attempt/id aid :seon.attempt/error r})))
+                           [aid rs])))]
+    {:asked (vec ids) :ran ran}))
+
 (defn task-files
   "The task files under dir (:seon.config.root/tasks-dir by default), read:
-  {owning-ns declarations or refusal}. A file's name is its owning namespace. Each work
+  {owning-ns declarations or error}. A file's name is its owning namespace. Each work
   task is followed by its merge task (seon.template/with-merge, over all files, so a need
   on another file's work task is a need on its merge), derived here and never written in
   a file."
@@ -82,7 +114,7 @@
 (defn load-tasks!
   "Reconcile the task files into main (seon.task/load-tx): new entries created held, changed
   ones updated, removed ones cancelled; unchanged ones write nothing. Answers the writer's
-  answer with the counts, or the refusal. Releasing stays run!'s."
+  answer with the counts, or the error. Releasing stays run!'s."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-tasks! sys nil))
   ([sys dir]
@@ -92,21 +124,129 @@
 (defn load-docs!
   "Load the wiki (the pages under dir of the checkout, docs by default) into main as section
   entities (seon.docs/load-tx): a changed section rewritten, a removed one retracted, an
-  unchanged wiki writing nothing. Answers the writer's answer with the counts, or the
-  :seon.docs/refused error naming a link to no section."
+  unchanged wiki writing nothing. Answers the writer's answer with the counts."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-docs! sys "docs"))
   ([sys dir]
    (write-declared! sys (docs/load-dir-tx @(:conn sys) (config/checkout) dir) {:pages (count (docs/pages (config/checkout) dir))} nil)))
 
 (defn problems
-  "Every problem recorded on main, by class (seon.problems/report): recorded errors counted
+  "Every open problem on main, by class (seon.problems/health): recorded errors counted
   by signature (:platform :eval :agent :effect) and attempts' red proofs, cost verdicts,
   merges, deaths, errors and waste, each row with its producer, owning namespace, evidence
-  as data, reproducing proofs and the tasks already answering it. Reads main and the api's fold (the true counts of repeats not yet on main); costs
-  the problems, not the program."
+  as data, reproducing proofs and the tasks already answering it; and what the program's
+  facts make true now (:dead-citation). Reads main and the api's fold (the true counts of
+  repeats not yet on main)."
   {:malli/schema [:=> [:cat :seon.root/sys] :seon.problems/report]}
-  [sys] (problems/report @(:conn sys) (root/errors sys)))
+  [sys] (problems/health @(:conn sys) (root/errors sys)))
+
+(defn- loader
+  "Which of main's loaders reads checkout path (relative): :docs (a page under docs/), :tasks
+  (a task file), :source (Seon's source, :seon.config.source/dirs), or nil."
+  {:malli/schema [:=> [:cat :string] [:maybe [:enum :docs :tasks :source]]]}
+  [path]
+  (let [under? (fn [dir] (str/starts-with? path (str dir "/")))]
+    (cond (and (under? "docs") (str/ends-with? path ".md")) :docs
+          (and (str/starts-with? (str (config/checkout) "/" path) (str (config/value :seon.config.root/tasks-dir) "/"))
+               (str/ends-with? path ".edn")) :tasks
+          (some under? (config/value :seon.config.source/dirs)) :source)))
+
+(def ^:private kinds "Main's loaders, each a kind of what changed on disk." #{:docs :tasks :source})
+
+(defn- load-kinds!
+  "Each of ks loaded into main once by its own loader: the wiki (load-docs!), the task files
+  (load-tasks!), Seon's source (seon.root/import-source!: main's program follows the tree,
+  imported only when it reads otherwise; none when root follows no source). Answers each
+  loader's answer and :opened, the derived problems the loads made true (seon.problems/caused
+  of main before and after)."
+  {:malli/schema [:=> [:cat :seon.root/sys [:set [:enum :docs :tasks :source]]] [:map [:loaded :map] [:opened [:set :string]]]]}
+  [sys ks]
+  (let [before @(:conn sys)
+        source (get-in sys [:bindings :source])
+        loaded (into {} (for [k (sort ks) :when (or (not= :source k) source)]
+                          [k (case k
+                               :docs (load-docs! sys)
+                               :tasks (load-tasks! sys)
+                               :source (root/import-source! sys source))]))]
+    {:loaded loaded :opened (problems/caused before @(:conn sys))}))
+
+(defn load-errors
+  "The typed errors among the answers of load-kinds! (a refused task file, a refused load): each
+  is to be recorded, never dropped."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [loaded] (filterv contract/error? (vals loaded)))
+
+(defn- git-refs
+  "The refs directory of the checkout's git repository (its common dir: a worktree's .git file
+  names its own git dir, whose commondir names the repository's), where a commit or merge on
+  any branch moves a ref; nil when the checkout is no git checkout."
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [co]
+  (let [dot (io/file co ".git")]
+    (cond (.isDirectory dot) (str (.getCanonicalPath dot) "/refs")
+          (.isFile dot) (let [gd (io/file (str/trim (str/replace-first (slurp dot) "gitdir:" "")))
+                              cd (io/file gd "commondir")]
+                          (str (.getCanonicalPath (if (.isFile cd) (io/file gd (str/trim (slurp cd))) gd)) "/refs"))
+          :else nil)))
+
+(defn watch-kinds
+  "What a watcher's batch makes root load: a changed path under checkout co by its loader, a
+  ref moved under refs (a commit or merge: the source), and every kind for a rescan or a
+  moved root (FSEvents coalesced or dropped what happened under it)."
+  {:malli/schema [:=> [:cat :string [:maybe :string] [:vector [:tuple :keyword :string]]] [:set [:enum :docs :tasks :source]]]}
+  [co refs batch]
+  (into #{} (mapcat (fn [[kind path]]
+                      (cond (#{:rescan :root} kind) kinds
+                            (and refs (str/starts-with? path (str refs "/"))) [:source]
+                            (str/starts-with? path (str co "/")) (keep identity [(loader (str/replace-first path (str co "/") ""))])
+                            :else [])))
+        batch))
+
+(defn watch!
+  "Root watches its checkout and its repository's refs (seon.watch, FSEvents: every writer,
+  a Claude session, an agent, the owner's editor, git). What changed while root was down is
+  boot's to load, as it always was: the wiki (seon.root/wiki-tx) and the source
+  (seon.root/import-source!); task files are loaded on their change, or by load-tasks!, never
+  at boot. Then each batch loads what it makes root load (watch-kinds),
+  and a batch that loads, its paths and any rescan are counted in root's :seon.root/watch fact. A
+  watcher that cannot start or dies is a :platform error on main (seon.root/platform-tx), and
+  root goes on unwatched: nothing falls back to a poll. Answers the watcher, or the error."
+  {:malli/schema [:=> [:cat :seon.root/sys] :any]}
+  [sys]
+  (let [co (config/checkout)
+        refs (git-refs co)
+        roots (vec (remove nil? [co refs]))
+        fact (fn [f] (root/transact-main! sys [{:seon.root/id :root :seon.root/watch f}]))
+        fresh {:roots roots :boot (:boot sys) :batches 0 :paths 0 :rescans 0}
+        held #(or (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) fresh)
+        died (fn [e] @(root/transact-main! sys (conj (root/platform-tx @(:conn sys) e (System/currentTimeMillis))
+                                                    {:seon.root/id :root :seon.root/watch (assoc (held) :error (:seon.error/message e))})))
+        w (watch/start! roots
+                        (fn [batch]
+                          (let [ks (watch-kinds co refs batch)
+                                rescan (last (filter (comp #{:rescan :root} first) batch))]
+                            ;; a batch no loader reads (root's own store under runs/, target/) writes
+                            ;; nothing, so root's writes never feed its watcher
+                            (when (seq ks)
+                              (let [{:keys [loaded opened]} (load-kinds! sys ks)]
+                                ;; a loader's typed error (a refused task file) is a recorded :platform error; the
+                                ;; problems the load made true are shown by health, and the last are kept in the fact
+                                (doseq [e (load-errors loaded)]
+                                  @(root/transact-main! sys (root/platform-tx @(:conn sys) e (System/currentTimeMillis))))
+                                @(fact (cond-> (-> (held) (update :batches inc) (update :paths + (count batch)) (assoc :last-opened (vec (sort opened))))
+                                         rescan (-> (update :rescans inc) (assoc :last-rescan {:kind (first rescan) :path (second rescan)}))))))))
+                        died)]
+    (if (contract/error? w)
+      (do (died w) w)
+      (do @(fact fresh) w))))
+
+(defn union
+  "Every branch's history as one db (seon.union): (d/q '[:find ... :where ...] (my.root/union
+  sys)) asks what happened across every branch; each datom's transaction names its branch
+  (:seon.tx/branch). Built at the first ask (about 1 s at 50k datoms), then kept current by
+  every commit (about 1 ms each)."
+  {:malli/schema [:=> [:cat :seon.root/sys] :seon.host/db]}
+  [sys] (:db @(root/union sys)))
 
 (defn generation
   "The next generation on main (seon.reconcile/generation): the last merges commit built,

@@ -37,15 +37,45 @@ Every entity id and every transaction id is issued once across the whole store: 
 
 **Content ids.** An entity with a program identity (`:form/id`, `:var/name`, `:ns/name`, `:method/key`, `:impl/key`, `:schema/key`, `:schema.file/path`: `{:seon.db/content-id true}` in seon.facts.edn, Datahike's `:db/contentId`) takes its id from its identity: `datahike.db.transaction/content-eid`, the hash of `[attribute value]` (hasch's uuid, Datahike's content hash: 17-19 us a call on Jolt, measured 2026-10-23) taken into `[ce0, emax]` = `[2^40, 2^60)`. Every branch that mints one identity mints one entity, so a merge carries its datoms as they are, with no remapping (owner's ruling 2026-10-23; notes/content-eids-2026-10-23.md). The partition, every id a fixnum: counter entity ids below `tx0` (2^29), transaction ids in `[tx0, 2^40)`, content ids above. Datahike mints them before anything resolves (`content-tempids`), so a ref to a tempid made before its entity map takes the content id too, and Seon's minting code is unchanged. An identity names its entity for good: asserting another value of it on that entity, a rename or a hash collision (about 4e-7 at a million identities), is refused `:entity-id/collision`, never merged. `:form/id` itself is now hasch's uuid of the namespace and text (it was Clojure's 32-bit `hash`). Cost, measured 2026-10-23 at 110k datoms: nodes written per commit 0.97x the counter's with 1 new identity, 1.51x with 2 and 4.50x with 10 (commit 3.4 -> 3.9, 3.8 -> 6.7, 8.2 -> 20.2 ms); commits that add no identity write the same. Proofs: `seon.db-test/an-identity-names-its-entity-on-every-branch`, `seon.db-test/content-ids-cost-the-writes-the-model-says`.
 
+**Several roots on one store.** Ids no longer stand in the way: every process maps the same page, so two roots issue distinct ids. Two things still do, so a store has one root:
+- **The branch roster.** `d/branch!` appends to it with a read and three writes under a lock of its own process only, so two processes branching at once can drop one branch from `d/branches` (task `seon.db/two-processes-branch-one-store-at-once`).
+- **Collection.** A root collects only as the store's only writer ([collection](#collection)), and it cannot see another root's live agents.
+
 A speculation (`d/with`) takes no ids. The fork server's replica of main applies each main commit as main's own transaction t (```seon.db/replay```), so its t is main's. Proofs: `seon.db-test/each-id-is-issued-once-across-branches`, `seon.db-test/a-reopened-store-issues-past-every-head`, and `bin/check ids` (two agents' processes). This replaced per-agent leases of entity ids, whose blocks held about 5,400 agents per store and whose transaction ids were per branch (two branches forked at one t gave their first transactions one id).
 
 ## Merges read what changed
 
 A merge decides what merges from the datoms that differ, never by reading whole programs. ```seon.merge/delta-three-way``` takes the datoms that differ between the merge base and each side (`datahike.api/datoms-diff`, which skips every subtree the two trees share by address), the program keys their entities bear on either side (```seon.merge/touched-keys```: a form's own key and its definitions', a definition's own and its form's, a schema entry's, declared data), and reads each key's content on base, ours and theirs by index seeks (```seon.merge/program-of```). It answers what `seon.merge/three-way` over three whole programs answers: every case of `seon.merge-test` checks both. The writer's merge and `:branch-diff`, an agent's `merge-main!`, a turn's contract gaps and `seon.merge/unmerged` read this way; ```seon.merge/program``` stays for tests and `mg/check`.
 
-What merges is then carried as it is (```seon.merge/merge-tx```, ```seon.merge/carried-tx```): the datoms the branch wrote for the keys that merge, with their own entity ids and transaction ids, its retractions first (so a card-one change writes no extra retraction under the merge's transaction), and the facts of the transactions that made them (their instants, their runtime). Ids are issued once across the store and identities take [content ids](#ids), so on main they name the same entities and transactions: a merge adds what the branch wrote, never a copy, and the same datom is one datom in every branch's history. Platform records (turns, evaluations, attempts) bear no program key, so they stay where they were written. The writer's octopus merge and an agent's `merge-main!` both merge this way; a conflict's unmerged entry is still written by the merge. Datahike keeps a carried datom's tx (`transact-add`, `transact-retract-datom`). Proof: `seon.merge-test/a-merge-carries-the-branchs-own-datoms`. This deleted `seon.merge/apply-tx` and its five setters (94 lines), which re-transacted each key's content by identity under the merge's transaction.
+What merges is then carried as it is (```seon.merge/merge-tx```, ```seon.merge/carried-tx```): the datoms the branch wrote for the keys that merge, with their own entity ids and transaction ids, its retractions first (so a card-one change writes no extra retraction under the merge's transaction), and the facts of the transactions that made them (their instants, their runtime). Ids are issued once across the store and identities take [content ids](#ids), so on main they name the same entities and transactions: a merge adds what the branch wrote, never a copy, and the same datom is one datom in every branch's history. Platform records (turns, evaluations, attempts) bear no program key, so they stay where they were written. The writer's octopus merge and an agent's `merge-main!` both merge this way; a conflict's unmerged entry is still written by the merge. Datahike keeps a carried datom's tx (`transact-add`, `transact-retract-datom`). Proof: `seon.merge-test/a-merge-carries-the-branchs-own-datoms`. This deleted the old apply-tx and its five setters (94 lines), which re-transacted each key's content by identity under the merge's transaction.
 
 Measured 2026-10-23 (notes/global-ids/MEASURED.md §5): on a 115k-datom main, a merge's three program reads took 6.6 s of 6.7 s. `seon.merge-cost-test/a-three-way-costs-the-changes-not-the-program` holds the three-way flat at about 7 ms from 100 to 10,000 forms, with one form changed on each side. That proof keeps a store on disk, because the in-memory test store gives index nodes no addresses, so a diff there shares nothing and reads everything.
+
+## The union
+
+Every datom any branch committed is held once in U, one ordinary Datahike db, and queried with plain `d/q`, `d/pull` and `d/entity` over `(d/history U)` (```seon.union```; root: `(my.root/union sys)`). Ids are issued once and identities take content ids ([ids](#ids)), and merges carry datoms as they are ([merges](#merges-read-what-changed)), so the union is a set union with nothing to resolve: an equal datom is the same datom. What is true now on one branch stays that branch's head; U answers what happened across branches, and each datom's transaction names its branch (`:seon.tx/branch`, in every transaction's tx-meta, ```seon.db/tx-meta```). U holds assertions in its current indexes and retractions in its temporal ones, and its schema lifts every attribute to cardinality many with no uniqueness (```seon.union/lifted-schema```), since constraints belong to a branch.
+
+Root's writer keeps it: built when first asked (`:union`; main's history, then each branch from its merge base), then every main commit and every agent's commit notice adds that branch's datoms since the commit U holds (```seon.union/catch-up```: the datoms that differ, by `datoms-diff`, with the branch's retractions from its history). No poll: U moves when a commit does.
+
+The owner's example, root's message on main and the agent's reply on its branch, is one query (`seon.union-test/conversation`):
+
+```clojure
+(d/q '[:find ?body ?reply ?branch :in $ ?agent
+       :where [?m :seon.message/to ?agent] [?m :seon.message/id ?id] [?m :seon.message/body ?body]
+              [?r :seon.message/reply-to ?id ?tx] [?r :seon.message/body ?reply] [?tx :seon.tx/branch ?branch]]
+     (my.root/union sys) "demo/f#1")
+```
+
+Measured 2026-10-23 (REPL, LMDB, main 46,708 datoms, each branch one turn of ~15 datoms; notes/global-ids/bench/um.clj):
+
+| | 10 branches | 100 branches |
+|---|---|---|
+| build: main's history, then each branch | 991 ms | 1,274 ms (about 3 ms a branch) |
+| keeping it current: one branch's commit | 0.93 ms | 1.30 ms |
+| one agent's conversation | 0.75 ms | 0.63 ms |
+| every conversation | 0.87 ms | 4.2 ms (100 rows) |
+
+U lives in root's writer, in memory: about main's history plus what branches add. Persisting it under one store key, so a booted root does not rebuild it, waits until a measurement asks; the rebuild is about 1 s at 50k datoms. Proofs: `seon.union-test/a-message-and-its-reply-on-two-branches-are-one-query`, `seon.procs-test/the-writer-keeps-the-union-current`.
 
 ## History
 
@@ -95,18 +125,21 @@ Measured on 5,006 real eval records: jfasl is the same size as EDN text (4.65 vs
 
 ## Collection
 
-Root collects the store while it is the store's only writer: at quiescence, with no agent live. The reconciler asks once per quiet spell (```seon.reconcile/quiet```), root refuses while an agent is live (`seon.root/api-proc`, `:collect`), and the writer runs ```seon.db/collect!```:
-- When a branch named in main's `:seon.root/collected` record is gone, it runs `datahike.api/gc-storage`. A new main with no record yet only records the branches it sees: every check step boots a new main on one store of hundreds of branches, and a full sweep at its first quiescence held its spawns behind root's writer for seconds (scale 8.2 s to ready). That sweeps every key no branch reaches: nodes, and the values out of line that the mark keeps while a tree reaches them.
+Root collects the store while it is the store's only writer: at quiescence, with no agent live (owner, 2026-10-22, simplest first), and only when no other root writes the store. The reconciler asks once per quiet spell (```seon.reconcile/quiet```), root refuses while an agent is live (`seon.root/api-proc`, `:collect`), and the writer runs ```seon.db/collect!```:
+- When `:seon.config.store/sole-writer?` is false, it sweeps nothing and records nothing (`{:skipped true :shared true}`). The key is false under the `:scripted` profile, which is the profile of bin/test's shards and bin/check's steps, whose roots share one store. Production runs one root per store (task `seon.db/two-processes-branch-one-store-at-once`).
+- When a branch named in main's `:seon.root/collected` record is gone, it runs `datahike.api/gc-storage`. A new main with no record yet only records the branches it sees: every check step boots a new main on one store of hundreds of branches, and a full sweep at its first quiescence held its spawns behind root's writer for seconds (scale 8.2 s to ready, 2026-10-22). That sweeps every key no branch reaches: nodes, and the values out of line that the mark keeps while a tree reaches them.
 - When branches were only added, it records them as seen and sweeps nothing. So a branch that exists at one quiescence and is gone at a later one gets reclaimed.
 - The record (`{:swept :ms :branches :gone}`) is committed on main through the writer's batch.
 
-Seon's `:sync` writer runs the collection itself, not as a transaction (fork `594815d`). Proofs: `seon.db-test/a-collection-runs-when-a-branch-is-gone`, `seon.db-test/gc-runs-through-the-sync-writer`, `seon.procs-test/a-collection-waits-until-no-agent-is-live`, `seon.reconcile-test/quiescence-is-reported-when-nothing-can-move`.
+Seon's `:sync` writer runs the collection itself, not as a transaction (fork `594815d`). Proofs: `seon.db-test/a-collection-runs-when-a-branch-is-gone`, `seon.db-test/a-root-that-shares-its-store-never-collects`, `seon.db-test/gc-runs-through-the-sync-writer`, `seon.procs-test/a-collection-waits-until-no-agent-is-live`, `seon.reconcile-test/quiescence-is-reported-when-nothing-can-move`.
 
 History is kept, so garbage comes from deleted branches: check and test mains, which the run that made them deletes (```seon.db/delete-main!```). Measured on a copy of a kept store (297 branches, 159,152 keys), a full collection took 11 s and swept 5,148 keys (3%). On a fresh root's store, a deleted branch was reclaimed at the next quiescence (19 keys, 488 ms).
 
 Why only with no agent live: every commit is one LMDB write transaction (nodes, values, commit record and head), and LMDB's writer lock serializes commits from every process. But a commit can reuse a value out of line that the store held when its node was flushed. A collection running at that moment could sweep the value, because no branch reached it. Collecting concurrently would need a mark outside the lock, then a short delta mark and sweep inside one write transaction, plus commits that re-assert reused values in their own transaction. Collecting beside live agents is not built.
 
-A live agent holds its branch: root refuses a second spawn on a branch a live agent holds, and caps the live agents at `:seon.config.root/max-agents` ([root](root.md#holders-and-spawn-refusals)).
+A live agent holds its branch: root refuses a second spawn on a branch a live agent holds, and caps the live agents at `:seon.config.root/max-agents` ([root](root.md#holders-and-refused-spawns)).
+
+Why only as the only writer: Datahike's collection sees the in-flight commits of its own process only (`datahike.gc/gc-storage!`'s safe point). A commit in another process can find a value stored, and then that value is swept before its commit lands. Or its nodes can be written before the cutoff but land after the mark. Neither was reproduced at n = 100 (`notes/store-gc-bug-2026-10-23.md`). One hole was a real bug, and it is fixed in [our Datahike](forks.md) (`jolt/gc-cache-epoch`). The node cache keeps a value's key under its datom, and that key is trusted only in the collection generation it was found in. `gc-storage!` counts up the store's generation (`datahike.index.interface/collection-key`) after its sweep, so every process asks the store again. Before the fix, an [e a v] reused after a collection (a dropped main's ids are minted again) named a value the sweep had deleted, and its node failed on read with `:value-not-found`. Proof: `datahike.test.gc-value-key-test`.
 
 ## Compiled code
 

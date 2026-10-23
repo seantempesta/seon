@@ -67,21 +67,21 @@
                                                                   :seon.task/proofs #{'demo-test/f-test}}]))
                               "demo/f"))
 
-(deftest a-refusal-and-a-run-error-reach-the-context
+(deftest a-reason-and-a-run-error-reach-the-context
   (let [db (db-with-program)
         t (task-f db)
         ;; the done rule refused beyond the task's own proof: a regression, a stray red, a
         ;; contract gap; the run named one failing assertion of each red test
-        refusals [{:refusal :proof-red :symbol 'demo-test/f-test} {:refusal :regression :symbol 'demo-test/g-test}
-                  {:refusal :stray-red :symbol 'user/scratch-test} {:refusal :contract-gap :symbol 'demo/helper}]
+        reasons [{:reason :proof-red :symbol 'demo-test/f-test} {:reason :regression :symbol 'demo-test/g-test}
+                  {:reason :stray-red :symbol 'user/scratch-test} {:reason :contract-gap :symbol 'demo/helper}]
         reds [{:test 'demo-test/g-test :type :fail :expected "(= 1 (g))" :actual "(not (= 1 0))" :got "(= 1 0)"}]
         block (context/current-state db t {:results {'demo-test/f-test :fail 'demo-test/g-test :fail} :reds reds
-                                           :refusals refusals :turn 1 :max-turns 4
+                                           :reasons reasons :turn 1 :max-turns 4
                                            :run-errors ["namespace app-test did not load: Unable to resolve symbol: g"]})]
-    (testing "every refusal but the task's own red proof (shown with the proofs), each with what explains it"
-      (is (= [{:refusal :regression :test 'demo-test/g-test :failures [{:assert "(= 1 (g))" :got "(= 1 0)"}]}
-              {:refusal :stray-red :test 'user/scratch-test}
-              {:refusal :contract-gap :vars ['demo/helper]}]
+    (testing "every reason but the task's own red proof (shown with the proofs), each with what explains it"
+      (is (= [{:reason :regression :test 'demo-test/g-test :failures [{:assert "(= 1 (g))" :got "(= 1 0)"}]}
+              {:reason :stray-red :test 'user/scratch-test}
+              {:reason :contract-gap :vars ['demo/helper]}]
              (:refused block))))
     (testing "a run that failed as a whole is said, not read as tests not run"
       (is (= {:failed ["namespace app-test did not load: Unable to resolve symbol: g"]} (:test-run block)))
@@ -94,11 +94,11 @@
         (is (re-find #":regression" text))
         (is (re-find #"did not load" text))))
     (testing "a design step that has not improved its plan is told what it lacks and the call that does it"
-      (let [b (context/current-state db t {:results {} :refusals [{:refusal :no-design}] :turn 1 :max-turns 4})]
+      (let [b (context/current-state db t {:results {} :reasons [{:reason :no-design}] :turn 1 :max-turns 4})]
         (is (= [[:no-design :seon.task/plan 'my.task/update!]]
-               (mapv (juxt :refusal :unchanged (comp first :do)) (:refused b))))))
+               (mapv (juxt :reason :unchanged (comp first :do)) (:refused b))))))
     (testing "nothing refused, nothing failed: no section"
-      (let [b (context/current-state db t {:results {'demo-test/f-test :pass} :refusals [] :turn 1 :max-turns 4 :run-errors []})]
+      (let [b (context/current-state db t {:results {'demo-test/f-test :pass} :reasons [] :turn 1 :max-turns 4 :run-errors []})]
         (is (not-any? #(contains? b %) [:refused :test-run :flagged :your-last-reply]))))))
 
 (deftest a-repair-is-shown-next-turn
@@ -132,14 +132,21 @@
     (eval '(ns ctx-calc-test (:require [clojure.test :refer [deftest is]] [ctx-calc :refer [square]])))
     (eval '(deftest square-test (is (= 9 (square 3))))))
   (let [db (d/db-with (db-with-program)
-                      (vec (mapcat (fn [[v src]]
-                                     [{:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)}
-                                      {:db/id (str "form " v) :form/id (str v) :form/src src :form/ns (str "ns " (namespace v)) :form/order 0
-                                       :form/defines [(str v)]}
+                      ;; as the compiler records them: each form's resolved references (:form/refs)
+                      (vec (mapcat (fn [[v src refs facts]]
+                                     [(merge {:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)} facts)
+                                      (cond-> {:db/id (str "form " v) :form/id (str v) :form/src src :form/ns (str "ns " (namespace v)) :form/order 0
+                                               :form/defines [(str v)]}
+                                        (seq refs) (assoc :form/refs refs))
                                       {:db/id (str "ns " (namespace v)) :ns/name (symbol (namespace v))}])
-                                   '[[ctx-calc/square "(defn square \"Squares x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))"]
-                                     [ctx-calc-test/square-test "(deftest square-test (is (= 9 (square 3))))"]
-                                     [ctx-calc-test/empty-test "(deftest empty-test (square 3))"]])))
+                                   '[[ctx-calc/square "(defn square \"Squares x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))" [clojure.core/*]
+                                      {:var/kind :fn :var/contract "[:=> [:cat :int] :int]" :var/doc "Squares x."}]
+                                     ;; a branch's function in a namespace this process never loaded
+                                     [ctx-ghost/half "(defn half {:malli/schema [:=> [:cat :int] :int]} [x] (quot x 2))" [clojure.core/quot]
+                                      {:var/kind :fn :var/contract "[:=> [:cat :int] :int]"}]
+                                     [ctx-calc-test/square-test "(deftest square-test (is (= 9 (square 3))))" [clojure.test/is ctx-calc/square ctx-ghost/half]
+                                      {:var/kind :test}]
+                                     [ctx-calc-test/empty-test "(deftest empty-test (square 3))" [ctx-calc/square] {:var/kind :test}]])))
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'ctx :seon.task/name "sq" :seon.task/plan "p"
                                                :seon.task/proofs #{'ctx-calc-test/square-test 'ctx-calc-test/cube-test 'ctx-calc-test/empty-test}}]))
         ;; the test child's report of the failing assertion, as clojure.test makes it
@@ -150,9 +157,10 @@
         by (into {} (map (juxt :test identity)) (:proofs block))]
     (is (= [{:assert "(= 9 (square 3))" :got "(= 9 6)"}] (:failures (by 'ctx-calc-test/square-test)))
         "the assertion once, and what it evaluated to")
-    (is (= [{:var 'ctx-calc/square :arglists '([x]) :contract [:=> [:cat :int] :int] :doc "Squares x."}]
+    (is (= [{:var 'ctx-calc/square :contract [:=> [:cat :int] :int] :doc "Squares x."}
+            {:var 'ctx-ghost/half :contract [:=> [:cat :int] :int]}]
            (:calls (by 'ctx-calc-test/square-test)))
-        "the program function the red proof calls, at summary level")
+        "the program functions the red proof calls, at summary level from their facts: one in a namespace never loaded too")
     (is (= {:test 'ctx-calc-test/cube-test :status :undefined} (by 'ctx-calc-test/cube-test))
         "a proof not written yet says so")
     (is (= :no-assertions (:status (by 'ctx-calc-test/empty-test))) "a proof that ran and asserted nothing says so")
@@ -211,7 +219,7 @@
                                                    :seon.task/proofs #{'demo-test/f-test}}]))
         observed {:results {'demo-test/f-test :fail} :run-errors []
                   :reds [{:test 'demo-test/f-test :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))" :got "(= 6 4)"}]
-                  :refusals [{:refusal :proof-red :symbol 'demo-test/f-test} {:refusal :contract-gap :symbol 'demo/helper}]}
+                  :reasons [{:reason :proof-red :symbol 'demo-test/f-test} {:reason :contract-gap :symbol 'demo/helper}]}
         basis (fn [db n] {:commit (d/commit-id db) :task "demo/f" :attempt "demo/f#1" :turn n :max-turns 4 :origin :model :observed observed})
         record! (fn [b more] (d/transact conn [(merge {:seon.turn/id (str "demo/f#1/" (:turn b)) :seon.turn/attempt "demo/f#1"
                                                        :seon.turn/n (:turn b) :seon.turn/origin :model :seon.turn/basis b
@@ -372,7 +380,7 @@
       (d/transact conn (program-facts '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))" []]]))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/f``` triple."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-      (let [observed {:results {'demo-test/f-test :fail} :run-errors [] :reds [] :refusals [{:refusal :proof-red :symbol 'demo-test/f-test}]}
+      (let [observed {:results {'demo-test/f-test :fail} :run-errors [] :reds [] :reasons [{:reason :proof-red :symbol 'demo-test/f-test}]}
             request (fn [n] (let [db @conn
                                   b {:commit (d/commit-id db) :task "demo/f" :attempt "demo/f#1" :turn n :max-turns 4 :origin :model :observed observed}
                                   ms (:messages (context/render db b))]
@@ -495,6 +503,68 @@
         refs (:references (context/current-state db (task/task db "demo/u") {:turn 0 :max-turns 4}))]
     (is (= ['demo/f] (keep :symbol refs)) "the resolved name as itself")
     (is (= {:unresolved ['demo/x 'demo/y] :problem (:unresolved seon.ref/problem-messages)} (last refs)) "the others, one problem")))
+
+(deftest an-error-shows-what-its-contract-says
+  ;; a contract refusal is data (its problems, the fix): the transcript shows that, not only
+  ;; the message (the step E dry run's agent read "invalid-input: its arguments do not
+  ;; satisfy its contract" with no word of which, 2026-10-22)
+  (let [em {:seon.error/type :seon.instrument/contract-error :seon.error/operation 'seon.e2e/agents-reused
+            :seon.error/member :malli.core/invalid-output
+            :seon.error/message "seon.e2e/agents-reused invalid-output: its value does not satisfy its contract"
+            :seon.error/fix "Fix seon.e2e/agents-reused (the producer), or its contract."
+            :seon.error/problems [{:path [0] :in [0] :expected :keyword :value nil}]}
+        text (context/evaluations-text [{:id 0 :tag :err :form "(seon.e2e/agents-reused db)" :printed (:seon.error/message em) :err em}])]
+    (is (str/includes? text ":expected :keyword") text)
+    (is (str/includes? text "Fix seon.e2e/agents-reused") text)
+    (is (= 1 (count (re-seq #"its value does not satisfy" text))) "the message once")))
+
+(deftest a-turns-reasoning-goes-back-with-its-reply
+  ;; DeepSeek's thinking mode with tools needs each earlier reply's reasoning_content sent back
+  ;; (a 400 otherwise): the scrollback's assistant message carries the turn's recorded reasoning
+  (let [db (db-with-program)
+        block (context/current-state db (task-f db) {:turn 1 :max-turns 4})
+        msgs (context/messages "H" block [{:attempt "A" :reply "f triples." :reasoning "Square it first."
+                                           :calls [{:id "c1" :code "(f 3)" :evals "9"}]}])
+        assistant (first (filter #(= "assistant" (:role %)) msgs))]
+    (is (= "Square it first." (:reasoning assistant)))
+    (is (not-any? :reasoning (remove #{assistant} msgs)))))
+
+(deftest an-unknown-proof-says-what-to-write
+  ;; a proof with no result: the refusal names the deftest to write in its namespace and how
+  ;; to run it (the dry run's agents read `{:reason :proof-unknown}` and searched for 25 turns)
+  (let [db (db-with-program)
+        b (context/current-state db (task-f db) {:results {} :reasons [{:reason :proof-unknown :symbol 'demo-test/f-test}] :turn 1 :max-turns 4})
+        r (first (:refused b))]
+    (is (= :proof-unknown (:reason r)))
+    (is (= 'demo-test/f-test (:test r)))
+    (is (re-find #"deftest f-test" (pr-str (:do r))) (pr-str r))
+    (is (re-find #"run-test" (pr-str (:do r))) (pr-str r))))
+
+(deftest a-turn-says-what-it-ran-what-the-judge-and-the-merge-run
+  ;; root's ruling (a), 2026-10-22: a turn runs the proofs and the tests the branch changed;
+  ;; the judge runs the reached in-process set at the attempt's end; the merge runs the
+  ;; process tests. The turn says each, and what runs the rest
+  (let [db (db-with-program)
+        b (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4
+                                                  :tests {:this-turn 2 :at-judge 40 :when-asked 3 :unfinished 1}})]
+    (is (= {:this-turn 2 :at-judge 40 :when-asked 3 :unfinished 1
+            :unfinished-run '(my.agent/prove) :judge-runs '(my.agent/prove) :root-runs '(my.agent/deferred)}
+           (:tests b)))
+    (is (nil? (:tests (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4}))) "not measured: nothing said")))
+
+(deftest the-map-names-each-cited-namespaces-functions
+  ;; root's research, lever 1 (aider's ranked repo map; v1 R4: naming the helpers took 7/32
+  ;; green to 22/24): the attempt shows the functions of the namespaces its proofs and cited
+  ;; vars live in, each a line (arglists, first sentence), most referenced first, within its
+  ;; token budget, and the form that lists the rest. Step E's runs 1-5: designs spent 15-25
+  ;; turns reading sources one pair at a time before writing anything
+  (let [db (db-with-program)
+        m (context/ns-map db '[demo/f demo-test/f-test])]
+    (is (= '[demo demo-test] (mapv :ns m)))
+    (is (= '[demo/f] (mapv :symbol (:vars (first m)))))
+    (is (= "Doubles." (:summary (first (:vars (first m))))))
+    (is (= '(clojure.repl/dir demo) (:all (first m))))
+    (is (= '#{demo-test/f-test demo-test/g-test} (set (map :symbol (:vars (second m))))))))
 
 (deftest a-cited-task-shows-its-plan-at-that-depth
   ;; wiki audit 2026-10-23 R4: a plan citing another task by its ns/name sees that task's

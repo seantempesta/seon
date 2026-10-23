@@ -10,7 +10,7 @@
   `:seon.db/*` properties, entity maps that declare their members (`:seon.db/attributes`),
   and one explicit plain-data slot (`{:seon.db/data true}`). Cut: Seon's vector cells and Datalog lowering, the
   projection (a registry generation), render-pair properties, secondary indexes, tuples, and
-  the automatic EDN codec for unions (see ../notes/archive/option3-D1-schema-datahike.md).
+  the automatic EDN codec for unions (see notes/archive/option3-D1-schema-datahike.md).
 
   Pure derivation over a Malli registry: no connection, no transaction. The store's owner
   transacts what `declarations` answers.
@@ -58,10 +58,10 @@
 
 (defn- refused
   {:malli/schema [:=> [:cat :qualified-keyword :any] :map]}
-  [reason form] {:refusal [reason form]})
+  [reason form] {:invalid [reason form]})
 
 (defn- storage
-  "What `node` stores: {:type :card :props}, or {:refusal [reason form]}. `active` is
+  "What `node` stores: {:type :card :props}, or {:invalid [reason form]}. `active` is
   the set of registry names being dereferenced (a cycle refuses)."
   {:malli/schema [:=> [:cat :seon.host/schema [:set :any]] :map]}
   [node active]
@@ -84,7 +84,7 @@
 
       (= :set t)
       (let [child (storage (first (m/children node)) active)]
-        (cond (:refusal child) child
+        (cond (:invalid child) child
               (= :many (:card child)) (refused ::nested-collection (m/form node))
               :else (assoc child :card :many :props props)))
 
@@ -120,8 +120,8 @@
   {:malli/schema [:=> [:cat :seon.host/registry :qualified-keyword] :boolean]}
   [registry attribute]
   (boolean (when-let [root (mr/schema registry attribute)]
-             (let [{:keys [refusal type]} (storage root #{attribute})]
-               (and (nil? refusal) (some? type))))))
+             (let [{:keys [invalid type]} (storage root #{attribute})]
+               (and (nil? invalid) (some? type))))))
 
 ;; ---- one attribute ----------------------------------------------------------------
 
@@ -131,9 +131,9 @@
   {:malli/schema [:=> [:cat :seon.host/registry :qualified-keyword] [:or :seon.schema/declaration :seon.schema/unstorable]]}
   [registry attribute]
   (let [root (mr/schema registry attribute)
-        {:keys [type card props refusal]} (if root (storage root #{attribute}) (refused ::absent attribute))]
-    (if refusal
-      (let [[reason form] refusal]
+        {:keys [type card props invalid]} (if root (storage root #{attribute}) (refused ::absent attribute))]
+    (if invalid
+      (let [[reason form] invalid]
         (error :seon.schema/unstorable 'seon.schema.datahike/declaration (reasons reason)
                {:seon.schema/attribute attribute :seon.schema/reason reason :seon.schema/form form}))
       (cond-> {:db/ident attribute :db/valueType type

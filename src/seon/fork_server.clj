@@ -13,17 +13,18 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program] [seon.db :as pdb]
             [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]
-            [jolt.deps] [clojure.edn :as edn]))
+            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx]))
 
 (defn- reap
-  "Every child that exited, as :exit events (non-blocking waitpid)."
-  {:malli/schema [:=> [:cat :map] [:vector :seon.fork-server/event]]}
+  "Every child that exited, as :exit events (non-blocking waitpid), and st without them in
+  its :children. Answers [st events]."
+  {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :seon.fork-server/event]]]}
   [st]
-  (loop [evs []]
+  (loop [st st evs []]
     (let [pid (lib/c-waitpid-nb -1 (:status-buf st) 1)]
       (if (pos? pid)
-        (recur (conj evs {:ev :exit :pid pid :status (lib/decode-status (ffi/read (:status-buf st) :int))}))
-        evs))))
+        (recur (update st :children disj pid) (conj evs {:ev :exit :pid pid :status (lib/decode-status (ffi/read (:status-buf st) :int))}))
+        [st evs]))))
 
 (declare main)
 
@@ -44,28 +45,46 @@
   ([] {:ins {:cmd "main's commits and fork requests, FIFO; :tick when idle"} :outs {:ev "events for root"}
        :workload :io
        :ping-map-fn (fn [st] {:t (:max-tx (:db st)) :mismatch (:mismatch st)})})
-  ([{:keys [db conn]}] {:db db :mismatch 0 :conn conn :status-buf (ffi/alloc 4)})
-  ([st _] st)
+  ;; :graph, main's reach graph (seon.program/reach-graph) for :db as of the last fork, handed
+  ;; to every agent forked (seon.agent/base-graph); a standby inherits it
+  ([{:keys [db cfg store conn graph]}] (cond-> {:db db :cfg cfg :store store :mismatch 0 :conn conn :status-buf (ffi/alloc 4) :children #{}} graph (assoc :graph graph)))
+  ;; stop (root closed its end, or died): every child (agents, the standby) killed and reaped
+  ;; before this process exits, so root's waitpid of this server is the end of every one of
+  ;; them. An agent that had closed its socket but not yet exited was handed to launchd when
+  ;; root SIGKILLed the server first, and outlived stop! (bin/check lifecycle's :left,
+  ;; notes/pure-tests/lifecycle.md)
+  ([st tr]
+   (when (= tr ::flow/stop)
+     (doseq [pid (:children st)] (lib/c-kill pid 9) (lib/c-waitpid pid (:status-buf st) 0)))
+   st)
   ([st _ m]
    (case (:op m)
-     :tick [st {:ev (reap st)}]
+     :tick (let [[st evs] (reap st)] [st {:ev evs}])
      :tx (if (<= (:t m) (:max-tx (:db st)))
            [st nil] ; already in the db this server was forked with
            (let [t0 (profile/now-ns)
-                 ;; main's commit as main's own transaction t (seon.db/replay)
-                 db' (pdb/replay (:db st) (:t m) (:tx-data m) (:tx-meta m {}))
+                 ;; main at t is the commit the writer made, read from the store (lazy over its
+                 ;; persistent indexes), never its datoms replayed here: replaying a 42,942-datom
+                 ;; import took 3.5 s, and the first fork waited behind it (2026-10-23)
+                 db' (d/commit-as-db (:store st) (:commit m))
                  st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled
                  errs (seq (program/load-changes! db' (:tx-data m)))]
              [st {:ev (cond-> [] errs (conj {:ev :load-errors :t (:t m) :errors (vec errs)})
                         true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (profile/ms-since t0)
                                     :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}]))
-     :fork (let [t0 (profile/now-ns)]
-             (fork-carrying! st #(repl/run! % m (:db st) (:ns m))
+     :fork (let [t0 (profile/now-ns)
+                 ;; main's reach graph brought to :db when a fork needs it, not at each commit: the
+                 ;; first fork builds it, a later one updates it by the commits since (reach-update)
+                 st (assoc st :graph (if-let [g (:graph st)]
+                                       (program/reach-update g (:db st))
+                                       (program/reach-graph (:db st) (fx/declared-refs (cfg/value :seon.config.root/system-path)))))]
+             (fork-carrying! st #(repl/run! % (assoc m :graph (:graph st)) (:db st) (:ns m))
                              (fn [n] [st {:ev [{:ev :fork-failed :agent (:agent m) :active-threads n}]}])
-                             (fn [pid] [st {:ev (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
-                                                        :fork-ms (profile/ms-since t0) :t (:max-tx (:db st))}]
-                                                      (reap st))}])))
+                             (fn [pid] (let [[st evs] (reap (update st :children conj pid))]
+                                         [st {:ev (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
+                                                          :fork-ms (profile/ms-since t0) :t (:max-tx (:db st))}]
+                                                        evs)}]))))
      :stats [st {:ev [{:ev :stats :t (:max-tx (:db st)) :datoms (count (d/datoms (:db st) :eavt))
                        :mismatch (:mismatch st) :mem-mb (lib/r2 (lib/real-mb)) :os-threads (lib/nthreads)
                        :active-threads (lib/active-threads)}]}]
@@ -73,11 +92,11 @@
      ;; a standby (session F2): a fork of this server, idle on its own named pipes until root
      ;; promotes it, so that no fork after boot ever comes from root (multithreaded).
      ;; The previous standby is killed: one standby at a time.
-     :standby (fork-carrying! st #(main (:db st) % false)
+     :standby (fork-carrying! st #(main (:db st) (:cfg st) % false (:graph st))
                               (fn [n] [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads n}]}])
                               (fn [pid] (when-let [old (:standby-pid st)] (lib/c-kill old 9))
-                                [(assoc st :standby-pid pid)
-                                 {:ev (into [{:ev :standby :gen (:gen m) :pid pid :t (:max-tx (:db st))}] (reap st))}]))
+                                (let [[st evs] (reap (-> st (assoc :standby-pid pid) (update :children conj pid)))]
+                                  [st {:ev (into [{:ev :standby :gen (:gen m) :pid pid :t (:max-tx (:db st))}] evs)}])))
      [st nil])))
 
 (defn- dev-classpath!
@@ -98,19 +117,24 @@
   that every agent, test child and clone inherits; a standby (boot? false) stays in it.
   EOF on the socket is root's death: the server kills the group, itself included. Never
   returns."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.lib/fd :boolean] :any]}
-  [db0 fd boot?]
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd :boolean] :any] [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd :boolean [:maybe :map]] :any]]}
+  ([db0 cfg fd boot?] (main db0 cfg fd boot? nil))
+  ([db0 cfg fd boot? graph]
   ;; every agent forked from here works in the scratch dir, with no repository above it: an
   ;; agent changes code through its REPL and git finds nothing (owner, 2026-10-22)
   (when boot? (lib/c-setpgid 0 0) (dev-classpath!)
     (let [dir (get cfg/config :seon.config.agent/cwd)] (.mkdirs (java.io.File. dir)) (lib/c-chdir dir)))
+  ;; it reads main's commits from the store itself, opened as an agent opens it
+  ;; (seon.db/after-fork!): the parent's handles are not used across fork
+  (pdb/after-fork! cfg)
   (let [conn (sock/conn fd)
+        store (d/connect (assoc cfg :branch (pdb/main-branch cfg)))
         recv! (fn [] (let [m (sock/recv-within! conn 100)]
                        (case m :eof nil :timeout [:cmd {:op :tick}] [:cmd m])))]
-    (step/run-loop #'server-step {:db db0 :conn conn}
+    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :graph graph}
                    recv! (fn [_ m] (sock/send! fd m)))
     (lib/c-kill 0 9)
-    (lib/c-exit 0)))
+    (lib/c-exit 0))))
 
 ;; ---- root's side: the :fork-server proc (proto/flow f2-final proto.control) ----------
 
@@ -131,12 +155,13 @@
     (.setDaemon true) (.start)))
 
 (defn fork-server
-  "Fork the boot fork server holding db (lib/fork!: boot has one active thread; another is
-  a defect, thrown). In the child it never returns; here answers {:pid :fd}."
-  {:malli/schema [:=> [:cat :seon.host/db] :seon.fork-server/forked]}
-  [db]
+  "Fork the boot fork server holding db, on the store cfg names (lib/fork!: boot has one
+  active thread; another is a defect, thrown). In the child it never returns; here answers
+  {:pid :fd}."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.db/cfg] :seon.fork-server/forked]}
+  [db cfg]
   (let [[r s] (sock/socketpair)]
-    (lib/fork! {:fd s :child #(do (sock/close! r) (main db s true))
+    (lib/fork! {:fd s :child #(do (sock/close! r) (main db cfg s true))
                 :refused #(throw (ex-info "the fork server cannot fork: root boots with more than one thread"
                                           {:seon.error/type ::not-single-threaded :active-threads %}))
                 :parent (fn [pid] {:pid pid :fd r})})))
@@ -162,14 +187,16 @@
     (sock/close! (:fd sb))))
 
 (defn- release!
-  "Release what init opened: kill the server and its standbys, join the event reader, and
-  reap the server when it is root's child (the boot server; a promoted one is not). nil."
+  "Release what init opened: its standbys killed; the server's socket closed for writing,
+  so the server reads EOF, kills and reaps every child (server-step's stop) and exits; its
+  exit awaited when it is root's child (the boot server; a promoted one is not); then the
+  event reader joined, whose EOF follows. nil."
   {:malli/schema [:=> [:cat :map] :nil]}
-  [{:keys [pid reader] :as st}]
-  (some-> pid (lib/c-kill 9))
+  [{:keys [pid fd reader] :as st}]
   (drop-standby (:standby st)) (drop-standby (:standby-pending st))
-  (some-> ^Thread reader (.join 5000))
+  (lib/c-shutdown fd 1) ; SHUT_WR
   (some-> pid (lib/c-waitpid (ffi/alloc 4) 0))
+  (some-> ^Thread reader (.join 5000))
   nil)
 
 (defn- promote

@@ -21,6 +21,12 @@ A list shown in part is one call, `seon.print/bounded` (items, its bound's confi
 
 A render's budget, when its env names none, is config too: `:seon.config.render/value-budget` for a value, `:seon.config.render/root-context-budget` for root's context (`seon.render.ai/system`) and `:seon.config.render/history-row-budget` for each evaluation in an agent's history.
 
+## The frame and its units
+
+A page is a layout (the declared render of `:seon.render/system` or `:seon.render/agent-page`) answering a skeleton with a slot per part, and `:seon.render/units`: each part's id, the exact value it reads (its input) and that input's schema (`:schema`), whose declared render shows it (`seon.render/html`). A part is declared on its value's schema like any other render: `:seon.render/swarm`, `:seon.render/work`, `:seon.render/procs-health`, `:seon.render/zoom-head`, … in `resources/seon/schemas/seon.render.edn`; a unit never names a render function. The render proc (`seon.render.proc`) renders a unit when its input changed and patches it when its bytes changed. Two units still name a render function, `events-list` and `history-list`, each around rows serialized ahead; jolt/printer-eval makes their rows ordinary units, and then a unit's `:render` goes.
+
+The frame is the one part with no value behind it: the document (`seon.web/page-doc`), its head and scripts (`seon.render.ui/shell`, with the theme's and Esc's inline script) and the top bar (`seon.render.ui/topbar`). It is fixed hiccup, the same on every page, served once with the page; nothing in it changes with the system, so nothing patches it. A part that shows something the system holds is never added to the frame.
+
 ## Tiles are data; the context reads the page's derivations
 
 Every dashboard tile is `seon.render.ui/metric-tile` over a map (`:kicker`, `:sub` or `:pill`, `:big` and `:unit`, `:series` and `:tone`, a `:body`, `:rows` of `[dt dd title class]`, `:explain`), so a new tile is a map. The writer, fork server and main are `seon.render.ui/load-tiles`, which root's context (`seon.render.ai`) prints as one line each. Each fact the page and the context both show has one producer they share:
@@ -33,7 +39,7 @@ Every dashboard tile is `seon.render.ui/metric-tile` over a map (`:kicker`, `:su
 - **How an agent is:** `seon.render.ui/shown-status` and `seon.render.ui/ended-as` (an agent's card and its stream's stop events alike); its newest events are the stream's own words (`seon.render.ui/event-detail`); a cost verdict's lines are `seon.cost/verdict-lines`.
 - **A proc's defect line** is `seon.render.ui/proc-health`: the health tile lists every proc by it, the effect owners among them.
 - **Runs, merges and evaluations:** a test run's words are `seon.render.ui/run-words` and its redness `seon.proofs/red?`; a merge's result is `seon.render.ui/merge-words`; an evaluation's arrow and value are one render for a card's row and a history row, its text a reply item's `:printed` or a record's `:shown` (an error's too: `seon.repl/record-tx`).
-- **Errors:** a refusal or failure shown reads `:seon.error/message` of the one error map ([errors](errors.md#errors)), never a second `{:error "text"}` shape.
+- **Errors:** an error or failure shown reads `:seon.error/message` of the one error map ([errors](errors.md#errors)), never a second `{:error "text"}` shape.
 - **Numbers:** root's view numbers (p50s, transactions per commit) are `seon.root/view-numbers`, read by `seon.root/state` and the render proc alike.
 - One-line text in a row or the context is `seon.print/line`. A root function called from the page is recorded on main by the render proc when root answers it (origin `:ui`), with that answer ([dashboard](dashboard.md)).
 
@@ -45,7 +51,7 @@ A view's layout (`seon.render.ui/system-page`, `seon.render.ui/agent-page`) answ
 
 ## Health is what flows
 
-Nothing is pinged and nothing runs on a beat. A render pass happens on an event, an api answer or a tab's request. What is wrong has one producer, what is recorded: root's context and the problems banner (`seon.render.ai/problems`) read root's defects and main's recorded problems (`seon.problems/report`), never re-derive them from the live view; root records an agent's death (`seon.root/end-agent`), and a red run, refused merge or refused spawn as it folds it into the agent's view (`seon.root/set-agent`). A proc is healthy unless a problem was recorded of it: the health tile lists each declared proc with the defects root recorded of it. Series are one point per change (transactions per writer batch, ms per fork, datoms per main commit). A value only a ping carried is its owner's to emit when it changes; until then the tile says it is not reported. `bin/check idle` proves an idle root with a tab open steps nothing, and that a spawn and a commit still reach the tab.
+Nothing is pinged and nothing runs on a beat. A render pass happens on an event, an api answer or a tab's request. What is wrong has one producer, what is recorded or derived from main's facts: root's context and the problems banner (`seon.render.ai/problems`) read root's defects and main's open problems (`seon.problems/health`: [health](health.md)), never re-derive them from the live view; root records an agent's death (`seon.root/end-agent`), and a red run, refused merge or refused spawn as it folds it into the agent's view (`seon.root/set-agent`). A proc is healthy unless a problem was recorded of it: the health tile lists each declared proc with the defects root recorded of it. Series are one point per change (transactions per writer batch, ms per fork, datoms per main commit). A value only a ping carried is its owner's to emit when it changes; until then the tile says it is not reported. `bin/check idle` proves an idle root with a tab open steps nothing, and that a spawn and a commit still reach the tab.
 
 
 ## A context read is shown once

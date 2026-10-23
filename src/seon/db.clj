@@ -113,8 +113,18 @@
   "The tx-meta of every transaction Seon makes: the runtime that made it
   (:seon.tx/runtime, jolt.host/runtime-fingerprint). A runtime Jolt cannot identify (nil)
   is refused by this contract, never recorded as no runtime."
-  {:malli/schema [:=> [:cat] [:map [:seon.tx/runtime :string]]]}
-  [] {:seon.tx/runtime (jolt.host/runtime-fingerprint)})
+  {:malli/schema [:=> [:cat :seon.db/branch] [:map [:seon.tx/runtime :string] [:seon.tx/branch :seon.db/branch]]]}
+  [branch] {:seon.tx/runtime (jolt.host/runtime-fingerprint) :seon.tx/branch branch})
+
+(defn main-branch
+  "The branch the root holding cfg works on as its main: cfg's :branch, :db when none."
+  {:malli/schema [:=> [:cat :seon.db/cfg] :seon.db/branch]}
+  [cfg] (:branch cfg :db))
+
+(defn conn-main
+  "The main of the root holding conn (its connection to main): the branch conn is on."
+  {:malli/schema [:=> [:cat :seon.host/conn] :seon.db/branch]}
+  [conn] (main-branch (:config @conn)))
 
 (defn- install-missing!
   "Transact the attributes of `schema` the db under conn lacks, or holds without their
@@ -143,9 +153,9 @@
         missing (vec (remove #(and (contains? have (:db/ident %))
                                    (= (:db/contentId %) (get-in have [(:db/ident %) :db/contentId])))
                              schema))]
-    (let [[runtime others] ((juxt filter remove) #(= :seon.tx/runtime (:db/ident %)) missing)]
-      (when (seq runtime) (d/transact conn {:tx-data (vec runtime)}))
-      (when (seq others) (d/transact conn {:tx-data (vec others) :tx-meta (tx-meta)})))
+    (let [[tx-attrs others] ((juxt filter remove) #(#{:seon.tx/runtime :seon.tx/branch} (:db/ident %)) missing)]
+      (when (seq tx-attrs) (d/transact conn {:tx-data (vec tx-attrs)}))
+      (when (seq others) (d/transact conn {:tx-data (vec others) :tx-meta (tx-meta (conn-main conn))})))
     (count missing)))
 
 (defn seed!
@@ -153,7 +163,7 @@
   {:malli/schema [:=> [:cat :seon.host/conn :int] :any]}
   [conn n]
   (install-missing! conn)
-  (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx :tx-meta (tx-meta)})))
+  (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx :tx-meta (tx-meta (conn-main conn))})))
 
 ;; ---- one store, many branches, as in production (owner, 2026-10-21) ------------
 ;; A store holds one seed on :db. Every root works on a main of its own, a branch of :db
@@ -161,16 +171,6 @@
 ;; branch), and its agents' and tasks' branches are named under that main, so roots
 ;; sharing a store never share a branch. A branch is one pointer write (~1 ms measured,
 ;; 2026-10-21) where a fresh seeded store was ~200 ms and ~2 MB.
-
-(defn main-branch
-  "The branch the root holding cfg works on as its main: cfg's :branch, :db when none."
-  {:malli/schema [:=> [:cat :seon.db/cfg] :seon.db/branch]}
-  [cfg] (:branch cfg :db))
-
-(defn conn-main
-  "The main of the root holding conn (its connection to main): the branch conn is on."
-  {:malli/schema [:=> [:cat :seon.host/conn] :seon.db/branch]}
-  [conn] (main-branch (:config @conn)))
 
 (defn on-main
   "Branch b of the root whose main is `main`, as the store names it: :db names main itself;
@@ -300,15 +300,17 @@
   :seon.root/collected): the record to write, {:swept :ms :branches :gone}. With no record yet
   (a new main) or none gone but branches made since, the record of what is here, nothing swept,
   so a branch seen at one quiescence and gone at a later one is reclaimed; {:skipped true} when
-  the branches are the ones recorded. Only while no
-  other process writes the store (owner, 2026-10-22, simplest first): root's writer runs it
-  (:collect) and root refuses it while an agent is live (docs/storage.md#collection)."
-  {:malli/schema [:=> [:cat :seon.host/conn] [:or [:map [:skipped :boolean]] :seon.root/collected]]}
-  [conn]
+  the branches are the ones recorded. Only while no other process writes the store (owner,
+  2026-10-22, simplest first): root's writer runs it (:collect), root refuses it while an agent
+  is live, and sole? (:seon.config.store/sole-writer?) says no other root writes it; when not,
+  {:skipped true :shared true} (docs/storage.md#collection)."
+  {:malli/schema [:=> [:cat :seon.host/conn :boolean] [:or [:map [:skipped :boolean] [:shared {:optional true} :boolean]] :seon.root/collected]]}
+  [conn sole?]
   (let [last (:seon.root/collected (d/pull @conn [:seon.root/collected] [:seon.root/id :root]))
         now (set (d/branches conn))
         gone (count (remove now (:branches last)))]
     (cond
+      (not sole?) {:skipped true :shared true}
       (and last (zero? gone) (= now (:branches last))) {:skipped true}
       ;; no record yet (a new main: every check step's) or nothing gone: record what is here,
       ;; sweep nothing; a full sweep on a store of hundreds of branches held a check step's
@@ -351,34 +353,19 @@
   [conn main branch]
   (d/commit-as-db conn (d/merge-base conn branch main)))
 
-;; ---- tx-data that replays exactly -----------------------------------------------
+;; ---- tx-data with explicit ids ----------------------------------------------------
 ;; The store issues every entity id and transaction id once (ids!), so ids are unique
-;; across branches: a branch's new entity keeps its id on main, and a replica (the fork
-;; server's main) applies the writer's RESOLVED datoms as main's own transaction (replay)
-;; rather than re-resolving tempids or taking an id of its own.
+;; across branches: a branch's new entity keeps its id on main. The fork server's replica
+;; of main reads each commit from the store (seon.fork-server, d/commit-as-db); these name
+;; a commit's datoms for the program's loader and main's readers.
 
 (defn report->tx-meta
   "The transaction entity's own facts in the writer's tx-report ({attribute value}: its
-  :db/txInstant and any tx-meta; empty without history): what a replica of the branch
-  applies as its transaction's :tx-meta (replay), so its transaction entity holds main's facts."
+  :db/txInstant and any tx-meta; empty without history): a commit's own facts, as main's
+  readers receive them beside its datoms."
   {:malli/schema [:=> [:cat :seon.db/tx-report] :map]}
   [rep]
   (into {} (for [dt (:tx-data rep) :when (and (= (:e dt) (:tx dt)) (:added dt))] [(:a dt) (:v dt)])))
-
-(defn replay
-  "db with main's commit t applied as main's transaction t: tx-data (report->tx) and the
-  transaction's facts (report->tx-meta) under main's own transaction id, so a replica's t
-  is main's (the fork server's replica: seon.agent/misaligned compares them). A speculation
-  of the replica's own (d/with) would take the next id after its own, which the store has
-  issued to another transaction. Explicit-id tx-data mints no entity id."
-  {:malli/schema [:=> [:cat :seon.host/db :int :seon.db/resolved-tx :map] :seon.host/db]}
-  [db t tx-data tx-meta]
-  (:db-after (datahike.core/with db tx-data tx-meta
-                                 (reify datahike.ids/IIds
-                                   (-take! [_ kind]
-                                     (if (= :tx kind) t
-                                         (throw (ex-info "a replayed commit names its entity ids (report->tx)" {:t t}))))
-                                   (-reach! [_ _ _] nil)))))
 
 (defn report->tx
   "The writer's tx-report as explicit-id tx-data (the transaction entity's own datoms left

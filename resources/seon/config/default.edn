@@ -124,6 +124,14 @@
  ;; cache holding them scanned in 26 ms and opened a sibling branch reading 8 nodes. 128 MB holds
  ;; about nine such indexes: a thirty-second of :seon.config.machine/memory-mb per process.
  :seon.config.store/node-cache-bytes 134217728
+ ;; Boolean: whether this root is its store's only writer process, so it may collect the store
+ ;; (seon.db/collect!; docs/storage.md#collection): Datahike's collection sees only its own
+ ;; process's in-flight commits (datahike.gc/gc-storage!), so a commit of another process can
+ ;; reuse a value the sweep is deleting. False: root never collects, and the store keeps its
+ ;; garbage. Provenance, 2026-10-23 (notes/store-gc-bug-2026-10-23.md): the :scripted profile is
+ ;; bin/test's and bin/check's, whose roots (a shard's, a step's) share one store; production
+ ;; runs one root per store (task seon.db/two-processes-branch-one-store-at-once).
+ :seon.config.store/sole-writer? #profile {:default true :scripted false}
 
  ;; ==== agents =================================================================================
 
@@ -204,6 +212,14 @@
  ;; than a form's: cost proofs measure large sizes. At the bound the run stops with
  ;; :seon.test/ticks-spent naming the test that was running. 0: none.
  :seon.config.agent/test-ticks 200000000000
+ ;; Unit: engine ticks a turn's own test run may do: the task's proofs and the tests the
+ ;; branch changed or added (root's ruling (a), 2026-10-22; the reached in-process set is the
+ ;; judge's, at the attempt's end, under test-ticks). Provenance: step E's run 7, where a change
+ ;; to seon.problems/report put 294 reached tests in every turn's run and one ran for 2.5 h;
+ ;; the same budget as one form's (~5-25 s of work). At the bound the run stops with
+ ;; :seon.test/ticks-spent; the tests it did not finish are unknown, never red, and the turn
+ ;; says how many and how to run them (my.agent/prove). 0: none.
+ :seon.config.agent/turn-test-ticks 20000000000
 
  ;; ==== merges =================================================================================
 
@@ -221,6 +237,7 @@
  ;; own :seon.config.merge/max-merge-turns wins.
  :seon.config.merge/max-merge-turns 2
 
+
  ;; ==== Seon's own source ======================================================================
 
  ;; Unit: path. The repository whose source is the program (session LOOP, resources/seon/tasks/
@@ -232,6 +249,14 @@
  ;; boots): absent, no source is imported and nothing is written. config/local.edn or --set names
  ;; another tree: the main tree's names ../next-merges, so write-back never edits main's files.
  :seon.config.source/root #env SEON_SOURCE_ROOT
+ ;; Unit: path. The checkout the merge gate runs a merge's deferred process tests on
+ ;; (seon.fx/run-tests: a worktree of it at the merges head, the candidate's files over it,
+ ;; prove's entry there). Provenance: root's ruling (a), 2026-10-23, from step E's dry run (a test
+ ;; root importing test/ could not host a checkout, and its gated merges were all refused).
+ ;; Absent (as here; the standing root's config/local.edn names its merges tree): a merge that
+ ;; reaches process tests merges with them recorded unrun on its attempt, an open problem
+ ;; ("merged with N process tests unrun") until they run; root's git merge runs them (bin/prove).
+ :seon.config.source/gate-checkout #env SEON_GATE_CHECKOUT
  ;; Unit: paths under the root, read in this order. Their .clj files are namespaces; the .edn
  ;; files under resources/seon/schemas are schema resources (schemas are program: an agent
  ;; changes one with my.schema/register!, and the merge writes it back; owner 2026-10-21).
@@ -240,6 +265,21 @@
  ;; The owner's standing root adds it (the main tree's config/local.edn), and
  ;; seon.source-test/a-restart-catches-up-and-a-new-generation-resumes boots with those dirs.
  :seon.config.source/dirs ["src" "resources/seon/schemas"]
+ ;; Unit: qualified var names. A test whose reach (seon.program/reach-index, the compiler's
+ ;; facts) references one of these reaches a process of its own: a shell, a fork, a root booted
+ ;; for it, the binary. Such tests never run automatically, only when named (owner, 2026-10-23;
+ ;; root's ruling 2026-10-22: by the reach walk, never a hand tag). Provenance: step E's run 4,
+ ;; where a turn's tests booted roots and spun for minutes in an agent's fork; process tests
+ ;; were 782 s of 917 s of recorded test time (pure-tests, 2026-10-23). A var missing here makes
+ ;; its tests run automatically (slower, never wrong).
+ :seon.config.source/process-vars #{seon.agent-test/in-agent clojure.java.shell/sh seon.lib/fork! seon.test-store/binary-sh}
+ ;; Unit: vars. The vars through which a test reaches the built binary (target/seon): a test whose
+ ;; reach references one runs it, so bin/test builds it first; a process test that only shells
+ ;; out (git) does not. Provenance: root's task seon.check/a-run-builds-the-binary-only-when-
+ ;; something-reaches-it (2026-10-23): bin/test built it (46 s) whenever anything ran. A var
+ ;; missing here is a missed build (a test fails on a stale binary), so it names the one way a
+ ;; test starts the binary: seon.test-store/binary-sh.
+ :seon.config.source/binary-vars #{seon.test-store/binary-sh}
  ;; Unit: branch. Merges are committed here, never on main and never pushed (owner).
  :seon.config.source/branch "jolt/seon-merges"
  ;; Unit: a git identity. Seon authors and commits its merges (the message names the merged
@@ -252,6 +292,10 @@
  ;; whose target/seon bin/root next starts. Kept with the run (a generation is a record of what
  ;; ran); one worktree and one ~200 MB binary per merges commit built.
  :seon.config.source/generations-dir #join [#ref [:seon.config.root/runs-dir] "/generations"]
+ ;; Unit: path. Where a merge's deferred process tests run (seon.fx/run-tests, root's ruling
+ ;; 2026-10-22): <dir>/<sha>-<uuid>, a worktree of the merges head with the candidate's files,
+ ;; removed after its run; its log stays beside it (<dir>/<sha>-<uuid>.tests.log).
+ :seon.config.source/tests-dir #join [#ref [:seon.config.root/runs-dir] "/merge-tests"]
  ;; Unit: path. Test results by reach digest (task seon.program/tests-run-by-reach; owner
  ;; 2026-10-21: "incremental tests even across worktrees based on test digest"): one directory
  ;; beside the checkouts, shared by every checkout and worktree, one <digest>.edn per result,
@@ -264,8 +308,28 @@
  ;; starts at once (test-runner/shards), its greens stored by digest when it has run. Provenance:
  ;; worktree session PROVE 2026-10-22 on the 16 GB M1 target (AGENTS section 8): 4 keeps the machine
  ;; responsive beside a standing root and other worktree sessions (measured in docs/merging.md#a-merge-runs-what-the-change-reaches).
- ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected.
+ ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected. bin/check
+ ;; runs this many steps at once too, and mg-check in this many shards (pure-tests 2026-10-23).
  :seon.config.proofs/jobs 4
+ ;; Unit: a salt (integer), 0 normally. Salt of every generative check's seed (seon.proofs/seed): a
+ ;; seed is derived from what its check reaches (a test's reach digest, a contract's var and the
+ ;; binary's tree), so the same digest draws the same cases and a result is a function of its
+ ;; digest, while a code change draws new ones. Change it to re-roll every seed once. Provenance:
+ ;; worktree session pure-tests 2026-10-23 (mg/check drew from the wall clock; owner via root:
+ ;; derive each seed from its digest, not one constant). At the bound: none.
+ :seon.config.proofs/seed-salt 0
+ ;; Unit: the size n of a cost proof's input (seon.cost/sizes). A proof measures its sizes up to
+ ;; this, and at least its two smallest (a growth fit needs two). Provenance: root, 2026-10-23
+ ;; (notes/test-time-2026-10-23.md: building inputs at 10k took 10-19 s per proof in every run).
+ ;; bin/test --all sets SEON_COST_MAX_N=100000, so the full run measures each proof as written.
+ ;; At the bound: the proof measures no size past this but its two smallest.
+ :seon.config.proofs/cost-max-n #long #or [#env SEON_COST_MAX_N 1000]
+ ;; Unit: seeds (a count). How many seeds a randomized property test draws in this run, each
+ ;; from its own test-seed (seon.proofs/test-seed) and the next ones after it. Provenance: root,
+ ;; 2026-10-23 (notes/test-time-2026-10-23.md: r3.inc-test's 5 seeds x 150 steps took 47 s, the
+ ;; automatic run's critical path). bin/test --all sets SEON_SEEDS=5, so the full run draws as
+ ;; many as before. At the bound: the test draws this many and no more.
+ :seon.config.proofs/seeds #long #or [#env SEON_SEEDS 1]
 
  ;; ==== effects and the model ==================================================================
 
@@ -293,8 +357,12 @@
  ;; the reasoning ate the reply (:seon.model/reasoning-ate-reply). v1 ships 65,536 for Flash
  ;; with thinking on (its 4,096 and 8,192 starved reasoning). Ported 2026-10-21 after the first
  ;; DeepSeek agent on Seon's own code: two refinement attempts answered empty, reasoning took all
- ;; 2,048. Billed by use, so the ceiling costs nothing unspent.
- :seon.config.ai/max-tokens #long #or [#env SEON_AI_MAX_TOKENS 65536]
+ ;; 2,048. 2026-10-22, step E (root's research, notes/agent-context-research-2026-10-22.md §3.3):
+ ;; 8,192 while thinking is off (the default below). The largest ordinary reply measured ~5k;
+ ;; loop replies ran for minutes (168 of 181 model-minutes, 12.4M tokens, AUDIT-agents §5.2),
+ ;; and a task whose every reply runs to 65,536 costs ~$5.8 (one such reply ~$0.04). A task or
+ ;; model that turns thinking on raises it through the resolver (v1's 65,536 for that case).
+ :seon.config.ai/max-tokens #long #or [#env SEON_AI_MAX_TOKENS 8192]
  ;; DeepSeek's thinking mode (:enabled | :disabled). Off (owner, 2026-10-21: "if we can't have
  ;; intuitive function calling based on the context our context is bad and instructions need
  ;; help"): a task whose next step needs long reasoning is a context or instruction defect to
@@ -340,7 +408,7 @@
    :seon.ai.model/input-usd-per-mtok 0.15
    :seon.ai.model/cached-input-usd-per-mtok 0.003
    :seon.ai.model/output-usd-per-mtok 0.6
-   :seon.ai.model/thinking-dials #{:enabled :disabled}
+   :seon.ai.model/thinking-modes #{:enabled :disabled}
    :seon.ai.model/provider-max-in-flight 2500
    :seon.ai.model/source "api-docs.deepseek.com/quick_start/pricing and /rate_limit, read 2026-10-21"}
   "deepseek-v4-pro"
@@ -351,7 +419,7 @@
    :seon.ai.model/input-usd-per-mtok 0.66
    :seon.ai.model/cached-input-usd-per-mtok 0.022
    :seon.ai.model/output-usd-per-mtok 1.98
-   :seon.ai.model/thinking-dials #{:enabled :disabled}
+   :seon.ai.model/thinking-modes #{:enabled :disabled}
    :seon.ai.model/provider-max-in-flight 500
    :seon.ai.model/source "api-docs.deepseek.com/quick_start/pricing and /rate_limit, read 2026-10-21"}}
  ;; Unit: tokens per second the provider admits, cluster-wide: the :model owner's token bucket
@@ -415,6 +483,11 @@
  ;; the plan's cited vars and the proofs call. 0 shows none. Provenance: R4's k = 5
  ;; (notes/option3-R4-learning.md 5: 14 of 16 needed helpers in the top 5).
  :seon.config.render/found 5
+ ;; Unit: tokens (seon.print.select/estimate). The attempt's map of the namespaces its proofs and
+ ;; cited vars live in (seon.context/ns-map): each namespace's functions, most referenced first,
+ ;; within an equal share. Provenance: root's research (2026-10-22, lever 1), aider's default
+ ;; --map-tokens 1k. At the bound a namespace's rest is (clojure.repl/dir ns).
+ :seon.config.render/map-tokens 1000
  ;; Unit: items. A list shown in part (seon.print/bounded) shows this many, then `+N more:
  ;; where` (docs/render.md#bounded-lists). Provenance: the literals each list carried before
  ;; (render.ui and render.ai, 2026-10-22), kept as they were.
@@ -466,11 +539,14 @@
  ;; A taken port leaves the web proc {:listening false} on the health line and boot goes on.
  :seon.config.web/port #long #or [#env SEON_WEB_PORT 0]
  ;; Unit: TCP port on 127.0.0.1: root's server (seon.server), which bin/mcp and outside
- ;; agents reach. 0 (the shipped value): `seon root` refuses to serve. config/local.edn names
+ ;; agents reach. Three values: >0 that port; 0 (the shipped value) none, `seon root` refuses to
+ ;; serve; -1 a free port the kernel assigns. The port bound is named on the root's ROOT LISTENING
+ ;; line and recorded in runs/root.port (a test's root: seon.test-store/start-root!,
+ ;; never a port picked and released beforehand, which another process can take). config/local.edn names
  ;; the checkout's own (main 7888, worktree k 7900+10k).
- ;; bin/root PORT WEB, bin/mcp PORT and the mcp check set SEON_ENTRANCE_PORT, which local.edn
+ ;; bin/root PORT WEB, bin/mcp PORT and the mcp check set SEON_SERVER_PORT, which local.edn
  ;; honours (until a built binary's top-level code sees its argv, so --set can say it).
- :seon.config.root/entrance-port #long #or [#env SEON_ENTRANCE_PORT 0]
+ :seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 0]
  ;; app.css and datastar.js, read per request so a style edit shows on reload.
  :seon.config.web/public-dir #seon/checkout "resources/public"
  ;; Unit: +hhmm. Jolt has no time zones: clocks on the page add this offset (`date +%z`).
@@ -480,7 +556,7 @@
  ;; Contracts and their recording (session G1): :on, :contracts (wrappers, no recording
  ;; transaction: the two measured apart), :off (no wrapper, no recording: the same binary
  ;; measured with instrumentation off; test/r3's benches).
- :seon.config.contract/guarantees #keyword #or [#env SEON_GUARANTEES "on"]
+ :seon.config.contract/instrument #keyword #or [#env SEON_INSTRUMENT "on"]
 
  ;; native/probe.c's library (bin/build native): Mach memory probes and qfork. T5 points it at
  ;; next's build from a snapshot that has none.

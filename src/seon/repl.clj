@@ -29,7 +29,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
             [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.render :as render] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
-            [jolt.ffi :as ffi] [seon.config :as cfg]))
+            [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test]))
 
 (defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
 
@@ -86,9 +86,10 @@
           (let [n (dec (:n (swap! agent/state update :n (fnil inc 0))))
                 out (java.io.StringWriter.)
                 err (java.io.StringWriter.)
-                ;; *1 *2 *3 *e as clojure.main/repl keeps them
+                ;; *1 *2 *3 *e as clojure.main/repl keeps them; clojure.test reports to
+                ;; *test-out*, bound to the form's output as nREPL does
                 {v1 :v1 v2 :v2 v3 :v3 e1 :e} (:repl-vars @agent/state)
-                [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err *1 v1 *2 v2 *3 v3 *e e1]
+                [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1]
                                          (let [v (intr/run ticks #(eval-fn form))] [:ret v *ns*]))
                                        (catch Throwable e [:err e ns (outer-frames)]))
                 common {:id n :out (not-empty (str out)) :form (form-text form) :repl/form form
@@ -359,7 +360,7 @@
   step's own state is empty."
   {:malli/schema :seon.step/step-fn}
   ([] {:ins {:sock "root's requests"} :outs {:sock "replies"} :workload :io
-       :ping-map-fn (fn [_] {:evals (:n @agent/state) :pending (count (:pending @agent/state)) :mem-mb (:mem @agent/state)})})
+       :ping-map-fn (fn [_] {:evals (:n @agent/state) :pending (count (:pending @agent/state))})})
   ([_] {})
   ([st _] st)
   ([st _ m]
@@ -371,7 +372,7 @@
        (intr/clear-pending!)
        (agent/send! {:op :started :id (:id m)})
        [st {:sock [{:op :reply :id (:id m) :items (eval-string (:forms m) (select-keys m [:ticks :origin]))
-                    :t (:max-tx (agent/db)) :mem-mb (agent/mem-mb)}]}])
+                    :t (:max-tx (agent/db))}]}])
      [st (when-let [ms (agent/handle! m)] {:sock ms})])))
 
 (defn serve!

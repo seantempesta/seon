@@ -305,7 +305,9 @@
     (is (true? (ref/names-something? db {:seon.ref/name 'clojure.core/map :seon.ref/depth :doc :seon.ref/line 1}))
         "a var of a namespace this process holds, as a namespace counts when loaded")
     (is (true? (ref/names-something? db {:seon.ref/name :seon.host/db :seon.ref/depth :doc :seon.ref/line 1}))
-        "a host predicate of the contract registry, as a declared schema key counts")))
+        "a host predicate of the contract registry, as a declared schema key counts")
+    (is (true? (ref/names-on-db? db 'clojure.core/map)) "a name alone: no file of the checkout is read")
+    (is (false? (ref/names-on-db? db 'no.such-ns/nothing)) "and one that names nothing is false")))
 
 (deftest a-task-name-is-a-reference-to-the-task
   ;; wiki audit 2026-10-23 R4: a cited ns/name naming a :seon.task/id resolves, and shows the

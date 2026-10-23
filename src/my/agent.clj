@@ -46,15 +46,15 @@
                    sym))))
 
 (defn prove
-  "Run what judges this branch, as root's judge and the turn loop run it (seon.agent/run-tests-forked,
-  in a fork of this agent): the task's proofs (or the given ones) and every test reaching what the
-  branch changed since the main it forked from, each test green at its reach digest reused, not
-  run. Answers that run ({:pass :fail :error :reports :ran :reused :ms ...}) with :results
+  "Run what root's judge will run on this branch (seon.agent/run-tests-forked :judge, in a fork
+  of this agent): the task's proofs (or the given ones) and every in-process test reaching what
+  the branch changed since the main it forked from, each test green at its reach digest reused,
+  not run; the process tests it reaches run only when root asks (:deferred). Answers that run ({:pass :fail :error :reports :ran :reused :ms ...}) with :results
   {test :pass|:fail|:error}."
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :qualified-symbol]] :map]]}
   ([] (prove (or (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})))
   ([proofs]
-   (let [run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks) proofs)]
+   (let [run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks) proofs :judge)]
      (assoc run :results (proofs/results run)))))
 
 (defn grep
@@ -80,13 +80,38 @@
 (defn source-fn
   "The source of the var sym names, or nil: clojure.repl/source-fn. The text its last definition
   in this process kept (seon.repl), else what this branch records for it, else the form at its
-  :file and :line (a library's)."
+  :file and :line (a library's). A namespace's name answers its ns form as this branch records
+  it (its requires and aliases), which clojure.repl's does not."
   {:malli/schema [:=> [:cat :symbol] [:maybe :string]]}
   [sym]
-  (when-let [v (resolve sym)]
+  (if-let [v (resolve sym)]
     (or (:source (meta v))
         (context/source-of (agent/db) (symbol (str (ns-name (:ns (meta v)))) (str (:name (meta v)))))
-        (file-source v))))
+        (file-source v))
+    (when-not (namespace sym)
+      (d/q '[:find ?src . :in $ ?s :where [?n :ns/name ?s] [?f :form/defines ?n] [?f :form/src ?src]] (agent/db) sym))))
+
+(defn not-found
+  "What source prints for sym when it names nothing: Clojure's words; when its namespace part
+  names a namespace, that no such var is defined here or recorded on this branch (a name a
+  plan gives a function to write is not one yet: step E's paid run 4, whose design and
+  implement asked the source of a planned function until they ended :no-progress), how to
+  write it there, and the form that shows that namespace's ns form."
+  {:malli/schema [:=> [:cat :symbol] :string]}
+  [sym]
+  (if-let [n (some-> (namespace sym) symbol find-ns)]
+    (str "Source not found for " sym ": no such var is defined or recorded on this branch. If your plan names it as new, "
+         "write it: (in-ns '" (ns-name n) ") (defn " (name sym) " ...). Its namespace's ns form: (source " (ns-name n) ")")
+    (str "Source not found for " sym)))
+
+(defn deferred
+  "The process tests this branch's change reaches, a proof among them: an agent's turn and
+  root's judge never run them, root's gate runs them when root asks (my.root/gate!; the
+  owner's ruling, 2026-10-23). seon.agent/test-plan's :process among what it selects: names."
+  {:malli/schema [:=> [:cat] [:vector :qualified-symbol]]}
+  [] (let [proofs (or (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})
+           plan (agent/test-plan (agent/db) (:base @agent/state) proofs)]
+       (vec (filter (:process plan) (:selected plan)))))
 
 (defn pst
   "Print the exception e (*e by default) as clojure.repl/pst does: its message, then each cause's
@@ -100,7 +125,7 @@
 
 (defmacro source
   "Print the recorded source of the definition named by sym (as clojure.repl/source does)."
-  [sym] `(println (or (source-fn '~sym) (str "Source not found for " '~sym))))
+  [sym] `(println (or (source-fn '~sym) (not-found '~sym))))
 
 (defn help
   "The help page every agent reads first (seon.context/help-page), as this branch holds it

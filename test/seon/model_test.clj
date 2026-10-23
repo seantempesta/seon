@@ -111,9 +111,29 @@
 
 (deftest no-provider-answers-a-typed-error-never-a-reply
   ;; root's ruling, 2026-10-22 (brief 1, item 1): a root whose config names no model provider
-  ;; ran the scripted stand-in (a test fixture) as if it were a model; it answers the first
+  ;; ran the scripted provider (a test fixture) as if it were a model; it answers the first
   ;; turn with the typed :seon.model/no-provider, which ends the attempt naming what to set
   (let [r (model/complete {:kind :none} {:messages [{:role "user" :content "x"}] :task "demo/t" :turn 0})]
     (is (= :seon.model/no-provider (:seon.error/type r)))
     (is (seon.contract/valid? :seon.model/failure r))
     (is (not (contains? r :tool-calls)) "no reply, scripted or otherwise")))
+
+(deftest a-thinking-reply-sends-its-reasoning-back
+  ;; DeepSeek's thinking mode with tools (api-docs.deepseek.com/guides/thinking_mode, read
+  ;; 2026-10-22): "the reasoning_content must be fully passed back to the API in all subsequent
+  ;; requests", else a 400; the reply's reasoning arrives as reasoning_content deltas (above)
+  (let [c (model/parse-reply
+           (apply str (map chunk-line
+                           [{:choices [{:delta {:reasoning_content "Square "}}]}
+                            {:choices [{:delta {:reasoning_content "multiplies."}}]}
+                            {:choices [{:delta {:tool_calls [{:index 0 :id "c1" :function {:name "eval" :arguments "{\"code\":\"(* 3 3)\"}"}}]}}]}
+                            {:choices [{:delta {} :finish_reason "tool_calls"}] :usage {:prompt_tokens 9 :completion_tokens 4}}]))
+           1.0 2048)
+        b (model/request-body {:kind :openai-compat :base-url "x" :model "m" :api-key-env "HOME" :max-tokens 64 :thinking :enabled}
+                              {:messages [{:role "user" :content "go"}
+                                          {:role "assistant" :content "" :reasoning (:reasoning c) :tool-calls (:tool-calls c)}
+                                          {:role "tool" :tool-call-id "c1" :content "9"}]
+                               :task "t/x" :turn 2})]
+    (is (= "Square multiplies." (:reasoning c)))
+    (is (= "Square multiplies." (:reasoning_content (second (:messages b)))) "the earlier reply's reasoning goes back with it")
+    (is (not-any? :reasoning_content [(first (:messages b)) (nth (:messages b) 2)]) "and only on the assistant's message")))

@@ -35,7 +35,7 @@
         (filter #(= :platform (:v %)) (d/datoms db :aevt :seon.error/class))))
 
 (defn await-quiet
-  "The reconciler's quiescence report ({:t :stuck}) for main at or after t: nothing runs,
+  "The reconciler's quiescence report ({:t :root-causes}) for main at or after t: nothing runs,
   nothing is left to judge, nothing is ready. Waits as long as work goes on, or until a
   root proc's defect is recorded on main after t ({:ended :defect :problem p}): a step
   that threw dropped its outputs, so the flight it carried never ends and quiescence never
@@ -270,7 +270,7 @@
                                   (str/includes? (second (second sq-turns)) ":got \"(= 9 0)\"")
                                   (every? #(every? (set (keys (nth % 2))) [:tests-ms :context-ms :model-ms :eval-ms :record-ms]) sq-turns))]
            (cond-> {:ok (and done? (= #{"calc/neg-merge"} blocked) read-failure?
-                             (= [{:task "calc/neg" :cause "cancelled" :blocks ["calc/abs" "calc/abs-merge" "calc/neg-merge"]}] (:stuck q)))
+                             (= [{:task "calc/neg" :cause "cancelled" :blocks ["calc/abs" "calc/abs-merge" "calc/neg-merge"]}] (:root-causes q)))
                     :done-all? done? :abs-blocked-by blocked :square-turns (count sq-turns) :square-read-its-failure? read-failure?
                     :square-splits (mapv #(nth % 2) sq-turns)}
              (not read-failure?) (assoc :square-second-context (second (second sq-turns))))))})
@@ -302,14 +302,14 @@
 (defn- swarm
   "n tasks over 5 shared definitions, max-running m (more than 5, so tasks on one var run
   at once and their merges conflict): conflicts arose, each was resolved by a merge agent,
-  every task is done, nothing is stuck, and a fresh agent on
+  every task is done, nothing is held for root, and a fresh agent on
   main gets every proof's value (s_k-test asserts (v_j 100) = 100+j). Verdict SWARM."
   [n m]
   {:boot {:max-running (parse-long (or m "8"))} :specs (fx/swarm-specs (parse-long (or n "20"))) :tns 'sw :label "SWARM"
    :check "(mapv #(% 100) [app.sw/v0 app.sw/v1 app.sw/v2 app.sw/v3 app.sw/v4])" :expect ["[100 101 102 103 104]"]
    :ok (fn [{:keys [q d]}]
          (let [c (:conflicts-measured (merge-counts d))]
-           (-> (all-done d) (assoc :conflicts c) (update :ok #(and % (empty? (:stuck q)) (pos? c))))))})
+           (-> (all-done d) (assoc :conflicts c) (update :ok #(and % (empty? (:root-causes q)) (pos? c))))))})
 
 (defn- model-run
   "Tasks of the calc graph worked by the config's OpenAI-compatible endpoint
@@ -333,7 +333,7 @@
   {:boot {:max-running 2 :provider {:kind :scripted :script 'seon.e2e/always-wrong}} :specs (vec (take 2 fx/calc)) :tns 'calc :max-turns 2
    :ok (fn [{:keys [sys q d]}]
          (let [blocks ["calc/add-merge" "calc/twice" "calc/twice-merge"]
-               [row & more] (:stuck q)
+               [row & more] (:root-causes q)
                ts (task/tasks d)
                add (get ts "calc/add")
                first? (and (nil? more) (= "calc/add" (:task row)) (= "calc/add#1" (:attempt row)) (= blocks (:blocks row))
@@ -355,10 +355,10 @@
                             (= "calc/add#2" (:attempt (:seon.task/failure (task/task d2 "calc/add"))))
                             (= :held (:seon.task/execution (task/task d2 "calc/add")))
                             (= 2 (count (task/attempts d2))) (= 4 (count (task/tasks d2)))
-                            (= ["calc/add"] (mapv :task (:stuck q2))))]
+                            (= ["calc/add"] (mapv :task (:root-causes q2))))]
            {:ok (and first? second? (= 1 (count (filter :open? problems))))
             :first-hold first? :release-on-the-same-branch second?
-            :stuck (:stuck q) :stuck-after-release (:stuck q2)
+            :root-causes (:root-causes q) :root-causes-after-release (:root-causes q2)
             :quiet-after-last-end-ms (- (now) (apply max 0 (keep :seon.attempt/end-ms (vals (task/attempts d2)))))
             :problems-failed (count problems)}))})
 

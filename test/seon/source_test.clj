@@ -8,14 +8,16 @@
             [clojure.java.shell :as sh]
             [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
             [datahike.api :as d]
-            [seon.db :as pdb]
+            [seon.db :as pdb] [seon.cost :as cost]
             [seon.fx :as fx]
             [seon.merge :as pm]
             [seon.program :as program]
             [seon.source :as source]
-            [seon.program-test :as pt]))
+            [seon.program-test :as pt] [seon.stage :as stage]))
 
 (defn- empty-db [] (ts/test-db))
+
+(declare hold!)
 
 (def ^:private here (System/getProperty "user.dir"))
 
@@ -137,14 +139,15 @@
 (deftest an-agent-runs-its-branchs-change-to-imported-source
   (let [main (main-with-file)
         branch (pt/record main 'app.pt-src "(defn twice [x] (* 2 x))")]
-    ;; the process holds the imported namespace, as a binary built from that source does
-    (remove-ns 'app.pt-src)
-    (create-ns 'app.pt-src)
-    (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! main))
-        "main's imported text whose namespace this process holds is the binary's: never evaluated (the example program is)")
-    (is (= [] (program/load-diff! main branch)))
-    (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
-    (is (nil? (resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again")))
+    ;; the process holds the imported namespace, as a binary built from that source does:
+    ;; every var it defines bound
+    (hold! 'app.pt-src pt-text)
+    (let [add0 @(resolve 'app.pt-src/add)]
+      (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! main))
+          "main's imported text whose namespace this process holds is the binary's: never evaluated (the example program is)")
+      (is (= [] (program/load-diff! main branch)))
+      (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
+      (is (identical? add0 @(resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again"))))
 
 (deftest an-imported-namespace-the-process-does-not-hold-is-loaded
   ;; task seon.agent/an-agent-holds-mains-tests: test/ is imported but not built into the
@@ -251,38 +254,25 @@
   ;; turns (~14 s each), three boots (~3-9 s each with the import) and one build (~25-60 s).
   (let [dir (scratch-dir "nextgen")
         tree (str dir "/tree")
-        port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
-        ;; its root's own store and main, named: an inherited SEON_STORE or SEON_MAIN (a bin/check
-        ;; run's) otherwise opens a store whose main already holds these merges, made in another
-        ;; run's clone (task seon.source/the-restart-test-runs-its-root-on-its-own-store)
-        env ["env" (str "SEON_RUNS=" dir "/runs") (str "SEON_STORE=" dir "/runs/store") "SEON_MAIN=main"
-             (str "SEON_ENTRANCE_PORT=" port) "SEON_WEB_PORT=0"]
-        root! (fn [& args] (apply ts/binary-sh (concat env [(str here "/bin/root")] args)))
-        ;; one request line, then its one reply line: the read ends on the reply, or on EOF when the
-        ;; root closes the connection or dies (nil, a recorded verdict); nc -w never times out on macOS
-        ask (fn [code] (with-open [s (java.net.Socket. "127.0.0.1" (int port))]
-                         (let [out (.getOutputStream s)
-                               _ (doto out (.write (.getBytes (str (pr-str {:op :eval :agent "root" :code code}) "\n") "UTF-8")) (.flush))
-                               line (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s) "UTF-8")))
-                               a (try (clojure.edn/read-string {:default tagged-literal} line) (catch Exception _ nil))]
-                           (some-> a :items first :printed clojure.edn/read-string))))
-        pids (fn [] (str/split (str/trim (slurp (str dir "/runs/root.pids"))) #" "))
+        ;; its root's own store and main, named (seon.test-store/start-root!: an inherited
+        ;; SEON_STORE or SEON_MAIN opened a store whose main already held these merges)
+        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")}
         cloned (sh/sh "git" "clone" "-q" "--local" here tree)
-        started (root! "start" "--set" (str ":seon.config.source/root=" (pr-str tree))
-                       "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]")]
+        root (atom (ts/start-root! (assoc root0 :args ["--set" (str ":seon.config.source/root=" (pr-str tree))
+                                                       "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]"])))
+        ;; the printed value of a root eval; a reply that is an error stays the error value
+        ask (fn [code] (let [a (ts/ask @root {:op :eval :agent "root" :code code})]
+                         (if (:error a) a (clojure.edn/read-string (:printed (first (:items a)))))))]
     (try
       (is (zero? (:exit cloned)) (:err cloned))
-      (is (zero? (:exit started)) (str (:out started) (:err started)))
+      (is (some? (:port @root)) (str "the root started: " (slurp (str dir "/runs/root.log"))))
       (let [t1 (ask "(seon.e2e/loop-turn! sys)")
             t2 (ask "(seon.e2e/loop-turn! sys :loop-2)")
             args (ask "(my.root/resume-args sys)")]
         (is (= [2 2] [(:root t1) (:root t2)]) (str "each merge live in place: " (pr-str [t1 t2])))
         (is (= 2 (count (:commits t2))) "two merges committed")
-        (let [[holder pid] (pids)]
-          (sh/sh "kill" "-9" pid)
-          (while (zero? (:exit (sh/sh "kill" "-0" pid))) (Thread/sleep 50))
-          ;; bin/root's holder of the dead root's stdin
-          (sh/sh "kill" holder))
+        ;; a crash: answered at the root's death, as its holder reaped it
+        (ts/kill-root! @root)
         ;; the tree changes a test namespace's ns form while root is down (as a merge to test/
         ;; does): main still holds the old one, which load-all! runs at boot (and another test
         ;; namespace's require marks it loaded), and the import must still apply the new
@@ -290,20 +280,20 @@
         (let [f (str tree "/test/seon/program_test.clj")]
           (spit f (str (str/replace-first (slurp f) "(:require " "(:require [clojure.set :as restart-set] ")
                        "\n(defn restart-probe [] (restart-set/union #{1} #{2}))\n")))
-        (let [restarted (apply root! "start" args)]
-          (is (zero? (:exit restarted)) (str (:out restarted) (:err restarted)))
+        (let [restarted (reset! root (ts/start-root! (assoc root0 :args args)))]
+          (is (some? (:port restarted)) (str "restarted: " (slurp (str dir "/runs/root.log"))))
           (is (true? (ask "(some? (seon.db/eid @(:conn sys) :var/name 'seon.program-test/restart-probe))"))
               "the changed ns form's alias analyzed: the form using it is main's program")
           (is (= [2 [1 2]] (ask "[(seon.fixtures/generation) (seon.fixtures/generations)]"))
               "the binary older than both merges runs both, caught up at boot on the same main"))
         (let [g (ask "(my.root/build! sys)")
-              nxt (root! "next")]
+              nxt (reset! root (ts/next-root! @root))]
           (is (nil? (:error g)) (str "the generation built: " (pr-str g)))
-          (is (zero? (:exit nxt)) (str (:out nxt) (:err nxt)))
+          (is (some? (:port nxt)) (str "the next generation started: " (slurp (str dir "/runs/root.log"))))
           (is (= [2 [1 2] (:commit g)] (ask "[(seon.fixtures/generation) (seon.fixtures/generations) (:commit (my.root/generation sys))]"))
               "the new generation runs both, resumed on main holding its generation")))
       (finally
-        (root! "stop")
+        (ts/stop-root! @root)
         (doseq [g (.listFiles (java.io.File. (str dir "/runs/generations")))]
           (sh/sh (str here "/bin/worktree") "--remove-at" (.getPath g)))
         (sh/sh "rm" "-rf" dir)))))
@@ -352,9 +342,9 @@
       (is (= (str/replace text "\n :seon.attempt/pid :int" "")
              (edit [[:db/retractEntity [:schema/key :seon.attempt/pid]]]))))
     (testing "a new key after the last entry, read back as written"
-      (let [out (edit [{:schema/key :seon.attempt/refusal :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]
-        (is (= (str (subs text 0 (- (count text) 2)) "\n :seon.attempt/refusal [:map [:seon.error/message :string]]}\n") out))
-        (is (= (assoc (edn/read-string text) :seon.attempt/refusal [:map [:seon.error/message :string]])
+      (let [out (edit [{:schema/key :seon.attempt/invalid :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]
+        (is (= (str (subs text 0 (- (count text) 2)) "\n :seon.attempt/invalid [:map [:seon.error/message :string]]}\n") out))
+        (is (= (assoc (edn/read-string text) :seon.attempt/invalid [:map [:seon.error/message :string]])
                (edn/read-string out)))))))
 
 ;; ---- a merge loads in place (BUILD plan P4) ---------------------------------------------
@@ -414,6 +404,22 @@
     (is (= 6 ((resolve 'app.mm-src/g) 5)) "the new record")
     (is (true? ((resolve 'app.mm-src/box?) ((resolve 'app.mm-src/->Box) 1))) "an instance? test held by the binary sees the redefined record")))
 
+(deftest a-form-imported-into-a-loaded-namespace-is-loaded-not-unmapped
+  ;; the step E dry run (2026-10-22): a root restarted on a tree whose test namespace gained a
+  ;; deftest imported it onto main, but held? read the namespace's existence as "the binary
+  ;; holds it", so neither root nor the fork server loaded it; the next agent's harvest read
+  ;; the missing var as an unmap and the merge deleted the deftest from main
+  (let [nsym (symbol (str "app.imported-" (random-uuid)))
+        path (str "test/app/" (str/replace (name nsym) "-" "_") ".clj")
+        a-text (str "(ns " nsym ")\n\n(defn a [] 1)\n")
+        db (d/db-with (empty-db) (source/import-tx (empty-db) {path a-text}))
+        _ (program/load-all! db)
+        rep (d/with db (source/replace-tx db {path (str a-text "\n(defn b [] 2)\n")}))
+        errs (program/load-changes! (:db-after rep) (pdb/report->tx rep))]
+    (is (= [] errs))
+    (is (= 2 (some-> (resolve (symbol (str nsym) "b")) deref (apply []))) "the imported form is loaded where main's program runs")
+    (is (= [] (stage/stage-tx (:db-after rep))) "so staging this runtime unmaps nothing")))
+
 (deftest the-source-read-carries-each-reference-code-pin
   ;; land6 review, must-fix 4: a cited reference-code file shows the revision main's source
   ;; pins it at; the :source effect reads each gitlink once, at import, so no render runs git
@@ -421,3 +427,185 @@
         head-tree (str/trim (:out (sh/sh "git" "rev-parse" "HEAD:reference-code/malli")))]
     (is (= head-tree (get (:pins r) "reference-code/malli")) "the gitlink HEAD's tree records for it")
     (is (every? #(str/starts-with? % "reference-code/") (keys (:pins r))))))
+
+(deftest a-test-that-reaches-a-process-is-found-by-the-reach-walk
+  ;; root's ruling (2026-10-22, owner 2026-10-23): a test that reaches a process (a shell, a
+  ;; fork, a root of its own, the binary) never runs automatically, only when named; it is
+  ;; found by the compiler's facts (the one reach walk, :seon.config.source/process-vars),
+  ;; never a marker. Each process var, reached directly or through a helper, and a test that
+  ;; reaches none. Step E's run 4: a change to seon.problems/report reached tests that boot a
+  ;; root, and an agent's proof run spun for minutes in its fork
+  (let [text (str "(ns app.proc-test (:require [clojure.java.shell :as sh] [clojure.test :refer [deftest is]] [app.proc :as p]"
+                  " [seon.lib :as lib] [seon.test-store :as ts] [seon.agent-test :as at] [seon.program :as sp]))\n\n"
+                  "(defn- shell-ok? [] (zero? (:exit (sh/sh \"true\"))))\n\n"
+                  "(deftest via-shell (is (shell-ok?)) (is (= 2 (p/twice 1))))\n\n"
+                  "(deftest via-fork (is (lib/fork! (fn [] 0))))\n\n"
+                  "(deftest via-binary (is (ts/binary-sh \"./seon\" \"version\")))\n\n"
+                  "(deftest via-root (is (at/in-agent [\"1\"])))\n\n"
+                  ;; tree-readers names binary-sh and a shell as quoted data: a test that only reaches that list
+                  ;; uses neither (the reach walk's own tests read it)
+                  "(deftest via-names (is (seq sp/tree-readers)))\n\n"
+                  "(deftest pure (is (= 2 (p/twice 1))))\n")
+        db (d/db-with (empty-db) (source/import-tx (empty-db) {"src/app/proc.clj" "(ns app.proc)\n\n(defn twice [x] (* 2 x))\n"
+                                                               "src/seon/program.clj" "(ns seon.program)\n\n(def tree-readers '#{seon.test-store/binary-sh clojure.java.shell/sh})\n"
+                                                               "test/app/proc_test.clj" text}))
+        idx (program/reach-index db {:env "" :tree ""})
+        mine (into {} (filter #(= "app.proc-test" (namespace (key %)))) idx)]
+    (is (= {'app.proc-test/via-shell true 'app.proc-test/via-fork true 'app.proc-test/via-binary true
+            'app.proc-test/via-root true 'app.proc-test/via-names false 'app.proc-test/pure false}
+           (update-vals mine :process?))
+        "each process var marks the test that reaches it, and only that")
+    (is (= #{'app.proc-test/via-shell 'app.proc-test/via-fork 'app.proc-test/via-binary 'app.proc-test/via-root}
+           (set (filter #(= "app.proc-test" (namespace %)) (program/process-tests idx)))))
+    ;; only seon.test-store/binary-sh runs target/seon (:seon.config.source/binary-vars): a shell
+    ;; or a fork is a process, not the binary, so a run of only those builds nothing (via-root
+    ;; reaches the binary through the real program's start-root!, which this program lacks)
+    (is (= {'app.proc-test/via-shell false 'app.proc-test/via-fork false 'app.proc-test/via-binary true
+            'app.proc-test/via-root false 'app.proc-test/via-names false 'app.proc-test/pure false}
+           (update-vals mine :binary?)))))
+
+;; ---- a changed file re-imports only what reaches it (task seon.source/an-import-reads-only-changed-files)
+
+(defn- program-of
+  "db's live forms as the reach walk reads them: by id, their text, refs, requires and lead."
+  [db] (into (sorted-map) (for [f (program/live-forms db)] [(:id f) (select-keys f [:src :refs :requires :ns :lead])])))
+
+(deftest a-refresh-is-the-whole-trees-replace-at-the-cost-of-what-changed
+  ;; root's ruling (2026-10-23): the test service's branch follows main by re-importing what a
+  ;; change reaches, not the program: a namespace whose file changed, and every one requiring it
+  (let [files {"src/rf/mac.clj" "(ns rf.mac)\n\n(defmacro twice [x] `(* 2 ~x))\n"
+               "src/rf/use.clj" "(ns rf.use (:require [rf.mac :refer [twice]]))\n\n(defn f [x] (twice x))\n"
+               "src/rf/other.clj" "(ns rf.other)\n\n(defn g [x] (inc x))\n"}
+        db (empty-db)
+        db (d/db-with db (source/import-tx db files))]
+    (testing "a changed macro: its namespace and the one using it read again, as the whole tree's replace reads them"
+      (let [mac "(ns rf.mac)\n\n(defmacro twice [x] `(+ ~x ~x))\n"]
+        (is (= (program-of (d/db-with db (source/replace-tx db (assoc files "src/rf/mac.clj" mac))))
+               (program-of (d/db-with db (source/refresh-tx db {"src/rf/mac.clj" mac})))))))
+    (testing "a removed file: its namespace's program is retracted, the others kept"
+      (let [after (d/db-with db (source/refresh-tx db {"src/rf/other.clj" nil}))]
+        (is (nil? (seon.db/eid after :var/name 'rf.other/g)))
+        (is (some? (seon.db/eid after :var/name 'rf.use/f)))
+        (is (= (program-of (d/db-with db (source/replace-tx db (dissoc files "src/rf/other.clj"))))
+               (program-of after)))))
+    (testing "an unchanged tree: nothing to do"
+      (is (= [] (source/refresh-tx db {}))))))
+
+(defn- refresh-program
+  "A program of n forms in other files (files of ten functions each, every one requiring rfc.c
+  and calling it when hub? is true) beside rfc.c, a file of ten functions: db holding it, and
+  rfc.c's text with one function's body edited."
+  {:malli/schema [:=> [:cat pos-int? :boolean] [:tuple :seon.host/db [:map-of :string :string]]]}
+  [n hub?]
+  (let [fns (fn [body] (apply str (for [i (range 10)] (str "\n\n(defn f" i " [x] " (body i) ")"))))
+        c (fn [body] (str "(ns rfc.c)" (fns body) "\n"))
+        fs (into {"src/rfc/c.clj" (c #(str "(+ x " % ")"))}
+                 (for [j (range (max 1 (quot n 10)))]
+                   [(str "src/rfc/o" j ".clj")
+                    (str "(ns rfc.o" j (when hub? " (:require [rfc.c :as c])") ")"
+                         (fns #(if hub? (str "(c/f" % " x)") (str "(* x " % ")"))) "\n")]))
+        db (empty-db)]
+    [(d/db-with db (source/import-tx db fs)) {"src/rfc/c.clj" (c #(if (zero? %) "(- x 1)" (str "(+ x " % ")")))}]))
+
+(defn refresh-of
+  "refresh-tx's arguments: a program of n forms in other files, and a body edit in a file no
+  namespace requires."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:map-of :string :string]]]}
+  [n] (refresh-program n false))
+
+(defn hub-refresh-of
+  "refresh-tx's arguments: a program of n forms in other files that all require rfc.c, and a
+  body edit in rfc.c."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:map-of :string :string]]]}
+  [n] (refresh-program n true))
+
+(defn read-of
+  "seon.source/read-nss's argument: refresh-of n's edited file."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  [n] [(second (refresh-of n))])
+
+(defn interface-of
+  "seon.source/db-interface's arguments: hub-refresh-of n's db and its hub."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :symbol]]}
+  [n] [(first (hub-refresh-of n)) 'rfc.c])
+
+(defn diff-of
+  "seon.source/program-tx's arguments: refresh-of n's db and its edited file, read."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :map :set]]}
+  [n] (let [[db ch] (refresh-of n)] [db (#'source/read-nss ch) ch #{}]))
+
+(defn transact-of
+  "datahike.api/db-with's arguments: refresh-of n's db and its refresh's facts."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.db/tx-data]]}
+  [n] (let [[db ch] (refresh-of n)] [db (source/refresh-tx db ch)]))
+
+(defn- written
+  "The namespaces whose forms tx writes (each form map's :form/ns tempid)."
+  [tx] (set (keep #(when (and (map? %) (:form/src %)) (:form/ns %)) tx)))
+
+(deftest a-body-edit-writes-only-its-form
+  (let [[db ch] (refresh-of 10)
+        tx (source/refresh-tx db ch)
+        after (d/db-with db tx)
+        tree (into {} (for [[p n] [["src/rfc/c.clj" 'rfc.c] ["src/rfc/o0.clj" 'rfc.o0]]] [p (source/file-text db n)]))]
+    (is (= (program-of (d/db-with db (source/replace-tx db (merge tree ch)))) (program-of after))
+        "the same program as the whole tree's replace")
+    (is (= 1 (count (filter #(and (map? %) (:form/src %)) tx))) "one form written: the edited one")
+    (is (= [] (source/refresh-tx after ch)) "the same text again: nothing")
+    (let [[hdb hch] (hub-refresh-of 10)]
+      (is (= #{"ns rfc.c"} (written (source/refresh-tx hdb hch))) "a hub's body edit reads no dependent"))
+    (let [[hdb hch] (hub-refresh-of 10)
+          renamed {"src/rfc/c.clj" (str/replace (hch "src/rfc/c.clj") "(defn f9 " "(defn g9 ")}]
+      (is (= #{"ns rfc.c" "ns rfc.o0"} (written (source/refresh-tx hdb (assoc renamed "src/rfc/o0.clj" (str/replace (source/file-text hdb 'rfc.o0) "(c/f9 x)" "(c/f8 x)")))))
+          "a renamed function changes the interface: its dependents are read again"))))
+
+(def ^:private refresh-sizes
+  "Forms in the other files: a fixed change costs the same at each."
+  [10 100 1000])
+
+(deftest a-fixed-change-costs-the-same-at-any-program-size
+  (doseq [e [{:of 'seon.source/read-nss :input 'seon.source-test/read-of
+              :n "forms in the program's other files; the read and analysis of one 10-function file"
+              :work "read: the file's text read form by form; analyze: each form's account (Jolt's analyzer, not run)"
+              :growth :constant
+              ;; measured 2026-10-23: 294k ticks, 2.44 MB, 391 calls at every size (1.3 ms CPU)
+              :fixed {:ticks 300000 :bytes 2500000 :calls 391}
+              :sizes refresh-sizes}
+             {:of 'seon.source/db-interface :input 'seon.source-test/interface-of
+              :n "forms in the program's other files, every file requiring the hub"
+              :work "the gate on dependents: the hub's forms (avet :form/ns) and their definitions read once"
+              :growth :constant
+              ;; measured 2026-10-23: 346k -> 351k ticks, 873 -> 887 KB, 25 calls (0.9 ms CPU)
+              :fixed {:ticks 360000 :bytes 910000 :calls 25}
+              :sizes refresh-sizes}
+             {:of 'seon.source/program-tx :input 'seon.source-test/diff-of
+              :n "forms in the program's other files"
+              :work "diff: each of the file's forms looked up by id and compared with its account; the tx: one form's facts"
+              :growth :constant
+              ;; measured 2026-10-23: 1.16M -> 1.19M ticks, 3.26 -> 3.39 MB, 142 calls (3.3 ms CPU)
+              :fixed {:ticks 1200000 :bytes 3480000 :calls 142}
+              :sizes refresh-sizes}
+             {:of 'datahike.api/db-with :input 'seon.source-test/transact-of
+              :n "forms in the program's other files"
+              :work "transact: one form's facts and its var's pointer, into the indexes of the program (log n per datom)"
+              :growth :log
+              ;; measured 2026-10-23: 561k -> 635k ticks, 1.38 -> 1.59 MB from 10 to 1,000 (1.9 ms CPU)
+              :fixed {:ticks 530000 :bytes 1290000} :per-n {:ticks 11500.0 :bytes 31000.0}
+              :sizes refresh-sizes}
+             {:of 'seon.source/refresh-tx :input 'seon.source-test/refresh-of
+              :n "forms in the program's other files; a body edit in a file no namespace requires"
+              :work "read, analyze, gate, diff and the tx of one file, the phases above: nothing of the program's other files"
+              :growth :constant
+              ;; measured 2026-10-23: 1.80M -> 1.84M ticks, 6.62 -> 6.76 MB, 563 calls (6-8 ms CPU); was 822k
+              ;; ticks at 10 namespaces of one function each, +350 ticks and +1.1 KB per namespace
+              :fixed {:ticks 1900000 :bytes 6950000 :calls 563}
+              :sizes refresh-sizes}
+             {:of 'seon.source/refresh-tx :input 'seon.source-test/hub-refresh-of
+              :n "forms in the program's other files, every file requiring the edited one"
+              :work "as a leaf's: the interface is unchanged, so no dependent is read"
+              :growth :constant
+              ;; measured 2026-10-23: as the leaf's, 1.80M -> 1.84M ticks, 6.61 -> 6.75 MB, 563 calls
+              :fixed {:ticks 1900000 :bytes 6950000 :calls 563}
+              :sizes refresh-sizes}]]
+    (testing (str (:of e) " on " (:input e))
+      (cost/proof e))))

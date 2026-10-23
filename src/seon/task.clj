@@ -53,7 +53,7 @@
 
 (defn citation-problems
   "Each citation of decls' text that resolves to nothing on db, as {:task :name :problem
-  :unresolved}: answered beside the write, never a refusal (docs/references.md)."
+  :unresolved}: answered beside the write, never an error (docs/references.md)."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/declaration]] [:vector :map]]}
   [db decls]
   (vec (for [decl decls
@@ -158,7 +158,7 @@
   "The observed members of an attempt's end (proto.agents/end), as attributes: a count
   nobody measured (no end written, a reply without usage) is absent, never 0."
   {:malli/schema [:=> [:cat :seon.turn/end :int :int] :map]}
-  [{:keys [outcome turns model-calls tokens results uncontracted reason conflicts unmerged changed]} end-ms basis-t]
+  [{:keys [outcome turns model-calls tokens results uncontracted reason conflicts unmerged changed deferred caused]} end-ms basis-t]
   (cond-> {:seon.attempt/outcome outcome :seon.attempt/basis-t basis-t :seon.attempt/end-ms end-ms
            :seon.attempt/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s}))}
     turns (assoc :seon.attempt/turns turns)
@@ -168,6 +168,8 @@
     (seq conflicts) (assoc :seon.attempt/conflicts (mapv pm/conflict-tx conflicts))
     (seq unmerged) (assoc :seon.attempt/unmerged (vec unmerged))
     (seq changed) (assoc :seon.attempt/changed (vec changed))
+    (seq deferred) (assoc :seon.attempt/deferred (vec deferred))
+    (seq caused) (assoc :seon.attempt/caused (vec caused))
     reason (assoc :seon.attempt/reason reason)))
 
 (defn carry-tx
@@ -267,6 +269,7 @@
 (def ^:private attempt-pull
   '[* {:seon.attempt/task [:seon.task/id]}
     {:seon.attempt/results [:seon.proof/test :seon.proof/status]}
+    {:seon.attempt/deferred-results [:seon.proof/test :seon.proof/status]}
    {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
 (defn- attempt-value
@@ -282,6 +285,9 @@
       uncontracted (assoc :seon.attempt/uncontracted (set uncontracted))
       unmerged (assoc :seon.attempt/unmerged (vec (sort unmerged)))
       (:seon.attempt/changed a) (update :seon.attempt/changed set)
+      (:seon.attempt/deferred a) (update :seon.attempt/deferred set)
+      (:seon.attempt/deferred-results a) (update :seon.attempt/deferred-results #(into {} (map (juxt :seon.proof/test :seon.proof/status)) %))
+      (:seon.attempt/caused a) (update :seon.attempt/caused set)
       conflicts (assoc :seon.attempt/conflicts
                        (vec (sort-by (comp str :key) (map pm/conflict-value conflicts)))))))
 
@@ -299,12 +305,15 @@
   (some-> (d/pull db attempt-pull [:seon.attempt/id aid]) attempt-value))
 
 (defn root
-  "Root's boot and config keys on db: {:boot :max-running :max-merging}, nil before the first boot."
-  {:malli/schema [:=> [:cat :seon.host/db] [:maybe [:map [:boot :string] [:max-running :int] [:max-merging {:optional true} :int]]]]}
+  "Root's boot and config keys on db: {:boot :max-running :max-merging :gate-checkout}, nil
+  before the first boot."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe [:map [:boot :string] [:max-running :int] [:max-merging {:optional true} :int]
+                                                     [:gate-checkout {:optional true} :string]]]]}
   [db]
-  (when-let [r (d/pull db [:seon.root/boot :seon.config.agent/max-running :seon.config.merge/max-running] [:seon.root/id :root])]
+  (when-let [r (d/pull db [:seon.root/boot :seon.config.agent/max-running :seon.config.merge/max-running :seon.config.source/gate-checkout] [:seon.root/id :root])]
     (cond-> {:boot (:seon.root/boot r) :max-running (:seon.config.agent/max-running r)}
-      (:seon.config.merge/max-running r) (assoc :max-merging (:seon.config.merge/max-running r)))))
+      (:seon.config.merge/max-running r) (assoc :max-merging (:seon.config.merge/max-running r))
+      (:seon.config.source/gate-checkout r) (assoc :gate-checkout (:seon.config.source/gate-checkout r)))))
 
 (defn entity-value
   "The task, attempt or root that entity e of db is now, as the reconciler's index holds it:
@@ -341,7 +350,7 @@
    :seon.task/kind :seon.task/evidence :seon.task/references
    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
 
-(defn- file-refusal
+(defn- file-refused
   {:malli/schema [:=> [:cat :symbol :string] :map]}
   [ns-sym m] (invalid 'seon.task/file-declarations (str "task file " ns-sym ".edn: " m)))
 
@@ -356,17 +365,17 @@
         forms (try (vec (take-while #(not= ::eof %) (repeatedly #(edn/read {:eof ::eof} r))))
                    (catch Exception e (ex-message e)))]
     (cond
-      (string? forms) (file-refusal ns-sym (str "not readable EDN: " forms))
-      (not (and (= 1 (count forms)) (vector? (first forms)))) (file-refusal ns-sym "not exactly one vector of declarations")
+      (string? forms) (file-refused ns-sym (str "not readable EDN: " forms))
+      (not (and (= 1 (count forms)) (vector? (first forms)))) (file-refused ns-sym "not exactly one vector of declarations")
       :else (let [ds (mapv #(if (map? %) (assoc % :seon.task/ns ns-sym) %) (first forms))]
               (if-let [bad (first (remove #(contract/valid? :seon.task/declaration %) ds))]
-                (file-refusal ns-sym (str "an entry is not a :seon.task/declaration: " (print/text bad (:part print/budgets))))
+                (file-refused ns-sym (str "an entry is not a :seon.task/declaration: " (print/text bad (:part print/budgets))))
                 ds)))))
 
 (defn load-tx
   "The transaction reconciling task files into main db. files: {owning-ns declarations or
-  refusal}, every file read (a file not given is not judged). Answers the tx-data, or the
-  first refusal: a file's own, or needs that name no task or form a cycle."
+  error}, every file read (a file not given is not judged). Answers the tx-data, or the
+  first error: a file's own, or needs that name no task or form a cycle."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :symbol :any]] [:or [:vector :any] [:map [:seon.error/type :keyword]]]]}
   [db files]
   (if-let [r (first (filter :seon.error/type (vals files)))]
@@ -382,7 +391,7 @@
                        (into {} (for [[id d] decls] [id (set (:seon.task/needs d))])))
           declared (fn [id d] {:seon.task/id id :seon.task/declared (sedn/encode d)})]
       (if-let [p (needs-problem graph graph)]
-        (file-refusal (first owners) p)
+        (file-refused (first owners) p)
         (vec (concat
                (when (seq new) (create-tx db new))
                (for [d new] (declared (task-id (:seon.task/ns d) (:seon.task/name d)) d))

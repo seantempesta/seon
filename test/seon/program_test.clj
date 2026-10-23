@@ -258,6 +258,22 @@
     (is (not= before (select-keys (program/reach-digests db {:env "e2" :tree "t"}) calc-tests))
         "the inputs without program facts are in every digest")))
 
+(deftest an-update-gives-the-digests-a-rebuild-gives
+  (let [db (calc-db)
+        in {:env "e" :tree "t"}
+        g (program/reach-graph db nil)
+        db' (record db 'app.pt-calc "(defn add [a b] (+ b a))")
+        g' (program/reach-update g db')
+        db'' (record db' 'app.pt-calc "(defn neg [x] (- 0 x))")]
+    (is (= (program/reach-index db' in) (program/graph-index g' in nil)) "the update and the rebuild agree")
+    (is (not= (program/graph-index g in nil) (program/graph-index g' in nil)) "and the change moved them")
+    (is (< (:affected g') (count (:rows g'))) "only add's component and what reaches it were re-folded")
+    (is (= (program/reach-index db'' in) (program/graph-index (program/reach-update g db'') in nil))
+        "two changes since the base, from the base's graph")
+    (is (= (program/graph-index g in nil) (program/graph-index (program/reach-update g db) in nil)) "no change: the same")
+    (is (= (program/reach-index db in) (program/graph-index (program/reach-update (program/reach-update g db'') db) in nil))
+        "and back: a later value's graph updated to an older one (a resumed branch's base) is the older one's")))
+
 (deftest a-second-run-with-nothing-changed-runs-nothing
   (let [db (calc-db)
         dir (scratch-dir "results")
@@ -301,6 +317,24 @@
     (spit (str b "/resources/seon/schemas/x.edn") "{:x :string}")
     (is (= calc-tests (set (:run (run-plan (select-keys (program/reach-digests db (fx/inputs b)) calc-tests) dir))))
         "a changed schema resource is an input of every test")))
+
+(deftest an-uncommitted-edit-in-a-submodule-is-an-input
+  ;; pure-tests 2026-10-23: tree-id stages a submodule at its HEAD, while bin/build copies and
+  ;; the test runtime loads its files as they are: a dependency edit not yet committed left
+  ;; every digest as it was, so a green proven on the old files was reused on the new
+  (let [p (checkout! "with-sub" {"deps.edn" "{}"})
+        s (str p "/reference-code/lib")
+        core (str s "/core.clj")]
+    (.mkdirs (java.io.File. s))
+    (spit core "(ns lib.core)")
+    (doseq [args [["init" "-q"] ["add" "."] ["-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "lib"]]]
+      (apply sh/sh "git" "-C" s args))
+    (sh/sh "git" "-C" p "add" "reference-code/lib")
+    (let [before (:env (fx/inputs p))]
+      (spit core "(ns lib.core) (def edited 1)")
+      (is (not= before (:env (fx/inputs p))) "an edit in the submodule's files moves every test's :env")
+      (spit core "(ns lib.core)")
+      (is (= before (:env (fx/inputs p))) "its files back as committed: the same input as before"))))
 
 ;; ---- refs the expansion and the quote leave (task seon.program/refs-name-quoted-symbols-and-macro-uses)
 
@@ -419,14 +453,18 @@
   ;; gives the same digest for every test: a second run reruns nothing, two worktrees share
   (let [here (System/getProperty "user.dir")
         copy (scratch-dir "copy")
-        _ (sh/sh "zsh" "-c" (str "git -C '" here "' archive HEAD src test | tar -x -C '" copy "'"))
+        ;; src and test as they are on disk (tracked and untracked, unignored), not HEAD's: the
+        ;; digests are the working tree's, and HEAD's copy was red whenever the tree was dirty
+        ;; (pure-tests 2026-10-23: HEAD is no input of the digest)
+        ;; (a tracked file deleted on disk is no file of the tree: left out)
+        _ (sh/sh "zsh" "-c" (str "cd '" here "' && for f in ${(0)\"$(git ls-files -z -co --exclude-standard src test)\"}; do [[ -e $f ]] && print -rN -- $f; done | tar -c --null -T - -f - | tar -x -C '" copy "'"))
         in {:env "e" :tree "t"}
         a (program/reach-digests (runner/program-db here) in)
         b (program/reach-digests (runner/program-db here) in)
         c (program/reach-digests (runner/program-db copy) in)]
     (is (< 300 (count a)) "the whole suite")
     (is (= a b) "the same tree imported twice in one process: every digest equal")
-    (is (= a c) "the same commit in another checkout: every digest equal, so its results are shared")
+    (is (= a c) "the same tree in another checkout: every digest equal, so its results are shared")
     (is (= [] (:run (run-plan a (let [dir (scratch-dir "same-tree")]
                                   (proofs/store-greens! #(fx/write-file {:req %}) dir (into {} (for [[t dg] a] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
                                   dir))))
@@ -494,6 +532,13 @@
         env #(:env (fx/inputs here % here))]
     (is (not= (env cfg) (env (assoc cfg :seon.config.ai/model "b"))) "another value in force: another :env, every test reruns")
     (is (= (env cfg) (env (assoc cfg :seon.config.web/port 9999))) "a checkout's own TCP port is no input")
+    ;; owner, 2026-10-23: agents' greens and a checkout's are one store, so where a process
+    ;; runs (its :seon.config/place keys) is no input; how a test behaves still is
+    (is (= (env cfg) (env (assoc cfg :seon.config.root/main "in-agent-1" :seon.config.root/store-path "/x/store"
+                                     :seon.config.source/root here :seon.config.source/dirs ["src" "test"]
+                                     :seon.config.source/test-results-dir "/x/results")))
+        "a root's own main, store, source and results directory are no input")
+    (is (not= (env cfg) (env (assoc cfg :seon.config.store/branching-factor 32))) "a bound a test runs under is one")
     (is (= (:env (fx/inputs here cfg here))
            (:env (fx/inputs here (assoc cfg :seon.config.root/runs-dir "/elsewhere/runs") "/elsewhere")))
         "a path under the checkout is the same input in any checkout")))

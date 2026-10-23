@@ -66,13 +66,16 @@
                         [:seon.attempt/results {:optional true} :seon.proof/results]
                         [:seon.attempt/conflicts {:optional true} [:vector :seon.merge/conflict]]
                         [:seon.attempt/unmerged {:optional true} [:vector :string]]
-                        [:seon.attempt/changed {:optional true} [:set :string]]]
+                        [:seon.attempt/changed {:optional true} :seon.attempt/changed]
+                        [:seon.attempt/deferred {:optional true} [:set :qualified-symbol]]
+                        [:seon.attempt/deferred-results {:optional true} :seon.proof/results]
+                        [:seon.attempt/caused {:optional true} [:set :string]]]
  ;; ---- the done rule and the reconciler's answer ----
  :seon.reconcile/merge-limits [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?]]
  ;; a released task not done at quiescence: a root cause (held for root with its failure, a
  ;; refused spawn, or cancelled or held)
  ;; and the released tasks it blocks, transitively
- :seon.reconcile/stuck-row [:map {:closed true} [:task :seon.task/id] [:cause :string]
+ :seon.reconcile/root-cause [:map {:closed true} [:task :seon.task/id] [:cause :string]
                             [:attempt {:optional true} :seon.attempt/id] [:blocks [:vector :seon.task/id]]]
  ;; the reconciler proc's state, and the steps of a flight
  :seon.reconcile/state [:map [:db :seon.host/db] [:boot :string]
@@ -94,7 +97,7 @@
                         [:ready [:set [:tuple :int :seon.task/id]]] [:ready-key :map]
                         [:live [:set :seon.attempt/id]] [:reap [:set :seon.attempt/id]] [:kill [:map-of :seon.attempt/id :keyword]]
                         [:judge [:set :seon.attempt/id]] [:merging [:set :seon.attempt/id]]]
- :seon.reconcile/step [:enum :ignored :done :dead-read :spawned :started :worked :tested :read :diffed :merged :octopus-merged :write-back :main-read :committed :commit-recorded :built]
+ :seon.reconcile/step [:enum :ignored :done :dead-read :spawned :started :worked :tested :read :diffed :merged :octopus-merged :write-back :main-read :committed :commit-recorded :built :gate-read :gated]
  ;; a task and an attempt as Datahike pulls them (the readers' inputs)
  :seon.task/pulled [:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                     [:seon.task/plan :seon.task/plan] [:seon.task/execution [:enum :held :running :cancelled]]
@@ -107,11 +110,15 @@
                              [:proofs :seon.task/proofs] [:results :seon.proof/results]
                              [:main-green [:set :qualified-symbol]] [:allowed-red [:set :qualified-symbol]]
                              [:uncontracted [:set :qualified-symbol]] [:unmerged {:optional true} [:vector :string]]
+                             ;; the derived problems the branch's work made true (seon.problems/caused)
+                             [:caused {:optional true} [:set :string]]
                              [:kind {:optional true} :seon.task/kind]
                              ;; a :design task's accumulated plan now and as its attempt began
-                             [:plan {:optional true} :seon.task/plan] [:plan-before {:optional true} :seon.task/plan]]
- :seon.reconcile/refusal [:map {:closed true}
-                          [:refusal [:enum :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design]]
+                             [:plan {:optional true} :seon.task/plan] [:plan-before {:optional true} :seon.task/plan]
+                             ;; the process tests the attempt's run left to root's gate (neither red nor unknown)
+                             [:deferred {:optional true} [:set :qualified-symbol]]]
+ :seon.reconcile/not-done [:map {:closed true}
+                          [:reason [:enum :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem]]
                           [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string]]
  :seon.reconcile/action [:multi {:dispatch :op}
                          [:reap [:map {:closed true} [:op [:= :reap]] [:attempt :seon.attempt/id]]]
@@ -120,6 +127,10 @@
                          ;; an octopus merge: every green merge attempt whose keys are disjoint merges in one commit
                          [:octopus-merge [:map {:closed true} [:op [:= :octopus-merge]] [:attempt :seon.attempt/id]
                                         [:members [:vector [:map {:closed true} [:attempt :seon.attempt/id] [:task :seon.task/id]]]]]]
+                         ;; a green merge whose change reaches process tests: they run on a checkout of the
+                         ;; merge candidate first (seon.fx/run-tests), and gate it like proofs
+                         [:gate [:map {:closed true} [:op [:= :gate]] [:attempt :seon.attempt/id] [:task :seon.task/id]
+                                 [:tests [:vector :qualified-symbol]]]]
                          [:accept [:map {:closed true} [:op [:= :accept]] [:attempt :seon.attempt/id] [:task :seon.task/id]]]
                          ;; a failed attempt: its task held for root, the problem as data (seon.reconcile/hold-tx)
                          [:hold [:map {:closed true} [:op [:= :hold]] [:attempt :seon.attempt/id] [:task :seon.task/id]
@@ -132,7 +143,8 @@
  ;; a conversation message: an assistant's may carry its eval calls, a tool message answers one by its id
  :seon.model/tool-call [:map [:id :string] [:code :string]]
  :seon.model/message [:map [:role [:enum "system" "user" "assistant" "tool"]] [:content :string]
-                      [:tool-calls {:optional true} [:vector :seon.model/tool-call]] [:tool-call-id {:optional true} :string]]
+                      [:tool-calls {:optional true} [:vector :seon.model/tool-call]] [:tool-call-id {:optional true} :string]
+                      [:reasoning {:optional true} :string]]
  :seon.model/provider [:multi {:dispatch :kind}
                        [:none [:map [:kind [:= :none]]]]
                        [:scripted [:map [:kind [:= :scripted]] [:script :qualified-symbol]]]
@@ -163,4 +175,6 @@
                  [:reason {:optional true} :string] [:ms {:optional true} number?]
                  [:conflicts {:optional true} [:vector :seon.merge/conflict]]
                  [:unmerged {:optional true} [:vector :string]]
-                 [:changed {:optional true} [:set :string]]]}
+                 [:changed {:optional true} [:set :string]]
+                 [:deferred {:optional true} [:vector :qualified-symbol]]
+                 [:caused {:optional true} [:set :string]]]}

@@ -2,7 +2,7 @@
   "Laws of the value printer (Seon's `seon.render.value-law-test`, on the slice): the text stays
   inside the budget, every cut's form reads exactly what the cut says it left (read off the
   text, as an agent reads it), and an uncut text reads back as the value."
-  (:require [clojure.edn :as edn]
+  (:require [clojure.edn :as edn] [seon.proofs :as proofs]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
@@ -79,8 +79,9 @@
                   :g (str/join "\n" (repeat 5 "zz")) :h {:i {:j {:k "deep"}}}}
                  budget)))
   (let [r (tc/quick-check 150 (prop/for-all [raw value-gen budget (gen/elements [60 200 800 1500])] (lawful? raw budget))
-                          :seed 202610071 :max-size 40)]
-    (is (:pass? r) "a printed value broke its budget or a cut's continuation")))
+                          :seed (proofs/test-seed) :max-size 40)]
+    (is (:pass? r) (str "a printed value broke its budget or a cut's continuation: "
+                        (pr-str (select-keys r [:seed]) (get-in r [:shrunk :smallest]))))))
 
 (deftest a-cut-counts-the-lines-it-left
   ;; the line breaks are found once per string (select/line-breaks), and each cut counts the
@@ -122,7 +123,7 @@
     (is (reads-exactly? text '(my.turn/evals) evals c) "the form reads exactly the rest")))
 
 (deftest a-refused-argument-is-shown-by-the-one-printer
-  ;; seon.contract's refusal shows the offending value within the part budget, cut the printer's way
+  ;; seon.contract's error shows the offending value within the part budget, cut the printer's way
   (let [f (seon.contract/checked 'seon.print-test/takes-an-int [:=> [:cat :int] :int] inc)
         e (try (f (vec (range 10000))) nil (catch Exception e (ex-data e)))
         shown (:value (first (:seon.error/problems e)))]
@@ -130,7 +131,7 @@
     (is (re-find #"…\d+" shown) "a long value is cut with the printer's marker")
     (is (<= (select/estimate shown) (:part seon/budgets)))))
 
-(deftest text-is-the-printed-text-or-the-refusal
+(deftest text-is-the-printed-text-or-the-error
   (is (= "{:a 1}" (seon/text {:a 1})))
   (is (string? (seon/text (vec (range 100)) 1))))
 
@@ -165,13 +166,14 @@
 
 (deftest the-layout-is-fipps
   (let [layout @#'seon.print.emit/layout
-        r (java.util.Random. 20261020)
+        seed (proofs/test-seed)
+        r (java.util.Random. seed)
         docs (concat (for [_ (range 600)] [(vec (fipp/serialize (random-doc r 0))) (inc (.nextInt r 40))])
                      ;; a group holding more than `width` open groups breaks, though it fits
                      (for [w [3 5 8] depth [2 5 8 12]]
                        [(vec (fipp/serialize [:group "a" :line (reduce (fn [d _] [:group d]) "b" (range depth))])) w]))
         wrong (for [[ops width] docs :when (seq ops) :when (not= (fipp-text ops width) (layout ops width))] [ops width])]
-    (is (empty? wrong) (str "laid out unlike fipp: " (pr-str (first wrong))))
+    (is (empty? wrong) (str "laid out unlike fipp (seed " seed "): " (pr-str (first wrong))))
     (is (= "a\nb" (layout (vec (fipp/serialize [:group "a" :line (reduce (fn [d _] [:group d]) "b" (range 8))])) 5))
         "the pruned group breaks")))
 

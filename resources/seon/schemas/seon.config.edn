@@ -31,6 +31,7 @@
   [:seon.config.store/value-out-of-line-bytes :seon.config.store/value-out-of-line-bytes]
   [:seon.config.store/compressor :seon.config.store/compressor]
   [:seon.config.store/node-cache-bytes :seon.config.store/node-cache-bytes]
+  [:seon.config.store/sole-writer? :seon.config.store/sole-writer?]
   ;; the machine
   [:seon.config.machine/memory-mb :seon.config.machine/memory-mb]
   [:seon.config.machine/relay-mb :seon.config.machine/relay-mb]
@@ -49,19 +50,27 @@
   [:seon.config.agent/form-ticks :seon.config.agent/form-ticks]
   [:seon.config.agent/form-top-fns :seon.config.agent/form-top-fns]
   [:seon.config.agent/test-ticks :seon.config.agent/test-ticks]
+  [:seon.config.agent/turn-test-ticks :seon.config.agent/turn-test-ticks]
   ;; merges
   [:seon.config.merge/max-running :seon.config.merge/max-running]
   [:seon.config.merge/max-conflicts :seon.config.merge/max-conflicts]
   [:seon.config.merge/max-merge-turns :seon.config.merge/max-merge-turns]
   ;; Seon's own source
   [:seon.config.source/root {:optional true} :seon.config.source/root]
+  [:seon.config.source/gate-checkout {:optional true} :seon.config.source/gate-checkout]
   [:seon.config.source/dirs :seon.config.source/dirs]
+  [:seon.config.source/process-vars :seon.config.source/process-vars]
+  [:seon.config.source/binary-vars :seon.config.source/binary-vars]
   [:seon.config.source/branch :seon.config.source/branch]
   [:seon.config.source/committer-name :seon.config.source/committer-name]
   [:seon.config.source/committer-email :seon.config.source/committer-email]
   [:seon.config.source/generations-dir :seon.config.source/generations-dir]
+  [:seon.config.source/tests-dir :seon.config.source/tests-dir]
   [:seon.config.source/test-results-dir :seon.config.source/test-results-dir]
   [:seon.config.proofs/jobs :seon.config.proofs/jobs]
+  [:seon.config.proofs/seed-salt :seon.config.proofs/seed-salt]
+  [:seon.config.proofs/cost-max-n :seon.config.proofs/cost-max-n]
+  [:seon.config.proofs/seeds :seon.config.proofs/seeds]
   ;; effects and the model
   [:seon.config.fx/buf :seon.config.fx/buf]
   [:seon.config.ai/provider :seon.config.ai/provider]
@@ -90,6 +99,7 @@
   [:seon.config.render/history-budget :seon.config.render/history-budget]
   [:seon.config.render/reference-tokens :seon.config.render/reference-tokens]
   [:seon.config.render/found :seon.config.render/found]
+  [:seon.config.render/map-tokens :seon.config.render/map-tokens]
   [:seon.config.render.list/rows :seon.config.render.list/rows]
   [:seon.config.render.list/newest :seon.config.render.list/newest]
   [:seon.config.render.list/brief :seon.config.render.list/brief]
@@ -105,10 +115,10 @@
   [:seon.config.render.list/history :seon.config.render.list/history]
   ;; the web, instrumentation, the native probe
   [:seon.config.web/port :seon.config.web/port]
-  [:seon.config.root/entrance-port :seon.config.root/entrance-port]
+  [:seon.config.root/server-port :seon.config.root/server-port]
   [:seon.config.web/public-dir :seon.config.web/public-dir]
   [:seon.config.web/utc-offset :seon.config.web/utc-offset]
-  [:seon.config.contract/guarantees :seon.config.contract/guarantees]
+  [:seon.config.contract/instrument :seon.config.contract/instrument]
   [:seon.config.native/probe-lib :seon.config.native/probe-lib]]
 
  ;; which layer each key came from (seon.config/sources): the shipped file, config/local.edn,

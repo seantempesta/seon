@@ -84,7 +84,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.procs-test/a-dropped-event-is-counted
                       seon.procs-test/root-buffers-come-from-the-declaration}}
- {:seon.task/name "fork-refusal-names-the-threads"
+ {:seon.task/name "fork-error-names-the-threads"
   :seon.task/plan "Done in part: `seon.lib/fork!` forks only while this is the one active Chez thread and otherwise calls its :refused fn at once with the active thread count, so a test run beside a thread answers :seon.test/fork-refused {:active-threads n} (`seon.agent/run-tests-forked`) instead of the old safe-fork's 1 s spin. Left: `seon.agent`'s interrupt-self-test spins up to 100,000 evals waiting for its own SIGUSR1. Correct: the self-test waits on one safe point (one engine tick) and records whether the handler ran. Deletes the 100,000. Its two proofs are not yet written."
   :seon.task/kind :work
   :seon.task/proofs #{seon.agent-test/a-fork-beside-a-thread-is-refused-at-once-naming-it

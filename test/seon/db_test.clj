@@ -172,7 +172,7 @@
       (let [c0 (d/connect made)] (d/transact c0 {:tx-data (vec (remove #(= :seon.tx/runtime (:db/ident %)) pdb/schema))}) (d/release c0))
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
         (is (= :seon.tx/runtime (:db/ident (get (d/schema @conn) :seon.tx/runtime))) "the attribute is installed")
-        (let [r (d/transact conn {:tx-data [{:note/text "after"}] :tx-meta (pdb/tx-meta)})]
+        (let [r (d/transact conn {:tx-data [{:note/text "after"}] :tx-meta (pdb/tx-meta :db)})]
           (is (string? (:seon.tx/runtime (d/entity @conn (:db/current-tx (:tempids r))))) "and the next transaction names its runtime"))
         (d/release conn))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
@@ -284,8 +284,8 @@
   than real turn text and made LZ4 look like the fix (2026-10-22)."
   [k]
   [{:seon.turn/id (str "att/" k) :seon.turn/attempt "att" :seon.turn/n k :seon.turn/origin :model
-    :seon.turn/basis {:commit (random-uuid) :task "t/x" :attempt "att" :turn k :max-turns 8 :origin :model
-                                       :observed {:results {'t-test/x :fail} :run-errors [] :refusals [{:refusal :proof-red :symbol 't-test/x}]
+    :seon.turn/basis {:commit (java.util.UUID. 0 k) :task "t/x" :attempt "att" :turn k :max-turns 8 :origin :model
+                                       :observed {:results {'t-test/x :fail} :run-errors [] :reasons [{:reason :proof-red :symbol 't-test/x}]
                                                   :reds [{:test 't-test/x :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))"}]}}
     :seon.turn/reply (slice @prose k 1500)
     :seon.turn/calls [{:id "call-0" :code "(f 2)" :evals (slice @code k 2000)}]}])
@@ -390,23 +390,44 @@
       (d/branch! conn :db :early)
       (on :early #(d/transact % {:tx-data [{:seon.turn/id "att/e" :seon.turn/reply (slice @prose 3 3000)}]}))
       (d/delete-branch! conn :early)
-      (let [r1 (record! (pdb/collect! conn))]
+      (let [r1 (record! (pdb/collect! conn true))]
         (is (= #{:db} (:branches r1)) "the first collection records the branches it saw")
         (is (zero? (:swept r1)) "and sweeps nothing: a new main must not hold its first work behind a full sweep"))
-      (is (:skipped (pdb/collect! conn)) "the same branches: nothing to reclaim, nothing written")
+      (is (:skipped (pdb/collect! conn true)) "the same branches: nothing to reclaim, nothing written")
       (d/branch! conn :db :gone)
       (on :gone #(d/transact % {:tx-data [{:seon.turn/id "att/0" :seon.turn/reply reply}]}))
-      (let [r (record! (pdb/collect! conn))]
+      (let [r (record! (pdb/collect! conn true))]
         (is (= {:swept 0 :gone 0 :branches #{:db :gone}} (select-keys r [:swept :gone :branches]))
             "a branch made since: recorded as seen, nothing swept"))
       (is (k/exists? (:store @conn) vk {:sync? true}))
       (d/delete-branch! conn :gone)
-      (let [r2 (record! (pdb/collect! conn))]
+      (let [r2 (record! (pdb/collect! conn true))]
         (is (pos? (:swept r2)) "the gone branch's nodes are swept")
         (is (= 1 (:gone r2)))
         (is (= #{:db} (:branches r2))))
       (is (not (k/exists? (:store @conn) vk {:sync? true})) "and its value out of line")
       (is (= #{"main's"} (notes @conn)) "main reads as before")
+      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+
+;; the rule a collection keeps beside "no agent live" (docs/storage.md#collection)
+(deftest a-root-that-shares-its-store-never-collects
+  ;; seon.db/collect! with sole? false (:seon.config.store/sole-writer?, false where roots share
+  ;; one store: bin/test's shards, bin/check's steps) sweeps nothing, though a branch is gone:
+  ;; another process's commit could be reusing a value the sweep would delete (Datahike's
+  ;; collection sees only its own process's commits). A store on disk of this test's own, the
+  ;; last resort: the in-memory store has no nodes to collect; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-shared-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        reply (slice @prose 11 3000)
+        vk (hasch.core/uuid reply)]
+    (try
+      (d/branch! conn :db :gone)
+      (let [c (d/connect (assoc (:config @conn) :branch :gone))]
+        (try (d/transact c {:tx-data [{:seon.turn/id "att/0" :seon.turn/reply reply}]}) (finally (d/release c))))
+      (d/delete-branch! conn :gone)
+      (is (= {:skipped true :shared true} (pdb/collect! conn false)) "a shared store: nothing swept, nothing recorded")
+      (is (k/exists? (:store @conn) vk {:sync? true}) "the gone branch's value out of line is kept")
+      (is (not (:skipped (pdb/collect! conn true))) "while the sole writer's collection of the same store runs")
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest a-commit-costs-what-it-writes

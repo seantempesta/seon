@@ -1,23 +1,59 @@
 (ns seon.writer
   "The writer: the only d/transact, d/branch! and merge caller, with group commit (drain
   the in-port, one Datahike commit per branch, one flush). From proto/flow f2-final
-  proto.control's writer (session F2; writer design A, ../notes/archive/option3-F1-flow.md section 4)."
+  proto.control's writer (session F2; writer design A, notes/archive/option3-F1-flow.md section 4)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
-            [seon.program :as program] [seon.merge :as pm] [seon.source :as source] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
+            [seon.program :as program] [seon.merge :as pm] [seon.union :as union] [seon.problems :as problems] [seon.source :as source] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
+(defn- union-caught-up
+  "st with its union (seon.union), once one was asked for, holding branch b's datoms up to
+  head: from the commit of b it holds, or from b's merge base with main for a branch it has
+  not seen. O(Δ) per commit: the writer sees every main commit and every agent's commit
+  notice, so U stays current with no poll. st as it is before anyone asked."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.db/branch :seon.host/db] :seon.writer/state]}
+  [st b head]
+  (if-let [un (:union st)]
+    (let [conn (:conn st) main (pdb/conn-main conn)
+          from (if-let [cid (get-in un [:applied b])] (d/commit-as-db conn cid) (pdb/branch-base conn main b))]
+      (assoc st :union (union/catch-up un b from head)))
+    st))
+
+(defn- union-built
+  "st with its union built (seon.union): main's history, and each branch under main from its
+  merge base; as it is when built already."
+  {:malli/schema [:=> [:cat :seon.writer/state] :seon.writer/state]}
+  [st]
+  (if (:union st)
+    st
+    (let [conn (:conn st) main (pdb/conn-main conn)]
+      (assoc st :union (reduce (fn [un b] (union/catch-up un b (pdb/branch-base conn main b) (pdb/head conn b)))
+                               (union/of-history (union/empty-union @conn) main @conn)
+                               (map #(pdb/on-main main %) (pdb/of-main main (set (d/branches conn)))))))))
+
 (defn- main-commit
-  "Main moved to t: the fork server's replica gets the commit (FIFO with fork requests),
-  the reconciler the report, and root loads the program change (a restarted fork server
-  forks from root). Answers st."
+  "Main moved to t: the reconciler gets the report, and root loads the program change (a
+  restarted fork server forks from root). The fork server hears of it per stored commit
+  (stored!). Answers st."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/t :seon.db/resolved-tx :map :seon.host/db] :seon.writer/state]}
   [st o t ops tx-meta db]
-  (step/out! o :to-fork-server {:op :tx :t t :ns (profile/now-ns) :tx-data ops :tx-meta tx-meta})
   (step/out! o :main {:t t :ops ops :db db :ns (profile/now-ns)})
   (when-let [errs (seq (program/load-changes! db ops))]
     (step/out! o :events (step/event {:type :load-errors :errors (vec errs)})))
-  st)
+  (union-caught-up st (pdb/conn-main (:conn st)) db))
+
+(defn- stored!
+  "Main's stored commit, made of ops (its transactions' resolved datoms, in order): the fork
+  server's replica reads that commit from the store (d/commit-as-db; FIFO with fork
+  requests) and loads the program they change, never replaying the datoms. A group commit
+  is one stored commit, so one notice covers its batch. The env is MDB_NOSYNC: a committed
+  write is readable by another process before the flusher's sync."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/resolved-tx] :nil]}
+  [st o ops]
+  (let [db @(:conn st)]
+    (step/out! o :to-fork-server {:op :tx :t (:max-tx db) :commit (d/commit-id db) :ns (profile/now-ns) :tx-data ops})
+    nil))
 
 (defn- branch-merge
   "seon.merge/three-way of branch b against main, from their merge base over Datahike's
@@ -31,11 +67,11 @@
 
 (defn- refused
   "The writer refusing a request, as the one error map (:seon.writer/refused); members
-  describe the refusal."
+  describe the refused answer."
   {:malli/schema [:=> [:cat :string :map] :seon.writer/refused]}
   [why members] (contract/error :seon.writer/refused 'seon.writer/writer-proc why members))
 
-(defn- merge-refusal
+(defn- merge-refused
   "Why branch head (its three-way r against main) cannot merge into main now (session M1), or
   nil: main's program (and declared data) changed since the branch's merge base
   (:seon.merge/behind: a merge task merges main first); the branch has unmerged entries
@@ -83,30 +119,31 @@
         judged (reduce (fn [{:keys [taken] :as acc} b]
                          (let [have? (pdb/branch? conn b)
                                [head r base] (when have? (branch-merge st b data-attrs))
-                               refusal (if have? (merge-refusal main head r) (refused (str "no branch " b) {}))
-                               refusal (or refusal
+                               why-not (if have? (merge-refused main head r) (refused (str "no branch " b) {}))
+                               why-not (or why-not
                                            (when (some taken (keys (:ours r)))
                                              (contract/error :seon.merge/behind 'seon.writer/octopus-merge
                                                              "another member of the octopus merge changes the same definitions: merge main into the branch first"
                                                              {:tx (:max-tx main) :behind (count (filter taken (keys (:ours r))))})))]
-                           (-> acc (update :members conj {:branch b :r r :head head :base base :refusal refusal})
-                               (cond-> (nil? refusal) (update :taken into (keys (:ours r)))))))
+                           (-> acc (update :members conj {:branch b :r r :head head :base base :refused why-not})
+                               (cond-> (nil? why-not) (update :taken into (keys (:ours r)))))))
                        {:taken #{} :members []} branches)
-        ok (remove :refusal (:members judged))
+        ok (remove :refused (:members judged))
         changed (into {} (for [{:keys [r]} ok [k [_ ov]] (:ours r)] [k ov]))]
     (if (empty? changed)
-      [st {:results (mapv #(or (:refusal %) {:merged? true :tx (:max-tx main) :datoms 0 :keys 0}) (:members judged))}]
+      [st {:results (mapv #(or (:refused %) {:merged? true :tx (:max-tx main) :datoms 0 :keys 0}) (:members judged))}]
       ;; git: each member's head becomes a parent, so its merge base moves to it; each
       ;; member's own datoms for the keys it changed, as they are (seon.merge/merge-tx)
       (let [rep (d/merge-db conn (set (map :branch ok))
                             (vec (mapcat (fn [{:keys [r head base]}] (pm/merge-tx main base head (keys (:ours r)) data-attrs)) ok))
-                            (pdb/tx-meta))
+                            (pdb/tx-meta (pdb/conn-main conn)))
             t (:max-tx (:db-after rep))
-            ops (pdb/report->tx rep)]
+            ops (pdb/report->tx rep)
+            _ (stored! st o ops)]
         [(main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep))
          {:tx t :datoms (count ops)
           ;; :files, the source files (namespaces' and schema resources') its changes touch: what a write-back rewrites
-          :results (mapv #(or (:refusal %) {:merged? true :tx t :keys (count (:ours (:r %))) :files (source/changed-files (:db-after rep) (:ours (:r %)))}) (:members judged))}]))))
+          :results (mapv #(or (:refused %) {:merged? true :tx t :keys (count (:ours (:r %))) :files (source/changed-files (:db-after rep) (:ours (:r %)))}) (:members judged))}]))))
 
 (defn- merge-branch
   "Merge the branch into main (git: only a branch that contains main's head; session M1): a
@@ -131,18 +168,20 @@
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile] :seon.writer/state]}
   [st o]
   (if-let [ms (seq (:pend st))]
-    (let [reps (try (dw/transact-batch! (:conn st) (mapv (fn [m] {:tx-data (:tx-data m) :tx-meta (pdb/tx-meta)}) ms))
+    (let [reps (try (dw/transact-batch! (:conn st) (mapv (fn [m] {:tx-data (:tx-data m) :tx-meta (pdb/tx-meta (pdb/conn-main (:conn st)))}) ms))
                     (catch Throwable e e))]
       (cond
         (sequential? reps)
-        (reduce (fn [st [m rep]]
-                  (if-not (map? rep)
-                    (do (answer o (:dest m) (refused (step/error-msg rep) {})) st)
-                    (let [t (:max-tx (:db-after rep)) ops (pdb/report->tx rep)]
-                      (answer o (:dest m) {:ok true :t t :datoms (count ops)})
-                      (main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep)))))
-                (-> st (dissoc :pend) (update :commits inc))
-                (map vector ms reps))
+        (let [ok (filter (comp map? second) (map vector ms reps))]
+          (when (seq ok) (stored! st o (vec (mapcat (comp pdb/report->tx second) ok))))
+          (reduce (fn [st [m rep]]
+                    (if-not (map? rep)
+                      (do (answer o (:dest m) (refused (step/error-msg rep) {})) st)
+                      (let [t (:max-tx (:db-after rep)) ops (pdb/report->tx rep)]
+                        (answer o (:dest m) {:ok true :t t :datoms (count ops)})
+                        (main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep)))))
+                  (-> st (dissoc :pend) (update :commits inc))
+                  (map vector ms reps)))
         (next ms) (reduce (fn [st m] (commit-batch (assoc st :pend [m]) o)) (dissoc st :pend) ms)
         :else (do (answer o (:dest (first ms)) (refused (step/error-msg reps) {})) (dissoc st :pend))))
     st))
@@ -165,7 +204,12 @@
       ;; its commits comes back): the event that ends the last pending sync (seon.check/idle)
       :clean (update st :clean-waiters (fnil conj []) dest)
       ;; an agent process committed its branch: a commit the next flush covers
-      :agent-commit (-> st (assoc :dirty true) (update :commits inc))
+      :agent-commit (-> st (assoc :dirty true) (update :commits inc)
+                        (cond-> (:union st) (union-caught-up (:branch m) (pdb/head conn (:branch m)))))
+      ;; the union of every branch's history (seon.union), built when first asked and kept
+      ;; current from then on by each commit this writer sees: query it with d/q over the
+      ;; answer's :db, a (d/history U)
+      :union (let [st (union-built st)] (reply st {:ok true :db (d/history (:db (:union st))) :branches (count (:applied (:union st)))}))
       ;; the agent's branch (new: a pointer to main's head), then its fork: the agent opens
       ;; the branch itself and owns its writes (run-ahead, committed by the agent), and holds
       ;; the task and attempt it works from its first form
@@ -189,6 +233,7 @@
                                  {:ok true :ours (vec (sort-by str (keys (:ours r)))) :theirs (count (:theirs r))
                                   :conflicts (count (:conflicts r))
                                   :unmerged (mapv :key (pm/unmerged head)) :uncontracted (pm/uncontracted (:ours r))
+                                  :caused (vec (problems/caused (pdb/branch-base conn main (:branch m)) head))
                                   :vars (into (sorted-set) (keep (fn [[k s]] (when (= :var k) s))) (keys (:ours r)))})
                                (refused (str "no branch " (:branch m)) {})))
       ;; root's read of a branch (or main): its committed value from the store; :base is the
@@ -203,7 +248,7 @@
                                (refused (str "no branch " (:branch m)) {})))
       ;; root's collection of the store (seon.db/collect!), asked at quiescence: swept when a
       ;; branch the last one saw is gone, and recorded on main through the batch
-      :collect (let [r (pdb/collect! conn)]
+      :collect (let [r (pdb/collect! conn (cfg/value :seon.config.store/sole-writer?))]
                  (reply (if (:skipped r) st (commit-batch (update st :pend (fnil conj []) {:tx-data [{:seon.root/id :root :seon.root/collected r}]}) o))
                         {:ok true :collected r}))
       (reply st (refused (str "unknown op " op) {})))))

@@ -5,6 +5,8 @@
 # exits 1 when one is not named. Kinds (default: all), each a mark over code with strings
 # and comments stripped, and the doc (and section) that sanctions it:
 #   catch       `(catch `                                         docs/failure-points.md
+#               read by Seon, not here: the :unnamed-site class of seon.problems/health over
+#               the compiler's facts (seon.problems/laws), which bin/check health prints
 #   clocks      time decides: sleep, timeout, deadline, *-MS      docs/clocks.md "## Time decides"
 #   measures    a clock read (currentTimeMillis, nanoTime, now-ns) docs/clocks.md
 #   resolution  requiring-resolve, ns-resolve, (resolve '..),
@@ -50,7 +52,9 @@ kinds=${*:-catch clocks measures resolution}
 for k in $kinds; do
   [ "$k" = catch ] || echo "== $k"
   case $k in
-    catch) sites catch '[(]catch ' docs/failure-points.md ;;
+    catch) out=$("$ROOT/bin/check" health unnamed-site 2>&1); st=$?
+           printf '%s\n' "$out" | grep -E "^unnamed-site|HEALTH (OK|FAILED)"
+           [ $st = 0 ] || bad=1 ;;
     clocks) sites clocks '[Ss]leep|[Tt]imeout([^s]|$)|deadline|[A-Z]-MS' docs/clocks.md "## Time decides" ;;
     measures) sites measures 'currentTimeMillis|nanoTime|now-ns|now-ms' docs/clocks.md ;;
     resolution) sites resolution "[(](requiring-resolve|ns-resolve|resolve '|intern|alter-var-root|with-redefs)[ )]" docs/resolution.md ;;
