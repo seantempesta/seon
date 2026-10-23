@@ -46,6 +46,8 @@ A branch has at most one live agent, and root refuses a spawn past `:seon.config
 
 The api's `:spawn` request names the branch's holder: a live agent whose branch it is. Then root answers `seon.root/spawn!`'s refused answer ("branch … is held by live agent …"); past the live-agent bound, "too many live agents" (`:clone` has the same bound). The reconciler writes the refused answer as the attempt itself, status `:refused` with root's reason, and asks again only once main moves for another reason: asking an unchanged main would be refused again. A collection waits the same way: the api refuses `:collect` while any agent is live ([storage](storage.md#collection)).
 
+The api's `:spawn` is answered `{:id}` at its agent's hello (`:ready`), never at once, so what is sent to the agent next reaches a ready agent. An agent that ends first answers that end instead: its death (`:seon.agent/died`, with the exit status the fork server reaped), a failed spawn (`:seon.agent/failed`) or the stop it met (`:seon.root/ended`: root stopped it), each naming the agent, and exactly one answer is given. The reconciler takes such an answer as the run's death (its attempt row started, then the dead path), not as a refused spawn.
+
 ## Root causes at quiescence
 
 Why released work is not done is observed, never stored on the task: ```seon.reconcile/root-causes``` reads it from the index once, at quiescence.

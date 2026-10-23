@@ -273,19 +273,19 @@
   (let [root (config/checkout)
         f (str root "/target/ports-test-" (random-uuid) ".edn")]
     (try
-      (spit f (str ";; ../worktree-ports (x); edit it to move this checkout's ports.\n"
+      (spit f (str ";; the main tree's config/worktree-ports (x); edit it to move this checkout's ports.\n"
                    "{;; root's entrance (bin/root, bin/mcp)\n"
                    " :seon.config.root/entrance-port #long #or [#env SEON_ENTRANCE_PORT 7920]\n"
                    " :seon.config.web/port #long #or [#env SEON_WEB_PORT 7921]\n"
                    " ;; the merges tree\n"
-                   " :seon.config.source/root \"../next-merges\"}\n"))
+                   " :seon.config.source/root \".worktrees/merges\"}\n"))
       (let [r (clojure.java.shell/sh "env" "-u" "SEON_WEB_PORT" "-u" "SEON_SERVER_PORT" (str root "/bin/ports") f)
             text (slurp f)]
         (is (= 0 (:exit r)) (:err r))
         (is (= "7920 7921" (str/trim (:out r))) "it boots, on the ports the file held")
         (is (str/includes? text ":seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 7920]"))
         (is (not (str/includes? text "entrance-port")) "the old name is gone")
-        (is (str/includes? text " ;; the merges tree\n :seon.config.source/root \"../next-merges\"}") "every other entry is kept")
+        (is (str/includes? text " ;; the merges tree\n :seon.config.source/root \".worktrees/merges\"}") "every other entry is kept")
         (is (= text (do (clojure.java.shell/sh "env" "-u" "SEON_WEB_PORT" (str root "/bin/ports") f) (slurp f))) "a second run writes the same file"))
       (finally (clojure.java.io/delete-file f true)))))
 

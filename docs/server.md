@@ -15,7 +15,7 @@ The ops are one table, ```seon.server/ops```, keyed by a request's `:op`; each e
 - `:agents`: live agents and every task's summary (`seon.server/task-summaries`: execution, done, blocked-by, its attempts, its problem).
 - `:eval`: Clojure evaluated in a running agent's process (recorded on its branch, origin `:outside`) or as `"root"` in root's process, with `sys` bound to root (`seon.server/*sys*`). Both go through the one REPL path, `seon.repl/eval-string` ([processes](processes.md#the-agent-process)).
 - `:context`: the current-state block of the task an agent works, as the model would read it now (`seon.turn/context-block`), recorded with origin `:context` ([render](render.md#a-context-read-is-shown-once)).
-- `:attach`: root starts an agent on the task's branch with model `"outside"`, so no turn loop runs in it, and answers its id.
+- `:attach`: root starts an agent on the task's branch with model `"outside"`, so no turn loop runs in it, and answers its id once the agent is ready (its hello), or the end it met first, which is the run's death ([root](root.md#holders-and-refused-spawns)).
 - `:done`: the attempt goes to the reconciler's `:judge` port and is judged as a turn loop's end is ([root](root.md#attempts-and-judging)).
 
 ```seon.server/answer``` dispatches one EDN request to its op; an unknown op answers the one error map. A line that does not read, or an op that throws, answers that request as the typed `:seon.server/defect`: the server is an entrant boundary ([failure points](failure-points.md)).

@@ -1,11 +1,15 @@
 (ns seon.main
   "The production entry points of the binary: a root serving its checkout (bin/root's `root`
-  mode) and the checkout's ports (`ports`). bin/build compiles the binary with the check
-  driver (seon.check, in test/, outside src: task seon.main/drivers-leave-src), whose -main
-  dispatches these two modes here and every check mode to itself."
+  mode) and the checkout's ports (`ports`); every other mode loads the check driver (seon.check,
+  in test/) from the checkout's source. The binary holds what this namespace requires, so it
+  requires every namespace system.edn names a proc in (seon.system resolves them by name at boot)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.root :as c] [seon.lib :as lib] [seon.print :as print]
-            [seon.config] [seon.server] [my.root] [clojure.edn] [jolt.deps]))
+            [seon.config] [seon.server] [my.root] [clojure.edn] [jolt.deps]
+            ;; the e2e loop's subject: the binary built from a merge answers its new value
+            [seon.generation]
+            ;; the procs system.edn names, resolved by name at boot (seon.system/proc-var)
+            [seon.fork-server] [seon.prove] [seon.reconcile] [seon.render.proc] [seon.web] [seon.writer]))
 
 (defn out!
   "xs printed as one line, flushed: a mode's console line (ROOT LISTENING, a verdict)."
@@ -16,6 +20,23 @@
   "A value a person reads on the console, whole, by the one printer (its layout, no budget)."
   {:malli/schema [:=> [:cat :any] :string]}
   [v] (print/text (vary-meta v assoc :seon.print/full true)))
+
+(defn- checkout
+  "The checkout this binary runs for: the parent of the working directory (bin/root and
+  bin/check run the binary in target/)."
+  {:malli/schema [:=> [:cat] :string]}
+  [] (.getParent (java.io.File. (System/getProperty "user.dir"))))
+
+(defn checkout-roots!
+  "The checkout's source added to this process's loader: its deps.edn roots (jolt.deps/add-deps,
+  as seon.fork-server's dev-classpath! does) and its test/ and src/ as source roots, so a name
+  outside the release binary (the check driver, a scripted provider's fixture, both in test/)
+  loads from the checkout by its namespace."
+  {:malli/schema [:=> [:cat :string] :any]}
+  [root]
+  (jolt.deps/add-deps (update (clojure.edn/read-string (slurp (str root "/deps.edn"))) :deps update-vals
+                              #(cond-> % (:local/root %) (update :local/root (partial str root "/")))))
+  (jolt.host/set-source-roots! (into (vec (jolt.host/source-roots)) [(str root "/test") (str root "/src")])))
 
 (defn root-serve
   "A root with its server on 127.0.0.1:(:seon.config.root/server-port) (seon.server),
@@ -31,6 +52,9 @@
         _ (when (zero? port)
             (out! "ROOT REFUSED: :seon.config.root/server-port is 0 (no server); bin/worktree --ports writes config/local.edn with this checkout's ports")
             (lib/c-exit 1))
+        ;; a scripted provider's script is a test fixture (seon.fixtures, in test/): the
+        ;; provider's config says so, and the checkout's source is added before root starts
+        _ (when (= :scripted (:kind (seon.config/provider seon.config/config))) (checkout-roots! (checkout)))
         sys (c/start! {})]
     ;; the first cause stops root, once; a signal's hook waits for that stop, then Jolt exits
     (let [cause (promise) stopped (promise)
@@ -58,14 +82,11 @@
 
 (defn- driver!
   "The check driver's -main (seon.check, in test/: task seon.main/drivers-leave-src), loaded
-  now from the checkout's source: its deps.edn roots added to the loader (jolt.deps/add-deps,
-  as seon.fork-server's dev-classpath! does) and its test/ and src/ to the source roots, so the release binary holds
-  only the program and a check run compiles the driver it runs."
+  now from the checkout's source (checkout-roots!), so the release binary holds only the
+  program and a check run compiles the driver it runs."
   {:malli/schema [:=> [:cat :string] :any]}
   [root]
-  (jolt.deps/add-deps (update (clojure.edn/read-string (slurp (str root "/deps.edn"))) :deps update-vals
-                              #(cond-> % (:local/root %) (update :local/root (partial str root "/")))))
-  (jolt.host/set-source-roots! (into (vec (jolt.host/source-roots)) [(str root "/test") (str root "/src")]))
+  (checkout-roots! root)
   (requiring-resolve 'seon.check/-main))
 
 (defn -main
@@ -77,4 +98,4 @@
   (case (first (seon.config/without-overrides args))
     "root" (root-serve)
     "ports" (ports)
-    (apply (driver! (.getParent (java.io.File. (System/getProperty "user.dir")))) args)))
+    (apply (driver! (checkout)) args)))
