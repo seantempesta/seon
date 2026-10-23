@@ -4,7 +4,8 @@
 # PORT, the port this checkout's root bound: runs/root.port, which bin/root writes from the root's
 # ROOT LISTENING line while it runs, read at each message, so a root restarted on
 # another port is followed. Tools: seon_agents, seon_eval (an agent's own REPL, recorded
-# :outside; or "root"), seon_context, seon_attach, seon_done.
+# :outside; or "root"), seon_context, seon_attach, seon_done, seon_prove (every op of
+# seon.server/ops is a tool seon_<op>; seon.check/mcp-proof compares them).
 #
 # Stock perl, no Seon binary (a `seon mcp` per client was 722 MB each; this is about 6 MB, and
 # seon.check/mcp-proof fails past :seon.config.machine/relay-mb). One connection per message, so
