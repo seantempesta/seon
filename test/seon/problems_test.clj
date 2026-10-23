@@ -851,22 +851,35 @@
     (is (= {:attention attention :caused caused}
            (konserve.jolt.fasl/decode (konserve.jolt.fasl/encode {:attention attention :caused caused}))) "and it is written to the store and read back")))
 
-(deftest a-ready-task-that-cites-nothing-or-names-no-proof-is-a-problem
-  ;; the context is only as good as the task it is built from: a task whose plan cites no var,
-  ;; attribute or section reaches no reference, so the walk pulls nothing (task
-  ;; seon.render/spend-has-a-render, 2026-10-23)
+(deftest a-ready-implement-task-that-cites-nothing-is-a-problem
+  ;; the context is only as good as the plan it is built from: an implement step whose accumulated
+  ;; plan (its design step's) cites no var, attribute or section reaches no reference, so the walk
+  ;; pulls nothing (task seon.render/spend-has-a-render, 2026-10-23). A design step's prose plan is
+  ;; its input, never red.
   (let [db0 (ts/test-db)
         v (:v (first (d/datoms db0 :aevt :var/name)))
-        decl (fn [n plan & {:as more}]
-               (merge {:seon.task/ns 'app :seon.task/name n :seon.task/plan plan :seon.task/kind :work
+        decl (fn [n kind plan & {:as more}]
+               (merge {:seon.task/ns 'app :seon.task/name n :seon.task/plan plan :seon.task/kind kind
                        :seon.task/proofs #{'app-test/a-proof}} more))
-        db (d/db-with db0 (seon.task/create-tx db0 [(decl "cites" (str "It changes `" v "`."))
-                                                    (decl "prose-only" "Something should be shown somewhere.")
-                                                    (decl "no-proof" (str "It changes `" v "`.") :seon.task/proofs #{})
-                                                    (decl "waits" "Nothing named yet." :seon.task/needs #{"app/cites"})]))
-        rows #(into {} (map (juxt (comp :task :evidence) (comp :reason :evidence))) (get-in (problems/health %) [:classes :uncited-task :rows]))]
-    (is (= {"app/prose-only" :no-references "app/no-proof" :no-proofs} (rows db))
-        "a task that cites nothing, and one with no proof; app/waits cites nothing too, but waits on a task not done: judged when it is ready, not before")
-    (let [db1 (d/db-with db (seon.task/load-tx db {'app [(decl "prose-only" (str "Show `" v "` somewhere.")) (decl "cites" (str "It changes `" v "`.")) (decl "no-proof" (str "It changes `" v "`.") :seon.task/proofs #{}) (decl "waits" "Nothing named yet." :seon.task/needs #{"app/cites"})]}))]
-      (is (not (contains? (rows db1) "app/prose-only")) "citing a name closes it, with nothing written to close it"))
+        pair (fn [n plan & {:as more}]
+               [(apply decl n :design plan (mapcat identity more))
+                (decl (str n "-impl") :implement "" :seon.task/needs #{(str "app/" n)} :seon.task/proofs #{})])
+        stub "(deftest stub (is false \"write the assertion: the behaviour, on data\"))"
+        tx (seon.task/create-tx db0 (vec (concat (pair "cites" (str "It changes `" v "`."))
+                                                 (pair "prose" "Something should be shown somewhere.")
+                                                 (pair "stubbed" (str "It changes `" v "`.") :seon.task/proofs #{'app-test/stub})
+                                                 (pair "bare" (str "It changes `" v "`.") :seon.task/proofs #{}))))
+        done (first (:seon.status/finished (contract/properties :seon.run/status)))
+        db (d/db-with db0 (concat tx [{:db/id -1 :var/name 'app-test/stub :var/form -2} {:db/id -2 :form/id "f-stub" :form/src stub}]
+                                    ;; each design step has a finished run: its implement step is ready
+                                    (for [n ["cites" "prose" "stubbed" "bare"]]
+                                      {:seon.run/task [:seon.task/id (str "app/" n)] :seon.run/status done})))
+        rows #(into #{} (map (juxt (comp :task :evidence) (comp :reason :evidence))) (get-in (problems/health %) [:classes :uncited-task :rows]))]
+    (is (= #{["app/prose-impl" :no-references] ["app/stubbed-impl" :placeholder-proof] ["app/bare-impl" :no-proofs]} (rows db))
+        "an implement step citing nothing, one whose proof is the stub, one with no proof; the design steps' prose plans are not judged")
+    (testing "writing the cited plan closes it, nothing written to close it"
+      (let [db1 (d/db-with db (seon.task/load-tx db {'app (vec (concat (pair "cites" (str "It changes `" v "`.")) (pair "prose" (str "Show `" v "` somewhere."))
+                                                                     (pair "stubbed" (str "It changes `" v "`.") :seon.task/proofs #{'app-test/stub})
+                                                                     (pair "bare" (str "It changes `" v "`.") :seon.task/proofs #{})))}))]
+        (is (not-any? #{"app/prose-impl"} (map first (rows db1))))))
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :uncited-task))))

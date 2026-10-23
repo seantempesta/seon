@@ -404,26 +404,44 @@
   (and (not (task-done? db te))
        (every? #(task-done? db (:v %)) (d/datoms db :eavt te :seon.task/needs))))
 
+(def ^:private placeholder-proof
+  "What seon.context writes as a missing proof's test (its :proof-unknown `do`): a proof still
+  holding it asserts nothing."
+  "write the assertion")
+
 (defn uncited-tasks
-  "Each ready work task whose plan cites nothing (no :seon.task/references: the context pulls no
-  var, attribute or section for it) or that names no proof, as an :uncited-task row with its
-  reason (:no-references, :no-proofs). Closed when the plan cites a name or the task names a proof.
-  Cost: the task, reference, proof and kind datoms once, then a run lookup per row."
+  "Each ready :implement task, which holds its design step's plan along :needs (seon.task/accumulate),
+  whose accumulated plan cites nothing (no :seon.task/references: the context pulls no var, attribute
+  or section for it), that names no proof, or one of whose proofs is still the placeholder
+  seon.context writes, as an :uncited-task row with its reason (:no-references, :no-proofs,
+  :placeholder-proof). A design step's plan is prose, its input: design writes the cited plan,
+  so only the implement step is judged. Closed when the design step's plan cites a name, the
+  proofs are named and written. Cost: the task, kind, reference and proof datoms once, then a
+  walk of each implement task's needs."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
-  (let [has (fn [a] (into #{} (map :e) (d/datoms db :aevt a)))
-        cited (has :seon.task/references) proofed (has :seon.task/proofs)
-        kinds (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.task/kind))]
+  (let [kinds (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.task/kind))
+        chain (fn chain [seen e]
+                (if (seen e) seen
+                    (reduce chain (conj seen e) (map :v (d/datoms db :eavt e :seon.task/needs)))))
+        vals-of (fn [es a] (into #{} (mapcat #(map :v (d/datoms db :eavt % a))) es))
+        placeholder? (fn [sym] (some-> (pdb/eid db :var/name sym) (->> (d/entity db)) :var/form :form/src
+                                      (str/includes? placeholder-proof)))]
     (vec (for [{:keys [e v]} (sort-by :v (d/datoms db :aevt :seon.task/id))
-               :when (= :work (kinds e))
-               :let [reasons (cond-> [] (not (cited e)) (conj :no-references) (not (proofed e)) (conj :no-proofs))]
-               :when (and (seq reasons) (task-ready? db e))
+               :when (and (= :implement (kinds e)) (task-ready? db e))
+               :let [es (chain #{} e)
+                     proofs (vals-of es :seon.task/proofs)
+                     reasons (cond-> []
+                               (empty? (vals-of es :seon.task/references)) (conj :no-references)
+                               (empty? proofs) (conj :no-proofs)
+                               (some placeholder? proofs) (conj :placeholder-proof))]
                reason reasons
                :let [s (str "uncited-task " v " " (name reason))]]
            {:signature s :task v :reason reason :open? true
             :message (case reason
                        :no-references (str v " is ready and its plan cites no var, attribute or section: the context pulls nothing for it")
-                       :no-proofs (str v " is ready and names no proof"))
+                       :no-proofs (str v " is ready and names no proof")
+                       :placeholder-proof (str v " is ready and a proof of it is still the placeholder (" placeholder-proof ")"))
             :producer nil :owner-ns 'seon.task :proofs []
             :evidence {:kind :uncited-task :task v :reason reason} :answered-by (get-in ans [:signature s] []) :at-ms nil}))))
 
