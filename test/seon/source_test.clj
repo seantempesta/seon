@@ -603,8 +603,11 @@
               :n "forms in the program's other files"
               :work "transact: one form's facts and its var's pointer, into the indexes of the program (log n per datom)"
               :growth :log
-              ;; measured 2026-10-23: 561k -> 635k ticks, 1.38 -> 1.59 MB from 10 to 1,000 (1.9 ms CPU)
-              :fixed {:ticks 530000 :bytes 1290000} :per-n {:ticks 11500.0 :bytes 31000.0}
+              ;; measured 2026-10-23: 561k -> 635k ticks, 1.38 -> 1.59 MB from 10 to 1,000 (1.9 ms CPU);
+              ;; after jolt/datom-cost 384k -> 457k ticks, 1.22 -> 1.43 MB, so bytes = f + p log2 n
+              ;; gives p 31.2 KB and f 1.12 MB: a :fixed above what a size costs leaves the fit a
+              ;; remainder near zero, which read as steeper (task seon.cost/a-speedup-never-reads-as-steeper)
+              :fixed {:ticks 340000 :bytes 1120000} :per-n {:ticks 11500.0 :bytes 31000.0}
               :sizes refresh-sizes}
              {:of 'seon.source/refresh-tx :input 'seon.source-test/refresh-of
               :n "forms in the program's other files; a body edit in a file no namespace requires"
