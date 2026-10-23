@@ -42,37 +42,29 @@
   ;; with its branches when the root has stopped.
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         main (str "root-test-" (random-uuid))
-        ;; a kernel-assigned port, never the checkout's: its standing root may hold that one
-        port (let [sock (java.net.ServerSocket. 0)] (try (.getLocalPort sock) (finally (.close sock))))
-        {:keys [exit out err]} (ts/binary-sh "env" "SEON_WEB_PORT=0" "./seon" "root"
-                                      "--set" (str ":seon.config.root/server-port=" port)
-                                      "--set" (str ":seon.config.source/root=" (pr-str checkout))
-                                      "--set" ":seon.config.source/dirs=[\"src\" \"test\"]"
-                                      "--set" (str ":seon.config.root/store-path=" (pr-str (test-store)))
-                                      "--set" (str ":seon.config.root/main=" (pr-str main))
-                                      :in "" :dir "target")]
+        runs (str checkout "/target/runs/" main "-runs")
+        root (ts/start-root! {:store (test-store) :main main :runs runs
+                              :args ["--set" (str ":seon.config.source/root=" (pr-str checkout))
+                                     "--set" ":seon.config.source/dirs=[\"src\" \"test\"]"]})
+        {:keys [exit log] :as stopped} (ts/stop-root! root)]
     (drop-main! main)
-    (is (= 0 exit) "the root boots with src and test imported")
-    (is (str/includes? out "ROOT LISTENING") "and listens")
-    (is (not (str/includes? (str out err) "Could not locate")) "every required library located")))
+    (sh/sh "rm" "-rf" runs)
+    (is (some? (:port root)) "the root boots with src and test imported, and listens")
+    (is (= 0 exit) (str "and stops cleanly: " (pr-str stopped)))
+    (is (not (str/includes? log "Could not locate")) "every required library located")))
 
 (defn- root-answers
-  "The output of a built root on the store at path (extra --set args), asked each request
-  in turn on its server: one answer line per request, then EXIT and its log. The root's
-  stdin is a fifo held open until every answer is in; its listening line (or its death)
-  ends the wait, as bin/root's start does. env: variables the root starts with (\"K=v \")."
-  ([path args requests] (root-answers path args requests ""))
-  ([path args requests env]
-  (let [port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
-        ask (fn [m] (str "printf '%s\\n' " (pr-str (pr-str m)) " | nc -w 30 127.0.0.1 " port ";"))
-        script (str "mkfifo '" path "-in'; " env "./seon root"
-                    " --set ':seon.config.root/store-path=" (pr-str path) "' " (str/join " " args)
-                    " --set ':seon.config.root/server-port=" port "' --set ':seon.config.web/port=0'"
-                    " < '" path "-in' > '" path ".log' 2>&1 & R=$!; exec 3>'" path "-in';"
-                    " until grep -q 'ROOT LISTENING' '" path ".log' || ! kill -0 $R 2>/dev/null; do sleep 0.1; done;"
-                    (apply str (map ask requests))
-                    " exec 3>&-; wait $R; echo EXIT $?; cat '" path ".log'")]
-    (:out (ts/binary-sh "zsh" "-c" script :dir "target")))))
+  "The output of a built root on the store at path and main (seon.test-store/start-root!: both
+  named, never inherited), asked each request in turn on its server: one answer line per
+  request, then EXIT and its log. opts: :args more root arguments, :env more variables."
+  ([path main requests] (root-answers path main requests {}))
+  ([path main requests {:keys [args env]}]
+   (let [root (ts/start-root! (cond-> {:store path :main main :runs (str path "-runs") :args (vec args)} env (assoc :env env)))
+         answers (when (:port root) (mapv #(ts/ask root %) requests))
+         stopped (ts/stop-root! root)]
+     (sh/sh "rm" "-rf" (str path "-runs"))
+     ;; each answer as the data it is (an error value among them), one per line
+     (str (str/join "\n" (map pr-str answers)) (when (seq answers) "\n") "EXIT " (or (:exit stopped) (pr-str stopped)) "\n" (:log stopped)))))
 
 (deftest a-root-resumes-a-store-an-earlier-build-wrote
   ;; task seon.root/a-root-resumes-a-store-an-earlier-build-wrote: the store as builds of
@@ -96,7 +88,7 @@
         _ (d/transact c2 {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t 536870914 :root-causes []}}]})
         _ (pdb/sync! cfg)
         _ (do (d/release c2) (d/release c))
-        out (root-answers path ["--set ':seon.config.root/main=\"old-run\"'"]
+        out (root-answers path "old-run"
                           [{:op :eval :agent "root" :code "(+ 1 2)"} {:op :agents}
                            {:op :eval :agent "root" :code "(get-in (my.root/problems sys) [:classes :platform :n])"}])
         [eval-line agents-line problems-line] (str/split-lines out)
@@ -122,9 +114,9 @@
         _ (spit (str tasks "/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]))
         main {:op :eval :agent "root" :code "(name (seon.db/conn-main (:conn sys)))"}
         held {:op :eval :agent "root" :code "[(count (seon.task/tasks @(:conn sys))) (set (map str (keys (seon.task/attempts @(:conn sys)))))]"}
-        first-boot (str/split-lines (root-answers path [] [main {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str tasks) ")")}
+        first-boot (str/split-lines (root-answers path "main" [main {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str tasks) ")")}
                                                            {:op :attach :task "demo/t"} held]))
-        second-boot (str/split-lines (root-answers path [] [main held]))
+        second-boot (str/split-lines (root-answers path "main" [main held]))
         printed (fn [l] (:printed (first (:items (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil))))))]
     (try
       (is (= "\"main\"" (printed (first first-boot))) "a boot with no main named works on the config's main")
@@ -150,8 +142,8 @@
             (sh/sh "ln" "-s" (.getPath f) (str tmp "/" n)))
         _ (doseq [f (.listFiles (java.io.File. checkout "docs"))] (sh/sh "cp" (.getPath f) (str tmp "/docs/")))
         _ (spit (str tmp "/docs/zz-broken.md") "# Broken\n\nIt links to [nowhere](agent.md#nowhere).\n")
-        out (root-answers path [] [{:op :eval :agent "root" :code "(boolean (re-find #\"links to docs/agent.md#nowhere\" (pr-str (my.root/problems sys))))"}]
-                          (str "SEON_CHECKOUT='" tmp "' "))
+        out (root-answers path "main" [{:op :eval :agent "root" :code "(boolean (re-find #\"links to docs/agent.md#nowhere\" (pr-str (my.root/problems sys))))"}]
+                          {:env {"SEON_RUN_CHECKOUT" tmp}})
         printed (:printed (first (:items (try (edn/read-string {:default tagged-literal} (first (str/split-lines out))) (catch Exception _ nil)))))]
     (try
       (is (str/includes? out "ROOT LISTENING") (str "the root boots: " out))
@@ -167,9 +159,9 @@
   (let [path (str (.getCanonicalPath (java.io.File. ".")) "/target/runs/root-test-ends-" (random-uuid))
         ev (fn [code] {:op :eval :agent "root" :code code})
         printed (fn [l] (some-> (:printed (first (:items (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil))))) edn/read-string))
-        [b1] (str/split-lines (root-answers path [] [(ev "(:boot sys)")]))
+        [b1] (str/split-lines (root-answers path "main" [(ev "(:boot sys)")]))
         [prev killed] (str/split-lines
-                       (root-answers path [] [(ev "(:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))")
+                       (root-answers path "main" [(ev "(:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))")
                                               (ev "(#'seon.root/previous-end (d/db-with @(:conn sys) [{:seon.root/id :root :seon.root/boot \"killed-boot\"}]))")]))]
     (try
       (is (string? (printed b1)))
@@ -186,7 +178,7 @@
   ;; citing `path:N`. On a main of its own on the test store, deleted at the end.
   (let [path (test-store)
         main (str "root-test-" (random-uuid))
-        out (root-answers path [(str "--set ':seon.config.root/main=" (pr-str main) "'")]
+        out (root-answers path main
                           [{:op :eval :agent "root" :code "((resolve 'seon.ref/line-citation) \"src/a.clj:50\")"}])
         answer (try (edn/read-string {:default tagged-literal} (first (str/split-lines out))) (catch Exception _ nil))]
     (try
@@ -225,9 +217,7 @@
         b "(ns follow.tree)\n\n(defn kept [] 1)\n\n(defn changed [] 2)\n"
         path (test-store)
         main (str "root-test-" (random-uuid))
-        args [(str "--set ':seon.config.root/main=" (pr-str main) "'")
-              (str "--set ':seon.config.source/root=" (pr-str tree) "'")
-              "--set ':seon.config.source/dirs=[\"src\"]'"]
+        args ["--set" (str ":seon.config.source/root=" (pr-str tree)) "--set" ":seon.config.source/dirs=[\"src\"]"]
         probe {:op :eval :agent "root"
                :code (str "(let [db @(:conn sys)] {:fact (:seon.root/source (datahike.api/pull db [:seon.root/source] [:seon.root/id :root]))"
                           " :text (seon.source/file-text db 'follow.tree)"
@@ -235,7 +225,7 @@
                           " :removed-var (count (datahike.api/datoms db :avet :var/name 'follow.tree/removed))"
                           " :tasks (count (seon.task/tasks db))})")}
         boot! (fn [requests]
-                (let [out (root-answers path args requests)]
+                (let [out (root-answers path main requests {:args args})]
                   (sh/sh "rm" "-f" (str path "-in"))
                   (mapv (fn [l] (try (edn/read-string (:printed (first (:items (edn/read-string {:default tagged-literal} l)))))
                                      (catch Exception _ l)))

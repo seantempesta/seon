@@ -17,11 +17,12 @@
   [n] [(zipmap (map #(keyword (str "k" %)) (range n)) (range n)) {:handle 'result/h1 :budget 60000}])
 
 (defn- priced
-  "What unit operations `ops` cost by the unit table: {:ns :bytes}."
-  {:malli/schema [:=> [:cat [:map-of :keyword number?]] [:map [:ns number?] [:bytes number?]]]}
+  "What unit operations `ops` cost by the unit table: {:ticks :ns :bytes}."
+  {:malli/schema [:=> [:cat [:map-of :keyword number?]] [:map [:ticks number?] [:ns number?] [:bytes number?]]]}
   [ops]
-  (reduce-kv (fn [acc op k] (-> acc (update :ns + (* k (:ns (cost/units op)))) (update :bytes + (* k (:bytes (cost/units op))))))
-             {:ns 0.0 :bytes 0.0} ops))
+  (reduce-kv (fn [acc op k] (-> acc (update :ticks + (* k (:ticks (cost/units op)))) (update :ns + (* k (:ns (cost/units op))))
+                                (update :bytes + (* k (:bytes (cost/units op))))))
+             {:ticks 0.0 :ns 0.0 :bytes 0.0} ops))
 
 (defn- round
   "Costs as whole numbers."

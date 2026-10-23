@@ -45,6 +45,16 @@ A bound passed under another name, which the marks do not see; each is owed its 
 - `seon.render.proc/ordered`: re-derives the grid's order when a second has passed, for `seon.render.proc/order`; task `seon.render/an-ended-agent-leaves-the-grid-by-an-event`.
 - `seon.agent/mem-mb`: memory re-read at most once a second, a cache keyed by time (a `now-ns` difference compared to a literal); task `seon.agent/memory-is-read-when-asked`.
 
+## Time decides nothing here: clock reads named as data
+
+- `seon.check/hidden-inputs`, `seon.check/named-test-inputs`: the lists the `test-inputs` check step reads test forms against (a clock read, a sleep, a timeout among the names they hold); they name those vars as data and read no clock.
+
+## Time orders a queue (measured workload)
+
+A measured time chooses which work goes first, never whether a result is green (AGENTS.md section 4: work is admitted by its measured workload).
+- `test-runner/shards`: bin/test's shards are dealt by each test's last measured ms (`target/prove/ms`), so they end together; a test never measured counts as the mean.
+- bin/check's queue: a full run's steps start longest first by the wall seconds of the last full run (its `STEP.time` files); a step not measured yet starts first.
+
 ## Time measured (recorded, never compared to decide)
 
 - `seon.profile/now-ns`, `seon.profile/ms-since`: the one clock read ([machine](machine.md#the-clock)); their callers are judged here one by one.

@@ -13,11 +13,11 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 ## jolt
 
-`reference-code/jolt` pinned at `4342b73c`, the tip of ``jolt/fork-carriers``.
+`reference-code/jolt` pinned at `f05de7db`, the tip of ``jolt/pin-2026-10-23``.
 
 - Fork repo: ``~/src/seon-jolt/jolt``. Upstream: ``jolt-lang/jolt``. Fork: ``seantempesta/jolt``.
 - Base: `f714b0ed`, upstream main (nightly + 10), the merge-base with upstream's main.
-- Branch chain: ``jolt/main`` `1fad8b83` → ``jolt/j2-on-main`` `fc5d2f82` (merges ``jolt/cache-records-relative``) → ``jolt/eval-outside-build`` `d7ec259b` → ``jolt/runtime-fingerprint`` `60961b84` → ``jolt/fork-carriers`` `4342b73c`.
+- Branch chain: ``jolt/main`` `1fad8b83` → ``jolt/j2-on-main`` `fc5d2f82` (merges ``jolt/cache-records-relative``) → ``jolt/eval-outside-build`` `d7ec259b` → ``jolt/runtime-fingerprint`` `60961b84` → ``jolt/fork-carriers`` `4342b73c` → ``jolt/thread-ticks`` `ed1e37a1` + ``jolt/temp-file-unique`` `a2fec377` (merged as `21e91705`) → ``jolt/aot-cache-hit`` `5edda163` → ``jolt/pin-2026-10-23`` `f05de7db`.
 - Ours, on ``jolt/main`` `1fad8b83`:
   - `28970daf` perf: deftype `set!` by a memoized per-type flag and direct index. Generic (``upstream/deftype-field-access``).
   - `f944a449` perf: deftype method bodies read and write fields by slot index. Generic (``upstream/deftype-field-access``).
@@ -56,8 +56,11 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
   - `d7ec259b` a build's own evals compile outside its unit, so an eval at macro expansion no longer references the build's unbound defs. Generic.
   - `60961b84` `jolt.host/runtime-fingerprint`: the runtime's identity as its compiled units are keyed. Generic.
   - `6871f997`, `e469164c`, `52b50504`, `4342b73c` `jolt-after-fork-child!`: a forked process drops the bookkeeping of the runtime threads fork(2) did not copy (carriers, timer and its deadlines, shutdown watcher, thread tables) and starts no thread; fork-child-test proves a parked go, a timeout and a double fork's grandchild ([failure points](failure-points.md)). Generic.
+  - `ed1e37a1` one tick count, owned by the timer: `jolt-set-timer!` is the one arm site, `jolt.host/ticks-of` and `jolt.host/ticks` read it, and a tick budget covers all the work in its extent, nested bounded runs included ([cost](cost.md#what-is-measured)). Generic.
+  - `a2fec377` `File/createTempFile`: an exclusive create, the name from the pid and a counter. Generic.
+  - `5edda163` the AOT cache's readers digest is folded once per key, not into every namespace digest, so a checkout's cache hits (a start 7.3 s to 0.6 s). Generic.
 - ``upstream/*`` branches in the fork repo: `arraycopy-object-block`, `deftype-field-access`, `fiber-park`, `fork-reprotect-jit`, `host-site-coll-reads`, `remote-chan`, `static-code-cow`. None is pushed or opened: they exist only in ``~/src/seon-jolt/jolt``, cut on jolt-lang/jolt main `8bebf786`. Before one is opened: the gate sweep of `fork`, `slots` and `static`, `make fibers` re-run alone on arraycopy-object-block (a new untriaged red under load), a Gambit check of deftype-field-access, a non-root Linux sweep, and a rebase on upstream's current main. static-code-cow is not for upstream (jolt itself never forks, and under the hardened runtime code outside MAP_JIT needs an entitlement or the process is SIGKILLed): it stays in our patch set. Of the Chez patches, 0006 belongs upstream (no fix in cisco/ChezScheme or Racket CS), 0007 only as an issue first. Drafts and reproductions: ``~/src/seon-jolt/notes/upstream/``.
-- Open: the fork repo's ``jolt/main`` is at `44c9574a` (``jolt/load-form``, which Seon does not use; not in the pin), and `d7ec259b`..`4342b73c` are only in the submodule clone, not yet in the fork repo. ``jolt/main`` should be moved to the pin's line.
+- Open: the fork repo's ``jolt/main`` is at `44c9574a` (``jolt/load-form``, which Seon does not use; not in the pin), and `d7ec259b`..`f05de7db` are only in the submodule clone, not yet in the fork repo. ``jolt/main`` should be moved to the pin's line.
 
 ## chez
 
