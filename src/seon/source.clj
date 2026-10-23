@@ -130,20 +130,18 @@
       (or file (seq tail)) (conj (cond-> {:db/id (str "ns " nsym) :ns/name nsym :ns/tail tail}
                                    file (assoc :ns/file file))))))
 
+(defn- ns-form
+  "A file's first form when it is an ns form naming its namespace, read once (not run), or nil."
+  {:malli/schema [:=> [:cat :string] [:maybe [:sequential :any]]]}
+  [text]
+  (let [form (binding [*ns* (the-ns 'user)] (read {:eof nil} (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. text))))]
+    (when (and (seq? form) (= 'ns (first form)) (symbol? (second form))) form)))
+
 (defn file-ns
   "The namespace a file's text declares: the name of its first form when that is an ns
   form, or nil."
   {:malli/schema [:=> [:cat :string] [:maybe :symbol]]}
-  [text]
-  (let [form (binding [*ns* (the-ns 'user)] (read {:eof nil} (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. text))))]
-    (when (and (seq? form) (= 'ns (first form)) (symbol? (second form))) (second form))))
-
-(defn- file-requires
-  "The namespaces a file's ns form requires, from the compiler's analysis of it (not run)."
-  {:malli/schema [:=> [:cat :symbol :string] [:set :symbol]]}
-  [nsym text]
-  (let [form (binding [*ns* (the-ns 'user)] (read {:eof nil} (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. text))))]
-    (:requires (program/unit-account (analyze nsym form)))))
+  [text] (second (ns-form text)))
 
 (defn schema-resource?
   "Is the relative path a schema resource: an .edn file under seon.config/schemas-dir?"
@@ -166,8 +164,10 @@
   so a namespace the process never loaded is set up before a file that requires it)."
   {:malli/schema [:=> [:cat [:map-of :string :string]] [:vector [:tuple :symbol :string :string]]]}
   [files]
-  (let [by-ns (into {} (for [[path text] files :when (str/ends-with? path ".clj") :let [nsym (file-ns text)] :when nsym] [nsym [path text]]))
-        reqs (into {} (for [[nsym [_ text]] by-ns] [nsym (file-requires nsym text)]))]
+  (let [forms (into {} (for [[path text] files :when (str/ends-with? path ".clj") :let [f (ns-form text)] :when f] [(second f) [path text f]]))
+        by-ns (update-vals forms pop)
+        ;; the namespaces each ns form requires, from the compiler's analysis of it (not run)
+        reqs (update-vals forms (fn [[_ _ f]] (:requires (program/unit-account (analyze (second f) f)))))]
     (vec (for [nsym (program/topo (vec (keys by-ns)) #(reqs %) #(first (by-ns %)))
                :let [[path text] (by-ns nsym)]]
            [nsym path text]))))

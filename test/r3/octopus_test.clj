@@ -30,17 +30,17 @@
                                      :seon.run/results [{:seon.proof/test (symbol "t" (str (subs id 2 (- (count id) 6)) "-test")) :seon.proof/status :pass}]}])}))
 
 (deftest disjoint-merges-run-together-overlapping-serialize
-  (main [["a" ["[:var x/f]"]] ["b" ["[:var x/g]"]] ["c" ["[:var x/f]" "[:var x/h]"]]] (fn [conn] (is (= #{"t/a-merge" "t/b-merge"} (spawned (r/reconcile @conn))) "a and b are disjoint; c overlaps a and waits"))))
+  (main [["a" ["[:var x/f]"]] ["b" ["[:var x/g]"]] ["c" ["[:var x/f]" "[:var x/h]"]]] (fn [conn] (is (= #{"t/a-merge" "t/b-merge"} (spawned (r/actions (r/index @conn)))) "a and b are disjoint; c overlaps a and waits"))))
 
 (deftest unknown-changes-run-alone
-  (main [["a" nil] ["b" ["[:var x/g]"]]] (fn [conn] (is (= 1 (count (spawned (r/reconcile @conn)))) "a merge whose changes no run measured runs alone"))))
+  (main [["a" nil] ["b" ["[:var x/g]"]]] (fn [conn] (is (= 1 (count (spawned (r/actions (r/index @conn))))) "a merge whose changes no run measured runs alone"))))
 
 (deftest an-octopus-merge-waits-for-running-merges-and-closes-when-a-member-ends
   (main [["a" ["[:var x/f]"]] ["b" ["[:var x/g]"]] ["c" ["[:var x/k]"]]] (fn [conn] (start-merge! conn "t/a-merge" :ended)
     (start-merge! conn "t/b-merge" :running)
-    (let [acts (r/reconcile @conn)]
+    (let [acts (r/actions (r/index @conn))]
       (is (not-any? #(= :octopus-merge (:op %)) acts) "b still runs: the octopus merge waits for it")
       (is (not (contains? (spawned acts) "t/c-merge")) "a ended: the octopus merge is closed to new members"))
     (d/transact conn {:tx-data [{:seon.run/id "t/b-merge#1" :seon.run/status :ended}]})
-    (let [octopus (first (filter #(= :octopus-merge (:op %)) (r/reconcile @conn)))]
+    (let [octopus (first (filter #(= :octopus-merge (:op %)) (r/actions (r/index @conn))))]
       (is (= ["t/a-merge#1" "t/b-merge#1"] (mapv :run (:members octopus))) "both merge in one octopus merge")))))

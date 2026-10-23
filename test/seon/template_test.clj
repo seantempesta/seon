@@ -13,7 +13,7 @@
 
 (defn- main [] (d/db-with (ts/test-db) (task/boot-tx "boot-1" 4)))
 
-(defn- spawns [db] (filter #(= :spawn (:op %)) (r/reconcile db)))
+(defn- spawns [db] (filter #(= :spawn (:op %)) (r/actions (r/index db))))
 
 (deftest a-request-is-design-implement-merge-on-one-branch
   (let [[design implement merge :as ds] (tpl/request req)
