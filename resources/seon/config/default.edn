@@ -246,6 +246,13 @@
  ;; were 782 s of 917 s of recorded test time (pure-tests, 2026-10-23). A var missing here makes
  ;; its tests run automatically (slower, never wrong).
  :seon.config.source/process-vars #{seon.agent-test/in-agent clojure.java.shell/sh seon.lib/fork! seon.test-store/binary-sh}
+ ;; Unit: vars. The vars through which a test reaches the built binary (target/seon): a test whose
+ ;; reach references one runs it, so bin/test builds it first; a process test that only shells
+ ;; out (git) does not. Provenance: root's task seon.check/a-run-builds-the-binary-only-when-
+ ;; something-reaches-it (2026-10-23): bin/test built it (46 s) whenever anything ran. A var
+ ;; missing here is a missed build (a test fails on a stale binary), so it names the one way a
+ ;; test starts the binary: seon.test-store/binary-sh.
+ :seon.config.source/binary-vars #{seon.test-store/binary-sh}
  ;; Unit: branch. Merges are committed here, never on main and never pushed (owner).
  :seon.config.source/branch "jolt/seon-merges"
  ;; Unit: a git identity. Seon authors and commits its merges (the message names the merged

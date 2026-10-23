@@ -844,21 +844,43 @@
   ([db inputs roots] (reach-fold db inputs roots (partial reach-digest inputs))))
 
 (defn- reaches-process?
-  "Does what a test reached reference one of vars (:seon.config.source/process-vars)?"
+  "Does what a test reached reference one of vars (:seon.config.source/process-vars or
+  -binary-vars)?"
   {:malli/schema [:=> [:cat [:set :qualified-symbol] [:set :any] :map] :boolean]}
   [vars reached {:keys [by-id]}] (boolean (some #(some vars (:refs (by-id %))) reached)))
 
+(def ^:private names-only
+  "The vars whose forms only name other vars, as quoted data (the reach walk follows a quoted
+  name): reaching one is not using what it names."
+  '#{seon.program/tree-readers seon.program/env-readers})
+
+(defn- reaches-binary?
+  "Does what a test reached use one of vars (:seon.config.source/binary-vars)? A form uses a var
+  it references and does not define (a var's own form names itself), and not when it only names
+  vars as data (names-only: tree-readers lists the binary-sh a test of the reach walk never runs)."
+  {:malli/schema [:=> [:cat [:set :qualified-symbol] [:set :any] :map] :boolean]}
+  [vars reached {:keys [by-id]}]
+  (boolean (some (fn [id] (let [f (by-id id)
+                                own (set (keep (fn [[k s]] (when (= :var k) s)) (:defines f)))]
+                            (and (not-any? names-only own)
+                                 (some #(and (vars %) (not (own %))) (:refs f)))))
+                 reached)))
+
 (defn reach-index
-  "{test {:digest :process?}} of db's tests under inputs, from the one walk (reach-fold): its
-  reach digest (reach-digests) and whether it reaches a process of its own (a var of
-  :seon.config.source/process-vars: process-tests). With roots (a bin/check step's mode
-  functions, as reach-digests takes them), the same of each key."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol [:map [:digest :string] [:process? :boolean]]]]
-                  [:=> [:cat :seon.host/db :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]]] [:map-of :any [:map [:digest :string] [:process? :boolean]]]]]}
+  "{test {:digest :process? :binary?}} of db's tests under inputs, from the one walk (reach-fold):
+  its reach digest (reach-digests), whether it reaches a process of its own (a var of
+  :seon.config.source/process-vars: process-tests) and whether it uses the built binary (a form it
+  reaches references a var of :seon.config.source/binary-vars: bin/test builds target/seon only
+  for these; reaches-binary? says what is not a use). With roots (a
+  bin/check step's mode functions, as reach-digests takes them), the same of each key."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol [:map [:digest :string] [:process? :boolean] [:binary? :boolean]]]]
+                  [:=> [:cat :seon.host/db :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]]] [:map-of :any [:map [:digest :string] [:process? :boolean] [:binary? :boolean]]]]]}
   ([db inputs] (reach-index db inputs nil))
   ([db inputs roots]
-   (let [vars (cfg/value :seon.config.source/process-vars)]
-     (reach-fold db inputs roots (fn [k reached ctx] {:digest (reach-digest inputs k reached ctx) :process? (reaches-process? vars reached ctx)})))))
+   (let [vars (cfg/value :seon.config.source/process-vars)
+         binary (cfg/value :seon.config.source/binary-vars)]
+     (reach-fold db inputs roots (fn [k reached ctx] {:digest (reach-digest inputs k reached ctx) :process? (reaches-process? vars reached ctx)
+                                                      :binary? (reaches-binary? binary reached ctx)})))))
 
 (defn process-tests
   "The keys of index (reach-index's answer) that reach a process of their own (a shell, a

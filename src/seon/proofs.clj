@@ -95,6 +95,13 @@
     "e2e-hairy" [seon.e2e/run] "e2e-newns" [seon.e2e/run] "e2e-sibling" [seon.e2e/run] "swarm" [seon.e2e/run]
     "e2e-loop" [seon.e2e/run] "e2e-held" [seon.e2e/run] "resume" [seon.e2e/run] "scale" [seon.check/scale]})
 
+(defn step-needs-binary?
+  "Does bin/check's step run a seon.check mode on target/seon (and a store branch): does
+  check-steps name functions for it? laws (the tree's digest) and lmdb-kill (a binary of its
+  own, no functions) do not, so a run of only those builds nothing and seeds nothing."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [step] (let [fns (get check-steps step)] (boolean (and (vector? fns) (seq fns)))))
+
 (defn step-digests
   "Of check-steps, {:digests {step digest} :missing [step ...]}: the reach digests (digests-of,
   seon.program/reach-digests over the steps' functions) and, for a step reading the whole tree, the

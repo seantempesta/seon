@@ -446,4 +446,10 @@
            (update-vals mine :process?))
         "each process var marks the test that reaches it, and only that")
     (is (= #{'app.proc-test/via-shell 'app.proc-test/via-fork 'app.proc-test/via-binary 'app.proc-test/via-root}
-           (set (filter #(= "app.proc-test" (namespace %)) (program/process-tests idx)))))))
+           (set (filter #(= "app.proc-test" (namespace %)) (program/process-tests idx)))))
+    ;; only seon.test-store/binary-sh runs target/seon (:seon.config.source/binary-vars): a shell
+    ;; or a fork is a process, not the binary, so a run of only those builds nothing (via-root
+    ;; reaches the binary through the real program's start-root!, which this program lacks)
+    (is (= {'app.proc-test/via-shell false 'app.proc-test/via-fork false 'app.proc-test/via-binary true
+            'app.proc-test/via-root false 'app.proc-test/pure false}
+           (update-vals mine :binary?)))))
