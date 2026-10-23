@@ -32,7 +32,6 @@
 (defc c-chdir "chdir" [:string] :int)
 (defc c-waitpid "waitpid" [:int :pointer :int] :int {:blocking true})
 (defc c-waitpid-nb "waitpid" [:int :pointer :int] :int)
-(defc c-pipe "pipe" [:pointer] :int)
 (defc c-close "close" [:int] :int)
 (defc c-shutdown "shutdown" [:int :int] :int)
 (defc c-read "read" [:int :pointer :size_t] :ssize_t {:blocking true})
@@ -60,7 +59,6 @@
     (ffi/read b :uint64 0)))
 (defc poll1 "e13_poll1" [:int :int] :long {:blocking true})
 (defc mp-probe* "mp_probe" [:pointer :long] :long)
-(defc events* "e13_events" [:pointer] :long)
 (defc nthreads "e13_nthreads" [] :long)
 (defc sysmem* "e13_sysmem" [:pointer] :long)
 
@@ -84,17 +82,9 @@
                            :let [r (get-in p [:regions k])]]
                        (+ (:snp r 0.0) (:prv-res r 0.0))))))
 
-(defn events {:malli/schema [:=> [:cat] :seon.lib/events]}
-  [] (let [b (ffi/alloc 24)] (events* b) {:cow-faults (ffi/read b :long 0) :faults (ffi/read b :long 8)}))
 (defn sysmem {:malli/schema [:=> [:cat] :seon.lib/sysmem]}
   [] (let [b (ffi/alloc 24)] (sysmem* b)
                   {:free-mb (/ (* PAGE (ffi/read b :long 0)) 1048576.0) :internal-mb (/ (* PAGE (ffi/read b :long 8)) 1048576.0)}))
-
-(defn pipe {:malli/schema [:=> [:cat] :seon.lib/pipe]}
-  []
-  (let [b (ffi/alloc 8)]
-    (when-not (zero? (c-pipe b)) (throw (ex-info "pipe failed" {})))
-    [(ffi/read b :int) (ffi/read (+ b 4) :int)]))
 
 (defn line-reader
   "A fn of a wait in ms (negative: until something arrives) that answers the complete
