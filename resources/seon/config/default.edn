@@ -255,6 +255,16 @@
  :seon.config.merge/max-merge-turns 2
 
 
+ ;; ==== the build ==============================================================================
+ ;; Unit: an EDN map, as text: Jolt's compile options for everything a Seon process compiles (its
+ ;; build, the test runner, root's and agents' evals). bin/env exports it as JOLT_COMPILER_OPTIONS,
+ ;; which Jolt reads into *compiler-options*' root at start (Jolt jolt/image-fn-forms-opt-in).
+ ;; {:image-fn-forms false}: Seon writes no state image, so its fn literals register no source for
+ ;; one, a third less allocation a compile (task jolt.backend/image-registration-is-opt-in;
+ ;; measured 2026-10-23). Read by bin/env from this line, so it stays one line of text. At the
+ ;; bound: none; a value that is no EDN map stops every Jolt process at start, naming it.
+ :seon.config.build/jolt-compiler-options "{:image-fn-forms false}"
+
  ;; ==== Seon's own source ======================================================================
 
  ;; Unit: path. The repository whose source is the program (session LOOP, resources/seon/tasks/
