@@ -34,7 +34,7 @@
   :seon.task/plan "What exists: octopus merges (the reconciler's :octopus-merge op) and reach selection (`seon.agent/run-tests-forked`), kept off by seon.fences/merge-trains-off-as-decided until this exists. Correct: an octopus merge's members are proven together by one combined run of the tests their changes reach; on red the members are bisected (halves re-run) to name the one that broke it, and the green members merge. Replaces the off switch. Reference only: jolt/r5-port 302ce17 (parked, on an old base; notes/archive/option3-R5-octopus merges.md); re-derive on main's reconciler."
   :seon.task/kind :work
   :seon.task/proofs #{seon.reconcile-test/a-red-octopus-merge-is-bisected-to-its-member}}
- {:seon.task/name "an-outside-attempts-agent-death-ends-it"
+ {:seon.task/name "an-outside-runs-agent-death-ends-it"
   :seon.task/plan "What exists: an outside run (`seon.server/attach!`, model \"outside\") is written by the server, and a reconciler-started outside run's flight ends at :started (`seon.reconcile/advance`), so nothing observes its agent's death: the run stays :running with its agent :dead, counts against :max-running, and a waiter (a check step, a test) hangs. A model run's death is observed only as the answer to its flight's pending eval (`seon.reconcile/dead-tx`). Root records the death on main as a problem (`seon.root/record-death`), but no fact names the run. Correct: an agent's death is a fact root writes on main with the agent's id when it sees the agent end, and the reconciler ends every :running run whose agent died through `dead-tx`, outside or not. Replaces the flight-only death path."
   :seon.task/kind :work
   :seon.task/proofs #{seon.server-test/an-outside-run-ends-dead-when-its-agent-dies}}

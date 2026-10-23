@@ -15,7 +15,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/an-ended-card-offers-no-live-buttons
                       seon.render-test/a-polling-proc-at-rest-reads-zero-work}}
- {:seon.task/name "an-attempt-row-shows-where-its-time-went"
+ {:seon.task/name "a-run-row-shows-where-its-time-went"
   :seon.task/plan "What exists: each turn records its split (:seon.turn/split: tests, context, model, eval ms; `seon.turn`), but `seon.render.ui/run-row` shows end-ms minus start-ms only, so a run at 8,126 ms beside siblings at 100-250 ms says nothing of where the time went. Correct: the run row's ms cell shows the split summed over its turns (largest part first, each part's ms), its title each turn's; the agent page's work box shows the split per turn. Replaces the bare span; no new measurement."
   :seon.task/kind :work
   :seon.task/needs #{"seon.turn/a-turn-records-what-it-saw-and-spent"}
