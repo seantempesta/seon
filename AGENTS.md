@@ -12,7 +12,7 @@ The running system: `bin/root status|start` (the owner's main tree: server port 
 
 ## 1. What Seon is for, and what moving forward means
 
-**Seon does any and all work its user wants** (owner, 2026-10-22: "Do not assume the system is constrained in what it should do for the user"): editing files, running commands, fetching from the web, working in any repository, and improving its own code. Software usually grows by tangling, so cost and defects outrun capability. Seon grows by accretion instead: many agents each change a branch, the proven changes merge into main, and the merged code runs next. That recursive loop is the heart of it, and `next/` must stay tiny (about 10k lines of our own code) and fast while it grows.
+**Seon does any and all work its user wants** (owner, 2026-10-22: "Do not assume the system is constrained in what it should do for the user"): editing files, running commands, fetching from the web, working in any repository, and improving its own code. Software usually grows by tangling, so cost and defects outrun capability. Seon grows by accretion instead: many agents each change a branch, the proven changes merge into main, and the merged code runs next. That recursive loop is the heart of it, and `next/` must resist growth and stay fast while it grows (owner, 2026-10-23: "don't hyper fixate on LoC. I want some resistance to growth mostly so agents reuse what's there and improve the core parts rather than making one offs"): a change reuses and improves the core rather than adding a one-off beside it, and a merge that grows `src` names what it replaces.
 
 **Moving forward means the loop works for real tasks, end to end:**
 1. a user's request becomes tasks;

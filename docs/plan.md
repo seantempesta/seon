@@ -28,7 +28,7 @@ Updated 2026-10-23 evening by root. Sessions are grouped so related tasks stay i
 
 Ended: shrink (its folder was removed at merge), eval-cost (merged).
 
-**For the owner when he's back:** what does `src`'s ~10k aim count? Walk measured main: 18,523 lines in all; 12,355 code lines as cloc counts (contracts counted, docstrings, comments and blanks not); ~11.2k without contract lines. The open shrink rows are about −300 and page's deletions the next source. Root's pick: code lines as cloc counts, docstrings kept as each var's home (AGENTS §7).
+**src size** (owner, 2026-10-23): not a line target; resistance to growth, so agents reuse and improve the core rather than add one-offs. Shrink work goes on only where it removes duplication or improves a core part.
 
 **The freeze**, on root's word: ``jolt/rename-run``, then ``jolt/a-page-is-an-entity-and-its-neighbors``, then the store is erased; then ``jolt/self-contained`` and step R (`~/src/seon-next`). Other sessions keep working, and afterwards re-run the rename's scripts on their branches (`notes/rename-run/` on ``jolt/rename-run``).
 
@@ -47,6 +47,6 @@ The destination is **E: a request worked design → implement → merge by Seon 
 1. **The context tells a model what to change, where, and how it will know it is done.** Real task contexts given to fast models with thinking off, scored on their first move; iterate until they act on turn 1; confirm with paid runs (``jolt/dry-run``, `notes/ASSESSMENT-2026-10-23.md` "Recommended next").
 2. **The merge gate merges a model-made change** (``jolt/dry-run``: `:tests`, the three test tiers, `reasoning_content`; ``jolt/hold-for-root`` first).
 3. **The owner can watch each turn:** the agent debug view (``jolt/agent-view``; `docs/parity.md` "Context, printing, the page").
-4. **`src` shrinks:** shrink brief 1, drivers out of `src` (≈ −1,800; task `seon.main/drivers-leave-src`).
+4. **`src` resists growth:** duplication removed and core parts improved, so new work reuses them (drivers out of `src`, task `seon.main/drivers-leave-src`).
 
 Beside E, the missing and partial rows of `docs/parity.md` are the parity backlog, each a task in `resources/seon/tasks/`; the task files hold the rest of the work.
