@@ -44,7 +44,7 @@ The ones that block THE PLAN; the full list (19) is at the end of [decisions](de
 
 The destination is **E: a request worked design → implement → merge by Seon agents, end to end, measured as turns to green.** Every step serves E; done steps leave this list (git and the wiki keep them). What blocks E, in order:
 
-1. **The context tells a model what to change, where, and how it will know it is done.** Real task contexts given to fast models with thinking off, scored on their first move; iterate until they act on turn 1; confirm with paid runs (``jolt/dry-run``, `notes/ASSESSMENT-2026-10-23.md` "Recommended next").
+1. **The context tells a model what to change, where, and how it will know it is done.** Measured by the first-move judge: real task contexts, fast models with thinking off, scored from compiler facts. The baseline is 0 of 10 acting on the first move, and wording, material and a stronger model all left it there (2026-10-23, $0.071), because one read is the models' normal first step. So the measure is "acts by its second move", with the read answered by the real REPL. Iterate the data context until it does, then confirm with paid runs.
 2. **The merge gate merges a model-made change** (``jolt/dry-run``: `:tests`, the three test tiers, `reasoning_content`; ``jolt/hold-for-root`` first).
 3. **The owner can watch each turn:** the agent debug view (``jolt/agent-view``; `docs/parity.md` "Context, printing, the page").
 4. **`src` resists growth:** duplication removed and core parts improved, so new work reuses them (drivers out of `src`, task `seon.main/drivers-leave-src`).

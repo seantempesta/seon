@@ -191,20 +191,20 @@
   64)
 
 (defn- once
-  "One call of f on args: the engine ticks it ran on this thread (jolt.host/ticks-of, the one
-  owner of the timer), less tick-allowance for each collection during it; its ns of this
-  thread's CPU; the bytes this thread allocated; and contracted calls (calls only when the
-  contracts are on: seon.profile counts armed functions). The collection count is read
+  "One call of f on args, measured by the one measurement of a call (seon.profile/measure!): the
+  engine ticks it ran on this thread, less tick-allowance for each collection during it; its ns
+  of this thread's CPU; the bytes this thread allocated; and contracted calls (calls only when
+  the contracts are on: seon.profile counts armed functions). The collection count is read
   outside the bytes' window, so reading it allocates nothing the call is charged."
   {:malli/schema [:=> [:cat :seon.host/fn [:sequential :any]] :seon.cost/dims]}
   [f args]
   (let [g0 (:count (lib/gc-stats))
-        a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/cpu-ns)
-        k (jolt.host/ticks-of #(apply f args))
-        t1 (profile/cpu-ns) c (profile/calls) a1 (profile/alloc-bytes)
-        gcs (- (:count (lib/gc-stats)) g0)]
-    (cond-> {:ticks (double (max 0 (- k (* tick-allowance gcs)))) :ns (double (- t1 t0)) :bytes (double (- a1 a0))}
-      contract/on? (assoc :calls (double c)))))
+        m (volatile! nil)
+        _ (profile/measure! #(apply f args) #(vreset! m %))
+        gcs (- (:count (lib/gc-stats)) g0)
+        {:keys [ticks bytes cpu-ns calls]} @m]
+    (cond-> {:ticks (double (max 0 (- ticks (* tick-allowance gcs)))) :ns (double cpu-ns) :bytes (double bytes)}
+      contract/on? (assoc :calls (double calls)))))
 
 (def ^:private baseline
   "What measuring a call that does nothing costs: the clock, tick and allocation reads themselves."
@@ -333,7 +333,9 @@
   same at any load (docs/cost.md); seon.cost-test/the-unit-table-is-current holds them to 1.25x."
   {:seq/reduce {:ticks 1.16 :ns 1.4 :bytes 0.0 :what "one step of reduce over a vector"}
    :fn/call {:ticks 5.16 :ns 7.4 :bytes 0.0 :what "a reduce step calling one plain function, both defined at the REPL"}
-   :fn/armed-call {:ticks 12.2 :ns 32.8 :bytes 353.53 :what "a reduce step calling one contracted function ([:=> [:cat :int] :int])"}
+   ;; 353.53 B before malli's total arms went unguarded (task seon.contract/an-armed-call-costs-its-checks:
+   ;; two try's a call, 2026-10-23); a total arm is checked bare
+   :fn/armed-call {:ticks 10.2 :ns 20.3 :bytes 0.02 :what "a reduce step calling one contracted function ([:=> [:cat :int] :int])"}
    :vec/nth {:ticks 8.15 :ns 12.4 :bytes 0.0 :what "nth of a vector"}
    :vec/conj {:ticks 29.18 :ns 30.7 :bytes 245.99 :what "conj onto a persistent vector"}
    :vec/conj! {:ticks 7.49 :ns 12.3 :bytes 43.28 :what "conj! onto a transient vector"}
