@@ -25,23 +25,25 @@ Start the root session in the main folder itself (`~/src/seon-jolt/next`, or `~/
 4. Write the owner a five-line state summary.
 5. Start the sessions again, one per live branch below, in that branch's worktree, each briefed with its handoff note and AGENTS §3. Start one merge session in the main tree, briefed with AGENTS §3's merge paragraph and the queue. File them in one sidebar group, and use the model AGENTS §2 names for the task.
 
-## Live branches at the handover (2026-10-23, ~13:30)
+## Live branches (checked 2026-10-23, ~13:10, by the new account's root)
 
-The queue order first; anything not listed is merged or old.
+Grouped as `docs/plan.md` "In flight" assigns them; anything not listed is merged or old. Merged since the handover: ``jolt/an-ended-agent-leaves-the-grid``, ``jolt/store-release``, ``jolt/in-scalar``.
 
-| Branch | Worktree | State and next step |
-|---|---|---|
-| ``jolt/health`` | `../next-health` | Not on main: the merge session merged it, the merged prove went red (a narrowed `seon.prove/reply` contract), and it reverted the merge (1ef9f0e9). Tip b2afabe1 is **not ready**: `notes/handoff-health.md` says what's left. Merging it again needs a revert of the revert. |
-| ``jolt/wiki-stale`` | `../next-wiki-stale` | Ready; merges right after health. |
-| ``jolt/rename-run`` | `../next-rename` | attempt → run, tip ebbfc94b; main has moved ahead of it. At the freeze, follow `notes/rename-run/HANDOFF.md` (merge main, take main's side of conflicts, the two scripts, sync the submodules, build, prove, health, self-review, merge), then erase the standing store. |
-| ``jolt/self-contained`` | `../next-self-contained` | Tip 1b3968e7, reported to the merge session. The order is in `notes/handoff-self-contained.md`: after rename-run, step A, then step D (history tags; the outer repo's uncommitted work committed first), then step R (`notes/cutover-step-R-2026-10-23.md`). Keep its grep-clean rewording of AGENTS.md's sidebar line and plan.md's cutover line. |
-| ``jolt/agent-view`` | `../next-agent-view` | The chat window, renders, messages as facts. Self-review, then its full run, then merge. Then the work-done recording task. |
-| ``jolt/writeback-order`` | `../next-writeback-order` | Seon's write-back puts a new form before its first user, which blocks every merge that adds a helper. Then step E's second paid real task: `notes/handoff-step-e.md` if it was written. Its session failed at the handover with 3 files uncommitted in the worktree, so start with `git -C ../next-writeback-order status` and `diff`. |
-| ``jolt/datom-cost`` | `.worktrees/datom-cost` | Datahike's add path costs ~7k ticks per datom (a 5.4 s import where ~0.35 s is due): `notes/handoff-store.md`. |
-| ``jolt/ctx-loop`` | `../next-ctx-loop` | The context render profiled on Seon's own program: `notes/handoff-speed.md`. |
-| ``jolt/reconcile-topo``, ``jolt/live-forms`` | `../next-drivers-out` | shrink's deletions, and the `seon.e2e` agent-test regression (two `seon.agent-test` reds on main: the test makes a root require `seon.e2e`, which lives in `test/` now): `notes/handoff-shrink.md`. |
-| ``jolt/an-ended-agent-leaves-the-grid`` | `../next-an-ended-agent-leaves-the-grid` | A clock still deciding (render's 90 s retire timer): `notes/handoff-clocks.md`. |
-| ``jolt/memory-is-read-when-asked`` | `.worktrees/memory-is-read-when-asked` | Claimed late; read its log first. |
+| Branch | Worktree | State | Group |
+|---|---|---|---|
+| ``jolt/health`` | `../next-health` | reverted on main (1ef9f0e9); `notes/handoff-health.md` gives the re-merge steps; its reply fix 6e08af63 is untested | merge |
+| ``jolt/wiki-stale`` | `../next-wiki-stale` | ready, after health | merge |
+| ``jolt/reconcile-topo``, ``jolt/live-forms`` | `.worktrees/live-forms` (reconcile-topo has no worktree) | one commit each, src −9 and −2; no handoff note | merge |
+| ``jolt/rename-run`` | `../next-rename` | at the freeze: `notes/rename-run/HANDOFF.md` | merge |
+| ``jolt/self-contained`` | `../next-self-contained` | after rename-run: `notes/handoff-self-contained.md` | merge |
+| ``jolt/memory-is-read-when-asked`` | `.worktrees/memory-is-read-when-asked` | WIP committed c5f2470c (a deftest; `seon.agent/mem-mb`'s time-keyed cache not yet removed) | shrink |
+| ``jolt/writeback-order`` | `../next-writeback-order` | WIP committed a4d1ae96, untested; no step-E note was written | agent loop |
+| ``jolt/ctx-loop`` | `../next-ctx-loop` | 5 commits, main merged; no handoff note (the cited `handoff-speed.md` was never written) | agent loop |
+| ``jolt/agent-view`` | `../next-agent-view` | `notes/agent-view-handoff-2026-10-23.md`; self-review, full run, merge | agent view |
+| ``jolt/datom-cost`` | `.worktrees/datom-cost` | only its note so far: `notes/handoff-store.md` | store |
+
+`handoff-shrink.md`, `handoff-clocks.md` and `handoff-step-e.md` were never written; their groups start from the task files.
+Kept for the owner, merged but holding a store or run output: `../next-agent-ends-with-root`, `../next-global-ids`, `../next-turn-cost` (`runs-2`, `runs-3`, `runs-noprovider`), `../next-drivers-out`. Thirteen other merged worktrees were removed, and fifteen orphan processes were ended.
 
 Old branches that are probably superseded: ``jolt/land2``, ``jolt/land11``, ``jolt/land13``, ``jolt/wiki``, ``jolt/unitflake``, ``jolt/reach-scc``, ``jolt/nested-tick-budget``, ``jolt/agent-view-prototype`` and ``jolt/dry-run-merges``. The last is Seon's own merge of run #10, kept as evidence. Check one against main before reviving it. Never delete a branch: that's the owner's act.
 
