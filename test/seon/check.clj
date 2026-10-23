@@ -1026,11 +1026,15 @@
     (let [;; the procs that answered a graph ping within :seon.config.check/ping-ms (an expected one that did not is blocked or absent)
           pids (fn [] (set (keys (flow/ping (:graph sys) :timeout-ms (seon.config/value :seon.config.check/ping-ms)))))
         booted (pids)
-        expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/source :fx.source/0 :fx/git :fx.git/0 :fx/deps :fx.deps/0 :fx/build :fx.build/0 :fx/tests :fx.tests/0 :fx/history :fx.history/0 :fx/model}
-                     (for [i (range (seon.config/value :seon.config.ai/max-in-flight))] (keyword "fx.model" (str i))))
+        decl (clojure.edn/read-string (slurp (seon.config/value :seon.config.root/system-path)))
+        ;; the procs system.edn declares, and each effect kind's owner and workers: the declaration is the one list
+        expect (into (set (keys (:procs decl)))
+                     (mapcat (fn [[k spec]] (cons (keyword "fx" (name k))
+                                                  (for [i (range (if (number? (:workers spec)) (:workers spec) (seon.config/value :seon.config.ai/max-in-flight)))]
+                                                    (keyword (str "fx." (name k)) (str i))))))
+                     (:fx decl))
         dir (str (:agents-dir (:store (c/state sys))) "/system") ; this root's own run dir
         _ (.mkdirs (java.io.File. dir))
-        decl (clojure.edn/read-string (slurp (seon.config/value :seon.config.root/system-path)))
         write! (fn [nm d] (let [f (str dir "/" nm ".edn")] (spit f (sedn/encode d)) f))
         probe (fn [tag] {:proc 'seon.check/probe-proc :args {:tag tag :events :bind/events}})
         r1 @(c/apply! sys (write! "add" (assoc-in decl [:procs :probe] (probe "one"))))
