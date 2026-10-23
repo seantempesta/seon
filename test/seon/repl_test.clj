@@ -281,10 +281,14 @@
       (is (not (str/includes? r ":jolt.error/line")) r)
       (is (some #{"at line 3:6"} (str/split-lines r))))))
 
+(def evals-run
+  "How many times the ticks proof's form ran."
+  (atom 0))
+
 (deftest an-evals-record-carries-its-ticks
   ;; task seon.turn/a-turn-shows-its-cost-against-its-budget (1): the work a form did is
   ;; recorded once, when it ran (jolt.host/ticks-of), beside :ms and :alloc-bytes, and the
-  ;; stored record keeps it; a render of that record never evaluates again.
+  ;; stored record keeps it; rendering that record runs the form no more.
   (let [answers (volatile! [])
         old @agent/state
         run! (fn [code] (vreset! answers [])
@@ -294,12 +298,14 @@
     (try
       (let [[small] (run! "(reduce + (range 100))")
             [big] (run! "(reduce + (range 1000000))")
-            [bad] (run! "(/ 1 0)")]
+            [bad] (run! "(/ 1 0)")
+            [once] (run! "(swap! seon.repl-test/evals-run inc)")]
         (is (pos? (:ticks small)) (pr-str small))
         (is (> (:ticks big) (* 10 (:ticks small))) "ticks are the work done: 10,000x the loop is >10x the ticks (the form's compile is a constant)")
         (is (pos? (:ticks bad)) "a form that threw still did work")
-        (let [rec (-> (repl/record-tx :a "run" [(assoc big :id 0)] nil) first :seon.cluster.eval/record)
+        (let [rec (-> (repl/record-tx :a "run" [(assoc once :id 0)] nil) first :seon.cluster.eval/record)
               render #(pr-str (h/html (:seon.render/html (ui/history-row rec {}))))]
-          (is (= (:ticks big) (:ticks rec)) "the stored record carries the ticks")
-          (is (= (render) (render)) "rendering one record twice gives the same bytes")))
+          (is (= (:ticks once) (:ticks rec)) "the stored record carries the ticks")
+          (is (= (render) (render)) "rendering one record twice gives the same bytes")
+          (is (= 1 @evals-run) "and runs the form no more than once")))
       (finally (reset! agent/state old)))))

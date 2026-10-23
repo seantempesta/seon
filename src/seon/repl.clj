@@ -178,10 +178,11 @@
                    m))))))
 
 (defn wrap-cost
-  "Per-form wall µs, allocated bytes, engine ticks (jolt.host/ticks: the work it did, the
-  exact measure) and the form's costliest contracted functions (each
-  with its exact calls and estimated ms: seon.profile), measured around the per-form eval
-  fn. Reading them costs the functions the form called, not the program's size."
+  "Per-form wall ms, allocated bytes, engine ticks (the work it did, the exact measure:
+  jolt.host/ticks-of, read in its own finally so a form that threw is counted) and the
+  form's costliest contracted functions (each with its exact calls and estimated ms:
+  seon.profile), measured around the per-form eval fn. They are recorded once, when the
+  form ran. Reading them costs the functions the form called, not the program's size."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
@@ -189,14 +190,20 @@
           ef (:repl/eval-fn req eval)]
       (h (-> req
              (assoc :repl/eval-fn (fn [form]
-                                    (let [a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/now-ns) k0 (jolt.host/ticks)]
-                                      (try (ef form)
-                                           (finally (let [k1 (jolt.host/ticks) t1 (profile/now-ns) a1 (profile/alloc-bytes)]
-                                                      (vreset! last [(/ (quot (- t1 t0) 1000) 1000.0) (- a1 a0) (profile/top (profile/touched) (cfg/value :seon.config.agent/form-top-fns)) (- k1 k0)])))))))
+                                    (let [a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/now-ns)
+                                          v (volatile! nil) k (volatile! 0)]
+                                      (try (jolt.host/ticks-of
+                                             (fn [] (let [k0 (jolt.host/ticks)]
+                                                      (try (vreset! v (ef form))
+                                                           (finally (vreset! k (- (jolt.host/ticks) k0)))))))
+                                           @v
+                                           (finally (let [t1 (profile/now-ns) a1 (profile/alloc-bytes)]
+                                                      (vreset! last {:ms (/ (quot (- t1 t0) 1000) 1000.0) :alloc-bytes (- a1 a0) :ticks @k
+                                                                     :fns (profile/top (profile/touched) (cfg/value :seon.config.agent/form-top-fns))})))))))
              (around-reply (fn [m]
-                             (if-let [[ms a fns k] (when (or (contains? m :repl/value) (contains? m :repl/ex)) @last)]
+                             (if-let [{:keys [fns] :as c} (when (or (contains? m :repl/value) (contains? m :repl/ex)) @last)]
                                (do (vreset! last nil)
-                                   (cond-> (assoc m :ms ms :alloc-bytes a :ticks k)
+                                   (cond-> (merge m (dissoc c :fns))
                                      (seq fns) (assoc :fns (mapv (fn [c] (update c :ms #(/ (Math/round (* % 1000.0)) 1000.0))) fns))))
                                m))))))))
 
