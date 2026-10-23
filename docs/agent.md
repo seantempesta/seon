@@ -20,7 +20,7 @@ Your context comes in two parts: the run's, sent once and unchanged while you wo
 The run's part:
 - `:task`: its id, kind and instructions, and its plan as it accumulated along its needs, prerequisites first.
 - `:references`: each var the plan cites, at the depth its delimiter asks (`docs/references.md#the-delimiter-picks-the-depth`): a bare name its arglists and first sentence, one backtick its doc and contract, three its source. A source past the cap shows `:left-out` and `:read`, the form that reads it.
-- `:found`: program functions the cited vars and your proofs call that the plan does not name; often the helpers the task needs.
+- `:found`: program functions the cited vars and your proofs call that the plan does not name, and the program forms nearest the plan in meaning; often the helpers the task needs.
 - `:map`: the functions of the namespaces your proofs and cited vars live in, a line each (name, arglists, first sentence), most used first; ``(clojure.repl/dir the.ns)`` lists them all. Before writing a helper, look here for one.
 - `:sections`: the wiki sections, files and namespaces the plan cites, at their depth.
 - `:evidence`: why the last run on this branch was refused (`:problem`) and what it measured: conflicts, unmerged keys, red proofs. Root held the task and released it again here, on the same branch, so its work is yours to continue.
