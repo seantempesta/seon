@@ -28,6 +28,9 @@ RULES = [
 RULES = [(re.compile(a), b) for a, b in RULES]
 
 def convert(text, path):
+    if path == 'test/seon/docs_test.clj':  # its last section names the old words on purpose (no-text-uses-an-old-word)
+        i = text.find(';; ---- text uses Clojure')
+        if i >= 0: return convert(text[:i], 'x') + text[i:]
     masks = []
     def mask(s):
         masks.append(s); return '\x00%d\x00' % (len(masks) - 1)
@@ -44,7 +47,6 @@ def convert(text, path):
 changed = {}
 for f in files:
     if not f or f.startswith(('reference-code/', 'notes/')) or os.path.islink(f): continue
-    if f == 'test/seon/docs_test.clj': continue  # names the old word on purpose (no-text-uses-an-old-word)
     if f.endswith(('.zst', '.jpg', '.png', '.ico', '.woff2', '.diff')): continue
     try: s = open(f).read()
     except Exception: continue

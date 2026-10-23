@@ -43,14 +43,16 @@
 
 (defn- tests-of
   "{test digest} of the named test namespaces (or every one) on the checkout at root, the
-  ones among them that reach a process of their own (:process, seon.program/reach-index), its
-  program db (program-db) and inputs."
+  ones among them that reach a process of their own (:process, seon.program/graph-index), its
+  program db (program-db), inputs and reach graph (seon.program/reach-graph: walked once, the
+  check steps' index is read from it too)."
   [root names]
   (let [nss (set (if (seq names) (map symbol names) (test-namespaces root)))
         db (program-db root)
         in (fx/inputs root)
-        idx (into {} (filter #(nss (symbol (namespace (key %))))) (program/reach-index db in))]
-    {:db db :inputs in
+        g (program/reach-graph db (:data-refs in))
+        idx (into {} (filter #(nss (symbol (namespace (key %))))) (program/graph-index g in nil))]
+    {:graph g :inputs in
      :digests (update-vals idx :digest)
      :process (set (keep (fn [[t v]] (when (:process? v) t)) idx))
      :binary (set (keep (fn [[t v]] (when (:binary? v) t)) idx))}))
@@ -167,11 +169,11 @@
   process (automatic). Answers {:run-tests :run-steps :reused :cand :left (the process keys
   left out) :digests :steps :missing :inputs}."
   [root what all? names]
-  (let [{:keys [db inputs digests process binary]} (tests-of root names)
+  (let [{:keys [graph inputs digests process binary]} (tests-of root names)
         dir (config/value :seon.config.source/test-results-dir)
         tests? (not= what "checks") checks? (not= what "tests")
-        ;; the steps' functions walked once: their digests and which boot a root or a process
-        step-idx (when checks? (program/reach-index db inputs (into {} (filter (comp vector? val)) proofs/check-steps)))
+        ;; the steps' functions read from the tests' graph: their digests and which boot a root or a process
+        step-idx (when checks? (program/graph-index graph inputs (into {} (filter (comp vector? val)) proofs/check-steps)))
         {steps :digests missing :missing} (when checks? (proofs/step-digests #(update-vals (select-keys step-idx (keys %)) :digest) inputs))
         process (into (if tests? process #{}) (keep (fn [[k v]] (when (:process? v) k))) step-idx)
         named? (or all? (seq names))

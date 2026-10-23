@@ -163,12 +163,14 @@
                       [:datum e (:a dt)]))))))
 
 (defn- key-content
-  "Key k's content on db, as `program` holds it, or nil when db's program lacks k."
+  "Key k's content on db, as `program` holds it, or nil when db's program lacks k. A form's
+  content is its row less where it was read (:source: one form id can be imported on one
+  branch and recorded at a REPL on another, the same text)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key [:set :keyword]] :any]}
   [db [kind a b c :as k] data-attrs]
   (case kind
     :form (when-let [e (pdb/eid db :form/id a)]
-            (when (program/live? db e) (dissoc (program/form-row db e) :e :id)))
+            (when (program/live? db e) (dissoc (program/form-row db e) :e :id :source)))
     (:var :method :impl :ns)
     (when-let [e (program/def-eid db k)]
       (when-let [f (:db/id (get (d/entity db e) (program/pointer kind)))]
