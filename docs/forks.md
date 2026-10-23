@@ -83,7 +83,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 ## datahike
 
-`reference-code/datahike` pinned at `ae35add`, the tip of ``jolt/nested-call-refused``, on `bae7c3e` (the tip of ``jolt/release-drains``: ``jolt/in-scalar`` `1880fcc` merged in (both on ``jolt/global-ids`` `b4596cf`, ``jolt/gc-cache-epoch`` `700c473` merged in).
+`reference-code/datahike` pinned at `ae35add`, the tip of ``jolt/nested-call-refused``, on `bae7c3e` (the tip of ``jolt/release-drains``: ``jolt/in-scalar`` `1880fcc` merged in (both on ``jolt/global-ids`` `b4596cf`, ``jolt/gc-cache-epoch`` `700c473` merged in)).
 
 - Fork repo: ``~/src/seon-jolt/libs/datahike``. Upstream: ``replikativ/datahike``.
 - Base: `ad9fc97` "baseline", a history-less snapshot of Seon's fork ``seantempesta/datahike`` `ccba220b` (unknown: that commit is not in the repo, so the snapshot cannot be checked against it).
