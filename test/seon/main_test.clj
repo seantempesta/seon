@@ -84,10 +84,11 @@
                   (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))
         carries-p? (fn [x] (or (and (map? x) (contains? x :p))
                                (and (seq? x) (symbol? (first x)) (= "assoc" (name (first x))) (some #{:p} (take-nth 2 (drop 2 x))))))
+        ;; not covered: a request bound first (let [m (assoc x :p p)] ...) or built by merge or into
         puts (into (sorted-set)
                    (for [[nsn src] forms
                          :let [f (read-in nsn src)]
-                         :when (some #(and (seq? %) (symbol? (first %)) (#{">!!" "put!" ">!"} (name (first %))) (carries-p? (nth % 2 nil)))
+                         :when (some #(and (seq? %) (symbol? (first %)) (#{">!!" "put!" ">!" "offer!"} (name (first %))) (carries-p? (nth % 2 nil)))
                                      (tree-seq coll? seq f))]
                      nsn))]
     (is (= #{'seon.step} puts))))
