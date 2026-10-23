@@ -475,8 +475,8 @@
             (:ns/name x) [:ns (:ns/name x)]))
 
 (defn form-row
-  "Form entity e as the loader and the merge read it (:source when it was read from a file:
-  seon.source, :form/source)."
+  "Form entity e as the loader and the merge read it (:source when it is the text of the
+  source tree the binary was built from, :form/source: its :order is its place in that file)."
   {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
   [db e]
   (let [f (d/entity db e)]
@@ -592,7 +592,8 @@
   that interns (defines or declares) a var it references, unless both were read from a file
   (:source): a file's own order is kept, since it already loads, though a form's :refs name
   the vars its quoted data names too (seon.db/install-missing! names 'seon.db/open!, defined
-  after it). Cost: one pass over the forms and their references."
+  after it; task seon.program/load-dependencies-leave-quoted-names-out). Cost: one pass over
+  the forms and their references."
   {:malli/schema [:=> [:cat [:sequential :map]] [:vector :map]]}
   [forms]
   (let [by-id (into {} (map (juxt :id identity)) forms)
