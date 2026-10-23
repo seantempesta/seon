@@ -124,3 +124,23 @@
     (is (some? section) "docs/config.md has its Constants section")
     (is (= #{} (apply disj sites named)) "every bound left in src is named in docs/config.md#constants with its reason")
     (is (= #{} (apply disj named sites)) "and every name there is still such a site")))
+
+(deftest an-edge-asks-one-way
+  ;; task seon.step/an-edge-asks-one-way: an edge asks a proc one way, seon.step/ask-edge, which
+  ;; answers a closed channel at once; no src form outside seon.step puts a request carrying its
+  ;; promise (:p) on a channel itself. src's forms read as data from the compiler's facts
+  (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
+        forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
+                     [(clojure.string/starts-with? ?file "src/")]] db)
+        read-in (fn [nsn src] (require nsn)
+                  (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))
+        carries-p? (fn [x] (or (and (map? x) (contains? x :p))
+                               (and (seq? x) (symbol? (first x)) (= "assoc" (name (first x))) (some #{:p} (take-nth 2 (drop 2 x))))))
+        ;; not covered: a request bound first (let [m (assoc x :p p)] ...) or built by merge or into
+        puts (into (sorted-set)
+                   (for [[nsn src] forms
+                         :let [f (read-in nsn src)]
+                         :when (some #(and (seq? %) (symbol? (first %)) (#{">!!" "put!" ">!" "offer!"} (name (first %))) (carries-p? (nth % 2 nil)))
+                                     (tree-seq coll? seq f))]
+                     nsn))]
+    (is (= #{'seon.step} puts))))

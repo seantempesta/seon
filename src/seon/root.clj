@@ -888,11 +888,7 @@
   "Put m (with a fresh reply promise) on the api; a promise. After stop! the
   api is closed and the promise answers :seon.root/no-agent (\"root stopped\")."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.root/request] :seon.host/promise]}
-  [sys m]
-  (let [p (promise)]
-    (when-not (a/>!! (:ext sys) (assoc m :p p))
-      (deliver p (gone nil "root stopped")))
-    p))
+  [sys m] (step/ask-edge (:ext sys) m (gone nil "root stopped")))
 
 (defn view-numbers
   "Root's view v (the api's :state answer) with its windows as the numbers shown: the
@@ -1145,11 +1141,13 @@
   (let [fact @(transact-main! sys [{:seon.root/id :root :seon.root/stopped {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)}}]
                               {:flush? true})
         t0 (profile/now-ns)
-        p (promise)]
-    (a/>!! (:ext sys) {:op :shutdown :p p})
+        ;; an api already closed (a root whose api ended on its own) answers at once that it is
+        p (step/ask-edge (:ext sys) {:op :shutdown} (gone nil "root stopped"))]
     (a/close! (:ext sys))
-    (when (= ::late (deref p (+ ap/stop-bound-ms 1000) ::late))
-      (a/>!! (:back sys) {:op :kill-all}))
+    ;; agents not stopped by the api's drain, late or never asked (its api closed), are killed
+    (let [answer (deref p (+ ap/stop-bound-ms 1000) ::late)]
+      (when (or (= ::late answer) (contract/error? answer))
+        (a/>!! (:back sys) {:op :kill-all})))
     (let [drained (deref p 15000 :timeout)
           graph (flow/stop (:graph sys))]
       (some-> ^Thread (:errors sys) (.join 5000))

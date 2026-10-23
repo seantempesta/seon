@@ -104,13 +104,11 @@
              [(java.net.URLDecoder/decode k "UTF-8") (java.net.URLDecoder/decode (or v "") "UTF-8")])))
 
 (defn- ask!
-  "Put m with a fresh promise on the proc's :http in-port and wait for its one answer (the
-  edge's blocking read; the proc never waits; at stop every waiting promise answers nil)."
+  "m asked of the web proc on its :http in-port (seon.step/ask-edge), and its one answer waited
+  for: the edge's blocking read; the proc never waits. At stop every waiting promise answers
+  nil, and a request after it, the channel closed, answers nil at once."
   {:malli/schema [:=> [:cat :seon.host/chan :map] :any]}
-  [ch m]
-  (let [p (promise)]
-    (a/>!! ch (assoc m :p p))
-    @p))
+  [ch m] @(step/ask-edge ch m nil))
 
 (defn- html-response {:malli/schema [:=> [:cat [:maybe :string]] :map]}
   [s]

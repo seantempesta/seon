@@ -14,7 +14,7 @@
   is the step's own business; control messages it meets there are pushed back for the
   loop."
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.core.async.flow :as flow] [seon.contract :refer [defn defn-]]))
+  (:require [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.contract :refer [defn defn-]]))
 
 ;; The contract every step-fn Var carries is the registered :seon.step/step-fn
 ;; (resources/seon/schemas/seon.core.edn): describe, init, transition, transform.
@@ -79,6 +79,18 @@
   or answered already). Answers [st' v]."
   {:malli/schema [:=> [:cat [:map [:pending :map]] :any] [:tuple :map :any]]}
   [st rid] [(update st :pending dissoc rid) (get-in st [:pending rid])])
+
+(defn ask-edge
+  "An edge's request (a caller outside the graph, on a thread of its own: the web's handler, root's
+  REPL surface, root's stop): m with a fresh promise as :p, put on the proc's channel ch, and that
+  promise, which the proc delivers its one answer to. A channel already closed answers closed at
+  once: every request is answered, none left waiting on a proc that will never take it. The one
+  way an edge asks a proc (seon.main-test/an-edge-asks-one-way)."
+  {:malli/schema [:=> [:cat :seon.host/chan :map :any] :seon.host/promise]}
+  [ch m closed]
+  (let [p (promise)]
+    (when-not (a/>!! ch (assoc m :p p)) (deliver p closed))
+    p))
 
 (defn event "m stamped with the wall-clock ms, for the events channel." {:malli/schema [:=> [:cat :map] :map]} [m] (assoc m :at-ms (System/currentTimeMillis)))
 
