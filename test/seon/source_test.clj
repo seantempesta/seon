@@ -421,3 +421,22 @@
         head-tree (str/trim (:out (sh/sh "git" "rev-parse" "HEAD:reference-code/malli")))]
     (is (= head-tree (get (:pins r) "reference-code/malli")) "the gitlink HEAD's tree records for it")
     (is (every? #(str/starts-with? % "reference-code/") (keys (:pins r))))))
+
+(deftest a-test-that-reaches-a-process-is-found-by-the-reach-walk
+  ;; root's ruling (2026-10-22, owner 2026-10-23): a test that reaches a process (a shell, a
+  ;; fork, a root of its own) never runs automatically, only when named; it is found by the
+  ;; compiler's facts (the one reach walk), never a marker. Step E's
+  ;; run 4: a change to seon.problems/report reached tests that boot a root, and an agent's
+  ;; proof run spun for minutes in its fork
+  (let [text (str "(ns app.proc-test (:require [clojure.java.shell :as sh] [clojure.test :refer [deftest is]] [app.proc :as p]))\n\n"
+                  "(defn- shell-ok? [] (zero? (:exit (sh/sh \"true\"))))\n\n"
+                  "(deftest via-shell (is (shell-ok?)) (is (= 2 (p/twice 1))))\n\n"
+                  "(deftest pure (is (= 2 (p/twice 1))))\n")
+        db (d/db-with (empty-db) (source/import-tx (empty-db) {"src/app/proc.clj" "(ns app.proc)\n\n(defn twice [x] (* 2 x))\n"
+                                                               "test/app/proc_test.clj" text}))]
+    (is (= #{'app.proc-test/via-shell} (set (filter #(= "app.proc-test" (namespace %)) (program/process-tests db {:env "" :tree ""})))))
+    (is (= {'app.proc-test/via-shell true 'app.proc-test/pure false}
+           (into {} (for [[t {:keys [process?]}] (program/reach-index db {:env "" :tree ""}) :when (= "app.proc-test" (namespace t))] [t process?])))
+        "the one walk says it beside each test's digest")
+    (is (= (program/reach-digests db {:env "" :tree ""}) (update-vals (program/reach-index db {:env "" :tree ""}) :digest))
+        "and the digests are reach-digests' own")))
