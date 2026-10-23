@@ -103,6 +103,13 @@
     (testing "a smallest size that costs more than the next leaves no two increments: the bounded fixed part judges"
       (let [r (g e #(if (= 10 %) 1000000.0 (+ 50000.0 (* 0.09 % %))))]
         (is (= :bounded-fixed (:basis r)))))
+    (testing "growth a small share of the cost: increments would amplify the measure's variance, so the bounded fixed part judges"
+      ;; seon.source-test's transact row on main 2026-10-23: 71k of growth on a 406k base read
+      ;; n^0.605 against an allowed n^0.601 in one run, n^0.58 in another
+      (let [t (assoc linear :growth :log :per-n {:ticks 11500.0} :fixed {:ticks 360000.0} :sizes [10 100 1000])
+            r (cost/growth t (rows t (fn [n] {:ticks ({10 406785.0 100 424921.0 1000 479600.0} n)})) :ticks)]
+        (is (= :bounded-fixed (:basis r)))
+        (is (< (:exponent r) (:allowed r)))))
     (testing "constant work: its cost itself, which a creep of a few percent barely moves"
       (let [c (assoc linear :growth :constant :per-n {} :fixed {:bytes 1290000.0} :sizes [10 100 1000])
             r (g c {10 1230000.0 100 1290000.0 1000 1430000.0})]

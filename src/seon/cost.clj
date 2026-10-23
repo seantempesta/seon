@@ -65,6 +65,14 @@
   passes, a second loop over the data (+1.0) does not."
   0.3)
 
+(def growth-share
+  "Growth is fitted on increments over the smallest size only when the largest increment is
+  at least this share of the smallest size's cost: below it, the measure's own variance moves
+  the increments more than the growth does. Measured 2026-10-23 on seon.source-test's transact
+  row (log growth, 406k ticks at 10, 71k more at 1,000): ticks varied 0.5% between runs, which
+  moved the increments' exponent by 0.02, its whole margin under the bound."
+  0.25)
+
 (def loose
   "At or below this fraction of its estimate at the largest size, the estimate is loose."
   (/ 1.0 3.0))
@@ -123,8 +131,9 @@
   allows over the same sizes (its own plus steeper-by). A change making every size cheaper,
   or dearer, by one amount never moves it (task seon.cost/a-speedup-never-reads-as-steeper;
   docs/cost.md#how-growth-is-judged). The basis: :increments, each size's increment over the
-  smallest against the work's own (three sizes or more with two positive increments, no
-  fixed part assumed); :total, the cost itself, for constant work (it should not grow);
+  smallest against the work's own (three sizes or more with two positive increments, the
+  largest at least growth-share of the smallest size's cost, no fixed part assumed);
+  :total, the cost itself, for constant work (it should not grow);
   else :bounded-fixed, the estimate's :fixed taken off but never more than the smallest
   size leaves beyond its estimated per-unit part. On the stated :fixed alone, a faster fixed
   part left the smallest size's remainder near 0 and the fit read the speedup as growth."
@@ -141,7 +150,8 @@
     (cond
       (< (count rs) 2) nil
       (= :constant (:growth e)) (fit :total (for [r rs] [(:n r) (m r)]) (for [r rs] [(:n r) (w r)]))
-      (>= (count incs) 2) (fit :increments (for [r incs] [(:n r) (- (m r) (m r0))]) (for [r incs] [(:n r) (- (w r) (w r0))]))
+      (and (>= (count incs) 2) (>= (- (m (last incs)) (m r0)) (* growth-share (m r0))))
+      (fit :increments (for [r incs] [(:n r) (- (m r) (m r0))]) (for [r incs] [(:n r) (- (w r) (w r0))]))
       :else (let [f (double (get-in e [:fixed d] 0.0))
                   e0 (get-in r0 [:expected d])
                   f (if e0 (max 0.0 (min f (- (m r0) (- e0 f)))) f)
