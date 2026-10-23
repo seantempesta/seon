@@ -228,7 +228,7 @@
   branch's unmerged entries (base, ours, theirs); what its merge will carry to main; what
   happened to the last reply; the last evaluations; turns left."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds last-items turn max-turns unmerged truncated? reasons run-errors source repairs will-merge]}]
+  [db t {:keys [results reds last-items turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
         task? #(and (qualified-symbol? (:seon.ref/name %)) (ref/task? db (:seon.ref/name %)))
@@ -246,7 +246,7 @@
              :proofs (vec (for [p (sort-by str proofs)
                                 :let [src (source-of db p)
                                       ;; no result: not written yet, the run failed as a whole, or it asserted nothing
-                                      st (get results p (cond (nil? src) :undefined (seq run-errors) :not-run :else :no-assertions))
+                                      st (get results p (cond (nil? src) :undefined (seq test-run-errors) :not-run :else :no-assertions))
                                       fs (filter #(= p (:test %)) reds)]]
                             (cond-> {:test p :status st}
                               (and src (not= :pass st)) (assoc :source src)
@@ -264,7 +264,7 @@
       (seq sections) (assoc :sections sections)
       (seq helpers) (assoc :found helpers)
       (seq (refused (vec reasons) (vec reds))) (assoc :refused (refused (vec reasons) (vec reds)))
-      (seq run-errors) (assoc :test-run {:failed (vec run-errors)})
+      (seq test-run-errors) (assoc :test-run {:failed (vec test-run-errors)})
       (last-reply truncated? source (vec repairs)) (assoc :your-last-reply (last-reply truncated? source (vec repairs)))
       (:seon.task/evidence t) (assoc :evidence (:seon.task/evidence t))
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))

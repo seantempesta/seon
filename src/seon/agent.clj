@@ -374,7 +374,7 @@
     {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
      :reports reports}))
 
-(defn run-answer
+(defn test-run-answer
   "The run, from the last line the test child wrote on its pipe before EOF (nil: none) and
   its exit status: that line when it is the run's result; else the child died while running
   the test the line's {:seon.test/started var} names, and the run is one :error report on
@@ -428,7 +428,7 @@
                                         (if (= ls :eof) line (recur (or (peek ls) line)))))
                                st (lib/wait-status pid)]
                            (lib/c-close r)
-                           (assoc (run-answer line st) :ms (profile/ms-since t0) :pid pid :exit st)))})
+                           (assoc (test-run-answer line st) :ms (profile/ms-since t0) :pid pid :exit st)))})
         unstored (when (and dir (not (contract/error? res)))
                    (proofs/store-greens! #(fx! :file % {}) dir
                                          (into {} (for [[t status] (proofs/results res) :when (and (= :pass status) (digests t))]

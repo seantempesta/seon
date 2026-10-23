@@ -75,14 +75,14 @@
   {:malli/schema [:=> [:cat :seon.task/id :seon.task/plan] :map]}
   [id plan-before]
   (let [t0 (profile/now-ns)
-        run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks) (:proofs (:seon.task/accumulated (task/task (agent/db) id))))
+        test-run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks) (:proofs (:seon.task/accumulated (task/task (agent/db) id))))
         tests-ms (long (profile/ms-since t0))
-        results (if (contract/error? run) {} (proofs/results run))
+        results (if (contract/error? test-run) {} (proofs/results test-run))
         db (agent/db)
         unc (added-gaps (:base @agent/state) db)
         unmerged (branch/unmerged)
         caused (problems/caused (:base @agent/state) db)]
-    {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :task (task/task db id)
+    {:test-run test-run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :task (task/task db id)
      :will-merge (program/divergence (:base @agent/state) db)
      :reasons (r/done-explain (assoc (r/done-input (r/index db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before)
                                      :caused caused))}))
@@ -115,15 +115,15 @@
 
 (defn- observed
   "The context inputs observe's map holds, beyond the proofs' results: every reason of the
-  done rule, the failing assertions of each test it names, the run's own errors, and what the
+  done rule, the failing assertions of each test it names, the test run's own errors, and what the
   branch's merge will carry to main."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{:keys [run reasons task results will-merge]}]
+  [{:keys [test-run reasons task results will-merge]}]
   (let [proofs (:proofs (:seon.task/accumulated task))
         named (into (set proofs) (keep :symbol) reasons)]
     {:results results :reasons reasons
-     :reds (if (contract/error? run) [] (proofs/red-reports run named))
-     :run-errors (if (contract/error? run) [(:seon.error/message run)] (proofs/run-errors run))
+     :reds (if (contract/error? test-run) [] (proofs/red-reports test-run named))
+     :test-run-errors (if (contract/error? test-run) [(:seon.error/message test-run)] (proofs/test-run-errors test-run))
      :will-merge will-merge}))
 
 (defn- basis!

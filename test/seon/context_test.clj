@@ -77,7 +77,7 @@
         reds [{:test 'demo-test/g-test :type :fail :expected "(= 1 (g))" :actual "(not (= 1 0))" :got "(= 1 0)"}]
         block (context/current-state db t {:results {'demo-test/f-test :fail 'demo-test/g-test :fail} :reds reds
                                            :reasons reasons :turn 1 :max-turns 4
-                                           :run-errors ["namespace app-test did not load: Unable to resolve symbol: g"]})]
+                                           :test-run-errors ["namespace app-test did not load: Unable to resolve symbol: g"]})]
     (testing "every reason but the task's own red proof (shown with the proofs), each with what explains it"
       (is (= [{:reason :regression :test 'demo-test/g-test :failures [{:assert "(= 1 (g))" :got "(= 1 0)"}]}
               {:reason :stray-red :test 'user/scratch-test}
@@ -86,7 +86,7 @@
     (testing "a run that failed as a whole is said, not read as tests not run"
       (is (= {:failed ["namespace app-test did not load: Unable to resolve symbol: g"]} (:test-run block)))
       (is (= ["namespace app-test did not load: Unable to resolve symbol: g" "test process died: 9"]
-             (proofs/run-errors {:reports [{:type :error :message "namespace app-test did not load: Unable to resolve symbol: g"}
+             (proofs/test-run-errors {:reports [{:type :error :message "namespace app-test did not load: Unable to resolve symbol: g"}
                                            {:type :fail :var "#'demo-test/f-test" :message "x"}
                                            {:type :error :var nil :message "test process died: 9"}]}))))
     (testing "the printed context carries them"
@@ -98,7 +98,7 @@
         (is (= [[:no-design :seon.task/plan 'my.task/update!]]
                (mapv (juxt :reason :unchanged (comp first :do)) (:refused b))))))
     (testing "nothing refused, nothing failed: no section"
-      (let [b (context/current-state db t {:results {'demo-test/f-test :pass} :reasons [] :turn 1 :max-turns 4 :run-errors []})]
+      (let [b (context/current-state db t {:results {'demo-test/f-test :pass} :reasons [] :turn 1 :max-turns 4 :test-run-errors []})]
         (is (not-any? #(contains? b %) [:refused :test-run :flagged :your-last-reply]))))))
 
 (deftest a-repair-is-shown-next-turn
@@ -156,7 +156,7 @@
     (is (= {:test 'ctx-calc-test/cube-test :status :undefined} (by 'ctx-calc-test/cube-test))
         "a proof not written yet says so")
     (is (= :no-assertions (:status (by 'ctx-calc-test/empty-test))) "a proof that ran and asserted nothing says so")
-    (let [b (context/current-state db (task/task db "ctx/sq") {:results {} :turn 1 :max-turns 4 :run-errors ["namespace app-test did not load"]})]
+    (let [b (context/current-state db (task/task db "ctx/sq") {:results {} :turn 1 :max-turns 4 :test-run-errors ["namespace app-test did not load"]})]
       (is (= {'ctx-calc-test/square-test :not-run 'ctx-calc-test/empty-test :not-run 'ctx-calc-test/cube-test :undefined}
              (into {} (map (juxt :test :status)) (:proofs b)))
           "when the run failed as a whole, a written proof did not run"))))
@@ -209,7 +209,7 @@
         _ (d/transact conn (program "(defn f \"Doubles.\" [x] (* 2 x))"))
         _ (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make `demo/f` triple."
                                                    :seon.task/proofs #{'demo-test/f-test}}]))
-        observed {:results {'demo-test/f-test :fail} :run-errors []
+        observed {:results {'demo-test/f-test :fail} :test-run-errors []
                   :reds [{:test 'demo-test/f-test :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))" :got "(= 6 4)"}]
                   :reasons [{:reason :proof-red :symbol 'demo-test/f-test} {:reason :contract-gap :symbol 'demo/helper}]}
         basis (fn [db n] {:commit (d/commit-id db) :task "demo/f" :attempt "demo/f#1" :turn n :max-turns 4 :origin :model :observed observed})
@@ -372,7 +372,7 @@
       (d/transact conn (program-facts '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))" []]]))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/f``` triple."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-      (let [observed {:results {'demo-test/f-test :fail} :run-errors [] :reds [] :reasons [{:reason :proof-red :symbol 'demo-test/f-test}]}
+      (let [observed {:results {'demo-test/f-test :fail} :test-run-errors [] :reds [] :reasons [{:reason :proof-red :symbol 'demo-test/f-test}]}
             request (fn [n] (let [db @conn
                                   b {:commit (d/commit-id db) :task "demo/f" :attempt "demo/f#1" :turn n :max-turns 4 :origin :model :observed observed}
                                   ms (:messages (context/render db b))]
