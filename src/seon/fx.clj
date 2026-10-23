@@ -241,15 +241,17 @@
 
 (defn test-results
   "Each of tests' status from prove's output out and its exit status: :fail or :error where a
-  RED line names it (its counts say which), :pass when the run reached its tests and named it
-  in no RED line (it ran green, or was green at its digest), :error for every one when the run
-  never reached its tests (its plan or its build failed)."
+  RED line names it (its counts say which), :pass only when the run reached its tests, exited
+  0 and named it in no RED line (it ran green, or was green at its digest), and :error for
+  every other one: a run that never reached its tests (its plan or its build failed), or that
+  exited non-zero without naming it (a check step, a crash after the shard), says nothing of it
+  passing."
   {:malli/schema [:=> [:cat :string :int [:sequential :qualified-symbol]] [:map-of :qualified-symbol [:enum :pass :fail :error]]]}
   [out exit tests]
   (let [red (into {} (for [[_ t counts] (re-seq #"(?m)^RED (\S+) (\{[^\n]*\})" out)]
                        [(symbol t) (if (pos? (or (:error (edn/read-string counts)) 0)) :error :fail)]))
         reached? (boolean (re-find #"(?m)^(SHARD |PROVE OK|prove: .* 0 to run)" out))]
-    (into {} (for [t tests] [t (or (red t) (if reached? :pass :error))]))))
+    (into {} (for [t tests] [t (or (red t) (if (and reached? (zero? exit)) :pass :error))]))))
 
 (defn run-tests
   "The :tests effect: tests (qualified names) run on a checkout of the merge candidate: a
@@ -274,7 +276,9 @@
               out (str (:out r) (:err r))]
           (spit log out)
           {:value {:results (test-results out (:exit r) tests) :ms (profile/ms-since t0) :log log}})
-        (finally (sh/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir))))))
+        ;; the worktree's removal is recorded in the run's log: a failed one names what it left
+        (finally (let [rm (sh/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
+                   (spit log (str "\nremove-at " dir ": exit " (:exit rm) "\n" (:out rm) (:err rm)) :append true)))))))
 
 ;; ---- the owner -----------------------------------------------------------------------
 

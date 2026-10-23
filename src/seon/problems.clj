@@ -153,9 +153,11 @@
       (assoc :error [(assoc base :error err :producer (:seon.error/operation err) :evidence {:from aid :error err})])
       (seq waste)
       (assoc :waste [(assoc base :waste waste :evidence {:from aid :waste waste})])
-      ;; root's ruling (a), 2026-10-23: merged where no gate checkout is declared, its
-      ;; deferred process tests never ran: unknown, open until a run gives them results
-      (and (= :merged status) (seq (:seon.attempt/deferred p)) (empty? (:seon.attempt/deferred-results p)))
+      ;; owner's ruling, 2026-10-23: merged with its deferred process tests unasked (or no
+      ;; gate checkout declared): open until each is recorded passing (my.root/gate!)
+      (and (= :merged status) (seq (:seon.attempt/deferred p))
+           (not-every? (into #{} (keep #(when (= :pass (:seon.proof/status %)) (:seon.proof/test %))) (:seon.attempt/deferred-results p))
+                       (:seon.attempt/deferred p)))
       (assoc :unrun [(assoc base :open? true :tests (vec (sort-by str (:seon.attempt/deferred p)))
                             :reason (str "merged with " (count (:seon.attempt/deferred p)) " process tests unrun")
                             :evidence {:from aid :deferred (vec (sort-by str (:seon.attempt/deferred p)))})]))))

@@ -351,19 +351,19 @@
   ;; unrun (an open problem until they run)
   (let [gate {:seon.root/id :root :seon.config.source/gate-checkout "/the/merges/tree"}
         asked {:seon.task/id "demo/a-merge" :seon.task/gate? true}
-        land (fn [root go & kv] (r/reconcile (mdb [(decl "a")] :extra (concat (attempt "a" 1 :done)
+        judged (fn [root go & kv] (r/reconcile (mdb [(decl "a")] :extra (concat (attempt "a" 1 :done)
                                                                              (apply attempt "a-merge" 1 :ended :outcome :green :results {(t "a") :pass}
                                                                                     :deferred ['seon.root-test/boots] kv)
                                                                              (when go [go])
                                                                              (when root [root])))))
         octopus [{:op :octopus-merge :attempt "demo/a-merge#1" :members [{:attempt "demo/a-merge#1" :task "demo/a-merge"}]}]]
-    (is (= [{:op :gate :attempt "demo/a-merge#1" :task "demo/a-merge" :tests ['seon.root-test/boots]}] (land gate asked)))
-    (is (= octopus (land gate asked :deferred-results {'seon.root-test/boots :pass})))
-    (is (= [:hold] (map :op (land gate asked :deferred-results {'seon.root-test/boots :fail}))))
-    (is (= [:hold] (map :op (land gate asked :deferred-results {'seon.root-test/boots :error}))) "a run that could not run them is no pass")
-    (is (str/includes? (:problem (first (land gate asked :deferred-results {'seon.root-test/boots :fail}))) "seon.root-test/boots"))
-    (is (= octopus (land gate nil)) "unasked: it merges, the deferred tests unrun")
-    (is (= octopus (land nil asked)) "no gate checkout declared: it merges, the deferred tests unrun")))
+    (is (= [{:op :gate :attempt "demo/a-merge#1" :task "demo/a-merge" :tests ['seon.root-test/boots]}] (judged gate asked)))
+    (is (= octopus (judged gate asked :deferred-results {'seon.root-test/boots :pass})))
+    (is (= [:hold] (map :op (judged gate asked :deferred-results {'seon.root-test/boots :fail}))))
+    (is (= [:hold] (map :op (judged gate asked :deferred-results {'seon.root-test/boots :error}))) "a run that could not run them is no pass")
+    (is (str/includes? (:problem (first (judged gate asked :deferred-results {'seon.root-test/boots :fail}))) "seon.root-test/boots"))
+    (is (= octopus (judged gate nil)) "unasked: it merges, the deferred tests unrun")
+    (is (= octopus (judged nil asked)) "no gate checkout declared: it merges, the deferred tests unrun")))
 
 (deftest a-deferred-proof-is-neither-red-nor-unknown
   ;; owner's ruling (2026-10-23): a process test never runs in an agent's turn or root's judge,

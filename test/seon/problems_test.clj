@@ -407,9 +407,9 @@
     (is (not-any? #(= "t/l#1" (:attempt %)) (get-in (problems/report db) [:classes :error :rows])))))
 
 (deftest a-merge-with-its-process-tests-unrun-is-an-open-problem
-  ;; root's ruling (a), 2026-10-23: a root that declares no gate checkout merges a change that
-  ;; reaches process tests with them unrun; unknown stays visible, an open :unrun row, until a
-  ;; run gives them results
+  ;; owner's ruling, 2026-10-23: a change that reaches process tests merges with them unrun
+  ;; unless root asked; unknown stays visible, an open :unrun row, until each is recorded
+  ;; passing (my.root/gate! runs them): one passing of two, or a red, keeps it open
   (let [att (fn [extra] (:db-after (d/with (seeded 1 5)
                                            [{:seon.task/id "t/u" :seon.task/ns 't :seon.task/name "u" :seon.task/plan "p" :seon.task/execution :running
                                              :seon.task/branch :u :seon.task/kind :merge}
@@ -419,5 +419,11 @@
                                                    extra)])))
         rows #(get-in (problems/report %) [:classes :unrun :rows])]
     (is (= [["t/u#1" "merged with 2 process tests unrun" true]] (mapv (juxt :attempt :reason :open?) (rows (att {})))))
-    (is (= [] (rows (att {:seon.attempt/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :pass}]})))
-        "once they ran, the row closes (a red among them is the gate's refusal)")))
+    (is (= 1 (count (rows (att {:seon.attempt/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :pass}]}))))
+        "one of two recorded: still open")
+    (is (= 1 (count (rows (att {:seon.attempt/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :pass}
+                                                                {:seon.proof/test 'seon.check-test/clean :seon.proof/status :fail}]}))))
+        "a red among them: still open")
+    (is (= [] (rows (att {:seon.attempt/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :pass}
+                                                         {:seon.proof/test 'seon.check-test/clean :seon.proof/status :pass}]})))
+        "each passing: the row closes")))

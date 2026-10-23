@@ -450,10 +450,9 @@
   "Form entity e as the loader and the merge read it."
   {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
   [db e]
-  (let [f (d/entity db e)
-        def-key definition-key]
+  (let [f (d/entity db e)]
     (cond-> {:e e :id (:form/id f) :src (:form/src f) :ns (:ns/name (:form/ns f)) :order (:form/order f)
-             :defines (into #{} (keep def-key) (:form/defines f))
+             :defines (into #{} (keep definition-key) (:form/defines f))
              :declares (into #{} (map :var/name) (:form/declares f))
              :refs (set (:form/refs f)) :requires (set (:form/requires f))
              :banned (set (:form/banned f)) :inline-defs (set (:form/inline-defs f))

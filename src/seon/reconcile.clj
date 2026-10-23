@@ -721,7 +721,7 @@
                        files (source/files (:db r) (vec (keep #(:ns/file (d/entity (:db r) [:ns/name %])) nss)))]
                    (one (request st aid :gated {:op :fx :kind :tests :req {:repo (get-in st [:idx :root :gate-checkout]) :branch (:branch (:source st))
                                                                           :files files :tests (:tests act)}})))
-      ;; each deferred test's status on the attempt; the next judgment lands it or refuses it
+      ;; each deferred test's status on the attempt; the next judgment merges it or holds it
       :gated (let [rs (if (contract/error? r) (zipmap (:tests act) (repeat :error)) (get-in r [:value :results]))]
                (one (write st aid :done (cond-> [{:seon.attempt/id aid
                                                   :seon.attempt/deferred-results (vec (for [[t s] rs] {:seon.proof/test t :seon.proof/status s}))}]
