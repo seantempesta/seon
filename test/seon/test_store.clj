@@ -115,7 +115,7 @@
   root arguments. Answers the options with :port, nil when the root died before listening (its
   log says why). runs is one root's, named per main by its caller: a root still running there
   is refused, never answered (bin/root start in it would only report that root, and the test
-  would ask another test's root: task seon.test-store/a-test-root-is-its-own). The refusal
+  would ask another test's root: task seon.test-store/a-test-root-is-its-own). The refused start
   backs that rule, it is no lock: two starts at once in one runs could both pass it, which a
   runs per main makes unreachable."
   {:malli/schema [:=> [:cat [:map [:store :string] [:main :string] [:runs :string]
