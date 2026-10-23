@@ -5,8 +5,8 @@
   (:require [clojure.test :refer [deftest is]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.db :as pdb] [datahike.api :as d] [seon.test-store :as ts]))
 
-(defn- test-store "The one store these tests' roots take a branch of." []
-  (str (.getCanonicalPath (java.io.File. ".")) "/target/runs/test-store"))
+(defn- test-store "The one store these tests' roots take a branch of (seon.test-store/process-store)." []
+  (ts/process-store))
 
 (defn- drop-main!
   "Delete main and every branch under it from the test store (seon.check/drop-mains), once
