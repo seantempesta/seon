@@ -272,7 +272,7 @@
 (defn- relevant
   "Entity value m of schema, as a walk shows it: only the attributes its schema declares
   relevant (:seon.render/keys) when it declares them, else every one it holds. What is not
-  relevant is never pulled into a view (the owner, 2026-10-23: improve the data at its producer)."
+  relevant is never pulled into a view (DECISIONS, The context is data, made relevant at its producer)."
   {:malli/schema [:=> [:cat [:maybe :qualified-keyword] :map] :map]}
   [schema m]
   (if-let [ks (some-> schema contract/properties :seon.render/keys)] (select-keys m ks) m))
