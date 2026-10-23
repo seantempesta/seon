@@ -204,6 +204,20 @@
 
 ;; ---- no clipping: every cut on the page and in root's context says what it left -------------
 
+(defn- zoom
+  "The agent page's value for agent id as the render proc makes it: root's view entry ag (nil:
+  not in root's view), its newest attempt on main, its branch db read (nil: not read)."
+  [db id attempt ag]
+  (second (#'p/zoom-value (cond-> {:agent-attempt (if attempt {id attempt} {}) :tasks {} :zoom {id (if db {:db db} {})}}
+                            ag (assoc-in [:view :agents id] ag))
+                          id)))
+
+(defn- conv-html
+  "The conversation's rows of a window's value, each as its unit renders it (its schema's render)."
+  [page] (mapv #(h/html (r/html (:input %) {:schema (:schema %) :unit (:id %)})) (:conv page)))
+
+(defn- turn-rows-of "The conversation's rows that are turns, rendered." [page] (filter #(str/includes? % "class=\"turn ") (conv-html page)))
+
 (defn- long-text [n] (str/join " " (for [i (range n)] (str "word" i))))
 
 (deftest no-cut-on-the-page-drops-silently
@@ -294,20 +308,6 @@
       (is (str/includes? (h/html (ui/turns-list (conv 100 140) {})) "+40 more: older evaluations outside its turns, recorded on its branch")))
     (testing "nothing capped, nothing said"
       (is (not (str/includes? (h/html (ui/turns-list (conv 1 1) {})) "more"))))))
-
-(defn- zoom
-  "The agent page's value for agent id as the render proc makes it: root's view entry ag (nil:
-  not in root's view), its newest attempt on main, its branch db read (nil: not read)."
-  [db id attempt ag]
-  (second (#'p/zoom-value (cond-> {:agent-attempt (if attempt {id attempt} {}) :tasks {} :zoom {id (if db {:db db} {})}}
-                            ag (assoc-in [:view :agents id] ag))
-                          id)))
-
-(defn- conv-html
-  "The conversation's rows of a window's value, each as its unit renders it (its schema's render)."
-  [page] (mapv #(h/html (r/html (:input %) {:schema (:schema %) :unit (:id %)})) (:conv page)))
-
-(defn- turn-rows-of "The conversation's rows that are turns, rendered." [page] (filter #(str/includes? % "class=\"turn ") (conv-html page)))
 
 (deftest a-context-read-is-shown-once
   (let [ctx (str "{:turn \"1 of 8\" :refused [{:reason :contract-gap :vars [" (str/join " " (for [i (range 360)] (str "app.m/f" i))) "]}]}")
