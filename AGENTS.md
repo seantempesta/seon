@@ -35,6 +35,7 @@ How we keep the first version's spirit: run, then right, then fast; the demo is 
   - checks what agents return (a reproduction, a file:line, a number) before acting on it, and puts the result into a task, the plan or the wiki section it concerns;
   - merges verified work into main (§3) and keeps the plan and the wiki true.
 - **Worktree sessions** are Claude sessions each in its own git worktree on its own branch, working one task (§3): they write the proofs, the code and the wiki edit, prove their change, and report. One that has found no cause or clearly correct fix after about fifteen minutes stops and reports what it measured. One whose code contradicts its plan stops and sends the plan back with the evidence; nobody redesigns on the fly.
+- **Starting sessions** (owner, 2026-10-23): a session may run research subagents (Haiku, for web search and reading) on its own. It asks root before starting another Claude session; root keeps the one list of what is running. The owner may tell any session to start one directly, and that instruction overrides this rule.
 - **Seon agents** are forked processes working tasks through the same server, tasks and context (§6). What our worktree sessions find missing from that context is a task for Seon.
 
 ### Root's working rules (what a fresh root needs; the owner's rulings behind them are in docs/decisions.md)
@@ -101,7 +102,7 @@ Its references are derived from the plan's citations by the one parser ([referen
 
 **Root's gate, before approving any plan, format, key or rule** (owner, 2026-10-21): (1) which existing mechanism does this, ours, v1's or the dependency's? (2) what did v1 do here? (3) what is the field's best known way? (4) does it add a format, key, layer or rule, and why can't the existing one do it? An agent gathers the evidence; root shows it to the owner. No evidence, no approval.
 
-**Learn as we go.** Each merge's lesson goes into the wiki in the same commit (the section where the problem lives, linked from the others like it). A failed attempt's cause stays on its task. A problem outside your task is filed as a task (what you saw, the cause, what correct looks like, its proofs), never fixed in passing.
+**Learn as we go.** Each merge's lesson goes into the wiki in the same commit (the section where the problem lives, linked from the others like it). A failed run's cause stays on its task. A problem outside your task is filed as a task (what you saw, the cause, what correct looks like, its proofs), never fixed in passing.
 
 ## 4. The principles: everything is data flowing through the system
 
@@ -126,7 +127,7 @@ Every need is met by one of these. If one doesn't fit, stop and say so; never ro
   - free (a real, unrestricted REPL);
   - isolated (each on its own branch, its crashes and memory its own);
   - named by role, task and checkout;
-  - ended when their attempt ends.
+  - ended when their run ends.
 - **A render.** Every view, the model's context included, is a render declared on the value's schema, over the one printer.
 - **An error is data**, flowing to whoever can fix it. A defect holds its message (per key) until the code is fixed. A typed error goes to the requester, agent or task that can act on it.
 
@@ -223,8 +224,9 @@ A note (`notes/`) is a working paper. Once its content is filed in one of the ho
 | dial | config key | Clojure map, Datahike config |
 | admit, guarantees | instrument | Malli `malli.instrument` |
 | refusal | invalid, explained (a contract's); a reason (the done rule's); refused (a merge's) | Malli `m/explain` |
+| attempt | run (one agent's try at a task); a clojure.test run is a "test run", a whole root's is "root's run" | owner, 2026-10-23: "I don't like the attempt name. Call it agentic loop or run" |
 
-Library words stay: proc, step-fn, transact, branch, merge, schema, registry, contract (a Malli function schema), flusher, group commit, fork server, lease, generation. **Waste** stays our word for the turns and tokens an attempt spent past what its work needed (`:seon.attempt/waste`; owner, 2026-10-23). A stored keyword is renamed by erasing the store, never by a migration (DECISIONS).
+Library words stay: proc, step-fn, transact, branch, merge, schema, registry, contract (a Malli function schema), flusher, group commit, fork server, lease, generation. **Waste** stays our word for the turns and tokens a run spent past what its work needed (`:seon.run/waste`; owner, 2026-10-23). A stored keyword is renamed by erasing the store, never by a migration (DECISIONS).
 
 ## 8. The machine
 
@@ -232,7 +234,7 @@ Library words stay: proc, step-fn, transact, branch, merge, schema, registry, co
 - **Builds:** `nice -n 15 bin/build`, in parallel, no lock. Full checks run niced, each in its own worktree. Every process on a store uses the same LMDB build. Details, and the disk rules (worktrees removed at merge, no new top-level directories, pruning): [machine](docs/machine.md).
 - **Never flood it.** Anything that makes threads or processes starts at n ≤ 100 under `nice -n 15`; kill your own process past 200 threads. One experiment at a time.
 - **Leave nothing running when you finish,** and say so. A process that must outlive a tool call is double-forked (`bin/root` does).
-- **Clean up garbage when you see it, whoever left it** (owner, 2026-10-23: "why not kill the leftover processes? why wouldn't you"; "cleanup garbage when you see it"). A leftover process (an orphan whose session is gone, an old binary's relay, a lock helper in a dead scratch folder), a merged worktree, a finished experiment's store or output: end or delete it now, and say what went. Garbage is what nothing live uses; check that first, by PID, path and working directory (`lsof -a -p PID -d cwd`), never by pattern (`pkill`, `killall`, `pgrep -f`). Keep what is evidence or someone's work in progress: the standing store (`runs/store`), anything git or the store records, a worktree with unmerged commits or uncommitted changes, a live session's checkout. Reclaiming a record (a store, a branch, history) stays the owner's act ([machine](docs/machine.md#disk-stays-bounded)).
+- **Clean up garbage when you see it, whoever left it** (owner, 2026-10-23: "why not kill the leftover processes? why wouldn't you"; "cleanup garbage when you see it"). A leftover process (an orphan whose session is gone, an old binary's relay, a lock helper in a dead scratch folder), a merged worktree, a finished experiment's store or output: end or delete it now, and say what went. Garbage is what nothing live uses; check that first, by PID, path and working directory (`lsof -a -p PID -d cwd`), never by pattern (`pkill`, `killall`, `pgrep -f`). Keep what is evidence or someone's work in progress: the standing store (`runs/store`), anything git or the store records, a worktree with unmerged commits or uncommitted changes, a live session's checkout (check every session's `cwd` with `list_sessions` before removing a worktree: a session whose folder is gone can no longer be reached). Reclaiming a record (a store, a branch, history) stays the owner's act ([machine](docs/machine.md#disk-stays-bounded)).
 - **A root's processes end with it:** kill the root, or its fork server's process group (`kill -9 -PGID`), never a fork server by pid. Killing the fork server first skips the group kill that ends its agents ([failure points](docs/failure-points.md), root dies).
 - **Git in a worktree:** `git -C` on your own checkout only; never `git submodule` in a worktree (after merging main, `bin/worktree --sync NAME` from the main tree); never bare `git stash`; never `checkout`, `restore` or `reset` on paths you don't own; commit explicit paths; never push this repository's branches. A fork commit your branch pins is pushed to its fork, ``seantempesta/<lib>``, on a ``jolt/<topic>`` branch, with no ask (owner, 2026-10-23: "You don't have to ask me to push public repos anymore"): no force, never a fork's main, verified with `gh api` after.
 - **Secrets are never printed.** Paid model runs spend from the owner's standing $50 budget, on productive work only, with the context checked first; past it they need the owner's go ([model](docs/model.md#paid-runs)). Install nothing system-wide. Never write in `~/src/seon`.

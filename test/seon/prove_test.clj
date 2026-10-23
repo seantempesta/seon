@@ -16,7 +16,7 @@
 (defn- answer-of [m r] [:answers {:tag (:tag m) :r r}])
 (defn- waiters-answered [outs] (sort (map :rid (filter #(= :prove-answer (:op %)) outs))))
 
-(def ^:private run-answer {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var "#'a.b-test/t"}] :digests {'a.b-test/t "d1"} :ms 5})
+(def ^:private test-run-answer {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var "#'a.b-test/t"}] :digests {'a.b-test/t "d1"} :ms 5})
 
 (defn- run-through
   "Drive the run that st (a run just started by `outs`) is on, to its end: the runner answers a
@@ -34,7 +34,7 @@
 (deftest a-running-key-is-joined-and-every-waiter-is-answered-once
   (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :main 5) (req 2 :main 5) (req 3 :main 5)])]
     (is (= 1 (count (asks outs :spawn))) "three askers of one key: one run")
-    (let [[st all] (run-through st outs run-answer)]
+    (let [[st all] (run-through st outs test-run-answer)]
       (is (= [1 2 3] (waiters-answered all)) "each answered, once")
       (is (= 1 (count (asks all :tests))))
       (is (nil? (:running st)))
@@ -53,7 +53,7 @@
     (is (= 1 (count (asks outs :tests))) "one tests request, to the agent that holds the branch")
     (is (= {:op :tests :id :a3 :mode :judge} (:req (first (asks outs :tests)))))
     (is (empty? (asks outs :spawn)) "the agent runs its own branch: no prove agent")
-    (let [[_ all] (run-through st outs run-answer)]
+    (let [[_ all] (run-through st outs test-run-answer)]
       (is (= [10 11] (waiters-answered all)))
       (is (= 1 (count (asks all :tests)))))))
 
@@ -65,7 +65,7 @@
     (is (= #{[:agent-3 nil :judge] [:agent-5 nil :judge]} (set (keys (:next st)))) "one pending change per branch")
     (is (= 209 (get-in st [:next [:agent-3 nil :judge] :t])) "the latest of the burst")
     (is (= 200 (count (get-in st [:next [:agent-3 nil :judge] :waiters]))) "the replaced requests' askers follow the latest")
-    (let [[st all] (run-through st outs run-answer)]
+    (let [[st all] (run-through st outs test-run-answer)]
       (is (= 3 (count (asks all :tests))) "main, then agent-3 once, then agent-5 once: one run each")
       (is (= 202 (count (waiters-answered all))) "every asker answered")
       (is (= (count (distinct (waiters-answered all))) (count (waiters-answered all))) "once each")
@@ -78,7 +78,7 @@
                    (if-let [m (first (filter :req (drop seen all)))]
                      (let [op (get-in m [:req :op])
                            _ (when (= :tests op) (swap! order conj (get-in m [:req :id])))
-                           r (case op :spawn {:id :p1} :eval [{:tag :ret}] :tests run-answer :write {:ok true} :kill {:killed 1})
+                           r (case op :spawn {:id :p1} :eval [{:tag :ret}] :tests test-run-answer :write {:ok true} :kill {:killed 1})
                            [st o] (feed st [(answer-of m r)])]
                        (recur st (into all o) (inc (.indexOf all m))))
                      [st all]))]
@@ -216,7 +216,7 @@
     (is (= 2 (count (:next st))) "two slots pending: the namespaces named differ")
     (is (= #{2 4} (get-in st [:next [:main '#{a.x-test} :judge] :waiters])) "the same slot joins")
     (is (= #{3} (get-in st [:next [:main '#{a.y-test} :judge] :waiters])) "the other keeps its own")
-    (let [[_ all] (run-through st outs run-answer)]
+    (let [[_ all] (run-through st outs test-run-answer)]
       (is (= 3 (count (asks all :spawn))) "three runs: main, x, y, each its own")
       (is (= [1 2 3 4] (waiters-answered all))))))
 
@@ -229,7 +229,7 @@
     (is (empty? (:done st)) "nothing remembered")
     (testing "asking again runs again"
       (let [[st outs] (feed st [(req 2 :agent-3 7 :a3)])
-            [_ all] (run-through st outs run-answer)]
+            [_ all] (run-through st outs test-run-answer)]
         (is (= 1 (count (asks outs :tests))))
         (is (= [2] (waiters-answered all)))
         (is (not (seon.contract/error? (:r (first (filter #(= :prove-answer (:op %)) all))))))))))
@@ -238,7 +238,7 @@
   ;; bin/check e2e-calc (2026-10-23): a cancel killed an agent whose turn had asked prove for its
   ;; tests; root answers a request to an agent that ended :seon.root/ended (its producer knows
   ;; ended from never-was), the run's waiter is answered with it, and nothing is recorded as a
-  ;; :platform problem: the agent's end is its attempt's record
+  ;; :platform problem: the agent's end is its run's record
   (let [ended (seon.contract/error :seon.root/ended 'seon.root/api-proc "agent a3 ended" {:agent :a3})
         [st outs] (feed (prove/prove-proc {}) [(req 1 :agent-3 7 :a3)])
         [st all] (run-through st outs ended)]

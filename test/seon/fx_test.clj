@@ -36,7 +36,7 @@
     (is (= :seon.fx/defect (get-in out [:outcome :seon.error/type])))
     (is (= {:agent :a1 :op :fx-reply :k 1} (:dest out)))))
 
-;; ---- write-back answers what happened (audit FENCES #21) ------------------------------
+;; ---- write-back answers what happened (audit GUARDS #21) ------------------------------
 
 (defn- scratch-dir []
   (let [d (str (System/getProperty "user.dir") "/target/tmp/fx-test-" (random-uuid))]

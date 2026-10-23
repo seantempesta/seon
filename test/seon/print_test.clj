@@ -74,6 +74,8 @@
   (is (lawful? [(list 0 [(apply str "aaaaaa" (repeat 82 "a"))])
                 {:A (apply str (repeat 66 "\"a")) :B {:A nil :B 0}}]
                70))
+  ;; a first member whose least form fits is shown, though a string four levels down cannot show
+  (is (lawful? [[[["aaaaa\"a\"a\"a\"aa\"\"aa\"aa\"\"aaaa\"a\naaa\"a\"aaaaaa\"aa\"\na\"\"aaa\"aa\"\"\"\"a\"\"aa\"\"a\"aaaa\"\"\"\"aaa\"a\"\"\"a\"a\"\"\"a\"\"\"\"\"\"\"\"aaa\"\"a\"a\"a"]]]] 60))
   (doseq [budget [40 120 400]]
     (is (lawful? {:a {:b (str/join "\n" (repeat 30 "a line of text")) :c [1 2 {:d "x\ny" :e {:f (vec (range 40))}}]}
                   :g (str/join "\n" (repeat 5 "zz")) :h {:i {:j {:k "deep"}}}}
@@ -204,7 +206,7 @@
 
 (deftest more-says-how-many-and-where
   (is (nil? (seon/more 3 3 "x")))
-  (is (= "+7 more: (seon.task/attempts db)" (seon/more 12 5 "(seon.task/attempts db)")))
+  (is (= "+7 more: (seon.task/runs db)" (seon/more 12 5 "(seon.task/runs db)")))
   (is (= "+1 more" (seon/more 2 1 nil))))
 
 (deftest a-one-line-cut-reads-the-source-rest

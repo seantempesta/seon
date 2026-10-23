@@ -32,8 +32,8 @@
 
 (def carried-platform-attrs
   "The platform attributes (seon.*) a branch carries: the task content an agent may improve
-  (my.task/update!), carried onto main at its attempt's end (seon.task/carry-tx). Every other seon.* attribute is a platform record (root's boot and
-  quiescence, recorded errors, attempts, observations) written where it happened and never
+  (my.task/update!), carried onto main at its run's end (seon.task/carry-tx). Every other seon.* attribute is a platform record (root's boot and
+  quiescence, recorded errors, runs, observations) written where it happened and never
   carried, so main writing one never puts a branch behind."
   #{:seon.task/plan :seon.task/instructions})
 
@@ -163,12 +163,14 @@
                       [:datum e (:a dt)]))))))
 
 (defn- key-content
-  "Key k's content on db, as `program` holds it, or nil when db's program lacks k."
+  "Key k's content on db, as `program` holds it, or nil when db's program lacks k. A form's
+  content is its row less where it was read (:source: one form id can be imported on one
+  branch and recorded at a REPL on another, the same text)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key [:set :keyword]] :any]}
   [db [kind a b c :as k] data-attrs]
   (case kind
     :form (when-let [e (pdb/eid db :form/id a)]
-            (when (program/live? db e) (dissoc (program/form-row db e) :e :id)))
+            (when (program/live? db e) (dissoc (program/form-row db e) :e :id :source)))
     (:var :method :impl :ns)
     (when-let [e (program/def-eid db k)]
       (when-let [f (:db/id (get (d/entity db e) (program/pointer kind)))]
@@ -292,13 +294,13 @@
 
 (defn- entry-eids
   "The branch's merge entries: entities with a key and the main t they were merged at
-  (an attempt's conflict evidence on main shares the :seon.merge/* members, not :main-t)."
+  (a run's conflict evidence on main shares the :seon.merge/* members, not :main-t)."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :int]]}
   [db] (vec (d/q '[:find [?e ...] :where [?e :seon.merge/key] [?e :seon.merge/main-t]] db)))
 
 (defn conflict-value
   "The conflict the :seon.merge/* members of m state, m a pulled entry (the inverse of
-  `conflict-tx`): one decoder for a branch's entries and an attempt's evidence."
+  `conflict-tx`): one decoder for a branch's entries and a run's evidence."
   {:malli/schema [:=> [:cat :seon.merge/entry-members] :seon.merge/conflict]}
   [m]
   (cond-> {:key (:seon.merge/key m) :kind (:seon.merge/kind m)}
@@ -317,7 +319,7 @@
 
 (defn conflict-tx
   "A conflict as the members of one merge entity (no :db/id): for the branch's entries
-  and an attempt's evidence alike."
+  and a run's evidence alike."
   {:malli/schema [:=> [:cat :seon.merge/conflict] :map]}
   [{:keys [key kind base ours theirs]}]
   (cond-> {:seon.merge/key key :seon.merge/kind kind}

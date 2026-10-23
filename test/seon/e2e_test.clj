@@ -1,11 +1,11 @@
 (ns seon.e2e-test
-  "A run ends on what the system observes: quiescence, or a recorded defect (audit FENCES
+  "A run ends on what the system observes: quiescence, or a recorded defect (audit GUARDS
   #26: a flight whose answer is lost never ends, so quiescence never comes; a root proc's
   defect recorded on main ends the wait instead). No clock."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.e2e :as e2e]
+            [seon.await :as await] [seon.e2e :as e2e]
             [seon.fixtures :as fx] [seon.ref :as ref] [seon.reader :as reader] [seon.task :as task] [seon.template :as tpl]
             [clojure.string :as str]))
 
@@ -14,7 +14,7 @@
   (ts/test-branch! (fn [_ c] (let [sys {:conn c}
         t (:max-tx @c)
         start (System/currentTimeMillis)
-        waiting (future (e2e/await-quiet sys t))]
+        waiting (future (await/await-quiet sys t))]
     (d/transact c {:tx-data [{:seon.error/signature "0123456789abcdef" :seon.error/class :eval :seon.error/count 1 :seon.error/agents 1
                               :seon.error/first-ms start :seon.error/last-ms start}]})
     (is (not (realized? (do (d/transact c {:tx-data [{:note/text "work goes on"}]}) waiting))) "an agent's eval error is no defect of the run")
@@ -24,7 +24,7 @@
       (is (= :defect (:ended r)))
       (is (= "seon.reconcile/reconciler-proc: boom" (get-in r [:problem :seon.error/message])) "the problem, as recorded"))
     (testing "quiescence ends it as before"
-      (ts/test-branch! (fn [_ c] (let [t (:max-tx @c) waiting (future (e2e/await-quiet {:conn c} t))]
+      (ts/test-branch! (fn [_ c] (let [t (:max-tx @c) waiting (future (await/await-quiet {:conn c} t))]
         (d/transact c {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t (inc t) :root-causes []}}]})
         (is (= {:t (inc t) :root-causes []} (deref waiting)))))))))))
 
@@ -64,15 +64,15 @@
     (is (str/includes? (first (:expect (e2e/expectation :newns false))) "(inc 1)"))
     (is (not-any? #(str/includes? % "(inc 1)") (:expect (e2e/expectation :newns true))))))
 
-(deftest turns-count-the-work-attempts
+(deftest turns-count-the-work-runs
   (let [decls (tpl/with-merge (vec (for [nm ["a" "b" "c"]]
                                      {:seon.task/ns 'demo :seon.task/name nm :seon.task/plan "Make it true." :seon.task/proofs #{(symbol "demo-test" nm)}})))
         empty-db (ts/test-db)
         db (d/db-with empty-db (task/create-tx empty-db decls))
         att (fn [id n status turns]
               (let [tid (str "demo/" id) branch (task/default-branch (str "demo/" (first (str/split id #"-"))))]
-                (conj (task/attempt-start-tx (str tid "#" n) tid "boot-1" (keyword (str "a-" id n)) {:branch branch :model nil :max-turns 4} 1000 "Make it true.")
-                      {:seon.attempt/id (str tid "#" n) :seon.attempt/status status :seon.attempt/turns turns})))
+                (conj (task/run-start-tx (str tid "#" n) tid "boot-1" (keyword (str "a-" id n)) {:branch branch :model nil :max-turns 4} 1000 "Make it true.")
+                      {:seon.run/id (str tid "#" n) :seon.run/status status :seon.run/turns turns})))
         db (d/db-with db (concat (att "a" 1 :closed 3) (att "a" 2 :ended 2) (att "a-merge" 1 :merged 0)
                                  (att "b" 1 :ended 1) (att "b-merge" 1 :merged 0)
                                  (att "c" 1 :ended 4) (att "c-merge" 1 :closed 0)))]

@@ -1,6 +1,6 @@
 ;; Problems as typed facts (session D2, notes/option3-D2-problems.md): the error variants every
 ;; producer builds through seon.contract/error (the one error map), the recorded error (one
-;; entity per signature on main, R4's seon.error), the problem members of an attempt's end,
+;; entity per signature on main, R4's seon.error), the problem members of a run's end,
 ;; and the shape of the one read, seon.problems/report.
 {;; ---- variants of the one error map (each [:and :seon.error/base ...]) ----
  :seon.agent/eval-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/eval-error]]
@@ -21,7 +21,7 @@
                                           [:pid {:optional true} [:maybe :int]] [:exit {:optional true} [:maybe :seon.lib/exit-status]]
                                           [:stderr {:optional true} [:maybe :string]] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]
  ;; what root saw go wrong for an agent: a red test run of an agent with no task (a task's
- ;; attempt records its reds at its end), a spawn or fork refused (seon.root/set-agent)
+ ;; run records its reds at its end), a spawn or fork refused (seon.root/set-agent)
  :seon.agent/failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/failed]] [:agent :keyword]]]
  ;; an agent's socket to root that cannot raise SIGIO (seon.sock/signal-at-input!): the agent
  ;; ends with its root only when it next reads that socket (task seon.agent/an-agent-ends-with-its-root)
@@ -117,9 +117,9 @@
  ;; what an agent sends root with its commit: its occurrences since the last commit, folded
  :seon.error/sent [:map [:error :map] [:form [:maybe :string]] [:n pos-int?] [:first-ms :int] [:last-ms :int]]
 
- ;; ---- problem members of an attempt's end (main; the judge writes them) and of the agent's end (branch) ----
- ;; the error that ended the attempt: the agent's death, the turn loop's error, a refused merge
- :seon.attempt/error [:map {:seon.db/data true}]
+ ;; ---- problem members of a run's end (main; the judge writes them) and of the agent's end (branch) ----
+ ;; the error that ended the run: the agent's death, the turn loop's error, a refused merge
+ :seon.run/error [:map {:seon.db/data true}]
  ;; failing assertions per red test (at most 8 each, printed by seon.print under :part)
  :seon.problems/assertion [:map [:type [:enum :fail :error]] [:message {:optional true} [:maybe :string]]
                            [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]]
@@ -131,25 +131,25 @@
                     ;; a run stopped by its tick budget: the typed error, on the test that was running
                     [:seon.error/type {:optional true} :qualified-keyword] [:ticks {:optional true} :int] [:budget {:optional true} :int]
                     [:cost {:optional true} :seon.cost/report]]
- :seon.attempt/failures [:map-of {:seon.db/data true} :qualified-symbol [:vector :seon.problems/assertion]]
+ :seon.run/failures [:map-of {:seon.db/data true} :qualified-symbol [:vector :seon.problems/assertion]]
  ;; a cost proof's measured rows and verdict per test (seon.cost/proof's report)
  :seon.cost/report [:map [:rows [:vector :seon.cost/row]] [:verdict :seon.cost/verdict]]
- :seon.attempt/costs [:map-of {:seon.db/data true} :qualified-symbol :seon.cost/report]
+ :seon.run/costs [:map-of {:seon.db/data true} :qualified-symbol :seon.cost/report]
  ;; waste charged to the producer of what the agent was shown (R4, v1 survey idea 14)
  :seon.learn/waste [:map-of {:seon.db/data true} :any [:map [:forms :int] [:turns :int]]]
- :seon.attempt/waste :seon.learn/waste
+ :seon.run/waste :seon.learn/waste
  :seon.end/waste :seon.learn/waste
  :seon.end/error [:map {:seon.db/data true}]
  :seon.fx/error-type :qualified-keyword
  ;; task content a branch and main both changed since the branch's base, differently: root's
  ;; to resolve (seon.task/carry-tx; owner, 2026-10-22, D4)
- :seon.attempt/task-conflicts [:vector {:seon.db/data true} [:map [:task :seon.task/id] [:attr :keyword] [:base :any] [:ours :any] [:theirs :any]]]
- :seon.problems/attempt-fact [:map {:seon.db/attributes true}
-                              [:seon.attempt/task-conflicts {:optional true} :seon.attempt/task-conflicts]
-                              [:seon.attempt/error {:optional true} :seon.attempt/error]
-                              [:seon.attempt/failures {:optional true} :seon.attempt/failures]
-                              [:seon.attempt/costs {:optional true} :seon.attempt/costs]
-                              [:seon.attempt/waste {:optional true} :seon.attempt/waste]]
+ :seon.run/task-conflicts [:vector {:seon.db/data true} [:map [:task :seon.task/id] [:attr :keyword] [:base :any] [:ours :any] [:theirs :any]]]
+ :seon.problems/run-fact [:map {:seon.db/attributes true}
+                              [:seon.run/task-conflicts {:optional true} :seon.run/task-conflicts]
+                              [:seon.run/error {:optional true} :seon.run/error]
+                              [:seon.run/failures {:optional true} :seon.run/failures]
+                              [:seon.run/costs {:optional true} :seon.run/costs]
+                              [:seon.run/waste {:optional true} :seon.run/waste]]
  :seon.problems/end-fact [:map {:seon.db/attributes true}
                           [:seon.end/error {:optional true} :seon.end/error] [:seon.end/waste {:optional true} :seon.end/waste]]
  ;; what a model call cost, on the asker's branch (latency is :seon.fx/us, admission :seon.fx/queue-us)
@@ -166,11 +166,25 @@
  ;; ---- the one read: seon.problems/report ----
  ;; each class's area, the group root's page and context show it under (docs/health.md),
  ;; declared once here and read through seon.contract/properties (as a status set is)
- :seon.problems/class [:enum {:seon.problems/derived #{:dead-citation :unnamed-site :stale-pin}
-                             :seon.problems/areas [[:docs #{:dead-citation :stale-pin}] [:tests #{:red :cost :test-red}]
+ :seon.problems/class [:enum {:seon.problems/derived #{:dead-citation :unnamed-site :stale-pin :stale-section :orphan-page :problem-unlinked}
+                             ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it)
+                             :seon.problems/attention #{:stale-section}
+                             :seon.problems/areas [[:docs #{:dead-citation :stale-pin :stale-section :orphan-page}] [:tests #{:red :cost :test-red}]
                                                     [:laws #{:unnamed-site}] [:merges #{:merge :task-conflict :unrun}] [:tasks #{:failed}]
-                                                    [:agents #{:dead :error :waste}] [:errors #{:platform :eval :agent :effect}]]}
-                       :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :test-red :dead-citation :unnamed-site :stale-pin :unrun]
+                                                    [:agents #{:dead :error :waste}] [:errors #{:platform :eval :agent :effect}] [:health #{:problem-unlinked}]]
+                             ;; each class's section of the wiki: what it is and how it is fixed. A class with open rows whose
+                             ;; section is no stored section is itself a problem (:problem-unlinked)
+                             :seon.problems/docs {:platform "docs/errors.md#problems" :eval "docs/errors.md#problems" :agent "docs/errors.md#problems"
+                                                  :effect "docs/errors.md#problems" :error "docs/errors.md#problems" :waste "docs/errors.md#problems"
+                                                  :red "docs/tasks.md#the-done-rule" :cost "docs/tasks.md#the-done-rule" :test-red "docs/health.md#a-red-test"
+                                                  :merge "docs/merging.md#conflicts-and-pins" :task-conflict "docs/merging.md#conflicts-and-pins"
+                                                  :unrun "docs/merging.md#a-merge-runs-what-the-change-reaches"
+                                                  :dead "docs/root.md#runs-and-judging" :failed "docs/tasks.md#a-refused-run-is-held-for-root"
+                                                  :dead-citation "docs/health.md#a-dead-citation" :unnamed-site "docs/health.md#a-laws-unnamed-site"
+                                                  :stale-pin "docs/forks.md#branch-scheme" :stale-section "docs/health.md#a-stale-section"
+                                                  :orphan-page "docs/health.md#an-orphan-page" :problem-unlinked "docs/health.md#a-problem-with-no-page"}}
+                       :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :test-red :dead-citation :unnamed-site :stale-pin :unrun
+                       :stale-section :orphan-page :problem-unlinked]
  :seon.problems/row [:map {:seon.render/ai seon.render.ai/problem-row}
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]

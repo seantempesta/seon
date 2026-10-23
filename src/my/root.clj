@@ -55,29 +55,29 @@
       (seq refused) (assoc :not-held refused))))
 
 (defn cancel!
-  "Cancel tasks ids: a live attempt is killed; tasks that need them stay blocked."
+  "Cancel tasks ids: a live run is killed; tasks that need them stay blocked."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
   [sys ids] @(root/transact-main! sys (task/execution-tx ids :cancelled)))
 
 (defn gate!
   "Root's go for tasks ids: the process tests each one's change reaches (a shell, a fork, a
   root, the binary: never run automatically, owner's ruling 2026-10-23) run on the gate
-  checkout (:seon.config.source/gate-checkout). Before the merge task's attempt is judged,
-  its deferred tests run before it merges and a red holds it (:seon.task/gate?). An attempt
+  checkout (:seon.config.source/gate-checkout). Before the merge task's run is judged,
+  its deferred tests run before it merges and a red holds it (:seon.task/gate?). A run
   that already merged unasked (its open :unrun problem) has them run now, through the
   :tests effect on the merges branch's head, which holds its change; their results are
-  recorded on it (:seon.attempt/deferred-results), which closes the problem when each passed.
-  Answers {:asked ids :ran {attempt {test status}}}; without a gate checkout declared, the
-  merged ones' tests are each :error, with :seon.root/no-gate-checkout on the attempt."
+  recorded on it (:seon.run/deferred-results), which closes the problem when each passed.
+  Answers {:asked ids :ran {run {test status}}}; without a gate checkout declared, the
+  merged ones' tests are each :error, with :seon.root/no-gate-checkout on the run."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
   @(root/transact-main! sys (vec (for [id ids] {:seon.task/id id :seon.task/gate? true})))
   (let [want (set ids)
-        unrun (for [[aid a] (sort-by key (task/attempts @(:conn sys)))
-                    :when (and (want (:seon.attempt/task a)) (= :merged (:seon.attempt/status a))
-                               (seq (:seon.attempt/deferred a))
-                               (not-every? #(= :pass (get (:seon.attempt/deferred-results a) %)) (:seon.attempt/deferred a)))]
-                [aid (vec (sort-by str (:seon.attempt/deferred a)))])
+        unrun (for [[aid a] (sort-by key (task/runs @(:conn sys)))
+                    :when (and (want (:seon.run/task a)) (= :merged (:seon.run/status a))
+                               (seq (:seon.run/deferred a))
+                               (not-every? #(= :pass (get (:seon.run/deferred-results a) %)) (:seon.run/deferred a)))]
+                [aid (vec (sort-by str (:seon.run/deferred a)))])
         ran (into {} (for [[aid tests] unrun
                            :let [repo (config/value :seon.config.source/gate-checkout)
                                  r (if repo
@@ -85,9 +85,9 @@
                                      (contract/error :seon.root/no-gate-checkout 'my.root/gate!
                                                      "no gate checkout declared (:seon.config.source/gate-checkout): the process tests cannot run here" {:tests tests}))
                                  rs (if (contract/error? r) (zipmap tests (repeat :error)) (get-in r [:value :results]))]]
-                       (do @(root/transact-main! sys (cond-> [{:seon.attempt/id aid
-                                                               :seon.attempt/deferred-results (vec (for [[t st] rs] {:seon.proof/test t :seon.proof/status st}))}]
-                                                       (contract/error? r) (conj {:seon.attempt/id aid :seon.attempt/error r})))
+                       (do @(root/transact-main! sys (cond-> [{:seon.run/id aid
+                                                               :seon.run/deferred-results (vec (for [[t st] rs] {:seon.proof/test t :seon.proof/status st}))}]
+                                                       (contract/error? r) (conj {:seon.run/id aid :seon.run/error r})))
                            [aid rs])))]
     {:asked (vec ids) :ran ran}))
 
@@ -128,11 +128,11 @@
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-docs! sys "docs"))
   ([sys dir]
-   (write-declared! sys (docs/load-dir-tx @(:conn sys) (config/checkout) dir) {:pages (count (docs/pages (config/checkout) dir))} nil)))
+   (write-declared! sys (docs/load-dir-tx @(:conn sys) (config/checkout) dir (root/wiki-baseline sys (config/checkout) dir)) {:pages (count (docs/pages (config/checkout) dir))} nil)))
 
 (defn problems
   "Every open problem on main, by class (seon.problems/health): recorded errors counted
-  by signature (:platform :eval :agent :effect) and attempts' red proofs, cost verdicts,
+  by signature (:platform :eval :agent :effect) and runs' red proofs, cost verdicts,
   merges, deaths, errors and waste, each row with its producer, owning namespace, evidence
   as data, reproducing proofs and the tasks already answering it; and what the program's
   facts make true now (:dead-citation). Reads main and the api's fold (the true counts of

@@ -1,6 +1,6 @@
 #!/bin/zsh
 # bin/check [N] — the platform's end-to-end checks on target/seon (bin/build seon), each a
-# mode of seon.check: laws, contracts, mg-check, fx, config, system, mcp, threads, instrument, record,
+# mode of seon.check: laws, health, contracts, mg-check, fx, config, system, mcp, threads, instrument, record,
 # problems, smoke, robust, lifecycle, backpressure, hotreload, drain, idle, orphan,
 # durable, window, e2e tasks and scenarios, swarm (10 tasks over 5 shared vars, max-running 8),
 # resume, scale N (default N = 100). A run's steps run at once, :seon.config.proofs/jobs at a
@@ -46,6 +46,8 @@ export SEON_STORE=${SEON_STORE:-$ROOT/target/check-store}
 # step's root that found it free took it (the owner's browser then showed a throwaway check
 # root). A run that wants one names its port: SEON_WEB_PORT=7790 bin/root
 export SEON_WEB_PORT=${SEON_WEB_PORT:-0}
+# every check root has a store of its own: its wiki's baseline from git (4 s) is not what a check asks
+export SEON_WIKI_BASELINE=${SEON_WIKI_BASELINE:-false}
 # idle watches a tab on its root's dashboard, so its root serves one: on this run's own port, in a
 # full run and a single mode alike
 IDLE_WEB_PORT=$((20000 + $$ % 20000))
@@ -120,7 +122,7 @@ if (( NEEDS )); then
 echo "== seed (the one store every step branches from: made when missing)"; step seed "" run seed 2000
 read -r STORE KB0 BR0 <<< "$(run store)"
 # the steps' own mains: what a failed earlier run left is deleted before this run's step
-STEPS=(seed fx config system mcp threads instrument record problems smoke robust lifecycle backpressure hotreload drain idle
+STEPS=(seed health fx config system mcp threads instrument record problems smoke robust lifecycle backpressure hotreload drain idle
        orphan durable window ids e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns e2e-sibling swarm e2e-loop e2e-held resume scale)
 run drop ${STEPS/#/check-} > "$OUT/drop-before.log" 2>&1 || failed "drop-before ($OUT/drop-before.log)"
 fi
@@ -135,6 +137,7 @@ u-lmdb-kill() {
   step lmdb-kill "" "$ROOT/target/lmdb-kill" "$OUT/lmdb-kill.mdb"
   is-green lmdb-kill && rm -f "$OUT/lmdb-kill.mdb" "$OUT/lmdb-kill.mdb-lock"
 }
+u-health() { echo "== health (the program's and the wiki's derived problems: dead citations, unnamed sites, stale sections, orphan pages, unlinked classes)"; step health "" run health }
 u-contracts() { echo "== contracts"; step contracts ":contracted|:uncontracted|^CONTRACTS " run contracts }
 u-test-inputs() { echo "== test-inputs (every test read of a clock, random, environment, sleep or deadline is named with its reason)"; step test-inputs ":unnamed|:named-not-read|^TEST-INPUTS " run test-inputs }
 u-mg-check() {
@@ -215,7 +218,7 @@ u-e2e-calc() { echo "== tasks: calc (6-task graph, cancel)"; step e2e-calc "" ru
 for k in conflict semantic hairy newns sibling; do functions[u-e2e-$k]="echo '== tasks: scenario $k'; step e2e-$k '' run e2e scenario $k"; done
 u-swarm() { echo "== swarm (10 tasks over 5 shared vars, max-running 8)"; step swarm ":merges|:checks|^SWARM " run swarm 10 8 }
 u-e2e-loop() { echo "== loop (Seon's own source is main's program: a task changes seon.generation/generation, its merge is written back, committed on a clone's jolt/seon-merges, and live in root and in an agent forked after it, nothing built)"; step e2e-loop ":source|:commits|:live|LOOP" run e2e loop "$OUT/loop" }
-u-e2e-held() { echo "== held (add always wrong: refused once and held for root, naming what it blocks; root releases it: one new attempt on its branch, from add#1's evidence, held again; each wait ends on quiescence)"; step e2e-held ":root-causes|:release|quiet-after" run e2e held }
+u-e2e-held() { echo "== held (add always wrong: refused once and held for root, naming what it blocks; root releases it: one new run on its branch, from add#1's evidence, held again; each wait ends on quiescence)"; step e2e-held ":root-causes|:release|quiet-after" run e2e held }
 u-resume() {
   echo "== resume (root SIGKILLed mid-graph; a new root finishes it)"
   want resume && run e2e resume check-resume > "$OUT/resume1.log" 2>&1; step resume "" run e2e resume2 check-resume
@@ -229,7 +232,7 @@ u-resume() {
 # seeded store (its data file; LMDB makes its lock file), the same content as a branch of it,
 # deleted when the unit is green. scale runs alone after them: it measures the machine's memory.
 if (( NEEDS )); then JOBS=$(run jobs); else JOBS=2; fi
-UNITS=(laws lmdb-kill contracts test-inputs mg-check fx config system mcp threads instrument record problems smoke robust lifecycle
+UNITS=(laws lmdb-kill health contracts test-inputs mg-check fx config system mcp threads instrument record problems smoke robust lifecycle
        backpressure hotreload drain idle orphan durable window ids e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns
        e2e-sibling swarm e2e-loop e2e-held resume)
 # the longest first, by the last full run's measured wall seconds (a unit not measured yet first):

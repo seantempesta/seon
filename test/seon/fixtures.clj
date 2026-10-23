@@ -206,7 +206,7 @@
   (into calc-replies (for [[k {:keys [replies]}] scenarios [nm r] replies] [(str (name k) "/" nm) r])))
 
 (defn same-call
-  "The stand-in for a model in a loop (seon.agent-test): every reply makes the same call,
+  "The scripted model in a loop (seon.agent-test): every reply makes the same call,
   whatever it saw (the step E dry run's first real design made one pair of calls 18 times)."
   {:malli/schema [:=> [:cat :seon.model/request] :string]}
   [_] "(+ 1 1)")
@@ -220,6 +220,12 @@
   (if-let [seen (some #(when (= "tool" (:role %)) (edn/read-string (:content %))) (rseq messages))]
     (str "(+ 1 " (or (:printed seen) (:value seen)) ")")
     "(+ 20 21)"))
+
+(defn thinking-call
+  "The scripted model that proves a call's thought is recorded with it (seon.agent-test): one
+  form with its ;; lead, and the eval tool's thinking."
+  {:malli/schema [:=> [:cat :seon.model/request] [:map [:code :string] [:thinking :string]]]}
+  [_] {:code ";; the sum first\n(+ 1 2)" :thinking "check the sum before the proof"})
 
 (defn reply
   "The scripted model: the scripted reply for the request's task and turn (the last one

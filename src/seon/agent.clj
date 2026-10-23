@@ -18,7 +18,7 @@
             [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
-;; :id :branch :task :attempt (the task and attempt root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
+;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 (defonce state (atom nil))
@@ -64,11 +64,45 @@
 (defn db {:malli/schema [:=> [:cat] :seon.host/db]}
   [] (:db @state))
 
-(defn messages
-  "The messages delivered to this agent and not yet taken ({:from :body}), taken: root's
-  requests (e.g. :catch-up, \"main moved, merge main\") and other agents' sends."
+(declare handle!)
+
+(defn- arrived!
+  "Take the message m from root if it is a delivery ({:op :message}): into the inbox, and root
+  hears it arrived; answers whether it was one. Wherever the agent reads its socket (the loop,
+  a wait for an answer, a read of its messages), a delivery lands in the inbox at once."
+  {:malli/schema [:=> [:cat :seon.wire/seon-msg] :boolean]}
+  [m]
+  (if (= :message (:op m))
+    (do (doseq [r (handle! m)] (send! r)) true)
+    false))
+
+(defn inbox
+  "The messages delivered to this agent and not yet taken ({:from :body}, and :id :to for a
+  message that is a fact), left in the inbox: root's requests (e.g. :catch-up, \"main moved,
+  merge main\"), other agents' sends and the owner's (the page's message bar). What root sent
+  before this call is read off the socket first (without waiting); any other request read
+  waits in :pending for the loop."
   {:malli/schema [:=> [:cat] [:vector :map]]}
-  [] (let [[old _] (swap-vals! state assoc :inbox [])] (:inbox old)))
+  []
+  (loop []
+    (let [m (sock/next-frame! (:conn @state))]
+      (when-not (#{:none :eof} m)
+        (when-not (arrived! m) (swap! state update :pending conj m))
+        (recur))))
+  (:inbox @state))
+
+(defn messages
+  "The inbox (inbox), taken: its reader is the turn that read them."
+  {:malli/schema [:=> [:cat] [:vector :map]]}
+  []
+  (inbox)
+  (let [[old _] (swap-vals! state assoc :inbox [])] (:inbox old)))
+
+(defn taken!
+  "The first n messages of the inbox leave it: their reader recorded them (seon.turn/basis!
+  takes them once their facts are committed on this branch). nil."
+  {:malli/schema [:=> [:cat nat-int?] :nil]}
+  [n] (swap! state update :inbox #(vec (drop n %))) nil)
 (defn send-message
   "Send body to the agents tos (ids); root delivers it by id. nil."
   {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
@@ -83,6 +117,7 @@
       (cond
         (= m :dead) (lib/c-exit 0)
         (and (= op (:op m)) (= k (:k m))) m
+        (arrived! m) (recur)
         :else (do (swap! state update :pending conj m) (recur))))))
 
 
@@ -259,12 +294,12 @@
                          (seq causes) (assoc :causes causes)))))))
 
 (defn write-end!
-  "Attempt's end on this branch (:seon.end/*, which root's judge reads), committed: its
+  "Run's end on this branch (:seon.end/*, which root's judge reads), committed: its
   outcome, and when known its reason, the error that ended it (as data), its turns, tokens
   and waste. The turn loop's end and the process's death write it the same way."
-  {:malli/schema [:=> [:cat :seon.attempt/id [:map [:outcome :seon.attempt/outcome]]] :any]}
-  [attempt {:keys [outcome reason error turns tokens waste]}]
-  (transact! [(cond-> {:seon.end/attempt attempt :seon.end/outcome outcome}
+  {:malli/schema [:=> [:cat :seon.run/id [:map [:outcome :seon.run/outcome]]] :any]}
+  [run {:keys [outcome reason error turns tokens waste]}]
+  (transact! [(cond-> {:seon.end/run run :seon.end/outcome outcome}
                 turns (assoc :seon.end/turns turns)
                 tokens (assoc :seon.end/tokens tokens)
                 reason (assoc :seon.end/reason reason)
@@ -275,13 +310,13 @@
 (defn died!
   "The process's death by defect e, caught at its entrant boundary (seon.repl/serve!): the
   cause, printed by the one printer, to stderr (root records its tail with the death, even
-  when the end cannot be written), then the end of the attempt this process works, written
+  when the end cannot be written), then the end of the run this process works, written
   on its branch. Root names the death by the exit status that follows."
   {:malli/schema [:=> [:cat :seon.host/throwable] :any]}
   [e]
   (let [em (error-map e 'seon.repl/serve!)]
     (sock/write-line! 2 (print/text em (:part print/budgets)))
-    (when-let [a (get-in @state [:turn :attempt])]
+    (when-let [a (get-in @state [:turn :run])]
       (write-end! a {:outcome :error :reason (str "the agent's process died: " (:seon.error/message em)) :error em}))))
 
 (defn- interrupt-self-test
@@ -301,7 +336,7 @@
   "One clojure.test report as the run keeps it: its type, test var and message; a failing
   assertion's expected and actual printed by the one printer under :part; a cost proof's
   rows and verdict (seon.cost/proof's :actual) kept as data under :cost (session W2's agent
-  page renders them; the judge persists them on the attempt)."
+  page renders them; the judge persists them on the run)."
   {:malli/schema [:=> [:cat :map [:maybe :string]] :map]}
   [m var]
   (let [cost (when (map? (:actual m)) (select-keys (:actual m) [:rows :verdict]))]
@@ -452,7 +487,7 @@
     {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
      :reports reports}))
 
-(defn run-answer
+(defn test-run-answer
   "The run, from the last line the test child wrote on its pipe before EOF (nil: none) and
   its exit status: that line when it is the run's result; else the child died while running
   the test the line's {:seon.test/started var} names, and the run is one :error report on
@@ -492,7 +527,7 @@
   runs again. :ran is how many tests reported. (forked pid) runs here once the child exists.
   A fork refused (threads active) is :seon.test/fork-refused: no test ran.
   Root's ruling (a), 2026-10-22: mode :turn (a turn's observation) selects the proofs and the
-  tests the branch itself changed or added; mode :judge (root's judge at the attempt's end, and
+  tests the branch itself changed or added; mode :judge (root's judge at the run's end, and
   the test service's runs) selects the plan's tests. names (the test service's request: a set of
   namespaces) restricts either to the tests of those namespaces. A process test (the plan's
   :process: it reaches a shell, a fork, a root or the binary) never runs here unless its namespace
@@ -544,7 +579,7 @@
                                         (if (= ls :eof) line (recur (or (peek ls) line)))))
                                st (lib/wait-status pid)]
                            (lib/c-close r)
-                           (assoc (run-answer line st) :ms (profile/ms-since t0) :pid pid :exit st)))})
+                           (assoc (test-run-answer line st) :ms (profile/ms-since t0) :pid pid :exit st)))})
         unstored (when (and dir (not (contract/error? res)))
                    (proofs/store-greens! #(fx! :file % {}) dir
                                          (into {} (for [[t status] (proofs/results res) :when (and (= :pass status) (digests t))]
@@ -614,7 +649,7 @@
                                               :heap-mb (lib/r2 (/ (lib/bytes-in-heap) 1048576.0))}}]
     ;; a message (session F2): it waits in :inbox until the agent's code takes it ((messages));
     ;; root hears that it arrived
-    :message (do (swap! state update :inbox (fnil conj []) (select-keys m [:from :body]))
+    :message (do (swap! state update :inbox (fnil conj []) (select-keys m [:from :body :id :to]))
                  [{:op :received :sent-ns (:ns m) :recv-ns (profile/now-ns)}])
     nil))
 
@@ -691,7 +726,7 @@
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
-  [fd {id :agent branch :branch task :task attempt :attempt cfg :cfg resumed :resumed commit :commit t :t graph :graph} db0 serve]
+  [fd {id :agent branch :branch task :task run :run cfg :cfg resumed :resumed commit :commit t :t graph :graph} db0 serve]
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
   (sock/clofork! fd)
@@ -721,16 +756,16 @@
           misaligned (when-not resumed (misaligned commit t @store-conn db0))]
      ;; a resumed branch whose program does not load runs main's for what failed: its errors
      ;; go to root with its hello (recorded problems), never dropped (T5b: a stub ran silently)
-     (reset! state (cond-> {:id id :branch branch :task task :attempt attempt :fd fd :conn c :db @store-conn
+     (reset! state (cond-> {:id id :branch branch :task task :run run :fd fd :conn c :db @store-conn
                    :base base :store-conn store-conn :cfg cfg :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
-                   :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
+                   :pending clojure.lang.PersistentQueue/EMPTY :inbox [] :tx-seq 0 :mode :agent
                    :ns nsx :interrupt-ok intr-ok :serve serve}
                    ;; main's reach graph as the fork server keeps it, for db0: test-plan's base
                    ;; graph starts from it (base-graph), never built in this process
                    graph (assoc :base-graph {:db db0 :graph graph})))
      ;; a kept branch, resumed (root released its held task: seon.reconcile/hold-tx), takes
-     ;; its task from main, with the failure and evidence the last attempt left there; an
+     ;; its task from main, with the failure and evidence the last run left there; an
      ;; agent with no task (a fresh one on a kept branch) takes none
      (when-let [tx (when (and resumed task) (not-empty (task/onto-tx db0 @store-conn task)))]
        (transact! tx)))))

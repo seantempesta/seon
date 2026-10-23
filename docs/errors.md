@@ -2,7 +2,7 @@
 
 An error is data: one error map, recorded once per cause on main, and read with every other recorded problem through one report, so health is the absence of open problem facts.
 
-Every failure is the one error map (`seon.contract/error`: `:seon.error/type`, `:seon.error/operation`, `:seon.error/message`, and its data), whether a contract refused a call, an edge caught the outside world ([failure points](failure-points.md)) or an entrant boundary caught a defect. It flows to whoever can act on it: the requester gets it as its answer, an attempt holds it as its error, and an observer records it. Nothing here files tasks or resolves errors; root and the owner mine them into tasks.
+Every failure is the one error map (`seon.contract/error`: `:seon.error/type`, `:seon.error/operation`, `:seon.error/message`, and its data), whether a contract refused a call, an edge caught the outside world ([failure points](failure-points.md)) or an entrant boundary caught a defect. It flows to whoever can act on it: the requester gets it as its answer, a run holds it as its error, and an observer records it. Nothing here files tasks or resolves errors; root and the owner mine them into tasks.
 
 ## Errors
 
@@ -10,7 +10,7 @@ A recorded error is one entity per signature on main, with its count, the agents
 
 The signature is the digest of the error's cause (```seon.error/cause```: its type, operation, member, its Malli problems' paths and expected schemas, its class, an exit or HTTP status, and its message with digit runs normalised by `seon.error/digits->n`), so one cause is one signature however often it repeats. An observer builds an occurrence (`seon.error/occurrence`, of class `:platform`, `:eval`, `:agent` or `:effect`) and folds it into its own state (```seon.error/fold```), costing one hash. ```seon.error/flush-tx``` writes only the signatures that changed, and the observer keeps one such write in flight, so a storm of identical errors costs one update per write.
 
-The observers: root's api proc (Flow's error channel, an agent's death or stall, an effect's error outcome; `seon.root/errors` answers its fold, with the true counts); an agent, which folds its own eval errors (`seon.error/note`) and sends them with its next commit, recorded at root as `:eval` (`seon.error/sent->occurrence`); and boot, when the wiki refuses to load (`seon.root/wiki-tx`). `seon.error/record` reads one back.
+The observers: root's api proc (Flow's error channel, an agent's death or stall, an effect's error outcome; `seon.root/errors` answers its fold, with the true counts); an agent, which folds its own eval errors (`seon.error/note`) and sends them with its next commit, recorded at root as `:eval` (`seon.error/sent->occurrence`); and the source watcher (`my.root/watch!`), whose loader error or failure to start is written as a `:platform` error by `seon.root/platform-tx`. The wiki written in boot's fact (`seon.root/wiki-tx`) never refuses the load: a link to no section is kept and shows as a dead citation ([health](health.md)). `seon.error/record` reads one back.
 
 ### An eval error's diagnostics
 
@@ -18,21 +18,21 @@ An exception from an evaluated form is the `:seon.agent/eval-error` map (`seon.a
 
 Deliberately unused (researched in the notes' `jolt-debug-features` paper), so nobody proposes them again:
 - `JOLT_DIAG`: read only by the CLI's top-level uncaught handler, which our eval's catch never reaches; the same data is already in the exception's ex-data.
-- `JOLT_CHECK`: warnings go to the process's stderr (read only on death), and the variable is a Scheme global with no Clojure setter. `jolt.passes.types/check-form` over the node the REPL's tap holds would need no variable; measured silent on all of `src` (3397 forms, 0 findings, `notes/check-form-measure-2026-10-23.md`) but a new item key waits for an owner ruling.
+- `JOLT_CHECK`: warnings go to the process's stderr (read only on death), and the variable is a Scheme global with no Clojure setter. `jolt.passes.types/check-form` over the node the REPL's tap holds would need no variable; measured silent on all of `src` (3397 forms, 0 findings, `notes/check-form-measure-2026-10-23.md`) but a new item key waits for an owner ruling: task `seon.repl/type-findings-are-an-evals-warnings`.
 - `JOLT_DEBUG`: stderr traces of the builder (AOT cache misses, dependency fetches); not an eval's concern.
 - `jolt.nrepl` as a server: a second request path beside `seon.server`'s `:eval`, bypassing recording, ticks and the middleware, on a second port. Its `err->msg` is used as a library.
 - `clj-kondo`: it only knows Jolt's `jolt.ffi` macros, our `seon.contract/defn` would flood it with unresolved symbols, and the compiler already reports those with suggestions.
 
 ## Problems
 
-Every problem Seon recorded is read by one function, ```seon.problems/report```: main's db in, one report out, by class.
+Every problem Seon recorded is read by one function, ```seon.problems/report```: main's db in, one report out, by class; ```seon.problems/health``` is that report with the classes the program's facts make true now (dead citations, unnamed sites, stale pins and sections, orphan pages) added.
 
-Its classes are the recorded errors counted by signature (`seon.problems/counted-classes`) and what an attempt or task holds (`seon.problems/attempt-classes`: red assertions, cost verdicts, merge conflicts and refused answers, a death, an error that ended the loop, overrun, task conflicts), plus each root cause with what it blocks ([root](root.md#root-causes-at-quiescence)) and a task marked failed while it is held ([tasks](tasks.md#a-refused-attempt-is-held-for-root)). Each row carries what a task needs (producer, owning namespace, evidence, the proofs that reproduce it) and the tasks whose `:seon.task/evidence` already answers it (`seon.problems/answers`). Its cost follows the problems, never the program: each class is read through an index that holds only problem rows.
+Its classes are the recorded errors counted by signature (`seon.problems/counted-classes`) and what a run or task holds (`seon.problems/run-classes`: red assertions, cost verdicts, merge conflicts and refused answers, a death, an error that ended the loop, overrun, task conflicts, and `:unrun`: a merge that left its process tests unrun), plus each root cause with what it blocks ([root](root.md#root-causes-at-quiescence)) and a task marked failed while it is held ([tasks](tasks.md#a-refused-run-is-held-for-root)). Each row carries what a task needs (producer, owning namespace, evidence, the proofs that reproduce it) and the tasks whose `:seon.task/evidence` already answers it (`seon.problems/answers`). Its cost follows the problems, never the program: each class is read through an index that holds only problem rows.
 
-`my.root/problems` is the report for root, with the api's fold; root's context and the dashboard's problems banner read it rather than re-deriving problems from the live view ([render](render.md#health-is-what-flows)). `bin/check problems` provokes every class through the paths agents and root use and reads them back.
+`my.root/problems` is `seon.problems/health` for root, with the api's fold; root's context and the dashboard's problems banner read it rather than re-deriving problems from the live view ([render](render.md#health-is-what-flows)). `bin/check problems` provokes every class through the paths agents and root use and reads them back.
 
 ## Learn
 
-An attempt's overrun is charged to the producer of what the agent was shown: ```seon.learn/waste```.
+A run's overrun is charged to the producer of what the agent was shown: ```seon.learn/waste``` (stored as `:seon.run/waste`, reported as the `:waste` class).
 
-At an attempt's end the agent folds its turns: a form that looks for code instead of changing it (`source`, `doc`, `ns-publics`, ...) is charged to whoever should have shown that code: `:re-read` to the render that already showed it, `:missing` or `:search` to the template; an error repeating an earlier turn's signature is `:repeats-error`, charged to `seon.context/current-state`, which delivered it. `seon.learn/summary` counts it by producer. It is stored as `:seon.end/waste` on the branch, carried to `:seon.attempt/waste` by the judge, and reported as the `:waste` class. What a producer is charged is a context to improve ([references](references.md), [render](render.md)).
+At a run's end the agent folds its turns: a form that looks for code instead of changing it (`source`, `doc`, `ns-publics`, ...) is charged to whoever should have shown that code: `:re-read` to the render that already showed it, `:missing` or `:search` to the template; an error repeating an earlier turn's signature is `:repeats-error`, charged to `seon.context/current-state`, which delivered it. `seon.learn/summary` counts it by producer. It is stored as `:seon.end/waste` on the branch, carried to `:seon.run/waste` by the judge, and reported as the `:waste` class. What a producer is charged is a context to improve ([references](references.md), [render](render.md)).

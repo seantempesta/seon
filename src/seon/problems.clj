@@ -7,18 +7,18 @@
 
   Its cost follows the problems, never the program: each class is read through an index
   that holds only problem rows (aevt of an attribute only a problem carries, avet of an
-  indexed status), then one pull per row. Nothing walks the tasks, attempts or vars.
+  indexed status), then one pull per row. Nothing walks the tasks, runs or vars.
 
   Classes:
     :platform :eval :agent :effect  recorded errors (seon.error), counted by signature
-    :red :cost                      an attempt's red assertions, its cost proofs' verdicts
+    :red :cost                      a run's red assertions, its cost proofs' verdicts
     :merge                          conflicts, unmerged keys, behind, a refused merge
-    :dead                           an attempt whose agent died or was lost
-    :error                          an attempt the turn loop ended on an error (the model)
+    :dead                           a run whose agent died or was lost
+    :error                          a run the turn loop ended on an error (the model)
     :waste                          forms charged to the producer of what was shown
     :task-conflict                  task content a branch and main both changed, differently,
-                                    recorded at its attempt's end (seon.task/carry-tx)
-    :failed                         a task held for root with a failure: an attempt refused, its
+                                    recorded at its run's end (seon.task/carry-tx)
+    :failed                         a task held for root with a failure: a run refused, its
                                     agent dead or its merge refused (seon.reconcile/hold-tx), or
                                     marked failed (my.task/fail!, root or a check): its reason, a
                                     counterexample when marked, its evidence; open while held
@@ -36,12 +36,12 @@
   derived classes, which read the program's names once (a set): their cost follows the
   citations (seon.problems-test/dead-citations-follow-the-citations)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.docs :as docs]))
 
 (def counted-classes [:platform :eval :agent :effect])
-(def ^:private death-statuses "Attempt statuses of a death (:seon.attempt/status)." (:seon.status/failed (contract/properties :seon.attempt/status)))
-(def ^:private finished "Attempt statuses that make its task done (:seon.attempt/status, as seon.reconcile/finished)." (:seon.status/finished (contract/properties :seon.attempt/status)))
-(def attempt-classes [:red :cost :merge :dead :error :waste :task-conflict :unrun])
+(def ^:private death-statuses "Run statuses of a death (:seon.run/status)." (:seon.status/failed (contract/properties :seon.run/status)))
+(def ^:private finished "Run statuses that make its task done (:seon.run/status, as seon.reconcile/finished)." (:seon.status/finished (contract/properties :seon.run/status)))
+(def run-classes [:red :cost :merge :dead :error :waste :task-conflict :unrun])
 
 (defn- es
   "The entities carrying attribute a (its aevt index: only the entities that have it)."
@@ -50,16 +50,16 @@
 
 (defn answers
   "The tasks on db whose evidence names a problem: {signature [task-id]} and
-  {attempt-id [task-id]} under :signature and :from. A task's evidence about its own
-  attempt (a hold's, seon.reconcile/hold-tx) answers nothing: it is that problem. Reads
+  {run-id [task-id]} under :signature and :from. A task's evidence about its own
+  run (a hold's, seon.reconcile/hold-tx) answers nothing: it is that problem. Reads
   only the tasks that carry evidence (aevt :seon.task/evidence)."
   {:malli/schema [:=> [:cat :seon.host/db] [:map [:signature :map] [:from :map]]]}
   [db]
   (reduce (fn [acc {:keys [e v]}]
             (let [ev v
                   id (:seon.task/id (d/pull db [:seon.task/id] e))
-                  own? (some->> (:from ev) (pdb/eid db :seon.attempt/id) (d/pull db [{:seon.attempt/task [:seon.task/id]}])
-                                :seon.attempt/task :seon.task/id (= id))]
+                  own? (some->> (:from ev) (pdb/eid db :seon.run/id) (d/pull db [{:seon.run/task [:seon.task/id]}])
+                                :seon.run/task :seon.task/id (= id))]
               (cond-> acc
                 (:signature ev) (update-in [:signature (:signature ev)] (fnil conj []) id)
                 (and (:from ev) (not own?)) (update-in [:from (:from ev)] (fnil conj []) id))))
@@ -205,6 +205,100 @@
               :producer nil :owner-ns 'seon.docs :proofs []
               :evidence {:kind :stale-pin :section a :path path :stated sha :recorded g} :answered-by (get-in ans [:signature s] []) :at-ms nil})))))
 
+;; ---- the wiki kept true: code that moved under its text, pages nothing links, issues with no page ----
+
+(defn- current-forms
+  "{var name form id} of every var of db with a form: three aevt scans, no seek."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :qualified-symbol :string]]}
+  [db]
+  (let [ids (into {} (map (juxt :e :v)) (d/datoms db :aevt :form/id))
+        forms (into {} (map (juxt :e :v)) (d/datoms db :aevt :var/form))]
+    (into {} (keep (fn [{:keys [e v]}] (some->> (forms e) ids (vector v)))) (d/datoms db :aevt :var/name))))
+
+(defn stale-sections
+  "Each section whose text cites a var the code has changed since the section was last written, as a
+  :stale-section row: a var's form id (the form's own digest) now differs from the one the section
+  recorded when its text was last loaded (:seon.section/read, seon.docs/load-tx; my.docs/reviewed!
+  records a review). Open until the section is edited or reviewed; attention, never a reason to refuse done.
+  A var that is gone is a dead citation, not this. Cost: the vars' and forms' datoms in one scan each
+  and one lookup per recorded name. With only ({:names :sections}: var names and section entity ids)
+  just the recorded names among those names, and every name of those sections, are read: a seek for
+  each, no scan of the vars (what `caused-split` asks, of what a branch changed)."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]
+                  [:=> [:cat :seon.host/db :map [:maybe :map]] [:vector :seon.problems/row]]]}
+  ([db ans] (stale-sections db ans nil))
+  ([db ans only]
+   (let [address (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.section/address))
+         reads (if only
+                 (keep (fn [{:keys [e v]}]
+                         (let [vs (if ((:sections only) e) v (select-keys v (filter (:names only) (keys v))))]
+                           (when (seq vs) {:e e :v vs})))
+                       (d/datoms db :aevt :seon.section/read))
+                 (d/datoms db :aevt :seon.section/read))
+         now (if only (docs/read-map db (into #{} (mapcat (comp keys :v)) reads)) (current-forms db))]
+     (vec (concat
+            (for [{:keys [e v]} reads
+                  [n then] v
+                  :let [cur (now n)] :when (and cur (not= cur then))
+                  :let [a (address e) s (str "stale-section " a " " n)]]
+              {:signature s :section a :name n :then then :now cur :open? true
+               :message (if (= "absent" then)
+                          (str a " cites " n ", which did not exist when the section was last written: it is code now, read it")
+                          (str a " describes " n " as it was (form " then "), and it has changed (form " cur ")"))
+               :producer nil :owner-ns (symbol (namespace n)) :proofs []
+               :evidence {:kind :stale-section :section a :name n :then then :now cur}
+               :answered-by (get-in ans [:signature s] []) :at-ms nil})
+            ;; a section whose baseline git could not give is read as of today: said, as attention
+            (for [{:keys [e v]} (d/datoms db :aevt :seon.section/baseline-unread)
+                  :when (or (nil? only) ((:sections only) e))
+                  :let [a (address e) s (str "stale-section " a " baseline")]]
+              {:signature s :section a :name nil :open? true
+               :message (str a " was recorded as of today: its baseline could not be taken from git (" v ")")
+               :producer nil :owner-ns 'seon.docs :proofs []
+               :evidence {:kind :stale-section :section a :unread v}
+               :answered-by (get-in ans [:signature s] []) :at-ms nil}))))))
+
+(defn orphan-pages
+  "Each page of the wiki that no other page links to, as an :orphan-page row: a page is its sections'
+  common path (docs/x.md#heading); it is linked when a section of another page has a reference to one of
+  its sections. The map (docs/README.md) is the root and is not judged; a db whose wiki has no map
+  has no orphans (unknown). Open until a page or the map links it. Cost: the section and reference
+  datoms, once."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (let [page-of (into {} (map (fn [{:keys [e v]}] [e (first (str/split v #"#" 2))])) (d/datoms db :aevt :seon.section/address))
+        map-page "docs/README.md"]
+    (if-not (some #{map-page} (vals page-of))
+      []
+      (let [linked (into #{} (keep (fn [{:keys [e v]}] (let [from (page-of e) to (page-of v)] (when (and to (not= from to)) to))))
+                         (d/datoms db :aevt :seon.section/references))]
+        (vec (for [p (sort (set (vals page-of))) :when (and (not= p map-page) (not (linked p)))
+                   :let [s (str "orphan-page " p)]]
+               {:signature s :page p :open? true
+                :message (str p " is linked from no other page, not even the map (docs/README.md)")
+                :producer nil :owner-ns 'seon.docs :proofs []
+                :evidence {:kind :orphan-page :page p} :answered-by (get-in ans [:signature s] []) :at-ms nil}))))))
+
+(defn problem-unlinked
+  "Each class of classes ({class {:rows ...}}) with an open row whose wiki section (:seon.problems/docs)
+  is no stored section, or that declares none, as a :problem-unlinked row: an issue that points
+  nowhere is itself a problem. None while the db holds no wiki (unknown). Cost: one lookup per
+  class with rows."
+  {:malli/schema [:=> [:cat :seon.host/db :map :map] [:vector :seon.problems/row]]}
+  [db ans classes]
+  (if (empty? (d/datoms db :aevt :seon.section/address))
+    []
+    (let [docs (:seon.problems/docs (contract/properties :seon.problems/class))]
+      (vec (for [[c {:keys [rows]}] (sort-by (comp str key) classes) :when (some #(not (false? (:open? %))) rows)
+                 :let [page (docs c)] :when (or (nil? page) (nil? (pdb/eid db :seon.section/address page)))
+                 :let [s (str "problem-unlinked " (name c))]]
+             {:signature s :class c :page page :open? true
+              :message (if page
+                         (str (name c) " has open problems, and its section " page " is no section of the wiki")
+                         (str (name c) " has open problems and no section of the wiki declared for it (:seon.problems/docs)"))
+              :producer nil :owner-ns 'seon.problems :proofs []
+              :evidence {:kind :problem-unlinked :class c :page page} :answered-by (get-in ans [:signature s] []) :at-ms nil})))))
+
 ;; ---- caused: what a branch's own work made true -----------------------------------------
 
 (defn- section-state
@@ -232,11 +326,12 @@
         ids (attr :form/id) srcs (attr :form/src)]
     (into {} (for [[e cs] carrying] [(ids e) {:e e :catches cs :src (srcs e)}]))))
 
-(defn caused
-  "The derived problems the branch at head has that base (its merge base) had not, by
-  message: what the branch's own work broke. The done rule refuses while any is open
-  (seon.reconcile/done-explain :open-problem), and the agent reads them each turn; an
-  evaluation is never refused (AGENTS: get out of an agent's way).
+(defn caused-split
+  "{:caused :attention}: the derived problems the branch at head has that base (its merge base) had not, by
+  message: what the branch's own work broke (:caused: the done rule refuses while any is open,
+  seon.reconcile/done-explain :open-problem) and what it changed under the wiki (:attention: the
+  sections it made stale, which the agent reads and never a reason to refuse; the classes
+  :seon.problems/attention declares). An evaluation is never refused (AGENTS: get out of an agent's way).
   Base and head are compared by value, never by tx (a branch's tx counter is its own): the
   sections whose citations or dead links differ, the sections citing a name a var or task lost,
   and the forms carrying a law's fact whose catches or text differ are the candidates, and
@@ -247,7 +342,7 @@
   (seon.problems-test/caused-follows-what-changed). Measured on Seon's own program (300 sections,
   880 citations, 1,735 vars, 30 catch forms) with a var every cite deleted: 11-12 ms against 26-29 ms
   for the two full readings; an unchanged branch 7 ms, the scan's floor."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :string]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map [:caused [:vector :string]] [:attention [:vector :string]]]]}
   [base head]
   (let [bs (section-state base) hs (section-state head)
         removed (set/difference (existing-names base) (existing-names head))
@@ -263,30 +358,41 @@
         lf (memoize (fn [db fact] (law-forms db fact)))
         changed-forms (memoize (fn [fact] (let [h (lf head fact) b (lf base fact)]
                                             (set (for [[id st] h :when (not= (dissoc st :e) (dissoc (b id) :e))] id)))))
+        ;; the stale sections the branch's change can have made: those citing a var it changed, and the sections that differ
+        moved (program/changed-vars base head)
         rows (fn [db state forms-of]
-               (concat (dead-citations db {} (eids state)) (sites db state forms-of)))
+               (concat (map #(assoc % :class :dead-citation) (dead-citations db {} (eids state)))
+                       (map #(assoc % :class :unnamed-site) (sites db state forms-of))
+                       (map #(assoc % :class :stale-section) (stale-sections db {} {:names moved :sections (eids state)}))))
         before (into #{} (map :signature)
                      (rows base bs (fn [fact] (set (keep #(:e ((lf base fact) %)) (changed-forms fact))))))]
-    (into (sorted-set) (comp (remove (comp before :signature)) (map :message))
-          (rows head hs (fn [fact] (set (keep #(:e ((lf head fact) %)) (changed-forms fact))))))))
+    (let [attention? (:seon.problems/attention (contract/properties :seon.problems/class))
+          made (remove (comp before :signature) (rows head hs (fn [fact] (set (keep #(:e ((lf head fact) %)) (changed-forms fact))))))
+          messages (fn [pred] (vec (sort (into #{} (comp (filter pred) (map :message)) made))))]
+      {:caused (messages (complement (comp attention? :class))) :attention (messages (comp attention? :class))})))
 
-;; ---- attempts ------------------------------------------------------------------------
+(defn caused
+  "The derived problems the branch at head has that base had not that refuse its done (`caused-split`'s :caused)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :string]]}
+  [base head] (into (sorted-set) (:caused (caused-split base head))))
 
-(def ^:private attempt-pull
-  "What a problem row reads of an attempt: one pull (its conflicts are read only when it has
+;; ---- runs ------------------------------------------------------------------------
+
+(def ^:private run-pull
+  "What a problem row reads of a run: one pull (its conflicts are read only when it has
   them)."
-  [:seon.attempt/id :seon.attempt/status :seon.attempt/outcome :seon.attempt/reason :seon.attempt/end-ms :seon.attempt/agent
-   :seon.attempt/unmerged :seon.attempt/failures :seon.attempt/costs :seon.attempt/error :seon.attempt/waste :seon.attempt/task-conflicts
-   :seon.attempt/deferred :seon.attempt/gate-unread {:seon.attempt/deferred-results [:seon.proof/test :seon.proof/status]}
-   {:seon.attempt/task [:db/id :seon.task/id :seon.task/ns :seon.task/proofs]}
-   {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
+  [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/end-ms :seon.run/agent
+   :seon.run/unmerged :seon.run/failures :seon.run/costs :seon.run/error :seon.run/waste :seon.run/task-conflicts
+   :seon.run/deferred :seon.run/gate-unread {:seon.run/deferred-results [:seon.proof/test :seon.proof/status]}
+   {:seon.run/task [:db/id :seon.task/id :seon.task/ns :seon.task/proofs]}
+   {:seon.run/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
 (defn- task-done?
-  "Has task te an attempt finished (`finished`)? One avet seek, then its attempts."
+  "Has task te a run finished (`finished`)? One avet seek, then its runs."
   {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
   [db te]
-  (boolean (some #(finished (:seon.attempt/status (d/pull db [:seon.attempt/status] (:e %))))
-                 (d/datoms db :avet :seon.attempt/task te))))
+  (boolean (some #(finished (:seon.run/status (d/pull db [:seon.run/status] (:e %))))
+                 (d/datoms db :avet :seon.run/task te))))
 
 ;; ---- tasks held for root -----------------------------------------------------------------
 
@@ -295,38 +401,38 @@
   {:malli/schema [:=> [:cat :seon.host/db :map :int] :seon.problems/row]}
   [db ans e]
   (let [t (d/pull db [:seon.task/id :seon.task/ns :seon.task/failure :seon.task/evidence :seon.task/execution :seon.task/proofs] e)
-        {:keys [attempt] :as f} (:seon.task/failure t)
+        {:keys [run] :as f} (:seon.task/failure t)
         ;; the measured evidence, when it is this failure's (hold-tx writes both)
-        ev (let [ev (:seon.task/evidence t)] (when (and attempt (= attempt (:from ev))) ev))
-        end-ms (some-> attempt (as-> a (d/pull db [:seon.attempt/end-ms] [:seon.attempt/id a])) :seon.attempt/end-ms)]
+        ev (let [ev (:seon.task/evidence t)] (when (and run (= run (:from ev))) ev))
+        end-ms (some-> run (as-> a (d/pull db [:seon.run/end-ms] [:seon.run/id a])) :seon.run/end-ms)]
     (merge (select-keys f [:reason :counterexample])
-           {:task (:seon.task/id t) :attempt attempt :open? (= :held (:seon.task/execution t))
+           {:task (:seon.task/id t) :run run :open? (= :held (:seon.task/execution t))
             :owner-ns (:seon.task/ns t) :producer nil :proofs (vec (sort-by str (:seon.task/proofs t)))
-            :evidence (merge ev f {:kind :failed}) :answered-by (get-in ans [:from attempt] []) :at-ms end-ms})))
+            :evidence (merge ev f {:kind :failed}) :answered-by (get-in ans [:from run] []) :at-ms end-ms})))
 
-(defn- attempt-rows
-  "The rows of attempt entity e, by class."
+(defn- run-rows
+  "The rows of run entity e, by class."
   {:malli/schema [:=> [:cat :seon.host/db :map :int] [:map-of :keyword [:vector :seon.problems/row]]]}
   [db ans e]
-  (let [p (d/pull db attempt-pull e)
-        aid (:seon.attempt/id p)
-        te (get-in p [:seon.attempt/task :db/id])
-        status (:seon.attempt/status p)
-        conflicts (mapv pm/conflict-value (:seon.attempt/conflicts p))
-        unmerged (vec (sort (:seon.attempt/unmerged p)))
-        base {:attempt aid :task (get-in p [:seon.attempt/task :seon.task/id]) :agent (:seon.attempt/agent p) :status status
-              :outcome (:seon.attempt/outcome p) :reason (:seon.attempt/reason p) :end-ms (:seon.attempt/end-ms p)
-              :open? (not (task-done? db te)) :owner-ns (get-in p [:seon.attempt/task :seon.task/ns]) :producer nil :proofs []
-              :answered-by (get-in ans [:from aid] []) :at-ms (:seon.attempt/end-ms p)}
-        ;; a red proof is this attempt's problem when the task itself states it: an inherited
+  (let [p (d/pull db run-pull e)
+        aid (:seon.run/id p)
+        te (get-in p [:seon.run/task :db/id])
+        status (:seon.run/status p)
+        conflicts (mapv pm/conflict-value (:seon.run/conflicts p))
+        unmerged (vec (sort (:seon.run/unmerged p)))
+        base {:run aid :task (get-in p [:seon.run/task :seon.task/id]) :agent (:seon.run/agent p) :status status
+              :outcome (:seon.run/outcome p) :reason (:seon.run/reason p) :end-ms (:seon.run/end-ms p)
+              :open? (not (task-done? db te)) :owner-ns (get-in p [:seon.run/task :seon.task/ns]) :producer nil :proofs []
+              :answered-by (get-in ans [:from aid] []) :at-ms (:seon.run/end-ms p)}
+        ;; a red proof is this run's problem when the task itself states it: an inherited
         ;; proof was green on main when the task started (its needs were done), so red now it
-        ;; is a regression, the attempt's reason; another task's proof not green yet is
-        ;; an allowed red. Both stay in the attempt's facts as evidence, never problem rows.
-        own (set (get-in p [:seon.attempt/task :seon.task/proofs]))
-        failures (select-keys (:seon.attempt/failures p) own)
-        costs (select-keys (:seon.attempt/costs p) own)
-        err (:seon.attempt/error p)
-        waste (:seon.attempt/waste p)
+        ;; is a regression, the run's reason; another task's proof not green yet is
+        ;; an allowed red. Both stay in the run's facts as evidence, never problem rows.
+        own (set (get-in p [:seon.run/task :seon.task/proofs]))
+        failures (select-keys (:seon.run/failures p) own)
+        costs (select-keys (:seon.run/costs p) own)
+        err (:seon.run/error p)
+        waste (:seon.run/waste p)
         merge? (or (seq conflicts) (seq unmerged) (= :behind status) (= :merge-failed (:outcome base))
                    (some-> err :seon.error/type namespace #{"seon.merge" "seon.writer"}))]
     (cond-> {}
@@ -343,8 +449,8 @@
                             :evidence (cond-> {:from aid :conflicts conflicts :unmerged unmerged
                                                :red []}
                                         err (assoc :error err)))])
-      (seq (:seon.attempt/task-conflicts p))
-      (assoc :task-conflict (vec (for [c (:seon.attempt/task-conflicts p)]
+      (seq (:seon.run/task-conflicts p))
+      (assoc :task-conflict (vec (for [c (:seon.run/task-conflicts p)]
                                    (assoc base :task (:task c) :attr (:attr c) :evidence (assoc c :from aid)))))
       (death-statuses status)
       (assoc :dead [(assoc base :error err :producer (:seon.error/operation err) :evidence (cond-> {:from aid} err (assoc :error err)))])
@@ -354,14 +460,14 @@
       (assoc :waste [(assoc base :waste waste :evidence {:from aid :waste waste})])
       ;; owner's ruling, 2026-10-23: merged with its deferred process tests unasked (or no
       ;; gate checkout declared): open until each is recorded passing (my.root/gate!)
-      (and (= :merged status) (seq (:seon.attempt/deferred p))
-           (not-every? (into #{} (keep #(when (= :pass (:seon.proof/status %)) (:seon.proof/test %))) (:seon.attempt/deferred-results p))
-                       (:seon.attempt/deferred p)))
-      (assoc :unrun [(cond-> (assoc base :open? true :tests (vec (sort-by str (:seon.attempt/deferred p)))
-                            :reason (str "merged with " (count (:seon.attempt/deferred p)) " process tests unrun")
-                            :evidence {:from aid :deferred (vec (sort-by str (:seon.attempt/deferred p)))})
+      (and (= :merged status) (seq (:seon.run/deferred p))
+           (not-every? (into #{} (keep #(when (= :pass (:seon.proof/status %)) (:seon.proof/test %))) (:seon.run/deferred-results p))
+                       (:seon.run/deferred p)))
+      (assoc :unrun [(cond-> (assoc base :open? true :tests (vec (sort-by str (:seon.run/deferred p)))
+                            :reason (str "merged with " (count (:seon.run/deferred p)) " process tests unrun")
+                            :evidence {:from aid :deferred (vec (sort-by str (:seon.run/deferred p)))})
                        ;; the changed namespaces its gate could not read, and why
-                       (:seon.attempt/gate-unread p) (assoc :unread (:seon.attempt/gate-unread p)))]))))
+                       (:seon.run/gate-unread p) (assoc :unread (:seon.run/gate-unread p)))]))))
 
 (defn test-reds
   "Each test whose newest result on main (the test service's, seon.prove/result-tx: the entity per
@@ -384,7 +490,7 @@
 
 (defn report
   "Every problem recorded on main db, by class: {:t :classes {class {:n :rows}}}. Counted
-  classes' :n is their occurrences and their rows run by count; attempt classes' :n is
+  classes' :n is their occurrences and their rows run by count; run classes' :n is
   their rows, newest first. With an observer's fold (seon.error/fold), a recorded error's
   count is the true one: a repeat of a written signature is counted in the fold and not
   yet on main."
@@ -396,33 +502,38 @@
         live (into {} (map (fn [{:keys [signature base] n :count}] [signature (+ (or base 0) n)])) (vals fold))
         errors (group-by :class (map #(let [r (error-row db ans %)] (update r :count max (get live (:signature r) 0)))
                                      (es db :seon.error/signature)))
-        attempts (into (sorted-set)
-                       (concat (mapcat #(es db %) [:seon.attempt/failures :seon.attempt/costs :seon.attempt/error :seon.attempt/waste :seon.attempt/deferred
-                                                   :seon.attempt/conflicts :seon.attempt/unmerged :seon.attempt/task-conflicts])
-                               (mapcat (fn [s] (map :e (d/datoms db :avet :seon.attempt/status s))) (conj death-statuses :behind))))
-        by-class (apply merge-with into (map #(attempt-rows db ans %) attempts))
+        runs (into (sorted-set)
+                       (concat (mapcat #(es db %) [:seon.run/failures :seon.run/costs :seon.run/error :seon.run/waste :seon.run/deferred
+                                                   :seon.run/conflicts :seon.run/unmerged :seon.run/task-conflicts])
+                               (mapcat (fn [s] (map :e (d/datoms db :avet :seon.run/status s))) (conj death-statuses :behind))))
+        by-class (apply merge-with into (map #(run-rows db ans %) runs))
         failed (mapv #(failed-row db ans %) (es db :seon.task/failure))
         reds (test-reds db ans)]
     ^{:seon.render/schema :seon.problems/report}
     {:t (:max-tx db)
      :classes (merge (into {} (for [c counted-classes :let [rows (vec (sort-by (comp - :count) (get errors c)))]]
                                 [c {:n (reduce + 0 (map :count rows)) :rows rows}]))
-                     (into {} (for [c attempt-classes :let [rows (vec (sort-by #(- (or (:end-ms %) 0)) (get by-class c)))]]
+                     (into {} (for [c run-classes :let [rows (vec (sort-by #(- (or (:end-ms %) 0)) (get by-class c)))]]
                                 [c {:n (count rows) :rows rows}]))
                      {:failed {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))}
                       :test-red {:n (count reds) :rows reds}})})))
 
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the
-  program's facts make true now (`dead-citations`, `unnamed-sites`, `stale-pins`). What the page, an agent's context and
+  program's facts make true now (`dead-citations`, `unnamed-sites`, `stale-pins`, `stale-sections`,
+  `orphan-pages`, and `problem-unlinked` over all of them). What the page, an agent's context and
   the done and merge gates read: computed when read, never stored, never polled."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]
                   [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}
   ([db] (health db {}))
   ([db fold]
-   (let [ans (answers db) dead (dead-citations db ans) unnamed (unnamed-sites db ans) pinned (stale-pins db ans)]
-     (vary-meta (update (report db fold) :classes assoc
-                        :dead-citation {:n (count dead) :rows dead}
-                        :unnamed-site {:n (count unnamed) :rows unnamed}
-                        :stale-pin {:n (count pinned) :rows pinned})
+   (let [ans (answers db)
+         derived {:dead-citation (dead-citations db ans) :unnamed-site (unnamed-sites db ans) :stale-pin (stale-pins db ans)
+                  :stale-section (stale-sections db ans) :orphan-page (orphan-pages db ans)}
+         classes (merge (:classes (report db fold)) (update-vals derived (fn [rows] {:n (count rows) :rows rows})))
+         ;; its own class last: a missing section of the unlinked class is one more row
+         unlinked (problem-unlinked db ans classes)
+         unlinked (into unlinked (problem-unlinked db ans (assoc classes :problem-unlinked {:rows unlinked})))
+         unlinked (vec (distinct unlinked))]
+     (vary-meta (assoc {:t (:max-tx db)} :classes (assoc classes :problem-unlinked {:n (count unlinked) :rows unlinked}))
                 assoc :seon.render/schema :seon.problems/report))))

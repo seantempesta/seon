@@ -8,8 +8,8 @@
   A mode is its body: run-check boots root, runs it, prints its report and checks, stops
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
-  reference (await-ref, seon.e2e/await-db), never a poll or a deadline."
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.main :refer [out! shown]]))
+  reference (await-ref, seon.await/await-db), never a poll or a deadline."
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.await] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.main :refer [out! shown]]))
 
 
 ;; ---- the harness: one frame, one verdict, one way to wait ------------------------------
@@ -97,7 +97,7 @@
   (ready! sys #(mapv (fn [t] (c/spawn! sys (if (map? t) t {:task t}))) tasks)))
 
 (defn- await-ref
-  "true once (pred @r) holds: a watch on reference r runs pred at each change (seon.e2e/await-db's
+  "true once (pred @r) holds: a watch on reference r runs pred at each change (seon.await/await-db's
   mechanism, on any reference). No deadline, no polling."
   [r pred]
   (let [p (promise) k (gensym "await-")]
@@ -147,7 +147,7 @@
                                 (vec (for [r (:reports (tests id)) :when (not= :pass (:type r))] r))))
         ;; the test's write vanished with the test's process
         _ (out! (ids 2) " after tests, its branch still says: " (:printed (first @(c/submit! sys (ids 2) "(doc-of 'app.m0/f1)"))))
-        _ (out! (ids 2) " branch diff before its merge: " @(c/branch-diff sys (ids 2)) "; stats now: " @(c/agent-stats! sys (ids 2)))
+        _ (out! (ids 2) " branch diff before its merge: " @(c/branch-diff sys (ids 2)) "; stats now: " @(c/call! sys {:op :stats :id (ids 2)}))
         m1 @(c/merge! sys (ids 0))
         ;; git: a branch merges main first (main took a1's work), then root merges it
         mm3 @(c/merge-main! sys (ids 2))
@@ -224,7 +224,7 @@
   '{[seon.db-test/a-commit-costs-what-it-writes seon.profile/now-ns] "printed ms per turn; the verdict is on bytes"
     [seon.db-test/a-commit-costs-what-it-writes seon.profile/ms-since] "printed ms per turn; the verdict is on bytes"
     [seon.lib-test/a-forked-child-runs-go-blocks-and-makes-a-store clojure.core.async/timeout] "a go block's timeout is the behaviour forked; its child's verdict is its exit status"
-    [seon.lib-test/probe-ms seon.profile/now-ns] "the probe's cost as a wall ratio of medians: open, FINDINGS (no counted stand-in for kernel time)"
+    [seon.lib-test/probe-ms seon.profile/now-ns] "the probe's cost as a wall ratio of medians: open, FINDINGS (no counted measure of kernel time)"
     [seon.lib-test/probe-ms seon.profile/ms-since] "the same"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it Thread/sleep] "the stream's pacing is the subject: a deadline can only turn it red (FINDINGS #13)"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it clojure.core/rand-int] "a port: a collision can only turn it red (FINDINGS #14)"
@@ -236,10 +236,10 @@
     [seon.profile-test/a-threads-allocation-is-its-own Thread/sleep] "a window in which bytes are counted; the verdict is on bytes"
     [seon.profile-test/reading-the-clock-allocates-nothing seon.profile/now-ns] "the clock read is the subject; the verdict is on bytes"
     [seon.profile-test/the-clock-is-the-one-every-process-reads seon.profile/now-ns] "the clock's identity is the subject"
-    [seon.reconcile-test/a-refused-spawn-writes-a-refused-attempt seon.profile/now-ns] "a message's :ns stamp"
+    [seon.reconcile-test/a-refused-spawn-writes-a-refused-run seon.profile/now-ns] "a message's :ns stamp"
     [seon.reconcile-test/a-refused-task-asks-again-when-main-moves seon.profile/now-ns] "a message's :ns stamp"
     [seon.reconcile-test/quiescence-is-reported-when-nothing-can-move seon.profile/now-ns] "a message's :ns stamp"
-    [seon.reconcile-test/a-refused-attempt-holds-its-task-and-creates-none seon.profile/now-ns] "a message's :ns stamp"
+    [seon.reconcile-test/a-refused-run-holds-its-task-and-creates-none seon.profile/now-ns] "a message's :ns stamp"
     [seon.reconcile-test/an-idle-system-does-nothing-after-a-reason seon.profile/now-ns] "a message's :ns stamp"
     [test-runner/prove! seon.profile/now-ns] "the runner's printed selection time"
     [test-runner/shard! seon.profile/now-ns] "the runner's printed shard time"})
@@ -350,7 +350,7 @@
   for the stall), then read my.root/problems: an eval error and a contract's error, an
   effect's io error, a platform defect in the api, a stall, an agent's death with its exit
   status and stderr, a red proof's assertions and a cost proof's verdict. It reads them
-  once main holds each (seon.e2e/await-db over seon.problems/report)."
+  once main holds each (seon.await/await-db over seon.problems/report)."
   []
   (run-check "PROBLEMS" {:datoms 300 :max-running 2 :stall-ms 1000}
    (fn [sys]
@@ -366,7 +366,7 @@
                  (remove #(= :merge (:seon.task/kind %)) (seon.fixtures/decls problem-specs 'problems nil)))
         _ (my.root/create! sys ds)
         _ (my.root/run! sys ["problems/p1" "problems/p2"])
-        _ (seon.e2e/await-db sys #(let [p (seon.problems/report %)]
+        _ (seon.await/await-db sys #(let [p (seon.problems/report %)]
                                     (and (some (fn [r] (= 'app.proofs/p1-test (:test r))) (get-in p [:classes :red :rows]))
                                          (pos? (get-in p [:classes :cost :n])) (pos? (get-in p [:classes :platform :n]))
                                          (some (fn [r] (= :seon.agent/died (:type r))) (get-in p [:classes :agent :rows])))))
@@ -379,8 +379,8 @@
       {:report {:replies (mapv short-items [r1 r2 r3])
                 :counts (into (sorted-map) (for [[k v] (:classes p)] [k (:n v)]))
                 :died (select-keys (:example died) [:exit :stderr :last-op])
-                :red (select-keys red [:attempt :test :assertions :evidence])
-                :cost (select-keys cost-row [:attempt :test :verdict])
+                :red (select-keys red [:run :test :assertions :evidence])
+                :cost (select-keys cost-row [:run :test :verdict])
                 :ms (- (System/currentTimeMillis) t0)}
        :checks {:eval (every? (types :eval) [:seon.agent/eval-error :seon.instrument/contract-error])
                 :effect (contains? (types :effect) :seon.fx/io-error)
@@ -405,7 +405,7 @@
   '#{seon.lib/percentile seon.lib/r2 seon.lib/summ seon.lib/push-window seon.lib/p50
      seon.cost/work seon.cost/exponent seon.cost/per-unit seon.cost/expected seon.cost/judge seon.profile/top
      ;; seon.proofs reads and writes results (greens, store-greens!, run-tests!): its pure part
-     seon.proofs/test-symbol seon.proofs/red? seon.proofs/results seon.proofs/red-reports seon.proofs/run-errors
+     seon.proofs/test-symbol seon.proofs/red? seon.proofs/results seon.proofs/red-reports seon.proofs/test-run-errors
      seon.proofs/failures seon.proofs/costs seon.proofs/green? seon.proofs/result-path seon.proofs/result-file
      seon.proofs/plan})
 
@@ -609,7 +609,7 @@
         agent-mb (keep #(get-in st [:agents % :mem-mb]) ids)
         merged (mapv (fn [id] @(c/merge-main! sys id) @(c/merge! sys id)) (take 10 ids)) ; as a merge task does: main first
         notes (count (main-q sys '[:find ?n :where [?n :note/text]]))
-        fs (c/fs-call! sys {:op :stats})
+        fs @(c/call! sys {:op :fs :req {:op :stats}})
         ;; kill! marks :killed at once; the :killed event says root has retired the process
         ev (c/events sys)
         _ (doseq [id ids] (c/kill! sys id))
@@ -1065,11 +1065,15 @@
     (let [;; the procs that answered a graph ping within :seon.config.check/ping-ms (an expected one that did not is blocked or absent)
           pids (fn [] (set (keys (flow/ping (:graph sys) :timeout-ms (seon.config/value :seon.config.check/ping-ms)))))
         booted (pids)
-        expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/source :fx.source/0 :fx/git :fx.git/0 :fx/deps :fx.deps/0 :fx/build :fx.build/0 :fx/tests :fx.tests/0 :fx/model}
-                     (for [i (range (seon.config/value :seon.config.ai/max-in-flight))] (keyword "fx.model" (str i))))
+        decl (clojure.edn/read-string (slurp (seon.config/value :seon.config.root/system-path)))
+        ;; the procs system.edn declares, and each effect kind's owner and workers: the declaration is the one list
+        expect (into (set (keys (:procs decl)))
+                     (mapcat (fn [[k spec]] (cons (keyword "fx" (name k))
+                                                  (for [i (range (if (number? (:workers spec)) (:workers spec) (seon.config/value :seon.config.ai/max-in-flight)))]
+                                                    (keyword (str "fx." (name k)) (str i))))))
+                     (:fx decl))
         dir (str (:agents-dir (:store (c/state sys))) "/system") ; this root's own run dir
         _ (.mkdirs (java.io.File. dir))
-        decl (clojure.edn/read-string (slurp (seon.config/value :seon.config.root/system-path)))
         write! (fn [nm d] (let [f (str dir "/" nm ".edn")] (spit f (sedn/encode d)) f))
         probe (fn [tag] {:proc 'seon.check/probe-proc :args {:tag tag :events :bind/events}})
         r1 @(c/apply! sys (write! "add" (assoc-in decl [:procs :probe] (probe "one"))))
@@ -1175,7 +1179,7 @@
                 :client-ms (lib/r2 ms) :exit (:exit r)
                 :relay-peak-mb (some-> (peak-mb r) lib/r2) :relay-mb-bound bound
                 :root-down (mapv #(get-in % ["error" "message"]) (lines down)) :root-down-exit (:exit down)}
-       :checks {:five-tools (= 5 (count (get-in answers [2 "result" "tools"])))
+       :checks {:tools-are-the-ops (= (set (map #(str "seon_" (name %)) (keys seon.server/ops))) (set (map #(get % "name") (get-in answers [2 "result" "tools"]))))
                 :notification-unanswered (= #{1 2 3 4 5} (set (keys answers)))
                 :both-recorded-outside (and (= 2 (count mine)) (= 1 (count roots)))
                 :agent-eval (clojure.string/includes? (str (text 4)) "42") :root-eval (clojure.string/includes? (str (text 5)) "1")
@@ -1237,7 +1241,7 @@
   server's :t has reached main's t read before the request; an ordering that changed fails here."
   [sys]
   (let [main-t (:max-tx @(:conn sys))
-        fs (c/fs-call! sys {:op :stats})]
+        fs @(c/call! sys {:op :fs :req {:op :stats}})]
     {:t (:t fs) :main-t main-t :mismatch (:mismatch fs) :caught-up (boolean (and (:t fs) (>= (:t fs) main-t)))}))
 
 (defn- writer-flushed
@@ -1272,7 +1276,7 @@
       {:report {:web web :needs "a web port: bin/check gives idle one (IDLE_WEB_PORT)"} :checks {:its-root-serves-a-dashboard false}}
     (let [;; the port its web proc bound
         port (:port web)
-        _ (seon.e2e/await-quiet sys 0)
+        _ (seon.await/await-quiet sys 0)
         received (atom 0)
         ;; what the wait needs of the feed's text: its keyframe seen, then a settled mark after it
         ;; (a mark split across two reads is found in the carry of the last read's end)

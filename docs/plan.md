@@ -11,27 +11,32 @@ Pins: see docs/forks.md · `src` 17,391 lines (19,304 this morning; aim ~10k) ·
 
 ## In flight
 
-Five worktree sessions, grouped so that related tasks stay in one session's context (owner, 2026-10-23: "grouped tasks can stay in one agents context"); each reports ready to the merge session, and talks to the groups named beside it. Restarted on the new account 2026-10-23; `docs/restart.md` holds each branch's state.
+Updated 2026-10-23 evening by root. Sessions are grouped so related tasks stay in one context (owner: "grouped tasks can stay in one agents context"); each reports ready to the merge session. A new session needs root's go unless the owner starts it (AGENTS §2).
 
-| Group | Tasks, in order | Model | Talks to |
-|---|---|---|---|
-| **Vocabulary** | ``jolt/rename-run`` widened to every AGENTS §7a word: one scripted pass, a `bin/laws` check, `seon.fences.edn` dissolved into its owners' files | Sonnet | merge (the freeze) |
-| **Merge and cutover** (main tree) | ``jolt/health`` again (merge main, revert the revert 1ef9f0e9, prove), ``jolt/wiki-stale``, ``jolt/reconcile-topo`` and ``jolt/live-forms``, then the freeze: ``jolt/rename-run`` (attempt → run, store erased), ``jolt/self-contained`` (steps A, D), step R (`~/src/seon-next`) | Sonnet | every group; root for the freeze |
-| **Shrink** | the two `seon.agent-test` reds on main ("No such namespace: seon.e2e"), the remaining driver deletions from `src` (task `seon.main/drivers-leave-src`), the clocks still deciding (``jolt/memory-is-read-when-asked``, the fork server's 100 ms idle poll) | Sonnet | merge |
-| **Agent loop** (THE PLAN 1, 2, E) | ``jolt/writeback-order`` (a new form before its first user; WIP committed a4d1ae96), ``jolt/ctx-loop`` (the context render on Seon's own program), then step E's second paid real task | Opus | agent view |
-| **Agent view** (THE PLAN 3) | ``jolt/agent-view`` (self-review, its full run, merge); then, re-scoped by the owner, a page is an entity pulled with the neighbours its schema declares (v1's `:seon.render/units`) and the links between root, agent, run, turns and messages are refs (tasks `seon.render/the-agents-links-are-refs`, `seon.render/a-page-is-an-entity-and-its-neighbors`; it deletes zoom-value, the attempt route, agent-card and the grid, and needs the store erase, so it merges at the freeze); then every call kind recording ticks, bytes and calls | Opus | agent loop, vocab (the freeze) |
-| **Store** | ``jolt/datom-cost``: Datahike's add path at ~7k ticks a datom (`notes/handoff-store.md`) | Opus | merge (pin bumps) |
+| Session | Working on | Next |
+|---|---|---|
+| **Merge** (main tree) | ``jolt/analysis-lookups`` (Jolt 86f49de8), with the cost proofs a pin bump runs | ``jolt/agent-view`` (chat window), then the freeze |
+| **Vocabulary** | ``jolt/rename-run``: run → run and every AGENTS §7a word, one scripted pass and a `bin/laws` check; ready | merges first in the freeze; the standing store is erased once |
+| **Agent view** | the context frame and the renders (data, not prose; the printer stays general), on ``jolt/a-page-is-an-entity-and-its-neighbors``, which merges in the freeze | the default HTML value render |
+| ↳ evaluations, page | the context as data (the frame, then the walk), the page entity | through agent view |
+| ↳ embed | similar search by embedding (approved, model download included) | reports to root and merge |
+| **Walk** | health holds a branch to the problems it caused (one `bin/prove` step; no silent `bin/check`), and the divergence bytes regression from health's merge | |
+| **Agent loop** | ``jolt/resumed-branch`` (a resumed branch keeps what main gained; `test/` in every root's dirs) | the first-move judge: ten real tasks, one call each, scored from compiler facts |
+| **Store** (covering shrink) | the reach-update regression from Jolt 0d39edc3 (n^1.96) | a check's roots take explicit config, not the checkout's `config/local.edn` |
+| **Reuse** | option B: `bin/test` branches a kept program db per git tree | the memo is paused until the data context is measured (two attacks: `notes/reuse/`) |
 
-During the freeze the other groups keep working; after it each merges main and re-runs the rename's scripts on its branch (`notes/rename-run/`).
+Ended: shrink (its folder was removed at merge), eval-cost (merged).
 
-**Waiting on the owner:** task `seon.derive/one-content-keyed-derivation` (reuse of expensive pure results; cold paths are fixed first, and nothing is cached that is fast enough); the type-findings-as-warnings task (on ``jolt/wiki-stale``, not merged yet).
+**For the owner when he's back:** does `src`'s ~10k aim count code lines (as cloc does: no docstrings, comments, blanks or contracts; ~10.45k now) or every line (18.5k)? Walk measured it on main 450c3fb8; the remaining shrink rows are about −300 lines, which is right under either reading. Root's pick: code lines, with docstrings kept as each var's home (AGENTS §7).
+
+**The freeze**, on root's word: ``jolt/rename-run``, then ``jolt/a-page-is-an-entity-and-its-neighbors``, then the store is erased; then ``jolt/self-contained`` and step R (`~/src/seon-next`). Other sessions keep working, and afterwards re-run the rename's scripts on their branches (`notes/rename-run/` on ``jolt/rename-run``).
 
 ## Open owner questions
 
 The ones that block THE PLAN; the full list (19) is at the end of [decisions](decisions.md).
 - What a merge carries and who wins a conflict (main wins, `:seon.merge/kept`, or an explicit `:seon.task/carry`), with D6's names and D7's task config.
 - Changed-since: a Datahike tree diff by node address, or a `:seon.tx/changed` stamp? Prototype the tree diff first (task `seon.merge/program-cost-follows-what-changed`).
-- No progress: does a byte-identical repeated reply end the attempt (``jolt/dry-run`` builds `:no-progress`), or is it only recorded?
+- No progress: does a byte-identical repeated reply end the run (``jolt/dry-run`` builds `:no-progress`), or is it only recorded?
 - Where each fork lives: the fork repos named in `.gitmodules` lack the newest pinned commits (they exist only in the main tree's submodule clones); self-contained plans the homes.
 
 ## THE PLAN

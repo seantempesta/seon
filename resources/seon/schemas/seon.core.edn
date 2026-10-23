@@ -9,7 +9,6 @@
  :seon.lib/ns-time :int
  :seon.lib/mb number?
  :seon.lib/probe [:map [:regions [:map-of :keyword :map]]]
- :seon.lib/events [:map [:cow-faults :int] [:faults :int]]
  :seon.lib/sysmem [:map [:free-mb number?] [:internal-mb number?]]
  :seon.lib/exit-status [:or [:map [:exit :int]] [:map [:signal :int]]]
  :seon.lib/pipe [:tuple :seon.lib/fd :seon.lib/fd]
@@ -59,14 +58,18 @@
  :seon.wire/seon-msg [:map [:op :keyword]]
  ;; agents
  ;; an agent's lifecycle as root's view holds it, in the dashboard's order: live, then gone
- ;; (stopped by root: a kill, or the end of its attempt; or dead). The sets are the
+ ;; (stopped by root: a kill, or the end of its run; or dead). The sets are the
  ;; lifecycle's one declaration (seon.root/gone, seon.render.ui/live): a new status is one entry
  :seon.agent/status [:enum {:seon.status/live #{:spawning :busy :idle} :seon.status/stopped #{:ended :killed}
                             :seon.status/gone #{:ended :killed :dead}}
                      :spawning :busy :idle :ended :killed :dead]
  :seon.agent/tx-result [:map [:t :int] [:datoms nat-int?]]
  :seon.agent/item [:map {:seon.render/html seon.render.ui/history-row :description "One form's reply at root: the printed value (the live one stays in the agent under :handle) or the error."}
-                   [:tag [:enum :ret :err]] [:printed {:optional true} [:maybe :string]]]
+                   [:tag [:enum :ret :err]] [:printed {:optional true} [:maybe :string]]
+                   ;; the ; comments its writer put before the form (seon.reader/lead): the thought beside it
+                   [:lead {:optional true} :string]
+                   ;; the id of the evaluation's record on the agent's branch, once recorded
+                   [:record {:optional true} :string]]
  :seon.agent/items [:vector :seon.agent/item]
  :seon.test/result [:map [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]
  ;; root's API
@@ -77,7 +80,7 @@
  ;; kinds, the conns between them
  :seon.system/decl [:map [:procs [:map-of :keyword [:map [:proc :qualified-symbol] [:args {:optional true} :map] [:chan-opts {:optional true} :map]]]]
                     [:fx {:optional true} [:map-of :keyword :map]] [:conns [:vector [:tuple [:tuple :keyword :keyword] [:tuple :keyword :keyword]]]]]
- :seon.root/spawn-opts [:maybe [:map [:branch {:optional true} :seon.db/branch] [:task {:optional true} [:maybe :string]] [:attempt {:optional true} [:maybe :string]]]]
+ :seon.root/spawn-opts [:maybe [:map [:branch {:optional true} :seon.db/branch] [:task {:optional true} [:maybe :string]] [:run {:optional true} [:maybe :string]]]]
  ;; contracts (seon.contract, from G1)
  :seon.contract/arm-result [:enum :armed :unchanged :off :uncontracted]
  :seon.contract/invalid [:and :seon.error/base [:map [:seon.error/type [:enum :seon.contract/invalid]] [:seon.contract/var :qualified-symbol]]]
