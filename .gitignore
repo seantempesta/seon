@@ -7,5 +7,6 @@ runs/
 # shared by every checkout, kept in the main tree: test results by reach digest (bin/env) and the
 # worktrees' port blocks (bin/ports)
 /test-results/
+/.worktrees/
 /config/worktree-ports
 /config/worktree-ports.lock

@@ -19,7 +19,7 @@ Every tracked file outside `reference-code/` and `notes/` was grepped for `../`,
 | `../test-results` (197 MB) | `default.edn:262` (`#seon/checkout "../test-results"`), docs/parity.md:57, docs/machine.md:37 | test results by reach digest, shared across checkouts | **done [branch]**: the main tree's `test-results/` (gitignored). `bin/env` exports `SEON_TEST_RESULTS=$MAIN_TREE/test-results`, found from git's common dir as the compile caches are. The shipped default is the checkout's own `test-results`. This also fixes a latent fault: a generation worktree (`runs/generations/<commit>`) resolved `../test-results` to `runs/generations/test-results`. The merge moves the directory **[root]** |
 | `../worktree-ports`, `.lock` | bin/ports:17, bin/worktree:126, docs/config.md:26 | the worktrees' port blocks | **done [branch]**: the main tree's `config/worktree-ports` (gitignored). The merge moves the file **[root]** |
 | `bin/ports`: the main tree is the one named `next` | bin/ports:14 | how a checkout knows it gets 7888/7777 | **done [branch]**: the main tree is the checkout whose git dir is the common dir, whatever its folder is called |
-| `../next-NAME` (the worktrees) | bin/worktree:2, :111, :124, :147, bin/worktree-check:9, bin/update:13 (`../next-merges`), default.edn:234, docs/merging.md:7 | where worktree sessions live | **done [branch]**: one function, `bin/worktree --path NAME`. With `SEON_WORKTREES` set, a worktree is `$SEON_WORKTREES/NAME`. Otherwise it sits beside the main tree, named after it (`../next-NAME` today, `../seon-NAME` if next is renamed `seon`). bin/worktree-check and bin/update ask it (§5) |
+| `../next-NAME` (the worktrees) | bin/worktree:2, :111, :124, :147, bin/worktree-check:9, bin/update:13 (`../next-merges`), default.edn:234, docs/merging.md:7 | where worktree sessions live | **done [branch]**: one function, `bin/worktree --path NAME`, which is `<root>/.worktrees/NAME` (owner ruling 2026-10-23, §5); bin/worktree-check and bin/update ask it |
 | `../flowlab/docs_check.clj`, `flowlab/run.sh`, `flowlab/tasks.edn` | docs/flow.md:3, :71, docs/core-async.md:3, task jolt.async.edn:3 | the checks behind the `[F..]` and `[A..]` claims in those pages | copied to `next/notes/flowlab/` **[root]**. Not under `test/`, which the standing root imports as program. The citations are then fixed |
 | `../vendor-c/lmdb` | README.md:22, docs/failure-points.md:141 | a stale citation: `bin/build` builds LMDB from `reference-code/lmdb` (bin/build:111) | **done [branch]** |
 | `../proto/*`, `../proto/BAGGAGE.md` | src/README.md:2, BAGGAGE.md:3 | the first prototype | src/README.md reworded **[branch]**. Its history is kept by §3's tag. BAGGAGE.md:3 is fixed in the same commit as §3 **[root]** |
@@ -32,6 +32,8 @@ Every tracked file outside `reference-code/` and `notes/` was grepped for `../`,
 | `#include "../../../resources/..."` | test/seon/config/*.edn | inside the repo | fine |
 
 ## 2. The forks' homes
+
+> **Superseded by the owner's ruling of 2026-10-23: the homes are the GitHub forks (option c), step C.** The options and measurements below stay as the record; (a1) was the first approval, and its branch-saving step B is still done and still wanted.
 
 ### Measurements
 
@@ -137,20 +139,15 @@ Nested repos with commits found nowhere else (the survey's EXTRACT 6, re-measure
 - With a section per ruling, the existing prose citations (`DECISIONS "Callbacks are data"`) can become links (`[decisions#callbacks-are-data](docs/decisions.md#...)`) that `seon.ref` resolves into the task's or docstring's references. That is a follow-up wiki edit, not part of the move.
 - Both are moved by root **[root]**, because root edits them all the time and the outer copies have uncommitted changes. The move is one commit in next. The outer copies then get a one-line pointer, in the commit taken just before the `history/seon-jolt` tag.
 
-## 5. Where worktrees live
+## 5. Where worktrees live (owner ruling 2026-10-23)
 
-**Done [branch]:**
-- `bin/worktree --path NAME` is the one answer;
-- with `SEON_WORKTREES` set, a worktree is `$SEON_WORKTREES/NAME`;
-- otherwise it sits beside the main tree, named after it.
-
-So today nothing moves (`../next-NAME`), and if next is renamed `seon`, the worktrees are `../seon-NAME`. The main tree is found from git's common dir, so the name is right from any checkout.
-
-**Proposal [owner]:**
-- `SEON_WORKTREES=<main>/.worktrees`, which makes the folder fully self-contained: deleting it deletes everything, and nothing is left beside it.
-- Checked: nothing in Seon walks the main tree's directory. `seon.fx` lists only `:seon.config.source/dirs`, `test_runner` only `test/`, `bin/laws` only `src/`, and `bin/build`'s `git add -A` honours `.gitignore`. So a gitignored `.worktrees/` is invisible to the program, the build and the tests. Claude's desktop app already does the same (`.claude/worktrees/`).
-- The cost: tools a person runs over the whole folder (`du`, Spotlight, an editor's search) see the worktrees.
-- To adopt it, set one default in `bin/worktree`'s `wt_path` and add `/.worktrees/` to `.gitignore`. Existing worktrees stay where they are until removed (`--sync` and `--remove` for them need `SEON_WORKTREES` unset).
+The root is **`~/src/seon-next`** (next, moved), and a worktree is **`<root>/.worktrees/NAME`**, gitignored. **Done [branch]:**
+- `bin/worktree --path NAME` is the one answer (`$MAIN_TREE/.worktrees/NAME`, the main tree found from git's common dir, so it is right from any checkout); `bin/worktree`, `--sync`, `--remove`, `bin/update` (`.worktrees/merges`) and `bin/worktree-check` all ask it. `SEON_WORKTREES`, which an earlier draft of this note proposed, is dropped: one place, no second mechanism.
+- `bin/worktree NAME` on an existing branch `jolt/NAME` checks it out (it used `-b` only), so a worktree can be recreated after the move.
+- `.gitignore` has `/.worktrees/`; `/test-results/` and `/config/worktree-ports` are in the root already, so they move with it.
+- Checked: nothing in Seon walks the root's directory (`seon.fx` lists only `:seon.config.source/dirs`, `test_runner` only `test/`, `bin/laws` only `src/`, `bin/build`'s `git add -A` honours `.gitignore`), so `.worktrees/` is invisible to the program, the build and the tests. The cost is that a person's `du`, Spotlight or editor search over the root sees them.
+- The port registry's key is the worktree's directory name, so it is now `NAME`, not `next-NAME`: a worktree recreated after the move gets a fresh block (`bin/worktree --remove` frees the old line).
+- Existing sibling worktrees (`../next-NAME`) are not found by `--sync NAME` or `--remove NAME` any more. Until they are gone, `bin/worktree --remove-at DIR` removes one, and `git -C <main> worktree list` shows them.
 
 ## 6. The steps, in order
 
@@ -198,15 +195,10 @@ git -C $S for-each-ref --format='%(objectname) %(refname)' refs/heads |
   while read s r; do [ -n "$(git -C $M for-each-ref --contains $s refs/heads refs/tags | head -1)" ] || echo "LOST $S $r $s"; done
 ```
 
-**C. [root, after B, with no session mid-merge of .gitmodules] Repoint the URLs.**
-- In `.gitmodules`, the 9 forks get `url = ./.git/modules/reference-code/<n>`.
-- Then, **in the main tree only**, `git submodule sync`, and check that `git -C reference-code/<n> remote get-url origin` names the module itself. Commit `.gitmodules` with the rewritten docs/forks.md, whose "Repo:" lines say "next's module store; branches …". Close task `seon.main/forks-live-in-one-place` with this plan's commit.
-- Prove it with a fresh clone, niced and in the background (this is the long run: once):
-```sh
-git -c protocol.file.allow=always clone --recurse-submodules ~/src/seon-jolt/next /tmp/next-clone
-cd /tmp/next-clone && nice -n 15 bin/build seon && bin/check smoke
-```
-  Then a clone of that clone: `git submodule update` resolves into its `.git/modules`.
+**C. [root, on "go C", after A, with no session mid-merge of .gitmodules] Repoint the URLs. Owner ruling 2026-10-23: GitHub, not the module store (§2's recommendation (a1) is superseded; (c) is chosen).** `old-cleanup` pushed every non-main branch of the module stores to the forks (no force), and I checked with `gh api` that each pin at this branch's head is present: jolt 4342b73, chez 80e4b9f, datahike fd0c065, konserve 3dbd4d5, malli 5a830e1, crypto 902196e, jolt-fressian 8f3eb5d, persistent-sorted-set 9cce727, jolt-overlay 4ecb7a8.
+- In `.gitmodules`: `https://github.com/seantempesta/` + `jolt`, `ChezScheme` (chez), `datahike`, `konserve`, `malli`, `crypto`, `jolt-fressian`, `persistent-sorted-set`, `jolt-overlay`. The last two are new and private: a fresh clone needs `gh` auth (a credential helper for github.com). awesome-jolt, zstd and lmdb stay on upstream. Step B still holds: the module stores keep every branch locally, so nothing depends on GitHub being up except a fresh clone.
+- Then, **in the main tree only**, `git submodule sync`; commit `.gitmodules` with docs/forks.md rewritten (each "Fork repo:" line becomes its GitHub URL). Close task `seon.main/forks-live-in-one-place` with this plan's commit.
+- Prove it once, niced, in the background, in a scratch directory (never in the tree): `git clone --recurse-submodules <main tree> <scratch>/clone` (the main tree as origin; the `.gitmodules` URLs come from the commit), then `cd <scratch>/clone && nice -n 15 bin/build seon && bin/check smoke`. Then tell `old-cleanup` (local_d488bf27) it may delete the nine source folders, **only after C is merged on main**.
 - Running worktrees are unaffected: they use the module repos directly, never the URL. A branch that merges main takes the new `.gitmodules` without conflict unless it edits `.gitmodules` itself.
 
 **D. [root] History tags in next:**
@@ -225,19 +217,59 @@ Expected: +20 MiB in next/.git. A tag is a record, so it is never deleted (AGENT
 - optionally `tmp/agy/` → `runs/agy/`.
 Each running session's brief names `../RESUME.md`; they read the new path after merging main.
 
-**F. [owner] The deletion and the move.**
+**F. [owner] The deletion** (the move is step R).
 - After A–E, nothing in next refers outside it except `~/src/seon` (v1, on purpose) and GitHub. Check with:
 ```sh
 git -C next ls-files | grep -v '^notes/' | xargs grep -nE '\.\./|/Users/sean|seon-jolt'
 ```
   Only intra-repo `../` links should remain.
 - Then the owner deletes the parent folder's experiment directories (the survey's list, about 15.9 GiB), once its EXTRACT items 1–3 are filed as tasks. Tags preserve their history; their untracked build output is not kept.
-- To make next the root folder: `mv`, then in the moved main tree:
-  - `git worktree repair <each worktree>` (their `.git` files name absolute paths);
-  - `git submodule sync`;
-  - each module's worktrees need `git -C reference-code/<n> worktree repair` too;
-  - `bin/root` restarts on the same store.
-- Doing F after every running worktree session has merged and been removed makes it a plain `mv`.
+
+**R. [root, last] The relocation, `~/src/seon-jolt/next` → `~/src/seon-next`.** Run after C and E have merged, every open branch has merged or been parked, and their sessions are archived, so that only the main tree is left. What a move touches, measured on the main tree and rehearsed in a scratch repo (a root with a submodule, a linked worktree inside `.worktrees/` with its submodule worktree, then `mv` and repair):
+- **Survives a move as it is:** the submodule `.git` files and each module's `core.worktree` are relative; the built `target/seon` holds no root path (0 occurrences of the old path in the binary); `.mcp.json`, `bin/*` and `deps.edn` are relative; `git status` in the moved root is clean.
+- **Breaks, and is repaired:** a linked worktree's `.git` file and `.git/worktrees/NAME/gitdir`, and each submodule worktree's pair under `.git/modules/reference-code/<m>/worktrees/` (all absolute). `git worktree repair <new path>` fixed both kinds in the rehearsal. Worktrees containing submodules cannot be moved with `git worktree move`, so the other worktrees are removed and recreated rather than moved.
+- **Names the old path and must be edited:** `config/local.edn` (gitignored, the owner's): `:seon.config.source/root "/Users/sean/src/seon-jolt/next-merges"` becomes `#seon/checkout ".worktrees/merges"` (the `#seon/checkout` tag works in a config layer). Shell state: any `cd`, alias or terminal tab at the old path.
+- **Not measured, and rehearsed first (R0):** whether the standing store (`runs/store`, 140 MB, compressed so a grep cannot see inside) records an absolute path; its files hold none in cleartext. R0 is below.
+- **Outside the repo:** the Claude project memory directory is keyed by the path: `~/.claude/projects/-Users-sean-src-seon-jolt-next` becomes `-Users-sean-src-seon-next` (copy it, do not delete the old one). The `.claude/worktrees/` of the desktop app holds a worktree of its own, to be removed first with the others.
+
+The sequence:
+```sh
+# R0 (rehearsal, once, niced; needs root's go as a long run): a copy-on-write clone of the root at the new path,
+# a root started on it on other ports, then deleted. It answers the store question before the real move.
+cp -cR ~/src/seon-jolt/next ~/src/seon-next-rehearsal
+cd ~/src/seon-next-rehearsal && git worktree prune   # its linked worktrees are the originals; ignore them
+bin/root start --set :seon.config.root/entrance-port=7990 --set :seon.config.web/port=7991   # then a seon_eval of (my.root/problems sys)
+bin/root stop; cd ..; rm -rf seon-next-rehearsal     # only after you looked; it is yours (root's) to remove
+
+# R1: quiet. No run in flight (bin/worktrees), no session mid-merge. The standing root stops.
+cd ~/src/seon-jolt/next && bin/root stop
+# R2: only the main tree's worktree remains. For every other: bin/worktree --remove NAME (new-style) or
+#     bin/worktree --remove-at DIR (old siblings ../next-NAME); the branches are kept. Then:
+git worktree prune; for m in .git/modules/reference-code/*; do git -C $m worktree prune; done
+git worktree list                         # must list the main tree only
+# R3: the move, one rename on one filesystem.
+mv ~/src/seon-jolt/next ~/src/seon-next && cd ~/src/seon-next
+# R4: checks, in this order; each must print what is shown.
+git status --short                        # empty
+git submodule status | grep -v '^ '       # empty (every submodule at its pin)
+git worktree list                         # ~/src/seon-next [main]
+# R5: the standing root's config, then start it on its store.
+#     edit config/local.edn: :seon.config.source/root #seon/checkout ".worktrees/merges"
+bin/worktree merges                       # jolt/merges exists: it is checked out at .worktrees/merges
+bin/root start && bin/prove               # prove runs only what the new path changed; expect nothing red
+# R6: memory and the shell.
+cp -R ~/.claude/projects/-Users-sean-src-seon-jolt-next ~/.claude/projects/-Users-sean-src-seon-next
+# R7: recreate the worktrees that are still wanted: bin/worktree NAME (existing branches are checked out as they are).
+```
+Rollback before R3: nothing has changed except stopped roots (`bin/root start`). After R3: `mv ~/src/seon-next ~/src/seon-jolt/next`, then `git worktree prune`.
+
+**S. [owner] The deletion of `~/src/seon-jolt`.** After R and the acceptance grep below, the parent folder holds only what `old-cleanup` bundled and the outer repo's own history (tag `history/seon-jolt`, step D) and `history-bundles/`. The owner deletes it. `bin/agy-agent`'s old state in `../tmp/agy` (4.6 MB) goes with it unless step E copied it to `runs/agy`.
+
+**Acceptance: next names nothing outside its root** (the dated `notes/` excepted, as they record paths as they were):
+```sh
+git ls-files | grep -v '^notes/' | xargs grep -nE 'seon-jolt|/Users/|\.\./' | grep -vE '^[^:]+:[0-9]+:.*(\]\(\.\./|\.\./\.\./resources)'
+```
+It must print nothing but v1 (`~/src/seon`, which stays on purpose) and links between files inside the root (`](../AGENTS.md)`). Today it prints the lists in §1 and "After merging land14".
 
 ## After merging land14 (3f28d3e), 2026-10-23
 

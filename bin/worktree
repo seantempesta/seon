@@ -1,8 +1,8 @@
 #!/bin/zsh
-# bin/worktree NAME [BASE]    a worktree of next/ on branch jolt/NAME (from BASE, default main), at
-#                             bin/worktree --path NAME
-# bin/worktree --path NAME    where worktree NAME lives: $SEON_WORKTREES/NAME when SEON_WORKTREES is
-#                             set, else beside the main tree, named after it (../next-NAME for next/)
+# bin/worktree NAME [BASE]    a worktree of the main tree on branch jolt/NAME (a new one from BASE, default
+#                             main; an existing one as it is), at <root>/.worktrees/NAME (gitignored: a
+#                             worktree is inside the root it belongs to)
+# bin/worktree --path NAME    that path
 # bin/worktree --remove NAME  remove that worktree and its submodule worktrees (the branch is kept)
 # bin/worktree --at DIR COMMIT [REPO]  a detached worktree of REPO (default next/) at COMMIT in DIR, set
 #                             up as below: what a generation is built in (seon.fx/build, docs/source.md)
@@ -31,10 +31,10 @@
 set -eu
 MAIN=$(cd "$(dirname "$0")/.." && pwd)
 die() { print -u2 "worktree: $*"; exit 1; }
-# the main tree (git's common dir), whichever checkout this runs from: worktrees and the port
-# registry (bin/ports) are named from it, so they need no directory outside it but the worktrees'
+# the main tree (git's common dir), whichever checkout this runs from: the worktrees and the port
+# registry (bin/ports) live inside it, so the root folder holds everything and can be moved whole
 MAIN_TREE=$(cd "$(git -C "$MAIN" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
-wt_path() { if [[ -n ${SEON_WORKTREES:-} ]]; then print "$SEON_WORKTREES/$1"; else print "${MAIN_TREE:h}/${MAIN_TREE:t}-$1"; fi }
+wt_path() { print "$MAIN_TREE/.worktrees/$1"; }
 
 if [[ ${1:-} == --path ]]; then
   [[ -n ${2:-} ]] || die "usage: bin/worktree --path NAME"
@@ -147,7 +147,13 @@ WT=$(wt_path "$NAME")
 BR=jolt/$NAME
 [[ ! -e $WT ]] || die "$WT exists"
 
-git -C "$MAIN" worktree add -q -b "$BR" "$WT" "$BASE"
+# a branch that exists (a worktree recreated after a move, a branch with unmerged work) is checked out
+# as it is; BASE only names the start of a new one
+if git -C "$MAIN" show-ref -q --verify "refs/heads/$BR"; then
+  git -C "$MAIN" worktree add -q "$WT" "$BR"
+else
+  git -C "$MAIN" worktree add -q -b "$BR" "$WT" "$BASE"
+fi
 
 setup "$WT"
 
