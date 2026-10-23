@@ -222,7 +222,8 @@ Library words stay: proc, step-fn, transact, branch, merge, schema, registry, co
 - **The target is a 16 GB MacBook M1** (owner, 2026-10-22). Seon stays within `:seon.config.machine/memory-mb`, and `bin/check scale` fails past it.
 - **Builds:** `nice -n 15 bin/build`, in parallel, no lock. Full checks run niced, each in its own worktree. Every process on a store uses the same LMDB build. Details, and the disk rules (worktrees removed at merge, no new top-level directories, pruning): [machine](docs/machine.md).
 - **Never flood it.** Anything that makes threads or processes starts at n ≤ 100 under `nice -n 15`; kill your own process past 200 threads. One experiment at a time.
-- **Leave nothing running when you finish,** and say so. Kill only PIDs you started; never `pkill` or `killall`. Delete only paths you created. A process that must outlive a tool call is double-forked (`bin/root` does).
+- **Leave nothing running when you finish,** and say so. A process that must outlive a tool call is double-forked (`bin/root` does).
+- **Clean up garbage when you see it, whoever left it** (owner, 2026-10-23: "why not kill the leftover processes? why wouldn't you"; "cleanup garbage when you see it"). A leftover process (an orphan whose session is gone, an old binary's relay, a lock helper in a dead scratch folder), a merged worktree, a finished experiment's store or output: end or delete it now, and say what went. Garbage is what nothing live uses; check that first, by PID, path and working directory (`lsof -a -p PID -d cwd`), never by pattern (`pkill`, `killall`, `pgrep -f`). Keep what is evidence or someone's work in progress: the standing store (`runs/store`), anything git or the store records, a worktree with unmerged commits or uncommitted changes, a live session's checkout. Reclaiming a record (a store, a branch, history) stays the owner's act ([machine](docs/machine.md#disk-stays-bounded)).
 - **A root's processes end with it:** kill the root, or its fork server's process group (`kill -9 -PGID`), never a fork server by pid. Killing the fork server first skips the group kill that ends its agents ([failure points](docs/failure-points.md), root dies).
 - **Git in a worktree:** `git -C` on your own checkout only; never `git submodule` in a worktree (after merging main, `bin/worktree --sync NAME` from the main tree); never bare `git stash`; never `checkout`, `restore` or `reset` on paths you don't own; commit explicit paths; never push.
 - **Secrets are never printed.** Paid model runs spend from the owner's standing $50 budget, on productive work only, with the context checked first; past it they need the owner's go ([model](docs/model.md#paid-runs)). Install nothing system-wide. Never write in `~/src/seon`.
@@ -251,7 +252,7 @@ Library words stay: proc, step-fn, transact, branch, merge, schema, registry, co
 - **Merging on a check nobody read,** or copying whole files over newer changes.
 - **Re-running everything on every change,** a full run while iterating, or a second run of an unchanged tree (§3, Testing).
 - **Deleting a record** (a store, a branch, history). Runs are kept, and reclaiming space is the owner's act. The one exception: until Seon holds a user's data, the standing store is test data, erased (never migrated) when its schema changes, on the owner's go ([machine](docs/machine.md#disk-stays-bounded)).
-- **Flooding the machine,** killing by pattern, or leaving things running.
+- **Flooding the machine,** killing by pattern, leaving things running, or walking past garbage (a leftover process, a merged worktree) because someone else left it.
 
 ## 10. Done
 
