@@ -4,7 +4,7 @@
   watcher that dies is a :platform error on main. Run: bin/test seon.watch-test"
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [clojure.java.io :as io]
             [seon.watch :as watch] [my.root :as mr] [seon.root :as root] [seon.problems :as problems] [seon.contract :as contract]
-            [datahike.api :as d] [seon.task]))
+            [datahike.api :as d] [seon.task] [seon.docs]))
 
 (deftest a-record-is-its-kind-then-its-path
   (is (= [:path "/a/b\nc.md"] (watch/record (.getBytes "p/a/b\nc.md" "UTF-8"))) "a newline is part of the path: NUL ends a record")
@@ -60,3 +60,36 @@
     (is (= [bad] (mr/load-errors loaded)) "the loader's error is kept, the ok answer is not")
     (let [db (d/db-with (ts/test-db) (root/platform-tx (ts/test-db) bad 1000))]
       (is (= [(:seon.error/type bad)] (mapv :type (get-in (problems/report db) [:classes :platform :rows])))))))
+
+(deftest a-file-gone-when-its-batch-reads-it-is-a-change
+  ;; task seon.watch/a-vanished-file-is-a-fact: a git merge or bin/update removes a file for a moment
+  ;; while a batch reads it (the standing root's watcher died: "its batch handler threw:
+  ;; .../docs/references.md (No such file or directory)"). A file listed and gone when read (here a
+  ;; page replaced by a link to nothing, which lists and does not open) is left out of that read: the
+  ;; watcher stays up, and the load records the page as gone, as it would a deletion
+  (let [co (.getCanonicalPath (doto (io/file (str (System/getProperty "java.io.tmpdir") "/seon-watch-" (random-uuid))) (.mkdirs)))
+        docs (doto (io/file co "docs") (.mkdirs))
+        page (io/file docs "a.md")
+        _ (spit page "# A\n\nIt reads.\n")
+        _ (spit (io/file docs "b.md") "# B\n\nIt stays.\n")
+        db0 (ts/test-db)
+        db (d/db-with db0 (seon.docs/load-dir-tx db0 co "docs" {}))
+        _ (is (some? (d/entity db [:seon.section/address "docs/a.md#a"])) "the page was loaded")
+        _ (.delete page)
+        _ (java.nio.file.Files/createSymbolicLink (.toPath page) (.toPath (io/file docs "gone.md")) (make-array java.nio.file.attribute.FileAttribute 0))
+        ;; whichever comes first: the batch's read, or the watcher's death (on the old read, the throw)
+        outcome (promise)
+        w (watch/start! [(.getCanonicalPath docs)]
+                        (fn [_] (deliver outcome [:read (seon.docs/load-dir-tx db co "docs" {})]))
+                        #(deliver outcome [:died %]))]
+    (is (not (contract/error? w)) (pr-str w))
+    (spit (io/file docs "b.md") "# B\n\nIt changed.\n")
+    (let [[kind tx] @outcome]
+      (testing "the batch read what was there and the watcher is still up"
+        (is (= :read kind) (str "no death: a vanished file never ends the watch; " (pr-str tx)))
+        (is (vector? tx) (pr-str tx)))
+      (testing "the page gone when read is recorded as gone: its section retracted, the other page's change loaded"
+        (let [db' (d/db-with db tx)]
+          (is (nil? (d/entity db' [:seon.section/address "docs/a.md#a"])))
+          (is (= "It changed." (:seon.section/lead (d/pull db' [:seon.section/lead] [:seon.section/address "docs/b.md#b"])))))))
+    (watch/stop! w)))
