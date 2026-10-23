@@ -198,6 +198,7 @@ build_css() {
   ( cd "$ROOT" && "$TAILWIND" -i resources/public/css/input.css -o "$T/css/app.css" --minify ) > "$T/css-build.log" 2>&1 ||
     die "css build failed; see target/css-build.log"
   echo "$pin" > "$T/css.stamp"
+}
 
 # The embedding model in process (docs/vector.md#the-model): llama.cpp from reference-code/llama.cpp
 # (the official repository at tag v0.7.0, the first release with EmbeddingGemma-2), built static with
