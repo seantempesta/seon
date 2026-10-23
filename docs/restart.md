@@ -12,7 +12,7 @@ Nothing else does: no Claude session, its sidebar group, a running agent or a qu
 
 ## The first steps of a fresh root
 
-Start the root session in the main folder itself (`~/src/seon-jolt/next`, or `~/src/seon-next` after the cutover), not in an app-made worktree. Root edits main's docs and owns the merges, and an app worktree's hook blocks writes outside it. Worktree sessions get their worktree from `bin/worktree NAME`, not from the app.
+Start the root session in the main folder itself (`~/src/seon-next`; from any worktree it is `git rev-parse --path-format=absolute --git-common-dir`, minus `/.git`), not in an app-made worktree. Root edits main's docs and owns the merges, and an app worktree's hook blocks writes outside it. Worktree sessions get their worktree from `bin/worktree NAME`, not from the app.
 
 1. Read AGENTS.md whole, then `docs/plan.md`, `docs/decisions.md`, this page, and the tail of `notes/merge-log.md`.
 2. Look at the state, without changing anything:
@@ -35,11 +35,11 @@ Old branches that are probably superseded: ``jolt/land2``, ``jolt/land11``, ``jo
 
 1. The merge session merges health, then wiki-stale, then whatever reports ready.
 2. Root holds main still, and rename-run merges; the store is erased.
-3. self-contained merges, then step R: a fresh clone into `~/src/seon-next`, build, prove, a grep for `~/src/seon-jolt` that finds nothing, and the full run. Then the unmerged branches are fetched into the new repo, and work moves there (`.worktrees/<name>`).
+3. self-contained merges, then step R: a fresh clone into `~/src/seon-next`, build, prove, a grep for the prototype folder's name that finds nothing, and the full run (`notes/cutover-step-R-2026-10-23.md`). Then the unmerged branches are fetched into the new repo, and work moves there (`.worktrees/<name>`).
 4. Step E continues: a second paid real task, within the $50 budget, on a context that has been checked.
 
 ## The prompt for a fresh account
 
 ```
-You are root for Seon on Jolt, restarting on a fresh account: no sessions, memory or transcripts carried over. Work in ~/src/seon-jolt/next (or ~/src/seon-next if docs/restart.md says the cutover is done). First read, in order: AGENTS.md (all of it), docs/restart.md, docs/plan.md, docs/decisions.md, and the tail of notes/merge-log.md. Then follow docs/restart.md "The first steps of a fresh root": look at the state, read each live branch's handoff note, write me a five-line state summary, then restart the sessions and the merge session. Delegate; investigate personally only what fits in a few tool calls.
+You are root for Seon on Jolt, restarting on a fresh account: no sessions, memory or transcripts carried over. Work in the repo's main folder (~/src/seon-next; if it does not exist, step R has not run: it is the folder `git rev-parse --path-format=absolute --git-common-dir` names, minus /.git). First read, in order: AGENTS.md (all of it), docs/restart.md, docs/plan.md, docs/decisions.md, and the tail of notes/merge-log.md. Then follow docs/restart.md "The first steps of a fresh root": look at the state, read each live branch's handoff note, write me a five-line state summary, then restart the sessions and the merge session. Delegate; investigate personally only what fits in a few tool calls.
 ```
