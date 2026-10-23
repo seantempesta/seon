@@ -148,3 +148,34 @@
       (is (exists? live) "a live starter's fifo stays")
       (is (exists? other) "a file not named for a starter stays")
       (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+
+(deftest a-stop-ends-on-its-holders-end-and-a-gone-holder-answers-at-once
+  ;; the first bin/update hung for 10 minutes in `bin/root stop`: it read a fifo it held open
+  ;; read-write itself, so EOF could never come, and a holder that never wrote left it waiting for
+  ;; ever. bin/held --end signals the holder and waits on the fifo the holder keeps open for its
+  ;; life: its status line, or its last writer closing (the holder's end). A holder that is gone
+  ;; has no writer, so the wait ends at once; a path that is not a fifo (a holder from before the
+  ;; done fifo) is refused at once. A hang here is the bug.
+  (let [dir (str (.getCanonicalPath (java.io.File. "target/tmp")) "/end-" (random-uuid))
+        _ (.mkdirs (java.io.File. dir))
+        sh clojure.java.shell/sh
+        held (fn []
+               (let [ready (str dir "/ready-" (random-uuid)) done (str dir "/done-" (random-uuid))]
+                 (sh "mkfifo" ready done)
+                 ;; a command that says it is up, then reads its stdin until the holder closes it
+                 (sh "bin/held" "--detach" "--log" (str dir "/log") "--ready" ready "--done" done
+                     "sh" "-c" "echo ROOT LISTENING 1; exec cat")
+                 (let [[h c] (str/split (str/trim (slurp ready)) #" ")] {:holder h :cmd c :done done})))
+        end (fn [{:keys [holder done]}] (sh "bin/held" "--end" "TERM" holder done "1"))]
+    (try
+      (let [live (held) r (end live)]
+        (is (= [0 "0\n"] [(:exit r) (:out r)]) "a live holder: TERM closes its command's stdin, and the status is its answer"))
+      (let [h (held)]
+        (sh "kill" "-9" (:holder h))
+        (sh "kill" "-9" (:cmd h))
+        (let [r (end h)]
+          (is (= [0 ""] [(:exit r) (:out r)]) "a holder that is gone answers at once, with no status")))
+      (let [f (str dir "/plain")]
+        (spit f "")
+        (is (= 2 (:exit (sh "bin/held" "--end" "TERM" "1" f "1"))) "a path that is no fifo is refused at once"))
+      (finally (sh "rm" "-rf" dir)))))
