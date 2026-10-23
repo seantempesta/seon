@@ -183,7 +183,7 @@
   re-rolls every seed at once (it is config, so it moves every digest too)."
   {:malli/schema [:=> [:cat [:* :any]] :int]}
   [& parts]
-  (Long/parseLong (subs (error/digest (pr-str (cons (cfg/value :seon.config.proofs/seed-salt) parts))) 0 15) 16))
+  (Long/parseLong (subs (error/digest (sedn/encode (cons (cfg/value :seon.config.proofs/seed-salt) parts))) 0 15) 16))
 
 (defn test-seed
   "The seed of the clojure.test test running now: (seed test digest), its digest the one
