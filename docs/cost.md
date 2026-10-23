@@ -19,7 +19,7 @@ Each size is the least of several repeats (`seon.cost/measure`), less what measu
 ## How growth is judged
 
 A dimension is steeper when its fitted growth exponent passes the estimate's growth by more than ```seon.cost/steeper-by``` over the same sizes. ```seon.cost/judge``` fits it so that a change making every size cheaper, or dearer, by one amount never moves the verdict (task `seon.cost/a-speedup-never-reads-as-steeper`):
-- with three sizes or more, on each size's increment over the smallest, m(n) - m(n0), against the work's own, W(n) - W(n0): no fixed part is assumed;
+- with three sizes or more, on each size's increment over the smallest, m(n) - m(n0), against the work's own, W(n) - W(n0): no fixed part is assumed. Only when the growth is a real share of the cost (the largest increment at least ```seon.cost/growth-share``` of the smallest size's): a 0.5% variance in a measure moved a log row's increments, 71k on 406k ticks, by 0.02 of exponent, its whole margin;
 - with two (a run capped at `:seon.config.proofs/cost-max-n` measures the two smallest), or when fewer than two increments are positive (a smallest size that cost more than the next), one increment has no shape, so the fixed part taken off is the estimate's `:fixed`, but never more than the smallest size leaves beyond its estimated per-unit part;
 - for constant work, on the cost itself, which should not grow. This is looser than a fit above an accurate `:fixed`: a small per-size creep on a large base reads as flat, and only the largest size's own estimate judges it.
 
