@@ -4,7 +4,7 @@
   watcher that dies is a :platform error on main. Run: bin/test seon.watch-test"
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [clojure.java.io :as io]
             [seon.watch :as watch] [my.root :as mr] [seon.root :as root] [seon.problems :as problems] [seon.contract :as contract]
-            [datahike.api :as d] [seon.task] [seon.docs]))
+            [datahike.api :as d] [seon.task] [seon.docs] [clojure.java.shell]))
 
 (deftest a-record-is-its-kind-then-its-path
   (is (= [:path "/a/b\nc.md"] (watch/record (.getBytes "p/a/b\nc.md" "UTF-8"))) "a newline is part of the path: NUL ends a record")
@@ -83,6 +83,9 @@
                         (fn [_] (deliver outcome [:read (seon.docs/load-dir-tx db co "docs" {})]))
                         #(deliver outcome [:died %]))]
     (is (not (contract/error? w)) (pr-str w))
+    ;; a watcher that never started answers as a death, so the wait below always ends
+    (when (contract/error? w) (deliver outcome [:died w]))
+    (try
     (spit (io/file docs "b.md") "# B\n\nIt changed.\n")
     (let [[kind tx] @outcome]
       (testing "the batch read what was there and the watcher is still up"
@@ -92,4 +95,6 @@
         (let [db' (d/db-with db tx)]
           (is (nil? (d/entity db' [:seon.section/address "docs/a.md#a"])))
           (is (= "It changed." (:seon.section/lead (d/pull db' [:seon.section/lead] [:seon.section/address "docs/b.md#b"])))))))
-    (watch/stop! w)))
+    (finally
+      (when-not (contract/error? w) (watch/stop! w))
+      (clojure.java.shell/sh "rm" "-rf" co)))))
