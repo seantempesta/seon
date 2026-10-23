@@ -7,7 +7,7 @@
   `render` makes the text from it, for the model and again for anyone who reads it later."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
-            [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
+            [seon.task :as task] [seon.merge :as pm]
             [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [clojure.edn]))
 
 (def help-page
@@ -21,39 +21,6 @@
   without it (no root booted on it) is refused by this contract, never answered empty."
   {:malli/schema [:=> [:cat :seon.host/db] :string]}
   [db] (docs/page-text db help-page))
-
-(defn source-of
-  "The recorded source of var sym on db (the text of the form that last defined it), or nil:
-  one AVET seek (seon.db/eid), never a query."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :string]]}
-  [db sym] (some->> (pdb/eid db :var/name sym) (d/entity db) :var/form :form/src))
-
-(def reference-tokens
-  "Tokens a cited var's source may take in the context: the config's."
-  (cfg/value :seon.config.render/reference-tokens))
-
-(defn resolve-ref
-  "Var sym as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth):
-  :summary its arglists and its doc's first sentence, :doc its arglists, doc and contract,
-  :code its source (from the db). A source over reference-tokens shows the doc instead, with
-  what it left out and the form that reads it; at :doc a var with no doc shows its source. A
-  name that resolves to nothing says so."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol :seon.ref/depth] :map]}
-  [db sym depth]
-  (let [m (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))) meta)
-        src (source-of db sym)
-        doc (cond-> {:symbol sym}
-              (:arglists m) (assoc :arglists (:arglists m))
-              (:doc m) (assoc :doc (:doc m))
-              (:malli/schema m) (assoc :contract (:malli/schema m)))
-        n (some-> src select/estimate)]
-    (cond
-      (and (nil? m) (nil? src)) {:symbol sym :unresolved true :problem (:unresolved ref/problem-messages)}
-      (= :summary depth) (cond-> (select-keys doc [:symbol :arglists]) (:doc m) (assoc :summary (ref/lead-sentence (:doc m))))
-      (or (nil? src) (and (= :doc depth) (:doc m))) doc
-      (<= n reference-tokens) {:symbol sym :source src}
-      :else (assoc doc :left-out (str "its source, about " n " tokens, over the context's " reference-tokens)
-                       :read (list 'clojure.repl/source sym)))))
 
 (defn found
   "The helpers the plan does not name (R4's lever, from the call graph): the program functions
@@ -74,7 +41,7 @@
         hits (->> pairs (map second) (remove #(or (named %) (macro? %))) frequencies
                   (sort-by (juxt (comp - score) (comp str key))) (mapv key))
         [shown more] (print/bounded hits :seon.config.render/found "(my.agent/callees 'ns/f) of each cited var")]
-    (cond-> (mapv #(resolve-ref db % :doc) shown) more (conj more))))
+    (cond-> (mapv #(docs/resolve-ref db % :doc) shown) more (conj more))))
 
 (defn- summary-of
   "Var sym's first doc sentence: its runtime doc, else the docstring of its recorded form;
@@ -82,7 +49,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :string]]}
   [db sym]
   (some-> (or (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))) meta :doc)
-              (let [f (binding [*read-eval* false] (read-string (or (source-of db sym) "nil")))]
+              (let [f (binding [*read-eval* false] (read-string (or (docs/source-of db sym) "nil")))]
                 (when (and (seq? f) (string? (nth f 2 nil))) (nth f 2))))
           ref/lead-sentence))
 
@@ -109,19 +76,6 @@
                                    [[] 0] lines)]
                :when (seq vs)]
            {:ns ns :vars (first shown) :all (list 'clojure.repl/dir ns)}))))
-
-(defn- cited-view
-  "What citation c asks to see, at its depth: a wiki section from main's sections, else a file of
-  the checkout read now (never stored), else a task by its ns/name, else a namespace; a
-  citation that reaches nothing says so, as an unresolved name does."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :map]}
-  [db {:seon.ref/keys [name path anchor depth]}]
-  (let [a (or (some-> name str) (str path (when anchor (str "#" anchor))))]
-    (or (some-> (if name
-                  (if (qualified-symbol? name) (ref/task-view db name depth) (ref/namespace-view db name depth))
-                  (or (when anchor (docs/view db a depth)) (ref/file-view db (cfg/checkout) path anchor depth)))
-                (assoc :seon.ref/depth depth))
-        {:seon.ref/address a :unresolved true :problem (:unresolved ref/problem-messages)})))
 
 (defn- failure
   "A failing assertion as the agent reads it (the test AI render): the assertion as written
@@ -279,13 +233,11 @@
   [db t {:keys [results reds last-items turn max-turns unmerged truncated? reasons run-errors source repairs will-merge tests messages message-ids]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
-        task? #(and (qualified-symbol? (:seon.ref/name %)) (ref/task? db (:seon.ref/name %)))
-        refs (filterv #(and (qualified-symbol? (:seon.ref/name %)) (not (task? %))) cites)
+        refs (filterv #(= :var (docs/citation-kind db %)) cites)
         named (into (set proofs) (map :seon.ref/name) refs)
         helpers (found db named (into (mapv :seon.ref/name refs) (sort-by str proofs)))
         nsmap (ns-map db (into (vec (sort-by str proofs)) (map :seon.ref/name) refs))
-        sections (into [] (comp (filter #(or (simple-symbol? (:seon.ref/name %)) (task? %) (and (:seon.ref/path %) (not (:seon.ref/problem-kind %)))))
-                                (map #(cited-view db %)))
+        sections (into [] (comp (filter #(= :view (docs/citation-kind db %))) (map #(docs/cited-view db %)))
                        cites)]
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])
                           ;; the plan as it accumulated along :needs (prerequisites first)
@@ -293,7 +245,7 @@
              ;; a passing proof is its status; a red or unrun one shows its source, its failures
              ;; and the program functions it calls; one not defined yet says so
              :proofs (vec (for [p (sort-by str proofs)
-                                :let [src (source-of db p)
+                                :let [src (docs/source-of db p)
                                       ;; no result: not written yet, the run failed as a whole, or it asserted nothing
                                       st (get results p (cond (nil? src) :undefined (seq run-errors) :not-run :else :no-assertions))
                                       fs (filter #(= p (:test %)) reds)]]
@@ -304,7 +256,7 @@
              ;; a reference already shown as a proof is not shown twice; the names that resolve
              ;; to nothing are one entry, their problem said once
              :references (let [rs (into [] (comp (remove (comp (set proofs) :seon.ref/name))
-                                                 (map #(resolve-ref db (:seon.ref/name %) (:seon.ref/depth %))))
+                                                 (map #(docs/resolve-ref db (:seon.ref/name %) (:seon.ref/depth %))))
                                         refs)
                                {gone true there false} (group-by (comp boolean :unresolved) rs)]
                            (cond-> (vec there)

@@ -273,7 +273,7 @@
 (deftest an-unresolved-citation-says-what-to-do
   ;; task seon.task/a-task-cites-what-it-needs: a name the plan cites that resolves to
   ;; nothing tells the agent what that means and what to do, not only that it is unresolved
-  (let [r (context/resolve-ref (db-with-program) 'demo/nowhere :doc)]
+  (let [r (seon.docs/resolve-ref (db-with-program) 'demo/nowhere :doc)]
     (is (:unresolved r))
     (is (string? (:problem r)) "a message beside the name")))
 
@@ -444,8 +444,8 @@
     (eval '(defn big "Does much." {:malli/schema [:=> [:cat] :int]} [] 1)))
   (let [src (str "(defn big \"Does much.\" [] " (str/join " " (repeat 4000 "(inc 1)")) ")")
         db (d/db-with (db-with-program) (program-facts [['ctx-big/big src []]]))
-        r (context/resolve-ref db 'ctx-big/big :code)]
-    (is (< context/reference-tokens (select/estimate src)) "the source is over the cap")
+        r (seon.docs/resolve-ref db 'ctx-big/big :code)]
+    (is (< seon.docs/reference-tokens (select/estimate src)) "the source is over the cap")
     (is (= "Does much." (:doc r)) "the doc instead")
     (is (nil? (:source r)) "no source cut short")
     (is (= '(clojure.repl/source ctx-big/big) (:read r)) "the form that reads the rest")

@@ -5,7 +5,7 @@
   root: a cost proof for the recursion). Run: bin/test seon.render-cost-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.web.html]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.task] [seon.repl]))
 
 (def ^:private fan "Children per node: a tree as deep as log3 n (10,000 nodes: 9 levels)." 3)
 
@@ -108,3 +108,71 @@
      ;; where the count of every datom it no longer does took 1.7 / 8.4 / 33.4 ms
      :per-n {:calls 26}
      :sizes [100 400 1000]}))
+
+(defn agent-of
+  "The input of size n: the test store's seed with root, its agent a1 and n evaluations of a1 (one
+  neighbour each, by the reverse ref :seon.cluster.eval/_agent), each evaluation's record as an
+  agent's REPL writes it (seon.repl/record-tx); and a1's eid."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any pos-int?]]}
+  [n]
+  (let [db (reduce d/db-with (ts/test-db)
+                   [[{:seon.root/id :root :seon.root/boot "b1"}]
+                    (seon.task/agent-tx "b1" :a1 {:status :idle})
+                    (seon.repl/record-tx {:seon.agent/key "b1/a1" :seon.agent/id :a1} "a1-7-1"
+                                         (vec (for [i (range n)] {:id i :tag :ret :form "(+ 1 2)" :printed "3"})) nil)])]
+    [db (:db/id (d/entity db [:seon.agent/key "b1/a1"]))]))
+
+(deftest a-walk-reads-its-entity-and-one-hop
+  (cost/proof
+    {:of 'seon.render/walk :input 'seon.render-cost-test/agent-of
+     :n "evaluations of the walked agent (its neighbours by :seon.cluster.eval/_agent)"
+     :work (str "two pulls: the agent's own attributes, then its ref units (its runs, its evaluations, its root), "
+                "each neighbour's own attributes and no further (its refs stay {:db/id}); per evaluation, one node: "
+                "its schema by one map lookup per key (seon.render/entity-schema), its prose (texts: prose? of its one "
+                "string, its id, which is no prose, so nothing is parsed) and the citation pass over none (cite). "
+                "Not sized here: card-many forward refs and components (pulled whole, as pull gives them); "
+                "citations: a-walk-pulls-each-citation-once")
+     :growth :linear
+     ;; entity-schema, texts, prose? of :seon.cluster.eval/id, cite: measured 419 / 4,019 calls at 100 / 1,000
+     :per-n {:calls 4}
+     ;; walk, the root's schema, its prose and citations, each unit attribute read forward and its ref test
+     :fixed {:calls 19}
+     :sizes [100 1000 4000]}))
+
+(def ^:private cited-vars
+  "Vars to cite, in a fixed order: the publics of namespaces this test loads (a citation that
+  names nothing loaded is no reference, seon.ref/kept), a plain name each."
+  (vec (sort-by str (for [nsym '[clojure.core clojure.string seon.render seon.print seon.ref seon.docs seon.task seon.contract seon.program seon.repl]
+                          [k _] (ns-publics nsym) :when (re-matches #"[a-z][a-z0-9-]*[?!]?" (name k))]
+                      (symbol (str nsym) (name k))))))
+
+(defn cited-of
+  "The input of size n: the test store's seed with a task whose plan cites n vars (one backtick
+  each, cited-vars), and a run of it whose own plan is the same text; and the run's eid. Walking
+  the run, its own plan pulls each var, and its task's plan cites the same n again."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any pos-int?]]}
+  [n]
+  (let [plan (apply str (for [v (take n cited-vars)] (str "Use `" v "`. ")))
+        db (reduce d/db-with (ts/test-db)
+                   [[{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan plan :seon.task/execution :running
+                      :seon.task/branch :task-demo-f :seon.task/kind :work}]
+                    (seon.task/attempt-start-tx "demo/f#1" "demo/f" "b1" nil {:branch :task-demo-f :model "m" :max-turns 8} 0 plan)])]
+    [db (:db/id (d/entity db [:seon.attempt/id "demo/f#1"]))]))
+
+(deftest a-walk-pulls-each-citation-once
+  (cost/proof
+    {:of 'seon.render/walk :input 'seon.render-cost-test/cited-of
+     :n "distinct vars a run's plan cites, each cited again by its task's plan"
+     :work (str "the run's plan parsed once (seon.ref/references), each name pulled once at its depth "
+                "(seon.docs/cited: its kind, then resolve-ref, at doc depth its arglists, doc and contract); its task's plan "
+                "parsed once, each name found by its address in the walk's index (one map lookup) and only its "
+                "place added. No ref is pulled twice and no list of refs is scanned")
+     :growth :linear
+     ;; per var: seon.ref's parse and keep of its two mentions, its kind and its one pull
+     ;; (citation-kind, resolve-ref, source-of), its second place an index lookup: 22 contracted
+     ;; calls, measured 2,236 / 6,636 / 17,636 at 100 / 300 / 800 vars (not itemized)
+     :per-n {:calls 22}
+     ;; walk, its pulls' setup, each node's prose and citation pass, the run's two plans parsed
+     :fixed {:calls 36}
+     ;; the fixed list holds 837 vars (cited-vars)
+     :sizes [100 300 800]}))

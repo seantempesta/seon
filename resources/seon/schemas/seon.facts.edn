@@ -124,14 +124,16 @@
  :seon.agent/pid :int
  :seon.agent/mem-mb :double
  :seon.agent/running :string
- :seon.agent/description :string
+ :seon.agent/description [:string {:seon.render/prose true}]
  :seon.agent/forked-ms :double
  :seon.agent/ended-ms :int
  :seon.agent/answered-t :int
  :seon.db/eval-fact [:map {:seon.db/attributes true}
                      [:seon.cluster.eval/id :seon.cluster.eval/id] [:seon.cluster.eval/agent :seon.cluster.eval/agent]
                      [:seon.cluster.eval/record :seon.cluster.eval/record]]
- :seon.db/agent-fact [:map {:seon.db/attributes true}
+ ;; an entity's units (seon.render/walk): the neighbours a view of it shows, one hop, as pull's
+ ;; attributes (a leading _ the reverse ref), each rendered by its own schema's render
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/units [:seon.attempt/_agent :seon.cluster.eval/_agent :seon.agent/root]}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/id {:optional true} :seon.agent/id]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status] [:seon.agent/pid {:optional true} :seon.agent/pid]
@@ -144,8 +146,8 @@
  :seon.task/id [:and {:seon.db/identity true} :string]
  :seon.task/ns :symbol
  :seon.task/name :string
- :seon.task/plan :string
- :seon.task/instructions :string
+ :seon.task/plan [:string {:seon.render/prose true}]
+ :seon.task/instructions [:string {:seon.render/prose true}]
  :seon.task/proofs [:set :qualified-symbol]
  :seon.task/needs [:set :seon.db/ref]
  :seon.task/references [:set :qualified-symbol]
@@ -171,7 +173,7 @@
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
  ;; config keys are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
- :seon.task/task-fact [:map {:seon.db/attributes true}
+ :seon.task/task-fact [:map {:seon.db/attributes true :seon.render/units [:seon.task/plan :seon.task/proofs]}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                           [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]
@@ -204,7 +206,7 @@
  :seon.attempt/model :string
  :seon.attempt/max-turns :int
  :seon.attempt/outcome [:enum :green :red :waiting :cap :failed :merge-failed :error :no-end :no-progress]
- :seon.attempt/reason :string
+ :seon.attempt/reason [:string {:seon.render/prose true}]
  :seon.attempt/turns :int
  :seon.attempt/model-calls :int
  :seon.attempt/tokens :int
@@ -240,7 +242,7 @@
  ;; measured at the attempt's end from the branch (seon.problems/caused): the derived problems
  ;; its work made true since its merge base, by message; the done rule refuses while any is open
  :seon.attempt/caused [:set :string]
- :seon.attempt/attempt-fact [:map {:seon.db/attributes true}
+ :seon.attempt/attempt-fact [:map {:seon.db/attributes true :seon.render/units [:seon.attempt/task :seon.turn/_attempt :seon.message/_to]}
                              [:seon.attempt/id :seon.attempt/id] [:seon.attempt/task :seon.attempt/task]
                              [:seon.attempt/status :seon.attempt/status] [:seon.attempt/boot :seon.attempt/boot]
                              [:seon.attempt/agent {:optional true} :seon.attempt/agent] [:seon.attempt/start-ms :seon.attempt/start-ms]
@@ -312,7 +314,7 @@
  :seon.root/stopped :seon.root/end
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
  :seon.root/previous-end :seon.root/end
- :seon.root/root-fact [:map {:seon.db/attributes true}
+ :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/units [:seon.agent/_root]}
                           [:seon.root/id :seon.root/id] [:seon.root/boot :seon.root/boot]
                           [:seon.root/stopped {:optional true} :seon.root/stopped]
                           [:seon.root/previous-end {:optional true} :seon.root/previous-end]
@@ -344,7 +346,7 @@
  :seon.message/from [:and {:seon.db/index true} :string]
  ;; the run it is to (the agent working it takes it)
  :seon.message/to [:and {:seon.db/index true} :seon.db/ref]
- :seon.message/body :string
+ :seon.message/body [:string {:seon.render/prose true}]
  :seon.message/reply-to [:and {:seon.db/index true} :string]
  :seon.message/fact [:map {:seon.db/attributes true} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
                      [:seon.message/to {:optional true} :seon.message/to] [:seon.message/body :seon.message/body]
@@ -353,7 +355,7 @@
  :seon.turn/id [:and {:seon.db/identity true} :string]
  :seon.turn/attempt [:and {:seon.db/index true} :seon.db/ref]
  :seon.turn/n :int
- :seon.turn/reply :string
+ :seon.turn/reply [:string {:seon.render/prose true}]
  :seon.turn/forms :int
  :seon.turn/errors :int
  :seon.turn/red :int
@@ -384,7 +386,7 @@
  ;; the provider's finish_reason, the model that answered, and its reasoning text
  :seon.turn/finish :string
  :seon.turn/model :string
- :seon.turn/reasoning :string
+ :seon.turn/reasoning [:string {:seon.render/prose true}]
  ;; where the turn's time went, as the agent saw it: the proof run, the context render, the
  ;; model round trip, the reply's evaluations, the turn's record (ms)
  :seon.turn/split [:map {:seon.db/data true} [:tests-ms {:optional true} :int] [:context-ms :int]

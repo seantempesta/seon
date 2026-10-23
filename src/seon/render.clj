@@ -23,7 +23,8 @@
        hiccup for :html.
   A nested value renders by a call ([render v opts] in hiccup, or render's result)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
+            [clojure.string :as str] [datahike.api :as d] [seon.ref :as ref] [seon.docs :as docs]))
 
 (def faces "Each face's key." {:html :seon.render/html :ai :seon.render/ai})
 
@@ -136,6 +137,20 @@
     (when-let [sym (if (symbol? own) own (when (nil? own) (declared (schema-of v hint) face)))]
       @(requiring-resolve sym))))
 
+(defn render-name
+  "Which render shows v for face, by name, for every outcome render-of's selection has: v's own
+  override, the face's key when v's own key holds a rendered result, its schema's declared render,
+  else the one printer's (print-ai, print-html). A walk's provenance (parts). Not a step of
+  render-of, which the printer asks of every nested value: a shared step measured three more
+  contracted calls a value (2,254 against 1,947 at 100 attempts,
+  seon.render-cost-test/the-printer-renders-nested-values-in-one-pass)."
+  {:malli/schema [:=> [:cat :any :seon.render/face [:maybe :qualified-keyword]] [:or :symbol :keyword]]}
+  [v face hint]
+  (let [own (own-key v (faces face))]
+    (cond (symbol? own) own
+          (some? own) (faces face)
+          :else (or (declared (schema-of v hint) face) (if (= :ai face) `print-ai `print-html)))))
+
 (defn render
   "v rendered: (render-fn v opts), the function its override or schema names for opts' :face
   (:html, the default, or :ai), else the printer's (print-html, print-ai); a value's own key
@@ -179,3 +194,138 @@
     (let [{t :text :keys [truncated?]} (render v {:face :ai :handle handle :budget print/default-budget})]
       {:text t :tokens (select/estimate t) :truncated? (boolean truncated?)})
     (print/print-value v {:handle handle})))
+
+;; ---- the walk: an entity and the units its schema declares (docs/render.md#the-walk) ----
+
+(def entity-schemas
+  "{attribute schema}: each attribute an entity schema ({:seon.db/attributes true}) names, to that
+  schema. Derived once from the registry (as by-identity); an identity or ref attribute is named
+  by one entity schema (seon.render-test/a-walk-is-its-entity-and-its-units)."
+  (into {} (for [[k form] contract/forms :when (:seon.db/attributes (contract/properties k)) a (map-keys form)] [a k])))
+
+(def ^:private identity-schemas
+  "{identity-attribute schema}: the entity schemas by the upsert keys they name."
+  (into {} (filter (comp identity-attr? key)) entity-schemas))
+
+(defn entity-schema
+  "The schema of pulled entity e: the entity schema naming one of its identity attributes, else
+  the one naming via (the attribute it was reached by, read forward), else nil: no entity schema
+  names it, and the one printer shows it."
+  {:malli/schema [:=> [:cat :map [:maybe :keyword]] [:maybe :qualified-keyword]]}
+  [e via] (or (some identity-schemas (keys e)) (get entity-schemas via)))
+
+(defn- forward
+  "Attribute a read forward: a reverse ref (:ns/_name, pull's syntax) as its own attribute (:ns/name)."
+  {:malli/schema [:=> [:cat :keyword] :keyword]}
+  [a] (if (str/starts-with? (name a) "_") (keyword (namespace a) (str/replace-first (name a) "_" "")) a))
+
+(defn prose?
+  "Is attribute a's value prose (its schema's :seon.render/prose, or the schema it names)? Prose
+  is parsed for its citations; any other string is a name or data, and cites nothing."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [a]
+  (let [form (get contract/forms a)]
+    (boolean (or (:seon.render/prose (contract/properties a)) (and (qualified-keyword? form) (prose? form))))))
+
+(defn- texts
+  "Node nd's prose, as [attribute text] pairs: a :value node's own value when its schema is
+  prose, an entity node's prose attributes in name order."
+  {:malli/schema [:=> [:cat :seon.render/node] [:vector [:tuple :keyword :string]]]}
+  [{:seon.render/keys [kind value schema]}]
+  (if (= :value kind)
+    (if (and (string? value) (prose? schema)) [[schema value]] [])
+    (vec (for [[a v] (sort-by (comp str key) value) :when (and (string? v) (prose? a))] [a v]))))
+
+(defn- address
+  "Citation c's address: its name, or its path and anchor."
+  {:malli/schema [:=> [:cat :seon.ref/citation] :string]}
+  [{:seon.ref/keys [name path anchor]}] (if name (str name) (str path (when anchor (str "#" anchor)))))
+
+(defn- cite
+  "State st ({:refs, each numbered :seon.render/n; :index, each ref's position by its address;
+  :next, the number a new ref takes}) with what node nd's prose cites added: a citation already
+  there gains this place; a new one is pulled once (seon.docs/cited, at the depth it is first
+  cited: a later, deeper citation of it is not pulled again) and numbered next; one that reaches
+  nothing pulled (a keyword, a path:N line reference) is left out. Answers [st' nd'], nd' naming
+  the numbers it cites (:seon.render/cites)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.render/cite-state :seon.render/node] [:tuple :seon.render/cite-state :seon.render/node]]}
+  [db st nd]
+  (let [[st nums]
+        (reduce (fn [[{:keys [refs index next] :as st} nums] [a c]]
+                  (let [at (cond-> {:seon.render/eid (:seon.render/eid nd) :seon.render/attr a} (:seon.ref/line c) (assoc :seon.render/line (:seon.ref/line c)))
+                        k (address c)]
+                    (if-let [i (get index k)]
+                      [(update-in st [:refs i :seon.render/cited-at] conj at) (conj nums (get-in refs [i :seon.render/n]))]
+                      (if-let [[kind v] (docs/cited db c)]
+                        [{:refs (conj refs {:seon.render/n next :seon.render/kind kind :seon.render/address k
+                                            :seon.render/depth (:seon.ref/depth c) :seon.render/value v :seon.render/cited-at [at]})
+                          :index (assoc index k (count refs)) :next (inc next)}
+                         (conj nums next)]
+                        [st nums]))))
+                [st []]
+                (for [[a text] (texts nd) c (ref/references db text)] [a c]))]
+    [st (cond-> nd (seq nums) (assoc :seon.render/cites (vec (distinct nums))))]))
+
+(defn walk
+  "Entity eid on db as one map: :seon.render/root, the entity's node (its own attributes less its
+  units); :seon.render/nodes, a node per unit its entity schema declares (:seon.render/units:
+  pull's attributes, a leading _ the reverse ref), in that order, one hop: a neighbour entity with
+  its own attributes (its refs {:db/id}; its components whole, as pull gives them) or the entity's
+  own value, each saying where it came from; :seon.render/refs, what the nodes' prose cites, each
+  pulled once and numbered, every place that cites it named. Given refs already seen (a context's),
+  they keep their numbers and are not pulled again. Two pulls: its own attributes, then its ref
+  units. db is a branch's, or seon.union's for what spans branches (ids are issued store-wide). An
+  eid with no attributes on db answers :seon.render/no-entity."
+  {:malli/schema [:function [:=> [:cat :seon.host/db pos-int?] [:or :seon.render/walk :seon.render/no-entity]]
+                  [:=> [:cat :seon.host/db pos-int? [:vector :seon.render/ref]] [:or :seon.render/walk :seon.render/no-entity]]]}
+  ([db eid] (walk db eid []))
+  ([db eid seen]
+   (if-let [own (d/pull db '[*] eid)]
+     (let [schema (entity-schema own nil)
+           units (:seon.render/units (contract/properties schema))
+           ref? (fn [a] (or (not= a (forward a)) (= :db.type/ref (get-in (d/schema db) [a :db/valueType]))))
+           refs (when (some ref? units) (d/pull db (into [] (comp (filter ref?) (map (fn [a] {a ['*]}))) units) eid))
+           from (fn [a] {:seon.render/eid eid :seon.render/attr a})
+           root (cond-> {:seon.render/kind :entity :seon.render/value (apply dissoc own units) :seon.render/eid eid}
+                  schema (assoc :seon.render/schema schema))
+           nodes (into [] (mapcat (fn [a]
+                                    (if (ref? a)
+                                      (let [v (get refs a) via (forward a)]
+                                        (map (fn [m] (let [s (entity-schema m via)]
+                                                       (cond-> {:seon.render/kind :entity :seon.render/value m :seon.render/eid (:db/id m) :seon.render/from (from a)}
+                                                         s (assoc :seon.render/schema s))))
+                                             (if (map? v) [v] v)))
+                                      (when (contains? own a)
+                                        [{:seon.render/kind :value :seon.render/value (get own a) :seon.render/schema a
+                                          :seon.render/eid eid :seon.render/from (from a)}]))))
+                       units)
+           st {:refs seen :index (into {} (map-indexed (fn [i r] [(:seon.render/address r) i])) seen)
+               :next (inc (reduce max 0 (map :seon.render/n seen)))}
+           [st root] (cite db st root)
+           [st nodes] (reduce (fn [[st out] nd] (let [[st nd] (cite db st nd)] [st (conj out nd)])) [st []] nodes)]
+       {:seon.render/root root :seon.render/nodes nodes :seon.render/refs (:refs st)})
+     (contract/error :seon.render/no-entity `walk (str "no entity " eid " on this db") {:seon.render/eid eid}))))
+
+(defn- shown
+  "Node or ref x rendered :as as on both faces by its schema's renders (render: none declared, the
+  one printer, whose nested values show by their own), with which render made each face
+  (render-name) and whether the :ai face was cut."
+  {:malli/schema [:=> [:cat :map :seon.render/as :seon.render/opts] :map]}
+  [x as opts]
+  (let [v (:seon.render/value x) schema (:seon.render/schema x)
+        o (assoc opts :as as :schema schema)
+        {:keys [text truncated?]} (render v (assoc o :face :ai))]
+    (assoc x :seon.render/as as
+           :seon.render/ai-by (render-name v :ai schema) :seon.render/html-by (render-name v :html schema)
+           :seon.render/ai-text text :seon.render/truncated? (boolean truncated?)
+           :seon.render/hiccup (render v (assoc o :face :html)))))
+
+(defn rendered
+  "Walk w with every part rendered on both faces (shown): its root :as :block, each unit and ref
+  :as :tile, each saying which render made it, beside what it is and where it came from."
+  {:malli/schema [:=> [:cat :seon.render/walk :seon.render/opts] :seon.render/walk]}
+  [w opts]
+  (-> w
+      (update :seon.render/root shown :block opts)
+      (update :seon.render/nodes (fn [us] (mapv #(shown % :tile opts) us)))
+      (update :seon.render/refs (fn [rs] (mapv #(shown % :tile opts) rs)))))

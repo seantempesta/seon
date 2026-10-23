@@ -223,7 +223,7 @@
         (cond-> (-> (assoc st :turn (inc turn) :tokens (when (and tokens used) (+ tokens used)) :calls (mapv :code calls))
                     ;; what this turn's block showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
-                                                 :shown {'seon.context/resolve-ref (set (keep :symbol (:references block)))
+                                                 :shown {'seon.docs/resolve-ref (set (keep :symbol (:references block)))
                                                          'seon.context/found (set (keep :symbol (:found block)))
                                                          'seon.context/current-state (set (map :test (:proofs block)))}
                                                  :items (mapv (fn [it] {:form (:form it) :error (:err it)}) items)}))
