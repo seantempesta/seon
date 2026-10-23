@@ -25,6 +25,10 @@ Not covered yet:
 
 A law the compiler's facts answer exactly is a derived class too: `seon.problems/laws` holds each one as data (the fact that marks a site, the page that must name it, the check drivers it leaves out), and `seon.problems/unnamed-sites` lists each site whose page does not cite its function (`:unnamed-site`). A site is a form of Seon's own `src` (bin/laws scans src): an agent's app and any test are not, since a deftest's `is` expands to a catch (found by e2e-newns, whose agent's test was refused done for it). Today that is `catch`, whose sites from `:form/catches` are exactly `bin/laws`' 26 (measured 2026-10-23). Clocks, measures and resolution stay `bin/laws`' text scan until the compiler's facts can tell their sites: a host member is recorded as `jolt.host/static-member`, not by its name, and a quoted symbol counts as a ref.
 
+## A red test
+
+The test service ([merging](merging.md#the-test-service)) leaves a fact per test digest on main. `seon.problems/report` reads the newest result of each test (`:test-red`, area tests): a red one is an open row naming the test, the branch and tx it ran at, and the agent that asked. A later green at a new digest is a newer result, so the row is gone with nothing written; the red fact stays as history.
+
 ## Checks are callers of Seon
 
 `bin/check health [CLASS ...]` (`seon.check/health-check`) is the one check of these classes. It boots Seon on the checkout's source and task files, loads the wiki, prints each open row of the derived classes, and ends `HEALTH OK` or `HEALTH FAILED`. `bin/laws catch` calls it for `:unnamed-site`; it checks nothing of its own. Not this: a second checker over the files (`bin/check docs` beside the class).

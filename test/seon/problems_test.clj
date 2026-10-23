@@ -548,6 +548,15 @@
         (is (= 1 (:count (row after))) "the record is kept"))
       (testing "the context marks it closed"
         (is (re-find #"\(closed\)" (render/ai (problems/report after) {})))))
+    (testing "the citing section's link is changed to an existing target: closed, nothing written (the target never appears)"
+      (let [dbc (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/a.md" "# A\n\nIt links to [b](b.md#nowhere).\n" "demo/c.md" "# C\n\nThe other.\n"}))
+            err (d/db-with dbc [{:seon.error/signature "cccccccccccccccc" :seon.error/class :platform :seon.error/count 1
+                                 :seon.error/agents 0 :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/type :seon.docs/refused
+                                 :seon.error/example {:seon.error/type :seon.docs/refused :seon.ref/address "demo/b.md#nowhere" :seon.section/address "demo/a.md#a"}}])
+            rowc #(first (filter (fn [r] (= "cccccccccccccccc" (:signature r))) (get-in (problems/report %) [:classes :platform :rows])))
+            fixed (d/db-with err (seon.docs/load-tx err "demo" {"demo/a.md" "# A\n\nIt links to [c](c.md).\n" "demo/c.md" "# C\n\nThe other.\n"}))]
+        (is (not (false? (:open? (rowc err)))) "the citing section still has the link")
+        (is (false? (:open? (rowc fixed))))))
     (testing "a named subject: open until a fact of the var is written after the error"
       (let [v (:v (first (d/datoms db0 :aevt :var/name)))
             e (:e (first (d/datoms db0 :aevt :var/name)))
