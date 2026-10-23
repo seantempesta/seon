@@ -1,0 +1,47 @@
+[{:seon.task/name "one-content-keyed-derivation"
+  :seon.task/plan "Filed by worktree session agent-view, 2026-10-23, at the owner's question: one universal cache, with easy rules for when to recompute, shared by every worker. It is a new mechanism, so it goes through root's gate (AGENTS §3) before it is built. It must meet AGENTS §5: \"Results are reused by input digest\" and \"Content-keyed reuse is allowed for units measured as expensive; no other caches, and never one keyed by time.\"
+
+What exists. There are about a dozen separate reuse mechanisms, sharing nothing but `seon.error/digest`:
+- test and check results by reach digest, in ../test-results and as :seon.proof/digest facts: `seon.proofs/plan`, `seon.prove`;
+- main's reach graph, kept by the fork server and inherited copy-on-write (`seon.agent/base-graph`);
+- Jolt's compile and AOT caches (bin/env);
+- bin/build stamps;
+- the source-import digest (`seon.root/import-source!`);
+- the render proc's per-unit input equality, `:turn-ctx` and `:tiles`;
+- `seon.render.proc/ordered`, reused by identity or for 1000 ms: a reuse keyed by time, which §5 forbids;
+- Datahike's node cache, bounded by size;
+- small `delay`s and a per-call `memoize`.
+
+Work repeated although its inputs are identical (survey of 2026-10-23, file:line in notes):
+- `seon.context/attempt-text` rebuilds the first turn's whole context on every later turn, to take one message that is byte-identical for the attempt (docs/render.md#the-models-context-a-cached-prefix-then-the-turn). Every later turn therefore builds current-state twice.
+- `seon.context/help-text` reassembles docs/agent.md (2,132 tokens) for every turn of every agent.
+- `seon.render.proc/turn-text` and `seon.context/recorded` remake a turn's context on each request.
+- bin/test's selection takes 7-12 s on an unchanged tree: import about 8 s plus digests about 0.7 s (docs/merging.md#a-merge-runs-what-the-change-reaches; docs/source.md#tests-run-by-reach).
+- A prove agent on main builds the full reach graph, 640 ms and 816 MB.
+- The seon binary rebuilds on an unchanged tree in about 25 s, and seon.fx/build rebuilds a generation that already exists.
+- The test service is keyed by branch@t, so two branches with identical content both run.
+
+v1's answer (~/src/seon/src/seon/cache.clj) was one per-process `seon.cache` used at about 84 sites:
+- each entry keyed [kind content-key], the key a digest of the inputs, never time;
+- nothing invalidated, only evicted by size under one byte budget (512 MB, W-TinyLFU);
+- compute-once per key (concurrent callers wait on the first caller's future);
+- measured: a hit 150-220 ns; misses it saved averaged 90-650 ms.
+
+It is built on Caffeine, CompletableFuture and virtual threads: JVM-only, but the design ports. It was never shared across processes; its durable shared part was test evidence in the store.
+
+The design (one mechanism; no memcached: every worker is a forked process on one LMDB store, which is already shared memory through the OS page cache):
+- `(seon.derive/derived kind inputs f)` answers (f) for the digest of exactly the inputs f reads (a commit id, form digests, a schema digest, a file digest). A changed input is a new key: nothing is invalidated by hand, and nothing is keyed by time.
+- Tier 1, per process: a table of promises, compute-once per key, evicted by size only under :seon.config.derive/max-bytes. Values the fork server derives before it forks (the help page at main's commit, an attempt's sections at its first turn's commit, main's reach graph) reach every agent copy-on-write.
+- Tier 2, durable and shared: the value under its key in the one store (konserve key derived/<kind>/<digest>), written by root. Root's derive proc answers an ask for [kind digest] with the stored value, joins one in flight, or runs it once and stores it. This generalizes the prove proc, which already joins a session's and an agent's run for one digest. Reclaiming durable space is the owner's act, as for runs.
+- Each kind is declared as data: its inputs, its measured hit and miss cost and value bytes, and its cost proof. A kind without a measured miss cost is refused (§5: only units measured as expensive).
+
+It replaces: the per-site reuse in `seon.agent/base-graph`, the render proc's `:turn-ctx`, `seon.render.proc/ordered`'s time window, and `seon.context/attempt-text`'s second build. It generalizes ../test-results and :seon.proof/digest facts into kind :test-result (their files and facts keep their shape). It deletes the ad-hoc holders. Jolt's caches, Datahike's node cache and bin/build stamps stay as they are: they are a dependency's or the build's.
+
+Order: measure each candidate's miss cost first (REPL, n ≤ 100); build the mechanism with one kind, the attempt sections; add kinds one at a time, each with its proof."
+  :seon.task/kind :design
+  :seon.task/proofs #{seon.derive-test/a-changed-input-is-a-new-key
+                      seon.derive-test/one-key-is-computed-once-across-callers
+                      seon.derive-test/a-kind-without-a-measured-cost-is-refused
+                      seon.derive-test/eviction-is-by-size-only
+                      seon.derive-test/an-agent-reads-what-the-fork-server-derived
+                      seon.context-test/a-later-turn-builds-its-current-state-once}}]
