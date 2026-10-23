@@ -7,7 +7,7 @@
   `render` makes the text from it, for the model and again for anyone who reads it later."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
-            [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
+            [seon.task :as task] [seon.merge :as pm]
             [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [clojure.edn]))
 
 (def help-page
