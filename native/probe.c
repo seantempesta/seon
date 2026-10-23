@@ -10,8 +10,6 @@
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
 #include <stdio.h>
-#include <errno.h>
-#include <sys/event.h>
 #include <string.h>
 
 typedef struct { unsigned long long res, snp, dirty, swap, cow_res, prv_res, oth_res, vsz, nreg; } acc_t;
@@ -99,28 +97,4 @@ long e13_poll1(int fd, int ms) {
   struct pollfd p = { fd, POLLIN, 0 };
   int r = poll(&p, 1, ms);
   return r;
-}
-
-// The fork server's one wait (seon.fork-server/main): its socket readable, or a child it
-// watches exited, whichever comes first, with no timeout. kq is a kqueue (e13_kq_new); a child
-// is watched by e13_kq_watch (EVFILT_PROC, NOTE_EXIT, one-shot). Answers 0 when fd is readable
-// (or at EOF), the pid of a child that exited (the caller waitpids exactly that pid), -1 on an
-// error. A signal restarts the wait.
-long e13_kq_new(void) { return kqueue(); }
-long e13_kq_watch(int kq, int pid) {
-  struct kevent ev;
-  EV_SET(&ev, pid, EVFILT_PROC, EV_ADD | EV_ONESHOT, NOTE_EXIT, 0, NULL);
-  if (kevent(kq, &ev, 1, NULL, 0, NULL) == 0) return 0;
-  return errno == ESRCH ? -1 : -2; // -1: already gone, the caller waitpids it; -2: an error
-}
-long e13_wait(int kq, int fd) {
-  struct kevent ch, ev;
-  EV_SET(&ch, fd, EVFILT_READ, EV_ADD, 0, 0, NULL); // level-triggered: unread input fires again
-  for (;;) {
-    int r = kevent(kq, &ch, 1, &ev, 1, NULL);
-    if (r < 0 && errno == EINTR) continue;
-    if (r < 1) return -1;
-    if (ev.flags & EV_ERROR) return -1;
-    return ev.filter == EVFILT_PROC ? (long)ev.ident : 0;
-  }
 }

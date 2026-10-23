@@ -15,26 +15,16 @@
             [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]
             [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx]))
 
-(defn- reaped
-  "Child pid, which exited (kqueue's NOTE_EXIT, seon.lib/kq-wait) or was already gone when it was
-  watched: waited for exactly, so the wait is the reap, and its :exit event. Answers [st events]."
-  {:malli/schema [:=> [:cat :map :seon.lib/pid] [:tuple :map [:vector :seon.fork-server/event]]]}
-  [st pid]
-  (when-not (= pid (lib/c-waitpid pid (:status-buf st) 0))
-    (throw (ex-info "the fork server cannot wait for a child it watched" {:pid pid})))
-  [(update st :children disj pid)
-   [{:ev :exit :pid pid :status (lib/decode-status (ffi/read (:status-buf st) :int))}]])
-
-(defn- adopt
-  "Child pid, now this server's to reap: watched for its exit, so its :exit is a command when it
-  comes. One already gone cannot be watched and is reaped now. Answers [st events]."
-  {:malli/schema [:=> [:cat :map :seon.lib/pid] [:tuple :map [:vector :seon.fork-server/event]]]}
-  [st pid]
-  (let [st (update st :children conj pid) r (lib/kq-watch (:kq st) pid)]
-    (case (int r)
-      0 [st []]
-      -1 (reaped st pid)
-      (throw (ex-info "the fork server cannot watch a child" {:pid pid})))))
+(defn- reap
+  "Every child that exited, as :exit events (non-blocking waitpid), and st without them in
+  its :children. Answers [st events]."
+  {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :seon.fork-server/event]]]}
+  [st]
+  (loop [st st evs []]
+    (let [pid (lib/c-waitpid-nb -1 (:status-buf st) 1)]
+      (if (pos? pid)
+        (recur (update st :children disj pid) (conj evs {:ev :exit :pid pid :status (lib/decode-status (ffi/read (:status-buf st) :int))}))
+        [st evs]))))
 
 (declare main)
 
@@ -48,16 +38,16 @@
                 :child #(do (sock/close! (:fd conn)) (sock/close-pending-fds! conn) (child fd))})))
 
 (defn server-step
-  "The fork server's step-fn. In :cmd ({:op :tx|:fork|:stats|:static|:exit}: :exit is a child
-  that exited, by its pid); out :ev (events for root). The fork is this process's own
+  "The fork server's step-fn. In :cmd ({:op :tx|:fork|:stats|:static}, and :tick when the
+  pipe is idle, to reap); out :ev (events for root). The fork is this process's own
   effect: the child never returns from the step (it becomes the agent)."
   {:malli/schema :seon.step/step-fn}
-  ([] {:ins {:cmd "main's commits and fork requests, FIFO; a child's :exit"} :outs {:ev "events for root"}
+  ([] {:ins {:cmd "main's commits and fork requests, FIFO; :tick when idle"} :outs {:ev "events for root"}
        :workload :io
        :ping-map-fn (fn [st] {:t (:max-tx (:db st)) :mismatch (:mismatch st)})})
   ;; :graph, main's reach graph (seon.program/reach-graph) for :db as of the last fork, handed
   ;; to every agent forked (seon.agent/base-graph); a standby inherits it
-  ([{:keys [db cfg store conn graph kq]}] (cond-> {:db db :cfg cfg :store store :mismatch 0 :conn conn :kq kq :status-buf (ffi/alloc 4) :children #{}} graph (assoc :graph graph)))
+  ([{:keys [db cfg store conn graph]}] (cond-> {:db db :cfg cfg :store store :mismatch 0 :conn conn :status-buf (ffi/alloc 4) :children #{}} graph (assoc :graph graph)))
   ;; stop (root closed its end, or died): every child (agents, the standby) killed and reaped
   ;; before this process exits, so root's waitpid of this server is the end of every one of
   ;; them. An agent that had closed its socket but not yet exited was handed to launchd when
@@ -69,7 +59,7 @@
    st)
   ([st _ m]
    (case (:op m)
-     :exit (let [[st evs] (reaped st (:pid m))] [st {:ev evs}])
+     :tick (let [[st evs] (reap st)] [st {:ev evs}])
      :tx (if (<= (:t m) (:max-tx (:db st)))
            [st nil] ; already in the db this server was forked with
            (let [t0 (profile/now-ns)
@@ -91,7 +81,7 @@
                                        (program/reach-graph (:db st) (fx/declared-refs (cfg/value :seon.config.root/system-path)))))]
              (fork-carrying! st #(repl/run! % (assoc m :graph (:graph st)) (:db st) (:ns m))
                              (fn [n] [st {:ev [{:ev :fork-failed :agent (:agent m) :active-threads n}]}])
-                             (fn [pid] (let [[st evs] (adopt st pid)]
+                             (fn [pid] (let [[st evs] (reap (update st :children conj pid))]
                                          [st {:ev (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
                                                           :fork-ms (profile/ms-since t0) :t (:max-tx (:db st))}]
                                                         evs)}]))))
@@ -105,7 +95,7 @@
      :standby (fork-carrying! st #(main (:db st) (:cfg st) % false (:graph st))
                               (fn [n] [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads n}]}])
                               (fn [pid] (when-let [old (:standby-pid st)] (lib/c-kill old 9))
-                                (let [[st evs] (adopt (assoc st :standby-pid pid) pid)]
+                                (let [[st evs] (reap (-> st (assoc :standby-pid pid) (update :children conj pid)))]
                                   [st {:ev (into [{:ev :standby :gen (:gen m) :pid pid :t (:max-tx (:db st))}] evs)}])))
      [st nil])))
 
@@ -139,17 +129,9 @@
   (pdb/after-fork! cfg)
   (let [conn (sock/conn fd)
         store (d/connect (assoc cfg :branch (pdb/main-branch cfg)))
-        ;; one wait on its two dependencies, root's socket and a child's exit (no timeout)
-        kq (lib/kq-new)
-        recv! (fn [] (loop []
-                       (let [m (sock/next-frame! conn)]
-                         (if (= :none m)
-                           (let [r (lib/kq-wait kq fd)]
-                             (cond (neg? r) (throw (ex-info "the fork server's wait failed" {:fd fd}))
-                                   (pos? r) [:cmd {:op :exit :pid r}]
-                                   :else (recur)))
-                           (case m :eof nil [:cmd m])))))]
-    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :kq kq :graph graph}
+        recv! (fn [] (let [m (sock/recv-within! conn 100)]
+                       (case m :eof nil :timeout [:cmd {:op :tick}] [:cmd m])))]
+    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :graph graph}
                    recv! (fn [_ m] (sock/send! fd m)))
     (lib/c-kill 0 9)
     (lib/c-exit 0))))
