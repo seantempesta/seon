@@ -3,6 +3,8 @@
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in notes/archive/DECISIONS-superseded.md.
 
 ## Tonight's rulings (2026-10-23, with the 2026-10-21/22 rulings they rest on)
+### Reuse every unique, immutable result that is proven the same and expensive to make
+Owner, 2026-10-23: "I want reuse of all unique and immutable data we are sure is the same and is expensive to render". A pure computation's result is reused wherever its inputs are the same by content: keyed by the digest of exactly what it reads (content ids, the reach walk's digests), shared across branches, sessions and worktrees, and only for units measured as expensive (AGENTS §5). Anything that reads the clock, the network or a model, or launches a process, is not reused; the reach walk classifies it. One mechanism serves every such result, in `src`, `test` or `bin`, and it replaces the per-case caches it covers. Stated in: not yet (owed AGENTS §5 and the section of task `seon.derive/one-content-keyed-derivation`).
 ### Fork URLs are the GitHub forks
 Owner, 2026-10-23: quote not recorded; relayed by root. `.gitmodules` names the forks at `seantempesta/*` over https, not a local path or the module store. Stated in: docs/forks.md (owed its rewrite when the URLs change).
 ### The project root is `~/src/seon-next`; worktrees live inside it at `.worktrees/NAME`; nothing refers to `~/src/seon-jolt`
