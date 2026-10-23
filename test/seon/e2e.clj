@@ -10,41 +10,12 @@
   Each run ends on what the system observes (the reconciler's quiescence report, an event,
   or a fact on main), never on a deadline. Prints one EDN line per phase; the last line is
   the run's numbers and its verdict."
-  (:require [seon.root :as c] [my.root :as root] [seon.task :as task] [seon.context :as context] [seon.reconcile :as r]
+  (:require [seon.await :as await] [seon.root :as c] [my.root :as root] [seon.task :as task] [seon.context :as context] [seon.reconcile :as r]
             [seon.fixtures :as fx] [datahike.api :as d] [seon.lib :as lib] [clojure.string :as str] [seon.config] [clojure.java.shell :as sh]
             [clojure.core.async :as a] [seon.server :as server] [seon.contract :as contract]))
 
 (defn- now [] (System/currentTimeMillis))
 (defn- db [sys] @(:conn sys))
-
-(defn await-db
-  "Main's first db value (now or after a later commit) for which (pred db) holds: a watch
-  on main's connection runs pred once per commit. No deadline, no polling."
-  [sys pred]
-  (let [p (promise) k (keyword "seon.e2e" (str "await-" (random-uuid)))
-        a (:wrapped-atom (:conn sys))]
-    (add-watch a k (fn [_ _ _ db] (when (pred db) (deliver p db))))
-    (let [db @(:conn sys)] (when (pred db) (deliver p db)))
-    (let [db @p] (remove-watch a k) db)))
-
-(defn- defect
-  "A root proc's defect (a :platform problem) whose record main wrote after t, or nil:
-  facts, not clocks."
-  [db t]
-  (some #(when (some (fn [dt] (> (:tx dt) t)) (d/datoms db :eavt (:e %) :seon.error/last-ms)) (into {} (d/entity db (:e %))))
-        (filter #(= :platform (:v %)) (d/datoms db :aevt :seon.error/class))))
-
-(defn await-quiet
-  "The reconciler's quiescence report ({:t :root-causes}) for main at or after t: nothing runs,
-  nothing is left to judge, nothing is ready. Waits as long as work goes on, or until a
-  root proc's defect is recorded on main after t ({:ended :defect :problem p}): a step
-  that threw dropped its outputs, so the flight it carried never ends and quiescence never
-  comes. No clock."
-  [sys t]
-  (let [db (await-db sys #(or (when-let [q (r/quiescent %)] (>= (:t q) t)) (defect % t)))]
-    (if-let [q (and (r/quiescent db) (>= (:t (r/quiescent db)) t) (r/quiescent db))]
-      q
-      (let [p (defect db t)] (println :defect p) {:ended :defect :problem p}))))
 
 (defn- release!
   "Write specs' program on main, then their tasks in task namespace tns (each with
@@ -102,14 +73,14 @@
     (a/untap (:events-mult sys) ev)
     (let [r @(c/submit! sys ag forms)] (c/kill! sys ag) (if (contract/error? r) r (mapv :printed r)))))
 
-(defn- quiet! "await-quiet from main's t now." [sys] (await-quiet sys (:max-tx (db sys))))
+(defn- quiet! "await/await-quiet from main's t now." [sys] (await/await-quiet sys (:max-tx (db sys))))
 
 (defn- verdict!
   "Stop root and give the run's verdict: ok, and no root proc defect recorded on the run's
   main (its own store), read before root stops; printed as LABEL OK or LABEL FAILED."
   ([sys ok] (verdict! sys ok "E2E"))
   ([sys ok label]
-   (let [p (defect (db sys) 0) ok (and ok (nil? p))]
+   (let [p (await/defect (db sys) 0) ok (and ok (nil? p))]
      (c/stop! sys)
      (when p (println :defect p))
      (println label (if ok "OK" "FAILED")) ok)))
@@ -237,7 +208,7 @@
       {:boot boot :ok (fn [{:keys [sys d]}] (assoc (all-done d) :recovered (get-in (c/state sys) [:store :recovered-branches])))}
       {:boot boot :specs fx/calc :tns 'calc
        :during (fn [sys _]
-                 (await-db sys #(let [idx (r/index %)] (and (r/done? idx "calc/add-merge") (seq (r/running idx)))))
+                 (await/await-db sys #(let [idx (r/index %)] (and (r/done? idx "calc/add-merge") (seq (r/running idx)))))
                  (println :running-at-kill (r/running (r/index (db sys))))
                  (flush)
                  (lib/c-kill (lib/c-getpid) 9))})))

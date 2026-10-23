@@ -7,7 +7,7 @@
   actions out as requests to the api, each action's facts written by the writer."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
-            [seon.task :as task] [seon.proofs :as proofs] [seon.merge :as pm] [seon.source :as source]
+            [seon.task :as task] [seon.proofs :as proofs] [seon.merge :as pm] [seon.program :as program] [seon.source :as source]
             [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
             [seon.config :as cfg]))
 
@@ -187,26 +187,17 @@
         (update-in [:by-task tid] (fnil (if a conj disj) #{}) aid))))
 
 (defn- downstream
-  "ids and every task that needs one of them, transitively (a walk over :needed-by)."
+  "ids and every task that needs one of them, transitively (seon.program/closure over :needed-by)."
   {:malli/schema [:=> [:cat :seon.reconcile/index [:set :seon.task/id]] [:set :seon.task/id]]}
-  [idx ids]
-  (loop [front (vec ids) seen (set ids)]
-    (if-let [[x & more] (seq front)]
-      (let [ns (remove seen (get-in idx [:needed-by x]))] (recur (into (vec more) ns) (into seen ns)))
-      seen)))
+  [idx ids] (into (set ids) (program/closure ids #(get-in idx [:needed-by %]))))
 
 (defn- topo
-  "ids and every task that needs one of them, transitively, each after its needs among them."
+  "ids and every task that needs one of them, transitively, each after its needs among them
+  (seon.program/topo; ties by id)."
   {:malli/schema [:=> [:cat :seon.reconcile/index [:set :seon.task/id]] [:vector :seon.task/id]]}
   [idx ids]
-  (let [all (downstream idx ids)
-        deg (into {} (for [x all] [x (count (filter all (get-in idx [:tasks x :seon.task/needs])))]))]
-    (loop [q (vec (sort (filter #(zero? (deg %)) all))) deg deg out []]
-      (if-let [[x & more] (seq q)]
-        (let [nb (filter all (get-in idx [:needed-by x]))
-              deg (reduce #(update %1 %2 dec) deg nb)]
-          (recur (into (vec more) (sort (filter #(zero? (deg %)) nb))) deg (conj out x)))
-        out))))
+  (let [all (downstream idx ids)]
+    (program/topo (vec all) #(filter all (get-in idx [:tasks % :seon.task/needs])) identity)))
 
 (defn- classify
   "Attempt aid's place in the sets actions reads: live, reap, kill (with the reason), judge
