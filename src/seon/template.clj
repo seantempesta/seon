@@ -14,7 +14,7 @@
     `request-tx` writes the whole linked set released in one transaction (owner,
     2026-10-22): the reconciler forks only from a committed main, so every agent of the
     set starts from the same graph.
-  A failed attempt attaches no tasks: its task is held for root (seon.reconcile/hold-tx)."
+  A failed run attaches no tasks: its task is held for root (seon.reconcile/hold-tx)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.task :as task] [clojure.string :as str]))
 
@@ -46,7 +46,7 @@
                 "  (my.task/update! :seon.task/plan str \"\\n\\nWhat the implement step changes: ...\")\n"
                 "(the :do of :proof-unknown under :refused is that deftest's skeleton), and explore only what that leaves open. Otherwise explore first: "
                 "find the owners of what it touches, their callers, the schemas on the data's path and the library functions that already "
-                "do the work, and try the idea at the REPL. If an earlier attempt failed, start from its evidence. A name cited in the plan between three backticks (``ns/f`` written with three on each side) shows its source in "
+                "do the work, and try the idea at the REPL. If an earlier run failed, start from its evidence. A name cited in the plan between three backticks (``ns/f`` written with three on each side) shows its source in "
                 "your context on every turn (a source over the cap shows its doc and how to :read it): cite there each function you must read "
                 "or change, and read it there rather than calling clojure.repl/source again. "
                 "Leave on this branch: (1) the plan rewritten with `my.task/update!`: what must become true, each function the implement step "

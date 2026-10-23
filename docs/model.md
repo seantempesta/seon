@@ -4,7 +4,7 @@ An agent's turns are answered by one function of a provider value and a request,
 
 ## No default model
 
-A root started without `SEON_PROFILE` has no model provider: an attempt it releases ends at its first turn on `:seon.model/no-provider`, whose message names what to set. Production must never run a test fixture as if it were a model, so nothing is chosen for you.
+A root started without `SEON_PROFILE` has no model provider: a run it releases ends at its first turn on `:seon.model/no-provider`, whose message names what to set. Production must never run a test fixture as if it were a model, so nothing is chosen for you.
 
 The profiles (aero's `#profile`, read by ```seon.config/profile```) are:
 - `deepseek`: the OpenAI-compatible endpoint of `:seon.config.ai/providers` (DeepSeek), model `:seon.config.ai/model` (deepseek-flash unless `SEON_AI_MODEL` says otherwise);
@@ -28,7 +28,7 @@ A completion carries what the provider reported: prompt, completion and reasonin
 
 ## Failures
 
-A model call fails as data, at its one edge ([failure points](failure-points.md)): HTTP 429 is `:seon.model/rate-limited`, which the `:model` owner keeps and sends again after the provider's Retry-After (one of the [clocks](clocks.md) exceptions); a connection that failed or dropped is `:seon.model/transport` and anything else `:seon.model/provider-error` with the whole response body, each answered to the asking agent, whose attempt ends `:error` with its message. Calls in flight are bounded by `:seon.config.ai/max-in-flight`.
+A model call fails as data, at its one edge ([failure points](failure-points.md)): HTTP 429 is `:seon.model/rate-limited`, which the `:model` owner keeps and sends again after the provider's Retry-After (one of the [clocks](clocks.md) exceptions); a connection that failed or dropped is `:seon.model/transport` and anything else `:seon.model/provider-error` with the whole response body, each answered to the asking agent, whose run ends `:error` with its message. Calls in flight are bounded by `:seon.config.ai/max-in-flight`.
 
 ## Paid runs
 

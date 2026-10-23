@@ -44,7 +44,7 @@
 
 (defn- ended
   "The one error map of a request to agent id after it ended: root stopped it (a kill, its
-  attempt's end) or it died, as root's view records (:ended-ms). Not gone: the agent was."
+  run's end) or it died, as root's view records (:ended-ms). Not gone: the agent was."
   {:malli/schema [:=> [:cat :keyword :string] :seon.root/ended]}
   [id why] (contract/error :seon.root/ended 'seon.root/api-proc why {:agent id}))
 
@@ -163,7 +163,7 @@
 (defn- failed
   "What went wrong in agent id's view change m (a its entry before), as the one error map,
   or nil: a spawn or fork refused (:error, its error map); a red test run or a refused merge of an agent
-  with no task (a task's attempt records its own at its end, seon.problems/report)."
+  with no task (a task's run records its own at its end, seon.problems/report)."
   {:malli/schema [:=> [:cat :seon.agent/id :map :map] [:maybe :seon.error/base]]}
   [id a m]
   (let [{:keys [fail error reports]} (:tests m) r (:merged m)]
@@ -177,7 +177,7 @@
 
 (defn- set-agent
   "Merge m into agent id's view entry, recording what went wrong in it (`failed`). A stopped
-  agent stays stopped: :killed (a kill) or :ended (root stopped it because its attempt ended)."
+  agent stays stopped: :killed (a kill) or :ended (root stopped it because its run ended)."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.agent/id :map] :seon.root/api-state]}
   [st id m]
   (if-let [a (get-in st [:view :agents id])]
@@ -204,15 +204,15 @@
     st))
 
 (defn- message-to
-  "Whom a message to agent id is to, as :seon.message/to names it: the attempt it works (an
-  agent id starts again each boot, an attempt's names one worker for good), else the agent."
+  "Whom a message to agent id is to, as :seon.message/to names it: the run it works (an
+  agent id starts again each boot, a run's names one worker for good), else the agent."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.agent/id] :string]}
-  [st id] (or (get-in st [:view :agents id :attempt]) (name id)))
+  [st id] (or (get-in st [:view :agents id :run]) (name id)))
 
 (defn- deliver-message
   "Send message m ({:from :to [id ...] :body :id}) to each agent it names: the one delivery, for
   an agent's send and the owner's message alike. A message that is a fact (:id, :seon.message/id)
-  carries its id and whom it is to (the attempt each agent works), so the agent that takes it
+  carries its id and whom it is to (the run each agent works), so the agent that takes it
   writes the same fact on its branch."
   {:malli/schema [:=> [:cat :seon.root/api-state :map] :seon.root/api-state]}
   [st m]
@@ -239,7 +239,7 @@
   end is a jolt.async.remote end (session RC1): its :in is the agent proc's :from, so the
   agent's port is an ordinary channel. Answers [st id agent-end-fd]."
   {:malli/schema [:=> [:cat :seon.root/api-state :map] [:tuple :seon.root/api-state :seon.agent/id :seon.lib/fd]]}
-  [st {:keys [branch task attempt cloned-from]}]
+  [st {:keys [branch task run cloned-from]}]
   (let [n (inc (:next-id st))
         id (keyword (str "a" n))
         ;; named under root's main, so roots sharing a store never share a branch (seon.db/on-main)
@@ -256,7 +256,7 @@
                                       :chan-opts {:in {:buf-or-n (cfg/value :seon.config.agent/inbox-size)}}})
          (assoc-in [:view :agents id] (cond-> {:branch branch :status :spawning :task task :pid nil
                                                :forked-ms nil :mem-mb nil :evals [] :tests nil}
-                                        attempt (assoc :attempt attempt)
+                                        run (assoc :run run)
                                         cloned-from (assoc :cloned-from cloned-from))))
      id a]))
 
@@ -267,7 +267,7 @@
   [st o {:keys [agent rid pid inflight]}]
   (let [{:keys [branch]} (get-in st [:agents agent])
         v (get-in st [:view :agents agent])
-        ;; stopped by root: a kill, or the end of its attempt (:ended); else it died
+        ;; stopped by root: a kill, or the end of its run (:ended); else it died
         stop (stopped-statuses (:status v))
         ;; neither stopped by root nor killed: a death, with what root saw of it (session D2)
         died (when-not (or rid stop)
@@ -320,7 +320,7 @@
                  (>= (count (:agents st)) (cfg/value :seon.config.root/max-agents)) (reply! st p (refused 'seon.root/spawn! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)}))
                  :else (let [[st aid fd] (start-agent st opts)
                              branch (get-in st [:agents aid :branch])]
-                         (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :attempt (:attempt opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}})
+                         (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :run (:run opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}})
                          ;; answered at its hello (set-agent's :ready), or the end it meets first
                          (assoc-in st [::spawning aid] p))))
       :clone (let [parent (:parent m)]
@@ -372,7 +372,7 @@
                (step/out! o [:prove :req] (assoc (select-keys m [:branch :t :agent :proofs :names :mode]) :rid rid))
                st)
       :kill (cond-> (if (get-in st [:agents id])
-                      ;; :ended when root stops it because its attempt ended (the reconciler says so)
+                      ;; :ended when root stops it because its run ended (the reconciler says so)
                       (-> st (set-agent id {:status (if (:ended m) :ended :killed)}) (to-agent id {:op :kill}))
                       st)
               p (reply! p {:killed id}))
@@ -735,8 +735,8 @@
   {:path dir (the store, created when missing, holding the schema and, given :datoms n,
    about n datoms of an example program on :db; a root holds no program it was not given)
    :main branch (root's main; an existing branch is resumed; :db is the seed itself)
-   :backend :lmdb|:file :log? true :max-running n (parallel attempts) :provider p (the
-   attempts' model) :stall-ms (a guard, seon.agent-proc/stall-ms, for the checks that
+   :backend :lmdb|:file :log? true :max-running n (parallel runs) :provider p (the
+   runs' model) :stall-ms (a guard, seon.agent-proc/stall-ms, for the checks that
    move it) :source s}. s: Seon's own source
    is the program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: main's program follows
    root's dirs at boot (import-source!: replaced when they read otherwise than main's last
@@ -769,7 +769,7 @@
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
         load-ms (profile/ms-since t0)
         t1 (profile/now-ns)
-        ;; this root's boot id (attempts of an earlier boot are reaped); its fact is written
+        ;; this root's boot id (runs of an earlier boot are reaped); its fact is written
         ;; through the writer once the graph runs, and that commit is the reconciler's first pass
         boot (str (random-uuid))
         source (or source (when-let [r (get cfg/config :seon.config.source/root)]
@@ -794,7 +794,7 @@
         events-mult (a/mult events-in)
         chans {:ext (a/chan 1024) :back (a/chan 4096) :to-writer (a/chan (cfg/value :seon.config.root/writer-buf))
                :fork-server-ev (a/chan 4096)
-               ;; outside agents' attempts handed back for judgement (seon.server)
+               ;; outside agents' runs handed back for judgement (seon.server)
                :judge (a/chan 64)}
         view {:agents {} :writer {:tx-count 0} :stats {}
               :fork-server {:agents-forked 0 :pid pid :status :up :restarts 0}
@@ -932,7 +932,7 @@
       run-tests! (cond-> {:op :tests :id id} (:ticks args) (assoc :ticks (:ticks args)))
       kill! {:op :kill :id id}
       message! {:op :message :id id :from :owner :body (:body args)}
-      ;; my.root/run!'s one transaction: the held task (:task) released, its next attempt the reconciler's
+      ;; my.root/run!'s one transaction: the held task (:task) released, its next run the reconciler's
       release! {:op :write :req {:op :tx :branch :db :tx-data (task/execution-tx [(:task args)] :running)}}
       merge-main! (if live?
                     {:op :merge-main :id id :data-attrs data-attrs}
@@ -990,16 +990,16 @@
 
 (defn release!
   "Release the held task task-id (my.root/run!'s one transaction): the reconciler runs its next
-  attempt. A promise of the writer's answer."
+  run. A promise of the writer's answer."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.task/id] :seon.host/promise]}
   [sys task-id] (request! sys 'release! nil {:task task-id}))
 
 (defn judge!
-  "Hand an outside agent's attempt to the reconciler for judgement, as a turn loop's end
-  is: proofs in a fork, the branch read, the agent retired. attempt {:attempt :task :env
+  "Hand an outside agent's run to the reconciler for judgement, as a turn loop's end
+  is: proofs in a fork, the branch read, the agent retired. run {:run :task :env
   :agent}. nil."
   {:malli/schema [:=> [:cat :seon.root/sys :map] :nil]}
-  [sys attempt] (a/>!! (:judge sys) attempt) nil)
+  [sys run] (a/>!! (:judge sys) run) nil)
 
 (defn run-tests!
   "The agent forks itself and runs its deftests in the child; a promise of

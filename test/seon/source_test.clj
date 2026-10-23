@@ -174,7 +174,7 @@
         main-sha (git tree "rev-parse" "main")
         [main2 ours] (merged (main-with-file) 'app.pt-src "(defn twice [x] (* 2 x))")
         files (source/files main2 (source/changed-files main2 ours))
-        msg (source/commit-message [{:task :app.pt/twice :attempt "app.pt/twice#1"}])
+        msg (source/commit-message [{:task :app.pt/twice :run "app.pt/twice#1"}])
         r (fx/git-commit {:req {:dir tree :branch "jolt/seon-merges" :files files :message msg}})]
     (is (re-matches #"[0-9a-f]{40}" (str (get-in r [:value :sha]))) (pr-str r))
     (is (= (get-in r [:value :sha]) (git tree "rev-parse" "jolt/seon-merges")) "the merges branch, made at HEAD, holds the commit")
@@ -188,7 +188,7 @@
     (is (= main-sha (git tree "rev-parse" "main")) "main never moves")
     (is (= (get files "src/app/pt_src.clj") (str (git tree "show" (str (get-in r [:value :sha]) ":src/app/pt_src.clj")) "\n")) "the merged text is what was committed")
     (is (= ["src/app/pt_src.clj"] (str/split-lines (git tree "diff" "--name-only" "main" (get-in r [:value :sha])))) "only the merged file")
-    (is (str/includes? (git tree "log" "-1" "--format=%B" (get-in r [:value :sha])) "app.pt/twice#1") "the message names the attempt")
+    (is (str/includes? (git tree "log" "-1" "--format=%B" (get-in r [:value :sha])) "app.pt/twice#1") "the message names the run")
     (is (= (str (config/value :seon.config.source/committer-name) " <" (config/value :seon.config.source/committer-email) "> "
                 (config/value :seon.config.source/committer-name) " <" (config/value :seon.config.source/committer-email) ">")
            (git tree "log" "-1" "--format=%an <%ae> %cn <%ce>" (get-in r [:value :sha])))
@@ -322,8 +322,8 @@
         db (d/db-with db (source/import-tx db {facts-path text}))
         ;; the entry's line as the file has it (a property added to the entry moves with it), and
         ;; its form with :paused added, as an edit would write it
-        status-line (some #(when (str/starts-with? % " :seon.attempt/status ") %) (str/split-lines text))
-        paused (str/trim (subs (str/replace status-line ":closed :refused]]" ":closed :refused :paused]]") (count " :seon.attempt/status ")))
+        status-line (some #(when (str/starts-with? % " :seon.run/status ") %) (str/split-lines text))
+        paused (str/trim (subs (str/replace status-line ":closed :refused]]" ":closed :refused :paused]]") (count " :seon.run/status ")))
         edit (fn [tx] (get (source/files (d/db-with db tx) [facts-path]) facts-path))]
     (is (str/ends-with? status-line ":closed :refused]]") "the entry's line ends its enum as the edit expects")
     (testing "every schema resource imported and written back unchanged is the same text"
@@ -336,15 +336,15 @@
         (is (= files (source/files db (source/source-files db))))))
     (testing "a replaced value: only its changed part"
       (is (= (str/replace text status-line (str/replace status-line ":closed :refused]]" ":closed :refused :paused]]"))
-             (edit [{:schema/key :seon.attempt/status
+             (edit [{:schema/key :seon.run/status
                      :schema/form paused}]))))
     (testing "a removed entry takes its line"
-      (is (= (str/replace text "\n :seon.attempt/pid :int" "")
-             (edit [[:db/retractEntity [:schema/key :seon.attempt/pid]]]))))
+      (is (= (str/replace text "\n :seon.run/pid :int" "")
+             (edit [[:db/retractEntity [:schema/key :seon.run/pid]]]))))
     (testing "a new key after the last entry, read back as written"
-      (let [out (edit [{:schema/key :seon.attempt/invalid :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]
-        (is (= (str (subs text 0 (- (count text) 2)) "\n :seon.attempt/invalid [:map [:seon.error/message :string]]}\n") out))
-        (is (= (assoc (edn/read-string text) :seon.attempt/invalid [:map [:seon.error/message :string]])
+      (let [out (edit [{:schema/key :seon.run/invalid :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]
+        (is (= (str (subs text 0 (- (count text) 2)) "\n :seon.run/invalid [:map [:seon.error/message :string]]}\n") out))
+        (is (= (assoc (edn/read-string text) :seon.run/invalid [:map [:seon.error/message :string]])
                (edn/read-string out)))))))
 
 ;; ---- a merge loads in place (BUILD plan P4) ---------------------------------------------
@@ -407,7 +407,7 @@
 (deftest a-form-imported-into-a-loaded-namespace-is-loaded-not-unmapped
   ;; the step E dry run (2026-10-22): a root restarted on a tree whose test namespace gained a
   ;; deftest imported it onto main, but held? read the namespace's existence as "the binary
-  ;; holds it", so neither root nor the fork server loaded it; the next agent's harvest read
+  ;; holds it", so neither root nor the fork server loaded it; the next agent's stage read
   ;; the missing var as an unmap and the merge deleted the deftest from main
   (let [nsym (symbol (str "app.imported-" (random-uuid)))
         path (str "test/app/" (str/replace (name nsym) "-" "_") ".clj")

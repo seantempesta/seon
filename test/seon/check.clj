@@ -224,7 +224,7 @@
   '{[seon.db-test/a-commit-costs-what-it-writes seon.profile/now-ns] "printed ms per turn; the verdict is on bytes"
     [seon.db-test/a-commit-costs-what-it-writes seon.profile/ms-since] "printed ms per turn; the verdict is on bytes"
     [seon.lib-test/a-forked-child-runs-go-blocks-and-makes-a-store clojure.core.async/timeout] "a go block's timeout is the behaviour forked; its child's verdict is its exit status"
-    [seon.lib-test/probe-ms seon.profile/now-ns] "the probe's cost as a wall ratio of medians: open, FINDINGS (no counted stand-in for kernel time)"
+    [seon.lib-test/probe-ms seon.profile/now-ns] "the probe's cost as a wall ratio of medians: open, FINDINGS (no counted measure of kernel time)"
     [seon.lib-test/probe-ms seon.profile/ms-since] "the same"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it Thread/sleep] "the stream's pacing is the subject: a deadline can only turn it red (FINDINGS #13)"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it clojure.core/rand-int] "a port: a collision can only turn it red (FINDINGS #14)"
@@ -236,10 +236,10 @@
     [seon.profile-test/a-threads-allocation-is-its-own Thread/sleep] "a window in which bytes are counted; the verdict is on bytes"
     [seon.profile-test/reading-the-clock-allocates-nothing seon.profile/now-ns] "the clock read is the subject; the verdict is on bytes"
     [seon.profile-test/the-clock-is-the-one-every-process-reads seon.profile/now-ns] "the clock's identity is the subject"
-    [seon.reconcile-test/a-refused-spawn-writes-a-refused-attempt seon.profile/now-ns] "a message's :ns stamp"
+    [seon.reconcile-test/a-refused-spawn-writes-a-refused-run seon.profile/now-ns] "a message's :ns stamp"
     [seon.reconcile-test/a-refused-task-asks-again-when-main-moves seon.profile/now-ns] "a message's :ns stamp"
     [seon.reconcile-test/quiescence-is-reported-when-nothing-can-move seon.profile/now-ns] "a message's :ns stamp"
-    [seon.reconcile-test/a-refused-attempt-holds-its-task-and-creates-none seon.profile/now-ns] "a message's :ns stamp"
+    [seon.reconcile-test/a-refused-run-holds-its-task-and-creates-none seon.profile/now-ns] "a message's :ns stamp"
     [seon.reconcile-test/an-idle-system-does-nothing-after-a-reason seon.profile/now-ns] "a message's :ns stamp"
     [test-runner/prove! seon.profile/now-ns] "the runner's printed selection time"
     [test-runner/shard! seon.profile/now-ns] "the runner's printed shard time"})
@@ -379,8 +379,8 @@
       {:report {:replies (mapv short-items [r1 r2 r3])
                 :counts (into (sorted-map) (for [[k v] (:classes p)] [k (:n v)]))
                 :died (select-keys (:example died) [:exit :stderr :last-op])
-                :red (select-keys red [:attempt :test :assertions :evidence])
-                :cost (select-keys cost-row [:attempt :test :verdict])
+                :red (select-keys red [:run :test :assertions :evidence])
+                :cost (select-keys cost-row [:run :test :verdict])
                 :ms (- (System/currentTimeMillis) t0)}
        :checks {:eval (every? (types :eval) [:seon.agent/eval-error :seon.instrument/contract-error])
                 :effect (contains? (types :effect) :seon.fx/io-error)
@@ -405,7 +405,7 @@
   '#{seon.lib/percentile seon.lib/r2 seon.lib/summ seon.lib/push-window seon.lib/p50
      seon.cost/work seon.cost/exponent seon.cost/per-unit seon.cost/expected seon.cost/judge seon.profile/top
      ;; seon.proofs reads and writes results (greens, store-greens!, run-tests!): its pure part
-     seon.proofs/test-symbol seon.proofs/red? seon.proofs/results seon.proofs/red-reports seon.proofs/run-errors
+     seon.proofs/test-symbol seon.proofs/red? seon.proofs/results seon.proofs/red-reports seon.proofs/test-run-errors
      seon.proofs/failures seon.proofs/costs seon.proofs/green? seon.proofs/result-path seon.proofs/result-file
      seon.proofs/plan})
 

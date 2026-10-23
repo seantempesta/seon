@@ -206,7 +206,7 @@
 
 (deftest more-says-how-many-and-where
   (is (nil? (seon/more 3 3 "x")))
-  (is (= "+7 more: (seon.task/attempts db)" (seon/more 12 5 "(seon.task/attempts db)")))
+  (is (= "+7 more: (seon.task/runs db)" (seon/more 12 5 "(seon.task/runs db)")))
   (is (= "+1 more" (seon/more 2 1 nil))))
 
 (deftest a-one-line-cut-reads-the-source-rest

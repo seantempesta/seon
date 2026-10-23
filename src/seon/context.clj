@@ -295,7 +295,7 @@
   happened to the last reply; the messages delivered since the last turn (the owner's, root's,
   other agents'); the last evaluations; turns left."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds last-items turn max-turns unmerged truncated? reasons run-errors source repairs will-merge tests messages message-ids attention]}]
+  [db t {:keys [results reds last-items turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge tests messages message-ids attention]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
         task? #(and (qualified-symbol? (:seon.ref/name %)) (ref/task? db (:seon.ref/name %)))
@@ -314,7 +314,7 @@
              :proofs (vec (for [p (sort-by str proofs)
                                 :let [src (source-of db p)
                                       ;; no result: not written yet, the run failed as a whole, or it asserted nothing
-                                      st (get results p (cond (nil? src) :undefined (seq run-errors) :not-run :else :no-assertions))
+                                      st (get results p (cond (nil? src) :undefined (seq test-run-errors) :not-run :else :no-assertions))
                                       fs (filter #(= p (:test %)) reds)]]
                             (cond-> {:test p :status st}
                               (and src (not= :pass st)) (assoc :source src)
@@ -333,7 +333,7 @@
       (seq helpers) (assoc :found helpers)
       (seq nsmap) (assoc :map nsmap)
       (seq (refused (vec reasons) (vec reds))) (assoc :refused (refused (vec reasons) (vec reds)))
-      (seq run-errors) (assoc :test-run {:failed (vec run-errors)})
+      (seq test-run-errors) (assoc :test-run {:failed (vec test-run-errors)})
       (last-reply truncated? source (vec repairs)) (assoc :your-last-reply (last-reply truncated? source (vec repairs)))
       (:seon.task/evidence t) (assoc :evidence (:seon.task/evidence t))
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
@@ -348,7 +348,7 @@
       (or (seq message-ids) (seq messages))
       (assoc :messages (mapv #(dissoc % :id) (taken-messages db {:message-ids message-ids :messages messages})))
       ;; root's ruling (a), 2026-10-22: the tests this turn ran (the proofs and the tests the
-      ;; branch changed), those the judge runs at the attempt's end, the process tests run only
+      ;; branch changed), those the judge runs at the run's end, the process tests run only
       ;; when root asks (owner, 2026-10-23); a run its bound ended leaves the rest unknown, never red
       tests (assoc :tests (cond-> tests
                             (:unfinished tests) (assoc :unfinished-run '(my.agent/prove))
@@ -391,50 +391,50 @@
           (map (fn [{:keys [id evals]}] {:role "tool" :tool-call-id id :content evals}) calls)
           (when-not last? [{:role "user" :content "Nothing ran: the reply called no eval."}]))))
 
-(def attempt-keys
-  "The block's attempt sections: what the task is and what it cites, the same each turn of an
-  attempt (made from its first turn's basis), so they are sent once, in the cached prefix."
+(def run-keys
+  "The block's run sections: what the task is and what it cites, the same each turn of an
+  run (made from its first turn's basis), so they are sent once, in the cached prefix."
   [:task :references :found :map :sections :evidence])
 
-(defn- attempt-message
-  "The attempt sections of block, printed by the one printer under the context's budget."
+(defn- run-message
+  "The run sections of block, printed by the one printer under the context's budget."
   {:malli/schema [:=> [:cat :map] :string]}
   [block]
-  (str "Your task and what it cites, the same for this whole attempt:\n"
-       (print/text (select-keys block attempt-keys) (:context print/budgets))))
+  (str "Your task and what it cites, the same for this whole run:\n"
+       (print/text (select-keys block run-keys) (:context print/budgets))))
 
 (defn- turn-message
-  "The turn sections of block (everything but the attempt's), printed under the context's
+  "The turn sections of block (everything but the run's), printed under the context's
   budget, then the last evaluations while no earlier turn shows them, then how many earlier
   turns the history budget left out."
   {:malli/schema [:=> [:cat :map :boolean :int] :string]}
   [block scrollback? dropped]
-  (cond-> (str "The current state:\n" (print/text (apply dissoc block :last-evals attempt-keys) (:context print/budgets)))
+  (cond-> (str "The current state:\n" (print/text (apply dissoc block :last-evals run-keys) (:context print/budgets)))
     (and (not scrollback?) (:last-evals block)) (str "\n\nYour last evaluations:\n" (:last-evals block))
     (pos? dropped) (str "\n\n;; " dropped " earlier turns are left out here (the history budget); (my.turn/evals) holds the last turn's")))
 
 (defn messages
   "The model request's messages, its unchanging part first so a provider caches it: help, the
-  help page (the same for every agent); the attempt sections, made from block when no turns
-  came before, else the first turn's (:attempt, which with turns it must carry: the prefix
+  help page (the same for every agent); the run sections, made from block when no turns
+  came before, else the first turn's (:run, which with turns it must carry: the prefix
   is never rebuilt from today's block); the conversation so far, as a REPL keeps its
   scrollback (each earlier turn's reply, its eval calls and each call's answer as a tool
   message, whole turns within the history budget, the newest kept); then the turn sections
-  of block, each cut naming the form that reads its rest. turns: [{:attempt :reply :calls}]
-  of this attempt, oldest first."
+  of block, each cut naming the form that reads its rest. turns: [{:run :reply :calls}]
+  of this run, oldest first."
   {:malli/schema [:function [:=> [:cat :string :map] [:vector :seon.model/message]]
-                  [:=> [:cat :string :map [:schema [:cat [:map [:attempt :string]] [:* :map]]]] [:vector :seon.model/message]]]}
+                  [:=> [:cat :string :map [:schema [:cat [:map [:run :string]] [:* :map]]]] [:vector :seon.model/message]]]}
   ([help block]
-   [{:role "system" :content help} {:role "user" :content (attempt-message block)}
+   [{:role "system" :content help} {:role "user" :content (run-message block)}
     {:role "user" :content (turn-message block false 0)}])
   ([help block turns]
    (let [kept (kept-turns (vec turns) (cfg/value :seon.config.render/history-budget))]
-     (-> [{:role "system" :content help} {:role "user" :content (:attempt (first turns))}]
+     (-> [{:role "system" :content help} {:role "user" :content (:run (first turns))}]
          (into (mapcat (fn [[t nxt]] (turn-messages t (nil? nxt))) (partition-all 2 1 kept)))
          (conj {:role "user" :content (turn-message block true (- (count turns) (count kept)))})))))
 
 (defn reader-text
-  "What a turn's reader got beyond the help page and the scrollback: its attempt sections and
+  "What a turn's reader got beyond the help page and the scrollback: its run sections and
   its turn sections, as one text (the server's context, the page's panel)."
   {:malli/schema [:=> [:cat [:vector :seon.model/message]] :string]}
   [msgs] (str (:content (second msgs)) "\n\n" (:content (peek msgs))))
@@ -448,11 +448,11 @@
   (d/pull db [:db/id :seon.turn/id :seon.turn/n :seon.turn/origin :seon.turn/basis :seon.turn/reply :seon.turn/calls :seon.turn/truncated :seon.turn/reasoning] e))
 
 (defn- model-turns
-  "The model turns of attempt on db before turn n, oldest first."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.attempt/id :int] [:vector :map]]}
-  [db attempt n]
-  (->> (d/q '[:find ?e ?k :in $ ?a ?n :where [?e :seon.turn/attempt ?a] [?e :seon.turn/origin :model] [?e :seon.turn/n ?k] [(< ?k ?n)]]
-            db attempt n)
+  "The model turns of run on db before turn n, oldest first."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.run/id :int] [:vector :map]]}
+  [db run n]
+  (->> (d/q '[:find ?e ?k :in $ ?a ?n :where [?e :seon.turn/run ?a] [?e :seon.turn/origin :model] [?e :seon.turn/n ?k] [(< ?k ?n)]]
+            db run n)
        (sort-by second) (mapv #(turn-record db (first %)))))
 
 (declare render)
@@ -473,8 +473,8 @@
 
 (defn sections
   "Where a request's tokens went, as the printer sizes them (seon.print.select/estimate), in
-  the order it sends them: the help page, the attempt sections, the scrollback (its earlier
-  turns), the turn sections; the attempt and turn sections each with the tokens of each key
+  the order it sends them: the help page, the run sections, the scrollback (its earlier
+  turns), the turn sections; the run and turn sections each with the tokens of each key
   of block printed alone. [{:part :tokens :keys [[k tokens]]}]."
   {:malli/schema [:=> [:cat [:map [:block :map] [:messages [:vector :seon.model/message]]]]
                   [:vector [:map [:part :string] [:tokens nat-int?] [:keys {:optional true} [:vector [:tuple :keyword nat-int?]]]]]]}
@@ -484,9 +484,9 @@
         each (fn [ks] (vec (for [k ks :when (contains? block k)]
                              [k (select/estimate (print/text {k (get block k)} (:context print/budgets)))])))]
     [{:part "help page" :tokens (est (first messages))}
-     {:part "attempt sections" :tokens (est (second messages)) :keys (each attempt-keys)}
+     {:part "run sections" :tokens (est (second messages)) :keys (each run-keys)}
      {:part (str "scrollback, " (count (filter #(= "assistant" (:role %)) scroll)) " earlier turns") :tokens (reduce + 0 (map est scroll))}
-     {:part "turn sections" :tokens (est (peek messages)) :keys (each (remove (set attempt-keys) (keys block)))}]))
+     {:part "turn sections" :tokens (est (peek messages)) :keys (each (remove (set run-keys) (keys block)))}]))
 
 (defn request-text
   "The whole request messages, as one text: each message headed by its role (and a tool
@@ -498,8 +498,8 @@
                      (str ";; ---- " role (when tool-call-id (str " · answer to " tool-call-id)) "\n" content
                           (str/join (for [{:keys [id code]} tool-calls] (str "\n;; eval call " id "\n" code)))))))
 
-(defn- attempt-text
-  "The attempt sections the first model turn e on db was sent, made again from its basis."
+(defn- run-text
+  "The run sections the first model turn e on db was sent, made again from its basis."
   {:malli/schema [:=> [:cat :seon.host/db :int] :string]}
   [db e]
   (let [b (:seon.turn/basis (turn-record db e))]
@@ -508,14 +508,14 @@
 (defn render
   "What a turn's reader got, from its basis b (seon.turn records it, :seon.turn/basis) on db,
   the commit b names: the current-state block of its task with the observations b holds, and
-  the messages, its attempt's earlier model turns as the scrollback (their replies, eval calls
-  and each call's evaluations as recorded, the attempt sections the first one's, made again from
+  the messages, its run's earlier model turns as the scrollback (their replies, eval calls
+  and each call's evaluations as recorded, the run sections the first one's, made again from
   its own basis). The one
   maker of a context: the model's request is this, and so is every later reading of it.
   {:block :messages}."
   {:malli/schema [:=> [:cat :seon.host/db :seon.turn/basis] [:map [:block :map] [:messages [:vector :seon.model/message]]]]}
-  [db {:keys [task attempt turn max-turns origin observed merge? last-evals]}]
-  (let [prev (if (= :model origin) (model-turns db attempt turn) [])
+  [db {:keys [task run turn max-turns origin observed merge? last-evals]}]
+  (let [prev (if (= :model origin) (model-turns db run turn) [])
         lst (peek prev)
         {:keys [text repairs]} (when lst (reader/forgive (str/join "\n" (map :code (:seon.turn/calls lst)))))
         ;; an outside agent's reads are not model turns: they have no turn count
@@ -527,16 +527,16 @@
                 last-evals (assoc :last-evals last-evals))
         turns (vec (map-indexed (fn [i r] (cond-> {:reply (:seon.turn/reply r) :calls (vec (:seon.turn/calls r))}
                                              (:seon.turn/reasoning r) (assoc :reasoning (:seon.turn/reasoning r))
-                                             (zero? i) (assoc :attempt (attempt-text db (:db/id r)))))
+                                             (zero? i) (assoc :run (run-text db (:db/id r)))))
                                 prev))]
     {:block block :messages (if (seq turns) (messages (help-text db) block turns) (messages (help-text db) block))}))
 
 (defn recorded
-  "The last context attempt's reader got, made again from its turn's basis on db (seon.turn:
+  "The last context run's reader got, made again from its turn's basis on db (seon.turn:
   a model turn's user message, or an outside read through the server): {:text :origin
   :turn}, or nil. The page shows it; nothing stores the text."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe [:map [:text :string] [:origin :keyword] [:turn :string]]]]}
-  [db attempt]
-  (when-let [e (last (sort (d/q '[:find [?e ...] :in $ ?a :where [?e :seon.turn/attempt ?a] [?e :seon.turn/basis _]] db attempt)))]
+  [db run]
+  (when-let [e (last (sort (d/q '[:find [?e ...] :in $ ?a :where [?e :seon.turn/run ?a] [?e :seon.turn/basis _]] db run)))]
     (let [r (turn-record db e)]
       {:text (turn-text db e) :origin (:seon.turn/origin r) :turn (:seon.turn/id r)})))

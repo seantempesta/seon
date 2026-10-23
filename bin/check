@@ -219,7 +219,7 @@ u-e2e-calc() { echo "== tasks: calc (6-task graph, cancel)"; step e2e-calc "" ru
 for k in conflict semantic hairy newns sibling; do functions[u-e2e-$k]="echo '== tasks: scenario $k'; step e2e-$k '' run e2e scenario $k"; done
 u-swarm() { echo "== swarm (10 tasks over 5 shared vars, max-running 8)"; step swarm ":merges|:checks|^SWARM " run swarm 10 8 }
 u-e2e-loop() { echo "== loop (Seon's own source is main's program: a task changes seon.generation/generation, its merge is written back, committed on a clone's jolt/seon-merges, and live in root and in an agent forked after it, nothing built)"; step e2e-loop ":source|:commits|:live|LOOP" run e2e loop "$OUT/loop" }
-u-e2e-held() { echo "== held (add always wrong: refused once and held for root, naming what it blocks; root releases it: one new attempt on its branch, from add#1's evidence, held again; each wait ends on quiescence)"; step e2e-held ":root-causes|:release|quiet-after" run e2e held }
+u-e2e-held() { echo "== held (add always wrong: refused once and held for root, naming what it blocks; root releases it: one new run on its branch, from add#1's evidence, held again; each wait ends on quiescence)"; step e2e-held ":root-causes|:release|quiet-after" run e2e held }
 u-resume() {
   echo "== resume (root SIGKILLed mid-graph; a new root finishes it)"
   want resume && run e2e resume check-resume > "$OUT/resume1.log" 2>&1; step resume "" run e2e resume2 check-resume

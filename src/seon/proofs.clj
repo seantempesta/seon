@@ -25,55 +25,55 @@
   [t] (pos? (+ (:fail t 0) (:error t 0))))
 
 (defn results
-  "{test-symbol status} of a run: :error or :fail when any assertion of the test was,
+  "{test-symbol status} of a test run: :error or :fail when any assertion of the test was,
   else :pass. A test with no assertion has no entry (a proof missing here is :none)."
   {:malli/schema [:=> [:cat [:map [:reports [:sequential :map]]]] :seon.proof/results]}
-  [run]
+  [test-run]
   (reduce (fn [acc {:keys [type var]}]
             (if-let [t (test-symbol var)]
               (let [rank {:pass 0 :fail 1 :error 2}]
                 (update acc t #(if (and % (>= (rank %) (rank type))) % type)))
               acc))
-          {} (:reports run)))
+          {} (:reports test-run)))
 
 (defn red-reports
-  "The failing assertions of run for the tests in `tests`, as data for the context."
+  "The failing assertions of the test run for the tests in `tests`, as data for the context."
   {:malli/schema [:=> [:cat [:map [:reports [:sequential :map]]] [:set :qualified-symbol]] [:vector :map]]}
-  [run tests]
-  (vec (for [{:keys [type var] :as r} (:reports run)
+  [test-run tests]
+  (vec (for [{:keys [type var] :as r} (:reports test-run)
              :when (and (#{:fail :error} type) (tests (test-symbol var)))]
          (-> (select-keys r [:type :message :expected :actual :got]) (assoc :test (test-symbol var))))))
 
-(defn run-errors
-  "The errors of run that name no test: the run itself failed (its fork died before any
+(defn test-run-errors
+  "The errors of the test run that name no test: the test run itself failed (its fork died before any
   test started, a namespace did not load), so every test reads as not run. Their messages."
   {:malli/schema [:=> [:cat [:map [:reports [:sequential :map]]]] [:vector :string]]}
-  [run]
-  (vec (for [{:keys [type var message]} (:reports run)
+  [test-run]
+  (vec (for [{:keys [type var message]} (:reports test-run)
              :when (and (= :error type) (nil? (test-symbol var)))]
          (or message "an error with no message"))))
 
 (def max-assertions
-  "Failing assertions a red test keeps in its attempt's facts (the first ones)."
+  "Failing assertions a red test keeps in its run's facts (the first ones)."
   8)
 
 (defn failures
-  "The failing assertions of run, per test: {test [{:type :message :expected :actual}]},
+  "The failing assertions of the test run, per test: {test [{:type :message :expected :actual}]},
   the first max-assertions of each (expected and actual as the test child printed them)."
-  {:malli/schema [:=> [:cat [:map [:reports [:sequential :seon.test/report]]]] :seon.attempt/failures]}
-  [run]
+  {:malli/schema [:=> [:cat [:map [:reports [:sequential :seon.test/report]]]] :seon.run/failures]}
+  [test-run]
   (reduce (fn [acc {:keys [type var] :as r}]
             (let [t (test-symbol var)]
               (if (and t (#{:fail :error} type) (< (count (get acc t)) max-assertions))
                 (update acc t (fnil conj []) (select-keys r [:type :message :expected :actual]))
                 acc)))
-          {} (:reports run)))
+          {} (:reports test-run)))
 
 (defn costs
-  "The cost proofs' reports of run, per test ({:rows :verdict}, kept as data)."
-  {:malli/schema [:=> [:cat [:map [:reports [:sequential :seon.test/report]]]] :seon.attempt/costs]}
-  [run]
-  (into {} (for [{:keys [var cost]} (:reports run) :let [t (test-symbol var)] :when (and t cost)] [t cost])))
+  "The cost proofs' reports of the test run, per test ({:rows :verdict}, kept as data)."
+  {:malli/schema [:=> [:cat [:map [:reports [:sequential :seon.test/report]]]] :seon.run/costs]}
+  [test-run]
+  (into {} (for [{:keys [var cost]} (:reports test-run) :let [t (test-symbol var)] :when (and t cost)] [t cost])))
 
 ;; ---- prove: run what a change reaches, reuse every green by digest ------------------------
 

@@ -1,11 +1,11 @@
 (ns seon.learn
   "Waste, charged to the producer of what an agent was shown (session R4's seon.learn, v1 survey
-  idea 14; ported by session D2). At an attempt's end the agent folds its
+  idea 14; ported by session D2). At a run's end the agent folds its
   turns: each turn's forms, and what that turn's context block showed, by its producer.
   A form that looks for code instead of changing it is waste, charged to whoever should
   have shown that code; an error repeating an earlier turn's is charged to the render that
-  delivered it. Stored as one map per attempt (:seon.end/waste on the branch, carried to
-  :seon.attempt/waste by the judge). R4's template rows and trials are not ported (next)."
+  delivered it. Stored as one map per run (:seon.end/waste on the branch, carried to
+  :seon.run/waste by the judge). R4's template rows and trials are not ported (next)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.error :as err]
             [seon.reader :as reader]))
@@ -15,7 +15,7 @@
   '#{source doc dir ns-publics ns-interns ns-map meta resolve find-var all-ns apropos find-doc source-fn})
 
 (defn aliases
-  "The aliases the forms of an attempt set up with (require '[ns :as a]): a -> ns."
+  "The aliases the forms of a run set up with (require '[ns :as a]): a -> ns."
   {:malli/schema [:=> [:cat [:sequential :string]] [:map-of :symbol :symbol]]}
   [forms]
   (into {} (for [f forms n (mapcat #(tree-seq coll? seq %) (or (reader/read-text f 'user) []))
@@ -37,9 +37,9 @@
                     nodes)}))
 
 (defn waste
-  "The waste of an attempt's turns, each form charged to a producer. turns: [{:n :shown
+  "The waste of a run's turns, each form charged to a producer. turns: [{:n :shown
   {producer #{symbol}} :items [{:form :error}]}]; final: the qualified symbols the
-  attempt's error-free definitions use. A form looking for code a producer showed already
+  run's error-free definitions use. A form looking for code a producer showed already
   is :re-read (charged to that producer: its render did not satisfy); looking for code the
   final definitions use but nothing showed is :missing, and anything else :search (both
   charged to :template); an error repeating an earlier turn's signature is :repeats-error
@@ -73,7 +73,7 @@
   (into {} (for [[p xs] (group-by :producer ws)] [p {:forms (count xs) :turns (count (distinct (map :turn xs)))}])))
 
 (defn final-symbols
-  "The qualified symbols the error-free definitions of turns use (what the attempt kept)."
+  "The qualified symbols the error-free definitions of turns use (what the run kept)."
   {:malli/schema [:=> [:cat [:sequential :map]] [:set :symbol]]}
   [turns]
   (let [items (for [t turns it (:items t) :when (and (nil? (:error it)) (str/starts-with? (str/triml (or (:form it) "")) "(def"))] it)

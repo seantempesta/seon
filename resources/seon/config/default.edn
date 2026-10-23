@@ -17,8 +17,9 @@
 ;; - Machine-dependent values are derived at load, never shipped: #seon/checkout "p" is p under
 ;;   the checkout this process runs from (SEON_CHECKOUT, else JOLT_PWD).
 ;; - Layers (owner, 2026-10-21: "hand out different edn config files ... or do command line
-;;   overrides"): this file, then the checkout's own config/local.edn (gitignored; bin/ports
-;;   writes its ports), then the command line's --config FILE and --set :ns/key=edn. Later
+;;   overrides"): this file, then the command line's --config FILE and --set :ns/key=edn
+;;   (a checkout's config/local.edn, gitignored, which bin/ports writes with its ports, is one
+;;   only where a command line names it: bin/root does for the standing root). Later
 ;;   layers win key by key; the merged map is validated once; seon.config/sources (and the
 ;;   :seon.config/sources fact on main) names the layer each key came from.
 {;; ==== root and its procs ====================================================================
@@ -172,15 +173,15 @@
  ;; returns (:system-free-returned-mb-per-agent, reported, not checked). Provenance: the
  ;; window it replaced. At the bound: the free memory is read.
  :seon.config.check/pages-ms 500
- ;; Unit: attempts running at once (v1's :seon.config.agent/max-running, same value and
+ ;; Unit: runs running at once (v1's :seon.config.agent/max-running, same value and
  ;; reason): four agents beside the user's work fit a 16 GB machine. A ready task beyond it
  ;; waits for an end; 0 starts nothing new while running work finishes. root's start! may
  ;; pass :max-running for one run; the fact on main says what the run used.
  :seon.config.agent/max-running 4
- ;; Unit: turns an attempt may take when its task sets none (a task's own
- ;; :seon.config.agent/max-turns wins). At the bound the attempt ends and the done rule judges it.
+ ;; Unit: turns a run may take when its task sets none (a task's own
+ ;; :seon.config.agent/max-turns wins). At the bound the run ends and the done rule judges it.
  ;; Provenance: v1's live runs measured turns-to-green median 14-40, run 11's p90 32
- ;; (2026-10-18); R4's DeepSeek runs p90 6 with good context. 8 cut ordinary attempts below
+ ;; (2026-10-18); R4's DeepSeek runs p90 6 with good context. 8 cut ordinary runs below
  ;; v1's median (owner, 2026-10-21: "8 turn cap? wtf? make sensible defaults!"), so the bound
  ;; sits above the measured p90. Tokens are the paid resource; task
  ;; seon.model/budgets-are-data-and-spend-is-measured makes them the budget.
@@ -221,7 +222,7 @@
  :seon.config.agent/test-ticks 200000000000
  ;; Unit: engine ticks a turn's own test run may do: the task's proofs and the tests the
  ;; branch changed or added (root's ruling (a), 2026-10-22; the reached in-process set is the
- ;; judge's, at the attempt's end, under test-ticks). Provenance: step E's run 7, where a change
+ ;; judge's, at the run's end, under test-ticks). Provenance: step E's run 7, where a change
  ;; to seon.problems/report put 294 reached tests in every turn's run and one ran for 2.5 h;
  ;; the same budget as one form's (~5-25 s of work). At the bound the run stops with
  ;; :seon.test/ticks-spent; the tests it did not finish are unknown, never red, and the turn
@@ -230,17 +231,17 @@
 
  ;; ==== merges =================================================================================
 
- ;; Unit: merge attempts at once. They run together only when the definitions they change are
+ ;; Unit: merge runs at once. They run together only when the definitions they change are
  ;; disjoint (an octopus merge); 1 is git's one-at-a-time merge queue. Provenance: DECISIONS (root's
  ;; calls on R3's questions): octopus merges stay off until one combined test run of all octopus
  ;; members, the par-200 hang and root memory growth with concurrent merges are fixed. The code
- ;; default had become 8 (b7459c3) with nothing writing the fact (FENCES active bug 1); boot now
+ ;; default had become 8 (b7459c3) with nothing writing the fact (GUARDS active bug 1); boot now
  ;; writes this. An octopus merge is turned on by stating more here (or on main's root entity).
  :seon.config.merge/max-running 1
- ;; Unit: conflicts. A merge attempt whose merge of main has more is refused
+ ;; Unit: conflicts. A merge run whose merge of main has more is refused
  ;; (:too-many-conflicts); a task's own :seon.config.merge/max-conflicts wins.
  :seon.config.merge/max-conflicts 3
- ;; Unit: merge turns without green. Past it the merge attempt ends (:merge-turns); a task's
+ ;; Unit: merge turns without green. Past it the merge run ends (:merge-turns); a task's
  ;; own :seon.config.merge/max-merge-turns wins.
  :seon.config.merge/max-merge-turns 2
 
@@ -262,7 +263,7 @@
  ;; prove's entry there). Provenance: root's ruling (a), 2026-10-23, from step E's dry run (a test
  ;; root importing test/ could not host a checkout, and its gated merges were all refused).
  ;; Absent (as here; the standing root's config/local.edn names its merges tree): a merge that
- ;; reaches process tests merges with them recorded unrun on its attempt, an open problem
+ ;; reaches process tests merges with them recorded unrun on its run, an open problem
  ;; ("merged with N process tests unrun") until they run; root's git merge runs them (bin/prove).
  :seon.config.source/gate-checkout #env SEON_GATE_CHECKOUT
  ;; Unit: paths under the root, read in this order. Their .clj files are namespaces; the .edn
@@ -291,7 +292,7 @@
  ;; Unit: branch. Merges are committed here, never on main and never pushed (owner).
  :seon.config.source/branch "jolt/seon-merges"
  ;; Unit: a git identity. Seon authors and commits its merges (the message names the merged
- ;; tasks and attempts). Stated here because a root's HOME is its checkout's target/home, which
+ ;; tasks and runs). Stated here because a root's HOME is its checkout's target/home, which
  ;; holds no git identity (bin/check loop, 2026-10-21: "Author identity unknown").
  :seon.config.source/committer-name "Seon"
  :seon.config.source/committer-email "seon@localhost"
@@ -348,7 +349,7 @@
  :seon.config.fx/buf 1024
 
  ;; Who answers agents' turns. With no profile, none: the first turn answers the typed
- ;; :seon.model/no-provider and the attempt ends on it (root's ruling 2026-10-22: production
+ ;; :seon.model/no-provider and the run ends on it (root's ruling 2026-10-22: production
  ;; ran the scripted test fixture as if it were a model). SEON_PROFILE=deepseek (or
  ;; SEON_AI_PROVIDER=openai-compat) uses the endpoint below; SEON_PROFILE=scripted, the
  ;; scripted provider (a test fixture) bin/check and bin/test run under, no paid call: it needs
@@ -365,7 +366,7 @@
  ;; (2,048) before this file. At the bound the reply is cut (:truncated?), or
  ;; the reasoning ate the reply (:seon.model/reasoning-ate-reply). v1 ships 65,536 for Flash
  ;; with thinking on (its 4,096 and 8,192 starved reasoning). Ported 2026-10-21 after the first
- ;; DeepSeek agent on Seon's own code: two refinement attempts answered empty, reasoning took all
+ ;; DeepSeek agent on Seon's own code: two refinement runs answered empty, reasoning took all
  ;; 2,048. 2026-10-22, step E (root's research, notes/agent-context-research-2026-10-22.md §3.3):
  ;; 8,192 while thinking is off (the default below). The largest ordinary reply measured ~5k;
  ;; loop replies ran for minutes (168 of 181 model-minutes, 12.4M tokens, AUDIT-agents §5.2),
@@ -380,7 +381,7 @@
  :seon.config.ai/thinking :disabled
  ;; Unit: model calls in flight at once, cluster-wide: our admission cap, the :model owner's
  ;; workers (session FX1). At the bound turns queue in the owner, by priority. Our choice, small:
- ;; eight is twice the attempts running at once (:seon.config.agent/max-running 4), so a
+ ;; eight is twice the runs running at once (:seon.config.agent/max-running 4), so a
  ;; merge's or a judge's call never waits behind the work, while a runaway loop spends at most
  ;; eight calls' tokens at a time. The provider's own ceiling, per account across all keys
  ;; (api-docs.deepseek.com/quick_start/rate_limit, read 2026-10-21): 2,500 concurrent for
@@ -473,7 +474,7 @@
  ;; the form that reads its rest. Provenance: seon.context's literal last-evals-budget (6000),
  ;; 2026-10-21 it was raised to 24000 (a live agent reading four Datahike functions got ~1500
  ;; tokens each and re-read them); with 256000 of history that sent ~300k tokens a turn (an
- ;; attempt of 13 turns spent 4.1M), so 8000: a long read is cut with the form that reads its rest.
+ ;; run of 13 turns spent 4.1M), so 8000: a long read is cut with the form that reads its rest.
  :seon.config.render/evals-budget 8000
  ;; Unit: tokens of earlier turns (each the model's reply and what its forms evaluated to) the
  ;; model reads before the current state, whole turns, the newest kept first; the task's first
@@ -498,7 +499,7 @@
  ;; functions its diff touched less those it names; docs/vector.md#fused-with-the-call-graph): recall@10 call graph
  ;; 0.042, embeddings 0.495, fused 0.451; 30 covers every rank a top-5 can come from.
  :seon.config.render/found-near 30
- ;; Unit: tokens (seon.print.select/estimate). The attempt's map of the namespaces its proofs and
+ ;; Unit: tokens (seon.print.select/estimate). The run's map of the namespaces its proofs and
  ;; cited vars live in (seon.context/ns-map): each namespace's functions, most referenced first,
  ;; within an equal share. Provenance: root's research (2026-10-22, lever 1), aider's default
  ;; --map-tokens 1k. At the bound a namespace's rest is (clojure.repl/dir ns).
@@ -542,11 +543,11 @@
  ;; Unit: items. A list shown in part (seon.print/bounded) shows this many, then `+N more:
  ;; where` (docs/render.md#bounded-lists). Provenance: the literals each list carried before
  ;; (render.ui and render.ai, 2026-10-22), kept as they were.
- ;; rows: running and newest attempts, root's context's newest events.
+ ;; rows: running and newest runs, root's context's newest events.
  :seon.config.render.list/rows 8
  ;; newest: a tile's or card's newest (root's defects on the page, a card's evaluations).
  :seon.config.render.list/newest 6
- ;; brief: a secondary list in root's context (ended attempts, costliest functions).
+ ;; brief: a secondary list in root's context (ended runs, costliest functions).
  :seon.config.render.list/brief 5
  ;; top: root's context's defects, the evaluations its costliest functions come from, a
  ;; card's top functions.
@@ -567,7 +568,7 @@
  ;; Unit: tokens each part of a turn on its agent's page shows (its reply, reasoning, each eval
  ;; call's code and answer, the context it read): past it the cut links the turn's whole request
  ;; (/turn?view=&id=). Provenance: the context's two messages are each under 16,000
- ;; tokens (seon.context/messages); measured 2026-10-22, a turn's attempt sections are 1.6-1.9k
+ ;; tokens (seon.context/messages); measured 2026-10-22, a turn's run sections are 1.6-1.9k
  ;; and its turn sections under 0.1k before a proof runs, so 4,000 shows most turns whole.
  :seon.config.render/turn-text-budget 4000
  ;; Unit: tokens of a message or reason shown in one line (root's context, a tile's or card's
@@ -594,9 +595,9 @@
  ;; ==== the web, instrumentation, the native probe ==============================================
 
  ;; Unit: TCP port on 127.0.0.1 (session W2). 0 (the shipped value): no dashboard. A checkout's
- ;; own config/local.edn names its port (bin/ports writes it: the main tree 7777, worktree k
+ ;; own config/local.edn (the standing root's --config layer) names its port (bin/ports writes it: the main tree 7777, worktree k
  ;; 7901+10k, from one registry), so no two checkouts share one (owner, 2026-10-21). bin/check
- ;; and bin/test set SEON_WEB_PORT=0, which local.edn honours, so check steps listen on nothing.
+ ;; and bin/test set SEON_WEB_PORT=0 and give their roots no local.edn, so check steps listen on nothing.
  ;; A taken port leaves the web proc {:listening false} on the health line and boot goes on.
  :seon.config.web/port #long #or [#env SEON_WEB_PORT 0]
  ;; Unit: TCP port on 127.0.0.1: root's server (seon.server), which bin/mcp and outside
@@ -605,8 +606,9 @@
  ;; line and recorded in runs/root.port (a test's root: seon.test-store/start-root!,
  ;; never a port picked and released beforehand, which another process can take). config/local.edn names
  ;; the checkout's own (main 7888, worktree k 7900+10k).
- ;; bin/root PORT WEB, bin/mcp PORT and the mcp check set SEON_SERVER_PORT, which local.edn
- ;; honours (until a built binary's top-level code sees its argv, so --set can say it).
+ ;; bin/root PORT WEB, bin/mcp PORT and the mcp check set SEON_SERVER_PORT, which local.edn's
+ ;; #env honours where bin/root names it (until a built binary's top-level code sees its argv,
+ ;; so --set can say it).
  :seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 0]
  ;; app.css and datastar.js, read per request so a style edit shows on reload.
  :seon.config.web/public-dir #seon/checkout "resources/public"

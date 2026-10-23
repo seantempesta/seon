@@ -72,7 +72,7 @@
            (mapv #(get-in % [:outcome :seon.error/type]) (:batch (first (get o [:fx/t :done]))))))
     (is (nil? (:handle st)) "nothing is held, so the next item opens again")))
 
-;; ---- write-back answers what happened (audit FENCES #21) ------------------------------
+;; ---- write-back answers what happened (audit GUARDS #21) ------------------------------
 
 (defn- scratch-dir []
   (let [d (str (System/getProperty "user.dir") "/target/tmp/fx-test-" (random-uuid))]
