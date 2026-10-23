@@ -242,6 +242,8 @@
     [seon.reconcile-test/a-refused-spawn-writes-a-refused-attempt seon.profile/now-ns] "a message's :ns stamp"
     [seon.reconcile-test/a-refused-task-asks-again-when-main-moves seon.profile/now-ns] "a message's :ns stamp"
     [seon.reconcile-test/quiescence-is-reported-when-nothing-can-move seon.profile/now-ns] "a message's :ns stamp"
+    [seon.reconcile-test/a-refused-attempt-holds-its-task-and-creates-none seon.profile/now-ns] "a message's :ns stamp"
+    [seon.reconcile-test/an-idle-system-does-nothing-after-a-reason seon.profile/now-ns] "a message's :ns stamp"
     [seon.source-test/a-restart-catches-up-and-a-new-generation-resumes Thread/sleep] "polls a killed pid's end: can only make it slower"
     [test-runner/prove! seon.profile/now-ns] "the runner's printed selection time"
     [test-runner/shard! seon.profile/now-ns] "the runner's printed shard time"})
