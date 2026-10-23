@@ -34,4 +34,9 @@
  {:seon.task/name "health-through-the-server"
   :seon.task/plan "What exists: `seon.server/ops` has :agents :eval :context :attach :done. :agents answers live agents plus every task on main (230+, mostly cancelled), too much for an outside agent's context, and nothing answers health through MCP (v1's runtime_status), which only the dashboard shows. Correct: a :status op (MCP tool seon_status) that answers root's AI render, `seon.render.ai/system`, the text /context.txt serves; :agents lists live agents and running, held or blocked tasks, the rest as `seon.print/bounded`'s count and the form that lists them. One row each in the ops table; nothing new beside it."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.server-test/status-is-roots-ai-render seon.server-test/agents-lists-live-work}}]
+  :seon.task/proofs #{seon.server-test/status-is-roots-ai-render seon.server-test/agents-lists-live-work}}
+ {:seon.task/name "an-outside-run-writes-its-end"
+  :seon.task/plan "Found by a worked example (evaluations session, 2026-10-23: seon.repl/eval-record-keeps-a-failing-form-whole done end to end through the server; notes example-1 in agent-view's notes folder): an outside agent's {:op :done} sent its run to the judge, but only the turn loop writes a run's end (seon.turn's end!, ```seon.agent/write-end!```), so the judge read none and the run read \"ended no-end (the agent wrote no end)\" with its turns and reason missing, whatever its proofs said (the hold itself is the done rule's: that run was held for two stray reds). Correct, at the producer: :done has the agent end its run as a turn loop does (```seon.turn/hand-back!```: the proofs run, :green when the done rule has no reason, else :red naming the reasons, the runtime staged, the end committed), then the judge reads it."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.agent-test/an-outside-run-writes-its-end}}
+]

@@ -18,7 +18,7 @@ The ops are one table, ```seon.server/ops```, keyed by a request's `:op`; each e
 - `:message`: the owner's words to a running agent (`seon.root/message!`, the page's message bar sends the same request): root delivers them, and the agent's next turn reads them in its block ([render](render.md)).
 - `:attach`: root starts an agent on the task's branch with model `"outside"`, so no turn loop runs in it, and answers its id once the agent is ready (its hello), or the end it met first, which is the run's death ([root](root.md#holders-and-refused-spawns)).
 - `:prove`: the tests a branch's change reaches, run once per branch and tx however many ask, through the one test service (`seon.prove`, [merging](merging.md#the-test-service)); it names an agent's branch, else main.
-- `:done`: the run goes to the reconciler's `:judge` port and is judged as a turn loop's end is ([root](root.md#runs-and-judging)).
+- `:done`: the agent ends its run as a turn loop does (```seon.turn/hand-back!```: its proofs run, its end `:green` or `:red` with the reasons, committed on its branch), then the run goes to the reconciler's `:judge` port and is judged ([root](root.md#runs-and-judging)).
 
 ```seon.server/answer``` dispatches one EDN request to its op; an unknown op answers the one error map. A line that does not read, or an op that throws, answers that request as the typed `:seon.server/defect`: the server is an entrant boundary ([failure points](failure-points.md)).
 

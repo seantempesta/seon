@@ -250,6 +250,20 @@
                        :seon.turn/split (cond-> {:context-ms (long (profile/ms-since t0))} tests-ms (assoc :tests-ms tests-ms))}])
     text))
 
+(defn hand-back!
+  "End run of task as an outside agent hands it back (seon.server's :done): the proofs run
+  again, and the run's end written as the turn loop writes its own (end!: the live runtime
+  staged, the end committed on the branch), :green when the done rule has no reason, else
+  :red with the reasons. Its turns are the context reads it made; its tokens are the outside
+  model's, unknown here, so absent. Without it the judge read no end and named the run
+  :no-end. Answers the end."
+  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :seon.turn/end]}
+  [task run]
+  (let [{:keys [plan-before reads]} (begin! task run)
+        {:keys [reasons]} (observe task plan-before)]
+    (end! {:turn (or reads 0) :t0 (profile/now-ns) :run run}
+          (if (empty? reasons) :green :red) (when (seq reasons) (r/explain-text reasons)) nil)))
+
 (defn work!
   "Work task `task` as run `run` (the model `model` when set, else root's), at most
   max-turns model calls. A turn whose calls repeat the last turn's, made from the same
