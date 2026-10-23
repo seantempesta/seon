@@ -145,6 +145,17 @@
     (d/branch! conn (:branch cfg) child)
     (is (= c (config/from-db @(d/connect (assoc cfg :branch child)))))))))
 
+;; a set-valued key written on main reads back as the same set, not the vector a pull of a
+;; cardinality-many attribute answers (pure-tests 2026-10-23: :seon.config.source/process-vars)
+(deftest a-set-valued-key-reads-back-as-the-set-it-was
+  (ts/test-branch! (fn [_ conn]
+    (let [vs '#{app.a/one app.b/two app.c/three}
+          c (assoc config/config :seon.config.source/process-vars vs)]
+      (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6) (config/facts c {}))})
+      (is (= vs (:seon.config.source/process-vars (config/from-db @conn))))
+      (is (set? (:seon.config.source/process-vars (config/from-db @conn))))
+      (is (= c (config/from-db @conn)) "and the whole config is its db copy")))))
+
 ;; ---- no environment read outside the loader -------------------------------------------------
 
 (defn- src-files []

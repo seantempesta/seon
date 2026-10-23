@@ -56,12 +56,14 @@
   ;; Seon's own source
   [:seon.config.source/root {:optional true} :seon.config.source/root]
   [:seon.config.source/dirs :seon.config.source/dirs]
+  [:seon.config.source/process-vars :seon.config.source/process-vars]
   [:seon.config.source/branch :seon.config.source/branch]
   [:seon.config.source/committer-name :seon.config.source/committer-name]
   [:seon.config.source/committer-email :seon.config.source/committer-email]
   [:seon.config.source/generations-dir :seon.config.source/generations-dir]
   [:seon.config.source/test-results-dir :seon.config.source/test-results-dir]
   [:seon.config.proofs/jobs :seon.config.proofs/jobs]
+  [:seon.config.proofs/cost-max-n :seon.config.proofs/cost-max-n]
   ;; effects and the model
   [:seon.config.fx/buf :seon.config.fx/buf]
   [:seon.config.ai/provider :seon.config.ai/provider]
