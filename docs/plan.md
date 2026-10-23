@@ -2,28 +2,28 @@
 
 What is in flight, what the owner has not yet ruled, and the steps from here to the goal (Seon agents fixing problems in the system); [AGENTS.md](../AGENTS.md) says who does what and the method, the [map](README.md) how the system works, [decisions](decisions.md) the owner's standing rulings, and git the history.
 
-## Now (2026-10-23, evening)
+## Now (2026-10-23, afternoon)
 
-Pins: Jolt `e0351af8`, Datahike `b4596cf`, persistent-sorted-set `1cae7f2`, Malli `0762fb6b`, Chez `80e4b9f` (docs/forks.md) · `src` ~18.5k lines (aim ~10k) · paid runs $0.144 of the $50 budget · standing root on 7888/7777 (`runs/store`, test data, erased at each rename pass).
+Pins: see docs/forks.md · `src` 17,391 lines (19,304 this morning; aim ~10k) · paid runs ~$0.16 of the $50 budget · standing root on 7888/7777 (`runs/store`, test data), loading main's source from `../next-merges` (root's write-back tree: live, never remove).
 
-**Goal:** real Seon agents fixing problems in the system (THE PLAN's step E). The loop turn is measured at 11.4 s (112 s this morning); the cold automatic test run is ~54–62 s (26 min this morning); a warm one is its plan only.
-**Root's working schedule:** `notes/root-schedule-2026-10-23.md` in root's worktree (the queue, the rules, what was rescheduled).
+**Goal:** real Seon agents fixing problems in the system (THE PLAN's step E). **Reached once:** paid run #10, DeepSeek flash with thinking off, carried `seon.context/the-map-reads-the-program-not-the-process` through design (3 turns), implement (7) and merge, for about $0.004. The lever was act-first design instructions. Seon's own per-turn time is ~1.8 s; the model's ~16–18 s now dominates.
+**How work moves now:** sessions self-review, then report ready to the merge session ("Merge: integrate ready branches into main"), which merges, proves and updates. Its log is `notes/merge-log.md`. A session that finishes claims its next task by creating its branch (AGENTS §3). Root keeps THE PLAN, rulings, briefs and docs (AGENTS §2, "Root's working rules").
 
 ## In flight
 
-Merged today, in order: ``jolt/hold-for-root``, ``jolt/agent-ready``, ``jolt/printer-eval``, ``jolt/wiki-live``, ``jolt/reach-index``, ``jolt/process-tests``, rename pass 2, ``jolt/health`` part 1 (problem classes, the watcher, the done refusal), ``jolt/test-root``, ``jolt/starter-fifo`` (and the stop-hang fix), ``jolt/pure-tests``, ``jolt/brief3`` (shared greens), ``jolt/shard-time``, ``jolt/ticks-cost``, ``jolt/no-idle-build``, ``jolt/reach-scc2``, ``jolt/dry-run`` (the gate on demand, turn-cost fixes), ``jolt/global-ids`` (the store-wide counter, content ids, delta and verbatim merges, the all-branches union `seon.union`, the store-gc fix).
+Five worktree sessions, grouped so that related tasks stay in one session's context (owner, 2026-10-23: "grouped tasks can stay in one agents context"); each reports ready to the merge session, and talks to the groups named beside it. Restarted on the new account 2026-10-23; `docs/restart.md` holds each branch's state.
 
-**Merge queue,** one heavy run at a time, root scheduling it; each branch merges main, does the revert check, runs one `bin/prove` plus the named process tests it reaches, and gets a §9 review:
-1. ``jolt/health``: the test service (`seon_prove`, one runner for every agent), proving now; then `caused` at O(changed), the Flow loader and commit stream, every write checked by `mg/check`.
-2. ``jolt/reach-update``: the incremental reach graph (a plan ~20–45 ms after one build per base).
-3. ``jolt/refresh``: the incremental re-import (re-reads only changed files; the per-form diff is in progress).
-4. ``jolt/divergence``: the turn's divergence from deltas.
-5. dry-run's fork-server fix: the replica reads main's head instead of replaying (first spawn 2.4 s → ~0.4 s).
-6. ``jolt/proof-ends``: proof forks end with their agent.
-7. ``jolt/agent-view``: the chat window, renders as (value opts) functions with auto-render, and messages as facts through the union; then its full run.
-8. ``jolt/rename-run``: rename pass 3, attempt → run (a script, refreshed over each main).
-9. ``jolt/self-contained``: step A (test-results inside the root), the fork pushes, step C (GitHub URLs), step R (a fresh clone into `~/src/seon-next`, prove, grep clean), then move the sessions.
-Then the first full run, and step E with paid DeepSeek runs.
+| Group | Tasks, in order | Model | Talks to |
+|---|---|---|---|
+| **Merge and cutover** (main tree) | ``jolt/health`` again (merge main, revert the revert 1ef9f0e9, prove), ``jolt/wiki-stale``, ``jolt/reconcile-topo`` and ``jolt/live-forms``, then the freeze: ``jolt/rename-run`` (attempt → run, store erased), ``jolt/self-contained`` (steps A, D), step R (`~/src/seon-next`) | Sonnet | every group; root for the freeze |
+| **Shrink** | the two `seon.agent-test` reds on main ("No such namespace: seon.e2e"), the remaining driver deletions from `src` (task `seon.main/drivers-leave-src`), the clocks still deciding (``jolt/memory-is-read-when-asked``, the fork server's 100 ms idle poll) | Sonnet | merge |
+| **Agent loop** (THE PLAN 1, 2, E) | ``jolt/writeback-order`` (a new form before its first user; WIP committed a4d1ae96), ``jolt/ctx-loop`` (the context render on Seon's own program), then step E's second paid real task | Opus | agent view |
+| **Agent view** (THE PLAN 3) | ``jolt/agent-view`` (self-review, its full run, merge), then every call kind recording ticks, bytes and calls | Opus | agent loop |
+| **Store** | ``jolt/datom-cost``: Datahike's add path at ~7k ticks a datom (`notes/handoff-store.md`) | Opus | merge (pin bumps) |
+
+During the freeze the other groups keep working; after it each merges main and re-runs the rename's scripts on its branch (`notes/rename-run/`).
+
+**Waiting on the owner:** task `seon.derive/one-content-keyed-derivation` (reuse of expensive pure results; cold paths are fixed first, and nothing is cached that is fast enough); the type-findings-as-warnings task (on ``jolt/wiki-stale``, not merged yet).
 
 ## Open owner questions
 

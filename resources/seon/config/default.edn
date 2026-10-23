@@ -247,7 +247,8 @@
  ;; store, build it from source; a store, resume it; the command line overrides), so a root started
  ;; with bin/root builds main from its checkout's source. Unset (bin/test, bin/check, a root a test
  ;; boots): absent, no source is imported and nothing is written. config/local.edn or --set names
- ;; another tree: the main tree's names ../next-merges, so write-back never edits main's files.
+ ;; another tree: the main tree's names its merges worktree (bin/worktree --path merges), so
+ ;; write-back never edits main's files.
  :seon.config.source/root #env SEON_SOURCE_ROOT
  ;; Unit: path. The checkout the merge gate runs a merge's deferred process tests on
  ;; (seon.fx/run-tests: a worktree of it at the merges head, the candidate's files over it,
@@ -298,11 +299,12 @@
  :seon.config.source/tests-dir #join [#ref [:seon.config.root/runs-dir] "/merge-tests"]
  ;; Unit: path. Test results by reach digest (task seon.program/tests-run-by-reach; owner
  ;; 2026-10-21: "incremental tests even across worktrees based on test digest"): one directory
- ;; beside the checkouts, shared by every checkout and worktree, one <digest>.edn per result,
+ ;; in the main tree, shared by every checkout and worktree, one <digest>.edn per result,
  ;; written temp-then-rename. A digest covers everything its result depends on, so a result
  ;; from any checkout is valid in every other. A checkout's store (runs/store) is its own, so
- ;; the store cannot hold them. SEON_TEST_RESULTS moves it (a check's own run).
- :seon.config.source/test-results-dir #or [#env SEON_TEST_RESULTS #seon/checkout "../test-results"]
+ ;; the store cannot hold them. bin/env sets SEON_TEST_RESULTS to the main tree's test-results/
+ ;; (found from git's common dir, as the compile caches are); unset, the checkout's own.
+ :seon.config.source/test-results-dir #or [#env SEON_TEST_RESULTS #seon/checkout "test-results"]
  ;; Unit: processes. A proof run's selected tests (bin/prove, bin/test) are dealt, a namespace (with
  ;; its fixtures) at a time, into this many shards, each a runner process of its own that bin/test
  ;; starts at once (test-runner/shards), its greens stored by digest when it has run. Provenance:
@@ -526,6 +528,10 @@
  :seon.config.render.list/stream 60
  ;; Unit: points a sparkline keeps, the newest changes. Provenance: the render proc's SERIES-CAP 60.
  :seon.config.render.list/series 60
+ ;; Unit: ended agents the dashboard's grid keeps beside every live one, the newest ended first;
+ ;; an agent's end pushes the oldest kept one off, and the tile counts those off it. Provenance:
+ ;; replaces seon.render.proc's RETIRE-MS (90 s after an end), a clock deciding what the grid shows.
+ :seon.config.render.list/ended 10
  ;; Unit: evaluations an agent's page shows, newest first (seon.print/bounded names the rest
  ;; on its branch). Provenance: the render proc's HISTORY-CAP 100.
  :seon.config.render.list/history 100

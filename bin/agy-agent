@@ -1,0 +1,136 @@
+#!/bin/sh
+# bin/agy-agent — run Antigravity (agy) reviewers: Gemini 3.8 Flash (high) by default, Gemini 4 Argon on request.
+#
+#   bin/agy-agent run <name> [spec]        launch a reviewer; spec as one argument or on stdin
+#                                          (quoted heredoc). Streams a readable transcript to
+#                                          stdout; the final answer -> summary.
+#   bin/agy-agent resume <name> [followup] continue the reviewer's conversation with full prior
+#                                          context (id from the reviewer's retained sid file).
+#   bin/agy-agent stop <name>              stop the reviewer's agy process tree; the sid is kept.
+#   bin/agy-agent summary <name>           print the final answer and its usage.
+#   bin/agy-agent watch <name>             follow a live transcript.
+#   bin/agy-agent status                   running reviewers, and summaries of the last hour.
+#
+# Config (env): AGY_MODEL (gemini-3.8-flash-high; also -low, -medium, gemini-4-argon-low|medium|high),
+# AGY_TIMEOUT (0 = until the turn completes; e.g. 30m), AGY_SID (resume another conversation),
+# AGY_TREE (scratch = the default here: run in runs/agy/<name>/work, an empty directory holding only what the
+# caller copies in (e.g. a brief); archive = run in runs/agy/<name>/tree, a `git archive HEAD` copy of this
+# checkout that is not a git repository, with only runs/agy/<name>/out added writable).
+#
+# Reviewers' state lives in this checkout's runs/agy (gitignored, as runs/ is). Originally a copy of
+# ~/src/seon/bin/agy-agent (2026-10-21). Reviewers are
+# READ-ONLY REVIEWERS. They never run in the checkout; all state lives in runs/agy/<name>/: sid, pid, prompt, stream.jsonl (raw events),
+# transcript.log, summary.txt, usage.json, work/ or tree/, out/. Reviewers run with
+# --dangerously-skip-permissions only because headless agy otherwise refuses every tool call; the
+# working directory is a scratch copy, so nothing they do can reach the repository.
+
+set -eu
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+model=${AGY_MODEL:-gemini-3.8-flash-high}
+timeout=${AGY_TIMEOUT:-0}
+tree=${AGY_TREE:-scratch}
+reviewer_rule="You are NAME, a READ-ONLY REVIEWER for the Seon-on-Jolt project, run through bin/agy-agent. You change nothing: no edits outside your own out directory, no git commands, no builds, no network writes. Your answer is your review, given as your final message. Say plainly when you are unsure, and never invent numbers, bounds or APIs: mark anything from memory as such."
+
+usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
+
+live() { [ -f "$1/pid" ] && kill -0 "$(cat "$1/pid")" 2>/dev/null; }
+
+# One readable line per tool call, model text as it streams, usage at the end.
+render() {
+  jq --unbuffered -j '
+    if .event == "step_update" then .step_update as $s
+      | if $s.step_type == "agent_response" then ($s.text_delta // "")
+        elif $s.step_type == "tool" and $s.state == "DONE" then
+          "\n▸ \($s.tool_name) \(($s.tool_info.parameters // {}) | (.CommandLine // .AbsolutePath // .TargetFile // .Query // .ToolName // "") | tostring | .[0:160])\n"
+        else "" end
+    elif .event == "result" then
+      "\n— \(.result.status) \(.result.usage.input_tokens) in / \(.result.usage.output_tokens) out, conversation total \(.result.duration_seconds | floor)s\n"
+    else "" end'
+}
+
+launch() {  # $1 name, $2 state dir, $3 prompt, rest: extra agy args
+  name=$1 state=$2 prompt=$3
+  shift 3
+  out="$root/$state/out"
+  mkdir -p "$out"
+  if [ "$tree" = archive ]; then
+    dir="$root/$state/tree"
+    [ -d "$dir" ] || { mkdir -p "$dir" && git -C "$root" archive HEAD | tar -x -C "$dir"; }
+  else
+    dir="$root/$state/work"
+    mkdir -p "$dir"
+  fi
+  set -- --add-dir "$out" "$@"
+  prompt="$prompt
+
+You run in $dir, a scratch directory that is not the repository. Write nothing except, if you must, notes under $out. Never cd into $root."
+  # The pipeline ends when agy exits; agy's own status goes through the status file.
+  { (cd "$dir" && agy -p "$prompt" --model "$model" --dangerously-skip-permissions \
+        --print-timeout "$timeout" --output-format stream-json "$@") \
+        2> "$state/stderr.log" &
+    echo $! > "$state/pid"
+    s=0; wait $! || s=$?; echo "$s" > "$state/status"
+  } | tee "$state/stream.jsonl" | render | tee -a "$state/transcript.log"
+  status=$(cat "$state/status")
+  rm -f "$state/pid"
+  sid=$(jq -r 'select(.event == "init") | .conversation_id' "$state/stream.jsonl" | head -1)
+  [ -n "$sid" ] && echo "$sid" > "$state/sid"
+  jq -r 'select(.event == "result") | .result.response' "$state/stream.jsonl" > "$state/summary.txt"
+  jq -c 'select(.event == "result") | .result | {status, duration_seconds, usage}' \
+     "$state/stream.jsonl" > "$state/usage.json"
+  [ -s "$state/stderr.log" ] && tail -n 5 "$state/stderr.log" >&2
+  echo "bin/agy-agent: $name exited $status (sid ${sid:-none}); summary: $state/summary.txt" >&2
+  return "$status"
+}
+
+text_arg() { if [ $# -gt 0 ]; then printf '%s' "$1"; else cat; fi; }
+
+cmd=${1:-}; [ $# -gt 0 ] && shift
+case "$cmd" in
+  run|resume)
+    name=${1:?name}; shift
+    case "$name" in *[!A-Za-z0-9._-]*|.*) echo "bin/agy-agent: bad name '$name'" >&2; exit 64 ;; esac
+    state=runs/agy/$name
+    mkdir -p "$state"
+    if live "$state"; then echo "bin/agy-agent: $name is running (pid $(cat "$state/pid"))" >&2; exit 1; fi
+    text=$(text_arg "$@")
+    [ -n "$text" ] || { echo "bin/agy-agent: empty spec" >&2; exit 64; }
+    rule=$(printf '%s' "$reviewer_rule" | sed "s/NAME/$name/")
+    if [ "$cmd" = run ]; then
+      [ -f "$state/sid" ] && { echo "bin/agy-agent: $name exists; resume it or pick a new name" >&2; exit 1; }
+      printf '%s\n' "$text" > "$state/prompt"
+      launch "$name" "$state" "$text
+
+$rule"
+    else
+      sid=${AGY_SID:-$(cat "$state/sid" 2>/dev/null || true)}
+      [ -n "$sid" ] || { echo "bin/agy-agent: no sid for $name" >&2; exit 1; }
+      printf '\n--- resume\n%s\n' "$text" >> "$state/prompt"
+      launch "$name" "$state" "$text" --conversation "$sid"
+    fi ;;
+  stop)
+    state=runs/agy/${1:?name}
+    live "$state" || { echo "bin/agy-agent: $1 is not running" >&2; exit 0; }
+    pid=$(cat "$state/pid")
+    pkill -TERM -P "$pid" 2>/dev/null || true; kill -TERM "$pid" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+    if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid"; fi
+    echo "bin/agy-agent: stopped $1 (pid $pid); sid $(cat "$state/sid" 2>/dev/null ||
+      jq -r 'select(.event == "init") | .conversation_id' "$state/stream.jsonl" | head -1 | tee "$state/sid")" ;;
+  summary)
+    state=runs/agy/${1:?name}
+    cat "$state/summary.txt"; cat "$state/usage.json" 2>/dev/null ;;
+  watch)
+    tail -n 40 -f "runs/agy/${1:?name}/transcript.log" ;;
+  status)
+    for state in runs/agy/*/; do
+      [ -d "$state" ] || continue
+      name=$(basename "$state")
+      if live "$state"; then echo "running  $name pid $(cat "$state/pid")"
+      elif [ -n "$(find "$state/summary.txt" -mmin -60 2>/dev/null)" ]; then echo "finished $name $(cat "$state/usage.json" 2>/dev/null)"
+      fi
+    done ;;
+  *) usage ;;
+esac

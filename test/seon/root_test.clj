@@ -16,7 +16,7 @@
 
 (deftest root-threads-are-what-root-declares
   ;; three start!/stop! cycles in one process: while running (three agents just
-  ;; evaluated) and after each stop!, every thread is one seon.root/declared-threads
+  ;; evaluated) and after each stop!, every thread is one seon.check/declared-threads
   ;; names, by name stem, the GC's sweepers are the declared number, and the OS counts
   ;; nothing else. A diff of {} is exact; anything else names what differs. No web
   ;; listener (SEON_WEB_PORT=0): its adapter's threads outlive stop! (task

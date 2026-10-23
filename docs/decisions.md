@@ -11,8 +11,8 @@ Owner, 2026-10-23: "caching isn't an excuse for writing shitty code. If the cold
 Owner, 2026-10-23: "You don't have to ask me to push public repos anymore." A session pushes the fork commits its branch pins to ``seantempesta/<lib>`` on a ``jolt/<topic>`` branch: no force, never a fork's main. Stated in: AGENTS §8; docs/forks.md.
 ### Fork URLs are the GitHub forks
 Owner, 2026-10-23: quote not recorded; relayed by root. `.gitmodules` names the forks at `seantempesta/*` over https, not a local path or the module store. Stated in: docs/forks.md (owed its rewrite when the URLs change).
-### The project root is `~/src/seon-next`; worktrees live inside it at `.worktrees/NAME`; nothing refers to `~/src/seon-jolt`
-Owner, 2026-10-23: quote not recorded; relayed by root. The self-contained plan (notes/archive of the outer repo, `self-contained-plan-2026-10-23`) is how `next` stops reaching outside itself. Stated in: not yet (owed AGENTS §3, docs/merging.md#a-worktree-session-works-in-a-checkout-of-its-own and `bin/worktree` when the move lands).
+### The project root is `~/src/seon-next`; worktrees live inside it at `.worktrees/NAME`; nothing refers to the old prototype folder
+Owner, 2026-10-23: quote not recorded; relayed by root. The root is a fresh clone with its history kept (the outer repo's history is the tag `history/prototype`), and `next` stops reaching outside itself: the plan is `notes/self-contained-plan-2026-10-23.md`. Stated in: docs/machine.md (what lives in the root and beside it), docs/merging.md#a-worktree-session-works-in-a-checkout-of-its-own, and `bin/worktree --path NAME`.
 ### Cost is work done: ticks, bytes and calls, never wall time
 Owner, 2026-10-23: quote not recorded; relayed by root. Stated in: docs/cost.md (ticks, bytes and calls are exact; wall time is not a measure).
 ### Process tests are not automatic: the reach walk classifies them
