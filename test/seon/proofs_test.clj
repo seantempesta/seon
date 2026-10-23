@@ -131,7 +131,7 @@
       (testing "a plan of tests and check steps walks the program once: one reach graph serves both indexes"
         (profile/begin!)
         (runner/plan-of d "both" false nil)
-        (is (= 1 (some #(when (= 'seon.program/reach-graph (:var %)) (:calls %)) (profile/touched))))))))
+        (is (= 1 (some #(when (= 'seon.program/reach-graph (:var %)) (:calls %)) (profile/touched))) "the plan built one reach graph (none counted: instrumentation is off)")))))
 
 (deftest shards-split-by-namespace-and-each-result-is-stored
   (record (ts/test-db) 'user "(ns app.pv-red-test (:require [clojure.test :refer [deftest is use-fixtures]]))"
