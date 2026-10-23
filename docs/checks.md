@@ -1,0 +1,24 @@
+# Checks
+
+A check is an end-to-end proof run on the built binary against a real root, its agents and a branch of one store, through the same API agents, the server and the dashboard use; `bin/check` runs its steps and `bin/test` runs the deftests, and `bin/prove` runs only the ones a change reaches.
+
+`bin/prove` is the one selection: a test or a check step runs when no green result is stored at its reach digest, in the results directory every checkout shares, so an unchanged tree runs nothing ([merging](merging.md#a-merge-runs-what-the-change-reaches)). `bin/test [NS ...]` is its tests half (`--all` the full run), `bin/check` with no argument its steps half, `bin/check MODE` one step, and `bin/check 100` the full run. Each step works on a branch of the checks' own store (``target/check-store``), never on a standing root's `runs/store`, and its log is kept in ``target/check/<time>/<step>.log``.
+
+## Modes
+
+A step is a mode of `target/seon` (except `laws`, which is `bin/laws`, and `lmdb-kill`, a native program on an LMDB env of its own), its body over one harness that boots root, runs it, and ends on the one verdict line `NAME OK` or `NAME FAILED` with its exit status (`seon.check/run-check`, [machine](machine.md#builds-and-checks)).
+
+```seon.check/modes``` maps each mode name to its function; `seon.proofs/check-steps` is the one list of `bin/check`'s steps, keyed by the mode functions each runs, and `bin/check` fails a step that list does not name. What the steps prove, each in its function's docstring:
+- **the laws and contracts**: `laws` (`bin/laws`, the whole tree: a site its page does not name is red; a name a page lists whose site is gone is not yet caught: the health problem classes, ``jolt/health``), `contracts` (`seon.check/contracts`: every platform function carries a contract), `mg-check` (`seon.check/mg-check`: every contract generates and passes `malli.generator/check`), `instrument`, `config` (`seon.check/config-check`: the config in force as facts on main, read alike by an agent);
+- **root and its procs**: `smoke` (`seon.check/smoke`: three agents define, test, transact; one merges, one is killed mid-eval), `system` (`seon.check/system-check`: [the root graph](root.md#the-root-graph)), `lifecycle` (every stop leaves exactly the declared threads), `drain` (every accepted request answered across a stop), `backpressure`, `hotreload` (a step-fn redefined runs at its next step), `idle` (an idle root with a tab open steps nothing), `threads` (`seon.check/threads-check`: the forking processes stay single-threaded), `problems` (`seon.check/problems-check`: every problem class provoked and read back, [errors](errors.md#problems)), `robust`, `record`, `fx`, `mcp` (`seon.check/mcp-proof`, [server](server.md#mcp));
+- **the store and recovery**: `durable` and `window` (group commit across a kill and a reopen, [storage](storage.md)), `lease`, `orphan` (no agent outlives its root), `lmdb-kill` (a writer SIGKILLed inside a transaction, then the next writes commit: [failure points](failure-points.md#lmdb-robust-locks));
+- **tasks end to end**: the `e2e-*` steps, `swarm` and `resume`, below;
+- **scale**: `scale N` agents spawned at once (`seon.check/scale`), red past `:seon.config.machine/memory-mb`.
+
+## Tasks end to end
+
+Each end-to-end run is a row of data worked by one runner with real agent processes, ending on what the system observes (the reconciler's quiescence, an event, a fact on main), never on a deadline: ```seon.e2e/run```.
+
+Its rows: the six-task graph with a cancel (`calc`), a root restarted in two phases (`resume`), the merge scenarios (`conflict`, `semantic`, `hairy`, `newns`, `sibling`), a swarm of tasks over shared definitions (`swarm N M`), a task that always fails ending stuck (`stuck`, [root](root.md#stuck-and-blocked)), a real model's run (`model`, a paid run: [model](model.md#paid-runs)), and the self-improvement loop's first turn on a clone of this repository (`loop`, [source](source.md#the-next-generation)). `seon.e2e/await-db` and `seon.e2e/await-quiet` are its waits: a watch on main's connection, run once per commit.
+
+The task graphs, their stub programs and proofs, and the scripted model's replies are data in `seon.fixtures`: ```seon.fixtures/calc```, ```seon.fixtures/scenarios``` (each with what a fresh agent must print on main afterwards), and `seon.fixtures/reply`, the scripted provider `bin/test` and `bin/check` run under ([model](model.md)). A new run is one more row.

@@ -1,0 +1,79 @@
+[
+ {
+  "section": 1,
+  "answer": "No. The shown text ends in section 5 (Laws), partway through the 'Procs follow the step-fn contract' bullets. Section 8 (\"The machine\") is not shown.",
+  "left_out": "+7279 chars in 88 more lines",
+  "read_form": "(subs result/h3 19523)",
+  "confident": true
+ },
+ {
+  "section": 2,
+  "answer": "## 1. What Seon is for, and what moving forward means",
+  "left_out": "+25313 chars in 233 more lines (the body of section 1 and everything after it)",
+  "read_form": "(subs (:seon.task/plan result/h3) 1489)",
+  "confident": true
+ },
+ {
+  "section": 3,
+  "answer": ":task calc/add-merge {:execution :running, :done true, :blocked-by #{}, :attempts [[calc/add-merge#1 :merged :green 0 0]]}",
+  "left_out": "+1643 chars (the lines after calc/add-merge, from the printed log)",
+  "read_form": "(subs (:out (nth (my.turn/evals) 1)) 665)",
+  "confident": true
+ },
+ {
+  "section": 4,
+  "answer": "## Where Jolt's Flow differs from upstream",
+  "left_out": "+10543 chars in 74 more lines (the rest of the Flow document, after its first bullet under that heading)",
+  "read_form": "(subs (get-in result/h3 [:seon.error/data :body]) 710)",
+  "confident": true
+ },
+ {
+  "section": 5,
+  "answer": "The test add-test in variants.clj:24 failed. Its first failure was expected (= 3 (- 1 2)) and actual (not (= 3 -1)). The second failure's expected (= 0 (- -2 2)) is shown, and its actual is cut.",
+  "left_out": "+245 chars (the second failure's actual and any output after it)",
+  "read_form": null,
+  "confident": true
+ },
+ {
+  "section": 6,
+  "answer": "The title is \"Render: what a person or a model reads\". Its plan body is not shown.",
+  "left_out": "+14143 chars in 76 more lines",
+  "read_form": "(subs (:seon.task/plan result/h3) 89)",
+  "confident": true
+ },
+ {
+  "section": 7,
+  "answer": "It shows the first two lines of the root log (:program {:ok true, :datoms 73} and :program {:ok true, :datoms 175}) and the start of the :create line.",
+  "left_out": "+2236 chars (the rest of the log, from the :create line onward)",
+  "read_form": null,
+  "confident": true
+ },
+ {
+  "section": 8,
+  "answer": "Explore first: find the owners of what it touches, their callers, the schemas on the data's path and the library functions that already do the work, and try the idea at the REPL.",
+  "left_out": "+1521 chars in 32 more lines (the rest of the instructions, from item (3) onward, and the rest of the context)",
+  "read_form": null,
+  "confident": true
+ },
+ {
+  "section": 9,
+  "answer": "HTTP 400 (the request's messages exceed the model's context window).",
+  "left_out": "+10964 chars in 78 more lines (the rest of the response body)",
+  "read_form": "(subs (get-in result/h3 [:seon.error/data :body]) 289)",
+  "confident": true
+ },
+ {
+  "section": 10,
+  "answer": "No. The shown part of docs/render.md has the headings \"## No clipping\", \"## Prose\", \"## Bounded lists\" and \"## Tiles are data; the context reads the page's derivations\". \"## One printer\" is not shown.",
+  "left_out": "+11603 chars, after the \"## Tiles are data\" heading (it may or may not hold \"## One printer\")",
+  "read_form": "(subs (get-in (nth (my.turn/evals) 5) [:value]) 2629)",
+  "confident": true
+ },
+ {
+  "section": 11,
+  "answer": "The shown AGENTS.md text runs through section 2 ('Forest before trees') and ends at its bullet list 'Stop and step back when:'. Sections 3 onward are not shown.",
+  "left_out": "+20541 chars in 194 more lines",
+  "read_form": "(subs (get-in (nth (my.turn/evals) 3) [:value]) 6261)",
+  "confident": true
+ }
+]

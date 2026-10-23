@@ -1,0 +1,47 @@
+;; One concrete question per rendered value, with its answer key (what a right answer must
+;; hold). :form is the exact form that reads what was left out, :n the count left out; a
+;; rendering that does not show :fact must say so. Keys read off the corpus (corpus.edn) and the
+;; cuts each rendering carries (variants.clj's :facts).
+{"37/reply/datoms" {:q "How many datoms (rows) does the whole value hold, how many are NOT shown, and what exact Clojure form returns the ones not shown?"
+                    :key {:total 400 :n 36 :form "(drop 364 result/h3)"}}
+ "37/reply/slurp-agents" {:q "The value is the text of AGENTS.md. Does the text shown include section 8 (\"The machine\")? How many characters are NOT shown, and what exact form returns them?"
+                          :key {:fact "no (not shown)" :n 7279 :form "(subs result/h3 19523)"}}
+ "37/part/tasks-calc" {:q "What is the :seon.task/execution of task \"calc/neg\"? If the rendering does not show it, say so and give the exact form that returns calc/neg's whole task map."
+                       :key {:fact "not shown" :form "(val (nth (seq result/h3) 4))"}}
+ "37/part/attempts-calc" {:q "What status did attempt \"calc/neg#1\" end with? If the rendering does not show it, say so and give the exact form that returns that attempt's map."
+                          :key {:fact "not shown" :form "(val (nth (seq result/h3) 2))"}}
+ "37/part/config" {:q "What is the value of :seon.config.root/max-agents? If it is not shown, say so, and say how many config keys are not shown and the exact form that returns them."
+                   :key {:fact "not shown" :n 73 :form "(drop 17 result/h3)"}}
+ "37/part/turns-square" {:q "How many turns does the value hold, and what exact form returns the eval calls (:seon.turn/calls) of the first turn?"
+                         :key {:total 2 :form "(get-in result/h3 [0 :seon.turn/calls])"}}
+ "37/part/problems-stuck" {:q "Which task is stuck, and why? If the rendering does not show it, say so and give the exact form that returns the stuck rows."
+                           :key {:fact "not shown" :form "(get-in result/h3 [:classes :stuck])"}}
+ "37/part/ex-info-http" {:q "What HTTP status did the provider answer? How many characters of the response body are NOT shown, and what exact form returns them?"
+                         :key {:fact "400" :n 10964 :form "(subs (get-in result/h3 [:seon.error/data :body]) 289)"}}
+ "37/context/turn-1" {:q "Which of this turn's evaluations raised an error (give its form), and what was the error's message? What exact form returns the rest of that error's response body?"
+                      :key {:fact "(seon.model/call provider request); The provider answered HTTP 400: the request's messages exceed the model's context window." :form "(subs (get-in (nth (my.turn/evals) 2) [:value :seon.error/data :body]) 5729)"}}
+ "37/context/turn-2" {:q "How many datoms did the d/datoms evaluation return in total, how many are NOT shown, and what exact form returns those not shown?"
+                      :key {:total 400 :n 334 :form "(drop 66 (get-in (nth (my.turn/evals) 2) [:value]))"}}
+
+ "38/reply/slurp-agents" {:q "The value is the text of AGENTS.md. Does the text shown include section 8 (\"The machine\")? How much of the text is NOT shown, and what exact form returns it?"
+                          :key {:fact "no (not shown)" :n 7279 :form "(subs result/h3 19523)"}}
+ "38/part/ex-info-http" {:q "What HTTP status did the provider answer? How much of the response body is NOT shown, and what exact form returns it?"
+                         :key {:fact "400" :n 10964 :form "(subs (get-in result/h3 [:seon.error/data :body]) 289)"}}
+ "38/context/turn-1" {:q "How much of AGENTS.md (the slurp evaluation's value) is NOT shown, and what exact form returns the rest of it?"
+                      :key {:n 20541 :form "(subs (get-in (nth (my.turn/evals) 3) [:value]) 6261)"}}
+ "38/context/turn-2" {:q "Does the shown part of docs/render.md (the last evaluation's value) include its section \"## One printer\"? How much is NOT shown, and what exact form returns the rest?"
+                      :key {:fact "no (not shown)" :n 11603 :form "(subs (get-in (nth (my.turn/evals) 5) [:value]) 2629)"}}
+ "38/prose/out/log" {:q "This is an evaluation's printed output (a root's log). What is the last task line shown? How much output is NOT shown, and what exact form returns it?"
+                     :key {:fact ":task calc/add-merge ... :merged" :n 1643 :form "(subs (:out (nth (my.turn/evals) 1)) 665)"}}
+ "38/prose/message/http" {:q "This is an error's response body. Which section heading is shown last? How much of the body is NOT shown, and what exact form returns it?"
+                          :key {:fact "## Where Jolt's Flow differs from upstream" :n 10543 :form "(subs (get-in result/h3 [:seon.error/data :body]) 710)"}}
+ "38/prose/plan/agents" {:q "This is a task's plan. What is the last section heading shown? How much of the plan is NOT shown, and what exact form returns it?"
+                         :key {:fact "## 1. What Seon is for, and what moving forward means" :n 25313 :form "(subs (:seon.task/plan result/h3) 1489)"}}
+ "38/prose/context/stuck" {:q "This is the start of an agent's context. What do the task's instructions say to do first? If that is not shown, say so. How much is NOT shown?"
+                           :key {:fact "Explore first (shown in one; not shown in the other)" :n "1521 (or 2162)"}}
+ "38/prose/line/log" {:q "This one-line cell shows a root's log. What does it show, and how much of the log is NOT shown?"
+                      :key {:n "2262 (or 2236)"}}
+ "38/prose/line/run-tests" {:q "This one-line cell shows a test run's output. Which test failed, and what was expected and what was actual in its first failure? How much is NOT shown?"
+                            :key {:fact "add-test; expected (= 3 (- 1 2)), actual (not (= 3 -1))" :n "269 (or 245)"}}
+ "38/prose/line/plan" {:q "This one-line cell shows a task's plan. What is its title, how much of the plan is NOT shown, and what exact form returns the rest?"
+                       :key {:fact "Render: what a person or a model reads" :n "14143 (or 14120)" :form "(subs (:seon.task/plan result/h3) 89) or (subs (:seon.task/plan result/h3) 112)"}}}

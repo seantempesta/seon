@@ -7,7 +7,7 @@
   paragraph boundaries) in one pass over the text."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.db :as pdb] [seon.reader :as reader]
-            [clojure.string :as str] [clojure.java.io :as io] [datahike.api :as d] [seon.config :as cfg]))
+            [clojure.string :as str] [clojure.java.io :as io] [datahike.api :as d] [seon.config :as cfg] [malli.registry :as mr]))
 
 (def roots
   "The checkout's top-level entries (docs, src, AGENTS.md, ...), read at first use: the bases
@@ -557,33 +557,72 @@
   "What each problem kind means and what the agent does about it (v1's seon.ref)."
   {:unresolved "This resolves to nothing on your branch; its operations read what does exist. What the task intends for it is its plan's to say. To mention a name that does not exist, as text and not a reference, wrap it in two backticks: ``ns/name`` or ``:ns/key``."})
 
+(defn task?
+  "Does sym name a task on db: is its ns/name a :seon.task/id (seon.task/task-id), and no
+  var's name (a var of that name is what it names)?"
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] :boolean]}
+  [db sym] (and (empty? (d/datoms db :avet :var/name sym)) (some? (pdb/eid db :seon.task/id (str sym)))))
+
+(defn task-view
+  "Task sym (its ns/name, a :seon.task/id on db) as depth shows it, by the one rule `shown`:
+  its address and heading are its id, its lead its plan. nil when db holds no such task."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol :seon.ref/depth] [:maybe :seon.ref/view]]}
+  [db sym depth]
+  (when-let [e (pdb/eid db :seon.task/id (str sym))]
+    (let [plan (:seon.task/plan (d/pull db [:seon.task/plan] e))]
+      (shown (cond-> {:seon.ref/address (str sym) :seon.ref/heading (str sym) :seon.ref/below []}
+               plan (assoc :seon.ref/lead plan))
+             depth))))
+
+(defn- loaded-var?
+  "Is sym a var of a namespace this process holds that db's program does not (a
+  dependency's, Jolt's)? A namespace of the program names its vars by db alone: this
+  process may still hold a var db's program deleted."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] :boolean]}
+  [db sym]
+  (let [nsym (symbol (namespace sym))]
+    (and (empty? (d/datoms db :avet :ns/name nsym))
+         (some? (some-> (find-ns nsym) ns-interns (get (symbol (name sym))))))))
+
 (defn names-something?
-  "Does citation c name something on db: a var by its :var/name, a namespace by its :ns/name
-  or as loaded, a registered schema key, a file of the checkout?"
+  "Does citation c name something on db: a var by its :var/name or as loaded, a task by its
+  :seon.task/id, a namespace by its :ns/name or as loaded, a schema key the contract registry
+  holds (a declared form or a host predicate, :seon.host/db), an entry
+  (file or directory) of the checkout, a section of a Markdown page by its anchor? An anchor
+  with no page of its own (:anchor-missing) names nothing."
   {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :boolean]}
-  [db {:seon.ref/keys [name path]}]
-  (boolean (cond (qualified-symbol? name) (seq (d/datoms db :avet :var/name name))
-                 (symbol? name) (or (seq (d/datoms db :avet :ns/name name)) (find-ns name))
-                 (keyword? name) (contains? contract/forms name)
-                 :else (.isFile (io/file (cfg/checkout) path)))))
+  [db {sym :seon.ref/name :seon.ref/keys [path anchor]}]
+  (boolean (cond (qualified-symbol? sym) (or (seq (d/datoms db :avet :var/name sym)) (task? db sym) (loaded-var? db sym))
+                 (symbol? sym) (or (seq (d/datoms db :avet :ns/name sym)) (find-ns sym))
+                 (keyword? sym) (some? (mr/schema contract/registry sym))
+                 (nil? path) false
+                 anchor (let [f (io/file (cfg/checkout) path)]
+                          (and (.isFile f) (some #(= anchor (:seon.ref/anchor %)) (:seon.ref/sections (parse path (slurp f))))))
+                 :else (.exists (io/file (cfg/checkout) path)))))
 
 (defn- alias-form?
   "Is citation c a qualified symbol whose namespace part names no namespace on db or in this
-  process, and no var? Then it is an alias form (`str/join`): code, not a reference."
+  process, and no var or task? Then it is an alias form (`str/join`): code, not a reference."
   {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :boolean]}
   [db {:seon.ref/keys [name]}]
   (let [nsym (when (qualified-symbol? name) (symbol (namespace name)))]
     (boolean (and nsym (empty? (d/datoms db :avet :ns/name nsym)) (nil? (find-ns nsym))
-                  (empty? (d/datoms db :avet :var/name name))))))
+                  (empty? (d/datoms db :avet :var/name name)) (not (task? db name))))))
+
+(defn kept
+  "Of citations (each once, at its strongest depth: `cited`), the references on db: a
+  resolve-only one (a prose word) kept only when it names something, an alias form left out."
+  {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.ref/citation]] [:vector :seon.ref/citation]]}
+  [db citations]
+  (into [] (remove #(or (alias-form? db %) (and (:seon.ref/resolve-only %) (not (names-something? db %))))) citations))
 
 (defn references
   "The references text makes, read on db: its citations once each at their strongest depth,
-  a resolve-only one (a prose word) kept only when it names something, an alias form left
-  out."
-  {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :seon.ref/citation]]}
-  [db text]
-  (into [] (remove #(or (alias-form? db %) (and (:seon.ref/resolve-only %) (not (names-something? db %)))))
-        (cited (:seon.ref/citations (parse nil text)))))
+  `kept`. Given the page's path, a relative link or an anchor resolves against it (`parse`)."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:vector :seon.ref/citation]]
+                  [:=> [:cat :seon.host/db [:maybe :string] :string] [:vector :seon.ref/citation]]]}
+  ([db text] (references db nil text))
+  ([db path text] (kept db (cited (:seon.ref/citations (parse path text))))))
 
 (defn names
   "The qualified symbols text cites, at any depth, once each in first-mention order."

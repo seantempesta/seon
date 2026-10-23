@@ -74,8 +74,9 @@
   (let [b (ffi/alloc 4096) n (mp-probe* b 4096)] (read-string (ffi/read-bytes b n))))
 
 (defn real-mb
-  "Pages this process owns (copied from its parent or newly dirtied), in MB: per method.md,
-  footprint overstates a forked child, so count shared-now-private + private resident pages."
+  "Pages this process owns (copied from its parent or newly dirtied), in MB: footprint
+  overstates a forked child (docs/cost.md#how-we-measure), so count shared-now-private +
+  private resident pages."
   {:malli/schema [:function [:=> [:cat] :seon.lib/mb] [:=> [:cat :seon.lib/probe] :seon.lib/mb]]}
   ([] (real-mb (mp-probe)))
   ([p] (reduce + 0.0 (for [k [:jit :malloc :anon0 :other]

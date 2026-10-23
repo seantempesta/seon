@@ -3,7 +3,7 @@
   to end on real functions, red when the body does more than the work needs."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]]
-            [seon.cost :as cost] [seon.profile :as profile] [datahike.api :as d] [seon.db :as pdb] [clojure.edn :as edn]))
+            [seon.cost :as cost] [seon.profile :as profile] [datahike.api :as d] [seon.db :as pdb] [clojure.edn :as edn] [clojure.string :as str]))
 
 ;; ---- the judge ------------------------------------------------------------------------
 
@@ -159,6 +159,9 @@
                   :per :n-log-n}
    :str/seq-char {:what "one step of a seq over a String's chars (doseq, reduce)" :setup #(vector (apply str (repeat % \a)))
                   :f (fn [s] (reduce (fn [n c] (inc n)) 0 s))}
+   :str/escape {:what "clojure.string/escape of a text by char-escape-string, newlines kept, per char"
+                :setup (fn [n] [(subs (str/join "\n" (repeat (inc (quot n 40)) "line 12 of a long log, as one prints it")) 0 n)])
+                :f (fn [s] (str/escape s #(when-not (= \newline %) (char-escape-string %))))}
    :str/append {:what "StringBuilder append of one char" :setup #(vector (apply str (repeat % \a)))
                 :f (fn [s] (let [sb (StringBuilder.) n (count s)] (loop [i 0] (when (< i n) (.append sb (.charAt ^String s i)) (recur (inc i)))) (.toString sb)))}
    :map/literal {:what "a small map literal of 5 keys built per element" :setup #(vector (vec (range %)))
