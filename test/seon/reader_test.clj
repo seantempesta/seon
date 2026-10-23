@@ -3,7 +3,7 @@
   source whose prose is comments; delimiters are repaired; and its two laws hold (T5's
   forgive tasks, Seon's spec): forgiving forgiven text changes nothing, and the repairs
   account for every change."
-  (:require [clojure.test :refer [deftest is are testing]]
+  (:require [clojure.test :refer [deftest is are testing]] [seon.proofs :as proofs]
             [clojure.string :as str]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -74,8 +74,8 @@
 (deftest the-laws-hold-over-generated-replies
   (let [piece (gen/elements ["(" ")" "[" "]" "{" "}" "\"" "\\" ";" "\n" " " "  " "a" "x/y" "1" "#" "'" ":k" "I'll "
                              "```" "```clojure\n" "```text\n" "\n```\n" "#{" "#(" "`" "~" "@" "^" ","])
-        r (tc/quick-check 300 (prop/for-all [ps (gen/vector piece 0 40)] (laws-hold? (apply str ps))) :seed 42)]
-    (is (:pass? r) (pr-str (get-in r [:shrunk :smallest])))))
+        r (tc/quick-check 300 (prop/for-all [ps (gen/vector piece 0 40)] (laws-hold? (apply str ps))) :seed (proofs/test-seed))]
+    (is (:pass? r) (pr-str (select-keys r [:seed]) (get-in r [:shrunk :smallest])))))
 
 (deftest line-starts-are-each-lines-offset
   (is (= [0] (reader/line-starts "")) "empty text is one line, at 0")

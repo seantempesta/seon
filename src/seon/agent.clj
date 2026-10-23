@@ -85,6 +85,13 @@
         :else (do (swap! state update :pending conj m) (recur))))))
 
 
+(defn mem-mb
+  "Real MB of this process, read now (lib/real-mb walks the VM regions, ~1.5 ms): on the
+  events that report the agent's state (its hello, each commit, a :tests reply, :stats),
+  never per evaluation and never kept for a time."
+  {:malli/schema [:=> [:cat] :seon.lib/mb]}
+  [] (lib/r2 (lib/real-mb)))
+
 (defn commit!
   "Commit the writes this agent applied (run-ahead) to its branch, once, through its own
   store handle, and tell root (its flush makes the commit durable). nil when nothing waits."
@@ -96,7 +103,7 @@
     ;; them across agents
     (let [errs (:errors @state)]
       (when errs (swap! state dissoc :errors))
-      (send! (cond-> {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c)} errs (assoc :errors (vec (vals errs))))))))
+      (send! (cond-> {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c) :mem-mb (mem-mb)} errs (assoc :errors (vec (vals errs))))))))
 
 (defn transact!
   "Write tx-data to this agent's branch: applied at once to the value ahead of the
@@ -111,7 +118,7 @@
       (swap! state assoc :db (:db-after r))
       {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
     (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta)})]
-      ;; past this process's block of entity ids: the typed refusal, nothing applied
+      ;; past this process's block of entity ids: the typed error, nothing applied
       (when-let [e (and (not (map? r)) (pdb/lease-spent r (:lease @state)))] (throw (ex-info (:seon.error/message e) e)))
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
       (swap! state assoc :db (:db-after r) :dirty? true)
@@ -151,7 +158,7 @@
     kind))
 
 (defn- fx-test
-  "An effect asked inside a test fork: the stub's outcome, or the declared refusal."
+  "An effect asked inside a test fork: the stub's outcome, or the declared error."
   {:malli/schema [:=> [:cat :keyword :map] :map]}
   [kind req]
   (if *fx-stub*
@@ -220,7 +227,7 @@
 (defn error-map
   "An exception caught at one of the agent's entrant boundaries (operation: the REPL's
   seon.repl/eval-code by default) as the one error map: its ex-data when that already is
-  one (a contract refusal names its operation, member and problems), else the
+  one (a contract's error names its operation, member and problems), else the
   :seon.agent/eval-error variant, with the exception's class, its ex-data printed by the one
   printer, and its cause chain (each cause's class and message)."
   {:malli/schema [:function [:=> [:cat :seon.host/throwable] :seon.error/base]
@@ -292,44 +299,46 @@
       (assoc :got (print/text (second (:actual m)) (:part print/budgets)))
       (contract/valid? :seon.cost/report cost) (assoc :cost cost))))
 
-(defn results-dir
-  "Where this root's agents keep their test results: beside its store, under its main (this
-  root's agents only), never the results directory bin/test and every checkout share: an agent's REPL can
-  change live state its recorded forms do not show (until the owner rules that agents share)."
-  {:malli/schema [:=> [:cat] :string]}
-  [] (str (cfg/value :seon.config.root/store-path) "-results/" (cfg/value :seon.config.root/main)))
-
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/reach-digests) against base's (main at its merge base), the greens stored at
   those digests and proofs. The digests' inputs with no program facts are this boot's
   :inputs on root's :seon.root/source fact (seon.root/import-source!: present only when root's
-  binary is built from its source tree), so an agent's results are kept by digest in
-  results-dir; a root with no such fact this boot shares nothing and reuses nothing (the
+  binary is built from its source tree), so an agent's results are kept by digest in the one
+  results directory every checkout shares (:seon.config.source/test-results-dir: owner,
+  2026-10-23, a test that is the same is not run again once green, \"especially when freshly
+  branched\"; every eval is a recorded form, so the digest covers what ran); a root with no
+  such fact this boot shares nothing and reuses nothing (the
   inputs then are blank, which keys nothing stored: it only selects). A test is selected when
   it is a proof or reaches what the branch changed since base (a var, method, fixture, ns form,
   macro or schema entry), and runs when no green is stored at its digest
-  (seon.reconcile/done-refusals reads the selected). Scratch namespaces' tests (user,
+  (seon.reconcile/done-explain reads the selected). Scratch namespaces' tests (user,
   ^:scratch) never merge, so they never judge; a proof with no test var here does not run, and
   one with a var but no program facts (loaded, never recorded) has no digest: it always runs.
-  Answers the plan with :digests {test digest} and :dir (results-dir when shared)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]]
+  With no base (a tree with nothing to diff against: root's on-change runs), the proofs and
+  every test with no green at its digest (seon.proofs/plan's own rule). Answers the plan with
+  :digests {test digest}, :dir (the results directory when shared) and :process, the tests that reach a
+  process of their own (seon.program/reach-index, the same walk as the digests): never run
+  automatically, only when named (owner's ruling, 2026-10-23)."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] [:set :qualified-symbol]]
                   [:map [:selected [:vector :qualified-symbol]] [:run [:vector :qualified-symbol]] [:reused [:map-of :qualified-symbol :map]]
-                   [:digests [:map-of :qualified-symbol :string]] [:dir [:maybe :string]]]]}
+                   [:digests [:map-of :qualified-symbol :string]] [:dir [:maybe :string]] [:process [:set :qualified-symbol]]]]}
   [db base proofs]
   (let [root (d/entity db [:seon.root/id :root])
         source (:seon.root/source root)
         shared (when (= (:boot source) (:seon.root/boot root)) (:inputs source))
         in (or shared {:env "" :tree "" :data-refs (fx/declared-refs (cfg/value :seon.config.root/system-path))})
-        dir (when shared (results-dir))
+        dir (when shared (cfg/value :seon.config.source/test-results-dir))
         judges? (fn [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
                           (and (:test m) (not (program/scratch-ns? (:ns m))))))
-        cd (into {} (filter (comp judges? key)) (program/reach-digests db in))
+        idx (into {} (filter (comp judges? key)) (program/reach-index db in))
+        cd (update-vals idx :digest)
         unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))]
-    (-> (proofs/plan (program/reach-digests base in) cd (if dir (proofs/greens dir (vec (vals cd))) {}) proofs)
+    (-> (proofs/plan (some-> base (program/reach-digests in)) cd (if dir (proofs/greens dir (vec (vals cd))) {}) proofs)
         (update :selected into unrecorded)
         (update :run into unrecorded)
-        (assoc :digests cd :dir dir))))
+        (assoc :digests cd :dir dir
+               :process (program/process-tests idx)))))
 
 (defn- run-tests-here
   "The tests a test-plan runs (var symbols), by the one runner (seon.proofs/run-tests!, nothing
@@ -468,17 +477,6 @@
       (alias 'str 'clojure.string))
     nsx))
 
-(defn mem-mb
-  "Real MB of this process (lib/real-mb walks the VM regions, ~1.5 ms), refreshed at most
-  once a second, or now when fresh?."
-  {:malli/schema [:function [:=> [:cat] :seon.lib/mb] [:=> [:cat :boolean] :seon.lib/mb]]}
-  ([] (mem-mb false))
-  ([fresh?]
-   (let [{:keys [mem-at mem]} @state now (profile/now-ns)]
-     (if (and (not fresh?) mem-at (< (- now mem-at) 1000000000))
-       mem
-       (let [m (lib/r2 (lib/real-mb))] (swap! state assoc :mem m :mem-at now) m)))))
-
 (declare clone!)
 
 (defn handle!
@@ -500,7 +498,7 @@
     ;; root asks this agent to merge main into its branch (it owns the branch's writes)
     :merge-main [{:op :merged-main :id (:id m) :result (merge-main! (:data-attrs m #{}))}]
     :clone (do (clone! m) nil)
-    :stats [{:op :stats :id (:id m) :result {:mem-mb (mem-mb true) :t (:max-tx (db)) :pid (lib/c-getpid)
+    :stats [{:op :stats :id (:id m) :result {:mem-mb (mem-mb) :t (:max-tx (db)) :pid (lib/c-getpid)
                                               :results (count (:results @state)) :evals (:n @state)
                                               :ids (pdb/lease-use (db) (:lease @state))
                                               :heap-mb (lib/r2 (/ (lib/bytes-in-heap) 1048576.0))}}]
@@ -564,7 +562,7 @@
                       (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
                       (let [store-conn (d/connect (assoc (:cfg r) :branch (:branch m)))]
                         (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn (sock/conn fd) :mode :agent :tx-seq 0
-                               :lease (:lease r) :pending clojure.lang.PersistentQueue/EMPTY :mem-at nil :fx-pending {}
+                               :lease (:lease r) :pending clojure.lang.PersistentQueue/EMPTY :fx-pending {}
                                :store-conn store-conn :db @store-conn))
                       (let [unwatched (sock/signal-at-input! fd)]
                         (hello! t0 (cond-> {:cloned-from parent} unwatched (assoc :unwatched unwatched))))
@@ -614,4 +612,8 @@
                    :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
-                   :ns nsx :interrupt-ok intr-ok :serve serve}))))
+                   :ns nsx :interrupt-ok intr-ok :serve serve})
+     ;; a kept branch, resumed (root released its held task: seon.reconcile/hold-tx), takes
+     ;; its task from main, with the failure and evidence the last attempt left there
+     (when-let [tx (when resumed (not-empty (task/onto-tx db0 @store-conn task)))]
+       (transact! tx)))))

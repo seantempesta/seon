@@ -7,7 +7,7 @@
   the printer makes per entry, which is what arming multiplies."
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is]] [seon.contract :as contract :refer [defn defn-]]
-            [seon.cost :as cost] [seon.print]))
+            [seon.cost :as cost] [seon.print] [seon.print.select :as select] [clojure.string :as str]))
 
 (defn entries
   "The input of size n: a map of n keyword keys to small integers, printed with a handle under a
@@ -17,11 +17,12 @@
   [n] [(zipmap (map #(keyword (str "k" %)) (range n)) (range n)) {:handle 'result/h1 :budget 60000}])
 
 (defn- priced
-  "What unit operations `ops` cost by the unit table: {:ns :bytes}."
-  {:malli/schema [:=> [:cat [:map-of :keyword number?]] [:map [:ns number?] [:bytes number?]]]}
+  "What unit operations `ops` cost by the unit table: {:ticks :ns :bytes}."
+  {:malli/schema [:=> [:cat [:map-of :keyword number?]] [:map [:ticks number?] [:ns number?] [:bytes number?]]]}
   [ops]
-  (reduce-kv (fn [acc op k] (-> acc (update :ns + (* k (:ns (cost/units op)))) (update :bytes + (* k (:bytes (cost/units op))))))
-             {:ns 0.0 :bytes 0.0} ops))
+  (reduce-kv (fn [acc op k] (-> acc (update :ticks + (* k (:ticks (cost/units op)))) (update :ns + (* k (:ns (cost/units op))))
+                                (update :bytes + (* k (:bytes (cost/units op))))))
+             {:ticks 0.0 :ns 0.0 :bytes 0.0} ops))
 
 (defn- round
   "Costs as whole numbers."
@@ -89,3 +90,31 @@
        ;; root's node and sizing, tree, emit-both, node-ops, layout and their helpers): 71 calls
        :fixed (dissoc (armed fixed 71) :ns)
        :sizes [100 1000 10000]})))
+
+(defn text
+  "The input of size n: a text of n lines (~50 characters each, a log an evaluation printed),
+  printed with a handle under the reply budget, which shows its first ~19.6k characters and
+  cuts the rest."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :string :map]]}
+  [n] [(str/join "\n" (for [i (range n)] (str "line " i " of a long log, as an evaluation prints it"))) {:handle 'result/h1}])
+
+(deftest a-cut-text-reads-its-lines-once
+  ;; the one string cutter counts the lines it left from the string's line breaks, found once
+  ;; (seon.print.select/line-breaks): what grows with the text is that one pass, never a scan of
+  ;; the rest at every sizing. What the budget shows is fixed: its characters escaped once into
+  ;; the literal, and read by the sizing passes (fill-end and escaped-width, about three).
+  (let [armed? (contract/armed? #'seon.print/print-value)
+        shown (select/estimate-chars (:reply seon.print/budgets))]
+    (require 'seon.print.emit 'seon.print.select 'seon.print :reload)
+    (try
+      (cost/proof
+        {:of 'seon.print/print-value :input 'seon.print-cost-test/text
+         :n "lines of a text cut under the reply budget, unarmed"
+         :work (str "per line, one indexOf to its line break (~50 characters read) and one conj! of the break's offset; "
+                    "fixed, the ~" shown " characters shown: each escaped once into the string literal and looked up by "
+                    "about three sizing passes (char-escape-string)")
+         :growth :linear
+         :ops {:vec/conj! 1 :seq/reduce 50}
+         :fixed (round (priced {:str/escape shown :map/get (* 3 shown)}))
+         :sizes [1000 10000 100000]})
+      (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))

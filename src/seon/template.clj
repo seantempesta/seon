@@ -14,13 +14,7 @@
     `request-tx` writes the whole linked set released in one transaction (owner,
     2026-10-22): the reconciler forks only from a committed main, so every agent of the
     set starts from the same graph.
-  - `attach-tx`: a failed attempt (any kind: refused by the done rule, its merge refused,
-    its agent dead) attaches design -> implement -> test -> merge on a fresh branch from
-    main, while the task's budget lasts (seon.reconcile/refine?). Each starts from the failed
-    task's improved plan and its measured evidence (the problem, the conflicts with base,
-    ours and theirs; the red proofs). The failed task and the rest of its branch's chain
-    (the tasks on its branch that need it: a work task's merge) are cancelled, and every
-    other task that needed one of them needs the new merge."
+  A failed attempt attaches no tasks: its task is held for root (seon.reconcile/hold-tx)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.task :as task] [clojure.string :as str]))
 
@@ -73,8 +67,10 @@
 
 (defn with-merge
   "decls (task declarations of work) followed by their merge tasks; needs on a work task
-  of decls become needs on its merge."
-  {:malli/schema [:=> [:cat [:vector :seon.task/declaration]] [:vector :seon.task/declaration]]}
+  of decls become needs on its merge. (A generated input holds at most 4 declarations: each is
+  a large nested map, and up to ~100 of them made this one contract's mg/check 78 s of the
+  step's 136, pure-tests 2026-10-23; 4 already cover a need on work, on a merge and outside.)"
+  {:malli/schema [:=> [:cat [:vector {:gen/max 4} :seon.task/declaration]] [:vector :seon.task/declaration]]}
   [decls]
   (let [id #(task/task-id (:seon.task/ns %) (:seon.task/name %))
         work (set (map id decls))
@@ -98,7 +94,7 @@
         did (task/task-id tns (:seon.task/name decl))
         design (-> decl (assoc :seon.task/kind :design :seon.task/instructions (instructions :design))
                    (update :seon.task/branch #(or % (task/default-branch did))))
-        implement (cond-> (-> (select-keys design [:seon.task/ns :seon.task/branch :seon.task/model :seon.task/config :seon.task/budget])
+        implement (cond-> (-> (select-keys design [:seon.task/ns :seon.task/branch :seon.task/model :seon.task/config])
                               (assoc :seon.task/name (str (:seon.task/name decl) "-implement") :seon.task/kind :implement
                                      :seon.task/plan "" :seon.task/instructions (instructions :implement)
                                      :seon.task/needs #{did})))]
@@ -107,7 +103,7 @@
 (defn request-tx
   "The one transaction that writes request decl's linked tasks (request) on main, released:
   the reconciler sees the whole set at once and forks its first agent only once it is
-  committed. A refusal (seon.task/create-tx's) answers as it is."
+  committed. An error (seon.task/create-tx's) answers as it is."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/declaration]
                   [:or [:vector :any] [:map [:seon.error/type [:= :seon.task/refused]] [:seon.error/message :string]]]]}
   [db decl]
@@ -116,72 +112,3 @@
     (if (contract/error? tx)
       tx
       (into tx (task/execution-tx (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) ds) :running)))))
-
-(defn evidence
-  "The measured evidence of failed attempt a: its conflicts (read from the branch by root's
-  judge), the proofs not passing in root's own test run, and the problem the reconciler
-  stated (nil: none)."
-  {:malli/schema [:=> [:cat :seon.attempt/attempt [:maybe :string]] :seon.task/evidence]}
-  [a problem]
-  (cond-> {:from (:seon.attempt/id a)
-           :conflicts (vec (:seon.attempt/conflicts a []))
-           :unmerged (vec (:seon.attempt/unmerged a []))
-           :red (vec (sort-by str (for [[t s] (:seon.attempt/results a) :when (not= :pass s)] t)))}
-    problem (assoc :problem problem)))
-
-(defn- stem
-  "The name a refinement chain grows from: nm without a merge suffix or an earlier
-  chain's -rN-kind suffix."
-  {:malli/schema [:=> [:cat :seon.task/name] :string]}
-  [nm] (-> nm (str/replace #"-r[0-9]+-(design|implement|test|merge)$" "") (str/replace #"-merge$" "")))
-
-(defn attach-tx
-  "The tasks a failed attempt attaches, in one transaction: design -> implement -> test ->
-  merge, released, on one fresh branch, one generation on, under the failed task's budget;
-  the failed task and the tasks on its branch that need it cancelled; every other task
-  that needed one of them moved to the new merge; the failed attempt closed. db: main."
-  {:malli/schema [:=> [:cat :seon.host/db [:map [:attempt :seon.attempt/id] [:task :seon.task/id] [:problem {:optional true} :string]]] [:vector :any]]}
-  [db {:keys [attempt task problem]}]
-  (let [m (task/task db task)
-        a (task/attempt db attempt)
-        g (inc (:seon.task/generation m 0))
-        base (str (stem (:seon.task/name m)) "-r" g)
-        tns (:seon.task/ns m)
-        tid #(task/task-id tns (str base "-" %))
-        branch (task/default-branch (task/task-id tns base))
-        ev (evidence a problem)
-        task-config (select-keys m [:seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
-        all (task/tasks db)
-        ;; the failed task's chain on its branch: it and the tasks there that need it, transitively
-        chain (loop [cs #{task}]
-                (let [more (into cs (for [[id t] all :when (and (= (:seon.task/branch t) (:seon.task/branch m))
-                                                                (not= :cancelled (:seon.task/execution t))
-                                                                (some cs (:seon.task/needs t)))]
-                                      id))]
-                  (if (= more cs) cs (recur more))))
-        ;; the chain starts from the failed task's accumulated plan and proofs (design
-        ;; holds them as its own); each later step inherits them along :needs and adds its own
-        step (fn [kind needs]
-               (cond-> {:seon.task/ns tns :seon.task/name (str base "-" (name kind)) :seon.task/kind kind
-                        :seon.task/plan "" :seon.task/instructions (instructions kind)
-                        :seon.task/branch branch :seon.task/evidence ev :seon.task/generation g}
-                 (nil? needs) (assoc :seon.task/plan (:plan (:seon.task/accumulated m))
-                                     :seon.task/proofs (:proofs (:seon.task/accumulated m)))
-                 needs (assoc :seon.task/needs #{needs})
-                 (:seon.task/model m) (assoc :seon.task/model (:seon.task/model m))
-                 (:seon.task/budget m) (assoc :seon.task/budget (:seon.task/budget m))
-                 ;; the task's config keys carry to its refinements
-                 (seq task-config) (assoc :seon.task/config task-config)))
-        decls [(step :design nil) (step :implement (tid "design")) (step :test (tid "implement")) (step :merge (tid "test"))]
-        new-merge (tid "merge")
-        moved (for [[id t] (sort-by key all) :when (not (chain id)) n (sort (filter chain (:seon.task/needs t)))] [id n])]
-    (vec (concat (task/create-tx db decls)
-                 (task/execution-tx (mapv #(task/task-id tns (:seon.task/name %)) decls) :running)
-                 (for [id (sort chain)]
-                   (cond-> {:seon.task/id id :seon.task/execution :cancelled}
-                     (= id task) (assoc :seon.task/problem (str "attempt " attempt " failed"
-                                                                (some->> problem (str ": ")) "; refined by " new-merge))))
-                 (mapcat (fn [[id n]] [[:db/retract [:seon.task/id id] :seon.task/needs [:seon.task/id n]]
-                                       [:db/add [:seon.task/id id] :seon.task/needs new-merge]])
-                         moved)
-                 (task/status-tx db attempt (:seon.attempt/status a) :closed {})))))

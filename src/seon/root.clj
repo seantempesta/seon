@@ -1,5 +1,5 @@
 (ns seon.root
-  "Root: the control process (session F2, notes/option3-F1-flow.md; proto/flow f2-final
+  "Root: the control process (session F2, notes/archive/option3-F1-flow.md; proto/flow f2-final
   proto.control's api, reader, boot and API). Boots the database
   (Datahike, E4a index), forks the single-threaded fork server before any thread exists,
   then runs ONE root graph of four procs:
@@ -43,7 +43,7 @@
   [id why] (contract/error :seon.root/no-agent 'seon.root/api-proc why {:agent id}))
 
 (defn- refused
-  "Root's API refusing a request, as the one error map; members describe the refusal."
+  "Root's API refusing a request, as the one error map; members describe the refused answer."
   {:malli/schema [:=> [:cat :qualified-symbol :string :map] :seon.root/refused]}
   [op why members] (contract/error :seon.root/refused op why members))
 
@@ -579,7 +579,7 @@
 
 (declare call!)
 
-(defn- import-source!
+(defn import-source!
   "Main's program follows Seon's own source (seon.source): root's dirs read through the
   :source effect (their files, the tree's HEAD commit and its reference-code pins, and the
   tree's inputs with no program facts, seon.fx/inputs). When what they read differs from
@@ -615,18 +615,21 @@
     @(call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/source fact}]}})
     fact))
 
+(defn platform-tx
+  "Error e, observed at ms outside root's procs (boot, the file watcher: seon.watch), as the
+  transaction recording it on main db: a :platform error by its signature (seon.error), what
+  my.root/problems shows."
+  {:malli/schema [:=> [:cat :seon.host/db :map :int] [:vector :any]]}
+  [db e ms] (second (err/flush-tx (err/fold {} (err/occurrence e :platform {} ms)) db)))
+
 (defn wiki-tx
   "The wiki (the checkout's docs/) onto main db, written in the boot fact's own commit so main
   holds it before any agent forks: the help page every agent reads first is one of its pages
-  (seon.context/help-text). An unchanged wiki writes nothing. A wiki the one load refuses (a
-  link to no section, seon.docs/load-dir-tx) is a recorded :platform error (seon.error, what
-  my.root/problems shows) and main keeps the wiki it held: the boot goes on."
-  {:malli/schema [:=> [:cat :seon.host/db :string :int] [:vector :any]]}
-  [db checkout ms]
-  (let [w (docs/load-dir-tx db checkout "docs")]
-    (if (contract/error? w)
-      (second (err/flush-tx (err/fold {} (err/occurrence w :platform {} ms)) db))
-      w)))
+  (seon.context/help-text). An unchanged wiki writes nothing. A link to no section is kept on
+  its section and shows as a dead citation (seon.problems/health), never refuses the load."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :any]]}
+  [db checkout]
+  (docs/load-dir-tx db checkout "docs"))
 
 (defn- previous-end
   "How the root before this boot on main ended: the stop fact it wrote, or, when it wrote
@@ -753,11 +756,11 @@
         ]
     (flow/resume g)
     ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is; a root
-    ;; whose boot fact was refused cannot start anything, so its refusal ends the boot
+    ;; whose boot fact was refused cannot start anything, so its error ends the boot
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
           r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running) (into (cfg/facts config cfg/sources))
-                                                                                  (into (wiki-tx db (cfg/checkout) (System/currentTimeMillis))))
+                                                                                  (into (wiki-tx db (cfg/checkout))))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev}))}})]
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
     (when source (import-source! sys source))
@@ -827,7 +830,7 @@
   "The op (named as its fn below: spawn! clone! submit! run-tests! kill! merge!
   merge-main!) on agent id with args, as the api request it is: one table for these fns
   and the dashboard's calls (seon.web). a: the agent's entry in root's view, which merge!
-  and merge-main! read; an op the agent cannot take answers its refusal."
+  and merge-main! read; an op the agent cannot take answers its error."
   {:malli/schema [:=> [:cat :symbol [:maybe :seon.agent/id] [:maybe :map] [:maybe :map]] :map]}
   [op id args a]
   (let [live? (boolean (and a (not (gone-statuses (:status a)))))
@@ -852,7 +855,7 @@
 
 (defn- request!
   "Call root's op on agent id with args (request): a promise of its answer, or of its
-  refusal."
+  error."
   {:malli/schema [:=> [:cat :seon.root/sys :symbol [:maybe :seon.agent/id] [:maybe :map]] :seon.host/promise]}
   [sys op id args]
   (let [r (request op id args (when (#{'merge! 'merge-main!} op) (agent-entry sys id)))]
@@ -869,7 +872,7 @@
 
 (defn clone!
   "Fork a live agent into a new agent on a branch of its branch. A promise of
-  {:ok true :id new-id}, or its refusal (the one error map)."
+  {:ok true :id new-id}, or its refused answer (the one error map)."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :map] :seon.host/promise]]}
   ([sys agent-id] (clone! sys agent-id {}))
   ([sys agent-id opts] (request! sys 'clone! agent-id opts)))

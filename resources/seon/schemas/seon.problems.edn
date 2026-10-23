@@ -24,6 +24,8 @@
  :seon.agent/stalled [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/stalled]] [:agent :keyword]
                                              [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]
  ;; a resumed agent's branch program that did not load (seon.program/load-diff!): main's ran instead
+ ;; an agent's boot check found its SIGUSR1 handler never ran (seon.agent/interrupt-self-test)
+ :seon.agent/interrupt-unreachable [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/interrupt-unreachable]]]]
  :seon.agent/load-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/load-failed]] [:ns :symbol]]]
  ;; a new agent whose branch or forked image is not at the commit root branched it from
  ;; (the writer's :spawn names main's commit and t on :fork; seon.agent/init! compares)
@@ -31,6 +33,10 @@
                                                      [:commit :uuid] [:t :int] [:branch-commit [:maybe :uuid]] [:image-t :int]]]
  :seon.root/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/proc-defect]] [:pid {:optional true} [:maybe :keyword]]]]
  :seon.root/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/refused]]]]
+ ;; a release (my.root/run!) of a task that is not held: unknown (execution nil), already
+ ;; running, or cancelled; the held ids of the same call are released
+ :seon.root/not-held [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/not-held]] [:task :string]
+                                             [:execution [:maybe [:enum :held :running :cancelled]]]]]
  ;; a defect answering one outside request at root's server (seon.server/respond): the
  ;; line it took, and the cause's ex-data printed; the server goes on serving
  :seon.server/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/defect]] [:line :string] [:data {:optional true} :string]]]
@@ -86,6 +92,7 @@
                             [:seon.error/last-agent {:optional true} :seon.error/last-agent]
                             [:seon.error/last-task {:optional true} :seon.error/last-task]
                             [:seon.error/form {:optional true} :seon.error/form]
+                            [:seon.error/subject {:optional true} :seon.error/subject]
                             [:seon.error/example {:optional true} :seon.error/example]]
  ;; one occurrence as its observer sees it (a value; never stored whole)
  :seon.error/occurrence [:map [:error :map] [:class :seon.error/class] [:cause [:vector :any]]
@@ -101,7 +108,7 @@
  :seon.error/sent [:map [:error :map] [:form [:maybe :string]] [:n pos-int?] [:first-ms :int] [:last-ms :int]]
 
  ;; ---- problem members of an attempt's end (main; the judge writes them) and of the agent's end (branch) ----
- ;; the error that ended the attempt: the agent's death, the turn loop's error, a merge refusal
+ ;; the error that ended the attempt: the agent's death, the turn loop's error, a refused merge
  :seon.attempt/error [:map {:seon.db/data true}]
  ;; failing assertions per red test (at most 8 each, printed by seon.print under :part)
  :seon.problems/assertion [:map [:type [:enum :fail :error]] [:message {:optional true} [:maybe :string]]
@@ -147,7 +154,13 @@
                          [:seon.fx/cache-hit-tokens {:optional true} :seon.fx/cache-hit-tokens]]
 
  ;; ---- the one read: seon.problems/report ----
- :seon.problems/class [:enum :platform :eval :agent :effect :red :cost :merge :dead :error :waste :stuck :failed :task-conflict]
+ ;; each class's area, the group root's page and context show it under (docs/health.md),
+ ;; declared once here and read through seon.contract/properties (as a status set is)
+ :seon.problems/class [:enum {:seon.problems/derived #{:dead-citation :unnamed-site :stale-pin}
+                             :seon.problems/areas [[:docs #{:dead-citation :stale-pin}] [:tests #{:red :cost}]
+                                                    [:laws #{:unnamed-site}] [:merges #{:merge :task-conflict}] [:tasks #{:failed}]
+                                                    [:agents #{:dead :error :waste}] [:errors #{:platform :eval :agent :effect}]]}
+                       :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :dead-citation :unnamed-site :stale-pin]
  :seon.problems/row [:map {:seon.render/ai seon.render.ai/problem-row}
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]

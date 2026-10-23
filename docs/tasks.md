@@ -4,22 +4,18 @@ All work is task entities on main, linked by `:needs`; a template turns what som
 
 ## A request is one transaction
 
-A request becomes its whole linked task set in one transaction on main, released, and the reconciler forks the set's first agent only from a main that holds all of it (owner, 2026-10-22: "it's just one transaction with several maps … only when everything is set should it fork and run it so they have the same data until that point").
+A request becomes its whole linked task set in one transaction on main, released, and the reconciler forks the set's first agent only from a main that holds all of it, so every agent of it reads the same data from its first form.
 
-`seon.template/request` makes the set from one declaration (the request's ns, name, plan, and any proofs or model):
+```seon.template/request``` makes the set from one declaration (the request's ns, name, plan, and any proofs or model):
 - the request itself as the **design** step (kind `:design`, its plan the request's words);
 - `<name>-implement` (kind `:implement`), needing design;
-- `<name>-merge` (kind `:merge`), needing implement: the template adds it, explicit in the graph from the start (DESIGN-tasks D3(a)).
+- `<name>-merge` (kind `:merge`), needing implement: the template adds it, explicit in the graph from the start.
 
 All three check out design's branch, so implement holds design's schemas, stubs and red proofs, and merge holds both. The request's proofs are design's and reach the later steps along `:needs` (`seon.task/accumulate`).
 
-`seon.template/request-tx` is the one transaction: `seon.task/create-tx` of the set, then `seon.task/execution-tx` releasing it. `my.root/request!` writes it with one `seon.root/transact-main!`. Since the reconciler reads only committed main, no agent of the set sees part of it. Not this: create held, then `my.root/run!` (two transactions), or adding `:needs` afterwards.
+```seon.template/request-tx``` is the one transaction: `seon.task/create-tx` of the set, then `seon.task/execution-tx` releasing it. `my.root/request!` writes it with one `seon.root/transact-main!`. Since the reconciler reads only committed main, no agent of the set sees part of it. Not this: create held, then `my.root/run!` (two transactions), or adding `:needs` afterwards.
 
-The two other templates make linked sets the same way:
-- `seon.template/with-merge` follows each declared work task (the task files, `my.root/load-tasks!`) with its merge task;
-- `seon.template/attach-tx` attaches design → implement → test → merge to a failed attempt, in the one transaction that cancels the failed chain.
-
-What is not settled: proofs accumulate along `:needs`, so a design step's own check would block implement (DESIGN-tasks §11 #14), and the proofs design writes reach main only as its plan's text (§11 #11, #16).
+`seon.template/with-merge` makes a linked set the same way: it follows each declared work task (the task files, `my.root/load-tasks!`) with its merge task; a task file's tasks are written held (`seon.task/load-tx` over `seon.task/create-tx`: new entries created held, changed ones updated, removed ones cancelled), so nothing loaded from a file runs until root releases it with `my.root/run!`.
 
 ## The agent knows its task
 
@@ -27,20 +23,28 @@ An agent holds the task and attempt root forked it for from its first form: `my.
 
 ## Task content reaches main at the attempt's end
 
-When an attempt ends, every task whose content its branch changed since the branch's base is written onto main, and one that main also changed, differently, is a conflict for root (owner, 2026-10-22, D4: a task edited on two live branches should never happen; if it does, root figures it out).
+When an attempt ends, every task whose content its branch changed since the branch's base is written onto main, and one that main also changed, differently, is a conflict for root: a task edited on two live branches should not happen, and when it does, root resolves it.
 
 `seon.task/carry-tx` compares the merge base, the branch and main over the carried task attributes (`seon.merge/carried-platform-attrs`: the plan and instructions `my.task/update!` edits). A member the branch changed and main did not overwrites main's; one equal on both sides writes nothing; one main changed too, to another value, is never resolved: it goes on the attempt as `:seon.attempt/task-conflicts` and `seon.problems/report` shows it in its `:task-conflict` class. Root's judge (`seon.reconcile/judge-tx`) calls it with the base the writer's branch read answers, so it is the one carry: a design step's plan reaches main before implement starts, on the same branch. Merging merges the program only (`:data-attrs #{}`), so main's task edits never put a merge behind. Not this: carrying only the attempt's own plan, or merging task data at merge, where every judged plan on main would make each merge `:seon.merge/behind`.
 
-## A failed task is held for root
+## A refused attempt is held for root
 
-A task is marked failed by writing `:seon.task/failure` (its reason, a counterexample, the attempt) on it; root holds it, shows it among the problems, and never retries it on its own (owner, 2026-10-22: "We need a way to mark the task as failed and root should be notified … where we are just updating the task data and root is monitoring for these situations").
+A task whose attempt was refused, or that its agent marked failed, is held for root: its failure and evidence are data on it, the problems read shows it, and nothing retries it on its own.
 
-An agent calls `my.task/fail!`: the failure goes on its task on its branch, and a turn loop ends after that turn (outcome `:failed`). Agents commit their own branches, so root sees branch data at the attempt's end, the event it already reacts to: `seon.reconcile/judge-tx` reads the branch and carries a failure of *this* attempt onto main with the task held (an earlier attempt's failure on a reused branch is not carried). The judged rule then closes the attempt, with no refinement. `seon.reconcile/task-state` reads held-with-a-failure as `:failed`, and `seon.problems/report` lists it in its `:failed` class, open while the task is held. Root answers by releasing it (`my.root/run!`); the failure stays as a record. Root or a check marks a task failed the same way, by writing the fact on main with the task held. Not this: a send-back carried as a string in the attempt's end, which the judge refined automatically.
+Every failure takes the one hold. The reconciler judges an ended attempt by the done rule; a reason (a red or unrun proof, a regression, a stray red, a contract gap, an unmerged key, `:no-design`, whatever the attempt's outcome, `:no-progress` included), a dead agent, or a merge the octopus merge refused is its `:hold` action, and `seon.reconcile/hold-tx` is its one write: `:seon.task/failure` (the reason as the reconciler states it, and the attempt), `:seon.task/evidence` (the attempt's conflicts, unmerged keys, red proofs and the reason), `:seon.task/execution :held`, and the attempt `:closed`, answered once. An agent calls `my.task/fail!` instead: the failure (with a counterexample) goes on its task on its branch and its turn loop ends; `seon.reconcile/judge-tx` carries a failure of *this* attempt onto main with the task held (an earlier attempt's failure on a reused branch is not carried), and the judged rule closes the attempt. No task is created and none cancelled.
+
+`seon.reconcile/task-state` reads held-with-a-failure as `:failed`; `seon.problems/report` lists it in its `:failed` class with its evidence, open while held; at quiescence `seon.reconcile/root-causes` names it as a root cause with the released tasks it blocks. An idle system then does nothing: a held task is not ready, and root's own commits do not end a quiet spell.
+
+Root, or the owner through root, decides: release it with `my.root/run!`, edit the task first, or cancel it. A released task's next attempt runs on the same branch (the writer resumes a kept branch), and `seon.task/onto-tx` puts the task onto it as main holds it, its failure and evidence included, so the agent starts from the evidence (its context's `:evidence`). The failure stays as a record after a release. Not this: a refinement chain (design → implement → test → merge on a fresh branch, the failed chain cancelled) attached while a budget lasted, then a "budget spent" fact; or a send-back carried as a string in the attempt's end.
 
 ## The done rule
 
-`seon.reconcile/done-refusals` says why an attempt's measured facts do not make its task done; empty means done. A proof with no result never ran: it refuses as `:proof-unknown`, not `:proof-red` (v1's reading), so the refusal names what was not measured.
+`seon.reconcile/done-explain` says why an attempt's measured facts do not make its task done; empty means done. A proof with no result never ran: it refuses as `:proof-unknown`, not `:proof-red` (v1's reading), so the reason names what was not measured.
 
 A contract gap is a function the branch's own changes define without a contract: `seon.merge/uncontracted` over the three-way merge's `:ours`, one answer for the writer's merge gate and for root's judge (which reads it from the writer's `:branch-diff`), so the done rule never refuses what the merge would take, or the reverse. The agent's own done check (`seon.turn`) asks the same function of its branch's changes since its merge base.
 
-Related: [merging](merging.md) for how a merge task's branch reaches main, [references](references.md) for how a plan's citations become the task's references, [parity](parity.md) for v1's chain and templates.
+## Where a task's state lives
+
+A task's state is derived from its attempts on main (```seon.reconcile/task-state```: `:cancelled`, `:merged`, `:done`, `:running`, `:blocked`, `:failed`, `:held`, `:open`), never stated. Work a worktree session merges has no attempt, so its task file entry reads the same before and after the merge; how that work is recorded is open (task `seon.task/merged-work-leaves-the-task-files`). An attempt's own lifecycle (its outcomes, judging, root causes) is [root's](root.md#attempts-and-judging); its turns are [turn](turn.md)'s.
+
+Related: [turn](turn.md) for an attempt's loop, [merging](merging.md) for how a merge task's branch reaches main, [references](references.md) for how a plan's citations become the task's references, [parity](parity.md) for v1's chain and templates.

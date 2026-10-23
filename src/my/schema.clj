@@ -18,11 +18,11 @@
 
 (defn- judged
   "The registry of forms and its Datahike declarations on db, {:registry :decls}, or the
-  refusal naming k: malli's of a form that does not compile (a name resolving to nothing
+  error naming k: malli's of a form that does not compile (a name resolving to nothing
   among them), or an attribute Datahike cannot store."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword [:map-of :qualified-keyword :any]] [:or [:map [:registry :seon.host/registry] [:decls [:vector :seon.schema/declaration]]] :seon.schema/registration-refused]]}
   [db k forms]
-  ;; interop edge: malli, the EDN reader and seon.schema.datahike throw their refusals
+  ;; interop edge: malli, the EDN reader and seon.schema.datahike throw their errors
   (try (let [reg (contract/registry-of forms)] {:registry reg :decls (program/schema-declarations db reg)})
        (catch Exception e (refused k (if (:seon.schema/reason (ex-data e)) :unstorable :invalid) (or (ex-message e) (str (type e)))))))
 

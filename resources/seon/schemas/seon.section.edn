@@ -13,13 +13,23 @@
  :seon.section/parent :seon.db/ref
  ;; what its own text cites and resolves to: a section (a link) or a var (a name)
  :seon.section/references [:set :seon.db/ref]
+ ;; the names its own text cites as references (seon.ref/kept: a prose word only when it named
+ ;; something at load), kept as names: a var deleted later leaves its name here, and a name that
+ ;; no longer names something is a dead citation (seon.problems, class :dead-citation)
+ :seon.section/names [:set :qualified-symbol]
+ ;; the addresses its own text links to (a link or a cited path#anchor) that reached no section
+ ;; at load: the load goes on without them, and a target that is still no stored section is a
+ ;; dead citation (seon.problems, class :dead-citation)
+ :seon.section/dead-links [:set :string]
  :seon.section/fact [:map {:seon.db/attributes true}
                      [:seon.section/address :seon.section/address]
                      [:seon.section/heading :seon.section/heading]
                      [:seon.section/lead {:optional true} :seon.section/lead]
                      [:seon.section/text {:optional true} :seon.section/text]
                      [:seon.section/parent {:optional true} :seon.section/parent]
-                     [:seon.section/references {:optional true} :seon.section/references]]
+                     [:seon.section/references {:optional true} :seon.section/references]
+                     [:seon.section/names {:optional true} :seon.section/names]
+                     [:seon.section/dead-links {:optional true} :seon.section/dead-links]]
  ;; a section as one parse reads it, before it is stored: its fact's values, its parent's
  ;; address, and the citations of its own text
  :seon.section/parsed [:map {:closed true}
@@ -28,8 +38,4 @@
                        [:seon.section/lead {:optional true} :seon.section/lead]
                        [:seon.section/text {:optional true} :seon.section/text]
                        [:seon.ref/parent {:optional true} :seon.ref/address]
-                       [:seon.ref/citations [:vector :seon.ref/citation]]]
- ;; a link (or a cited path#anchor) that reaches no section: the load is refused, naming it
- :seon.docs/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.docs/refused]]
-                                            [:seon.ref/address :seon.ref/address]
-                                            [:seon.section/address :seon.section/address]]]}
+                       [:seon.ref/citations [:vector :seon.ref/citation]]]}

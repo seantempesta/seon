@@ -34,6 +34,7 @@
 (defc c-waitpid-nb "waitpid" [:int :pointer :int] :int)
 (defc c-pipe "pipe" [:pointer] :int)
 (defc c-close "close" [:int] :int)
+(defc c-shutdown "shutdown" [:int :int] :int)
 (defc c-read "read" [:int :pointer :size_t] :ssize_t {:blocking true})
 (defc c-write "write" [:int :pointer :size_t] :ssize_t {:blocking true})
 (defc c-signal "signal" [:int :pointer] :pointer)
@@ -74,8 +75,9 @@
   (let [b (ffi/alloc 4096) n (mp-probe* b 4096)] (read-string (ffi/read-bytes b n))))
 
 (defn real-mb
-  "Pages this process owns (copied from its parent or newly dirtied), in MB: per method.md,
-  footprint overstates a forked child, so count shared-now-private + private resident pages."
+  "Pages this process owns (copied from its parent or newly dirtied), in MB: footprint
+  overstates a forked child (docs/cost.md#how-we-measure), so count shared-now-private +
+  private resident pages."
   {:malli/schema [:function [:=> [:cat] :seon.lib/mb] [:=> [:cat :seon.lib/probe] :seon.lib/mb]]}
   ([] (real-mb (mp-probe)))
   ([p] (reduce + 0.0 (for [k [:jit :malloc :anon0 :other]

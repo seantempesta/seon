@@ -6,7 +6,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.docs :as docs] [seon.ref]
+            [seon.docs :as docs] [seon.ref] [seon.problems :as problems]
             [seon.config :as config]))
 
 (defn- empty-db [] (ts/test-db))
@@ -23,7 +23,7 @@
   "db after loading pages (path -> text) as the demo wiki."
   [db pages]
   (let [tx (docs/load-tx db "demo" pages)]
-    (is (vector? tx) (str "the load is refused: " (:seon.error/message tx)))
+    (is (vector? tx))
     (d/db-with db tx)))
 
 (deftest an-unchanged-page-writes-nothing
@@ -44,13 +44,19 @@
     (is (= "Count every message, with `app.m0/f1`."
            (:seon.section/text (docs/section (d/db-with db tx) "demo/flow.md#quiet"))))))
 
-(deftest a-link-to-no-section-is-refused-by-name
-  (let [db (load-pages (empty-db) pages)
-        r (docs/load-tx db "demo" (assoc pages "demo/async.md" (str/replace async "flow.md#idioms" "flow.md#nowhere")))]
-    (is (= :seon.docs/refused (:seon.error/type r)))
-    (is (= "demo/flow.md#nowhere" (:seon.ref/address r)) "the refusal names the link")
-    (is (= "demo/async.md#waiting" (:seon.section/address r)) "and the section that makes it")
-    (is (str/includes? (:seon.error/message r) "demo/flow.md#nowhere"))))
+(deftest a-link-to-no-section-is-a-dead-link-and-the-rest-loads
+  (let [broken (assoc pages "demo/async.md" (str/replace async "flow.md#idioms" "flow.md#nowhere"))
+        db (load-pages (empty-db) broken)
+        dead #(get-in (problems/health %) [:classes :dead-citation :rows])]
+    (is (= #{"demo/flow.md#flow" "demo/flow.md#idioms" "demo/flow.md#quiet" "demo/async.md#async" "demo/async.md#waiting"}
+           (set (map :v (d/datoms db :avet :seon.section/address)))) "every section loads")
+    (is (= #{"demo/flow.md#nowhere"} (set (:seon.section/dead-links (d/pull db [:seon.section/dead-links] [:seon.section/address "demo/async.md#waiting"]))))
+        "the link is kept on the section that makes it")
+    (is (= [["demo/async.md#waiting" "demo/flow.md#nowhere" "demo/async.md#waiting links to demo/flow.md#nowhere, which is no section"]]
+           (mapv (juxt :section :target :message) (dead db))) "and is exactly one dead citation, naming page, section and target")
+    (is (empty? (docs/load-tx db "demo" broken)) "an unchanged wiki writes nothing")
+    (let [fixed (d/db-with db (docs/load-tx db "demo" (assoc broken "demo/flow.md" (str flow "\n## Nowhere\n\nNow it exists.\n"))))]
+      (is (empty? (dead fixed)) "the target section is added: the dead citation closes, and nothing was written to close it"))))
 
 (defn- backlinks
   "The addresses of the sections whose text cites target (a section's address or a var's name), sorted."
@@ -101,14 +107,13 @@
 
 (defn- old-words
   "The old house words of AGENTS.md section 7a's table, hyphenated (\"merge train\" ->
-  \"merge-train\"), leaving out the rows still stored under their old names (\"until
-  migrated\": the stored attributes' task, seon.db/stored-attributes-take-the-new-words)."
+  \"merge-train\"), leaving out a row still stored under its old name (\"stored as\": none now)."
   [agents]
   (let [table (->> (str/split-lines agents)
                    (drop-while #(not (str/starts-with? % "| Old house word")))
                    (drop 2)
                    (take-while #(str/starts-with? % "|")))]
-    (set (for [row table :when (not (str/includes? row "until migrated"))
+    (set (for [row table :when (not (str/includes? row "stored as"))
                w (str/split (second (str/split row #"\|")) #",")]
            (str/replace (str/trim w) " " "-")))))
 
@@ -129,6 +134,6 @@
                             x (cons (ns-name n) (map #(symbol (str (ns-name n)) (str %)) (keys (ns-interns n))))]
                         x))]
     (is (contains? words "lane") "the table is read")
-    (is (not (contains? words "stuck")) "a row still stored under its old name waits for its migration")
+    (is (contains? words "refusal") "no row is still stored under its old name: the table is read whole")
     (is (empty? (for [n names w words :when (and (uses? w (str n)) (not (kept n)) (not (and (qualified-symbol? n) (kept (symbol (namespace n))))))] [w n]))
         "every name uses Clojure's, a library's or Jolt's word")))

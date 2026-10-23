@@ -16,7 +16,7 @@
   (`error`), a task (`task`), an attempt (`attempt`) and a problem row (`problem-row`, the
   line root's context and the page's banner lead with)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.config :as config] [seon.print :as print] [seon.print.select :as select] [seon.render.ui :as ui]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [seon.config :as config] [seon.print :as print] [seon.print.select :as select] [seon.render.ui :as ui]))
 
 (defn- line-budget {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render/line-budget))
 (defn- part-budget {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render/part-budget))
@@ -95,12 +95,12 @@
 
 (def ^:private task-shown
   "The keys `task`'s lines show; every other key of the task is printed after them."
-  [:seon.task/id :seon.task/kind :seon.task/execution :seon.task/needs :seon.task/branch :seon.task/model :seon.task/problem
-   :seon.task/failure :seon.task/stuck :seon.task/accumulated :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/evidence])
+  [:seon.task/id :seon.task/kind :seon.task/execution :seon.task/needs :seon.task/branch :seon.task/model
+   :seon.task/failure :seon.task/accumulated :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/evidence])
 
 (defn task
   "A task as an agent or root reads it: its id, kind, desired execution, needs, branch and
-  model, what is wrong with it (its problem, failure and budget-spent fact), its plan
+  model, what is wrong with it (its failure, held for root), its plan
   (accumulated along its needs) as prose whose cut names the form that reads the rest, its
   instructions, proofs and evidence, every other key it carries, and the form that reads
   the whole."
@@ -111,18 +111,14 @@
         plan (or (:plan acc) (:seon.task/plan t))
         proofs (sort-by str (or (:proofs acc) (:seon.task/proofs t)))
         {:keys [reason counterexample]} (:seon.task/failure t)
-        {:keys [cause blocks]} (:seon.task/stuck t)
         own (apply dissoc t task-shown)
         line #(prose-part %1 (line-budget) %2 true)]
     (out "\n"
       [[(str "task " (:seon.task/id t) " · " (ui/kname (:seon.task/kind t)) " · " (ui/kname (:seon.task/execution t))
              (when (seq (:seon.task/needs t)) (str " · needs " (str/join ", " (sort (:seon.task/needs t)))))
              (some->> (:seon.task/branch t) ui/kname (str " · branch ")) (some->> (:seon.task/model t) (str " · model "))) false]
-       (when (:seon.task/problem t) (cat-parts [["problem: " false] (line (:seon.task/problem t) (read-of env :seon.task/problem))]))
        (when reason (cat-parts [["failed: " false] (line reason (read-of env [:seon.task/failure :reason]))
                                 (when counterexample (cat-parts [[" · counterexample " false] (line counterexample (read-of env [:seon.task/failure :counterexample]))]))]))
-       (when cause (cat-parts [["budget spent: " false] (line cause (read-of env [:seon.task/stuck :cause]))
-                               (when (seq blocks) (cat-parts [[" · blocks " false] (names-part (sort blocks) :seon.config.render.list/rows (read-of env [:seon.task/stuck :blocks]))]))]))
        (when plan (cat-parts [["plan: " false] (prose-part plan (or (:seon.render/budget env) (part-budget))
                                                            (read-of env (if acc [:seon.task/accumulated :plan] :seon.task/plan)) false)]))
        (when (:seon.task/instructions t) (cat-parts [["instructions: " false] (line (:seon.task/instructions t) (read-of env :seon.task/instructions))]))
@@ -150,34 +146,26 @@
        (n :seon.attempt/conflicts "conflicts") (n :seon.attempt/unmerged "unmerged") (n :seon.attempt/changed "changed")
        (n :seon.attempt/uncontracted "without a contract")])))
 
-(defn- class-word
-  "A problem class as its line says it: the stored class :stuck reads as budget spent (owner's
-  ruling, 2026-10-22; :blocked is a task waiting on its needs)."
-  {:malli/schema [:=> [:cat [:maybe :keyword]] :string]}
-  [c] (if (= :stuck c) "budget spent" (ui/kname c)))
-
 (defn problem-row
   "One problem row (seon.problems/report), :class (and its class's open count :n) assoc'd by
   its reader, as one line: what it is about (task, attempt, test, attribute), then why: the
-  recorded message, the error's message, the failure's reason, the blocked cause, or a task
-  conflict's three sides; a merge row's conflicts and unmerged keys; the tasks it blocks;
-  its outcome; and what answered it. Each cut reads its rest through env's handle."
+  recorded message, the error's message, the failure's reason, or a task conflict's three
+  sides; a merge row's conflicts and unmerged keys; its outcome; and what answered it. Each cut reads its rest through env's handle."
   {:malli/schema [:=> [:cat :map :seon.render/env] :seon.render/out]}
   [r env]
   (let [ev (:evidence r)
         why (some (fn [[k v]] (when v (prose-part v (line-budget) (read-of env k) true)))
                   [[:message (:message r)] [[:error :seon.error/message] (get-in r [:error :seon.error/message])]
-                   [:reason (:reason r)] [:cause (:cause r)]])
+                   [:reason (:reason r)]])
         why (or why
                 (when (= :task-conflict (:class r)) (value-part (select-keys ev [:base :ours :theirs]) (line-budget) (read-of env :evidence)))
                 (some-> (:outcome r) ui/kname (vector false)))
         what (remove nil? [(:task r) (:attempt r) (some-> (:test r) str) (some-> (:attr r) ui/kname)])]
     (out ""
-      [[(str (class-word (:class r)) (if-let [n (:n r)] (str " " n) (some->> (:count r) (str " ×"))) (when (seq what) (str " " (str/join " " what)))) false]
+      [[(str (ui/kname (:class r)) (if-let [n (:n r)] (str " " n) (some->> (:count r) (str " ×"))) (when (seq what) (str " " (str/join " " what)))) false]
        (when why (cat-parts [[": " false] why]))
        (when (some-> (:conflicts r) pos?) [(str " · " (:conflicts r) " conflicts" (some->> (read-of env [:evidence :conflicts]) form (str " in "))) true])
        (when (seq (:unmerged r)) [(str " · unmerged " (str/join ", " (:unmerged r))) false])
-       (when (seq (:blocks r)) (cat-parts [[" · blocks " false] (names-part (sort (:blocks r)) :seon.config.render.list/top (read-of env :blocks))]))
        (when-let [ts (seq (:answered-by r))] [(str " (answered by " (str/join ", " ts) ")") false])])))
 
 (defn report
@@ -195,7 +183,7 @@
                   lines (for [[i r] shown]
                           (let [o (problem-row (assoc r :class c) {:seon.render/handle (read-of env [:classes c :rows i])})]
                             [(str "- " (:seon.render/ai o) (when (false? (:open? r)) " (closed)")) (:seon.render/truncated? o)]))]]
-        [(str/join "\n" (concat [(str "# " (class-word c) " " n)] (map first lines) (some-> more vector)))
+        [(str/join "\n" (concat [(str "# " (ui/kname c) " " n)] (map first lines) (some-> more vector)))
          (boolean (or more (some second lines)))])
       [(whole env)])))
 
@@ -212,12 +200,18 @@
 (defn- counts {:malli/schema [:=> [:cat :map] :string]}
   [freq] (str/join " " (for [[k n] (sort-by (comp str key) freq)] (str (ui/kname k) " " n))))
 
-(defn problems
-  "What is wrong now, most urgent first: root's procs' defects (what flows: no proc is
-  pinged), then the problems main recorded (seon.problems/report, by class): one producer,
-  so the banner and root's context cannot disagree. An agent's death, red run or refused
-  merge is recorded by root (seon.root/set-agent, end-agent), never re-derived here."
-  {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
+(def ^:private derived
+  "The classes main's facts make true when read, never recorded (:seon.problems/class declares them)."
+  (:seon.problems/derived (contract/properties :seon.problems/class)))
+
+(def ^:private areas
+  "Each problem class's area, in the order shown (:seon.problems/class declares them)."
+  (:seon.problems/areas (contract/properties :seon.problems/class)))
+
+(defn- problem-lines
+  "Root's defects' lines (:root) and one line per class with open problems ([class line] in
+  :classes), the lines `problem-areas` groups."
+  {:malli/schema [:=> [:cat :seon.render/system] [:map [:root [:vector :string]] [:classes [:vector [:tuple :keyword :string]]]]]}
   [{:keys [root-errors root-errors-total recorded]}]
   (let [n-errs (or root-errors-total (count root-errors))
         [shown more] (print/bounded (reverse (map-indexed vector root-errors)) :seon.config.render.list/top "(:root-errors (seon.root/state sys)) holds the newest 20" n-errs)
@@ -232,10 +226,30 @@
                   :when i
                   :let [open (count (remove #(false? (:open? %)) rows))
                         where (list 'get-in '(my.root/problems sys) [:classes c :rows])]]
-              (str "recorded " (:seon.render/ai (problem-row (assoc (nth rows i) :class c :n (if (:signature (nth rows i)) n open))
-                                                             {:seon.render/handle (list 'get-in '(my.root/problems sys) [:classes c :rows i])}))
-                   (some->> (print/more open 1 (str "open, all in " (form where))) (str " · "))))]
-    (vec (concat errs rec))))
+              [c (str (if (derived c) "derived " "recorded ") (:seon.render/ai (problem-row (assoc (nth rows i) :class c :n (if (:signature (nth rows i)) n open))
+                                                                {:seon.render/handle (list 'get-in '(my.root/problems sys) [:classes c :rows i])}))
+                      (some->> (print/more open 1 (str "open, all in " (form where))) (str " · ")))])]
+    {:root (vec errs) :classes (vec rec)}))
+
+(defn problem-areas
+  "What is wrong now, by area, most urgent first: root's procs' defects (:root: what flows,
+  no proc is pinged), then main's open problems (seon.problems/health, recorded or derived),
+  each class under the area :seon.problems/class declares for it, one line per class. One
+  producer, so the banner and root's context cannot disagree. An agent's death, red run or
+  refused merge is recorded by root (seon.root/set-agent, end-agent), never re-derived here.
+  Answers [[area [line]]], areas with no line left out."
+  {:malli/schema [:=> [:cat :seon.render/system] [:vector [:tuple :keyword [:vector :string]]]]}
+  [sys]
+  (let [ls (problem-lines sys)
+        in (fn [cs] (vec (keep (fn [[c l]] (when (contains? cs c) l)) (:classes ls))))]
+    (vec (remove (comp empty? second)
+                 (into [[:root (:root ls)]] (for [[area cs] areas] [area (in cs)]))))))
+
+(defn problems
+  "What is wrong now, most urgent first, as root's context leads with it: `problem-areas`'
+  lines in their order."
+  {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
+  [sys] (into [] (mapcat second) (problem-areas sys)))
 
 (defn- section-work {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
   [{:keys [tasks attempts task-rows]}]

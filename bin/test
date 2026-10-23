@@ -1,5 +1,6 @@
 #!/bin/zsh
-# bin/test [--all] [NS ...] — test/'s deftests (every *_test namespace, or the ones named) with
+# bin/test [--all] [NS ...] — (--all, the one flag, first; a flag it does not know, or a name that is no
+# test namespace, is TEST FAILED) test/'s deftests (every *_test namespace, or the ones named) with
 # no green result at their reach digest, the rest reused from the results directory every
 # checkout shares (bin/prove's tests; seon.proofs/plan). --all runs every one, green or not (the
 # full run). The selected tests are dealt, a namespace at a time, into :seon.config.proofs/jobs
@@ -9,6 +10,7 @@
 # bin/test --plan|--shard|--store-steps ... are test/test_runner.clj's parts (bin/prove's).
 # On the runtime bin/build made (target/jolt/jolt), with dependencies cached in target/home.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+"$ROOT/bin/ports" --write   # the port keys under their current names (bin/ports)
 JOLT=$ROOT/target/jolt/jolt
 [[ -x $JOLT ]] || { echo "test: no target/jolt/jolt; run bin/build jolt first" >&2; exit 1 }
 . "$ROOT/bin/env"
@@ -18,6 +20,10 @@ export SEON_WEB_PORT=${SEON_WEB_PORT:-0}
 # agents' turns are the scripted provider's (a test fixture; a root with no profile has no model provider)
 export SEON_PROFILE=${SEON_PROFILE:-scripted}
 runner() { HOME=$ROOT/target/home JOLT_PWD=$ROOT "$JOLT" -A:test run -m test-runner "$@" }
+# the full run measures each cost proof at the sizes it states (:seon.config.proofs/cost-max-n)
+[[ " $* " == *" --all "* ]] && export SEON_COST_MAX_N=100000
+# and draws every randomized property test's seeds (:seon.config.proofs/seeds)
+[[ " $* " == *" --all "* ]] && export SEON_SEEDS=5
 case ${1:-} in
   --plan|--shard|--store-steps) runner "$@"; exit $? ;;
   --prove) WHAT=$2 OUT=$3; shift 3 ;;
@@ -25,15 +31,17 @@ case ${1:-} in
 esac
 mkdir -p "$OUT"; rm -f $OUT/shard-*(N)
 runner --plan $WHAT "$OUT" "$@" || { echo "TEST FAILED (the plan)"; exit 1 }
-# a test that starts ./seon (a root, an agent) runs the binary, which its digest does not
-# cover: whatever is about to run, runs on target/seon built from this tree (a no-op build
-# costs ~30 s, so only when something runs)
+# a test or step that reaches a process of its own (a root, an agent, the binary) runs target/seon,
+# which its digest does not cover: that binary is built from this tree first (a no-op build costs
+# ~30-45 s). The plan names what it selected that reaches one (out/binary); nothing, no build
 F=($OUT/shard-*.edn(N))
-if (( ${#F} )) || [[ -s $OUT/steps ]]; then
+if [[ -s $OUT/binary ]]; then
   nice -n 15 "$ROOT/bin/build" seon > "$OUT/build.log" 2>&1 || { tail -5 "$OUT/build.log"; echo "TEST FAILED (bin/build seon: $OUT/build.log)"; exit 1 }
 fi
 st=0 P=()
-for f in $F; do runner --shard "$f" > "${f%.edn}.log" 2>&1 & P+=($!); done
+# each shard's wall and CPU seconds kept beside its log (shard-<i>.time); its tests' own in their results (:ms)
+TIMEFMT='real %E user %U sys %S'
+for f in $F; do { time (runner --shard "$f" > "${f%.edn}.log" 2>&1) } 2> "${f%.edn}.time" & P+=($!); done
 for (( i = 1; i <= ${#F}; i++ )); do
   f=$F[$i] log=${F[$i]%.edn}.log
   wait $P[$i]; s=$?

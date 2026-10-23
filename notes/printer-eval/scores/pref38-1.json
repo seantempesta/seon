@@ -1,0 +1,211 @@
+[
+ {
+  "pair": 1,
+  "answer_x": "About 20541 chars of AGENTS.md are not shown. (subs (get-in (nth (my.turn/evals) 3) [:value]) 6261) returns the rest.",
+  "answer_y": "About 20541 chars and 194 more lines of AGENTS.md are not shown. (subs (get-in (nth (my.turn/evals) 3) [:value]) 6261) returns the rest.",
+  "x": {
+   "answer": 5,
+   "left_out": 4,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "better": "Y",
+  "why": "Y gives both the character count and the line count with the same exact form, while X gives only characters."
+ },
+ {
+  "pair": 2,
+  "answer_x": "No, '## One printer' is not shown; the text ends at '## Tiles are data; the context reads the page's derivations'. +11603 chars are not shown. (subs (get-in (nth (my.turn/evals) 5) [:value]) 2629) returns the rest.",
+  "answer_y": "No, '## One printer' is not shown; the text ends at the same heading. +11603 chars and 56 more lines are not shown. (subs (get-in (nth (my.turn/evals) 5) [:value]) 2629) returns the rest.",
+  "x": {
+   "answer": 5,
+   "left_out": 4,
+   "misleading": 5,
+   "concise": 5
+  },
+  "y": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "better": "Y",
+  "why": "Y states the line count as well as the character count, and the exact form is the same in both."
+ },
+ {
+  "pair": 3,
+  "answer_x": "HTTP 400. +10964 chars of the response body are not shown. (subs (get-in result/h3 [:seon.error/data :body]) 289) returns the rest.",
+  "answer_y": "HTTP 400. +10964 chars and 78 more lines of the response body are not shown. (subs (get-in result/h3 [:seon.error/data :body]) 289) returns the rest.",
+  "x": {
+   "answer": 5,
+   "left_out": 4,
+   "misleading": 5,
+   "concise": 5
+  },
+  "y": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "better": "Y",
+  "why": "Y adds the line count to the same exact form, so the omitted amount is fully stated."
+ },
+ {
+  "pair": 4,
+  "answer_x": "The first step is to explore first: find the owners of what it touches, their callers, the schemas on the data's path and the library functions that already do the work, then try the idea at the REPL. +1521 chars in 32 more lines are not shown, and no form is given to read them.",
+  "answer_y": "not shown. The text is cut at '\u2026+2162' right after the :instructions key, so the first step is not in the text. No form is given to read the rest.",
+  "x": {
+   "answer": 5,
+   "left_out": 3,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 1,
+   "left_out": 2,
+   "misleading": 5,
+   "concise": 2
+  },
+  "better": "X",
+  "why": "X shows the first instruction and says how much is left out, while Y shows none of the instructions and gives only a bare count."
+ },
+ {
+  "pair": 5,
+  "answer_x": "It shows the first program load (datoms 73) and the start of the second program load. +2262 chars in 19 more lines are not shown. No form is given.",
+  "answer_y": "It shows two program loads (datoms 73 and 175) and the start of the :create line. +2236 chars are not shown. No form is given.",
+  "x": {
+   "answer": 3,
+   "left_out": 4,
+   "misleading": 5,
+   "concise": 3
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 3,
+   "misleading": 5,
+   "concise": 4
+  },
+  "better": "Y",
+  "why": "Y shows more of the log within the same cell, which gives more evidence per token, though it omits the line count."
+ },
+ {
+  "pair": 6,
+  "answer_x": "The title is '# Render: what a person or a model reads'. +14143 chars in 76 more lines are not shown. (subs (:seon.task/plan result/h3) 89) returns the rest.",
+  "answer_y": "The title is '# Render: what a person or a model reads'. +14120 chars are not shown. (subs (:seon.task/plan result/h3) 112) returns the rest.",
+  "x": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 5,
+   "left_out": 4,
+   "misleading": 5,
+   "concise": 5
+  },
+  "better": "Y",
+  "why": "Y shows slightly more of the text for the same form and omits only the line count, so it is marginally more information per token."
+ },
+ {
+  "pair": 7,
+  "answer_x": "The add-test failed at variants.clj:24: expected (= 3 (- 1 2)), actual (not (= 3 -1)). +269 chars in 7 more lines are not shown. No form is given.",
+  "answer_y": "The add-test failed at variants.clj:24: expected (= 3 (- 1 2)), actual (not (= 3 -1)). It also shows the second failure's expected (= 0 (- -2 2)). +245 chars are not shown. No form is given.",
+  "x": {
+   "answer": 5,
+   "left_out": 4,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 5,
+   "left_out": 3,
+   "misleading": 5,
+   "concise": 4
+  },
+  "better": "Y",
+  "why": "Y shows the second failure's expected value as well, which gives more evidence, though X states the line count that Y omits."
+ },
+ {
+  "pair": 8,
+  "answer_x": "The last section heading shown is '## Where Jolt's Flow differs from upstream'. +10543 chars in 74 more lines are not shown. (subs (get-in result/h3 [:seon.error/data :body]) 710) returns the rest.",
+  "answer_y": "The last section heading shown is '## Where Jolt's Flow differs from upstream'. +10543 chars are not shown. (subs (get-in result/h3 [:seon.error/data :body]) 710) returns the rest.",
+  "x": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 5,
+   "left_out": 4,
+   "misleading": 5,
+   "concise": 4
+  },
+  "better": "X",
+  "why": "Both show the same text, but X also states the line count of what is left out."
+ },
+ {
+  "pair": 9,
+  "answer_x": "The last task line shown is ':task calc/add-merge {:execution :running, :done true, ...}'. +1643 chars in 12 more lines are not shown. (subs (:out (nth (my.turn/evals) 1)) 665) returns them.",
+  "answer_y": "The last task line shown is ':task calc/add-merge {...}'. +1643 chars are not shown. (subs (:out (nth (my.turn/evals) 1)) 665) returns them.",
+  "x": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 5,
+   "left_out": 4,
+   "misleading": 5,
+   "concise": 4
+  },
+  "better": "X",
+  "why": "Both show the same lines and give the same form, but X also states the number of lines left out."
+ },
+ {
+  "pair": 10,
+  "answer_x": "The last heading shown is '## 1. What Seon is for, and what moving forward means'. +25313 chars in 233 more lines are not shown. (subs (:seon.task/plan result/h3) 1489) returns the rest.",
+  "answer_y": "The last heading shown is '## 1. What Seon is for, and what moving forward means'. +25313 chars are not shown. (subs (:seon.task/plan result/h3) 1489) returns the rest.",
+  "x": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 5,
+   "left_out": 4,
+   "misleading": 5,
+   "concise": 4
+  },
+  "better": "X",
+  "why": "Both show the same text and form, but X also states the line count of what is left out."
+ },
+ {
+  "pair": 11,
+  "answer_x": "No, section 8 is not shown; the text ends in section 5 at 'buffers are bounded by their loss semantics;'. +7279 chars are not shown. (subs result/h3 19523) returns the rest.",
+  "answer_y": "No, section 8 is not shown; the text ends at the same point in section 5. +7279 chars and 88 more lines are not shown. (subs result/h3 19523) returns the rest.",
+  "x": {
+   "answer": 5,
+   "left_out": 4,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 4
+  },
+  "better": "Y",
+  "why": "Y states the line count as well as the character count, so the amount left out is fully stated, with the same exact form."
+ }
+]

@@ -1,6 +1,6 @@
 (ns seon.render
   "Render selection and the one render call (W1's proto.render and proto.render.schema,
-  ported onto next's registry: notes/option3-W1-render.md §1).
+  ported onto next's registry: notes/archive/option3-W1-render.md §1).
 
   A render is a plain function (v env) -> :seon.render/out: one or both of
   :seon.render/html (hiccup, serialized by seon.web.html) and :seon.render/ai (data or text
