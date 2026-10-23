@@ -28,6 +28,7 @@ References and their depths: [references](references.md).
 - [config](config.md): every limit, bound and default is one documented key in one aero file, read through one resolver.
 - [storage](storage.md): one store of Datahike index trees on LMDB; what a commit writes, history, node compression, large values out of line, and collection.
 - [failure points](failure-points.md): every place the outside world can fail, its one catching edge and its declared error; nothing else catches.
+- [health](health.md): the open problems, recorded or derived from the program's facts, read when looked at and never polled; what a branch caused refuses its done.
 - [clocks](clocks.md): where time decides (only the owner's exceptions) and where it is only measured; `bin/laws clocks` and `measures` name every site.
 - [resolution](resolution.md): where a name is resolved or a Var defined at run time, each with its reason; `bin/laws resolution` names every site.
 

@@ -4,7 +4,7 @@
   proto.control's writer (session F2; writer design A, ../notes/archive/option3-F1-flow.md section 4)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
-            [seon.program :as program] [seon.merge :as pm] [seon.source :as source] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
+            [seon.program :as program] [seon.merge :as pm] [seon.problems :as problems] [seon.source :as source] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
 (defn- main-commit
@@ -188,6 +188,7 @@
                                  {:ok true :ours (vec (sort-by str (keys (:ours r)))) :theirs (count (:theirs r))
                                   :conflicts (count (:conflicts r))
                                   :unmerged (mapv :key (pm/unmerged head (pm/program head #{}))) :uncontracted (pm/uncontracted (:ours r))
+                                  :caused (vec (problems/caused (pdb/branch-base conn main (:branch m)) head))
                                   :vars (into (sorted-set) (keep (fn [[k s]] (when (= :var k) s))) (keys (:ours r)))})
                                (refused (str "no branch " (:branch m)) {})))
       ;; root's read of a branch (or main): its committed value from the store; :base is the

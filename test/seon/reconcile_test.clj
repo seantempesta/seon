@@ -24,7 +24,7 @@
 (defn- attempt
   "An attempt fact of task nm: status, plus members (results as {test status}; conflicts
   as :seon.merge/conflict values; unmerged as printed keys)."
-  [nm n status & {:keys [boot model results outcome conflicts unmerged changed plan] :or {boot "boot-1" plan (str "Make " nm " true.")}}]
+  [nm n status & {:keys [boot model results outcome conflicts unmerged changed caused plan] :or {boot "boot-1" plan (str "Make " nm " true.")}}]
   (let [id (str "demo/" nm) aid (str id "#" n)]
     (into (task/attempt-start-tx aid id boot (keyword (str "a-" nm n))
                                  {:branch (task/default-branch id) :model model :max-turns (cfg/value :seon.config.agent/max-turns)} 1000 plan)
@@ -33,7 +33,8 @@
              outcome (assoc :seon.attempt/outcome outcome)
              conflicts (assoc :seon.attempt/conflicts (mapv pm/conflict-tx conflicts))
              unmerged (assoc :seon.attempt/unmerged unmerged)
-             changed (assoc :seon.attempt/changed changed))])))
+             changed (assoc :seon.attempt/changed changed)
+             caused (assoc :seon.attempt/caused caused))])))
 
 (defn- db-of
   "A main db: decls written, the ids in `released` released (all when :all), root's boot,
@@ -376,6 +377,16 @@
            :problem "attempt demo/a#1 ended green: unmerged [:var app/f]"}]
          (r/reconcile (db-of diamond :extra (attempt "a" 1 :ended :outcome :green :results {(t "a") :pass}
                                                      :unmerged ["[:var app/f]"]))))))
+
+(deftest an-open-problem-its-work-caused-refuses-done
+  ;; notes/health-design-2026-10-23.md: recorded at its end (seon.problems/caused), refused by
+  ;; the done rule, so the task is held for root naming it; its evaluations were never refused
+  (let [msg "docs/x.md#y cites app/f, which names nothing"]
+    (is (= [{:op :hold :attempt "demo/a#1" :task "demo/a"
+             :problem (str "attempt demo/a#1 ended green: open-problem " msg)}]
+           (r/reconcile (db-of diamond :extra (attempt "a" 1 :ended :outcome :green :results {(t "a") :pass} :caused [msg])))))
+    (is (= [{:reason :open-problem :key msg}]
+           (r/done-explain {:proofs #{(t "a")} :results {(t "a") :pass} :main-green #{} :allowed-red #{} :uncontracted #{} :caused #{msg}})))))
 
 (deftest behind-merge-gets-a-new-attempt
   (testing "root's merge found main moved: the merge task's next attempt is a new agent; no catch-up"
