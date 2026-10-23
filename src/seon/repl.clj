@@ -178,9 +178,16 @@
                    m))))))
 
 (defn wrap-cost
-  "Per-form wall µs, allocated bytes and the form's costliest contracted functions (each
-  with its exact calls and estimated ms: seon.profile), measured around the per-form eval
-  fn. Reading them costs the functions the form called, not the program's size."
+  "Per-form wall ms, allocated bytes, engine ticks (the work it did, the exact measure:
+  jolt.host/ticks-of) and the
+  form's costliest contracted functions (each with its exact calls and estimated ms:
+  seon.profile), measured around the per-form eval fn. They are recorded once, when the
+  form ran, beside the answer's value: the one value the record (record-tx) stores and the
+  reply shows, so it is shown from that fact and never measured again (the provider's prompt
+  cache holds while the context repeats it byte for byte). jolt.host/ticks-of arms the timer
+  (root's unbounded forms have no budget to), and its count is read in a finally inside it, so
+  a form that threw is counted. Reading them costs the
+  functions the form called, not the program's size."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
@@ -188,14 +195,20 @@
           ef (:repl/eval-fn req eval)]
       (h (-> req
              (assoc :repl/eval-fn (fn [form]
-                                    (let [a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/now-ns)]
-                                      (try (ef form)
+                                    (let [a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/now-ns)
+                                          v (volatile! nil) k (volatile! 0)]
+                                      (try (jolt.host/ticks-of
+                                             (fn [] (let [k0 (jolt.host/ticks)]
+                                                      (try (vreset! v (ef form))
+                                                           (finally (vreset! k (- (jolt.host/ticks) k0)))))))
+                                           @v
                                            (finally (let [t1 (profile/now-ns) a1 (profile/alloc-bytes)]
-                                                      (vreset! last [(/ (quot (- t1 t0) 1000) 1000.0) (- a1 a0) (profile/top (profile/touched) (cfg/value :seon.config.agent/form-top-fns))])))))))
+                                                      (vreset! last {:ms (/ (quot (- t1 t0) 1000) 1000.0) :alloc-bytes (- a1 a0) :ticks @k
+                                                                     :fns (profile/top (profile/touched) (cfg/value :seon.config.agent/form-top-fns))})))))))
              (around-reply (fn [m]
-                             (if-let [[ms a fns] (when (or (contains? m :repl/value) (contains? m :repl/ex)) @last)]
+                             (if-let [{:keys [fns] :as c} (when (or (contains? m :repl/value) (contains? m :repl/ex)) @last)]
                                (do (vreset! last nil)
-                                   (cond-> (assoc m :ms ms :alloc-bytes a)
+                                   (cond-> (merge m (dissoc c :fns))
                                      (seq fns) (assoc :fns (mapv (fn [c] (update c :ms #(/ (Math/round (* % 1000.0)) 1000.0))) fns))))
                                m))))))))
 
@@ -321,7 +334,7 @@
 
 (def ^:private item-keys
   "The keys of a form's answer that are its reply item's."
-  [:id :tag :form :printed :out :err-text :ms :alloc-bytes :handle :err :tokens :truncated? :elisions :recorded :contract :contract-error :warnings :fns])
+  [:id :tag :form :printed :out :err-text :ms :alloc-bytes :ticks :handle :err :tokens :truncated? :elisions :recorded :contract :contract-error :warnings :fns])
 
 (defn fold
   "The answers of one eval request (in order) -> its reply items: each form's answer (:tag),
@@ -341,7 +354,7 @@
   [id run items t-basis]
   (conj (vec (for [it items :when (:id it)]
                {:seon.cluster.eval/id (str run "/" (:id it)) :seon.cluster.eval/agent "agent"
-                :seon.cluster.eval/record (cond-> (select-keys it [:tag :form :out :ms :alloc-bytes :fns :origin])
+                :seon.cluster.eval/record (cond-> (select-keys it [:tag :form :out :ms :alloc-bytes :ticks :fns :origin])
                                             (:printed it) (assoc :shown (:printed it))
                                             (= :err (:tag it)) (assoc :error (or (:err it) (:printed it))))}))
         (cond-> {:db/id "agent" :seon.agent/id id} t-basis (assoc :seon.agent/answered-t t-basis))))
@@ -367,7 +380,9 @@
   adds to the request (root's: seon.server's namespace, origin, budget and eval fn; root's
   requests to an agent: agent-step's). The request's entrant boundary: a defect past a
   form's own (a middleware's, the printer's) ends the request with the answers so far and
-  one :err item, its error map, recorded with them."
+  one :err item, its error map, recorded with them. Each item carries its form's cost
+  (:ms :alloc-bytes :ticks :fns, seon.repl/wrap-cost): the one value the recording stores and the reply shows, taken once
+  when the form ran, so what the model reads of it never changes in a later turn."
   {:malli/schema [:function [:=> [:cat :string] :seon.agent/items] [:=> [:cat :string :map] :seon.agent/items]]}
   ([code] (eval-string code {:origin :model}))
   ([code req]

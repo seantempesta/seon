@@ -147,7 +147,7 @@
                                 (vec (for [r (:reports (tests id)) :when (not= :pass (:type r))] r))))
         ;; the test's write vanished with the test's process
         _ (out! (ids 2) " after tests, its branch still says: " (:printed (first @(c/submit! sys (ids 2) "(doc-of 'app.m0/f1)"))))
-        _ (out! (ids 2) " branch diff before its merge: " @(c/branch-diff sys (ids 2)) "; stats now: " @(c/agent-stats! sys (ids 2)))
+        _ (out! (ids 2) " branch diff before its merge: " @(c/branch-diff sys (ids 2)) "; stats now: " @(c/call! sys {:op :stats :id (ids 2)}))
         m1 @(c/merge! sys (ids 0))
         ;; git: a branch merges main first (main took a1's work), then root merges it
         mm3 @(c/merge-main! sys (ids 2))
@@ -609,7 +609,7 @@
         agent-mb (keep #(get-in st [:agents % :mem-mb]) ids)
         merged (mapv (fn [id] @(c/merge-main! sys id) @(c/merge! sys id)) (take 10 ids)) ; as a merge task does: main first
         notes (count (main-q sys '[:find ?n :where [?n :note/text]]))
-        fs (c/fs-call! sys {:op :stats})
+        fs @(c/call! sys {:op :fs :req {:op :stats}})
         ;; kill! marks :killed at once; the :killed event says root has retired the process
         ev (c/events sys)
         _ (doseq [id ids] (c/kill! sys id))
@@ -1273,7 +1273,7 @@
   server's :t has reached main's t read before the request; an ordering that changed fails here."
   [sys]
   (let [main-t (:max-tx @(:conn sys))
-        fs (c/fs-call! sys {:op :stats})]
+        fs @(c/call! sys {:op :fs :req {:op :stats}})]
     {:t (:t fs) :main-t main-t :mismatch (:mismatch fs) :caught-up (boolean (and (:t fs) (>= (:t fs) main-t)))}))
 
 (defn- writer-flushed

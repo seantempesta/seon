@@ -3,7 +3,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [seon.agent-test :as at]
             [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]
             [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.docs :as docs]
-            [seon.config :as cfg] [seon.render :as render] [seon.test-store :as ts] [datahike.api :as d]))
+            [seon.config :as cfg] [seon.render :as render] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [datahike.api :as d]))
 
 (deftest an-agent-repl-answers-what-a-clojure-repl-answers
   ;; owner, 2026-10-21: "Whatever intuitions agents have we need to make sure we are matching a
@@ -280,3 +280,30 @@
     (let [r (render/ai (assoc em :seon.error/at {:line 3 :column 6}) {})]
       (is (not (str/includes? r ":jolt.error/line")) r)
       (is (some #{"at line 3:6"} (str/split-lines r))))))
+
+(def evals-run
+  "How many times the ticks proof's form ran."
+  (atom 0))
+
+(deftest an-evals-record-carries-its-ticks
+  ;; task seon.turn/a-turn-shows-its-cost-against-its-budget (1), owner 2026-10-23 (the model sees
+  ;; cost, stable across turns): the work a form did is taken once, when it ran
+  ;; (jolt.host/ticks-of, bytes), and the reply item and the stored record carry
+  ;; the same values, so nothing is measured again in a later turn.
+  (let [old @agent/state
+        run! (fn [code] (let [answers (volatile! [])]
+                          (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
+                          ((repl/handler) {"op" "eval" "code" code :reply #(vswap! answers conj %)})
+                          (first (repl/fold @answers))))
+        cost [:ms :alloc-bytes :ticks]]
+    (try
+      (let [small (run! "(reduce + (range 100))")
+            big (run! "(reduce + (range 1000000))")
+            bad (run! "(/ 1 0)")]
+        (is (pos? (:ticks small)) (pr-str small))
+        (is (> (:ticks big) (* 10 (:ticks small))) "ticks are the work done: 10,000x the loop is >10x the ticks (the form's compile is a constant)")
+        (is (pos? (:ticks bad)) "a form that threw still did work")
+        (doseq [it [small big bad]
+                :let [rec (-> (repl/record-tx :a "run" [(assoc it :id 0)] nil) first :seon.cluster.eval/record)]]
+          (is (= (select-keys it cost) (select-keys rec cost)) "the record stores the values the reply shows")))
+      (finally (reset! agent/state old)))))

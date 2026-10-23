@@ -35,6 +35,7 @@ How we keep the first version's spirit: run, then right, then fast; the demo is 
   - checks what agents return (a reproduction, a file:line, a number) before acting on it, and puts the result into a task, the plan or the wiki section it concerns;
   - merges verified work into main (§3) and keeps the plan and the wiki true.
 - **Worktree sessions** are Claude sessions each in its own git worktree on its own branch, working one task (§3): they write the proofs, the code and the wiki edit, prove their change, and report. One that has found no cause or clearly correct fix after about fifteen minutes stops and reports what it measured. One whose code contradicts its plan stops and sends the plan back with the evidence; nobody redesigns on the fly.
+- **Starting sessions** (owner, 2026-10-23): a session may run research subagents (Haiku, for web search and reading) on its own. It asks root before starting another Claude session; root keeps the one list of what is running. The owner may tell any session to start one directly, and that instruction overrides this rule.
 - **Seon agents** are forked processes working tasks through the same server, tasks and context (§6). What our worktree sessions find missing from that context is a task for Seon.
 
 ### Root's working rules (what a fresh root needs; the owner's rulings behind them are in docs/decisions.md)
