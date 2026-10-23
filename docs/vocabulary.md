@@ -10,17 +10,17 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 |---|---|---|
 | **proc** | a Flow process: one step-fn Var with four arities (describe, init, transition, transform) | `seon.step` |
 | **step-fn** | the four-arity function a proc runs; the one process abstraction | `seon.step` |
-| **root** | the control process: one Flow graph of seven procs (api, writer, fork-server, flusher, reconciler, render, web), one worker proc per effect kind (`:fx` in `resources/seon/system.edn`), and one proc per agent ([root](root.md#the-root-graph)) | `seon.root` |
+| **root** | the control process: one Flow graph of eight procs (api, writer, fork-server, flusher, reconciler, prove, render, web), one worker proc per effect kind (`:fx` in `resources/seon/system.edn`), and one proc per agent ([root](root.md#the-root-graph)) | `seon.root` |
 | **root graph** | that one Flow graph, changed in place by `flow/update!` | `seon.root/start!` |
 | **api** | root's request server proc: callers' reply promises, routing by request id | `seon.root/api-proc` |
-| **writer** | root's writes to main (group commit), `d/branch!`, and every merge into main | `seon.writer/writer-proc` |
+| **writer** | root's writes to main (group commit), `d/branch!`, and every merge into main; an agent commits its own branch | `seon.writer/writer-proc` |
 | **run-ahead write** | an agent's own write on its own branch: applied at once, committed when idle or at a turn's end, and synced by the next group commit | `seon.agent/transact!`, `seon.agent/commit!`, `datahike.writer/apply!` |
-| **ids** | the store's entity ids and transaction ids, each issued once across every branch and process, from one shared page ([storage](storage.md#ids)) | `seon.db/ids!`, `datahike.ids`, `native/ids.c` |
-| **group commit** | one Datahike commit per branch per writer step; every write is answered when committed in memory; the flusher syncs everything unflushed at once, then again, so commits arriving during a sync share the next one; `:flush?` waits for the sync that covers it | `seon.writer/commit-batch`, `seon.writer/flusher-proc` |
+| **ids** | the store's entity ids and transaction ids, each issued once across every branch and process, from one shared page (a file beside a durable store, an anonymous page for one in memory; [storage](storage.md#ids)) | `seon.db/ids!`, `datahike.ids`, `native/ids.c` |
+| **group commit** | one Datahike commit of every transaction the writer has queued for main (`datahike.writer/transact-batch!`, one transaction at a time only when the store refuses the batch); every write is answered when committed in memory; the flusher syncs everything unflushed at once, then again, so commits arriving during a sync share the next one; `:flush?` waits for the sync that covers it | `seon.writer/commit-batch`, `seon.writer/flusher-proc` |
 | **flusher** | the proc that syncs everything unflushed, continuously, with no window | `seon.writer/flusher-proc` |
 | **fork server** | the single-threaded process holding main's db value that forks agents ([processes](processes.md#the-fork-server)) | `seon.fork-server` |
 | **standby** | a fork of the fork server, promoted when the server dies (root never forks after boot) | `seon.fork-server/promote` |
-| **reconciler** | the proc that sees main's commits through a sliding buffer of one | `seon.reconcile` |
+| **reconciler** | the proc that sees every main commit through a bounded buffer (`:seon.config.root/reconciler-buf`): a lagging reconciler parks the writer's send | `seon.reconcile` |
 | **agent** | a process forked from the fork server, holding one branch, running a REPL ([processes](processes.md#the-agent-process)) | `seon.agent` |
 | **agent proc** (was stand-in) | an agent's proc in root: owns root's end of its socket and its process | `seon.agent-proc/agent-proc` |
 | **edge reader** | a thread doing one blocking read and feeding one proc's in-port, the one thread a proc may own | `seon.fork-server/start-event-reader!` |
@@ -39,7 +39,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **middleware** | `(fn [handler] (fn [request] ...))` over the base handler | `seon.repl/middleware` |
 | **reply item** | one form's folded answer at root: printed value or error, handle, cost | `seon.repl/fold` |
 | **handle** | a live value kept in the agent, named ``result/hN`` | `seon.repl` |
-| **value printer** | the one function that turns a value into text ([render](render.md#one-printer)) | `seon.print/print-value` |
+| **value printer** | the one function that turns a value into text under a token budget, saying what a cut omitted ([render](render.md#one-printer)) | `seon.print/print-value` |
 | **render** | a view of a value declared on its schema, over the one printer; the model's context is one ([render](render.md)) | `seon.render` |
 | **interrupt** | SIGUSR1 to an agent, escaping the running form at a safe point | `seon.intr` |
 
@@ -64,7 +64,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **recording** | an eval request's evaluations (on its agent entity, one EDN `:seon.cluster.eval/record` each) and its defs, written by the agent on its own branch | `seon.repl/record-tx` |
 | **observation** | data on the branch that observed it (evaluations, answered t), never carried by a merge: every `seon.*` attribute but the carried task content is a platform record | `seon.merge/carried-platform-attrs` |
 | **generation** | a build of Seon's own source: the running binary is one, and the next is the merges commit built by the `:build` effect, recorded on main (`:seon.root/generation`) and started on the same store by `bin/root next` ([source](source.md#the-next-generation)) | `seon.fx/build`, `my.root/generation`, `my.root/next-generation` |
-| **prove** | run what a change reaches and reuse every test and check step green at its reach digest: `bin/prove` in a checkout, ``(my.agent/prove)`` in an agent ([merging](merging.md#a-merge-runs-what-the-change-reaches)) | `seon.proofs/plan`, `my.agent/prove` |
+| **prove** | run what a change reaches and reuse every test and check step green at its reach digest: `bin/prove` in a checkout, ``(my.agent/prove)`` in an agent (the process tests it reaches run only when root asks; [merging](merging.md#a-merge-runs-what-the-change-reaches)) | `seon.proofs/plan`, `my.agent/prove` |
 
 ## Tasks (TASK-CHAIN's words)
 
@@ -82,7 +82,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **done rule** | why an attempt's measured facts do not make its task done; empty means done | `seon.reconcile/done-explain` |
 | **reconciler** | the pure function of main's db to actions, and the proc that carries them out | `seon.reconcile/reconcile`, `reconciler-proc` |
 | **flight** | one action carried out as a chain of requests and answers in the reconciler proc | `seon.reconcile/advance` |
-| **turn loop** | inside an agent: observe, then end or act (context to the model, forms through the REPL path) | `seon.turn/work!` |
+| **turn loop** | inside an agent: observe, then end (green, or stopped with the outcome and reason) or act (context to the model, forms through the REPL path); a merge task merges main first and again until main brings nothing new | `seon.turn/work!` |
 | **three-way** | git's merge of program maps (base, ours, theirs) keyed `[:var sym]`, `[:form id]`, `[:schema k]` (a schema entry), read only where the dbs differ ([storage](storage.md#merges-read-what-changed)) | `seon.merge/three-way`, `seon.merge/delta-three-way` |
 | **unmerged entry** | a conflict kept on the branch (base, ours, theirs) until re-defn or `resolve!` | `seon.merge/unmerged` |
 | **stage** (was harvest) | staging the live runtime onto the branch (unmaps, plain defs as values, aliases) | `seon.stage/stage!` |
