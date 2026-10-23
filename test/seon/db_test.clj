@@ -4,7 +4,7 @@
   (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [clojure.java.io] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.config :as cfg] [seon.contract :as contract] [seon.edn]
-            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc]))
+            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -596,3 +596,57 @@
     (is (< (ratio 2) 2.0) (str "2 new identities: " (ratio 2) "x the counter's nodes"))
     (is (< (ratio 10) 6.0) (str "10 new identities: " (ratio 10) "x the counter's nodes"))
     (is (< (ratio 2) (ratio 10)) "more new identities per commit scatter more")))
+
+(defn plain-datoms
+  "d/db-with's arguments for n plain datoms: the test store's seed and n [:db/add e a v] of
+  two cardinality-one attributes (a string and a long), two to an entity, every entity new."
+  [n]
+  [(ts/test-db) (vec (for [i (range n)]
+                       [:db/add (+ 100000000 (quot i 2)) (if (even? i) :form/src :form/order) (if (even? i) (str "(defn f" i ")") i)]))])
+
+(defn identity-datoms
+  "d/db-with's arguments for n datoms as n/2 entity maps, each named by an identity (attribute
+  a, :db/unique, with or without :db/contentId) and holding one plain value."
+  [a n]
+  [(ts/test-db) (vec (for [i (range (quot n 2))] {a (str "proof entity " i) :form/src (str "(defn f" i ")")}))])
+
+(def content-id-datoms (partial identity-datoms :form/id))
+(def unique-datoms (partial identity-datoms :seon.task/id))
+
+(deftest a-datom-costs-its-index-inserts
+  ;; task datahike.transaction/a-datom-costs-its-index-inserts. The floor, measured on this store's
+  ;; seed at 1,000 (the task's plan): its two inserts (:eavt and :aevt, current indexes,
+  ;; transient) 5.5k ticks and 7.0 KB; the card-one check, one :eavt descent, 0.95k and 1.4 KB;
+  ;; the datom 0.5 KB; its conj onto the tx-data twice 0.55 KB; five copies of the db record
+  ;; (indexes, op-count, max-eid, hash) 0.3k and 1.0 KB. Bytes decide: ticks have 3x slack
+  (cost/proof
+    {:of 'datahike.api/db-with :input 'seon.db-test/plain-datoms
+     :n "plain datoms, each of a new entity's cardinality-one attribute"
+     :work "per datom: its insert into :eavt and :aevt, one :eavt descent for the attribute's current value, the datom, its place in the tx-data"
+     :growth :linear
+     :per-n {:ticks 7000 :bytes 10500}
+     :sizes [100 1000 10000]}))
+
+(deftest an-identity-costs-its-seek
+  ;; task datahike.transaction/an-identity-costs-its-seek: an identity adds its :avet insert,
+  ;; the unique check's :avet descent and the entity's upsert seek, ~1.5x a plain datom's
+  ;; floor; a content id adds hashing [attribute value] once. The overruns below are what
+  ;; 1,000 datoms cost when the task was filed: :db/unique 11.5k ticks and 34 KB per datom,
+  ;; a content id 16.9k and 65 KB
+  (cost/proof
+    {:of 'datahike.api/db-with :input 'seon.db-test/unique-datoms
+     :n "datoms, half a :db/unique identity naming its entity map"
+     :work "per datom: its inserts (:avet too for the identity), one descent for a card-one value, one :avet seek per identity"
+     :growth :linear
+     :per-n {:ticks 10000 :bytes 15000}
+     :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :measured {:ticks 11543218.0 :bytes 34428528.0}}
+     ;; the overrun's measure is at 1,000, the largest size in every run (--all too)
+     :sizes [10 100 1000]})
+  (cost/proof
+    {:of 'datahike.api/db-with :input 'seon.db-test/content-id-datoms
+     :n "datoms, half a content-id identity naming its entity map"
+     :work "per datom: as a :db/unique identity's, and the identity's [attribute value] hashed once to its entity id"
+     :growth :linear
+     :per-n {:ticks 11000 :bytes 16000}
+     :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :measured {:ticks 16945178.0 :bytes 64847328.0}}
+     :sizes [10 100 1000]}))
