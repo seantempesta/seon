@@ -21,7 +21,7 @@ Only a span of exactly one qualified symbol or keyword is a name. A form, an ali
 
 ```seon.ref/references``` resolves names against the program's `:var/name` facts, keywords against the schema registry and paths against the checkout; ```seon.ref/names``` is the qualified symbols alone (what `seon.reconcile/hairy` and the context use). ```seon.ref/view``` shows a section at a depth: at summary its heading and its lead's first sentence, at doc its lead and the headings below, at code the whole section. A section with no lead answers `:no-lead` at summary and doc depth, so every section should open with one sentence that stands alone.
 
-A var is shown by the same depths (```seon.docs/resolve-ref```): at summary its arglists and its docstring's first sentence, at doc its arglists, docstring and contract, at code its recorded source. A source over `:seon.config.render/reference-tokens` (3,000, v1's per-function cap) shows the doc instead, with `:left-out` (how many tokens) and `:read`, the `(clojure.repl/source ns/f)` that reads it; a var with no docstring shows its source at doc depth. Uncapped, whole sources were 82-88% of a measured task's context.
+A var is shown by the same depths (```seon.context/resolve-ref```): at summary its arglists and its docstring's first sentence, at doc its arglists, docstring and contract, at code its recorded source. A source over `:seon.config.render/reference-tokens` (3,000, v1's per-function cap) shows the doc instead, with `:left-out` (how many tokens) and `:read`, the `(clojure.repl/source ns/f)` that reads it; a var with no docstring shows its source at doc depth. Uncapped, whole sources were 82-88% of a measured task's context.
 
 ## Cost
 

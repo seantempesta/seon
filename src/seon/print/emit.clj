@@ -351,27 +351,15 @@
       (run! #(case (:op %) :text (.append out ^String (:text %)) :line (.append out ^String (:inline %)) nil) ops)
       (str out))))
 
-(defn- flat?
-  "True when collection `node` holds only scalars (a map: scalar keys and values): it reads at a
-  glance, so nothing folds it."
-  {:malli/schema [:=> [:cat :map] :boolean]}
-  [node]
-  (every? (fn [c] (if (vector? c) (every? #(contains? scalar-kinds (:seon.print/face %)) c) (contains? scalar-kinds (:seon.print/face c))))
-          (or (:seon.print/items node) (:seon.print/entries node))))
-
 (defn- close-frame
-  "One collection's hiccup: the value printed (its root) or a collection of scalars inline, as
-  text reads them; any other nested collection a `<details>` that folds it, its summary saying
-  what it holds."
+  "One collection's `<details>`: its summary and its `children`' hiccup."
   {:malli/schema [:=> [:cat :map [:sequential :any]] :seon.print/hiccup]}
   [node children]
-  (if (or (empty? (:seon.print/path node)) (flat? node))
-    (into [:span {:class (str "seon-print-node seon-print-inline " (css-class (:seon.print/face node)))}] children)
-    ;; open: a closed <details> hides its content however it is styled
-    [:details {:class (str "seon-print-node " (css-class (:seon.print/face node))) :open true
-               :data-seon-path (literal (:seon.print/path node))}
-     [:summary {:class "seon-print-summary"} (summary node (:seon.print/path node))]
-     (into [:span {:class "seon-print-content"}] children)]))
+  ;; open: a closed <details> hides its content however it is styled
+  [:details {:class (str "seon-print-node " (css-class (:seon.print/face node))) :open true
+             :data-seon-path (literal (:seon.print/path node))}
+   [:summary {:class "seon-print-summary"} (summary node (:seon.print/path node))]
+   (into [:span {:class "seon-print-content"}] children)])
 
 ;; A span's attributes for each class a text op carries, made once (hiccup is immutable data,
 ;; so every span of a class shares its map).
@@ -380,8 +368,7 @@
         (concat scalar-kinds [:seon.print/tag :seon.print/separator :seon.print/delimiter :seon.print/elision])))
 
 (defn- ops-hiccup
-  "The same operations as structural hiccup: a `<details>` per nested collection that holds
-  collections, every one open; the root and a collection of scalars inline (close-frame).
+  "The same operations as structural hiccup: a `<details>` per collection, every one open.
   One pass: `stack` holds each open collection's hiccup so far, its node first."
   {:malli/schema [:=> [:cat [:vector :seon.print/op]] :seon.print/hiccup]}
   [ops]

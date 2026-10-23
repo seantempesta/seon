@@ -3,13 +3,10 @@
   docs/references.md#the-wiki-in-the-store): a section entity per heading of docs/*.md, read
   by the one parse (seon.ref/parse). A section's references are what its own text cites,
   resolved on the db (a link to a section, a name to a var), so its backlinks are who cites
-  it. Loading writes only what differs from what main holds, as task files do. A citation is
-  pulled here at its depth (cited: a var, a section, a file, a task or a namespace), for the
-  model's context and every walk (seon.render/walk) alike."
+  it. Loading writes only what differs from what main holds, as task files do."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.ref :as ref] [seon.source :as source] [seon.task :as task] [seon.db :as pdb]
-            [datahike.api :as d] [clojure.string :as str] [clojure.java.io :as io]
-            [seon.print.select :as select] [seon.config :as cfg]))
+            [datahike.api :as d] [clojure.string :as str] [clojure.java.io :as io]))
 
 ;; ---- one page, parsed into sections ----------------------------------------------------
 
@@ -313,82 +310,3 @@
                                 [address {:read today :unread bad}]
                                 [address {:read (into {} (for [[n res] per] [n (get (:ids res) n "absent")]))}]))))))
           plan)))
-
-;; ---- a citation as its depth shows it (docs/references.md#the-delimiter-picks-the-depth): ----
-;; what the model's context and every walk (seon.render/walk) pull of what a text cites
-
-(defn source-of
-  "The recorded source of var sym on db (the text of the form that last defined it), or nil:
-  one AVET seek (seon.db/eid), never a query."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :string]]}
-  [db sym] (some->> (pdb/eid db :var/name sym) (d/entity db) :var/form :form/src))
-
-(def reference-tokens
-  "Tokens a cited var's source may take in the context: the config's."
-  (cfg/value :seon.config.render/reference-tokens))
-
-(defn resolve-ref
-  "Var sym as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth):
-  :summary its arglists and its doc's first sentence, :doc its arglists, doc and contract,
-  :code its source (from the db). A source over reference-tokens shows the doc instead, with
-  what it left out and the form that reads it; at :doc a var with no doc shows its source. A
-  name that resolves to nothing says so."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol :seon.ref/depth] :map]}
-  [db sym depth]
-  (let [m (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))) meta)
-        src (source-of db sym)
-        doc (cond-> {:symbol sym}
-              (:arglists m) (assoc :arglists (:arglists m))
-              (:doc m) (assoc :doc (:doc m))
-              (:malli/schema m) (assoc :contract (:malli/schema m)))
-        n (some-> src select/estimate)]
-    (cond
-      (and (nil? m) (nil? src)) {:symbol sym :unresolved true :problem (:unresolved ref/problem-messages)}
-      (= :summary depth) (cond-> (select-keys doc [:symbol :arglists]) (:doc m) (assoc :summary (ref/lead-sentence (:doc m))))
-      (or (nil? src) (and (= :doc depth) (:doc m))) doc
-      (<= n reference-tokens) {:symbol sym :source src}
-      :else (assoc doc :left-out (str "its source, about " n " tokens, over the context's " reference-tokens)
-                       :read (list 'clojure.repl/source sym)))))
-
-(defn- reached
-  "What citation c asks to see, at its depth, and what that is: a wiki section from main's
-  sections (:section), else a file of the checkout read now, never stored (:file), else a task by
-  its ns/name (:task), else a namespace (:namespace); a citation that reaches nothing says so, as
-  an unresolved name does (:unresolved). Answers [kind view]."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] [:tuple :seon.render/kind :map]]}
-  [db {:seon.ref/keys [name path anchor depth]}]
-  (let [a (or (some-> name str) (str path (when anchor (str "#" anchor))))
-        [kind v] (cond (qualified-symbol? name) [:task (ref/task-view db name depth)]
-                       name [:namespace (ref/namespace-view db name depth)]
-                       :else (if-let [sv (when anchor (view db a depth))]
-                               [:section sv]
-                               [:file (ref/file-view db (cfg/checkout) path anchor depth)]))]
-    (if v
-      [kind (assoc v :seon.ref/depth depth)]
-      [:unresolved {:seon.ref/address a :unresolved true :problem (:unresolved ref/problem-messages)}])))
-
-(defn cited-view
-  "What citation c asks to see, at its depth (reached's view): a section, a file, a task, a
-  namespace, or that it reaches nothing."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :map]}
-  [db c] (second (reached db c)))
-
-(defn citation-kind
-  "What citation c reaches on db: :var, a qualified name that is no task (resolve-ref); :view, a
-  namespace, a task, or a path with no problem (cited-view); nil, nothing pulled (a keyword, a
-  path:N line reference)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] [:maybe [:enum :var :view]]]}
-  [db {:seon.ref/keys [name path problem-kind]}]
-  (cond (and (qualified-symbol? name) (not (ref/task? db name))) :var
-        (or (symbol? name) (and path (not problem-kind))) :view))
-
-(defn cited
-  "Citation c pulled at its depth, as citation-kind reaches it, and what it reached: [:var view]
-  by resolve-ref ([:unresolved view] when it resolves to nothing), anything else by reached; nil
-  when it reaches nothing pulled (a keyword, a path:N line reference)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] [:maybe [:tuple :seon.render/kind :map]]]}
-  [db c]
-  (case (citation-kind db c)
-    :var (let [v (resolve-ref db (:seon.ref/name c) (:seon.ref/depth c))] [(if (:unresolved v) :unresolved :var) v])
-    :view (reached db c)
-    nil))

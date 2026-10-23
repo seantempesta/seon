@@ -189,7 +189,7 @@
     (is (= :err (:tag bad)) (pr-str items))
     (is (= "boom" (:seon.error/message (:err bad))) "the defect as its error map")
     (is (int? (:id bad)) "an id, so record-tx records it")
-    (is (= 2 (count (filter :seon.cluster.eval/record (repl/record-tx {:seon.agent/key "b/a1" :seon.agent/id :a1} "r" items nil))))
+    (is (= 2 (count (filter :seon.cluster.eval/record (repl/record-tx :a1 "r" items nil))))
         "both items are recorded: the form that ran and the defect")))
 
 (deftest a-forms-lead-is-recorded-with-its-eval
@@ -199,7 +199,7 @@
   ;; line a form ends on is that form's, not the next one's; a comment after the last form leads
   ;; nothing
   (let [items (repl/eval-string ";; first, the sum\n;; of two\n(+ 1 2)\n\n(+ 3 4) ; trailing\n;; why: the product\n(* 2 3)\n;; left over" {"ns" "user" :origin :outside})
-        recs (map :seon.cluster.eval/record (filter :seon.cluster.eval/record (repl/record-tx {:seon.agent/key "b/a1" :seon.agent/id :a1} "r" items nil)))]
+        recs (map :seon.cluster.eval/record (filter :seon.cluster.eval/record (repl/record-tx :a1 "r" items nil)))]
     (is (= [";; first, the sum\n;; of two" nil ";; why: the product"] (mapv :lead items)) (pr-str items))
     (is (= ["3" "7" "6"] (mapv :printed items)))
     (is (= (mapv :lead items) (mapv :lead recs)) "its record keeps it")))

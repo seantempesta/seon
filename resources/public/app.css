@@ -495,13 +495,3 @@ li.turn .tfoot { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 10.5p
 li.turn p.lead { margin: 0; color: var(--text-200); font-style: normal; font-size: 12px; }
 li.turn p.reply { margin: 0; color: var(--text-100); }
 .zhead p.lead { margin: 4px 0; color: var(--text-100); font-size: 13px; }
-
-/* the walk page (seon.render.ui/walk-page): parts beside the text a model reads; one column on a narrow screen */
-.walk { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; padding: 16px; }
-@media (max-width: 900px) { .walk { grid-template-columns: minmax(0, 1fr); } }
-.walk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-.walk-part { border: 1px solid var(--line, #8884); border-radius: 8px; padding: 8px 10px; overflow: auto; }
-.walk-part.as-block { margin-bottom: 12px; }
-.walk-head { font-size: 12px; margin-bottom: 6px; }
-.walk-by { opacity: .7; }
-.walk-text pre { white-space: pre-wrap; font-size: 12px; position: sticky; top: 8px; max-height: calc(100vh - 32px); overflow: auto; }

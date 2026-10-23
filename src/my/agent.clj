@@ -86,7 +86,7 @@
   [sym]
   (if-let [v (resolve sym)]
     (or (:source (meta v))
-        (docs/source-of (agent/db) (symbol (str (ns-name (:ns (meta v)))) (str (:name (meta v)))))
+        (context/source-of (agent/db) (symbol (str (ns-name (:ns (meta v)))) (str (:name (meta v)))))
         (file-source v))
     (when-not (namespace sym)
       (d/q '[:find ?src . :in $ ?s :where [?n :ns/name ?s] [?f :form/defines ?n] [?f :form/src ?src]] (agent/db) sym))))

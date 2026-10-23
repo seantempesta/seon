@@ -32,7 +32,7 @@
 
 (def ^:private explicit-run-pull
   "The run pull before the wildcard (2026-10-22, research row 20): what the reader read."
-  [:seon.run/id {:seon.run/task [:seon.task/id]} :seon.run/status :seon.run/boot {:seon.run/agent [:seon.agent/id]}
+  [:seon.run/id {:seon.run/task [:seon.task/id]} :seon.run/status :seon.run/boot :seon.run/agent
    :seon.run/pid :seon.run/start-ms :seon.run/end-ms :seon.run/branch :seon.run/model
    :seon.run/max-turns :seon.run/outcome :seon.run/reason :seon.run/turns :seon.run/model-calls
    :seon.run/tokens :seon.run/merged-t :seon.run/basis-t :seon.run/plan :seon.run/uncontracted
@@ -51,14 +51,14 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "t" :seon.task/plan "p"}]))
         report {:rows [{:n 100 :measured {:ns 1200.0 :bytes 900.0} :expected {:ns 1000.0 :bytes 800.0}}] :verdict {:ok? false :over [{:dim :ns :n 100 :ratio 1.2}] :steeper [] :under [] :unmerged []}}]
     [(d/db-with db (vec (for [i (range n) :let [aid (str "demo/t#" i)]
-                              tx (concat (task/run-start-tx aid "demo/t" "boot-1" (task/agent-key "boot-1" (keyword (str "a" i))) {:branch :b :model "m" :max-turns 4} 1000 "p")
+                              tx (concat (task/run-start-tx aid "demo/t" "boot-1" (keyword (str "a" i)) {:branch :b :model "m" :max-turns 4} 1000 "p")
                                          [(assoc (task/end-members {:outcome :error :turns 3 :model-calls 3 :tokens 900 :results {'demo-test/t :fail}
                                                                     :uncontracted #{} :reason "the model failed"} 2000 7)
                                                  :seon.run/id aid :seon.run/commit "c0ffee"
                                                  :seon.run/error {:seon.error/type :seon.model/no-provider :seon.error/operation 'seon.model/complete :seon.error/message "no model provider is configured"}
                                                  :seon.run/failures {'demo-test/t [{:type :fail :message "sums" :expected "(= 3 (f 1 2))" :actual "(= 3 4)"}]}
                                                  :seon.run/costs {'demo-test/c report}
-                                                 :seon.run/waste {'seon.docs/resolve-ref {:forms 2 :turns 1}})])]
+                                                 :seon.run/waste {'seon.context/resolve-ref {:forms 2 :turns 1}})])]
                           tx)))]))
 
 (deftest a-run-row-is-what-it-was-under-the-wildcard-pull
