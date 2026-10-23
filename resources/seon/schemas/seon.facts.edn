@@ -211,6 +211,9 @@
  :seon.attempt/deferred [:set :qualified-symbol]
  ;; the merge gate's run of them on a checkout (seon.fx/run-tests): each test's status, as proofs'
  :seon.attempt/deferred-results [:set {:seon.db/component true} :seon.db/ref]
+ ;; the changed namespaces the merge gate could not read from the branch, each with why: its
+ ;; run tested another tree than the one that merges, so none of its results counts as a pass
+ :seon.attempt/gate-unread [:vector {:seon.db/data true} [:map [:ns :symbol] [:reason :string]]]
  :seon.attempt/attempt-fact [:map {:seon.db/attributes true}
                              [:seon.attempt/id :seon.attempt/id] [:seon.attempt/task :seon.attempt/task]
                              [:seon.attempt/status :seon.attempt/status] [:seon.attempt/boot :seon.attempt/boot]
@@ -230,6 +233,7 @@
                              [:seon.attempt/changed {:optional true} :seon.attempt/changed]
                              [:seon.attempt/deferred {:optional true} :seon.attempt/deferred]
                              [:seon.attempt/deferred-results {:optional true} :seon.attempt/deferred-results]
+                             [:seon.attempt/gate-unread {:optional true} :seon.attempt/gate-unread]
                              [:seon.attempt/commit {:optional true} :seon.attempt/commit]
                              [:seon.attempt/commit-error {:optional true} :seon.attempt/commit-error]]
  :seon.proof/proof-fact [:map {:seon.db/attributes true} [:seon.proof/test :seon.proof/test] [:seon.proof/status :seon.proof/status]]

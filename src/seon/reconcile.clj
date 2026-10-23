@@ -718,13 +718,22 @@
                                                   :let [[kind x] (read-string k)]
                                                   :when (#{:var :form} kind)]
                                               (symbol (first (str/split (str x) #"/" 2))))))
-                       files (source/files (:db r) (vec (keep #(:ns/file (d/entity (:db r) [:ns/name %])) nss)))]
-                   (one (request st aid :gated {:op :fx :kind :tests :req {:repo (get-in st [:idx :root :gate-checkout]) :branch (:branch (:source st))
-                                                                          :files files :tests (:tests act)}})))
-      ;; each deferred test's status on the attempt; the next judgment merges it or holds it
-      :gated (let [rs (if (contract/error? r) (zipmap (:tests act) (repeat :error)) (get-in r [:value :results]))]
+                       file (fn [n] (:ns/file (d/entity (:db r) [:ns/name n])))
+                       ;; a changed namespace with no file on the branch (made at the REPL, never
+                       ;; written) cannot be put over the checkout: named, never dropped
+                       unread (vec (for [n nss :when (nil? (file n))]
+                                     {:ns n :reason "no :ns/file on the branch: its forms were never written to a file"}))
+                       files (source/files (:db r) (vec (keep file nss)))]
+                   (one (request (assoc-in st [:flights aid :gate-unread] unread) aid :gated
+                                 {:op :fx :kind :tests :req {:repo (get-in st [:idx :root :gate-checkout]) :branch (:branch (:source st))
+                                                             :files files :tests (:tests act)}})))
+      ;; each deferred test's status on the attempt; the next judgment merges it or holds it. A
+      ;; run over a tree missing a changed namespace (gate-unread) vouches for none: each :error
+      :gated (let [unread (:gate-unread f)
+                   rs (if (or (contract/error? r) (seq unread)) (zipmap (:tests act) (repeat :error)) (get-in r [:value :results]))]
                (one (write st aid :done (cond-> [{:seon.attempt/id aid
                                                   :seon.attempt/deferred-results (vec (for [[t s] rs] {:seon.proof/test t :seon.proof/status s}))}]
+                                          (seq unread) (conj {:seon.attempt/id aid :seon.attempt/gate-unread unread})
                                           (contract/error? r) (conj {:seon.attempt/id aid :seon.attempt/error r})))))
       :write-back (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)

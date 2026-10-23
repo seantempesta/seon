@@ -426,4 +426,9 @@
         "a red among them: still open")
     (is (= [] (rows (att {:seon.attempt/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :pass}
                                                          {:seon.proof/test 'seon.check-test/clean :seon.proof/status :pass}]})))
-        "each passing: the row closes")))
+        "each passing: the row closes")
+    (is (= [{:ns 'app.repl-only :reason "no :ns/file on the branch: its forms were never written to a file"}]
+           (:unread (first (rows (att {:seon.attempt/deferred-results [{:seon.proof/test 'seon.root-test/boots :seon.proof/status :error}
+                                                                       {:seon.proof/test 'seon.check-test/clean :seon.proof/status :error}]
+                                       :seon.attempt/gate-unread [{:ns 'app.repl-only :reason "no :ns/file on the branch: its forms were never written to a file"}]})))))
+        "a gate that could not read a changed namespace names it, and why, on the open row")))

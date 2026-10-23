@@ -78,7 +78,7 @@
   them)."
   [:seon.attempt/id :seon.attempt/status :seon.attempt/outcome :seon.attempt/reason :seon.attempt/end-ms :seon.attempt/agent
    :seon.attempt/unmerged :seon.attempt/failures :seon.attempt/costs :seon.attempt/error :seon.attempt/waste :seon.attempt/task-conflicts
-   :seon.attempt/deferred {:seon.attempt/deferred-results [:seon.proof/test :seon.proof/status]}
+   :seon.attempt/deferred :seon.attempt/gate-unread {:seon.attempt/deferred-results [:seon.proof/test :seon.proof/status]}
    {:seon.attempt/task [:db/id :seon.task/id :seon.task/ns :seon.task/proofs]}
    {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
@@ -158,9 +158,11 @@
       (and (= :merged status) (seq (:seon.attempt/deferred p))
            (not-every? (into #{} (keep #(when (= :pass (:seon.proof/status %)) (:seon.proof/test %))) (:seon.attempt/deferred-results p))
                        (:seon.attempt/deferred p)))
-      (assoc :unrun [(assoc base :open? true :tests (vec (sort-by str (:seon.attempt/deferred p)))
+      (assoc :unrun [(cond-> (assoc base :open? true :tests (vec (sort-by str (:seon.attempt/deferred p)))
                             :reason (str "merged with " (count (:seon.attempt/deferred p)) " process tests unrun")
-                            :evidence {:from aid :deferred (vec (sort-by str (:seon.attempt/deferred p)))})]))))
+                            :evidence {:from aid :deferred (vec (sort-by str (:seon.attempt/deferred p)))})
+                       ;; the changed namespaces its gate could not read, and why
+                       (:seon.attempt/gate-unread p) (assoc :unread (:seon.attempt/gate-unread p)))]))))
 
 (defn report
   "Every problem recorded on main db, by class: {:t :classes {class {:n :rows}}}. Counted
