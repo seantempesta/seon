@@ -387,6 +387,28 @@ ol.history { list-style: none; margin: 0; padding: 0; display: flex; flex-direct
 .hr .meta { display: flex; gap: 12px; color: var(--text-500); font-size: 10px; }
 .hr .meta .origin { color: var(--info); } .hr .meta .rec { color: var(--success); } .hr .meta .handle { margin-left: auto; }
 .hr pre.out { margin: 0; color: var(--text-400); white-space: pre-wrap; font-size: 10.5px; }
+/* the agent's debug view: why, actions, turns, branch, problems */
+.zhead ul.why { margin: 6px 0; padding-left: 18px; color: var(--text-200); font-size: 12px; }
+.zactions { display: flex; flex-direction: column; gap: 8px; }
+.zactions .repl.message .prompt { color: var(--info); }
+ol.turns { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+li.turn { border-left: 3px solid var(--base-700); padding: 6px 0 6px 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+li.turn.has-err { border-left-color: var(--error); }
+li.turn.o-outside { border-left-color: var(--info); }
+li.turn header { display: flex; flex-wrap: wrap; gap: 2px 4px; font-size: 11px; color: var(--text-300); }
+li.turn header b { color: var(--text-50); }
+li.turn .split, li.turn .seen, li.turn .msgs { display: flex; flex-wrap: wrap; gap: 10px; font-size: 10.5px; color: var(--text-400); }
+li.turn .split em, li.turn .seen em, li.turn .msgs em, li.turn .reply em, li.turn .calls em { color: var(--text-500); font-style: normal; margin-right: 4px; }
+li.turn pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 10.5px/1.5 var(--font-mono); color: var(--text-200); }
+li.turn details summary { cursor: pointer; font-size: 11px; color: var(--text-300); }
+li.turn table.sections { font-size: 10.5px; margin: 6px 0; }
+li.turn table.sections th { text-align: left; color: var(--text-300); font-weight: 600; padding-right: 12px; }
+li.turn table.sections tr.key td:first-child { padding-left: 14px; }
+li.turn table.sections td.n { text-align: right; color: var(--text-400); }
+li.turn pre.ctx { max-height: 60vh; overflow: auto; }
+li.turn ol.calls { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.box.problems.bad { border-left: 3px solid var(--error); }
+.box.problems ul { margin: 0; padding-left: 18px; font-size: 11px; }
 table.fnt td code { color: var(--eval); } table.fnt td.n { text-align: right; color: var(--text-300); }
 ul.proofs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 10.5px; }
 .pr .sq { display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--base-700); }
@@ -443,3 +465,33 @@ dl.cfg dd code { color: var(--text-100); }
 .card:has(.cb.s-ended) .live, .card:has(.cb.s-killed) .live, .card:has(.cb.s-died) .live,
 .dense .card:has(.cb.s-ended):hover .repl.live, .dense .card:has(.cb.s-killed):hover .repl.live, .dense .card:has(.cb.s-died):hover .repl.live { display: none; }
 .explain { font-size: 9.5px; margin: 4px 0 0; }
+/* the agent's window: the chat (head, turns, its own evaluations, the input at the bottom) and
+   the live tile column, the last changed first */
+.wlayout { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 16px; padding: 12px 18px 0; height: calc(100vh - 56px); box-sizing: border-box; }
+@media (max-width: 1100px) { .wlayout { grid-template-columns: 1fr; height: auto; } }
+.wlayout .chat { display: flex; flex-direction: column; gap: 12px; min-width: 0; overflow-y: auto; padding-bottom: 12px; }
+.wlayout .wside { overflow-y: auto; min-width: 0; padding-bottom: 12px; }
+.wtiles { display: flex; flex-direction: column; gap: 10px; }
+.wrule { margin: 0 0 6px; font-size: 12px; }
+.wtile { min-width: 0; }
+.wtile > .cb, .wtile > .box, .wtile > section { margin: 0; }
+.winput { position: sticky; bottom: 0; background: var(--base-950, var(--base-900)); padding: 8px 0 12px; display: flex; gap: 8px; align-items: center; }
+.winput form { flex: 1; display: flex; gap: 8px; align-items: center; }
+.winput input { flex: 1; }
+li.turn .call { display: flex; flex-direction: column; gap: 6px; }
+li.turn .thinking { margin: 0; color: var(--info); font-size: 11.5px; }
+li.turn .form { border-left: 2px solid var(--base-700); padding-left: 8px; display: flex; flex-direction: column; gap: 3px; }
+li.turn .form.tag-err { border-left-color: var(--error); }
+li.turn pre.lead { color: var(--text-400); font-style: italic; }
+li.turn .result { display: flex; gap: 6px; align-items: baseline; font-size: 11px; min-width: 0; }
+.winput.ended { position: static; }
+.box .changed { color: var(--warning); }
+details.fns summary { cursor: pointer; font-size: 10.5px; color: var(--text-500); }
+.winput textarea { flex: 1; resize: vertical; font: 12px/1.45 var(--font-mono); background: var(--base-900); color: var(--text-100); border: 1px solid var(--base-700); border-radius: 6px; padding: 6px 8px; }
+.zhead .stats { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; }
+.zhead .stats em { font-style: normal; color: var(--text-500); margin-right: 5px; }
+.hr pre.lead { margin: 0; color: var(--text-400); font-style: italic; white-space: pre-wrap; font-size: 10.5px; }
+li.turn .tfoot { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 10.5px; color: var(--text-500); }
+li.turn p.lead { margin: 0; color: var(--text-200); font-style: normal; font-size: 12px; }
+li.turn p.reply { margin: 0; color: var(--text-100); }
+.zhead p.lead { margin: 4px 0; color: var(--text-100); font-size: 13px; }

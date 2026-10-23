@@ -71,5 +71,6 @@ A measured time chooses which work goes first, never whether a result is green (
 - `seon.render.proc/pass`: a render pass's duration and the events' age, shown on the dashboard.
 - `seon.render.proc/system-value`: carries the pass's wall time (`:now-ms`) to the dashboard, which shows ages from it; nothing here decides by it.
 - `seon.agent/handle!`, `seon.root/ext-op`, `seon.reconcile/advance`, `seon.reconcile/reconciler-proc`: stamps and durations.
+- `seon.root/deliver-message`: a delivered message's send stamp (`:ns`), which the agent's receipt (`:received`) answers with its own, so the delivery's time is measured.
 
 The thread CPU clock (`seon.profile/cpu-ns`, what a cost proof's `seon.cost/measure` times) orders nothing and carries no mark; [cost](cost.md) says what it measures.

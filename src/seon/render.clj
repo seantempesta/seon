@@ -2,21 +2,26 @@
   "Render selection and the one render call (W1's proto.render and proto.render.schema,
   ported onto next's registry: notes/archive/option3-W1-render.md §1).
 
-  A render is a plain function (v env) -> :seon.render/out: one or both of
-  :seon.render/html (hiccup, serialized by seon.web.html) and :seon.render/ai (data or text
-  the model or root reads). Selection, first match wins, and nothing else (owner,
+  A render is a plain function (value opts) -> its result, like a React component: opts are
+  its props, all optional (:as, the room it is shown in, :inline, :block or :tile; :budget,
+  its tokens; :handle, the form its cuts read the rest through), and a function that does not
+  care about one ignores it (owner, 2026-10-23: \"It's all just functions and results\"). An
+  :html render answers hiccup (serialized by seon.web.html, where a vector headed by a
+  function is a call, expanded as Reagent does); an :ai render answers text, or the printer's
+  result {:text :truncated?}. Selection, first match wins, and nothing else (owner,
   2026-10-20: \"Everything has a schema right so we say this renders this\"):
     1. the value's own override key (:seon.render/html or :seon.render/ai, in the map or its
        metadata): a render symbol, or already-rendered data;
     2. the render its schema declares: a schema's properties {:seon.render/html sym
        :seon.render/ai sym} in resources/seon/schemas/*.edn (seon.contract/forms), the
        schema then its parents ([:and p ...], [:merge p ...]). The value's schema is never
-       guessed: the producer names it (env :seon.render/schema, or the value's metadata
+       guessed: the producer names it (opts :schema, or the value's metadata
        :seon.render/schema), an error map's is its :seon.error/type (else :seon.error/base),
        and a pulled entity's is the schema with a declared render holding its identity
        attribute;
-    3. the one value printer (seon.print/print-value): text for :ai, hiccup for :html.
-  A nested value renders by calling `render` on it; the printer never re-dispatches."
+    3. the one value printer (seon.print/print-value), the default render: text for :ai,
+       hiccup for :html.
+  A nested value renders by a call ([render v opts] in hiccup, or render's result)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]))
 
@@ -73,47 +78,88 @@
           (if (contains? contract/forms t) t :seon.error/base)
           (some by-identity (keys v))))))
 
-(defn print-out
-  "The one value printer's output for face: hiccup for :html, text for :ai."
-  {:malli/schema [:=> [:cat :seon.render/face :any :seon.render/env] :seon.render/out]}
-  [face v env]
-  ;; without a handle a cut names no form: no result would answer it
-  (let [opts {:budget (or (:seon.render/budget env) (config/value :seon.config.render/value-budget)) :handle (:seon.render/handle env)}]
-    (if (= face :html)
-      (let [r (print/print-value v (assoc opts :outputs #{:hiccup}))]
-        {:seon.render/html (or (:html r) [:span {:class "seon-print-refused"} (str (:seon.error/message r))])})
-      {:seon.render/ai (let [r (print/print-value v opts)] (or (:text r) (:seon.error/message r)))})))
+(declare render-of render)
+
+(defn- nested
+  "The printer's :render: a nested value whose schema declares a render, as that render's one
+  line ({:text, its :ai render inline; :html, a call of its :html render inline}), else nil.
+  Each face's render is looked up by render-of (seon.render/schema-of: one metadata read or
+  one map lookup per key, never a validation)."
+  {:malli/schema [:=> [:cat :any] [:maybe [:map [:text :string] [:html :any]]]]}
+  [v]
+  (let [h (render-of v :html nil) a (render-of v :ai nil)]
+    (when (or h a)
+      ;; one line, as the printer's row needs it: a render that ignores :inline is cut to one by the printer
+      (let [text (print/line (:text (render v {:face :ai :as :inline :budget (config/value :seon.config.render/line-budget)}))
+                             (config/value :seon.config.render/line-budget))]
+        {:text text :html (if h [h v {:as :inline}] text)}))))
+
+(defn- printer-opts
+  "The printer's options for a render's opts: its budget (else :seon.config.render/value-budget),
+  its handle, and its nested values' own renders (nested)."
+  {:malli/schema [:=> [:cat :seon.render/opts] :map]}
+  [opts] {:budget (or (:budget opts) (config/value :seon.config.render/value-budget)) :handle (:handle opts) :render nested})
+
+(defn print-html
+  "The one value printer as the default :html render: v's structural hiccup under opts' budget,
+  or one line (seon.print/line) when shown :inline."
+  {:malli/schema [:=> [:cat :any :seon.render/opts] :any]}
+  [v opts]
+  (if (= :inline (:as opts))
+    [:code {:class "seon-inline"} (print/line v (or (:budget opts) (config/value :seon.config.render/line-budget)) (:handle opts))]
+    (let [r (print/print-value v (assoc (printer-opts opts) :outputs #{:hiccup}))]
+      (or (:html r) [:span {:class "seon-print-refused"} (str (:seon.error/message r))]))))
+
+(defn print-ai
+  "The one value printer as the default :ai render: v's text under opts' budget ({:text
+  :truncated?}), one line when shown :inline; the error's message when even its first part
+  does not fit."
+  {:malli/schema [:=> [:cat :any :seon.render/opts] :seon.render/text]}
+  [v opts]
+  (if (= :inline (:as opts))
+    (select-keys (print/line-prose v (or (:budget opts) (config/value :seon.config.render/line-budget)) (:handle opts)) [:text :truncated?])
+    (let [r (print/print-value v (printer-opts opts))]
+      {:text (or (:text r) (:seon.error/message r)) :truncated? (boolean (:truncated? r))})))
 
 (defn- own-key
   "v's own override for face: in the map, else in its metadata."
   {:malli/schema [:=> [:cat :any :keyword] :any]}
   [v k] (or (when (map? v) (get v k)) (get (meta v) k)))
 
-(defn render-face
-  "v rendered for one face under env: :seon.render/out holding that face."
-  {:malli/schema [:=> [:cat :seon.render/face :any :seon.render/env] :seon.render/out]}
-  [face v env]
-  (let [k (faces face)
-        own (own-key v k)]
-    (if (and (some? own) (not (symbol? own)))
-      {k own}
-      (if-let [sym (or own (declared (schema-of v (:seon.render/schema env)) face))]
-        (let [out ((requiring-resolve sym) v env)]
-          (if (contains? out k) out (merge out (print-out face v env))))
-        (print-out face v env)))))
+(defn render-of
+  "The render function v takes for face: its own override (a symbol), else its schema's
+  declared one (opts :schema, else seon.render/schema-of: one metadata read or one map lookup
+  per key, never a validation), else nil (the printer). nil also when v's own key holds an
+  already rendered result."
+  {:malli/schema [:=> [:cat :any :seon.render/face [:maybe :qualified-keyword]] [:maybe :seon.host/fn]]}
+  [v face hint]
+  (let [own (own-key v (faces face))]
+    (when-let [sym (if (symbol? own) own (when (nil? own) (declared (schema-of v hint) face)))]
+      @(requiring-resolve sym))))
+
+(defn render
+  "v rendered: (render-fn v opts), the function its override or schema names for opts' :face
+  (:html, the default, or :ai), else the printer's (print-html, print-ai); a value's own key
+  holding a result answers that result. :html answers hiccup, :ai {:text :truncated?}."
+  {:malli/schema [:=> [:cat :any :seon.render/opts] :any]}
+  [v opts]
+  (let [face (:face opts :html)
+        own (own-key v (faces face))]
+    (cond
+      (and (some? own) (not (symbol? own))) (if (= :ai face) {:text (if (string? own) own (print/text own)) :truncated? false} own)
+      :else (let [f (render-of v face (:schema opts))
+                  r (if f (f v opts) ((if (= :ai face) print-ai print-html) v opts))]
+              (if (and (= :ai face) (string? r)) {:text r :truncated? false} r)))))
 
 (defn html
-  "v's HTML face under env (the hiccup)."
-  {:malli/schema [:=> [:cat :any :seon.render/env] :any]}
-  [v env] (:seon.render/html (render-face :html v env)))
+  "v's :html render under opts (its hiccup)."
+  {:malli/schema [:=> [:cat :any :seon.render/opts] :any]}
+  [v opts] (render v (assoc opts :face :html)))
 
 (defn ai
-  "v's AI face under env, as the text the model or root reads (a render's data printed by
-  the value printer under the env's budget)."
-  {:malli/schema [:=> [:cat :any :seon.render/env] :string]}
-  [v env]
-  (let [x (:seon.render/ai (render-face :ai v env))]
-    (if (string? x) x (print/text x (or (:seon.render/budget env) (config/value :seon.config.render/value-budget))))))
+  "v's :ai render under opts, as the text the model or root reads."
+  {:malli/schema [:=> [:cat :any :seon.render/opts] :string]}
+  [v opts] (:text (render v (assoc opts :face :ai))))
 
 (defn rendered?
   "Does v's producer name an AI render for it (the value's own key, or its metadata's
@@ -126,14 +172,11 @@
   "v as a REPL answers it, cuts reading through handle (result/h3, or a form that reads v):
   its producer's AI render when it is `rendered?`, else the one value printer's result under
   the reply budget. A render's text ends with the form that shows the whole value as data,
-  (with-meta result/h3 nil), and says whether it cut anything (:seon.render/truncated?, the
-  render's own fact). Answers the printer's result, or a render's {:text :tokens :truncated?}."
+  (with-meta result/h3 nil), and says whether it cut anything. Answers the printer's result,
+  or a render's {:text :tokens :truncated?}."
   {:malli/schema [:=> [:cat :any :any] [:or :seon.print/result [:map [:text :string] [:tokens nat-int?] [:truncated? :boolean]]]]}
   [v handle]
   (if (rendered? v)
-    (let [env {:seon.render/handle handle :seon.render/budget print/default-budget}
-          out (render-face :ai v env)
-          x (:seon.render/ai out)
-          t (if (string? x) x (print/text x print/default-budget))]
-      {:text t :tokens (select/estimate t) :truncated? (boolean (:seon.render/truncated? out))})
+    (let [{t :text :keys [truncated?]} (render v {:face :ai :handle handle :budget print/default-budget})]
+      {:text t :tokens (select/estimate t) :truncated? (boolean truncated?)})
     (print/print-value v {:handle handle})))
