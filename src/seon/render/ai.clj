@@ -283,7 +283,7 @@
   {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
   [{:keys [agents agent-attempt writer fork-server main]}]
   (into [(str (count agents) " agents (" (counts (frequencies (for [[id a] agents] (ui/shown-status (ui/ended-as a id (or agent-attempt {})))))) ")")]
-        (for [{:keys [kicker pill big unit rows]} (ui/load-tiles writer fork-server main {})]
+        (for [{:keys [kicker pill big unit rows]} (ui/load-tiles writer fork-server main)]
           (str kicker (when pill (str " " (second pill))) " " big " " unit (str/join (for [[dt dd] rows] (str ", " dt " " dd)))))))
 
 (defn- section-costly {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}

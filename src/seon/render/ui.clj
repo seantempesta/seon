@@ -103,25 +103,6 @@
 (defn- kicker {:malli/schema [:=> [:cat :any :any] :any]}
   [k sub] [:header [:span {:class "kicker"} k] (if (vector? sub) sub [:span {:class "sub"} sub])])
 
-(defn sparkline
-  "An inline SVG sparkline over xs (oldest first), an area fill and a dot on the newest."
-  {:malli/schema [:=> [:cat [:maybe [:sequential :any]] :string] :any]}
-  [xs tone]
-  (let [w 160 hgt 34 pad 2
-        ;; the series as the render proc keeps it (:seon.config.render.list/series points)
-        xs (filterv number? xs)
-        n (count xs)]
-    (if (< n 2)
-      [:svg {:class (str "spark " tone) :viewBox (str "0 0 " w " " hgt) :preserveAspectRatio "none"}]
-      (let [hi (max 1e-9 (apply max xs))
-            px (fn [i] (+ pad (* (- w (* 2 pad)) (/ i (double (dec n))))))
-            py (fn [v] (- hgt pad (* (- hgt (* 2 pad)) (/ v hi))))
-            pts (str/join " " (map-indexed (fn [i v] (str (fmt1 (px i)) "," (fmt1 (py v)))) xs))]
-        [:svg {:class (str "spark " tone) :viewBox (str "0 0 " w " " hgt) :preserveAspectRatio "none"}
-         [:polygon {:class "spark-area" :points (str (fmt1 (px 0)) "," hgt " " pts " " (fmt1 (px (dec n))) "," hgt)}]
-         [:polyline {:class "spark-line" :points pts}]
-         [:circle {:class "spark-dot" :cx (fmt1 (px (dec n))) :cy (fmt1 (py (peek xs))) :r "2.2"}]]))))
-
 (defn context-read?
   "Is evaluation e a context read: an outside agent reading its current-state block through
   root's server (origin :context; seon.server)? Its output is the block itself."
@@ -145,17 +126,16 @@
         (= :dead (:status a)) :died
         :else (or (:status a) :unknown)))
 
-;;; --- metric tiles -------------------------------------------------------------
+;;; --- the load, as data -------------------------------------------------------------
 
 (defn load-tiles
-  "The writer, the fork server and main as `metric-tile` data, every number from what its
-  owner reports when it changes (the writer when it commits or flushes, the fork server
-  when it forks, main when it commits); series: one point per change."
-  {:malli/schema [:=> [:cat :map :map :map :map] [:vector :map]]}
-  [{:keys [commits flushes] :as writer} fork-server main series]
+  "The writer, the fork server and main as data root's context prints, one line each (seon.render.ai),
+  every number from what its owner reports when it changes (the writer when it commits or flushes,
+  the fork server when it forks, main when it commits)."
+  {:malli/schema [:=> [:cat :map :map :map] [:vector :map]]}
+  [{:keys [commits flushes] :as writer} fork-server main]
   (let [st (or (:status fork-server) :up)]
     [{:id "t-writer" :kicker "writer" :sub "the only d/transact caller" :big (group3 (:tx-count writer)) :unit "txs"
-      :series (:tx series) :tone "tone-signal" :series-title "transactions per writer batch, the newest batches"
       :rows [["batch" (ms-str (:batch-p50-ms writer)) "batch p50: one writer step (a group commit and its flush, when one is due)"]
              ["tx/commit" (fmt2 (:tx-per-commit writer)) "main's transactions per group commit: one commit takes every transaction queued (at least 1)"]
              ["commits/flush" (if (and (number? commits) (number? flushes) (pos? flushes)) (fmt1 (/ (double commits) flushes)) "–")
@@ -164,13 +144,13 @@
       :explain "a transaction is one write to main; a commit takes every queued transaction at once; a flush makes the commits since the last one durable on disk"}
      {:id "t-fork-server" :class (str "srv-" (kname st) " restarts-" (:restarts fork-server 0)) :kicker "fork server"
       :pill [(str "srv " (if (= st :up) "s-up" "s-down")) (kname st)]
-      :big (fmt2 (:fork-ms-p50 fork-server)) :unit "ms fork p50" :series (:fork series) :tone "tone-info"
+      :big (fmt2 (:fork-ms-p50 fork-server)) :unit "ms fork p50"
       :rows [["forked" (group3 (:agents-forked fork-server))]
              ["lag" (ms-str (:lag-ms fork-server)) "commit applied in the fork server after main took it, p50"]
              ["pid" (str (or (:pid fork-server) "–"))]
              ["restarts" (str (:restarts fork-server 0)) nil (when (pos? (:restarts fork-server 0)) "hot")]]}
      {:id "t-main" :class (str "pulse-" (mod (or (:merges main) 0) 2)) :kicker "main" :sub "every write to main moves t"
-      :big (group3 (:vars main)) :unit "definitions" :series (:vars series) :tone "tone-success"
+      :big (group3 (:vars main)) :unit "definitions"
       :rows [["t" (group3 (:t main))] ["merges" (group3 (:merges main 0))]
              ["datoms" "on demand" "main's datom count is a walk of every datom: (:main (c/state sys {:datoms true})) at root's REPL"]]
       :explain "definitions on main now: its :var/name facts (boot loaded those with source; tasks' merges add more)"}]))
@@ -444,13 +424,16 @@
   {:ui "the owner, from this page" :outside "an outside agent, through root's server" :context "the context, read for a turn"})
 
 (defn evaluation
-  "One evaluation (the declared html render of :seon.db/eval-fact), as it ran: its ;; thought as
-  prose, its form, its result as the REPL printed it when it ran (the result's own render then;
-  an error by its error map's render), what it printed, and its cost as recorded; :as :inline,
-  its form and result in one line. Rendered from the record, which never changes."
+  "One evaluation (the declared html render of :seon.db/eval-fact, its record and a reply item), as
+  it ran: its ;; thought as prose, its form, its result as the REPL printed it when it ran (the
+  result's own render then; an error by its error map's render), what it printed, and its cost as
+  recorded; :as :inline, its form and result in one line. Rendered from the record, which never
+  changes; a reply item names its text :printed and its error :err, as the REPL answered it."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [{r :seon.cluster.eval/record :as e} opts]
-  (let [err? (= :err (:tag r))]
+  [e opts]
+  (let [it (or (:seon.cluster.eval/record e) e)
+        r (cond-> it (:printed it) (assoc :shown (:printed it)) (:err it) (assoc :error (:err it)))
+        err? (= :err (:tag r))]
     (if (= :inline (:as opts))
       [:span {:class "font-mono"} [:code (prose (:form r) (cell) {:one-line? true})] (if err? " ✕ " " ⇒ ")
        [:code (prose (or (:shown r) (:seon.error/message (:error r)) "") (cell) {:one-line? true})]]

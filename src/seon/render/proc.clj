@@ -16,7 +16,7 @@
   event carries is its owner's to emit. A pass: an event asks the api for its view; while that request is in
   flight, more events only queue, so a burst becomes one pass (the round trip is the
   coalescing window: no step sleeps). The answer is joined with health, main's tasks and
-  attempts, and the series into the system value (:seon.render/system), whose :ai face is
+  attempts and the events into the system value (:seon.render/system), whose :ai face is
   root's context. Each page a tab watches is an entity's (seon.render/page: / root's, /agent/{id}
   an agent's in root's boot, /walk/{eid} any entity's), walked on main and, for an agent, on its
   branch as last read, and laid out by seon.render.ui/page into units. Then, per unit: inputs
@@ -32,9 +32,7 @@
             [seon.config :as config] [seon.step :as step]))
 
 (defn- event-cap "Events the stream keeps (:seon.config.render.list/stream)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/stream))
-(defn- series-cap "Points a sparkline keeps, the newest changes (:seon.config.render.list/series)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/series))
-(defn- ended-cap "Ended agents the grid keeps beside the live ones (:seon.config.render.list/ended)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/ended))
-(defn- history-cap "Evaluations an agent's page shows (:seon.config.render.list/history)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/history))
+(defn- history-cap "Rows a page renders at first, and more each time its list's end scrolls into view (:seon.config.render.list/history)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/history))
 
 ;;; --- requests -------------------------------------------------------------------------
 
@@ -53,29 +51,6 @@
 
 ;;; --- the system value ------------------------------------------------------------------
 
-(defn- order
-  "The grid's agents: by id, every live one and the newest `ended-cap` ended ones (by the
-  :ended-ms root recorded at each end); an agent's end is the event that pushes the oldest
-  ended one off. A function of the agents alone."
-  {:malli/schema [:=> [:cat :map] [:vector :keyword]]}
-  [agents]
-  (let [kept (into #{} (comp (take (ended-cap)) (map key))
-                   (sort-by (comp - :ended-ms val) (filter (comp :ended-ms val) agents)))]
-    ;; each id's key computed once (sort-by would build it per comparison)
-    (mapv peek (sort (for [[id a] agents :when (or (not (:ended-ms a)) (kept id))
-                           :let [s (str id)]]
-                       [(count s) s id])))))
-
-(defn- ordered
-  "st with the grid's order current: derived again only when root's agents changed (the
-  view's map is persistent: unchanged means identical)."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [st]
-  (let [agents (get-in st [:view :agents] {})]
-    (if (identical? agents (:order-agents st))
-      st
-      (assoc st :order (order agents) :order-agents agents))))
-
 (defn- proc-health-of
   "Each declared root proc (the built system's, once it is) with the defects root's view
   holds of it: {pid {:defects n :newest message}}; agent procs are not counted here."
@@ -90,8 +65,8 @@
 
 (defn system-value
   "The whole system as one value (:seon.render/system), from the render proc's state:
-  root's view (the api's), every proc's health, main (t, datoms, tasks, attempts), the
-  series, the events, the render's own numbers."
+  root's view (the api's), every proc's health, main (t, datoms, tasks, attempts),
+  the events, the render's own numbers."
   {:malli/schema [:=> [:cat :map :int :int] :seon.render/system]}
   [st now-ns now-ms]
   (let [v (:view st)
@@ -99,7 +74,6 @@
         n (c/view-numbers v)
         agents (:agents v {})]
     {:agents agents
-     :order (or (:order st) (order agents))
      :writer (:writer n) :fork-server (:fork-server n) :store (:store n)
      :boot (:boot v) :root-errors (:root-errors v []) :root-errors-total (:root-errors-total v 0)
      ;; health is what flows: each declared proc with the defects root recorded of it (a
@@ -110,15 +84,8 @@
      :main (assoc (:main st {}) :merges (+ (:merges st 0) (count (filter #(= :merged (:seon.attempt/status %)) (vals (:attempts st))))))
      :recorded (:recorded st)
      :tasks (:tasks st {}) :attempts (:attempts st {}) :task-rows (:task-rows st {}) :agent-attempt (:agent-attempt st {})
-     ;; one point per change, from the data itself: transactions per writer batch, ms per
-     ;; fork, datoms per main commit
-     :series {:tx (vec (take-last (series-cap) (map second (get-in v [:writer :recent]))))
-              :fork (vec (take-last (series-cap) (get-in v [:stats :fork-ms])))
-              :vars (:vars-series st [])}
      ;; a stop that arrived before main recorded how the attempt ended says so once main does
      :events (mapv #(ui/ended-as % (:agent %) (:agent-attempt st {})) (:events st [])) :events-seen (:ev-seq st 0)
-     :web {:tabs (:tabs st 0)}
-     :ended-kept (ended-cap)
      :config (:config st)
      :now-ms now-ms}))
 
@@ -157,8 +124,6 @@
     (let [tasks (task/tasks db) idx (reconcile/index db) attempts (:attempts idx)
           vars (count (d/datoms db :aevt :var/name))]
       (assoc st :main {:t (:max-tx db) :vars vars}
-             ;; one point per main commit this proc read
-             :vars-series (vec (take-last (series-cap) (conj (:vars-series st []) (double vars))))
              :main-db db :tasks tasks :attempts attempts
              ;; the config in force, as root wrote it on main's root entity (one pull)
              :config (config/from-db db)
@@ -317,7 +282,6 @@
                (seq evs) (assoc :events (vec (take (event-cap) (concat (reverse evs) (:events st))))
                                 :ev-seq (+ seq0 (count evs)))
                true (assoc :new-events []))
-          st (ordered st)
           sys (system-value st t0 now-ms)
           ;; root's context: the system's AI face, also a unit of root's layout
           ctx (render/ai sys {:schema :seon.render/system})

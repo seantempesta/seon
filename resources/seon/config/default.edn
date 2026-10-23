@@ -495,8 +495,6 @@
  ;; (render.ui and render.ai, 2026-10-22), kept as they were.
  ;; rows: running and newest attempts, root's context's newest events.
  :seon.config.render.list/rows 8
- ;; newest: a tile's or card's newest (root's defects on the page, a card's evaluations).
- :seon.config.render.list/newest 6
  ;; brief: a secondary list in root's context (ended attempts, costliest functions).
  :seon.config.render.list/brief 5
  ;; top: root's context's defects, the evaluations its costliest functions come from, a
@@ -512,15 +510,6 @@
  ;; Unit: tokens of root's context, the system's AI face (seon.render.ai/system); past it the
  ;; later sections are named, not shown. Provenance: render.ai's and the render proc's 700.
  :seon.config.render/root-context-budget 700
- ;; Unit: tokens each evaluation's value shows in an agent's history on its page (the render
- ;; proc renders each row once). Provenance: the render proc's literal 400.
- :seon.config.render/history-row-budget 400
- ;; Unit: tokens each part of a turn on its agent's page shows (its reply, reasoning, each eval
- ;; call's code and answer, the context it read): past it the cut links the turn's whole request
- ;; (/turn?view=&id=). Provenance: the context's two messages are each under 16,000
- ;; tokens (seon.context/messages); measured 2026-10-22, a turn's attempt sections are 1.6-1.9k
- ;; and its turn sections under 0.1k before a proof runs, so 4,000 shows most turns whole.
- :seon.config.render/turn-text-budget 4000
  ;; Unit: tokens of a message or reason shown in one line (root's context, a tile's or card's
  ;; line, a declared AI render's line); past it the line's cut names the form that reads the
  ;; rest. Provenance: the literals 40-60 render.ui and render.ai carried (2026-10-22), as one.
@@ -529,15 +518,9 @@
  ;; cut says what it omitted and links the page that shows it whole. Provenance: the literals
  ;; 12-30 render.ui carried (2026-10-22), as one.
  :seon.config.render/cell-budget 25
- ;; Unit: events the dashboard's stream keeps (the render proc), newest first; its header says
+ ;; Unit: events root's context keeps (the render proc), newest first; its events section says
  ;; how many older ones it did not keep. Provenance: the render proc's EVENT-CAP 60.
  :seon.config.render.list/stream 60
- ;; Unit: points a sparkline keeps, the newest changes. Provenance: the render proc's SERIES-CAP 60.
- :seon.config.render.list/series 60
- ;; Unit: ended agents the dashboard's grid keeps beside every live one, the newest ended first;
- ;; an agent's end pushes the oldest kept one off, and the tile counts those off it. Provenance:
- ;; replaces seon.render.proc's RETIRE-MS (90 s after an end), a clock deciding what the grid shows.
- :seon.config.render.list/ended 10
  ;; Unit: rows (an evaluation, or a turn with its evaluations). A page renders this many of its
  ;; list at first, newest first, and this many more each time its last row scrolls into view
  ;; (seon.render.ui/page); the rest are counted, never rendered until looked at. Provenance: the

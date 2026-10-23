@@ -2,13 +2,13 @@
 
 Root's dashboard is a live web page of the whole system, served on 127.0.0.1 by two procs of the root graph: the render proc decides what changed and renders it, and the web proc owns the listener and the tabs and renders nothing.
 
-The port is `:seon.config.web/port` (`bin/ports` gives each checkout its own; the owner's main tree uses 7777; 0 serves nothing). The page is a render like every other view ([render](render.md)): a layout declared on the value's schema, over the one printer, with every number measured by the system and carried in the value.
+The port is `:seon.config.web/port` (`bin/ports` gives each checkout its own; the owner's main tree uses 7777; 0 serves nothing). The page is a render like every other view ([render](render.md#the-page)): an entity's walk, each part by its schema's render over the one printer, laid out by Tailwind's classes, with every number measured by the system and carried in the value.
 
 ## The render proc
 
 The render proc turns root's events into patches per view, one pass per burst, with no beat: ```seon.render.proc/render-proc```.
 
-An event asks the api for root's view; while that request is in flight more events only queue, so a burst becomes one pass and no step sleeps. The answer is joined with each proc's health, main's tasks and attempts, and the series (one point per change) into one system value, `seon.render.proc/system-value` (`:seon.render/system`). Its declared render answers the layout and its units: ```seon.render.ui/system-page``` for root's whole system and ```seon.render.ui/agent-page``` for one agent zoomed. Each unit names the exact value it reads, so a unit renders only when its input changed and sends a patch only when its bytes changed. A tab that opened or fell behind gets a keyframe composed from the retained fragments (`seon.render.proc/compose`), rendering nothing. Every task row reads `seon.render.proc/task-rows`, over the reconciler's one derivation of a task's state ([root](root.md#root-causes-at-quiescence)).
+An event asks the api for root's view; while that request is in flight more events only queue, so a burst becomes one pass and no step sleeps. The answer is joined with each proc's health, main's tasks and attempts and the events into one system value, `seon.render.proc/system-value` (`:seon.render/system`), whose `:ai` face is root's context. Each page a tab watches is an entity's: ```seon.render/page``` walks it, ```seon.render.ui/page``` lays it out into units ([render](render.md#the-page)). Each unit names the exact value it reads, so a unit renders only when its input changed and sends a patch only when its bytes changed. A tab that opened or fell behind gets a keyframe composed from the retained fragments (`seon.render.proc/compose`), rendering nothing. Every task row reads `seon.render.proc/task-rows`, over the reconciler's one derivation of a task's state ([root](root.md#root-causes-at-quiescence)).
 
 Health is what flows: a proc is healthy unless a problem was recorded of it, and `bin/check idle` proves an idle root with a tab open steps nothing ([render](render.md#health-is-what-flows)).
 
@@ -16,7 +16,7 @@ Health is what flows: a proc is healthy unless a problem was recorded of it, and
 
 The web proc owns the HTTP listener and each tab's server-sent-events channel: ```seon.web/web-proc```.
 
-`seon.web/handler` is the edge in front of it: `/` and `/agent/<id>` answer a page, `/feed?view=` opens a tab's event stream, `/context.txt` answers root's context as the model would read it, and ``/render.edn`` and ``/web.edn`` the procs' own numbers. A patch is serialized once (Datastar's `datastar-patch-elements`) and offered to every tab of its view; a full channel marks the tab stale and it gets a keyframe, morphed by id so inputs survive; a closed one is dropped.
+`seon.web/handler` is the edge in front of it: `/`, `/agent/<id>` and `/walk/<eid>` answer an entity's page, `/more?view=` asks for a page's next rows as its list's end scrolls into view, `/app.css` is the stylesheet `bin/build css` made ([render](render.md#tailwind)), `/feed?view=` opens a tab's event stream, `/context.txt` answers root's context as the model would read it, and ``/render.edn`` and ``/web.edn`` the procs' own numbers. A patch is serialized once (Datastar's `datastar-patch-elements`) and offered to every tab of its view; a full channel marks the tab stale and it gets a keyframe, morphed by id so inputs survive; a closed one is dropped.
 
 Hiccup becomes HTML through one serializer, ```seon.web.html/html```: attributes in sorted order, so the same value is always the same bytes, which is what lets the render proc compare bytes.
 

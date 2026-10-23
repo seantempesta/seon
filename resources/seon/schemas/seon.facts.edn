@@ -111,7 +111,7 @@
  :seon.cluster.eval/agent :seon.db/ref
  ;; the evaluation's details as one EDN value: {:tag :form :shown|:error :out :ms :alloc-bytes :fns}
  ;; (:fns: its 10 costliest contracted functions, [{:var :calls :ms}], seon.profile)
- :seon.cluster.eval/record [:map {:seon.db/data true :seon.render/html seon.render.ui/history-row} [:tag [:enum :ret :err]]]
+ :seon.cluster.eval/record [:map {:seon.db/data true :seon.render/html seon.render.ui/evaluation} [:tag [:enum :ret :err]]]
  ;; an agent: one entity per agent per boot of its root (an id like :a3 starts again each boot),
  ;; named by its key (seon.task/agent-key: "<boot>/<id>"), a content id so root's entity on main
  ;; and the one its branch's records name are one; it refs the root that started it. What root

@@ -5,7 +5,7 @@
   root: a cost proof for the recursion). Run: bin/test seon.render-cost-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.web.html]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.task] [seon.repl]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.render.ui] [seon.config] [seon.task] [seon.repl]))
 
 (def ^:private fan "Children per node: a tree as deep as log3 n (10,000 nodes: 9 levels)." 3)
 
@@ -176,3 +176,29 @@
      :fixed {:calls 36}
      ;; the fixed list holds 837 vars (cited-vars)
      :sizes [100 300 800]}))
+
+(defn paged-of
+  "The input of size n: agent a1's page walk (seon.render/page) with n evaluations of a1, none in a
+  turn (each its own row), and the layout's opts: the first page of rows."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any :map]]}
+  [n]
+  (let [[db eid] (agent-of n)]
+    [(seon.render/page [db] eid) {:shown (seon.config/value :seon.config.render.list/history) :view "a1"}]))
+
+(deftest a-page-renders-only-its-first-rows
+  (cost/proof
+    {:of 'seon.render.ui/page :input 'seon.render-cost-test/paged-of
+     :n "evaluations on the page's list"
+     :work (str "per node, how its schema shows it (shown-as: one properties lookup), its row (grouped by the "
+                "turns that name it: none here) and the sort of the rows by the transaction that made them; then "
+                "units for the first :seon.config.render.list/history rows only: what is rendered does not grow with "
+                "the list, only its count does (seon.render.ui/more)")
+     ;; the sort is n log n comparisons of one number, uncounted beside a node's two armed calls:
+     ;; measured 208 / 2,008 calls and 390 KB / 3.5 MB at 100 / 1,000 (2026-10-23)
+     :growth :linear
+     ;; shown-as twice a node (the list, then the tiles), each armed (~353 B), and the node's row:
+     ;; a map, its parts' vector, its place in the sort
+     :per-n {:calls 2 :bytes 3600}
+     ;; page, rows, and a slot per shown row and the list's end; what the first page's units hold
+     :fixed {:calls 8 :bytes 30000}
+     :sizes [100 1000 4000]}))
