@@ -6,7 +6,7 @@
 # worktree and its branch removed. Run it from the main tree. Every step's exit status is printed;
 # the last line is WORKTREE-CHECK OK or WORKTREE-CHECK FAILED, and so is the exit status.
 setopt pipefail
-MAIN=$(cd "$(dirname "$0")/.." && pwd); NAME=${1:-worktree-check}; BASE=${2:-main}; WT=$MAIN/../next-$NAME; WT=${WT:A}
+MAIN=$(cd "$(dirname "$0")/.." && pwd); NAME=${1:-worktree-check}; BASE=${2:-main}; WT=$($MAIN/bin/worktree --path $NAME); WT=${WT:A}
 fails=0
 step() { local name=$1; shift; local t0=$SECONDS
   if "$@"; then print "OK   $name ($((SECONDS-t0)) s)"; else print "FAIL $name ($((SECONDS-t0)) s)"; fails=$((fails+1)); fi }
