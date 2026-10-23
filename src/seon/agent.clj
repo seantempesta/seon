@@ -693,6 +693,7 @@
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :interrupt-ok intr-ok :serve serve})
      ;; a kept branch, resumed (root released its held task: seon.reconcile/hold-tx), takes
-     ;; its task from main, with the failure and evidence the last attempt left there
-     (when-let [tx (when resumed (not-empty (task/onto-tx db0 @store-conn task)))]
+     ;; its task from main, with the failure and evidence the last attempt left there; an
+     ;; agent with no task (a fresh one on a kept branch) takes none
+     (when-let [tx (when (and resumed task) (not-empty (task/onto-tx db0 @store-conn task)))]
        (transact! tx)))))
