@@ -84,20 +84,28 @@
 
 (defn dead-citations
   "Each name a wiki section cites (:seon.section/names) that names nothing on db
-  (seon.ref/names-on-db?, the one rule for a name), as a :dead-citation row: open while it is true,
-  since nothing writes it. Cost: main's var names read once into a set and one set lookup per
-  cited name; the rule runs only on a name the set misses."
+  (seon.ref/names-on-db?, the one rule for a name), and each link it makes that reached no
+  section at load (:seon.section/dead-links) and still reaches none, as a :dead-citation row:
+  open while it is true, since nothing writes it. Cost: main's var names read once into a set
+  and one set lookup per cited name; the rule runs only on a name the set misses; one seek per
+  dead link."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
-  (let [vars (into #{} (map :v) (d/datoms db :aevt :var/name))]
-    (vec (for [{:keys [e v]} (d/datoms db :aevt :seon.section/names)
-               :when (not (or (vars v) (ref/names-on-db? db v)))
-               :let [a (:seon.section/address (d/pull db [:seon.section/address] e))
-                     s (str "dead-citation " a " " v)]]
-           {:signature s :section a :name v :open? true
-            :message (str a " cites " v ", which names nothing")
-            :producer nil :owner-ns (symbol (namespace v)) :proofs []
-            :evidence {:kind :dead-citation :section a :name v} :answered-by (get-in ans [:signature s] []) :at-ms nil}))))
+  (let [vars (into #{} (map :v) (d/datoms db :aevt :var/name))
+        row (fn [e k v message evidence]
+              (let [a (:seon.section/address (d/pull db [:seon.section/address] e))
+                    s (str "dead-citation " a " " v)]
+                (merge {:signature s :section a :open? true :message (message a)
+                        :producer nil :owner-ns (when (symbol? v) (symbol (namespace v))) :proofs []
+                        :evidence (assoc evidence :kind :dead-citation :section a) :answered-by (get-in ans [:signature s] []) :at-ms nil}
+                       {k v})))]
+    (vec (concat
+           (for [{:keys [e v]} (d/datoms db :aevt :seon.section/names)
+                 :when (not (or (vars v) (ref/names-on-db? db v)))]
+             (row e :name v #(str % " cites " v ", which names nothing") {:name v}))
+           (for [{:keys [e v]} (d/datoms db :aevt :seon.section/dead-links)
+                 :when (nil? (pdb/eid db :seon.section/address v))]
+             (row e :target v #(str % " links to " v ", which is no section") {:target v}))))))
 
 (def laws
   "The laws the compiler's facts answer exactly, as data: the fact that marks a site, the page

@@ -77,8 +77,7 @@
 (defn load-docs!
   "Load the wiki (the pages under dir of the checkout, docs by default) into main as section
   entities (seon.docs/load-tx): a changed section rewritten, a removed one retracted, an
-  unchanged wiki writing nothing. Answers the writer's answer with the counts, or the
-  :seon.docs/refused error naming a link to no section."
+  unchanged wiki writing nothing. Answers the writer's answer with the counts."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-docs! sys "docs"))
   ([sys dir]

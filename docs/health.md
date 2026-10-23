@@ -10,7 +10,9 @@ A **derived** problem is something the program's facts make true now. It is a re
 
 ## A dead citation
 
-A wiki section stores the names its own text cites as references (`:seon.section/names`, written by `seon.docs/load-tx` through `seon.ref/kept`). A prose word is kept only when it names something at load; a backticked name is always kept. When one of those names no longer names anything (`seon.ref/names-something?`, the one rule, reading main's var names as a set first), it is a `:dead-citation` (`seon.problems/dead-citations`). The commonest case is a var deleted after the page cited it.
+A wiki section stores the names its own text cites as references (`:seon.section/names`, written by `seon.docs/load-tx` through `seon.ref/kept`). A prose word is kept only when it names something at load; a backticked name is always kept. When one of those names no longer names anything (`seon.ref/names-on-db?`, the one rule, reading main's var names as a set first), it is a `:dead-citation` (`seon.problems/dead-citations`). The commonest case is a var deleted after the page cited it.
+
+A link (or a cited `path#anchor`) that reaches no section is kept on its section as `:seon.section/dead-links` instead of refusing the load, so one stale link never takes the wiki down. `seon.problems/dead-citations` reads those targets too: one still no stored section is a `:dead-citation` row with the target under `:target` ("<section> links to <target>, which is no section"), closed when the section exists.
 
 Not covered yet:
 - A task's plan. It cites the vars it will create (its write set), so "names nothing" there is the plan, not a dead citation; `seon.task/citation-problems` answers those at the write.

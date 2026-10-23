@@ -136,10 +136,11 @@
         (is (every? attempts-2 attempts-1) "and the first boot's attempt (it reaps it and starts the next)"))
       (finally (sh/sh "rm" "-rf" path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
 
-(deftest a-refused-wiki-is-a-recorded-problem-and-the-boot-goes-on
+(deftest a-dead-link-in-the-wiki-is-a-problem-and-the-boot-goes-on
   ;; root's boot loads the wiki (seon.root/wiki-tx) in its boot fact's commit; one link to no
-  ;; section in any page used to end the boot (bin/root start and next with it). Now the
-  ;; refusal is a recorded :platform error my.root/problems shows, and the root boots. A
+  ;; section in any page used to end the boot (bin/root start and next with it), then refused
+  ;; the whole wiki. Now the rest loads, the link is a dead citation my.root/problems shows,
+  ;; and the root boots. A
   ;; checkout of this test's own: this one's files, its docs/ with one broken page more
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         tmp (str checkout "/target/runs/root-test-wiki-" (random-uuid))
@@ -154,7 +155,7 @@
         printed (:printed (first (:items (try (edn/read-string {:default tagged-literal} (first (str/split-lines out))) (catch Exception _ nil)))))]
     (try
       (is (str/includes? out "ROOT LISTENING") (str "the root boots: " out))
-      (is (= "true" printed) "and the refused wiki is a recorded problem")
+      (is (= "true" printed) "and the dead link is an open problem")
       (finally (sh/sh "rm" "-rf" tmp path (str path "-in") (str path ".log") (str path "-agents"))))))
 
 (deftest every-end-of-a-root-is-a-fact
