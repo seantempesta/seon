@@ -37,16 +37,24 @@
   (contract/error :seon.model/transport 'seon.model/complete (str "transport: " message) data))
 
 (defn- scripted
-  {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request] :seon.model/completion]}
+  "The reply of the function :script names (data: :seon.config.ai/script), loaded by name: a
+  test fixture (seon.fixtures, in test/) that a scripted root reads from the checkout's source
+  (seon.main/checkout-roots!). One this process cannot find is :seon.model/no-script."
+  {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request] [:or :seon.model/completion :seon.model/no-script]]}
   [{:keys [script]} request]
   (let [t0 (profile/now-ns)
-        ;; a script answers its call's code, or the code and the thinking the eval tool takes
-        out ((resolve script) request)
-        {text :code thinking :thinking} (if (string? out) {:code out} out)]
-    {:text "" :tool-calls [(cond-> {:id (str "call-" (:turn request)) :code (:text (reader/forgive text))}
-                             thinking (assoc :thinking thinking))]
-     :prompt-tokens (reduce + (map (comp select/estimate :content) (:messages request)))
-     :completion-tokens (select/estimate text) :estimated true :ms (profile/ms-since t0)}))
+        f (when (or (find-ns (symbol (namespace script))) (jolt.host/ns-source (namespace script)))
+            (requiring-resolve script))]
+    (if-not f
+      (contract/error :seon.model/no-script 'seon.model/complete
+                      (str "the scripted provider's " script " is not on this process's source roots") {:script script})
+      ;; a script answers its call's code, or the code and the thinking the eval tool takes
+      (let [out (f request)
+            {text :code thinking :thinking} (if (string? out) {:code out} out)]
+        {:text "" :tool-calls [(cond-> {:id (str "call-" (:turn request)) :code (:text (reader/forgive text))}
+                                 thinking (assoc :thinking thinking))]
+         :prompt-tokens (reduce + (map (comp select/estimate :content) (:messages request)))
+         :completion-tokens (select/estimate text) :estimated true :ms (profile/ms-since t0)}))))
 
 (defn- body-text
   "A read response's whole body as text: its buffered bytes, or every piece its pull yields

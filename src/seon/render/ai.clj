@@ -80,10 +80,12 @@
   [e opts]
   (let [h (:handle opts)
         [ps more] (print/bounded (:seon.error/problems e) :seon.config.render.list/top (form (read-of opts :seon.error/problems)))
-        own (apply dissoc e ui/error-shown)]
+        own (apply dissoc e (ui/error-hidden e))]
     (out "\n"
       (concat [(prose-part (:seon.error/message e) (part-budget) (read-of opts :seon.error/message) false)]
               (when (:seon.error/fix e) [[(str "fix: " (:seon.error/fix e)) false]])
+              (when-let [{:keys [line column]} (:seon.error/at e)]
+                [[(str "at line " line (some->> column (str ":")) (some->> (:seon.error/in e) (str " of "))) false]])
               (for [[i {:keys [in expected value]}] (map-indexed vector ps)]
                 (cat-parts [["at " false] (value-part in (part-budget) nil) [" expected " false]
                             (value-part expected (part-budget) (read-of opts [:seon.error/problems i :expected])) [(str ", got " value) false]]))
