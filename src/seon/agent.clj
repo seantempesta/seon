@@ -122,7 +122,7 @@
 
 
 (defn mem-mb
-  "Real MB of this process, read now (lib/real-mb walks the VM regions, ~1.5 ms): on the
+  "This process's memory as macOS charges it, read now (lib/real-mb: one task_info call): on the
   events that report the agent's state (its hello, each commit, a :tests reply, :stats),
   never per evaluation and never kept for a time."
   {:malli/schema [:=> [:cat] :seon.lib/mb]}

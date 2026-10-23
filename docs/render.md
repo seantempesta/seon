@@ -34,7 +34,7 @@ The frame is the one part with no value behind it: the document (`seon.web/page-
 Every dashboard tile is `seon.render.ui/metric-tile` over a map (`:kicker`, `:sub` or `:pill`, `:big` and `:unit`, `:series` and `:tone`, a `:body`, `:rows` of `[dt dd title class]`, `:explain`), so a new tile is a map. The writer, fork server and main are `seon.render.ui/load-tiles`, which root's context (`seon.render.ai`) prints as one line each. Each fact the page and the context both show has one producer they share:
 - **A lifecycle is declared once, on its enum's schema,** and read through one reader, `seon.contract/properties` (an enum's members, in order: `seon.contract/enum-values`):
   - `:seon.agent/status` carries its live, stopped and gone sets (`seon.root/gone-statuses`, read by root, the web, the server and the check harness; `seon.render.ui/live`; `seon.render.ui/status-order`);
-  - `:seon.run/status` its finished, judged and failed sets (`seon.reconcile/finished`; a death in `seon.problems/report`);
+  - `:seon.run/status` its finished, judged and failed sets, read once, by `seon.task` (`seon.task/finished`, `judged`, `failed`; with `seon.task/done?`, a task's done on a db, and `seon.task/running`, the running runs by one index seek), which the reconciler, problems, the render UI and the server require (`seon.main-test/a-runs-lifecycle-is-read-once`);
   - `:seon.task/state` a task's observed states with each pill's title (`seon.render.ui/state-title`). A task's state is derived once, from the reconciler's index (`seon.reconcile/task-state`), and every task row reads it (`seon.render.proc/task-rows`).
 
   A new status is one enum entry. Not this: a status set typed out at each site that asks.

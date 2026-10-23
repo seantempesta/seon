@@ -10,7 +10,7 @@ Native profiling of our own processes needs no root: `sample PID SECS -file F` a
 
 ## The target: a 16 GB MacBook M1
 
-Seon is built to run well on a 16 GB MacBook M1: it stays within `:seon.config.machine/memory-mb` (4096: root, the fork server and the default number of agents), and `bin/check scale` fails past it. A cost that grows with something other than the work (a probe walking a 64 GiB address-space reservation took 100 agents from 0.6 s to 18 s) is found by a cost proof sized by what it walks ([storage](storage.md#the-map-is-address-space)). A process's memory is the pages it owns, `seon.lib/real-mb`, never macOS `footprint`, which counts pages a forked child only reads ([cost](cost.md#how-we-measure)). Like every bound, the key lives in `resources/seon/config/default.edn` ([config](config.md)).
+Seon is built to run well on a 16 GB MacBook M1: it stays within `:seon.config.machine/memory-mb` (4096: root, the fork server and the default number of agents), and `bin/check scale` fails past it. A cost that grows with something other than the work (a probe walking a 64 GiB address-space reservation took 100 agents from 0.6 s to 18 s) is found by a cost proof sized by what it walks ([storage](storage.md#the-map-is-address-space)). A process's memory is what macOS charges it, its `phys_footprint` (`seon.lib/real-mb`): a forked child is charged what it writes, and the parent keeps its own charge ([cost](cost.md#how-we-measure)). Like every bound, the key lives in `resources/seon/config/default.edn` ([config](config.md)).
 
 ## The clock
 
