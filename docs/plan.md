@@ -20,14 +20,15 @@ Updated 2026-10-23 evening by root. Sessions are grouped so related tasks stay i
 | **Agent view** | the context frame and the renders (data, not prose; the printer stays general), on ``jolt/a-page-is-an-entity-and-its-neighbors``, which merges in the freeze | the default HTML value render |
 | ↳ evaluations, page | the context as data (the frame, then the walk), the page entity | through agent view |
 | ↳ embed | similar search by embedding (approved, model download included) | reports to root and merge |
-| **Walk** | health holds a branch to the problems it caused (one `bin/prove` step; no silent `bin/check`), and the divergence bytes regression from health's merge | |
+| **Walk** | shrink `src` (THE PLAN step 4), one small branch per deletion; its health branch is with merge | reconcile's duplication |
+| **Wiki** (was eval-cost) | main's 35 dead citations and 167 stale sections | |
 | **Agent loop** | ``jolt/resumed-branch`` (a resumed branch keeps what main gained; `test/` in every root's dirs) | the first-move judge: ten real tasks, one call each, scored from compiler facts |
 | **Store** (covering shrink) | the reach-update regression from Jolt 0d39edc3 (n^1.96) | a check's roots take explicit config, not the checkout's `config/local.edn` |
 | **Reuse** | option B: `bin/test` branches a kept program db per git tree | the memo is paused until the data context is measured (two attacks: `notes/reuse/`) |
 
 Ended: shrink (its folder was removed at merge), eval-cost (merged).
 
-**For the owner when he's back:** does `src`'s ~10k aim count code lines (as cloc does: no docstrings, comments, blanks or contracts; ~10.45k now) or every line (18.5k)? Walk measured it on main 450c3fb8; the remaining shrink rows are about −300 lines, which is right under either reading. Root's pick: code lines, with docstrings kept as each var's home (AGENTS §7).
+**For the owner when he's back:** what does `src`'s ~10k aim count? Walk measured main: 18,523 lines in all; 12,355 code lines as cloc counts (contracts counted, docstrings, comments and blanks not); ~11.2k without contract lines. The open shrink rows are about −300 and page's deletions the next source. Root's pick: code lines as cloc counts, docstrings kept as each var's home (AGENTS §7).
 
 **The freeze**, on root's word: ``jolt/rename-run``, then ``jolt/a-page-is-an-entity-and-its-neighbors``, then the store is erased; then ``jolt/self-contained`` and step R (`~/src/seon-next`). Other sessions keep working, and afterwards re-run the rename's scripts on their branches (`notes/rename-run/` on ``jolt/rename-run``).
 

@@ -82,7 +82,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **held for root** | a task whose run was refused (done rule, dead agent, refused merge) or marked failed: its failure and evidence on it, execution `:held`, state `:failed`, until root releases, edits or cancels it; never retried on its own | `seon.reconcile/hold-tx` |
 | **observed state** | what happened to a task (running, blocked, open, held, failed, done, merged, cancelled; `:seon.task/state`), derived once from the index | `seon.reconcile/task-state` |
 | **done rule** | why a run's measured facts do not make its task done; empty means done | `seon.reconcile/done-explain` |
-| **reconciler** | the pure function of main's db to actions, and the proc that carries them out | `seon.reconcile/reconcile`, `reconciler-proc` |
+| **reconciler** | the pure function of main's db to actions, and the proc that carries them out | `seon.reconcile/index` then `seon.reconcile/actions`, and `reconciler-proc` |
 | **flight** | one action carried out as a chain of requests and answers in the reconciler proc | `seon.reconcile/advance` |
 | **turn loop** | inside an agent: observe, then end (green, or stopped with the outcome and reason) or act (context to the model, forms through the REPL path); a merge task merges main first and again until main brings nothing new | `seon.turn/work!` |
 | **three-way** | git's merge of program maps (base, ours, theirs) keyed `[:var sym]`, `[:form id]`, `[:schema k]` (a schema entry), read only where the dbs differ ([storage](storage.md#merges-read-what-changed)) | `seon.merge/three-way`, `seon.merge/delta-three-way` |

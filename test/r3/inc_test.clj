@@ -34,7 +34,7 @@
           (when (and src (seq work)) [[:db/add [:seon.task/id src] :seon.task/needs [:seon.task/id (pick work)]]]))
       8 [{:db/id "x" :ns/name (symbol (str "unrelated" k))}])))
 
-(defn- acyclic? [db] (some? (try (r/reconcile db) (catch Throwable _ nil))))
+(defn- acyclic? [db] (some? (try (r/actions (r/index db)) (catch Throwable _ nil))))
 
 (deftest incremental-equals-full
   ;; one seed in the automatic run, five in the full one (:seon.config.proofs/seeds)

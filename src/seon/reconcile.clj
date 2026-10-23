@@ -468,16 +468,6 @@
 
 ;; ---- queries, over one index (list it once: (index db)) -----------------------------
 
-(defn reconcile
-  "The actions that move db's observed state toward its desired state (index, then actions)."
-  {:malli/schema [:=> [:cat :seon.host/db] :seon.reconcile/actions]}
-  [db] (actions (index db)))
-
-(defn running
-  "The runs running now (in this boot), by id."
-  {:malli/schema [:=> [:cat :seon.reconcile/index] [:set :seon.run/id]]}
-  [idx] (:live idx))
-
 (defn done?
   "Is task id done (merged into its target, or accepted on its branch)?"
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
@@ -568,13 +558,14 @@
 
 (defn- judge-tx
   "Run aid's end on main from MEASURED facts: the end its agent wrote on the branch,
-  root's own proof results, the branch's merge entries, and diff, the writer's diff of the
-  branch (:branch-diff: the keys it changed, its unmerged keys, its contract gaps); the
+  root's own proof results, the branch's merge entries, and diff, the writer's one read of the
+  branch (:branch-diff: its head db, its merge base and main's t there, the keys it changed,
+  its unmerged keys, its contract gaps); the
   task content the branch changed carried to main, or its conflicts with main's recorded on
   the run for root (seon.task/carry-tx); and a failure it marked (my.task/fail!)
   carried with the task held."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db]] [:map [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:vector :any]]}
-  [st {:keys [act run-problems worked-error deferred]} results {:keys [db base base-t]} diff]
+  {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db] [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:vector :any]]}
+  [st {:keys [act run-problems worked-error deferred]} results {:keys [db base base-t] :as diff}]
   (let [main (:db st)
         aid (:run act) id (:task act)
         end (pull-end db aid)
@@ -684,18 +675,15 @@
                 (one (request (-> st (assoc-in [:flights aid :results] (proofs/results r))
                                   (assoc-in [:flights aid :deferred] (:deferred r))
                                   (assoc-in [:flights aid :run-problems] {:failures (proofs/failures r) :costs (proofs/costs r)}))
-                              aid :read {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}})))
-      ;; what the branch changed since its merge base (three-way's :ours), measured for the octopus merge
-      :read (if (contract/error? r)
-              (refused st r)
-              (one (request (assoc-in st [:flights aid :branch-db] r) aid :diffed
-                            {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}})))
+                              ;; the branch read once: its head, its merge base, and what it changed
+                              ;; since (three-way's :ours, measured for the octopus merge)
+                              aid :diffed {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}})))
       ;; every run is a new agent: none is reused
       ;; root stops it because its run ended: its view says :ended, not :killed
       :diffed (if (contract/error? r)
                 (refused st r)
                 (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
-                      [st o2] (write st aid :done (judge-tx st f (:results f) (:branch-db f) r))]
+                      [st o2] (write st aid :done (judge-tx st f (:results f) r))]
                   [st [o1 o2]]))
       ;; each member's answer, as one write: merged at the octopus merge's t, behind (its merge task
       ;; runs again, a new agent), or refused: a failed run like any other (held for root)
