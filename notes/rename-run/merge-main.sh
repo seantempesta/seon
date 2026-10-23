@@ -10,7 +10,7 @@ cd "$(git rev-parse --show-toplevel)"
 [ -z "$(git status --porcelain --untracked-files=no -- . ':!reference-code')" ] || { echo "merge-main: commit your work first (explicit paths)"; exit 2; }
 base=$(git merge-base HEAD main)
 T=$(mktemp -d "${TMPDIR:-/tmp}/rename-base.XXXXXX")
-trap 'git worktree remove --force "$T" 2>/dev/null; rm -rf "$T"' EXIT
+trap 'git worktree remove --force "$T/wt" 2>/dev/null; rm -rf "$T"; git worktree prune' EXIT
 git worktree add -q --detach "$T/wt" "$base"
 ( cd "$T/wt" && sh "$here/all.sh" >/dev/null && git add -A -- . ':!reference-code' && git commit -q --allow-empty -m "rename pass over the merge base" )
 rbase=$(git -C "$T/wt" rev-parse HEAD)

@@ -3,10 +3,11 @@
 # -> target/hello (a binary that requires Datahike and opens an in-memory db), then
 # target/lib/libprobe.dylib (native/probe.c, native/ids.c), target/watch (native/watch.c, root's file events), target/lib/liblmdb.dylib (LMDB, robust locks),
 # target/lib/liblz4.dylib and target/lib/libzstd.dylib (the store's compressors), target/lib/libseon-embed.dylib
-# (llama.cpp and native/embed.c, with the embedding model fetched once by its sha256) and target/seon (the platform, -main seon.main; a check mode loads the driver, test/seon/check.clj, at run time).
+# (llama.cpp and native/embed.c, with the embedding model fetched once by its sha256), target/css/app.css (the page's
+# stylesheet, Tailwind over resources/public/css/input.css) and target/seon (the platform, -main seon.main; a check mode loads the driver, test/seon/check.clj, at run time).
 #
-#   bin/build            every step; chez, jolt, native, lmdb, lz4 and zstd are skipped when their stamp matches their pin
-#   bin/build chez|jolt|hello|native|lmdb|lz4|zstd|embed|seon   one step, and each step it needs whose stamp is stale
+#   bin/build            every step; chez, jolt, native, lmdb, lz4, zstd, embed and css are skipped when their stamp matches their pin
+#   bin/build chez|jolt|hello|native|lmdb|lz4|zstd|embed|css|seon   one step, and each step it needs whose stamp is stale
 #   BUILD_FORCE=1 bin/build     every stamp removed first: each step rebuilds, once
 #
 # Everything is written under target/; nothing is installed outside it. Dependency
@@ -49,7 +50,7 @@ copy_tree() {
 # fresh NAME PIN: true when target/NAME.stamp records PIN. A forced build removes every stamp
 # once, here, so each step rebuilds once however many steps call it.
 fresh() { [ -f "$T/$1.stamp" ] && [ "$(cat "$T/$1.stamp")" = "$2" ]; }
-[ -z "${BUILD_FORCE:-}" ] || rm -f "$T"/chez.stamp "$T"/jolt.stamp "$T"/native.stamp "$T"/lmdb.stamp "$T"/lz4.stamp "$T"/zstd.stamp "$T"/embed.stamp
+[ -z "${BUILD_FORCE:-}" ] || rm -f "$T"/chez.stamp "$T"/jolt.stamp "$T"/native.stamp "$T"/lmdb.stamp "$T"/lz4.stamp "$T"/zstd.stamp "$T"/embed.stamp "$T"/css.stamp
 
 # pin DIR: what a build reads from the checkout at DIR, by content: its HEAD when its files are
 # HEAD's, else HEAD+ the tree of its files as they are (untracked ones too, in an index of its
@@ -174,6 +175,31 @@ build_zstd() {
   echo "$pin" > "$T/zstd.stamp"
 }
 
+# The page's stylesheet (docs/render.md#tailwind): Tailwind v4's standalone binary, pinned by version
+# and checksum and fetched once into target/tailwind/, over resources/public/css/input.css (every
+# directive, token, source glob and the agents' safelist) into target/css/app.css. Its pin is the
+# digest of its inputs, input.css and the src/ files it scans: unchanged, nothing is regenerated.
+TAILWIND_VERSION=v4.3.3
+TAILWIND_SHA256=cdf646702987a743464dff4d9c60fd4480d1c1e73dd819a9a67f1078815dce9d  # tailwindcss-macos-arm64
+TAILWIND=$T/tailwind/tailwindcss-$TAILWIND_VERSION
+build_css() {
+  pin="$TAILWIND_VERSION $( (cat "$ROOT/resources/public/css/input.css"; find "$ROOT/src" -name '*.clj' | LC_ALL=C sort | xargs cat) | shasum -a 256 | cut -c1-64)"
+  if fresh css "$pin" && [ -f "$T/css/app.css" ]; then say "css up to date ($pin)"; return; fi
+  if [ ! -x "$TAILWIND" ]; then
+    say "css: fetching tailwindcss $TAILWIND_VERSION (macos-arm64) into target/tailwind/"
+    mkdir -p "$T/tailwind"
+    curl -sSfL -o "$TAILWIND.part" "https://github.com/tailwindlabs/tailwindcss/releases/download/$TAILWIND_VERSION/tailwindcss-macos-arm64" ||
+      die "css: fetching tailwindcss $TAILWIND_VERSION failed"
+    [ "$(shasum -a 256 "$TAILWIND.part" | cut -c1-64)" = "$TAILWIND_SHA256" ] || { rm -f "$TAILWIND.part"; die "css: tailwindcss $TAILWIND_VERSION does not match its pinned checksum"; }
+    chmod +x "$TAILWIND.part" && mv "$TAILWIND.part" "$TAILWIND"
+  fi
+  mkdir -p "$T/css"
+  say "css: resources/public/css/input.css -> target/css/app.css"
+  ( cd "$ROOT" && "$TAILWIND" -i resources/public/css/input.css -o "$T/css/app.css" --minify ) > "$T/css-build.log" 2>&1 ||
+    die "css build failed; see target/css-build.log"
+  echo "$pin" > "$T/css.stamp"
+}
+
 # The embedding model in process (docs/vector.md#the-model): llama.cpp from reference-code/llama.cpp
 # (the official repository at tag v0.7.0, the first release with EmbeddingGemma-2), built static with
 # Metal and no OpenMP (nothing linked from outside target/), and native/embed.c over it, into
@@ -222,6 +248,7 @@ build_seon() {
   build_lz4
   build_zstd
   build_embed
+  build_css
   # the shared compile caches (bin/env): a schema file seon.contract reads, or one added to the
   # directory it lists, moves the key of every namespace compiled against it
   . "$ROOT/bin/env"
@@ -250,7 +277,8 @@ case $STEP in
   lz4) build_lz4 ;;
   zstd) build_zstd ;;
   embed) build_embed ;;
+  css) build_css ;;
   seon) build_seon ;;
-  all) build_chez; build_jolt; build_native; build_lmdb; build_lz4; build_zstd; build_embed; build_hello; build_seon ;;
-  *) die "unknown step $STEP (chez | jolt | hello | native | lmdb | lz4 | zstd | embed | seon | all)" ;;
+  all) build_chez; build_jolt; build_native; build_lmdb; build_lz4; build_zstd; build_embed; build_css; build_hello; build_seon ;;
+  *) die "unknown step $STEP (chez | jolt | hello | native | lmdb | lz4 | zstd | embed | css | seon | all)" ;;
 esac

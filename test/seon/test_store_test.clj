@@ -20,3 +20,21 @@
       (d/release (:conn (pdb/open! :lmdb path 0 :db)))
       (is (= path (ts/process-store co)) "made, it is the store")
       (finally (sh/sh "rm" "-rf" co)))))
+
+(deftest a-test-root-is-its-own
+  ;; task seon.test-store/a-test-root-is-its-own: root_test's root-answers gave every root on the
+  ;; one test store the runs directory <store>-runs; bin/root start in a runs directory whose root
+  ;; still runs only reports that root, so under parallel load one test asked another test's
+  ;; root (main-follows-its-source-tree-across-restarts read the whole Seon program, :removed-forms 71).
+  ;; A second root asked for in a runs directory a live root holds is refused, never answered
+  (let [store (ts/process-store)
+        runs (str (.getParent (java.io.File. ^String store)) "/own-root-" (random-uuid) "-runs")
+        main (str "own-a-" (random-uuid))
+        a (ts/start-root! {:store store :main main :runs runs})]
+    (try
+      (is (some? (:port a)) "the first root listens")
+      (let [e (is (thrown? ExceptionInfo (ts/start-root! {:store store :main (str "own-b-" (random-uuid)) :runs runs})))]
+        (is (= :seon.test-store/runs-in-use (:seon.error/type (ex-data e)))))
+      (finally (ts/stop-root! a) (sh/sh "rm" "-rf" runs)
+               ;; its main and its branches leave the one store (as root_test's drop-main!)
+               (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")))))

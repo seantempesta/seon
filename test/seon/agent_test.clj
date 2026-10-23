@@ -296,6 +296,26 @@
                                    " :else (recur))))))")}])]
     (is (= ":ready" (:printed r)) (pr-str r))))
 
+(deftest a-resumed-branchs-agent-is-this-boots
+  ;; page's browser round, 2026-10-23: an agent on a kept branch recorded its evaluations under an
+  ;; earlier boot's agent (its key read root's boot from the branch, whose root fact is as old as
+  ;; the branch). Its key is root's boot as main holds it
+  (let [[r k] (in-agent [{:op :eval :agent "root"
+                          :code (str "(let [ev (seon.root/events sys) m (seon.db/conn-main (:conn sys)) b (seon.db/on-main m :kept)]"
+                                     " (datahike.api/branch! (:conn sys) m b)"
+                                     " (let [bc (datahike.api/connect (assoc (:cfg sys) :branch b))]"
+                                     "   (datahike.api/transact bc [{:seon.root/id :root :seon.root/boot \"an-earlier-boot\"}]) (datahike.api/release bc))"
+                                     " (let [ag (seon.root/spawn! sys {:branch :kept})]"
+                                     " (loop [] (let [e (clojure.core.async/<!! ev)]"
+                                     " (cond (not= ag (:agent e)) (recur)"
+                                     " (#{:ready :dead :ended :killed} (:type e)) [(:type e) (:boot sys)]"
+                                     " :else (recur))))))")}
+                         ;; in-agent's own agent is a1; the one spawned onto the kept branch is a2
+                         {:op :eval :agent "a2" :code "(:key @seon.agent/state)"}])
+        [status boot] (edn/read-string (:printed r))]
+    (is (= :ready status) (pr-str r))
+    (is (str/starts-with? (edn/read-string (:printed k)) (str boot "/")) (str "its key names this boot: " (:printed k)))))
+
 (deftest a-resumed-branch-holds-what-main-gained
   ;; step E run #11 (2026-10-23): a kept branch made before main imported test/ was resumed,
   ;; and its agent held seon.context-test with no vars (seon.agent/init! unmapped every
@@ -499,7 +519,7 @@
                                              "   :leads (mapv #(:lead (datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.cluster.eval/id ?i] [?e :seon.cluster.eval/record ?r]] db %)) (:items (first (:seon.turn/calls t))))})")
                                         {:op :eval :agent "root"
                                          :code (str "(datahike.api/q '[:find ?id ?f ?to ?b :where [?m :seon.message/id ?id] [?m :seon.message/from ?f]"
-                                                    " [?m :seon.message/to ?to] [?m :seon.message/body ?b]] @(:conn sys))")}]
+                                                    " [?m :seon.message/to ?r] [?r :seon.run/id ?to] [?m :seon.message/body ?b]] @(:conn sys))")}]
                                        {:sets [":seon.config.ai/script=seon.fixtures/thinking-call"]})
         end (edn/read-string {:default tagged-literal} (:printed end))
         {:keys [calls ids committed leads]} (edn/read-string {:default tagged-literal} (:printed turn))

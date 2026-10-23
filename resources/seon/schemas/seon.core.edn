@@ -8,7 +8,7 @@
  :seon.ffi/address [:any {:description "A foreign address (jolt.ffi's pointer or long, or ffi/null)."}]
  :seon.lib/ns-time :int
  :seon.lib/mb number?
- :seon.lib/probe [:map [:regions [:map-of :keyword :map]]]
+ :seon.lib/probe [:map [:phys-fp number?] [:internal number?] [:compressed number?] [:resident number?]]
  :seon.lib/sysmem [:map [:free-mb number?] [:internal-mb number?]]
  :seon.lib/exit-status [:or [:map [:exit :int]] [:map [:signal :int]]]
  :seon.lib/pipe [:tuple :seon.lib/fd :seon.lib/fd]
@@ -64,7 +64,7 @@
                             :seon.status/gone #{:ended :killed :dead}}
                      :spawning :busy :idle :ended :killed :dead]
  :seon.agent/tx-result [:map [:t :int] [:datoms nat-int?]]
- :seon.agent/item [:map {:seon.render/html seon.render.ui/history-row :description "One form's reply at root: the printed value (the live one stays in the agent under :handle) or the error."}
+ :seon.agent/item [:map {:seon.render/html seon.render.ui/evaluation :description "One form's reply at root: the printed value (the live one stays in the agent under :handle) or the error."}
                    [:tag [:enum :ret :err]] [:printed {:optional true} [:maybe :string]]
                    ;; the ; comments its writer put before the form (seon.reader/lead): the thought beside it
                    [:lead {:optional true} :string]
@@ -74,7 +74,7 @@
  :seon.test/result [:map [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]
  ;; root's API
  :seon.root/sys [:map [:graph :any] [:ext :seon.host/chan] [:conn :seon.host/conn]]
- :seon.root/api-state [:map [:agents :map] [:pending :map] [:rid :int]]
+ :seon.root/api-state [:map [:agents :map] [:pending :map] [:rid :int] [:boot :string]]
  :seon.root/request [:map [:op :keyword]]
  ;; root's system declaration (resources/seon/system.edn, seon.system): procs by id, effect
  ;; kinds, the conns between them

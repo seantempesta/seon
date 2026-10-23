@@ -100,6 +100,35 @@
         (assoc st ::errors f ::errors-dirty false)))
     st))
 
+(def ^:private observed-keys
+  "The members of an agent's view entry recorded on its entity (seon.task/agent-tx)."
+  [:status :pid :mem-mb :running :task :branch :forked-ms :ended-ms])
+
+(defn- observed
+  "What root records of agent entry a: its observed-keys, less :task for an agent a run started,
+  whose :task is that run's task id (the run names its task; recording it again pulled the task
+  into every walk of the agent twice)."
+  {:malli/schema [:=> [:cat [:maybe :map]] :map]}
+  [a] (cond-> (select-keys a observed-keys) (:run a) (dissoc :task)))
+
+(defn- record-agents
+  "What root observed of its agents in this step, written to main as one transaction: an
+  agent's facts (seon.task/agent-tx) when a member it records changed since before (its view
+  entries at the step's start). Nothing changed, nothing written."
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile [:maybe :map]] :seon.root/api-state]}
+  [st o before]
+  (let [now (get-in st [:view :agents])
+        changed (for [[id a] now
+                      :let [b (get before id)]
+                      :when (and (not (identical? a b)) (not= (observed a) (observed b)))]
+                  id)]
+    (if (and (seq changed) (not (:writer-closed st)))
+      (do
+        (step/out! o :to-writer {:op :tx :branch :db :tx-data (into [] (mapcat #(task/agent-tx (:boot st) % (observed (get now %)))) changed)
+                                 :dest {:agent-facts (vec changed)}})
+        st)
+      st)))
+
 (defn- proc-sym
   "The step-fn of root proc pid, as its declaration names it (an agent's proc for an
   agent id)."
@@ -202,22 +231,16 @@
   (when (get-in st [:agents id]) (step/out! o [id :in] m))
   st)
 
-(defn- message-to
-  "Whom a message to agent id is to, as :seon.message/to names it: the run it works (an
-  agent id starts again each boot, a run's names one worker for good), else the agent."
-  {:malli/schema [:=> [:cat :seon.root/api-state :seon.agent/id] :string]}
-  [st id] (or (get-in st [:view :agents id :run]) (name id)))
-
 (defn- deliver-message
   "Send message m ({:from :to [id ...] :body :id}) to each agent it names: the one delivery, for
   an agent's send and the owner's message alike. A message that is a fact (:id, :seon.message/id)
-  carries its id and whom it is to (the run each agent works), so the agent that takes it
-  writes the same fact on its branch."
+  carries its id and the run each agent works (none for an agent no run started), so the agent
+  that takes it writes the same fact on its branch (seon.task/message-tx)."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :map] :seon.root/api-state]}
   [st o m]
   (reduce (fn [st id]
             (to-agent st o id {:op :write :msg (cond-> {:op :message :from (:from m) :body (:body m) :ns (profile/now-ns)}
-                                               (:id m) (assoc :id (:id m) :to (message-to st id)))}))
+                                               (:id m) (assoc :id (:id m) :to (get-in st [:view :agents id :run])))}))
           st (:to m)))
 
 (defn- spawn-failed
@@ -346,15 +369,15 @@
           (to-agent st o id {:op :req :rid rid :kind op :msg msg :merge-branch (:merge-branch m) :data-attrs (:data-attrs m)})))
       ;; a message to a live agent (the owner's, from the page or the server): root's one
       ;; delivery, as an agent's send is; it lands in the agent's inbox, which its next turn reads
-      ;; the owner's message is a fact on main (root's branch: :seon.message/*), delivered and
-      ;; answered once the writer has it; the agent writes the same fact on its own branch
-      ;; when its turn takes it (seon.agent/messages)
+      ;; the owner's message is a fact on main (root's branch: :seon.message/*, seon.task/message-tx),
+      ;; delivered once the writer has it, and answered then; the agent writes the same fact on
+      ;; its own branch when its turn takes it (seon.turn/basis!)
       :message (if (nil? (get-in st [:agents id]))
                  (reply! st o p (gone id (str "no live agent " id)))
                  (let [mid (str "m-" (random-uuid))
-                       fact {:seon.message/id mid :seon.message/from (name (:from m)) :seon.message/to (message-to st id) :seon.message/body (:body m)}
                        [st rid] (pend st p :tx nil)]
-                   (step/out! o :to-writer {:op :tx :branch :db :tx-data [fact] :dest {:rid rid :message {:from (:from m) :to [id] :body (:body m) :id mid}}})
+                   (step/out! o :to-writer {:op :tx :branch :db :tx-data (task/message-tx mid (name (:from m)) (get-in st [:view :agents id :run]) (:body m))
+                                            :dest {:rid rid :message {:from (:from m) :to [id] :body (:body m) :id mid}}})
                    (update st :writes (fnil conj #{}) rid)))
       ;; requests for the writer: answered by rid; a collection only while no agent is live,
       ;; the store's only writer then being root's writer (seon.db/collect!)
@@ -412,6 +435,8 @@
         ;; a message is delivered once its fact is written, never before
         (:rid dest) (cond-> (deliver-rid st o (:rid dest) r)
                       (and (:message dest) (not (contract/error? r))) (deliver-message o (:message dest)))
+        (:agent-facts dest) (cond-> st
+                              (contract/error? r) (problem (err/occurrence r :agent {:agent (:agent-facts dest)} (System/currentTimeMillis))))
         (:agent dest) (to-agent st o (:agent dest) {:op :write :msg (cond (:op r) r
                                                                           (= :branched (:op dest)) (cond-> {:op :branched :k (:k dest) :cfg (:cfg r)} (contract/error? r) (assoc :error r))
                                                                           :else (assoc r :op (:op dest) :k (:k dest)))})
@@ -571,6 +596,7 @@
    st)
   ([st in m]
    (let [o (volatile! {})
+         before (get-in st [:view :agents])
          ;; a step that threw left what it took (Flow names only the first): lost, each
          ;; answered when the api's defect arrives at :error
          st (if-let [lost (seq @(::taken st))] (update st ::lost (fnil into []) lost) st)
@@ -584,6 +610,7 @@
                   st)
                 st))
          st (flush-problems st o)
+         st (record-agents st o before)
          ;; while an agent has an eval in flight, the stall check runs every half stall bound
          st (if (and (seq (::busy st)) (not (::stall-due st)) (pos? (:stall-ms st)) (:back st))
               (let [back (:back st)]
@@ -839,7 +866,7 @@
     ;; whose boot fact was refused cannot start anything, so its error ends the boot
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
-          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running) (into (cfg/facts config cfg/sources))
+          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running) (into (task/earlier-agents-tx db)) (into (cfg/facts config cfg/sources))
                                                                                   (into (wiki-tx db (cfg/checkout) (wiki-baseline sys (cfg/checkout) "docs"))))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev}))}})]
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))

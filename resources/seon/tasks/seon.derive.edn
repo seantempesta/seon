@@ -26,7 +26,7 @@ Net size, counted over src, test and bin together. It must replace the per-case 
 
 | what | where | lines |
 |---|---|---|
-| the ../test-results file store (result-path, greens, result-file, store-greens!) | proofs.clj:121-131, 142-158 | 28 |
+| the test-results file store (result-path, greens, result-file, store-greens!) | proofs.clj:121-131, 142-158 | 28 |
 | its callers | | ~12 |
 | stored-greens | proofs.clj:132-141 | 10 |
 | result-tx's digest part | prove.clj:32-56 | ~8 |
@@ -48,7 +48,7 @@ The cold costs, measured by pure-tests on 2026-10-23 (main 1343c920 with Datahik
 
 Inside an agent's turn, test-plan computed reach-digests twice a turn (3.1 s and 7.4 GB each), before brief3 and reach-update; this was not re-measured on main.
 
-The reuse code in test and bin today is the result store by digest (proofs/greens, store-greens!, ../test-results) plus target/prove/ms: about 25 lines, of test_runner's 257, bin/prove's 28 and bin/test's 55. Nothing caches the analysis or the plan.
+The reuse code in test and bin today is the result store by digest (proofs/greens, store-greens!, test-results) plus target/prove/ms: about 25 lines, of test_runner's 257, bin/prove's 28 and bin/test's 55. Nothing caches the analysis or the plan.
 
 So the cold defects come first, each fixed at its cause by its owner, then measured again:
 - the 48 KB a datom in d/db-with;

@@ -2,7 +2,7 @@
   "The task writer derives what a task cites (seon.docs.edn's one-reference-reader, task
   seon.task/a-task-cites-what-it-needs): references from the plan, never authored, and a
   citation that resolves to nothing answered beside the write."
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]] [datahike.api :as d]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d] [seon.repl :as repl]
             [seon.db :as pdb] [seon.task :as task] [seon.ref :as ref] [seon.template :as template]))
 
 (defn- db-with-program []
@@ -74,3 +74,87 @@
     (is (= ev (:seon.task/evidence (task/task after "demo/a"))) "the evidence")
     (is (= "demo/a#1" (:run (:seon.task/failure (task/task after "demo/a")))) "and the failure it answers")
     (is (= [] (task/onto-tx main after "demo/a")) "nothing when the branch holds it as main does")))
+
+(deftest a-runs-lifecycle-is-read-from-its-schema
+  ;; task seon.task/a-runs-lifecycle-is-read-once: the sets are the schema's, and the two reads
+  ;; every view and judge shares answer from the runs' own facts
+  (let [db0 (d/db-with (ts/test-db) [{:seon.task/id "demo/a" :seon.task/ns 'demo :seon.task/name "a" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work}
+                                     {:seon.task/id "demo/b" :seon.task/ns 'demo :seon.task/name "b" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b2 :seon.task/kind :work}])
+        start (fn [db aid tid ag] (d/db-with db (task/run-start-tx aid tid "boot-1" ag {:branch :b :model nil :max-turns 4} 1000 "p")))
+        db (-> db0 (start "demo/a#1" "demo/a" :a1) (start "demo/b#1" "demo/b" :a2)
+               (d/db-with [{:seon.run/id "demo/b#1" :seon.run/status :merged}]))
+        te #(:db/id (d/entity db [:seon.task/id %]))]
+    (is (= #{:done :merged} task/finished) "the schema's finished set")
+    (is (= ["demo/a#1"] (mapv :seon.run/id (task/running db))) "only the running run, one seek of the status")
+    (is (= :a1 (:seon.run/agent (first (task/running db)))) "as `run` answers it")
+    (is (false? (task/done? db (te "demo/a"))) "a running run makes no task done")
+    (is (true? (task/done? db (te "demo/b"))) "a merged run does")))
+
+;; ---- the links between root, an agent, its run, turns and messages are refs (task
+;; seon.render/the-agents-links-are-refs): a pull follows them ----------------------------
+
+(deftest an-agents-links-pull-from-its-root
+  ;; root records its agent on main; the reconciler records the run, naming the agent by its key;
+  ;; the agent's branch records a turn of the run, its evaluations and the message it took: each
+  ;; written by its producer's own function, each link a ref a pull follows from root down
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [main (:branch cfg) b (keyword (str (name main) "-a3"))
+           k (task/agent-key "b1" :a3)]
+       (d/transact conn [{:seon.root/id :root :seon.root/boot "b1"}])
+       (d/transact conn [{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :task-demo-f}])
+       (d/transact conn (task/agent-tx "b1" :a3 {:status :idle :pid 77 :running {:form "(f 2)"}}))
+       (d/branch! conn main b)
+       (let [bc (d/connect (assoc cfg :branch b))]
+         (try
+           (d/transact conn (task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch b :model "m" :max-turns 8} 0 "p"))
+           (d/transact conn (task/message-tx "m-1" "owner" "demo/f#1" "check g"))
+           ;; on the branch, which forked before main held the run or the message
+           (d/transact bc [{:db/id "run" :seon.run/id "demo/f#1"} {:seon.turn/id "demo/f#1/0" :seon.turn/run "run" :seon.turn/n 0 :seon.turn/origin :model}])
+           (d/transact bc (task/message-tx "m-1" "owner" "demo/f#1" "check g"))
+           (d/transact bc (repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "a3-77-1" [{:id 1 :tag :ret :form "(f 2)" :printed "4"}] nil))
+           (testing "from root on main: its agents, each agent's run"
+             (is (= [{:seon.agent/id :a3 :seon.agent/status :idle :seon.agent/pid 77 :seon.agent/running "(f 2)"
+                      :seon.run/_agent [{:seon.run/id "demo/f#1"}]}]
+                    (:seon.agent/_root (d/pull @conn '[{:seon.agent/_root [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/running
+                                                                           {:seon.run/_agent [:seon.run/id]}]}]
+                                               [:seon.root/id :root])))))
+           (testing "the message is to the run, on main"
+             (is (= [{:seon.message/body "check g"}] (:seon.message/_to (d/pull @conn '[{:seon.message/_to [:seon.message/body]}] [:seon.run/id "demo/f#1"])))))
+           (testing "on the branch: the run's turns and the message it took, the agent's evaluations"
+             (let [run (d/pull @bc '[{:seon.turn/_run [:seon.turn/id]} {:seon.message/_to [:seon.message/id]}] [:seon.run/id "demo/f#1"])]
+               (is (= [{:seon.turn/id "demo/f#1/0"}] (:seon.turn/_run run)))
+               (is (= [{:seon.message/id "m-1"}] (:seon.message/_to run))))
+             (is (= ["a3-77-1/1"] (mapv :seon.cluster.eval/id (:seon.cluster.eval/_agent (d/pull @bc '[{:seon.cluster.eval/_agent [:seon.cluster.eval/id]}] [:seon.agent/key k]))))))
+           (testing "the run, the message and the agent are one entity on the branch and on main (content ids)"
+             (doseq [ref [[:seon.run/id "demo/f#1"] [:seon.message/id "m-1"] [:seon.agent/key k]]]
+               (is (= (:db/id (d/entity @conn ref)) (:db/id (d/entity @bc ref))) (pr-str ref))))
+           (testing "the run's reader names its agent by id"
+             (is (= :a3 (:seon.run/agent (task/run @conn "demo/f#1")))))
+           (finally (d/release bc) (d/delete-branch! conn b))))))))
+
+(deftest an-agents-live-state-is-facts-on-its-entity
+  ;; what root observes of an agent is recorded on the agent's entity: a member no longer true
+  ;; is retracted, and an id that starts again in a later boot is another agent
+  (let [db0 (d/db-with (ts/test-db) [{:seon.root/id :root :seon.root/boot "b1"}])
+        db1 (d/db-with db0 (task/agent-tx "b1" :a3 {:status :running :pid 77 :running {:form "(f 2)" :since-ms 5} :mem-mb 120.5}))
+        db2 (d/db-with db1 (task/agent-tx "b1" :a3 {:status :idle :running nil}))
+        db3 (d/db-with db2 (task/agent-tx "b2" :a3 {:status :spawning}))
+        pull (fn [db boot] (d/pull db [:seon.agent/status :seon.agent/pid :seon.agent/running :seon.agent/mem-mb {:seon.agent/root [:seon.root/id]}]
+                                   [:seon.agent/key (task/agent-key boot :a3)]))]
+    (is (= {:seon.agent/status :running :seon.agent/pid 77 :seon.agent/running "(f 2)" :seon.agent/mem-mb 120.5 :seon.agent/root {:seon.root/id :root}} (pull db1 "b1")))
+    (is (= {:seon.agent/status :idle :seon.agent/pid 77 :seon.agent/mem-mb 120.5 :seon.agent/root {:seon.root/id :root}} (pull db2 "b1"))
+        "the form returned: no longer running")
+    (is (= :spawning (:seon.agent/status (pull db3 "b2"))) "the next boot's a3")
+    (is (= :idle (:seon.agent/status (pull db3 "b1"))) "is not the earlier boot's")))
+
+(deftest a-new-boot-leaves-the-earlier-boots-agents
+  ;; root's agents are this boot's: a boot retracts the earlier boots' agents' link to root
+  (let [db (d/db-with (ts/test-db) (into [{:seon.root/id :root :seon.root/boot "b1"}] (task/agent-tx "b1" :a1 {:status :idle})))
+        db2 (d/db-with db (into (task/boot-tx "b2" 4) (task/earlier-agents-tx db)))
+        db3 (d/db-with db2 (task/agent-tx "b2" :a1 {:status :spawning}))
+        agents (fn [db] (set (map :seon.agent/key (:seon.agent/_root (d/pull db '[{:seon.agent/_root [:seon.agent/key]}] [:seon.root/id :root]))))) ]
+    (is (= #{"b1/a1"} (agents db)))
+    (is (= #{} (agents db2)) "the new boot holds none of the earlier boot's")
+    (is (= #{"b2/a1"} (agents db3)) "and its own as they start")
+    (is (some? (d/entity db3 [:seon.agent/key "b1/a1"])) "the earlier agent is kept, not deleted")))

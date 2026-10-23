@@ -399,6 +399,11 @@
  ;; fix, not a cost to pay every turn. A model or task can turn it on through the resolver
  ;; (task -> model -> provider -> config); effort is :seon.config.ai/reasoning-effort.
  :seon.config.ai/thinking :disabled
+ ;; Unit: USD. One first-move pass's spend (my.root/first-moves!: one call per task, ~6k
+ ;; prompt tokens at turn 0, ~$0.001 a task off-peak, twice at DeepSeek's peak); at the bound
+ ;; the pass stops and writes :seon.judge/stopped. 0.10 is about a hundred tasks' first moves,
+ ;; out of the owner's standing $50 (docs/model.md#paid-runs).
+ :seon.config.ai/judge-pass-usd 0.10
  ;; Unit: model calls in flight at once, cluster-wide: our admission cap, the :model owner's
  ;; workers (session FX1). At the bound turns queue in the owner, by priority. Our choice, small:
  ;; eight is twice the runs running at once (:seon.config.agent/max-running 4), so a
@@ -575,8 +580,6 @@
  ;; (render.ui and render.ai, 2026-10-22), kept as they were.
  ;; rows: running and newest runs, root's context's newest events.
  :seon.config.render.list/rows 8
- ;; newest: a tile's or card's newest (root's defects on the page, a card's evaluations).
- :seon.config.render.list/newest 6
  ;; brief: a secondary list in root's context (ended runs, costliest functions).
  :seon.config.render.list/brief 5
  ;; top: root's context's defects, the evaluations its costliest functions come from, a
@@ -592,35 +595,23 @@
  ;; Unit: tokens of root's context, the system's AI face (seon.render.ai/system); past it the
  ;; later sections are named, not shown. Provenance: render.ai's and the render proc's 700.
  :seon.config.render/root-context-budget 700
- ;; Unit: tokens each evaluation's value shows in an agent's history on its page (the render
- ;; proc renders each row once). Provenance: the render proc's literal 400.
- :seon.config.render/history-row-budget 400
- ;; Unit: tokens each part of a turn on its agent's page shows (its reply, reasoning, each eval
- ;; call's code and answer, the context it read): past it the cut links the turn's whole request
- ;; (/turn?view=&id=). Provenance: the context's two messages are each under 16,000
- ;; tokens (seon.context/messages); measured 2026-10-22, a turn's run sections are 1.6-1.9k
- ;; and its turn sections under 0.1k before a proof runs, so 4,000 shows most turns whole.
- :seon.config.render/turn-text-budget 4000
- ;; Unit: tokens of a message or reason shown in one line (root's context, a tile's or card's
- ;; line, a declared AI render's line); past it the line's cut names the form that reads the
+ ;; Unit: tokens of a message or reason shown in one line (root's context, a page's tile or row,
+ ;; a declared AI render's line); past it the line's cut names the form that reads the
  ;; rest. Provenance: the literals 40-60 render.ui and render.ai carried (2026-10-22), as one.
  :seon.config.render/line-budget 50
  ;; Unit: tokens of a table cell or a stream row's field (a form, a value, a reason); past it the
  ;; cut says what it omitted and links the page that shows it whole. Provenance: the literals
  ;; 12-30 render.ui carried (2026-10-22), as one.
  :seon.config.render/cell-budget 25
- ;; Unit: events the dashboard's stream keeps (the render proc), newest first; its header says
+ ;; Unit: events root's context keeps (the render proc), newest first; its events section says
  ;; how many older ones it did not keep. Provenance: the render proc's EVENT-CAP 60.
  :seon.config.render.list/stream 60
- ;; Unit: points a sparkline keeps, the newest changes. Provenance: the render proc's SERIES-CAP 60.
- :seon.config.render.list/series 60
- ;; Unit: ended agents the dashboard's grid keeps beside every live one, the newest ended first;
- ;; an agent's end pushes the oldest kept one off, and the tile counts those off it. Provenance:
- ;; replaces seon.render.proc's RETIRE-MS (90 s after an end), a clock deciding what the grid shows.
- :seon.config.render.list/ended 10
- ;; Unit: evaluations an agent's page shows, newest first (seon.print/bounded names the rest
- ;; on its branch). Provenance: the render proc's HISTORY-CAP 100.
- :seon.config.render.list/history 100
+ ;; Unit: rows (an evaluation, or a turn with its evaluations). A page renders this many of its
+ ;; list at first, newest first, and this many more each time its last row scrolls into view
+ ;; (seon.render.ui/page); the rest are counted, never rendered until looked at. Provenance: the
+ ;; render proc's HISTORY-CAP 100, then 20 when only what is on screen is rendered (a screen
+ ;; holds about 10 rows).
+ :seon.config.render.list/history 20
 
  ;; ==== the web, instrumentation, the native probe ==============================================
 
@@ -640,8 +631,12 @@
  ;; #env honours where bin/root names it (until a built binary's top-level code sees its argv,
  ;; so --set can say it).
  :seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 0]
- ;; app.css and datastar.js, read per request so a style edit shows on reload.
+ ;; datastar.js, read once.
  :seon.config.web/public-dir #seon/checkout "resources/public"
+ ;; The page's stylesheet, bin/build's css step's output (Tailwind over
+ ;; resources/public/css/input.css, docs/render.md#tailwind); read per request, so a build's
+ ;; new stylesheet shows on reload. Missing (no build yet): the page is served unstyled.
+ :seon.config.web/stylesheet #seon/checkout "target/css/app.css"
  ;; Unit: +hhmm. Jolt has no time zones: clocks on the page add this offset (`date +%z`).
  ;; Unset: UTC, which the page's clocks then show.
  :seon.config.web/utc-offset #or [#env SEON_UTC_OFFSET "+0000"]

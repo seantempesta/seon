@@ -32,7 +32,7 @@
 
 (def ^:private explicit-run-pull
   "The run pull before the wildcard (2026-10-22, research row 20): what the reader read."
-  [:seon.run/id {:seon.run/task [:seon.task/id]} :seon.run/status :seon.run/boot :seon.run/agent
+  [:seon.run/id {:seon.run/task [:seon.task/id]} :seon.run/status :seon.run/boot {:seon.run/agent [:seon.agent/id]}
    :seon.run/pid :seon.run/start-ms :seon.run/end-ms :seon.run/branch :seon.run/model
    :seon.run/max-turns :seon.run/outcome :seon.run/reason :seon.run/turns :seon.run/model-calls
    :seon.run/tokens :seon.run/merged-t :seon.run/basis-t :seon.run/plan :seon.run/uncontracted
@@ -58,7 +58,7 @@
                                                  :seon.run/error {:seon.error/type :seon.model/no-provider :seon.error/operation 'seon.model/complete :seon.error/message "no model provider is configured"}
                                                  :seon.run/failures {'demo-test/t [{:type :fail :message "sums" :expected "(= 3 (f 1 2))" :actual "(= 3 4)"}]}
                                                  :seon.run/costs {'demo-test/c report}
-                                                 :seon.run/waste {'seon.context/resolve-ref {:forms 2 :turns 1}})])]
+                                                 :seon.run/waste {'seon.docs/resolve-ref {:forms 2 :turns 1}})])]
                           tx)))]))
 
 (deftest a-run-row-is-what-it-was-under-the-wildcard-pull

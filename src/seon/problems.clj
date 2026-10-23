@@ -36,11 +36,10 @@
   derived classes, which read the program's names once (a set): their cost follows the
   citations (seon.problems-test/dead-citations-follow-the-citations)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.docs :as docs]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.docs :as docs] [seon.task :as task]))
 
 (def counted-classes [:platform :eval :agent :effect])
-(def ^:private death-statuses "Run statuses of a death (:seon.run/status)." (:seon.status/failed (contract/properties :seon.run/status)))
-(def ^:private finished "Run statuses that make its task done (:seon.run/status, as seon.reconcile/finished)." (:seon.status/finished (contract/properties :seon.run/status)))
+(def ^:private death-statuses task/failed)
 (def run-classes [:red :cost :merge :dead :error :waste :task-conflict :unrun])
 
 (defn- es
@@ -383,18 +382,11 @@
 (def ^:private run-pull
   "What a problem row reads of a run: one pull (its conflicts are read only when it has
   them)."
-  [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/end-ms :seon.run/agent
+  [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/end-ms {:seon.run/agent [:seon.agent/id]}
    :seon.run/unmerged :seon.run/failures :seon.run/costs :seon.run/error :seon.run/waste :seon.run/task-conflicts
    :seon.run/deferred :seon.run/gate-unread {:seon.run/deferred-results [:seon.proof/test :seon.proof/status]}
    {:seon.run/task [:db/id :seon.task/id :seon.task/ns :seon.task/proofs]}
    {:seon.run/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
-
-(defn- task-done?
-  "Has task te a run finished (`finished`)? One avet seek, then its runs."
-  {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
-  [db te]
-  (boolean (some #(finished (:seon.run/status (d/pull db [:seon.run/status] (:e %))))
-                 (d/datoms db :avet :seon.run/task te))))
 
 ;; ---- tasks held for root -----------------------------------------------------------------
 
@@ -422,9 +414,9 @@
         status (:seon.run/status p)
         conflicts (mapv pm/conflict-value (:seon.run/conflicts p))
         unmerged (vec (sort (:seon.run/unmerged p)))
-        base {:run aid :task (get-in p [:seon.run/task :seon.task/id]) :agent (:seon.run/agent p) :status status
+        base {:run aid :task (get-in p [:seon.run/task :seon.task/id]) :agent (get-in p [:seon.run/agent :seon.agent/id]) :status status
               :outcome (:seon.run/outcome p) :reason (:seon.run/reason p) :end-ms (:seon.run/end-ms p)
-              :open? (not (task-done? db te)) :owner-ns (get-in p [:seon.run/task :seon.task/ns]) :producer nil :proofs []
+              :open? (not (task/done? db te)) :owner-ns (get-in p [:seon.run/task :seon.task/ns]) :producer nil :proofs []
               :answered-by (get-in ans [:from aid] []) :at-ms (:seon.run/end-ms p)}
         ;; a red proof is this run's problem when the task itself states it: an inherited
         ;; proof was green on main when the task started (its needs were done), so red now it

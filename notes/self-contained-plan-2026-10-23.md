@@ -164,7 +164,7 @@ The root is **`~/src/seon-next`** (next, moved), and a worktree is **`<root>/.wo
 ```sh
 cd ~/src/seon-jolt
 mv test-results next/test-results && ln -s next/test-results test-results
-mv worktree-ports next/config/worktree-ports && ln -s next/config/worktree-ports worktree-ports
+rm worktree-ports && ln -s next/config/worktree-ports worktree-ports   # next/config/worktree-ports already holds the union of both registries (2026-10-23, stale entries pruned); re-union anything a not-yet-merged branch allocated in ../worktree-ports first
 mv worktree-ports.lock next/config/worktree-ports.lock && ln -s next/config/worktree-ports.lock worktree-ports.lock
 ```
 - The symlinks keep worktrees still on old main writing to the same files until they merge main; they are deleted with the parent folder.

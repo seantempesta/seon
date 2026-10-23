@@ -17,7 +17,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.agent-test/a-wide-reach-reuses-unchanged-results}}
  {:seon.task/name "memory-is-read-when-asked"
-  :seon.task/plan "Done. `seon.agent/mem-mb` reads `lib/real-mb` (~1.5 ms, walking the VM regions) when asked, on the events that report the agent's state (its hello, each commit, a `:tests` reply, `:stats`), never per evaluation and never kept for a time: no cache keyed by time (AGENTS §5), no clock. It left docs/clocks.md's owed list."
+  :seon.task/plan "Done. `seon.agent/mem-mb` reads `lib/real-mb` (one task_info call) when asked, on the events that report the agent's state (its hello, each commit, a `:tests` reply, `:stats`), never per evaluation and never kept for a time: no cache keyed by time (AGENTS §5), no clock. It left docs/clocks.md's owed list."
   :seon.task/kind :work
   :seon.task/proofs #{seon.agent-test/memory-is-read-when-asked}}
  {:seon.task/name "an-agents-base-is-its-merge-base"

@@ -274,7 +274,7 @@
     (sock/close! a)))
 
 (deftest api-server
-  (let [st (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+  (let [st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                           :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})]
     (testing "the view is answered to its caller's promise"
       (let [p (promise)
@@ -291,11 +291,30 @@
             [_ _] (step #'root/api-proc st :from-writer {:dest {:rid rid} :r {:ok true}})]
         (is (= {:ok true} @p))))))
 
+(deftest root-records-what-it-observes-of-its-agents
+  ;; task seon.render/the-agents-links-are-refs: what root observes of an agent is facts on the
+  ;; agent's entity, written when a member it records changes; a change it does not record
+  ;; (the main t the agent reports) writes nothing
+  (let [st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                             :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
+        ;; no stall check (:stall-ms 0): the busy agent's check is not this test's
+        st (assoc st :stall-ms 0 :view {:agents {:a3 {:status :idle :pid 77 :branch :task-demo-f}}})
+        [st outs] (step #'root/api-proc st :back {:op :status :agent :a3 :set {:status :busy :running {:form "(f 2)" :since-ms 5}}})
+        w (first (:to-writer outs))]
+    (is (= {:op :tx :branch :db :dest {:agent-facts [:a3]}} (dissoc w :tx-data)))
+    (is (= [:busy "(f 2)" 77] ((juxt :seon.agent/status :seon.agent/running :seon.agent/pid) (first (:tx-data w)))))
+    (is (= "b1/a3" (:seon.agent/key (first (:tx-data w)))) "its key in root's boot")
+    (let [[st outs] (step #'root/api-proc st :back {:op :status :agent :a3 :set {:t 42}})]
+      (is (empty? (:to-writer outs)) "nothing it records changed: nothing written")
+      (let [[_ outs] (step #'root/api-proc st :back {:op :status :agent :a3 :set {:status :idle :running nil}})]
+        (is (some #{[:db.fn/retractAttribute [:seon.agent/key "b1/a3"] :seon.agent/running]} (:tx-data (first (:to-writer outs))))
+            "the form returned: no longer running")))))
+
 (deftest an-agent-that-ended-is-answered-ended-one-never-had-no-agent
   ;; bin/check e2e-calc (2026-10-23): root's answer says whether the agent ended (its view
   ;; records :ended-ms: a kill, its run's end, a death) or root never had it, so a reader
   ;; (seon.prove) tells a cancel from a defect by the type alone
-  (let [st (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+  (let [st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                              :view {:agents {:a7 {:status :killed :ended-ms 1}}} :graph (promise)
                              :system (doto (promise) (deliver {:procs {} :conns []}))})
         ask (fn [m] (let [p (promise)] (step #'root/api-proc st :ext (assoc m :p p)) @p))]
@@ -320,7 +339,7 @@
   ;; a request no live agent can take, a function root refuses, and a write the writer refuses
   ;; each answer the one error map (seon.contract/error) and nothing beside it: no eval item
   ;; with id -1, no test count, no :ok or :merged? false
-  (let [st (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+  (let [st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                              :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
         bare? (fn [r] (and (map? r) (seon.contract/error? r) (empty? (filter fake-members (keys r)))))]
     (doseq [op [:eval :tests :merge-tests :merge-main :stats]]
@@ -345,7 +364,7 @@
   ;; root collects the store only as its only writer (owner, 2026-10-22, simplest first;
   ;; seon.db/collect!): a :collect while an agent is live is refused at once, naming the live
   ;; agents, and never reaches the writer; with none live it goes to the writer like any write
-  (let [st (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+  (let [st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                              :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})]
     (let [p (promise)
           [_ outs] (step #'root/api-proc (assoc st :agents {:a1 {:status :running}}) :ext {:op :write :req {:op :collect} :p p})]
@@ -440,7 +459,7 @@
 ;; ---- task seon.root/a-proc-answers-every-request-it-took (laws audit #2) ----------------------
 
 (defn- api-state []
-  (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+  (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                     :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))}))
 
 (defn- answer "What p was answered, or :unanswered." [p] (if (realized? p) @p :unanswered))
@@ -488,7 +507,7 @@
   that takes the update! a spawn makes (the agent's proc), so the api's step runs alone."
   [f]
   (ts/test-branch! (fn [_ conn]
-    (f (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 8) :conn conn
+    (f (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 8) :conn conn
                          :view {:agents {}} :system (doto (promise) (deliver {:procs {} :conns []}))
                          :graph (doto (promise) (deliver (reify clojure.core.async.flow.impl.graph/Update (update-flow [_ _] {}))))})))))
 
@@ -599,7 +618,7 @@
     (d/branch! conn main ab)
     (let [[st r] (union-of st)
           _ (is (true? (:ok r)))
-          [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:seon.message/id "m1" :seon.message/from "root" :seon.message/to "a1" :seon.message/body "from main"}] :dest {:rid 1}})
+          [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:seon.message/id "m1" :seon.message/from "root" :seon.message/to {:seon.run/id "a1"} :seon.message/body "from main"}] :dest {:rid 1}})
           bc (d/connect (assoc cfg :branch ab))
           _ (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from "a1" :seon.message/reply-to "m1" :seon.message/body "from a1"}] :tx-meta (pdb/tx-meta ab)})
           _ (d/release bc)

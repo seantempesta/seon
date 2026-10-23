@@ -1,0 +1,5 @@
+[{:seon.task/name "forgive-holds-on-a-backtick-before-an-escape"
+  :seon.task/plan "Found 2026-10-23 (agent-view, freeze merge): seon.reader-test/the-laws-hold-over-generated-replies is red at seed 469951192514273856, shrunk to the reply text made of the pieces \"`\" \"\\\\\" \"(\" (a backtick, a backslash, an open paren). The test's seed is drawn from its reach digest, so a branch that changes nothing in seon.reader still draws a new seed; seon.reader and its test were byte-identical to main when it went red. One of the two laws breaks on it: forgiving forgiven text changes nothing, or the repairs account for every change (seon.reader/forgive). Correct: forgive's repairs of a syntax-quote followed by a character escape keep both laws; the proof is the generated test, green at that seed (a fixed-seed case beside it)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.reader-test/the-laws-hold-over-generated-replies}}
+]

@@ -150,9 +150,7 @@
   (let [msgs (agent/inbox)
         {facts true others false} (if take? (group-by (comp some? :id) msgs) {false msgs})
         _ (when (seq facts)
-            (agent/transact! (vec (for [{:keys [id from to body]} facts]
-                                    (cond-> {:seon.message/id id :seon.message/from (name from) :seon.message/body body}
-                                      to (assoc :seon.message/to to))))))
+            (agent/transact! (into [] (mapcat (fn [{:keys [id from to body]}] (task/message-tx id (name from) to body))) facts)))
         _ (agent/commit!)
         ;; taken once their facts are committed: a refused write leaves them in the inbox
         _ (when take? (agent/taken! (count msgs)))
@@ -203,7 +201,8 @@
         ;; what the model read, as its basis (seon.context/render makes the text from it), what
         ;; it answered and how it stopped, what its forms evaluated to as the next turns show it,
         ;; and where the turn's time went as this agent saw it
-        (agent/transact! [(cond-> (merge (usage c) {:seon.turn/id (str run "/" turn) :seon.turn/run run :seon.turn/n turn
+        (agent/transact! [{:db/id "run" :seon.run/id run}
+                          (cond-> (merge (usage c) {:seon.turn/id (str run "/" turn) :seon.turn/run "run" :seon.turn/n turn
                                    :seon.turn/origin :model :seon.turn/basis basis
                                    :seon.turn/calls (mapv (fn [{:keys [id code thinking items]}]
                                                             (cond-> {:id id :code code :evals (context/evaluations-text items) :items (vec (keep :record items))}
@@ -224,7 +223,7 @@
         (cond-> (-> (assoc st :turn (inc turn) :tokens (when (and tokens used) (+ tokens used)) :calls (mapv :code calls))
                     ;; what this turn's block showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
-                                                 :shown {'seon.context/resolve-ref (set (keep :symbol (:references block)))
+                                                 :shown {'seon.docs/resolve-ref (set (keep :symbol (:references block)))
                                                          'seon.context/found (set (keep :symbol (:found block)))
                                                          'seon.context/current-state (set (map :test (:proofs block)))}
                                                  :items (mapv (fn [it] {:form (:form it) :error (:err it)}) items)}))
@@ -245,7 +244,8 @@
         basis (basis! task run n 1 :outside (assoc (observed obs) :merge? true) take?)
         text (context/reader-text (:messages (context/render (agent/db) basis)))]
     ;; the read is a turn of this run, as a model turn is: what it was built from and what it cost
-    (agent/transact! [{:seon.turn/id (str run "/read-" n) :seon.turn/run run :seon.turn/n n
+    (agent/transact! [{:db/id "run" :seon.run/id run}
+                      {:seon.turn/id (str run "/read-" n) :seon.turn/run "run" :seon.turn/n n
                        :seon.turn/origin :outside :seon.turn/basis basis
                        :seon.turn/split (cond-> {:context-ms (long (profile/ms-since t0))} tests-ms (assoc :tests-ms tests-ms))}])
     text))

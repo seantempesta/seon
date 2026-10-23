@@ -2,7 +2,8 @@
 ;; ported; the rest new in next).
 {:seon.config.web/port [:int {:seon.config/place true :min 0 :max 65535 :seon.config/unit "TCP port" :description "The dashboard's port on 127.0.0.1. 0: no web."}]
  :seon.config.root/server-port [:int {:seon.config/place true :min -1 :max 65535 :seon.config/unit "TCP port" :description "Root's server on 127.0.0.1 (bin/mcp, outside agents). -1: a free port the kernel assigns; 0: none; >0: that port. The port bound is named on ROOT LISTENING (runs/root.port); nothing reads -1 as a port."}]
- :seon.config.web/public-dir [:string {:min 1 :seon.config/unit "path" :description "Where app.css and datastar.js are read (per request)."}]
+ :seon.config.web/public-dir [:string {:min 1 :seon.config/unit "path" :description "Where datastar.js is read."}]
+ :seon.config.web/stylesheet [:string {:min 1 :seon.config/unit "path" :description "The page's stylesheet, bin/build's css step's output (read per request)."}]
  :seon.config.web/utc-offset [:string {:min 5 :max 5 :seon.config/unit "+hhmm" :description "The local offset clocks are shown in (Jolt has no time zones)."}]
  :seon.config.contract/instrument [:enum {:seon.config/unit "mode" :description "Contracts and their recording: on, contracts (wrappers, no recording), off."} :on :contracts :off]
  :seon.config.native/probe-lib [:string {:min 1 :seon.config/unit "path" :description "native/probe.c's library (bin/build native)."}]}
