@@ -211,18 +211,24 @@
   (delay (let [f (fn [] nil)]
            (reduce (fn [acc m] (merge-with min acc m)) (repeatedly 5 #(once f []))))))
 
+(def repeats
+  "How many measured calls a measure takes after its warm one; each dimension's minimum over
+  them. A count, never a time: repeats until 20 ms of CPU time took more samples of a fast call
+  and fewer under load, so the minimum a counted dimension reported moved with the machine
+  (task seon.cost/ticks-are-exact). Three: a quiet process counts one call's ticks within a few
+  (seon.source-test's transact row, 406,355-406,362 over 40 samples), and a whole 1,000-tick
+  timer quantum lands on about one sample in 40, which the minimum of three drops."
+  3)
+
 (defn measure
-  "f on args, measured: one warm call, then repeats until 20 ms or 25 calls (3 at least);
-  each dimension's minimum, less what measuring itself costs."
+  "f on args, measured: one warm call, then repeats calls; each dimension's minimum, less what
+  measuring itself costs."
   {:malli/schema [:=> [:cat :seon.host/fn [:sequential :any]] :seon.cost/dims]}
   [f args]
   (once f args)
-  (let [b @baseline]
-    (loop [k 0 spent 0.0 best nil]
-      (if (and (>= k 3) (or (>= spent 2e7) (>= k 25)))
-        (into {} (for [[d v] best] [d (max 0.0 (- v (if (= d :calls) 0.0 (get b d 0.0))))]))
-        (let [m (once f args)]
-          (recur (inc k) (+ spent (:ns m)) (if best (merge-with min best m) m)))))))
+  (let [b @baseline
+        best (reduce (fn [best _] (let [m (once f args)] (if best (merge-with min best m) m))) nil (range repeats))]
+    (into {} (for [[d v] best] [d (max 0.0 (- v (if (= d :calls) 0.0 (get b d 0.0))))]))))
 
 (declare units)
 
