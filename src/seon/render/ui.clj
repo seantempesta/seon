@@ -242,9 +242,10 @@
              ["pid" (str (or (:pid fork-server) "–"))]
              ["restarts" (str (:restarts fork-server 0)) nil (when (pos? (:restarts fork-server 0)) "hot")]]}
      {:id "t-main" :class (str "pulse-" (mod (or (:merges main) 0) 2)) :kicker "main" :sub "every write to main moves t"
-      :big (group3 (:datoms main)) :unit "datoms" :series (:datoms series) :tone "tone-success"
+      :big (group3 (:vars main)) :unit "definitions" :series (:vars series) :tone "tone-success"
       :rows [["t" (group3 (:t main))] ["merges" (group3 (:merges main 0))]
-             ["vars" (group3 (:vars main)) "definitions on main now: its :var/name facts (boot loaded those with source; tasks' merges add more)"]]}]))
+             ["datoms" "on demand" "main's datom count is a walk of every datom: (:main (c/state sys {:datoms true})) at root's REPL"]]
+      :explain "definitions on main now: its :var/name facts (boot loaded those with source; tasks' merges add more)"}]))
 
 (defn proc-health
   "A declared proc's health as one line: no defect recorded, or how many and the newest

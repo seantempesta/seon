@@ -109,7 +109,7 @@
      ;; fork, datoms per main commit
      :series {:tx (vec (take-last (series-cap) (map second (get-in v [:writer :recent]))))
               :fork (vec (take-last (series-cap) (get-in v [:stats :fork-ms])))
-              :datoms (:datoms-series st [])}
+              :vars (:vars-series st [])}
      ;; a stop that arrived before main recorded how the attempt ended says so once main does
      :events (mapv #(ui/ended-as % (:agent %) (:agent-attempt st {})) (:events st [])) :events-seen (:ev-seq st 0)
      :web {:tabs (:tabs st 0)}
@@ -140,17 +140,20 @@
                   :proofs (count own)}])))
 
 (defn- main-info
-  "What the tiles show of main's db value: t, datoms, program vars, tasks and attempts
-  (read when main's t moved: O(datoms) for the count, O(tasks) for the rest)."
+  "What the tiles show of main's db value: t, program vars, tasks and attempts, read when
+  main's t moved: O(vars) for the vars (an index count), O(tasks) for the rest, nothing per
+  datom of main (seon.render-cost-test/main-info-reads-what-the-page-shows: was a count of
+  every datom, 15 ms at 47k datoms, 174 ms on the owner's main). Main's datom count is root's
+  state's on demand ((c/state sys {:datoms true}))."
   {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
   [st db]
   (if (= (:max-tx db) (get-in st [:main :t]))
     st
     (let [tasks (task/tasks db) idx (reconcile/index db) attempts (:attempts idx)
-          n (count (d/datoms db :eavt))]
-      (assoc st :main {:t (:max-tx db) :datoms n :vars (count (d/datoms db :aevt :var/name))}
+          vars (count (d/datoms db :aevt :var/name))]
+      (assoc st :main {:t (:max-tx db) :vars vars}
              ;; one point per main commit this proc read
-             :datoms-series (vec (take-last (series-cap) (conj (:datoms-series st []) (double n))))
+             :vars-series (vec (take-last (series-cap) (conj (:vars-series st []) (double vars))))
              :main-db db :tasks tasks :attempts attempts
              ;; the config in force, as root wrote it on main's root entity (one pull)
              :config (config/from-db db)

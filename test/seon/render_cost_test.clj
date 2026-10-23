@@ -4,7 +4,8 @@
   serialized in one pass, linear in its nodes (owner, 2026-10-23: renders as functions and results;
   root: a cost proof for the recursion). Run: bin/test seon.render-cost-test"
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.web.html]))
+  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.web.html]
+            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc]))
 
 (def ^:private fan "Children per node: a tree as deep as log3 n (10,000 nodes: 9 levels)." 3)
 
@@ -77,3 +78,33 @@
      :per-n {:calls 19}
      :fixed {:calls 47}
      :sizes [100 1000 4000]}))
+
+
+(defn main-of
+  "The input of size n: an empty render state and the test store's seed with n more evaluation
+  records on main (three datoms each: data, not program), as the render proc reads main when
+  its t moves."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
+  [n]
+  [{} (d/db-with (ts/test-db) (into [{:db/id "a" :seon.agent/id :a1}]
+                                    (for [i (range n)] {:seon.cluster.eval/id (str "a1-1-1/" i) :seon.cluster.eval/agent "a"
+                                                        :seon.cluster.eval/record {:tag :ret :form "(+ 1 2)" :shown "3"}})))])
+
+(deftest main-info-reads-what-the-page-shows
+  ;; global-ids' profile (2026-10-23): main-info took 174 ms a call on the owner's main, 695 ms
+  ;; of one loop turn; its count of every datom grew with main (15 ms at 47k datoms). What the
+  ;; page shows of main is its t, its definitions (an index count over :var/name), its tasks,
+  ;; attempts, config and problems: none grows with main's other data
+  (cost/proof
+    {:of 'seon.render.proc/main-info :input 'seon.render-cost-test/main-of
+     :n "evaluation records on main (data that is neither program, task nor problem)"
+     :work (str "none per record: the vars are an index count over :var/name, the tasks and attempts the "
+                "reconciler's index over their own attributes, the config one pull of root's entity, the "
+                "problems their own indexes; a record is never walked")
+     :growth :constant
+     ;; the bound is the page's: a pass reads main in under 2 ms on the test store's seed, however
+     ;; much data main holds. Timed 2026-10-23 (direct, before Jolt's tick counter was built
+     ;; here): 1.8 / 1.4 / 1.6 ms at 8k / 35k / 155k datoms, where the count it no longer does
+     ;; took 1.7 / 8.4 / 33.4 ms
+     :per-n {:ns 2000000}
+     :sizes [1000 10000 50000]}))
