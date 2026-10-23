@@ -264,7 +264,7 @@
   happened to the last reply; the messages delivered since the last turn (the owner's, root's,
   other agents'); the last evaluations; turns left."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds last-items turn max-turns unmerged truncated? reasons run-errors source repairs will-merge tests messages]}]
+  [db t {:keys [results reds last-items turn max-turns unmerged truncated? reasons run-errors source repairs will-merge tests messages message-ids]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
         task? #(and (qualified-symbol? (:seon.ref/name %)) (ref/task? db (:seon.ref/name %)))
@@ -309,7 +309,12 @@
       ;; owner D4 (2026-10-22): every change the branch's merge carries to main, every turn
       ;; measured and empty ({}) says so; absent only when not measured (a basis before D4)
       (some? will-merge) (assoc :will-merge will-merge)
-      (seq messages) (assoc :messages messages)
+      ;; the messages the turn took: those that are facts read again from db (the commit the turn
+      ;; read, where its agent wrote them), the rest as the basis holds them
+      (or (seq message-ids) (seq messages))
+      (assoc :messages (into (vec (for [mid message-ids :let [m (d/pull db [:seon.message/from :seon.message/body] [:seon.message/id mid])]]
+                                    {:from (:seon.message/from m) :body (:seon.message/body m)}))
+                             messages))
       ;; root's ruling (a), 2026-10-22: the tests this turn ran (the proofs and the tests the
       ;; branch changed), those the judge runs at the attempt's end, the process tests run only
       ;; when root asks (owner, 2026-10-23); a run its bound ended leaves the rest unknown, never red

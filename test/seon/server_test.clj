@@ -87,6 +87,9 @@
   (let [[sent taken none] (at/in-agent [{:op :message :agent "a1" :body "use demo/g"}
                                         "(my.agent/messages)"
                                         {:op :message :agent "a9" :body "hello?"}])]
-    (is (= {:delivered :a1} sent))
-    (is (= "[{:from :owner, :body \"use demo/g\"}]" (:printed taken)))
+    (is (true? (:ok sent)) "answered when its fact is on main")
+    (is (re-find #":from :owner" (:printed taken)) (:printed taken))
+    (is (re-find #":body \"use demo/g\"" (:printed taken)))
+    (is (re-find #":to \"demo/t#1\"" (:printed taken)) "to the attempt the agent works")
+    (is (re-find #":id \"m-" (:printed taken)) "the fact's id, which the agent writes on its branch")
     (is (contract/error? none) "no live agent a9: refused, as root refuses")))

@@ -311,8 +311,10 @@
                 [:seon.tx/branch {:optional true} :seon.tx/branch]]
  ;; a message between root and an agent, as a fact on the sender's branch: root's on main, an
  ;; agent's reply on its own; the union of every branch's history joins a conversation in one
- ;; query (seon.union). from and to name an attempt (its :seon.attempt/id, "demo/f#1") or
- ;; "root": an agent id starts again every boot, an attempt's names one worker for good.
+ ;; query (seon.union). from and to name an attempt (its :seon.attempt/id, "demo/f#1"),
+ ;; "root", or "owner" (the page's message bar and the server's :message op, written by root):
+ ;; an agent id starts again every boot, an attempt's names one worker for good. The agent that
+ ;; takes a message writes the same fact on its own branch, and its turn's basis names it by id.
  ;; reply-to is the replied message's id, a value, since that message may be on a branch the
  ;; reply's is not
  :seon.message/id [:and {:seon.db/identity true} :string]

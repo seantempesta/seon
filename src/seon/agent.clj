@@ -612,7 +612,7 @@
                                               :heap-mb (lib/r2 (/ (lib/bytes-in-heap) 1048576.0))}}]
     ;; a message (session F2): it waits in :inbox until the agent's code takes it ((messages));
     ;; root hears that it arrived
-    :message (do (swap! state update :inbox (fnil conj []) (select-keys m [:from :body]))
+    :message (do (swap! state update :inbox (fnil conj []) (select-keys m [:from :body :id :to]))
                  [{:op :received :sent-ns (:ns m) :recv-ns (profile/now-ns)}])
     nil))
 

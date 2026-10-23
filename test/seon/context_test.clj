@@ -593,3 +593,14 @@
         shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))]
     (is (= "G is defined first. Then f calls it." (:seon.ref/lead (shown "demo.other/g"))) "doc depth: the task's plan")
     (is (not (clojure.string/includes? (str (:references block)) "demo.other/g")) "and not an unresolved name")))
+
+
+(deftest a-taken-message-is-read-from-its-fact
+  ;; root's ruling (2026-10-23): a message is a fact. Root writes the owner's on main; the turn
+  ;; that takes it writes the same fact on its branch and names it in its basis by id, so its
+  ;; block (and every later reading of that turn) reads the text from the commit
+  (let [db (d/db-with (db-with-program) [{:seon.message/id "m-1" :seon.message/from "owner" :seon.message/to "demo/f#1"
+                                          :seon.message/body "use demo/g, not a new helper"}])
+        b (context/current-state db (task-f db) {:turn 1 :max-turns 4 :message-ids ["m-1"]})]
+    (is (= [{:from "owner" :body "use demo/g, not a new helper"}] (:messages b)))
+    (is (str/includes? (:content (peek (context/messages "H" b))) "use demo/g") "in the turn sections")))

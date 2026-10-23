@@ -243,11 +243,16 @@
     {:all (vec rows) :by-id (into {} (for [[eid r] rows] [eid r]))}))
 
 (defn messages-of
-  "The messages turn entity e took (the owner's and others' words, read at its start): today
-  its basis's observation; where messages are kept is root's to decide, and this is the one
-  reader of them."
+  "The messages turn entity e took (the owner's and others' words, read at its start): those
+  that are facts read from e's db by the ids its basis names (the same :seon.message/* fact
+  root wrote on main, written on the agent's branch when it took them), then the rest as
+  its basis holds them. The one reader of a turn's messages."
   {:malli/schema [:=> [:cat :any] [:vector :map]]}
-  [e] (vec (get-in (:seon.turn/basis e) [:observed :messages])))
+  [e]
+  (let [db (d/entity-db e) obs (:observed (:seon.turn/basis e))]
+    (into (vec (for [mid (:message-ids obs) :let [m (d/entity db [:seon.message/id mid])]]
+                 {:id mid :from (:seon.message/from m) :body (:seon.message/body m)}))
+          (:messages obs))))
 
 (defn- turn-rows
   "The turns of attempt on branch db, oldest first (as written), each its facts with its cost

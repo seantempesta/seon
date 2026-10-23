@@ -173,13 +173,23 @@
     (update st ::to-agents (fnil conj []) [id m])
     st))
 
+(defn- message-to
+  "Whom a message to agent id is to, as :seon.message/to names it: the attempt it works (an
+  agent id starts again each boot, an attempt's names one worker for good), else the agent."
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.agent/id] :string]}
+  [st id] (or (get-in st [:view :agents id :attempt]) (name id)))
+
 (defn- deliver-message
-  "Send message m ({:from :to [id ...] :body}) to each agent it names: the one delivery, for an
-  agent's send and the owner's message alike."
+  "Send message m ({:from :to [id ...] :body :id}) to each agent it names: the one delivery, for
+  an agent's send and the owner's message alike. A message that is a fact (:id, :seon.message/id)
+  carries its id and whom it is to (the attempt each agent works), so the agent that takes it
+  writes the same fact on its branch."
   {:malli/schema [:=> [:cat :seon.root/api-state :map] :seon.root/api-state]}
   [st m]
-  (let [msg {:op :message :from (:from m) :body (:body m) :ns (profile/now-ns)}]
-    (reduce #(to-agent %1 %2 {:op :write :msg msg}) st (:to m))))
+  (reduce (fn [st id]
+            (to-agent st id {:op :write :msg (cond-> {:op :message :from (:from m) :body (:body m) :ns (profile/now-ns)}
+                                               (:id m) (assoc :id (:id m) :to (message-to st id)))}))
+          st (:to m)))
 
 (defn- spawn-failed
   "Agent id's spawn or fork refused (why, and its cause when another proc refused it): the
@@ -199,7 +209,7 @@
   end is a jolt.async.remote end (session RC1): its :in is the agent proc's :from, so the
   agent's port is an ordinary channel. Answers [st id agent-end-fd]."
   {:malli/schema [:=> [:cat :seon.root/api-state :map] [:tuple :seon.root/api-state :seon.agent/id :seon.lib/fd]]}
-  [st {:keys [branch task cloned-from]}]
+  [st {:keys [branch task attempt cloned-from]}]
   (let [n (inc (:next-id st))
         id (keyword (str "a" n))
         ;; named under root's main, so roots sharing a store never share a branch (seon.db/on-main)
@@ -216,6 +226,7 @@
                                       :chan-opts {:in {:buf-or-n (cfg/value :seon.config.agent/inbox-size)}}})
          (assoc-in [:view :agents id] (cond-> {:branch branch :status :spawning :task task :pid nil
                                                :forked-ms nil :mem-mb nil :evals [] :tests nil}
+                                        attempt (assoc :attempt attempt)
                                         cloned-from (assoc :cloned-from cloned-from))))
      id a]))
 
@@ -305,9 +316,17 @@
           (to-agent st id {:op :req :rid rid :kind op :msg msg :merge-branch (:merge-branch m) :data-attrs (:data-attrs m)})))
       ;; a message to a live agent (the owner's, from the page or the server): root's one
       ;; delivery, as an agent's send is; it lands in the agent's inbox, which its next turn reads
+      ;; the owner's message is a fact on main (root's branch: :seon.message/*), delivered at once
+      ;; and answered when the writer has it; the agent writes the same fact on its own branch
+      ;; when its turn takes it (seon.agent/messages)
       :message (if (nil? (get-in st [:agents id]))
                  (reply! st p (gone id (str "no live agent " id)))
-                 (reply! (deliver-message st {:from (:from m) :to [id] :body (:body m)}) p {:delivered id}))
+                 (let [mid (str "m-" (random-uuid))
+                       fact {:seon.message/id mid :seon.message/from (name (:from m)) :seon.message/to (message-to st id) :seon.message/body (:body m)}
+                       [st rid] (pend st p :tx nil)]
+                   (step/out! o :to-writer {:op :tx :branch :db :tx-data [fact] :dest {:rid rid}})
+                   (-> st (update :writes (fnil conj #{}) rid)
+                       (deliver-message {:from (:from m) :to [id] :body (:body m) :id mid}))))
       ;; requests for the writer: answered by rid; a collection only while no agent is live,
       ;; the store's only writer then being root's writer (seon.db/collect!)
       :write (if (and (= :collect (get-in m [:req :op])) (seq (:agents st)))

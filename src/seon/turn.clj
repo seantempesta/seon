@@ -138,17 +138,27 @@
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its
   basis, not its prompt): the commit it reads (the run-ahead writes committed now, as the
-  model call's wait would), the task, attempt and turn, the observations no db holds (the
-  messages delivered since the last turn among them, taken: the turn is their reader), and
-  the last evaluations' transcript while no earlier turn shows them."
+  model call's wait would), the task, attempt and turn, the observations no db holds, the
+  messages delivered since the last turn (taken: the turn is their reader; a message that is
+  a fact is written on this branch first, the same fact root wrote on main, and the basis
+  names it by id, so its text is read again from the commit), and the last evaluations'
+  transcript while no earlier turn shows them."
   {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id :int :int :seon.turn/origin :map] :seon.turn/basis]}
   [task attempt turn max-turns origin observed]
-  (agent/commit!)
-  (let [items (when (or (= :outside origin) (zero? turn)) (last-evals))
-        ev (when (seq items) (context/evaluations-text items))
-        msgs (agent/messages)]
+  (let [msgs (agent/messages)
+        {facts true others false} (group-by (comp some? :id) msgs)
+        _ (when (seq facts)
+            (agent/transact! (vec (for [{:keys [id from to body]} facts]
+                                    (cond-> {:seon.message/id id :seon.message/from (name from) :seon.message/body body}
+                                      to (assoc :seon.message/to to))))))
+        _ (agent/commit!)
+        items (when (or (= :outside origin) (zero? turn)) (last-evals))
+        ev (when (seq items) (context/evaluations-text items))]
     (cond-> {:commit (d/commit-id (agent/db)) :task task :attempt attempt :turn turn :max-turns max-turns
-             :origin origin :observed (cond-> (dissoc observed :merge?) (seq msgs) (assoc :messages msgs))}
+             :origin origin :observed (cond-> (dissoc observed :merge?)
+                                        (seq facts) (assoc :message-ids (mapv :id facts))
+                                        ;; a send no fact holds (another agent's, until its sender writes one)
+                                        (seq others) (assoc :messages (mapv #(select-keys % [:from :body]) others)))}
       (:merge? observed) (assoc :merge? true)
       ev (assoc :last-evals ev))))
 
