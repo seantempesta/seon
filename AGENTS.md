@@ -261,6 +261,7 @@ Library words stay: proc, step-fn, transact, branch, merge, schema, registry, co
 - **Merging on a check nobody read,** or copying whole files over newer changes.
 - **Re-running everything on every change,** a full run while iterating, or a second run of an unchanged tree (§3, Testing).
 - **Deleting a record** (a store, a branch, history). Runs are kept, and reclaiming space is the owner's act. The one exception: until Seon holds a user's data, the standing store is test data, erased (never migrated) when its schema changes, on the owner's go ([machine](docs/machine.md#disk-stays-bounded)).
+- **Throwing away good work, or keeping its slow copy** (owner, 2026-10-23: "don't throw away good work have agents learn from it if you want a clean implementation. No crappy slow repetitive code"). Before rewriting, read what an earlier branch, worktree or note did and keep what it learned (its measurements, its proofs, its cause); then write the clean implementation once, with no repeated or slow code. A worktree is removed as soon as its branch is merged and nothing in it is unsaved: commits merged, notes filed, and a store or run output recorded or handed to the owner.
 - **Flooding the machine,** killing by pattern, leaving things running, or walking past garbage (a leftover process, a merged worktree) because someone else left it.
 
 ## 10. Done
