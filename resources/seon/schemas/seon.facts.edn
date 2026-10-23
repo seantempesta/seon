@@ -268,6 +268,7 @@
  :seon.root/watch [:map {:seon.db/data true} [:roots [:vector :string]] [:boot :string]
                    [:batches nat-int?] [:paths nat-int?] [:rescans nat-int?]
                    [:last-rescan {:optional true} [:map [:path :string] [:kind [:enum :rescan :root]]]]
+                   [:last-opened {:optional true} [:vector :string]]
                    [:error {:optional true} :string]]
  :seon.root/stopped :seon.root/end
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean

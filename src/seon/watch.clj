@@ -71,7 +71,12 @@
                                   (fn []
                                     (loop []
                                       (if-let [b (read-batch! in)]
-                                        (do (on-batch b) (recur))
+                                        ;; a throw in the batch's handler ends the watch as a death, recorded by on-exit
+                                        ;; (the failure point docs/failure-points.md names): never a silent thread end
+                                        (if-let [t (try (on-batch b) nil (catch Throwable t t))]
+                                          (do (.destroy p)
+                                              (on-exit (died p (str "its batch handler threw: " (.getMessage ^Throwable t) ": root no longer watches the checkout"))))
+                                          (recur))
                                         (when-not (realized? stopped)
                                           (on-exit (died p (str bin " ended: root no longer watches the checkout")))))))
                                   "seon.watch")

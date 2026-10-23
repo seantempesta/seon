@@ -779,7 +779,7 @@
          [:ol {:id "events" :class "events"} (for [e (:events sys)] (slot (str "ev-" (:seq e))))]]]]]
      :seon.render/units
      (vec (concat
-           [(u "problems" (:problem-areas sys []) :seon.render/problems-banner)
+           [(u "problems" (:problem-areas sys) :seon.render/problems-banner)
             (u "t-agents" {:cells (mapv (fn [id] (let [a (get agents id)] [id (shown-status (ended-as a id agent-attempt)) (count (:evals a))])) order)
                            :off (- (count agents) (count order)) :retire-ms (:retire-ms sys)} :seon.render/swarm)]
            (for [t (load-tiles writer fork-server main series)] (u (:id t) t :seon.render/tile))

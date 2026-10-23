@@ -45,6 +45,8 @@ int main(int argc, char **argv) {
   dispatch_source_t gone = dispatch_source_create(DISPATCH_SOURCE_TYPE_PROC, parent, DISPATCH_PROC_EXIT, q);
   dispatch_source_set_event_handler(gone, ^{ exit(0); });
   dispatch_resume(gone);
+  // the parent may have died between getppid and the source's creation: the source then never fires
+  if (getppid() != parent) return 0;
   // ready: the stream is started, so a change from here on is reported
   put('w', argv[1]);
   fflush(stdout);

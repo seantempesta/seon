@@ -138,15 +138,11 @@
                                :source (root/import-source! sys source))]))]
     {:loaded loaded :opened (problems/caused before @(:conn sys))}))
 
-(defn load-paths!
-  "What changed on disk at paths (relative to the checkout), loaded into main by each one's
-  own loader, once per loader (load-kinds!). A path no loader reads is named, never loaded.
-  Answers each loader's answer, the paths no loader read, and :opened, the derived problems
-  the load made true."
-  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :string]] [:map [:loaded :map] [:unread [:vector :string]] [:opened [:set :string]]]]}
-  [sys paths]
-  (let [by (group-by loader paths)]
-    (assoc (load-kinds! sys (set (remove nil? (keys by)))) :unread (vec (get by nil [])))))
+(defn load-errors
+  "The typed errors among the answers of load-kinds! (a refused task file, a refused load): each
+  is to be recorded, never dropped."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [loaded] (filterv contract/error? (vals loaded)))
 
 (defn- git-refs
   "The refs directory of the checkout's git repository (its common dir: a worktree's .git file
@@ -200,9 +196,13 @@
                             ;; a batch no loader reads (root's own store under runs/, target/) writes
                             ;; nothing, so root's writes never feed its watcher
                             (when (seq ks)
-                              (load-kinds! sys ks)
-                              @(fact (cond-> (-> (held) (update :batches inc) (update :paths + (count batch)))
-                                       rescan (-> (update :rescans inc) (assoc :last-rescan {:kind (first rescan) :path (second rescan)})))))))
+                              (let [{:keys [loaded opened]} (load-kinds! sys ks)]
+                                ;; a loader's typed error (a refused task file) is a recorded :platform error; the
+                                ;; problems the load made true are shown by health, and the last are kept in the fact
+                                (doseq [e (load-errors loaded)]
+                                  @(root/transact-main! sys (root/platform-tx @(:conn sys) e (System/currentTimeMillis))))
+                                @(fact (cond-> (-> (held) (update :batches inc) (update :paths + (count batch)) (assoc :last-opened (vec (sort opened))))
+                                         rescan (-> (update :rescans inc) (assoc :last-rescan {:kind (first rescan) :path (second rescan)}))))))))
                         died)]
     (if (contract/error? w)
       (do (died w) w)

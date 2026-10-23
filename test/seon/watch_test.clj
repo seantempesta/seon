@@ -4,7 +4,7 @@
   watcher that dies is a :platform error on main. Run: bin/test seon.watch-test"
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [clojure.java.io :as io]
             [seon.watch :as watch] [my.root :as mr] [seon.root :as root] [seon.problems :as problems] [seon.contract :as contract]
-            [datahike.api :as d]))
+            [datahike.api :as d] [seon.task]))
 
 (deftest a-record-is-its-kind-then-its-path
   (is (= [:path "/a/b\nc.md"] (watch/record (.getBytes "p/a/b\nc.md" "UTF-8"))) "a newline is part of the path: NUL ends a record")
@@ -41,3 +41,22 @@
       (let [dead2 (promise) w2 (watch/start! [dir] (fn [_]) #(deliver dead2 %))]
         (watch/stop! w2)
         (is (not (realized? dead2)))))))
+
+(deftest a-throw-in-the-batch-handler-is-a-recorded-death
+  (let [dir (.getCanonicalPath (doto (io/file (str (System/getProperty "java.io.tmpdir") "/seon-watch-" (random-uuid) "/docs")) (.mkdirs)))
+        dead (promise)
+        w (watch/start! [dir] (fn [_] (throw (ex-info "the handler broke" {}))) #(deliver dead %))]
+    (is (not (contract/error? w)))
+    (spit (str dir "/x.md") "# X\n")
+    (let [e @dead]
+      (is (= :seon.watch/died (:seon.error/type e)) "the thread does not end silently")
+      (is (re-find #"handler threw: the handler broke" (:seon.error/message e)))
+      (is (contract/valid? :seon.watch/died e)))))
+
+(deftest a-refused-task-file-is-a-recorded-platform-error
+  (let [bad (seon.task/file-declarations 't.x "{:not a vector")
+        loaded {:docs {:ok true} :tasks bad}]
+    (is (contract/error? bad) "a malformed task file is refused with a typed error")
+    (is (= [bad] (mr/load-errors loaded)) "the loader's error is kept, the ok answer is not")
+    (let [db (d/db-with (ts/test-db) (root/platform-tx (ts/test-db) bad 1000))]
+      (is (= [(:seon.error/type bad)] (mapv :type (get-in (problems/report db) [:classes :platform :rows])))))))
