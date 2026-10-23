@@ -4,7 +4,7 @@ What is in flight, what the owner has not yet ruled, and the steps from here to 
 
 ## Now (2026-10-23)
 
-Pins: Jolt `4342b73c`, Chez `80e4b9f` (docs/forks.md) · `src` 17,470 lines (aim ~10k) · paid runs $0.144 of the $50 budget · standing root on 7888/7777 (`runs/store`, test data).
+Pins: Jolt `f05de7db`, Chez `80e4b9f` (docs/forks.md) · `src` 17,470 lines (aim ~10k) · paid runs $0.144 of the $50 budget · standing root on 7888/7777 (`runs/store`, test data).
 
 **Goal:** real Seon agents fixing problems in the system (THE PLAN's step E). A small real request has gone design → implement on DeepSeek; no model-made change has merged yet.
 **Owner's focus:** (1) the agent's context, tuned by evidence: it speaks Clojure, with thinking beside the forms; (2) the agent debug view; (3) shrink brief 1.

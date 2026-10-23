@@ -20,7 +20,7 @@ Owner, 2026-10-23: quote not recorded; relayed by root. Stated in: not yet (owed
 ### Thinking is off by default
 Owner, 2026-10-21, restated 2026-10-23: "if we can't have intuitive function calling based on the context our context is bad and instructions need help". Stated in: docs/model.md#thinking-is-off-by-default; `:seon.config.ai/thinking` in `resources/seon/config/default.edn`.
 ### No automatic retries: a refused or failed attempt is held for root
-Owner, 2026-10-23: "no automatic retries, send it to root to decide if it should be retried" (and 2026-10-22: "We need a way to mark the task as failed and root should be notified"). Stated in: docs/tasks.md#a-failed-task-is-held-for-root.
+Owner, 2026-10-23: "no automatic retries, send it to root to decide if it should be retried" (and 2026-10-22: "We need a way to mark the task as failed and root should be notified"). Stated in: docs/tasks.md#a-refused-attempt-is-held-for-root.
 ### The standing store is test data: erase it, no migration; history within a store is kept
 Owner, 2026-10-23: "why are you migrating 6 facts? isn't it just test data just nuke it and move on". Stated in: AGENTS §9 (the exception to "Runs are kept"); docs/machine.md#disk-stays-bounded; docs/storage.md#history (history kept).
 ### Agents share greens: a test green at its digest never runs again
