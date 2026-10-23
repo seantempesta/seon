@@ -51,6 +51,32 @@ What merges is then carried as it is (```seon.merge/merge-tx```, ```seon.merge/c
 
 Measured 2026-10-23 (notes/global-ids/MEASURED.md §5): on a 115k-datom main, a merge's three program reads took 6.6 s of 6.7 s. `seon.merge-cost-test/a-three-way-costs-the-changes-not-the-program` holds the three-way flat at about 7 ms from 100 to 10,000 forms, with one form changed on each side. That proof keeps a store on disk, because the in-memory test store gives index nodes no addresses, so a diff there shares nothing and reads everything.
 
+## The union
+
+Every datom any branch committed is held once in U, one ordinary Datahike db, and queried with plain `d/q`, `d/pull` and `d/entity` over `(d/history U)` (```seon.union```; root: `(my.root/union sys)`). Ids are issued once and identities take content ids ([ids](#ids)), and merges carry datoms as they are ([merges](#merges-read-what-changed)), so the union is a set union with nothing to resolve: an equal datom is the same datom. What is true now on one branch stays that branch's head; U answers what happened across branches, and each datom's transaction names its branch (`:seon.tx/branch`, in every transaction's tx-meta, ```seon.db/tx-meta```). U holds assertions in its current indexes and retractions in its temporal ones, and its schema lifts every attribute to cardinality many with no uniqueness (```seon.union/lifted-schema```), since constraints belong to a branch.
+
+Root's writer keeps it: built when first asked (`:union`; main's history, then each branch from its merge base), then every main commit and every agent's commit notice adds that branch's datoms since the commit U holds (```seon.union/catch-up```: the datoms that differ, by `datoms-diff`, with the branch's retractions from its history). No poll: U moves when a commit does.
+
+The owner's example, root's message on main and the agent's reply on its branch, is one query (`seon.union-test/conversation`):
+
+```clojure
+(d/q '[:find ?body ?reply ?branch :in $ ?agent
+       :where [?m :seon.message/to ?agent] [?m :seon.message/id ?id] [?m :seon.message/body ?body]
+              [?r :seon.message/reply-to ?id ?tx] [?r :seon.message/body ?reply] [?tx :seon.tx/branch ?branch]]
+     (my.root/union sys) "a1")
+```
+
+Measured 2026-10-23 (REPL, LMDB, main 46,708 datoms, each branch one turn of ~15 datoms; notes/global-ids/bench/um.clj):
+
+| | 10 branches | 100 branches |
+|---|---|---|
+| build: main's history, then each branch | 991 ms | 1,274 ms (about 3 ms a branch) |
+| keeping it current: one branch's commit | 0.93 ms | 1.30 ms |
+| one agent's conversation | 0.75 ms | 0.63 ms |
+| every conversation | 0.87 ms | 4.2 ms (100 rows) |
+
+U lives in root's writer, in memory: about main's history plus what branches add. Persisting it under one store key, so a booted root does not rebuild it, waits until a measurement asks; the rebuild is about 1 s at 50k datoms. Proofs: `seon.union-test/a-message-and-its-reply-on-two-branches-are-one-query`, `seon.procs-test/the-writer-keeps-the-union-current`.
+
 ## History
 
 A store keeps history when `:seon.config.store/keep-history?` is true, the default (v1's ruling 23, and Datahike's own default). With history, `d/history`, `as-of` and `since` work, a retraction stays a datom, and a transaction keeps its tx-meta. ``:db/txInstant`` is part of that tx-meta: Datahike applies tx-meta only when history is on, and drops it silently when it is off. The flag is fixed when a store is made (Datahike's `store-fixed-record-keys`). So ```seon.db/made-cfg``` adds it only when a store is created (`seon.db/open!`, and the test store), and ```seon.db/store-cfg``` never names it. A connect adopts what the store recorded, so a store made either way still opens, and keeps the layout it was made with. Proofs: `seon.db-test/the-store-keeps-history`, `seon.db-test/a-kept-store-keeps-the-history-it-was-made-with`.

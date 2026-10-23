@@ -113,8 +113,18 @@
   "The tx-meta of every transaction Seon makes: the runtime that made it
   (:seon.tx/runtime, jolt.host/runtime-fingerprint). A runtime Jolt cannot identify (nil)
   is refused by this contract, never recorded as no runtime."
-  {:malli/schema [:=> [:cat] [:map [:seon.tx/runtime :string]]]}
-  [] {:seon.tx/runtime (jolt.host/runtime-fingerprint)})
+  {:malli/schema [:=> [:cat :seon.db/branch] [:map [:seon.tx/runtime :string] [:seon.tx/branch :seon.db/branch]]]}
+  [branch] {:seon.tx/runtime (jolt.host/runtime-fingerprint) :seon.tx/branch branch})
+
+(defn main-branch
+  "The branch the root holding cfg works on as its main: cfg's :branch, :db when none."
+  {:malli/schema [:=> [:cat :seon.db/cfg] :seon.db/branch]}
+  [cfg] (:branch cfg :db))
+
+(defn conn-main
+  "The main of the root holding conn (its connection to main): the branch conn is on."
+  {:malli/schema [:=> [:cat :seon.host/conn] :seon.db/branch]}
+  [conn] (main-branch (:config @conn)))
 
 (defn- install-missing!
   "Transact the attributes of `schema` the db under conn lacks, or holds without their
@@ -143,9 +153,9 @@
         missing (vec (remove #(and (contains? have (:db/ident %))
                                    (= (:db/contentId %) (get-in have [(:db/ident %) :db/contentId])))
                              schema))]
-    (let [[runtime others] ((juxt filter remove) #(= :seon.tx/runtime (:db/ident %)) missing)]
-      (when (seq runtime) (d/transact conn {:tx-data (vec runtime)}))
-      (when (seq others) (d/transact conn {:tx-data (vec others) :tx-meta (tx-meta)})))
+    (let [[tx-attrs others] ((juxt filter remove) #(#{:seon.tx/runtime :seon.tx/branch} (:db/ident %)) missing)]
+      (when (seq tx-attrs) (d/transact conn {:tx-data (vec tx-attrs)}))
+      (when (seq others) (d/transact conn {:tx-data (vec others) :tx-meta (tx-meta (conn-main conn))})))
     (count missing)))
 
 (defn seed!
@@ -153,7 +163,7 @@
   {:malli/schema [:=> [:cat :seon.host/conn :int] :any]}
   [conn n]
   (install-missing! conn)
-  (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx :tx-meta (tx-meta)})))
+  (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx :tx-meta (tx-meta (conn-main conn))})))
 
 ;; ---- one store, many branches, as in production (owner, 2026-10-21) ------------
 ;; A store holds one seed on :db. Every root works on a main of its own, a branch of :db
@@ -161,16 +171,6 @@
 ;; branch), and its agents' and tasks' branches are named under that main, so roots
 ;; sharing a store never share a branch. A branch is one pointer write (~1 ms measured,
 ;; 2026-10-21) where a fresh seeded store was ~200 ms and ~2 MB.
-
-(defn main-branch
-  "The branch the root holding cfg works on as its main: cfg's :branch, :db when none."
-  {:malli/schema [:=> [:cat :seon.db/cfg] :seon.db/branch]}
-  [cfg] (:branch cfg :db))
-
-(defn conn-main
-  "The main of the root holding conn (its connection to main): the branch conn is on."
-  {:malli/schema [:=> [:cat :seon.host/conn] :seon.db/branch]}
-  [conn] (main-branch (:config @conn)))
 
 (defn on-main
   "Branch b of the root whose main is `main`, as the store names it: :db names main itself;

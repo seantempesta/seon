@@ -946,6 +946,13 @@
   {:malli/schema [:=> [:cat :seon.root/sys :seon.db/branch] :seon.host/promise]}
   [sys branch] (write! sys {:op :branch-db :branch branch}))
 
+(defn union
+  "The union of every branch's history (seon.union) as the writer keeps it: a promise of
+  {:ok true :db (d/history U) :branches n}, U built at the first ask and kept current by
+  every commit since. Query :db with plain d/q, d/pull, d/entity."
+  {:malli/schema [:=> [:cat :seon.root/sys] :seon.host/promise]}
+  [sys] (write! sys {:op :union}))
+
 (defn branch-diff "The agent's branch versus main. A promise." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
   [sys agent-id]
   (if-let [b (:branch (agent-entry sys agent-id))]

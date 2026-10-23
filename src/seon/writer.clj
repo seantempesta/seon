@@ -4,8 +4,33 @@
   proto.control's writer (session F2; writer design A, ../notes/archive/option3-F1-flow.md section 4)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
-            [seon.program :as program] [seon.merge :as pm] [seon.source :as source] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
+            [seon.program :as program] [seon.merge :as pm] [seon.union :as union] [seon.source :as source] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str]))
+
+(defn- union-caught-up
+  "st with its union (seon.union), once one was asked for, holding branch b's datoms up to
+  head: from the commit of b it holds, or from b's merge base with main for a branch it has
+  not seen. O(Δ) per commit: the writer sees every main commit and every agent's commit
+  notice, so U stays current with no poll. st as it is before anyone asked."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.db/branch :seon.host/db] :seon.writer/state]}
+  [st b head]
+  (if-let [un (:union st)]
+    (let [conn (:conn st) main (pdb/conn-main conn)
+          from (if-let [cid (get-in un [:applied b])] (d/commit-as-db conn cid) (pdb/branch-base conn main b))]
+      (assoc st :union (union/catch-up un b from head)))
+    st))
+
+(defn- union-built
+  "st with its union built (seon.union): main's history, and each branch under main from its
+  merge base; as it is when built already."
+  {:malli/schema [:=> [:cat :seon.writer/state] :seon.writer/state]}
+  [st]
+  (if (:union st)
+    st
+    (let [conn (:conn st) main (pdb/conn-main conn)]
+      (assoc st :union (reduce (fn [un b] (union/catch-up un b (pdb/branch-base conn main b) (pdb/head conn b)))
+                               (union/of-history (union/empty-union @conn) main @conn)
+                               (map #(pdb/on-main main %) (pdb/of-main main (set (d/branches conn)))))))))
 
 (defn- main-commit
   "Main moved to t: the fork server's replica gets the commit (FIFO with fork requests),
@@ -17,7 +42,7 @@
   (step/out! o :main {:t t :ops ops :db db :ns (profile/now-ns)})
   (when-let [errs (seq (program/load-changes! db ops))]
     (step/out! o :events (step/event {:type :load-errors :errors (vec errs)})))
-  st)
+  (union-caught-up st (pdb/conn-main (:conn st)) db))
 
 (defn- branch-merge
   "seon.merge/three-way of branch b against main, from their merge base over Datahike's
@@ -100,7 +125,7 @@
       ;; member's own datoms for the keys it changed, as they are (seon.merge/merge-tx)
       (let [rep (d/merge-db conn (set (map :branch ok))
                             (vec (mapcat (fn [{:keys [r head base]}] (pm/merge-tx main base head (keys (:ours r)) data-attrs)) ok))
-                            (pdb/tx-meta))
+                            (pdb/tx-meta (pdb/conn-main conn)))
             t (:max-tx (:db-after rep))
             ops (pdb/report->tx rep)]
         [(main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep))
@@ -131,7 +156,7 @@
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile] :seon.writer/state]}
   [st o]
   (if-let [ms (seq (:pend st))]
-    (let [reps (try (dw/transact-batch! (:conn st) (mapv (fn [m] {:tx-data (:tx-data m) :tx-meta (pdb/tx-meta)}) ms))
+    (let [reps (try (dw/transact-batch! (:conn st) (mapv (fn [m] {:tx-data (:tx-data m) :tx-meta (pdb/tx-meta (pdb/conn-main (:conn st)))}) ms))
                     (catch Throwable e e))]
       (cond
         (sequential? reps)
@@ -165,7 +190,12 @@
       ;; its commits comes back): the event that ends the last pending sync (seon.check/idle)
       :clean (update st :clean-waiters (fnil conj []) dest)
       ;; an agent process committed its branch: a commit the next flush covers
-      :agent-commit (-> st (assoc :dirty true) (update :commits inc))
+      :agent-commit (-> st (assoc :dirty true) (update :commits inc)
+                        (cond-> (:union st) (union-caught-up (:branch m) (pdb/head conn (:branch m)))))
+      ;; the union of every branch's history (seon.union), built when first asked and kept
+      ;; current from then on by each commit this writer sees: query it with d/q over the
+      ;; answer's :db, a (d/history U)
+      :union (let [st (union-built st)] (reply st {:ok true :db (d/history (:db (:union st))) :branches (count (:applied (:union st)))}))
       ;; the agent's branch (new: a pointer to main's head), then its fork: the agent opens
       ;; the branch itself and owns its writes (run-ahead, committed by the agent), and holds
       ;; the task and attempt it works from its first form

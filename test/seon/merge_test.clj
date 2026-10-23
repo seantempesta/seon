@@ -250,7 +250,7 @@
                r (pm/delta-three-way base head main #{})
                ks (keys (:ours r))
                tx (pm/merge-tx main base head ks #{})
-               rep (d/merge-db conn #{b} tx (pdb/tx-meta))
+               rep (d/merge-db conn #{b} tx (pdb/tx-meta (:branch cfg)))
                after (:db-after rep)
                merge-t (:max-tx after)
                own (remove #(= merge-t (:tx %)) (:tx-data rep))

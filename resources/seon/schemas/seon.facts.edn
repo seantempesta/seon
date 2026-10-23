@@ -274,7 +274,23 @@
  ;; the runtime that made it, as its compiled units are keyed (jolt.host/runtime-fingerprint:
  ;; Jolt's version, its runtime fingerprint, its trace tag; docs/storage.md#history)
  :seon.tx/runtime :string
- :seon.tx/meta [:map {:seon.db/attributes true} [:seon.tx/runtime {:optional true} :seon.tx/runtime]]
+ ;; the branch the transaction was written on: it travels with a merged datom, so the union
+ ;; of every branch's history names who wrote what (seon.union)
+ :seon.tx/branch [:and {:seon.db/index true} :keyword]
+ :seon.tx/meta [:map {:seon.db/attributes true} [:seon.tx/runtime {:optional true} :seon.tx/runtime]
+                [:seon.tx/branch {:optional true} :seon.tx/branch]]
+ ;; a message between root and an agent, as a fact on the sender's branch: root's on main, an
+ ;; agent's reply on its own; the union of every branch's history joins a conversation in one
+ ;; query (seon.union). reply-to is the replied message's id, a value, since that message may
+ ;; be on a branch the reply's is not
+ :seon.message/id [:and {:seon.db/identity true} :string]
+ :seon.message/from [:and {:seon.db/index true} :string]
+ :seon.message/to [:and {:seon.db/index true} :string]
+ :seon.message/body :string
+ :seon.message/reply-to [:and {:seon.db/index true} :string]
+ :seon.message/fact [:map {:seon.db/attributes true} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
+                     [:seon.message/to {:optional true} :seon.message/to] [:seon.message/body :seon.message/body]
+                     [:seon.message/reply-to {:optional true} :seon.message/reply-to]]
  ;; ---- written by an agent on its own branch; they reach main with its merge ----
  :seon.turn/id [:and {:seon.db/identity true} :string]
  :seon.turn/attempt [:and {:seon.db/index true} :string]
