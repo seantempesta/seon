@@ -5,7 +5,7 @@
   forms in one pass over them and their references."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]]
-            [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.program :as program]))
+            [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.program :as program] [clojure.java.shell :as sh]))
 
 (defn- acct
   {:malli/schema [:=> [:cat :int :string] :map]}
@@ -65,6 +65,53 @@
      :fixed {:calls 3}
      :sizes [100 1000 10000]}))
 
+(def ^:private divergence-sizes "The sizes divergence's proof measures." [100 1000 10000])
+
+(defn- on-disk-path
+  "Where divergence's proof keeps its store of size n."
+  {:malli/schema [:=> [:cat pos-int?] :string]}
+  [n] (str (System/getProperty "user.dir") "/target/tmp/divergence-" n))
+
+(defn on-disk-diverged-of
+  "divergence's arguments on a store on disk of its own (the last resort: Datahike's
+  datoms-diff skips the index subtrees two branches share once they are stored, and the test
+  store's in-memory branches hold none, so there both answers grow with the program): main
+  holding n forms (branch-of's), and a branch of it that redefines one. The store is made
+  afresh at on-disk-path; the proof's end releases and removes it."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db]]}
+  [n]
+  (let [path (on-disk-path n)
+        _ (sh/sh "rm" "-rf" path)
+        {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
+        _ (d/transact conn {:tx-data (vec (mapcat #(program/account-tx @conn (acct % "x") %) (range n)))})
+        base @conn
+        _ (d/branch! conn :db :branch)
+        bc (d/connect (assoc cfg :branch :branch))]
+    (d/transact bc {:tx-data (program/record-tx @bc (acct (quot n 2) "(inc x)"))})
+    [base @bc]))
+
+(deftest divergence-reads-what-the-branch-changed
+  (try
+    (cost/proof
+      {:of 'seon.program/divergence :input 'seon.program-cost-test/on-disk-diverged-of
+       :n "forms main and the branch hold (the branch redefines one)"
+       :work (str "the :var/form and :schema/form datoms that differ (d/datoms-diff over :aevt, skipping the "
+                  "stored subtrees both share: one index path per changed entry, log n), and per entry among "
+                  "them its name and two content seeks; nothing reads the forms they share")
+       :growth :log
+       ;; measured 2026-10-23 on LMDB, three fresh stores per size, identical bytes each time (+-96 B
+       ;; at 1,000): 103.5k ticks / 453 KB at 100 forms, 136k / 612 KB at 1,000, 154k / 678 KB at
+       ;; 10,000 (the aevt scans before: 428 KB, 3.1 MB, 33 MB); contracted calls: divergence and
+       ;; the two eid seeks of the one changed var's content
+       :per-n {:ticks 7700.0 :bytes 34000.0}
+       :fixed {:ticks 53000.0 :bytes 230000.0 :calls 3}
+       :sizes divergence-sizes})
+    (finally
+      ;; each store made, released whatever holds it (release-all) and removed
+      (doseq [n divergence-sizes :let [path (on-disk-path n)] :when (pdb/store? path)]
+        (doseq [b [:db :branch]] (d/release (d/connect (assoc (pdb/store-cfg :lmdb path) :branch b)) true))
+        (sh/sh "rm" "-rf" path)))))
+
 (defn fan
   "closure's arguments of size n: one root whose neighbors are n leaves (the frontier n wide)."
   {:malli/schema [:=> [:cat pos-int?] [:tuple [:vector :int] :seon.host/fn]]}
@@ -83,8 +130,9 @@
                 "with no neighbors costs its visit alone; nothing per node already queued (the frontier "
                 "was copied on every visit before: 446 KB at 100 leaves, quadratic)")
      :growth :linear
-     :per-n {:ns 400 :bytes 1100 :calls 0}
-     :fixed {:ns 2000 :bytes 2000 :calls 1}
+     ;; ticks measured 2026-10-23 (seon.cost's once): 12.9k at 100, 153k at 1,000
+     :per-n {:ticks 160 :bytes 1100 :calls 0}
+     :fixed {:ticks 2000 :bytes 2000 :calls 1}
      :sizes [100 1000 10000]}))
 
 (defn knotted
@@ -102,8 +150,9 @@
                 "each node popped into its component once. Measured 2026-10-23: 145 us / 214 KB at 100 "
                 "nodes, 1.6 ms / 2.2 MB at 1,000, 21 ms / 21.7 MB at 10,000 (~2 us, ~2.2 KB a node)")
      :growth :linear
-     :per-n {:ns 2000 :bytes 2000 :calls 0}
-     :fixed {:ns 2000 :bytes 2000 :calls 1}
+     ;; ticks measured 2026-10-23 (seon.cost's once): 54k at 100, 559k at 1,000
+     :per-n {:ticks 560 :bytes 2000 :calls 0}
+     :fixed {:ticks 2000 :bytes 2000 :calls 1}
      :sizes [100 1000 10000]}))
 
 (defn keyed-chain
@@ -125,8 +174,9 @@
                 "quadratic here). Measured 2026-10-23: 81 ms / 94 MB at 100, 244 ms / 270 MB at 1,000, "
                 "557 ms / 665 MB at 3,000; the fixed part is the test store's example program")
      :growth :linear
-     :per-n {:ns 160000 :bytes 200000}
-     :fixed {:ns 60000000 :bytes 78000000}
+     ;; ticks measured 2026-10-23 (seon.cost's once): 31.7M at 100, 95.1M at 1,000
+     :per-n {:ticks 71000 :bytes 200000}
+     :fixed {:ticks 25000000 :bytes 78000000}
      :sizes [100 1000 10000]}))
 
 (defn changed-top
@@ -149,6 +199,7 @@
                 "11.5 ms / 16 MB at 3,000, one form re-folded each time; the per-form part is the scan "
                 "(~3 us, ~5 KB a form), the re-fold is the change's")
      :growth :linear
-     :per-n {:ns 4000 :bytes 5000}
-     :fixed {:ns 3000000 :bytes 4000000}
+     ;; ticks measured 2026-10-23 (seon.cost's once): 0.50M at 100, 1.24M at 1,000; calls 16
+     :per-n {:ticks 850 :bytes 5000 :calls 0}
+     :fixed {:ticks 420000 :bytes 4000000 :calls 16}
      :sizes [100 1000 10000]}))
