@@ -12,7 +12,8 @@
 
 long mp_probe(char *buf, long len) {
   task_vm_info_data_t vi; mach_msg_type_number_t cnt = TASK_VM_INFO_COUNT;
-  task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vi, &cnt);
+  kern_return_t kr = task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vi, &cnt);
+  if (kr != KERN_SUCCESS) return -(long)kr;  // the kernel's refusal, negated: nothing is made up
   return snprintf(buf, len, "{:phys-fp %.1f :internal %.1f :compressed %.1f :resident %.1f}",
                   vi.phys_footprint / 1048576.0, vi.internal / 1048576.0, vi.compressed / 1048576.0, vi.resident_size / 1048576.0);
 }

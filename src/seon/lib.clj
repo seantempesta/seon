@@ -74,7 +74,12 @@
   {:phys-fp :internal :compressed :resident} in MB."
   {:malli/schema [:=> [:cat] :seon.lib/probe]}
   []
-  (let [b (ffi/alloc 256) n (mp-probe* b 256)] (read-string (ffi/read-bytes b n))))
+  (let [b (ffi/alloc 256) n (mp-probe* b 256)]
+    (if (neg? n)
+      (throw (ex-info "task_info refused this process's memory"
+                      {:seon.error/type :seon.lib/probe-refused :seon.error/message "task_info refused this process's memory"
+                       :kern-return (- n)}))
+      (read-string (ffi/read-bytes b n)))))
 
 (defn real-mb
   "This process's memory as macOS charges it, in MB: its phys_footprint (what Activity Monitor and
