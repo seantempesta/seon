@@ -486,7 +486,7 @@
         [[mid from to body] :as facts] (vec (edn/read-string (:printed on-main)))]
     (is (= 1 (:model-calls end)) (pr-str end))
     (is (= [["owner" "demo/t#1" "use demo/g"]] (mapv #(subvec % 1) facts)) "one fact on main: from the owner, to the attempt a1 works")
-    (is (= [mid] ids) "the turn's basis names the fact root wrote, by its id")
+    (is (= [mid] ids) (str "the turn's basis names the fact root wrote, by its id: " (pr-str turn)))
     (is (= [{:id mid :from "owner" :body "use demo/g"}] committed) "and its text is read from the commit the turn read")
     (is (= "check the sum before the proof" (:thinking (first calls))) "the call's thinking, recorded with it")
     (is (= 1 (count (:items (first calls)))) "the call names its one evaluation's record")
