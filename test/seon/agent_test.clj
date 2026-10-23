@@ -239,6 +239,21 @@
   (let [[id] (in-agent ["(:seon.task/id (my.task/current))"])]
     (is (= (pr-str "demo/t") (:printed id)))))
 
+(deftest an-agent-with-no-task-resumes-a-kept-branch
+  ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
+  ;; store already holds (a kept branch; e2e's fresh agent on a store an earlier run left)
+  ;; died in its init, giving seon.task/onto-tx a nil task, and a wait for its :ready never
+  ;; ended. A kept branch takes its task from main only when the agent has one
+  (let [[r] (in-agent [{:op :eval :agent "root"
+                        :code (str "(let [ev (seon.root/events sys) m (seon.db/conn-main (:conn sys))]"
+                                   " (datahike.api/branch! (:conn sys) m (seon.db/on-main m :kept))"
+                                   " (let [ag (seon.root/spawn! sys {:branch :kept})]"
+                                   " (loop [] (let [e (clojure.core.async/<!! ev)]"
+                                   " (cond (not= ag (:agent e)) (recur)"
+                                   " (#{:ready :dead :ended :killed} (:type e)) (:type e)"
+                                   " :else (recur))))))")}])]
+    (is (= ":ready" (:printed r)) (pr-str r))))
+
 (deftest a-failure-marked-through-the-server-holds-the-task
   ;; owner, 2026-10-22: a failure is task data and root reacts to it. The agent marks its
   ;; task failed on its branch, hands the attempt back (seon_done), and root, at the

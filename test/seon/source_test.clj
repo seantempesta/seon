@@ -8,7 +8,7 @@
             [clojure.java.shell :as sh]
             [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
             [datahike.api :as d]
-            [seon.db :as pdb]
+            [seon.db :as pdb] [seon.cost :as cost]
             [seon.fx :as fx]
             [seon.merge :as pm]
             [seon.program :as program]
@@ -463,3 +463,149 @@
     (is (= {'app.proc-test/via-shell false 'app.proc-test/via-fork false 'app.proc-test/via-binary true
             'app.proc-test/via-root false 'app.proc-test/via-names false 'app.proc-test/pure false}
            (update-vals mine :binary?)))))
+
+;; ---- a changed file re-imports only what reaches it (task seon.source/an-import-reads-only-changed-files)
+
+(defn- program-of
+  "db's live forms as the reach walk reads them: by id, their text, refs, requires and lead."
+  [db] (into (sorted-map) (for [f (program/live-forms db)] [(:id f) (select-keys f [:src :refs :requires :ns :lead])])))
+
+(deftest a-refresh-is-the-whole-trees-replace-at-the-cost-of-what-changed
+  ;; root's ruling (2026-10-23): the test service's branch follows main by re-importing what a
+  ;; change reaches, not the program: a namespace whose file changed, and every one requiring it
+  (let [files {"src/rf/mac.clj" "(ns rf.mac)\n\n(defmacro twice [x] `(* 2 ~x))\n"
+               "src/rf/use.clj" "(ns rf.use (:require [rf.mac :refer [twice]]))\n\n(defn f [x] (twice x))\n"
+               "src/rf/other.clj" "(ns rf.other)\n\n(defn g [x] (inc x))\n"}
+        db (empty-db)
+        db (d/db-with db (source/import-tx db files))]
+    (testing "a changed macro: its namespace and the one using it read again, as the whole tree's replace reads them"
+      (let [mac "(ns rf.mac)\n\n(defmacro twice [x] `(+ ~x ~x))\n"]
+        (is (= (program-of (d/db-with db (source/replace-tx db (assoc files "src/rf/mac.clj" mac))))
+               (program-of (d/db-with db (source/refresh-tx db {"src/rf/mac.clj" mac})))))))
+    (testing "a removed file: its namespace's program is retracted, the others kept"
+      (let [after (d/db-with db (source/refresh-tx db {"src/rf/other.clj" nil}))]
+        (is (nil? (seon.db/eid after :var/name 'rf.other/g)))
+        (is (some? (seon.db/eid after :var/name 'rf.use/f)))
+        (is (= (program-of (d/db-with db (source/replace-tx db (dissoc files "src/rf/other.clj"))))
+               (program-of after)))))
+    (testing "an unchanged tree: nothing to do"
+      (is (= [] (source/refresh-tx db {}))))))
+
+(defn- refresh-program
+  "A program of n forms in other files (files of ten functions each, every one requiring rfc.c
+  and calling it when hub? is true) beside rfc.c, a file of ten functions: db holding it, and
+  rfc.c's text with one function's body edited."
+  {:malli/schema [:=> [:cat pos-int? :boolean] [:tuple :seon.host/db [:map-of :string :string]]]}
+  [n hub?]
+  (let [fns (fn [body] (apply str (for [i (range 10)] (str "\n\n(defn f" i " [x] " (body i) ")"))))
+        c (fn [body] (str "(ns rfc.c)" (fns body) "\n"))
+        fs (into {"src/rfc/c.clj" (c #(str "(+ x " % ")"))}
+                 (for [j (range (max 1 (quot n 10)))]
+                   [(str "src/rfc/o" j ".clj")
+                    (str "(ns rfc.o" j (when hub? " (:require [rfc.c :as c])") ")"
+                         (fns #(if hub? (str "(c/f" % " x)") (str "(* x " % ")"))) "\n")]))
+        db (empty-db)]
+    [(d/db-with db (source/import-tx db fs)) {"src/rfc/c.clj" (c #(if (zero? %) "(- x 1)" (str "(+ x " % ")")))}]))
+
+(defn refresh-of
+  "refresh-tx's arguments: a program of n forms in other files, and a body edit in a file no
+  namespace requires."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:map-of :string :string]]]}
+  [n] (refresh-program n false))
+
+(defn hub-refresh-of
+  "refresh-tx's arguments: a program of n forms in other files that all require rfc.c, and a
+  body edit in rfc.c."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:map-of :string :string]]]}
+  [n] (refresh-program n true))
+
+(defn read-of
+  "seon.source/read-nss's argument: refresh-of n's edited file."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  [n] [(second (refresh-of n))])
+
+(defn interface-of
+  "seon.source/db-interface's arguments: hub-refresh-of n's db and its hub."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :symbol]]}
+  [n] [(first (hub-refresh-of n)) 'rfc.c])
+
+(defn diff-of
+  "seon.source/program-tx's arguments: refresh-of n's db and its edited file, read."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :map :set]]}
+  [n] (let [[db ch] (refresh-of n)] [db (#'source/read-nss ch) ch #{}]))
+
+(defn transact-of
+  "datahike.api/db-with's arguments: refresh-of n's db and its refresh's facts."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.db/tx-data]]}
+  [n] (let [[db ch] (refresh-of n)] [db (source/refresh-tx db ch)]))
+
+(defn- written
+  "The namespaces whose forms tx writes (each form map's :form/ns tempid)."
+  [tx] (set (keep #(when (and (map? %) (:form/src %)) (:form/ns %)) tx)))
+
+(deftest a-body-edit-writes-only-its-form
+  (let [[db ch] (refresh-of 10)
+        tx (source/refresh-tx db ch)
+        after (d/db-with db tx)
+        tree (into {} (for [[p n] [["src/rfc/c.clj" 'rfc.c] ["src/rfc/o0.clj" 'rfc.o0]]] [p (source/file-text db n)]))]
+    (is (= (program-of (d/db-with db (source/replace-tx db (merge tree ch)))) (program-of after))
+        "the same program as the whole tree's replace")
+    (is (= 1 (count (filter #(and (map? %) (:form/src %)) tx))) "one form written: the edited one")
+    (is (= [] (source/refresh-tx after ch)) "the same text again: nothing")
+    (let [[hdb hch] (hub-refresh-of 10)]
+      (is (= #{"ns rfc.c"} (written (source/refresh-tx hdb hch))) "a hub's body edit reads no dependent"))
+    (let [[hdb hch] (hub-refresh-of 10)
+          renamed {"src/rfc/c.clj" (str/replace (hch "src/rfc/c.clj") "(defn f9 " "(defn g9 ")}]
+      (is (= #{"ns rfc.c" "ns rfc.o0"} (written (source/refresh-tx hdb (assoc renamed "src/rfc/o0.clj" (str/replace (source/file-text hdb 'rfc.o0) "(c/f9 x)" "(c/f8 x)")))))
+          "a renamed function changes the interface: its dependents are read again"))))
+
+(def ^:private refresh-sizes
+  "Forms in the other files: a fixed change costs the same at each."
+  [10 100 1000])
+
+(deftest a-fixed-change-costs-the-same-at-any-program-size
+  (doseq [e [{:of 'seon.source/read-nss :input 'seon.source-test/read-of
+              :n "forms in the program's other files; the read and analysis of one 10-function file"
+              :work "read: the file's text read form by form; analyze: each form's account (Jolt's analyzer, not run)"
+              :growth :constant
+              ;; measured 2026-10-23: 294k ticks, 2.44 MB, 391 calls at every size (1.3 ms CPU)
+              :fixed {:ticks 300000 :bytes 2500000 :calls 391}
+              :sizes refresh-sizes}
+             {:of 'seon.source/db-interface :input 'seon.source-test/interface-of
+              :n "forms in the program's other files, every file requiring the hub"
+              :work "the gate on dependents: the hub's forms (avet :form/ns) and their definitions read once"
+              :growth :constant
+              ;; measured 2026-10-23: 346k -> 351k ticks, 873 -> 887 KB, 25 calls (0.9 ms CPU)
+              :fixed {:ticks 360000 :bytes 910000 :calls 25}
+              :sizes refresh-sizes}
+             {:of 'seon.source/program-tx :input 'seon.source-test/diff-of
+              :n "forms in the program's other files"
+              :work "diff: each of the file's forms looked up by id and compared with its account; the tx: one form's facts"
+              :growth :constant
+              ;; measured 2026-10-23: 1.16M -> 1.19M ticks, 3.26 -> 3.39 MB, 142 calls (3.3 ms CPU)
+              :fixed {:ticks 1200000 :bytes 3480000 :calls 142}
+              :sizes refresh-sizes}
+             {:of 'datahike.api/db-with :input 'seon.source-test/transact-of
+              :n "forms in the program's other files"
+              :work "transact: one form's facts and its var's pointer, into the indexes of the program (log n per datom)"
+              :growth :log
+              ;; measured 2026-10-23: 561k -> 635k ticks, 1.38 -> 1.59 MB from 10 to 1,000 (1.9 ms CPU)
+              :fixed {:ticks 530000 :bytes 1290000} :per-n {:ticks 11500.0 :bytes 31000.0}
+              :sizes refresh-sizes}
+             {:of 'seon.source/refresh-tx :input 'seon.source-test/refresh-of
+              :n "forms in the program's other files; a body edit in a file no namespace requires"
+              :work "read, analyze, gate, diff and the tx of one file, the phases above: nothing of the program's other files"
+              :growth :constant
+              ;; measured 2026-10-23: 1.80M -> 1.84M ticks, 6.62 -> 6.76 MB, 563 calls (6-8 ms CPU); was 822k
+              ;; ticks at 10 namespaces of one function each, +350 ticks and +1.1 KB per namespace
+              :fixed {:ticks 1900000 :bytes 6950000 :calls 563}
+              :sizes refresh-sizes}
+             {:of 'seon.source/refresh-tx :input 'seon.source-test/hub-refresh-of
+              :n "forms in the program's other files, every file requiring the edited one"
+              :work "as a leaf's: the interface is unchanged, so no dependent is read"
+              :growth :constant
+              ;; measured 2026-10-23: as the leaf's, 1.80M -> 1.84M ticks, 6.61 -> 6.75 MB, 563 calls
+              :fixed {:ticks 1900000 :bytes 6950000 :calls 563}
+              :sizes refresh-sizes}]]
+    (testing (str (:of e) " on " (:input e))
+      (cost/proof e))))
