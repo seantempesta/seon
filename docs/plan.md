@@ -26,7 +26,7 @@ Pins: see docs/forks.md · `src` 17,391 lines (19,304 this morning; aim ~10k) ·
 - every call kind recording ticks, bytes and calls, and each REPL eval saying what it reused (agent-view, after its merge);
 - the clocks still deciding: render's 90 s retire timer and the fork server's 100 ms idle poll (check-events).
 
-**Waiting on the owner:** task `seon.derive/one-content-keyed-derivation` (reuse of expensive pure results; cold paths are fixed first, and nothing is cached that is fast enough); task `seon.repl/type-findings-are-an-evals-warnings`.
+**Waiting on the owner:** task `seon.derive/one-content-keyed-derivation` (reuse of expensive pure results; cold paths are fixed first, and nothing is cached that is fast enough); the type-findings-as-warnings task (on ``jolt/wiki-stale``, not merged yet).
 
 ## Open owner questions
 
