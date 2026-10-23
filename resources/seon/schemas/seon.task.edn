@@ -72,7 +72,7 @@
                         [:seon.attempt/results {:optional true} :seon.proof/results]
                         [:seon.attempt/conflicts {:optional true} [:vector :seon.merge/conflict]]
                         [:seon.attempt/unmerged {:optional true} [:vector :string]]
-                        [:seon.attempt/changed {:optional true} [:set :string]]
+                        [:seon.attempt/changed {:optional true} :seon.attempt/changed]
                         [:seon.attempt/deferred {:optional true} [:set :qualified-symbol]]
                         [:seon.attempt/deferred-results {:optional true} :seon.proof/results]]
  ;; ---- the done rule and the reconciler's answer ----

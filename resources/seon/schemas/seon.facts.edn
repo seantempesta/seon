@@ -207,9 +207,10 @@
  :seon.attempt/conflicts [:set {:seon.db/component true} :seon.db/ref]
  :seon.attempt/unmerged [:set :string]
  ;; measured at the attempt's end from the branch (seon.merge/three-way's :ours): the printed
- ;; program keys the branch changed since its merge base; the octopus merge admits on them
- :seon.attempt/changed [:set :string]
- ;; measured at the attempt's end (seon.program/test-split): the process tests its change reaches,
+ ;; program keys the branch changed since its merge base (each seon.edn/encode of a
+ ;; :seon.merge/program-key, so generated ones are too); the octopus merge admits on them
+ :seon.attempt/changed [:set [:string {:gen/elements ["[:var app/a]" "[:var app.b/c]" "[:form \"app/1-2\"]" "[:ns app]"]}]]
+ ;; measured at the attempt's end (the reach walk's :process?): the process tests its change reaches,
  ;; which its merge runs on a checkout (root's ruling, 2026-10-22), never an agent's fork
  :seon.attempt/deferred [:set :qualified-symbol]
  ;; the merge gate's run of them on a checkout (seon.fx/run-tests): each test's status, as proofs'
