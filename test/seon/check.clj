@@ -861,6 +861,24 @@
     (out! (sedn/encode {:running (mapv :running rows) :stopped (mapv :stopped rows)}))
     (lib/c-exit (if (every? exact? rows) 0 1))))
 
+;; ---- the GC's sweepers ----------------------------------------------------------------
+
+(defn sweepers-held
+  "Six threads allocate while this one waits for 30 more collections; the last line is the EDN
+  {:sweepers n :collections n :gc-real-ms ms}: the sweepers this process has after collecting beside threads
+  that wait. Unfixed, Chez starts one per waiting thread and never stops it (our Chez,
+  S_collect_sweepers); 0 only when the pool was fixed before the first of them, which
+  seon.main/-main does first (seon.root-test/the-sweeper-pool-is-fixed-before-anything-collects)."
+  []
+  (let [stop (atom false)
+        c0 (:count (lib/gc-stats)) r0 (:real-ms (lib/gc-stats))
+        workers (doall (for [_ (range 6)] (future (loop [n 0] (if @stop n (do (vec (range 2000)) (recur (inc n))))))))]
+    (loop [] (when (< (- (:count (lib/gc-stats)) c0) 30) (recur)))
+    (reset! stop true)
+    (run! deref workers)
+    (out! (sedn/encode {:sweepers (lib/gc-sweepers! -1) :collections (- (:count (lib/gc-stats)) c0) :gc-real-ms (- (:real-ms (lib/gc-stats)) r0)}))
+    (lib/c-exit 0)))
+
 ;; ---- delivery (session F2): main's commits to the reconciler, messages to agents ------
 
 (defn drain
@@ -1472,6 +1490,7 @@
      "robust" (fn [n more] (robust))
      "lifecycle" (fn [n more] (lifecycle (n-or n "10")))
      "threads-declared" (fn [n more] (threads-declared (n-or n "3")))
+     "sweepers-held" (fn [n more] (sweepers-held))
      "drain" (fn [n more] (drain (n-or n "8")))
      "backpressure" (fn [n more] (backpressure (n-or n "8")))
      "contracts" (fn [n more] (contracts))

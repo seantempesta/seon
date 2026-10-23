@@ -67,7 +67,8 @@
  ;; log of commits a promoted standby is sent. Provenance: f2-final.
  :seon.config.root/standby-every 256
  ;; Unit: threads, Chez's parallel-collector sweepers in root, fixed at boot right after the
- ;; fork server is forked (seon.lib/gc-sweepers!). 0: root collects on the thread that triggers
+ ;; fork server is forked (seon.lib/gc-sweepers!; seon.main/-main fixed the pool at 0 before that, so the
+ ;; fork server never has one). 0: root collects on the thread that triggers
  ;; it. Provenance: session THREADS, 2026-10-21: unfixed, Chez kept one per thread a collection
  ;; found waiting, so root's count drifted with load (0, 5, 15 across identical runs); A/B at
  ;; 0/2/4/8 gave the same GC real time, GC CPU rising with n, threads 37/39/41/45. At the bound: none.

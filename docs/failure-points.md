@@ -96,8 +96,10 @@ Three rules of the OS and Chez that no code may "fix" by adding a thread or a ch
   (`seon.sock`), and only root, which never forks after boot, holds `jolt.async.remote`
   ends with pumps. `bin/check threads` counts the OS threads of the fork server and of an
   agent. The real fix is a Chez atfork handler that resets the sweepers.
-  Root, which does hold threads, fixes its sweepers at boot, right after the fork server is
-  forked: `seon.lib/gc-sweepers!` (our Chez's `(cs)collect_sweepers`, branch
+  The binary's `-main` first fixes the pool at 0 (Chez never stops a sweeper it started, so a
+  collection beside a waiting thread before the fix leaves the count to timing; measured: `./seon
+  sweepers-held`, run in target/, ended at 6 sweepers unfixed), and root, which does hold threads, then fixes it at its
+  configured number at boot, right after the fork server is forked: `seon.lib/gc-sweepers!` (our Chez's `(cs)collect_sweepers`, branch
   ``jolt/gc-sweepers``) fixes them at `:seon.config.root/gc-sweepers`, 0 (measured: sweepers did
   not shorten root's small collections), and no collection starts one.
   Unfixed, Chez kept one per thread a collection found waiting, so root's thread count
