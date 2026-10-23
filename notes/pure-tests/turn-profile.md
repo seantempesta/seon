@@ -64,3 +64,28 @@ seon.program/reach-digests 3.1 s, 7.4 GB (an agent's test-plan calls it twice a 
 | writer-proc's unaccounted ~115 s | ~30 s per attempt | profile the writer's ops by kind (commit, branch-merge, :branch-diff): count and time per op | global-ids / dry-run |
 | reach-digests in every turn's test-plan, twice | 3.1 s, 7.4 GB each | queue in closure, edges once per call, base digests once per attempt, branch's only for what changed | pure-tests (with shrink2's brief3) |
 | the agent side (~250 s) | unknown | read an agent's own profile per eval (its records carry :fns) and the turn's splits | dry-run (turns) |
+
+## Against root's budget (a scripted calc turn: ~50-100 ms in all)
+
+Recorded splits, check step e2e-calc at the 2026-10-23 baseline (load 12-41; the example calc
+program, not Seon's own): the square task's two turns, `:square-splits` in e2e-calc.log.
+
+| row | budget (root) | turn 1 | turn 2 | over by |
+|---|---|---|---|---|
+| model call (scripted) | < 1 ms | 23 ms | 24 ms | 23x |
+| evals | < 1 ms each | 246 ms | 70 ms | 70-250x |
+| record (record-tx, ~2 forms; commit) | 2-5 ms | 34 ms | 4 ms | 1-7x |
+| tests (digests 1-10 + fork 5-20 + proofs ~20 ms) | ~50 ms | 1 536 ms | 4 387 ms | 30-90x |
+| context render | 10-50 ms | 428 ms | 858 ms | 9-17x |
+| a turn, sum | 50-100 ms | 2.3 s | 5.4 s | 25-50x |
+
+On Seon's own program (the loop above), an attempt costs 59-104 s with 0-1 model turns, and
+31-36 s even when the attempt ends at its first model call: the attempt's fixed cost (spawn,
+the fork, merge-main's three whole-program reads, the first observe's two reach-digests, the
+context) is far over any row here. Root's writer: 4 whole-program reads per attempt
+(seon.merge/program, 0.67 s each, where a three-way of a 2-form change needs ~ms: global-ids'
+delta-three-way measures 7-9 ms flat).
+
+The "~14 s per turn" is no configured budget: it is a measurement written in a comment
+(test/seon/source_test.clj:251). The configured bounds are tick budgets
+(:seon.config.agent/test-ticks and its siblings), work, not time.
