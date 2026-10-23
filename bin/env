@@ -1,5 +1,5 @@
-# bin/env — sourced by bin/test, bin/check and bin/root: where the runtime finds its native
-# libraries and its checkout.
+# bin/env — sourced by bin/build, bin/test, bin/check, bin/root, bin/ports, bin/worktree and
+# bin/cache-smoke: where the runtime finds its native libraries and its checkout, and Jolt's options.
 # LMDB: konserve.jolt.lmdb-ffi loads JOLT_LMDB_LIB, the robust-lock build bin/build makes
 # (bin/build lmdb). Every process on a store must load the same build: the lock scheme is
 # part of the lock file's format.

@@ -4,7 +4,7 @@
   branch that already holds n forms are a few index seeks, whatever n. Loading orders the
   forms in one pass over them and their references."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
             [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.program :as program] [clojure.java.shell :as sh]))
 
 (defn- acct
@@ -313,6 +313,8 @@
   ;; task jolt.backend/image-registration-is-opt-in: Seon writes no state image, so its compiles
   ;; register no fn literal's source for one (bin/env's JOLT_COMPILER_OPTIONS {:image-fn-forms
   ;; false}); registering rendered each literal's source, read it back, and wrapped it in a maker
+  (is (false? (:image-fn-forms *compiler-options*))
+      "this process compiles without image registration (bin/env's JOLT_COMPILER_OPTIONS): else the bytes below are registering's")
   (cost/proof
     {:of 'clojure.core/eval :input 'seon.program-cost-test/literals-of
      :n "fn literals in the defn"
