@@ -177,3 +177,16 @@ How: `bench/split.clj` at the REPL, niced, with the machine at load ~30.
 - Before, it cost about **2 s**, and `:branch-diff` cost another 2 s.
 - No writer op left reads the whole program. The one O(changes) step left is `program/load-changes!` in `main-commit`: root loads the forms that changed.
 - The turn's 40 platform facts stayed on the branch. 29 datoms merged: the new form, the var's repointing, and the transactions' facts.
+
+**The turn's contract gaps** (`seon.turn` added-gaps, `seon.merge/delta-changes`), on the same program and branch (`bench/gaps.clj`):
+- Before: 1,830–2,770 ms, the changes of two whole programs.
+- After: 6.2 ms in all:
+
+| part | cost |
+|---|---|
+| `datoms-diff` (69 datoms) | 2.7 ms |
+| `touched-keys`, the diff included | 3.7 ms |
+| `program-of`, both sides | 1.35 ms |
+
+- `entity-keys` used to read about six attributes of each touched entity through `d/entity`, and build `d/schema` twice (0.85 ms each). It now reads each entity's datoms with one `:eavt` seek, and cardinality from the db's rschema: 12.7 → 6.2 ms.
+- The floor is the diff, which grows with the change, never with the program.
