@@ -38,9 +38,26 @@
 ;; ---- the judge (pure) -----------------------------------------------------------------
 
 (def slack
-  "Each dimension is red above this multiple of its estimate. Bytes and calls are exact on
-  one thread (allocation is counted, not sampled); wall time moves with the machine's load."
-  {:ns 3.0 :bytes 1.25 :calls 1.0})
+  "Each dimension is over above this multiple of its estimate. Ticks, bytes and calls are
+  counted exactly on one thread, so their slack is the estimate's own imprecision (an
+  estimate priced from unit operations leaves out a function's overheads: ticks get time's
+  old 3x); CPU time moves with the machine's load."
+  {:ticks 3.0 :ns 3.0 :bytes 1.25 :calls 1.0})
+
+(def exact
+  "The dimensions a verdict is decided on: counted, so the same code on the same input
+  measures the same on any machine at any load, and a green is a function of its reach
+  digest (AGENTS.md section 5, results reused by input digest). Cost is work done: ticks
+  (the time dimension: jolt.host/ticks-of, in Jolt's pin; judged wherever an estimate and a
+  measure both have them, and once does not measure them yet), bytes and calls. An estimate with
+  none of them both stated and measured is red (:uncounted). CPU time (:ns) moves with load
+  (158 to 210 us for one function between load 10 and 17, check-events 2026-10-23): it is
+  measured, recorded and shown, never red."
+  #{:ticks :bytes :calls})
+
+(def dimensions
+  "The measured dimensions, in the order a verdict shows them."
+  [:ticks :ns :bytes :calls])
 
 (def steeper-by
   "A dimension is steeper when its fitted exponent exceeds its growth's own exponent over
@@ -85,8 +102,9 @@
   {:malli/schema [:=> [:cat :seon.cost/estimate [:map-of :keyword :seon.cost/unit]] :seon.cost/dims]}
   [e u]
   (let [derived (reduce (fn [acc [op k]]
-                          (if-let [{:keys [ns bytes]} (get u op)]
-                            (-> acc (update :ns (fnil + 0.0) (* k ns)) (update :bytes (fnil + 0.0) (* k bytes)))
+                          (if-let [{:keys [ticks ns bytes]} (get u op)]
+                            (cond-> (-> acc (update :ns (fnil + 0.0) (* k ns)) (update :bytes (fnil + 0.0) (* k bytes)))
+                              ticks (update :ticks (fnil + 0.0) (* k ticks)))
                             acc))
                         {} (:ops e))]
     (merge derived (:per-n e))))
@@ -96,7 +114,7 @@
   {:malli/schema [:=> [:cat :seon.cost/estimate [:map-of :keyword :seon.cost/unit] pos-int?] :seon.cost/dims]}
   [e u n]
   (let [p (per-unit e u) f (:fixed e {}) w (work (:growth e) n)]
-    (into {} (for [d [:ns :bytes :calls] :when (or (contains? p d) (contains? f d))]
+    (into {} (for [d dimensions :when (or (contains? p d) (contains? f d))]
                [d (+ (double (get f d 0.0)) (* w (double (get p d 0.0))))]))))
 
 (defn judge
@@ -107,26 +125,31 @@
         ratio (fn [{:keys [measured expected]} d]
                 (let [m (get measured d) x (get expected d)]
                   (when (and (some? m) (some? x)) (if (pos? x) (/ (double m) x) (if (pos? m) Double/POSITIVE_INFINITY 1.0)))))
-        over (vec (for [r rows d [:ns :bytes :calls] :when (dims d)
+        over (vec (for [r rows d dimensions :when (dims d)
                         :let [q (ratio r d)] :when (and q (> q (slack d)))]
                     {:dim d :n (:n r) :ratio q}))
         fixed (:fixed e {})
         allowed (+ steeper-by (exponent (for [r rows] [(:n r) (work (:growth e) (:n r))])))
-        steeper (vec (for [d [:ns :bytes :calls] :when (dims d)
+        steeper (vec (for [d dimensions :when (dims d)
                            :let [pts (for [r rows :let [m (get-in r [:measured d])] :when m] [(:n r) (- m (get fixed d 0.0))])]
                            :when (>= (count pts) 2)
                            :let [x (exponent pts)] :when (> x allowed)]
                        {:dim d :exponent x :allowed allowed}))
         largest (peek rows)
-        under (vec (for [d [:ns :bytes :calls] :when (dims d)
+        under (vec (for [d dimensions :when (dims d)
                          :let [q (when largest (ratio largest d))] :when (and q (< q loose))]
                      {:dim d :n (:n largest) :ratio q}))
-        unmeasured (vec (for [d [:ns :bytes :calls] :when (and (dims d) (seq rows) (every? #(nil? (get-in % [:measured d])) rows))] d))
+        unmeasured (vec (for [d dimensions :when (and (dims d) (seq rows) (every? #(nil? (get-in % [:measured d])) rows))] d))
         held? (when-let [{:keys [measured]} (:overrun e)]
-                (and largest (every? (fn [[d m]] (<= (get-in largest [:measured d] 0.0) (* ratchet m))) measured)))]
-    (cond-> {:ok? (or (and (empty? over) (empty? steeper)) (boolean held?))
+                (and largest (every? (fn [[d m]] (or (not (exact d)) (<= (get-in largest [:measured d] 0.0) (* ratchet m)))) measured)))
+        red? (fn [fs] (some (comp exact :dim) fs))
+        ;; a verdict needs a counted dimension both estimated and measured: one judged on time
+        ;; alone could never be red (time is shown, never red)
+        uncounted? (not-any? #(and (exact %) (dims %) (not (some #{%} unmeasured))) dimensions)]
+    (cond-> {:ok? (and (not uncounted?) (or (not (or (red? over) (red? steeper))) (boolean held?)))
              :over over :steeper steeper :under under :unmeasured unmeasured}
-      (and held? (or (seq over) (seq steeper)))
+      uncounted? (assoc :uncounted true)
+      (and held? (or (red? over) (red? steeper)))
       (assoc :accepted {:task (:task (:overrun e)) :over over :steeper steeper}))))
 
 ;; ---- measuring ----------------------------------------------------------------------------
@@ -176,8 +199,8 @@
 
 (defn run
   "Estimate e measured: its function on its input at each size (sizes, under
-  :seon.config.proofs/cost-max-n), ascending, stopping after the first size over its estimate.
-  Answers {:rows :verdict}."
+  :seon.config.proofs/cost-max-n), ascending, stopping after the first size over its estimate
+  in an exact dimension. Answers {:rows :verdict}."
   {:malli/schema [:=> [:cat :seon.cost/estimate] [:map [:rows [:vector :seon.cost/row]] [:verdict :seon.cost/verdict]]]}
   [e]
   (let [f @(requiring-resolve (:of e)) input @(requiring-resolve (:input e))]
@@ -186,7 +209,7 @@
         {:rows rows :verdict (judge e rows)}
         (let [row {:n n :measured (measure f (vec (input n))) :expected (expected e units n)}
               rows (conj rows row)]
-          (if (and (nil? (:overrun e)) (seq (:over (judge e [row]))))
+          (if (and (nil? (:overrun e)) (not (:ok? (judge e [row]))))
             {:rows rows :verdict (judge e rows)}
             (recur more rows)))))))
 
@@ -200,20 +223,23 @@
 
 (defn verdict-lines
   "A cost verdict as [class words] lines, red first: within or over its estimate, each size
-  over it (and the slack allowed), each dimension grown steeper than the work needs, loose
+  over it (and the slack allowed), each dimension grown steeper than the work needs (time's
+  shown as a finding: it is never red, `exact`), loose
   estimates and unmeasured dimensions as findings, an accepted overrun, and, with its
   estimate e, a regression past the recorded overrun. The one wording of a verdict: the
   agent's text (`explain`) and the page's verdict box (seon.render.ui/verdict-box)."
   {:malli/schema [:=> [:cat :seon.cost/verdict [:maybe :seon.cost/estimate]] [:sequential [:tuple :string :string]]]}
-  [{:keys [ok? over steeper under unmeasured accepted]} e]
+  [{:keys [ok? over steeper under unmeasured accepted] :as v} e]
   (concat [[(if ok? "ok" "bad") (if ok? "within estimate" "OVER ESTIMATE")]]
           (for [{:keys [dim n ratio]} over]
-            ["bad" (str "OVER: " (name dim) " at n=" n " is " (format "%.2f" ratio) "x its estimate (allowed " (slack dim) "x).")])
+            [(if (exact dim) "bad" "muted") (str (if (exact dim) "OVER: " "TIME OVER (measured, not red): ") (name dim) " at n=" n " is " (format "%.2f" ratio) "x its estimate (allowed " (slack dim) "x).")])
           (for [{:keys [dim exponent allowed]} steeper]
-            ["bad" (str "STEEPER: " (name dim) " grew as n^" (format "%.2f" exponent) "; " (if-let [g (:growth e)] (str (name g) " allows") "the estimate allows") " n^"
+            [(if (exact dim) "bad" "muted") (str (if (exact dim) "STEEPER: " "TIME STEEPER (measured, not red): ") (name dim) " grew as n^" (format "%.2f" exponent) "; " (if-let [g (:growth e)] (str (name g) " allows") "the estimate allows") " n^"
                         (format "%.2f" allowed) ". Something does more passes over the data than the work needs.")])
           (for [{:keys [dim n ratio]} under] ["muted" (str "LOOSE: " (name dim) " at n=" n " is " (format "%.2f" ratio) "x its estimate: tighten the estimate.")])
           (for [d unmeasured] ["muted" (str "NOT MEASURED: " (name d) ".")])
+          (when (:uncounted v)
+            [["bad" "NO COUNTED DIMENSION: the estimate states no bytes, calls or ticks that were measured; time alone is never red, so the proof could not fail."]])
           (when-let [{:keys [task]} accepted]
             [["muted" (str "OVERRUN accepted while task " task " is open (within " ratchet "x of "
                            (if-let [m (:measured (:overrun e))] (print/text m (:part print/budgets)) "the overrun its task recorded") "): it is that task's work.")]])
@@ -225,7 +251,7 @@
   agent reads."
   {:malli/schema [:=> [:cat :seon.cost/estimate [:vector :seon.cost/row] :seon.cost/verdict] :string]}
   [e rows v]
-  (let [dims (filter (set (mapcat (comp keys :expected) rows)) [:ns :bytes :calls])]
+  (let [dims (filter (set (mapcat (comp keys :expected) rows)) dimensions)]
     (str/join "\n"
       (concat
         [(str (:of e) ", N = " (:n e) ". The work: " (:work e) " (" (name (:growth e)) ").")
@@ -258,8 +284,9 @@
   per char it showed was the String's seq, not the StringBuilder; :fn/armed-call and the
   pull rows re-measured on Jolt 00a3b321, J3's try/catch: 990 -> 354 B per armed call), per unit: estimates price their :ops with these.
   seon.cost-test/the-unit-table-is-current measures them again (seon.cost-test/unit-benches)
-  and is red when a row has drifted past 3x, naming the row it measured, so estimates stay
-  derived from today's physics."
+  and is red when a row's bytes have drifted past 1.25x, naming the row it measured, so
+  estimates stay derived from today's physics. :ns is CPU time, shown, never judged; each row
+  gains :ticks (jolt.host/ticks-of) when once measures them."
   {:seq/reduce {:ns 1.4 :bytes 0.0 :what "one step of reduce over a vector"}
    :fn/call {:ns 7.4 :bytes 0.0 :what "a reduce step calling one plain function, both defined at the REPL"}
    :fn/armed-call {:ns 32.8 :bytes 353.53 :what "a reduce step calling one contracted function ([:=> [:cat :int] :int])"}

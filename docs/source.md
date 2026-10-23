@@ -50,6 +50,15 @@ An agent holds main's whole suite (the fork server loads test/ like any imported
 
 Not this: a hand list of the tests a change touches, or a result keyed by time or by checkout path. What the digest does not see: a test reading files through a reader outside `tree-readers`, or resolving a var by a name it builds at run time (not a quoted symbol), is digested without it; digesting the branch costs a pass over its live forms per run (about 0.7 s on src and test; the base is digested once); `bin/test` imports no schema resources, so schemas reach its tests through `:env` (all of resources/, which also declares the store's attributes); the import costs about 8 s per run.
 
+
+### A result is a function of its digest
+
+A green is reused forever, by any checkout or agent, so everything a result depends on is in its digest or out of the test (worktree session pure-tests, 2026-10-23; `notes/pure-tests/FINDINGS.md`):
+- **Seeds.** A generative check draws from a seed derived from its digest (```seon.proofs/seed```: the parts and `:seon.config.proofs/seed-salt`; ```seon.proofs/test-seed``` for the running test, bound by ```seon.proofs/run-tests!```; each mg-check contract from its var and the step's digest), so the same digest checks the same cases and a code change draws new ones; a failure prints its seed and a reproduction form. Before, mg/check drew from the wall clock (our malli fork ignored `:seed`; fixed on its `jolt/mg-seed`).
+- **Work, not time.** A cost proof is judged on ticks, bytes and calls (```seon.cost/exact```, [cost](cost.md)); CPU time is shown, never red.
+- **Dependencies as they are.** A submodule with uncommitted edits is in `:env` by its content (```seon.fx/pin```: HEAD and the tree of its files), as bin/build builds it; a clean one is its gitlink.
+- **The tree held.** A shard stores only if the tree is the plan's before and after its run.
+- Still open, each with its fix in the findings: shard co-residency (a test leaving a thread or process state behind), the kept stores in `target/`, the inherited environment, render functions named by symbol in schemas, and deadlines and picked ports (which can only turn a result red).
 ## Schemas at the REPL
 
 An agent changes a schema the way `defn` changes a function: `(my.schema/register! k form)` on its branch (v1's ``seon.schema/register!``). The registration is judged against the whole population, the binary's forms with the branch's changes and this one: a form that is no EDN data, does not compile (a name resolving to nothing), or declares an attribute Datahike cannot store is refused as data (`:seon.schema/registration-refused`, naming why), and nothing is written. Accepted, the entry is written on the branch without `:schema/source` (the binary does not hold it), in the resource it came from, or for a new key the resource holding most keys of its namespace; a new or changed attribute's Datahike declaration comes with it, so the branch can store its facts at once. A key in a scratch namespace (`user`, the agent's own) gets no resource: it is seen at the REPL and is no program.

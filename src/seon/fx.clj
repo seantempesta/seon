@@ -140,18 +140,36 @@
       (git! env root ["write-tree"] nil)
       (finally (.delete idx)))))
 
+(defn pin
+  "What a build or a test reads from the checkout at dir (a submodule), by content: its HEAD
+  when its files are HEAD's, else HEAD+ the tree-id of its files as they are, so an
+  uncommitted edit in a dependency is an input like a committed one (bin/build's pin computes
+  the same, and builds it)."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [dir]
+  (let [head (git! {} dir ["rev-parse" "HEAD"] nil)]
+    (if (str/blank? (git! {} dir ["status" "--porcelain" "-uall" "--ignore-submodules=all"] nil))
+      head
+      (str head "+" (tree-id dir)))))
+
 (defn inputs
   "The one producer of the checkout at root's inputs that have no program facts, for bin/test
   and for root's :source read (read-source, which records them for its agents):
   {:tree (tree-id: every file and pin, for a test reading files or running the binary) :env
-  (every test's: the tree's env-input? entries, every submodule's pin, Jolt's included, and
+  (every test's: the tree's env-input? entries, every submodule's pin (its files as they are),
+  Jolt's included, and
   the config in force, config-input) :data-refs (declared-refs of its system.edn)}, by
   relative paths and content, so the same content at another path is the same inputs."
   {:malli/schema [:function [:=> [:cat :string] :seon.program/inputs] [:=> [:cat :string :map :string] :seon.program/inputs]]}
   ([root] (inputs root cfg/config (cfg/checkout)))
   ([root cfg checkout]
    (let [tree (tree-id root)
-         entries (for [l (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil)) :let [[_ p] (str/split l #"\t" 2)] :when (env-input? p)] l)]
+         entries (for [l (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil)) :let [[m p] (str/split l #"\t" 2)] :when (env-input? p)]
+                   ;; a submodule by its pin: its files as they are, an uncommitted edit included
+                   ;; (a clean one's line is its gitlink's, as before; one not checked out has no files to read)
+                   (let [d (str root "/" p)
+                         pn (when (and (str/starts-with? m "160000") (.exists (java.io.File. d ".git"))) (pin d))]
+                     (if (and pn (str/includes? pn "+")) (str l " " pn) l)))]
      {:tree tree
       :env (err/digest (str/join "\n" (concat entries [(config-input cfg checkout)])))
       :data-refs (declared-refs (str root "/resources/seon/system.edn"))})))

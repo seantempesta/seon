@@ -282,8 +282,9 @@
     (is (= :hold (:op (first (r/reconcile (db-of two :extra (concat merged-x (y 150))))))))))
 
 (deftest contracts-are-checked
-  ;; dev/test.clj arms every contract before the tests run: a call outside its contract is
-  ;; refused at entry with the one error map
+  ;; with the contracts on (:seon.config.contract/guarantees, config: in every digest), a call
+  ;; outside its contract is refused at entry with the one error map. (It read an inherited
+  ;; PROTO_GUARANTEES, an input no digest held; pure-tests 2026-10-23.)
   (when contract/on?
     (is (= :seon.instrument/contract-error
            (:seon.error/type (try (task/task-id "not-a-symbol" "x") (catch Exception e (ex-data e))))))))

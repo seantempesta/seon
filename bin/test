@@ -37,7 +37,9 @@ if (( ${#F} )) || [[ -s $OUT/steps ]]; then
   nice -n 15 "$ROOT/bin/build" seon > "$OUT/build.log" 2>&1 || { tail -5 "$OUT/build.log"; echo "TEST FAILED (bin/build seon: $OUT/build.log)"; exit 1 }
 fi
 st=0 P=()
-for f in $F; do runner --shard "$f" > "${f%.edn}.log" 2>&1 & P+=($!); done
+# each shard's wall and CPU seconds kept beside its log (shard-<i>.time); its tests' own in their results (:ms)
+TIMEFMT='real %E user %U sys %S'
+for f in $F; do { time (runner --shard "$f" > "${f%.edn}.log" 2>&1) } 2> "${f%.edn}.time" & P+=($!); done
 for (( i = 1; i <= ${#F}; i++ )); do
   f=$F[$i] log=${F[$i]%.edn}.log
   wait $P[$i]; s=$?

@@ -139,9 +139,10 @@
         notes (atom [])
         ran (proofs/run-tests! tests dg #(swap! notes conj %))
         unstored (proofs/store-greens! #(fx/write-file {:req %}) dir ran)]
-    (is (= [["app.pv-calc-test/add-test" "app.pv-calc-test/twice-test"] ["app.pv-neg-test/neg-test"] ["app.pv-red-test/red-test" "app.pv-red-test/fixture-test"]]
-           (sort-by first (map #(mapv str %) (runner/shards tests 3)))) "a namespace's tests stay in one shard")
-    (is (= 2 (count (runner/shards tests 2))) "never more shards than jobs")
+    (is (= [["app.pv-calc-test/add-test" "app.pv-calc-test/twice-test"] ["app.pv-neg-test/neg-test"] ["app.pv-red-test/fixture-test" "app.pv-red-test/red-test"]]
+           (sort-by first (map #(sort (mapv str %)) (runner/shards tests 3 (zipmap tests [1 1 1 1 2])))))
+        "a namespace within its share of the measured ms stays in one shard")
+    (is (= 2 (count (runner/shards tests 2 {}))) "never more shards than jobs")
     (is (= [] unstored) "every green written")
     (is (= (set tests) (set (keys ran))) "every test has a result")
     (is (= {:pass 0 :fail 1 :error 0} (select-keys (ran 'app.pv-red-test/red-test) [:pass :fail :error])))
@@ -169,6 +170,15 @@
     (is (some #(and (= 'app.pv-fx-test/never-runs (:test %)) (= :error (:type (:seon.test/report %)))) @notes) "the unreported test is reported, as an error")
     (is (re-find #"the fixture's store is gone" (:message t)) "the throw's own message, not a guess")
     (is (= "{:store :gone}" (:data t)) "and its data")))
+
+(deftest shards-are-dealt-by-measured-work
+  ;; pure-tests 2026-10-23: dealt by count, the full run's shards ended 437, 397, 110 and 68 s
+  ;; into it; by each test's last measured ms they end together
+  (is (= '#{[x/a] [y/b y/c z/d]} (set (runner/shards '[x/a y/b y/c z/d] 2 '{x/a 10 y/b 3 y/c 3 z/d 3})))
+      "the longest alone, the rest together")
+  (is (= '#{[p/a p/c q/e] [p/b p/d]} (set (runner/shards '[p/a p/b p/c p/d q/e] 2 '{p/a 5 p/b 5 p/c 5 p/d 5 q/e 1})))
+      "a namespace longer than a shard's share is split into share-sized parts")
+  (is (= 2 (count (runner/shards '[x/a y/b y/c] 2 '{x/a 10}))) "a test never measured counts as the mean of those measured"))
 
 (deftest a-tree-changed-since-the-plan-stores-nothing
   ;; re-review 2026-10-22: a shard requires its namespaces from disk seconds or minutes after the
