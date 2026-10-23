@@ -380,9 +380,9 @@
 
 (deftest an-open-problem-its-work-caused-refuses-done
   ;; notes/health-design-2026-10-23.md: recorded at its end (seon.problems/caused), refused by
-  ;; the done rule, so a refinement attaches naming it; its evaluations were never refused
+  ;; the done rule, so the task is held for root naming it; its evaluations were never refused
   (let [msg "docs/x.md#y cites app/f, which names nothing"]
-    (is (= [{:op :attach :attempt "demo/a#1" :task "demo/a"
+    (is (= [{:op :hold :attempt "demo/a#1" :task "demo/a"
              :problem (str "attempt demo/a#1 ended green: open-problem " msg)}]
            (r/reconcile (db-of diamond :extra (attempt "a" 1 :ended :outcome :green :results {(t "a") :pass} :caused [msg])))))
     (is (= [{:refusal :open-problem :key msg}]
