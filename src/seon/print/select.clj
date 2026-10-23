@@ -545,7 +545,9 @@
 
 (defn- fill-members
   "Sequence or set `node` within `budget`: whole members in order while each fits beside the one
-  cut that follows them; the first that does not fit is allotted what is left when that shows part of it."
+  cut that follows them; the first that does not fit is allotted what is left when that shows part of it.
+  A first member that shows no part is shown at its least when that fits, so a node shows its first
+  member whenever its least form fits (select's floor)."
   {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc number?] :seon.print/alloc]}
   [context node budget]
   (let [sep (separator context node)]
@@ -561,9 +563,13 @@
                           (whole context member (- budget (:ub (sized context (assoc node :kids kids :pending nil))) sep)))))
             part (when (and member (not shown))
                    (let [allotted (allot context member cap)]
-                     (when (and (<= (:ub allotted) cap) (shows? allotted)) allotted)))]
+                     (when (and (<= (:ub allotted) cap) (shows? allotted)) allotted)))
+            least (when (and member (not shown) (not part) (empty? kids))
+                    (let [with-least (sized context (assoc node :kids [(minimal context member)] :pending more))]
+                      (when (<= (:ub with-least) budget) with-least)))]
         (cond
           part (sized context (assoc node :kids (conj kids part) :pending more))
+          least least
           (nil? shown) (cut)
           more (recur (conj kids shown) (+ spent sep (:ub shown)) more)
           :else (let [complete (sized context (assoc node :kids (conj kids shown) :pending nil))]
