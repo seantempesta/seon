@@ -529,7 +529,7 @@
 (defn topo
   "nodes in dependency order: each after the nodes among them it needs (deps), the rest in
   the order of k; a cycle is broken at the node first by k. One visit per node and edge."
-  {:malli/schema [:=> [:cat [:sequential :any] :seon.host/fn :seon.host/fn] [:vector :any]]}
+  {:malli/schema [:=> [:cat [:sequential :any] ifn? ifn?] [:vector :any]]}
   [nodes deps k]
   (let [in? (set nodes)]
     (:order (reduce (fn visit [st n]

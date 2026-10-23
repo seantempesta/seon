@@ -559,6 +559,17 @@
       (is (= #{"ns rfc.c" "ns rfc.o0"} (written (source/refresh-tx hdb (assoc renamed "src/rfc/o0.clj" (str/replace (source/file-text hdb 'rfc.o0) "(c/f9 x)" "(c/f8 x)")))))
           "a renamed function changes the interface: its dependents are read again"))))
 
+(defn file-of
+  "seon.source/file-text's arguments: a db whose namespace app.ft holds n functions, each
+  calling the one before it, and a helper recorded at a REPL after the first function, which
+  now calls it (the write-back moves it before its user)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :symbol]]}
+  [n]
+  (let [text (apply str "(ns app.ft)\n" (for [i (range n)] (str "\n(defn f" i " [x] " (if (zero? i) "x" (str "(f" (dec i) " x)")) ")\n")))
+        db0 (empty-db)
+        db (d/db-with db0 (source/import-tx db0 {"src/app/ft.clj" text}))]
+    [(pt/record db 'app.ft "(defn- h [x] x)" 'app.ft "(defn f0 [x] (h x))") 'app.ft]))
+
 (def ^:private refresh-sizes
   "Forms in the other files: a fixed change costs the same at each."
   [10 100 1000])
@@ -617,8 +628,7 @@
   ;; namespace, unless an earlier form declares it, and leaves a file in that order as it is
   (let [db0 (empty-db)
         db (d/db-with db0 (source/import-tx db0 {"src/app/wb.clj" "(ns app.wb)\n\n(defn a [] 1)\n\n(defn b [] (a))\n"}))
-        db (d/db-with db (source/text-tx db 'app.wb "(defn- h [] 2)" nil))
-        db (d/db-with db (source/text-tx db 'app.wb "(defn a [] (h))" nil))
+        db (pt/record db 'app.wb "(defn- h [] 2)" 'app.wb "(defn a [] (h))")
         text (source/file-text db 'app.wb)]
     (is (< (str/index-of text "(defn- h") (str/index-of text "(defn a")) text)
     (is (< (str/index-of text "(defn a") (str/index-of text "(defn b")) "the rest keeps its order")
@@ -627,3 +637,14 @@
       (let [src "(ns app.wd)\n\n(declare g)\n\n(defn f [] (g))\n\n(defn g [] 3)\n"
             dbd (d/db-with db0 (source/import-tx db0 {"src/app/wd.clj" src}))]
         (is (= src (source/file-text dbd 'app.wd)))))))
+
+(deftest the-write-back-of-a-file-is-one-pass-over-its-forms
+  (cost/proof {:of 'seon.source/file-text :input 'seon.source-test/file-of
+               :n "functions in the namespace, each calling the one before it"
+               :work "per form: its row (seon.program/form-row: the entity and its definitions, refs and declares) and one visit in seon.program/topo"
+               :growth :linear
+               ;; measured 2026-10-23: 736k -> 60.6M ticks, 1.88 -> 153 MB, 51 -> 4,011 calls from 10 to 1,000 forms;
+               ;; main's file-text before the order: 727k -> 59.7M ticks, 1.80 -> 146 MB, 4,010 calls (the topo: +1.5% ticks, +5% bytes, one call)
+               :per-n {:ticks 62000.0 :bytes 157000.0 :calls 4.0}
+               :fixed {:ticks 150000 :bytes 400000 :calls 12}
+               :sizes [10 100 1000]}))
