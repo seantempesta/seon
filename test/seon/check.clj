@@ -558,7 +558,7 @@
          ;; an :embed worker holding the model: Metal's own threads, outside Jolt's roster
          model? (some #(get-in (ping sys %) [:state :open?]) (filter #(= "fx.embed" (namespace %)) (keys pm)))]
      (cond-> (update (declared-threads) :roster merge
-                     (cond-> {"async-mixed" mixed "seon-flow-errors" 1 "seon-fs-events" 1}
+                     (cond-> {"async-mixed" mixed "seon-fs-events" 1}
                        web? (assoc "clojure-agent-pool" 2)))
        model? (assoc :foreign (seon.config/value :seon.config.vector/model-threads))))))
 
