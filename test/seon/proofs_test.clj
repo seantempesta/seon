@@ -6,7 +6,7 @@
   stored."
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d]
             [seon.test-store :as ts] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
-            [seon.program-test :refer [record]] [seon.fx :as fx] [seon.config] [test-runner :as runner]))
+            [seon.program-test :refer [record]] [seon.fx :as fx] [seon.config] [seon.profile :as profile] [test-runner :as runner]))
 
 (defn- prog []
   (record (ts/test-db)
@@ -127,7 +127,11 @@
           named (runner/plan-of d "tests" false ["app.pt-shell-test"])]
       (is (= ['app.pt-calc-test/adds] (:run-tests auto)) "named nothing: the in-process test runs, the shelling one does not")
       (is (= ['app.pt-shell-test/shells] (:left auto)) "and the plan says it left that one out")
-      (is (= ['app.pt-shell-test/shells] (:run-tests named)) "named, it runs"))))
+      (is (= ['app.pt-shell-test/shells] (:run-tests named)) "named, it runs")
+      (testing "a plan of tests and check steps walks the program once: one reach graph serves both indexes"
+        (profile/begin!)
+        (runner/plan-of d "both" false nil)
+        (is (= 1 (some #(when (= 'seon.program/reach-graph (:var %)) (:calls %)) (profile/touched))))))))
 
 (deftest shards-split-by-namespace-and-each-result-is-stored
   (record (ts/test-db) 'user "(ns app.pv-red-test (:require [clojure.test :refer [deftest is use-fixtures]]))"
