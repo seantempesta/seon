@@ -63,7 +63,7 @@ The owner's example, root's message on main and the agent's reply on its branch,
 (d/q '[:find ?body ?reply ?branch :in $ ?agent
        :where [?m :seon.message/to ?agent] [?m :seon.message/id ?id] [?m :seon.message/body ?body]
               [?r :seon.message/reply-to ?id ?tx] [?r :seon.message/body ?reply] [?tx :seon.tx/branch ?branch]]
-     (my.root/union sys) "a1")
+     (my.root/union sys) "demo/f#1")
 ```
 
 Measured 2026-10-23 (REPL, LMDB, main 46,708 datoms, each branch one turn of ~15 datoms; notes/global-ids/bench/um.clj):
