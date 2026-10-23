@@ -306,7 +306,13 @@
 
 (defn from-db
   "The config root wrote on db (main, or any branch made from it since): every declared key
-  the root entity holds. What agents, the dashboard and the context read."
+  the root entity holds, each as its schema declares it. What agents, the dashboard and the
+  context read. A [:set T] key is a cardinality-many attribute (seon.schema.datahike/
+  declaration), which a pull answers as a vector: it is read back as the set it was (the
+  first set-valued key, :seon.config.source/process-vars, came back a vector, so the config
+  in force and main's copy of it differed)."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :map]]}
   [db]
-  (not-empty (d/pull db (keys-declared) [:seon.root/id :root])))
+  (let [schema (d/schema db)]
+    (not-empty (into {} (for [[k v] (d/pull db (keys-declared) [:seon.root/id :root])]
+                          [k (if (= :db.cardinality/many (get-in schema [k :db/cardinality])) (set v) v)])))))

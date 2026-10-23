@@ -272,6 +272,12 @@
  ;; responsive beside a standing root and other worktree sessions (measured in docs/merging.md#a-merge-runs-what-the-change-reaches).
  ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected.
  :seon.config.proofs/jobs 4
+ ;; Unit: the size n of a cost proof's input (seon.cost/sizes). A proof measures its sizes up to
+ ;; this, and at least its two smallest (a growth fit needs two). Provenance: root, 2026-10-23
+ ;; (notes/test-time-2026-10-23.md: building inputs at 10k took 10-19 s per proof in every run).
+ ;; bin/test --all sets SEON_COST_MAX_N=100000, so the full run measures each proof as written.
+ ;; At the bound: the proof measures no size past this but its two smallest.
+ :seon.config.proofs/cost-max-n #long #or [#env SEON_COST_MAX_N 1000]
 
  ;; ==== effects and the model ==================================================================
 
