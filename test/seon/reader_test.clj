@@ -55,7 +55,10 @@
    "I'll fix add now.\n(defn add [a b] (+ a b))"
    "Text\n```clojure\n(defn f [x]\n  (inc x)\n```\nMore text (with parens\n```clojure\n(f 1))\n```"
    "```\nRun this:\n(+ 1 2\n```\n" "```text\n(not code\n```" "  (indented\nprose at col 0\n  more)"
-   "(defn f \"doc\nwith a line starting ; and (\" [x] x)" ";; a comment (\n(+ 1 2)" ":k\n42\n1. item\n# Heading\n## Sub"])
+   "(defn f \"doc\nwith a line starting ; and (\" [x] x)" ";; a comment (\n(+ 1 2)" ":k\n42\n1. item\n# Heading\n## Sub"
+   ;; a reseed's counterexample (seed 449380042768857075): a backslash inside a token starts a character, so `\( is
+   ;; one form (syntax-quote of the character (), never an open paren to close
+   (apply str ["`" "\\" "("])])
 
 (defn- laws-hold? [t]
   (let [r (reader/forgive t)]

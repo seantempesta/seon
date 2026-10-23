@@ -119,7 +119,8 @@
 
 (defn- scan
   "One pass over a reply, line by line, with one stack of open delimiters (outside strings,
-  character literals and comments). A line is:
+  character literals and comments; a backslash anywhere in a token starts a character literal,
+  which takes the next character whatever it is, so `\\( is one form). A line is:
   - a fence line (``` first): it becomes a comment (`;; `), and is still known as a fence
     when read again. A clojure/clj/cljc/edn fence's body is code; another tag's is prose;
     an untagged one's (models fence prose too) goes by the rule below, as outside fences;
@@ -178,12 +179,19 @@
                                (.append out c)
                                (recur (inc i) (end! (update st :stack pop))))))
                          :else
-                         (let [end (loop [k (if (= c \\) (min n (+ i 2)) (inc i))]
-                                     (if (and (< k n) (not (delim? (.charAt line (int k))))) (recur (inc k)) k))
+                         ;; a token runs to the next delimiter; a backslash anywhere in it starts a
+                         ;; character literal, which takes the next character whatever it is (`\( is
+                         ;; syntax-quote and the character (, never a quote and an open paren)
+                         (let [[end lone?] (loop [k i]
+                                             (cond (>= k n) [k false]
+                                                   (= \\ (.charAt line (int k))) (if (< (inc k) n) (recur (+ k 2)) [n true])
+                                                   (delim? (.charAt line (int k))) [k false]
+                                                   :else (recur (inc k))))
                                tok (subs line i end)]
                            (.append out tok)
-                           ;; a closer after a lone backslash would be read as its character
-                           (recur end (if (= "\\" tok) st (end! st))))))))))
+                           ;; a closer after a lone backslash (one ending the line) would be read as its
+                           ;; character: it goes right before that backslash, after the rest of the token
+                           (recur end (if lone? (assoc st :code-end (dec (.length out))) (end! st))))))))))
         lines (str/split text #"\n" -1)]
     (loop [k 0 st {:stack [] :repairs [] :delimiters 0 :code-end 0 :in-str false :esc false :fenced nil}]
       (if (= k (count lines))
