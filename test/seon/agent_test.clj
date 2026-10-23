@@ -28,7 +28,7 @@
   ([forms {:keys [dirs proofs sets decls] :or {dirs ["src"] proofs '#{demo-test/t}}}]
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         main (str "in-agent-" (random-uuid))
-        store (str checkout "/target/runs/test-store")
+        store (ts/process-store checkout)
         path (str checkout "/target/runs/" main)
         _ (.mkdirs (java.io.File. (str path "-tasks")))
         _ (spit (str path "-tasks/demo.edn") (pr-str (into [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}] decls)))
@@ -65,7 +65,7 @@
   [code fork-server-first?]
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         main (str "root-ended-" (random-uuid))
-        store (str checkout "/target/runs/test-store")
+        store (ts/process-store checkout)
         runs (str checkout "/target/runs/" main "-runs")
         root (ts/start-root! {:store store :main main :runs runs})
         ask (fn [m] (ts/ask root m))
@@ -114,7 +114,7 @@
   ;; second byte, which fails the test.
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         main (str "proof-ended-" (random-uuid))
-        store (str checkout "/target/runs/test-store")
+        store (ts/process-store checkout)
         runs (str checkout "/target/runs/" main "-runs")
         fifo (str checkout "/target/runs/" main ".fifo")
         _ (sh/sh "mkfifo" fifo)
@@ -163,7 +163,7 @@
   ;; channel take, and the agent answers its next request
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         main (str "blocked-take-" (random-uuid))
-        store (str checkout "/target/runs/test-store")
+        store (ts/process-store checkout)
         runs (str checkout "/target/runs/" main "-runs")
         root (ts/start-root! {:store store :main main :runs runs})
         ask (fn [m] (ts/ask root m))

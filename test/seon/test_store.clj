@@ -27,6 +27,23 @@
   {:malli/schema [:=> [:cat] :string]}
   [] @program-store-path)
 
+(defn process-store
+  "The path of the one durable store the process tests' roots take a branch of (each its own
+  main): <checkout>/target/runs/test-store, made once by bin/test before any shard starts
+  (seon seed 0, as bin/check seeds its store), so no two shards' roots ever create it at once.
+  A root that found it missing created it (seon.db/open!), and another root starting in
+  another shard meanwhile saw its data file and opened a database not yet made: \"Database
+  does not exist\" (task seon.test-store/the-process-store-is-made-before-any-shard). A missing
+  store is refused, naming who makes it, never created here. checkout: default this process's."
+  {:malli/schema [:function [:=> [:cat] :string] [:=> [:cat :string] :string]]}
+  ([] (process-store (.getCanonicalPath (java.io.File. "."))))
+  ([checkout]
+   (let [path (str checkout "/target/runs/test-store")]
+     (when-not (pdb/store? path)
+       (throw (ex-info (str "no process store at " path ": bin/test makes it (seon seed 0) before any shard starts; run the test through bin/test")
+                       {:seon.error/type :seon.test-store/no-process-store :path path})))
+     path)))
+
 (defn test-db
   "The test store's seed as a db value (the schema and about 2,000 datoms of the example
   program), for a test that only reads or uses d/db-with: no branch is made."
