@@ -198,13 +198,13 @@
                        'app.pt-mm "(defrecord Circle [r] Named (label [_] (str \"circle \" r)))"
                        'app.pt-mm "(defmethod area :circle [{:keys [r]}] (* 3 r r))")
         r (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program base #{}))
-        main (d/db-with base (pm/apply-tx base (into {} (for [[k [_ o]] (:ours r)] [k o]))))]
+        main (d/db-with base (pm/merge-tx base base branch (keys (:ours r)) #{}))]
     (is (= '#{[:ns app.pt-mm] [:var app.pt-mm/area] [:method app.pt-mm/area ":square"] [:method app.pt-mm/area ":circle"]
               [:var app.pt-mm/Named] [:var app.pt-mm/label] [:impl app.pt-mm/Named "String"]
               [:var app.pt-mm/Circle] [:var app.pt-mm/->Circle] [:var app.pt-mm/map->Circle]}
            (set (remove #(= :form (first %)) (keys (:ours r)))))
         "each definition is its own merge key: methods [multi dispatch], extensions [protocol type]")
-    (is (= [] (pm/unmerged main (pm/program main #{}))))
+    (is (= [] (pm/unmerged main)))
     (remove-ns 'app.pt-mm)
     (is (= [] (:errors (program/load-all! main))) "main loads the merged forms from nothing")
     (is (= [16 27] [((resolve 'app.pt-mm/area) {:shape :square :s 4}) ((resolve 'app.pt-mm/area) {:shape :circle :r 3})]))
@@ -257,6 +257,22 @@
         "add changed: exactly the tests reaching it moved (sum3-test through sum3), neg-test kept its digest")
     (is (not= before (select-keys (program/reach-digests db {:env "e2" :tree "t"}) calc-tests))
         "the inputs without program facts are in every digest")))
+
+(deftest an-update-gives-the-digests-a-rebuild-gives
+  (let [db (calc-db)
+        in {:env "e" :tree "t"}
+        g (program/reach-graph db nil)
+        db' (record db 'app.pt-calc "(defn add [a b] (+ b a))")
+        g' (program/reach-update g db')
+        db'' (record db' 'app.pt-calc "(defn neg [x] (- 0 x))")]
+    (is (= (program/reach-index db' in) (program/graph-index g' in nil)) "the update and the rebuild agree")
+    (is (not= (program/graph-index g in nil) (program/graph-index g' in nil)) "and the change moved them")
+    (is (< (:affected g') (count (:rows g'))) "only add's component and what reaches it were re-folded")
+    (is (= (program/reach-index db'' in) (program/graph-index (program/reach-update g db'') in nil))
+        "two changes since the base, from the base's graph")
+    (is (= (program/graph-index g in nil) (program/graph-index (program/reach-update g db) in nil)) "no change: the same")
+    (is (= (program/reach-index db in) (program/graph-index (program/reach-update (program/reach-update g db'') db) in nil))
+        "and back: a later value's graph updated to an older one (a resumed branch's base) is the older one's")))
 
 (deftest a-second-run-with-nothing-changed-runs-nothing
   (let [db (calc-db)
@@ -415,16 +431,16 @@
         main (d/db-with base [{:db/id (e base 'app/f) :var/form "f2"} {:db/id "f2" :form/id "(def f 2)" :form/src "(def f 2)"}
                               {:db/id "g" :var/name 'app/g :var/form "g1"} {:db/id "g1" :form/id "(def g 1)" :form/src "(def g 1)"}
                               {:schema/key :app/k :schema/form ":string"}])
-        ;; the branch first writes entities of its own, so its ids differ from main's
+        ;; the branch first writes entities of its own; identities still take their content ids
         own (d/db-with base (vec (for [i (range 5)] {:db/id (str "x" i) :form/id (str "(comment " i ")") :form/src "x"})))
-        ;; it adds h, then merges main: main's forms by content, under the branch's own ids
+        ;; it adds h, then merges main: main's forms by content, at the same content ids
         merged (d/db-with own [{:db/id "h" :var/name 'app/h :var/form "h1"} {:db/id "h1" :form/id "(def h 1)" :form/src "(def h 1)"}
                                {:db/id (e own 'app/f) :var/form "bf2"} {:db/id "bf2" :form/id "(def f 2)" :form/src "(def f 2)"}
                                {:db/id "bg" :var/name 'app/g :var/form "bg1"} {:db/id "bg1" :form/id "(def g 1)" :form/src "(def g 1)"}
                                {:schema/key :app/k :schema/form ":string"}])
         form-e (fn [db v] (:db/id (:var/form (d/entity db (e db v)))))]
-    (is (not= (form-e main 'app/f) (form-e merged 'app/f)) "f's form is another entity on each side")
-    (is (not= (e main 'app/g) (e merged 'app/g)) "and so is g")
+    (is (= (form-e main 'app/f) (form-e merged 'app/f)) "f's form is one entity on both sides")
+    (is (= (e main 'app/g) (e merged 'app/g)) "and so is g")
     (is (= {:added ['app/h]} (program/divergence main merged)) "only h, the branch's own")
     (is (= #{'app/h} (program/changed-vars main merged)) "and the tests it reaches are h's")))
 
@@ -522,7 +538,7 @@
                                      :seon.config.source/root here :seon.config.source/dirs ["src" "test"]
                                      :seon.config.source/test-results-dir "/x/results")))
         "a root's own main, store, source and results directory are no input")
-    (is (not= (env cfg) (env (assoc cfg :seon.config.store/eid-lease 50))) "a bound a test runs under is one")
+    (is (not= (env cfg) (env (assoc cfg :seon.config.store/branching-factor 32))) "a bound a test runs under is one")
     (is (= (:env (fx/inputs here cfg here))
            (:env (fx/inputs here (assoc cfg :seon.config.root/runs-dir "/elsewhere/runs") "/elsewhere")))
         "a path under the checkout is the same input in any checkout")))

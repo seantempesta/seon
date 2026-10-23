@@ -517,6 +517,68 @@
     (is (not (str/includes? (:content (second ms)) "use demo/g")) "not in the cached attempt sections")
     (is (not (contains? (context/current-state db (task-f db) {:turn 1 :max-turns 4}) :messages)) "none delivered: no section")))
 
+(deftest an-error-shows-what-its-contract-says
+  ;; a contract refusal is data (its problems, the fix): the transcript shows that, not only
+  ;; the message (the step E dry run's agent read "invalid-input: its arguments do not
+  ;; satisfy its contract" with no word of which, 2026-10-22)
+  (let [em {:seon.error/type :seon.instrument/contract-error :seon.error/operation 'seon.e2e/agents-reused
+            :seon.error/member :malli.core/invalid-output
+            :seon.error/message "seon.e2e/agents-reused invalid-output: its value does not satisfy its contract"
+            :seon.error/fix "Fix seon.e2e/agents-reused (the producer), or its contract."
+            :seon.error/problems [{:path [0] :in [0] :expected :keyword :value nil}]}
+        text (context/evaluations-text [{:id 0 :tag :err :form "(seon.e2e/agents-reused db)" :printed (:seon.error/message em) :err em}])]
+    (is (str/includes? text ":expected :keyword") text)
+    (is (str/includes? text "Fix seon.e2e/agents-reused") text)
+    (is (= 1 (count (re-seq #"its value does not satisfy" text))) "the message once")))
+
+(deftest a-turns-reasoning-goes-back-with-its-reply
+  ;; DeepSeek's thinking mode with tools needs each earlier reply's reasoning_content sent back
+  ;; (a 400 otherwise): the scrollback's assistant message carries the turn's recorded reasoning
+  (let [db (db-with-program)
+        block (context/current-state db (task-f db) {:turn 1 :max-turns 4})
+        msgs (context/messages "H" block [{:attempt "A" :reply "f triples." :reasoning "Square it first."
+                                           :calls [{:id "c1" :code "(f 3)" :evals "9"}]}])
+        assistant (first (filter #(= "assistant" (:role %)) msgs))]
+    (is (= "Square it first." (:reasoning assistant)))
+    (is (not-any? :reasoning (remove #{assistant} msgs)))))
+
+(deftest an-unknown-proof-says-what-to-write
+  ;; a proof with no result: the refusal names the deftest to write in its namespace and how
+  ;; to run it (the dry run's agents read `{:reason :proof-unknown}` and searched for 25 turns)
+  (let [db (db-with-program)
+        b (context/current-state db (task-f db) {:results {} :reasons [{:reason :proof-unknown :symbol 'demo-test/f-test}] :turn 1 :max-turns 4})
+        r (first (:refused b))]
+    (is (= :proof-unknown (:reason r)))
+    (is (= 'demo-test/f-test (:test r)))
+    (is (re-find #"deftest f-test" (pr-str (:do r))) (pr-str r))
+    (is (re-find #"run-test" (pr-str (:do r))) (pr-str r))))
+
+(deftest a-turn-says-what-it-ran-what-the-judge-and-the-merge-run
+  ;; root's ruling (a), 2026-10-22: a turn runs the proofs and the tests the branch changed;
+  ;; the judge runs the reached in-process set at the attempt's end; the merge runs the
+  ;; process tests. The turn says each, and what runs the rest
+  (let [db (db-with-program)
+        b (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4
+                                                  :tests {:this-turn 2 :at-judge 40 :when-asked 3 :unfinished 1}})]
+    (is (= {:this-turn 2 :at-judge 40 :when-asked 3 :unfinished 1
+            :unfinished-run '(my.agent/prove) :judge-runs '(my.agent/prove) :root-runs '(my.agent/deferred)}
+           (:tests b)))
+    (is (nil? (:tests (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4}))) "not measured: nothing said")))
+
+(deftest the-map-names-each-cited-namespaces-functions
+  ;; root's research, lever 1 (aider's ranked repo map; v1 R4: naming the helpers took 7/32
+  ;; green to 22/24): the attempt shows the functions of the namespaces its proofs and cited
+  ;; vars live in, each a line (arglists, first sentence), most referenced first, within its
+  ;; token budget, and the form that lists the rest. Step E's runs 1-5: designs spent 15-25
+  ;; turns reading sources one pair at a time before writing anything
+  (let [db (db-with-program)
+        m (context/ns-map db '[demo/f demo-test/f-test])]
+    (is (= '[demo demo-test] (mapv :ns m)))
+    (is (= '[demo/f] (mapv :symbol (:vars (first m)))))
+    (is (= "Doubles." (:summary (first (:vars (first m))))))
+    (is (= '(clojure.repl/dir demo) (:all (first m))))
+    (is (= '#{demo-test/f-test demo-test/g-test} (set (map :symbol (:vars (second m))))))))
+
 (deftest a-cited-task-shows-its-plan-at-that-depth
   ;; wiki audit 2026-10-23 R4: a plan citing another task by its ns/name sees that task's
   ;; plan as a section at the citation's depth, not an unresolved name

@@ -139,3 +139,23 @@
     (is (nil? (model/cost "deepseek-flash" (turn/usage {:prompt-tokens 100 :completion-tokens 5}))))
     (is (nil? (model/cost "no-such-model" {:seon.turn/tokens 10 :seon.turn/cache-hit-tokens 1 :seon.turn/cache-miss-tokens 1})))
     (is (nil? (model/cost nil {:seon.turn/tokens 10 :seon.turn/cache-hit-tokens 1 :seon.turn/cache-miss-tokens 1})))))
+
+(deftest a-thinking-reply-sends-its-reasoning-back
+  ;; DeepSeek's thinking mode with tools (api-docs.deepseek.com/guides/thinking_mode, read
+  ;; 2026-10-22): "the reasoning_content must be fully passed back to the API in all subsequent
+  ;; requests", else a 400; the reply's reasoning arrives as reasoning_content deltas (above)
+  (let [c (model/parse-reply
+           (apply str (map chunk-line
+                           [{:choices [{:delta {:reasoning_content "Square "}}]}
+                            {:choices [{:delta {:reasoning_content "multiplies."}}]}
+                            {:choices [{:delta {:tool_calls [{:index 0 :id "c1" :function {:name "eval" :arguments "{\"code\":\"(* 3 3)\"}"}}]}}]}
+                            {:choices [{:delta {} :finish_reason "tool_calls"}] :usage {:prompt_tokens 9 :completion_tokens 4}}]))
+           1.0 2048)
+        b (model/request-body {:kind :openai-compat :base-url "x" :model "m" :api-key-env "HOME" :max-tokens 64 :thinking :enabled}
+                              {:messages [{:role "user" :content "go"}
+                                          {:role "assistant" :content "" :reasoning (:reasoning c) :tool-calls (:tool-calls c)}
+                                          {:role "tool" :tool-call-id "c1" :content "9"}]
+                               :task "t/x" :turn 2})]
+    (is (= "Square multiplies." (:reasoning c)))
+    (is (= "Square multiplies." (:reasoning_content (second (:messages b)))) "the earlier reply's reasoning goes back with it")
+    (is (not-any? :reasoning_content [(first (:messages b)) (nth (:messages b) 2)]) "and only on the assistant's message")))

@@ -21,6 +21,7 @@ The attempt's part:
 - `:task`: its id, kind and instructions, and its plan as it accumulated along its needs, prerequisites first.
 - `:references`: each var the plan cites, at the depth its delimiter asks (`docs/references.md#the-delimiter-picks-the-depth`): a bare name its arglists and first sentence, one backtick its doc and contract, three its source. A source past the cap shows `:left-out` and `:read`, the form that reads it.
 - `:found`: program functions the cited vars and your proofs call that the plan does not name; often the helpers the task needs.
+- `:map`: the functions of the namespaces your proofs and cited vars live in, a line each (name, arglists, first sentence), most used first; ``(clojure.repl/dir the.ns)`` lists them all. Before writing a helper, look here for one.
 - `:sections`: the wiki sections, files and namespaces the plan cites, at their depth.
 - `:evidence`: why the last attempt on this branch was refused (`:problem`) and what it measured: conflicts, unmerged keys, red proofs. Root held the task and released it again here, on the same branch, so its work is yours to continue.
 
@@ -31,6 +32,7 @@ The turn's part:
 - `:test-run`: the test run itself failing (a timeout, a dead fork); no test result is real until it runs.
 - `:unmerged`: on a merge task, the entries to resolve.
 - `:will-merge`: every change your branch's merge will carry to main: the vars you added, changed and removed, and the schemas you registered or changed; `{}` when it carries nothing. Anything listed that the task does not need, put back.
+- `:tests`: how many tests this turn ran (`:this-turn`: your proofs and the tests your branch changed), how many root's judge runs at your attempt's end (`:at-judge`, `(my.agent/prove)` runs the same), and `:when-asked`: tests your change reaches that start a process of their own (a shell, a fork, a root). Those never run in your turn or the judge, a proof among them; root runs them when it asks, and a proof among them is read as deferred, not unknown. `(my.agent/deferred)` lists them.
 - `:messages`: what was sent to you since your last turn, each `{:from :body}`: the owner's words (`:from :owner`), root's, or another agent's.
 - Your last evaluations, when no earlier turn shows them.
 
@@ -53,6 +55,7 @@ The program as your branch records it answers where things are, so read before y
 
 - By name: `(clojure.repl/apropos "accumulate")`; by docstring: `(clojure.repl/find-doc "accumulated plan")`; by the text of a definition: `(my.agent/grep "accumulated")`.
 - A function: `(clojure.repl/doc seon.task/accumulate)` and `(clojure.repl/source seon.task/accumulate)`; who calls it: `(my.agent/callers 'seon.task/accumulate)`; what it calls: `(my.agent/callees 'seon.task/accumulate)`.
+- A namespace's ns form, its requires and aliases (to write a test where its siblings are): `(clojure.repl/source seon.task)`.
 - A namespace's publics: `(clojure.repl/dir my.task)`; every program namespace: `(my.db/q '[:find [?n ...] :where [_ :ns/name ?n]])`.
 - Your task: `(my.task/current)`; one task by id: `(seon.task/task (my.db/db) (:seon.task/id (my.task/current)))`.
 - An effect (a file, a model, git) goes through its owner: ``(my.fx/call :kind req)``.

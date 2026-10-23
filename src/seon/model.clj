@@ -88,10 +88,13 @@
 
 (defn- wire-message
   "A conversation message as the chat API reads it: an assistant's eval calls as tool_calls
-  (their code as the JSON arguments), a tool result named by its call's id."
+  (their code as the JSON arguments) and its reasoning as reasoning_content (DeepSeek's
+  thinking mode with tools needs every earlier reply's reasoning back, a 400 otherwise), a
+  tool result named by its call's id."
   {:malli/schema [:=> [:cat :seon.model/message] :map]}
-  [{:keys [role content tool-calls tool-call-id]}]
+  [{:keys [role content tool-calls tool-call-id reasoning]}]
   (cond-> {:role role :content content}
+    reasoning (assoc :reasoning_content reasoning)
     (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code thinking]}]
                                                 {:id id :type "function"
                                                  :function {:name "eval" :arguments (json/write-str (cond-> {:code code} thinking (assoc :thinking thinking)))}})

@@ -23,7 +23,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
-            [seon.writer :as writer] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
+            [seon.writer :as writer] [seon.prove] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.docs :as docs] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
@@ -298,7 +298,7 @@
         (let [[st rid] (pend st p op id)
               msg (case op
                     :eval (cond-> {:op :eval :forms (:forms m)} (:ticks m) (assoc :ticks (:ticks m)) (:origin m) (assoc :origin (:origin m)))
-                    (:tests :merge-tests) (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m))
+                    (:tests :merge-tests) (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)) (:names m) (assoc :names (:names m)) (:mode m) (assoc :mode (:mode m))
                                             (get-in st [:view :agents id :task]) (assoc :task (get-in st [:view :agents id :task])))
                     :stats {:op :stats}
                     :merge-main {:op :merge-main :data-attrs (:data-attrs m)})]
@@ -317,6 +317,11 @@
                    dest (case (:op req) :merge-main {:merge-main (:agent req) :rid rid} :merge {:merged (:agent req) :rid rid} {:rid rid})]
                (step/out! o :to-writer (assoc (dissoc req :agent) :dest dest))
                (update st :writes (fnil conj #{}) rid)))
+      ;; the test service (seon.prove): the request goes to its proc, the caller (a session, or an
+      ;; agent's turn through its proc) is answered when the run it joined ends
+      :prove (let [[st rid] (pend st p :prove (:agent m))]
+               (step/out! o [:prove :req] (assoc (select-keys m [:branch :t :agent :proofs :names :mode]) :rid rid))
+               st)
       :kill (cond-> (if (get-in st [:agents id])
                       ;; :ended when root stops it because its attempt ended (the reconciler says so)
                       (-> st (set-agent id {:status (if (:ended m) :ended :killed)}) (to-agent id {:op :kill}))
@@ -358,7 +363,7 @@
         (:errors-flushed dest) (dissoc st ::errors-flight)
         (:rid dest) (deliver-rid st (:rid dest) r)
         (:agent dest) (to-agent st (:agent dest) {:op :write :msg (cond (:op r) r
-                                                                          (= :branched (:op dest)) (cond-> {:op :branched :k (:k dest) :cfg (:cfg r) :lease (:lease r)} (contract/error? r) (assoc :error r))
+                                                                          (= :branched (:op dest)) (cond-> {:op :branched :k (:k dest) :cfg (:cfg r)} (contract/error? r) (assoc :error r))
                                                                           :else (assoc r :op (:op dest) :k (:k dest)))})
         (:spawn dest) (if (contract/error? r) (spawn-failed st (:spawn dest) (:seon.error/message r) r) st)
         :else st))
@@ -401,6 +406,8 @@
 
     :else
     (case (:op m)
+      ;; the test service answered a waiter (seon.prove)
+      :prove-answer (deliver-rid st (:rid m) (:r m))
       :status (set-agent st (:agent m) (:set m))
       :stat (case (:k m)
               :noise (view! st update :stats assoc :noise (:v m) :noise-ordered (:ordered m) :noise-first-bad (:bad m))
@@ -710,7 +717,7 @@
         db @conn
         ;; physics: the fork server is forked while this is the one active thread (Jolt's carriers,
         ;; timer and watcher parked: the child resets them, seon.lib/fork!; docs/failure-points.md, Physics)
-        {:keys [pid fd]} (fs/fork-server db)
+        {:keys [pid fd]} (fs/fork-server db store-cfg)
         ;; then the GC's sweeper threads, a declared number (Chez would grow them by timing)
         sweepers (lib/gc-sweepers! (cfg/value :seon.config.root/gc-sweepers))
         events-in (a/chan (a/sliding-buffer 8192))
@@ -735,7 +742,7 @@
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
-                         :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf)
+                         :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1)
                          :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
                          :web-port (cfg/value :seon.config.web/port)})
         decl (system/read-decl (cfg/value :seon.config.root/system-path))
@@ -928,6 +935,19 @@
   ([sys agent-id] (request! sys 'run-tests! agent-id nil))
   ([sys agent-id ticks] (request! sys 'run-tests! agent-id {:ticks ticks})))
 
+(defn prove!
+  "Ask the test service (seon.prove) to prove a branch at a tx: agent id's own branch at its head,
+  or main (agent nil) at its head (an agent's branch is proved as its turn proves it, mode :turn, so a session's request and the agent's turn are one run; main as the judge does), the tests of namespaces names (a set of symbols; none: all it selects). A promise of the run's answer ({:key :ran :pass :fail :error
+  :red :reports ...}), the same run for every asker of that key: a session here, and the agent's
+  turn."
+  {:malli/schema [:function [:=> [:cat :seon.root/sys [:maybe :seon.agent/id]] :seon.host/promise]
+                  [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol]] :seon.host/promise]]}
+  ([sys agent-id] (prove! sys agent-id #{}))
+  ([sys agent-id names]
+  (if-let [b (if agent-id (get-in @(call! sys {:op :state}) [:agents agent-id :branch]) (pdb/conn-main (:conn sys)))]
+    (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx (pdb/head (:conn sys) b)) :mode (if agent-id :turn :judge)} agent-id (assoc :agent agent-id) (seq names) (assoc :names names)))
+    (doto (promise) (deliver (gone agent-id (str "no live agent " agent-id)))))))
+
 (defn agent-stats! "A promise of the agent's numbers now." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
   [sys agent-id] (call! sys {:op :stats :id agent-id}))
 
@@ -976,6 +996,13 @@
   {:ok true :db db :base-t t} (base-t: main's t at the branch's merge base)."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.db/branch] :seon.host/promise]}
   [sys branch] (write! sys {:op :branch-db :branch branch}))
+
+(defn union
+  "The union of every branch's history (seon.union) as the writer keeps it: a promise of
+  {:ok true :db (d/history U) :branches n}, U built at the first ask and kept current by
+  every commit since. Query :db with plain d/q, d/pull, d/entity."
+  {:malli/schema [:=> [:cat :seon.root/sys] :seon.host/promise]}
+  [sys] (write! sys {:op :union}))
 
 (defn branch-diff "The agent's branch versus main. A promise." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
   [sys agent-id]
