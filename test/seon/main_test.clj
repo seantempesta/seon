@@ -62,3 +62,17 @@
     (is (pos? (count rows)) "the facts hold src's docstrings")
     (is (= [] (sort (for [[n doc] rows :when (dated doc)] [n (dated doc)])))
         "no src docstring holds an ISO date")))
+
+(deftest a-runs-lifecycle-is-read-once
+  ;; task seon.task/a-runs-lifecycle-is-read-once: a run's lifecycle sets are declared once, on
+  ;; :seon.run/status's schema, and read once, by seon.task (finished, judged, failed), which every
+  ;; view and judge requires; a second reader is red here. Each src form's recorded source read as
+  ;; data (the compiler's facts: :form/src), never a text search
+  (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
+        forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
+                     [(clojure.string/starts-with? ?file "src/")]] db)
+        ;; read in the form's own namespace, so its alias keywords (::flow/in-ports) resolve
+        reads? (fn [nsn src] (require nsn)
+                 (some #(and (seq? %) (symbol? (first %)) (= "properties" (name (first %))) (= :seon.run/status (second %)))
+                       (tree-seq coll? seq (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow} src)))))]
+    (is (= #{'seon.task} (into #{} (keep (fn [[nsn src]] (when (reads? nsn src) nsn))) forms)))))

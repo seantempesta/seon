@@ -17,7 +17,7 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
-            [seon.render :as render] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.proofs :as proofs] [seon.cost :as cost]))
+            [seon.render :as render] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.proofs :as proofs] [seon.cost :as cost] [seon.task :as task]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -169,7 +169,7 @@
 (def status-order "Agent statuses in the swarm's order (:seon.agent/status)." (contract/enum-values :seon.agent/status))
 (def live "The live agent statuses (:seon.agent/status)." (:seon.status/live (contract/properties :seon.agent/status)))
 (def ^:private gone (:seon.status/gone (contract/properties :seon.agent/status)))
-(def ^:private finished (:seon.status/finished (contract/properties :seon.run/status)))
+(def ^:private finished task/finished)
 
 (defn shown-status
   "The word for how an agent is: its live status, or how its process ended: :ended when

@@ -108,8 +108,8 @@
    :runs {} :by-task {} :done {} :ready (sorted-set) :ready-key {}
    :live #{} :reap #{} :kill {} :judge #{} :merging #{}})
 
-(def finished "Run statuses that make its task done (:seon.run/status)." (:seon.status/finished (contract/properties :seon.run/status)))
-(def ^:private judged (:seon.status/judged (contract/properties :seon.run/status)))
+(def ^:private finished task/finished)
+(def ^:private judged task/judged)
 
 (defn- live-in?
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.run/run] :boolean]}
