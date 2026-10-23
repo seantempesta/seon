@@ -131,7 +131,6 @@
 ;; separately or do command line overrides." Later layers win, key by key; the merged map is
 ;; validated once, and every key remembers the layer it came from (`sources`).
 
-
 (defn argv
   "This process's command line, as *command-line-args* holds it while namespaces load (a
   `jolt run`, and a built binary since Jolt's jolt/argv): the one place the loader reads it,

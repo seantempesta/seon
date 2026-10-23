@@ -105,7 +105,8 @@
 
 (defn config-input
   "The config in force as a test reads it, cfg (seon.config/config: the shipped file, the
-  --config layers its command line names, the #env values, the profile), as text: the checkout's own path
+  --config layers its command line names, the #env values, the profile), as text: the
+  checkout's own path
   written as <checkout>, and the keys that say where a process runs left out (their schemas'
   :seon.config/place: its ports, main, store, runs, source tree and results directory: each
   checkout's and each root's own by design, while :tree covers the source's content). What a

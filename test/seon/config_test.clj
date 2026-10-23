@@ -188,7 +188,7 @@
     (is (= #{'seon.config} (set (map first refs))))
     (is (= '#{(defn checkout) (defn profile) (defn secret)} (set (map second refs))))))
 
-;; ---- layers: the checkout's local.edn, --config, --set ---------------------------------------
+;; ---- layers: the shipped file, --config (a checkout's local.edn only when named), --set ---------------------------------------
 
 (deftest the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
   (let [o (config/overrides ["scale" "100" "--set" ":seon.config.web/port=7791" "--config" "x.edn" "more"])]
@@ -211,13 +211,15 @@
     (.mkdirs (java.io.File. (str co "/config")))
     (spit (str co "/resources/seon/config/default.edn") (slurp (str (config/checkout) "/resources/seon/config/default.edn")))
     (spit local "{:seon.config.source/root \"/elsewhere/next-merges\" :seon.config.web/port 4242}")
-    (let [{c :config srcs :sources} (config/layered (config/load-layers co :default []))]
-      (is (not= "/elsewhere/next-merges" (:seon.config.source/root c)) "unnamed, it is no layer")
-      (is (not-any? #{"config/local.edn"} (vals srcs))))
-    (let [{c :config srcs :sources} (config/layered (config/load-layers co :default ["--config" local]))]
-      (is (= "/elsewhere/next-merges" (:seon.config.source/root c)) "named, it is one")
-      (is (= 4242 (:seon.config.web/port c)))
-      (is (= (str "--config " local) (srcs :seon.config.source/root))))))
+    (try
+      (let [{c :config srcs :sources} (config/layered (config/load-layers co :default []))]
+        (is (not= "/elsewhere/next-merges" (:seon.config.source/root c)) "unnamed, it is no layer")
+        (is (not-any? #{"config/local.edn"} (vals srcs))))
+      (let [{c :config srcs :sources} (config/layered (config/load-layers co :default ["--config" local]))]
+        (is (= "/elsewhere/next-merges" (:seon.config.source/root c)) "named, it is one")
+        (is (= 4242 (:seon.config.web/port c)))
+        (is (= (str "--config " local) (srcs :seon.config.source/root))))
+      (finally (clojure.java.shell/sh "rm" "-rf" co)))))
 
 (deftest later-layers-win-key-by-key-and-name-their-source
   (let [ls (config/load-layers (config/checkout) :default
