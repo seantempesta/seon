@@ -94,7 +94,7 @@
                   (pos? unfinished) (assoc :unfinished unfinished))))
      :reasons (r/done-explain (assoc (r/done-input (r/index db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before
                                                    (if (contract/error? run) #{} (set (:deferred run))))
-                                     :caused caused))}))
+                                     :caused (set caused)))}))
 
 (defn- end!
   "The attempt's end: the live runtime staged onto the branch, the end written there (with
