@@ -19,6 +19,7 @@
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task :attempt (the task and attempt root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
+;; :walks (test-plan's last reach walks, each keyed by the db value it walked: walks)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 (defonce state (atom nil))
 
@@ -299,6 +300,21 @@
   {:malli/schema [:=> [:cat] :string]}
   [] (str (cfg/value :seon.config.root/store-path) "-results/" (cfg/value :seon.config.root/main)))
 
+(defn- walk
+  "(f db inputs), reused while db is the very value walked last for role (:branch, :base): a
+  value never changes, so neither does its walk (AGENTS §5, results reused by input). An
+  attempt's base stays one value until merge-main! replaces it, so its digests are walked once
+  per base, not once per observe; root's :tests after the last observe reuses the branch's.
+  Measured 2026-10-23: a reach walk ~1.2-1.4 s, 1.7-1.9 GB on Seon's program (2144 forms)."
+  {:malli/schema [:=> [:cat [:enum :branch :base] :seon.host/db :seon.program/inputs :seon.host/fn] :map]}
+  [role db inputs f]
+  (let [w (get-in @state [:walks role])]
+    (if (and w (identical? db (:db w)) (= inputs (:inputs w)))
+      (:value w)
+      (let [v (f db inputs)]
+        (swap! state assoc-in [:walks role] {:db db :inputs inputs :value v})
+        v))))
+
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/reach-digests) against base's (main at its merge base), the greens stored at
@@ -328,10 +344,10 @@
         dir (when shared (results-dir))
         judges? (fn [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
                           (and (:test m) (not (program/scratch-ns? (:ns m))))))
-        idx (into {} (filter (comp judges? key)) (program/reach-index db in))
+        idx (into {} (filter (comp judges? key)) (walk :branch db in program/reach-index))
         cd (update-vals idx :digest)
         unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))]
-    (-> (proofs/plan (some-> base (program/reach-digests in)) cd (if dir (proofs/greens dir (vec (vals cd))) {}) proofs)
+    (-> (proofs/plan (when base (walk :base base in program/reach-digests)) cd (if dir (proofs/greens dir (vec (vals cd))) {}) proofs)
         (update :selected into unrecorded)
         (update :run into unrecorded)
         (assoc :digests cd :dir dir
