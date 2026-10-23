@@ -1140,7 +1140,7 @@
                 :client-ms (lib/r2 ms) :exit (:exit r)
                 :relay-peak-mb (some-> (peak-mb r) lib/r2) :relay-mb-bound bound
                 :root-down (mapv #(get-in % ["error" "message"]) (lines down)) :root-down-exit (:exit down)}
-       :checks {:five-tools (= 5 (count (get-in answers [2 "result" "tools"])))
+       :checks {:tools-are-the-ops (= (set (map #(str "seon_" (name %)) (keys seon.server/ops))) (set (map #(get % "name") (get-in answers [2 "result" "tools"]))))
                 :notification-unanswered (= #{1 2 3 4 5} (set (keys answers)))
                 :both-recorded-outside (and (= 2 (count mine)) (= 1 (count roots)))
                 :agent-eval (clojure.string/includes? (str (text 4)) "42") :root-eval (clojure.string/includes? (str (text 5)) "1")
