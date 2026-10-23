@@ -25,7 +25,7 @@
     platform's own source has the same facts (seon.source)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]
-            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [seon.error :as error] [seon.db :as pdb] [seon.config :as cfg] [clojure.string :as str]))
+            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [seon.error :as error] [seon.db :as pdb] [seon.config :as cfg] [clojure.string :as str] [hasch.core :as hasch]))
 
 (defn scratch-ns?
   "Is namespace nsx scratch (never program): `user`, or declared ^:scratch."
@@ -284,11 +284,12 @@
         (tree-seq coll? seq (binding [*ns* nsx] (read-string src)))))
 
 (defn- form-id
-  "A form's identity: its namespace and exact text (an imported file's repeated text adds
-  its occurrence)."
+  "A form's identity: its namespace and exact text, by their content hash (hasch's uuid, the
+  one Datahike names content by; Clojure's 32-bit hash let two texts of one length share an
+  id), and an imported file's repeated text adds its occurrence."
   {:malli/schema [:=> [:cat :symbol :string :int] :string]}
   [nsym src k]
-  (str nsym "/" (Long/toHexString (hash (str nsym "\n" src))) "-" (count src) (when (pos? k) (str "#" k))))
+  (str nsym "/" (hasch/uuid [nsym src]) (when (pos? k) (str "#" k))))
 
 (defn account
   "The program account of one top-level form, or nil when it is none of the program's.

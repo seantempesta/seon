@@ -240,6 +240,14 @@
       (do (died w) w)
       (do @(fact fresh) w))))
 
+(defn union
+  "Every branch's history as one db (seon.union): (d/q '[:find ... :where ...] (my.root/union
+  sys)) asks what happened across every branch; each datom's transaction names its branch
+  (:seon.tx/branch). Built at the first ask (about 1 s at 50k datoms), then kept current by
+  every commit (about 1 ms each)."
+  {:malli/schema [:=> [:cat :seon.root/sys] :seon.host/db]}
+  [sys] (:db @(root/union sys)))
+
 (defn generation
   "The next generation on main (seon.reconcile/generation): the last merges commit built,
   {:commit :checkout :binary :ms}, or why its build was refused; nil before any."

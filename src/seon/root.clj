@@ -350,7 +350,7 @@
         (:errors-flushed dest) (dissoc st ::errors-flight)
         (:rid dest) (deliver-rid st (:rid dest) r)
         (:agent dest) (to-agent st (:agent dest) {:op :write :msg (cond (:op r) r
-                                                                          (= :branched (:op dest)) (cond-> {:op :branched :k (:k dest) :cfg (:cfg r) :lease (:lease r)} (contract/error? r) (assoc :error r))
+                                                                          (= :branched (:op dest)) (cond-> {:op :branched :k (:k dest) :cfg (:cfg r)} (contract/error? r) (assoc :error r))
                                                                           :else (assoc r :op (:op dest) :k (:k dest)))})
         (:spawn dest) (if (contract/error? r) (spawn-failed st (:spawn dest) (:seon.error/message r) r) st)
         :else st))
@@ -968,6 +968,13 @@
   {:ok true :db db :base-t t} (base-t: main's t at the branch's merge base)."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.db/branch] :seon.host/promise]}
   [sys branch] (write! sys {:op :branch-db :branch branch}))
+
+(defn union
+  "The union of every branch's history (seon.union) as the writer keeps it: a promise of
+  {:ok true :db (d/history U) :branches n}, U built at the first ask and kept current by
+  every commit since. Query :db with plain d/q, d/pull, d/entity."
+  {:malli/schema [:=> [:cat :seon.root/sys] :seon.host/promise]}
+  [sys] (write! sys {:op :union}))
 
 (defn branch-diff "The agent's branch versus main. A promise." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
   [sys agent-id]
