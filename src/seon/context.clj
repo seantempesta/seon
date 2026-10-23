@@ -38,8 +38,9 @@
         ;; defn's contract plumbing is named by every contracted form, so it sinks)
         n (count (d/datoms db :aevt :form/id))
         score (fn [[r k]] (* k (Math/log (/ n (inc (count (d/datoms db :avet :form/refs r)))))))
+        ;; each hit's score taken once (sort-by would take it per comparison: an index count each)
         hits (->> pairs (map second) (remove #(or (named %) (macro? %))) frequencies
-                  (sort-by (juxt (comp - score) (comp str key))) (mapv key))
+                  (map (fn [e] [(- (score e)) (str (key e)) (key e)])) sort (mapv peek))
         [shown more] (print/bounded hits :seon.config.render/found "(my.agent/callees 'ns/f) of each cited var")]
     (cond-> (mapv #(docs/resolve-ref db % :doc) shown) more (conj more))))
 
@@ -70,7 +71,8 @@
                          sm (assoc :summary sm))))]
     (vec (for [ns nss
                :let [vs (d/q '[:find [?n ...] :in $ ?ns :where [?e :ns/name ?ns] [?v :var/ns ?e] [?v :var/name ?n] [?v :var/form _]] db ns)
-                     lines (map line (sort-by (juxt (comp - uses) str) vs))
+                     ;; each var's uses counted once (sort-by would count per comparison)
+                     lines (map line (map peek (sort (map (fn [v] [(- (uses v)) (str v) v]) vs))))
                      shown (reduce (fn [[acc spent] l] (let [s (+ spent (:tokens (print/print-value l {:budget share}) share))]
                                                          (if (<= s share) [(conj acc l) s] (reduced [acc spent]))))
                                    [[] 0] lines)]
@@ -230,7 +232,7 @@
   happened to the last reply; the messages delivered since the last turn (the owner's, root's,
   other agents'); the last evaluations; turns left."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds last-items turn max-turns unmerged truncated? reasons run-errors source repairs will-merge tests messages message-ids]}]
+  [db t {:keys [results reds last-items turn max-turns unmerged truncated? reasons run-errors source repairs will-merge tests messages message-ids attention]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
         refs (filterv #(= :var (docs/citation-kind db %)) cites)
@@ -272,6 +274,9 @@
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
       ;; owner D4 (2026-10-22): every change the branch's merge carries to main, every turn
       ;; measured and empty ({}) says so; absent only when not measured (a basis before D4)
+      ;; the sections of the wiki this branch's code changes made stale (seon.problems/caused-split): to read and
+      ;; probably fix; never a reason to refuse done
+      (seq attention) (assoc :attention attention)
       (some? will-merge) (assoc :will-merge will-merge)
       ;; the messages the turn took: those that are facts read again from db (the commit the turn
       ;; read, where its agent wrote them), the rest as the basis holds them

@@ -3,4 +3,8 @@
   :seon.task/kind :work
   :seon.task/needs #{"seon.program/definitions-from-the-compiler"}
   :seon.task/proofs #{seon.contract-test/a-contracted-definition-is-checked-from-its-definition
-                      seon.contract-test/one-contract-gap-rule-agrees-everywhere}}]
+                      seon.contract-test/one-contract-gap-rule-agrees-everywhere}}
+ {:seon.task/name "an-armed-call-costs-its-checks"
+  :seon.task/plan "Found by worktree session reuse, 2026-10-23. A call of a contracted function costs 354 B and 12 ticks over a plain call (seon.cost/units :fn/armed-call, [:=> [:cat :int] :int]): its argument tuple, the malli validators' work and the profile count. Small helpers called per IR node pay it on every node: seon.program/unit-account calls vsym, invoked (twice) and datum (twice) per call node, 5 armed calls, ~1.8 KB of the 2.8 KB a call node costs (seon.program-cost-test/a-scalar-constant-costs-no-walk); seon.source/import-tx makes 519k contracted calls over src and test (~180 MB, ~6% of its bytes). Question for root before any change: is the cost in the wrapper (malli -instrument's per-call allocation: the args vector, an explain on success?) and so fixed there for every function, or is the rule that a private helper in an inner loop is folded into its caller? Measure first: bytes of one armed call split into args collection, input validation, output validation and the count (seon.contract/wrap). Proofs: a cost proof of an armed call at its floor; seon.cost-test/the-unit-table-is-current with :fn/armed-call re-measured."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.cost-test/the-unit-table-is-current}}]

@@ -246,9 +246,10 @@
                                (exists? b) (let [base (pdb/branch-base conn main b)]
                                              {:ok true :db (pdb/head conn b) :base base :base-t (:max-tx base)})
                                :else (refused (str "no branch " b) {}))))
-      :branch-info (reply st (if (exists? (:branch m))
-                               (let [h (pdb/head conn (:branch m))] {:ok true :datoms (count (d/datoms h :eavt)) :t (:max-tx h)})
-                               (refused (str "no branch " (:branch m)) {})))
+      :branch-info (let [b (pdb/on-main main (:branch m))]
+                     (reply st (if (exists? b)
+                                 (let [h (pdb/head conn b)] {:ok true :datoms (count (d/datoms h :eavt)) :t (:max-tx h)})
+                                 (refused (str "no branch " b) {}))))
       ;; root's collection of the store (seon.db/collect!), asked at quiescence: swept when a
       ;; branch the last one saw is gone, and recorded on main through the batch
       :collect (let [r (pdb/collect! conn (cfg/value :seon.config.store/sole-writer?))]

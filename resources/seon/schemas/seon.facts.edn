@@ -13,7 +13,8 @@
  ;; the form is the text of a source tree a generation was built from (seon.source's import):
  ;; the binary holds it compiled, so a process evaluates it again only where a changed macro
  ;; expanded or a changed schema reaches its contract (seon.program/load-changes!); a form an agent or a merge
- ;; makes never carries it
+ ;; makes never carries it. Its :form/order is its place in that file, so seon.program/load-order
+ ;; keeps the order between two such forms (the file already loads)
  :form/source :boolean
  :form/ns [:and {:seon.db/index true} :seon.db/ref]
  ;; its place among its namespace's forms (a file's order; a new form after all others)
@@ -109,7 +110,7 @@
  ;; Observations: data on the branch that recorded them, never carried by a merge ----
  :seon.cluster.eval/id :string
  :seon.cluster.eval/agent :seon.db/ref
- ;; the evaluation's details as one EDN value: {:tag :form :shown|:error :out :ms :alloc-bytes :fns}
+ ;; the evaluation's details as one EDN value: {:tag :form :shown|:error :out :ms :alloc-bytes :ticks :fns}
  ;; (:fns: its 10 costliest contracted functions, [{:var :calls :ms}], seon.profile)
  :seon.cluster.eval/record [:map {:seon.db/data true :seon.render/html seon.render.ui/evaluation} [:tag [:enum :ret :err]]]
  ;; an agent: one entity per agent per boot of its root (an id like :a3 starts again each boot),
@@ -133,7 +134,7 @@
                      [:seon.cluster.eval/record :seon.cluster.eval/record]]
  ;; an entity's units (seon.render/walk): the neighbours a view of it shows, one hop, as pull's
  ;; attributes (a leading _ the reverse ref), each rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/ai seon.render.ai/agent-fact :seon.render/html seon.render.ui/walk-line :seon.render/units [:seon.attempt/_agent :seon.cluster.eval/_agent :seon.agent/root] :seon.render/parts [:seon.attempt/_agent]}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] :seon.render/units [:seon.attempt/_agent :seon.cluster.eval/_agent] :seon.render/parts [:seon.attempt/_agent]}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/id {:optional true} :seon.agent/id]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status] [:seon.agent/pid {:optional true} :seon.agent/pid]
@@ -242,7 +243,7 @@
  ;; measured at the attempt's end from the branch (seon.problems/caused): the derived problems
  ;; its work made true since its merge base, by message; the done rule refuses while any is open
  :seon.attempt/caused [:set :string]
- :seon.attempt/attempt-fact [:map {:seon.db/attributes true :seon.render/ai seon.render.ai/attempt-fact :seon.render/html seon.render.ui/walk-line :seon.render/units [:seon.attempt/task :seon.turn/_attempt :seon.message/_to]}
+ :seon.attempt/attempt-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.attempt/id :seon.attempt/status :seon.attempt/outcome :seon.attempt/reason :seon.attempt/model :seon.attempt/turns :seon.attempt/max-turns :seon.attempt/branch] :seon.render/units [:seon.attempt/task :seon.turn/_attempt :seon.message/_to]}
                              [:seon.attempt/id :seon.attempt/id] [:seon.attempt/task :seon.attempt/task]
                              [:seon.attempt/status :seon.attempt/status] [:seon.attempt/boot :seon.attempt/boot]
                              [:seon.attempt/agent {:optional true} :seon.attempt/agent] [:seon.attempt/start-ms :seon.attempt/start-ms]
@@ -314,7 +315,7 @@
  :seon.root/stopped :seon.root/end
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
  :seon.root/previous-end :seon.root/end
- :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/ai seon.render.ai/root-fact :seon.render/html seon.render.ui/walk-line :seon.render/units [:seon.agent/_root :seon.cluster.eval/_agent]}
+ :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/stopped :seon.root/quiescent] :seon.render/units [:seon.agent/_root :seon.cluster.eval/_agent]}
                           [:seon.root/id :seon.root/id] [:seon.root/boot :seon.root/boot]
                           [:seon.root/stopped {:optional true} :seon.root/stopped]
                           [:seon.root/previous-end {:optional true} :seon.root/previous-end]

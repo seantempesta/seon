@@ -9,7 +9,6 @@
  :seon.lib/ns-time :int
  :seon.lib/mb number?
  :seon.lib/probe [:map [:regions [:map-of :keyword :map]]]
- :seon.lib/events [:map [:cow-faults :int] [:faults :int]]
  :seon.lib/sysmem [:map [:free-mb number?] [:internal-mb number?]]
  :seon.lib/exit-status [:or [:map [:exit :int]] [:map [:signal :int]]]
  :seon.lib/pipe [:tuple :seon.lib/fd :seon.lib/fd]

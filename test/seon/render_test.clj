@@ -394,18 +394,19 @@
         (is (= {:seon.agent/id :a3 :seon.agent/status :idle :seon.agent/pid 77 :seon.agent/running "(f 2)"}
                (select-keys (:seon.render/value root) [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/running])))
         (is (not (contains? (:seon.render/value root) :seon.agent/root)) "a unit is its own node, not again in the entity")
-        (is (= [:seon.attempt/_agent :seon.cluster.eval/_agent :seon.cluster.eval/_agent :seon.agent/root] (mapv attr-of (:seon.render/nodes w))))
+        (is (= [:seon.attempt/_agent :seon.cluster.eval/_agent :seon.cluster.eval/_agent] (mapv attr-of (:seon.render/nodes w)))
+            "its run and its evaluations; root, of no use to a working agent, is not its unit")
         (is (every? #(= eid (get-in % [:seon.render/from :seon.render/eid])) (:seon.render/nodes w)) "each says where it came from")
         (is (= ["demo/f#1"] (values-of w :seon.attempt/_agent :seon.attempt/id)))
         (is (= ["a3-77-1/1" "a3-77-1/2"] (values-of w :seon.cluster.eval/_agent :seon.cluster.eval/id)))
-        (is (= [:root] (values-of w :seon.agent/root :seon.root/id)))
         (testing "each node is an entity with its own schema; an evaluation, with no identity, the one naming the ref that reached it"
-          (is (= [:seon.attempt/attempt-fact :seon.db/eval-fact :seon.db/eval-fact :seon.root/root-fact] (mapv :seon.render/schema (:seon.render/nodes w))))
+          (is (= [:seon.attempt/attempt-fact :seon.db/eval-fact :seon.db/eval-fact] (mapv :seon.render/schema (:seon.render/nodes w))))
           (is (every? #(= :entity (:seon.render/kind %)) (:seon.render/nodes w))))
-        (testing "one hop: a neighbour's refs are {:db/id}, its components whole"
+        (testing "a neighbour holds only the attributes its schema declares relevant (:seon.render/keys)"
           (let [run (first (:seon.render/nodes w))]
-            (is (= [:db/id] (keys (get-in run [:seon.render/value :seon.attempt/task]))))
-            (is (= [:pass] (mapv :seon.proof/status (get-in run [:seon.render/value :seon.attempt/results]))))))))
+            (is (= "demo/f#1" (get-in run [:seon.render/value :seon.attempt/id])))
+            (is (not (contains? (:seon.render/value run) :seon.attempt/plan)) "its plan is its task's")
+            (is (not (contains? (:seon.render/value run) :seon.attempt/boot)) "its boot is root's")))))
     (testing "a run: its task, its turns, the messages to it"
       (let [w (r/walk db (eid-of db [:seon.attempt/id "demo/f#1"]))]
         (is (= :seon.attempt/attempt-fact (get-in w [:seon.render/root :seon.render/schema])))
@@ -467,7 +468,7 @@
         w (r/rendered (r/walk db run) {})
         [task-node turn msg] (:seon.render/nodes w)
         by (juxt :seon.render/as :seon.render/ai-by :seon.render/html-by)]
-    (is (= [:block 'seon.render.ai/attempt-fact 'seon.render.ui/walk-line] (by (:seon.render/root w))) "a run by its schema's declared renders, named")
+    (is (= [:block 'seon.render/print-ai 'seon.render/print-html] (by (:seon.render/root w))) "no render declared: the one printer, named")
     (is (= [:tile 'seon.render/print-ai 'seon.render/print-html] (by task-node)) "no render declared: the one printer, named")
     (is (= [:tile 'seon.render/print-ai 'seon.render.ui/turn] (by turn)) "a turn by its schema's declared render")
     (is (= (r/render-of (:seon.render/value turn) :html :seon.turn/turn-fact) @(requiring-resolve (:seon.render/html-by turn))) "the named render is the one that ran")
@@ -539,7 +540,7 @@
     (testing "the entity as main holds it: what root observed wins over the branch's older copy"
       (is (= :busy (get-in w [:seon.render/root :seon.render/value :seon.agent/status])))
       (is (= "p-head" (:id (first units))))
-      (is (str/includes? (unit-html (first units)) "agent a3 busy")))
+      (is (every? #(str/includes? (unit-html (first units)) %) [":a3" ":busy" ":task-demo-f"]) "its relevant facts, by the one printer at the page's budget"))
     (testing "its units from every db, each once: main's run, the branch's evaluations"
       (is (= 3 (count (filter #(= :seon.db/eval-fact (:seon.render/schema %)) (:seon.render/nodes w)))))
       (is (= (count (distinct (map :seon.render/eid (:seon.render/nodes w)))) (count (:seon.render/nodes w)))))
@@ -555,7 +556,7 @@
       (let [ids (for [u units :when (= :seon.render/page-row (:schema u)) nd (:input u) :when (= :seon.db/eval-fact (:seon.render/schema nd))] (:seon.render/eid nd))]
         (is (= 3 (count ids) (count (distinct ids))))))
     (testing "its other units are tiles, each a link that moves the page to its entity"
-      (is (= [:seon.attempt/attempt-fact :seon.root/root-fact :seon.task/task-fact]
+      (is (= [:seon.attempt/attempt-fact :seon.task/task-fact]
              (for [u units :when (= :seon.render/page-tile (:schema u))] (get-in u [:input :seon.render/schema]))))
       (let [run (first (filter #(= :seon.render/page-tile (:schema %)) units))]
         (is (str/includes? (unit-html run) (str "href=\"/walk/" (get-in run [:input :seon.render/eid]) "\"")))))
@@ -647,3 +648,35 @@
           (is (= 3 (rows st2)))
           (is (= ["#p-rows" "#p-rows" "#p-foot"] (mapv first (:appends p))) "the older rows after what the list holds, then the list's new end")
           (is (= ["p-more-1"] (:removes p)) "the old end goes: a new element, watched anew"))))))
+
+(deftest a-walk-is-data-a-model-reads
+  ;; the owner, 2026-10-23: what a model reads is data, improved at its producer. The walk as one
+  ;; value: the entity's relevant attributes, each unit under the attribute that reached it, what
+  ;; its prose cites as data under :seon.render/refs; no prose, no printer artifact
+  (let [w {:seon.render/root {:seon.render/kind :entity :seon.render/eid 1 :seon.render/value {:seon.attempt/id "demo/f#1" :seon.attempt/status :running}}
+           :seon.render/nodes [{:seon.render/kind :entity :seon.render/eid 2 :seon.render/value {:seon.task/id "demo/f" :seon.task/plan "Make `demo/f` triple."}
+                                :seon.render/from {:seon.render/eid 1 :seon.render/attr :seon.attempt/task}}
+                               {:seon.render/kind :entity :seon.render/eid 3 :seon.render/value {:seon.turn/id "demo/f#1/0"}
+                                :seon.render/from {:seon.render/eid 1 :seon.render/attr :seon.turn/_attempt}}]
+           :seon.render/refs [{:seon.render/n 1 :seon.render/kind :var :seon.render/address "demo/f" :seon.render/depth :summary
+                               :seon.render/cited-at [{:seon.render/eid 2 :seon.render/attr :seon.task/plan}]
+                               :seon.render/value {:symbol 'demo/f :arglists '([x]) :summary "Doubles."}}]}
+        d (r/data w)]
+    (is (= {:seon.attempt/id "demo/f#1" :seon.attempt/status :running
+            :seon.attempt/task {:seon.task/id "demo/f" :seon.task/plan "Make `demo/f` triple."}
+            :seon.turn/_attempt [{:seon.turn/id "demo/f#1/0"}]
+            :seon.render/refs [{:symbol 'demo/f :arglists '([x]) :summary "Doubles." :seon.render/n 1 :seon.render/address "demo/f"}]}
+           d))
+    (is (not (str/includes? (r/ai d {}) ";;")) "no comment lines: data only")))
+
+(deftest the-html-fallback-folds-only-what-nests
+  ;; the owner, 2026-10-23, on the default html: a fold and its "map 12 items, depth 0" header on
+  ;; every collection was noise. The value printed and a collection of scalars are inline; a
+  ;; nested collection that holds collections folds, saying what it holds
+  (let [flat (h/html (r/html {:demo/id "f" :demo/proofs ['demo-test/f-test]} {}))
+        nested (h/html (r/html {:demo/id "f" :rows [{:a 1} {:a 2}]} {}))]
+    (is (not (str/includes? flat "<details")) "a map of scalars and a vector of one symbol: no fold")
+    (is (not (str/includes? flat "items, depth")))
+    (is (str/includes? flat "demo-test/f-test") "the value is all there")
+    (is (= 1 (count (re-seq #"<details" nested))) "only the vector of maps folds")
+    (is (str/includes? nested "vector 2 items"))))

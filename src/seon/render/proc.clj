@@ -205,6 +205,7 @@
   id like :a3 starts again each boot, so only this boot's names a process root holds."
   {:malli/schema [:=> [:cat :map :any] [:maybe :keyword]]}
   [st e]
+  ;; e an entity of main (its key: a walk shows only an agent's relevant attributes)
   (let [id (:seon.agent/id e) boot (get-in st [:view :boot])]
     (when (and id boot (= (:seon.agent/key e) (task/agent-key boot id))) id)))
 
@@ -227,7 +228,7 @@
                         {:schema :seon.render/agent-input
                          :value {:id (:seon.agent/id agent)
                                  ;; root's view of it in this boot: an agent of another boot has no process
-                                 :live? (boolean (when-let [id (this-boots st agent)] (ui/live (ui/shown-status (get-in st [:view :agents id] {})))))
+                                 :live? (boolean (when-let [id (this-boots st (d/entity db eid))] (ui/live (ui/shown-status (get-in st [:view :agents id] {})))))
                                  :held (when (= :held (:seon.task/execution task)) (:seon.task/id task))}})
             ;; root's focus: main's open problems, a part of its page by their own render
             w (cond-> w (= :root view) (update :seon.render/nodes conj {:seon.render/kind :value :seon.render/value (:recorded st)

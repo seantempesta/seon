@@ -594,8 +594,3 @@
                   [{:id (str "p-more-" (count on)) :input {:older older :view view} :schema :seon.render/page-more :container "#p-foot"}]
                   (for [t tiles] {:id (tile-id t) :input t :schema :seon.render/page-tile :container "#p-tiles"})))}))
 
-(defn walk-line
-  "An entity a walk shows in one line, as html: its :ai render's text (seon.render.ai/root-fact,
-  agent-fact, attempt-fact) in a line of the page."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [v opts] [:p {:class "walk-line"} (:text (render/render v (assoc opts :face :ai)))])

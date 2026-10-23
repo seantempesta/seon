@@ -122,6 +122,14 @@
      branch (assoc :seon.task/branch branch) model (assoc :seon.task/model model)
      max-turns (assoc :seon.config.agent/max-turns max-turns))])
 
+(defn earlier-agents-tx
+  "A new boot's root is no longer the root of the agents an earlier boot started: their link to
+  root retracted (their processes ended with that boot; history keeps that root started them), so
+  root's agents are this boot's (root's walk, :seon.agent/_root)."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
+  [db] (vec (for [[a r] (d/q '[:find ?a ?r :where [?r :seon.root/id :root] [?a :seon.agent/root ?r]] db)]
+              [:db/retract a :seon.agent/root r])))
+
 (defn boot-tx
   "Root's boot: its id for this process lifetime and its max-running config key (merges at once,
   :seon.config.merge/max-running, is written with the config in force, seon.config/facts)."
