@@ -61,13 +61,15 @@
 
 (defn- added-gaps
   "The functions branch db defines without a contract since its merge base base (the
-  branch's own changes, seon.merge/uncontracted-since): what root's judge and the merge gate ask."
+  branch's own changes, seon.merge/uncontracted over seon.merge/delta-changes): what root's judge and
+  the merge gate ask."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :qualified-symbol]]}
-  [base db] (set (pm/uncontracted-since base db)))
+  [base db] (set (pm/uncontracted (pm/delta-changes base db #{}))))
 
 (defn- observe
-  "What a turn starts from, measured now: the proofs run in a fork of this agent (a run it
-  could not fork ran no proof: every proof is unknown, and the refused answer is the run's error),
+  "What a turn starts from, measured now: the proofs run by the test service (seon.prove: one run
+  per branch and tx whoever asks, in a fork of this agent; a run it could not fork ran no proof:
+  every proof is unknown, and the refused answer is the run's error),
   the contract gaps the branch adds since its merge base (seon.merge/uncontracted, as root's
   judge and the merge gate ask it), its unmerged entries, the problems its work made true
   (seon.problems/caused, as root's judge asks it), the done rule over them, and
@@ -75,7 +77,7 @@
   {:malli/schema [:=> [:cat :seon.task/id :seon.task/plan] :map]}
   [id plan-before]
   (let [t0 (profile/now-ns)
-        run (agent/run-tests-forked (cfg/value :seon.config.agent/turn-test-ticks) (:proofs (:seon.task/accumulated (task/task (agent/db) id))) :turn)
+        run (agent/prove!)
         tests-ms (long (profile/ms-since t0))
         results (if (contract/error? run) {} (proofs/results run))
         db (agent/db)

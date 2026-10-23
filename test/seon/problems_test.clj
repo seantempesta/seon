@@ -90,7 +90,7 @@
                   f))]
     (is (= ['seon.task/entity-value] (map #(get-in % [:example :seon.error/operation]) (vals (reduce round {} (range 10)))))
         "the step fails in the task owner's contract, each round")
-    (is (<= (- (:max-tx @conn) t0) 1) "ten failing commits, one record")))))
+    (is (<= (or (d/q '[:find (count ?tx) . :in $ ?t0 :where [?tx :db/txInstant] [(> ?tx ?t0)]] @conn t0) 0) 1) "ten failing commits, one record")))))
 
 ;; ---- eval errors: the error map as data, on the branch, and counted across agents ------
 
@@ -548,6 +548,15 @@
         (is (= 1 (:count (row after))) "the record is kept"))
       (testing "the context marks it closed"
         (is (re-find #"\(closed\)" (render/ai (problems/report after) {})))))
+    (testing "the citing section's link is changed to an existing target: closed, nothing written (the target never appears)"
+      (let [dbc (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/a.md" "# A\n\nIt links to [b](b.md#nowhere).\n" "demo/c.md" "# C\n\nThe other.\n"}))
+            err (d/db-with dbc [{:seon.error/signature "cccccccccccccccc" :seon.error/class :platform :seon.error/count 1
+                                 :seon.error/agents 0 :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/type :seon.docs/refused
+                                 :seon.error/example {:seon.error/type :seon.docs/refused :seon.ref/address "demo/b.md#nowhere" :seon.section/address "demo/a.md#a"}}])
+            rowc #(first (filter (fn [r] (= "cccccccccccccccc" (:signature r))) (get-in (problems/report %) [:classes :platform :rows])))
+            fixed (d/db-with err (seon.docs/load-tx err "demo" {"demo/a.md" "# A\n\nIt links to [c](c.md).\n" "demo/c.md" "# C\n\nThe other.\n"}))]
+        (is (not (false? (:open? (rowc err)))) "the citing section still has the link")
+        (is (false? (:open? (rowc fixed))))))
     (testing "a named subject: open until a fact of the var is written after the error"
       (let [v (:v (first (d/datoms db0 :aevt :var/name)))
             e (:e (first (d/datoms db0 :aevt :var/name)))
@@ -612,12 +621,6 @@
 
 (defn health-input "The cost proof's input at n: the db of n unnamed catch sites." [n] [(catch-forms (ts/test-db) n)])
 
-(defn caused-input
-  "The cost proof's input at n: [base head], base holding n catch sites, head one more."
-  [n] (let [base (catch-forms (ts/test-db) n)] [base (d/db-with base [{:db/id -1 :form/id "cost-head" :form/ns (:db/id (:var/ns (d/entity base (:e (first (d/datoms base :aevt :var/name))))))
-                                                                        :form/order 0 :form/src "(defn g [])" :form/catches #{"{:class Exception, :answers :expr}"} :form/defines [-2]}
-                                                                       {:db/id -2 :var/name 'app.cost/head :var/form -1}])]))
-
 (defn pins-input
   "The cost proof's input at n: docs/forks.md of n sections each stating a pin, root's import
   recording a different gitlink for every one (so each is a :stale-pin)."
@@ -653,11 +656,59 @@
                :fixed {:ns 3000000 :bytes 3000000 :calls 60}
                :sizes [10 100 1000]}))
 
-(deftest caused-reads-both-dbs-in-full
-  (cost/proof {:of 'seon.problems/caused :input 'seon.problems-test/caused-input
-               :n "unnamed catch sites in the base (the head has one more)"
-               :work "the two derived reads (citations, sites) over base and over head: today O(program) twice, not O(changed)"
+;; ---- caused reads what changed (diff by value), and agrees with the full reading ---------------
+
+(defn- caused-full
+  "The old `caused`: both derived classes read in full over base and over head."
+  [base head]
+  (let [derived #(concat (problems/dead-citations % {}) (problems/unnamed-sites % {}))
+        before (into #{} (map :signature) (derived base))]
+    (into (sorted-set) (comp (remove (comp before :signature)) (map :message)) (derived head))))
+
+(deftest caused-agrees-with-the-full-reading
+  (let [db0 (ts/test-db)
+        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
+        e (fn [db s] (pdb/eid db :var/name s))
+        none (symbol (namespace v) "no-such-var")
+        page (str "# P\n\nIt reads `" v "`, `" w "` and `" none "`.\n\n## Q\n\nAlso `" v "`.\n")
+        base (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" page}))
+        base (catch-forms base 3)
+        failure-points "# Failure points\n\n| x | `app.cost/v1` |\n"
+        scenarios
+        {"unchanged" base
+         "a var both sections cite is deleted" (d/db-with base [[:db/retractEntity (e base v)]])
+         "the var is back" (d/db-with (d/db-with base [[:db/retractEntity (e base v)]]) [{:var/name v}])
+         "a section is added citing a dead name" (d/db-with base (seon.docs/load-tx base "demo" {"demo/p.md" page "demo/r.md" (str "# R\n\nIt reads `" none "`.\n")}))
+         "a section is rewritten to cite a var that exists" (d/db-with base (seon.docs/load-tx base "demo" {"demo/p.md" (str "# P\n\nIt reads `" w "`.\n")}))
+         "a catch site is added" (catch-forms base 4)
+         "the failure-points page names a site" (d/db-with base (seon.docs/load-tx base "docs" {"docs/failure-points.md" failure-points}))
+         "the page names it, then a var it cites is deleted" (let [b2 (d/db-with base (seon.docs/load-tx base "docs" {"docs/failure-points.md" failure-points}))]
+                                                              (d/db-with b2 [[:db/retractEntity (e b2 'app.cost/v1)]]))}]
+    (doseq [[label head] scenarios]
+      (testing label
+        (is (= (caused-full base head) (problems/caused base head)))))
+    (testing "and the cases are not all empty"
+      (is (seq (problems/caused base (get scenarios "a var both sections cite is deleted"))))
+      (is (seq (problems/caused base (get scenarios "a catch site is added")))))))
+
+(defn caused-flat-input
+  "The cost proof's input at n: [base head] over a program of n catch sites and n citing sections,
+  the head one section rewritten to cite a dead name and one more catch site: a fixed change."
+  [n] (let [db0 (ts/test-db)
+            vs (vec (take 10 (map :v (d/datoms db0 :aevt :var/name))))
+            page (apply str "# Cited\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\nIt reads `" (nth vs (mod i 10)) "`.\n")))
+            base (catch-forms (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/c.md" page})) n)
+            changed (str/replace page "## S0\n\nIt reads `" (str "## S0\n\nIt reads `app.nowhere/dead` and `"))]
+        [base (catch-forms (d/db-with base (seon.docs/load-tx base "demo" {"demo/c.md" changed})) (inc n))]))
+
+(deftest caused-follows-what-changed
+  ;; the program grows (n sections citing, n catch sites); the change is fixed (one section, one
+  ;; site): the work is the scan of the attributes' datoms, a few bytes each, never a pull or a rule
+  ;; per citation or site. Before: ~150 KB per catch site, both dbs read in full.
+  (cost/proof {:of 'seon.problems/caused :input 'seon.problems-test/caused-flat-input
+               :n "sections citing a var and catch sites in the program, one of each changed"
+               :work "three aevt scans of the sections, the var and task names, the catch forms; candidates only through the rule"
                :growth :linear
-               :per-n {:ns 150000 :bytes 155000 :calls 4}
-               :fixed {:ns 1500000 :bytes 1500000 :calls 10}
+               :per-n {:ns 22000 :bytes 26000 :calls 0}
+               :fixed {:ns 800000 :bytes 1500000 :calls 13}
                :sizes [10 100 1000]}))

@@ -450,7 +450,7 @@
         block (cond-> (current-state db (task/task db task)
                                      (cond-> (assoc observed :truncated? (:seon.turn/truncated lst)
                                                     :source text :repairs (vec repairs)
-                                                    :unmerged (when merge? (pm/unmerged db (pm/program db #{}))))
+                                                    :unmerged (when merge? (pm/unmerged db)))
                                        (= :model origin) (assoc :turn turn :max-turns max-turns)))
                 last-evals (assoc :last-evals last-evals))
         turns (vec (map-indexed (fn [i r] (cond-> {:reply (:seon.turn/reply r) :calls (vec (:seon.turn/calls r))}

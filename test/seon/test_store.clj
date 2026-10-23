@@ -11,7 +11,7 @@
   (delay (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write
                         :writer pdb/writer-cfg}]
            (d/create-database (pdb/made-cfg cfg))
-           (let [conn (d/connect cfg)] (pdb/seed! conn 2000) (d/release conn))
+           (let [conn (d/connect cfg)] (pdb/ids! conn) (pdb/seed! conn 2000) (d/release conn))
            cfg)))
 
 (defn test-db

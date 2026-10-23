@@ -32,9 +32,9 @@
         t0 (:max-tx @conn)]
     (testing "a main transaction: committed once, its report to the reconciler, its commit to the fork server, its answer by dest"
       (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})]
-        (is (= (inc t0) (:max-tx @conn)))
+        (is (< t0 (:max-tx @conn)) "main's t moves past its last")
         (is (= [:tx] (map :op (:to-fork-server outs))))
-        (is (= [(inc t0)] (map :t (:main outs))))
+        (is (= [(:max-tx @conn)] (map :t (:main outs))))
         (is (= {:rid 1} (:dest (first (:to-api outs)))))
         (is (true? (:ok (:r (first (:to-api outs))))))
         (testing "group commit: three queued transactions, one step, one commit"
@@ -53,13 +53,14 @@
 
 (deftest the-writers-transactions-name-their-runtime
   ;; task seon.db/each-commit-names-its-runtime: main's transactions through the writer's group
-  ;; commit carry the runtime that made them, and the fork server's replica applies it too
+  ;; commit carry the runtime that made them, and so does the stored commit the fork server's replica reads
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
         [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
         fp (jolt.host/runtime-fingerprint)]
     (is (= fp (:seon.tx/runtime (d/entity @conn (:max-tx @conn)))) "main's transaction names it")
-    (is (= fp (get-in (first (:to-fork-server outs)) [:tx-meta :seon.tx/runtime])) "and so does what the replica applies")))))
+    (let [m (first (:to-fork-server outs))]
+      (is (= fp (:seon.tx/runtime (d/entity (d/commit-as-db conn (:commit m)) (:t m)))) "and so does the stored commit the replica reads"))))))
 
 (deftest a-writers-merge-names-its-runtime
   ;; task seon.db/each-commit-names-its-runtime: a branch merged into main through the writer
@@ -79,6 +80,27 @@
     (is (:merged? (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))) "the branch merges")
     (is (< t0 (:max-tx @conn)))
     (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @conn (:max-tx @conn)))) "and its merge names the runtime")))))
+
+(deftest the-fork-servers-replica-is-main-at-each-commit
+  ;; the fork server's replica reads each main commit from the store (d/commit-as-db of the
+  ;; commit the writer names), never replaying its datoms: replaying the boot's 42,942-datom
+  ;; source import took 3.5 s and the first fork waited behind it (2026-10-23). After a large
+  ;; commit the replica is main at that t exactly: the same commit, the same datoms
+  (ts/test-branch! (fn [cfg conn]
+    (let [in (a/chan 16)
+          wst (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+          before @conn
+          [_ outs] (step #'writer/writer-proc wst :in {:op :tx :branch :db :tx-data (vec (for [i (range 2000)] {:note/text (str "n" i)})) :dest {:rid 1}})
+          m (first (filter #(= :tx (:op %)) (:to-fork-server outs)))
+          fst (#'server/server-step {:db before :cfg cfg :store conn :conn nil})
+          [fst' fouts] (step #'server/server-step fst :cmd m)
+          replica (:db fst')]
+      (is (= (d/commit-id @conn) (:commit m)) "the writer names the commit it made")
+      (is (= (:max-tx @conn) (:max-tx replica) (:t m)) "the replica is main at t")
+      (is (= (d/commit-id @conn) (d/commit-id replica)))
+      (is (= (vec (d/datoms @conn :eavt)) (vec (d/datoms replica :eavt))) "with main's datoms, every one")
+      (is (= 0 (:mismatch fst')))
+      (is (= [:applied] (mapv :ev (:ev fouts))))))))
 
 (deftest a-fork-at-another-commit-is-recorded-misaligned
   ;; task seon.agent/an-agents-base-is-its-merge-base: a new agent whose branch is not at the
@@ -475,28 +497,47 @@
     (is (= [[:in 4]] @inbox) "nothing is taken after stop")))
 
 (deftest the-fork-server-step
-  (ts/test-branch! (fn [_ conn] (let [db @conn
-        st (#'server/server-step {:db db :conn nil})]
-    (testing "a main commit is applied to its replica"
-      (let [rep (d/with db [{:note/text "z"}])
-            ops (pdb/report->tx rep)
-            [st outs] (step #'server/server-step st :cmd {:op :tx :t (:max-tx (:db-after rep)) :ns 0 :tx-data ops})]
-        (is (= (:max-tx (:db-after rep)) (:max-tx (:db st))))
+  (ts/test-branch! (fn [cfg conn] (let [st (#'server/server-step {:db @conn :cfg cfg :store conn :conn nil})
+        stored (fn [rep] {:op :tx :t (:max-tx @conn) :commit (d/commit-id @conn) :ns 0 :tx-data (pdb/report->tx rep)})]
+    (testing "a main commit is read into its replica from the store"
+      (let [m (stored (d/transact conn [{:note/text "z"}]))
+            [st outs] (step #'server/server-step st :cmd m)]
+        (is (= (:max-tx @conn) (:max-tx (:db st))))
         (is (= [:applied] (map :ev (:ev outs))))
         (testing "and a commit it already holds is skipped"
-          (is (= [st nil] (#'server/server-step st :cmd {:op :tx :t (:max-tx (:db st)) :tx-data ops}))))))
-    (testing "the replica's transaction holds main's transaction facts (its instant, its tx-meta): seon.db/report->tx-meta"
-      (let [rep (d/with db {:tx-data [{:note/text "w"}] :tx-meta {:note/text "the commit's own fact"}})
-            t (:max-tx (:db-after rep))
-            [st2 _] (step #'server/server-step st :cmd {:op :tx :t t :ns 0 :tx-data (pdb/report->tx rep) :tx-meta (pdb/report->tx-meta rep)})
-            instant (fn [d] (:db/txInstant (d/entity d t)))]
-        (is (inst? (instant (:db-after rep))) "main's transaction has its instant (history is kept)")
-        (is (= (instant (:db-after rep)) (instant (:db st2))))
-        (is (= "the commit's own fact" (:note/text (d/entity (:db st2) t))) "and its tx-meta")))))))
+          (is (= [st nil] (#'server/server-step st :cmd m))))
+        (testing "the replica's transaction holds main's transaction facts (its instant, its tx-meta), as stored"
+          (let [m2 (stored (d/transact conn {:tx-data [{:note/text "w"}] :tx-meta {:note/text "the commit's own fact"}}))
+                t (:t m2)
+                [st2 _] (step #'server/server-step st :cmd m2)
+                instant (fn [d] (:db/txInstant (d/entity d t)))]
+            (is (inst? (instant @conn)) "main's transaction has its instant (history is kept)")
+            (is (= (instant @conn) (instant (:db st2))))
+            (is (= "the commit's own fact" (:note/text (d/entity (:db st2) t))) "and its tx-meta")))))))))
 
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'seon.procs-test)]
     (System/exit (if (zero? (+ fail error)) 0 1))))
+
+(deftest the-writer-keeps-the-union-current
+  ;; seon.union through the writer: built at the first :union, then every main commit and
+  ;; every agent's commit notice add their datoms, so one query over its answer sees both
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        main (:branch cfg)
+        ab (pdb/on-main main :a1)
+        union-of (fn [st] (let [[st outs] (step #'writer/writer-proc st :in {:op :union :dest {:rid 9}})] [st (:r (first (:to-api outs)))]))
+        bodies (fn [db] (set (d/q '[:find ?b ?br :where [?m :seon.message/body ?b ?tx] [?tx :seon.tx/branch ?br]] db)))]
+    (d/branch! conn main ab)
+    (let [[st r] (union-of st)
+          _ (is (true? (:ok r)))
+          [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:seon.message/id "m1" :seon.message/from "root" :seon.message/to "a1" :seon.message/body "from main"}] :dest {:rid 1}})
+          bc (d/connect (assoc cfg :branch ab))
+          _ (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from "a1" :seon.message/reply-to "m1" :seon.message/body "from a1"}] :tx-meta (pdb/tx-meta ab)})
+          _ (d/release bc)
+          [st _] (step #'writer/writer-proc st :in {:op :agent-commit :branch :a1})
+          [_ r2] (union-of st)]
+      (is (= #{["from main" main] ["from a1" ab]} (bodies (:db r2))) "a main commit and an agent's commit, each under its branch"))))))
 
 (deftest the-fork-servers-stop-ends-every-child-before-it-answers
   ;; bin/check lifecycle's :left (notes/pure-tests/lifecycle.md): root SIGKILLed the fork

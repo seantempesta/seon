@@ -239,6 +239,21 @@
   (let [[id] (in-agent ["(:seon.task/id (my.task/current))"])]
     (is (= (pr-str "demo/t") (:printed id)))))
 
+(deftest an-agent-with-no-task-resumes-a-kept-branch
+  ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
+  ;; store already holds (a kept branch; e2e's fresh agent on a store an earlier run left)
+  ;; died in its init, giving seon.task/onto-tx a nil task, and a wait for its :ready never
+  ;; ended. A kept branch takes its task from main only when the agent has one
+  (let [[r] (in-agent [{:op :eval :agent "root"
+                        :code (str "(let [ev (seon.root/events sys) m (seon.db/conn-main (:conn sys))]"
+                                   " (datahike.api/branch! (:conn sys) m (seon.db/on-main m :kept))"
+                                   " (let [ag (seon.root/spawn! sys {:branch :kept})]"
+                                   " (loop [] (let [e (clojure.core.async/<!! ev)]"
+                                   " (cond (not= ag (:agent e)) (recur)"
+                                   " (#{:ready :dead :ended :killed} (:type e)) (:type e)"
+                                   " :else (recur))))))")}])]
+    (is (= ":ready" (:printed r)) (pr-str r))))
+
 (deftest a-failure-marked-through-the-server-holds-the-task
   ;; owner, 2026-10-22: a failure is task data and root reacts to it. The agent marks its
   ;; task failed on its branch, hands the attempt back (seon_done), and root, at the
@@ -363,7 +378,7 @@
            [a b] (sock/socketpair)
            old @agent/state]
        (try
-         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :db @store-conn :lease 0})
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :db @store-conn})
          (let [{:keys [t]} (agent/transact! [{:note/text "the agent's"}])]
            (agent/commit!)
            (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @store-conn t)))))
@@ -394,30 +409,6 @@
         end (edn/read-string {:default tagged-literal} (:printed end))]
     (is (= [:no-progress 2] [(:outcome end) (:model-calls end)]) (pr-str end))
     (is (str/includes? (str (:reason end)) "(+ 1 1)") "the reason names the repeated code")))
-
-(deftest no-entity-of-main-is-inside-an-agents-lease
-  ;; bin/check lease, nondeterministic (2026-10-22): agent a's db held id lease+50, its
-  ;; ceiling, which no agent mints. Root handed out leases from a base it read once at boot,
-  ;; before its own writes to main (the source import's program, later facts) went on minting
-  ;; from under that base, through the agents' blocks: an agent's "new" ids are main's
-  ;; entities. With eid-lease 50, root writes 150 entities after a1 holds its lease, clones a1
-  ;; (the writer's :clone-branch reserves the clone's block too) and writes 150 more: no
-  ;; entity of main lies in either block, and the two blocks are apart
-  (let [w "@(seon.root/transact-main! sys (vec (for [i (range 150)] {:note/text (str \"root-\" i)})))"
-        [r] (in-agent [{:op :eval :agent "root"
-                        :code (str "(do " w
-                                   " (let [c @(seon.root/clone! sys :a1)] " w
-                                   " (let [db @(:conn sys) es (into #{} (map :e) (datahike.api/datoms db :eavt))"
-                                   " block (fn [a] (let [ids (:ids @(seon.root/agent-stats! sys a))] [(:from ids) (+ (:from ids) (:of ids))]))"
-                                   " inside (fn [[lo hi]] (count (filter #(< lo % hi) es)))"
-                                   " a (block :a1) b (block (:id c))]"
-                                   " [(- (second a) (first a)) (inside a) (inside b) (or (<= (second a) (first b)) (<= (second b) (first a)))])))")}]
-                      {:sets [":seon.config.store/eid-lease=50"]})
-        [of in-a1 in-clone apart] (edn/read-string (:printed r))]
-    (is (= 50 of) (pr-str r))
-    (is (= 0 in-a1) "main's entities stay out of the agent's block")
-    (is (= 0 in-clone) "and out of its clone's")
-    (is (true? apart) "the clone's block is not its parent's")))
 
 (deftest a-proof-run-ends-at-its-budget-though-its-tests-run-bounded-evals
   ;; Jolt jolt/nested-tick-budget: a tick budget covers all the work inside it, nested
