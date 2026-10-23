@@ -546,16 +546,21 @@
   declaration (Flow runs :io procs, agent procs included, on the carriers), its two edge
   readers (Flow's error channel, the fork server's socket) and, while the web proc listens,
   the web server's acceptor and sweeper (ring-chez-adapter's, each a future of Jolt's agent
-  pool; task seon.web/web-server-threads-are-joined-at-stop)."
+  pool; task seon.web/web-server-threads-are-joined-at-stop), and :foreign, threads outside Jolt's
+  roster: the model's (:seon.config.vector/model-threads) while an :embed worker holds it."
   ([] {:roster {"main" 1 "jolt-shutdown" 1 "jolt-timer" 1 "jolt-io-poller" 1 "jolt-carrier" (fiber-carriers)}
        :gc-sweepers (seon.config/value :seon.config.root/gc-sweepers)})
   ([sys]
-   (let [procs (vals (:procs @(get-in sys [:bindings :system])))
+   (let [pm (:procs @(get-in sys [:bindings :system]))
+         procs (vals pm)
          mixed (count (filter #(= :mixed (or (:workload (clojure.core.async.flow.spi/describe (:proc %))) :mixed)) procs))
-         web? (true? (get-in (c/state sys) [:web :listening]))]
-     (update (declared-threads) :roster merge
-             (cond-> {"async-mixed" mixed "seon-flow-errors" 1 "seon-fs-events" 1}
-               web? (assoc "clojure-agent-pool" 2))))))
+         web? (true? (get-in (c/state sys) [:web :listening]))
+         ;; an :embed worker holding the model: Metal's own threads, outside Jolt's roster
+         model? (some #(get-in (ping sys %) [:state :open?]) (filter #(= "fx.embed" (namespace %)) (keys pm)))]
+     (cond-> (update (declared-threads) :roster merge
+                     (cond-> {"async-mixed" mixed "seon-flow-errors" 1 "seon-fs-events" 1}
+                       web? (assoc "clojure-agent-pool" 2)))
+       model? (assoc :foreign (seon.config/value :seon.config.vector/model-threads))))))
 
 (defn- threads
   "The threads this process runs now, measured as declared-threads declares them, and :os,
@@ -567,12 +572,12 @@
   "Where measured threads (threads) differ from declared ones
   (declared-threads): {} when they are exactly what is declared, else each
   differing name with [declared measured], :gc-sweepers likewise, and :os when the OS
-  counts threads beyond the roster and the sweepers."
+  counts threads beyond the roster, the sweepers and the declared :foreign ones."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [decl got]
   (let [names (into (set (keys (:roster decl))) (keys (:roster got)))
         roster (into {} (for [n names :let [d (get-in decl [:roster n] 0) g (get-in got [:roster n] 0)] :when (not= d g)] [n [d g]]))
-        expect-os (+ (reduce + 0 (vals (:roster got))) (:gc-sweepers got))]
+        expect-os (+ (reduce + 0 (vals (:roster got))) (:gc-sweepers got) (:foreign decl 0))]
     (cond-> roster
       (not= (:gc-sweepers decl) (:gc-sweepers got)) (assoc :gc-sweepers [(:gc-sweepers decl) (:gc-sweepers got)])
       (not= expect-os (:os got)) (assoc :os [expect-os (:os got)]))))
@@ -582,7 +587,11 @@
 (defn scale [n]
   (run-check "SCALE" {:datoms 2000}
    (fn [sys]
-    (let [mem0 (lib/sysmem)
+    (let [;; with embedding on, main's texts embedded first (seon.await/await-db: nothing due), so
+          ;; the threads counted are the open model's steady ones, not its load's or an encode's
+          _ (when (pos? (seon.config/value :seon.config.vector/texts))
+              (seon.await/await-db sys #(empty? (seon.vector/due % (seon.vector/model-id (seon.config/value :seon.config.vector/model))))))
+          mem0 (lib/sysmem)
         th-boot (thread-diff (declared-threads sys) (threads))
         t0 (profile/now-ns)
         ids (ready! sys #(vec (pmap (fn [i] (c/spawn! sys {:task (str "scale " i)})) (range n))))

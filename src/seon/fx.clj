@@ -588,7 +588,8 @@
        ;; :mixed gives each worker its own thread: the declared workload is true, and the
        ;; worker count already bounds the threads
        :workload :mixed
-       :ping-map-fn (fn [st] (select-keys st [:n]))})
+       ;; :open?: it holds its kind's host object (a model's foreign threads run while it does)
+       :ping-map-fn (fn [st] (-> (select-keys st [:n]) (assoc :open? (some? (:handle st)))))})
   ([args] {:perform (:perform args) :open (:open args) :kind (:kind args) :ctx (:ctx args) :n 0
            :owner (:owner args) ::flow/in-ports {:work (:work args)}})
   ([st _] st)

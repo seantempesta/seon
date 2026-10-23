@@ -552,6 +552,11 @@
  ;; fast as 18 (139 vs 140 texts/s, 2026-10-23). Whatever it is, the open model keeps 4 threads of
  ;; its own (Metal's), and loading it runs ~32 that end when it has loaded.
  :seon.config.vector/threads 1
+ ;; Unit: threads. The open model's own threads, outside Jolt's roster (Metal's), which root
+ ;; declares while its :embed worker holds the model (seon.check/declared-threads). Measured
+ ;; 2026-10-23 on an M5 Max: 4 at every :seon.config.vector/threads from 1 to 18. Its load runs
+ ;; ~32 more for ~4 s, which end when it has loaded (a thread count taken then reads them).
+ :seon.config.vector/model-threads 4
  ;; Unit: tokens. A text past it keeps its first max-tokens (the count cut is recorded). Provenance:
  ;; v1's 2,048 (forms p99 1,766 tokens); at 512, 148 of Seon's 1,393 forms were cut.
  :seon.config.vector/max-tokens 2048
