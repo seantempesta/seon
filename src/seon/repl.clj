@@ -183,7 +183,7 @@
 
 (defn wrap-cost
   "Per-form wall ms, allocated bytes, engine ticks (the work it did, the exact measure:
-  jolt.host/ticks-of) and the
+  seon.profile/measure!) and the
   form's costliest contracted functions (each with its exact calls and estimated ms:
   seon.profile), measured around the per-form eval fn. They are recorded once, when the
   form ran, beside the answer's value: the one value the record (record-tx) stores and the

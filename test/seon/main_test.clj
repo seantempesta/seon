@@ -48,3 +48,13 @@
     (is (in? "test/" 'seon.fixtures) "and test's")
     (is (= #{} (set (for [[n r] reqs :when (and (in? "src/" n) (in? "test/" r))] [n r])))
         "no src namespace requires a test/ one")))
+
+(deftest only-measure-reads-the-tick-counter
+  ;; task seon.profile/a-call-is-measured-one-way: a call is measured one way, so no src form but
+  ;; seon.profile/measure! reads the engine's tick counter (jolt.host/ticks-of or jolt.host/ticks):
+  ;; a measurement built beside it is red here. Read from the compiler's facts
+  (let [db (runner/program-db (System/getProperty "user.dir"))
+        callers (d/q '[:find [?n ...] :in $ [?r ...] :where [?f :form/refs ?r] [?f :form/defines ?v] [?v :var/name ?n]
+                       [?f :form/ns ?ns] [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]]
+                     db ['jolt.host/ticks-of 'jolt.host/ticks])]
+    (is (= ['seon.profile/measure!] (vec callers)))))

@@ -2,7 +2,7 @@
   "seon.profile: every contracted call counted exactly, one in 64 timed, read per epoch."
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :as contract :refer [defn defn-]]
-            [seon.profile :as profile] [seon.cost] [seon.repl :as repl] [seon.agent :as agent] [jolt.ffi :as ffi] [test-runner] [datahike.api] [clojure.string]))
+            [seon.profile :as profile] [seon.cost] [seon.repl :as repl] [seon.agent :as agent] [jolt.ffi :as ffi]))
 
 (defn- leaf {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))
 
@@ -123,7 +123,6 @@
     (is (>= wall 20000000) (str "wall " wall " ns: the wait is real"))
     (is (< measured 2000000) (str "measured " measured " ns: what the call did, not its wait"))))
 
-
 (deftest a-call-is-measured-one-way
   ;; task seon.profile/a-call-is-measured-one-way: one measurement of a call, which the REPL's
   ;; per-form cost and the cost proof both read
@@ -136,9 +135,4 @@
     (testing "a call that throws is measured too, and its exception goes on"
       (vreset! m nil)
       (is (thrown-with-msg? Exception #"boom" (profile/measure! #(do (branch 10) (throw (ex-info "boom" {}))) #(vreset! m %))))
-      (is (= 11 (:calls @m))))
-    (testing "the one measurement: no src form but measure! calls jolt.host/ticks-of"
-      (let [db (test-runner/program-db (System/getProperty "user.dir"))
-            callers (datahike.api/q '[:find [?n ...] :where [?f :form/refs jolt.host/ticks-of] [?f :form/defines ?v] [?v :var/name ?n]
-                                      [?f :form/ns ?ns] [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]] db)]
-        (is (= ['seon.profile/measure!] (vec callers)))))))
+      (is (= 11 (:calls @m))))))
