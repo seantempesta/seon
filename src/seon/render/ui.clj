@@ -10,7 +10,7 @@
   the exact value it reads (its input) and the render that shows it. The render proc
   (seon.render.proc) renders a unit only when its input changed, and sends a patch only
   when its bytes changed. Values inside a part render by their own schema's declared
-  render (seon.render/html): an agent's card, a task, an attempt, an evaluation, a proc's
+  render (seon.render/html): an agent's card, a task, a run, an evaluation, a proc's
   health, a cost verdict; anything else by the one value printer.
 
   Every number shown is measured by the system and carried in the value; nothing here
@@ -38,14 +38,14 @@
   {:malli/schema [:=> [:cat :any] :string]}
   [view]
   (java.net.URLEncoder/encode ^String (cond (= :root view) "root"
-                                            (= "attempt" (namespace view)) (str "attempt:" (name view))
+                                            (= "run" (namespace view)) (str "run:" (name view))
                                             :else (name view)) "UTF-8"))
 
-(defn attempt-href
-  "Where attempt aid's window is: its agent as that attempt ran it (agent ids start again each
-  boot; an attempt's id never does)."
+(defn run-href
+  "Where run aid's window is: its agent as that run ran it (agent ids start again each
+  boot; a run's id never does)."
   {:malli/schema [:=> [:cat :string] :string]}
-  [aid] (str "/attempt/" (java.net.URLEncoder/encode ^String aid "UTF-8")))
+  [aid] (str "/run/" (java.net.URLEncoder/encode ^String aid "UTF-8")))
 
 (defn kname
   "A keyword's name with its namespace (:fx/model -> \"fx/model\"), \"–\" for nil, else as
@@ -169,12 +169,12 @@
 (def status-order "Agent statuses in the swarm's order (:seon.agent/status)." (contract/enum-values :seon.agent/status))
 (def live "The live agent statuses (:seon.agent/status)." (:seon.status/live (contract/properties :seon.agent/status)))
 (def ^:private gone (:seon.status/gone (contract/properties :seon.agent/status)))
-(def ^:private finished (:seon.status/finished (contract/properties :seon.attempt/status)))
+(def ^:private finished (:seon.status/finished (contract/properties :seon.run/status)))
 
 (defn shown-status
   "The word for how an agent is: its live status, or how its process ended: :ended when
-  root stopped it after its attempt finished (done or merged), :killed for a kill, :died
-  when its process died on its own (an agent entry carries :ended-as from main's attempt)."
+  root stopped it after its run finished (done or merged), :killed for a kill, :died
+  when its process died on its own (an agent entry carries :ended-as from main's run)."
   {:malli/schema [:=> [:cat :map] :keyword]}
   [a]
   (cond (or (= :ended (:status a)) (:ended-as a)) :ended
@@ -285,73 +285,73 @@
   [rows]
   (vec (sort-by (fn [[b n]] [(- n) (str b)]) (frequencies (for [[_ r] rows b (:blocked-by r)] b)))))
 
-(defn- attempts-table
-  "Attempts as table rows by their declared render (`attempt-row`), under a header whose
+(defn- runs-table
+  "Runs as table rows by their declared render (`run-row`), under a header whose
   first column is label, then more rows (what the table left)."
   {:malli/schema [:=> [:cat :string [:sequential :map] :seon.render/opts :any] :any]}
-  [label attempts opts more]
-  [:table {:class "attempts"}
+  [label runs opts more]
+  [:table {:class "runs"}
    [:thead [:tr [:th label] [:th "agent"] [:th "status"] [:th "turns"] [:th "tokens"] [:th "outcome"] [:th "ms"]]]
-   [:tbody (for [a attempts] (render/html a (assoc opts :schema :seon.attempt/attempt))) more]])
+   [:tbody (for [a runs] (render/html a (assoc opts :schema :seon.run/run))) more]])
 
 (defn tile-tasks
   "The work as it is: every task by its observed state (what happened, not the desired
   execution), the tasks list (state, what blocks it, proofs green/red on its newest
-  attempt, attempts so far, tokens; each links to its newest attempt's agent), then the
-  newest attempts. input {:rows (seon.render.proc/task-rows) :attempts :main-t}."
+  run, runs so far, tokens; each links to its newest run's agent), then the
+  newest runs. input {:rows (seon.render.proc/task-rows) :runs :main-t}."
   {:malli/schema [:=> [:cat :seon.render/work :seon.render/opts] :any]}
-  [{:keys [rows attempts main-t]} opts]
+  [{:keys [rows runs main-t]} opts]
   (let [freq (frequencies (map :state (vals rows)))
-        [newest older] (print/bounded (sort-by (comp - #(or (:seon.attempt/start-ms %) 0)) (vals attempts)) :seon.config.render.list/rows
-                                      "older, on main: (seon.task/attempts (deref (:conn sys))) at root's REPL")
+        [newest older] (print/bounded (sort-by (comp - #(or (:seon.run/start-ms %) 0)) (vals runs)) :seon.config.render.list/rows
+                                      "older, on main: (seon.task/runs (deref (:conn sys))) at root's REPL")
         tokens (reduce + 0 (keep :tokens (vals rows)))
-        running (count (filter #(= :running (:seon.attempt/status %)) (vals attempts)))
+        running (count (filter #(= :running (:seon.run/status %)) (vals runs)))
         rank (zipmap task-state-order (range))]
          [:section {:id "t-tasks" :class "tile wide"}
-      (kicker "reconciler · tasks" (str "main t " (group3 main-t) " · " running " attempt" (when (not= 1 running) "s") " running"))
+      (kicker "reconciler · tasks" (str "main t " (group3 main-t) " · " running " run" (when (not= 1 running) "s") " running"))
       [:div {:class "states"}
        [:span [:b (str (count rows))] " tasks"]
        (for [k task-state-order :let [n (get freq k 0)] :when (pos? n)]
          [:span {:class (str "pill s-" (name k)) :title (state-title k)} (str (name k) " " n)])
-       [:span {:class "muted" :title "model tokens spent by every attempt"} (str (group3 tokens) " tokens")]]
+       [:span {:class "muted" :title "model tokens spent by every run"} (str (group3 tokens) " tokens")]]
       (when-let [w (seq (waiting-on rows))]
         [:p {:class "waiting" :title "the tasks blocked tasks wait on, each once, the one holding most up first"}
          [:span {:class "muted"} (str (count (filter (comp seq :blocked-by val) rows)) " with needs not done (whatever their state), waiting on: ")]
          (interpose ", " (for [[b n] w] [:span [:code b] (str " (" n ")")]))])
       (if (empty? rows)
-        [:p {:class "muted"} "no tasks on main yet: the reconciler starts an attempt per ready task"]
+        [:p {:class "muted"} "no tasks on main yet: the reconciler starts a run per ready task"]
         (list
-          [:table {:class "attempts tasks"}
-           [:thead [:tr [:th "task"] [:th "state"] [:th "blocked by"] [:th "proofs"] [:th "attempts"] [:th "tokens"]]]
+          [:table {:class "runs tasks"}
+           [:thead [:tr [:th "task"] [:th "state"] [:th "blocked by"] [:th "proofs"] [:th "runs"] [:th "tokens"]]]
            [:tbody
             (for [[id r] (sort-by (fn [[id r]] [(rank (:state r) 9) id]) rows)
-                  :let [ag (get-in r [:newest :seon.attempt/agent])]]
+                  :let [ag (get-in r [:newest :seon.run/agent])]]
               [:tr {:class (str "s-" (name (:state r)))}
-               [:td (if ag [:a {:href (attempt-href (get-in r [:newest :seon.attempt/id])) :title (str "its newest attempt's window, " (get-in r [:newest :seon.attempt/id]) ", worked by " (kname ag))} id] id)]
+               [:td (if ag [:a {:href (run-href (get-in r [:newest :seon.run/id])) :title (str "its newest run's window, " (get-in r [:newest :seon.run/id]) ", worked by " (kname ag))} id] id)]
                [:td [:span {:class (str "pill s-" (name (:state r))) :title (state-title (:state r))} (name (:state r))]]
                [:td (if (seq (:blocked-by r)) [:span {:class "warn"} (str/join " " (sort (:blocked-by r)))] [:span {:class "muted"} "–"])]
-               [:td {:title (str "its own proofs green / red on its newest attempt"
-                                 (when-let [a (get-in r [:newest :seon.attempt/id])] (str ", " a))
-                                 "; allowed red: other tasks' proofs red on that attempt's branch (not done yet), which do not block it")}
+               [:td {:title (str "its own proofs green / red on its newest run"
+                                 (when-let [a (get-in r [:newest :seon.run/id])] (str ", " a))
+                                 "; allowed red: other tasks' proofs red on that run's branch (not done yet), which do not block it")}
                 (if (pos? (+ (:green r) (:red r)))
                   (list [:span {:class "ok"} (str (:green r) " ✓")] (when (pos? (:red r)) [:span {:class "bad"} (str " " (:red r) " ✕")])
                         (when (pos? (:allowed-red r 0)) [:span {:class "muted"} (str " · " (:allowed-red r) " allowed red")]))
                   [:span {:class "muted"} (str (:proofs r) " to run")])]
-               [:td (str (:attempts r))] [:td (group3 (:tokens r))]])]]
-          (attempts-table "newest attempts" newest opts (when older [:tr {:class "more"} [:td {:colspan 7 :class "muted"} older]]))))]))
+               [:td (str (:runs r))] [:td (group3 (:tokens r))]])]]
+          (runs-table "newest runs" newest opts (when older [:tr {:class "more"} [:td {:colspan 7 :class "muted"} older]]))))]))
 
-(defn attempt-row
-  "An attempt: its agent, status, turns, tokens and outcome (from main's facts)."
+(defn run-row
+  "A run: its agent, status, turns, tokens and outcome (from main's facts)."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [{:seon.attempt/keys [id agent status turns tokens outcome reason start-ms end-ms env]} _]
+  [{:seon.run/keys [id agent status turns tokens outcome reason start-ms end-ms env]} _]
      [:tr {:class (str "at s-" (kname status) (when outcome (str " o-" (kname outcome))))}
     [:td [:code id]]
-    [:td (if agent [:a {:href (attempt-href id) :title "its window, as this attempt ran"} (kname agent)] "–")
+    [:td (if agent [:a {:href (run-href id) :title "its window, as this run ran"} (kname agent)] "–")
      (when (= "outside" (:model env)) [:span {:class "muted" :title "worked from outside (an outside agent through root's server): no turn loop, its turns and tokens are not counted here"} " · outside"])]
     [:td [:span {:class (str "pill s-" (kname status))} (kname status)]]
     [:td (str (or turns "–"))] [:td (group3 tokens)]
     [:td {:title (str reason)} (kname outcome)]
-    [:td {:title "the attempt's wall time, start to end: its fork, every turn (model, evaluations, test runs in forks) and its end; its agent's page shows where it went"}
+    [:td {:title "the run's wall time, start to end: its fork, every turn (model, evaluations, test runs in forks) and its end; its agent's page shows where it went"}
      (if (and start-ms end-ms) (group3 (- end-ms start-ms)) "–")]])
 
 (defn tile-errors
@@ -486,10 +486,10 @@
       (when (seq own) [:code {:class "muted"} " " (print/text own budget)])]))
 
 (defn- status-pill
-  "How an agent is, as its pill: its status word, or how it ended once its attempt did."
+  "How an agent is, as its pill: its status word, or how it ended once its run did."
   {:malli/schema [:=> [:cat :map :string] :any]}
   [ag st]
-  [:span {:class (str "pill s-" st) :title (when (:ended-as ag) (str "root stopped it after its attempt ended " (kname (:ended-as ag))))}
+  [:span {:class (str "pill s-" st) :title (when (:ended-as ag) (str "root stopped it after its run ended " (kname (:ended-as ag))))}
    (if (:ended-as ag) (str "ended · " (kname (:ended-as ag))) st)])
 
 (defn- agent-stats
@@ -578,9 +578,9 @@
            (when more [:li {:class "more muted opened"} more])])
         [:ol {:class "evals empty"} [:li {:class "ev"} [:span {:class "muted"} "no evaluations yet"]]])
       (test-dots (:tests ag))
-      ;; its attempt passed the done rule, so every red above is another task's proof
+      ;; its run passed the done rule, so every red above is another task's proof
       (when (and (:ended-as ag) (proofs/red? (:tests ag)))
-        [:p {:class "muted allowed"} (str "its attempt ended " (kname (:ended-as ag)) ": its own proofs passed; these reds are other tasks' proofs, allowed")])]))
+        [:p {:class "muted allowed"} (str "its run ended " (kname (:ended-as ag)) ": its own proofs passed; these reds are other tasks' proofs, allowed")])]))
 
 (defn card-shell
   "One whole agent card around its body's slot: appended to the grid once, when the agent
@@ -610,7 +610,7 @@
 ;;; --- events ---------------------------------------------------------------------
 
 (defn event-kind
-  "An event's kind as the stream says it: ended for a stop after its attempt finished."
+  "An event's kind as the stream says it: ended for a stop after its run finished."
   {:malli/schema [:=> [:cat :map] :string]}
   [ev] (if (:ended-as ev) "ended" (kname (:type ev))))
 
@@ -641,9 +641,9 @@
     :ready (str "ready" (when (:start-ms ev) (str " in " (ms-str (:start-ms ev)))))
     :started (str "began " (print/line (or (:form ev) "") 30))
     :tests-started (str "test child forked · pid " (:pid ev))
-    :killed (if (:ended-as ev) (str "stopped by root after its attempt ended " (kname (:ended-as ev))) "KILLED")
-    :ended (str "stopped by root: its attempt ended" (when (:ended-as ev) (str " " (kname (:ended-as ev)))))
-    :dead (if (:ended-as ev) (str "exited after its attempt ended " (kname (:ended-as ev))) "its process died")
+    :killed (if (:ended-as ev) (str "stopped by root after its run ended " (kname (:ended-as ev))) "KILLED")
+    :ended (str "stopped by root: its run ended" (when (:ended-as ev) (str " " (kname (:ended-as ev)))))
+    :dead (if (:ended-as ev) (str "exited after its run ended " (kname (:ended-as ev))) "its process died")
     :ui (str (:call ev) (when (:detail ev) (str " · " (print/line (:detail ev) (cell)))))
     (print/text (dissoc ev :type :at-ms :agent) (cell))))
 
@@ -700,11 +700,11 @@
 
 (defn ended-as
   "Agent id's entry, or an event of its stream (x), with :ended-as when its process ended
-  (its status, or the event's type, is gone) after its attempt finished (main's attempt
+  (its status, or the event's type, is gone) after its run finished (main's run
   done or merged); else x as it is (identical: inputs compare O(1))."
   {:malli/schema [:=> [:cat [:maybe :map] :any :map] [:maybe :map]]}
-  [x id agent-attempt]
-  (let [st (:seon.attempt/status (get agent-attempt id))]
+  [x id agent-run]
+  (let [st (:seon.run/status (get agent-run id))]
     (if (and x (gone (or (:status x) (:type x))) (finished st)) (assoc x :ended-as st) x)))
 
 (defn tile-problems
@@ -772,7 +772,7 @@
   top bar, the metric tiles, the grid of agent cards, the side column (root's context,
   the event stream), each part a unit reading exactly what it shows."
   {:malli/schema [:=> [:cat :seon.render/system :seon.render/opts] :any]}
-  [{:keys [agents health series writer fork-server main attempts root-errors boot store web agent-attempt] :as sys} _]
+  [{:keys [agents health series writer fork-server main runs root-errors boot store web agent-run] :as sys} _]
   (let [order (:order sys)
         procs (into {} (remove (fn [[pid]] (and (keyword? pid) (str/starts-with? (str (namespace pid)) "fx.")))) health)
         u (fn [id input schema] {:id id :input input :schema schema})]
@@ -795,11 +795,11 @@
      :seon.render/units
      (vec (concat
            [(u "problems" (:problem-areas sys) :seon.render/problems-banner)
-            (u "t-agents" {:cells (mapv (fn [id] (let [a (get agents id)] [id (shown-status (ended-as a id agent-attempt)) (count (:evals a))])) order)
+            (u "t-agents" {:cells (mapv (fn [id] (let [a (get agents id)] [id (shown-status (ended-as a id agent-run)) (count (:evals a))])) order)
                            :off (- (count agents) (count order)) :ended-kept (:ended-kept sys)} :seon.render/swarm)]
            (for [t (load-tiles writer fork-server main series)] (u (:id t) t :seon.render/tile))
            [(u "t-health" {:health procs} :seon.render/procs-health)
-            (u "t-tasks" {:rows (:task-rows sys) :attempts attempts :main-t (:t main)} :seon.render/work)
+            (u "t-tasks" {:rows (:task-rows sys) :runs runs :main-t (:t main)} :seon.render/work)
             (u "t-errors" {:root-errors root-errors :root-errors-total (:root-errors-total sys) :boot boot :store store} :seon.render/root-errors)
             (u "ctx" (:context sys) :seon.render/context)
             (u "events-n" {:kept (count (:events sys)) :seen (:events-seen sys 0)} :seon.render/events-count)
@@ -807,11 +807,11 @@
            ;; the config root wrote on main, by its schema's declared render (none before boot's fact)
            (when-let [c (:config sys)] [{:id "t-config" :input c :schema :seon.config/config}])
            ;; the stream, newest first: a new event's row is prepended, one past the cap removed,
-           ;; and a row whose event changed (main said how a stopped agent's attempt ended) replaced
+           ;; and a row whose event changed (main said how a stopped agent's run ended) replaced
            (for [e (:events sys)]
              {:id (str "ev-" (:seq e)) :input e :schema :seon.render/event :container "#events" :prepend? true})
            (for [id order]
-             {:id (str "cb-" (dom-id id)) :input (ended-as (get agents id) id agent-attempt) :agent id :schema :seon.render/agent
+             {:id (str "cb-" (dom-id id)) :input (ended-as (get agents id) id agent-run) :agent id :schema :seon.render/agent
               :shell (str "card-" (dom-id id)) :container "#grid"})))}))
 
 ;;; --- one agent, zoomed -----------------------------------------------------------------
@@ -829,8 +829,8 @@
                    (if-let [st (:seon.task/state t)] (kname st) (kname (:seon.task/execution t)))))
       [:pre {:class "plan" :title "its plan, accumulated along its needs: theirs first"} plan]
       (when (:seon.task/instructions t) [:p {:class "muted"} (:seon.task/instructions t)])
-      (when-let [{:keys [reason counterexample attempt]} (:seon.task/failure t)]
-        [:p {:class "err"} "failed" (when attempt (str " in " attempt)) ": " reason (when counterexample (list " · counterexample " [:code counterexample]))])
+      (when-let [{:keys [reason counterexample run]} (:seon.task/failure t)]
+        [:p {:class "err"} "failed" (when run (str " in " run)) ": " reason (when counterexample (list " · counterexample " [:code counterexample]))])
       (when (seq (:seon.task/needs t))
         [:p {:class "muted"} "needs "
          ;; met or not, when the producer carries what blocks it (seon.reconcile/blocked-by)
@@ -864,7 +864,7 @@
       (render/html verdict (assoc opts :schema :seon.cost/verdict))]))
 
 (defn red-label
-  "Why a red proof does or does not block: a proof of this attempt's own task blocks; a
+  "Why a red proof does or does not block: a proof of this run's own task blocks; a
   proof of another task not done yet is an allowed red (whose task)."
   {:malli/schema [:=> [:cat :any [:maybe [:set :any]] [:maybe :map]] :any]}
   [p own owners]
@@ -898,7 +898,7 @@
 
 (defn proofs-box
   "The agent's last test run: every report, the red ones first, cost proofs with their
-  measurements. input {:tests :results} (results: main's attempt results by proof)."
+  measurements. input {:tests :results} (results: main's run results by proof)."
   {:malli/schema [:=> [:cat :seon.render/proofs :seon.render/opts] :any]}
   [{:keys [tests results own owners seen seen-turn]} opts]
      [:section {:class "box" :id "z-proofs"}
@@ -944,69 +944,69 @@
 
 (defn why
   "Why agent ag is as it is, in words, one line each: its status (and the form it evaluates
-  now), how its attempt stands or ended (outcome and reason), and its task held for root (the
-  failure). From root's view entry, main's attempt and task; an agent neither knows says so."
+  now), how its run stands or ended (outcome and reason), and its task held for root (the
+  failure). From root's view entry, main's run and task; an agent neither knows says so."
   {:malli/schema [:=> [:cat :map [:maybe :map] [:maybe :map] nat-int?] [:vector :string]]}
-  [ag attempt task model-turns]
+  [ag run task model-turns]
   (let [st (when (:status ag) (shown-status ag))
-        {:seon.attempt/keys [id status outcome reason env]} attempt
+        {:seon.run/keys [id status outcome reason env]} run
         max-turns (:max-turns env)
         outside? (= "outside" (:model env))]
     (cond-> []
-      (and (nil? st) (nil? attempt)) (conj (str "root holds no agent " (kname (:id ag)) " and main records no attempt it worked"))
-      (and (nil? st) attempt) (conj "not in root's view (its process ended, or another boot ran it): read from the store")
+      (and (nil? st) (nil? run)) (conj (str "root holds no agent " (kname (:id ag)) " and main records no run it worked"))
+      (and (nil? st) run) (conj "not in root's view (its process ended, or another boot ran it): read from the store")
       (:running ag) (conj (str "evaluating " (print/line (:form (:running ag)) (one-line))))
       (:error ag) (conj (str "root recorded: " (:seon.error/message (:error ag))))
       (and st (live st) (not (:running ag)) (not outside?)) (conj (str (kname st) ": waits for its next request"))
       (and st (live st) outside?) (conj "worked from outside (model outside): waits for its outside agent's next request through root's server")
-      (= :running status) (conj (str "attempt " id " running: " model-turns " model turn" (when (not= 1 model-turns) "s") " recorded"
+      (= :running status) (conj (str "run " id " running: " model-turns " model turn" (when (not= 1 model-turns) "s") " recorded"
                                      (when max-turns (str " of at most " max-turns))
                                      (when (and (:running ag) (not outside?)) "; the turn after the last recorded is in flight (model, then its evaluations)")))
-      (and status (not= :running status)) (conj (str "attempt " id " " (kname status) (when outcome (str ", outcome " (kname outcome))) (when reason (str ": " reason))))
+      (and status (not= :running status)) (conj (str "run " id " " (kname status) (when outcome (str ", outcome " (kname outcome))) (when reason (str ": " reason))))
       (= :held (:seon.task/execution task)) (conj (str "its task " (:seon.task/id task) " is held for root"
                                                        (when-let [f (:seon.task/failure task)] (str ": " (:reason f)))
-                                                       "; release it to run a next attempt")))))
+                                                       "; release it to run a next run")))))
 
 (defn- cost-str "USD, or what is unknown." {:malli/schema [:=> [:cat :any] :string]}
   [usd] (if (number? usd) (format "$%.4f" (double usd)) "not priced"))
 
 (defn zoom-head
   "The zoomed agent's head: who it is, why it is as it is (`why`), its process (pid, memory,
-  fork to ready, its branch's t, evaluations), its attempt (model, start, turns, tokens and
+  fork to ready, its branch's t, evaluations), its run (model, start, turns, tokens and
   cost at the model's configured prices: seon.model/cost, unpriced turns counted). input
-  {:agent :attempt :task :turns {:n :tokens :usd :unpriced}}."
+  {:agent :run :task :turns {:n :tokens :usd :unpriced}}."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [{:keys [agent attempt task turns]} _]
-  (let [st (kname (if (:status agent) (shown-status agent) (or (:seon.attempt/status attempt) :unknown)))
-        {:seon.attempt/keys [start-ms end-ms]} attempt
-        {:keys [model branch]} (:seon.attempt/env attempt)]
+  [{:keys [agent run task turns]} _]
+  (let [st (kname (if (:status agent) (shown-status agent) (or (:seon.run/status run) :unknown)))
+        {:seon.run/keys [start-ms end-ms]} run
+        {:keys [model branch]} (:seon.run/env run)]
          [:section {:id "z-head" :class (str "zhead cb s-" st)}
       [:h1 [:span {:class (str "dot s-" st)}] (kname (:id agent)) " " (status-pill agent st)
        [:span {:class "branch" :title (str "the store names it " (kname (or (:branch agent) branch)) " (under root's main)")} (str " branch " (kname (or branch (:branch agent))))]]
       ;; the one sentence: what it worked, how that went, what it took
-      (when attempt
+      (when run
         [:p {:class "lead"}
          (if-not (:read? turns)
-           (str (:seon.attempt/task attempt) ": " (kname (:seon.attempt/status attempt)) " · its branch is being read")
-         (str (:seon.attempt/task attempt) ": " (kname (:seon.attempt/status attempt))
-              (when-let [o (:seon.attempt/outcome attempt)] (str ", " (kname o)))
+           (str (:seon.run/task run) ": " (kname (:seon.run/status run)) " · its branch is being read")
+         (str (:seon.run/task run) ": " (kname (:seon.run/status run))
+              (when-let [o (:seon.run/outcome run)] (str ", " (kname o)))
               " · " (:model turns) " model turn" (when (not= 1 (:model turns)) "s")
               (when (pos? (:reads turns)) (str ", " (:reads turns) " reads"))
               (when (and start-ms end-ms) (str " · " (ms-str (- end-ms start-ms))))
               (when (:tokens turns) (str " · " (group3 (:tokens turns)) " tokens"))))])
-      (when-let [t (or (:task agent) (:seon.attempt/task attempt))] [:p {:class "task"} (str t)])
-      [:ul {:class "why"} (for [l (why agent attempt task (:model turns))] [:li l])]
+      (when-let [t (or (:task agent) (:seon.run/task run))] [:p {:class "task"} (str t)])
+      [:ul {:class "why"} (for [l (why agent run task (:model turns))] [:li l])]
       ;; its evaluations: every one its branch records (the card's count is this boot's process's)
       (agent-stats agent (:evals turns) nil)
       [:div {:class "stats"}
-       [:span [:em "attempt"] (or (:seon.attempt/id attempt) "–")]
+       [:span [:em "run"] (or (:seon.run/id run) "–")]
        [:span {:title "the task's model, else root's (:seon.config.ai/model)"} [:em "model"]
         (cond model model
               (= :scripted (config/value :seon.config.ai/provider)) "scripted (a test fixture, no model)"
-              attempt (str (config/value :seon.config.ai/model) " (root's default)") :else "–")]
-       [:span {:title "the attempt's start, local time (:seon.config.web/utc-offset)"} [:em "started"] (str (clock start-ms) " UTC" (config/value :seon.config.web/utc-offset))]
-       (when end-ms [:span {:title "the attempt's end, local time"} [:em "ended"] (str (clock end-ms) " UTC" (config/value :seon.config.web/utc-offset))])
-       (when (and start-ms end-ms) [:span {:title "wall time, the attempt's start to its end: its fork, every turn and its judging"} [:em "took (wall)"] (ms-str (- end-ms start-ms))])
+              run (str (config/value :seon.config.ai/model) " (root's default)") :else "–")]
+       [:span {:title "the run's start, local time (:seon.config.web/utc-offset)"} [:em "started"] (str (clock start-ms) " UTC" (config/value :seon.config.web/utc-offset))]
+       (when end-ms [:span {:title "the run's end, local time"} [:em "ended"] (str (clock end-ms) " UTC" (config/value :seon.config.web/utc-offset))])
+       (when (and start-ms end-ms) [:span {:title "wall time, the run's start to its end: its fork, every turn and its judging"} [:em "took (wall)"] (ms-str (- end-ms start-ms))])
        [:span {:title "model turns, and context reads through root's server (no model call)"} [:em "turns"]
         (str (:model turns) " model" (when (pos? (:reads turns)) (str " · " (:reads turns) " reads")))]
        [:span [:em "tokens"] (group3 (:tokens turns))]
@@ -1021,7 +1021,7 @@
   "The input at the bottom of the agent's window, each through root's requests (the server's
   ops send the same): a line evaluates in its REPL (seon.root/submit!, origin :ui); a line that
   starts with > is a message its next turn reads (seon.root/message!); interrupt stops its
-  running form; release runs its task's next attempt when the task is held (seon.root/release!).
+  running form; release runs its task's next run when the task is held (seon.root/release!).
   input {:id :live? :held}."
   {:malli/schema [:=> [:cat :seon.render/agent-input :seon.render/opts] :any]}
   [{:keys [id live? held]} _]
@@ -1037,7 +1037,7 @@
                 :seon/call 'seon.root/interrupt! :seon/agent id} "⏹ interrupt"]]
      [:p {:class "muted"} "its process has ended: no REPL to evaluate in, no turn to read a message; what it did is above, read from the store"])
    (when held
-     [:button {:class "act" :title (str "release " held ": the reconciler runs its next attempt (my.root/run!)") :seon/call 'seon.root/release! :seon/agent id
+     [:button {:class "act" :title (str "release " held ": the reconciler runs its next run (my.root/run!)") :seon/call 'seon.root/release! :seon/agent id
                :seon/args {:task held}}
       (str "▶ release " held)])])
 
@@ -1052,7 +1052,7 @@
        (for [[p r] rs] [:span {:class (if (= :pass r) "ok" "bad") :title (str p " " (kname r))} " " (if (= :pass r) "●" "✕") " " [:code (name (symbol (str p)))]])])))
 
 (defn turn-row
-  "One turn of an attempt, the declared html render of :seon.turn/turn-fact: its tokens and the
+  "One turn of a run, the declared html render of :seon.turn/turn-fact: its tokens and the
   share its provider served from cache, its cost, where its time went, how the reply stopped;
   the reply and its reasoning; each eval call's code and what the REPL answered, as the model
   read it (the scrollback's own text); the proofs it saw; the messages it took; and the exact
@@ -1123,7 +1123,7 @@
          [:tbody (for [{:keys [part tokens keys]} (:sections context)]
                    (list [:tr [:th part] [:td {:class "n"} (group3 tokens)]]
                          (for [[k t] keys] [:tr {:class "key"} [:td [:code (str k)]] [:td {:class "n"} (group3 t)]])))]]
-        [:p {:class "muted"} "its attempt and turn sections, as it read them (the help page is "
+        [:p {:class "muted"} "its run and turn sections, as it read them (the help page is "
          [:code "docs/agent.md"] "; the scrollback is the earlier turns above); "
          [:a {:href (:href context)} "the whole request"]]
         [:pre {:class "ctx"} (prose (:text context) budget {:href (:href context)})]])]))
@@ -1132,18 +1132,18 @@
   "The head of the agent's conversation, whose rows follow it, oldest first: its turns (each by
   its declared render, turn-row) and its evaluations outside them (history-row), each a unit of
   the window; why there is no turn when there is none; and how many older evaluations it left.
-  input {:attempt :turns (how many) :why :more}."
+  input {:run :turns (how many) :why :more}."
   {:malli/schema [:=> [:cat :seon.render/turns :seon.render/opts] :any]}
-  [{:keys [attempt turns why more]} _]
+  [{:keys [run turns why more]} _]
   [:section {:id "z-turns" :class "convhead"}
-   (kicker "conversation" (if attempt (str "attempt " (:seon.attempt/id attempt) ", oldest first") "no attempt"))
+   (kicker "conversation" (if run (str "run " (:seon.run/id run) ", oldest first") "no run"))
    (when more [:p {:class "more muted"} more])
    (when (zero? turns) [:p {:class "muted"} why])])
 
 (defn branch-box
   "What the branch's merge will carry to main (:will-merge, as its newest turn measured it
   against the branch's merge base) and the merge's conflicts and unmerged entries (the
-  attempt's), each by the printer. input {:will-merge :turn :conflicts :unmerged :branch}."
+  run's), each by the printer. input {:will-merge :turn :conflicts :unmerged :branch}."
   {:malli/schema [:=> [:cat :seon.render/branch :seon.render/opts] :any]}
   [{:keys [will-merge turn conflicts unmerged branch]} _]
   (let [budget (config/value :seon.config.render/value-budget)]
@@ -1182,7 +1182,7 @@
   result), its evaluations from outside the turns, and the input at the bottom; on the right a
   live tile per value it shows, the last changed first."
   {:malli/schema [:=> [:cat :seon.render/agent-page :seon.render/opts] :any]}
-  [{:keys [agent attempt task conv] :as page} _]
+  [{:keys [agent run task conv] :as page} _]
   (let [id (:id agent)]
     {:seon.render/html
      [:div {:id "app" :class "window"}
@@ -1194,8 +1194,8 @@
        [:aside {:class "wside"} [:p {:class "muted wrule"} "the last changed first"] [:div {:id "z-tiles" :class "wtiles"} (for [t (:tiles page)] (slot (:id t)))]]]]
      :seon.render/units
      (into
-     [{:id "z-head" :input {:agent agent :attempt attempt :task task :turns (:totals page)} :schema :seon.render/zoom-head}
-      {:id "z-turns" :input {:attempt attempt :turns (:n (:totals page)) :why (:turns-why page)
+     [{:id "z-head" :input {:agent agent :run run :task task :turns (:totals page)} :schema :seon.render/zoom-head}
+      {:id "z-turns" :input {:run run :turns (:n (:totals page)) :why (:turns-why page)
                              :more (print/more (:history-total page) (:history-shown page) "older evaluations outside its turns, recorded on its branch (:seon.cluster.eval/record)")}
        :schema :seon.render/turns}
       {:id "z-input" :input {:id id :live? (boolean (live (shown-status agent)))

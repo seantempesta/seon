@@ -115,12 +115,12 @@
     {:status 503 :headers {"Content-Type" "text/plain"} :body "not rendered yet: reload"}))
 
 (defn- view-of
-  "The view a path names: :root, an agent's id, or an attempt (attempt:<id>, its id's agent
-  window as that attempt ran: agent ids start again each boot, an attempt's never does)."
+  "The view a path names: :root, an agent's id, or a run (run:<id>, its id's agent
+  window as that run ran: agent ids start again each boot, a run's never does)."
   {:malli/schema [:=> [:cat [:maybe :string]] :any]}
   [s]
   (cond (or (str/blank? s) (= "root" s)) :root
-        (str/starts-with? s "attempt:") (keyword "attempt" (str/replace-first s "attempt:" ""))
+        (str/starts-with? s "run:") (keyword "run" (str/replace-first s "run:" ""))
         :else (keyword s)))
 
 (defn handler
@@ -139,8 +139,8 @@
           {:status 200 :headers {"Content-Type" "text/plain; charset=utf-8" "Cache-Control" "no-store"}
            :body (str (ask! ch {:op :turn-text :agent (view-of (get q "view")) :turn (get q "id")}))}
           (and (= m :get) (str/starts-with? uri "/agent/")) (html-response (ask! ch {:op :page :view (view-of (subs uri 7))}))
-          (and (= m :get) (str/starts-with? uri "/attempt/"))
-          (html-response (ask! ch {:op :page :view (view-of (str "attempt:" (java.net.URLDecoder/decode (subs uri 9) "UTF-8")))}))
+          (and (= m :get) (str/starts-with? uri "/run/"))
+          (html-response (ask! ch {:op :page :view (view-of (str "run:" (java.net.URLDecoder/decode (subs uri 9) "UTF-8")))}))
           (and (= m :get) (= uri "/feed"))
           (let [out (a/chan 64)]
             (a/>!! ch {:op :open :view (view-of (get q "view")) :ch out})

@@ -23,7 +23,7 @@
  :seon.merge/conflict [:map [:key :seon.merge/program-key] [:kind :seon.merge/conflict-kind]
                         [:base {:optional true} :any] [:ours {:optional true} :any] [:theirs {:optional true} :any]]
  ;; a merge entry's :seon.merge/* members as conflict-value reads them (a pulled entry or an
- ;; attempt's evidence): the stored facts (seon.facts' :seon.merge/entry-fact) with key and kind
+ ;; run's evidence): the stored facts (seon.facts' :seon.merge/entry-fact) with key and kind
  ;; at the conflict's own schemas
  :seon.merge/entry-members [:map [:seon.merge/key :seon.merge/program-key] [:seon.merge/kind :seon.merge/conflict-kind]
                              [:seon.merge/base {:optional true} :any] [:seon.merge/ours {:optional true} :any]

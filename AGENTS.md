@@ -102,7 +102,7 @@ Its references are derived from the plan's citations by the one parser ([referen
 
 **Root's gate, before approving any plan, format, key or rule** (owner, 2026-10-21): (1) which existing mechanism does this, ours, v1's or the dependency's? (2) what did v1 do here? (3) what is the field's best known way? (4) does it add a format, key, layer or rule, and why can't the existing one do it? An agent gathers the evidence; root shows it to the owner. No evidence, no approval.
 
-**Learn as we go.** Each merge's lesson goes into the wiki in the same commit (the section where the problem lives, linked from the others like it). A failed attempt's cause stays on its task. A problem outside your task is filed as a task (what you saw, the cause, what correct looks like, its proofs), never fixed in passing.
+**Learn as we go.** Each merge's lesson goes into the wiki in the same commit (the section where the problem lives, linked from the others like it). A failed run's cause stays on its task. A problem outside your task is filed as a task (what you saw, the cause, what correct looks like, its proofs), never fixed in passing.
 
 ## 4. The principles: everything is data flowing through the system
 
@@ -127,7 +127,7 @@ Every need is met by one of these. If one doesn't fit, stop and say so; never ro
   - free (a real, unrestricted REPL);
   - isolated (each on its own branch, its crashes and memory its own);
   - named by role, task and checkout;
-  - ended when their attempt ends.
+  - ended when their run ends.
 - **A render.** Every view, the model's context included, is a render declared on the value's schema, over the one printer.
 - **An error is data**, flowing to whoever can fix it. A defect holds its message (per key) until the code is fixed. A typed error goes to the requester, agent or task that can act on it.
 
@@ -224,8 +224,9 @@ A note (`notes/`) is a working paper. Once its content is filed in one of the ho
 | dial | config key | Clojure map, Datahike config |
 | admit, guarantees | instrument | Malli `malli.instrument` |
 | refusal | invalid, explained (a contract's); a reason (the done rule's); refused (a merge's) | Malli `m/explain` |
+| attempt | run (one agent's try at a task); a clojure.test run is a "test run", a whole root's is "root's run" | owner, 2026-10-23: "I don't like the attempt name. Call it agentic loop or run" |
 
-Library words stay: proc, step-fn, transact, branch, merge, schema, registry, contract (a Malli function schema), flusher, group commit, fork server, lease, generation. **Waste** stays our word for the turns and tokens an attempt spent past what its work needed (`:seon.attempt/waste`; owner, 2026-10-23). A stored keyword is renamed by erasing the store, never by a migration (DECISIONS).
+Library words stay: proc, step-fn, transact, branch, merge, schema, registry, contract (a Malli function schema), flusher, group commit, fork server, lease, generation. **Waste** stays our word for the turns and tokens a run spent past what its work needed (`:seon.run/waste`; owner, 2026-10-23). A stored keyword is renamed by erasing the store, never by a migration (DECISIONS).
 
 ## 8. The machine
 

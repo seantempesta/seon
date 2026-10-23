@@ -45,8 +45,8 @@ Owner, 2026-10-23: "I want the testing to happen on demand. When a change happen
 Owner, 2026-10-23: quote not recorded; relayed by root. Stated in: not yet (owed docs/render.md, with the ``jolt/printer-eval`` and renders branches).
 ### Thinking is off by default
 Owner, 2026-10-21, restated 2026-10-23: "if we can't have intuitive function calling based on the context our context is bad and instructions need help". Stated in: docs/model.md#thinking-is-off-by-default; `:seon.config.ai/thinking` in `resources/seon/config/default.edn`.
-### No automatic retries: a refused or failed attempt is held for root
-Owner, 2026-10-23: "no automatic retries, send it to root to decide if it should be retried" (and 2026-10-22: "We need a way to mark the task as failed and root should be notified"). Stated in: docs/tasks.md#a-refused-attempt-is-held-for-root.
+### No automatic retries: a refused or failed run is held for root
+Owner, 2026-10-23: "no automatic retries, send it to root to decide if it should be retried" (and 2026-10-22: "We need a way to mark the task as failed and root should be notified"). Stated in: docs/tasks.md#a-refused-run-is-held-for-root.
 ### The standing store is test data: erase it, no migration; history within a store is kept
 Owner, 2026-10-23: "why are you migrating 6 facts? isn't it just test data just nuke it and move on". Stated in: AGENTS §9 (the exception to "Runs are kept"); docs/machine.md#disk-stays-bounded; docs/storage.md#history (history kept).
 ### Agents share greens: a test green at its digest never runs again
@@ -55,7 +55,7 @@ Owner, 2026-10-23: "tests that are the same (especially when freshly branched!) 
 Owner, 2026-10-23: "Those decisions should override any of my decisions. This is up to the agent really". Stated in: docs/render.md#one-printer (the scored result goes there; not yet).
 ### The context speaks Clojure, with the agent's thinking beside its forms
 Owner, 2026-10-23: "We should explain the task in terms of clojure code executing and thinking comments and encourage the agent to do the same." Stated in: no section yet; owed to docs/render.md#the-models-context-a-cached-prefix-then-the-turn and docs/agent.md#your-turn.
-### waste stays (`:seon.attempt/waste`); stuck went with the budget
+### waste stays (`:seon.run/waste`); stuck went with the budget
 Owner, 2026-10-23: quote not recorded; from root's note "Owner answers, 2026-10-23 morning" (archive) and the triage's C5. Stated in: AGENTS §7a ("Waste stays our word"; the stuck row is gone).
 ### The dashboard stays in `src`
 Owner, 2026-10-23: quote not recorded; from root's note "Owner answers, 2026-10-23 morning" (archive). Stated in: no section yet.
@@ -78,7 +78,7 @@ Owner, 2026-10-22: "stop using names that aren't clojure or clojure library or j
 ### Compiled units are not stored now; the idea stays open
 Owner, 2026-10-22: "keep the idea open I just want to get to the point we are productive and have real seon agents fixing problems in the system". Stated in: docs/storage.md#compiled-code.
 ### A task edited on two live branches is a conflict for root (D4)
-Owner, 2026-10-22: "This should never happen. If it does there should be a merge conflict and root will have to figure it out." Stated in: docs/tasks.md#task-content-reaches-main-at-the-attempts-end.
+Owner, 2026-10-22: "This should never happen. If it does there should be a merge conflict and root will have to figure it out." Stated in: docs/tasks.md#task-content-reaches-main-at-the-runs-end.
 ### A task's own checks live with the task, outside main's test namespaces (D5 (a))
 Owner, 2026-10-22: quote not recorded (the owner chose option (a)). Stated in: no section yet.
 ### Paid model runs: up to $50, productive runs only; known-wrong context is fixed first
@@ -95,7 +95,7 @@ Owner, 2026-10-22: "tasks shouldn't be restricted in what they can do". Stated i
 Owner, 2026-10-22: "No not a wiki. This is internal seon." Stated in: docs/tasks.md#a-request-is-one-transaction; docs/references.md#task-references; docs/agent.md.
 ### Tasks are extensible, with no explicit kinds (`:seon.task/kind` goes)
 Owner, 2026-10-22: quote not recorded. Stated in: no section yet (every task file still carries `:kind`).
-### One agent entity: the attempt folds into `:seon.agent/*`
+### One agent entity: the run folds into `:seon.agent/*`
 Owner, 2026-10-22: quote not recorded. Stated in: no section yet.
 ### RELOAD goes: `require` and `load-file` load as in Clojure and record nothing
 Owner, 2026-10-22: quote not recorded. Stated in: docs/source.md#an-agent-changes-code-at-its-repl.
@@ -148,7 +148,7 @@ Owner, 2026-10-21: "the only things that should stay are documented config schem
 ### Branches as in production; a separate store is a last resort
 Owner, 2026-10-21: "separate stores should be a last ditch effort". Stated in: AGENTS §5.
 ### A merge carries the program and the agents' data, never platform records
-Root, 2026-10-21 (reversible): no owner quote. Stated in: docs/tasks.md#task-content-reaches-main-at-the-attempts-end; docs/config.md#facts-on-main.
+Root, 2026-10-21 (reversible): no owner quote. Stated in: docs/tasks.md#task-content-reaches-main-at-the-runs-end; docs/config.md#facts-on-main.
 ### Durability is continuous group commit
 Owner, 2026-10-21: "Why have an arbitrary 10ms collection point?" Stated in: AGENTS §5.
 
@@ -192,16 +192,15 @@ Owner, 2026-10-20: "the agent is its own process so having the flow controls be 
 - What a merge carries and who wins a conflict: the whole branch with main winning (`:seon.merge/kept`, v1 MERGE-STEP 5a) or an explicit `:seon.task/carry` list; parity.md still says "ours is kept".
 - Changed-since: a Datahike tree diff by node address (port v1 fork `771a0c4b`, prototype first) or a `:seon.tx/changed` stamp against the "no stamps" ruling.
 - Proofs along `:needs`: keep `seon.task/accumulate` (2026-10-20 ruling) or never carry proofs, since an accumulated designed-red check blocks implement (DESIGN-tasks §3.4, §11 #14); possibly moot once templates become held task data.
-- No progress: is a byte-identical repeated reply a recorded fact only, or does it end the attempt.
-- What is a stall once an eval is bounded by its work: three tasks (`seon.fences/a-stall-is-past-the-requests-own-bound`, `seon.root/one-clock`, `seon.turn/a-form-has-a-time-bound`) still plan a clock; `seon.agent-proc/stall-ms` (30000) remains.
-- The per-attempt turn cap: lower `:seon.config.agent/max-turns` (40) to about 2x the measured p90 turns-to-green once 20 real tasks give one.
+- No progress: is a byte-identical repeated reply a recorded fact only, or does it end the run.
+- What is a stall once an eval is bounded by its work: three tasks (`seon.root/a-stall-is-past-the-requests-own-bound`, `seon.root/one-clock`, `seon.turn/a-form-has-a-time-bound`) still plan a clock; `seon.agent-proc/stall-ms` (30000) remains.
+- The per-run turn cap: lower `:seon.config.agent/max-turns` (40) to about 2x the measured p90 turns-to-green once 20 real tasks give one.
 - A dropped model connection (`:seon.model/transport`): retry once after a wait, or end as now.
 - File and shell roots: a config key with a permissive default, or none; and whether `:git` `:build` `:deps` `:source` effects are root-only.
 - A `jolt/<topic>` fork of `jolt-lang/ring-chez-adapter` (needed by the `seon.web` listener-as-fiber task).
 - Upstream: when to push the `upstream/*` Jolt branches and open PRs, and whether to send the Chez 0006 report and a 0007 issue.
 - Profiling tooling: which to build (Jolt symbol map per generation for `sample`/xctrace; per-op LMDB counts; a `bin/check profile` mode; `mdb_stat` from `bin/build lmdb`).
 - A go for the lmdb-ffi helper reading `mti_semid` that the semaphore-set task needs (a dependency change).
-- `seon.fences.edn`: nine entries read "Done:" yet load as tasks; move the open ones to their owning files and delete the file?
 - Root's external channels (`:to-writer`, `:back`, `:ext`, `:events`, passed as `:bind`) as declared Flow `:conns`?
 - The render proc's render-once caches (`:event-rows`, the zoom history's `:rows`) as units with a `:container`?
 - Do `seon.cost` and `seon.profile` belong in the release binary or with the drivers?
