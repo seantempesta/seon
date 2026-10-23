@@ -212,13 +212,13 @@
     (.mkdirs (java.io.File. (str co "/resources/seon/config")))
     (.mkdirs (java.io.File. (str co "/config")))
     (spit (str co "/resources/seon/config/default.edn") (slurp (str (config/checkout) "/resources/seon/config/default.edn")))
-    (spit local "{:seon.config.source/root \"/elsewhere/next-merges\" :seon.config.web/port 4242}")
+    (spit local "{:seon.config.source/root \"/elsewhere/write-back\" :seon.config.web/port 4242}")
     (try
       (let [{c :config srcs :sources} (config/layered (config/load-layers co :default []))]
-        (is (not= "/elsewhere/next-merges" (:seon.config.source/root c)) "unnamed, it is no layer")
+        (is (not= "/elsewhere/write-back" (:seon.config.source/root c)) "unnamed, it is no layer")
         (is (not-any? #{"config/local.edn"} (vals srcs))))
       (let [{c :config srcs :sources} (config/layered (config/load-layers co :default ["--config" local]))]
-        (is (= "/elsewhere/next-merges" (:seon.config.source/root c)) "named, it is one")
+        (is (= "/elsewhere/write-back" (:seon.config.source/root c)) "named, it is one")
         (is (= 4242 (:seon.config.web/port c)))
         (is (= (str "--config " local) (srcs :seon.config.source/root))))
       (finally (clojure.java.shell/sh "rm" "-rf" co)))))
