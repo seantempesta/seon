@@ -386,6 +386,25 @@
                          [:seon.end/run :seon.end/run] [:seon.end/outcome :seon.end/outcome]
                          [:seon.end/reason {:optional true} :seon.end/reason]
                          [:seon.end/turns {:optional true} :seon.end/turns] [:seon.end/tokens {:optional true} :seon.end/tokens]]
+ ;; ---- a first move scored (seon.judge, my.root/first-moves!) ----
+ ;; the digest of the request it answers (seon.judge/digest): the same context is scored once
+ :seon.judge/digest [:and {:seon.db/identity true} :string]
+ :seon.judge/task :seon.task/id
+ ;; the score from the compiler's facts, with the version that served the context (root's
+ ;; source tree and its commit), the reply's eval calls and their cost in USD when priced
+ :seon.judge/score [:map {:seon.db/data true} [:acted :boolean] [:right-var :boolean] [:right-test :boolean]
+                    [:waste :int] [:uncompiled :int] [:green :boolean] [:version [:map [:root {:optional true} :string] [:commit {:optional true} :string]]]
+                    [:calls [:vector :string]] [:usd {:optional true} number?]
+                    ;; the scoring that made it (seon.judge/scorer): other scoring scores the calls again
+                    [:scorer :string]]
+ ;; a pass that stopped at its budget: what it spent, the bound, the tasks it left
+ :seon.judge/stopped [:map {:seon.db/data true} [:usd number?] [:bound number?] [:left [:vector :seon.task/id]]]
+ :seon.judge/judge-fact [:map {:seon.db/attributes true}
+                         [:seon.judge/digest :seon.judge/digest] [:seon.judge/task {:optional true} :seon.judge/task]
+                         [:seon.judge/score {:optional true} :seon.judge/score] [:seon.judge/stopped {:optional true} :seon.judge/stopped]
+                         [:seon.turn/tokens {:optional true} :seon.turn/tokens]
+                         [:seon.turn/cache-hit-tokens {:optional true} :seon.turn/cache-hit-tokens]
+                         [:seon.turn/cache-miss-tokens {:optional true} :seon.turn/cache-miss-tokens]]
  ;; ---- an effect's outcome, recorded by its asker on its own branch (seon.fx, session FX1) ----
  :seon.fx/id [:and {:seon.db/identity true} :string]
  :seon.fx/kind :keyword
