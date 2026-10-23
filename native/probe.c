@@ -71,6 +71,12 @@ long mp_probe(char *buf, long len) {
 // ---- E13 additions ----
 #include <sys/sysctl.h>
 #include <poll.h>
+// Mach task events: cow_faults, faults, pageins (counts; x 16 KB pages).
+long e13_events(long *out3) {
+  task_events_info_data_t ev; mach_msg_type_number_t c = TASK_EVENTS_INFO_COUNT;
+  if (task_info(mach_task_self(), TASK_EVENTS_INFO, (task_info_t)&ev, &c) != KERN_SUCCESS) return -1;
+  out3[0] = ev.cow_faults; out3[1] = ev.faults; out3[2] = ev.pageins; return 0;
+}
 // OS threads of this task (Mach), independent of Chez's own thread list.
 long e13_nthreads(void) {
   thread_act_array_t th; mach_msg_type_number_t n = 0;
