@@ -73,13 +73,13 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **task** | an entity of desired state: plan, instructions, proofs, `:needs`, environment, execution | `seon.task` |
 | **needs** | a task's prerequisites (refs); the only dependency edge, no chain entity | `seon.task/create-tx` |
 | **accumulated** | a task's plan and proofs with its prerequisites', derived along `:needs` | `seon.task/tasks` |
-| **attempt** | observed state: one agent working one task once (`task#n`); a spawn root refused is an attempt too (`:refused`, no agent, root's reason), named by `seon.reconcile/root-causes` at quiescence and asked again only once main moves for another reason. Its turns, model calls and tokens are what its end measured: absent when unknown (no end is outcome `:no-end`), never 0 ([root](root.md#attempts-and-judging)) | `seon.task/attempt-start-tx` |
+| **run** | observed state: one agent working one task once (`task#n`); a spawn root refused is a run too (`:refused`, no agent, root's reason), named by `seon.reconcile/root-causes` at quiescence and asked again only once main moves for another reason. Its turns, model calls and tokens are what its end measured: absent when unknown (no end is outcome `:no-end`), never 0 ([root](root.md#runs-and-judging)) | `seon.task/run-start-tx` |
 | **template** | a task kind's defaults: work, design, implement, test, merge | `seon.template` |
 | **merge task** | an ordinary task (kind `:merge`) whose new agent merges main into the branch and goes green | `seon.template/with-merge` |
 | **request** | what someone asked, as design → implement → merge tasks on one branch, written in one transaction | `seon.template/request` |
-| **held for root** | a task whose attempt was refused (done rule, dead agent, refused merge) or marked failed: its failure and evidence on it, execution `:held`, state `:failed`, until root releases, edits or cancels it; never retried on its own | `seon.reconcile/hold-tx` |
+| **held for root** | a task whose run was refused (done rule, dead agent, refused merge) or marked failed: its failure and evidence on it, execution `:held`, state `:failed`, until root releases, edits or cancels it; never retried on its own | `seon.reconcile/hold-tx` |
 | **observed state** | what happened to a task (running, blocked, open, held, failed, done, merged, cancelled; `:seon.task/state`), derived once from the index | `seon.reconcile/task-state` |
-| **done rule** | why an attempt's measured facts do not make its task done; empty means done | `seon.reconcile/done-explain` |
+| **done rule** | why a run's measured facts do not make its task done; empty means done | `seon.reconcile/done-explain` |
 | **reconciler** | the pure function of main's db to actions, and the proc that carries them out | `seon.reconcile/reconcile`, `reconciler-proc` |
 | **flight** | one action carried out as a chain of requests and answers in the reconciler proc | `seon.reconcile/advance` |
 | **turn loop** | inside an agent: observe, then end (green, or stopped with the outcome and reason) or act (context to the model, forms through the REPL path); a merge task merges main first and again until main brings nothing new | `seon.turn/work!` |

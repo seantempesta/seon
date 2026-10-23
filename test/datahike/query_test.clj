@@ -12,31 +12,31 @@
         nested '[:find ?n :where [?e :ns/name ?n] [(clojure.string/ends-with? (str ?n) "-test")]]
         bound '[:find ?n :where [?e :ns/name ?n] [(str ?n) ?s] [(clojure.string/ends-with? ?s "-test")]
                 [(clojure.string/starts-with? ?s "proof.")]]
-        refusal (fn [q & args] (ex-data (is (thrown? ExceptionInfo (apply d/q q db args)))))]
+        refused (fn [q & args] (ex-data (is (thrown? ExceptionInfo (apply d/q q db args)))))]
     (is (= #{['proof.one-test] ['proof.two-test]} (d/q bound db)) "bound first, the call answers")
-    (let [r (refusal nested)]
+    (let [r (refused nested)]
       (is (= :query/nested-call (:error r)))
       (is (= '(str ?n) (:argument r))))
     (is (= :query/nested-call
-           (:error (refusal '[:find ?s :where [?e :ns/name ?n] [(str (name ?n)) ?s]])))
+           (:error (refused '[:find ?s :where [?e :ns/name ?n] [(str (name ?n)) ?s]])))
         "a function clause too")
     (is (= :query/nested-call
-           (:error (refusal '[:find ?n :in $ % :where [?e :ns/name ?n] (tested ?n)]
+           (:error (refused '[:find ?n :in $ % :where [?e :ns/name ?n] (tested ?n)]
                             '[[(tested ?n) [(clojure.string/ends-with? (str ?n) "-test")]]])))
         "and a rule's body")
     (is (= :query/nested-call
-           (:error (refusal '[:find ?n :where [?e :ns/name ?n] (not [?e :ns/name ?n] [(clojure.string/ends-with? (str ?n) "three")])])))
+           (:error (refused '[:find ?n :where [?e :ns/name ?n] (not [?e :ns/name ?n] [(clojure.string/ends-with? (str ?n) "three")])])))
         "and inside not")
     (is (= :query/nested-call
-           (:error (refusal '[:find ?n :where [?e :ns/name ?n]
+           (:error (refused '[:find ?n :where [?e :ns/name ?n]
                               (or (and [?e :ns/name ?n] [(clojure.string/ends-with? (str ?n) "-test")]) [?e :ns/name ?n])])))
         "and inside or")
     (is (= :query/nested-call
-           (:error (refusal '[:find ?n :where [?e :ns/name ?n]
+           (:error (refused '[:find ?n :where [?e :ns/name ?n]
                               (not-join [?n] [?x :ns/name ?n] [(clojure.string/ends-with? (str ?n) "three")])])))
         "and inside not-join")
     (is (= :query/nested-call
-           (:error (refusal '[:find ?n :where [?e :ns/name ?n] [(contains? '#{proof.three} ?n)]])))
+           (:error (refused '[:find ?n :where [?e :ns/name ?n] [(contains? '#{proof.three} ?n)]])))
         "a quoted literal inside a quoted query is the list (quote ...), refused")
     (is (= #{['proof.three]}
            (d/q '[:find ?n :where [?e :ns/name ?n] [(contains? #{proof.three} ?n)]] db))

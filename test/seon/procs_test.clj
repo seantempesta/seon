@@ -312,7 +312,7 @@
 
 (deftest an-agent-that-ended-is-answered-ended-one-never-had-no-agent
   ;; bin/check e2e-calc (2026-10-23): root's answer says whether the agent ended (its view
-  ;; records :ended-ms: a kill, its attempt's end, a death) or root never had it, so a reader
+  ;; records :ended-ms: a kill, its run's end, a death) or root never had it, so a reader
   ;; (seon.prove) tells a cancel from a defect by the type alone
   (let [st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                              :view {:agents {:a7 {:status :killed :ended-ms 1}}} :graph (promise)
@@ -618,7 +618,7 @@
     (d/branch! conn main ab)
     (let [[st r] (union-of st)
           _ (is (true? (:ok r)))
-          [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:seon.message/id "m1" :seon.message/from "root" :seon.message/to {:seon.attempt/id "a1"} :seon.message/body "from main"}] :dest {:rid 1}})
+          [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:seon.message/id "m1" :seon.message/from "root" :seon.message/to {:seon.run/id "a1"} :seon.message/body "from main"}] :dest {:rid 1}})
           bc (d/connect (assoc cfg :branch ab))
           _ (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from "a1" :seon.message/reply-to "m1" :seon.message/body "from a1"}] :tx-meta (pdb/tx-meta ab)})
           _ (d/release bc)

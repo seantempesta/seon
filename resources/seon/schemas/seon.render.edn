@@ -80,15 +80,15 @@
  :seon.render/no-entity [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-entity]] [:seon.render/eid :seon.render/eid]]]
  ;; ---- what root's dashboard shows: the whole system as one value ----
  ;; the api's view (agents, writer, fork server, store, boot, root errors) joined with every
- ;; proc's health, main's tasks and attempts, the series the tiles draw, and the events.
+ ;; proc's health, main's tasks and runs, the series the tiles draw, and the events.
  ;; Its HTML face is root's layout; its AI face is root's context (a budgeted text).
  :seon.render/system [:map {:seon.render/html seon.render.ui/system-page :seon.render/ai seon.render.ai/system}
                       [:agents :map] [:health :map] [:writer :map] [:fork-server :map]
-                      [:main :map] [:tasks :map] [:attempts :map] [:events [:vector :any]]]
+                      [:main :map] [:tasks :map] [:runs :map] [:events [:vector :any]]]
  ;; one agent as root holds it (the api's view entry, its id added): its card in root's layout
  :seon.render/agent [:map {:seon.render/html seon.render.ui/agent-card}
                      [:id :keyword] [:status {:optional true} [:maybe :keyword]]]
- ;; one agent zoomed: the agent, its attempt and task on main, its evaluations on its branch,
+ ;; one agent zoomed: the agent, its run and task on main, its evaluations on its branch,
  ;; the current-state block its model reads. Its HTML face is the agent's page.
  :seon.render/agent-page [:map {:seon.render/html seon.render.ui/agent-page}
                           [:agent :seon.render/agent]]
@@ -103,9 +103,9 @@
                      [:cells [:sequential [:tuple :any :any nat-int?]]] [:off :int]]
  ;; every declared root proc's health, by proc id
  :seon.render/procs-health [:map {:seon.render/html seon.render.ui/tile-health} [:health :map]]
- ;; the work: every task's row (seon.render.proc/task-rows), main's attempts, main's t
+ ;; the work: every task's row (seon.render.proc/task-rows), main's runs, main's t
  :seon.render/work [:map {:seon.render/html seon.render.ui/tile-tasks}
-                    [:rows [:maybe :map]] [:attempts [:maybe :map]]]
+                    [:rows [:maybe :map]] [:runs [:maybe :map]]]
  ;; root's own defects, the boot's numbers and the store
  :seon.render/root-errors [:map {:seon.render/html seon.render.ui/tile-errors}]
  ;; root's context: the system's AI face as root reads it
@@ -115,15 +115,15 @@
  :seon.render/events-count [:map {:seon.render/html seon.render.ui/events-count} [:kept nat-int?] [:seen nat-int?]]
  ;; the web proc's own numbers (tabs open)
  :seon.render/web [:map {:seon.render/html seon.render.ui/web-stats}]
- ;; the agent window's head: its view entry, attempt and task, the totals over its turns
+ ;; the agent window's head: its view entry, run and task, the totals over its turns
  :seon.render/zoom-head [:map {:seon.render/html seon.render.ui/zoom-head} [:agent :map] [:turns :map]]
- ;; the attempt's turns, each row serialized ahead by its declared render (seon.render.ui/turn-row)
+ ;; the run's turns, each row serialized ahead by its declared render (seon.render.ui/turn-row)
  :seon.render/turns [:map {:seon.render/html seon.render.ui/turns-list} [:turns nat-int?]]
  ;; the input at the bottom of the agent's window
  :seon.render/agent-input [:map {:seon.render/html seon.render.ui/agent-input} [:id :keyword] [:live? :boolean]]
  ;; one live tile of the agent window: a value and the schema whose render shows it as a tile
  :seon.render/window-tile [:map {:seon.render/html seon.render.ui/window-tile} [:value :any] [:schema :qualified-keyword]]
- ;; the agent's last test run, and main's results of its attempt
+ ;; the agent's last test run, and main's results of its run
  :seon.render/proofs [:map {:seon.render/html seon.render.ui/proofs-box}]
  ;; what the agent's branch will carry to main, as its newest turn measured it
  :seon.render/branch [:map {:seon.render/html seon.render.ui/branch-box}]

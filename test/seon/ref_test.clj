@@ -130,7 +130,7 @@
 
 (deftest a-citation-ending-in-a-wildcard-is-prose
   (is (= [['seon.ref/parse nil nil nil :doc]]
-         (kinds nil "`seon.ref/parse`, not `:seon.render.unknown/*` and `seon.task.attempt/*` and seon.task.attempt/*"))))
+         (kinds nil "`seon.ref/parse`, not `:seon.render.unknown/*` and `seon.task.run/*` and seon.task.run/*"))))
 
 (def ^:private page
   (str "# Flow\n\nFlow runs procs, e.g. steps. Each proc is a Var.\nSee `seon.step/step`.\n\n"

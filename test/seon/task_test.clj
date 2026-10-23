@@ -45,7 +45,7 @@
     (is (= t (get (task/tasks db) "demo/t")))))
 
 (deftest a-resumed-branch-takes-its-needs-from-main
-  ;; a kept branch resumed for an attempt may have been forked before main held the tasks its
+  ;; a kept branch resumed for a run may have been forked before main held the tasks its
   ;; task needs (the step E dry run read its task on its branch as nil and threw).
   ;; onto-tx puts the task and what it needs there, as main holds them, and leaves another
   ;; task the branch already holds as the branch has it
@@ -63,16 +63,16 @@
     (is (= [] (task/onto-tx main after "demo/store")) "nothing when the branch holds them")))
 
 (deftest a-released-branch-takes-its-task-from-main
-  ;; owner, 2026-10-23: a refused attempt holds its task for root, and root's release runs it
+  ;; owner, 2026-10-23: a refused run holds its task for root, and root's release runs it
   ;; again on the same, kept branch; root's judge wrote the failure and the evidence on main
   ;; after the branch last moved, so the resumed agent takes its task as main holds it
   (let [db0 (ts/test-db)
         branch (d/db-with db0 (task/create-tx db0 [{:seon.task/ns 'demo :seon.task/name "a" :seon.task/plan "Make a true."}]))
         ev {:from "demo/a#1" :conflicts [] :unmerged [] :red ['demo-test/a-test] :problem "proof-red demo-test/a-test"}
-        main (d/db-with branch [{:seon.task/id "demo/a" :seon.task/evidence ev :seon.task/failure {:reason "proof-red demo-test/a-test" :attempt "demo/a#1"}}])
+        main (d/db-with branch [{:seon.task/id "demo/a" :seon.task/evidence ev :seon.task/failure {:reason "proof-red demo-test/a-test" :run "demo/a#1"}}])
         after (d/db-with branch (task/onto-tx main branch "demo/a"))]
     (is (= ev (:seon.task/evidence (task/task after "demo/a"))) "the evidence")
-    (is (= "demo/a#1" (:attempt (:seon.task/failure (task/task after "demo/a")))) "and the failure it answers")
+    (is (= "demo/a#1" (:run (:seon.task/failure (task/task after "demo/a")))) "and the failure it answers")
     (is (= [] (task/onto-tx main after "demo/a")) "nothing when the branch holds it as main does")))
 
 ;; ---- the links between root, an agent, its run, turns and messages are refs (task
@@ -92,30 +92,30 @@
        (d/branch! conn main b)
        (let [bc (d/connect (assoc cfg :branch b))]
          (try
-           (d/transact conn (task/attempt-start-tx "demo/f#1" "demo/f" "b1" k {:branch b :model "m" :max-turns 8} 0 "p"))
+           (d/transact conn (task/run-start-tx "demo/f#1" "demo/f" "b1" k {:branch b :model "m" :max-turns 8} 0 "p"))
            (d/transact conn (task/message-tx "m-1" "owner" "demo/f#1" "check g"))
            ;; on the branch, which forked before main held the run or the message
-           (d/transact bc [{:db/id "run" :seon.attempt/id "demo/f#1"} {:seon.turn/id "demo/f#1/0" :seon.turn/attempt "run" :seon.turn/n 0 :seon.turn/origin :model}])
+           (d/transact bc [{:db/id "run" :seon.run/id "demo/f#1"} {:seon.turn/id "demo/f#1/0" :seon.turn/run "run" :seon.turn/n 0 :seon.turn/origin :model}])
            (d/transact bc (task/message-tx "m-1" "owner" "demo/f#1" "check g"))
            (d/transact bc (repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "a3-77-1" [{:id 1 :tag :ret :form "(f 2)" :printed "4"}] nil))
            (testing "from root on main: its agents, each agent's run"
              (is (= [{:seon.agent/id :a3 :seon.agent/status :idle :seon.agent/pid 77 :seon.agent/running "(f 2)"
-                      :seon.attempt/_agent [{:seon.attempt/id "demo/f#1"}]}]
+                      :seon.run/_agent [{:seon.run/id "demo/f#1"}]}]
                     (:seon.agent/_root (d/pull @conn '[{:seon.agent/_root [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/running
-                                                                           {:seon.attempt/_agent [:seon.attempt/id]}]}]
+                                                                           {:seon.run/_agent [:seon.run/id]}]}]
                                                [:seon.root/id :root])))))
            (testing "the message is to the run, on main"
-             (is (= [{:seon.message/body "check g"}] (:seon.message/_to (d/pull @conn '[{:seon.message/_to [:seon.message/body]}] [:seon.attempt/id "demo/f#1"])))))
+             (is (= [{:seon.message/body "check g"}] (:seon.message/_to (d/pull @conn '[{:seon.message/_to [:seon.message/body]}] [:seon.run/id "demo/f#1"])))))
            (testing "on the branch: the run's turns and the message it took, the agent's evaluations"
-             (let [run (d/pull @bc '[{:seon.turn/_attempt [:seon.turn/id]} {:seon.message/_to [:seon.message/id]}] [:seon.attempt/id "demo/f#1"])]
-               (is (= [{:seon.turn/id "demo/f#1/0"}] (:seon.turn/_attempt run)))
+             (let [run (d/pull @bc '[{:seon.turn/_run [:seon.turn/id]} {:seon.message/_to [:seon.message/id]}] [:seon.run/id "demo/f#1"])]
+               (is (= [{:seon.turn/id "demo/f#1/0"}] (:seon.turn/_run run)))
                (is (= [{:seon.message/id "m-1"}] (:seon.message/_to run))))
              (is (= ["a3-77-1/1"] (mapv :seon.cluster.eval/id (:seon.cluster.eval/_agent (d/pull @bc '[{:seon.cluster.eval/_agent [:seon.cluster.eval/id]}] [:seon.agent/key k]))))))
            (testing "the run, the message and the agent are one entity on the branch and on main (content ids)"
-             (doseq [ref [[:seon.attempt/id "demo/f#1"] [:seon.message/id "m-1"] [:seon.agent/key k]]]
+             (doseq [ref [[:seon.run/id "demo/f#1"] [:seon.message/id "m-1"] [:seon.agent/key k]]]
                (is (= (:db/id (d/entity @conn ref)) (:db/id (d/entity @bc ref))) (pr-str ref))))
            (testing "the run's reader names its agent by id"
-             (is (= :a3 (:seon.attempt/agent (task/attempt @conn "demo/f#1")))))
+             (is (= :a3 (:seon.run/agent (task/run @conn "demo/f#1")))))
            (finally (d/release bc) (d/delete-branch! conn b))))))))
 
 (deftest an-agents-live-state-is-facts-on-its-entity
