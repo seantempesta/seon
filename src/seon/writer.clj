@@ -234,7 +234,7 @@
                                (refused (str "no branch " (:branch m)) {})))
       ;; root's collection of the store (seon.db/collect!), asked at quiescence: swept when a
       ;; branch the last one saw is gone, and recorded on main through the batch
-      :collect (let [r (pdb/collect! conn)]
+      :collect (let [r (pdb/collect! conn (cfg/value :seon.config.store/sole-writer?))]
                  (reply (if (:skipped r) st (commit-batch (update st :pend (fnil conj []) {:tx-data [{:seon.root/id :root :seon.root/collected r}]}) o))
                         {:ok true :collected r}))
       (reply st (refused (str "unknown op " op) {})))))

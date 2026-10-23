@@ -124,6 +124,14 @@
  ;; cache holding them scanned in 26 ms and opened a sibling branch reading 8 nodes. 128 MB holds
  ;; about nine such indexes: a thirty-second of :seon.config.machine/memory-mb per process.
  :seon.config.store/node-cache-bytes 134217728
+ ;; Boolean: whether this root is its store's only writer process, so it may collect the store
+ ;; (seon.db/collect!; docs/storage.md#collection): Datahike's collection sees only its own
+ ;; process's in-flight commits (datahike.gc/gc-storage!), so a commit of another process can
+ ;; reuse a value the sweep is deleting. False: root never collects, and the store keeps its
+ ;; garbage. Provenance, 2026-10-23 (notes/store-gc-bug-2026-10-23.md): the :scripted profile is
+ ;; bin/test's and bin/check's, whose roots (a shard's, a step's) share one store; production
+ ;; runs one root per store (task seon.db/two-processes-branch-one-store-at-once).
+ :seon.config.store/sole-writer? #profile {:default true :scripted false}
 
  ;; ==== agents =================================================================================
 

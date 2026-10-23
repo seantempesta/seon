@@ -300,15 +300,17 @@
   :seon.root/collected): the record to write, {:swept :ms :branches :gone}. With no record yet
   (a new main) or none gone but branches made since, the record of what is here, nothing swept,
   so a branch seen at one quiescence and gone at a later one is reclaimed; {:skipped true} when
-  the branches are the ones recorded. Only while no
-  other process writes the store (owner, 2026-10-22, simplest first): root's writer runs it
-  (:collect) and root refuses it while an agent is live (docs/storage.md#collection)."
-  {:malli/schema [:=> [:cat :seon.host/conn] [:or [:map [:skipped :boolean]] :seon.root/collected]]}
-  [conn]
+  the branches are the ones recorded. Only while no other process writes the store (owner,
+  2026-10-22, simplest first): root's writer runs it (:collect), root refuses it while an agent
+  is live, and sole? (:seon.config.store/sole-writer?) says no other root writes it; when not,
+  {:skipped true :shared true} (docs/storage.md#collection)."
+  {:malli/schema [:=> [:cat :seon.host/conn :boolean] [:or [:map [:skipped :boolean] [:shared {:optional true} :boolean]] :seon.root/collected]]}
+  [conn sole?]
   (let [last (:seon.root/collected (d/pull @conn [:seon.root/collected] [:seon.root/id :root]))
         now (set (d/branches conn))
         gone (count (remove now (:branches last)))]
     (cond
+      (not sole?) {:skipped true :shared true}
       (and last (zero? gone) (= now (:branches last))) {:skipped true}
       ;; no record yet (a new main: every check step's) or nothing gone: record what is here,
       ;; sweep nothing; a full sweep on a store of hundreds of branches held a check step's

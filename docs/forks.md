@@ -83,7 +83,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 ## datahike
 
-`reference-code/datahike` pinned at `0783e8b`, the tip of ``jolt/global-ids``.
+`reference-code/datahike` pinned at `b4596cf`, the tip of ``jolt/global-ids`` (``jolt/gc-cache-epoch`` `700c473` merged in).
 
 - Fork repo: ``~/src/seon-jolt/libs/datahike``. Upstream: ``replikativ/datahike``.
 - Base: `ad9fc97` "baseline", a history-less snapshot of Seon's fork ``seantempesta/datahike`` `ccba220b` (unknown: that commit is not in the repo, so the snapshot cannot be checked against it).
@@ -116,6 +116,9 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 ## persistent-sorted-set
 
 `reference-code/persistent-sorted-set` pinned at `1cae7f2`, the tip of ``jolt/forward-cursor-comparator`` (on ``jolt/main`` `9cce727`).
+- `jolt/gc-cache-epoch` `700c473` (worktree session store-gc, 2026-10-23; on the pin `fd0c065`, for root to merge onto `jolt/main`): a value key held in the node cache is trusted only in the collection generation it was found in; `gc-storage!` counts up `datahike.index.interface/collection-key` after its sweep ([storage](storage.md#collection)). Proof: `datahike.test.gc-value-key-test` (on Jolt, LMDB), red (`:value-not-found`) -> green.
+
+- A1 (2026-10-20): `a1/jolt-main` = `jolt/main` `fde9f89` (which already holds F2's f2-final `writer.cljc` byte for byte) + `jolt/node-cache-reads` `deee8c2` + `jolt/qcache-off` `21bc8cd` + `jolt/branch-pointer` `7de2e94` (on `jolt/branch-roster` `c0f9149`). `jolt/main` itself is checked out in L1's worktree `l1/qc/dh-main`, so root moves it. Versioning tests: 13 tests, 49 pass, 3 fail, 4 error; `jolt/main` is 1 fail, 4 error. The 2 new failures are `commit-as-db-preserves-only-attached-generation-identity`'s query-cache evidence assertions (miss-owner, hit), which `qcache-off` makes false by design.
 
 - Fork repo: ``~/src/seon-jolt/e4/pss-a``. Upstream: ``replikativ/persistent-sorted-set`` 0.4.137.
 - Base: none; written fresh, with no upstream history (root commit `d397c58`).
