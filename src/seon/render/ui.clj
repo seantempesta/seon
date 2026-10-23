@@ -1154,13 +1154,13 @@
       [:ul (for [{:keys [line evidence]} rows]
              [:li [:b line] (when evidence [:details [:summary "evidence"] (render/print-html evidence {:budget (part)})])])])])
 
-(defn tiles-list
-  "The agent window's right column: a live tile for each value it shows, the one whose value
-  changed last at the top, each already serialized (rendered once per change of its value).
-  input {:tiles [html ...]}."
-  {:malli/schema [:=> [:cat :seon.render/tiles :seon.render/opts] :any]}
-  [{:keys [tiles]} _]
-  [:div {:id "z-tiles" :class "wtiles"} (map h/raw tiles)])
+(defn window-tile
+  "One tile of the agent window's right column: the value its tile render shows (render with
+  :as :tile), in an element named by its unit (its id carries the tile's change number, so a
+  changed tile is prepended anew and the last changed is first). input {:value :schema}."
+  {:malli/schema [:=> [:cat :seon.render/window-tile :seon.render/opts] :any]}
+  [{:keys [value schema]} opts]
+  [:div {:class "wtile" :id (:unit opts)} [render/html value {:schema schema :as :tile}]])
 
 (defn agent-page
   "One agent's window (the declared HTML render of :seon.render/agent-page), chat-style: its
@@ -1177,7 +1177,7 @@
        [:section {:class "chat"} (slot "z-head") (slot "z-turns")
         [:ol {:id "z-conv" :class "turns"} (for [c conv] (slot (:id c)))]
         (slot "z-input")]
-       [:aside {:class "wside"} (slot "z-tiles")]]]
+       [:aside {:class "wside"} [:div {:id "z-tiles" :class "wtiles"} (for [t (:tiles page)] (slot (:id t)))]]]]
      :seon.render/units
      (into
      [{:id "z-head" :input {:agent agent :attempt attempt :task task :turns (:totals page)} :schema :seon.render/zoom-head}
@@ -1186,6 +1186,9 @@
        :schema :seon.render/turns}
       {:id "z-input" :input {:id id :live? (boolean (live (shown-status agent)))
                              :held (when (= :held (:seon.task/execution task)) (:seon.task/id task))} :schema :seon.render/agent-input}
-      {:id "z-tiles" :input {:tiles (:tiles page)} :schema :seon.render/tiles}]
-     ;; each row of the conversation, appended in the order it was written
-     (map #(assoc % :container "#z-conv") conv))}))
+      ]
+     (concat
+      ;; each row of the conversation, appended in the order it was written
+      (map #(assoc % :container "#z-conv") conv)
+      ;; each tile, prepended when it is new or changed (a new id): one change sends one tile
+      (map #(assoc % :container "#z-tiles" :prepend? true) (:tiles page))))}))

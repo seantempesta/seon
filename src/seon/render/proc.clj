@@ -343,12 +343,13 @@
         problems (problem-rows (:recorded st) id (:seon.attempt/task attempt))
         ;; the right column: each value the window shows as its tile, renumbered when its value
         ;; changes, so the last changed is first
+        ;; each tile renumbered when its value changes: its unit's id carries the number, so a
+        ;; change is the old element removed and the new one prepended, the last changed first
         tiles (reduce (fn [acc [k v schema]]
                         (let [old (get acc k)]
-                          (if (or (nil? v) (= v (:input old)))
-                            (if (nil? v) (dissoc acc k) acc)
-                            (assoc acc k {:input v :seq (inc (reduce max 0 (map :seq (vals acc))))
-                                          :html (h/html [:div {:class "wtile" :id (str "tile-" (name k))} (render/html v {:schema schema :as :tile})])}))))
+                          (cond (nil? v) (dissoc acc k)
+                                (= v (:input old)) acc
+                                :else (assoc acc k {:input v :schema schema :seq (inc (reduce max 0 (map :seq (vals acc))))}))))
                       (:tiles z {})
                       [[:task (when task (assoc task :seon.task/state (get-in st [:task-rows (:seon.task/id task) :state])
                                                 :seon.task/blocked-by (set (get-in st [:task-rows (:seon.task/id task) :blocked-by]))))
@@ -367,7 +368,9 @@
                        (nil? db) (if (:db-error z) (str "its branch could not be read: " (:db-error z)) "its branch is being read")
                        :else (str "no turn recorded yet in attempt " (:seon.attempt/id attempt)))]
     [(assoc-in st [:zoom view] (assoc z :turn-ctx cache :tiles tiles))
-     {:agent agent :attempt attempt :task task :tiles (mapv :html (sort-by (comp - :seq) (vals tiles)))
+     {:agent agent :attempt attempt :task task
+      :tiles (vec (for [[k {:keys [input schema seq]}] (sort-by (comp - :seq val) tiles)]
+                    {:id (str "tile-" (name k) "-" seq) :input {:value input :schema schema} :schema :seon.render/window-tile}))
       ;; each proof's task, to tell a blocking red from an allowed one
       :owners (into {} (for [[tid t] (:tasks st) p (:seon.task/proofs t)] [p tid]))
       ;; the conversation: its turns and its evaluations outside them, in the order they were

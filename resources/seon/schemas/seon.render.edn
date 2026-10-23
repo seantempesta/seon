@@ -68,8 +68,8 @@
  :seon.render/turns [:map {:seon.render/html seon.render.ui/turns-list} [:turns nat-int?]]
  ;; the input at the bottom of the agent's window
  :seon.render/agent-input [:map {:seon.render/html seon.render.ui/agent-input} [:id :keyword] [:live? :boolean]]
- ;; the agent window's live tiles, the last changed first, each serialized ahead
- :seon.render/tiles [:map {:seon.render/html seon.render.ui/tiles-list} [:tiles [:sequential :string]]]
+ ;; one live tile of the agent window: a value and the schema whose render shows it as a tile
+ :seon.render/window-tile [:map {:seon.render/html seon.render.ui/window-tile} [:value :any] [:schema :qualified-keyword]]
  ;; the agent's last test run, and main's results of its attempt
  :seon.render/proofs [:map {:seon.render/html seon.render.ui/proofs-box}]
  ;; what the agent's branch will carry to main, as its newest turn measured it

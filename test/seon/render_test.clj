@@ -855,3 +855,18 @@
       (is (str/includes? html "seon-print-keyword\">:count") "around it, the printer's map"))
     (is (= "{:k [1 2 3]}" (r/ai {:k [1 2 3]} {})) "a value with no render of its own prints as data")
     (is (str/includes? (r/ai a {}) "calc/square#1") "the value itself by its render, as before")))
+
+(deftest one-tiles-change-sends-one-tile
+  ;; the agent window's right column: each tile is a unit; a change to one value is that tile
+  ;; removed and prepended anew (the last changed first), the others not sent
+  (let [st0 (assoc (fresh-state) :watch #{:a1})
+        [st1 _] (answer st0 view0)
+        view1 (assoc-in view0 [:agents :a1 :tests] {:pass 1 :fail 0 :error 0 :ms 3.0 :reports [{:type :pass :var "#'app.proofs/t"}]})
+        [_ out] (answer st1 view1)
+        patch (first (filter #(and (= :patch (:op %)) (= :a1 (:view %))) (:to-web out)))
+        tile-ids (fn [xs] (keep #(re-find #"tile-[a-z]+-\d+" (str %)) xs))]
+    (is (= "#z-tiles" (ffirst (:prepends patch))) "the changed tile is prepended")
+    (is (str/includes? (second (first (:prepends patch))) "its last run: 1 pass"))
+    (is (= 1 (count (re-seq #"class=\"wtile\"" (second (first (:prepends patch)))))) "one tile, not the column")
+    (is (= ["tile-proofs"] (map #(re-find #"tile-[a-z]+" %) (filter #(str/starts-with? % "tile-") (:removes patch)))) "its old element removed")
+    (is (empty? (tile-ids (map first (:frags patch)))) "no other tile is sent")))
