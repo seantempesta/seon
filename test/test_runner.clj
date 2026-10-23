@@ -83,33 +83,58 @@
     r))
 
 (defn shards
-  "tests (var symbols) dealt into at most jobs shards, a namespace's tests (and so its fixtures)
-  in one, the largest namespace first into the smallest shard; no empty shard."
-  [tests jobs]
-  (let [by-ns (sort-by (juxt (comp - count val) (comp str key)) (group-by (comp symbol namespace) tests))]
-    (vec (remove empty? (reduce (fn [sh [_ ts]] (update sh (apply min-key #(count (sh %)) (range (count sh))) into ts))
-                                (vec (repeat (max 1 (min jobs (count by-ns))) [])) by-ns)))))
+  "tests (var symbols) dealt into at most jobs shards by their recorded ms ({test ms}: each
+  one's time at its last run, durations), a namespace's tests (and so its fixtures) in one:
+  the namespaces by their summed ms, largest first, each into the shard with the least so far
+  (LPT, longest processing time first); a test with none recorded counts as the median of
+  those recorded (one ms when none is). No empty shard."
+  [tests jobs ms]
+  (let [known (sort (keep ms tests))
+        median (if (seq known) (nth known (quot (count known) 2)) 1)
+        by-ns (sort-by (juxt (comp - val) (comp str key))
+                       (update-vals (group-by (comp symbol namespace) tests) #(reduce + (map (fn [t] (get ms t median)) %))))
+        groups (group-by (comp symbol namespace) tests)
+        sh (reduce (fn [sh [n w]] (let [i (apply min-key #(:ms (sh %)) (range (count sh)))]
+                                    (-> sh (update-in [i :tests] into (groups n)) (update-in [i :ms] + w))))
+                   (vec (repeat (max 1 (min jobs (count by-ns))) {:tests [] :ms 0})) by-ns)]
+    (vec (remove (comp empty? :tests) sh))))
+
+(defn- durations-path
+  "Where namespace n's tests' recorded ms are kept ({test ms}): beside the results, in the
+  directory every checkout shares, one file a namespace (a namespace runs in one shard, so
+  no two shards of a run write one file)."
+  [dir n] (str dir "/ms/" n ".edn"))
+
+(defn durations
+  "{test ms} of each of tests' namespaces as last recorded (durations-path); a test never run
+  has none."
+  [dir tests]
+  (into {} (for [n (distinct (map (comp symbol namespace) tests))
+                 :let [f (io/file (durations-path dir n))] :when (.isFile f)
+                 e (edn/read-string (slurp f))]
+             e)))
 
 (defn- write-shards!
-  "tests (var symbols) dealt into :seon.config.proofs/jobs shards (shards), each written as
-  out/shard-<i>.edn ({:tests [...] :digests {test digest} :tree t}, t the planned tree's id)
-  for bin/test to run, one process each (bin/test removes the last run's first). Answers the
-  shard count."
+  "tests (var symbols) dealt into :seon.config.proofs/jobs shards by their recorded ms
+  (shards), each written as out/shard-<i>.edn ({:tests [...] :digests {test digest} :tree t
+  :ms m}, t the planned tree's id, m the ms dealt to it) for bin/test to run, one process each
+  (bin/test removes the last run's first). Answers the shard count."
   [out tests digests tree]
-  (let [sh (shards tests (config/value :seon.config.proofs/jobs))]
-    (doseq [[i ts] (map-indexed vector sh)]
-      (write! (str out "/shard-" i ".edn") (sedn/encode {:tests ts :digests (select-keys digests ts) :tree tree})))
+  (let [sh (shards tests (config/value :seon.config.proofs/jobs) (durations (config/value :seon.config.source/test-results-dir) tests))]
+    (doseq [[i {ts :tests ms :ms}] (map-indexed vector sh)]
+      (write! (str out "/shard-" i ".edn") (sedn/encode {:tests ts :digests (select-keys digests ts) :tree tree :ms ms})))
     (count sh)))
 
 (defn- shard!
   "One shard bin/test runs (out/shard-<i>.edn): its namespaces required, its tests run
-  (seon.proofs/run-tests!), each test named as it starts and each red one printed (RED); then
-  its greens stored at their digests (seon.proofs/store-greens!), unless the tree changed
+  (seon.proofs/run-tests!), each test named as it starts and each red one printed (RED); each
+  test's ms recorded for the next dealing (durations); then its greens stored at their digests
+  (seon.proofs/store-greens!), unless the tree changed
   since the plan was made (an edit during the run: what ran is not what the digests name, so
   nothing is kept, and the run stays as reported). A shard that dies midway stores nothing.
   Then SHARD n green m red. Answers the exit status."
   [file]
-  (let [{:keys [tests digests tree]} (edn/read-string (slurp file))
+  (let [{:keys [tests digests tree] dealt :ms} (edn/read-string (slurp file))
         t0 (profile/now-ns)]
     (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
     (let [same? (= tree (fx/tree-id (System/getProperty "user.dir")))
@@ -120,11 +145,16 @@
                                                (not (proofs/green? x)) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))
                                    (flush)))
           unstored (when same? (proofs/store-greens! #(fx/write-file {:req %}) (config/value :seon.config.source/test-results-dir) ran))
+          ;; each test's ms, red or green, kept for the next run's dealing (shards): a
+          ;; measured time deals the work, it never decides what runs
+          _ (doseq [[n ts] (group-by (comp symbol namespace) (keys ran))
+                    :let [dir (config/value :seon.config.source/test-results-dir)]]
+              (write! (durations-path dir n) (sedn/encode (into (into (sorted-map) (durations dir [(first ts)])) (for [t ts :when (:ms (ran t))] [t (:ms (ran t))])))))
           red (count (remove proofs/green? (vals ran)))]
       (when-not same? (println "the tree changed since the plan: no result stored"))
       (doseq [u unstored] (println "UNSTORED" (:key u) (:message u)))
       (println (str "SHARD " (count ran) " tests, " (- (count ran) red) " green, " red " red, in "
-                    (quot (- (profile/now-ns) t0) 1000000) " ms"))
+                    (quot (- (profile/now-ns) t0) 1000000) " ms (dealt " dealt " ms of recorded test time)"))
       (if (and (zero? red) (empty? unstored)) 0 1))))
 
 (defn plan-of
