@@ -49,7 +49,7 @@
                 (mapv #(ask (if (map? %) % {:op :eval :agent "a1" :code %})) forms))
               [{:error :root-did-not-listen :log (let [f (java.io.File. (str path "-runs/root.log"))] (if (.exists f) (slurp f) ""))}])]
     (ts/stop-root! root)
-    (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
+    (ts/drop-main! store main)
     (sh/sh "rm" "-rf" (str path "-runs") (str path "-tasks"))
     (mapv #(if (contains? % :items) (first (:items %)) %) out))))
 
@@ -91,7 +91,7 @@
           left (->> (str/split-lines (:out (sh/sh "pgrep" "-g" (str fs)))) (remove str/blank?) (map parse-long) set)
           log (let [f (java.io.File. (str runs "/root.log"))] (if (.exists f) (slurp f) ""))]
       (doseq [p left] (sh/sh "kill" "-9" (str p)))
-      (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
+      (ts/drop-main! store main)
       (sh/sh "rm" "-rf" runs)
       {:agents agents :out log :left (if drained left (conj left :not-drained))})))
 
@@ -136,7 +136,7 @@
         ended (.read in)]
     (.close in)
     (ts/kill-root! root)
-    (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
+    (ts/drop-main! store main)
     (sh/sh "rm" "-rf" runs fifo)
     (is (pos-int? agent-pid) (str "the agent's pid, from " (pr-str pids)))
     (is (= 49 began) "the proof run was in its test")
@@ -176,7 +176,7 @@
         stopped (eval-root "(clojure.string/starts-with? (:printed (first @blocked)) \"interrupted by root\")")
         next-answer (let [r (ask {:op :eval :agent "a1" :code "(+ 2 2)"})] (if (:error r) r (:printed (first (:items r)))))]
     (ts/stop-root! root)
-    (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
+    (ts/drop-main! store main)
     (sh/sh "rm" "-rf" runs)
     (is (= "true" stopped) (str "the blocked eval answers interrupted by root: " stopped))
     (is (= "4" next-answer) (pr-str next-answer))))
