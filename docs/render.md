@@ -77,7 +77,7 @@ Each fact the page and root's context both show has one producer they share:
 
 ## Health is what flows
 
-Nothing is pinged and nothing runs on a beat. A render pass happens on an event, an api answer or a tab's request. What is wrong has one producer, what is recorded or derived from main's facts: root's context (`seon.render.ai/problems`) and root's page read root's defects and main's open problems (`seon.problems/health`: [health](health.md)), never re-derive them from the live view; root records an agent's death (`seon.root/end-agent`), and a red run, refused merge or refused spawn as it folds it into the agent's view (`seon.root/set-agent`). A value only a ping carried is its owner's to emit when it changes. `bin/check idle` proves an idle root with a tab open steps nothing, and that a spawn and a commit still reach the tab.
+Nothing is pinged and nothing runs on a beat. A render pass happens on an event, an api answer or a tab's request. What is wrong has one producer, what is recorded or derived from main's facts: root's context (`seon.render.ai/problems`) and root's page read root's defects and main's open problems (`seon.problems/health`: [health](health.md)), never re-derive them from the live view; root records an agent's death (`seon.root/end-agent`), and a refused spawn, or a red test run or refused merge of an agent with no task (a task's run records its own), as it folds it into the agent's view (`seon.root/set-agent`). A value only a ping carried is its owner's to emit when it changes. `bin/check idle` proves an idle root with a tab open steps nothing, and that a spawn and a commit still reach the tab.
 
 
 ## The model's context: a cached prefix, then the turn

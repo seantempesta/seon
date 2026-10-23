@@ -8,7 +8,7 @@ A store is named by the id it records, never by where it lies, so a kept run ope
 
 ## The map is address space
 
-LMDB's map (`:seon.config.store/lmdb-map-bytes`, 64 GiB) is address space only: an open or a fork costs the same at 1 or 64 GiB, and the file grows only as it is used. Anything that walks a map page by page pays for its size, under the file's one VM-object lock that every process mapping the store shares: the memory probe once did (`VM_REGION_EXTENDED_INFO` on every region, ~1.5 ms per GiB), and 100 agents took 18 s to be ready instead of 0.65 s. `native/probe.c` now reads each region's O(1) short info and skips file-backed, unshadowed regions, which hold none of the process's own pages (`seon.lib-test/the-memory-probe-costs-what-the-process-holds-not-what-it-maps`). Not this: a smaller map; at 1 GiB the kept store hit Datahike's fatal-commit-error.
+LMDB's map (`:seon.config.store/lmdb-map-bytes`, 64 GiB) is address space only: an open or a fork costs the same at 1 or 64 GiB, and the file grows only as it is used. Anything that walks a map page by page pays for its size, under the file's one VM-object lock that every process mapping the store shares: the memory probe once did (`VM_REGION_EXTENDED_INFO` on every region, ~1.5 ms per GiB), and 100 agents took 18 s to be ready instead of 0.65 s. `native/probe.c` now makes one `task_info` call, the kernel's ledger of the process's own memory (`seon.lib/mp-probe`), so its cost does not grow with what is mapped (`seon.lib-test/the-memory-probe-costs-what-the-process-holds-not-what-it-maps`). Not this: a smaller map; at 1 GiB the kept store hit Datahike's fatal-commit-error.
 
 ## The proof: what a commit costs
 
@@ -65,7 +65,7 @@ The owner's example, root's message on main and the agent's reply on its branch,
 
 ```clojure
 (d/q '[:find ?body ?reply ?branch :in $ ?agent
-       :where [?m :seon.message/to ?agent] [?m :seon.message/id ?id] [?m :seon.message/body ?body]
+       :where [?run :seon.run/id ?agent] [?m :seon.message/to ?run] [?m :seon.message/id ?id] [?m :seon.message/body ?body]
               [?r :seon.message/reply-to ?id ?tx] [?r :seon.message/body ?reply] [?tx :seon.tx/branch ?branch]]
      (my.root/union sys) "demo/f#1")
 ```
