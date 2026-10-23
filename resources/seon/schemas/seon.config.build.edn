@@ -1,0 +1,3 @@
+;; How Seon's processes are built and compile (bin/env, bin/build). Values, units and provenance:
+;; resources/seon/config/default.edn.
+{:seon.config.build/jolt-compiler-options [:string {:min 2 :seon.config/unit "an EDN map, as text" :description "Jolt's compile options for everything a Seon process compiles, exported by bin/env as JOLT_COMPILER_OPTIONS."}]}
