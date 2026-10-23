@@ -826,7 +826,7 @@
 ;; The API: callers outside the graph. Each call puts one request on :ext.
 ;; ====================================================================================
 
-(defn- call!
+(defn call!
   "Put m (with a fresh reply promise) on the api; a promise. After stop! the
   api is closed and the promise answers :seon.root/no-agent (\"root stopped\")."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.root/request] :seon.host/promise]}
@@ -970,9 +970,6 @@
     (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx (pdb/head (:conn sys) b)) :mode (if agent-id :turn :judge)} agent-id (assoc :agent agent-id) (seq names) (assoc :names names)))
     (doto (promise) (deliver (absent (get-in @(call! sys {:op :state}) [:agents agent-id]) agent-id))))))
 
-(defn agent-stats! "A promise of the agent's numbers now." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
-  [sys agent-id] (call! sys {:op :stats :id agent-id}))
-
 (defn- write! {:malli/schema [:=> [:cat :seon.root/sys :seon.writer/request] :seon.host/promise]}
   [sys req] (call! sys {:op :write :req req}))
 
@@ -1056,9 +1053,6 @@
 
 (defn kill! "SIGKILL the agent's process (through its agent proc). nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
   [sys agent-id] (request! sys 'kill! agent-id nil) nil)
-
-(defn fs-call! "Ask the fork server for {:op :stats} or {:op :static}." {:malli/schema [:=> [:cat :seon.root/sys :seon.root/request] :any]}
-  [sys msg] @(call! sys {:op :fs :req msg}))
 
 (defn stop!
   "Stop root by letting the flow drain: the api closes (later calls answer \"root
