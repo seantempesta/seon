@@ -19,7 +19,6 @@
   git's merge queue: the config's."
   (cfg/value :seon.config.merge/max-running))
 
-(def default-budget "Refinement chains a task's failures may attach, undeclared." 2)
 
 ;; ---- the view: one read of main ---------------------------------------------------
 
@@ -124,7 +123,6 @@
   [v t]
   (let [id (:seon.task/id t) as (get-in v [:attempts id])]
     (and (= :running (:seon.task/execution t))
-         (nil? (:seon.task/stuck t))
          (not (done-in? v id))
          (empty? (blocked-in v id))
          (not-any? #(or (live? v %) (#{:ended :dead} (:seon.attempt/status %))) as))))
@@ -175,18 +173,16 @@
                  (cond
                    (not= :running (:seon.task/execution t)) {:op :close :attempt aid}
                    (= :dead (:seon.attempt/status a))
-                   {:op (if (< (:seon.task/generation t 0) (:seon.task/budget t default-budget)) :attach :bail)
-                    :attempt aid :task id :problem (str "its agent died" (some->> (:seon.attempt/reason a) (str ": ")))}
+                   {:op :hold :attempt aid :task id :problem (str "its agent died" (some->> (:seon.attempt/reason a) (str ": ")))}
                    :else
                    (let [rs (done-refusals (done-input v id (:seon.attempt/results a {}) (:seon.attempt/uncontracted a #{})
                                                        (:seon.attempt/unmerged a []) (:seon.attempt/basis-t a)))]
                      (cond
                        (and (empty? rs) merge?) {:op :merge :attempt aid :task id}
                        (empty? rs) {:op :accept :attempt aid :task id}
-                       ;; a failed attempt: new tasks attach through :needs, each a new agent, while
-                       ;; the budget lasts; spent, the task is stuck (bail)
+                       ;; a refused attempt: its task is held for root (no automatic retry)
                        :else
-                       {:op (if (< (:seon.task/generation t 0) (:seon.task/budget t default-budget)) :attach :bail) :attempt aid :task id
+                       {:op :hold :attempt aid :task id
                         :problem (str "attempt " aid " ended" (some->> (:seon.attempt/outcome a) name (str " "))
                                       (some->> (:seon.attempt/reason a) (str " (") (#(str % ")")))
                                       ": " (refusals-text rs))}))))

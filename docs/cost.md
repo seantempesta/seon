@@ -11,6 +11,10 @@ A proof measures the function under test, on the thread that calls it, and nothi
 
 Each size is the least of several repeats (`seon.cost/measure`), less what measuring an empty call costs. The proofs: `seon.profile-test/a-threads-allocation-is-its-own`, `seon.profile-test/a-measure-is-the-same-beside-another-thread`.
 
+## An accepted overrun and its ratchet
+
+Cost is work done, counted (ticks, bytes, calls), never wall time (owner's ruling). A proof past its estimate stays green while the task its `:overrun` names is open and every dimension at the largest size is within `seon.cost/ratchet` (1.5x) of the `:measured` the task recorded, so a regression is red even inside an open overrun. A record is comparable only on the measure it was taken with: the proof's own thread's bytes and calls, exact and the same in every run, and that thread's CPU, which still moves with the machine's load. When the measure changes, every record is measured again on the new one, and its comment says when and under what load.
+
 ## How we measure
 
 Every measurement, in a cost proof or outside one, starts from a written estimate and is read across sizes, never from one quick run (owner: "think about things algorithmically first and always put estimates on things"):

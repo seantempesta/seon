@@ -1,0 +1,79 @@
+[
+ {
+  "section": 1,
+  "answer": "The AGENTS.md text is shown up to the 'Forest before trees' bullet 'Stop and step back when:'. The rest of the file, from section 2 onward, is not shown.",
+  "left_out": "+20541 chars in 194 more lines",
+  "read_form": "(subs (get-in (nth (my.turn/evals) 3) [:value]) 6261)",
+  "confident": true
+ },
+ {
+  "section": 2,
+  "answer": "No. The shown part ends at the heading '## Tiles are data; the context reads the page's derivations', so '## One printer' is not shown.",
+  "left_out": "+11603 chars",
+  "read_form": "(subs (get-in (nth (my.turn/evals) 5) [:value]) 2629)",
+  "confident": true
+ },
+ {
+  "section": 3,
+  "answer": "HTTP 400.",
+  "left_out": "+10964 chars in 78 more lines of the response body",
+  "read_form": "(subs (get-in result/h3 [:seon.error/data :body]) 289)",
+  "confident": true
+ },
+ {
+  "section": 4,
+  "answer": "Explore first: find the owners of what it touches, their callers, the schemas on the data's path and the library functions that already do the work, and try the idea at the REPL.",
+  "left_out": "+1521 chars in 32 more lines of the instructions",
+  "read_form": null,
+  "confident": true
+ },
+ {
+  "section": 5,
+  "answer": "The first lines of a root's log: two ':program' lines (ok true, datoms 73 and datoms 175) and the start of the ':create' line.",
+  "left_out": "+2236 chars (the rest of the log; no line count given)",
+  "read_form": null,
+  "confident": true
+ },
+ {
+  "section": 6,
+  "answer": "The title is '# Render: what a person or a model reads'.",
+  "left_out": "+14143 chars in 76 more lines of the plan",
+  "read_form": "(subs (:seon.task/plan result/h3) 89)",
+  "confident": true
+ },
+ {
+  "section": 7,
+  "answer": "add-test (variants.clj:24). Expected: (= 3 (- 1 2)). Actual: (not (= 3 -1)).",
+  "left_out": "+245 chars (no line count given)",
+  "read_form": null,
+  "confident": true
+ },
+ {
+  "section": 8,
+  "answer": "'## Where Jolt's Flow differs from upstream'",
+  "left_out": "+10543 chars in 74 more lines of the response body",
+  "read_form": "(subs (get-in result/h3 [:seon.error/data :body]) 710)",
+  "confident": true
+ },
+ {
+  "section": 9,
+  "answer": "The last task line shown is ':task calc/add-merge {:execution :running, :done true, :blocked-by #{}, :attempts [[calc/add-merge#1 :merged :green 0 0]]}'.",
+  "left_out": "+1643 chars of the output",
+  "read_form": "(subs (:out (nth (my.turn/evals) 1)) 665)",
+  "confident": true
+ },
+ {
+  "section": 10,
+  "answer": "'## 1. What Seon is for, and what moving forward means'",
+  "left_out": "+25313 chars in 233 more lines of the plan",
+  "read_form": "(subs (:seon.task/plan result/h3) 1489)",
+  "confident": true
+ },
+ {
+  "section": 11,
+  "answer": "No. The shown text ends in section 5 (Laws) at the bullet 'buffers are bounded by their loss semantics;', so section 8 ('The machine') is not shown.",
+  "left_out": "+7279 chars in 88 more lines of the text",
+  "read_form": "(subs result/h3 19523)",
+  "confident": true
+ }
+]

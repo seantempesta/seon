@@ -6,7 +6,7 @@ An agent works its task in a loop inside its own process: observe the branch, en
 
 Root's reconciler forks an agent for a released task and evaluates ```seon.turn/work!``` in it, naming the task, the attempt and `:seon.config.agent/max-turns`. The loop ends on the first of:
 - the done rule refuses nothing (`:green`; all green at the start ends it with no model call);
-- a function asked to stop: `my.turn/wait` (`:waiting`) or `my.task/fail!` (`:failed`, the task held for root: [tasks](tasks.md#a-failed-task-is-held-for-root));
+- a function asked to stop: `my.turn/wait` (`:waiting`) or `my.task/fail!` (`:failed`, the task held for root: [tasks](tasks.md#a-refused-attempt-is-held-for-root));
 - the turns run out (`:cap`, with the done rule's refusals as its reason);
 - a merge task's merge of main is too hairy (`:merge-failed`, [below](#a-merge-tasks-loop));
 - the model call fails (`:error`: [model](model.md#failures)).

@@ -190,6 +190,32 @@
             {:tx [] :conflicts []}
             (sort (for [k (into (set (keys b)) (keys o)) :when (not= (b k) (o k))] k)))))
 
+(defn onto-tx
+  "The facts that put task id as main holds it, and every task it needs (transitively) that
+  branch does not hold, onto branch: a kept branch resumed for an attempt starts from main's
+  task. Root released it after holding it (seon.reconcile/hold-tx), so main's holds the
+  failure and evidence the last attempt left, root's edits, and the branch's own carried at
+  its attempt's end (carry-tx); or the branch was forked before main held the task or its
+  needs. Another task the branch holds is left as the branch has it. Empty when the branch
+  holds them all as main does. Cost: the closure's tasks, pulled once each."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.task/id] [:vector :map]]}
+  [main branch id]
+  (let [pull #(d/pull %1 '[* {:seon.task/needs [:seon.task/id]}] [:seon.task/id %2])
+        held? #(and (pdb/eid branch :seon.task/id %)
+                    (or (not= id %) (= (dissoc (pull main %) :db/id) (dissoc (pull branch %) :db/id))))
+        closure (loop [todo [id] seen #{}]
+                  (if-let [[x & more] (seq todo)]
+                    (if (or (seen x) (held? x))
+                      (recur more seen)
+                      (recur (into (vec more) (map :seon.task/id (:seon.task/needs (d/pull main '[{:seon.task/needs [:seon.task/id]}] [:seon.task/id x]))))
+                             (conj seen x)))
+                    seen))]
+    (vec (for [x (sort closure)
+               :let [t (pull main x)]]
+           (cond-> (-> t (dissoc :db/id :seon.task/needs) (assoc :db/id x))
+             (seq (:seon.task/needs t))
+             (assoc :seon.task/needs (mapv (fn [{n :seon.task/id}] (if (closure n) n [:seon.task/id n])) (:seon.task/needs t))))))))
+
 ;; ---- the reader ------------------------------------------------------------------
 
 (def ^:private task-pull '[* {:seon.task/needs [:seon.task/id]}])
@@ -314,7 +340,7 @@
 (def ^:private stated-attributes
   "The task attributes a declaration states (its members, config flattened), as stored."
   [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
-   :seon.task/kind :seon.task/evidence :seon.task/generation :seon.task/budget :seon.task/references
+   :seon.task/kind :seon.task/evidence :seon.task/references
    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
 
 (defn- file-refusal

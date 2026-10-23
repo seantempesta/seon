@@ -1,0 +1,79 @@
+[
+ {
+  "section": 1,
+  "answer": "No, section 8 (The machine) is not shown. The text stops inside section 5 (Laws), at the bullet 'buffers are bounded by their loss semantics;'.",
+  "left_out": "7279 chars",
+  "read_form": "(subs result/h3 19523)",
+  "confident": true
+ },
+ {
+  "section": 2,
+  "answer": "## 1. What Seon is for, and what moving forward means",
+  "left_out": "25313 chars",
+  "read_form": "(subs (:seon.task/plan result/h3) 1489)",
+  "confident": true
+ },
+ {
+  "section": 3,
+  "answer": ":task calc/add-merge {:execution :running, :done true, :blocked-by #{}, :attempts [[calc/add-merge#1 :merged :green 0 0]]}",
+  "left_out": "1643 chars in 12 more lines",
+  "read_form": "(subs (:out (nth (my.turn/evals) 1)) 665)",
+  "confident": true
+ },
+ {
+  "section": 4,
+  "answer": "## Where Jolt's Flow differs from upstream",
+  "left_out": "10543 chars",
+  "read_form": "(subs (get-in result/h3 [:seon.error/data :body]) 710)",
+  "confident": true
+ },
+ {
+  "section": 5,
+  "answer": "First failure: FAIL in (add-test) (variants.clj:24), expected: (= 3 (- 1 2)), actual: (not (= 3 -1)). The rest of the output, including later failures, is not shown.",
+  "left_out": "269 chars in 7 more lines",
+  "read_form": null,
+  "confident": true
+ },
+ {
+  "section": 6,
+  "answer": "Render: what a person or a model reads",
+  "left_out": "14120 chars",
+  "read_form": "(subs (:seon.task/plan result/h3) 112)",
+  "confident": true
+ },
+ {
+  "section": 7,
+  "answer": "The root's log (runs/root.log). It shows the first line ':program {:ok true, :datoms 73}' and the start of the second ':program' line. The rest is not shown.",
+  "left_out": "2262 chars in 19 more lines",
+  "read_form": null,
+  "confident": true
+ },
+ {
+  "section": 8,
+  "answer": "Not shown. The text stops at the start of the task's :instructions key, so what the instructions say to do first is not in the text.",
+  "left_out": "2162 chars",
+  "read_form": null,
+  "confident": true
+ },
+ {
+  "section": 9,
+  "answer": "HTTP 400 (the request's messages exceed the model's context window). The body's first lines, through the note on the experiments in ../notes/option3-FLOWLAB*.md, are shown.",
+  "left_out": "10964 chars",
+  "read_form": "(subs (get-in result/h3 [:seon.error/data :body]) 289)",
+  "confident": true
+ },
+ {
+  "section": 10,
+  "answer": "No. The shown part of docs/render.md has sections No clipping, Prose, Bounded lists, and Tiles are data; the context reads the page's derivations. The heading '## One printer' is not in the shown part.",
+  "left_out": "11603 chars in 56 more lines",
+  "read_form": "(subs (get-in (nth (my.turn/evals) 5) [:value]) 2629)",
+  "confident": true
+ },
+ {
+  "section": 11,
+  "answer": "The shown part of AGENTS.md runs through section 2 and ends at the bullet 'Stop and step back when:' under 'Forest before trees'. The rest of the file is not shown.",
+  "left_out": "20541 chars",
+  "read_form": "(subs (get-in (nth (my.turn/evals) 3) [:value]) 6261)",
+  "confident": true
+ }
+]

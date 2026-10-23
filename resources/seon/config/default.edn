@@ -203,7 +203,7 @@
  ;; :seon.test/ticks-spent naming the test that was running. 0: none.
  :seon.config.agent/test-ticks 200000000000
 
- ;; ==== merges and refinement ==================================================================
+ ;; ==== merges =================================================================================
 
  ;; Unit: merge attempts at once. They run together only when the definitions they change are
  ;; disjoint (an octopus merge); 1 is git's one-at-a-time merge queue. Provenance: DECISIONS (root's
@@ -218,9 +218,6 @@
  ;; Unit: merge turns without green. Past it the merge attempt ends (:merge-turns); a task's
  ;; own :seon.config.merge/max-merge-turns wins.
  :seon.config.merge/max-merge-turns 2
- ;; Unit: refinement chains a task's failures may attach when it declares no :seon.task/budget.
- ;; At the bound the task is observed stuck (a fact naming its cause and what it blocks).
- :seon.config.task/budget 2
 
  ;; ==== Seon's own source ======================================================================
 
