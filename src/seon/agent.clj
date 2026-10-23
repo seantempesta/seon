@@ -744,16 +744,19 @@
     (intr/install!)
     ;; root gone, this process ends, busy or not (the fork server's group kill may be gone too)
     (intr/exit-at-eof! #(sock/peer-gone? (:fd @state)))
-    ;; a kept branch, resumed: its program is what this process runs (it was forked holding main's)
-    (let [load-errors (when resumed (program/load-diff! db0 @store-conn))
+    ;; :base is the branch's merge base with main: a new branch's is the image (main as it
+    ;; forked); a resumed one's is older than main, and comparing against main's head would
+    ;; read main's later changes as the branch's (seon.program/divergence, changed-vars)
+    (let [base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0)
+          ;; a kept branch, resumed: this process (forked holding main's program) runs the
+          ;; branch's own changes since its base on top, as merging main would; from main's
+          ;; head it would unmap all main gained since (step E run #11: test/'s namespaces)
+          load-errors (when resumed (program/load-diff! base @store-conn))
           misaligned (when-not resumed (misaligned commit t @store-conn db0))]
      ;; a resumed branch whose program does not load runs main's for what failed: its errors
      ;; go to root with its hello (recorded problems), never dropped (T5b: a stub ran silently)
-     ;; :base is the branch's merge base with main: a new branch's is the image (main as it
-     ;; forked); a resumed one's is older than main, and comparing against main's head would
-     ;; read main's later changes as the branch's (seon.program/divergence, changed-vars)
      (reset! state (cond-> {:id id :branch branch :task task :run run :fd fd :conn c :db @store-conn
-                   :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :results {} :n 0
+                   :base base :store-conn store-conn :cfg cfg :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :pending clojure.lang.PersistentQueue/EMPTY :inbox [] :tx-seq 0 :mode :agent
                    :ns nsx :interrupt-ok intr-ok :serve serve}

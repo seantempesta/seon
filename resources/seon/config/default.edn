@@ -269,11 +269,13 @@
  ;; Unit: paths under the root, read in this order. Their .clj files are namespaces; the .edn
  ;; files under resources/seon/schemas are schema resources (schemas are program: an agent
  ;; changes one with my.schema/register!, and the merge writes it back; owner 2026-10-21).
- ;; test/ is left out by default: a root importing it re-evaluates every test form at each
- ;; boot (+5 s a restart, measured 2026-10-22; task seon.source/test-namespaces-built-into-the-binary).
- ;; The owner's standing root adds it (the main tree's config/local.edn), and
- ;; seon.source-test/a-restart-catches-up-and-a-new-generation-resumes boots with those dirs.
- :seon.config.source/dirs ["src" "resources/seon/schemas"]
+ ;; test/ is in: a task's proofs and their fixtures live there, and an agent holds main's
+ ;; tests only when main imported them (step E run #11, 2026-10-23: a worktree root without
+ ;; test/ forked a design whose proof namespace did not exist, 27 turns of no progress). Only
+ ;; a root with a source root imports (bin/root's: SEON_SOURCE_ROOT); a test's root states its
+ ;; own dirs. It costs each boot the test forms' evaluation (+5 s a restart, measured
+ ;; 2026-10-22; task seon.source/test-namespaces-built-into-the-binary).
+ :seon.config.source/dirs ["src" "test" "resources/seon/schemas"]
  ;; Unit: qualified var names. A test whose reach (seon.program/reach-index, the compiler's
  ;; facts) references one of these reaches a process of its own: a shell, a fork, a root booted
  ;; for it, the binary. Such tests never run automatically, only when named (owner, 2026-10-23;
