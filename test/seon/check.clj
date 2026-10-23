@@ -1,21 +1,18 @@
 (ns seon.check
   "End-to-end checks of seon.root through the same API the dashboard uses (proto/flow
-  f2-final proto.smoke). bin/check runs them; target/seon <check> [args] runs one.
+  f2-final proto.smoke). bin/check runs them; target/seon <check> [args] runs one. A driver,
+  outside src (task seon.main/drivers-leave-src): bin/build compiles it into the binary from
+  test/, and its root and ports modes are seon.main's, the production code.
   usage: target/seon smoke        3 agents: define, test, transact; merge one; kill one mid-eval
          target/seon scale N      N agents spawned at once, each eval + transact + test
   A mode is its body: run-check boots root, runs it, prints its report and checks, stops
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
   reference (await-ref, seon.e2e/await-db), never a poll or a deadline."
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs]))
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.main :refer [out! shown]]))
 
-(defn- out! [& xs] (println (apply str xs)) (flush))
 
 ;; ---- the harness: one frame, one verdict, one way to wait ------------------------------
-
-(defn- shown
-  "A value a person reads on the console, whole, by the one printer (its layout, no budget)."
-  [v] (print/text (vary-meta v assoc :seon.print/full true)))
 
 (defn- verdict!
   "The one verdict: NAME OK or NAME FAILED as the last line, and the exit status, 0 only
@@ -1073,37 +1070,6 @@
        {:report {:open (into (sorted-map) (for [c cs] [c (get-in h [:classes c :n] 0)]))}
         :checks (into {} (for [c cs] [(keyword (str "no-" (name c))) (zero? (get-in h [:classes c :n] 0))]))}))))
 
-(defn root-serve
-  "A root with its server on 127.0.0.1:(:seon.config.root/server-port) (seon.server),
-  until stdin closes (bin/root stop) or SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks):
-  what an outside agent's MCP relay (bin/mcp) talks to. It watches its checkout
-  (my.root/watch!: every writer's changes loaded as they happen). Its end is a fact on main
-  naming that cause (seon.root/stop!). A checkout whose config names no server port (0)
-  serves none, and says so; -1 asks the kernel for a free port. ROOT LISTENING names the port
-  it bound (what bin/root and seon.test-store/start-root! read), never one picked beforehand."
-  []
-  (let [port (seon.config/value :seon.config.root/server-port)
-        _ (when (zero? port)
-            (out! "ROOT REFUSED: :seon.config.root/server-port is 0 (no server); bin/worktree --ports writes config/local.edn with this checkout's ports")
-            (lib/c-exit 1))
-        sys (c/start! {})]
-    ;; the first cause stops root, once; a signal's hook waits for that stop, then Jolt exits
-    (let [cause (promise) stopped (promise)
-          end! (fn [why] (deliver cause why)
-                 (when (= why @cause) (out! "ROOT STOPPED " (shown (select-keys (c/stop! sys why) [:cause :ms :stop-fact-refused]))) (deliver stopped true))
-                 @stopped)]
-      (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (end! :signal))))
-      ;; the key's three values, read here only: -1 the kernel assigns a port (0 to bind), >0 that
-      ;; port (0, none, refused above); the port bound is the fact, printed for bin/root to record
-      (let [bound (.getLocalPort ^java.net.ServerSocket (seon.server/serve! sys (if (= -1 port) 0 port)))]
-        ;; the watcher ends with this process (target/watch exits on its parent's exit)
-        (let [w (my.root/watch! sys)]
-          (out! "ROOT WATCHING " (if (contract/error? w) (str "nothing: " (:seon.error/message w)) "the checkout and its refs")))
-        (out! "ROOT LISTENING " bound))
-      (loop [] (when (read-line) (recur)))
-      (end! :stdin-eof))
-    (lib/c-exit 0)))
-
 (defn- eval-records
   "The evaluation records on db of agent id: [{:form :origin ...}]."
   [db id]
@@ -1390,13 +1356,13 @@
      "problems" (fn [n more] (problems-check))
      "health" (fn [n more] (health-check (map keyword (remove nil? (cons n more)))))
      "threads" (fn [n more] (threads-check))
-     "root" (fn [n more] (root-serve))
+     "root" (fn [n more] (seon.main/root-serve))
      ;; this checkout's ports as the config resolves them, "SERVER WEB" (bin/ports)
      ;; bin/check's step names, the one list (seon.proofs/check-steps), space separated
      ;; jobs: how many steps or shards a proof run runs at once (:seon.config.proofs/jobs), for bin/check
      "jobs" (fn [n more] (do (println (seon.config/value :seon.config.proofs/jobs)) (lib/c-exit 0)))
      "steps" (fn [n more] (do (println (clojure.string/join " " (sort (keys seon.proofs/check-steps)))) (lib/c-exit 0)))
-     "ports" (fn [n more] (do (println (seon.config/value :seon.config.root/server-port) (seon.config/value :seon.config.web/port)) (lib/c-exit 0)))
+     "ports" (fn [n more] (seon.main/ports))
      "mcp-proof" (fn [n more] (mcp-proof))
      "hotreload" (fn [n more] (hotreload))
      "idle" (fn [n more] (idle (n-or n "2000")))
