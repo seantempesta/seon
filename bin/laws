@@ -24,7 +24,7 @@ fi
 mkdir -p target
 bad=0
 sites() { # KIND PATTERN DOC [SECTION]
-  if [ "$1" = clocks ]; then files=$(find src -name '*.clj' | sort); else files=$(find src -name '*.clj' ! -name e2e.clj | sort); fi
+  if [ "$1" = clocks ]; then files=$(find src test -name '*.clj' | sort); else files=$(find src -name '*.clj' ! -name e2e.clj | sort); fi
   for f in $files; do
     ns=$(sed -n 's/^(ns \([^ ]*\).*/\1/p' "$f" | head -1)
     awk -v ns="$ns" -v pat="$2" '

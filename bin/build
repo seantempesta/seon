@@ -2,7 +2,7 @@
 # bin/build — the runtime from the pinned sources: Chez (our fork) -> Jolt (our fork)
 # -> target/hello (a binary that requires Datahike and opens an in-memory db), then
 # target/lib/libprobe.dylib (native/probe.c, native/ids.c), target/watch (native/watch.c, root's file events), target/lib/liblmdb.dylib (LMDB, robust locks),
-# target/lib/liblz4.dylib and target/lib/libzstd.dylib (the store's compressors) and target/seon (the platform, -main seon.check, the check driver in test/).
+# target/lib/liblz4.dylib and target/lib/libzstd.dylib (the store's compressors) and target/seon (the platform, -main seon.main; a check mode loads the driver, test/seon/check.clj, at run time).
 #
 #   bin/build            every step; chez, jolt, native, lmdb, lz4 and zstd are skipped when their stamp matches their pin
 #   bin/build chez|jolt|hello|native|lmdb|lz4|zstd|seon   one step, and each step it needs whose stamp is stale
@@ -194,12 +194,12 @@ build_seon() {
   GIT_INDEX_FILE=$idx git -C "$ROOT" add -A && tree=$(GIT_INDEX_FILE=$idx git -C "$ROOT" write-tree) || tree=
   rm -f "$idx"
   rm -f "$T/seon.tree"
-  # the check driver is the binary's main: seon.check, in test/ (outside src; task
-  # seon.main/drivers-leave-src), dispatches root and ports to seon.main and every check mode
-  # to itself, so the build reads test/ too (the :test alias)
-  say "seon: jolt -A:test build -m seon.check -> target/seon"
+  # the program's main: seon.main serves root and ports, and loads the check driver
+  # (seon.check, in test/, outside src; task seon.main/drivers-leave-src) from the checkout's
+  # source for every other mode, so the release binary holds only the program
+  say "seon: jolt build -m seon.main -> target/seon"
   ( cd "$ROOT"
-    HOME=$T/home JOLT_PWD=$ROOT "$JOLT" -A:test build -m seon.check -o "$T/seon" ) > "$T/seon-build.log" 2>&1 ||
+    HOME=$T/home JOLT_PWD=$ROOT "$JOLT" build -m seon.main -o "$T/seon" ) > "$T/seon-build.log" 2>&1 ||
     { tail -30 "$T/seon-build.log" >&2; die "seon build failed; see target/seon-build.log"; }
   [ -n "$tree" ] && echo "$tree" > "$T/seon.tree"
   say "seon: built target/seon (tree ${tree:-unknown})"

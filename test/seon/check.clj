@@ -1,8 +1,8 @@
 (ns seon.check
   "End-to-end checks of seon.root through the same API the dashboard uses (proto/flow
   f2-final proto.smoke). bin/check runs them; target/seon <check> [args] runs one. A driver,
-  outside src (task seon.main/drivers-leave-src): bin/build compiles it into the binary from
-  test/, and its root and ports modes are seon.main's, the production code.
+  outside src (task seon.main/drivers-leave-src): the binary's -main (seon.main/-main) serves
+  root and ports and loads this driver from the checkout's test/ for every other mode.
   usage: target/seon smoke        3 agents: define, test, transact; merge one; kill one mid-eval
          target/seon scale N      N agents spawned at once, each eval + transact + test
   A mode is its body: run-check boots root, runs it, prints its report and checks, stops
@@ -1356,13 +1356,11 @@
      "problems" (fn [n more] (problems-check))
      "health" (fn [n more] (health-check (map keyword (remove nil? (cons n more)))))
      "threads" (fn [n more] (threads-check))
-     "root" (fn [n more] (seon.main/root-serve))
      ;; this checkout's ports as the config resolves them, "SERVER WEB" (bin/ports)
      ;; bin/check's step names, the one list (seon.proofs/check-steps), space separated
      ;; jobs: how many steps or shards a proof run runs at once (:seon.config.proofs/jobs), for bin/check
      "jobs" (fn [n more] (do (println (seon.config/value :seon.config.proofs/jobs)) (lib/c-exit 0)))
      "steps" (fn [n more] (do (println (clojure.string/join " " (sort (keys seon.proofs/check-steps)))) (lib/c-exit 0)))
-     "ports" (fn [n more] (seon.main/ports))
      "mcp-proof" (fn [n more] (mcp-proof))
      "hotreload" (fn [n more] (hotreload))
      "idle" (fn [n more] (idle (n-or n "2000")))

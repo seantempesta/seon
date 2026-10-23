@@ -5,7 +5,7 @@
   dispatches these two modes here and every check mode to itself."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.root :as c] [seon.lib :as lib] [seon.print :as print]
-            [seon.config] [seon.server] [my.root]))
+            [seon.config] [seon.server] [my.root] [clojure.edn] [jolt.deps]))
 
 (defn out!
   "xs printed as one line, flushed: a mode's console line (ROOT LISTENING, a verdict)."
@@ -55,3 +55,26 @@
   []
   (println (seon.config/value :seon.config.root/server-port) (seon.config/value :seon.config.web/port))
   (lib/c-exit 0))
+
+(defn- driver!
+  "The check driver's -main (seon.check, in test/: task seon.main/drivers-leave-src), loaded
+  now from the checkout's source: its deps.edn roots added to the loader (jolt.deps/add-deps,
+  as seon.fork-server's dev-classpath! does) and its test/ and src/ to the source roots, so the release binary holds
+  only the program and a check run compiles the driver it runs."
+  {:malli/schema [:=> [:cat :string] :any]}
+  [root]
+  (jolt.deps/add-deps (update (clojure.edn/read-string (slurp (str root "/deps.edn"))) :deps update-vals
+                              #(cond-> % (:local/root %) (update :local/root (partial str root "/")))))
+  (jolt.host/set-source-roots! (into (vec (jolt.host/source-roots)) [(str root "/test") (str root "/src")]))
+  (requiring-resolve 'seon.check/-main))
+
+(defn -main
+  "The binary's modes: `root` (root-serve) and `ports` here, every other one the check
+  driver's (driver!), with the checkout's root the parent of the working directory (bin/check
+  and bin/root run the binary in target/)."
+  {:malli/schema [:=> [:cat [:* :string]] :any]}
+  [& args]
+  (case (first (seon.config/without-overrides args))
+    "root" (root-serve)
+    "ports" (ports)
+    (apply (driver! (.getParent (java.io.File. (System/getProperty "user.dir")))) args)))
