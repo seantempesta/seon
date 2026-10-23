@@ -1,12 +1,13 @@
 #!/bin/zsh
-# bin/root [start [ARGS]|stop|status|next]   this checkout's standing root, on this checkout's own
-# ports (bin/ports): its server (reached by bin/mcp, or `printf '{:op :agents}\n' | nc -w 5
-# 127.0.0.1 PORT`) and its dashboard. `start` (the default) runs it detached: double-forked so it
+# bin/root [start [ARGS]|stop|kill|status|next]   this checkout's standing root, on this checkout's own
+# ports (bin/ports): its server (reached by bin/mcp, or `printf '{:op :agents}\n' | bin/ask
+# PORT`) and its dashboard. `start` (the default) runs it detached: double-forked so it
 # is re-parented to PID 1, because the tool host kills a background task's whole process tree
 # when the task stops or its agent exits (ISOLATION, 2026-10-21). It runs until `bin/root stop`
 # closes its stdin. ARGS go to the root (`--set :seon.config.source/root=\"DIR\"`, ...). Its
 # output: runs/root.log; its pids: runs/root.pids ("TAIL ROOT"); the server port it was started
-# on (bin/ports' resolution, what bin/mcp relays to): runs/root.port, while it runs.
+# bound (what bin/mcp relays to; the root's ROOT LISTENING line names it): runs/root.port, while
+# it runs.
 # `next` restarts the next generation (owner, 2026-10-21; docs/source.md#the-next-generation):
 # it asks the running root for the generation main records (my.root/next-generation: the tree
 # my.root/build! built from the last merges commit, and the arguments resuming this root's store
@@ -29,64 +30,76 @@ if [[ ${1:-} == run ]]; then
   # the tree's own build, config and caches (bin/env, read from that tree); the ports over the
   # config's (local.edn honours these)
   G=$2; P=$3; W=$4; shift 4
-  cd "$G/target" && SEON_CHECKOUT=$G HOME=$G/target/home JOLT_LMDB_LIB=$G/target/lib/liblmdb.dylib \
+  # SEON_RUN_CHECKOUT: the tree a root reads its checkout's files from (docs, config) when it is
+  # not the build's own (a test's: seon.test-store/start-root!)
+  cd "$G/target" && SEON_CHECKOUT=${SEON_RUN_CHECKOUT:-$G} HOME=$G/target/home JOLT_LMDB_LIB=$G/target/lib/liblmdb.dylib \
     JOLT_LZ4_LIB=$G/target/lib/liblz4.dylib JOLT_ZSTD_LIB=$G/target/lib/libzstd.dylib \
     SEON_SERVER_PORT=$P SEON_WEB_PORT=$W exec ./seon root "$@"
 fi
 mkdir -p "$SEON_RUNS"
 PIDS=$SEON_RUNS/root.pids LOG=$SEON_RUNS/root.log PORTF=$SEON_RUNS/root.port
+READY=$SEON_RUNS/root.ready DONE=$SEON_RUNS/root.done
 read PORT WEB <<< "$("$ROOT/bin/ports")"
 running() { [[ -f $PIDS ]] && read T R < "$PIDS" && kill -0 $R 2>/dev/null }
 # launch CHECKOUT [ARGS]: `run` detached (double fork), until its listening line or its death
 launch() {
   : > "$LOG"
-  rm -f "$PIDS"
-  print $PORT > "$PORTF"
-  # the holder (perl, below) owns the write end of the root's stdin and waits on the root. stop
-  # kills the holder, so the pipe closes and the root stops cleanly; a root that dies any other
-  # way ends the wait and the holder exits with it (a `tail -f /dev/null | root` holder outlived
-  # every root that crashed or was killed: its shell waited on a tail that never ends)
-  perl -MPOSIX -e 'exit 0 if fork; POSIX::setsid(); exit 0 if fork;
-    open STDIN,"<","/dev/null"; open STDOUT,">>",$ARGV[0]; open STDERR,">&STDOUT";
-    my ($log, $pids, @cmd) = @ARGV;
-    pipe(my $r, my $w) or die "pipe: $!";
-    my $root = fork // die "fork: $!";
-    if ($root == 0) { close $w; open STDIN, "<&", $r or die; exec @cmd; die "exec: $!" }
-    close $r;
-    open my $f, ">", $pids or die; print $f "$$ $root\n"; close $f;
-    waitpid($root, 0); exit 0' "$LOG" "$PIDS" "$ROOT/bin/root" run "$1" "$PORT" "$WEB" "${@:2}"
-  # the root's own facts end the wait: its listening line, or its death
-  until [[ -f $PIDS ]]; do sleep 0.1; done
-  read T R < "$PIDS"
-  until grep -q "ROOT LISTENING" "$LOG" || ! kill -0 $R 2>/dev/null; do sleep 0.2; done
-  if kill -0 $R 2>/dev/null; then "$ROOT/bin/root" status
+  rm -f "$PIDS" "$PORTF" "$READY"; mkfifo "$READY"
+  # the one holder (bin/held, detached) owns the root's stdin and output and waits on it: it
+  # copies the output to the log; at the root's ROOT LISTENING line it writes "HOLDER ROOT PORT"
+  # (the port the root bound) on the ready fifo this shell is reading, and at the root's death
+  # before that it closes the fifo (EOF): the root's own facts end the wait, never a poll. stop
+  # sends it TERM: the root's stdin closes (it stops cleanly), and held writes its exit status
+  # on the done fifo stop reads. A root started with SEON_STARTER_FIFO (a test's) ends with its
+  # starter. (A `tail -f /dev/null | root` holder outlived every root that crashed or was killed.)
+  "$ROOT/bin/held" --detach --drain --log "$LOG" --pids "$PIDS" --ready "$READY" --done "$DONE" \
+    "$ROOT/bin/root" run "$1" "$PORT" "$WEB" "${@:2}"
+  read -r T R P < "$READY"
+  rm -f "$READY"
+  if [[ -n ${P:-} ]]; then print $P > "$PORTF"; "$ROOT/bin/root" status
   else print -u2 "root failed to start; its log:"; tail -20 "$LOG" >&2; exit 1; fi
 }
 stop() {
   read T R < "$PIDS"
-  kill $T                                    # the holder: its pipe closes, the root stops cleanly
-  while kill -0 $R 2>/dev/null; do sleep 0.2; done
-  rm -f "$PIDS" "$PORTF"; print "root $R stopped"
+  # the done fifo held open read-write before the holder is told: its write never waits on a
+  # reader, and this read ends at the root's exit, which the holder reaped
+  rm -f "$DONE"; mkfifo "$DONE"; exec 3<>"$DONE"
+  kill -TERM $T                              # the holder: the root's stdin closes, it stops cleanly
+  read -r -u 3 st; exec 3<&-
+  rm -f "$PIDS" "$PORTF" "$DONE"; print "root $R stopped (exit $st)"
+}
+# kill: SIGKILL the root (a crash, as a test makes one); answered when it and everything it started
+# is gone (bin/held's "drained"), where stop is answered at the root's exit
+kill_root() {
+  read T R < "$PIDS"
+  rm -f "$DONE"; mkfifo "$DONE"; exec 3<>"$DONE"
+  kill -9 $R
+  # its status line, then "drained": every process the root started is gone (bin/held --drain)
+  read -r -u 3 st; read -r -u 3 drained; exec 3<&-
+  rm -f "$PIDS" "$PORTF" "$DONE"; print "root $R killed (${drained:-not drained})"
 }
 case ${1:-start} in
   status)
-    if running; then read T R < "$PIDS"; print "root $R up: server $PORT, dashboard http://127.0.0.1:$WEB/"
+    if running; then read T R < "$PIDS"; print "root $R up: server $(cat "$PORTF" 2>/dev/null || print $PORT), dashboard http://127.0.0.1:$WEB/"
     else print "no root running for $ROOT (ports $PORT $WEB)"; exit 1; fi ;;
   stop)
     running || { print "no root running"; exit 0 }
     stop ;;
+  kill)
+    running || { print "no root running"; exit 0 }
+    kill_root ;;
   start)
     if running; then "$0" status; exit 0; fi
     launch "$ROOT" "${@:2}" ;;
   next)
     running || { print -u2 "no root running: next restarts a running root's next generation"; exit 1 }
     # its answer {:items [{:printed "[\"CHECKOUT\" \"--set\" ...]"}]}: the vector's strings, NUL-separated
-    gen=("${(@0)$(print -r -- '{:op :eval :agent "root" :code "(my.root/next-generation sys)"}' | nc -w 30 127.0.0.1 $PORT |
+    gen=("${(@0)$(print -r -- '{:op :eval :agent "root" :code "(my.root/next-generation sys)"}' | "$ROOT/bin/ask" $(cat "$PORTF") |
       perl -0777 -ne 'm/:printed "((?:[^"\\]|\\.)*)"/ or exit 1; my $v = $1; $v =~ s/\\(.)/$1/g;
         while ($v =~ /"((?:[^"\\]|\\.)*)"/g) { my $s = $1; $s =~ s/\\(.)/$1/g; print "$s\0" }')}")
     gen=(${gen:#})
     (( ${#gen} )) || { print -u2 "no next generation built on the running root's main (my.root/generation)"; exit 1 }
     stop
     launch "${gen[@]}" ;;
-  *) print -u2 "usage: bin/root [start [ARGS]|stop|status|next] | bin/root run CHECKOUT PORT WEB [ARGS]"; exit 2 ;;
+  *) print -u2 "usage: bin/root [start [ARGS]|stop|kill|status|next] | bin/root run CHECKOUT PORT WEB [ARGS]"; exit 2 ;;
 esac

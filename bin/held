@@ -1,0 +1,95 @@
+#!/usr/bin/perl
+# bin/held [--detach] [--drain] [--log F] [--pids F] [--ready F] [--done F] CMD [ARGS]   the one holder
+# of a long-lived child (a root, a check mode): CMD in a process group of its own, ended with its
+# starter, its end reported. The process that started it (bin/check, a test runner) holds the
+# fifo SEON_STARTER_FIFO open read-write while it lives; at that fifo's EOF, the starter gone
+# however it ended (a harness's alarm, a SIGKILL), held SIGKILLs CMD's group: the agents'
+# mechanism (an end is EOF), never a clock (8 `seon lease` roots outlived the bin/check that
+# started them by hours; root, 2026-10-23). With no SEON_STARTER_FIFO, CMD only runs held.
+#   --detach  double-forked out of the caller's session (bin/root start: the tool host kills a
+#             background task's whole tree), CMD's stdin a pipe held keeps open: TERM to held
+#             closes it, and CMD stops cleanly
+#   --drain   held outlives CMD until every process it started is gone: CMD and each descendant
+#             inherit the write end of a pipe held made, so its EOF is the whole tree's end. An
+#             orphan that never ends holds held (and what waits on it) open: there is no clock to
+#             call it dead, so that verdict is the harness's. With --done, "drained" follows the
+#             status line
+#   --log F   held's and CMD's output appended to F
+#   --pids F  "HELD CMD" written to F
+#   --ready F CMD's output read line by line: at its ROOT LISTENING line, "HELD CMD PORT" written
+#             on the fifo F (the port the root bound), at its death before that, F closed (EOF)
+#   --done F  at CMD's end, its exit status written on the fifo F if someone holds it open
+# held exits with CMD's status (128+N for a signal).
+use strict; use warnings; use POSIX (); use IO::Handle; use Fcntl qw(O_WRONLY O_NONBLOCK F_SETFD);
+my %o;
+while (@ARGV && $ARGV[0] =~ /^--(detach|drain|log|pids|ready|done)$/) { shift; $o{$1} = $1 =~ /^(detach|drain)$/ ? 1 : shift }
+@ARGV or die "usage: bin/held [--detach] [--drain] [--log F] [--pids F] [--ready F] [--done F] CMD [ARGS]\n";
+$SIG{PIPE} = "IGNORE";
+if ($o{detach}) { exit 0 if fork; POSIX::setsid(); exit 0 if fork; open STDIN, "<", "/dev/null" }
+if ($o{log}) { open my $l, ">>", $o{log} or die "held: log: $!\n"; $l->autoflush(1);
+               open STDOUT, ">&", $l; open STDERR, ">&", $l; STDOUT->autoflush(1) }
+my $ready; if ($o{ready}) { open $ready, ">", $o{ready} or die "held: ready: $!\n"; $ready->autoflush(1) }
+my ($in_r, $in_w, $out_r, $out_w, $life_r, $life_w);
+pipe($in_r, $in_w) or die "held: pipe: $!\n" if $o{detach};
+pipe($out_r, $out_w) or die "held: pipe: $!\n" if $ready;
+if ($o{drain}) { pipe($life_r, $life_w) or die "held: pipe: $!\n"; fcntl($life_w, F_SETFD, 0) }   # survives exec
+my $cmd = fork // die "held: fork: $!\n";
+if ($cmd == 0) {
+  POSIX::setpgid(0, 0);
+  close $life_r if $life_r;
+  if ($in_r) { close $in_w; open STDIN, "<&", $in_r or die }
+  if ($out_w) { close $out_r; open STDOUT, ">&", $out_w or die; open STDERR, ">&", $out_w or die }
+  exec { $ARGV[0] } @ARGV or die "held: exec $ARGV[0]: $!\n";
+}
+POSIX::setpgid($cmd, $cmd);
+close $in_r if $in_r; close $out_w if $out_w; close $life_w if $life_w;
+if ($o{pids}) { open my $f, ">", $o{pids} or die; print $f "$$ $cmd\n"; close $f }
+# TERM closes CMD's stdin. Installed without SA_RESTART (%SIG's handlers restart a blocking read,
+# so a TERM to a holder of a quiet root waited for the root's next line): the read returns
+# EINTR, the handler runs, the read is read again
+POSIX::sigaction(POSIX::SIGTERM(), POSIX::SigAction->new(sub { if ($in_w) { close $in_w; undef $in_w } })) if $in_w;
+my $fifo = $ENV{SEON_STARTER_FIFO} // "";
+my $watch = 0;
+if ($fifo ne "") {
+  $watch = fork // die "held: fork: $!\n";
+  if ($watch == 0) {
+    # it holds none of CMD's pipes: a copy of CMD's stdin's write end here would keep CMD's
+    # stdin open after held closes its own (a stop that never reached the root)
+    close $in_w if $in_w; close $out_r if $out_r; close $ready if $ready; close $life_r if $life_r;
+    open STDIN, "<", "/dev/null";
+    # a starter fifo it cannot open is a starter it cannot watch: CMD does not run unwatched
+    open(my $s, "<", $fifo) or do { kill "KILL", -$cmd; print STDERR "held: starter fifo $fifo: $!: CMD killed\n"; exit 1 };
+    1 while sysread($s, my $buf, 512);
+    kill "KILL", -$cmd;
+    exit 0;
+  }
+}
+if ($out_r) {
+  # read to CMD's EOF: a signal (TERM at stop) interrupts a read, which is read again
+  my $buf = "";
+  while (1) {
+    my $n = sysread($out_r, my $chunk, 65536);
+    if (!defined $n) { next if $!{EINTR}; last }
+    last if $n == 0;
+    print $chunk;
+    $buf .= $chunk;
+    while ($buf =~ s/^([^\n]*)\n//) {
+      my $line = $1;
+      if ($ready && $line =~ /^ROOT LISTENING (\d+)/) { print $ready "$$ $cmd $1\n"; close $ready; undef $ready }
+    }
+  }
+  close $ready if $ready;
+}
+1 while waitpid($cmd, 0) == -1 && $!{EINTR};
+my $st = $?;
+my $code = ($st & 127) ? 128 + ($st & 127) : $st >> 8;
+my $d;
+if ($o{done} && sysopen($d, $o{done}, O_WRONLY | O_NONBLOCK)) { $d->autoflush(1); print $d "$code\n" } else { undef $d }
+if ($life_r) {
+  # every process CMD started holds the lifeline's write end: its EOF is the last one gone
+  while (1) { my $n = sysread($life_r, my $b, 512); if (!defined $n) { next if $!{EINTR}; last } last if $n == 0 }
+  print $d "drained\n" if $d;
+}
+if ($watch) { kill "KILL", $watch; waitpid($watch, 0) }
+close $d if $d;
+exit $code;

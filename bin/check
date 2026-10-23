@@ -55,7 +55,14 @@ SEL=
 [[ ${1:-} == --steps ]] && { SEL=$2; shift 2; set -- 100 }
 S=$ROOT/target/seon
 [[ -x $S ]] || { echo "check: no target/seon; run bin/build seon" >&2; exit 1 }
-run() { (cd "$ROOT/target" && ./seon "$@" 2>&1) }
+# what this run starts ends with it (bin/held): a fifo of its own, held open read-write while
+# bin/check lives, named to every step; its EOF, bin/check gone however it ended, ends them
+STARTER=$ROOT/target/tmp/check-starter-$$.fifo
+mkdir -p "$ROOT/target/tmp"; rm -f "$STARTER"; mkfifo "$STARTER"; exec 7<>"$STARTER"
+export SEON_STARTER_FIFO=$STARTER
+trap 'rm -f "$STARTER"' EXIT
+# (fd 7, the fifo's write end, stays bin/check's own: a child holding it would keep the fifo open)
+run() { (cd "$ROOT/target" && "$ROOT/bin/held" ./seon "$@" 2>&1 7>&-) }
 # a step's own settings, the same alone or in the run: lease's block is small enough to spend
 LEASE_SET=(--set :seon.config.store/eid-lease=50)
 # a single mode: on its own branch check-<mode> of the given store, deleted when it is green
@@ -87,7 +94,7 @@ step() {
   local name=$1 filter=$2; shift 2
   local log=$OUT/$name.log expect=${EXPECT:-0}
   [[ $name == seed ]] || want ${${name%-write}%-read} || return 0
-  SEON_MAIN=check-$name "$@" > "$log" 2>&1
+  SEON_MAIN=check-$name "$@" > "$log" 2>&1 7>&-
   local st=$?
   if [[ -n $filter ]]; then grep -E "$filter" "$log"; else tail -1 "$log"; fi
   if (( st != expect )); then FAILED+=("$name (exit $st, expected $expect, $log)"); echo "FAILED $name (exit $st, expected $expect)"
@@ -132,27 +139,25 @@ echo "== smoke"; step smoke "^merge|^killed|spawned|ready|^SMOKE " run smoke
 echo "== robust"; step robust "" run robust
 # no web listener: the adapter's acceptor and sweeper outlive stop! (task seon.web.edn
 # web-server-threads-are-joined-at-stop), so root's exact thread count is checked without it
-echo "== lifecycle (start!/stop! x10 in one process, root's threads exactly as declared; pause/resume)"; step lifecycle "LIFECYCLE" env SEON_WEB_PORT=0 zsh -c "cd '$ROOT/target' && ./seon lifecycle 10"
+echo "== lifecycle (start!/stop! x10 in one process, root's threads exactly as declared; pause/resume)"; step lifecycle "LIFECYCLE" env SEON_WEB_PORT=0 zsh -c "cd '$ROOT/target' && '$ROOT/bin/held' ./seon lifecycle 10"
 echo "== backpressure"; step backpressure "" run backpressure 200
 echo "== hotreload"; step hotreload "" run hotreload
 echo "== drain"; step drain "" run drain 32
 echo "== idle (no beat: an idle root with a tab open steps nothing; a spawn and a commit still reach the tab)"
-step idle ":steps-at-idle|:bytes-at-idle|reached-tab|^IDLE " env SEON_WEB_PORT=$IDLE_WEB_PORT zsh -c "cd '$ROOT/target' && ./seon idle 5000"
+step idle ":steps-at-idle|:bytes-at-idle|reached-tab|^IDLE " env SEON_WEB_PORT=$IDLE_WEB_PORT zsh -c "cd '$ROOT/target' && '$ROOT/bin/held' ./seon idle 5000"
 
 if want orphan; then
 echo "== orphan (root dies under busy agents, a clone and a test child)"
-SEON_MAIN=check-orphan run orphan > "$OUT/orphan.log" 2>&1
+# held --drain returns once root and every process it started has ended (bin/held's lifeline pipe,
+# which each inherits): the orphans' end is the event this waits on, not a count of seconds. An
+# orphan that never ends holds this step open: no clock calls it dead, so that verdict is the
+# harness's (docs/failure-points.md)
+(cd "$ROOT/target" && SEON_MAIN=check-orphan "$ROOT/bin/held" --drain ./seon orphan 7>&-) > "$OUT/orphan.log" 2>&1
 (( $? == 0 )) || { echo "FAILED orphan (no test child)"; FAILED+=("orphan (no test child, $OUT/orphan.log)") }
 ORPHAN_FAILED=${#FAILED}
 PIDS=$(sed -n 's/^PIDS //p' "$OUT/orphan.log")
-# the orphans are given until their parent's death reaches them: each is asked once a
-# second for up to 5 s, and a survivor past that is the failure
-LEFT=$PIDS
-for i in 1 2 3 4 5; do
-  LEFT=$(for p in ${=PIDS}; do kill -0 $p 2>/dev/null && echo $p; done)
-  [[ -z $LEFT ]] && break
-  sleep 1
-done
+# every process of the tree has ended by now (the drain above); any pid still alive is a survivor
+LEFT=$(for p in ${=PIDS}; do kill -0 $p 2>/dev/null && echo $p; done)
 if [[ -z $PIDS ]]; then echo "FAIL no pids"; FAILED+=("orphan (no pids, $OUT/orphan.log)")
 elif [[ -n $LEFT ]]; then echo "FAIL left running: $LEFT"; kill -9 ${=LEFT}; FAILED+=("orphan (left running: $LEFT)")
 else echo "PASS none of $PIDS outlived root"; (( ${#FAILED} == ORPHAN_FAILED )) && GREEN+=(check-orphan); fi

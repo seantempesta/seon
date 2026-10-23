@@ -5,7 +5,7 @@
   under that main, and a recovery step reopens the same store on the same main."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d]
-            [seon.db :as pdb] [clojure.core.async :as a] [seon.check]))
+            [seon.db :as pdb] [clojure.core.async :as a] [seon.check] [seon.source] [clojure.string]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -108,3 +108,20 @@
     (is (= {:events ev} (:clojure.core.async.flow/out-ports st)))
     (is (= [[{:type :probe :tag "one" :got 1}] [{:type :probe :tag "one" :got 2}]]
            (map #(mapv (fn [e] (dissoc e :at-ms)) (:events %)) [o1 o2])))))
+
+(deftest every-test-root-starts-through-start-root!
+  ;; task seon.check/a-test-root-names-its-store-and-main: read from the program of test/ (the
+  ;; compiler's references, not a text search over files), no test var but the helper's one
+  ;; launcher runs bin/root or `./seon root` through binary-sh, so every test root names its
+  ;; store and main and waits on its listening line
+  (let [files (into {} (for [^java.io.File f (file-seq (java.io.File. "test")) :when (.endsWith (.getName f) ".clj")]
+                         [(.getPath f) (slurp f)]))
+        db (d/db-with (ts/test-db) (seon.source/import-tx (ts/test-db) files))
+        launchers (set (for [[v src] (d/q '[:find ?v ?s :where [?e :var/name ?v] [?e :var/form ?f]
+                                             [?f :form/refs seon.test-store/binary-sh] [?f :form/src ?s]] db)
+                             ;; binary-sh is the primitive the one launcher calls; this test names both in its query
+                             :when (not (#{'seon.test-store/binary-sh 'seon.check-test/every-test-root-starts-through-start-root!} v))
+                             :when (some #(clojure.string/includes? src %) ["bin/root" "seon root" "\"./seon\" \"root\""])]
+                         v))]
+    (is (seq files))
+    (is (= #{'seon.test-store/root-sh} launchers))))
