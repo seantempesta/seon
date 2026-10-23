@@ -30,7 +30,7 @@ The server's ops, the MCP tools and root's evaluation path are [server](server.m
 | v1 | next | Status |
 |---|---|---|
 | `my.task/current`, `update!`, `send-back!`; `my.turn/wait` | `current`, `update!`, `fail!` (send-back replaced: a failure is task data, held for root: [tasks](tasks.md#a-refused-attempt-is-held-for-root)); `my.turn/wait` | present (an agent holds its task from the fork: [tasks](tasks.md#the-agent-knows-its-task)) |
-| `my.program/callers`, `source`, `tests-reaching` | `my.agent/callers`, `callees`, `grep`, `source-fn`; `seon.program/reach-digests` | present |
+| `my.program/callers`, `source`, `tests-reaching` | `my.agent/callers`, `callees`, `grep`, `source-fn`; `seon.program/reach-digests` (the digest of what a test reaches; `my.agent/prove` runs the tests a change reaches) | present |
 | `my.program/history` | none yet; the store keeps history ([storage](storage.md#history)), the function is not built | missing |
 | `my.program/search`, `similar` (embeddings) | none; decided (DECISIONS, "Embeddings join the context"), not built; the context's `:found` finds helpers by the call graph meanwhile (`seon.context/found`) | missing |
 | `my.program/diff`, `sizes`, `breaks` | `seon.root/branch-diff` (root only) | partial |
@@ -40,7 +40,7 @@ The server's ops, the MCP tools and root's evaluation path are [server](server.m
 | removal that refuses while a referrer remains (`my.program/unmap-subject!`) | plain `ns-unmap`, nothing checked | missing |
 | `my.web/fetch`, `search` | none (no `:web` effect) | missing |
 | `my.fs/*` (read, write, list files), `my.edit/*` (exact-span text edits), `my.shell/run!` (a command, its output and exit), and their handlers' policy (fs roots, no symlink following, a digest precondition on write, argv-only shell with an env allowlist) | none; they go through the effect owner (`my.fx/call`), like every outside-world call. Seon does any work its user wants (AGENTS §1); only Seon's own code changes at the REPL | missing |
-| `my.schema/register!`, `my.branch/merge-main!`, `unmerged`, `resolve!` | the same names | present |
+| `my.schema/register!`, `my.branch/merge-main!`, `unmerged`, `resolve!` | the same names (`merge-main!` stages the live runtime onto the branch, then merges main's changes since the merge base) | present |
 | an effect's receipt committed before its handler runs, settled once, never sent again (`seon.effect`) | the outcome only, recorded after it (`seon.agent` writes `:seon.fx/status` on the answer); a dead agent's effect in flight leaves no record | missing |
 
 ## Tasks, merges, tests
@@ -54,8 +54,8 @@ The server's ops, the MCP tools and root's evaluation path are [server](server.m
 | many agents merging onto shared definitions at once (v1's swarm) | `bin/check swarm` (`seon.e2e`'s swarm row: 20 tasks over 5 shared vars, 8 agents at once; red unless conflicts arose and every one was resolved, every task done, and a fresh agent on main gets every proof's value) | present |
 | main wins a conflict | ours is kept | missing |
 | a changed function no test reaches refuses the branch (``:seon.test/unreached``, ``:seon.source/unreached``) | none: `seon.reconcile/done-explain` has no coverage reason | missing |
-| one done rule shared with merge | `seon.reconcile/done-explain` (a proof that never ran is `:proof-unknown`, not red; [tasks](tasks.md#the-done-rule)) | present |
-| tests selected by reach; results reused by reach digest | `seon.proofs/plan` over `seon.program/reach-digests`: `bin/prove`, `bin/test` and `bin/check` reuse greens in `../test-results` (check steps keyed too); agents' runs select and reuse by the same plan (`seon.agent/test-plan`) | present; agents' greens are kept per root ([merging](merging.md#a-merge-runs-what-the-change-reaches)) |
+| one done rule shared with merge | `seon.reconcile/done-explain` (a proof that never ran is `:proof-unknown`, not red; a deferred process test is neither until root asks; a problem the branch made true is `:open-problem`; [tasks](tasks.md#the-done-rule)) | present |
+| tests selected by reach; results reused by reach digest | `seon.proofs/plan` over `seon.program/reach-digests`: `bin/prove`, `bin/test` and `bin/check` reuse greens in the results directory every checkout shares (`:seon.config.source/test-results-dir`; check steps keyed too); agents' runs select and reuse by the same plan against their merge base (`seon.agent/test-plan`), also finding a green by its digest among main's result facts | present; an agent shares the greens when its root's binary is built from its source tree ([merging](merging.md#a-merge-runs-what-the-change-reaches)) |
 | contracts armed at definition; cost proofs; per-function profile | `seon.contract`, `seon.cost`, `seon.profile` | present |
 | turns-to-green report (median, p90) | `seon.learn` charges overrun per attempt (stored as ``:seon.attempt/waste``) | partial |
 | scheduled work (``seon.schedule``) | none (AGENTS names a cron proc; `resources/seon/system.edn` has none) | missing |
