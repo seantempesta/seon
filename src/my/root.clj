@@ -4,7 +4,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
             [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.watch :as watch] [datahike.api :as d]
-            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn]))
+            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn]))
 
 (defn- write-declared!
   "Declared state's tx written on main: the error that built it as it is; an empty tx
@@ -297,55 +297,59 @@
 
 (defn first-moves!
   "Score the first move a model makes on each task of ids (task ids on main): per task, its
-  first-turn request (seon.judge/request); the :seon.judge fact already on main for that
-  request's digest when there is one, else one model call through root's :model owner, its
-  reply's calls scored from the compiler's facts (seon.judge/form-facts, seon.judge/score)
-  and written on main with its usage and cost. No loop and no evaluation: a call answers one
-  reply. Paid calls stop once the pass has spent :seon.config.ai/judge-pass-usd, and the
-  stop is written (:seon.judge/stopped on the pass's own fact); a reply whose usage cannot
-  be priced ends the pass with :error. Answers {:rows [{:task :acted :right-var :right-test
-  :waste :green :usd :reused?}] :usd :stopped}."
+  first-turn request (seon.judge/request) and the :seon.judge fact already on main for that
+  request's digest; only when there is none, one model call through root's :model owner,
+  whose reply's eval calls are scored from the compiler's facts in one disposable agent the
+  pass spawns (seon.judge/first-move: analysis runs a reply's ns form, so never in root) and
+  written on main with its usage and cost. No loop: a call answers one reply, and nothing of
+  it runs. A paid call is made only while the pass has spent under
+  :seon.config.ai/judge-pass-usd; at the bound the pass stops and writes :seon.judge/stopped
+  on the pass's own fact. A reply whose usage cannot be priced, a model error or a scoring
+  error ends the pass with :error. Answers {:rows [{:task :acted :right-var :right-test
+  :waste :uncompiled :green :usd :reused?}] :usd :stopped :error}."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
   (let [bound (config/value :seon.config.ai/judge-pass-usd)
-        db0 @(:conn sys)
-        src (:seon.root/source (d/pull db0 [:seon.root/source] [:seon.root/id :root]))
+        src (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))
         version (select-keys src [:root :commit])
+        scorer (delay (root/spawn! sys {}))
         row (fn [f reused?] (merge {:task (:seon.judge/task f) :reused? reused?}
-                                   (select-keys (:seon.judge/score f) [:acted :right-var :right-test :waste :uncompiled :green :usd])))]
-    (loop [[id & more] ids rows [] spent 0.0]
-      (cond
-        (nil? id) {:rows rows :usd spent}
-        (>= spent bound)
-        (let [left (vec (cons id more))
-              stopped {:usd spent :bound bound :left left}]
-          @(root/transact-main! sys [{:seon.judge/digest (judge/digest {:pass ids :version version}) :seon.judge/task id
-                                      :seon.judge/stopped stopped}])
-          {:rows rows :usd spent :stopped stopped})
-        :else
-        (let [db @(:conn sys)
-              t (task/task db id)
-              req (judge/request db id)
-              dg (judge/digest req)
-              held (d/pull db '[*] [:seon.judge/digest dg])]
-          (if (:seon.judge/score held)
-            (recur more (conj rows (row held true)) spent)
-            (let [r @(root/call! sys {:op :fx :kind :model :req {:messages (:messages req) :task id :turn 0}})
-                  c (:value r)]
-              (if (contract/error? r)
-                {:rows rows :usd spent :error r}
-                (let [calls (mapv :code (:tool-calls c))
-                      nsym (symbol (namespace (or (first (sort (:seon.task/proofs t))) (symbol (str (:seon.task/ns t)) "x"))))
-                      sc (judge/score t (into [] (mapcat #(judge/form-facts nsym %)) calls))
-                      usage (turn/usage c)
-                      usd (model/cost (:model req) usage)
-                      f (judge/fact dg id version calls sc usage usd)]
-                  @(root/transact-main! sys [f])
-                  ;; a cost the provider's usage cannot price is unknown, never 0: the bound
-                  ;; cannot hold over it, so the pass ends there, recorded
-                  (if usd
-                    (recur more (conj rows (row f false)) (+ spent usd))
-                    {:rows (conj rows (row f false)) :usd spent
-                     :error (contract/error :seon.judge/cost-unknown 'my.root/first-moves!
-                                            (str "the reply's usage cannot be priced (model " (:model req) "): the pass stops") {:task id :usage usage})}))))))))))
-
+                                   (select-keys (:seon.judge/score f) [:acted :right-var :right-test :waste :uncompiled :green :usd])))
+        end (fn [r] (when (realized? scorer) (root/kill! sys @scorer)) r)]
+    (end
+      (loop [[id & more] ids rows [] spent 0.0]
+        (if (nil? id)
+          {:rows rows :usd spent}
+          (let [db @(:conn sys)
+                t (task/task db id)
+                req (judge/request db t)
+                dg (judge/digest req)
+                held (d/pull db '[*] [:seon.judge/digest dg])]
+            (cond
+              (:seon.judge/score held) (recur more (conj rows (row held true)) spent)
+              (>= spent bound)
+              (let [stopped {:usd spent :bound bound :left (vec (cons id more))}]
+                @(root/transact-main! sys [{:seon.judge/digest (judge/digest {:pass ids :version version}) :seon.judge/stopped stopped}])
+                {:rows rows :usd spent :stopped stopped})
+              :else
+              (let [r @(root/call! sys {:op :fx :kind :model :req {:messages (:messages req) :task id :turn 0 :model (:model req)}})
+                    c (:value r)
+                    calls (mapv :code (:tool-calls c))
+                    item (when-not (contract/error? r)
+                           (first @(root/submit! sys @scorer (pr-str (list 'seon.edn/encode (list 'seon.judge/first-move (list 'quote (judge/subject db t)) calls))))))
+                    usage (when c (turn/usage c))
+                    usd (when c (model/cost (:model req) usage))]
+                (cond
+                  (contract/error? r) {:rows rows :usd spent :error r}
+                  (not= :ret (:tag item)) {:rows rows :usd spent :error (or (:err item) item)}
+                  :else
+                  (let [f ;; the agent answers the score as seon.edn text; its item prints that string
+                  (judge/fact dg id version calls (sedn/decode (edn/read-string (:printed item))) usage usd)]
+                    @(root/transact-main! sys [f])
+                    ;; a cost the provider's usage cannot price is unknown, never 0: the bound
+                    ;; cannot hold over it, so the pass ends there, recorded
+                    (if usd
+                      (recur more (conj rows (row f false)) (+ spent usd))
+                      {:rows (conj rows (row f false)) :usd spent
+                       :error (contract/error :seon.judge/cost-unknown 'my.root/first-moves!
+                                              (str "the reply's usage cannot be priced (model " (:model req) "): the pass stops") {:task id :usage usage})})))))))))))
