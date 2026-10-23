@@ -59,6 +59,7 @@
   [:seon.config.source/root {:optional true} :seon.config.source/root]
   [:seon.config.source/gate-checkout {:optional true} :seon.config.source/gate-checkout]
   [:seon.config.source/dirs :seon.config.source/dirs]
+  [:seon.config.source/process-vars :seon.config.source/process-vars]
   [:seon.config.source/branch :seon.config.source/branch]
   [:seon.config.source/committer-name :seon.config.source/committer-name]
   [:seon.config.source/committer-email :seon.config.source/committer-email]

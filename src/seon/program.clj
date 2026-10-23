@@ -25,7 +25,7 @@
     platform's own source has the same facts (seon.source)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]
-            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [seon.error :as error] [seon.db :as pdb]))
+            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [seon.error :as error] [seon.db :as pdb] [seon.config :as cfg]))
 
 (defn scratch-ns?
   "Is namespace nsx scratch (never program): `user`, or declared ^:scratch."
@@ -752,13 +752,6 @@
   [db-from db-to]
   (into #{} cat (vals (dissoc (divergence db-from db-to) :schemas))))
 
-(def process-vars
-  "The vars through which a test reaches a process of its own (a shell, a fork, a root booted
-  for it, the binary): a test reaching one is a process test (root's ruling, 2026-10-22). An
-  agent's fork holds no checkout and runs as its agent's child, so a process test runs at the
-  merge, on a checkout, never in an agent's turn or root's judge."
-  '#{seon.agent-test/in-agent clojure.java.shell/sh seon.lib/fork! seon.test-store/binary-sh})
-
 (def tree-readers
   "The vars that read the checkout's files or run the binary built from them: a test whose
   reached forms reference one has the whole tree as an input, so its reach digest covers it
@@ -779,50 +772,6 @@
      seon.fx/declared-refs ;; resources/seon/system.edn, in :env
      seon.web/handler ;; web/public, in :env
      seon.proofs/greens}) ;; the results directory, outside the tree, by digest
-
-(declare reach-fold reach-digest)
-
-(defn reach-digests
-  "{test var -> reach digest} of db's tests (task seon.program/tests-run-by-reach): the
-  digest of the test's name, inputs' :env (what has no program facts), its own form, its
-  namespace's forms that define no var (the ns form, fixtures), and every live form their
-  references reach (a var to the form that last defined it, macros and quoted names among
-  them (unit-account); a defined multimethod's methods and protocol's extensions; a
-  contracted var's form to the schema entries its contract names, and each entry to those
-  its form names; a var named in data its form reads, inputs' :data-refs: system.edn's procs,
-  which root resolves by name), with inputs' :tree when a reached form references a
-  tree-reader. A
-  test's digest moves exactly when a form or schema entry it reaches does. Cost: the live
-  forms, contracts and schema entries read once and digested once, then per test its
-  closure. With roots ({key [var ...]}, a bin/check step's mode functions: seon.proofs/
-  check-steps), the same digest of each key: what its vars' forms and their namespaces'
-  plain forms reach; a key one of whose vars has no form here has none."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol :string]]
-                  [:=> [:cat :seon.host/db :seon.program/inputs [:map-of :string [:sequential :qualified-symbol]]] [:map-of :string :string]]]}
-  ([db inputs] (reach-digests db inputs nil))
-  ([db inputs roots] (reach-fold db inputs roots (partial reach-digest inputs))))
-
-(defn- reach-digest
-  "Key k's reach digest from what it reached (reach-digests)."
-  {:malli/schema [:=> [:cat :seon.program/inputs :any [:set :any] :map] :string]}
-  [{:keys [env tree]} k reached {:keys [by-id digest]}]
-  (let [reads? (some #(let [f (by-id %)]
-                        (and (some tree-readers (:refs f))
-                             (not (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f))))))
-                     reached)]
-    (error/digest (apply str k "\n" env "\n" (when reads? tree) (sort (map digest reached))))))
-
-(defn- reaches-process?
-  "Does what a test reached reference a process var (process-vars)?"
-  {:malli/schema [:=> [:cat [:set :any] :map] :boolean]}
-  [reached {:keys [by-id]}] (boolean (some #(some process-vars (:refs (by-id %))) reached)))
-
-(defn reach-index
-  "{test {:digest :process?}} of db's tests under inputs, from the one walk (reach-fold): its
-  reach digest (reach-digests) and whether it reaches a process of its own (process-tests)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol [:map [:digest :string] [:process? :boolean]]]]}
-  [db inputs]
-  (reach-fold db inputs nil (fn [k reached ctx] {:digest (reach-digest inputs k reached ctx) :process? (reaches-process? reached ctx)})))
 
 (defn- reach-fold
   "(f key reached {:by-id :digest}) of each of db's tests (or each of roots' keys), reached the
@@ -850,13 +799,19 @@
                               (for [[k s] (:defines f) :when (= :var k)
                                     id (concat (methods s) (impls s) (contract s) (keep var-form (get data-refs s)))]
                                 id)))
-        plain (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) live))
-        ;; key k reaching from the forms ids, with their namespaces' plain forms
+        plain (update-vals (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) live)) #(mapv :id %))
+        ;; each form's neighbours, built once per call: every test's walk reads them, and
+        ;; rebuilding a form's edges per test that reaches it cost 7.4 GB a call on Seon's own
+        ;; program (pure-tests' measure, 2026-10-23)
+        adj (into {} (map (juxt :id #(vec (edges %)))) forms)
+        ;; key k reaching from the forms ids, with their namespaces' plain forms: a stack
+        ;; (peek/pop), never a copy of the front per step
         digest-of (fn [k ids]
-                    (f k (loop [front (into (vec ids) (comp (mapcat #(plain (:ns (by-id %)))) (map :id)) ids) seen #{}]
-                           (if-let [[id & more] (seq front)]
-                             (if (seen id) (recur more seen) (recur (into (vec more) (edges (by-id id))) (conj seen id)))
-                             seen))
+                    (f k (loop [stack (into (vec ids) (mapcat #(plain (:ns (by-id %)))) ids) seen #{}]
+                           (if (empty? stack)
+                             seen
+                             (let [id (peek stack) stack (pop stack)]
+                               (if (seen id) (recur stack seen) (recur (into stack (adj id)) (conj seen id))))))
                        {:by-id by-id :digest digest}))]
     (if roots
       ;; a root naming a var with no form here (renamed, not imported) gets no digest: its
@@ -865,10 +820,56 @@
       (into {} (for [f forms [k t] (:defines f) :when (and (= :var k) (= :test (:var/kind (d/entity db [:var/name t]))))]
                  [t (digest-of t [(:id f)])])))))
 
+(defn- reach-digest
+  "Key k's reach digest from what it reached (reach-digests)."
+  {:malli/schema [:=> [:cat :seon.program/inputs :any [:set :any] :map] :string]}
+  [{:keys [env tree]} k reached {:keys [by-id digest]}]
+  (let [reads? (some #(let [f (by-id %)]
+                        (and (some tree-readers (:refs f))
+                             (not (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f))))))
+                     reached)]
+    (error/digest (apply str k "\n" env "\n" (when reads? tree) (sort (map digest reached))))))
+
+(defn reach-digests
+  "{test var -> reach digest} of db's tests (task seon.program/tests-run-by-reach): the
+  digest of the test's name, inputs' :env (what has no program facts), its own form, its
+  namespace's forms that define no var (the ns form, fixtures), and every live form their
+  references reach (a var to the form that last defined it, macros and quoted names among
+  them (unit-account); a defined multimethod's methods and protocol's extensions; a
+  contracted var's form to the schema entries its contract names, and each entry to those
+  its form names; a var named in data its form reads, inputs' :data-refs: system.edn's procs,
+  which root resolves by name), with inputs' :tree when a reached form references a
+  tree-reader. A
+  test's digest moves exactly when a form or schema entry it reaches does. Cost: the live
+  forms, contracts and schema entries read once and digested once, then per test its
+  closure. With roots ({key [var ...]}, a bin/check step's mode functions: seon.proofs/
+  check-steps), the same digest of each key: what its vars' forms and their namespaces'
+  plain forms reach; a key one of whose vars has no form here has none."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol :string]]
+                  [:=> [:cat :seon.host/db :seon.program/inputs [:map-of :string [:sequential :qualified-symbol]]] [:map-of :string :string]]]}
+  ([db inputs] (reach-digests db inputs nil))
+  ([db inputs roots] (reach-fold db inputs roots (partial reach-digest inputs))))
+
+(defn- reaches-process?
+  "Does what a test reached reference one of vars (:seon.config.source/process-vars)?"
+  {:malli/schema [:=> [:cat [:set :qualified-symbol] [:set :any] :map] :boolean]}
+  [vars reached {:keys [by-id]}] (boolean (some #(some vars (:refs (by-id %))) reached)))
+
+(defn reach-index
+  "{test {:digest :process?}} of db's tests under inputs, from the one walk (reach-fold): its
+  reach digest (reach-digests) and whether it reaches a process of its own (a var of
+  :seon.config.source/process-vars: process-tests). With roots (a bin/check step's mode
+  functions, as reach-digests takes them), the same of each key."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol [:map [:digest :string] [:process? :boolean]]]]
+                  [:=> [:cat :seon.host/db :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]]] [:map-of :any [:map [:digest :string] [:process? :boolean]]]]]}
+  ([db inputs] (reach-index db inputs nil))
+  ([db inputs roots]
+   (let [vars (cfg/value :seon.config.source/process-vars)]
+     (reach-fold db inputs roots (fn [k reached ctx] {:digest (reach-digest inputs k reached ctx) :process? (reaches-process? vars reached ctx)})))))
+
 (defn process-tests
-  "The tests on db that reach a process of their own (process-vars: a shell, a fork, a root
-  booted for it, the binary), by the one walk reach-digests takes (reach-fold) under inputs:
-  a test whose reached forms reference one. An agent's turn and root's judge run the rest;
-  these run at the merge, on a checkout (root's ruling, 2026-10-22)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.program/inputs] [:set :qualified-symbol]]}
-  [db inputs] (into #{} (keep (fn [[t {:keys [process?]}]] (when process? t))) (reach-index db inputs)))
+  "The keys of index (reach-index's answer) that reach a process of their own (a shell, a
+  fork, a root booted for it, the binary): never run automatically, only when named (owner,
+  2026-10-23). Taking the index, not db, so a caller holding one walks once."
+  {:malli/schema [:=> [:cat [:map-of :any [:map [:process? :boolean]]]] [:set :any]]}
+  [index] (into #{} (keep (fn [[t {:keys [process?]}]] (when process? t))) index))
