@@ -3,7 +3,8 @@
   the reconciler proc does the rest. Each takes root's system (seon.root/start!)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
-            [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.watch :as watch] [datahike.api :as d]))
+            [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.watch :as watch] [datahike.api :as d]
+            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn]))
 
 (defn- write-declared!
   "Declared state's tx written on main: the error that built it as it is; an empty tx
@@ -293,3 +294,58 @@
   [sys]
   (when-let [{:keys [checkout]} (let [g (generation sys)] (when (:binary g) g))]
     (into [checkout] (resume-args sys checkout))))
+
+(defn first-moves!
+  "Score the first move a model makes on each task of ids (task ids on main): per task, its
+  first-turn request (seon.judge/request); the :seon.judge fact already on main for that
+  request's digest when there is one, else one model call through root's :model owner, its
+  reply's calls scored from the compiler's facts (seon.judge/form-facts, seon.judge/score)
+  and written on main with its usage and cost. No loop and no evaluation: a call answers one
+  reply. Paid calls stop once the pass has spent :seon.config.ai/judge-pass-usd, and the
+  stop is written (:seon.judge/stopped on the pass's own fact); a reply whose usage cannot
+  be priced ends the pass with :error. Answers {:rows [{:task :acted :right-var :right-test
+  :waste :green :usd :reused?}] :usd :stopped}."
+  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
+  [sys ids]
+  (let [bound (config/value :seon.config.ai/judge-pass-usd)
+        db0 @(:conn sys)
+        src (:seon.root/source (d/pull db0 [:seon.root/source] [:seon.root/id :root]))
+        version (select-keys src [:root :commit])
+        row (fn [f reused?] (merge {:task (:seon.judge/task f) :reused? reused?}
+                                   (select-keys (:seon.judge/score f) [:acted :right-var :right-test :waste :uncompiled :green :usd])))]
+    (loop [[id & more] ids rows [] spent 0.0]
+      (cond
+        (nil? id) {:rows rows :usd spent}
+        (>= spent bound)
+        (let [left (vec (cons id more))
+              stopped {:usd spent :bound bound :left left}]
+          @(root/transact-main! sys [{:seon.judge/digest (judge/digest {:pass ids :version version}) :seon.judge/task id
+                                      :seon.judge/stopped stopped}])
+          {:rows rows :usd spent :stopped stopped})
+        :else
+        (let [db @(:conn sys)
+              t (task/task db id)
+              req (judge/request db id)
+              dg (judge/digest req)
+              held (d/pull db '[*] [:seon.judge/digest dg])]
+          (if (:seon.judge/score held)
+            (recur more (conj rows (row held true)) spent)
+            (let [r @(root/call! sys {:op :fx :kind :model :req {:messages (:messages req) :task id :turn 0}})
+                  c (:value r)]
+              (if (contract/error? r)
+                {:rows rows :usd spent :error r}
+                (let [calls (mapv :code (:tool-calls c))
+                      nsym (symbol (namespace (or (first (sort (:seon.task/proofs t))) (symbol (str (:seon.task/ns t)) "x"))))
+                      sc (judge/score t (into [] (mapcat #(judge/form-facts nsym %)) calls))
+                      usage (turn/usage c)
+                      usd (model/cost (:model req) usage)
+                      f (judge/fact dg id version calls sc usage usd)]
+                  @(root/transact-main! sys [f])
+                  ;; a cost the provider's usage cannot price is unknown, never 0: the bound
+                  ;; cannot hold over it, so the pass ends there, recorded
+                  (if usd
+                    (recur more (conj rows (row f false)) (+ spent usd))
+                    {:rows (conj rows (row f false)) :usd spent
+                     :error (contract/error :seon.judge/cost-unknown 'my.root/first-moves!
+                                            (str "the reply's usage cannot be priced (model " (:model req) "): the pass stops") {:task id :usage usage})}))))))))))
+

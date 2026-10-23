@@ -49,8 +49,9 @@
   (when (and (seq? form) (symbol? (first form)))
     (let [v (ns-resolve nsx (first form))] (when (var? v) v))))
 
-(defn- analyze
-  "form's analyzed node in namespace nsym, without running it."
+(defn analyze
+  "form's analyzed node in namespace nsym, without running it (the import's, and the
+  first-move judge's: seon.judge/form-facts)."
   {:malli/schema [:=> [:cat :symbol :any] :map]}
   [nsym form]
   (let [nsx (program/ensure-ns! nsym)]

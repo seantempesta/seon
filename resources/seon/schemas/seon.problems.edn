@@ -74,6 +74,10 @@
                                                          [:max-tokens {:optional true} :int] [:reasoning-chars :int]]]
  ;; the config names no model provider (no profile): the turn ends on it, naming what to set
  :seon.model/no-provider [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/no-provider]]]]
+ ;; a model's reply that does not read or compile where the first-move judge analyzes it (seon.judge/form-facts)
+ :seon.judge/uncompiled [:and :seon.error/base [:map [:seon.error/type [:= :seon.judge/uncompiled]]]]
+ ;; a first-move pass whose reply's usage cannot be priced: the pass stops there (my.root/first-moves!)
+ :seon.judge/cost-unknown [:and :seon.error/base [:map [:seon.error/type [:= :seon.judge/cost-unknown]]]]
  ;; the scripted provider's :script names a function this process cannot load (its namespace is
  ;; on no source root, or does not define it): seon.model/scripted
  :seon.model/no-script [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/no-script]] [:script :qualified-symbol]]]
