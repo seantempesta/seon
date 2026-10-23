@@ -86,13 +86,13 @@
     {:test-run test-run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :task (task/task db id)
      :will-merge (program/divergence (:base @agent/state) db)
      ;; root's ruling (a): what this turn ran, what the judge will run, what the merge runs
-     :tests (when-not (contract/error? run)
-              (let [results (proofs/results run)
-                    unfinished (count (remove #(contains? results %) (:selected run)))]
-                (cond-> {:this-turn (count (:selected run)) :at-judge (:at-judge run) :when-asked (count (:deferred run))}
+     :tests (when-not (contract/error? test-run)
+              (let [results (proofs/results test-run)
+                    unfinished (count (remove #(contains? results %) (:selected test-run)))]
+                (cond-> {:this-turn (count (:selected test-run)) :at-judge (:at-judge test-run) :when-asked (count (:deferred test-run))}
                   (pos? unfinished) (assoc :unfinished unfinished))))
      :reasons (r/done-explain (assoc (r/done-input (r/index db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before
-                                                   (if (contract/error? run) #{} (set (:deferred run))))
+                                                   (if (contract/error? test-run) #{} (set (:deferred test-run))))
                                      :caused caused))}))
 
 (defn- end!
@@ -126,7 +126,7 @@
   done rule, the failing assertions of each test it names, the test run's own errors, and what the
   branch's merge will carry to main."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{:keys [run reasons task results will-merge tests]}]
+  [{:keys [test-run reasons task results will-merge tests]}]
   (let [proofs (:proofs (:seon.task/accumulated task))
         named (into (set proofs) (keep :symbol) reasons)]
     {:results results :reasons reasons
