@@ -124,7 +124,7 @@
         _ (eval-root "(c/spawn! sys {})")
         parked (str "(do (ns parked-proof (:require [clojure.test :refer [deftest is]]))"
                     " (deftest p (let [w (java.io.FileOutputStream. " (pr-str fifo) ")] (.write w 49) (.flush w) (Thread/sleep 60000) (.write w 50) (.flush w)) (is true))"
-                    " (seon.agent/run-tests-forked 1000000000 '#{parked-proof/p}))")
+                    " (seon.agent/run-tests-forked 1000000000 '#{parked-proof/p} :turn))")
         ;; a1 begins the form (its :started event, tapped before the submit); root knows its pid by then
         _ (eval-root (str "(let [ev (c/events sys)] (c/submit! sys :a1 " (pr-str parked) ") "
                           "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= :a1 (:agent e))) :began (recur)))))"))
