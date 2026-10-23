@@ -445,7 +445,7 @@
         (cost-line r)
         [:span (if (:origin r) (get asked-by (:origin r) (kname (:origin r))) "its own turn")]
         (when (seq (:fns r))
-          [:details [:summary (str "costliest: " (:var (first (:fns r))) " · " (count (:fns r)) " functions")]
+          [:details [:summary (str "costliest: " (:var (first (:fns r))) " · " (count (:fns r)) (if (= 1 (count (:fns r))) " function" " functions"))]
            [:table [:tbody (for [{:keys [var calls ms]} (:fns r)]
                              [:tr [:td [:code (str var)]] [:td {:class "tabular-nums"} (str (group3 calls) " calls")] [:td {:class "tabular-nums"} (ms-str ms)]])]]])]])))
 

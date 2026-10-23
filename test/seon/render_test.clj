@@ -668,7 +668,15 @@
               page (first (filter #(= :page (:op %)) (:to-web @o)))]
           (is (= 7 (:k page)))
           (is (str/includes? (:html page) "id=\"p-head\""))
-          (is (empty? (:waiting st2))))))
+          (is (empty? (:waiting st2)))))
+      (testing "an agent's page waits for its branch read too: answered with the rows its branch records"
+        (let [o (volatile! {})
+              st1 (#'p/pass (-> st (update :branches dissoc :a3) (assoc :waiting {8 :a3})) o)]
+          (is (empty? (filter #(= :page (:op %)) (:to-web @o))))
+          (let [o (volatile! {})
+                _ (#'p/pass (assoc-in st1 [:branches :a3 :db] branch) o)
+                page (first (filter #(= :page (:op %)) (:to-web @o)))]
+            (is (str/includes? (:html page) "(f 2)"))))))
     (testing "a view no tab watches keeps nothing: its page, its branch read, its rows"
       (let [[st2 _] (#'p/render-proc (assoc st1 :shown {:a3 21}) :from-web {:op :views :views #{:root} :tabs 1})]
         (is (nil? (get-in st2 [:views :a3])))

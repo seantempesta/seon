@@ -257,6 +257,17 @@
           w
           (ui/page w {:shown (get-in st [:shown view] (history-cap)) :view (ui/view-param view) :input input}))))))
 
+(defn- ready?
+  "Is view's page whole to answer: rendered, and, when its entity is an agent with a branch, that
+  branch read (or why it could not be)? A page answered before its branch is read would show the
+  agent with none of what its branch records."
+  {:malli/schema [:=> [:cat :map :any] :boolean]}
+  [st view]
+  (let [db (:main-db st)
+        b (when db (some->> (location db view) (d/entity db) :seon.agent/branch))]
+    (boolean (and (get-in st [:views view])
+                  (or (nil? b) (get-in st [:branches view :db]) (get-in st [:branches view :error]))))))
+
 ;;; --- the pass ------------------------------------------------------------------------------------
 
 (defn- pass-view
@@ -322,13 +333,13 @@
           ms (profile/ms-since t0)]
       (doseq [p patches] (step/out! o :to-web p))
       (when (not= idx (:index st)) (step/out! o :to-web {:op :index :agents idx}))
-      ;; a page or keyframe is answered once its view is rendered; one asked before main was read
-      ;; waits for the pass main's answer brings
-      (doseq [[k v] (:waiting st) :when (get-in st [:views v])] (step/out! o :to-web {:op :page :k k :view v :html (page-html st v)}))
-      (doseq [v (:kf-wanted st) :when (get-in st [:views v])] (step/out! o :to-web {:op :keyframe :view v :html (page-html st v)}))
+      ;; a page or keyframe is answered once its view is whole (ready?); one asked before main or its
+      ;; branch was read waits for the pass that read's answer brings
+      (doseq [[k v] (:waiting st) :when (ready? st v)] (step/out! o :to-web {:op :page :k k :view v :html (page-html st v)}))
+      (doseq [v (:kf-wanted st) :when (ready? st v)] (step/out! o :to-web {:op :keyframe :view v :html (page-html st v)}))
       (-> st (assoc :index idx
-                    :waiting (into {} (remove (fn [[_ v]] (get-in st [:views v]))) (:waiting st))
-                    :kf-wanted (into #{} (remove #(get-in st [:views %])) (:kf-wanted st)))
+                    :waiting (into {} (remove (fn [[_ v]] (ready? st v))) (:waiting st))
+                    :kf-wanted (into #{} (remove #(ready? st %)) (:kf-wanted st)))
           (update :passes (fnil inc 0))
           (cond-> (seq patches) (assoc :render-ms (lib/r2 ms) :patches (reduce + (map #(+ (count (:frags %)) (count (:appends %)) (count (:prepends %)) (count (:removes %))) patches))))
           (update :pass-ms #(lib/push-window % ms 200))
@@ -472,7 +483,7 @@
                           :page (if (and (get-in st [:views (:view m)]) (contains? (:watch st) (:view m)))
                                   (do (step/out! o :to-web {:op :page :k (:k m) :view (:view m) :html (page-html st (:view m))}) st)
                                   (ask-state (assoc-in st [:waiting (:k m)] (:view m)) o))
-                          :keyframe (if (get-in st [:views (:view m)])
+                          :keyframe (if (ready? st (:view m))
                                       (do (step/out! o :to-web {:op :keyframe :view (:view m) :html (page-html st (:view m))}) st)
                                       (ask-state (update st :kf-wanted conj (:view m)) o))
                           :context (do (step/out! o :to-web {:op :text :k (:k m) :text (:context st "")}) st)
