@@ -258,6 +258,20 @@
     (is (not= before (select-keys (program/reach-digests db {:env "e2" :tree "t"}) calc-tests))
         "the inputs without program facts are in every digest")))
 
+(deftest an-update-gives-the-digests-a-rebuild-gives
+  (let [db (calc-db)
+        in {:env "e" :tree "t"}
+        g (program/reach-graph db nil)
+        db' (record db 'app.pt-calc "(defn add [a b] (+ b a))")
+        g' (program/reach-update g db')
+        db'' (record db' 'app.pt-calc "(defn neg [x] (- 0 x))")]
+    (is (= (program/reach-index db' in) (program/graph-index g' in nil)) "the update and the rebuild agree")
+    (is (not= (program/graph-index g in nil) (program/graph-index g' in nil)) "and the change moved them")
+    (is (< (:affected g') (count (:rows g'))) "only add's component and what reaches it were re-folded")
+    (is (= (program/reach-index db'' in) (program/graph-index (program/reach-update g db'') in nil))
+        "two changes since the base, from the base's graph")
+    (is (= (program/graph-index g in nil) (program/graph-index (program/reach-update g db) in nil)) "no change: the same")))
+
 (deftest a-second-run-with-nothing-changed-runs-nothing
   (let [db (calc-db)
         dir (scratch-dir "results")
