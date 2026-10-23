@@ -1,5 +1,5 @@
 [{:seon.task/name "no-clipping-functions"
-  :seon.task/plan "What exists (DECISIONS: The printer is the one printer; trimming lives only there): text a person or a model reads as prose goes through `seon.print/prose`, the one printer's face for it: shown unquoted under a token budget, a cut keeping whole lines and words and saying what it omitted (+N lines, +N chars) and how to read the rest when it has a source; every bounded list says how many more and where they are; an agent's running form travels whole to root. Deleted: `seon.render.ui/clip` and `/line` (28 fixed-character cuts), the bare top-N lists in seon.render.ui and seon.render.ai, the agent proc's 200-character cut of the running form, the stylesheet's clips (ellipsis, line-clamp, overflow hidden), and seon_context's escaped string literal (now the text). Answers seon.fences/no-clip-in-renders."
+  :seon.task/plan "What exists (DECISIONS: The printer is the one printer; trimming lives only there): text a person or a model reads as prose goes through `seon.print/prose`, the one printer's face for it: shown unquoted under a token budget, a cut keeping whole lines and words and saying what it omitted (+N lines, +N chars) and how to read the rest when it has a source; every bounded list says how many more and where they are; an agent's running form travels whole to root. Deleted: `seon.render.ui/clip` and `/line` (28 fixed-character cuts), the bare top-N lists in seon.render.ui and seon.render.ai, the agent proc's 200-character cut of the running form, the stylesheet's clips (ellipsis, line-clamp, overflow hidden), and seon_context's escaped string literal (now the text). Answers seon.render/no-clip-in-renders."
   :seon.task/kind :work
   :seon.task/proofs #{seon.print-test/prose-says-what-it-omitted
                       seon.render-test/no-cut-on-the-page-drops-silently
@@ -15,11 +15,11 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/an-ended-card-offers-no-live-buttons
                       seon.render-test/a-polling-proc-at-rest-reads-zero-work}}
- {:seon.task/name "an-attempt-row-shows-where-its-time-went"
-  :seon.task/plan "What exists: each turn records its split (:seon.turn/split: tests, context, model, eval ms; `seon.turn`), but `seon.render.ui/attempt-row` shows end-ms minus start-ms only, so an attempt at 8,126 ms beside siblings at 100-250 ms says nothing of where the time went. Correct: the attempt row's ms cell shows the split summed over its turns (largest part first, each part's ms), its title each turn's; the agent page's work box shows the split per turn. Replaces the bare span; no new measurement."
+ {:seon.task/name "a-run-row-shows-where-its-time-went"
+  :seon.task/plan "What exists: each turn records its split (:seon.turn/split: tests, context, model, eval ms; `seon.turn`), but `seon.render.ui/run-row` shows end-ms minus start-ms only, so a run at 8,126 ms beside siblings at 100-250 ms says nothing of where the time went. Correct: the run row's ms cell shows the split summed over its turns (largest part first, each part's ms), its title each turn's; the agent page's work box shows the split per turn. Replaces the bare span; no new measurement."
   :seon.task/kind :work
   :seon.task/needs #{"seon.turn/a-turn-records-what-it-saw-and-spent"}
-  :seon.task/proofs #{seon.render-test/an-attempt-row-shows-its-turns-split}}
+  :seon.task/proofs #{seon.render-test/a-run-row-shows-its-turns-split}}
  {:seon.task/name "one-owner-per-view-path"
   :seon.task/plan "What exists, one owner per view path (findings in notes/archive/duplicates-audit-2026-10-22.md, DUP-VIEWS rows): the declared status sets are `seon.root/gone-statuses`, read by the web, the server's agents answer and the check harness; one properties reader, `seon.contract/properties` (with `seon.contract/enum-values`); `seon.problems` reads :seon.status/failed; root's view numbers are one pure `seon.root/view-numbers`, called by `seon.root/state` and `seon.render.proc/system-value`; a test run is red by `seon.proofs/red?`; a card's evaluation row is the history row; a merge's result in words is `seon.render.ui/merge-words`; my.root's create!/load-tasks!/load-docs! share one write-declared!; the render proc's stats read `seon.lib/summ`; the web proc waits with `seon.step/pend`. One error shape: every server error is :seon.root/refused, a defect its thrown error map, and the readers' (or (:seon.error/message r) (:error r)) patches are gone; a root function called from the page is recorded with its answer. Deleted: the zoom's {:status :unknown}, web's :bytes-per-s, the fork server's standby row, the fx workers line, `seon.render.ai/tokens`."
   :seon.task/kind :work
@@ -28,18 +28,18 @@
                       seon.web-test/a-listener-that-cannot-bind-is-the-one-error-map
                       seon.render-test/a-recorded-error-shows-its-message
                       seon.render-test/a-refused-merge-says-why-once
-                      seon.problems-test/a-lost-attempt-is-a-death}}
+                      seon.problems-test/a-lost-run-is-a-death}}
  {:seon.task/name "an-ended-agent-leaves-the-grid-by-an-event"
   :seon.task/plan "What exists: `seon.render.proc/order` leaves out an agent ended more than `seon.render.proc/RETIRE-MS` (90000, a literal) ago, and `seon.render.proc/ordered` re-derives the order when the agents changed or a second passed (a literal 1000, a cache keyed by time): what the grid shows is decided by the clock, and an idle dashboard changes with nothing happening (docs/clocks.md#time-decides-owed-its-owners-fix). v1: the grid showed live agents, the ended ones as their own section. Correct: an ended agent leaves the grid on an event (the next agent's start, the user's dismissal, or a bounded count of ended agents kept, each a config key), and the order is derived only when the agents changed. Deletes RETIRE-MS, the :order-at clause and the :retire-ms caption field; the three leave docs/clocks.md's owed list. Done as: the grid keeps every live agent and the newest :seon.config.render.list/ended (10) ended ones by the :ended-ms root recorded; an agent's end is the event that pushes the oldest off; `order` takes the agents alone, `ordered` derives only when they changed; the tile caption names the count kept (:ended-kept)."
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/an-ended-agent-leaves-the-grid-by-an-event}}
  {:seon.task/name "one-printer-and-declared-renders"
-  :seon.task/plan "What exists (DECISIONS: The printer is the one printer; trimming lives only there): (1) the REPL answers every value through `seon.render/printed` (`seon.repl/wrap-print`): a value whose producer names its schema in its metadata (`seon.task/task`, `seon.problems/report`) reads by its declared :seon.render/ai render, ending with the form that shows the whole value as data; a map that merely holds a key prints as data; an eval error reads by its error map's render, which carries :seon.error/fix. (2) `seon.render/schema-of`: an error map's schema is its :seon.error/type (else :seon.error/base); a producer may name its value's schema in metadata. (3) Declared renders: :seon.error/base (`seon.render.ai/error`, `seon.render.ui/error-box`), :seon.task/task (`seon.render.ai/task`), :seon.attempt/attempt (`seon.render.ai/attempt`), :seon.problems/row (`seon.render.ai/problem-row`), :seon.problems/report (`seon.render.ai/report`). (4) A cost verdict's words are `seon.cost/verdict-lines`, once. (5) Second printers deleted (the page serializer `seon.web.html/html` str'ing leaves, `seon.print/line` and the config panel pr-str'ing values, and the rest). (6) Every cut's bound is config: :seon.config.render.list/stream, series, history; :seon.config.render/cell-budget, line-budget, part-budget, form-budget. (7) The law as a check from the compiler's facts: `seon.render-test/one-printer-and-no-cut-before-it` reads :form/refs (`seon.program/live-forms`); every var printing beside seon.print, and every display var that cuts, is named in docs/render.md#one-printer. An outside model's seon_eval text is its items as the REPL's text (`seon.render.ai/items` in `seon.server/mcp-reply`). Owed, each its own task: the seon.render tasks below, seon.task/an-agent-reads-its-task-as-main-holds-it, seon.root/root-keeps-what-it-shows-by-config, seon.agent/an-eval-error-carries-its-data, seon.cost/the-page-says-regression, seon.ref/a-summary-says-there-is-more, seon.check/a-check-that-never-hears-back-says-so."
+  :seon.task/plan "What exists (DECISIONS: The printer is the one printer; trimming lives only there): (1) the REPL answers every value through `seon.render/printed` (`seon.repl/wrap-print`): a value whose producer names its schema in its metadata (`seon.task/task`, `seon.problems/report`) reads by its declared :seon.render/ai render, ending with the form that shows the whole value as data; a map that merely holds a key prints as data; an eval error reads by its error map's render, which carries :seon.error/fix. (2) `seon.render/schema-of`: an error map's schema is its :seon.error/type (else :seon.error/base); a producer may name its value's schema in metadata. (3) Declared renders: :seon.error/base (`seon.render.ai/error`, `seon.render.ui/error-box`), :seon.task/task (`seon.render.ai/task`), :seon.run/run (`seon.render.ai/run`), :seon.problems/row (`seon.render.ai/problem-row`), :seon.problems/report (`seon.render.ai/report`). (4) A cost verdict's words are `seon.cost/verdict-lines`, once. (5) Second printers deleted (the page serializer `seon.web.html/html` str'ing leaves, `seon.print/line` and the config panel pr-str'ing values, and the rest). (6) Every cut's bound is config: :seon.config.render.list/stream, series, history; :seon.config.render/cell-budget, line-budget, part-budget, form-budget. (7) The law as a check from the compiler's facts: `seon.render-test/one-printer-and-no-cut-before-it` reads :form/refs (`seon.program/live-forms`); every var printing beside seon.print, and every display var that cuts, is named in docs/render.md#one-printer. An outside model's seon_eval text is its items as the REPL's text (`seon.render.ai/items` in `seon.server/mcp-reply`). Owed, each its own task: the seon.render tasks below, seon.task/an-agent-reads-its-task-as-main-holds-it, seon.root/root-keeps-what-it-shows-by-config, seon.agent/an-eval-error-carries-its-data, seon.cost/the-page-says-regression, seon.ref/a-summary-says-there-is-more, seon.check/a-check-that-never-hears-back-says-so."
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/one-printer-and-no-cut-before-it
                       seon.render-test/an-error-reads-its-message-fix-and-variant
                       seon.render-test/a-task-reads-its-state-plan-proofs-and-failure
-                      seon.render-test/an-attempt-reads-in-one-line
+                      seon.render-test/a-run-reads-in-one-line
                       seon.render-test/every-problem-class-reads-what-it-is-about-and-why
                       seon.render-test/an-outside-model-reads-an-evaluation-as-the-repl-says-it
                       seon.render-test/the-model-reads-a-rendered-value-as-its-repl-did
@@ -58,7 +58,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/a-merge-answer-reads-by-its-render}}
  {:seon.task/name "a-merge-conflict-shows-on-the-page"
-  :seon.task/plan "What exists: an attempt's merge conflicts (:seon.attempt/conflicts: key, kind, base, ours, theirs) reach no page; the attempt row and the problems banner show only a count. Correct: a declared html render of :seon.merge/conflict, shown on the agent's page and from the attempt row."
+  :seon.task/plan "What exists: a run's merge conflicts (:seon.run/conflicts: key, kind, base, ours, theirs) reach no page; the run row and the problems banner show only a count. Correct: a declared html render of :seon.merge/conflict, shown on the agent's page and from the run row."
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/a-merge-conflict-shows-its-three-sides}}
  {:seon.task/name "what-a-branch-will-merge-shows-on-the-page"
@@ -66,7 +66,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/the-agent-page-shows-what-its-merge-will-carry}}
  {:seon.task/name "a-turn-is-a-row-on-the-agent-page"
-  :seon.task/plan "What exists: a turn (:seon.turn/turn-fact: tokens, split, finish, cache hits) has no render; the agent's page shows attempt totals only. Correct: a declared html render of a turn, one row per turn on the agent's page, and an ai render for the REPL."
+  :seon.task/plan "What exists: a turn (:seon.turn/turn-fact: tokens, split, finish, cache hits) has no render; the agent's page shows run totals only. Correct: a declared html render of a turn, one row per turn on the agent's page, and an ai render for the REPL."
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/each-turn-is-a-row}}
  {:seon.task/name "config-shows-where-each-value-came-from"
@@ -74,10 +74,15 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/the-config-panel-names-each-source}}
  {:seon.task/name "spend-has-a-render"
-  :seon.task/plan "What exists: what the effect owner spent (the fx proc's :spent per budget key, :seon.fx/cost facts) is shown nowhere; the page sums attempt tokens only. Correct: a named spend value with ai and html renders, on the page and at root's REPL."
+  :seon.task/plan "What exists: what the effect owner spent (the fx proc's :spent per budget key, :seon.fx/cost facts) is shown nowhere; the page sums run tokens only. Correct: a named spend value with ai and html renders, on the page and at root's REPL."
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/spend-reads-by-its-render}}
  {:seon.task/name "namespace-agent-debug-and-data-pages"
   :seon.task/plan "What exists: `seon.web/handler` serves /, /agent/{id}, /feed, /context.txt, /render.edn, /web.edn and POST /call; pages are `seon.render.ui/system-page` and `seon.render.ui/agent-page`. v1's route table (~/src/seon/src/seon/render/route.clj) also served /ns/{namespace} and /ns/{namespace}/debug, /agent/{id}/debug and /data (docs/parity.md). Missing: the owner cannot see a namespace's vars, contracts and the tests reaching them, an agent's raw records, or main's data. Correct: each a view the render proc renders from main's or the agent's branch, through renders declared on the values' schemas (docs/render.md), routed beside /agent/; read first what each v1 page showed and keep what the owner acts on (seon.render/the-page-shows-only-what-acts). Replaces nothing."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.web-test/a-namespace-page-shows-its-vars seon.web-test/an-agent-debug-page-shows-its-records seon.web-test/the-data-page-shows-mains-entities}}]
+  :seon.task/proofs #{seon.web-test/a-namespace-page-shows-its-vars seon.web-test/an-agent-debug-page-shows-its-records seon.web-test/the-data-page-shows-mains-entities}}
+ {:seon.task/name "no-clip-in-renders"
+  :seon.task/plan "Done in part: `seon.render.ui/clip` and line, seon.render.ai's char cuts and its 4-chars-a-token budget are gone, and the render proc's event, series and history caps are config keys (resources/seon/config/default.edn, provenance EVENT-CAP 60, SERIES-CAP 60, HISTORY-CAP 100). Left: the api's view keeps :evals and :root-errors with `(take-last 20 ...)` in seon.root, a list dropped silently (AGENTS.md section 9: a clipping function). Correct: each capped list says how many more and links to the record on main; each clipped value gets a :seon.render/ai or :seon.render/html render on its schema, or goes through the one printer with a handle; budgets are :seon.render/budget on the view schemas, measured by the printer's own token count."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.render-test/no-render-calls-clip
+                      seon.render-test/a-capped-list-says-how-many-more}}]

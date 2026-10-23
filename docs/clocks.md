@@ -39,7 +39,7 @@ way in [failure points](failure-points.md).
 Each is a defect named with the task that removes it, so the laws check stays a ratchet: a new
 site is red, and a fixed one leaves this list in the fix's commit.
 - `seon.root/start!` (Flow's `:stop-timeout-ms`), `seon.root/stop!` (timed derefs and a `.join`), `seon.agent-proc/await-dead` (the SIGKILL ladder): task `seon.root/shutdown-and-death-are-dataflow`.
-- `seon.root/api-proc` (the stall timer): with `seon.root/back-op` (its `:stall-check`, a clock read compared to the bound) and `seon.agent-proc/agent-proc` (the `:last-frame-ms` the stall compares), task `seon.fences/a-stall-is-past-the-requests-own-bound`.
+- `seon.root/api-proc` (the stall timer): with `seon.root/back-op` (its `:stall-check`, a clock read compared to the bound) and `seon.agent-proc/agent-proc` (the `:last-frame-ms` the stall compares), task `seon.root/a-stall-is-past-the-requests-own-bound`.
 - `seon.web/web-proc` (the HTTP adapter's keep-alive and write timeouts, literals): task `seon.web/web-server-threads-are-joined-at-stop`.
 - `seon.model-test/chunks`: a `Thread/sleep` between a streamed reply's chunks (each `>!!` is its own write without it): task `seon.model/a-streamed-reply-test-sleeps-not`.
 
@@ -62,7 +62,7 @@ A measured time chooses which work goes first, never whether a result is green (
 ## Time measured (recorded, never compared to decide)
 
 - `seon.profile/now-ns`, `seon.profile/ms-since`: the one clock read ([machine](machine.md#the-clock)); their callers are judged here one by one.
-- `seon.step/event`, `seon.agent-proc/agent-in`, `seon.root/end-agent`, `seon.root/record-death`, `seon.root/set-agent`, `seon.root/previous-end`, `seon.reconcile/judge-tx`, `seon.reconcile/start`, `seon.reconcile/dead-tx`, `seon.server/attach!`, `seon.writer/main-commit`, `seon.writer/stored!`, `seon.writer/writer-proc` (the `:since` on its dirty notice), `seon.repl/wrap-caught`, `seon.web/render-in`: a wall-clock stamp on an event, an attempt, a death, a root's end, a problem, an error, a commit or a dashboard chunk.
+- `seon.step/event`, `seon.agent-proc/agent-in`, `seon.root/end-agent`, `seon.root/record-death`, `seon.root/set-agent`, `seon.root/previous-end`, `seon.reconcile/judge-tx`, `seon.reconcile/start`, `seon.reconcile/dead-tx`, `seon.server/attach!`, `seon.writer/main-commit`, `seon.writer/stored!`, `seon.writer/writer-proc` (the `:since` on its dirty notice), `seon.repl/wrap-caught`, `seon.web/render-in`: a wall-clock stamp on an event, a run, a death, a root's end, a problem, an error, a commit or a dashboard chunk.
 - `seon.repl/record!`: a record's id made unique by the clock read.
 - `seon.render.proc/web-answered`: a UI call's answer, its record's id made unique by the clock read and its stream event stamped.
 - `seon.turn/act!`, `seon.turn/work!`, `seon.turn/observe`, `seon.turn/context-block`, `seon.model/openai-compat`, `seon.model/scripted`, `seon.fx/build`, `seon.fx/run-tests`, `seon.fx/worker-proc`, `seon.contract/instrument!`, `seon.repl/wrap-cost`, `seon.agent/clone!`, `seon.agent/run-tests-forked`, `seon.proofs/run-tests!`, `seon.db/collect!`, `seon.fork-server/server-step`, `seon.root/import-source!`, `seon.server/root-eval`: a duration recorded on the work's own fact or reply (`seon.fork-server/server-step`'s on its `:applied`, `:fork` and `:static` events, with a commit's lag from the writer's stamp).

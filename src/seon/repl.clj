@@ -423,7 +423,7 @@
 (defn serve!
   "The agent's loop: one request at a time, in arrival order. Never returns. The agent
   process's entrant boundary: a defect no request's own boundary caught (the agent may
-  redefine a function its loop calls) ends the process; its cause is the attempt's end on
+  redefine a function its loop calls) ends the process; its cause is the run's end on
   the branch (seon.agent/died!), and the exit status 70 (EX_SOFTWARE) names the death."
   {:malli/schema [:=> [:cat] :any]}
   []

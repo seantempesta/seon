@@ -16,7 +16,7 @@ open http://127.0.0.1:7777/
   (every third body is quadratic, so its cost proof is red), runs its tests and evaluates a value.
 - `./seon web N light` gives each agent one evaluation only, with no test forks (for the size sweep).
 - `./seon web N calc` or `./seon web N swarm M` adds tasks the reconciler works, with real
-  attempt agents and the scripted model.
+  run agents and the scripted model.
 - It serves until stdin closes. The port is `:seon.config.web/port` (7777; `SEON_WEB_PORT` overrides it through the config file), on 127.0.0.1 only.
   A port that cannot be bound shows as data in the `:web` proc's health (`:listening false :error`).
 - Every root boot serves it. That includes checks and tests: the first root gets the port and
@@ -25,7 +25,7 @@ open http://127.0.0.1:7777/
 | Route | What |
 |---|---|
 | `/` | Root's view: tiles, health, the reconciler and tasks, effects, root's defects, agent cards, root's context, the event stream. |
-| `/agent/<id>` | One agent zoomed: its process, its attempt and task on main, proofs (red assertions, cost proofs), every evaluation on its branch (form, value, ms, alloc, costliest functions), the context its model reads, its REPL. Esc goes back. |
+| `/agent/<id>` | One agent zoomed: its process, its run and task on main, proofs (red assertions, cost proofs), every evaluation on its branch (form, value, ms, alloc, costliest functions), the context its model reads, its REPL. Esc goes back. |
 | `/feed?view=root\|<id>` | The view's Datastar SSE feed. |
 | `POST /call?fn=&agent=&args=` | The one stateless callback route. Its payload is the call. |
 | `/context.txt` | Root's context: the system's AI face, the text root reads. |
@@ -41,7 +41,7 @@ open http://127.0.0.1:7777/
   1. An event (from a tap of root's events) or a sampler beat (500 ms) asks the api for its view.
   2. While that request is in flight, more events only queue. The round trip is the coalescing
      window, so no step sleeps.
-  3. The answer is joined with every proc's health (Flow's ping), main's tasks and attempts
+  3. The answer is joined with every proc's health (Flow's ping), main's tasks and runs
      (re-read only when the writer's tx count moved), the series and the events. The result is
      the system value, `:seon.render/system`.
 - **Renders.**
@@ -70,7 +70,7 @@ open http://127.0.0.1:7777/
   | `:seon.render/agent` | `agent-card` |
   | `:seon.render/agent-page` | `agent-page` |
   | `:seon.task/task` | `task-box` |
-  | `:seon.attempt/attempt` | `attempt-row` |
+  | `:seon.run/run` | `run-row` |
   | `:seon.agent/item` and `:seon.cluster.eval/record` | `history-row` |
   | `:seon.root/health` | `health-cell` |
   | `:seon.render/proc-health` | `proc-health` |
@@ -143,8 +143,8 @@ commit), so two passes, and root's context panel (~2.5 KB) re-renders on each.
 
 | File | What |
 |---|---|
-| `root-6-agents-calc-graph.jpg` | Root's view: 6 hand-spawned agents plus the calc graph's 12 attempts. |
+| `root-6-agents-calc-graph.jpg` | Root's view: 6 hand-spawned agents plus the calc graph's 12 runs. |
 | `zoom-a1-red-cost-proof.jpg` | A zoomed agent whose cost proof is red: OVER, ns at n=100 is 24× its estimate. |
-| `zoom-a8-attempt-calc-neg.jpg` | An attempt agent: attempt, task, proofs with red assertions, evaluations with their costliest functions. |
+| `zoom-a8-attempt-calc-neg.jpg` | A run agent: run, task, proofs with red assertions, evaluations with their costliest functions. |
 | `root-problems-tasks-health.jpg` | After root's feedback: problems first, observed task states with what blocks each, one-line health, ended agents. |
-| `zoom-a9-merge-allowed-reds-big-alloc.jpg` | A merge attempt: "ended · merged", a flagged 88 MB evaluation, and each red proof labelled allowed with its task. |
+| `zoom-a9-merge-allowed-reds-big-alloc.jpg` | A merge run: "ended · merged", a flagged 88 MB evaluation, and each red proof labelled allowed with its task. |

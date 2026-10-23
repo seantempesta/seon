@@ -32,7 +32,7 @@
               ["(clojure.repl/source root-causes)" :out "(defn root-causes"]
               ;; a namespace's ns form, its requires and aliases (step E's run 3: the real design
               ;; asked for seon.problems-test/ns 18 turns running, to write its deftest)
-              ["(my.schema/forms :seon.attempt/status)" :printed ":enum"]
+              ["(my.schema/forms :seon.run/status)" :printed ":enum"]
               ["(clojure.repl/source seon.reconcile)" :out "(ns seon.reconcile"]
               ["(clojure.repl/source seon.reconcile/ns)" :out "(source seon.reconcile)"]
               ["(clojure.repl/source seon.reconcile/not-yet)" :out "no such var is defined"]

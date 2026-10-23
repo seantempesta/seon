@@ -212,12 +212,12 @@
       :union (let [st (union-built st)] (reply st {:ok true :db (d/history (:db (:union st))) :branches (count (:applied (:union st)))}))
       ;; the agent's branch (new: a pointer to main's head), then its fork: the agent opens
       ;; the branch itself and owns its writes (run-ahead, committed by the agent), and holds
-      ;; the task and attempt it works from its first form
+      ;; the task and run it works from its first form
       :spawn (let [{:keys [agent branch]} m
                    resumed? (exists? branch)]
                (when-not resumed? (d/branch! conn main branch))
                ;; main's commit and t, which this branch starts at and the image it forks from holds
-               (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :task (:task m) :attempt (:attempt m) :ns (:ns m) :fd (:fd m)
+               (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :task (:task m) :run (:run m) :ns (:ns m) :fd (:fd m)
                                               :cfg (:cfg st) :resumed resumed?
                                               :commit (d/commit-id @conn) :t (:max-tx @conn)})
                (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))
