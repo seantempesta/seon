@@ -38,7 +38,7 @@ way in [failure points](failure-points.md).
 
 Each is a defect named with the task that removes it, so the laws check stays a ratchet: a new
 site is red, and a fixed one leaves this list in the fix's commit.
-- `seon.root/start!` (Flow's `:stop-timeout-ms`), `seon.root/stop!` (timed derefs and a `.join`), `seon.agent-proc/await-dead` (the SIGKILL ladder), `seon.fork-server/main` and `seon.sock/recv-within!` (the 100 ms poll by which a child's death is seen): task `seon.root/shutdown-and-death-are-dataflow`.
+- `seon.root/start!` (Flow's `:stop-timeout-ms`), `seon.root/stop!` (timed derefs and a `.join`), `seon.agent-proc/await-dead` (the SIGKILL ladder): task `seon.root/shutdown-and-death-are-dataflow`.
 - `seon.root/api-proc` (the stall timer): with `seon.root/back-op` (its `:stall-check`, a clock read compared to the bound) and `seon.agent-proc/agent-proc` (the `:last-frame-ms` the stall compares), task `seon.root/a-stall-is-past-the-requests-own-bound`.
 - `seon.web/web-proc` (the HTTP adapter's keep-alive and write timeouts, literals): task `seon.web/web-server-threads-are-joined-at-stop`.
 - `seon.model-test/chunks`: a `Thread/sleep` between a streamed reply's chunks (each `>!!` is its own write without it): task `seon.model/a-streamed-reply-test-sleeps-not`.
@@ -71,5 +71,6 @@ A measured time chooses which work goes first, never whether a result is green (
 - `seon.render.proc/pass`: a render pass's duration and the events' age, shown on the dashboard.
 - `seon.render.proc/system-value`: carries the pass's wall time (`:now-ms`) to the dashboard, which shows ages from it; nothing here decides by it.
 - `seon.agent/handle!`, `seon.root/ext-op`, `seon.reconcile/advance`, `seon.reconcile/reconciler-proc`: stamps and durations.
+- `seon.root/deliver-message`: a delivered message's send stamp (`:ns`), which the agent's receipt (`:received`) answers with its own, so the delivery's time is measured.
 
 The thread CPU clock (`seon.profile/cpu-ns`, what a cost proof's `seon.cost/measure` times) orders nothing and carries no mark; [cost](cost.md) says what it measures.

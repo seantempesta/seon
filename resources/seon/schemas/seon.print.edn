@@ -2,7 +2,10 @@
 ;; allotter (seon.print.select) and emitter (seon.print.emit) pass between their functions.
 {:seon.print/opts [:map [:handle {:optional true} [:maybe [:or :symbol [:sequential :any]]]] [:budget {:optional true} pos-int?]
                    [:max-depth {:optional true} pos-int?] [:width {:optional true} nat-int?]
-                   [:outputs {:optional true} [:set [:enum :text :hiccup]]]]
+                   [:outputs {:optional true} [:set [:enum :text :hiccup]]]
+                   ;; a nested value's own render: (fn [v] {:text :html}) for a value whose schema
+                   ;; declares one, else nil; the printer shows it in that value's place
+                   [:render {:optional true} [:maybe :seon.host/fn]]]
  :seon.print/answer [:map [:text :string] [:tokens nat-int?] [:truncated? :boolean] [:elisions nat-int?]
                      [:html {:optional true} :seon.print/hiccup]]
  ;; printed, or the budget refused the value's first part (an error map)

@@ -203,6 +203,24 @@
     (update st ::to-agents (fnil conj []) [id m])
     st))
 
+(defn- message-to
+  "Whom a message to agent id is to, as :seon.message/to names it: the run it works (an
+  agent id starts again each boot, a run's names one worker for good), else the agent."
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.agent/id] :string]}
+  [st id] (or (get-in st [:view :agents id :run]) (name id)))
+
+(defn- deliver-message
+  "Send message m ({:from :to [id ...] :body :id}) to each agent it names: the one delivery, for
+  an agent's send and the owner's message alike. A message that is a fact (:id, :seon.message/id)
+  carries its id and whom it is to (the run each agent works), so the agent that takes it
+  writes the same fact on its branch."
+  {:malli/schema [:=> [:cat :seon.root/api-state :map] :seon.root/api-state]}
+  [st m]
+  (reduce (fn [st id]
+            (to-agent st id {:op :write :msg (cond-> {:op :message :from (:from m) :body (:body m) :ns (profile/now-ns)}
+                                               (:id m) (assoc :id (:id m) :to (message-to st id)))}))
+          st (:to m)))
+
 (defn- spawn-failed
   "Agent id's spawn or fork refused (why, and its cause when another proc refused it): the
   one error map in its view and sent to its proc, which hangs up."
@@ -221,7 +239,7 @@
   end is a jolt.async.remote end (session RC1): its :in is the agent proc's :from, so the
   agent's port is an ordinary channel. Answers [st id agent-end-fd]."
   {:malli/schema [:=> [:cat :seon.root/api-state :map] [:tuple :seon.root/api-state :seon.agent/id :seon.lib/fd]]}
-  [st {:keys [branch task cloned-from]}]
+  [st {:keys [branch task run cloned-from]}]
   (let [n (inc (:next-id st))
         id (keyword (str "a" n))
         ;; named under root's main, so roots sharing a store never share a branch (seon.db/on-main)
@@ -238,6 +256,7 @@
                                       :chan-opts {:in {:buf-or-n (cfg/value :seon.config.agent/inbox-size)}}})
          (assoc-in [:view :agents id] (cond-> {:branch branch :status :spawning :task task :pid nil
                                                :forked-ms nil :mem-mb nil :evals [] :tests nil}
+                                        run (assoc :run run)
                                         cloned-from (assoc :cloned-from cloned-from))))
      id a]))
 
@@ -326,6 +345,18 @@
                     :stats {:op :stats}
                     :merge-main {:op :merge-main :data-attrs (:data-attrs m)})]
           (to-agent st id {:op :req :rid rid :kind op :msg msg :merge-branch (:merge-branch m) :data-attrs (:data-attrs m)})))
+      ;; a message to a live agent (the owner's, from the page or the server): root's one
+      ;; delivery, as an agent's send is; it lands in the agent's inbox, which its next turn reads
+      ;; the owner's message is a fact on main (root's branch: :seon.message/*), delivered and
+      ;; answered once the writer has it; the agent writes the same fact on its own branch
+      ;; when its turn takes it (seon.agent/messages)
+      :message (if (nil? (get-in st [:agents id]))
+                 (reply! st p (gone id (str "no live agent " id)))
+                 (let [mid (str "m-" (random-uuid))
+                       fact {:seon.message/id mid :seon.message/from (name (:from m)) :seon.message/to (message-to st id) :seon.message/body (:body m)}
+                       [st rid] (pend st p :tx nil)]
+                   (step/out! o :to-writer {:op :tx :branch :db :tx-data [fact] :dest {:rid rid :message {:from (:from m) :to [id] :body (:body m) :id mid}}})
+                   (update st :writes (fnil conj #{}) rid)))
       ;; requests for the writer: answered by rid; a collection only while no agent is live,
       ;; the store's only writer then being root's writer (seon.db/collect!)
       :write (if (and (= :collect (get-in m [:req :op])) (seq (:agents st)))
@@ -379,7 +410,9 @@
                                true (deliver-rid (:rid dest) (dissoc r :sync))))
         ;; the recorded errors' write was answered: the next window may write
         (:errors-flushed dest) (dissoc st ::errors-flight)
-        (:rid dest) (deliver-rid st (:rid dest) r)
+        ;; a message is delivered once its fact is written, never before
+        (:rid dest) (cond-> (deliver-rid st (:rid dest) r)
+                      (and (:message dest) (not (contract/error? r))) (deliver-message (:message dest)))
         (:agent dest) (to-agent st (:agent dest) {:op :write :msg (cond (:op r) r
                                                                           (= :branched (:op dest)) (cond-> {:op :branched :k (:k dest) :cfg (:cfg r)} (contract/error? r) (assoc :error r))
                                                                           :else (assoc r :op (:op dest) :k (:k dest)))})
@@ -430,8 +463,7 @@
       :stat (case (:k m)
               :noise (view! st update :stats assoc :noise (:v m) :noise-ordered (:ordered m) :noise-first-bad (:bad m))
               (view! st update-in [:stats (:k m)] lib/push-window (:v m) 100000))
-      :message (let [msg {:op :message :from (:from m) :body (:body m) :ns (profile/now-ns)}]
-                 (reduce #(to-agent %1 %2 {:op :write :msg msg}) st (:to m)))
+      :message (deliver-message st m)
       ;; a proc's request (the reconciler's, the web's, MCP's): an ordinary api request
       ;; whose answer goes back to the proc as data
       :request (ext-op st o (assoc (:req m) :p {:route (:route m) :tag (:tag m)}))
@@ -826,7 +858,7 @@
 ;; The API: callers outside the graph. Each call puts one request on :ext.
 ;; ====================================================================================
 
-(defn- call!
+(defn call!
   "Put m (with a fresh reply promise) on the api; a promise. After stop! the
   api is closed and the promise answers :seon.root/no-agent (\"root stopped\")."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.root/request] :seon.host/promise]}
@@ -884,7 +916,7 @@
 
 (defn request
   "The op (named as its fn below: spawn! clone! submit! run-tests! kill! merge!
-  merge-main!) on agent id with args, as the api request it is: one table for these fns
+  merge-main! message! release!) on agent id with args, as the api request it is: one table for these fns
   and the dashboard's calls (seon.web). a: the agent's entry in root's view, which merge!
   and merge-main! read; an op the agent cannot take answers its error."
   {:malli/schema [:=> [:cat :symbol [:maybe :seon.agent/id] [:maybe :map] [:maybe :map]] :map]}
@@ -897,6 +929,9 @@
       submit! (cond-> {:op :eval :id id :forms (:forms args)} (:ticks args) (assoc :ticks (:ticks args)) (:origin args) (assoc :origin (:origin args)))
       run-tests! (cond-> {:op :tests :id id} (:ticks args) (assoc :ticks (:ticks args)))
       kill! {:op :kill :id id}
+      message! {:op :message :id id :from :owner :body (:body args)}
+      ;; my.root/run!'s one transaction: the held task (:task) released, its next run the reconciler's
+      release! {:op :write :req {:op :tx :branch :db :tx-data (task/execution-tx [(:task args)] :running)}}
       merge-main! (if live?
                     {:op :merge-main :id id :data-attrs data-attrs}
                     (absent a id))
@@ -943,6 +978,20 @@
   ([sys agent-id forms-string] (submit! sys agent-id forms-string nil))
   ([sys agent-id forms-string opts] (request! sys 'submit! agent-id (assoc opts :forms forms-string))))
 
+(defn message!
+  "Send the owner's message body (a string) to the agent: root's one delivery, into the
+  agent's inbox, which its next turn takes into the block it reads (:messages), and a fact on
+  main (:seon.message/*). A promise of the writer's answer for that fact's transaction, or
+  refused when no live agent has the id."
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id :string] :seon.host/promise]}
+  [sys agent-id body] (request! sys 'message! agent-id {:body body}))
+
+(defn release!
+  "Release the held task task-id (my.root/run!'s one transaction): the reconciler runs its next
+  run. A promise of the writer's answer."
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.task/id] :seon.host/promise]}
+  [sys task-id] (request! sys 'release! nil {:task task-id}))
+
 (defn judge!
   "Hand an outside agent's run to the reconciler for judgement, as a turn loop's end
   is: proofs in a fork, the branch read, the agent retired. run {:run :task :env
@@ -969,9 +1018,6 @@
   (if-let [b (if agent-id (get-in @(call! sys {:op :state}) [:agents agent-id :branch]) (pdb/conn-main (:conn sys)))]
     (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx (pdb/head (:conn sys) b)) :mode (if agent-id :turn :judge)} agent-id (assoc :agent agent-id) (seq names) (assoc :names names)))
     (doto (promise) (deliver (absent (get-in @(call! sys {:op :state}) [:agents agent-id]) agent-id))))))
-
-(defn agent-stats! "A promise of the agent's numbers now." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
-  [sys agent-id] (call! sys {:op :stats :id agent-id}))
 
 (defn- write! {:malli/schema [:=> [:cat :seon.root/sys :seon.writer/request] :seon.host/promise]}
   [sys req] (call! sys {:op :write :req req}))
@@ -1056,9 +1102,6 @@
 
 (defn kill! "SIGKILL the agent's process (through its agent proc). nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
   [sys agent-id] (request! sys 'kill! agent-id nil) nil)
-
-(defn fs-call! "Ask the fork server for {:op :stats} or {:op :static}." {:malli/schema [:=> [:cat :seon.root/sys :seon.root/request] :any]}
-  [sys msg] @(call! sys {:op :fs :req msg}))
 
 (defn stop!
   "Stop root by letting the flow drain: the api closes (later calls answer \"root

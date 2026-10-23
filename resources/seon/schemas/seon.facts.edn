@@ -110,7 +110,7 @@
  ;; Observations: data on the branch that recorded them, never carried by a merge ----
  :seon.cluster.eval/id :string
  :seon.cluster.eval/agent :seon.db/ref
- ;; the evaluation's details as one EDN value: {:tag :form :shown|:error :out :ms :alloc-bytes :fns}
+ ;; the evaluation's details as one EDN value: {:tag :form :shown|:error :out :ms :alloc-bytes :ticks :fns}
  ;; (:fns: its 10 costliest contracted functions, [{:var :calls :ms}], seon.profile)
  :seon.cluster.eval/record [:map {:seon.db/data true :seon.render/html seon.render.ui/history-row} [:tag [:enum :ret :err]]]
  :seon.agent/id [:and {:seon.db/identity true} :keyword]
@@ -312,8 +312,10 @@
                 [:seon.tx/branch {:optional true} :seon.tx/branch]]
  ;; a message between root and an agent, as a fact on the sender's branch: root's on main, an
  ;; agent's reply on its own; the union of every branch's history joins a conversation in one
- ;; query (seon.union). from and to name a run (its :seon.run/id, "demo/f#1") or
- ;; "root": an agent id starts again every boot, a run's names one worker for good.
+ ;; query (seon.union). from and to name a run (its :seon.run/id, "demo/f#1"),
+ ;; "root", or "owner" (the page's message bar and the server's :message op, written by root):
+ ;; an agent id starts again every boot, a run's names one worker for good. The agent that
+ ;; takes a message writes the same fact on its own branch, and its turn's basis names it by id.
  ;; reply-to is the replied message's id, a value, since that message may be on a branch the
  ;; reply's is not
  :seon.message/id [:and {:seon.db/identity true} :string]
@@ -352,7 +354,10 @@
                    [:merge? {:optional true} :boolean] [:last-evals {:optional true} :string]]
  ;; a model turn's eval calls, each its id, its code and what it evaluated to as the later
  ;; turns' tool messages show it (seon.context/evaluations-text: folded, within the evals budget)
- :seon.turn/calls [:vector {:seon.db/data true} [:map [:id :string] [:code :string] [:evals :string]]]
+ :seon.turn/calls [:vector {:seon.db/data true} [:map [:id :string] [:code :string] [:evals :string]
+                                                    ;; the ids of the call's evaluation records (:seon.cluster.eval/id), and the
+                                                    ;; model's thinking about the call (the eval tool's optional argument)
+                                                    [:items {:optional true} [:vector :string]] [:thinking {:optional true} :string]]]
  ;; the provider's finish_reason, the model that answered, and its reasoning text
  :seon.turn/finish :string
  :seon.turn/model :string
@@ -366,7 +371,7 @@
  :seon.end/reason :string
  :seon.end/turns :int
  :seon.end/tokens :int
- :seon.turn/turn-fact [:map {:seon.db/attributes true}
+ :seon.turn/turn-fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/turn-row}
                           [:seon.turn/id :seon.turn/id] [:seon.turn/run :seon.turn/run] [:seon.turn/n :seon.turn/n]
                           [:seon.turn/reply :seon.turn/reply] [:seon.turn/forms :seon.turn/forms] [:seon.turn/errors :seon.turn/errors]
                           [:seon.turn/red :seon.turn/red] [:seon.turn/ms :seon.turn/ms] [:seon.turn/tokens {:optional true} :seon.turn/tokens]

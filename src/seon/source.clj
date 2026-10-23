@@ -17,18 +17,6 @@
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.program :as program] [seon.db :as pdb] [seon.reader :as reader] [seon.config :as config] [datahike.api :as d] [clojure.string :as str]
             [rewrite-clj.zip :as z] [rewrite-clj.node :as node] [rewrite-clj.parser :as parser] [jolt.analyzer] [jolt.host] [seon.edn :as sedn]))
 
-(defn- lead-end
-  "Where the first form starts in text from i to end: past whitespace, commas and ; comments."
-  {:malli/schema [:=> [:cat :string :int :int] :int]}
-  [^String text i end]
-  (loop [i i]
-    (if (>= i end)
-      end
-      (let [c (.charAt text i)]
-        (cond (or (Character/isWhitespace c) (= c \,)) (recur (inc i))
-              (= c \;) (let [j (.indexOf text "\n" (int i))] (recur (if (or (neg? j) (> j end)) end (inc j))))
-              :else i)))))
-
 (defn read-forms
   "text read form by form in namespace nsym (its ns form switches the namespace the rest is
   read in, as loading does): {:forms [{:form :src :lead :ns}] :tail}. Each form's :src is
@@ -49,7 +37,7 @@
          (if (= ::eof form)
            {:forms acc :tail (subs text prev)}
            (let [end (off (.getLineNumber r) (.getColumnNumber r))
-                 start (lead-end text prev end)
+                 start (reader/lead-end text prev end)
                  nsym' (if (and (seq? form) (= 'ns (first form)) (symbol? (second form))) (second form) nsym)]
              (recur (conj acc (step {:form form :src (subs text start end) :lead (subs text prev start) :ns nsym'}))
                     end nsym'))))))))

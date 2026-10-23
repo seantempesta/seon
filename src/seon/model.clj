@@ -48,8 +48,11 @@
     (if-not f
       (contract/error :seon.model/no-script 'seon.model/complete
                       (str "the scripted provider's " script " is not on this process's source roots") {:script script})
-      (let [text (f request)]
-        {:text "" :tool-calls [{:id (str "call-" (:turn request)) :code (:text (reader/forgive text))}]
+      ;; a script answers its call's code, or the code and the thinking the eval tool takes
+      (let [out (f request)
+            {text :code thinking :thinking} (if (string? out) {:code out} out)]
+        {:text "" :tool-calls [(cond-> {:id (str "call-" (:turn request)) :code (:text (reader/forgive text))}
+                                 thinking (assoc :thinking thinking))]
          :prompt-tokens (reduce + (map (comp select/estimate :content) (:messages request)))
          :completion-tokens (select/estimate text) :estimated true :ms (profile/ms-since t0)}))))
 
@@ -90,7 +93,8 @@
    :function {:name "eval"
               :description "Evaluate Clojure forms at your REPL; the answer is this call's result."
               :parameters {:type "object"
-                           :properties {:code {:type "string" :description "Clojure forms; prose in ;; comments."}}
+                           :properties {:code {:type "string" :description "Clojure forms; your thought about each in ;; comments before it."}
+                                        :thinking {:type "string" :description "Optional: why this call, what you expect it to show."}}
                            :required ["code"]}}})
 
 (defn- wire-message
@@ -102,9 +106,9 @@
   [{:keys [role content tool-calls tool-call-id reasoning]}]
   (cond-> {:role role :content content}
     reasoning (assoc :reasoning_content reasoning)
-    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code]}]
+    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code thinking]}]
                                                 {:id id :type "function"
-                                                 :function {:name "eval" :arguments (json/write-str {:code code})}})
+                                                 :function {:name "eval" :arguments (json/write-str (cond-> {:code code} thinking (assoc :thinking thinking)))}})
                                               tool-calls))
     tool-call-id (assoc :tool_call_id tool-call-id)))
 
@@ -122,13 +126,16 @@
     reasoning-effort (assoc :reasoning_effort (name reasoning-effort))))
 
 (defn- call-code
-  "An eval call's code: the `code` of its JSON arguments, or the arguments as they came when
-  they are not that JSON (a reply cut mid-call): the reader shows what they hold."
-  {:malli/schema [:=> [:cat [:maybe :string]] :string]}
+  "An eval call's code and its thinking: the `code` of its JSON arguments (and `thinking`, when
+  the model gave it), or the arguments as they came when they are not that JSON (a reply cut
+  mid-call): the reader shows what they hold."
+  {:malli/schema [:=> [:cat [:maybe :string]] [:map [:code :string] [:thinking {:optional true} :string]]]}
   [arguments]
   (let [a (or arguments "")
         j (try (json/read-str a) (catch Throwable _ nil))]
-    (if (and (map? j) (string? (get j "code"))) (get j "code") a)))
+    (if (and (map? j) (string? (get j "code")))
+      (cond-> {:code (get j "code")} (and (string? (get j "thinking")) (not (str/blank? (get j "thinking")))) (assoc :thinking (get j "thinking")))
+      {:code a})))
 
 (defn reply-of
   "A 200 reply (its chat-completion JSON as data) as the completion: its text, its eval calls
@@ -139,7 +146,7 @@
   {:malli/schema [:=> [:cat :map number? [:maybe :int]] [:or :seon.model/completion :seon.model/failure]]}
   [j ms max-tokens]
   (let [msg (get-in j [:choices 0 :message])
-        calls (mapv (fn [c] {:id (str (:id c)) :code (call-code (get-in c [:function :arguments]))}) (:tool_calls msg))
+        calls (mapv (fn [c] (assoc (call-code (get-in c [:function :arguments])) :id (str (:id c)))) (:tool_calls msg))
         text (or (:content msg) (when (seq calls) ""))
         reasoning (:reasoning_content msg)
         u (:usage j)
@@ -242,3 +249,21 @@
                           "no model provider is configured: set SEON_PROFILE=deepseek (a paid model) or SEON_PROFILE=scripted (a test fixture), or :seon.config.ai/provider" {})
     :scripted (scripted provider request)
     :openai-compat (openai-compat provider request)))
+
+(defn cost
+  "What a turn's usage cost in USD at model's configured prices (:seon.config.ai/models, the
+  off-peak rates; the provider charges twice at peak): its uncached prompt tokens at the input
+  rate, its cached ones at the cached rate, the rest of its tokens (the completion) at the
+  output rate. nil when unknown: a model with no prices in config, or a usage that does not
+  split its prompt into cache hits and misses (the price depends on it)."
+  {:malli/schema [:=> [:cat [:maybe :string] [:map [:seon.turn/tokens {:optional true} :int]
+                                              [:seon.turn/cache-hit-tokens {:optional true} :int]
+                                              [:seon.turn/cache-miss-tokens {:optional true} :int]]]
+                  [:maybe number?]]}
+  [model {:seon.turn/keys [tokens cache-hit-tokens cache-miss-tokens]}]
+  (let [m (get (config/value :seon.config.ai/models) model)]
+    (when (and m tokens cache-hit-tokens cache-miss-tokens)
+      (/ (+ (* cache-miss-tokens (:seon.ai.model/input-usd-per-mtok m))
+            (* cache-hit-tokens (:seon.ai.model/cached-input-usd-per-mtok m))
+            (* (- tokens cache-hit-tokens cache-miss-tokens) (:seon.ai.model/output-usd-per-mtok m)))
+         1e6))))

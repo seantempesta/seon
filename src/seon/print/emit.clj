@@ -154,6 +154,8 @@
       :seon.print/class (text-op :seon.print/symbol (:seon.print/name node))
       :seon.print/object (text-op :seon.print/object (str "#object[" (:seon.print/class node)
                                                           (when-some [rep (:seon.print/rep node)] (str " " rep)) "]"))
+      ;; a nested value shown by its own render (seon.print/print-value's :render): its text, and its hiccup
+      :seon.print/rendered (text-op :seon.print/rendered (:seon.print/text node) (:seon.print/html node))
       :seon.print/elided (let [text (elided-text node)]
                            (text-op :seon.print/elision text (elided-hiccup node text))))))
 

@@ -464,6 +464,34 @@
     (is (= :seon.test/ticks-spent type) (:printed r))
     (is (= "#'spin-test/spin" test) "naming the test that was running")))
 
+(deftest a-model-turn-records-its-thinking-and-the-message-it-took
+  ;; task seon.render/a-debug-view-of-any-agent: the owner's message is a fact root writes on
+  ;; main (from "owner", to the run the agent works); the turn that takes it writes the same
+  ;; fact on its branch before its commit and names it by id in its basis, so the window and every
+  ;; later reading read its text from that commit; the call's thinking (the eval tool's argument,
+  ;; here the scripted model's) and its form's ;; lead are recorded with the call and its record
+  (let [[_ end turn on-main] (in-agent [{:op :message :agent "a1" :body "use demo/g"}
+                                        "(seon.turn/work! {:task \"demo/t\" :run \"demo/t#think\" :max-turns 1})"
+                                        (str "(let [db (seon.agent/db) t (datahike.api/pull db '[*] [:seon.turn/id \"demo/t#think/0\"])"
+                                             "      ids (get-in t [:seon.turn/basis :observed :message-ids])]"
+                                             "  {:calls (mapv #(select-keys % [:code :thinking :items]) (:seon.turn/calls t)) :ids ids"
+                                             "   :committed (seon.context/taken-messages (datahike.api/commit-as-db db (get-in t [:seon.turn/basis :commit])) {:message-ids ids})"
+                                             "   :leads (mapv #(:lead (datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.cluster.eval/id ?i] [?e :seon.cluster.eval/record ?r]] db %)) (:items (first (:seon.turn/calls t))))})")
+                                        {:op :eval :agent "root"
+                                         :code (str "(datahike.api/q '[:find ?id ?f ?to ?b :where [?m :seon.message/id ?id] [?m :seon.message/from ?f]"
+                                                    " [?m :seon.message/to ?to] [?m :seon.message/body ?b]] @(:conn sys))")}]
+                                       {:sets [":seon.config.ai/script=seon.fixtures/thinking-call"]})
+        end (edn/read-string {:default tagged-literal} (:printed end))
+        {:keys [calls ids committed leads]} (edn/read-string {:default tagged-literal} (:printed turn))
+        [[mid from to body] :as facts] (vec (edn/read-string (:printed on-main)))]
+    (is (= 1 (:model-calls end)) (pr-str end))
+    (is (= [["owner" "demo/t#1" "use demo/g"]] (mapv #(subvec % 1) facts)) "one fact on main: from the owner, to the run a1 works")
+    (is (= [mid] ids) "the turn's basis names the fact root wrote, by its id")
+    (is (= [{:id mid :from "owner" :body "use demo/g"}] committed) "and its text is read from the commit the turn read")
+    (is (= "check the sum before the proof" (:thinking (first calls))) "the call's thinking, recorded with it")
+    (is (= 1 (count (:items (first calls)))) "the call names its one evaluation's record")
+    (is (= [";; the sum first"] leads) "whose record keeps the form's thought")))
+
 (deftest a-compile-errors-line-and-suggestions-arrive-as-data
   ;; the exception Jolt's analyzer raises for `(prinltn 1)`, as the one error map: its line,
   ;; column and symbol are keys, its suggestions the fix, and nothing is a printed copy

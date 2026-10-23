@@ -3,7 +3,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [seon.agent-test :as at]
             [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]
             [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.docs :as docs]
-            [seon.config :as cfg] [seon.render :as render] [seon.test-store :as ts] [datahike.api :as d]))
+            [seon.config :as cfg] [seon.render :as render] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [datahike.api :as d]))
 
 (deftest an-agent-repl-answers-what-a-clojure-repl-answers
   ;; owner, 2026-10-21: "Whatever intuitions agents have we need to make sure we are matching a
@@ -192,6 +192,18 @@
     (is (= 2 (count (filter :seon.cluster.eval/record (repl/record-tx :a1 "r" items nil))))
         "both items are recorded: the form that ran and the defect")))
 
+(deftest a-forms-lead-is-recorded-with-its-eval
+  ;; owner, 2026-10-23: the agent thinks in ;; comments beside the forms it evaluates; each
+  ;; form's comments are recorded with its evaluation (as :form/lead keeps a definition's), so
+  ;; its page reads thought -> form -> result. A form with none has no :lead; a comment on the
+  ;; line a form ends on is that form's, not the next one's; a comment after the last form leads
+  ;; nothing
+  (let [items (repl/eval-string ";; first, the sum\n;; of two\n(+ 1 2)\n\n(+ 3 4) ; trailing\n;; why: the product\n(* 2 3)\n;; left over" {"ns" "user" :origin :outside})
+        recs (map :seon.cluster.eval/record (filter :seon.cluster.eval/record (repl/record-tx :a1 "r" items nil)))]
+    (is (= [";; first, the sum\n;; of two" nil ";; why: the product"] (mapv :lead items)) (pr-str items))
+    (is (= ["3" "7" "6"] (mapv :printed items)))
+    (is (= (mapv :lead items) (mapv :lead recs)) "its record keeps it")))
+
 (defn- eval-item
   "The one reply item of `code` asked of the REPL's own handler in this process, as a scratch session."
   {:malli/schema [:=> [:cat :string] :map]}
@@ -280,3 +292,30 @@
     (let [r (render/ai (assoc em :seon.error/at {:line 3 :column 6}) {})]
       (is (not (str/includes? r ":jolt.error/line")) r)
       (is (some #{"at line 3:6"} (str/split-lines r))))))
+
+(def evals-run
+  "How many times the ticks proof's form ran."
+  (atom 0))
+
+(deftest an-evals-record-carries-its-ticks
+  ;; task seon.turn/a-turn-shows-its-cost-against-its-budget (1), owner 2026-10-23 (the model sees
+  ;; cost, stable across turns): the work a form did is taken once, when it ran
+  ;; (jolt.host/ticks-of, bytes), and the reply item and the stored record carry
+  ;; the same values, so nothing is measured again in a later turn.
+  (let [old @agent/state
+        run! (fn [code] (let [answers (volatile! [])]
+                          (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
+                          ((repl/handler) {"op" "eval" "code" code :reply #(vswap! answers conj %)})
+                          (first (repl/fold @answers))))
+        cost [:ms :alloc-bytes :ticks]]
+    (try
+      (let [small (run! "(reduce + (range 100))")
+            big (run! "(reduce + (range 1000000))")
+            bad (run! "(/ 1 0)")]
+        (is (pos? (:ticks small)) (pr-str small))
+        (is (> (:ticks big) (* 10 (:ticks small))) "ticks are the work done: 10,000x the loop is >10x the ticks (the form's compile is a constant)")
+        (is (pos? (:ticks bad)) "a form that threw still did work")
+        (doseq [it [small big bad]
+                :let [rec (-> (repl/record-tx :a "run" [(assoc it :id 0)] nil) first :seon.cluster.eval/record)]]
+          (is (= (select-keys it cost) (select-keys rec cost)) "the record stores the values the reply shows")))
+      (finally (reset! agent/state old)))))

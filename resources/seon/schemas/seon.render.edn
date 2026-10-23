@@ -1,22 +1,29 @@
 ;; Renders (seon.render, session W2; W1's render contract, notes/option3-W1-render.md §1): a
-;; render takes a value and an env and answers one or both faces. A schema declares its
+;; render is a function of a value and its opts (props) answering its result for one face. A schema declares its
 ;; renders in its own properties ({:seon.render/html sym :seon.render/ai sym}); selection is
 ;; the value's own override key, else the declared render (the schema, then its parents),
 ;; else the one value printer (seon.print). The values below are what root's web renders.
 {:seon.render/hiccup [:vector :any]
  :seon.render/face [:enum :ai :html]
- :seon.render/env [:map
-                   ;; the producer's declared schema of the value, when known
-                   [:seon.render/schema {:optional true} [:maybe :qualified-keyword]]
-                   ;; tokens for the printer (the AI face's budget, and the HTML face's)
-                   [:seon.render/budget {:optional true} pos-int?]
-                   ;; what a cut reads the value through: its result handle (result/h3) or a form
-                   [:seon.render/handle {:optional true} :any]
-                   ;; the unit the render proc renders it as: its element's id
-                   [:seon.render/unit {:optional true} [:maybe :string]]]
- :seon.render/out [:map [:seon.render/html {:optional true} :any] [:seon.render/ai {:optional true} :any]
-                   ;; the render cut something (each cut names what it left and how to read it)
-                   [:seon.render/truncated? {:optional true} :boolean]]
+ :seon.render/as [:enum :inline :block :tile]
+ ;; a render's props (its second argument), every one optional: like React's, a render that
+ ;; does not care about one ignores it
+ :seon.render/opts [:map
+                    ;; the face (:html, the default, or :ai), when rendering through seon.render/render
+                    [:face {:optional true} :seon.render/face]
+                    ;; the room it is shown in: one line (a chat stream, a table cell), a full panel
+                    ;; (the default), a compact live tile
+                    [:as {:optional true} :seon.render/as]
+                    ;; tokens for the printer (the AI face's budget, and the HTML face's)
+                    [:budget {:optional true} pos-int?]
+                    ;; what a cut reads the value through: its result handle (result/h3) or a form
+                    [:handle {:optional true} :any]
+                    ;; the producer's declared schema of the value, when known
+                    [:schema {:optional true} [:maybe :qualified-keyword]]
+                    ;; the unit the render proc renders it as: its element's id
+                    [:unit {:optional true} [:maybe :string]]]
+ ;; an :ai render's result: its text, and whether it cut (each cut names what it left and how to read it)
+ :seon.render/text [:map [:text :string] [:truncated? {:optional true} :boolean]]
 
  ;; ---- what root's dashboard shows: the whole system as one value ----
  ;; the api's view (agents, writer, fork server, store, boot, root errors) joined with every
@@ -55,14 +62,20 @@
  :seon.render/events-count [:map {:seon.render/html seon.render.ui/events-count} [:kept nat-int?] [:seen nat-int?]]
  ;; the web proc's own numbers (tabs open)
  :seon.render/web [:map {:seon.render/html seon.render.ui/web-stats}]
- ;; the zoomed agent's head (its entry as root holds it, its card's numbers)
- :seon.render/zoom-head [:map {:seon.render/html seon.render.ui/zoom-head} [:id :keyword]]
- ;; the zoomed agent's work on main: its run and task
- :seon.render/zoom-work [:map {:seon.render/html seon.render.ui/zoom-work}]
- ;; the zoomed agent's last test run, and main's results of its run
+ ;; the agent window's head: its view entry, run and task, the totals over its turns
+ :seon.render/zoom-head [:map {:seon.render/html seon.render.ui/zoom-head} [:agent :map] [:turns :map]]
+ ;; the run's turns, each row serialized ahead by its declared render (seon.render.ui/turn-row)
+ :seon.render/turns [:map {:seon.render/html seon.render.ui/turns-list} [:turns nat-int?]]
+ ;; the input at the bottom of the agent's window
+ :seon.render/agent-input [:map {:seon.render/html seon.render.ui/agent-input} [:id :keyword] [:live? :boolean]]
+ ;; one live tile of the agent window: a value and the schema whose render shows it as a tile
+ :seon.render/window-tile [:map {:seon.render/html seon.render.ui/window-tile} [:value :any] [:schema :qualified-keyword]]
+ ;; the agent's last test run, and main's results of its run
  :seon.render/proofs [:map {:seon.render/html seon.render.ui/proofs-box}]
- ;; the current-state block the zoomed agent's model reads, or why there is none
- :seon.render/zoom-context [:map {:seon.render/html seon.render.ui/zoom-context}]
+ ;; what the agent's branch will carry to main, as its newest turn measured it
+ :seon.render/branch [:map {:seon.render/html seon.render.ui/branch-box}]
+ ;; the problems main recorded of an agent or its task, in root's context's words
+ :seon.render/agent-problems [:map {:seon.render/html seon.render.ui/problems-box} [:rows [:vector :map]]]
  ;; one event of root's stream
  :seon.render/event [:map {:seon.render/html seon.render.ui/event-row} [:type :keyword]]
  ;; a declared proc's health as what flows: the defects root recorded of it (no ping)
