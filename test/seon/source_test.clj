@@ -241,8 +241,8 @@
   ;; BUILD plan P5 (task seon.source/the-next-generation-runs-from-the-merges-commit),
   ;; through the path the owner uses: bin/root starts a root on a clone of this checkout
   ;; (Seon's own source as main's program, its store under this test's directory); through
-  ;; its server two loop turns merge seon.fixtures/generation 1 -> 2 and a new
-  ;; seon.fixtures/generations, each live in place. Root is SIGKILLed and the same binary,
+  ;; its server two loop turns merge seon.generation/generation 1 -> 2 and a new
+  ;; seon.generation/generations, each live in place. Root is SIGKILLed and the same binary,
   ;; older than both merges, started on the same store and main: it catches up at boot
   ;; (seon.program/load-all!). Then the cold-start path: my.root/build! builds main's last
   ;; merges commit (seon.fx/build, bin/build seon in the generation's worktree) and
@@ -284,13 +284,13 @@
           (is (some? (:port restarted)) (str "restarted: " (slurp (str dir "/runs/root.log"))))
           (is (true? (ask "(some? (seon.db/eid @(:conn sys) :var/name 'seon.program-test/restart-probe))"))
               "the changed ns form's alias analyzed: the form using it is main's program")
-          (is (= [2 [1 2]] (ask "[(seon.fixtures/generation) (seon.fixtures/generations)]"))
+          (is (= [2 [1 2]] (ask "[(seon.generation/generation) (seon.generation/generations)]"))
               "the binary older than both merges runs both, caught up at boot on the same main"))
         (let [g (ask "(my.root/build! sys)")
               nxt (reset! root (ts/next-root! @root))]
           (is (nil? (:error g)) (str "the generation built: " (pr-str g)))
           (is (some? (:port nxt)) (str "the next generation started: " (slurp (str dir "/runs/root.log"))))
-          (is (= [2 [1 2] (:commit g)] (ask "[(seon.fixtures/generation) (seon.fixtures/generations) (:commit (my.root/generation sys))]"))
+          (is (= [2 [1 2] (:commit g)] (ask "[(seon.generation/generation) (seon.generation/generations) (:commit (my.root/generation sys))]"))
               "the new generation runs both, resumed on main holding its generation")))
       (finally
         (ts/stop-root! @root)

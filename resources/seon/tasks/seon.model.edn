@@ -1,4 +1,8 @@
-[{:seon.task/name "a-model-call-follows-its-config"
+[{:seon.task/name "a-streamed-reply-test-sleeps-not"
+  :seon.task/plan "What exists: `seon.model-test/a-streamed-reply-ends-when-the-server-ends-it` writes its seven chunks with `(Thread/sleep 200)` between them (test/seon/model_test.clj:31), 1.4 s of a clock in a test (AGENTS.md section 9; notes/test-time-2026-10-23.md #12); `bin/laws clocks` names it (docs/clocks.md, owed its fix) since the clocks step reads test/. Correct: write the chunks without the sleep, each `>!!` its own write, so the test proves the reply ends when the server ends it, not when time passes."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.model-test/a-streamed-reply-ends-when-the-server-ends-it}}
+ {:seon.task/name "a-model-call-follows-its-config"
   :seon.task/plan "What exists: `seon.config/provider` resolves base URL, key variable and max-tokens through `seon.config/resolve-in` but reads `:seon.config.ai/thinking` and `:seon.config.ai/reasoning-effort` straight from the config it is given (src/seon/config.clj:267-268), so a model or a task cannot set them; root builds one provider at start and every call uses it; `:seon.task/config` admits only `:seon.config.agent/max-turns`. Correct (one resolver; v1 built each model request from its model's config): each request's settings (model, max-tokens, thinking, reasoning effort) come from `seon.config/resolve` for that request's task and model (task -> model -> provider -> config), `seon.model` builds the request from what it is handed and holds no defaults of its own, and a task's config may state the `:seon.config.ai/*` keys its model accepts. Extend the resolver and the request builder; no second path."
   :seon.task/kind :work
   :seon.task/proofs #{seon.model-test/a-request-carries-its-tasks-resolved-settings}}
