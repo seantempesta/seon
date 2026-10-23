@@ -204,7 +204,7 @@
   [100 1000]; [1000 10000 100000]: [1000 10000]). Never a size smaller than the proof states:
   scaled down to n=10, fixed per-call costs swamp the per-element price its estimate states
   (print-cost and ref proofs went 1.8-5x over). Building the input at 10k cost 10-19 s per
-  proof in every run (the test-time note under notes/); the full run measures as written."
+  proof in every run; the full run measures as written."
   {:malli/schema [:=> [:cat [:sequential pos-int?] pos-int?] [:vector pos-int?]]}
   [ns cap]
   ;; a selection of the sizes to measure, one filter by position and size (no output is cut)

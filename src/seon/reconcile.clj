@@ -40,10 +40,9 @@
   branch's work made true (seon.problems/caused: a citation of a var it deleted). A :design task readies
   the interface and plan for its implement step, so its own proofs may stay red but not
   unknown (each written and run), and it is refused :no-design until its plan differs from
-  the one its run began with (or that one is unknown). A deferred proof (a process test:
-  run only when root asks, DECISIONS, Process tests are not automatic) is neither red nor unknown
-  here; while
-  unrun it is the merge's open :unrun problem."
+  the one its run began with (or that one is unknown). A deferred proof (a process test, run
+  only when root asks: DECISIONS, Process tests are not automatic) is neither red nor unknown
+  here; while unrun it is the merge's open :unrun problem."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
   [{:keys [proofs results main-green allowed-red uncontracted unmerged caused kind plan plan-before deferred]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))

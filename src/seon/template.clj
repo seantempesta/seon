@@ -11,8 +11,8 @@
     from a main that holds that work.
   - `request`: a request (one declaration: what the user asked) becomes design ->
     implement -> merge on design's branch, so each step holds the last one's work, and
-    `request-tx` writes the whole linked set released in one transaction (DECISIONS,
-    A request's whole linked task set is one transaction on main, before any agent forks): the
+    `request-tx` writes the whole linked set released in one transaction (DECISIONS, A
+    request's whole linked task set is one transaction on main, before any agent forks): the
     reconciler forks only from a committed main, so every agent of the
     set starts from the same graph.
   A failed run attaches no tasks: its task is held for root (seon.reconcile/hold-tx)."

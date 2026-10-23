@@ -376,11 +376,10 @@
   those digests (files in results-dir, and the test service's result facts in db: seon.proofs/stored-greens) and proofs. The digests' inputs with no program facts are this boot's
   :inputs on root's :seon.root/source fact (seon.root/import-source!: present only when root's
   binary is built from its source tree), so an agent's results are kept by digest in the one
-  results directory every checkout shares (:seon.config.source/test-results-dir: DECISIONS, Agents
-  share
-  greens: a test green at its digest never runs again, \"especially when freshly branched\"; every
-  eval is a recorded form, so the digest covers what ran); a root with no
-  such fact this boot shares nothing and reuses nothing (the
+  results directory every checkout shares (:seon.config.source/test-results-dir;
+  DECISIONS, Agents share greens: a test green at its digest never runs again, \"especially
+  when freshly branched\"; every eval is a recorded form, so the digest covers what ran); a
+  root with no such fact this boot shares nothing and reuses nothing (the
   inputs then are blank, which keys nothing stored: it only selects). A test is selected when
   it is a proof or reaches what the branch changed since base (a var, method, fixture, ns form,
   macro or schema entry), and runs when no green is stored at its digest
