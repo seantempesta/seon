@@ -227,6 +227,55 @@
   (let [ks (vec (touched-keys from [to] data-attrs))]
     (changes (program-of from ks data-attrs) (program-of to ks data-attrs))))
 
+;; ---- verbatim merges: a merged datom is the same datom ------------------------------
+
+(defn- key-entity
+  "The entity bearing program key k on db, or nil."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key] [:maybe :int]]}
+  [db [kind a :as k]]
+  (case kind
+    :form (pdb/eid db :form/id a)
+    (:var :method :impl :ns) (def-entity db k)
+    :schema (pdb/eid db :schema/key a)
+    :datum a))
+
+(defn carried-tx
+  "The datoms src's changes since base carry for program keys ks, as they are (e, a, v and
+  tx): the retractions src made of the keys' entities' datoms base holds, then the datoms
+  src added to them, then the facts of the transactions that made them. Ids are the
+  store's, issued once (docs/storage.md#ids), so on any other branch they name the same
+  entities and transactions: a merge adds what the branch wrote, never a copy. Platform
+  records ride on no key, so they stay where they were written. Datahike keeps a carried
+  datom's own tx (datahike.db.transaction, transact-add and transact-retract-datom)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:sequential :seon.merge/program-key] :seon.merge/data-attrs] :seon.db/tx-data]}
+  [base src ks data-attrs]
+  (let [es (into #{} (for [k ks db [base src] :let [e (key-entity db k)] :when e] e))
+        das (data-attr-set src data-attrs)
+        carry? (fn [d] (and (es (:e d)) (let [a (:a d)] (or (das a) (program-ns-attrs (namespace a))))))
+        [gone added] (d/datoms-diff base src :eavt [])
+        added (filterv carry? added)
+        retracted (vec (for [d gone :when (carry? d)
+                             :let [r (last (filter #(and (not (:added %)) (> (:tx %) (:tx d)))
+                                                   (d/datoms (d/history src) :eavt (:e d) (:a d) (:v d))))]
+                             :when r]
+                         r))
+        txs (into (sorted-set) (map :tx) (concat retracted added))]
+    (-> []
+        (into retracted)
+        (into added)
+        (into (for [t txs d (d/datoms src :eavt t)] d)))))
+
+(defn merge-tx
+  "The tx-data merging src's changes since base for program keys ks onto db onto: the
+  datoms src wrote, as they are (carried-tx), and the Datahike declarations a merged schema
+  entry's population needs on onto (as a registration installs them)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db [:sequential :seon.merge/program-key] :seon.merge/data-attrs] :seon.db/tx-data]}
+  [onto base src ks data-attrs]
+  (let [tx (carried-tx base src ks data-attrs)]
+    (if (some #(= :schema (first %)) ks)
+      (into tx (program/schema-declarations onto (program/schema-registry (program/schema-changes (d/db-with onto tx)))))
+      tx)))
+
 ;; ---- what program code does not do (owner, 2026-10-21) ------------------------------
 
 (defn mutations
@@ -244,100 +293,6 @@
              finding (concat (for [c (sort-by str (:banned f))] {:call c})
                              (for [v (sort-by str (:inline-defs f))] {:inline-def v}))]
          (merge {:form id :ns (:ns f) :defines (vec (sort-by sedn/encode (:defines f)))} finding))))
-
-;; ---- tx-data: setting keys on a db ---------------------------------------------------
-
-
-(defn- def-ref
-  "The entity map naming definition k on db: its entity when db has it, else an upsert by
-  its identity with its tempid (Datahike allocates a tempid first seen as a ref, in
-  :form/defines, before the map that upserts it, and a form defining two existing
-  definitions, a protocol or a record, then conflicts)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/def-key] :map]}
-  [db [kind a b :as k]]
-  (cond-> (case kind
-            :var {:db/id (str "var " a) :var/name a :var/ns (program/ns-tid (symbol (namespace a)))}
-            :method (let [k (program/method-key a b)] {:db/id (str "method " k) :method/key k :method/multi a :method/dispatch b})
-            :impl (let [k (program/impl-key a b)] {:db/id (str "impl " k) :impl/key k :impl/protocol a :impl/type b})
-            :ns {:db/id (program/ns-tid a) :ns/name a})
-    (def-entity db k) (assoc :db/id (def-entity db k))))
-
-
-(defn- set-form-tx
-  {:malli/schema [:=> [:cat :seon.host/db :string [:maybe :map]] :seon.db/tx-data]}
-  [db id content]
-  (let [e (pdb/eid db :form/id id)]
-    (if (nil? content)
-      (if e [[:db/retractEntity e]] [])
-      (let [{:keys [ns src order lead defines declares refs requires banned inline-defs timeouts catches]} content]
-        (into [{:db/id (program/ns-tid ns) :ns/name ns}
-               (cond-> {:db/id (program/form-tid id) :form/id id :form/src src :form/ns (program/ns-tid ns) :form/order order}
-                 lead (assoc :form/lead lead)
-                 (seq defines) (assoc :form/defines (mapv #(:db/id (def-ref db %)) defines))
-                 (seq declares) (assoc :form/declares (mapv #(:db/id (def-ref db [:var %])) declares))
-                 (seq refs) (assoc :form/refs (vec refs))
-                 (seq requires) (assoc :form/requires (vec requires))
-                 (seq banned) (assoc :form/banned (vec banned))
-                 (seq inline-defs) (assoc :form/inline-defs (vec inline-defs))
-                 (seq timeouts) (assoc :form/timeouts (vec timeouts))
-                 (seq catches) (assoc :form/catches (vec catches)))]
-              (concat (map #(def-ref db %) defines)
-                      (for [s declares] (def-ref db [:var s]))))))))
-
-(defn- set-def-tx
-  {:malli/schema [:=> [:cat :seon.host/db :any [:maybe :map]] :seon.db/tx-data]}
-  [db k content]
-  (let [e (def-entity db k)
-        x (when e (d/entity db e))
-        attrs (case (first k) :var [:var/form :var/kind :var/contract :var/doc] :ns [:ns/form :ns/file] [(pointer (first k))])
-        now (when content
-              (cond-> {(pointer (first k)) (program/form-tid (:form content))}
-                (:kind content) (assoc :var/kind (:kind content))
-                (:contract content) (assoc :var/contract (:contract content))
-                (:doc content) (assoc :var/doc (:doc content))
-                (:file content) (assoc :ns/file (:file content))))]
-    (into (if content [(merge (def-ref db k) now) {:db/id (program/form-tid (:form content)) :form/id (:form content)}] [])
-          (for [a attrs :let [old (get x a)] :when (and (some? old) (not (contains? now a)))]
-            [:db/retract e a (if (#{:var/form :ns/form :method/form :impl/form} a) (:db/id old) old)]))))
-
-(defn- set-datum-tx
-  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key :any] :seon.db/tx-data]}
-  [db [_ e a v :as k] content]
-  (if (= 4 (count k))
-    (if content [[:db/add e a v]] (if (seq (d/datoms db :eavt e a v)) [[:db/retract e a v]] []))
-    (let [old (:v (first (d/datoms db :eavt e a)))]
-      (cond (some? content) [[:db/add e a content]]
-            (some? old) [[:db/retract e a old]]
-            :else []))))
-
-(defn- set-schema-tx
-  "tx-data making schema entry k hold content on db: upserted by its key, no longer the
-  binary's (:schema/source retracted), or retracted."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword [:maybe :seon.merge/schema-entry]] :seon.db/tx-data]}
-  [db k content]
-  (let [e (pdb/eid db :schema/key k)]
-    (cond (nil? content) (if e [[:db/retractEntity e]] [])
-          :else (cond-> [{:schema/key k :schema/form (:form content) :schema/file (:file content)}]
-                  (and e (:schema/source (d/entity db e))) (conj [:db/retract e :schema/source true])))))
-
-(defn apply-tx
-  "tx-data making each key of m ({key content}, nil content: absent) hold its content on
-  db: forms upserted by id (or retracted), definitions pointed at their forms by identity
-  (entity ids never matter), schema entries by key with the Datahike declarations their
-  population needs, data by entity id."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :seon.merge/program-key :any]] :seon.db/tx-data]}
-  [db m]
-  (let [tx (vec (distinct
-                  (mapcat (fn [[k content]]
-                            (case (first k)
-                              :form (set-form-tx db (second k) content)
-                              (:var :method :impl :ns) (set-def-tx db k content)
-                              :schema (set-schema-tx db (second k) content)
-                              :datum (set-datum-tx db k content)))
-                          (sort-by (comp sedn/encode key) m))))]
-    (if (some #(= :schema (ffirst %)) m)
-      (let [db' (d/db-with db tx)] (into tx (program/schema-declarations db (program/schema-registry (program/schema-changes db')))))
-      tx)))
 
 ;; ---- unmerged entries (git's index stages 1, 2, 3), on the branch ------------------------
 

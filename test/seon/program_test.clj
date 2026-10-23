@@ -198,7 +198,7 @@
                        'app.pt-mm "(defrecord Circle [r] Named (label [_] (str \"circle \" r)))"
                        'app.pt-mm "(defmethod area :circle [{:keys [r]}] (* 3 r r))")
         r (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program base #{}))
-        main (d/db-with base (pm/apply-tx base (into {} (for [[k [_ o]] (:ours r)] [k o]))))]
+        main (d/db-with base (pm/merge-tx base base branch (keys (:ours r)) #{}))]
     (is (= '#{[:ns app.pt-mm] [:var app.pt-mm/area] [:method app.pt-mm/area ":square"] [:method app.pt-mm/area ":circle"]
               [:var app.pt-mm/Named] [:var app.pt-mm/label] [:impl app.pt-mm/Named "String"]
               [:var app.pt-mm/Circle] [:var app.pt-mm/->Circle] [:var app.pt-mm/map->Circle]}

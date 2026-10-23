@@ -93,7 +93,7 @@
   [main & forms]
   (let [branch (apply pt/record main forms)
         r (pm/three-way (pm/program main #{}) (pm/program branch #{}) (pm/program main #{}))]
-    [(d/db-with main (pm/apply-tx main (into {} (for [[k [_ o]] (:ours r)] [k o])))) (:ours r)]))
+    [(d/db-with main (pm/merge-tx main main branch (keys (:ours r)) #{})) (:ours r)]))
 
 (deftest a-merged-change-rewrites-only-its-form
   (let [main (main-with-file)]
@@ -384,7 +384,7 @@
   (let [branch (apply pt/record main forms)
         _ (hold! nsym text)
         r (pm/three-way (pm/program main #{}) (pm/program branch #{}) (pm/program main #{}))
-        rep (d/with main (pm/apply-tx main (into {} (for [[k [_ o]] (:ours r)] [k o]))))]
+        rep (d/with main (pm/merge-tx main main branch (keys (:ours r)) #{}))]
     [(:db-after rep) (program/load-changes! (:db-after rep) (pdb/report->tx rep))]))
 
 (deftest a-merge-to-imported-source-loads-in-place

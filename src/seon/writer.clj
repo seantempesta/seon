@@ -24,10 +24,10 @@
   commit graph (the branch point, or the main the branch last merged), the branch read
   from the store (its agent commits it). data-attrs: the data that merges beside the
   program (session M1)."
-  {:malli/schema [:=> [:cat :seon.writer/state :seon.db/branch :seon.merge/data-attrs] [:tuple :seon.host/db :seon.merge/result]]}
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.db/branch :seon.merge/data-attrs] [:tuple :seon.host/db :seon.merge/result :seon.host/db]]}
   [{:keys [conn]} b data-attrs]
-  (let [head (pdb/head conn b)]
-    [head (pm/delta-three-way (pdb/branch-base conn (pdb/conn-main conn) b) head @conn data-attrs)]))
+  (let [head (pdb/head conn b) base (pdb/branch-base conn (pdb/conn-main conn) b)]
+    [head (pm/delta-three-way base head @conn data-attrs) base]))
 
 (defn- refused
   "The writer refusing a request, as the one error map (:seon.writer/refused); members
@@ -82,22 +82,25 @@
         main @conn
         judged (reduce (fn [{:keys [taken] :as acc} b]
                          (let [have? (pdb/branch? conn b)
-                               [head r] (when have? (branch-merge st b data-attrs))
+                               [head r base] (when have? (branch-merge st b data-attrs))
                                refusal (if have? (merge-refusal main head r) (refused (str "no branch " b) {}))
                                refusal (or refusal
                                            (when (some taken (keys (:ours r)))
                                              (contract/error :seon.merge/behind 'seon.writer/octopus-merge
                                                              "another member of the octopus merge changes the same definitions: merge main into the branch first"
                                                              {:tx (:max-tx main) :behind (count (filter taken (keys (:ours r))))})))]
-                           (-> acc (update :members conj {:branch b :r r :refusal refusal})
+                           (-> acc (update :members conj {:branch b :r r :head head :base base :refusal refusal})
                                (cond-> (nil? refusal) (update :taken into (keys (:ours r)))))))
                        {:taken #{} :members []} branches)
         ok (remove :refusal (:members judged))
         changed (into {} (for [{:keys [r]} ok [k [_ ov]] (:ours r)] [k ov]))]
     (if (empty? changed)
       [st {:results (mapv #(or (:refusal %) {:merged? true :tx (:max-tx main) :datoms 0 :keys 0}) (:members judged))}]
-      ;; git: each member's head becomes a parent, so its merge base moves to it
-      (let [rep (d/merge-db conn (set (map :branch ok)) (pm/apply-tx main changed) (pdb/tx-meta))
+      ;; git: each member's head becomes a parent, so its merge base moves to it; each
+      ;; member's own datoms for the keys it changed, as they are (seon.merge/merge-tx)
+      (let [rep (d/merge-db conn (set (map :branch ok))
+                            (vec (mapcat (fn [{:keys [r head base]}] (pm/merge-tx main base head (keys (:ours r)) data-attrs)) ok))
+                            (pdb/tx-meta))
             t (:max-tx (:db-after rep))
             ops (pdb/report->tx rep)]
         [(main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep))

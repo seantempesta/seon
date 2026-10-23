@@ -200,8 +200,7 @@
         r (pm/delta-three-way (:base @state) head main data-attrs)]
     (if (empty? (:theirs r))
       {:ok true :applied [] :conflicts [] :t (:max-tx head)}
-      (let [theirs (pm/program-of main (:apply r) data-attrs)
-            rep (d/merge-db conn #{main-b} (into (pm/apply-tx head (into {} (for [k (:apply r)] [k (get theirs k)])))
+      (let [rep (d/merge-db conn #{main-b} (into (pm/merge-tx head (:base @state) main (:apply r) data-attrs)
                                               (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
                              (pdb/tx-meta))
             ops (pdb/report->tx rep)

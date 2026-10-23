@@ -101,10 +101,10 @@
 (deftest unmap-merges-as-delete
   (let [ours (with (base) (unmap "g"))
         r (tw ours (base))
-        main' (d/db-with (base) (pm/apply-tx (base) (into {} (for [[k [_ o]] (:ours r)] [k o]))))]
+        main' (d/db-with (base) (pm/merge-tx (base) (base) ours (keys (:ours r)) #{}))]
     (is (= #{(vk "g") [:form (fid "g" "x")]} (set (keys (:ours r)))) "the definition, and the form it leaves dead")
     (is (nil? (context/source-of main' 'app/g)))
-    (is (nil? (d/entity main' [:form/id (fid "g" "x")])) "the form is retracted on main")
+    (is (not (program/live? main' (pdb/eid main' :form/id (fid "g" "x")))) "the form is dead on main, as on the branch")
     (is (= [:deleted-by-us] (map :kind (filter #(= :var (first (:key %))) (:conflicts (tw ours (with (base) (var-tx "g" "(dec x)"))))))))))
 
 (deftest latest-redefinition-wins
@@ -127,15 +127,6 @@
                          {:task/name :x/y :task/status :done}])]
     (is (= (pm/program (base) #{}) (pm/program ours #{})))
     (is (empty? (:ours (tw ours (base)))))))
-
-(deftest apply-tx-sets-each-key
-  (let [p (pm/program (with (base) (var-tx "f" "(dec x)") (var-tx "n" "1") (unmap "h")) #{})
-        db' (d/db-with (base) (pm/apply-tx (base) (select-keys p [(vk "f") (vk "n") [:form (fid "f" "(dec x)")] [:form (fid "n" "1")]])))
-        db'' (d/db-with db' (pm/apply-tx db' {(vk "h") nil}))]
-    (is (= (select-keys p [(vk "f") (vk "n")]) (select-keys (pm/program db' #{}) [(vk "f") (vk "n")])))
-    (is (= "(defn n {:malli/schema [:=> [:cat :int] :int]} [x] 1)" (context/source-of db' 'app/n))
-        "a definition and its form set together")
-    (is (not (contains? (pm/program db'' #{}) (vk "h"))))))
 
 (deftest unmerged-entry-derivation
   (let [o (with (base) (var-tx "f" "(inc x)"))
@@ -220,7 +211,7 @@
       (let [r2 (pm/three-way (prog main) (prog ours) (prog (registered main :seon.attempt/status [:enum :running])))]
         (is (= [[:schema :seon.attempt/status] :both-modified] ((juxt :key :kind) (first (:conflicts r2)))))))
     (testing "merged into main: the entry is main's, no longer the binary's, and write-back changes only its bytes"
-      (let [main2 (d/db-with main (pm/apply-tx main (into {} (for [[k [_ o]] (:ours r)] [k o]))))]
+      (let [main2 (d/db-with main (pm/merge-tx main main ours (keys (:ours r)) #{}))]
         (is (= #{:seon.attempt/status} (set (keys (program/schema-changes main2)))))
         (is (= [facts-path] (source/changed-files main2 (:ours r))))
         (is (= {facts-path (str/replace text status-line (str/replace status-line ":closed :refused]]" ":closed :refused :paused]]"))}
@@ -240,3 +231,37 @@
         (is (= full (pm/delta-three-way b o t da)) (pr-str da))
         (is (seq (:ours full)))))
     (is (= (pm/changes (pm/program b :all) (pm/program o :all)) (pm/delta-changes b o :all)))))
+
+(deftest a-merge-carries-the-branchs-own-datoms
+  ;; a verbatim merge (seon.merge/merge-tx): main gains exactly the datoms the branch wrote
+  ;; for the keys that merge, with their own entity ids and tx ids, and nothing else of its
+  ;; own; a card-one change carries the branch's retraction, so main writes no extra one
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (keyword (str (name (:branch cfg)) "-v"))
+           _ (d/transact conn ((var-tx "f" "x") @conn))
+           _ (d/branch! conn (:branch cfg) b)
+           bc (d/connect (assoc cfg :branch b))]
+       (try
+         (d/transact bc ((var-tx "n" "1") @bc))
+         (d/transact bc ((var-tx "f" "(inc x)") @bc))
+         (d/transact bc [{:note/text "a platform-free scratch note"}])
+         (let [base (pdb/branch-base conn (:branch cfg) b) head @bc main @conn
+               r (pm/delta-three-way base head main #{})
+               ks (keys (:ours r))
+               tx (pm/merge-tx main base head ks #{})
+               rep (d/merge-db conn #{b} tx (pdb/tx-meta))
+               after (:db-after rep)
+               merge-t (:max-tx after)
+               own (remove #(= merge-t (:tx %)) (:tx-data rep))
+               carried (set (map (juxt :e :a :v :tx :added) tx))]
+           (testing "main's program at the merged keys is the branch's"
+             (is (= (pm/program-of head ks #{}) (pm/program-of after ks #{}))))
+           (testing "every datom main gained besides the merge's own is one the branch wrote, ids and tx kept"
+             (is (seq own))
+             (is (every? #(carried ((juxt :e :a :v :tx :added) %)) own)))
+           (testing "each new form is one entity on both sides"
+             (is (= (pdb/eid head :var/name 'app/n) (pdb/eid after :var/name 'app/n))))
+           (testing "the scratch note stays on the branch"
+             (is (empty? (d/datoms after :avet :note/text "a platform-free scratch note")))))
+         (finally (d/release bc) (d/delete-branch! conn b)))))))
