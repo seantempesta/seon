@@ -14,13 +14,22 @@
             [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.source :as source] [seon.system :as system]))
 
 (defn- test-namespaces
-  "Namespace symbols of root's test/**/*_test.clj(c)."
-  [root]
-  (->> (file-seq (io/file root "test"))
-       (map #(subs (.getPath %) (inc (count root))))
-       (filter #(re-find #"_test\.cljc?$" %))
-       (map #(-> % (str/replace #"^test/" "") (str/replace #"\.cljc?$" "") (str/replace "/" ".") (str/replace "_" "-") symbol))
-       sort))
+  "Namespace symbols of <tree>/test/**/*_test.clj(c): tree the checkout planned (source-tree, or
+  the one a proof names). Never the working directory: a root and its agents run in target/
+  and the agents' scratch dir, where a relative \"test\" is nothing."
+  [tree]
+  (let [prefix (str tree "/test/")]
+    (->> (file-seq (io/file tree "test"))
+         (map #(.getPath %))
+         (filter #(re-find #"_test\.cljc?$" %))
+         (map #(-> % (subs (count prefix)) (str/replace #"\.cljc?$" "") (str/replace "/" ".") (str/replace "_" "-") symbol))
+         sort)))
+
+(defn- source-tree
+  "The tree the config names (:seon.config.source/root, when a root was given one: a clone an
+  agent works on), else the checkout this process runs from."
+  []
+  (str (or (get config/config :seon.config.source/root) (config/checkout))))
 
 ;; ---- reach -----------------------------------------------------------------------------
 
@@ -53,6 +62,17 @@
   NS, bin/check MODE), in the full run, or by root's gate before a merge that reaches them."
   {:malli/schema [:=> [:cat [:map-of :any :string] [:set :any]] [:map-of :any :string]]}
   [cand process] (apply dissoc cand process))
+
+(defn- refused-names
+  "Why the arguments after --plan WHAT OUT [--all] cannot select tests, or nil: a flag this runner
+  does not know (bin/test --reach ran nothing and passed: reach is the default since bin/prove),
+  or a name that is no test namespace of test/."
+  [names]
+  (let [flags (filter #(str/starts-with? % "--") names)
+        nss (set (map str (test-namespaces (source-tree))))
+        unknown (remove #(or (str/starts-with? % "--") (nss %)) names)]
+    (cond (seq flags) (str "no flag " (str/join " " flags) " (bin/test [--all] [NS ...]: --all, the one flag, comes first)")
+          (seq unknown) (str "no test namespace " (str/join " " unknown) " in test/"))))
 
 (defn- write!
   "text to path through the effect owner's file write (seon.fx/write-file); its declared
@@ -136,10 +156,12 @@
   (names, one line) and out/steps.edn ({:tree :digests {step digest}}) for bin/prove to run. Answers the exit
   status: 1 when a check step names a function the program does not define."
   [what all? out names]
+  (if-let [bad (refused-names names)]
+    (do (println (str "TEST FAILED: " bad)) 1)
   (let [t0 (profile/now-ns)
         dir (config/value :seon.config.source/test-results-dir)
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left digests steps missing inputs]} (plan-of (System/getProperty "user.dir") what all? names)
+        {:keys [run-tests run-steps reused cand left digests steps missing inputs]} (plan-of (source-tree) what all? names)
         n (write-shards! out run-tests digests (:tree inputs))]
     (when left
       (println (str "prove: " (count left) " tests and steps that reach a process left out (run them by name:"
@@ -153,7 +175,11 @@
       (when (seq run-steps) (println "prove: check steps to run:" (str/join " " run-steps)))
       (when (seq missing)
         (println "prove: check steps naming a function the program does not define (seon.proofs/check-steps):" (str/join " " missing))))
-    (if (seq missing) 1 0)))
+    (if (seq missing)
+      1
+      (do (when (and (empty? run-tests) (empty? run-steps))
+            (println (str "prove: nothing to run: " (count reused) " reused green at their digest")))
+          0)))))
 
 (defn- store-steps!
   "bin/prove's last part: each step of out/steps.edn that bin/check named green in out/green

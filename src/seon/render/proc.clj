@@ -110,7 +110,8 @@
      :series {:tx (vec (take-last (series-cap) (map second (get-in v [:writer :recent]))))
               :fork (vec (take-last (series-cap) (get-in v [:stats :fork-ms])))
               :datoms (:datoms-series st [])}
-     :events (:events st []) :events-seen (:ev-seq st 0)
+     ;; a stop that arrived before main recorded how the attempt ended says so once main does
+     :events (mapv #(ui/ended-as % (:agent %) (:agent-attempt st {})) (:events st [])) :events-seen (:ev-seq st 0)
      :web {:tabs (:tabs st 0)}
      :retire-ms RETIRE-MS
      :config (:config st)
@@ -161,34 +162,35 @@
 
 (defn- render-unit
   "A unit's HTML: its render applied to its input (an agent's card takes the entry with its
-  id), or the input's schema-declared render."
+  id), or the input's schema-declared render; the env names the unit (its element's id)."
   {:malli/schema [:=> [:cat :map] :string]}
-  [{:keys [input render schema agent]}]
+  [{:keys [id input render schema agent]}]
   (let [v (if agent (assoc input :id agent) input)
-        env {:seon.render/schema schema}]
+        env {:seon.render/schema schema :seon.render/unit id}]
     (h/html (if render
               (:seon.render/html ((requiring-resolve render) v env))
               (render/html v env)))))
 
 (defn- step-units
   "Run a layout's units against what the view retained: a unit whose input is unchanged is
-  skipped; one whose bytes are unchanged sends nothing. Answers [view' patch counts]."
+  skipped; one whose bytes are unchanged sends nothing; a new one with a container is added
+  to it (appended, or prepended when the unit says so: a stream's row, newest first), within
+  its shell when it has one (an agent's card). Answers [view' patch counts]."
   {:malli/schema [:=> [:cat [:maybe :map] [:sequential :map]] [:tuple :map :map :map]]}
   [view units]
-  (reduce (fn [[view patch n] {:keys [id input shell container] :as u}]
+  (reduce (fn [[view patch n] {:keys [id input shell container prepend?] :as u}]
             (let [old (get-in view [:units id])]
               (if (and old (= input (:input old)))
                 [view patch n]
                 (let [html (render-unit u)
-                      view (assoc-in view [:units id] {:input input :html html})
+                      view (assoc-in view [:units id] (cond-> {:input input :html html} container (assoc :container container :shell shell)))
                       view (cond-> view (and shell (not (get-in view [:units shell])))
                                    (assoc-in [:units shell] {:html (h/html (ui/card-shell (:agent u)))}))]
                   (cond
-                    (:keyframe-only u) [view patch n]
                     (= html (:html old)) [view patch (update n :same inc)]
-                    (and container (nil? old)) [view (update patch :appends conj [container shell]) (update n :rendered inc)]
+                    (and container (nil? old)) [view (update patch (if prepend? :prepends :appends) conj [container (or shell id)]) (update n :rendered inc)]
                     :else [view (update patch :frags conj [id html]) (update n :rendered inc)])))))
-          [(or view {}) {:frags [] :appends [] :removes []} {:rendered 0 :same 0}]
+          [(or view {}) {:frags [] :appends [] :prepends [] :removes []} {:rendered 0 :same 0}]
           units))
 
 (defn compose
@@ -198,16 +200,18 @@
   (str/replace html #"<!--s:([^>]*?)-->" (fn [[_ id]] (compose (get-in units [id :html] "") units))))
 
 (defn- finish-patch
-  "A patch's appends composed (a new card's shell with its body), and the removes of the
-  units the layout no longer has."
+  "A patch's appends and prepends composed (a new card's shell with its body; a container's
+  new rows as one prepend, newest first), and the removes of the contained units the layout
+  no longer has."
   {:malli/schema [:=> [:cat :map :map [:set :string]] [:tuple :map :map]]}
   [view patch live-ids]
-  (let [gone (remove live-ids (filter #(str/starts-with? % "cb-") (keys (:units view))))
-        shells (map #(str "card-" (subs % 3)) gone)
-        view (update view :units #(apply dissoc % (concat gone shells)))]
+  (let [gone (for [[id u] (:units view) :when (and (:container u) (not (live-ids id)))] [id (or (:shell u) id)])
+        view (update view :units #(apply dissoc % (mapcat identity gone)))
+        html #(compose (get-in view [:units % :html]) (:units view))]
     [view (-> patch
-              (update :appends (fn [as] (vec (for [[c shell] as] [c (compose (get-in view [:units shell :html]) (:units view))]))))
-              (assoc :removes (vec shells)))]))
+              (update :appends (fn [as] (vec (for [[c el] as] [c (html el)]))))
+              (update :prepends (fn [ps] (vec (for [[c group] (group-by first ps)] [c (apply str (map (comp html second) group))]))))
+              (assoc :removes (mapv second gone)))]))
 
 ;;; --- one agent, zoomed ------------------------------------------------------------------------
 
@@ -237,8 +241,7 @@
       :else {:text (:text r) :tokens (select/estimate (:text r)) :origin (:origin r) :turn (:turn r)})))
 
 (defn- zoom-value
-  "The agent page's value (:seon.render/agent-page) for agent id, and the zoom's state with
-  each new evaluation's row rendered once."
+  "The agent page's value (:seon.render/agent-page) for agent id, and the zoom's state."
   {:malli/schema [:=> [:cat :map :keyword] [:tuple :map :map]]}
   [st id]
   (let [ag (assoc (get-in st [:view :agents id] {}) :id id)
@@ -247,11 +250,6 @@
         attempt (get-in st [:agent-attempt id])
         db (:db z)
         records (if db (eval-records db id) (vec (map-indexed (fn [i e] [(str "v/" i) e]) (:evals ag))))
-        rows (reduce (fn [rows [eid r]]
-                       (if (contains? rows eid)
-                         rows
-                         (assoc rows eid (h/html (:seon.render/html (ui/history-row r {:seon.render/budget (config/value :seon.config.render/history-row-budget)}))))))
-                     (select-keys (:rows z {}) (map first records)) records)
         ctx-key [(:t z) (:seon.attempt/id attempt) (:seon.attempt/turns attempt) (:tests ag)]
         ;; a new context read is a new evaluation of the agent's
         ctx-key (conj ctx-key (some? db) (get-in st [:main :t]) (count (:evals ag)) (peek (:evals ag)))
@@ -261,11 +259,11 @@
                   (cond-> c
                     ;; on main: its branch is gone (reading it failed), or not read yet
                     (and (nil? db) (:main-db st)) (assoc :from (if (:db-error z) :main-gone :main)))))]
-    [(assoc-in st [:zoom id] (assoc z :rows rows :ctx-key ctx-key :ctx ctx))
+    [(assoc-in st [:zoom id] (assoc z :ctx-key ctx-key :ctx ctx))
      {:agent (ui/ended-as ag id (:agent-attempt st {})) :attempt attempt :task (when attempt (get (:tasks st) (:seon.attempt/task attempt)))
       ;; each proof's task, to tell a blocking red from an allowed one
       :owners (into {} (for [[tid t] (:tasks st) p (:seon.task/proofs t)] [p tid]))
-      :context ctx :history (vec (reverse (map #(get rows (first %)) records)))
+      :context ctx :history (vec (rseq records))
       :history-total (or (:total (meta records)) (count records))}]))
 
 ;;; --- the pass ------------------------------------------------------------------------------------
@@ -285,7 +283,7 @@
         view (assoc view :skeleton skeleton)
         st (-> st (assoc-in [:views view-id] view)
                (update-in [:counts :rendered] (fnil + 0) (:rendered n)) (update-in [:counts :same] (fnil + 0) (:same n)))]
-    [st (when (or (seq (:frags patch)) (seq (:appends patch)) (seq (:removes patch)))
+    [st (when (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:removes patch)))
           (assoc patch :op :patch :view view-id))]))
 
 (defn page-html
@@ -310,34 +308,13 @@
     st
     (let [t0 (profile/now-ns)
           now-ms (System/currentTimeMillis)
-          ;; the stream: each new event's row rendered once
-          ;; an agent that ended after its attempt finished ended normally: its event says so
-          evs (mapv #(ui/ended-as % (:agent %) (:agent-attempt st {})) (:new-events st))
-          ;; each new event's row rendered once, with its own id: the stream patch prepends the
-          ;; new rows and removes the ones past the cap (not the whole list)
+          ;; the stream, newest first: each event numbered, its row a unit of root's layout
           seq0 (:ev-seq st 0)
-          evs (map-indexed (fn [i e] (assoc e :seq (+ seq0 i 1))) evs)
-          new-rows (map (fn [e] [(:seq e) (h/html (:seon.render/html (ui/event-row e {})))]) evs)
-          rows (vec (concat (reverse new-rows) (:event-rows st)))
+          evs (map-indexed (fn [i e] (assoc e :seq (+ seq0 i 1))) (:new-events st))
           st (cond-> st
                (seq evs) (assoc :events (vec (take (event-cap) (concat (reverse evs) (:events st))))
-                                :event-rows (vec (take (event-cap) rows))
                                 :ev-seq (+ seq0 (count evs)))
                true (assoc :new-events []))
-          ;; a stop that arrived before main recorded how the attempt ended: its row again,
-          ;; now that main says (60 rows at most)
-          late (for [[i e] (map-indexed vector (:events st)) :when (not (:ended-as e))
-                     :let [e (ui/ended-as e (:agent e) (:agent-attempt st {}))] :when (:ended-as e)]
-                 [i e])
-          st (reduce (fn [st [i e]]
-                       (-> st (assoc-in [:events i] e)
-                           (update :event-rows (fn [rows] (mapv #(if (= (first %) (:seq e)) [(:seq e) (h/html (:seon.render/html (ui/event-row e {})))] %) rows)))))
-                     st late)
-          late-frags (vec (for [[_ e] late :let [r (some #(when (= (first %) (:seq e)) (second %)) (:event-rows st))] :when r] [(str "ev-" (:seq e)) r]))
-          ev-patch (when (or (seq new-rows) (seq late-frags))
-                     {:prepends (if (seq new-rows) [["#events" (apply str (map second (reverse new-rows)))]] [])
-                      :frags late-frags
-                      :removes (mapv #(str "ev-" (first %)) (drop (event-cap) rows))})
           st (ordered st now-ms)
           sys (system-value st t0 now-ms)
           ;; root's context: the system's AI face, also a unit of root's layout
@@ -346,13 +323,7 @@
           st (assoc st :context ctx)
           views (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st)))
           [st patches] (reduce (fn [[st ps] v]
-                                 (let [[st p] (pass-view st v (assoc sys :event-rows (mapv second (:event-rows st))))
-                                       p (if (and (= :root v) ev-patch)
-                                           (-> (or p {:op :patch :view :root :frags [] :appends [] :removes []})
-                                               (assoc :prepends (:prepends ev-patch))
-                                               (update :frags into (:frags ev-patch))
-                                               (update :removes into (:removes ev-patch)))
-                                           p)]
+                                 (let [[st p] (pass-view st v sys)]
                                    [st (cond-> ps p (conj p))]))
                                [st []] (sort-by str views))
           idx (index-of (:agents sys))
@@ -458,7 +429,7 @@
    (let [events (a/chan (a/sliding-buffer 4096))]
      (a/tap (:events-mult args) events)
      {:events-ch events :mult (:events-mult args) :system-p (:system args) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{}
-      :new-events [] :events [] :event-rows [] :views {} :zoom {} :merges 0
+      :new-events [] :events [] :views {} :zoom {} :merges 0
       ::flow/in-ports {:events events}}))
   ([st tr]
    (when (= tr ::flow/stop)

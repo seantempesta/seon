@@ -614,4 +614,8 @@
                    :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
-                   :ns nsx :interrupt-ok intr-ok :serve serve}))))
+                   :ns nsx :interrupt-ok intr-ok :serve serve})
+     ;; a kept branch, resumed (root released its held task: seon.reconcile/hold-tx), takes
+     ;; its task from main, with the failure and evidence the last attempt left there
+     (when-let [tx (when resumed (not-empty (task/onto-tx db0 @store-conn task)))]
+       (transact! tx)))))

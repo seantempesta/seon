@@ -1,0 +1,192 @@
+[
+ {
+  "pair": 1,
+  "answer_x": "Error eval is (seon.model/call provider request). Message: The provider answered HTTP 400: the request's messages exceed the model's context window. Rest of body: (subs (get-in (nth (my.turn/evals) 2) [:value :seon.error/data :body]) 5729).",
+  "answer_y": "Error eval is (seon.model/call provider request). Message: The provider answered HTTP 400: the request's messages exceed the model's context window. Rest of body: (subs (get-in (nth (my.turn/evals) 2) [:value :seon.error/data :body]) 5729), with 5524 characters stated as not shown.",
+  "x": {
+   "answer": 4,
+   "left_out": 3,
+   "misleading": 4,
+   "concise": 3
+  },
+  "y": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 4,
+   "concise": 3
+  },
+  "better": "Y",
+  "why": "Y restates the cut as an explicit left-out line with its count and form, while X only has the inline marker, though Y repeats the cut in two places."
+ },
+ {
+  "pair": 2,
+  "answer_x": "Total not shown. 66 datoms shown and 334 not shown, read with (drop 66 (get-in (nth (my.turn/evals) 2) [:value])).",
+  "answer_y": "Total not shown. 66 datoms shown and 334 not shown, read with (drop 66 (get-in (nth (my.turn/evals) 2) [:value])).",
+  "x": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 4,
+   "concise": 3
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 2,
+   "misleading": 4,
+   "concise": 3
+  },
+  "better": "X",
+  "why": "X states the 334 not-shown count and exact form in a left-out block, while Y gives only the inline marker for the datoms."
+ },
+ {
+  "pair": 3,
+  "answer_x": "Status not shown. The calc/neg#1 map is returned by (val (nth (seq result/h3) 2)), which holds 10 members not shown.",
+  "answer_y": "Status not shown. The calc/neg#1 map is returned by (val (nth (seq result/h3) 2)), which holds 10 members not shown.",
+  "x": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 3
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 3,
+   "misleading": 5,
+   "concise": 3
+  },
+  "better": "X",
+  "why": "X adds a left-out line naming the exact form for the calc/neg#1 map, while Y gives it only inline."
+ },
+ {
+  "pair": 4,
+  "answer_x": "max-agents not shown. 73 config keys not shown, read with (drop 17 result/h3).",
+  "answer_y": "max-agents not shown. 73 config keys not shown, read with (drop 17 result/h3).",
+  "x": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 3
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 3,
+   "misleading": 5,
+   "concise": 3
+  },
+  "better": "X",
+  "why": "X states the 73 not-shown count and the exact form in a left-out block; Y has only the inline marker."
+ },
+ {
+  "pair": 5,
+  "answer_x": "HTTP 400. 10964 characters of the body are not shown, read with (subs (get-in result/h3 [:seon.error/data :body]) 289).",
+  "answer_y": "HTTP 400. 10964 characters of the body are not shown, read with (subs (get-in result/h3 [:seon.error/data :body]) 289).",
+  "x": {
+   "answer": 4,
+   "left_out": 3,
+   "misleading": 4,
+   "concise": 4
+  },
+  "y": {
+   "answer": 5,
+   "left_out": 5,
+   "misleading": 4,
+   "concise": 3
+  },
+  "better": "Y",
+  "why": "Y states the not-shown count and exact form in a left-out line, which X lacks, though Y repeats the cut."
+ },
+ {
+  "pair": 6,
+  "answer_x": "Not shown. The stuck rows are 2 members behind (get-in result/h3 [:classes :stuck]), and the task is not named.",
+  "answer_y": "Not shown. The stuck rows are 2 members behind (get-in result/h3 [:classes :stuck]), and the task is not named.",
+  "x": {
+   "answer": 3,
+   "left_out": 2,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 3
+  },
+  "better": "Y",
+  "why": "Y lists the stuck class's 2 hidden members with their exact form, which X leaves to the inline marker only."
+ },
+ {
+  "pair": 7,
+  "answer_x": "Execution not shown. calc/neg's whole task map is returned by (val (nth (seq result/h3) 4)).",
+  "answer_y": "Execution not shown. calc/neg's whole task map is returned by (val (nth (seq result/h3) 4)).",
+  "x": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 3
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 3,
+   "misleading": 5,
+   "concise": 3
+  },
+  "better": "X",
+  "why": "X adds a left-out line naming the 11 hidden members and the exact form for calc/neg, while Y gives only the inline cut."
+ },
+ {
+  "pair": 8,
+  "answer_x": "Total not stated: 1 turn shown and 1 not shown (drop 1 result/h3). The first turn's eval calls are (get-in result/h3 [0 :seon.turn/calls]).",
+  "answer_y": "Total not stated: 1 turn shown and 1 not shown (drop 1 result/h3). The first turn's eval calls are (get-in result/h3 [0 :seon.turn/calls]).",
+  "x": {
+   "answer": 4,
+   "left_out": 2,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 3
+  },
+  "better": "Y",
+  "why": "Y states the exact form for the first turn's calls in a left-out line, while X shows only the inline marker."
+ },
+ {
+  "pair": 9,
+  "answer_x": "Total not stated. 364 datoms shown and 36 not shown, read with (drop 364 result/h3).",
+  "answer_y": "Total not stated. 364 datoms shown and 36 not shown, read with (drop 364 result/h3).",
+  "x": {
+   "answer": 4,
+   "left_out": 2,
+   "misleading": 5,
+   "concise": 3
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 3
+  },
+  "better": "Y",
+  "why": "Y states the 36 not-shown count and exact form in a left-out line, while X gives only the inline marker."
+ },
+ {
+  "pair": 10,
+  "answer_x": "No, section 8 is not shown. 7279 characters are not shown, read with (subs result/h3 19523).",
+  "answer_y": "No, section 8 is not shown. 7279 characters are not shown, read with (subs result/h3 19523).",
+  "x": {
+   "answer": 3,
+   "left_out": 2,
+   "misleading": 5,
+   "concise": 4
+  },
+  "y": {
+   "answer": 4,
+   "left_out": 5,
+   "misleading": 5,
+   "concise": 3
+  },
+  "better": "Y",
+  "why": "Y states the 7279 not-shown characters and exact form in a left-out line, while X gives only the inline marker."
+ }
+]
