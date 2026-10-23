@@ -178,7 +178,8 @@
                    m))))))
 
 (defn wrap-cost
-  "Per-form wall µs, allocated bytes and the form's costliest contracted functions (each
+  "Per-form wall µs, allocated bytes, engine ticks (jolt.host/ticks: the work it did, the
+  exact measure) and the form's costliest contracted functions (each
   with its exact calls and estimated ms: seon.profile), measured around the per-form eval
   fn. Reading them costs the functions the form called, not the program's size."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
@@ -188,14 +189,14 @@
           ef (:repl/eval-fn req eval)]
       (h (-> req
              (assoc :repl/eval-fn (fn [form]
-                                    (let [a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/now-ns)]
+                                    (let [a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/now-ns) k0 (jolt.host/ticks)]
                                       (try (ef form)
-                                           (finally (let [t1 (profile/now-ns) a1 (profile/alloc-bytes)]
-                                                      (vreset! last [(/ (quot (- t1 t0) 1000) 1000.0) (- a1 a0) (profile/top (profile/touched) (cfg/value :seon.config.agent/form-top-fns))])))))))
+                                           (finally (let [k1 (jolt.host/ticks) t1 (profile/now-ns) a1 (profile/alloc-bytes)]
+                                                      (vreset! last [(/ (quot (- t1 t0) 1000) 1000.0) (- a1 a0) (profile/top (profile/touched) (cfg/value :seon.config.agent/form-top-fns)) (- k1 k0)])))))))
              (around-reply (fn [m]
-                             (if-let [[ms a fns] (when (or (contains? m :repl/value) (contains? m :repl/ex)) @last)]
+                             (if-let [[ms a fns k] (when (or (contains? m :repl/value) (contains? m :repl/ex)) @last)]
                                (do (vreset! last nil)
-                                   (cond-> (assoc m :ms ms :alloc-bytes a)
+                                   (cond-> (assoc m :ms ms :alloc-bytes a :ticks k)
                                      (seq fns) (assoc :fns (mapv (fn [c] (update c :ms #(/ (Math/round (* % 1000.0)) 1000.0))) fns))))
                                m))))))))
 
@@ -321,7 +322,7 @@
 
 (def ^:private item-keys
   "The keys of a form's answer that are its reply item's."
-  [:id :tag :form :printed :out :err-text :ms :alloc-bytes :handle :err :tokens :truncated? :elisions :recorded :contract :contract-error :warnings :fns])
+  [:id :tag :form :printed :out :err-text :ms :alloc-bytes :ticks :handle :err :tokens :truncated? :elisions :recorded :contract :contract-error :warnings :fns])
 
 (defn fold
   "The answers of one eval request (in order) -> its reply items: each form's answer (:tag),
@@ -341,7 +342,7 @@
   [id run items t-basis]
   (conj (vec (for [it items :when (:id it)]
                {:seon.cluster.eval/id (str run "/" (:id it)) :seon.cluster.eval/agent "agent"
-                :seon.cluster.eval/record (cond-> (select-keys it [:tag :form :out :ms :alloc-bytes :fns :origin])
+                :seon.cluster.eval/record (cond-> (select-keys it [:tag :form :out :ms :alloc-bytes :ticks :fns :origin])
                                             (:printed it) (assoc :shown (:printed it))
                                             (= :err (:tag it)) (assoc :error (or (:err it) (:printed it))))}))
         (cond-> {:db/id "agent" :seon.agent/id id} t-basis (assoc :seon.agent/answered-t t-basis))))

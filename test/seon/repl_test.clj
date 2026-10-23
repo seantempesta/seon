@@ -3,7 +3,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [seon.agent-test :as at]
             [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]
             [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.docs :as docs]
-            [seon.config :as cfg] [seon.render :as render] [seon.test-store :as ts] [datahike.api :as d]))
+            [seon.config :as cfg] [seon.render :as render] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [datahike.api :as d]))
 
 (deftest an-agent-repl-answers-what-a-clojure-repl-answers
   ;; owner, 2026-10-21: "Whatever intuitions agents have we need to make sure we are matching a
@@ -280,3 +280,26 @@
     (let [r (render/ai (assoc em :seon.error/at {:line 3 :column 6}) {})]
       (is (not (str/includes? r ":jolt.error/line")) r)
       (is (some #{"at line 3:6"} (str/split-lines r))))))
+
+(deftest an-evals-record-carries-its-ticks
+  ;; task seon.turn/a-turn-shows-its-cost-against-its-budget (1): the work a form did is
+  ;; recorded once, when it ran (jolt.host/ticks-of), beside :ms and :alloc-bytes, and the
+  ;; stored record keeps it; a render of that record never evaluates again.
+  (let [answers (volatile! [])
+        old @agent/state
+        run! (fn [code] (vreset! answers [])
+               (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
+               ((repl/handler) {"op" "eval" "code" code :reply #(vswap! answers conj %)})
+               (repl/fold @answers))]
+    (try
+      (let [[small] (run! "(reduce + (range 100))")
+            [big] (run! "(reduce + (range 1000000))")
+            [bad] (run! "(/ 1 0)")]
+        (is (pos? (:ticks small)) (pr-str small))
+        (is (> (:ticks big) (* 10 (:ticks small))) "ticks are the work done: 10,000x the loop is >10x the ticks (the form's compile is a constant)")
+        (is (pos? (:ticks bad)) "a form that threw still did work")
+        (let [rec (-> (repl/record-tx :a "run" [(assoc big :id 0)] nil) first :seon.cluster.eval/record)
+              render #(pr-str (h/html (:seon.render/html (ui/history-row rec {}))))]
+          (is (= (:ticks big) (:ticks rec)) "the stored record carries the ticks")
+          (is (= (render) (render)) "rendering one record twice gives the same bytes")))
+      (finally (reset! agent/state old)))))
