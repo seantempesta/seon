@@ -150,10 +150,14 @@
   "The program keys entity e bears on db: a form's own and those of the definitions it
   makes (their content holds its text), a definition's own and that of the form it points
   to (whose liveness it decides), a schema entry's, and e's declared data."
-  {:malli/schema [:=> [:cat :seon.host/db :map :int [:set :keyword]] [:set :seon.merge/program-key]]}
-  [db schema e data-attrs]
-  (let [x (d/entity db e)
+  {:malli/schema [:=> [:cat :seon.host/db [:set :keyword] :int [:set :keyword]] [:set :seon.merge/program-key]]}
+  [db many e data-attrs]
+  ;; one seek reads the entity's datoms; an entity that bears no key (a turn's facts, a
+  ;; transaction) costs only that seek
+  (let [ds (d/datoms db :eavt e)
+        x (into {} (for [dt ds :when (not (many (:a dt)))] [(:a dt) (:v dt)]))
         form-key (fn [f] (when-let [id (:form/id f)] [:form id]))
+        pointed (fn [a] (when-let [f (get x a)] (form-key (d/entity db f))))
         def-key (:defines (when (:form/id x) (program/form-row db e)))
         own-def (cond (:var/name x) [:var (:var/name x)]
                       (:method/key x) (into [:method] (sedn/decode (:method/key x)))
@@ -161,10 +165,10 @@
                       (:ns/name x) [:ns (:ns/name x)])]
     (into #{}
           (concat (when-let [k (form-key x)] (cons k def-key))
-                  (when own-def (remove nil? [own-def (form-key (get x (pointer (first own-def))))]))
+                  (when own-def (remove nil? [own-def (pointed (pointer (first own-def)))]))
                   (when-let [k (:schema/key x)] [[:schema k]])
-                  (for [dt (when (seq data-attrs) (d/datoms db :eavt e)) :when (data-attrs (:a dt))]
-                    (if (= :db.cardinality/many (get-in schema [(:a dt) :db/cardinality]))
+                  (for [dt (when (seq data-attrs) ds) :when (data-attrs (:a dt))]
+                    (if (many (:a dt))
                       [:datum e (:a dt) (:v dt)]
                       [:datum e (:a dt)]))))))
 
@@ -201,14 +205,14 @@
   differ, not the program."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/db] :seon.merge/data-attrs] [:set :seon.merge/program-key]]}
   [base dbs data-attrs]
-  (let [read (fn [db] [db (d/schema db) (data-attr-set db data-attrs)])
+  (let [read (fn [db] [db (get-in db [:rschema :db.cardinality/many] #{}) (data-attr-set db data-attrs)])
         b (read base)]
     (into #{} (for [db dbs
                     :let [[gone added] (d/datoms-diff base db :eavt [])
                           d (read db)]
                     e (into #{} (map :e) (concat gone added))
-                    [side schema das] [b d]
-                    k (entity-keys side schema e das)]
+                    [side many das] [b d]
+                    k (entity-keys side many e das)]
                 k))))
 
 (defn delta-three-way
