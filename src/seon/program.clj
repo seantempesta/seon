@@ -485,12 +485,22 @@
                   (for [[a k] form-sets] [k (set (get f a))]))
       (:form/lead f) (assoc :lead (:form/lead f)))))
 
+(defn- live-ids
+  "{form id -> entity} of db's live forms (live?), from four index scans and no entity read:
+  a form that defines nothing, or one a definition points to. So two values' difference is
+  their programs' (reach-update), at index speed."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :string :int]]}
+  [db]
+  (let [defining (into #{} (map :e) (d/datoms db :aevt :form/defines))
+        pointed (into #{} (comp (mapcat #(d/datoms db :aevt %)) (map :v)) [:var/form :method/form :impl/form :ns/form])]
+    (into {} (for [dt (d/datoms db :aevt :form/id) :when (or (not (defining (:e dt))) (pointed (:e dt)))] [(:v dt) (:e dt)]))))
+
 (defn live-forms
-  "Every live form of db, as form-row. Cost: the program's forms and their definitions,
-  read once."
+  "Every live form of db, as form-row, in entity order (live-ids: index scans, then one row a
+  live form)."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]]}
   [db]
-  (vec (for [dt (d/datoms db :aevt :form/id) :when (live? db (:e dt))] (form-row db (:e dt)))))
+  (mapv #(form-row db %) (sort (vals (live-ids db)))))
 
 (defn account-diff-tx
   "account-tx of acct at its own order and lead (a file's), less what db holds already:
@@ -783,15 +793,13 @@
   program: four live-forms reads, ~1.4 s, before)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.program/error]]}
   [db-from db-to]
-  (let [live-ids (fn [db] (into #{} (for [dt (d/datoms db :aevt :form/id) :when (live? db (:e dt))] (:v dt))))
-        def-keys (fn [db] (into #{} (for [a (vals pointer) dt (d/datoms db :aevt a)] (definition-key (d/entity db (:e dt))))))
+  (let [def-keys (fn [db] (into #{} (for [a (vals pointer) dt (d/datoms db :aevt a)] (definition-key (d/entity db (:e dt))))))
         from (live-ids db-from)
         to-defs (def-keys db-to)
         sc-from (schema-changes db-from)]
     (doseq [k (sort-by str (def-keys db-from)) :when (not (contains? to-defs k))] (remove-definition! k))
     (load! db-to (filterv #(not (held? db-to %))
-                          (for [dt (d/datoms db-to :aevt :form/id) :when (and (not (from (:v dt))) (live? db-to (:e dt)))]
-                            (form-row db-to (:e dt))))
+                          (for [e (sort (vals (apply dissoc (live-ids db-to) (keys from))))] (form-row db-to e)))
            (set (for [[k v] (schema-changes db-to) :when (not= v (get sc-from k))] k)))))
 
 (defn load-changes!
@@ -895,16 +903,6 @@
   [vars f]
   (let [own (set (keep (fn [[k s]] (when (= :var k) s)) (:defines f)))]
     (boolean (and (not-any? names-only own) (some #(and (vars %) (not (own %))) (:refs f))))))
-
-(defn- live-ids
-  "{form id -> entity} of db's live forms (live?), from four index scans and no entity read:
-  a form that defines nothing, or one a definition points to. So two values' difference is
-  their programs' (reach-update), at index speed."
-  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :string :int]]}
-  [db]
-  (let [defining (into #{} (map :e) (d/datoms db :aevt :form/defines))
-        pointed (into #{} (comp (mapcat #(d/datoms db :aevt %)) (map :v)) [:var/form :method/form :impl/form :ns/form])]
-    (into {} (for [dt (d/datoms db :aevt :form/id) :when (or (not (defining (:e dt))) (pointed (:e dt)))] [(:v dt) (:e dt)]))))
 
 (defn- schema-texts
   "{schema key -> its form's text} of db, from two index scans."
