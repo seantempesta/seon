@@ -77,6 +77,7 @@
   [:seon.config.proofs/program-store-max-bytes :seon.config.proofs/program-store-max-bytes]
   [:seon.config.proofs/seed-salt :seon.config.proofs/seed-salt]
   [:seon.config.proofs/cost-max-n :seon.config.proofs/cost-max-n]
+  [:seon.config.proofs/tick-quantum :seon.config.proofs/tick-quantum]
   [:seon.config.proofs/seeds :seon.config.proofs/seeds]
   ;; effects and the model
   [:seon.config.fx/buf :seon.config.fx/buf]

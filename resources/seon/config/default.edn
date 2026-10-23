@@ -367,6 +367,15 @@
  ;; bin/test --all sets SEON_COST_MAX_N=100000, so the full run measures each proof as written.
  ;; At the bound: the proof measures no size past this but its two smallest.
  :seon.config.proofs/cost-max-n #long #or [#env SEON_COST_MAX_N 1000]
+ ;; Unit: engine ticks. What one measure of a call's ticks may be off by, whatever the load: Chez
+ ;; feeds the timer in chunks of 1,000 ticks, and some calls are charged one whole chunk more
+ ;; than others on the same input, plus up to ~50 ticks. Provenance: worktree session store,
+ ;; 2026-10-23, task seon.cost/ticks-are-exact: 40 calls of d/db-with on one pinned input read
+ ;; 407,097 + 0..46 on 17 and + 1,041..1,048 on 23, with no collection in any of them; the
+ ;; chunk's cause in Chez is open on that task. At the bound: seon.cost/judge takes this off a
+ ;; size's ticks before judging it over its estimate, and against the growth before fitting it
+ ;; (the smallest size's up, the others' down), so one stray chunk is never a red.
+ :seon.config.proofs/tick-quantum #long 1050
  ;; Unit: seeds (a count). How many seeds a randomized property test draws in this run, each
  ;; from its own test-seed (seon.proofs/test-seed) and the next ones after it. Provenance: root,
  ;; 2026-10-23 (notes/test-time-2026-10-23.md: r3.inc-test's 5 seeds x 150 steps took 47 s, the

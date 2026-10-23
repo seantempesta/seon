@@ -128,6 +128,26 @@
         (is (< (:exponent r) (:allowed r)))))
     (is (nil? (cost/growth e [(first (rows e (fn [n] {:bytes (* 90.0 n)})))] :bytes)) "one size has no growth")))
 
+(deftest one-timer-chunk-is-not-a-red-and-a-real-regression-is
+  ;; task seon.cost/ticks-are-exact: one measure of a call's ticks may read one 1,000-tick timer
+  ;; chunk more than another on the same input (:seon.config.proofs/tick-quantum). The transact
+  ;; row's numbers: 407k ticks at 10 against an estimate of 400k, under 3x slack either way; its
+  ;; growth from 10 to 1,000 small, so a chunk on one size moved the fit
+  (let [q (seon.config/value :seon.config.proofs/tick-quantum)
+        e (assoc linear :growth :log :per-n {:ticks 2000.0} :fixed {:ticks 400000.0} :sizes [10 100 1000])
+        at (fn [f] (rows e (fn [n] {:ticks (f n)})))
+        clean {10 407000.0 100 413000.0 1000 420000.0}]
+    (is (:ok? (cost/judge e (at clean))) "the clean row")
+    (doseq [n [10 100 1000]]
+      (is (:ok? (cost/judge e (at #(+ (clean %) (if (= % n) q 0)))))
+          (str "one chunk more at n=" n " is not a red")))
+    (is (empty? (:steeper (cost/judge e (at #(+ (clean %) (if (= % 1000) q 0)) )))))
+    (let [v (cost/judge e (at #(* 2.0 (- (clean %) 400000.0) (if (= % 1000) 30 1))))]
+      (is (not (:ok? v)) "a real regression, the largest size's growth thirty times its share, is red"))
+    (let [tight (assoc e :fixed {:ticks 130000.0} :per-n {:ticks 500.0})]
+      (is (not (:ok? (cost/judge tight (rows tight (fn [n] {:ticks (* 2.0 (clean n))})))))
+          "every size twice its cost against a tight estimate is red"))))
+
 (deftest n-log-n-under-a-linear-estimate-is-not-steeper
   (let [e (assoc linear :per-n {:ns 1000.0} :fixed {})]
     (is (empty? (:steeper (cost/judge e (rows e (fn [n] {:ns (cost/work :n-log-n n)}))))))))

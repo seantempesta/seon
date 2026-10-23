@@ -163,14 +163,25 @@
   {:malli/schema [:=> [:cat :seon.cost/estimate [:vector :seon.cost/row]] :seon.cost/verdict]}
   [e rows]
   (let [dims (into #{} (mapcat (comp keys :expected)) rows)
+        ;; one measure of ticks may be off by a timer chunk (:seon.config.proofs/tick-quantum, task
+        ;; seon.cost/ticks-are-exact): taken off a size before it is judged over, and against the
+        ;; growth before it is fitted (the smallest size up, the others down)
+        quantum {:ticks (double (config/value :seon.config.proofs/tick-quantum))}
         ratio (fn [{:keys [measured expected]} d]
                 (let [m (get measured d) x (get expected d)]
                   (when (and (some? m) (some? x)) (if (pos? x) (/ (double m) x) (if (pos? m) Double/POSITIVE_INFINITY 1.0)))))
+        allowed-ratio (fn [{:keys [measured] :as r} d]
+                        (ratio (cond-> r (get measured d) (update-in [:measured d] #(max 0.0 (- % (get quantum d 0.0))))) d))
         over (vec (for [r rows d dimensions :when (dims d)
-                        :let [q (ratio r d)] :when (and q (> q (slack d)))]
+                        :let [q (ratio r d)] :when (and q (> (allowed-ratio r d) (slack d)))]
                     {:dim d :n (:n r) :ratio q}))
+        toward-flat (fn [d] (let [q (get quantum d 0.0)]
+                              (if (zero? q) rows
+                                  (vec (map-indexed (fn [i r] (cond-> r (get-in r [:measured d])
+                                                                (update-in [:measured d] #(max 0.0 (if (zero? i) (+ % q) (- % q))))))
+                                                    rows)))))
         steeper (vec (for [d dimensions :when (dims d)
-                           :let [{:keys [exponent allowed]} (growth e rows d)]
+                           :let [{:keys [exponent allowed]} (growth e (toward-flat d) d)]
                            :when (and exponent (> exponent allowed))]
                        {:dim d :exponent exponent :allowed allowed}))
         largest (peek rows)
