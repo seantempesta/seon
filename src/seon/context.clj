@@ -71,8 +71,9 @@
         ;; defn's contract plumbing is named by every contracted form, so it sinks)
         n (count (d/datoms db :aevt :form/id))
         score (fn [[r k]] (* k (Math/log (/ n (inc (count (d/datoms db :avet :form/refs r)))))))
+        ;; each hit's score taken once (sort-by would take it per comparison: an index count each)
         hits (->> pairs (map second) (remove #(or (named %) (macro? %))) frequencies
-                  (sort-by (juxt (comp - score) (comp str key))) (mapv key))
+                  (map (fn [e] [(- (score e)) (str (key e)) (key e)])) sort (mapv peek))
         [shown more] (print/bounded hits :seon.config.render/found "(my.agent/callees 'ns/f) of each cited var")]
     (cond-> (mapv #(resolve-ref db % :doc) shown) more (conj more))))
 
@@ -103,7 +104,8 @@
                          sm (assoc :summary sm))))]
     (vec (for [ns nss
                :let [vs (d/q '[:find [?n ...] :in $ ?ns :where [?e :ns/name ?ns] [?v :var/ns ?e] [?v :var/name ?n] [?v :var/form _]] db ns)
-                     lines (map line (sort-by (juxt (comp - uses) str) vs))
+                     ;; each var's uses counted once (sort-by would count per comparison)
+                     lines (map line (map peek (sort (map (fn [v] [(- (uses v)) (str v) v]) vs))))
                      shown (reduce (fn [[acc spent] l] (let [s (+ spent (:tokens (print/print-value l {:budget share}) share))]
                                                          (if (<= s share) [(conj acc l) s] (reduced [acc spent]))))
                                    [[] 0] lines)]

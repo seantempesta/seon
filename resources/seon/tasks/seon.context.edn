@@ -78,4 +78,12 @@
  {:seon.task/name "the-state-names-what-was-read"
   :seon.task/plan "Found by step E's runs #8 and #9 (2026-10-23, DeepSeek flash, thinking off; attempts seon.context/e1b-map-from-program#1 and e2b-map-from-program#1 on worktree dry-run's root, mains e1 and e2): a design read the same sources turn after turn (`clojure.repl/source` of ns-map in turns 0, 6, 11, 12 of run #8; turns 4-6 of run #9) though every result stood in its scrollback, until the no-progress end. Correct: the current state (```seon.context/current-state```) records what this attempt has already read (each name and the turn that read it, from the recorded evals), so a re-read is visible as one before the attempt ends. Recording, never a gate: nothing refuses a read. Proof: the state of an attempt whose turns read seon.context/ns-map twice names it with both turns."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.context-test/the-state-names-what-was-read}}]
+  :seon.task/proofs #{seon.context-test/the-state-names-what-was-read}}
+ {:seon.task/name "a-ranking-takes-each-key-once"
+  :seon.task/plan "Measured at the REPL on Seon's own program (2,749 forms, 304 sections, 534 tasks; 2026-10-23): a first turn's context (seon.context/render, origin :outside) for task seon.source/an-import-reads-only-changed-files cost 29.8M ticks and 124 MB for an 11 KB text; ns-map (4 namespaces) was 14.9M of it and found 7.6M, though only 5-11 lines of each namespace are shown. Cause: both sorted with clojure.core/sort-by over a key that counts an index (```seon.context/ns-map```'s uses, ```seon.context/found```'s score), and sort-by takes its key on every comparison, so each count ran ~2 n log n times, not n. Correct: take each key once, then sort [key name x] tuples (the same order: the name breaks every tie)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.context-cost-test/a-namespace-map-counts-each-vars-uses-once seon.context-cost-test/found-scores-each-hit-once seon.context-test/the-map-shows-the-most-used-first-then-by-name}}
+ {:seon.task/name "a-first-turns-context-costs-what-it-shows"
+  :seon.task/plan "Left by a-ranking-takes-each-key-once (2026-10-23, REPL on Seon's own program): the first turn's context for seon.source/an-import-reads-only-changed-files costs 14.3M ticks and 59 MB for an 11 KB text; of the rest, found's pairs query is ~1.9M, ```seon.ref/references``` ~2.1M, then the cited sections and the printing. Measure each part with a cost proof on a production-shaped db, and bring the render to the work its shown text needs."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}]
