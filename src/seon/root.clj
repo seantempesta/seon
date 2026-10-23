@@ -42,6 +42,22 @@
   {:malli/schema [:=> [:cat [:maybe :keyword] :string] :seon.root/no-agent]}
   [id why] (contract/error :seon.root/no-agent 'seon.root/api-proc why {:agent id}))
 
+(defn- ended
+  "The one error map of a request to agent id after it ended: root stopped it (a kill, its
+  attempt's end) or it died, as root's view records (:ended-ms). Not gone: the agent was."
+  {:malli/schema [:=> [:cat :keyword :string] :seon.root/ended]}
+  [id why] (contract/error :seon.root/ended 'seon.root/api-proc why {:agent id}))
+
+(defn- absent
+  "Why agent id, whose entry in root's view is a (nil: root never had it), takes no request
+  now: it ended (ended: the view records its :ended-ms), or root never had it (gone). The one
+  answer the api, request and prove! give for an agent that is not there."
+  {:malli/schema [:=> [:cat [:maybe :map] [:maybe :keyword]] [:or :seon.root/ended :seon.root/no-agent]]}
+  [a id]
+  (if (and id (:ended-ms a))
+    (ended id (str "agent " (name id) " ended"))
+    (gone id (str "no live agent " id))))
+
 (defn- refused
   "Root's API refusing a request, as the one error map; members describe the refused answer."
   {:malli/schema [:=> [:cat :qualified-symbol :string :map] :seon.root/refused]}
@@ -240,7 +256,7 @@
                                {:agent agent :pid (or pid (:pid v)) :exit (:exit v)
                                 :stderr (stderr-tail (agent/stderr-path (get-in st [:view :store :agents-dir]) agent))
                                 :last-op (some-> (:running v) (select-keys [:form :since-ms]) (assoc :kind :eval))}))
-        e (or died (gone agent "agent stopped"))]
+        e (or died (ended agent (str "agent " (name agent) " ended")))]
     (step/out! o :events (step/event {:type (or stop :dead) :agent agent}))
     (let [st (cond
                (nil? died) (reduce (fn [st r] (deliver-rid st r e)) (answer-spawn st agent e) inflight)
@@ -290,7 +306,7 @@
                          (assoc-in st [::spawning aid] p))))
       :clone (let [parent (:parent m)]
                (cond
-                 (nil? (get-in st [:agents parent])) (reply! st p (gone parent (str "no live agent " parent)))
+                 (nil? (get-in st [:agents parent])) (reply! st p (absent (get-in st [:view :agents parent]) parent))
                  (>= (count (:agents st)) (cfg/value :seon.config.root/max-agents)) (reply! st p (refused 'seon.root/clone! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)}))
                  :else (let [[st aid fd] (start-agent st (merge {:task (get-in st [:view :agents parent :task])} (:opts m) {:cloned-from parent}))
                        branch (get-in st [:agents aid :branch])
@@ -301,7 +317,7 @@
                               :msg {:op :clone :agent aid :branch branch}}))))
       (:eval :tests :merge-tests :stats :merge-main)
       (if (nil? (get-in st [:agents id]))
-        (reply! st p (gone id (str "no live agent " id)))
+        (reply! st p (absent (get-in st [:view :agents id]) id))
         (let [[st rid] (pend st p op id)
               msg (case op
                     :eval (cond-> {:op :eval :forms (:forms m)} (:ticks m) (assoc :ticks (:ticks m)) (:origin m) (assoc :origin (:origin m)))
@@ -865,7 +881,7 @@
       kill! {:op :kill :id id}
       merge-main! (if live?
                     {:op :merge-main :id id :data-attrs data-attrs}
-                    (gone id (str "no live agent " id)))
+                    (absent a id))
       merge! (cond (not (:branch a)) (refused 'seon.root/merge! (str "no agent " id) {:agent id})
                    (false? (:gate? args)) {:op :write :req {:op :merge :branch (:branch a) :agent id :data-attrs data-attrs}}
                    live? {:op :merge-tests :id id :merge-branch (:branch a) :data-attrs data-attrs}
@@ -934,7 +950,7 @@
   ([sys agent-id names]
   (if-let [b (if agent-id (get-in @(call! sys {:op :state}) [:agents agent-id :branch]) (pdb/conn-main (:conn sys)))]
     (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx (pdb/head (:conn sys) b)) :mode (if agent-id :turn :judge)} agent-id (assoc :agent agent-id) (seq names) (assoc :names names)))
-    (doto (promise) (deliver (gone agent-id (str "no live agent " agent-id)))))))
+    (doto (promise) (deliver (absent (get-in @(call! sys {:op :state}) [:agents agent-id]) agent-id))))))
 
 (defn agent-stats! "A promise of the agent's numbers now." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
   [sys agent-id] (call! sys {:op :stats :id agent-id}))
