@@ -17,8 +17,9 @@
 ;; - Machine-dependent values are derived at load, never shipped: #seon/checkout "p" is p under
 ;;   the checkout this process runs from (SEON_CHECKOUT, else JOLT_PWD).
 ;; - Layers (owner, 2026-10-21: "hand out different edn config files ... or do command line
-;;   overrides"): this file, then the checkout's own config/local.edn (gitignored; bin/ports
-;;   writes its ports), then the command line's --config FILE and --set :ns/key=edn. Later
+;;   overrides"): this file, then the command line's --config FILE and --set :ns/key=edn
+;;   (a checkout's config/local.edn, gitignored, which bin/ports writes with its ports, is one
+;;   only where a command line names it: bin/root does for the standing root). Later
 ;;   layers win key by key; the merged map is validated once; seon.config/sources (and the
 ;;   :seon.config/sources fact on main) names the layer each key came from.
 {;; ==== root and its procs ====================================================================
@@ -552,9 +553,9 @@
  ;; ==== the web, instrumentation, the native probe ==============================================
 
  ;; Unit: TCP port on 127.0.0.1 (session W2). 0 (the shipped value): no dashboard. A checkout's
- ;; own config/local.edn names its port (bin/ports writes it: the main tree 7777, worktree k
+ ;; own config/local.edn (the standing root's --config layer) names its port (bin/ports writes it: the main tree 7777, worktree k
  ;; 7901+10k, from one registry), so no two checkouts share one (owner, 2026-10-21). bin/check
- ;; and bin/test set SEON_WEB_PORT=0, which local.edn honours, so check steps listen on nothing.
+ ;; and bin/test set SEON_WEB_PORT=0 and give their roots no local.edn, so check steps listen on nothing.
  ;; A taken port leaves the web proc {:listening false} on the health line and boot goes on.
  :seon.config.web/port #long #or [#env SEON_WEB_PORT 0]
  ;; Unit: TCP port on 127.0.0.1: root's server (seon.server), which bin/mcp and outside
@@ -563,8 +564,9 @@
  ;; line and recorded in runs/root.port (a test's root: seon.test-store/start-root!,
  ;; never a port picked and released beforehand, which another process can take). config/local.edn names
  ;; the checkout's own (main 7888, worktree k 7900+10k).
- ;; bin/root PORT WEB, bin/mcp PORT and the mcp check set SEON_SERVER_PORT, which local.edn
- ;; honours (until a built binary's top-level code sees its argv, so --set can say it).
+ ;; bin/root PORT WEB, bin/mcp PORT and the mcp check set SEON_SERVER_PORT, which local.edn's
+ ;; #env honours where bin/root names it (until a built binary's top-level code sees its argv,
+ ;; so --set can say it).
  :seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 0]
  ;; app.css and datastar.js, read per request so a style edit shows on reload.
  :seon.config.web/public-dir #seon/checkout "resources/public"
