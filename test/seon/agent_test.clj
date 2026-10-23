@@ -350,6 +350,39 @@
     (is (= [:failed {:task "demo/t" :reason "the premise is refuted" :counterexample "(= 1 2)" :open? true}]
            (edn/read-string (:printed seen))))))
 
+(deftest an-outside-run-writes-its-end
+  ;; found by a worked example (evaluations session, 2026-10-23): an outside agent's :done
+  ;; judged a run that had no end, so its run read "ended no-end (the agent wrote no end)"
+  ;; whatever its proofs said. The agent writes the end first, as a turn loop does: here its
+  ;; one proof is not written, so the end is :red and names why
+  (let [[_ done seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+                                 {:op :done :agent "a1"}
+                                 {:op :eval :agent "root"
+                                  :code (str "(let [t (:max-tx @(:conn sys))] (seon.await/await-quiet sys (inc t))"
+                                             " (select-keys (first (vals (seon.task/runs @(:conn sys)))) [:seon.run/outcome :seon.run/reason]))")}])
+        run (edn/read-string (:printed seen))]
+    (is (contains? done :judging) (pr-str done))
+    (is (= :red (:seon.run/outcome run)) (pr-str run))
+    (is (str/includes? (str (:seon.run/reason run)) "proof-unknown demo-test/t") "the end names why it is red")
+    (is (not (str/includes? (str (:seon.run/reason run)) "no end")) "never read as an end nobody wrote")))
+
+(deftest an-outside-run-with-a-green-proof-finishes
+  ;; root (2026-10-23): an outside agent that writes its proof green and hands the run back is
+  ;; judged by the end it wrote, and its task finishes, not held
+  (let [[_ _ t done seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+                                     "(ns demo-test (:require [clojure.test :refer [deftest is]]))"
+                                     "(deftest t (is (= 2 (inc 1))))"
+                                     {:op :done :agent "a1"}
+                                     {:op :eval :agent "root"
+                                      :code (str "(let [t (:max-tx @(:conn sys))] (seon.await/await-quiet sys (inc t))"
+                                                 " [(select-keys (first (vals (seon.task/runs @(:conn sys)))) [:seon.run/outcome :seon.run/status])"
+                                                 "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) \"demo/t\")])")}])
+        [run state] (edn/read-string (:printed seen))]
+    (is (= "#'demo-test/t" (:printed t)))
+    (is (contains? done :judging) (pr-str done))
+    (is (= :green (:seon.run/outcome run)) (pr-str run))
+    (is (#{:done :merged} state) (str "the task finishes, never held for root: " state))))
+
 (deftest an-agent-finds-no-repository
   ;; owner, 2026-10-22: no git in agents, and no source-file editing as the way to develop
   ;; Seon; an agent works in a scratch dir with no repository above it

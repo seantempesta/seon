@@ -105,8 +105,10 @@
   (stage/stage!)
   (agent/write-end! run {:outcome outcome :turns turn :tokens tokens :reason reason :error error
                              :waste (learn/summary (learn/waste (or log []) (learn/final-symbols (or log []))))})
-  (cond-> {:outcome outcome :turns turn :model-calls turn :results {} :uncontracted #{}
-           :ms (profile/ms-since t0)}
+  ;; what was not measured is absent, never 0: an outside run counts no model calls and no loop time
+  (cond-> {:outcome outcome :results {} :uncontracted #{}}
+    turn (assoc :turns turn :model-calls turn)
+    t0 (assoc :ms (profile/ms-since t0))
     tokens (assoc :tokens tokens)
     reason (assoc :reason reason)))
 
@@ -249,6 +251,20 @@
                        :seon.turn/origin :outside :seon.turn/basis basis
                        :seon.turn/split (cond-> {:context-ms (long (profile/ms-since t0))} tests-ms (assoc :tests-ms tests-ms))}])
     text))
+
+(defn hand-back!
+  "End run of task as an outside agent hands it back (seon.server's :done): the proofs run
+  again, and the run's end written as the turn loop writes its own (end!: the live runtime
+  staged, the end committed on the branch), :green when the done rule has no reason, else
+  :red with the reasons. Its turns, model calls, tokens and time are the outside model's,
+  unknown here, so absent (never 0). The judge decides from its own run of the proofs and the
+  plan the run began with on main; this end is what the run says of itself. Without it the
+  judge read no end and named the run :no-end. Answers the end."
+  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :seon.turn/end]}
+  [task run]
+  (let [{:keys [plan-before]} (begin! task run)
+        {:keys [reasons]} (observe task plan-before)]
+    (end! {:run run} (if (empty? reasons) :green :red) (when (seq reasons) (r/explain-text reasons)) nil)))
 
 (defn work!
   "Work task `task` as run `run` (the model `model` when set, else root's), at most
