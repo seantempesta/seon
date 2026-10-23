@@ -111,7 +111,20 @@
            (update-vals idx :digest))
         "the walk's digests are reach-digests'")
     (is (= {"calc" (:digest (idx "calc")) 'app.pv-calc-test/add-test "d"} (runner/automatic cand process))
-        "a run that names nothing selects every key but it")))
+        "a run that names nothing selects every key but it"))
+  (testing "through the plan bin/prove and bin/test run (test-runner/plan-of), on a checkout of two tests"
+    (let [d (scratch-dir)
+          files {"deps.edn" "{}"
+                 "test/app/pt_calc_test.clj" "(ns app.pt-calc-test (:require [clojure.test :refer [deftest is]]))\n(deftest adds (is (= 3 (+ 1 2))))\n"
+                 "test/app/pt_shell_test.clj" "(ns app.pt-shell-test (:require [clojure.test :refer [deftest is]] [clojure.java.shell :as sh]))\n(deftest shells (is (zero? (:exit (sh/sh \"true\")))))\n"}
+          _ (doseq [[p t] files] (.mkdirs (.getParentFile (java.io.File. (str d "/" p)))) (spit (str d "/" p) t))
+          _ (clojure.java.shell/sh "git" "-C" d "init" "-q")
+          _ (clojure.java.shell/sh "git" "-C" d "add" ".")
+          auto (runner/plan-of d "tests" false nil)
+          named (runner/plan-of d "tests" false ["app.pt-shell-test"])]
+      (is (= ['app.pt-calc-test/adds] (:run-tests auto)) "named nothing: the in-process test runs, the shelling one does not")
+      (is (= ['app.pt-shell-test/shells] (:left auto)) "and the plan says it left that one out")
+      (is (= ['app.pt-shell-test/shells] (:run-tests named)) "named, it runs"))))
 
 (deftest shards-split-by-namespace-and-each-result-is-stored
   (record (ts/test-db) 'user "(ns app.pv-red-test (:require [clojure.test :refer [deftest is use-fixtures]]))"
