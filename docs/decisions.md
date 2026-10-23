@@ -7,6 +7,8 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 Owner, 2026-10-23: "don't forget to clean up the old work trees once they aren't needed and don't throw away good work have agents learn from it if you want a clean implementation. No crappy slow repetitive code." Stated in: AGENTS §9.
 ### Reuse every unique, immutable result that is proven the same and expensive to make
 Owner, 2026-10-23: "I want reuse of all unique and immutable data we are sure is the same and is expensive to render". A pure computation's result is reused wherever its inputs are the same by content: keyed by the digest of exactly what it reads (content ids, the reach walk's digests), shared across branches, sessions and worktrees, and only for units measured as expensive (AGENTS §5). Anything that reads the clock, the network or a model, or launches a process, is not reused; the reach walk classifies it. One mechanism serves every such result, in `src`, `test` or `bin`, and it replaces the per-case caches it covers. Stated in: not yet (owed AGENTS §5 and the section of the task one-content-keyed-derivation (on ``jolt/one-content-keyed-derivation``, not merged yet)).
+### The embedding work goes ahead, the model download included
+Owner, 2026-10-23: "yeah I approved the embedding work" (in agent-view's thread; relayed by root). Settles the open EMBED question: the embedding model is downloaded and run in-process for `similar`, keyed by each form's content id. Stated in: not yet (owed docs/parity.md and the task seon.context/similar-finds-helpers-by-embedding, on its branch).
 ### No live agent runs until the context has a format agents respond well to
 Owner, 2026-10-23: "I think the current agent context isn't great. I'm not sure how helpful it is to run live agent runs until we get a sane format that agents respond well too". Paid end-to-end runs pause. The context's format is rewritten (agent-view's pull-and-walk render) and judged by its first move: real task contexts, one model call each, thinking off, scored blind, until a model acts on turn 1. Live runs resume after that, on a new real task. Stated in: docs/plan.md (THE PLAN step 1); extends "Agents run only on a sound platform" (2026-10-22).
 ### bin/test branches a kept program db per git tree (option B); each worktree's root is the end state
@@ -189,7 +191,6 @@ Owner, 2026-10-20: "the agent is its own process so having the flow controls be 
 - The per-attempt turn cap: lower `:seon.config.agent/max-turns` (40) to about 2x the measured p90 turns-to-green once 20 real tasks give one.
 - A dropped model connection (`:seon.model/transport`): retry once after a wait, or end as now.
 - File and shell roots: a config key with a permissive default, or none; and whether `:git` `:build` `:deps` `:source` effects are root-only.
-- EMBED: allow the embedding model download (v1's EmbeddingGemma server) for `similar` and `:found` RRF.
 - A `jolt/<topic>` fork of `jolt-lang/ring-chez-adapter` (needed by the `seon.web` listener-as-fiber task).
 - Upstream: when to push the `upstream/*` Jolt branches and open PRs, and whether to send the Chez 0006 report and a 0007 issue.
 - Profiling tooling: which to build (Jolt symbol map per generation for `sample`/xctrace; per-op LMDB counts; a `bin/check profile` mode; `mdb_stat` from `bin/build lmdb`).
