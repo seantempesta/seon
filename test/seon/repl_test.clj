@@ -316,6 +316,6 @@
         (is (> (:ticks big) (* 10 (:ticks small))) "ticks are the work done: 10,000x the loop is >10x the ticks (the form's compile is a constant)")
         (is (pos? (:ticks bad)) "a form that threw still did work")
         (doseq [it [small big bad]
-                :let [rec (-> (repl/record-tx :a "run" [(assoc it :id 0)] nil) first :seon.cluster.eval/record)]]
+                :let [rec (-> (repl/record-tx {:seon.agent/key "b/a" :seon.agent/id :a} "run" [(assoc it :id 0)] nil) first :seon.cluster.eval/record)]]
           (is (= (select-keys it cost) (select-keys rec cost)) "the record stores the values the reply shows")))
       (finally (reset! agent/state old)))))
