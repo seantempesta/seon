@@ -142,19 +142,25 @@
   (vec (for [{:keys [law fact page except]} laws
              :let [named (into #{} (keep (fn [{:keys [e v]}]
                                            (when (str/starts-with? (:seon.section/address (d/pull db [:seon.section/address] e)) (str page "#")) v)))
-                               (d/datoms db :aevt :seon.section/names))]
+                               (d/datoms db :aevt :seon.section/names))
+                   owners (merge (into {} (map (fn [{:keys [e v]}] [v (:method/multi (d/entity db e))])) (d/datoms db :aevt :method/form))
+                                 (into {} (map (fn [{:keys [e v]}] [v (:impl/protocol (d/entity db e))])) (d/datoms db :aevt :impl/form)))]
              fe (distinct (map :e (d/datoms db :aevt fact)))
              :when (program/live? db fe)
-             d (:form/defines (d/entity db fe))
-             :let [v (:var/name d)]
-             :when (and v (not (except (namespace v))) (not (named v))
-                        ;; the law is Seon's own source's (bin/laws scans src): an agent's app, and a test's
-                        ;; `is` (which expands to a catch), are not failure points of the system
-                        (some-> d :var/ns :ns/file (str/starts-with? "src/")))
+             :let [f (d/entity db fe)
+                   ;; a catch is attributed to its form: the vars it defines, else the multimethod or
+                   ;; protocol it extends, else the form's id: no site drops
+                   sites (or (seq (map :var/name (:form/defines f))) (some-> (owners fe) vector) [(:form/id f)])
+                   file (some-> f :form/ns :ns/file)
+                   nsym (:ns/name (:form/ns f))]
+             v sites
+             ;; the law is Seon's own source's (bin/laws scans src): an agent's app, and a test's
+             ;; `is` (which expands to a catch), are not failure points of the system
+             :when (and (not (except (str nsym))) (not (named v)) (some-> file (str/starts-with? "src/")))
              :let [s (str "unnamed-site " (name law) " " v)]]
          {:signature s :law law :site v :page page :open? true
           :message (str v " has a " (name law) " site that " page " does not name")
-          :producer nil :owner-ns (symbol (namespace v)) :proofs []
+          :producer nil :owner-ns nsym :proofs []
           :evidence {:kind :unnamed-site :law law :site v :page page} :answered-by (get-in ans [:signature s] []) :at-ms nil})))
 
 (def pins

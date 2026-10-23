@@ -7,7 +7,7 @@
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
             [seon.repl :as repl] [seon.proofs :as proofs] [seon.root :as root] [seon.agent-proc :as ap]
             [seon.reconcile :as rec] [seon.sock :as sock]
-            [seon.render :as render] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.cost :as cost] [seon.docs]))
+            [seon.render :as render] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.cost :as cost] [seon.docs]))
 
 (defn- invalid [op v]
   (contract/error :seon.instrument/contract-error op (str op " invalid-input: its arguments do not satisfy its contract")
@@ -528,3 +528,42 @@
                                  :seon.error/agents 0 :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/subject v}])]
         (is (not (false? (:open? (row err)))))
         (is (false? (:open? (row (d/db-with err [{:db/id e :var/doc "changed"}])))))))))
+
+(defn- literal-catch-sites
+  "The old bin/laws rule over text: each line of each src file but check.clj and e2e.clj, strings
+  and comments stripped, holding `(catch ` is a site of the last top-level def before it, as
+  ns/name."
+  [files]
+  (set (for [[path text] files :when (not (re-find #"/(check|e2e)\.clj$" path))
+             :let [nsym (seon.source/file-ns text)]
+             site (loop [lines (str/split-lines text) in-str? false n nil acc []]
+                    (if-let [l (first lines)]
+                      (let [n (if-let [m (re-find #"^\((?:defn-?|defchecked|defmacro|def|defonce) (\S+)(?: (\S+))?" l)]
+                                (if (str/starts-with? (second m) "^") (nth m 2) (second m))
+                                n)
+                            [code in-str?] (loop [cs (seq l) in-str? in-str? out []]
+                                             (if-let [c (first cs)]
+                                               (cond in-str? (cond (= c \\) (recur (nnext cs) true out) (= c \") (recur (next cs) false out) :else (recur (next cs) true out))
+                                                     (= c \\) (recur (nnext cs) false out)
+                                                     (= c \") (recur (next cs) true out)
+                                                     (= c \;) [out false]
+                                                     :else (recur (next cs) false (conj out c)))
+                                               [out in-str?]))]
+                        (recur (rest lines) in-str? n (cond-> acc (str/includes? (apply str code) "(catch ") (conj (str nsym "/" n)))))
+                      acc))]
+         site)))
+
+(deftest the-catch-class-finds-the-sites-the-literal-scan-finds
+  ;; parity (root's review of a370169): over Seon's own src the :unnamed-site class lists exactly the
+  ;; sites bin/laws' text scan listed, none dropped (a catch in a defmethod, an extend-protocol or a
+  ;; reify is attributed to its form). Extras the compiler's facts add are listed here, each justified.
+  (let [files (:value (seon.fx/read-source {:req {:root (System/getProperty "user.dir") :dirs ["src"]}}))
+        _ (doseq [n (keep #(seon.source/file-ns (val %)) files)] (require n))
+        db0 (ts/test-db)
+        db (d/db-with db0 (seon.source/import-tx db0 files))
+        class (set (map #(str (:site %)) (get-in (problems/health db) [:classes :unnamed-site :rows])))
+        literal (literal-catch-sites files)
+        extras {}]
+    (is (seq literal))
+    (is (= #{} (clojure.set/difference literal class)) "no literal site dropped")
+    (is (= (set (keys extras)) (clojure.set/difference class literal)) "every extra is listed with its reason")))
