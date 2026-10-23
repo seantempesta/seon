@@ -1,6 +1,7 @@
 (ns seon.print-test
   "Laws of the value printer (Seon's `seon.render.value-law-test`, on the slice): the text stays
-  inside the budget, every string cut continues exactly, and an uncut text reads back as the value."
+  inside the budget, every cut's form reads exactly what the cut says it left (read off the
+  text, as an agent reads it), and an uncut text reads back as the value."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -8,27 +9,57 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.print :as seon]
-            [seon.print.select :as select] [seon.contract]
+            [clojure.walk :as walk]
+            [seon.print.select :as select] [seon.print.emit :as emit] [seon.contract]
             [fipp.engine :as fipp]))
 
-(defn- step
-  "The member one path step names in `parent` (the typed steps cuts carry)."
-  [parent s]
-  (let [tag (when (vector? s) (first s))]
-    (cond (= tag :seon.render.data/entry) (let [e (nth (seq parent) (second s))] (if (= :seon.render.data/key (nth s 2)) (key e) (val e)))
-          (= tag :seon.render.data/nth) (nth (seq parent) (second s))
-          (map? parent) (get parent s)
-          :else (nth parent s))))
+(defn cuts-of
+  "Every cut in printed text, read as an agent reads it: how many it says it left (:n, nil for
+  `…?`, members not yet counted), whether in characters (:chars?; a long name's cut is `…+N`
+  with neither, :name?), and the form after it that reads the rest (:form, nil when none)."
+  [text]
+  (loop [from 0 cuts []]
+    (if-let [i (str/index-of text "…" from)]
+      (let [[m plus n chars?] (re-find #"^…(\+?)(\d+|\?)( chars(?: in \d+ more lines?)?)?" (subs text i))
+            after (when m (subs text (+ i (count m))))
+            form (when (and after (re-find #"^ [(r]" after)) (edn/read-string (subs after 1)))]
+        (recur (inc i) (cond-> cuts m (conj {:n (parse-long n) :chars? (some? chars?) :name? (and (= "+" plus) (not chars?)) :form form}))))
+      cuts)))
+
+(defn read-rest
+  "What form reads when its handle is v (h, the handle the printer was given)."
+  [form h v]
+  ((eval (list 'fn '[v] (walk/postwalk-replace {h 'v} form))) v))
+
+(defn reads-exactly?
+  "Does cut c of text, printed of v through handle h, read exactly what it says it left? A
+  string's form `(subs s k)` reads its last n characters and text shows s's first k before the
+  cut; a collection's `(drop k c)` reads its last n members; a collection's own form reads all
+  of it: n members when it shows none, and a map or set shown sorted (its members' order is not
+  the collection's) is read whole with at most n left."
+  [text h v {:keys [n chars? form]}]
+  (let [rest (read-rest form h v)
+        drop? (and (seq? form) (= 'drop (first form)))]
+    (cond
+      chars? (let [[whole k] (if (and (seq? form) (= 'subs (first form))) [(read-rest (second form) h v) (nth form 2)] [rest 0])]
+               (and (= n (count rest)) (= rest (subs whole k))
+                    (str/includes? text (str (emit/string-literal (subs whole 0 k)) "…+" n))))
+      (nil? n) (some? (seq rest))
+      drop? (let [c (read-rest (nth form 2) h v)]
+              (and (= (nth form 1) (- (count c) n)) (= (seq rest) (seq (drop (- (count c) n) c)))))
+      (or (map? rest) (set? rest)) (<= n (count rest))
+      :else (= n (count rest)))))
 
 (defn- lawful? [raw budget]
-  (let [{:keys [text cuts]} (seon/print-value raw {:budget budget :handle 'result/e0123456789ab})]
+  (let [h 'result/e0123456789ab
+        {:keys [text truncated? elisions]} (seon/print-value raw {:budget budget :handle h})
+        cuts (cuts-of text)]
     (boolean
      (and (<= (select/estimate text) budget)
-          (every? (fn [c] (let [s (reduce step raw (:seon.render.data/path c))]
-                            (or (not (:seon.print/prefix c))
-                                (= s (str (:seon.print/prefix c) (subs s (:seon.render.data/next-offset c)))))))
-                  cuts)
-          (or (seq cuts) (= raw (edn/read-string text)))))))
+          (= elisions (count cuts))
+          ;; through a handle every cut names its form, but a long name's
+          (every? #(if (:name? %) (nil? (:form %)) (and (:form %) (reads-exactly? text h raw %))) cuts)
+          (or truncated? (= raw (edn/read-string text)))))))
 
 (def ^:private line-gen
   (gen/fmap str/join (gen/vector (gen/elements [\a \space \" \\ \tab \return \( \ü \日]) 0 90)))
@@ -51,23 +82,32 @@
                           :seed 202610071 :max-size 40)]
     (is (:pass? r) "a printed value broke its budget or a cut's continuation")))
 
+(deftest a-cut-counts-the-lines-it-left
+  ;; the line breaks are found once per string (select/line-breaks), and each cut counts the
+  ;; lines after it by binary search: the same count as reading the text after the cut
+  (let [naive (fn [^String s at] (+ (if (and (< at (count s)) (or (zero? at) (= \newline (.charAt s (dec at))))) 1 0)
+                                    (count (filter #(and (= \newline (.charAt s %)) (< (inc %) (count s))) (range at (count s))))))]
+    (doseq [s ["" "a" "\n" "a\n" "\na" "a\nb" "a\n\nb\n" "\n\n\n" (str/join "\n" (repeat 40 "a line"))]
+            at (range (inc (count s)))]
+      (is (= (naive s at) (select/lines-after (select/line-breaks s) (count s) at)) (pr-str s at)))))
+
 (deftest escaped-strings-stay-printable-under-a-small-budget
   (doseq [raw [(apply str (repeat 64 "\"")) (apply str (repeat 64 "\\")) (apply str (repeat 64 "\t")) [(apply str (repeat 64 "\""))]]]
-    (let [{:keys [text cuts]} (seon/print-value raw {:budget 40})
-          s (if (vector? raw) (first raw) raw)
-          c (first cuts)]
+    (let [{:keys [text]} (seon/print-value raw {:budget 40 :handle 'result/h1})
+          [c :as cs] (cuts-of text)]
       (is (string? text) "the value prints rather than refusing the budget")
-      (is (= s (str (:seon.print/prefix c) (subs s (:seon.render.data/next-offset c)))) "the cut continues exactly"))))
+      (is (= 1 (count cs)) text)
+      (is (reads-exactly? text 'result/h1 raw c) "the cut continues exactly"))))
 
 ;; ---- the one printer, at every place a value is shown ----------------------------------
 
 (deftest a-reply-value-cut-reads-its-rest-through-its-handle
-  (let [{:keys [text truncated? cuts]} (seon/print-value (vec (range 5000)) {:handle 'result/h7 :budget 100})]
+  (let [{:keys [text truncated?]} (seon/print-value (vec (range 5000)) {:handle 'result/h7 :budget 100})
+        [{:keys [n form]}] (cuts-of text)]
     (is truncated?)
     (is (re-find #"\(drop \d+ result/h7\)" text) "the cut names the form that reads the rest")
-    (let [c (first cuts)]
-      (is (= (list 'drop (:seon.render.data/next-offset c) 'result/h7) (:seon.print/continuation c)) (pr-str c))
-      (is (= 5000 (+ (:seon.render.data/next-offset c) (:seon.print/omitted c))) "shown + omitted is the whole"))))
+    (is (= (list 'drop (- 5000 n) 'result/h7) form) text)
+    (is (= (range (- 5000 n) 5000) (read-rest form 'result/h7 (vec (range 5000)))) "shown + omitted is the whole")))
 
 (deftest a-cut-reads-its-rest-through-a-form-handle
   ;; a value read by a form rather than held by a result var (one of the last turn's evals):
@@ -75,12 +115,11 @@
   (let [it {:form "(pp (code-of 3))" :out (apply str (repeat 400 "line 3 of output\n"))}
         evals [{} {} {} it]
         h '(nth (my.turn/evals) 3)
-        {:keys [text cuts]} (seon/print-value it {:handle h :budget 60})
-        c (first cuts)]
-    (is (= (list 'subs (list 'get-in h [:out]) (:seon.render.data/next-offset c)) (:seon.print/continuation c)) (pr-str c))
+        {:keys [text]} (seon/print-value it {:handle h :budget 60})
+        [c] (cuts-of text)]
+    (is (= ['subs (list 'get-in h [:out])] (take 2 (:form c))) (pr-str c))
     (is (re-find #"\(subs \(get-in \(nth \(my.turn/evals\) 3\) \[:out\]\) \d+\)" text) text)
-    (is (= (:out it) (str (:seon.print/prefix c) (subs (get-in (nth evals 3) [:out]) (:seon.render.data/next-offset c))))
-        "the form reads exactly the rest")))
+    (is (reads-exactly? text '(my.turn/evals) evals c) "the form reads exactly the rest")))
 
 (deftest a-refused-argument-is-shown-by-the-one-printer
   ;; seon.contract's error shows the offending value within the part budget, cut the printer's way

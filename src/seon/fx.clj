@@ -1,5 +1,5 @@
 (ns seon.fx
-  "Effects (session FX1, notes/option3-FX1-effects.md). Every outside effect kind has ONE
+  "Effects (session FX1, ../notes/archive/option3-FX1-effects.md). Every outside effect kind has ONE
   owner proc in root behind a bounded channel, and `workers` performer procs:
 
     agent --socket--> agent proc --:fx/<kind>--> owner --:work--> worker (performs)

@@ -10,7 +10,7 @@
   `:seon.db/*` properties, entity maps that declare their members (`:seon.db/attributes`),
   and one explicit plain-data slot (`{:seon.db/data true}`). Cut: Seon's vector cells and Datalog lowering, the
   projection (a registry generation), render-pair properties, secondary indexes, tuples, and
-  the automatic EDN codec for unions (see notes/option3-D1-schema-datahike.md).
+  the automatic EDN codec for unions (see ../notes/archive/option3-D1-schema-datahike.md).
 
   Pure derivation over a Malli registry: no connection, no transaction. The store's owner
   transacts what `declarations` answers.

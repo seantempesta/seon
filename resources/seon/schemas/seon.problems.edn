@@ -31,6 +31,10 @@
                                                      [:commit :uuid] [:t :int] [:branch-commit [:maybe :uuid]] [:image-t :int]]]
  :seon.root/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/proc-defect]] [:pid {:optional true} [:maybe :keyword]]]]
  :seon.root/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/refused]]]]
+ ;; a release (my.root/run!) of a task that is not held: unknown (execution nil), already
+ ;; running, or cancelled; the held ids of the same call are released
+ :seon.root/not-held [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/not-held]] [:task :string]
+                                             [:execution [:maybe [:enum :held :running :cancelled]]]]]
  ;; a defect answering one outside request at root's server (seon.server/respond): the
  ;; line it took, and the cause's ex-data printed; the server goes on serving
  :seon.server/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/defect]] [:line :string] [:data {:optional true} :string]]]
@@ -147,7 +151,7 @@
                          [:seon.fx/cache-hit-tokens {:optional true} :seon.fx/cache-hit-tokens]]
 
  ;; ---- the one read: seon.problems/report ----
- :seon.problems/class [:enum :platform :eval :agent :effect :red :cost :merge :dead :error :waste :stuck :failed :task-conflict]
+ :seon.problems/class [:enum :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict]
  :seon.problems/row [:map {:seon.render/ai seon.render.ai/problem-row}
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]

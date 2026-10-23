@@ -3,9 +3,9 @@
   is a row of data that one runner works (run-scenario): its specs, its boot, what a fresh
   agent must print on main afterwards and what else it asserts. The rows: the six-task graph
   with a cancel, a root restart in two phases, the merge scenarios (seon.fixtures/scenarios),
-  a swarm over shared definitions, a real model's run, and a task that always fails ending
-  stuck; a new run is one row. bin/check runs them as modes of target/seon:
-    calc | resume DIR | resume2 DIR | scenario conflict|semantic|hairy|newns|sibling [model] | swarm N M (verdict SWARM) | model add|calc | stuck
+  a swarm over shared definitions, a real model's run, and a task that always fails held for
+  root, then released by root; a new run is one row. bin/check runs them as modes of target/seon:
+    calc | resume DIR | resume2 DIR | scenario conflict|semantic|hairy|newns|sibling [model] | swarm N M (verdict SWARM) | model add|calc | held
     | loop DIR (the self-improvement loop's first turn, on a clone of this repository under DIR)
   Each run ends on what the system observes (the reconciler's quiescence report, an event,
   or a fact on main), never on a deadline. Prints one EDN line per phase; the last line is
@@ -68,7 +68,7 @@
     {:merge-attempts (frequencies (map :seon.attempt/status merge-as))
      :behind-reattempts (count (filter #(= :behind (:seon.attempt/status %)) merge-as))
      :conflicts-measured (reduce + (map #(count (:seon.attempt/conflicts % [])) merge-as))
-     :attached-tasks (count (filter #(pos? (:seon.task/generation % 0)) (vals ts)))
+     :held-tasks (count (filter #(= :held (:seon.task/execution %)) (vals ts)))
      :model-calls-in-merges (reduce + (map #(:seon.attempt/model-calls % 0) merge-as))}))
 
 (defn turns-per-merged-task
@@ -275,20 +275,34 @@
                     :square-splits (mapv #(nth % 2) sq-turns)}
              (not read-failure?) (assoc :square-second-context (second (second sq-turns))))))})
 
+(defn- held-as
+  "Did held (task name -> a word its reason holds) end held for root, each with its failure,
+  in task namespace tns on d, and every other task done?"
+  [d tns held]
+  (let [ids (into {} (for [[nm word] held] [(str tns "/" nm) word]))
+        ts (task/tasks d)
+        rows (into {} (for [id (keys ids)] [id (select-keys (get ts id) [:seon.task/execution :seon.task/failure])]))]
+    {:ok (and (every? (fn [[id word]] (let [{x :seon.task/execution f :seon.task/failure} (rows id)]
+                                        (and (= :held x) (str/includes? (str (:reason f)) word))))
+                      ids)
+              (every? :done (vals (apply dissoc (server/task-summaries d) (keys ids)))))
+     :held rows}))
+
 (defn- scenario
   "A merge scenario of seon.fixtures/scenarios: its tasks with their merge tasks, each merge
-  after its :after, all released; then what main runs. model: a real model's run, with its
-  own verdict."
+  after its :after, all released; then what main runs, and the tasks it expects held for
+  root (:held). model: a real model's run, with its own verdict."
   [k model]
-  (let [k (keyword k) model? (= "model" model)]
-    (merge (select-keys (get fx/scenarios k) [:specs :after])
-           {:boot (cond-> {:max-running 4} model? (assoc :provider (model-provider))) :tns (symbol (name k)) :max-turns 4}
-           (expectation k model?))))
+  (let [k (keyword k) model? (= "model" model) {:keys [held]} (get fx/scenarios k)]
+    (cond-> (merge (select-keys (get fx/scenarios k) [:specs :after])
+                   {:boot (cond-> {:max-running 4} model? (assoc :provider (model-provider))) :tns (symbol (name k)) :max-turns 4}
+                   (expectation k model?))
+      held (assoc :ok (fn [{:keys [d]}] (held-as d (name k) held))))))
 
 (defn- swarm
   "n tasks over 5 shared definitions, max-running m (more than 5, so tasks on one var run
-  at once and their merges conflict): conflicts arose, each was resolved by a merge agent
-  or ended in attached tasks, every task is done, nothing is stuck, and a fresh agent on
+  at once and their merges conflict): conflicts arose, each was resolved by a merge agent,
+  every task is done, nothing is stuck, and a fresh agent on
   main gets every proof's value (s_k-test asserts (v_j 100) = 100+j). Verdict SWARM."
   [n m]
   {:boot {:max-running (parse-long (or m "8"))} :specs (fx/swarm-specs (parse-long (or n "20"))) :tns 'sw :label "SWARM"
@@ -307,23 +321,46 @@
      :check (if add? "(app.calc/add 1 2)" "[(app.calc/add 1 2) (app.calc/sum-sq 3 4) (app.calc/abs -5)]")
      :ok (fn [{:keys [d]}] (all-done d))}))
 
-(defn- stuck
-  "A task that always fails ends observed stuck: add (always wrong) attaches refinement
-  chains until its budget is spent, then the reconciler records the stuck fact (cause and
-  what it blocks: twice, needing add) and reports quiescence; this run returns on that
-  report, with no deadline. Verdict: one root cause, the last chain's design (the
-  always-wrong model never improves the plan, so it is refused :no-design), blocking the
-  rest of its chain, twice and its merge; nothing held."
+(defn- held
+  "A task that always fails is held for root, and root's release runs it again on its branch,
+  from the evidence: add (always wrong) is refused once and held (its failure, its
+  evidence, the attempt closed); nothing else starts, no task is created, and the reconciler
+  reports quiescence naming add as the root cause of twice and the merges; the problems read
+  lists it. Root releases add (my.root/run!): one new attempt, on add's branch, whose agent
+  took the task from main with add#1's evidence (seon.task/onto-tx), refused and held again.
+  Each wait ends on the reconciler's quiescence report, with no deadline."
   []
   {:boot {:max-running 2 :provider {:kind :scripted :script 'seon.e2e/always-wrong}} :specs (vec (take 2 fx/calc)) :tns 'calc :max-turns 2
    :ok (fn [{:keys [sys q d]}]
-         (let [[row & more] (:root-causes q)]
-           {:ok (and (nil? more) (= "calc/add-r2-design" (:task row))
-                     (= ["calc/add-r2-implement" "calc/add-r2-merge" "calc/add-r2-test" "calc/twice" "calc/twice-merge"] (:blocks row))
-                     (not-any? #(= :held (:seon.task/execution %)) (vals (task/tasks d))))
-            :root-causes (:root-causes q)
-            :quiet-after-last-end-ms (- (now) (apply max 0 (keep :seon.attempt/end-ms (vals (task/attempts d)))))
-            :problems-stuck (count (get-in (root/problems sys) [:classes :stuck :rows]))}))})
+         (let [blocks ["calc/add-merge" "calc/twice" "calc/twice-merge"]
+               [row & more] (:root-causes q)
+               ts (task/tasks d)
+               add (get ts "calc/add")
+               first? (and (nil? more) (= "calc/add" (:task row)) (= "calc/add#1" (:attempt row)) (= blocks (:blocks row))
+                           (= :held (:seon.task/execution add)) (= "calc/add#1" (:attempt (:seon.task/failure add)))
+                           (= "calc/add#1" (:from (:seon.task/evidence add)))
+                           (= #{"calc/add" "calc/add-merge" "calc/twice" "calc/twice-merge"} (set (keys ts)))
+                           (= [[:closed]] (mapv (comp vector :seon.attempt/status) (vals (task/attempts d)))))
+               problems (get-in (root/problems sys) [:classes :failed :rows])
+               ;; root decides: run it again
+               _ (println :release (select-keys (root/run! sys ["calc/add"]) [:ok]))
+               q2 (quiet! sys)
+               d2 (db sys)
+               a2 (task/attempt d2 "calc/add#2")
+               branch (task/default-branch "calc/add")
+               on-branch (task/task (:db @(c/branch-db sys branch)) "calc/add")
+               second? (and (= branch (get-in a2 [:seon.attempt/env :branch]))
+                            ;; the agent took its task from main: add#1's evidence
+                            (= "calc/add#1" (:from (:seon.task/evidence on-branch)))
+                            (= "calc/add#2" (:attempt (:seon.task/failure (task/task d2 "calc/add"))))
+                            (= :held (:seon.task/execution (task/task d2 "calc/add")))
+                            (= 2 (count (task/attempts d2))) (= 4 (count (task/tasks d2)))
+                            (= ["calc/add"] (mapv :task (:root-causes q2))))]
+           {:ok (and first? second? (= 1 (count (filter :open? problems))))
+            :first-hold first? :release-on-the-same-branch second?
+            :root-causes (:root-causes q) :root-causes-after-release (:root-causes q2)
+            :quiet-after-last-end-ms (- (now) (apply max 0 (keep :seon.attempt/end-ms (vals (task/attempts d2)))))
+            :problems-failed (count problems)}))})
 
 (defn run
   "One e2e mode; answers whether it passed. No mode, or an unknown one: its usage, then
@@ -331,7 +368,7 @@
   [mode [x y]]
   (case mode
     "loop" (loop-run x)
-    ("calc" "resume" "resume2" "scenario" "swarm" "model" "stuck")
+    ("calc" "resume" "resume2" "scenario" "swarm" "model" "held")
     (run-scenario (case mode
                     "calc" (calc x)
                     "resume" (restart false x)
@@ -339,7 +376,7 @@
                     "scenario" (scenario x y)
                     "swarm" (swarm x y)
                     "model" (model-run x)
-                    "stuck" (stuck)))
-    (do (println (str "e2e: no mode " mode "; usage: seon e2e loop|calc|resume|resume2|scenario|swarm|model|stuck [ARGS]"))
+                    "held" (held)))
+    (do (println (str "e2e: no mode " mode "; usage: seon e2e loop|calc|resume|resume2|scenario|swarm|model|held [ARGS]"))
         (println "E2E FAILED")
         false)))

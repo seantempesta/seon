@@ -7,7 +7,7 @@
   Need: the agents' reply text and the dashboard's value panel. Taken from Seon's
   `seon.print` (clone a780860c3) and cut to what the value printer (`seon.print.select`)
   reaches: the node kinds it builds, its cuts and their continuation forms. Keys keep
-  Seon's names (`:seon.print/*`, `:seon.render.data/*`): the cuts are data agents read.
+  Seon's names (`:seon.print/*`, `:seon.render.data/*`); a cut is read as its text.
   Dropped mechanisms are listed in notes BAGGAGE (proto/BAGGAGE.md)."
   (:require [clojure.string :as str]))
 
@@ -72,43 +72,25 @@
         (seq? form) (str "(" (str/join " " (map form-text form)) ")")
         :else (literal form)))
 
+(defn cut-words
+  "The words of a text's cut, the same in a value (after its string's shown prefix) and in prose:
+  `…+N chars` and, when lines begin in what it omitted, `in M more lines`, then the form that
+  reads the rest when there is one."
+  {:malli/schema [:=> [:cat nat-int? nat-int? :any] :string]}
+  [omitted lines continuation]
+  (str "…+" omitted " chars" (when (pos? lines) (str " in " lines " more line" (when (not= 1 lines) "s")))
+       (when continuation (str " " (form-text continuation)))))
+
 (defn elided-text
-  "The one text of a cut: `…N`, `\"prefix\"…+N` or `…?`, then its continuation form."
+  "The one text of a cut: `…N` or `…?`, then its continuation form; a string's
+  `\"prefix\"`, then its `cut-words`."
   {:malli/schema [:=> [:cat :seon.print/node] :string]}
   [node]
-  (let [prefix (or (:seon.print/prefix node) "")
-        text (case (:seon.print/elision-unit node)
-               :characters (str (string-literal prefix) "…+" (:seon.print/omitted node))
-               :pending "…?"
-               (str "…" (:seon.print/omitted node "?")))]
-    (if-some [form (:seon.print/continuation node)]
-      (str text " " (form-text form))
-      text)))
-
-(defn elision
-  "One cut node: what was omitted, where, and the form that reads the rest."
-  {:malli/schema [:=> [:cat :map] :seon.print/node]}
-  [{:seon.print/keys [requery-id requery-refused omitted elision-unit prefix bound-by]
-    supplied :seon.print/continuation profile-id :seon.render.profile/id path :seon.render.data/path
-    next-offset :seon.render.data/next-offset total :seon.render.data/total}]
-  (cond-> {:seon.print/face :seon.print/elided}
-    (some? omitted) (assoc :seon.print/omitted (max 1 (long omitted)))
-    (some? elision-unit) (assoc :seon.print/elision-unit elision-unit)
-    (some? path) (assoc :seon.render.data/path (vec path))
-    (some? next-offset) (assoc :seon.render.data/next-offset (long next-offset))
-    (some? profile-id) (assoc :seon.render.profile/id profile-id)
-    (some? total) (assoc :seon.render.data/total (long total))
-    (some? prefix) (assoc :seon.print/prefix prefix)
-    (some? bound-by) (assoc :seon.print/bound-by bound-by)
-    (some? requery-id) (assoc :seon.print/requery-id requery-id)
-    (some? supplied) (assoc :seon.print/continuation supplied)
-    (and (nil? supplied) (or (symbol? requery-id) (seq? requery-id)))
-    (assoc :seon.print/continuation (continuation {:seon.print/requery-id requery-id :seon.print/elision-unit elision-unit
-                                                   :seon.render.data/path (or path [])
-                                                   :seon.render.data/next-offset next-offset}))
-    (and (nil? requery-id) (some? requery-refused)) (assoc :seon.print/requery-refused requery-refused)
-    (and (nil? requery-id) (nil? requery-refused))
-    (assoc :seon.print/requery-refused "the source has no stable requery identity")))
+  (let [form (:seon.print/continuation node)]
+    (case (:seon.print/elision-unit node)
+      :characters (str (string-literal (or (:seon.print/prefix node) "")) (cut-words (:seon.print/omitted node) (:seon.print/lines node) form))
+      (cond-> (if (= :pending (:seon.print/elision-unit node)) "…?" (str "…" (:seon.print/omitted node "?")))
+        form (str " " (form-text form))))))
 
 ;;; Emission: one walk appends a node tree's fipp-style operation maps to one vector; text is
 ;;; the layout of that stream, hiccup a fold over the same stream.
@@ -147,7 +129,8 @@
   [node text]
   (let [prefix (or (:seon.print/prefix node) "")
         shown (when (= :characters (:seon.print/elision-unit node)) prefix)
-        label (if shown (subs text (count (string-literal prefix))) text)
+        ;; a string's label is its cut's words (the text after its prefix's literal)
+        label (if shown (cut-words (:seon.print/omitted node) (:seon.print/lines node) (:seon.print/continuation node)) text)
         reason (when-not (:seon.print/continuation node) (:seon.print/requery-refused node))
         marker [:span (cond-> {:class (css-class :seon.print/elision)} reason (assoc :title reason)) label]]
     (if shown

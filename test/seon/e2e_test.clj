@@ -73,7 +73,7 @@
               (let [tid (str "demo/" id) branch (task/default-branch (str "demo/" (first (str/split id #"-"))))]
                 (conj (task/attempt-start-tx (str tid "#" n) tid "boot-1" (keyword (str "a-" id n)) {:branch branch :model nil :max-turns 4} 1000 "Make it true.")
                       {:seon.attempt/id (str tid "#" n) :seon.attempt/status status :seon.attempt/turns turns})))
-        db (d/db-with db (concat (att "a" 1 :bailed 3) (att "a" 2 :ended 2) (att "a-merge" 1 :merged 0)
+        db (d/db-with db (concat (att "a" 1 :closed 3) (att "a" 2 :ended 2) (att "a-merge" 1 :merged 0)
                                  (att "b" 1 :ended 1) (att "b-merge" 1 :merged 0)
-                                 (att "c" 1 :ended 4) (att "c-merge" 1 :bailed 0)))]
+                                 (att "c" 1 :ended 4) (att "c-merge" 1 :closed 0)))]
     (is (= 3.0 (double (e2e/turns-per-merged-task db))) "a and b reached main: (3 + 2 + 1) turns over 2 tasks; c did not")))

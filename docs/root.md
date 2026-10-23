@@ -1,0 +1,53 @@
+# Root
+
+Root is the control process: it opens the one store, forks the fork server, runs one Flow graph of procs on its main, and from there reconciles the tasks on main into agents, judgements and merges (`seon.root`, `seon.reconcile`).
+
+## The root graph
+
+Root's procs are declared as data in `resources/seon/system.edn` and started all at once as one Flow graph; there is no start order, because every proc parks on its inputs until upstream sends.
+
+| Proc | Step-fn | What it owns |
+|---|---|---|
+| `:api` | ```seon.root/api-proc``` | where requests come in: callers' reply promises, the agents' procs, root's view; it routes every request and answer as data |
+| `:writer` | `seon.writer/writer-proc` | the only transact, branch and merge caller, with group commit ([storage](storage.md)) |
+| `:flusher` | `seon.writer/flusher-proc` | the store's sync ([storage](storage.md)) |
+| `:fork-server` | `seon.fork-server/fork-server-proc` | the fork server's command pipe, its events, its standby ([processes](processes.md#the-fork-server)) |
+| `:reconciler` | `seon.reconcile/reconciler-proc` | main's commits, turned into actions ([attempts](#attempts-and-judging)) |
+| `:render` | `seon.render.proc/render-proc` | the dashboard's views ([dashboard](dashboard.md)) |
+| `:web` | `seon.web/web-proc` | the HTTP listener and the tabs ([dashboard](dashboard.md)) |
+
+The file's `:fx` map declares the effect kinds (`:echo`, `:file`, `:source`, `:git`, `:deps`, `:build`, `:model`), each built into an owner proc ``:fx/<kind>`` and its workers. Each agent adds one more proc, `seon.agent-proc/agent-proc`, added and removed with `flow/update!` ([processes](processes.md#the-agent-process)).
+
+```seon.system/build``` turns the declaration into procs and conns, filling each ``:bind/<name>`` keyword from the values boot holds; `seon.system/read-decl` reads the file. ```seon.root/apply!``` re-reads it while root runs and rebuilds only the procs whose declaration changed; an unchanged proc keeps its queue (`bin/check system` proves both). The proc contract they all follow: [flow](flow.md).
+
+## Boot
+
+Boot opens the store, forks the fork server while root has one thread, starts the graph, and writes one boot fact on main whose commit is the reconciler's first pass: ```seon.root/start!```.
+
+In order: the store is opened and main resumed (`seon.db/open!`); the program loaded (`seon.program/load-all!`); the code paths agents take are run once (`seon.root/warm!`), so forked children inherit them compiled; the fork server is forked (the physics rule: [failure points](failure-points.md#physics-who-may-run-threads)); the GC's sweeper threads are set to `:seon.config.root/gc-sweepers`; the graph starts. Then one write holds the boot fact (`seon.task/boot-tx`: a new boot id and `:seon.config.agent/max-running`), the config in force (`seon.config/facts`, [config](config.md#facts-on-main)), the wiki (```seon.root/wiki-tx```) and how the previous root on this main ended (```seon.root/previous-end```: its stop fact, or `:unclean` when it wrote none). A refused boot fact ends the boot. Last, main's program follows Seon's own source (```seon.root/import-source!```, [source](source.md#import-the-running-generations-source-as-mains-program)).
+
+Attempts of an earlier boot still `:running` are reaped as `:lost` ("root restarted") by the reconciler's first pass.
+
+`seon.root/stop!` drains the graph and first writes `:seon.root/stopped` (`{:boot :cause :at-ms}`), so every clean end says why. `bin/root start` runs a root detached on this checkout's ports; `bin/root next` stops it and starts the next generation's binary on the same store and main ([source](source.md#the-next-generation)).
+
+## Attempts and judging
+
+An attempt is one agent's try at a task; the reconciler starts it, and judges its end from measured facts only.
+
+```seon.reconcile/actions``` derives, from an index of main kept current by each commit's datoms (`seon.reconcile/index`, `seon.reconcile/observe`), what root does next, in order: reap, kill, judge, an octopus merge of the green merge attempts, then spawns of ready tasks up to `:seon.config.agent/max-running` (merges up to `:seon.config.merge/max-running`). A pass costs what changed plus what is in flight, never the number of tasks.
+
+An attempt's status (`:seon.attempt/status`) moves `:running` → `:ended` (or `:dead`, `:killed`, `:lost`) → `:done`, `:merged`, `:behind`, `:bailed`, `:closed`; `:refused` is a spawn root refused. The schema's properties name the finished, judged and failed sets, read through `seon.contract/properties` ([render](render.md)). Its outcome (`:seon.attempt/outcome`) is what its turn loop wrote: `:green`, `:red`, `:waiting`, `:cap`, `:failed`, `:merge-failed`, `:error`, or `:no-end` when the agent wrote none (it died, was killed, or never reached `seon.turn/end!`) ([turn](turn.md#one-attempt-from-release-to-judge)).
+
+The judge asks the agent's REPL for its proofs' results (`:tests`), reads the branch and the writer's diff of it, stops the agent, and writes the end with `seon.reconcile/judge-tx`: outcome, results, contract gaps, unmerged keys, the task content the branch changed carried to main. Then `seon.reconcile/done-refusals` decides ([tasks](tasks.md#the-done-rule)): none, and the attempt is accepted (`:done`), or for a merge task, ready to merge. A refused or dead attempt attaches a refinement chain while its task has budget (`seon.reconcile/refine?`, `:seon.config.task/budget`); spent, it bails and the task is stuck ([below](#stuck-and-blocked)). An outside agent's `seon_done` enters the same judge ([server](server.md#ops)).
+
+## Holders and spawn refusals
+
+A branch has at most one live agent, and root refuses a spawn past `:seon.config.root/max-agents` live agents: both are refusals the api answers, recorded as the attempt.
+
+The api's `:spawn` request names the branch's holder: a live agent whose branch it is. Then root answers `seon.root/spawn!`'s refusal ("branch … is held by live agent …"); past the live-agent bound, "too many live agents" (`:clone` has the same bound). The reconciler writes the refusal as the attempt itself, status `:refused` with root's reason, and asks again only once main moves for another reason: asking an unchanged main would be refused again. A collection waits the same way: the api refuses `:collect` while any agent is live ([storage](storage.md#collection)).
+
+## Stuck and blocked
+
+Why released work is not done is observed, never held: ```seon.reconcile/stuck``` reads it from the index at quiescence.
+
+A task is stuck when its budget is spent (```seon.reconcile/stuck-tx``` writes `:seon.task/stuck` with the cause and the released tasks it blocks, and the problem); when its latest attempt was a refused spawn; or when it is not released (cancelled, held) but released work needs it. Blocked is a task's derived state when a need is not done (`seon.reconcile/blocked-by`, `seon.reconcile/task-state`: [tasks](tasks.md#where-a-tasks-state-lives)). When nothing is in flight and no attempt is live after a pass that started nothing, the reconciler writes `:seon.root/quiescent` once per quiet spell (the t judged and the stuck rows; read by `seon.reconcile/quiescent`) and asks the writer to collect the store. `my.root/problems` reports stuck tasks among the other problems ([errors](errors.md#problems)).

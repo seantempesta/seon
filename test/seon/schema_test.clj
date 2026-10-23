@@ -40,7 +40,7 @@
          (finally (reset! agent/state old)))))
 
 (def ^:private paused-status
-  "[:and {:seon.db/index true} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed :refused :paused]]")
+  "[:and {:seon.db/index true} [:enum :running :ended :killed :dead :lost :done :merged :behind :closed :refused :paused]]")
 
 (deftest register-validates-against-the-population
   (let [[printed db] (evals (main-db)
