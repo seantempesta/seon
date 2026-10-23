@@ -1,7 +1,7 @@
 (ns seon.writer
   "The writer: the only d/transact, d/branch! and merge caller, with group commit (drain
   the in-port, one Datahike commit per branch, one flush). From proto/flow f2-final
-  proto.control's writer (session F2; writer design A, ../notes/archive/option3-F1-flow.md section 4)."
+  proto.control's writer (session F2; writer design A, notes/archive/option3-F1-flow.md section 4)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
             [seon.program :as program] [seon.merge :as pm] [seon.source :as source] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
