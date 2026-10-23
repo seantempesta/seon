@@ -472,6 +472,7 @@ dl.cfg dd code { color: var(--text-100); }
 .wlayout .chat { display: flex; flex-direction: column; gap: 12px; min-width: 0; overflow-y: auto; padding-bottom: 12px; }
 .wlayout .wside { overflow-y: auto; min-width: 0; padding-bottom: 12px; }
 .wtiles { display: flex; flex-direction: column; gap: 10px; }
+.wrule { margin: 0 0 6px; font-size: 12px; }
 .wtile { min-width: 0; }
 .wtile > .cb, .wtile > .box, .wtile > section { margin: 0; }
 .winput { position: sticky; bottom: 0; background: var(--base-950, var(--base-900)); padding: 8px 0 12px; display: flex; gap: 8px; align-items: center; }

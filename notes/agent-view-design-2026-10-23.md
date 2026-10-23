@@ -192,6 +192,14 @@ That is 19 contracted calls an attempt plus 47 fixed, linear.
 
 **Live, by event, no polling.** As in the prototype: an agent's `:commit` event re-reads its branch. Added: a turn-start event at `basis!` gives a pending row.
 
+**As built (2026-10-23), where it differs from the plan above:**
+- No pushState: plain links between windows do it.
+- The conversation's rows and the right column's tiles are each their own unit (a tile's id carries its change number, prepended on change), not whole parts re-rendered.
+- There is no `:as` declaration map: `:as` is a prop of the one render function.
+- Messages are facts (root's ruling): `:seon.message/*` on main and on the taking agent's branch, the basis naming them by id.
+- `/attempt/{id}` windows, stable across boots, beside `/agent/{id}`.
+- The dashboard's agent card is still a render of its own; the owner's direction (2026-10-23) is that root's page becomes the same window, with each agent's tile the agent's own tile render, compact by CSS.
+
 ## 5. Thought next to the forms (owner direction, 2026-10-23)
 
 The owner wants the context to explain the work as Clojure code being evaluated, and the agent to think in `;;` comments beside the forms it evaluates. Each comment is recorded with its form's evaluation, as `:form/lead` keeps a definition's leading comments. The eval tool may also get an optional `thinking` parameter, recorded with its call.
@@ -236,6 +244,8 @@ The debug view then needs no parsing of `:code`. It reads `:lead`, `:form` and t
 - task `seon.render/a-turn-is-a-row-on-the-agent-page`.
 
 **Net ≈ +400**, which I expect within 2x. That is about 4% of the 10k budget.
+
+**Measured at the build (2026-10-23):** against main at e2d69fe3 the branch was +2,185/−534 lines over 46 files, notes and tasks included; `src` alone is in `git diff --stat main -- src`.
 
 ## 7. What the prototype's verifier found (fix list for whoever builds it)
 

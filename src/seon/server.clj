@@ -112,8 +112,10 @@
    :context {:doc "The current-state block of the task an agent works: what the model would read now."
              :args {:agent {:type "string"}} :required ["agent"]
              :answer (fn [sys ag _]
-                       (if-let [{:keys [task attempt]} (attempt-of sys ag)]
-                         (let [r @(c/submit! sys ag (sedn/encode (list 'print (list 'seon.turn/context-block task attempt))) {:origin :context})]
+                       (if-let [{:keys [task attempt env]} (attempt-of sys ag)]
+                         ;; an outside model's read is its turn, and takes its messages; anyone
+                         ;; else's read of an agent its model drives only looks
+                         (let [r @(c/submit! sys ag (sedn/encode (list 'print (list 'seon.turn/context-block task attempt (= "outside" (:model env))))) {:origin :context})]
                            (cond (contract/error? r) r (= :err (:tag (last r))) (:err (last r)) :else {:context (:out (last r))}))
                          (refused (str ag " works no task: attach one first"))))}
    :message {:doc "Send a running agent a message (the owner's words): root delivers it, and the agent's next turn reads it in its current-state block (:messages). The page's message bar sends the same request (seon.root/message!)."

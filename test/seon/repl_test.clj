@@ -195,10 +195,11 @@
 (deftest a-forms-lead-is-recorded-with-its-eval
   ;; owner, 2026-10-23: the agent thinks in ;; comments beside the forms it evaluates; each
   ;; form's comments are recorded with its evaluation (as :form/lead keeps a definition's), so
-  ;; its page reads thought -> form -> result. A form with none has no :lead; a comment after the
-  ;; last form leads nothing
+  ;; its page reads thought -> form -> result. A form with none has no :lead; a comment on the
+  ;; line a form ends on is that form's, not the next one's; a comment after the last form leads
+  ;; nothing
   (let [items (repl/eval-string ";; first, the sum\n;; of two\n(+ 1 2)\n\n(+ 3 4) ; trailing\n;; why: the product\n(* 2 3)\n;; left over" {"ns" "user" :origin :outside})
         recs (map :seon.cluster.eval/record (filter :seon.cluster.eval/record (repl/record-tx :a1 "r" items nil)))]
-    (is (= [";; first, the sum\n;; of two" nil "; trailing\n;; why: the product"] (mapv :lead items)) (pr-str items))
+    (is (= [";; first, the sum\n;; of two" nil ";; why: the product"] (mapv :lead items)) (pr-str items))
     (is (= ["3" "7" "6"] (mapv :printed items)))
     (is (= (mapv :lead items) (mapv :lead recs)) "its record keeps it")))

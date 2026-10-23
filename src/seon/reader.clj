@@ -29,11 +29,17 @@
 (defn lead
   "The ; comments before the form that ends at end in text, read from i (where the form
   before it ended): the text between them, trimmed, when it holds a comment, else nil. A
-  form's lead is what its writer said before it: a definition's (:form/lead), and an
-  evaluation's thought."
+  comment on the line the form before ended on is that form's, so the lead starts on the
+  next line. A form's lead is what its writer said before it: a definition's (:form/lead),
+  and an evaluation's thought."
   {:malli/schema [:=> [:cat :string :int :int] [:maybe :string]]}
   [^String text i end]
-  (let [l (str/trim (subs text i (lead-end text i end)))]
+  (let [nl (.indexOf text "\n" (int i))
+        i (if (and (pos? i) (<= 0 nl) (< nl end)
+                   (let [s (str/triml (subs text i nl))] (or (= "" s) (str/starts-with? s ";"))))
+            (inc nl)
+            i)
+        l (str/trim (subs text i (lead-end text i end)))]
     (when (str/includes? l ";") l)))
 
 (defn opts

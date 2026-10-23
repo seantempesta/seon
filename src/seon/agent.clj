@@ -76,11 +76,12 @@
     (do (doseq [r (handle! m)] (send! r)) true)
     false))
 
-(defn messages
-  "The messages delivered to this agent and not yet taken ({:from :body}), taken: root's
-  requests (e.g. :catch-up, \"main moved, merge main\"), other agents' sends and the owner's
-  (the page's message bar). What root sent before this call is read off the socket first
-  (without waiting); any other request read waits in :pending for the loop."
+(defn inbox
+  "The messages delivered to this agent and not yet taken ({:from :body}, and :id :to for a
+  message that is a fact), left in the inbox: root's requests (e.g. :catch-up, \"main moved,
+  merge main\"), other agents' sends and the owner's (the page's message bar). What root sent
+  before this call is read off the socket first (without waiting); any other request read
+  waits in :pending for the loop."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
   (loop []
@@ -88,6 +89,13 @@
       (when-not (#{:none :eof} m)
         (when-not (arrived! m) (swap! state update :pending conj m))
         (recur))))
+  (:inbox @state))
+
+(defn messages
+  "The inbox (inbox), taken: its reader is the turn that read them."
+  {:malli/schema [:=> [:cat] [:vector :map]]}
+  []
+  (inbox)
   (let [[old _] (swap-vals! state assoc :inbox [])] (:inbox old)))
 (defn send-message
   "Send body to the agents tos (ids); root delivers it by id. nil."

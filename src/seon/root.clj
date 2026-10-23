@@ -945,8 +945,9 @@
 
 (defn message!
   "Send the owner's message body (a string) to the agent: root's one delivery, into the
-  agent's inbox, which its next turn takes into the block it reads (:messages). A promise of
-  {:delivered id}, or refused when no live agent has the id."
+  agent's inbox, which its next turn takes into the block it reads (:messages), and a fact on
+  main (:seon.message/*). A promise of the writer's answer for that fact's transaction, or
+  refused when no live agent has the id."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id :string] :seon.host/promise]}
   [sys agent-id body] (request! sys 'message! agent-id {:body body}))
 

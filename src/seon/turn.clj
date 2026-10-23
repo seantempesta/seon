@@ -142,11 +142,13 @@
   messages delivered since the last turn (taken: the turn is their reader; a message that is
   a fact is written on this branch first, the same fact root wrote on main, and the basis
   names it by id, so its text is read again from the commit), and the last evaluations'
-  transcript while no earlier turn shows them."
-  {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id :int :int :seon.turn/origin :map] :seon.turn/basis]}
-  [task attempt turn max-turns origin observed]
-  (let [msgs (agent/messages)
-        {facts true others false} (group-by (comp some? :id) msgs)
+  transcript while no earlier turn shows them. A read that is not the attempt's turn (take?
+  false: an observer's read of an agent its model drives) shows the inbox and leaves it, each
+  message as it was sent."
+  {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id :int :int :seon.turn/origin :map :boolean] :seon.turn/basis]}
+  [task attempt turn max-turns origin observed take?]
+  (let [msgs (if take? (agent/messages) (agent/inbox))
+        {facts true others false} (if take? (group-by (comp some? :id) msgs) {false msgs})
         _ (when (seq facts)
             (agent/transact! (vec (for [{:keys [id from to body]} facts]
                                     (cond-> {:seon.message/id id :seon.message/from (name from) :seon.message/body body}
@@ -158,7 +160,7 @@
              :origin origin :observed (cond-> (dissoc observed :merge?)
                                         (seq facts) (assoc :message-ids (mapv :id facts))
                                         ;; a send no fact holds (another agent's, until its sender writes one)
-                                        (seq others) (assoc :messages (mapv #(select-keys % [:from :body]) others)))}
+                                        (seq others) (assoc :messages (mapv (fn [{:keys [from body]}] {:from (name from) :body body}) others)))}
       (:merge? observed) (assoc :merge? true)
       ev (assoc :last-evals ev))))
 
@@ -173,7 +175,7 @@
         proofs (:proofs (:seon.task/accumulated t))
         t0 (profile/now-ns)
         basis (basis! (:seon.task/id t) attempt turn max-turns :model
-                      (cond-> (observed obs) merge? (assoc :merge? true)))
+                      (cond-> (observed obs) merge? (assoc :merge? true)) true)
         {:keys [block messages]} (context/render (agent/db) basis)
         context-ms (long (profile/ms-since t0))
         t1 (profile/now-ns)
@@ -230,14 +232,15 @@
   "The current-state block of task, as the model sees it on this branch now (the proofs run
   again): what an outside agent working the task reads, recorded as a turn of the attempt
   (origin :outside). It also makes this process work task as attempt, so the my.* functions act
-  on it."
-  {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id] :string]}
-  [task attempt]
+  on it. take?: the read is the attempt's turn (its model is outside) and takes the messages
+  delivered; else it is an observer's, and leaves them for the model's next turn."
+  {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id :boolean] :string]}
+  [task attempt take?]
   (let [{:keys [plan-before]} (begin! task attempt)
         {:keys [tests-ms] :as obs} (observe task plan-before)
         n (get-in (swap! agent/state update-in [:turn :reads] (fnil inc 0)) [:turn :reads])
         t0 (profile/now-ns)
-        basis (basis! task attempt n 1 :outside (assoc (observed obs) :merge? true))
+        basis (basis! task attempt n 1 :outside (assoc (observed obs) :merge? true) take?)
         text (context/reader-text (:messages (context/render (agent/db) basis)))]
     ;; the read is a turn of this attempt, as a model turn is: what it was built from and what it cost
     (agent/transact! [{:seon.turn/id (str attempt "/read-" n) :seon.turn/attempt attempt :seon.turn/n n

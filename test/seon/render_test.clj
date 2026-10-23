@@ -309,7 +309,7 @@
 
 (deftest a-context-read-is-shown-once
   (let [ctx (str "{:turn \"1 of 8\" :refused [{:reason :contract-gap :vars [" (str/join " " (for [i (range 360)] (str "app.m/f" i))) "]}]}")
-        read {:id 0 :tag :ret :form "(print (seon.turn/context-block \"t/x\" \"t/x#1\"))" :printed "nil" :out ctx :origin :context}
+        read {:id 0 :tag :ret :form "(print (seon.turn/context-block \"t/x\" \"t/x#1\" true))" :printed "nil" :out ctx :origin :context}
         card (h/html (ui/agent-card {:id :a14 :status :idle :evals [read]} {}))
         row (h/html (ui/history-row read {}))]
     (testing "a card and a history row refer to the block; they never print it again"
@@ -672,8 +672,11 @@
               (assoc (u 3900 120 0) :seon.turn/reasoning "The plan says triple; the proof checks (f 2) is 6."))
        (d/transact conn (seon.repl/record-tx :a3 "a3-77-2000" [{:id 6 :tag :ret :form "(f 2)" :printed "6" :ms 0.1 :origin :ui}] nil))
        (d/transact conn (program "(defn f \"Triples.\" [x] (* 3 x))"))
+       ;; the owner's message as seon.turn/basis! takes it: the fact root wrote on main, written on
+       ;; the branch before the turn's commit, and named by id in the basis
+       (d/transact conn [{:seon.message/id "m-1" :seon.message/from "owner" :seon.message/to "demo/f#1" :seon.message/body "check demo/g too"}])
        (turn! 1 (assoc observed :results {'demo-test/f-test :pass} :reds [] :reasons [] :will-merge {:changed ['demo/f]}
-                       :messages [{:from :owner :body "check demo/g too"}])
+                       :message-ids ["m-1"])
               "Done; checking g." [{:id "call-1" :code "(my.turn/wait)" :evals ""}] (u 4400 40 3800))
        (f @conn)))))
 
@@ -687,7 +690,12 @@
       (let [page (zoom db :a3 attempt1 {:status :running :branch :task-demo-f :pid 77 :evals [] :running {:form "(seon.turn/work! '{})"}})
             [t0 t1] (turn-rows-of page)]
         (is (= 2 (count (turn-rows-of page))) "every turn, oldest first")
-        (is (str/includes? t0 "turn 1") "numbered as its context says it (:turn \"1 of 8\")") (is (str/includes? t1 "turn 2"))
+        (is (str/includes? t0 "turn 1 of 8") "numbered as its context says it (:turn \"1 of 8\")") (is (str/includes? t1 "turn 2 of 8"))
+        (is (str/includes? t0 "id demo/f#1/0") "and its id, which counts from 0, named as an id")
+        (is (str/includes? t0 "its thought ") "a form's lead is labeled a thought, not the reply")
+        (is (str/includes? t0 "its reply ") "the reply labeled")
+        (is (str/includes? (h/html (ui/turn-row {:seon.turn/id "demo/f#1/2" :seon.turn/n 2 :seon.turn/origin :model :seon.turn/reply ""} {})) "no reply text")
+            "a model turn that answered only with forms says so")
         (testing "tokens, the cached share, the cost at the model's prices, where the time went, how it stopped"
           (is (str/includes? t0 "4,020 tokens"))
           (is (str/includes? t0 "0% cached"))
@@ -699,7 +707,7 @@
           (is (str/includes? t0 "I will make f triple."))
           (is (str/includes? t0 "The plan says triple"))
           (is (str/includes? t0 "redefine f, then the proof runs") "the call's thinking")
-          (is (re-find #"(?s)<p class=\"lead\">work in demo</p>.*\(in-ns 'demo\).*#namespace\[demo\].*<p class=\"lead\">triple, as the plan says</p>.*\(defn f \[x\] \(\* 3 x\)\).*#'demo/f" t0)
+          (is (re-find #"(?s)<p class=\"lead\"><em>its thought </em>work in demo</p>.*\(in-ns 'demo\).*#namespace\[demo\].*<p class=\"lead\"><em>its thought </em>triple, as the plan says</p>.*\(defn f \[x\] \(\* 3 x\)\).*#'demo/f" t0)
               "per form, in order: its thought, the form, its result")
           (is (str/includes? t0 "what call-0 answered, as the model read it")))
         (testing "the evaluations outside the turns are in the conversation in the order they were written: the owner's (f 2), not the turn's forms again"
@@ -707,9 +715,9 @@
           (is (= [:seon.turn/turn-fact :seon.agent/item :seon.turn/turn-fact] (mapv :schema (:conv page))) "two turns, and the owner's evaluation between them")
           (is (str/includes? (nth (conv-html page) 1) "(f 2)") "written after turn 0's forms, before turn 1"))
         (testing "the proofs it saw and the messages it took"
-          (is (str/includes? t0 "0/1 pass"))
+          (is (str/includes? t0 "0/1 proofs pass"))
           (is (str/includes? t0 "✕ <code>f-test</code>"))
-          (is (str/includes? t1 "1/1 pass"))
+          (is (str/includes? t1 "1/1 proofs pass"))
           (is (str/includes? t1 "since the turn before: f-test fail → pass") "what changed since the turn before")
           (is (str/includes? t1 "check demo/g too")))
         (testing "the head: totals over the turns, priced where the provider split its cache"
@@ -866,7 +874,7 @@
         patch (first (filter #(and (= :patch (:op %)) (= :a1 (:view %))) (:to-web out)))
         tile-ids (fn [xs] (keep #(re-find #"tile-[a-z]+-\d+" (str %)) xs))]
     (is (= "#z-tiles" (ffirst (:prepends patch))) "the changed tile is prepended")
-    (is (str/includes? (second (first (:prepends patch))) "its last run: 1 pass"))
+    (is (str/includes? (second (first (:prepends patch))) "its last run: 1 proof, its assertions 1 pass") "proofs and assertions each named")
     (is (= 1 (count (re-seq #"class=\"wtile\"" (second (first (:prepends patch)))))) "one tile, not the column")
     (is (= ["tile-proofs"] (map #(re-find #"tile-[a-z]+" %) (filter #(str/starts-with? % "tile-") (:removes patch)))) "its old element removed")
     (is (empty? (tile-ids (map first (:frags patch)))) "no other tile is sent")))

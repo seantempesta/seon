@@ -515,7 +515,7 @@
  :seon.config.render/history-row-budget 400
  ;; Unit: tokens each part of a turn on its agent's page shows (its reply, reasoning, each eval
  ;; call's code and answer, the context it read): past it the cut links the turn's whole request
- ;; (/agent/{id}/turn/{turn id}). Provenance: the context's two messages are each under 16,000
+ ;; (/turn?view=&id=). Provenance: the context's two messages are each under 16,000
  ;; tokens (seon.context/messages); measured 2026-10-22, a turn's attempt sections are 1.6-1.9k
  ;; and its turn sections under 0.1k before a proof runs, so 4,000 shows most turns whole.
  :seon.config.render/turn-text-budget 4000

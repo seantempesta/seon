@@ -255,6 +255,18 @@
       truncated? (assoc :cut "at the model's token limit: what followed the cut was lost. Answer with less: one change at a time.")
       (seq rs) (assoc :repaired (vec rs)))))
 
+
+(defn taken-messages
+  "The messages a turn took, as its basis's :observed names them: each that is a fact read
+  from db (the commit the turn read, where its agent wrote it) by its id, then each send no
+  fact holds as the basis keeps it. The one reader of a turn's messages (the block, the
+  agent's window)."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector [:map [:from :string] [:body :any]]]]}
+  [db {:keys [message-ids messages]}]
+  (into (vec (for [mid message-ids :let [m (d/pull db [:seon.message/from :seon.message/body] [:seon.message/id mid])]]
+               {:id mid :from (:seon.message/from m) :body (:seon.message/body m)}))
+        messages))
+
 (defn current-state
   "The current-state block of task t as data: proofs with their status, red assertions and
   source; what else the done rule refuses (regressions, stray reds, contract gaps), and a
@@ -312,9 +324,7 @@
       ;; the messages the turn took: those that are facts read again from db (the commit the turn
       ;; read, where its agent wrote them), the rest as the basis holds them
       (or (seq message-ids) (seq messages))
-      (assoc :messages (into (vec (for [mid message-ids :let [m (d/pull db [:seon.message/from :seon.message/body] [:seon.message/id mid])]]
-                                    {:from (:seon.message/from m) :body (:seon.message/body m)}))
-                             messages))
+      (assoc :messages (mapv #(dissoc % :id) (taken-messages db {:message-ids message-ids :messages messages})))
       ;; root's ruling (a), 2026-10-22: the tests this turn ran (the proofs and the tests the
       ;; branch changed), those the judge runs at the attempt's end, the process tests run only
       ;; when root asks (owner, 2026-10-23); a run its bound ended leaves the rest unknown, never red

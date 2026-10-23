@@ -262,7 +262,7 @@
         t (task-f db)
         text-of (fn [items] (:content (peek (context/messages "H" (context/current-state db t {:turn 1 :max-turns 4 :last-items items})))))
         c0 (text-of (evals 259 11))
-        item (fn [c] {:id 0 :tag :ret :form "(seon.turn/context-block \"demo/f\" \"demo/f#1\")" :printed (pr-str c) :value c})
+        item (fn [c] {:id 0 :tag :ret :form "(seon.turn/context-block \"demo/f\" \"demo/f#1\" true)" :printed (pr-str c) :value c})
         c1 (text-of [(item c0)])
         c2 (text-of [(item c1)])]
     (is (< (select/estimate c0) (+ (:context print/budgets) context/last-evals-budget)))
@@ -510,10 +510,10 @@
   ;; so the block it reads shows them, in the turn sections, and every later reading of that
   ;; turn shows them again from the basis
   (let [db (db-with-program)
-        msgs [{:from :owner :body "use demo/g, not a new helper"}]
+        msgs [{:from "owner" :body "use demo/g, not a new helper"}]
         ms (context/messages "H" (context/current-state db (task-f db) {:turn 1 :max-turns 4 :messages msgs}))]
     (is (str/includes? (:content (peek ms)) "use demo/g, not a new helper") "in the turn sections")
-    (is (str/includes? (:content (peek ms)) ":from :owner") "who sent it")
+    (is (str/includes? (:content (peek ms)) ":from \"owner\"") "who sent it")
     (is (not (str/includes? (:content (second ms)) "use demo/g")) "not in the cached attempt sections")
     (is (not (contains? (context/current-state db (task-f db) {:turn 1 :max-turns 4}) :messages)) "none delivered: no section")))
 

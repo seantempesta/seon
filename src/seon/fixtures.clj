@@ -227,6 +227,12 @@
     (str "(+ 1 " (or (:printed seen) (:value seen)) ")")
     "(+ 20 21)"))
 
+(defn thinking-call
+  "The scripted model that proves a call's thought is recorded with it (seon.agent-test): one
+  form with its ;; lead, and the eval tool's thinking."
+  {:malli/schema [:=> [:cat :seon.model/request] [:map [:code :string] [:thinking :string]]]}
+  [_] {:code ";; the sum first\n(+ 1 2)" :thinking "check the sum before the proof"})
+
 (defn reply
   "The scripted model: the scripted reply for the request's task and turn (the last one
   repeats); a swarm task's reply is generated from its index; a merge or design task

@@ -890,8 +890,8 @@
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [{:keys [tests results own owners seen seen-turn]} opts]
      [:section {:class "box" :id "z-proofs"}
-    (kicker "proofs" (cond (seq results) (str "judged on main: " (count (filter #(= :pass (val %)) results)) "/" (count results) " pass")
-                           tests (str "its last run: " (run-words tests) " · " (ms-str (:ms tests)))
+    (kicker "proofs" (cond (seq results) (str "judged on main: " (count (filter #(= :pass (val %)) results)) "/" (count results) " proofs pass")
+                           tests (str "its last run: " (count (:reports tests)) (if (= 1 (count (:reports tests))) " proof" " proofs") ", its assertions " (run-words tests) " · " (ms-str (:ms tests)))
                            seen "as its newest turn began"
                            :else "no run: none in root's view, and no turn has run them"))
     (when (and seen (not tests))
@@ -1036,7 +1036,7 @@
   (let [rs (sort-by (comp str key) results)
         pass (count (filter #(= :pass (val %)) rs))]
     (when (seq rs)
-      [:span {:class "proofs-seen"} (str pass "/" (count rs) " pass")
+      [:span {:class "proofs-seen"} (str pass "/" (count rs) " proofs pass")
        (for [[p r] rs] [:span {:class (if (= :pass r) "ok" "bad") :title (str p " " (kname r))} " " (if (= :pass r) "●" "✕") " " [:code (name (symbol (str p)))]])])))
 
 (defn turn-row
@@ -1056,7 +1056,7 @@
     [:li {:id (or (:unit opts) (str "turn-" (dom-id id))) :class (str "turn o-" (kname origin) (when (and errors (pos? errors)) " has-err"))}
      ;; the conversation first: who spoke, what it was told, what it thought and did
      [:header
-      [:b (if (= :outside origin) (str "read " n) (str "turn " (inc n)))]
+      [:b (if (= :outside origin) (str "read " n) (str "turn " (inc n) (when-let [m (:max-turns basis)] (str " of " m))))]
       (when (= :outside origin) [:span {:class "muted"} " · a context read through root's server, no model call"])
       (when truncated [:span {:class "bad"} " · cut at the token limit"])
       (when (and errors (pos? errors)) [:span {:class "bad"} (str " · " errors " of " forms " forms failed")])]
@@ -1065,18 +1065,20 @@
         (for [{:keys [from body]} messages] [:p [:b (kname from)] " " (prose (print/text body budget) budget)])])
      (when-not (str/blank? reasoning)
        [:details {:class "reasoning"} [:summary "its reasoning"] [:pre (prose reasoning budget)]])
-     (when-not (str/blank? reply) [:p {:class "reply"} (prose reply budget)])
+     (if (str/blank? reply)
+       (when (= :model origin) [:p {:class "reply muted"} "no reply text: it answered only with its forms"])
+       [:p {:class "reply"} [:em "its reply "] (prose reply budget)])
      (when (seq calls)
        [:ol {:class "calls"}
         (for [{call-id :id :keys [code evals thinking records]} calls]
           [:li {:class "call"}
-           (when thinking [:p {:class "thinking"} (prose thinking budget)])
+           (when thinking [:p {:class "thinking"} [:em "its thinking "] (prose thinking budget)])
            (if (seq records)
              ;; each form as it ran: the thought its writer put before it (as prose), the form,
              ;; its result or error
              (for [r records]
                [:div {:class (str "form tag-" (kname (:tag r)))}
-                (when (:lead r) [:p {:class "lead"} (prose (str/replace (:lead r) #"(?m)^\s*;+ ?" "") budget)])
+                (when (:lead r) [:p {:class "lead"} [:em "its thought "] (prose (str/replace (:lead r) #"(?m)^\s*;+ ?" "") budget)])
                 [:pre {:class "code"} [:code (prose (:form r) budget)]]
                 [:div {:class "result"} (eval-out r (config/value :seon.config.render/history-row-budget) (part) nil true)
                  [:span {:class "muted"} " " (ms-str (:ms r))]]])
@@ -1095,7 +1097,7 @@
         (for [[k label] [[:tests-ms "tests"] [:context-ms "context"] [:model-ms "model"] [:eval-ms "evals"] [:record-ms "record"]]
               :when (get split k)]
           [:span {:title "where the turn's time went, as the agent measured it"} (str label " " (ms-str (get split k)))]))
-      [:span {:class "muted"} id]]
+      [:span {:class "muted" :title "the turn's id counts from 0; its context counts turns from 1"} (str "id " id)]]
      (when (seq (:results obs))
        [:div {:class "seen tfoot"} [:span "proofs when it began, before its forms ran: " (proof-counts (:results obs))]
         (when-let [changed (seq (for [[p r] (sort-by (comp str key) (:results obs)) :let [was (get previous p)] :when (and previous (not= was r))] [p was r]))]
@@ -1177,7 +1179,7 @@
        [:section {:class "chat"} (slot "z-head") (slot "z-turns")
         [:ol {:id "z-conv" :class "turns"} (for [c conv] (slot (:id c)))]
         (slot "z-input")]
-       [:aside {:class "wside"} [:div {:id "z-tiles" :class "wtiles"} (for [t (:tiles page)] (slot (:id t)))]]]]
+       [:aside {:class "wside"} [:p {:class "muted wrule"} "the last changed first"] [:div {:id "z-tiles" :class "wtiles"} (for [t (:tiles page)] (slot (:id t)))]]]]
      :seon.render/units
      (into
      [{:id "z-head" :input {:agent agent :attempt attempt :task task :turns (:totals page)} :schema :seon.render/zoom-head}

@@ -40,8 +40,11 @@
   {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request] :seon.model/completion]}
   [{:keys [script]} request]
   (let [t0 (profile/now-ns)
-        text ((resolve script) request)]
-    {:text "" :tool-calls [{:id (str "call-" (:turn request)) :code (:text (reader/forgive text))}]
+        ;; a script answers its call's code, or the code and the thinking the eval tool takes
+        out ((resolve script) request)
+        {text :code thinking :thinking} (if (string? out) {:code out} out)]
+    {:text "" :tool-calls [(cond-> {:id (str "call-" (:turn request)) :code (:text (reader/forgive text))}
+                             thinking (assoc :thinking thinking))]
      :prompt-tokens (reduce + (map (comp select/estimate :content) (:messages request)))
      :completion-tokens (select/estimate text) :estimated true :ms (profile/ms-since t0)}))
 

@@ -62,14 +62,14 @@
 
 (defn- ordered
   "st with the grid's order current: derived again only when root's agents changed (the
-  view's map is persistent: unchanged means identical) or a second passed (retirement is
-  by time)."
+  view's map is persistent: unchanged means identical). An ended agent past RETIRE-MS leaves
+  at the next change."
   {:malli/schema [:=> [:cat :map :int] :map]}
   [st now-ms]
   (let [agents (get-in st [:view :agents] {})]
-    (if (and (identical? agents (:order-agents st)) (< (- now-ms (:order-at st 0)) 1000))
+    (if (identical? agents (:order-agents st))
       st
-      (assoc st :order (order agents now-ms) :order-agents agents :order-at now-ms))))
+      (assoc st :order (order agents now-ms) :order-agents agents))))
 
 (defn- proc-health-of
   "Each declared root proc (the built system's, once it is) with the defects root's view
@@ -223,13 +223,12 @@
 
 ;;; --- one agent, zoomed ------------------------------------------------------------------------
 
-(defn- record-key
-  "An evaluation record's id (<agent>-<pid>-<nanos>/<item id>) as [pid item-id nanos]: the
-  process that ran it and its item's id there (what a turn's call names, :items), and when."
-  {:malli/schema [:=> [:cat :string] [:tuple :int :int :int]]}
+(defn- record-ord
+  "An evaluation record's id (<run>/<item id>) as its item's id: its order in the request that
+  ran it (what a turn's call names, :items)."
+  {:malli/schema [:=> [:cat :string] :int]}
   [eid]
-  (let [[run ord] (str/split eid #"/") parts (str/split run #"-")]
-    [(or (some-> (nth parts (- (count parts) 2) nil) parse-long) 0) (or (parse-long (str ord)) 0) (or (some-> (peek parts) parse-long) 0)]))
+  (parse-long (peek (str/split eid #"/"))))
 
 (defn- eval-records
   "The evaluations recorded on branch db for agent id, in the order they were written:
@@ -237,22 +236,16 @@
   through."
   {:malli/schema [:=> [:cat :seon.host/db :keyword] [:map [:all [:vector :any]] [:by-id :map]]]}
   [db id]
-  (let [rows (sort-by (fn [[eid _ tx]] [tx (second (record-key eid))])
+  (let [rows (sort-by (fn [[eid _ tx]] [tx (record-ord eid)])
                       (d/q '[:find ?eid ?r ?tx :in $ ?id :where [?a :seon.agent/id ?id] [?e :seon.cluster.eval/agent ?a]
                              [?e :seon.cluster.eval/id ?eid ?tx] [?e :seon.cluster.eval/record ?r]] db id))]
     {:all (vec rows) :by-id (into {} (for [[eid r] rows] [eid r]))}))
 
 (defn messages-of
-  "The messages turn entity e took (the owner's and others' words, read at its start): those
-  that are facts read from e's db by the ids its basis names (the same :seon.message/* fact
-  root wrote on main, written on the agent's branch when it took them), then the rest as
-  its basis holds them. The one reader of a turn's messages."
+  "The messages turn entity e took, read from e's db by seon.context/taken-messages."
   {:malli/schema [:=> [:cat :any] [:vector :map]]}
   [e]
-  (let [db (d/entity-db e) obs (:observed (:seon.turn/basis e))]
-    (into (vec (for [mid (:message-ids obs) :let [m (d/entity db [:seon.message/id mid])]]
-                 {:id mid :from (:seon.message/from m) :body (:seon.message/body m)}))
-          (:messages obs))))
+  (context/taken-messages (d/entity-db e) (:observed (:seon.turn/basis e))))
 
 (defn- turn-rows
   "The turns of attempt on branch db, oldest first (as written), each its facts with its cost
