@@ -27,7 +27,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **run-loop** | the step-fn contract run on one thread, lifecycle as messages | `seon.step/run-loop` |
 | **effect worker** | a proc performing one kind of effect (a file, a git commit, a build, a model call) off root's graph, its answer data | `seon.fx/procs`, `seon.fx/worker-proc` |
 | **server** (was door) | root's request server: the `:op`s a caller sends over the socket, and the `seon_*` MCP tools `bin/mcp` relays ([server](server.md#ops)) | `seon.server/ops` |
-| **holder** | a live agent holding a branch; a spawn on a held branch, or past the live-agent cap, is refused ([root](root.md#holders-and-spawn-reasons)) | `seon.root/spawn!` |
+| **holder** | a live agent holding a branch; a spawn on a held branch, or past the live-agent cap, is refused ([root](root.md#holders-and-refused-spawns)) | `seon.root/spawn!` |
 | **dashboard** | the web page root serves, a render of main's facts pushed as they change ([dashboard](dashboard.md)) | `seon.web/web-proc`, `seon.render.proc/render-proc` |
 | **config key** (was dial) | a config key: one documented value in `resources/seon/config/default.edn` (unit, provenance, bound), validated by its `seon.config.*` schema, read once at boot and written as facts on main | `seon.config`, `seon.config/from-db` |
 
