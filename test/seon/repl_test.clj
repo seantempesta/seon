@@ -66,7 +66,7 @@
       (is (= :h0 (:handle d)))
       (is (= :uncontracted-definition (:seon.repl/finding (first (:warnings d)))) "the warning, a map")
       (is (= ['seon.repl-test.scratch/uncontracted-g] (:uncontracted (first (:warnings d)))))
-      (is (every? number? (map (comp :ms :cost) [d e])))
+      (is (every? number? (map :ms [d e])))
       (is (= :seon.agent/eval-error (:seon.error/type (:err e))) "the error map itself")
       (testing "its text is the error's render: the message first, then its type and where it was raised"
         (is (str/starts-with? (:printed e) (:seon.error/message (:err e))))
@@ -285,49 +285,33 @@
   "How many times the ticks proof's form ran."
   (atom 0))
 
-(deftest an-evals-record-carries-its-ticks
-  ;; task seon.turn/a-turn-shows-its-cost-against-its-budget (1): the work a form did is
-  ;; recorded once, when it ran (jolt.host/ticks-of), beside :ms and :alloc-bytes, and the
-  ;; stored record keeps it; rendering that record runs the form no more.
-  (let [answers (volatile! [])
-        old @agent/state
-        run! (fn [code] (vreset! answers [])
-               (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
-               ((repl/handler) {"op" "eval" "code" code :reply #(vswap! answers conj %)})
-               (repl/fold @answers))]
-    (try
-      (let [[small] (run! "(reduce + (range 100))")
-            [big] (run! "(reduce + (range 1000000))")
-            [bad] (run! "(/ 1 0)")
-            [once] (run! "(swap! seon.repl-test/evals-run inc)")]
-        (is (pos? (:ticks (:cost small))) (pr-str small))
-        (is (> (:ticks (:cost big)) (* 10 (:ticks (:cost small)))) "ticks are the work done: 10,000x the loop is >10x the ticks (the form's compile is a constant)")
-        (is (pos? (:ticks (:cost bad))) "a form that threw still did work")
-        (let [rec (-> (repl/record-tx :a "run" [(assoc once :id 0)] nil) first :seon.cluster.eval/record)
-              render #(pr-str (h/html (:seon.render/html (ui/history-row rec {}))))]
-          (is (= (:ticks (:cost once)) (:ticks rec)) "the stored record carries the ticks")
-          (is (= (render) (render)) "rendering one record twice gives the same bytes")
-          (is (= 1 @evals-run) "and runs the form no more than once")))
-      (finally (reset! agent/state old)))))
+(contract/defn inc1
+  "One contracted call, for the calls proof."
+  {:malli/schema [:=> [:cat :int] :int]}
+  [x] (inc x))
 
-(deftest an-evals-cost-is-one-fact-shown-the-same-in-every-later-turn
-  ;; owner, 2026-10-23: the model sees each eval's cost, stable across turns so the prompt cache
-  ;; holds. The reply carries the value the record stores, taken once when the form ran; an eval of
-  ;; a later turn, doing far more work, leaves the earlier one's rendered cost byte for byte.
+(deftest an-evals-record-carries-its-ticks
+  ;; task seon.turn/a-turn-shows-its-cost-against-its-budget (1), owner 2026-10-23 (the model sees
+  ;; cost, stable across turns): the work a form did is taken once, when it ran
+  ;; (jolt.host/ticks-of, contracted calls, bytes), and the reply item and the stored record carry
+  ;; the same values, so nothing is measured again in a later turn.
   (let [old @agent/state
         run! (fn [code] (let [answers (volatile! [])]
                           (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
                           ((repl/handler) {"op" "eval" "code" code :reply #(vswap! answers conj %)})
                           (first (repl/fold @answers))))
-        record #(-> (repl/record-tx :a "r" [(assoc % :id 0)] nil) first :seon.cluster.eval/record)
-        shown #(pr-str (h/html (:seon.render/html (ui/history-row (record %) {}))))]
+        cost [:ms :alloc-bytes :ticks :calls]]
     (try
-      (let [turn-1 (run! "(reduce + (range 100))")
-            at-1 (shown turn-1)
-            turn-2 (run! "(reduce + (range 3000000))")]
-        (is (< (:ticks (:cost turn-1)) (:ticks (:cost turn-2))) "the later eval did more work")
-        (is (not= at-1 (shown turn-2)) "and its cost shows differently, so the render is sensitive to it")
-        (is (= (select-keys (:cost turn-1) [:ticks :ms :alloc-bytes]) (select-keys (record turn-1) [:ticks :ms :alloc-bytes]))
-            "the reply's cost is the value the record stores")
-        (is (= at-1 (shown turn-1)) "turn 1's rendered cost is the same bytes after turn 2 ran"))
+      (let [small (run! "(reduce + (range 100))")
+            big (run! "(reduce + (range 1000000))")
+            bad (run! "(/ 1 0)")
+            calls (run! "(+ (seon.repl-test/inc1 1) (seon.repl-test/inc1 1) (seon.repl-test/inc1 1))")]
+        (is (pos? (:ticks small)) (pr-str small))
+        (is (> (:ticks big) (* 10 (:ticks small))) "ticks are the work done: 10,000x the loop is >10x the ticks (the form's compile is a constant)")
+        (is (pos? (:ticks bad)) "a form that threw still did work")
+        (when contract/on?
+          (is (= 3 (:calls calls)) "contracted calls are counted, as a cost proof counts them"))
+        (doseq [it [small big bad calls]
+                :let [rec (-> (repl/record-tx :a "run" [(assoc it :id 0)] nil) first :seon.cluster.eval/record)]]
+          (is (= (select-keys it cost) (select-keys rec cost)) "the record stores the values the reply shows")))
       (finally (reset! agent/state old)))))

@@ -51,7 +51,7 @@
       (try ((repl/handler) {"op" "eval" "code" "(seon.profile-test/branch 300)" :reply #(vswap! answers conj %)})
            (finally (reset! agent/state old)))
       (let [items (repl/fold @answers)
-            fns (:fns (:cost (first items)))]
+            fns (:fns (first items))]
         (is (= "8955050" (:printed (first items))) (pr-str items))
         (is (= {'seon.profile-test/branch 1 'seon.profile-test/leaf 300}
                (into {} (map (juxt :var :calls)) fns)))
