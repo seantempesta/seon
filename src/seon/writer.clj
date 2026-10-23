@@ -229,11 +229,12 @@
                (reply st (refused (str "no branch " (:branch m)) {})))
       ;; one derivation (seon.merge/three-way) for the dashboard, the done rule and merges
       :branch-diff (reply st (if (exists? (:branch m))
-                               (let [[head r] (branch-merge st (:branch m) (:data-attrs m #{}))]
-                                 {:ok true :ours (vec (sort-by str (keys (:ours r)))) :theirs (count (:theirs r))
+                               (let [[head r base] (branch-merge st (:branch m) (:data-attrs m #{}))]
+                                 {:ok true :db head :base base :base-t (:max-tx base)
+                                  :ours (vec (sort-by str (keys (:ours r)))) :theirs (count (:theirs r))
                                   :conflicts (count (:conflicts r))
                                   :unmerged (mapv :key (pm/unmerged head)) :uncontracted (pm/uncontracted (:ours r))
-                                  :caused (vec (problems/caused (pdb/branch-base conn main (:branch m)) head))
+                                  :caused (vec (problems/caused base head))
                                   :vars (into (sorted-set) (keep (fn [[k s]] (when (= :var k) s))) (keys (:ours r)))})
                                (refused (str "no branch " (:branch m)) {})))
       ;; root's read of a branch (or main): its committed value from the store; :base is the

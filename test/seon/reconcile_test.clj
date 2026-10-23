@@ -150,7 +150,7 @@
   ;; task seon.model/budgets-are-data-and-spend-is-measured: the agent wrote no end (it died
   ;; or was killed before end!), so its turns, tokens and time are unknown: absent, never 0
   (let [db (db-of diamond :extra (run "a" 1 :running))
-        tx (#'r/judge-tx {:db db :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:run "demo/a#1" :task "demo/a"}} {} {:db db :base db} {:ours [] :uncontracted [] :unmerged []})
+        tx (#'r/judge-tx {:db db :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:run "demo/a#1" :task "demo/a"}} {} {:db db :base db :ours [] :uncontracted [] :unmerged []})
         ended (first (filter #(and (map? %) (= "demo/a#1" (:seon.run/id %)) (:seon.run/outcome %)) tx))]
     (is (= :no-end (:seon.run/outcome ended)))
     (is (= #{} (set (filter #{:seon.run/turns :seon.run/model-calls :seon.run/tokens :seon.run/ms} (keys ended)))))))
@@ -187,7 +187,7 @@
                gate (ask {:op :merge :branch ab})
                judged (first (filter #(and (map? %) (:seon.run/outcome %))
                                      (#'r/judge-tx {:db @conn :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:run "demo/a#1" :task "demo/a"}} {}
-                                                   {:db @bc :base base} diff)))]
+                                                   diff)))]
            (is (= #{'app.gaps/u} (#'turn/added-gaps base @bc)) "the agent's done check")
            (is (= '[app.gaps/u] (:uncontracted diff)) "the writer's diff")
            (is (= '#{app.gaps/u} (set (:seon.run/uncontracted judged))) "root's judge: g is main's gap, fixed on main")
@@ -219,7 +219,7 @@
     (testing "the turn loop threw and the agent lives: its error is the run's reason"
       (let [db (db-of diamond :extra (run "a" 1 :running))
             tx (#'r/judge-tx {:db db :boot "boot-1" :rid 0 :flights {} :pending {}}
-                             {:act {:run "demo/a#1" :task "demo/a"} :worked-error cause} {} {:db db :base db} {:ours [] :uncontracted [] :unmerged []})]
+                             {:act {:run "demo/a#1" :task "demo/a"} :worked-error cause} {} {:db db :base db :ours [] :uncontracted [] :unmerged []})]
         (is (= "seon.turn/work! threw: boom" (:seon.run/reason (row tx))))
         (is (= "boom" (:seon.error/message (err tx))))))))
 
@@ -233,6 +233,22 @@
         [st' outs] (#'r/advance st "demo/a#1" :worked died)]
     (is (= died (get-in st' [:flights "demo/a#1" :died])) "the death is the flight's cause")
     (is (= [{:op :write :req {:op :branch-db :branch :demo/a}}] (mapv :req outs)) "its end is read from the branch next")))
+
+(deftest the-judge-reads-its-branch-in-one-request
+  ;; task seon.reconcile/the-judge-reads-its-branch-in-one-request: once the tests answer, the flight
+  ;; asks the writer once (:branch-diff, whose answer holds the head, its merge base and what it
+  ;; changed), never :branch-db then :branch-diff; that one answer is what the run is judged on
+  (let [db (db-of [(decl "a")] :extra (run "a" 1 :running))
+        flight {:act {:run "demo/a#1" :task "demo/a" :env {:branch :demo/a}} :agent :a1}
+        st {:db db :boot "boot-1" :rid 0 :pending {} :flights {"demo/a#1" (assoc flight :step :tested)}}
+        [st' outs] (#'r/advance st "demo/a#1" :tested {:reports []})]
+    (is (= [{:op :write :req {:op :branch-diff :branch :demo/a}}] (mapv :req outs)) "one request, the diff")
+    (is (= :diffed (get-in st' [:pending (:tag (first outs)) 1])) "answered at :diffed, with no :read step between")
+    (let [st (assoc-in st [:flights "demo/a#1"] (assoc flight :step :diffed :results {}))
+          [_ outs] (#'r/advance st "demo/a#1" :diffed {:ok true :db db :base db :base-t (:max-tx db) :ours [] :theirs 0 :conflicts 0
+                                                        :unmerged [] :uncontracted [] :caused [] :vars #{}})]
+      (is (= {:op :kill :id :a1 :ended true} (:req (first outs))) "its agent is stopped")
+      (is (some #(= "demo/a#1" (:seon.run/id %)) (get-in (second outs) [:req :req :tx-data])) "and its end judged from that one answer"))))
 
 (deftest a-refused-diff-ends-the-run-with-its-cause
   ;; the writer refuses to diff the branch: the run is not judged on facts nobody
@@ -674,7 +690,7 @@
   (let [main (db-of [(decl "a")] :extra (run "a" 1 :running))
         f {:reason "the premise is refuted" :counterexample "(= 1 2)" :run "demo/a#1"}
         branch (d/db-with main [{:seon.task/id "demo/a" :seon.task/failure f}])
-        judge #(#'r/judge-tx {:db main :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:run "demo/a#1" :task "demo/a"}} {} {:db % :base main} {:ours [] :uncontracted [] :unmerged []})
+        judge #(#'r/judge-tx {:db main :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:run "demo/a#1" :task "demo/a"}} {} {:db % :base main :ours [] :uncontracted [] :unmerged []})
         judged (d/db-with main (judge branch))
         idx (r/index judged)]
     (is (= :held (:seon.task/execution (task/task judged "demo/a"))) "held for root, without a merge")
@@ -700,7 +716,7 @@
                                 {:seon.task/id "demo/c" :seon.task/plan "c, the branch's"}])
         main (d/db-with base [{:seon.task/id "demo/c" :seon.task/plan "c, main's"}])
         judged (d/db-with main (#'r/judge-tx {:db main :boot "boot-1" :rid 0 :flights {} :pending {}}
-                                             {:act {:run "demo/a#1" :task "demo/a"}} {} {:db branch :base base} {:ours [] :uncontracted [] :unmerged []}))
+                                             {:act {:run "demo/a#1" :task "demo/a"}} {} {:db branch :base base :ours [] :uncontracted [] :unmerged []}))
         conflict {:task "demo/c" :attr :seon.task/plan :base "Make c true." :ours "c, the branch's" :theirs "c, main's"}]
     (is (= "b, as a's agent learned it" (:seon.task/plan (task/task judged "demo/b"))) "another task's edit reaches main at the run's end")
     (is (= "Make a true." (:seon.task/plan (task/task judged "demo/a"))) "an unchanged task stays as main holds it")
