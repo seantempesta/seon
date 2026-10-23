@@ -201,7 +201,6 @@ Owner, 2026-10-20: "the agent is its own process so having the flow controls be 
 - Upstream: when to push the `upstream/*` Jolt branches and open PRs, and whether to send the Chez 0006 report and a 0007 issue.
 - Profiling tooling: which to build (Jolt symbol map per generation for `sample`/xctrace; per-op LMDB counts; a `bin/check profile` mode; `mdb_stat` from `bin/build lmdb`).
 - A go for the lmdb-ffi helper reading `mti_semid` that the semaphore-set task needs (a dependency change).
-- `seon.fences.edn`: nine entries read "Done:" yet load as tasks; move the open ones to their owning files and delete the file?
 - Root's external channels (`:to-writer`, `:back`, `:ext`, `:events`, passed as `:bind`) as declared Flow `:conns`?
 - The render proc's render-once caches (`:event-rows`, the zoom history's `:rows`) as units with a `:container`?
 - Do `seon.cost` and `seon.profile` belong in the release binary or with the drivers?

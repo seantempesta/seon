@@ -27,6 +27,8 @@ Updated 2026-10-23 evening by root. Sessions are grouped so related tasks stay i
 
 Ended: shrink (its folder was removed at merge), eval-cost (merged).
 
+**For the owner when he's back:** does `src`'s ~10k aim count code lines (as cloc does: no docstrings, comments, blanks or contracts; ~10.45k now) or every line (18.5k)? Walk measured it on main 450c3fb8; the remaining shrink rows are about −300 lines, which is right under either reading. Root's pick: code lines, with docstrings kept as each var's home (AGENTS §7).
+
 **The freeze**, on root's word: ``jolt/rename-run``, then ``jolt/a-page-is-an-entity-and-its-neighbors``, then the store is erased; then ``jolt/self-contained`` and step R (`~/src/seon-next`). Other sessions keep working, and afterwards re-run the rename's scripts on their branches (`notes/rename-run/` on ``jolt/rename-run``).
 
 ## Open owner questions
