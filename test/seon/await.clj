@@ -1,7 +1,8 @@
 (ns seon.await
   "What a test waits on, as facts: a watch on main's connection, never a poll or a deadline. Alone in
   its namespace so a root (which imports src only) can load it by path: (load-file path)."
-  (:require [seon.reconcile :as r] [datahike.api :as d]))
+  (:refer-clojure :exclude [defn])
+  (:require [seon.contract :refer [defn]] [seon.reconcile :as r] [datahike.api :as d]))
 
 (defn await-db
   "Main's first db value (now or after a later commit) for which (pred db) holds: a watch
