@@ -1,6 +1,6 @@
 (ns seon.render
   "Render selection and the one render call (W1's proto.render and proto.render.schema,
-  ported onto next's registry: ../notes/archive/option3-W1-render.md §1).
+  ported onto next's registry: notes/archive/option3-W1-render.md §1).
 
   A render is a plain function (value opts) -> its result, like a React component: opts are
   its props, all optional (:as, the room it is shown in, :inline, :block or :tile; :budget,

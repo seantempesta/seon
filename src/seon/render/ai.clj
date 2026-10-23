@@ -16,7 +16,7 @@
   (`error`), a task (`task`), an attempt (`attempt`) and a problem row (`problem-row`, the
   line root's context and the page's banner lead with)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.config :as config] [seon.print :as print] [seon.print.select :as select] [seon.render.ui :as ui]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [seon.config :as config] [seon.print :as print] [seon.print.select :as select] [seon.render.ui :as ui]))
 
 (defn- line-budget {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render/line-budget))
 (defn- part-budget {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render/part-budget))
@@ -200,12 +200,18 @@
 (defn- counts {:malli/schema [:=> [:cat :map] :string]}
   [freq] (str/join " " (for [[k n] (sort-by (comp str key) freq)] (str (ui/kname k) " " n))))
 
-(defn problems
-  "What is wrong now, most urgent first: root's procs' defects (what flows: no proc is
-  pinged), then the problems main recorded (seon.problems/report, by class): one producer,
-  so the banner and root's context cannot disagree. An agent's death, red run or refused
-  merge is recorded by root (seon.root/set-agent, end-agent), never re-derived here."
-  {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
+(def ^:private derived
+  "The classes main's facts make true when read, never recorded (:seon.problems/class declares them)."
+  (:seon.problems/derived (contract/properties :seon.problems/class)))
+
+(def ^:private areas
+  "Each problem class's area, in the order shown (:seon.problems/class declares them)."
+  (:seon.problems/areas (contract/properties :seon.problems/class)))
+
+(defn- problem-lines
+  "Root's defects' lines (:root) and one line per class with open problems ([class line] in
+  :classes), the lines `problem-areas` groups."
+  {:malli/schema [:=> [:cat :seon.render/system] [:map [:root [:vector :string]] [:classes [:vector [:tuple :keyword :string]]]]]}
   [{:keys [root-errors root-errors-total recorded]}]
   (let [n-errs (or root-errors-total (count root-errors))
         [shown more] (print/bounded (reverse (map-indexed vector root-errors)) :seon.config.render.list/top "(:root-errors (seon.root/state sys)) holds the newest 20" n-errs)
@@ -220,10 +226,30 @@
                   :when i
                   :let [open (count (remove #(false? (:open? %)) rows))
                         where (list 'get-in '(my.root/problems sys) [:classes c :rows])]]
-              (str "recorded " (:text (problem-row (assoc (nth rows i) :class c :n (if (:signature (nth rows i)) n open))
-                                                             {:handle (list 'get-in '(my.root/problems sys) [:classes c :rows i])}))
-                   (some->> (print/more open 1 (str "open, all in " (form where))) (str " · "))))]
-    (vec (concat errs rec))))
+              [c (str (if (derived c) "derived " "recorded ") (:text (problem-row (assoc (nth rows i) :class c :n (if (:signature (nth rows i)) n open))
+                                                                {:handle (list 'get-in '(my.root/problems sys) [:classes c :rows i])}))
+                      (some->> (print/more open 1 (str "open, all in " (form where))) (str " · ")))])]
+    {:root (vec errs) :classes (vec rec)}))
+
+(defn problem-areas
+  "What is wrong now, by area, most urgent first: root's procs' defects (:root: what flows,
+  no proc is pinged), then main's open problems (seon.problems/health, recorded or derived),
+  each class under the area :seon.problems/class declares for it, one line per class. One
+  producer, so the banner and root's context cannot disagree. An agent's death, red run or
+  refused merge is recorded by root (seon.root/set-agent, end-agent), never re-derived here.
+  Answers [[area [line]]], areas with no line left out."
+  {:malli/schema [:=> [:cat :seon.render/system] [:vector [:tuple :keyword [:vector :string]]]]}
+  [sys]
+  (let [ls (problem-lines sys)
+        in (fn [cs] (vec (keep (fn [[c l]] (when (contains? cs c) l)) (:classes ls))))]
+    (vec (remove (comp empty? second)
+                 (into [[:root (:root ls)]] (for [[area cs] areas] [area (in cs)]))))))
+
+(defn problems
+  "What is wrong now, most urgent first, as root's context leads with it: `problem-areas`'
+  lines in their order."
+  {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
+  [sys] (into [] (mapcat second) (problem-areas sys)))
 
 (defn- section-work {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
   [{:keys [tasks attempts task-rows]}]

@@ -51,9 +51,20 @@
     (is (not (:ok? v)))
     (is (= [:calls] (distinct (map :dim (:over v)))) "calls are exact: one more than stated is over")
     (is (empty? (:steeper v))))
-  (testing "wall time has 3x slack"
-    (is (:ok? (cost/judge linear (rows linear (fn [n] {:ns (* 290.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})))))
-    (is (not (:ok? (cost/judge linear (rows linear (fn [n] {:ns (* 310.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)}))))))))
+  (testing "wall time over its 3x slack is recorded and shown, never red: it moves with the machine's load"
+    (let [v (cost/judge linear (rows linear (fn [n] {:ns (* 310.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})))]
+      (is (:ok? v))
+      (is (= [:ns] (distinct (map :dim (:over v)))) "the time over is in the verdict")
+      (is (re-find #"TIME OVER \(measured, not red\): ns" (cost/explain linear (rows linear (fn [n] {:ns (* 310.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})) v))))))
+
+(deftest more-work-with-the-same-bytes-and-calls-is-red-on-ticks
+  ;; an extra loop that allocates nothing: bytes and calls cannot see it, CPU time can only
+  ;; guess at it under load; ticks count it (pure-tests 2026-10-23: 2.56x ticks, 1.0x bytes)
+  (let [e (assoc linear :per-n {:ticks 100.0 :bytes 50.0 :calls 1.0})
+        v (cost/judge e (rows e (fn [n] {:ticks (* 400.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})))]
+    (is (not (:ok? v)))
+    (is (= [:ticks] (distinct (map :dim (:over v)))))
+    (is (re-find #"OVER: ticks" (cost/explain e (rows e (fn [n] {:ticks (* 400.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})) v)))))
 
 (deftest a-second-pass-is-steeper-even-inside-the-slack
   ;; quadratic bytes that stay under the linear estimate at every size: only the growth sees them
@@ -67,6 +78,16 @@
 (deftest n-log-n-under-a-linear-estimate-is-not-steeper
   (let [e (assoc linear :per-n {:ns 1000.0} :fixed {})]
     (is (empty? (:steeper (cost/judge e (rows e (fn [n] {:ns (cost/work :n-log-n n)}))))))))
+
+(deftest an-estimate-of-time-alone-is-red-it-could-not-fail
+  ;; time is shown, never red: an estimate stating only :ns judged nothing (review 2026-10-23)
+  (let [e (assoc linear :per-n {:ns 100.0} :fixed {})
+        v (cost/judge e (rows e (fn [n] {:ns (* 60.0 n) :bytes (* 50.0 n)})))]
+    (is (not (:ok? v)))
+    (is (:uncounted v))
+    (is (re-find #"NO COUNTED DIMENSION" (cost/explain e (rows e (fn [n] {:ns (* 60.0 n) :bytes (* 50.0 n)})) v))))
+  (is (:ok? (cost/judge linear (rows linear (fn [n] {:ns (* 60.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)}))))
+      "with bytes and calls stated and measured, it judges"))
 
 (deftest a-loose-estimate-is-a-finding-not-red
   (let [v (cost/judge linear (rows linear (fn [n] {:ns (* 10.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})))]
@@ -118,7 +139,7 @@
         text (cost/explain e rows verdict)]
     (is (not (:ok? verdict)))
     (is (< (count rows) 3) "it stops at the first size over its estimate")
-    (is (re-find #"OVER: ns" text))
+    (is (re-find #"OVER: (bytes|calls)" text) "red on an exact dimension (time is shown, never red)")
     (is (re-find #"one pass" text) "the explanation restates the work the data needs")))
 
 ;; ---- the unit table's bench (seon.cost/units is these, divided by n) ---------------------
@@ -134,6 +155,12 @@
     (refer-clojure)
     (eval forms)
     @(ns-resolve 'seon.cost.unit sym)))
+
+(defn- scrambled
+  "0..n-1 in a scrambled order that is the same in every run (a multiplicative hash mod a
+  prime, as sort keys): a cost measured on it is a function of n, never of a clock-seeded
+  shuffle."
+  [n] (vec (sort-by #(mod (* (inc %) 2654435761) 4294967291) (range n))))
 
 (def unit-benches
   "How each unit operation is measured: (f n) does n units on (setup n). The table below
@@ -159,9 +186,9 @@
                 :f (fn [v] (reduce (fn [m k] (update m k (fnil inc 0))) {} v))}
    :set/conj! {:what "conj! of a new integer into a transient hash set" :setup #(vector (vec (range %)))
                :f (fn [v] (persistent! (reduce conj! (transient #{}) v)))}
-   :sorted/assoc {:what "assoc of a new integer key into a sorted map" :setup #(vector (vec (shuffle (range %))))
+   :sorted/assoc {:what "assoc of a new integer key into a sorted map" :setup #(vector (scrambled %))
                   :f (fn [v] (reduce (fn [m k] (assoc m k k)) (sorted-map) v))}
-   :sort/compare {:what "sort of shuffled integers, per n log2 n" :setup #(vector (vec (shuffle (range %)))) :f (fn [v] (sort v))
+   :sort/compare {:what "sort of shuffled integers, per n log2 n" :setup #(vector (scrambled %)) :f (fn [v] (sort v))
                   :per :n-log-n}
    :str/seq-char {:what "one step of a seq over a String's chars (doseq, reduce)" :setup #(vector (apply str (repeat % \a)))
                   :f (fn [s] (reduce (fn [n c] (inc n)) 0 s))}
@@ -194,8 +221,8 @@
                   :minus :db/pull}})
 
 (defn measure-unit
-  "Unit k measured at n units: {:ns :bytes} per unit."
-  {:malli/schema [:=> [:cat :keyword pos-int?] [:map [:ns :double] [:bytes :double]]]}
+  "Unit k measured at n units: {:ticks :ns :bytes} per unit."
+  {:malli/schema [:=> [:cat :keyword pos-int?] [:map [:ticks :double] [:ns :double] [:bytes :double]]]}
   [k n]
   (let [{:keys [setup f per per-char minus]} (unit-benches k)
         args (setup n)
@@ -204,29 +231,32 @@
         m (cost/measure f args)
         ;; a unit measured as the difference from another (an attribute beyond a pull's first)
         b (when minus (measure-unit minus n))]
-    {:ns (- (/ (:ns m) units) (:ns b 0.0)) :bytes (- (/ (:bytes m) units) (:bytes b 0.0))}))
+    {:ticks (- (/ (:ticks m) units) (:ticks b 0.0)) :ns (- (/ (:ns m) units) (:ns b 0.0)) :bytes (- (/ (:bytes m) units) (:bytes b 0.0))}))
 
 (deftest the-unit-table-is-current
   ;; every row of the table measured again at 10k units (the table's own n: a unit's bytes at 1k
-  ;; differ, 630 against 825 B for :map/assoc): within 3x of its ns, its bytes within
-  ;; 1.25x (allocation is counted); a drifted row means the estimates priced by it are stale
-  (doseq [[k {:keys [ns bytes]}] cost/units
-          :let [m (measure-unit k 10000)]]
-    (is (<= (/ ns 3.0) (:ns m) (* ns 3.0)) (str k " ns: table " ns ", measured " (:ns m) "; the row now: " (assoc m :what (:what (unit-benches k)))))
-    (is (<= (- (/ bytes 1.25) 1.0) (:bytes m) (+ (* bytes 1.25) 1.0)) (str k " bytes: table " bytes ", measured " (:bytes m)))))
+  ;; differ, 630 against 825 B for :map/assoc): its bytes within 1.25x (counted, the same at any
+  ;; load); its ticks too, the work done; a drifted row means the estimates
+  ;; priced by it are stale. Its ns (CPU time) no verdict decides on (seon.cost/exact): measured,
+  ;; not asserted (pure-tests 2026-10-23: within 3x of a table measured under another day's load
+  ;; was no function of the digest)
+  (doseq [[k {:keys [ticks bytes]}] cost/units
+          :let [m (measure-unit k 10000) row (assoc m :what (:what (unit-benches k)))]]
+    (is (<= (/ ticks 1.25) (:ticks m) (* ticks 1.25)) (str k " ticks: table " ticks ", measured " (:ticks m) "; the row now: " row))
+    (is (<= (- (/ bytes 1.25) 1.0) (:bytes m) (+ (* bytes 1.25) 1.0)) (str k " bytes: table " bytes ", measured " (:bytes m) "; the row now: " row))))
 
 (deftest an-open-overrun-is-accepted-until-it-regresses
-  ;; 400 ns per integer against a 100 ns estimate: 4x, over the 3x slack (4e6 ns at n=10000)
-  (let [m (fn [n] {:ns (* 400.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})]
+  ;; 200 bytes per integer against a 50 byte estimate: 4x, over the 1.25x slack (2e6 bytes at n=10000)
+  (let [m (fn [n] {:ns (* 60.0 n) :bytes (* 200.0 n) :calls (+ 1.0 n)})]
     (testing "within the ratchet (1.5x) of what was measured when its task was filed: green, still reported"
-      (let [e (assoc linear :overrun {:task "seon.cost/demo-overrun" :measured {:ns 3000000.0}})
+      (let [e (assoc linear :overrun {:task "seon.cost/demo-overrun" :measured {:bytes 1500000.0}})
             v (cost/judge e (rows e m))]
         (is (:ok? v))
         (is (= "seon.cost/demo-overrun" (get-in v [:accepted :task])))
         (is (seq (get-in v [:accepted :over])))
         (is (re-find #"OVERRUN accepted while task seon.cost/demo-overrun" (cost/explain e (rows e m) v)))))
     (testing "past the ratchet: a regression, red"
-      (let [e (assoc linear :overrun {:task "seon.cost/demo-overrun" :measured {:ns 2000000.0}})
+      (let [e (assoc linear :overrun {:task "seon.cost/demo-overrun" :measured {:bytes 1000000.0}})
             v (cost/judge e (rows e m))]
         (is (not (:ok? v)))
         (is (re-find #"REGRESSION" (cost/explain e (rows e m) v)))))))

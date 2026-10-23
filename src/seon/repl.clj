@@ -373,7 +373,7 @@
   step's own state is empty."
   {:malli/schema :seon.step/step-fn}
   ([] {:ins {:sock "root's requests"} :outs {:sock "replies"} :workload :io
-       :ping-map-fn (fn [_] {:evals (:n @agent/state) :pending (count (:pending @agent/state)) :mem-mb (:mem @agent/state)})})
+       :ping-map-fn (fn [_] {:evals (:n @agent/state) :pending (count (:pending @agent/state))})})
   ([_] {})
   ([st _] st)
   ([st _ m]
@@ -385,7 +385,7 @@
        (intr/clear-pending!)
        (agent/send! {:op :started :id (:id m)})
        [st {:sock [{:op :reply :id (:id m) :items (eval-string (:forms m) (select-keys m [:ticks :origin]))
-                    :t (:max-tx (agent/db)) :mem-mb (agent/mem-mb)}]}])
+                    :t (:max-tx (agent/db))}]}])
      [st (when-let [ms (agent/handle! m)] {:sock ms})])))
 
 (defn serve!

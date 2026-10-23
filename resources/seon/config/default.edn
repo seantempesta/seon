@@ -247,6 +247,13 @@
  ;; were 782 s of 917 s of recorded test time (pure-tests, 2026-10-23). A var missing here makes
  ;; its tests run automatically (slower, never wrong).
  :seon.config.source/process-vars #{seon.agent-test/in-agent clojure.java.shell/sh seon.lib/fork! seon.test-store/binary-sh}
+ ;; Unit: vars. The vars through which a test reaches the built binary (target/seon): a test whose
+ ;; reach references one runs it, so bin/test builds it first; a process test that only shells
+ ;; out (git) does not. Provenance: root's task seon.check/a-run-builds-the-binary-only-when-
+ ;; something-reaches-it (2026-10-23): bin/test built it (46 s) whenever anything ran. A var
+ ;; missing here is a missed build (a test fails on a stale binary), so it names the one way a
+ ;; test starts the binary: seon.test-store/binary-sh.
+ :seon.config.source/binary-vars #{seon.test-store/binary-sh}
  ;; Unit: branch. Merges are committed here, never on main and never pushed (owner).
  :seon.config.source/branch "jolt/seon-merges"
  ;; Unit: a git identity. Seon authors and commits its merges (the message names the merged
@@ -271,14 +278,28 @@
  ;; starts at once (test-runner/shards), its greens stored by digest when it has run. Provenance:
  ;; worktree session PROVE 2026-10-22 on the 16 GB M1 target (AGENTS section 8): 4 keeps the machine
  ;; responsive beside a standing root and other worktree sessions (measured in docs/merging.md#a-merge-runs-what-the-change-reaches).
- ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected.
+ ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected. bin/check
+ ;; runs this many steps at once too, and mg-check in this many shards (pure-tests 2026-10-23).
  :seon.config.proofs/jobs 4
+ ;; Unit: a salt (integer), 0 normally. Salt of every generative check's seed (seon.proofs/seed): a
+ ;; seed is derived from what its check reaches (a test's reach digest, a contract's var and the
+ ;; binary's tree), so the same digest draws the same cases and a result is a function of its
+ ;; digest, while a code change draws new ones. Change it to re-roll every seed once. Provenance:
+ ;; worktree session pure-tests 2026-10-23 (mg/check drew from the wall clock; owner via root:
+ ;; derive each seed from its digest, not one constant). At the bound: none.
+ :seon.config.proofs/seed-salt 0
  ;; Unit: the size n of a cost proof's input (seon.cost/sizes). A proof measures its sizes up to
  ;; this, and at least its two smallest (a growth fit needs two). Provenance: root, 2026-10-23
  ;; (notes/test-time-2026-10-23.md: building inputs at 10k took 10-19 s per proof in every run).
  ;; bin/test --all sets SEON_COST_MAX_N=100000, so the full run measures each proof as written.
  ;; At the bound: the proof measures no size past this but its two smallest.
  :seon.config.proofs/cost-max-n #long #or [#env SEON_COST_MAX_N 1000]
+ ;; Unit: seeds (a count). How many seeds a randomized property test draws in this run, each
+ ;; from its own test-seed (seon.proofs/test-seed) and the next ones after it. Provenance: root,
+ ;; 2026-10-23 (notes/test-time-2026-10-23.md: r3.inc-test's 5 seeds x 150 steps took 47 s, the
+ ;; automatic run's critical path). bin/test --all sets SEON_SEEDS=5, so the full run draws as
+ ;; many as before. At the bound: the test draws this many and no more.
+ :seon.config.proofs/seeds #long #or [#env SEON_SEEDS 1]
 
  ;; ==== effects and the model ==================================================================
 
@@ -443,7 +464,7 @@
  ;; Unit: bytes. An evaluation that allocated more is flagged on its card and row
  ;; (seon.render.ui/alloc-span). Provenance: render.ui's BIG-ALLOC literal (10 MiB).
  :seon.config.render/big-alloc 10485760
- ;; Unit: tokens a rendered value spends when its env names no budget (seon.render/print-out,
+ ;; Unit: tokens a rendered value spends when its env names no budget (seon.render/print-html and print-ai,
  ;; seon.render/ai, an agent's history row). Provenance: the literal 600 render.clj and
  ;; render.ui carried (2026-10-22), kept as it was.
  :seon.config.render/value-budget 600
@@ -485,7 +506,10 @@
  ;; A taken port leaves the web proc {:listening false} on the health line and boot goes on.
  :seon.config.web/port #long #or [#env SEON_WEB_PORT 0]
  ;; Unit: TCP port on 127.0.0.1: root's server (seon.server), which bin/mcp and outside
- ;; agents reach. 0 (the shipped value): `seon root` refuses to serve. config/local.edn names
+ ;; agents reach. Three values: >0 that port; 0 (the shipped value) none, `seon root` refuses to
+ ;; serve; -1 a free port the kernel assigns. The port bound is named on the root's ROOT LISTENING
+ ;; line and recorded in runs/root.port (a test's root: seon.test-store/start-root!,
+ ;; never a port picked and released beforehand, which another process can take). config/local.edn names
  ;; the checkout's own (main 7888, worktree k 7900+10k).
  ;; bin/root PORT WEB, bin/mcp PORT and the mcp check set SEON_SERVER_PORT, which local.edn
  ;; honours (until a built binary's top-level code sees its argv, so --set can say it).

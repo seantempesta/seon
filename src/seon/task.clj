@@ -158,7 +158,7 @@
   "The observed members of an attempt's end (proto.agents/end), as attributes: a count
   nobody measured (no end written, a reply without usage) is absent, never 0."
   {:malli/schema [:=> [:cat :seon.turn/end :int :int] :map]}
-  [{:keys [outcome turns model-calls tokens results uncontracted reason conflicts unmerged changed]} end-ms basis-t]
+  [{:keys [outcome turns model-calls tokens results uncontracted reason conflicts unmerged changed caused]} end-ms basis-t]
   (cond-> {:seon.attempt/outcome outcome :seon.attempt/basis-t basis-t :seon.attempt/end-ms end-ms
            :seon.attempt/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s}))}
     turns (assoc :seon.attempt/turns turns)
@@ -168,6 +168,7 @@
     (seq conflicts) (assoc :seon.attempt/conflicts (mapv pm/conflict-tx conflicts))
     (seq unmerged) (assoc :seon.attempt/unmerged (vec unmerged))
     (seq changed) (assoc :seon.attempt/changed (vec changed))
+    (seq caused) (assoc :seon.attempt/caused (vec caused))
     reason (assoc :seon.attempt/reason reason)))
 
 (defn carry-tx
@@ -282,6 +283,7 @@
       uncontracted (assoc :seon.attempt/uncontracted (set uncontracted))
       unmerged (assoc :seon.attempt/unmerged (vec (sort unmerged)))
       (:seon.attempt/changed a) (update :seon.attempt/changed set)
+      (:seon.attempt/caused a) (update :seon.attempt/caused set)
       conflicts (assoc :seon.attempt/conflicts
                        (vec (sort-by (comp str :key) (map pm/conflict-value conflicts)))))))
 

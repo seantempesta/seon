@@ -41,8 +41,8 @@
                           [:agent :seon.render/agent]]
  ;; ---- the parts of root's layout: each unit's input, its render declared here ----
  ;; (a unit names its input's schema, never a render function: docs/render.md#the-frame-and-its-units)
- ;; what is wrong now, the lines root's context leads with (seon.render.ai/problems)
- :seon.render/problems-banner [:sequential {:seon.render/html seon.render.ui/tile-problems} :string]
+ ;; what is wrong now, by area: the lines root's context leads with (seon.render.ai/problem-areas)
+ :seon.render/problems-banner [:sequential {:seon.render/html seon.render.ui/tile-problems} [:tuple :keyword [:sequential :string]]]
  ;; a tile as data (seon.render.ui/load-tiles; every tile's own render builds one)
  :seon.render/tile [:map {:seon.render/html seon.render.ui/metric-tile} [:id :string]]
  ;; the swarm: one cell per agent shown [id status evals-seen], and how many ended off the grid

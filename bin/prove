@@ -5,7 +5,7 @@
 # result in the results directory every checkout shares runs; the rest are reused. An unchanged
 # tree runs nothing. Tests run in :seon.config.proofs/jobs shards at once (bin/test); the steps to run go
 # through bin/check's own bodies (bin/check --steps target/prove), on target/seon built from this tree first
-# (bin/test builds it when anything runs).
+# (bin/test builds it only when a selected test or step reaches the binary: the plan's out/binary).
 # With no namespace named, the tests and steps that reach a process of their own (a root, an
 # agent, a shell, a fork: seon.program/reach-index's :process?) are left out; they run when
 # named (bin/test NS, bin/check MODE) or in the full run (docs/merging.md).
