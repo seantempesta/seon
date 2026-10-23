@@ -72,12 +72,14 @@
 
 (deftest armed-printing-adds-only-its-contracted-calls
   ;; as root runs it: every contracted printer function armed. Calls are exact; bytes are the
-  ;; own work's plus one :fn/armed-call per call. Wall time is judged unarmed above: armed, it
-  ;; is the armed call's (session J3), and the printer's contracts, which check maps, cost ~5x the
-  ;; table's one-int contract per call (~340 ns against 60).
+  ;; own work's plus what each call's checks allocate. An armed call takes no try (task
+  ;; seon.contract/an-armed-call-costs-its-checks: :fn/armed-call's one-int row is ~0 B), but the
+  ;; printer's contracts check maps, and a map's validator allocates: measured 2026-10-23, armed
+  ;; minus unarmed, 62 B a call per entry (3,020 against 2,460 B an entry, nine calls) and ~170 B
+  ;; a call of the print's fixed part (19.8 against 7.8 KB at 100, 71 calls). Wall time is judged
+  ;; unarmed above.
   (contract/instrument! '[seon.print seon.print.select seon.print.emit])
-  (let [armed (fn [own calls] (round (assoc own :bytes (+ (:bytes own) (:bytes (priced {:fn/armed-call calls})))
-                                        :calls calls)))]
+  (let [armed (fn [own calls per-call] (round (assoc own :bytes (+ (:bytes own) (* calls per-call)) :calls calls)))]
     (cost/proof
       {:of 'seon.print/print-value :input 'seon.print-cost-test/entries
        :n "entries of a flat map, all shown, armed as at boot"
@@ -85,10 +87,10 @@
                   "and the value (4), child, entry and member-indent (3), and leaf-op for the key and the "
                   "value (2)")
        :growth :linear
-       :per-n (dissoc (armed (priced per-entry) 9) :ns)
+       :per-n (dissoc (armed (priced per-entry) 9 62) :ns)
        ;; the functions a print calls once or twice whatever its size (show, select, allot, the
        ;; root's node and sizing, tree, emit-both, node-ops, layout and their helpers): 71 calls
-       :fixed (dissoc (armed fixed 71) :ns)
+       :fixed (dissoc (armed fixed 71 170) :ns)
        :sizes [100 1000 10000]})))
 
 (defn text
