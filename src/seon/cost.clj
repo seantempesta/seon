@@ -68,7 +68,7 @@
 (def growth-share
   "Growth is fitted on increments over the smallest size only when the largest increment is
   at least this share of the smallest size's cost: below it, the measure's own variance moves
-  the increments more than the growth does. Measured 2026-10-23 on seon.source-test's transact
+  the increments more than the growth does. Measured on seon.source-test's transact
   row (log growth, 406k ticks at 10, 71k more at 1,000): ticks varied 0.5% between runs, which
   moved the increments' exponent by 0.02, its whole margin under the bound."
   0.25)
