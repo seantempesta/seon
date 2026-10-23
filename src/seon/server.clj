@@ -119,6 +119,12 @@
    :attach {:doc "Work a task as a Seon agent: root starts an agent on the task's branch (model outside) and answers its id."
             :args {:task {:type "string" :description "ns/name"}} :required ["task"]
             :answer (fn [sys _ req] (attach! sys (:task req)))}
+   :prove {:doc "Run the tests a branch's change reaches, once per branch and tx however many ask (a session, an agent's turn): the one test service (seon.prove). Names an agent (its branch at its head), else main. Answers the run: its key, the counts, the red tests; a result already held for a test's digest is not run again."
+           :args {:agent {:type "string" :description "an agent id whose branch to prove; omit for main"}
+                  :names {:type "array" :items {:type "string"} :description "test namespaces to run; omit for every test whose digest holds no green"}}
+           :answer (fn [sys ag req]
+                     (let [r @(c/prove! sys ag (set (map symbol (:names req))))]
+                       (if (contract/error? r) r (select-keys r [:key :ran :pass :fail :error :red :reused :ms]))))}
    :done {:doc "Hand the run the agent works back to root: its proofs run, it is judged, and merged when the done rule has no reason."
           :args {:agent {:type "string"}} :required ["agent"]
           :answer (fn [sys ag _]

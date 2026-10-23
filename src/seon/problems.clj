@@ -27,6 +27,8 @@
                                     never written, so it is open exactly while it is true
     :unnamed-site                   a site of a law (`laws`: a catch) its page does not name:
                                     derived from the compiler's facts and the page's names
+    :test-red                       a test whose newest result the test service recorded is red
+                                    (seon.prove): closed by a later green, written by nothing
     :stale-pin                      a pin the wiki states (`pins`: docs/forks.md) that is not
                                     the gitlink root's source import recorded
 
@@ -66,17 +68,24 @@
 ;; ---- recorded errors ------------------------------------------------------------------
 
 (defn- closed?
-  "Is the recorded error r (entity e) closed: its subject (a var's name or a section's address,
-  :seon.error/subject, or, on a store from before the type left the code, the target address of a
-  :seon.docs/refused link) has a fact written after the error's last one. Nothing is written to
-  close it, and a subject that does not exist yet has changed nothing."
+  "Is the recorded error r (entity e) closed: a subject of it has a fact written after the error's
+  last one. The subjects: :seon.error/subject (a var's name or a section's address), and, for a
+  :seon.docs/refused error from a store older than the type's removal, the link's target address
+  and the citing section's (its example's). Such an error is closed too when the citing section
+  exists and no longer links to the target (not a dead link of it, not among its references).
+  Nothing is written to close it, and a subject that does not exist has changed nothing."
   {:malli/schema [:=> [:cat :seon.host/db :map :int] :boolean]}
   [db r e]
-  (let [subject (or (:seon.error/subject r)
-                    (when (= :seon.docs/refused (:seon.error/type r)) (:seon.ref/address (:seon.error/example r))))
-        s (when subject (pdb/eid db (if (symbol? subject) :var/name :seon.section/address) subject))
-        last-tx (reduce max (map :tx (d/datoms db :eavt e)))]
-    (boolean (and s (some #(> (:tx %) last-tx) (d/datoms db :eavt s))))))
+  (let [ex (:seon.error/example r)
+        refused? (= :seon.docs/refused (:seon.error/type r))
+        [target from] (when refused? [(:seon.ref/address ex) (:seon.section/address ex)])
+        subjects (keep (fn [s] (when s (pdb/eid db (if (symbol? s) :var/name :seon.section/address) s)))
+                       [(:seon.error/subject r) target from])
+        last-tx (reduce max (map :tx (d/datoms db :eavt e)))
+        citing (some->> from (pdb/eid db :seon.section/address) (d/pull db [:seon.section/dead-links {:seon.section/references [:seon.section/address]}]))]
+    (boolean (or (some (fn [s] (some #(> (:tx %) last-tx) (d/datoms db :eavt s))) subjects)
+                 (and citing (not-any? #{target} (:seon.section/dead-links citing))
+                      (not-any? #(= target (:seon.section/address %)) (:seon.section/references citing)))))))
 
 (defn- error-row
   "One recorded error (entity e) as a row, :open? false once its subject changed (`closed?`)."
@@ -295,6 +304,25 @@
                        ;; the changed namespaces its gate could not read, and why
                        (:seon.run/gate-unread p) (assoc :unread (:seon.run/gate-unread p)))]))))
 
+(defn test-reds
+  "Each test whose newest result on main (the test service's, seon.prove/result-tx: the entity per
+  test under :seon.proof/latest) is red, as a :test-red row naming the test, the branch and tx it
+  ran at and the change that asked. A later green is the newer result of that entity, so it closes
+  the row with nothing written; the older result stays in the history. A red on an agent's branch is
+  not on main, so it is not here. Cost: one datom per test, and a pull per red one."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (vec (for [{:keys [e v]} (d/datoms db :aevt :seon.proof/latest)
+             :when (not= :pass (:v (first (d/datoms db :eavt e :seon.proof/status))))
+             :let [r (d/pull db '[*] e) t (symbol v) s (str "test-red " v)]]
+         {:signature s :test t :status (:seon.proof/status r) :open? true :branch (:seon.proof/branch r) :t (:seon.proof/t r)
+          :run (:seon.proof/run r) :change (:seon.proof/change r) :failures (:seon.proof/failures r)
+          :message (str t " is " (name (:seon.proof/status r)) " at " (:seon.proof/branch r) " t " (:seon.proof/t r)
+                        (when-let [a (get-in r [:seon.proof/change :agent])] (str ", asked by " (name a))))
+          :producer nil :owner-ns (symbol (namespace t)) :proofs [t]
+          :evidence {:kind :test-red :test t :run (:seon.proof/run r) :failures (:seon.proof/failures r)}
+          :answered-by (get-in ans [:signature s] []) :at-ms nil})))
+
 (defn report
   "Every problem recorded on main db, by class: {:t :classes {class {:n :rows}}}. Counted
   classes' :n is their occurrences and their rows run by count; run classes' :n is
@@ -314,14 +342,16 @@
                                                    :seon.run/conflicts :seon.run/unmerged :seon.run/task-conflicts])
                                (mapcat (fn [s] (map :e (d/datoms db :avet :seon.run/status s))) (conj death-statuses :behind))))
         by-class (apply merge-with into (map #(run-rows db ans %) runs))
-        failed (mapv #(failed-row db ans %) (es db :seon.task/failure))]
+        failed (mapv #(failed-row db ans %) (es db :seon.task/failure))
+        reds (test-reds db ans)]
     ^{:seon.render/schema :seon.problems/report}
     {:t (:max-tx db)
      :classes (merge (into {} (for [c counted-classes :let [rows (vec (sort-by (comp - :count) (get errors c)))]]
                                 [c {:n (reduce + 0 (map :count rows)) :rows rows}]))
                      (into {} (for [c run-classes :let [rows (vec (sort-by #(- (or (:end-ms %) 0)) (get by-class c)))]]
                                 [c {:n (count rows) :rows rows}]))
-                     {:failed {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))}})})))
+                     {:failed {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))}
+                      :test-red {:n (count reds) :rows reds}})})))
 
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the

@@ -256,3 +256,10 @@ Approved at net ~−15 src. Build after the first merge lands, in root's run que
 4. A check over its tick budget is an "unknown" attention row: never green, never a refusal.
 5. Main's vars run in the tests-branch prove agent.
 The Malli seed bump (jolt/mg-seed) comes with pure-tests' branch. Until it merges, a cached green is not reproducible.
+
+### The test service: follow-ups (not built, 2026-10-23)
+
+- An agent sees main's result facts only as of its last merge of main. With global-ids' shared addressing, it would see them live.
+- The `tests` branch is not kept in step with main: a main run imports the checkout's tests each time (`seon.agent/load-tests!`). Keep it current through the one loader once the Flow work (`:load`) lands.
+- The burst behaviour (200 requests, one run) has a test but no cost proof. Add one with the commit-stream work.
+- Next commit: `seon.problems/caused` O(changed), by diffing base and head by value (section text, names and dead links; var and task name sets; catch forms), not by tx id.

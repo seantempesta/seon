@@ -9,7 +9,7 @@
   loop and root's judge."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.config :as cfg] [seon.edn :as sedn] [seon.error :as error] [seon.profile :as profile]
-            [clojure.edn :as edn] [clojure.string :as str] [clojure.test :as t]))
+            [clojure.edn :as edn] [datahike.api :as d] [clojure.string :as str] [clojure.test :as t]))
 
 (defn test-symbol
   "The qualified symbol of a report's :var (\"#'ns/name\" or \"ns/name\"), or nil."
@@ -128,6 +128,16 @@
   (into {} (for [dg (distinct digests) :let [f (java.io.File. ^String (result-path dir dg))] :when (.isFile f)
                  :let [r (edn/read-string (slurp f))] :when (green? r)]
              [dg r])))
+
+(defn stored-greens
+  "{digest result} of the results db holds as green at digests (:seon.proof/ facts, which the test
+  service records, seon.prove/result-tx): one AVET seek per digest. The same shape greens reads from
+  the files, which stay the lookup across checkouts until the stores are shared."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] [:map-of :string :map]]}
+  [db digests]
+  (into {} (for [dg (distinct digests) :let [e (:e (first (d/datoms db :avet :seon.proof/digest dg)))]
+                 :when (and e (= :pass (:seon.proof/status (d/pull db [:seon.proof/status] e))))]
+             [dg {:digest dg :pass 1 :fail 0 :error 0}])))
 
 (defn result-file
   "The write that stores result r ({:test or :step, :digest, :pass :fail :error :ms}) in dir:
