@@ -254,7 +254,10 @@
   []
   (run-check "TEST-INPUTS" {:datoms 2000}
    (fn [sys]
-    (let [files (into {} (filter #(clojure.string/ends-with? (key %) ".clj")) (:value (seon.fx/read-source {:req {:root (seon.config/checkout) :dirs ["test"]}})))
+    ;; the tests' files: this driver lives in test/ too (outside src) but is no test, and its
+    ;; waits are a check's measurement, named in docs/clocks.md
+    (let [files (into {} (filter #(and (clojure.string/ends-with? (key %) ".clj") (not (clojure.string/ends-with? (key %) "seon/check.clj"))))
+                      (:value (seon.fx/read-source {:req {:root (seon.config/checkout) :dirs ["test"]}})))
           ;; test/'s forms analyzed onto main's value (d/db-with: nothing transacted)
           db (let [db (d/db (:conn sys))] (d/db-with db (seon.source/import-tx db files)))
           found (set (d/q '[:find ?v ?r :in $ [?r ...] :where [?f :form/refs ?r] [?f :form/defines ?d] [?d :var/name ?v]] db (vec hidden-inputs)))
