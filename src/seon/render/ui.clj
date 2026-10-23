@@ -17,7 +17,7 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
-            [seon.render :as render] [seon.print :as print] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.proofs :as proofs] [seon.cost :as cost]))
+            [seon.render :as render] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.proofs :as proofs] [seon.cost :as cost]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -70,7 +70,7 @@
          {:keys [shown truncated? omitted lines]} (print/prose s budget {:one-line? (boolean one-line?)})]
      (if-not truncated?
        shown
-       (let [words (str (print/cut-words omitted lines nil) (when whole (str " · the whole value: " (print/text whole (form-budget)) " at its REPL")))
+       (let [words (str (emit/cut-words omitted lines nil) (when whole (str " · the whole value: " (print/text whole (form-budget)) " at its REPL")))
              cut (if href
                    [:a {:class "seon-print-elision" :href href :title "the whole on this page"} words]
                    [:span {:class "seon-print-elision" :title s} words])]
@@ -647,12 +647,6 @@
     [:span {:class "eagent"} (if (:agent ev) [:a {:href (str "/agent/" (dom-id (:agent ev)))} (kname (:agent ev))] "root")]
     [:span {:class "edetail"} (event-detail ev)]]})
 
-(defn events-list
-  "The stream around rows already serialized (each event's row is rendered once)."
-  {:malli/schema [:=> [:cat [:sequential :string] :seon.render/env] :seon.render/out]}
-  [rows _]
-  {:seon.render/html [:ol {:id "events" :class "events"} (map h/raw rows)]})
-
 (defn events-count
   "The stream's header: newest first, and how many of the events since root's boot it
   keeps (:seon.config.render.list/stream); the older are not kept anywhere."
@@ -776,7 +770,7 @@
         (slot "ctx")
         [:div {:class "stream"}
          [:header [:span {:class "kicker"} "event stream"] (slot "events-n")]
-         (slot "events")]]]]
+         [:ol {:id "events" :class "events"} (for [e (:events sys)] (slot (str "ev-" (:seq e))))]]]]]
      :seon.render/units
      (vec (concat
            [(u "problems" (:problems sys []) `tile-problems)
@@ -787,13 +781,14 @@
             (u "t-tasks" {:rows (:task-rows sys) :attempts attempts :main-t (:t main)} `tile-tasks)
             (u "t-errors" {:root-errors root-errors :root-errors-total (:root-errors-total sys) :boot boot :store store} `tile-errors)
             (u "ctx" (:context sys) `context-panel)
-            ;; the stream's patches are the render proc's prepends; this unit keeps the list
-            ;; for pages and keyframes
-            (assoc (u "events" (:event-rows sys []) `events-list) :keyframe-only true)
             (u "events-n" {:kept (count (:events sys)) :seen (:events-seen sys 0)} `events-count)
             (u "webstats" web `web-stats)]
            ;; the config root wrote on main, by its schema's declared render (none before boot's fact)
            (when-let [c (:config sys)] [{:id "t-config" :input c :schema :seon.config/config}])
+           ;; the stream, newest first: a new event's row is prepended, one past the cap removed,
+           ;; and a row whose event changed (main said how a stopped agent's attempt ended) replaced
+           (for [e (:events sys)]
+             {:id (str "ev-" (:seq e)) :input e :render `event-row :container "#events" :prepend? true})
            (for [id order]
              {:id (str "cb-" (dom-id id)) :input (ended-as (get agents id) id agent-attempt) :agent id :schema :seon.render/agent
               :shell (str "card-" (dom-id id)) :container "#grid"})))}))
@@ -802,7 +797,7 @@
 
 (defn task-box
   "A task: its kind and execution, its plan (accumulated along its needs), instructions, what
-  is wrong (its problem, failure, budget-spent fact), its needs and proofs, and its evidence."
+  is wrong (its failure, held for root), its needs and proofs, and its evidence."
   {:malli/schema [:=> [:cat :seon.task/task :seon.render/env] :seon.render/out]}
   [t _]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)]
@@ -811,11 +806,8 @@
       (kicker (str "task · " (:seon.task/id t)) (str (kname (:seon.task/kind t)) " · " (kname (:seon.task/execution t))))
       [:pre {:class "plan"} plan]
       (when (:seon.task/instructions t) [:p {:class "muted"} (:seon.task/instructions t)])
-      (when (:seon.task/problem t) [:p {:class "err"} (:seon.task/problem t)])
       (when-let [{:keys [reason counterexample attempt]} (:seon.task/failure t)]
         [:p {:class "err"} "failed" (when attempt (str " in " attempt)) ": " reason (when counterexample (list " · counterexample " [:code counterexample]))])
-      (when-let [{:keys [cause blocks]} (:seon.task/stuck t)]
-        [:p {:class "warn"} "budget spent: " cause (when (seq blocks) (str " · blocks " (str/join ", " (sort blocks))))])
       (when (seq (:seon.task/needs t)) [:p {:class "muted"} "needs " (str/join ", " (sort (:seon.task/needs t)))])
       [:p {:class "muted"} (str (count proofs) (if (= 1 (count proofs)) " proof: " " proofs: ")) (str/join " " (map str (sort-by str proofs)))]
       (when-let [ev (:seon.task/evidence t)]
@@ -893,14 +885,15 @@
 
 (defn history-row
   "One evaluation, as a row of the agent's history: its form, its value (the printer's
-  HTML), its time and allocation, who asked (origin), and its costliest functions with
-  exact calls and estimated ms. Takes a reply item or the recorded evaluation."
+  HTML, under :seon.config.render/history-row-budget unless env names one), its time and
+  allocation, who asked (origin), and its costliest functions with exact calls and
+  estimated ms. Takes a reply item or the recorded evaluation."
   {:malli/schema [:=> [:cat :map :seon.render/env] :seon.render/out]}
   [e env]
   {:seon.render/html
-     [:li {:class (str "hr tag-" (kname (or (:tag e) :ret)))}
+     [:li {:id (:seon.render/unit env) :class (str "hr tag-" (kname (or (:tag e) :ret)))}
       [:div {:class "hf"} [:code (prose (:form e) (form-budget))]]
-      [:div {:class "hv"} (eval-out e (or (:seon.render/budget env) (config/value :seon.config.render/value-budget)) (part) nil true)]
+      [:div {:class "hv"} (eval-out e (or (:seon.render/budget env) (config/value :seon.config.render/history-row-budget)) (part) nil true)]
       (when (and (seq (:out e)) (not (context-read? e))) [:pre {:class "out"} (prose (:out e) (part))])
       (eval-meta e)
       (when (seq (:fns e))
@@ -908,15 +901,14 @@
          [:tbody (for [{:keys [var calls ms]} (:fns e)]
                    [:tr [:td [:code (str var)]] [:td {:class "n"} (str (group3 calls) " calls")] [:td {:class "n"} (ms-str ms)]])]])]})
 
-(defn history-list
-  "The agent's evaluations, newest first, around rows already serialized (an evaluation is
-  written once, so its row is rendered once), and how many older ones its branch records
-  beyond the page's (:seon.config.render.list/history). input {:rows :total}."
-  {:malli/schema [:=> [:cat [:map [:rows [:sequential :string]] [:total nat-int?]] :seon.render/env] :seon.render/out]}
-  [{:keys [rows total]} _]
-  {:seon.render/html [:ol {:id "z-history" :class "history"}
-                      (if (seq rows) (map h/raw rows) [:li {:class "muted"} "no evaluations yet"])
-                      (when-let [m (print/more total (count rows) "older evaluations, recorded on its branch (:seon.cluster.eval/record)")] [:li {:class "more muted"} m])]})
+(defn history-more
+  "The last line of the agent's history: how many older evaluations its branch records
+  beyond the page's (:seon.config.render.list/history), or that it has none yet. input
+  {:shown :total}."
+  {:malli/schema [:=> [:cat [:map [:shown nat-int?] [:total nat-int?]] :seon.render/env] :seon.render/out]}
+  [{:keys [shown total]} _]
+  (let [m (if (zero? total) "no evaluations yet" (print/more total shown "older evaluations, recorded on its branch (:seon.cluster.eval/record)"))]
+    {:seon.render/html [:li {:id "z-history-more" :class "more muted" :hidden (nil? m)} m]}))
 
 (defn zoom-head
   "The zoomed agent's head: its card's numbers, its process and its branch."
@@ -975,12 +967,15 @@
          [:span {:class "prompt"} (str (kname id) "=>")]
          [:input {:id "zi" :name "forms" :autocomplete "off" :spellcheck "false" :autofocus true
                   :placeholder "evaluate in this agent's REPL (recorded with origin :ui)"}]]
-        (slot "z-history")]
+        [:ol {:id "z-history" :class "history"} (for [[eid] history] (slot (str "hr-" (dom-id eid)))) (slot "z-history-more")]]
        [:aside {:class "zside"} (slot "z-work") (slot "z-proofs") (slot "z-context")]]]
      :seon.render/units
-     [{:id "z-head" :input agent :render `zoom-head}
-      {:id "z-work" :input {:attempt attempt :task task} :render `zoom-work}
-      {:id "z-proofs" :input {:tests (:tests agent) :results (:seon.attempt/results attempt)
-                              :own (get-in task [:seon.task/accumulated :proofs]) :owners (:owners page)} :render `proofs-box}
-      {:id "z-context" :input context :render `zoom-context}
-      {:id "z-history" :input {:rows history :total (:history-total page (count history))} :render `history-list}]}))
+     (into
+      [{:id "z-head" :input agent :render `zoom-head}
+       {:id "z-work" :input {:attempt attempt :task task} :render `zoom-work}
+       {:id "z-proofs" :input {:tests (:tests agent) :results (:seon.attempt/results attempt)
+                               :own (get-in task [:seon.task/accumulated :proofs]) :owners (:owners page)} :render `proofs-box}
+       {:id "z-context" :input context :render `zoom-context}
+       {:id "z-history-more" :input {:shown (count history) :total (:history-total page (count history))} :render `history-more}]
+      ;; its evaluations, newest first: each written once, so its row renders once, prepended
+      (for [[eid r] history] {:id (str "hr-" (dom-id eid)) :input r :render `history-row :container "#z-history" :prepend? true}))}))

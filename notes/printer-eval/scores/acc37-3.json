@@ -1,0 +1,72 @@
+[
+ {
+  "section": 1,
+  "answer": "The evaluation with form (seon.model/call provider request) raised an error (tag :err). Its message is: The provider answered HTTP 400: the request's messages exceed the model's context window.",
+  "left_out": "+5524 characters of the response body",
+  "read_form": "(subs (get-in (nth (my.turn/evals) 2) [:value :seon.error/data :body]) 5729)",
+  "confident": true
+ },
+ {
+  "section": 2,
+  "answer": "The d/datoms evaluation (vec (d/datoms (my.db/db) :eavt)) holds 400 datoms in total: 66 are shown and 334 are not shown.",
+  "left_out": "334 datoms",
+  "read_form": "(drop 66 (get-in (nth (my.turn/evals) 2) [:value]))",
+  "confident": true
+ },
+ {
+  "section": 3,
+  "answer": "not shown. The rendering shows only the key calc/neg#1 with its map elided (10 members), so its status is not in the text.",
+  "left_out": "the whole attempt map for calc/neg#1 (10 members)",
+  "read_form": "(val (nth (seq result/h3) 2))",
+  "confident": true
+ },
+ {
+  "section": 4,
+  "answer": "not shown. The key :seon.config.root/max-agents does not appear in the 17 keys shown.",
+  "left_out": "73 config keys not shown",
+  "read_form": "(drop 17 result/h3)",
+  "confident": true
+ },
+ {
+  "section": 5,
+  "answer": "HTTP 400.",
+  "left_out": "10964 characters of the response body",
+  "read_form": "(subs (get-in result/h3 [:seon.error/data :body]) 289)",
+  "confident": true
+ },
+ {
+  "section": 6,
+  "answer": "not shown. The stuck class is elided with 2 members, so neither the stuck task nor its reason is in the text.",
+  "left_out": "2 stuck members (the whole :stuck class rows)",
+  "read_form": "(get-in result/h3 [:classes :stuck])",
+  "confident": true
+ },
+ {
+  "section": 7,
+  "answer": "not shown. The entry for calc/neg is elided with 11 members, so its :seon.task/execution is not in the text.",
+  "left_out": "the whole task map for calc/neg (11 members)",
+  "read_form": "(val (nth (seq result/h3) 4))",
+  "confident": true
+ },
+ {
+  "section": 8,
+  "answer": "The value holds 2 turns: 1 is shown and 1 is not shown. The first turn's :seon.turn/calls is elided and not shown.",
+  "left_out": "1 turn not shown, and the whole :seon.turn/calls vector of the first turn (1 call)",
+  "read_form": "(get-in result/h3 [0 :seon.turn/calls])",
+  "confident": true
+ },
+ {
+  "section": 9,
+  "answer": "400 datoms in total: 364 are shown and 36 are not shown.",
+  "left_out": "36 datoms",
+  "read_form": "(drop 364 result/h3)",
+  "confident": true
+ },
+ {
+  "section": 10,
+  "answer": "No. The shown text ends in the Laws section (section 5 of AGENTS.md, after the proc contract bullets) and does not reach section 8 The machine.",
+  "left_out": "7279 characters",
+  "read_form": "(subs result/h3 19523)",
+  "confident": true
+ }
+]

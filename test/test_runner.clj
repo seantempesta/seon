@@ -14,13 +14,18 @@
             [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.source :as source] [seon.system :as system]))
 
 (defn- test-namespaces
-  "Namespace symbols of test/**/*_test.clj(c)."
+  "Namespace symbols of <tree>/test/**/*_test.clj(c), the tree the config names
+  (:seon.config.source/root, when a root was given one: a clone an agent works on) else the
+  checkout this process runs from. Never the working directory: a root and its agents run in
+  target/ and the agents' scratch dir, where a relative \"test\" is nothing."
   []
-  (->> (file-seq (io/file "test"))
-       (map #(.getPath %))
-       (filter #(re-find #"_test\.cljc?$" %))
-       (map #(-> % (str/replace #"^test/" "") (str/replace #"\.cljc?$" "") (str/replace "/" ".") (str/replace "_" "-") symbol))
-       sort))
+  (let [tree (str (or (get config/config :seon.config.source/root) (config/checkout)))
+        prefix (str tree "/test/")]
+    (->> (file-seq (io/file tree "test"))
+         (map #(.getPath %))
+         (filter #(re-find #"_test\.cljc?$" %))
+         (map #(-> % (subs (count prefix)) (str/replace #"\.cljc?$" "") (str/replace "/" ".") (str/replace "_" "-") symbol))
+         sort)))
 
 ;; ---- reach -----------------------------------------------------------------------------
 

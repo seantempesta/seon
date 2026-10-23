@@ -1,0 +1,92 @@
+[
+ {
+  "section": 1,
+  "ranking": [
+   "P",
+   "R",
+   "Q"
+  ],
+  "why": "P gives the error, its message and the inline form that reads the rest of the body at the lowest token cost; R says the same through a legend, and Q repeats every cut in a footer at the highest cost."
+ },
+ {
+  "section": 2,
+  "ranking": [
+   "R",
+   "Q",
+   "P"
+  ],
+  "why": "R gives the inline cut form at the lowest cost, Q adds a legend lookup, and P repeats each cut in a footer for the most tokens, though all three show the 334 hidden rows and their form."
+ },
+ {
+  "section": 3,
+  "ranking": [
+   "Q",
+   "P",
+   "R"
+  ],
+  "why": "None shows the status, but Q gives the exact attempt-map form inline at the lowest cost, P adds a legend, and R repeats the same forms in a footer at over twice the tokens."
+ },
+ {
+  "section": 4,
+  "ranking": [
+   "R",
+   "P",
+   "Q"
+  ],
+  "why": "R states the 73 hidden keys and the form inline at the lowest cost, P gives the same through a legend, and Q repeats the count in a footer for the most tokens."
+ },
+ {
+  "section": 5,
+  "ranking": [
+   "P",
+   "Q",
+   "R"
+  ],
+  "why": "P gives the HTTP status and the exact body-rest form inline at the lowest cost, Q uses a legend, and R repeats the form in a footer for the most tokens."
+ },
+ {
+  "section": 6,
+  "ranking": [
+   "Q",
+   "R",
+   "P"
+  ],
+  "why": "All three cut the stuck class and give its exact form, Q does so inline at the lowest cost, R uses a legend, and P adds redundant footers for the most tokens."
+ },
+ {
+  "section": 7,
+  "ranking": [
+   "P",
+   "R",
+   "Q"
+  ],
+  "why": "All three cut calc/neg's execution and give its map form, P does so inline at low cost, R uses a legend, and Q repeats the forms in a 12-line footer at nearly three times the tokens."
+ },
+ {
+  "section": 8,
+  "ranking": [
+   "R",
+   "Q",
+   "P"
+  ],
+  "why": "R gives the turn count, the hidden turn and the calls form inline at the lowest cost, Q uses a legend, and P adds a redundant footer for the most tokens."
+ },
+ {
+  "section": 9,
+  "ranking": [
+   "Q",
+   "P",
+   "R"
+  ],
+  "why": "All three hide 36 datoms with the exact drop form, Q gives it inline at the lowest cost, P uses a legend, and R repeats it in a footer."
+ },
+ {
+  "section": 10,
+  "ranking": [
+   "R",
+   "P",
+   "Q"
+  ],
+  "why": "All three cut AGENTS.md before section 8 with the exact rest form, R gives it inline at the lowest cost, P uses a legend, and Q repeats it in a footer for the most tokens."
+ }
+]

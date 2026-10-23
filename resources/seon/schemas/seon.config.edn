@@ -49,11 +49,10 @@
   [:seon.config.agent/form-ticks :seon.config.agent/form-ticks]
   [:seon.config.agent/form-top-fns :seon.config.agent/form-top-fns]
   [:seon.config.agent/test-ticks :seon.config.agent/test-ticks]
-  ;; merges and refinement
+  ;; merges
   [:seon.config.merge/max-running :seon.config.merge/max-running]
   [:seon.config.merge/max-conflicts :seon.config.merge/max-conflicts]
   [:seon.config.merge/max-merge-turns :seon.config.merge/max-merge-turns]
-  [:seon.config.task/budget :seon.config.task/budget]
   ;; Seon's own source
   [:seon.config.source/root {:optional true} :seon.config.source/root]
   [:seon.config.source/dirs :seon.config.source/dirs]

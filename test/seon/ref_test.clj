@@ -288,3 +288,36 @@
     (is (contains? names 'demo.calc) "a namespace main holds")
     (is (contains? names 'demo.calc/add) "a qualified name, as before")
     (is (not (contains? names 'demo.nowhere)) "a dotted word naming nothing is prose")))
+
+(deftest a-citation-naming-no-page-names-nothing
+  ;; wiki audit 2026-10-23 R1: names-something? threw (io/file of a nil path) on an anchor
+  ;; link read with no page of its own; it names nothing, and an anchor names a section only
+  ;; when its page holds one
+  (let [db (program-db)
+        [c] (ref/cited (:seon.ref/citations (ref/parse nil "[above](#the-api)")))]
+    (is (= :anchor-missing (:seon.ref/problem-kind c)))
+    (is (false? (ref/names-something? db c)) "an anchor with no page names nothing")
+    (is (true? (ref/names-something? db {:seon.ref/path "docs/references.md" :seon.ref/depth :doc :seon.ref/line 1})))
+    (is (false? (ref/names-something? db {:seon.ref/path "docs/references.md" :seon.ref/anchor "no-such-section"
+                                          :seon.ref/depth :doc :seon.ref/line 1}))
+        "a path#anchor names something only when the page holds that section")
+    (is (true? (ref/names-something? db {:seon.ref/path "docs" :seon.ref/depth :doc :seon.ref/line 1})) "a directory of the checkout")
+    (is (true? (ref/names-something? db {:seon.ref/name 'clojure.core/map :seon.ref/depth :doc :seon.ref/line 1}))
+        "a var of a namespace this process holds, as a namespace counts when loaded")
+    (is (true? (ref/names-something? db {:seon.ref/name :seon.host/db :seon.ref/depth :doc :seon.ref/line 1}))
+        "a host predicate of the contract registry, as a declared schema key counts")))
+
+(deftest a-task-name-is-a-reference-to-the-task
+  ;; wiki audit 2026-10-23 R4: a cited ns/name naming a :seon.task/id resolves, and shows the
+  ;; task's plan by the one rule
+  (let [db (d/db-with (program-db) [{:seon.task/id "demo.ops/add-works" :seon.task/ns 'demo.ops :seon.task/name "add-works"
+                                     :seon.task/plan "Add two numbers. Then subtract them."}])
+        rs (ref/references db "Needs `demo.ops/add-works`, demo.ops/add-works and `demo.ops/no-such-task`.")]
+    (is (= ['demo.ops/add-works] (mapv :seon.ref/name rs))
+        "a task in a namespace no file defines is a reference, not an alias form; one naming nothing is code")
+    (is (ref/names-something? db (first rs)))
+    (is (= {:seon.ref/address "demo.ops/add-works" :seon.ref/heading "demo.ops/add-works"
+            :seon.ref/lead "Add two numbers. Then subtract them." :seon.ref/below []}
+           (ref/task-view db 'demo.ops/add-works :doc)))
+    (is (= "Add two numbers." (:seon.ref/summary (ref/task-view db 'demo.ops/add-works :summary))))
+    (is (nil? (ref/task-view db 'demo.ops/no-such-task :doc)))))

@@ -1,0 +1,92 @@
+[
+ {
+  "section": 1,
+  "ranking": [
+   "Q",
+   "P",
+   "R"
+  ],
+  "why": "Q states the error's form, message and inline body-reading form in the smallest rendering with no repeated footers, P makes the reader follow \u00abk\u00bb markers, and R is the largest because it repeats every form in a trailing list."
+ },
+ {
+  "section": 2,
+  "ranking": [
+   "R",
+   "P",
+   "Q"
+  ],
+  "why": "R shows the 66 shown datoms with the exact inline form for the remaining 334 at the lowest cost, P needs a marker lookup, and Q is the largest because it repeats each form in a footer."
+ },
+ {
+  "section": 3,
+  "ranking": [
+   "P",
+   "Q",
+   "R"
+  ],
+  "why": "P cuts the calc/neg#1 entry with its exact inline form at about 205 tokens, Q needs a marker lookup, and R repeats the forms in a footer at over twice the cost."
+ },
+ {
+  "section": 4,
+  "ranking": [
+   "Q",
+   "R",
+   "P"
+  ],
+  "why": "Q states the 73 unshown config keys with the exact inline form in the fewest tokens, R needs a marker lookup, and P repeats the form in a footer."
+ },
+ {
+  "section": 5,
+  "ranking": [
+   "P",
+   "R",
+   "Q"
+  ],
+  "why": "P gives the HTTP 400 status and the unshown body count with its exact inline form at the lowest cost, R needs a marker lookup, and Q repeats the form in a footer at the highest cost."
+ },
+ {
+  "section": 6,
+  "ranking": [
+   "R",
+   "Q",
+   "P"
+  ],
+  "why": "R shows the stuck and red class counts with the exact inline forms in the fewest tokens, Q needs marker lookups, and P repeats the forms in a footer at the highest cost."
+ },
+ {
+  "section": 7,
+  "ranking": [
+   "Q",
+   "P",
+   "R"
+  ],
+  "why": "Q gives the calc/neg entry's exact inline form at about 230 tokens, P needs marker lookups, and R repeats every form in a footer at nearly three times the cost."
+ },
+ {
+  "section": 8,
+  "ranking": [
+   "R",
+   "P",
+   "Q"
+  ],
+  "why": "R shows the two turns and the exact inline form for the first turn's calls in the fewest tokens, P needs marker lookups, and Q repeats the forms in a footer at the highest cost."
+ },
+ {
+  "section": 9,
+  "ranking": [
+   "P",
+   "Q",
+   "R"
+  ],
+  "why": "P states the 400 total with 364 shown and the exact inline form for the remaining 36 at no repeated cost, Q needs a footer lookup, and R repeats the form in a footer at the highest cost."
+ },
+ {
+  "section": 10,
+  "ranking": [
+   "Q",
+   "R",
+   "P"
+  ],
+  "why": "Q gives the 7279 unshown characters and the exact inline form in the fewest tokens, R needs a marker lookup, and P repeats the form in a footer at the highest cost."
+ }
+]

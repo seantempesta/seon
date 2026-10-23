@@ -3,7 +3,7 @@
   the reconciler proc does the rest. Each takes root's system (seon.root/start!)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [seon.config :as config]
-            [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl]))
+            [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [datahike.api :as d]))
 
 (defn- write-declared!
   "Declared state's tx written on main: the refusal that built it as it is; an empty tx
@@ -35,9 +35,24 @@
              :tasks (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) (tpl/request decl))))))
 
 (defn run!
-  "Release tasks ids: the one release (nothing autoruns)."
+  "Release tasks ids: the one release (nothing autoruns). Each held task becomes running,
+  by compare-and-swap on main (a cancel! between the read and the write refuses the write);
+  each id that is not held (unknown, running, cancelled) is answered :seon.root/not-held
+  under :not-held, and only the held ones are written. Answers the writer's answer (or
+  {:ok true :changed 0} when none is held) with :not-held when any."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
-  [sys ids] @(root/transact-main! sys (task/execution-tx ids :running)))
+  [sys ids]
+  (let [db @(:conn sys)
+        x (into {} (for [id ids] [id (some->> (pdb/eid db :seon.task/id id) (d/pull db [:seon.task/execution]) :seon.task/execution)]))
+        held (filterv #(= :held (x %)) ids)
+        refused (vec (for [id ids :when (not= :held (x id))]
+                       (contract/error :seon.root/not-held 'my.root/run!
+                                       (str "task " id (if-let [e (x id)] (str " is " (name e)) " does not exist") ", not held: nothing to release")
+                                       {:task id :execution (x id)})))]
+    (cond-> (if (seq held)
+              @(root/transact-main! sys (mapv #(vector :db/cas [:seon.task/id %] :seon.task/execution :held :running) held))
+              {:ok true :changed 0})
+      (seq refused) (assoc :not-held refused))))
 
 (defn cancel!
   "Cancel tasks ids: a live attempt is killed; tasks that need them stay blocked."
