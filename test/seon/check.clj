@@ -1144,7 +1144,7 @@
        (my.root/load-docs! sys)
        (let [head @(:conn sys)
              base (seon.fx/base-commit root)
-             _ (when-not base (throw (ex-info (str "no base: " root " has no merge base with " (seon.config/value :seon.config.source/main)) {})))
+             _ (when-not base (throw (ex-info (str "no base: " root " has no commit before this one on " (seon.config/value :seon.config.source/main) ", or no commit, or no branch of that name") {})))
              ;; the base's tree, removed once read (one health run per checkout: its store branch, check-health, is one too)
              dir (str root "/target/tmp/health-base-" base)
              based (try (base-db sys head (seon.fx/checkout-at root base (into dirs ["docs" (seon.config/value :seon.config.root/tasks-dir)]) dir) dirs)

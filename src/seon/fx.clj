@@ -149,13 +149,16 @@
   merge base with main: a branch with no commits of its own, or one main has passed, has HEAD
   itself or an older commit, so it caused only what it changes. With main checked out, its first
   parent (the previous main, which a merge is held to) when the tree is clean, else HEAD (what the
-  uncommitted change caused). nil only for main's first commit, which has no parent; a main git
-  cannot name, or no merge base, throws git's words (git!)."
+  uncommitted change caused). nil when there is no base: main's first commit (no parent), or a
+  repository with no commit or no branch named main (the health step then says which, and its
+  digest is missing); a merge base git cannot find throws git's words (git!)."
   {:malli/schema [:=> [:cat :string] [:maybe :string]]}
   [root]
   (let [main (cfg/value :seon.config.source/main)
-        on (:out (sh/sh "git" "-C" root "symbolic-ref" "--short" "-q" "HEAD"))]
-    (cond (not= main (str/trim on)) (git! {} root ["merge-base" "HEAD" main] nil)
+        on (:out (sh/sh "git" "-C" root "symbolic-ref" "--short" "-q" "HEAD"))
+        named? (fn [rev] (zero? (:exit (sh/sh "git" "-C" root "rev-parse" "--verify" "--quiet" (str rev "^{commit}")))))]
+    (cond (not (and (named? "HEAD") (named? main))) nil
+          (not= main (str/trim on)) (git! {} root ["merge-base" "HEAD" main] nil)
           (not (str/blank? (git! {} root ["status" "--porcelain" "--ignore-submodules=all"] nil))) (git! {} root ["rev-parse" "HEAD"] nil)
           :else (let [p (sh/sh "git" "-C" root "rev-parse" "--verify" "--quiet" "HEAD^1")]
                   (when (zero? (:exit p)) (str/trim (:out p)))))))

@@ -250,6 +250,7 @@
     (try
       (.mkdirs (java.io.File. dir))
       (git "init" "-q" "-b" "main")
+      (is (nil? (seon.fx/base-commit dir)) "a repository with no commit has no base")
       (let [a (commit! "a")]
         (is (nil? (seon.fx/base-commit dir)) "main's first commit has no previous main")
         (git "checkout" "-q" "-b" "topic")
