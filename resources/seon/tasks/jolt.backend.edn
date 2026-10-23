@@ -3,7 +3,14 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.program-cost-test/a-defn-compiles-within-its-estimate}}
  {:seon.task/name "the-emitter-builds-one-buffer"
-  :seon.task/plan "Jolt's emitter builds Scheme by nested str concatenation, quadratic in nesting depth (6.2 MB at depth 50, 18 at 100, 59 at 200, 209 at 400) and ~1.4 KB of allocation per output character. Correct: the output is built in one buffer (or s-expressions are handed to Chez). Agents run release or trace-off (source mode with trace doubles every eval)."
+  :seon.task/plan "Jolt's emitter builds Scheme by nested str concatenation, quadratic in nesting depth (6.2 MB at depth 50, 18 at 100, 59 at 200, 209 at 400) and ~1.4 KB of allocation per output character. Correct: the output is built in one buffer (or s-expressions are handed to Chez). Agents run release or trace-off (source mode with trace doubles every eval).
+
+Measured by worktree session reuse, 2026-10-23 (Jolt eba8826a, image registration off): on 400 real src/seon forms, jolt.backend-scheme/emit-top-form allocated 1,159 MB against the analyzer's 57 MB and the passes' 24 MB: ~2.9 MB a form for ~8 KB of Scheme out, 358 B per output character. Synthetic (fn* [x] (inc (inc ... x))): emit 0.52 MB at depth 50, 1.26 at 100, 3.53 at 200, 11.2 at 400. Cause: every emit fn returns a string and each parent's (str \"(\" a \" \" b \")\") copies its children again, so a character is copied about depth times (Chez strings are 4 B a character). The emitter, not the analyzer, is most of what a compile costs.
+
+Root's go (2026-10-23), option A, kept by this session, in milestones, each a pushed Jolt commit with the gates green (Jolt branch jolt/emitter-one-buffer, on jolt/image-fn-forms-opt-in eba8826a):
+(1) the part-tree type (an emit fn answers a tree of parts, not a string) and the one linear writer at emit-top-form (one string port), plus the 8 sites that inspect a child's text realizing it there; the hottest emit fns converted first; then emit allocation measured again on the 400 forms. If it shows no real drop: stop and report before (2).
+(2) the rest of the ~406 str sites in the emitter's 157 fns (backend_scheme.clj, 4,505 lines), mechanically.
+The proof at every milestone is byte-identical output: Jolt's selfhost (the minted seed byte for byte), corpus and errorreport gates. Plus a cost proof in bytes on nesting depth, red today (quadratic) and green linear. One Jolt pin bump at the end, through merge, with the cost proofs. Rejected: B, s-expressions handed to Chez (a bigger change: the AOT cache and the trace markers are text)."
   :seon.task/kind :work
   :seon.task/needs #{"jolt.backend/image-registration-is-opt-in"}
   :seon.task/proofs #{seon.program-cost-test/a-defn-compiles-within-its-estimate}}
