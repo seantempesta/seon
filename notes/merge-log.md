@@ -1,2 +1,3 @@
 # Merge log (one line per merge: sha, branch, verdicts, src lines before -> after)
 a60054af jolt/in-scalar: build OK; prove: all green but seon.print-test/the-text-stays-inside-its-budget (seed 360391723495090826, printer, also red on other branches, not in-scalar's); health OK; smoke OK; src unchanged (Datahike pin b4596cf -> 1880fcc); bin/update run. Note: main tree has another session's uncommitted src/seon/main.clj edit.
+5e85c5c5 batch calc-stop, dry-run, proof-ends, claude/eval-diagnostics-75a04b, driver-api (merged one by one, proved once): prove OK (387 tests, laws, lmdb-kill), health OK, smoke OK; bin/update run. jolt/health NOT merged: conflict in src/seon/root.clj require line, sent back to health.
