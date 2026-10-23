@@ -51,7 +51,7 @@
         runs (str base "-" pdb/schema-digest "-some-main-runs")]
     (try
       (.mkdirs (java.io.File. dir))
-      ;; a store of another schema: its attribute a string where this schema declares a ref
+      ;; a store made under another schema's digest (what it holds is not read: its name says it)
       (let [cfg (pdb/store-cfg :lmdb old)]
         (d/create-database cfg)
         (let [c (d/connect cfg)]

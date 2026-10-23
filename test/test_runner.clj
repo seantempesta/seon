@@ -273,7 +273,7 @@
         _ (write! (str out "/binary") (str (str/join " " bin-keys) (when (seq bin-keys) "\n")))
         ;; the process tests' store, made here before any shard starts (shards' roots that each made
         ;; it raced: seon.test-store/process-store), for this schema (seon.test-store/kept-store!)
-        _ (when (seq (filter binary run-tests)) (ts/make-process-store! (config/checkout)))
+        _ (when (seq (filter binary run-tests)) (ts/make-process-store! (.getCanonicalPath (io/file (config/checkout)))))
         _ (write! (str out "/steps-binary") (str (str/join " " step-bin) (when (seq step-bin) "\n")))]
     (when left
       (println (str "prove: " (count left) " tests and steps that reach a process left out (run them by name:"
