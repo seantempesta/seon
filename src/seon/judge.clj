@@ -63,8 +63,9 @@
       (catch Exception e [(uncompiled e)]))))
 
 (def ^:private reads
-  "The vars a read of a definition calls: its source, its doc."
-  '#{clojure.repl/source clojure.repl/source-fn clojure.repl/print-doc})
+  "The vars a read of a definition calls: its source (an agent's clojure.repl/source expands
+  to my.agent/source-fn, a plain REPL's to clojure.repl/source-fn), its doc."
+  '#{clojure.repl/source clojure.repl/source-fn my.agent/source-fn clojure.repl/print-doc})
 
 (defn score
   "First move facts (form-facts of each eval call of the first reply) against the task's
@@ -95,6 +96,13 @@
   {:malli/schema [:=> [:cat :map [:vector :string]] :map]}
   [subject calls]
   (score subject (into [] (mapcat #(form-facts (:ns subject) %)) calls)))
+
+(defn scorer
+  "The digest of the scoring as main's program records it (the recorded sources of
+  form-facts, reads, score and first-move): a score made by other scoring is made again from
+  its fact's calls, with no model call."
+  {:malli/schema [:=> [:cat :seon.host/db] :string]}
+  [db] (err/digest (sedn/encode (mapv #(context/source-of db %) '[seon.judge/form-facts seon.judge/reads seon.judge/score seon.judge/first-move]))))
 
 (defn fact
   "The :seon.judge fact of task id's first move: its request's digest, the version that

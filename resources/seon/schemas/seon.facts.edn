@@ -394,7 +394,9 @@
  ;; source tree and its commit), the reply's eval calls and their cost in USD when priced
  :seon.judge/score [:map {:seon.db/data true} [:acted :boolean] [:right-var :boolean] [:right-test :boolean]
                     [:waste :int] [:uncompiled :int] [:green :boolean] [:version [:map [:root {:optional true} :string] [:commit {:optional true} :string]]]
-                    [:calls [:vector :string]] [:usd {:optional true} number?]]
+                    [:calls [:vector :string]] [:usd {:optional true} number?]
+                    ;; the scoring that made it (seon.judge/scorer): other scoring scores the calls again
+                    [:scorer :string]]
  ;; a pass that stopped at its budget: what it spent, the bound, the tasks it left
  :seon.judge/stopped [:map {:seon.db/data true} [:usd number?] [:bound number?] [:left [:vector :seon.task/id]]]
  :seon.judge/judge-fact [:map {:seon.db/attributes true}

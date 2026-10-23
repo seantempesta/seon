@@ -305,14 +305,23 @@
   it runs. A paid call is made only while the pass has spent under
   :seon.config.ai/judge-pass-usd; at the bound the pass stops and writes :seon.judge/stopped
   on the pass's own fact. A reply whose usage cannot be priced, a model error or a scoring
-  error ends the pass with :error. Answers {:rows [{:task :acted :right-var :right-test
-  :waste :uncompiled :green :usd :reused?}] :usd :stopped :error}."
+  error ends the pass with :error. A fact held for the request but scored by other scoring
+  (seon.judge/scorer) is scored again from its calls, with no model call (:reused?
+  :rescored). Answers {:rows [{:task :acted :right-var :right-test :waste :uncompiled :green
+  :usd :reused?}] :usd :stopped :error}."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
   (let [bound (config/value :seon.config.ai/judge-pass-usd)
         src (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))
         version (select-keys src [:root :commit])
         scorer (delay (root/spawn! sys {}))
+        ;; the score of calls against task t's subject, made in the disposable agent: the
+        ;; agent answers it as seon.edn text, which its item prints as a string
+        score (fn [db t calls]
+                (let [item (first @(root/submit! sys @scorer (pr-str (list 'seon.edn/encode (list 'seon.judge/first-move (list 'quote (judge/subject db t)) calls)))))]
+                  (if (= :ret (:tag item))
+                    (assoc (sedn/decode (edn/read-string (:printed item))) :scorer (judge/scorer db))
+                    (contract/error :seon.judge/unscored 'my.root/first-moves! "the scoring agent answered no score" {:item item}))))
         row (fn [f reused?] (merge {:task (:seon.judge/task f) :reused? reused?}
                                    (select-keys (:seon.judge/score f) [:acted :right-var :right-test :waste :uncompiled :green :usd])))
         end (fn [r] (when (realized? scorer) (root/kill! sys @scorer)) r)]
@@ -326,7 +335,16 @@
                 dg (judge/digest req)
                 held (d/pull db '[*] [:seon.judge/digest dg])]
             (cond
-              (:seon.judge/score held) (recur more (conj rows (row held true)) spent)
+              (= (judge/scorer db) (:scorer (:seon.judge/score held))) (recur more (conj rows (row held true)) spent)
+              ;; held, but scored by other scoring: scored again from its calls, no model call
+              (:seon.judge/score held)
+              (let [{:keys [calls version usd]} (:seon.judge/score held)
+                    sc (score db t calls)]
+                (if (contract/error? sc)
+                  {:rows rows :usd spent :error sc}
+                  (let [f {:seon.judge/digest dg :seon.judge/score (cond-> (assoc sc :version version :calls calls) usd (assoc :usd usd))}]
+                    @(root/transact-main! sys [f])
+                    (recur more (conj rows (row (assoc f :seon.judge/task id) :rescored)) spent))))
               (>= spent bound)
               (let [stopped {:usd spent :bound bound :left (vec (cons id more))}]
                 @(root/transact-main! sys [{:seon.judge/digest (judge/digest {:pass ids :version version}) :seon.judge/stopped stopped}])
@@ -335,16 +353,14 @@
               (let [r @(root/call! sys {:op :fx :kind :model :req {:messages (:messages req) :task id :turn 0 :model (:model req)}})
                     c (:value r)
                     calls (mapv :code (:tool-calls c))
-                    item (when-not (contract/error? r)
-                           (first @(root/submit! sys @scorer (pr-str (list 'seon.edn/encode (list 'seon.judge/first-move (list 'quote (judge/subject db t)) calls))))))
+                    sc (when-not (contract/error? r) (score db t calls))
                     usage (when c (turn/usage c))
                     usd (when c (model/cost (:model req) usage))]
                 (cond
                   (contract/error? r) {:rows rows :usd spent :error r}
-                  (not= :ret (:tag item)) {:rows rows :usd spent :error (or (:err item) item)}
+                  (contract/error? sc) {:rows rows :usd spent :error sc}
                   :else
-                  (let [f ;; the agent answers the score as seon.edn text; its item prints that string
-                  (judge/fact dg id version calls (sedn/decode (edn/read-string (:printed item))) usage usd)]
+                  (let [f (judge/fact dg id version calls sc usage usd)]
                     @(root/transact-main! sys [f])
                     ;; a cost the provider's usage cannot price is unknown, never 0: the bound
                     ;; cannot hold over it, so the pass ends there, recorded
