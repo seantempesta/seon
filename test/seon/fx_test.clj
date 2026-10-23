@@ -1,6 +1,6 @@
 (ns seon.fx-test
   "The effect owner and worker step-fns as plain functions (no graph): admission by workers,
-  priority order, budget refusal, the queue bound, and a worker answering a defect."
+  priority order, budget refused, the queue bound, and a worker answering a defect."
   (:require [clojure.test :refer [deftest is testing]] [jolt.deps] [seon.fx :as fx] [seon.config :as cfg]
             [clojure.core.async.flow :as flow]))
 

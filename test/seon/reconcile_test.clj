@@ -234,7 +234,7 @@
 (deftest a-refused-diff-ends-the-attempt-with-its-cause
   ;; the writer refuses to diff the branch: the attempt is not judged on facts nobody
   ;; measured (no changed keys, no gaps); its agent is stopped and the attempt ends with the
-  ;; refusal as its error, the read not asked again
+  ;; reason as its error, the read not asked again
   (let [no (contract/error :seon.writer/refused 'seon.writer/writer-proc "no branch :demo/a" {})
         st {:db (db-of [(decl "a")]) :boot "boot-1" :rid 0 :pending {}
             :flights {"demo/a#1" {:act {:attempt "demo/a#1" :task "demo/a" :env {:branch :demo/a}} :agent :a1 :step :diffed}}}
@@ -250,8 +250,8 @@
          (r/reconcile (db-of diamond :extra (concat (attempt "a" 1 :ended :outcome :green :results {(t "a") :pass})
                                                     (task/execution-tx ["demo/a"] :cancelled)))))))
 
-(deftest done-refusals-table
-  (are [in expected] (= expected (mapv (juxt :refusal :symbol) (r/done-refusals in)))
+(deftest done-explain-table
+  (are [in expected] (= expected (mapv (juxt :reason :symbol) (r/done-explain in)))
     {:proofs #{'p/a} :results {'p/a :pass} :main-green #{} :allowed-red #{} :uncontracted #{}} []
     {:proofs #{} :results {} :main-green #{} :allowed-red #{} :uncontracted #{}} [[:no-proofs nil]]
     {:proofs #{'p/a} :results {'p/a :error} :main-green #{} :allowed-red #{} :uncontracted #{}} [[:proof-red 'p/a]]
@@ -283,7 +283,7 @@
 (deftest contracts-are-checked
   ;; dev/test.clj arms every contract before the tests run: a call outside its contract is
   ;; refused at entry with the one error map
-  (when (not= "off" (System/getenv "PROTO_GUARANTEES"))
+  (when contract/on?
     (is (= :seon.instrument/contract-error
            (:seon.error/type (try (task/task-id "not-a-symbol" "x") (catch Exception e (ex-data e))))))))
 
@@ -316,8 +316,8 @@
       (is (= #{(t "a") (t "b")} (:proofs (acc "demo/b-merge")))))
     (testing "the done rule judges every accumulated proof"
       (is (= [[:proof-red (t "a")]]
-             (mapv (juxt :refusal :symbol)
-                   (r/done-refusals (r/done-input (r/index db) "demo/b-merge" {(t "b") :pass (t "a") :fail} #{} [] nil nil))))))))
+             (mapv (juxt :reason :symbol)
+                   (r/done-explain (r/done-input (r/index db) "demo/b-merge" {(t "b") :pass (t "a") :fail} #{} [] nil nil))))))))
 
 (deftest with-merge-chains-work-through-merges
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])])]
@@ -384,7 +384,7 @@
 
 (deftest design-may-leave-its-proofs-red
   ;; a design step's work is the plan: done only when the plan differs from the one it began with
-  (are [in expected] (= expected (mapv :refusal (r/done-refusals in)))
+  (are [in expected] (= expected (mapv :reason (r/done-explain in)))
     {:kind :design :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{} :plan "B" :plan-before "A"} []
     {:kind :design :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{'app/f} :plan "B" :plan-before "A"} [:contract-gap]
     {:kind :design :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{} :plan "A" :plan-before "A"} [:no-design]
@@ -404,7 +404,7 @@
   (testing "at its start (the plan as it began), the done rule refuses :no-design"
     (let [db (design-db (attempt "a" 1 :running))]
       (is (= [:no-design]
-             (mapv :refusal (r/done-refusals (r/done-input (r/index db) "demo/a" {(t "a") :fail} #{} []
+             (mapv :reason (r/done-explain (r/done-input (r/index db) "demo/a" {(t "a") :fail} #{} []
                                                            nil (:seon.attempt/plan (task/attempt db "demo/a#1")))))))))
   (testing "ended green with the plan unchanged: refused, so it is held for root, never accepted"
     (is (= [{:op :hold :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended green: no-design"}]
@@ -425,7 +425,7 @@
 
 (deftest a-refused-attempt-holds-its-task-and-creates-none
   ;; owner, 2026-10-23: "no automatic retries, send it to root to decide if it should be
-  ;; retried". Every refusal holds its task as my.task/fail! does: its failure (the reason,
+  ;; retried". Every reason holds its task as my.task/fail! does: its failure (the reason,
   ;; the attempt), the measured evidence, the attempt closed; no task is created or cancelled
   (doseq [[why extra problem]
           [["a red proof" (attempt "add" 1 :ended :outcome :cap :results {(t "add") :fail})
@@ -454,8 +454,8 @@
     (let [db (mdb [(decl "add")] :extra (concat (attempt "add" 1 :done) (attempt "add-merge" 1 :ended :outcome :green :results {(t "add") :pass})))
           [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1"}) :main {:t (:max-tx db) :ops [] :db db :ns (profile/now-ns)})
           asked (first (filter #(= :octopus-merge (get-in % [:req :req :op])) (:to-api outs)))
-          refusal (contract/error :seon.writer/refused 'seon.writer/octopus-merge "conflicts with main at app/f" {:merged? false})
-          [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r {:ok true :results [refusal]}})
+          reason (contract/error :seon.writer/refused 'seon.writer/octopus-merge "conflicts with main at app/f" {:merged? false})
+          [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r {:ok true :results [reason]}})
           tx (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= :write (get-in % [:req :op])) (:to-api outs2))))
           db' (d/db-with db tx)
           tk (task/task db' "demo/add-merge")]
@@ -464,7 +464,7 @@
       (is (= :held (:seon.task/execution tk)))
       (is (= {:reason "merge refused: conflicts with main at app/f" :attempt "demo/add-merge#1"} (:seon.task/failure tk)))
       (is (= :closed (:seon.attempt/status (task/attempt db' "demo/add-merge#1"))))
-      (is (= refusal (:seon.attempt/error (task/attempt db' "demo/add-merge#1"))) "the writer's refusal, on the attempt"))))
+      (is (= reason (:seon.attempt/error (task/attempt db' "demo/add-merge#1"))) "the writer's reason, on the attempt"))))
 
 (deftest a-held-task-shows-its-reason-among-the-problems
   (let [[db' act] (held (mdb [(decl "add")] :extra (attempt "add" 1 :ended :outcome :cap :results {(t "add") :fail})))
@@ -491,8 +491,8 @@
         (is (= "demo/add#1" (:attempt (:seon.task/failure tk))))))
     (is (not= :failed (r/task-state (r/index released) "demo/add")) "released, it is no longer failed")))
 
-(deftest an-idle-system-does-nothing-after-a-refusal
-  ;; the reconciler proc's own steps: the refusal's hold is one write; once it is committed
+(deftest an-idle-system-does-nothing-after-a-reason
+  ;; the reconciler proc's own steps: the reason's hold is one write; once it is committed
   ;; and answered nothing is left to do (quiet, naming the held task as a root cause); a
   ;; root-only commit after it asks nothing
   (let [db (mdb [(decl "add") (decl "twice" :needs ["add"])]
@@ -513,7 +513,7 @@
     (is (= :held (:seon.task/execution (task/task db2 "demo/add"))))
     (is (= [{:task "demo/add" :cause "attempt demo/add#1 ended cap: proof-red demo-test/add-test" :attempt "demo/add#1"
              :blocks ["demo/add-merge" "demo/twice" "demo/twice-merge"]}]
-           (:stuck quiet)) "quiet, naming the held task and what it blocks")
+           (:root-causes quiet)) "quiet, naming the held task and what it blocks")
     (is (not-any? #(= :spawn (get-in % [:req :op])) (reqs outs2)) "nothing starts")
     (let [[db3 ops3] (commit db2 [{:seon.root/id :root :seon.root/quiescent quiet}])
           [_ outs3] (main st db3 ops3)]
@@ -522,7 +522,7 @@
 (deftest stuck-names-cancelled-and-held-roots
   (let [db (db-of diamond :extra (concat (merged "a") (task/execution-tx ["demo/b"] :cancelled) (task/execution-tx ["demo/c"] :held)))]
     (is (= [{:task "demo/b" :cause "cancelled" :blocks ["demo/d"]} {:task "demo/c" :cause "held" :blocks ["demo/d"]}]
-           (r/stuck (r/index db))))))
+           (r/root-causes (r/index db))))))
 
 (deftest hairy-rule
   (let [t {:seon.task/accumulated {:plan "Use `app/g` and `app/f`." :proofs #{'app.proofs/a-test}}}
@@ -551,7 +551,7 @@
         blocked ["demo/add-merge" "demo/twice" "demo/twice-merge"]]
     (testing "nothing to start, nothing in flight: one positive report, naming the held root and what it blocks"
       (is (empty? (:flights st)))
-      (is (= {:t (:max-tx db) :stuck [{:task "demo/add" :cause "capped" :attempt "demo/add#1" :blocks blocked}]} report))
+      (is (= {:t (:max-tx db) :root-causes [{:task "demo/add" :cause "capped" :attempt "demo/add#1" :blocks blocked}]} report))
       (is (some #(= {:op :collect} (get-in % [:req :req])) outs) "and asks the writer to collect the store, once a spell")
       (is (:quiet st)))
     (let [[db2 ops2] (commit db [{:seon.root/id :root :seon.root/quiescent report}])
@@ -574,22 +574,22 @@
 (def ^:private held-why "branch :demo/a is held by live agent a9")
 
 (deftest a-refused-spawn-writes-a-refused-attempt
-  ;; root refuses the spawn (the branch is held, or too many live agents): the refusal is
+  ;; root refuses the spawn (the branch is held, or too many live agents): the refused answer is
   ;; the attempt, written on main, and the next pass starts the task again
   (let [db (db-of [(decl "a")])
         [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1"}) :main {:t (:max-tx db) :ops [] :db db :ns (profile/now-ns)})
         asked (first (filter #(= :spawn (get-in % [:req :op])) (:to-api outs)))
-        refusal (contract/error :seon.root/refused 'seon.root/spawn! held-why {:branch :demo/a :agent :a9})
-        [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r refusal})
+        held (contract/error :seon.root/refused 'seon.root/spawn! held-why {:branch :demo/a :agent :a9})
+        [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r held})
         written (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= :write (get-in % [:req :op])) (:to-api outs2))))
         attempt (first (filter #(= "demo/a#1" (:seon.attempt/id %)) written))]
     (is (some? asked) "the first pass asks for the spawn")
-    (is (= :refused (:seon.attempt/status attempt)) "the refusal is written as the attempt")
+    (is (= :refused (:seon.attempt/status attempt)) "the refused answer is written as the attempt")
     (is (= held-why (:seon.attempt/reason attempt)) "with root's reason")
     (is (= [(spawn "a" 2)] (r/reconcile (d/db-with db written))) "the next pass starts the task again")))
 
 (deftest a-refused-task-asks-again-when-main-moves
-  ;; if nothing has changed, asking again is refused again: neither the refusal's answer nor
+  ;; if nothing has changed, asking again is refused again: neither the refused answer nor
   ;; its own commit starts the task; other work on main lets it ask again, as its next attempt
   (let [commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
         main (fn [st db ops] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (profile/now-ns)}))
@@ -606,15 +606,15 @@
         [_ outs5] (main st db3 ops3)]
     (is (= ["demo/a"] (spawns outs)))
     (is (= [] (spawns outs3)) "the write's answer starts nothing")
-    (is (= [] (spawns outs4)) "nor does the refusal's own commit")
-    (is (= [{:task "demo/a" :cause held-why :attempt "demo/a#1" :blocks []}] (get-in st [:quiescent :stuck])) "quiet, naming it")
+    (is (= [] (spawns outs4)) "nor does the refused answer's own commit")
+    (is (= [{:task "demo/a" :cause held-why :attempt "demo/a#1" :blocks []}] (get-in st [:quiescent :root-causes])) "quiet, naming it")
     (is (= ["demo/a"] (spawns outs5)) "other work on main: it asks again")))
 
 (deftest quiescence-names-a-task-that-cannot-start
   ;; a refused attempt is a root cause at quiescence, naming what it blocks
   (let [db (db-of [(decl "a") (decl "b" :needs ["a"])]
                   :extra (concat (attempt "a" 1 :refused) [{:seon.attempt/id "demo/a#1" :seon.attempt/reason held-why}]))]
-    (is (= [{:task "demo/a" :cause held-why :attempt "demo/a#1" :blocks ["demo/b"]}] (r/stuck (r/index db))))))
+    (is (= [{:task "demo/a" :cause held-why :attempt "demo/a#1" :blocks ["demo/b"]}] (r/root-causes (r/index db))))))
 
 (deftest a-task-marked-failed-is-held-for-root
   ;; owner, 2026-10-22: a failure is task data and root reacts to it; D2(a): held for root,

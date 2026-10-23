@@ -293,7 +293,7 @@
 
 (defn problems-check
   "Provoke every class of problem through the paths agents and root use (:stall-ms 1000
-  for the stall), then read my.root/problems: an eval error and a contract refusal, an
+  for the stall), then read my.root/problems: an eval error and a contract's error, an
   effect's io error, a platform defect in the api, a stall, an agent's death with its exit
   status and stderr, a red proof's assertions and a cost proof's verdict. It reads them
   once main holds each (seon.e2e/await-db over seon.problems/report)."
@@ -989,16 +989,16 @@
                 :running-set-after (= (conj expect :probe) after)}}))))
 
 (defn root-serve
-  "A root with its server on 127.0.0.1:(:seon.config.root/entrance-port) (seon.server),
+  "A root with its server on 127.0.0.1:(:seon.config.root/server-port) (seon.server),
   until stdin closes (bin/root stop) or SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks):
   what an outside agent's MCP relay (bin/mcp) talks to. Its end is a fact on main
   naming that cause (seon.root/stop!). A checkout whose config names no server port (0)
   serves none, and says so; -1 asks the kernel for a free port. ROOT LISTENING names the port
   it bound (what bin/root and seon.test-store/start-root! read), never one picked beforehand."
   []
-  (let [port (seon.config/value :seon.config.root/entrance-port)
+  (let [port (seon.config/value :seon.config.root/server-port)
         _ (when (zero? port)
-            (out! "ROOT REFUSED: :seon.config.root/entrance-port is 0 (no server); bin/worktree --ports writes config/local.edn with this checkout's ports")
+            (out! "ROOT REFUSED: :seon.config.root/server-port is 0 (no server); bin/worktree --ports writes config/local.edn with this checkout's ports")
             (lib/c-exit 1))
         sys (c/start! {})]
     ;; the first cause stops root, once; a signal's hook waits for that stop, then Jolt exits
@@ -1130,7 +1130,7 @@
         b-min (read-string (:printed (first @(c/submit! sys b "(q '[:find (min ?n) . :where [?n :note/text]])"))))
         ;; the reply says whether its record was written: when it was not (:unrecorded), root
         ;; was told before the reply came and its fact is on its way to main, so this parks on
-        ;; main's commits until it lands; a record that was written is the answer, now
+        ;; main's commits until it arrives; a record that was written is the answer, now
         lease-q '[:find ?c . :where [?e :seon.error/type :seon.db/lease-spent] [?e :seon.error/count ?c]]
         recorded (when (:unrecorded r-past) (d/q lease-q (seon.e2e/await-db sys #(d/q lease-q %))))
         spent? #(and (= :err (:tag %)) (re-find #"entity ids are spent" (str (:printed %))))]
@@ -1313,7 +1313,7 @@
      ;; this checkout's ports as the config resolves them, "SERVER WEB" (bin/ports)
      ;; bin/check's step names, the one list (seon.proofs/check-steps), space separated
      "steps" (fn [n more] (do (println (clojure.string/join " " (sort (keys seon.proofs/check-steps)))) (lib/c-exit 0)))
-     "ports" (fn [n more] (do (println (seon.config/value :seon.config.root/entrance-port) (seon.config/value :seon.config.web/port)) (lib/c-exit 0)))
+     "ports" (fn [n more] (do (println (seon.config/value :seon.config.root/server-port) (seon.config/value :seon.config.web/port)) (lib/c-exit 0)))
      "mcp-proof" (fn [n more] (mcp-proof))
      "hotreload" (fn [n more] (hotreload))
      "idle" (fn [n more] (idle (n-or n "5000")))

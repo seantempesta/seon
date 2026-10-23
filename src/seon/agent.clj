@@ -111,7 +111,7 @@
       (swap! state assoc :db (:db-after r))
       {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
     (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta)})]
-      ;; past this process's block of entity ids: the typed refusal, nothing applied
+      ;; past this process's block of entity ids: the typed error, nothing applied
       (when-let [e (and (not (map? r)) (pdb/lease-spent r (:lease @state)))] (throw (ex-info (:seon.error/message e) e)))
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
       (swap! state assoc :db (:db-after r) :dirty? true)
@@ -151,7 +151,7 @@
     kind))
 
 (defn- fx-test
-  "An effect asked inside a test fork: the stub's outcome, or the declared refusal."
+  "An effect asked inside a test fork: the stub's outcome, or the declared error."
   {:malli/schema [:=> [:cat :keyword :map] :map]}
   [kind req]
   (if *fx-stub*
@@ -220,7 +220,7 @@
 (defn error-map
   "An exception caught at one of the agent's entrant boundaries (operation: the REPL's
   seon.repl/eval-code by default) as the one error map: its ex-data when that already is
-  one (a contract refusal names its operation, member and problems), else the
+  one (a contract's error names its operation, member and problems), else the
   :seon.agent/eval-error variant, with the exception's class, its ex-data printed by the one
   printer, and its cause chain (each cause's class and message)."
   {:malli/schema [:function [:=> [:cat :seon.host/throwable] :seon.error/base]
@@ -309,13 +309,17 @@
   inputs then are blank, which keys nothing stored: it only selects). A test is selected when
   it is a proof or reaches what the branch changed since base (a var, method, fixture, ns form,
   macro or schema entry), and runs when no green is stored at its digest
-  (seon.reconcile/done-refusals reads the selected). Scratch namespaces' tests (user,
+  (seon.reconcile/done-explain reads the selected). Scratch namespaces' tests (user,
   ^:scratch) never merge, so they never judge; a proof with no test var here does not run, and
   one with a var but no program facts (loaded, never recorded) has no digest: it always runs.
-  Answers the plan with :digests {test digest} and :dir (results-dir when shared)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]]
+  With no base (a tree with nothing to diff against: root's on-change runs), the proofs and
+  every test with no green at its digest (seon.proofs/plan's own rule). Answers the plan with
+  :digests {test digest}, :dir (results-dir when shared) and :process, the tests that reach a
+  process of their own (seon.program/reach-index, the same walk as the digests): never run
+  automatically, only when named (owner's ruling, 2026-10-23)."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] [:set :qualified-symbol]]
                   [:map [:selected [:vector :qualified-symbol]] [:run [:vector :qualified-symbol]] [:reused [:map-of :qualified-symbol :map]]
-                   [:digests [:map-of :qualified-symbol :string]] [:dir [:maybe :string]]]]}
+                   [:digests [:map-of :qualified-symbol :string]] [:dir [:maybe :string]] [:process [:set :qualified-symbol]]]]}
   [db base proofs]
   (let [root (d/entity db [:seon.root/id :root])
         source (:seon.root/source root)
@@ -324,12 +328,14 @@
         dir (when shared (results-dir))
         judges? (fn [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
                           (and (:test m) (not (program/scratch-ns? (:ns m))))))
-        cd (into {} (filter (comp judges? key)) (program/reach-digests db in))
+        idx (into {} (filter (comp judges? key)) (program/reach-index db in))
+        cd (update-vals idx :digest)
         unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))]
-    (-> (proofs/plan (program/reach-digests base in) cd (if dir (proofs/greens dir (vec (vals cd))) {}) proofs)
+    (-> (proofs/plan (some-> base (program/reach-digests in)) cd (if dir (proofs/greens dir (vec (vals cd))) {}) proofs)
         (update :selected into unrecorded)
         (update :run into unrecorded)
-        (assoc :digests cd :dir dir))))
+        (assoc :digests cd :dir dir
+               :process (program/process-tests idx)))))
 
 (defn- run-tests-here
   "The tests a test-plan runs (var symbols), by the one runner (seon.proofs/run-tests!, nothing

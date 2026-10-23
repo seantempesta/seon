@@ -34,7 +34,7 @@ if [[ ${1:-} == run ]]; then
   # not the build's own (a test's: seon.test-store/start-root!)
   cd "$G/target" && SEON_CHECKOUT=${SEON_RUN_CHECKOUT:-$G} HOME=$G/target/home JOLT_LMDB_LIB=$G/target/lib/liblmdb.dylib \
     JOLT_LZ4_LIB=$G/target/lib/liblz4.dylib JOLT_ZSTD_LIB=$G/target/lib/libzstd.dylib \
-    SEON_ENTRANCE_PORT=$P SEON_WEB_PORT=$W exec ./seon root "$@"
+    SEON_SERVER_PORT=$P SEON_WEB_PORT=$W exec ./seon root "$@"
 fi
 mkdir -p "$SEON_RUNS"
 PIDS=$SEON_RUNS/root.pids LOG=$SEON_RUNS/root.log PORTF=$SEON_RUNS/root.port

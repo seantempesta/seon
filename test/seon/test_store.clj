@@ -52,16 +52,16 @@
   [& args] (apply sh/sh "env" (str "SEON_STARTER_FIFO=" (first @starter)) (.getCanonicalPath (java.io.File. "bin/held")) args))
 
 (defn- root-sh
-  "bin/root VERB ARGS for a test's root (root): its store, main and runs named in the
+  "bin/root COMMAND ARGS for a test's root (root): its store, main and runs named in the
   environment it starts with, over the caller's, so nothing inherited redirects it (task
   seon.check/a-test-root-names-its-store-and-main); its server port -1, a port the kernel
   assigns, which bin/root next carries to the next generation."
   {:malli/schema [:=> [:cat :map :string [:sequential :string]] :map]}
-  [{:keys [store main runs env]} verb args]
+  [{:keys [store main runs env]} command args]
   (apply binary-sh (concat ["env" (str "SEON_RUNS=" runs) (str "SEON_STORE=" store) (str "SEON_MAIN=" main)
-                            "SEON_ENTRANCE_PORT=-1" "SEON_WEB_PORT=0"]
+                            "SEON_SERVER_PORT=-1" "SEON_WEB_PORT=0"]
                            (for [[k v] env] (str k "=" v))
-                           ["bin/root" verb] args)))
+                           ["bin/root" command] args)))
 
 (defn- bound-port "The port the root in runs bound (bin/root wrote it from ROOT LISTENING), or nil."
   {:malli/schema [:=> [:cat :string] [:maybe :int]]}
@@ -72,7 +72,7 @@
 (defn start-root!
   "A built root (bin/root start, this checkout's binary) on store and main, both named and never
   inherited (a caller's SEON_STORE or SEON_MAIN, a bin/check run's, opened a store another run
-  had written). Its server is on a port the kernel assigns (:seon.config.root/entrance-port -1),
+  had written). Its server is on a port the kernel assigns (:seon.config.root/server-port -1),
   read back from its ROOT LISTENING line: bin/root returns at that line or at the root's death,
   never on a clock. runs: its pids, log and port; env: more variables {name value}; args: more
   root arguments. Answers the options with :port, nil when the root died before listening (its

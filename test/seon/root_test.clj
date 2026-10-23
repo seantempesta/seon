@@ -85,7 +85,7 @@
         _ (doseq [tx (pdb/seed-tx 110)] (d/transact c {:tx-data tx}))
         _ (d/branch! c :db :old-run)
         c2 (d/connect (assoc cfg :branch :old-run))
-        _ (d/transact c2 {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t 536870914 :stuck []}}]})
+        _ (d/transact c2 {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t 536870914 :root-causes []}}]})
         _ (pdb/sync! cfg)
         _ (do (d/release c2) (d/release c))
         out (root-answers path "old-run"
@@ -131,7 +131,7 @@
 (deftest a-refused-wiki-is-a-recorded-problem-and-the-boot-goes-on
   ;; root's boot loads the wiki (seon.root/wiki-tx) in its boot fact's commit; one link to no
   ;; section in any page used to end the boot (bin/root start and next with it). Now the
-  ;; refusal is a recorded :platform error my.root/problems shows, and the root boots. A
+  ;; error is a recorded :platform error my.root/problems shows, and the root boots. A
   ;; checkout of this test's own: this one's files, its docs/ with one broken page more
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         tmp (str checkout "/target/runs/root-test-wiki-" (random-uuid))

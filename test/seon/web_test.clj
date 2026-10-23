@@ -19,7 +19,7 @@
   (testing "merge!: gated by the agent's tests, on its branch; no deadline (the child's exit ends a run)"
     (is (= {:op :merge-tests :id :a1 :merge-branch :agent-1 :data-attrs :all}
            (ffirst (w/requests {:var 'seon.root/merge! :agent :a1} index)))))
-  (testing "merge! of an ended agent: root refuses it (seon.root/request, the API fn's own table): its refusal, for the asker"
+  (testing "merge! of an ended agent: root refuses it (seon.root/request, the API fn's own table): its refused answer, for the asker"
     (let [[[r id] & more] (w/requests {:var 'seon.root/merge! :agent :a2} index)]
       (is (= :seon.root/refused (:seon.error/type r)))
       (is (= :a2 id))
@@ -92,7 +92,7 @@
       (is (str/includes? (str (:shown rec)) ":killed :a1") "what root answered"))))
 
 (deftest a-refused-ui-call-reaches-the-stream-and-main
-  ;; root refuses merge! of an ended agent before any request: the refusal goes to the render
+  ;; root refuses merge! of an ended agent before any request: the refused answer goes to the render
   ;; proc as the call's answer (shown, and recorded on main as an :err item), not dropped
   (let [st (#'w/web-proc {:port 0})
         [_ out] (#'w/web-proc (assoc st :index index) :http {:op :call :call {:var 'seon.root/merge! :agent :a2}})

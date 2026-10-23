@@ -339,9 +339,9 @@
       (is (= (str/replace text "\n :seon.attempt/pid :int" "")
              (edit [[:db/retractEntity [:schema/key :seon.attempt/pid]]]))))
     (testing "a new key after the last entry, read back as written"
-      (let [out (edit [{:schema/key :seon.attempt/refusal :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]
-        (is (= (str (subs text 0 (- (count text) 2)) "\n :seon.attempt/refusal [:map [:seon.error/message :string]]}\n") out))
-        (is (= (assoc (edn/read-string text) :seon.attempt/refusal [:map [:seon.error/message :string]])
+      (let [out (edit [{:schema/key :seon.attempt/invalid :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]
+        (is (= (str (subs text 0 (- (count text) 2)) "\n :seon.attempt/invalid [:map [:seon.error/message :string]]}\n") out))
+        (is (= (assoc (edn/read-string text) :seon.attempt/invalid [:map [:seon.error/message :string]])
                (edn/read-string out)))))))
 
 ;; ---- a merge loads in place (BUILD plan P4) ---------------------------------------------
@@ -408,3 +408,29 @@
         head-tree (str/trim (:out (sh/sh "git" "rev-parse" "HEAD:reference-code/malli")))]
     (is (= head-tree (get (:pins r) "reference-code/malli")) "the gitlink HEAD's tree records for it")
     (is (every? #(str/starts-with? % "reference-code/") (keys (:pins r))))))
+
+(deftest a-test-that-reaches-a-process-is-found-by-the-reach-walk
+  ;; root's ruling (2026-10-22, owner 2026-10-23): a test that reaches a process (a shell, a
+  ;; fork, a root of its own, the binary) never runs automatically, only when named; it is
+  ;; found by the compiler's facts (the one reach walk, :seon.config.source/process-vars),
+  ;; never a marker. Each process var, reached directly or through a helper, and a test that
+  ;; reaches none. Step E's run 4: a change to seon.problems/report reached tests that boot a
+  ;; root, and an agent's proof run spun for minutes in its fork
+  (let [text (str "(ns app.proc-test (:require [clojure.java.shell :as sh] [clojure.test :refer [deftest is]] [app.proc :as p]"
+                  " [seon.lib :as lib] [seon.test-store :as ts] [seon.agent-test :as at]))\n\n"
+                  "(defn- shell-ok? [] (zero? (:exit (sh/sh \"true\"))))\n\n"
+                  "(deftest via-shell (is (shell-ok?)) (is (= 2 (p/twice 1))))\n\n"
+                  "(deftest via-fork (is (lib/fork! (fn [] 0))))\n\n"
+                  "(deftest via-binary (is (ts/binary-sh \"./seon\" \"version\")))\n\n"
+                  "(deftest via-root (is (at/in-agent [\"1\"])))\n\n"
+                  "(deftest pure (is (= 2 (p/twice 1))))\n")
+        db (d/db-with (empty-db) (source/import-tx (empty-db) {"src/app/proc.clj" "(ns app.proc)\n\n(defn twice [x] (* 2 x))\n"
+                                                               "test/app/proc_test.clj" text}))
+        idx (program/reach-index db {:env "" :tree ""})
+        mine (into {} (filter #(= "app.proc-test" (namespace (key %)))) idx)]
+    (is (= {'app.proc-test/via-shell true 'app.proc-test/via-fork true 'app.proc-test/via-binary true
+            'app.proc-test/via-root true 'app.proc-test/pure false}
+           (update-vals mine :process?))
+        "each process var marks the test that reaches it, and only that")
+    (is (= #{'app.proc-test/via-shell 'app.proc-test/via-fork 'app.proc-test/via-binary 'app.proc-test/via-root}
+           (set (filter #(= "app.proc-test" (namespace %)) (program/process-tests idx)))))))
