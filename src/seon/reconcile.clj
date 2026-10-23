@@ -7,14 +7,10 @@
   actions out as requests to the api, each action's facts written by the writer."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
-            [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm] [seon.source :as source]
+            [seon.task :as task] [seon.proofs :as proofs] [seon.merge :as pm] [seon.source :as source]
             [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
             [seon.config :as cfg]))
 
-(defn refine?
-  "Has task t budget left for one more refinement chain (its generation below its budget)?"
-  {:malli/schema [:=> [:cat :seon.task/own] :boolean]}
-  [t] (< (:seon.task/generation t 0) (:seon.task/budget t (cfg/value :seon.config.task/budget))))
 
 (defn merge-limits
   "Task t's merge limits (:seon.config.merge/*), through the one resolver."
@@ -133,7 +129,7 @@
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
   [idx id]
   (let [t (get-in idx [:tasks id])]
-    (boolean (and t (= :running (:seon.task/execution t)) (not (idx-done? idx id)) (nil? (:seon.task/stuck t))
+    (boolean (and t (= :running (:seon.task/execution t)) (not (idx-done? idx id))
                   (every? #(idx-done? idx %) (:seon.task/needs t))
                   (not-any? #(let [a (get-in idx [:attempts %])] (or (live-in? idx a) (judged (:seon.attempt/status a))))
                             (get-in idx [:by-task id]))))))
@@ -323,16 +319,16 @@
         att (:attempts idx)
         reaps (for [aid (sort (:reap idx))] {:op :reap :attempt aid})
         kills (for [[aid r] (sort-by key (:kill idx))] {:op :kill :attempt aid :reason r})
-        ;; a failed attempt (refused by the done rule, or its agent died) attaches a
-        ;; refinement chain while its task has budget; spent, the task is stuck (bail)
-        failed (fn [aid id t problem] {:op (if (refine? t) :attach :bail) :attempt aid :task id :problem problem})
+        ;; a failed attempt (refused by the done rule, or its agent died) holds its task for
+        ;; root, which decides whether it runs again (owner, 2026-10-23: no automatic retries)
+        failed (fn [aid id problem] {:op :hold :attempt aid :task id :problem problem})
         judged (for [aid (sort (:judge idx))
                      :let [a (att aid) id (:seon.attempt/task a) t (get-in idx [:tasks id])
                            merge? (= :merge (:seon.task/kind t))]]
                  (cond
                    (not= :running (:seon.task/execution t)) {:op :close :attempt aid}
                    (= :dead (:seon.attempt/status a))
-                   (failed aid id t (str "its agent died" (some->> (:seon.attempt/reason a) (str ": "))))
+                   (failed aid id (str "its agent died" (some->> (:seon.attempt/reason a) (str ": "))))
                    :else
                    (let [rs (done-refusals (done-input idx id (:seon.attempt/results a {}) (:seon.attempt/uncontracted a #{})
                                                            (:seon.attempt/unmerged a []) (:seon.attempt/basis-t a) (:seon.attempt/plan a)
@@ -350,11 +346,11 @@
                                {:op :ready-to-merge :attempt aid :task id}
                                (nil? dres) {:op :gate :attempt aid :task id :tests (vec deferred)}
                                (empty? red) {:op :ready-to-merge :attempt aid :task id}
-                               :else (failed aid id t (str "attempt " aid "'s deferred tests, run on a checkout at its merge, are not green: "
+                               :else (failed aid id (str "attempt " aid "'s deferred tests, run on a checkout at its merge, are not green: "
                                                            (str/join ", " (for [[t s] red] (str t " " (name s))))))))
                        (empty? rs) {:op :accept :attempt aid :task id}
                        :else
-                       (failed aid id t (str "attempt " aid " ended" (some->> (:seon.attempt/outcome a) name (str " "))
+                       (failed aid id (str "attempt " aid " ended" (some->> (:seon.attempt/outcome a) name (str " "))
                                              (some->> (:seon.attempt/reason a) (str " (") (#(str % ")")))
                                              ": " (refusals-text rs)))))))
         ;; the octopus merge (bors, GitHub's merge queue): green merge attempts merge together in
@@ -390,7 +386,7 @@
                   :attempt (task/attempt-id id (inc (count (get-in idx [:by-task id]))))})]
     (vec (concat reaps kills judged gates octopus spawns))))
 
-;; ---- stuck: observed, never held ------------------------------------------------------
+;; ---- held for root, and the root causes at quiescence -----------------------------------
 
 (defn blocks
   "The released tasks not done that need task id, transitively, sorted."
@@ -400,33 +396,61 @@
                      (disj (downstream idx #{id}) id)))))
 
 (defn stuck
-  "Why released work is not done, as root causes: each task whose stuck fact holds (its
-  budget spent), each task whose latest attempt root refused to spawn (its reason: the
-  branch is held, or too many live agents), and each task not released (cancelled, held)
-  that released work needs, with the released tasks it blocks. Read once at quiescence: one
-  pass over the tasks."
+  "Why released work is not done, as root causes: each task held for root with a failure
+  (an attempt refused, its agent dead, its merge refused, or marked failed: its reason),
+  each task whose latest attempt root refused to spawn (its reason: the branch is held, or
+  too many live agents), and each other task not released (cancelled, held) that released
+  work needs, with the released tasks it blocks. Read once at quiescence: one pass over the
+  tasks."
   {:malli/schema [:=> [:cat :seon.reconcile/index] [:vector :seon.reconcile/stuck-row]]}
   [idx]
   (vec (for [[id t] (sort-by key (:tasks idx))
              :when (not (idx-done? idx id))
-             :let [s (:seon.task/stuck t)
-                   ex (:seon.task/execution t)
+             :let [ex (:seon.task/execution t)
+                   f (when (= :held ex) (:seon.task/failure t))
                    ;; attempts are numbered in order (actions' spawns), so the latest is the count's
                    latest (let [n (count (get-in idx [:by-task id]))] (when (pos? n) (get-in idx [:attempts (task/attempt-id id n)])))
                    refused (when (= :refused (:seon.attempt/status latest)) latest)
                    bs (blocks idx id)]
-             :when (if (= :running ex) (or s refused) (seq bs))]
-         (cond-> {:task id :cause (cond s (:cause s) refused (:seon.attempt/reason refused) :else (name ex)) :blocks bs}
-           s (assoc :attempt (:attempt s))
-           (and refused (not s)) (assoc :attempt (:seon.attempt/id refused))))))
+             :when (cond (= :running ex) refused f true :else (seq bs))]
+         (cond-> {:task id :cause (cond f (:reason f) refused (:seon.attempt/reason refused) :else (name ex)) :blocks bs}
+           (:attempt f) (assoc :attempt (:attempt f))
+           refused (assoc :attempt (:seon.attempt/id refused))))))
 
-(defn stuck-tx
-  "Task id is stuck: attempt aid failed with its budget spent. The problem and the derived
-  fact (the cause and what it blocks); the task stays released, its execution the owner's."
-  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.attempt/id :seon.task/id :string] [:vector :map]]}
-  [idx aid id problem]
-  [{:seon.task/id id :seon.task/problem problem
-    :seon.task/stuck {:attempt aid :cause problem :blocks (blocks idx id)}}])
+(defn- cas-tx
+  "Move attempt aid's status from -> to (Datahike's compare-and-swap, by lookup ref: a racing
+  observer that already moved it leaves it), with the observed members m."
+  {:malli/schema [:=> [:cat :seon.attempt/id :seon.attempt/status :seon.attempt/status :map] [:vector :any]]}
+  [aid from to m]
+  (cond-> [[:db/cas [:seon.attempt/id aid] :seon.attempt/status from to]]
+    (seq m) (conj (assoc m :seon.attempt/id aid))))
+
+(defn evidence
+  "The measured evidence of failed attempt a: its conflicts (read from the branch by root's
+  judge), its unmerged keys, the proofs not passing in root's own test run, and the problem
+  the reconciler stated (nil: none)."
+  {:malli/schema [:=> [:cat :seon.attempt/attempt [:maybe :string]] :seon.task/evidence]}
+  [a problem]
+  (cond-> {:from (:seon.attempt/id a)
+           :conflicts (vec (:seon.attempt/conflicts a []))
+           :unmerged (vec (:seon.attempt/unmerged a []))
+           :red (vec (sort-by str (for [[t s] (:seon.attempt/results a) :when (not= :pass s)] t)))}
+    problem (assoc :problem problem)))
+
+(defn hold-tx
+  "Attempt a failed (the done rule refused it, its agent died, or its merge was refused):
+  its task held for root with the failure (problem, the attempt) and the measured evidence,
+  exactly as my.task/fail!'s failure holds it, and the attempt closed, in one write. Root
+  decides: release it again (my.root/run!: the next attempt continues its branch, from the
+  evidence), edit it, or cancel it (owner, 2026-10-23: no automatic retries). The hold is a
+  compare-and-swap from :running, so a cancel! that landed first refuses it (the attempt is
+  then closed by the judged rule, its task not running)."
+  {:malli/schema [:=> [:cat :seon.attempt/attempt :string] [:vector :any]]}
+  [a problem]
+  (let [aid (:seon.attempt/id a) id (:seon.attempt/task a)]
+    (into (cas-tx aid (:seon.attempt/status a) :closed {})
+          [[:db/cas [:seon.task/id id] :seon.task/execution :running :held]
+           {:seon.task/id id :seon.task/failure {:reason problem :attempt aid} :seon.task/evidence (evidence a problem)}])))
 
 (defn quiescent
   "Main's last quiescence report on db ({:t :stuck}, written by the reconciler proc), or nil."
@@ -502,14 +526,6 @@
 ;; arriving on :answers keyed by its request id. An action whose attempt is in flight is not
 ;; started twice.
 
-(defn- cas-tx
-  "Move attempt aid's status from -> to (Datahike's compare-and-swap, by lookup ref: a racing
-  observer that already moved it leaves it), with the observed members m."
-  {:malli/schema [:=> [:cat :seon.attempt/id :seon.attempt/status :seon.attempt/status :map] [:vector :any]]}
-  [aid from to m]
-  (cond-> [[:db/cas [:seon.attempt/id aid] :seon.attempt/status from to]]
-    (seq m) (conj (assoc m :seon.attempt/id aid))))
-
 (defn- request
   "Send req to the api as this proc's request: the answer comes back on :answers tagged by a
   new request id, which then names step of attempt aid's flight. Answers [st output]."
@@ -541,9 +557,8 @@
                   [st o2] (write st attempt (if killing? :ignored :done) (cas-tx attempt :running :killed {:seon.attempt/end-ms (System/currentTimeMillis)
                                                                                     :seon.attempt/reason (name (:reason act))}))]
               [st [o1 o2]])
-      ;; budget spent: the task is stuck, observed; its release stays the owner's
-      :bail (one (write st attempt :done (into (cas-tx attempt (:seon.attempt/status a) :bailed {})
-                                               (stuck-tx (:idx st) attempt (:task act) (:problem act)))))
+      ;; refused, dead or its merge refused: the task is held for root, with the evidence
+      :hold (one (write st attempt :done (hold-tx a (:problem act))))
       ;; a merge task's branch into main: clean by construction when the branch holds main's
       ;; program head; behind: its task runs again, a new agent
       ;; an octopus merge: every member's branch into main in one commit (each holds main's
@@ -552,9 +567,8 @@
       :octopus-merge (let [bs (mapv #(get-in (task/attempt (:db st) (:attempt %)) [:seon.attempt/env :branch]) (:members act))]
                      (one (request (assoc-in st [:flights attempt :branches] bs) attempt :octopus-merged
                                    {:op :write :req {:op :octopus-merge :branches bs :data-attrs #{}}})))
-      :attach (one (write st attempt :done (tpl/attach-tx (:db st) act)))
-      ;; the merge gate: the candidate's files read from its branch, then its deferred tests
-      ;; run on a checkout of the merges head with them (seon.fx/run-tests)
+      ;; the merge gate (root asked: :seon.task/gate?): the candidate's files read from its
+      ;; branch, then its deferred tests run on a checkout of the merges head with them (seon.fx/run-tests)
       :gate (one (request st attempt :gate-read
                           {:op :write :req {:op :branch-db :branch (get-in (task/attempt (:db st) attempt) [:seon.attempt/env :branch])}})))))
 
@@ -596,8 +610,12 @@
                       (seq (:conflicts carried)) (assoc :seon.attempt/task-conflicts (:conflicts carried)))))
             (concat (:tx carried)
                     ;; marked failed in this attempt (my.task/fail!): the failure on main and the
-                    ;; task held for root, so the judge closes the attempt (no refinement)
-                    (when (= aid (:attempt failure)) [{:seon.task/id id :seon.task/failure failure :seon.task/execution :held}])))))
+                    ;; task held for root (a compare-and-swap from :running), so the judge closes
+                    ;; the attempt (no retry); one root already cancelled or held keeps root's
+                    (when (= aid (:attempt failure))
+                      (cond-> [{:seon.task/id id :seon.task/failure failure}]
+                        (= :running (:seon.task/execution (task/task main id)))
+                        (conj [:db/cas [:seon.task/id id] :seon.task/execution :running :held])))))))
 
 (defn- dead-tx
   "Attempt aid's death on main: the end its agent wrote on its branch before it exited (its
@@ -677,8 +695,7 @@
                       [st o2] (write st aid :done (judge-tx st f (:results f) (:branch-db f) r))]
                   [st [o1 o2]]))
       ;; each member's answer, as one write: merged at the octopus merge's t, behind (its merge task
-      ;; runs again, a new agent), or refused: a failed attempt like any other (a refinement
-      ;; chain while the budget lasts, else stuck)
+      ;; runs again, a new agent), or refused: a failed attempt like any other (held for root)
       ;; the merged members' namespaces that are Seon's own source are written back: main's
       ;; files after the octopus merge, committed on the merges branch (:git), the sha recorded on
       ;; each merged attempt (the self-improvement loop: the next generation builds it)
@@ -687,17 +704,14 @@
                      back? (and (:source st) (seq paths))]
                  (one (write (cond-> st back? (assoc-in [:flights aid :writeback] {:files paths :members (mapv first merged)}))
                              aid (if back? :write-back :done)
-                           (vec (mapcat (fn [{:keys [attempt task]} r]
+                           (vec (mapcat (fn [{:keys [attempt]} r]
                                           (let [problem (str "merge refused: " (:seon.error/message r))]
                                             (cond
                                               (:merged? r) (cas-tx attempt :ended :merged {:seon.attempt/merged-t (long (:tx r))})
                                               (= :seon.merge/behind (:seon.error/type r)) (cas-tx attempt :ended :behind {:seon.attempt/reason (:seon.error/message r)
                                                                                                                           :seon.attempt/error r})
-                                              (refine? (get-in st [:idx :tasks task]))
-                                              (conj (tpl/attach-tx (:db st) {:attempt attempt :task task :problem problem})
-                                                    {:seon.attempt/id attempt :seon.attempt/error r})
-                                              :else (into (cas-tx attempt :ended :bailed {:seon.attempt/error r})
-                                                          (stuck-tx (:idx st) attempt task problem)))))
+                                              :else (conj (hold-tx (task/attempt (:db st) attempt) problem)
+                                                          {:seon.attempt/id attempt :seon.attempt/error r}))))
                                         (:members act) (:results r))))))
       ;; the gate's candidate: the files of the namespaces the branch changed, as it holds them
       :gate-read (let [nss (sort (distinct (for [k (:seon.attempt/changed (task/attempt (:db st) aid))

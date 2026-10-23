@@ -158,7 +158,7 @@
   "The observed members of an attempt's end (proto.agents/end), as attributes: a count
   nobody measured (no end written, a reply without usage) is absent, never 0."
   {:malli/schema [:=> [:cat :seon.turn/end :int :int] :map]}
-  [{:keys [outcome turns model-calls tokens results uncontracted reason conflicts unmerged changed deferred]} end-ms basis-t]
+  [{:keys [outcome turns model-calls tokens results uncontracted reason conflicts unmerged changed]} end-ms basis-t]
   (cond-> {:seon.attempt/outcome outcome :seon.attempt/basis-t basis-t :seon.attempt/end-ms end-ms
            :seon.attempt/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s}))}
     turns (assoc :seon.attempt/turns turns)
@@ -168,7 +168,6 @@
     (seq conflicts) (assoc :seon.attempt/conflicts (mapv pm/conflict-tx conflicts))
     (seq unmerged) (assoc :seon.attempt/unmerged (vec unmerged))
     (seq changed) (assoc :seon.attempt/changed (vec changed))
-    (seq deferred) (assoc :seon.attempt/deferred (vec deferred))
     reason (assoc :seon.attempt/reason reason)))
 
 (defn carry-tx
@@ -191,14 +190,18 @@
             (sort (for [k (into (set (keys b)) (keys o)) :when (not= (b k) (o k))] k)))))
 
 (defn onto-tx
-  "The facts that put task id, and every task it needs (transitively) that branch does not
-  hold, onto branch as main holds them: a refinement continuing a branch that was forked before
-  main held its tasks (seon.template/attach-tx) starts with them. A task the branch holds is
-  left as the branch has it (its edits carry back at the attempt's end, carry-tx). Empty
-  when the branch holds them all. Cost: the closure's tasks, pulled once each."
+  "The facts that put task id as main holds it, and every task it needs (transitively) that
+  branch does not hold, onto branch: a kept branch resumed for an attempt starts from main's
+  task. Root released it after holding it (seon.reconcile/hold-tx), so main's holds the
+  failure and evidence the last attempt left, root's edits, and the branch's own carried at
+  its attempt's end (carry-tx); or the branch was forked before main held the task or its
+  needs. Another task the branch holds is left as the branch has it. Empty when the branch
+  holds them all as main does. Cost: the closure's tasks, pulled once each."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.task/id] [:vector :map]]}
   [main branch id]
-  (let [held? #(pdb/eid branch :seon.task/id %)
+  (let [pull #(d/pull %1 '[* {:seon.task/needs [:seon.task/id]}] [:seon.task/id %2])
+        held? #(and (pdb/eid branch :seon.task/id %)
+                    (or (not= id %) (= (dissoc (pull main %) :db/id) (dissoc (pull branch %) :db/id))))
         closure (loop [todo [id] seen #{}]
                   (if-let [[x & more] (seq todo)]
                     (if (or (seen x) (held? x))
@@ -207,7 +210,7 @@
                              (conj seen x)))
                     seen))]
     (vec (for [x (sort closure)
-               :let [t (d/pull main '[* {:seon.task/needs [:seon.task/id]}] [:seon.task/id x])]]
+               :let [t (pull main x)]]
            (cond-> (-> t (dissoc :db/id :seon.task/needs) (assoc :db/id x))
              (seq (:seon.task/needs t))
              (assoc :seon.task/needs (mapv (fn [{n :seon.task/id}] (if (closure n) n [:seon.task/id n])) (:seon.task/needs t))))))))
@@ -264,7 +267,6 @@
 (def ^:private attempt-pull
   '[* {:seon.attempt/task [:seon.task/id]}
     {:seon.attempt/results [:seon.proof/test :seon.proof/status]}
-    {:seon.attempt/deferred-results [:seon.proof/test :seon.proof/status]}
    {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
 (defn- attempt-value
@@ -280,8 +282,6 @@
       uncontracted (assoc :seon.attempt/uncontracted (set uncontracted))
       unmerged (assoc :seon.attempt/unmerged (vec (sort unmerged)))
       (:seon.attempt/changed a) (update :seon.attempt/changed set)
-      (:seon.attempt/deferred a) (update :seon.attempt/deferred set)
-      (:seon.attempt/deferred-results a) (update :seon.attempt/deferred-results #(into {} (map (juxt :seon.proof/test :seon.proof/status)) %))
       conflicts (assoc :seon.attempt/conflicts
                        (vec (sort-by (comp str :key) (map pm/conflict-value conflicts)))))))
 
@@ -299,15 +299,12 @@
   (some-> (d/pull db attempt-pull [:seon.attempt/id aid]) attempt-value))
 
 (defn root
-  "Root's boot and config keys on db: {:boot :max-running :max-merging :gate-checkout}, nil
-  before the first boot."
-  {:malli/schema [:=> [:cat :seon.host/db] [:maybe [:map [:boot :string] [:max-running :int] [:max-merging {:optional true} :int]
-                                                     [:gate-checkout {:optional true} :string]]]]}
+  "Root's boot and config keys on db: {:boot :max-running :max-merging}, nil before the first boot."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe [:map [:boot :string] [:max-running :int] [:max-merging {:optional true} :int]]]]}
   [db]
-  (when-let [r (d/pull db [:seon.root/boot :seon.config.agent/max-running :seon.config.merge/max-running :seon.config.source/gate-checkout] [:seon.root/id :root])]
+  (when-let [r (d/pull db [:seon.root/boot :seon.config.agent/max-running :seon.config.merge/max-running] [:seon.root/id :root])]
     (cond-> {:boot (:seon.root/boot r) :max-running (:seon.config.agent/max-running r)}
-      (:seon.config.merge/max-running r) (assoc :max-merging (:seon.config.merge/max-running r))
-      (:seon.config.source/gate-checkout r) (assoc :gate-checkout (:seon.config.source/gate-checkout r)))))
+      (:seon.config.merge/max-running r) (assoc :max-merging (:seon.config.merge/max-running r)))))
 
 (defn entity-value
   "The task, attempt or root that entity e of db is now, as the reconciler's index holds it:
@@ -341,7 +338,7 @@
 (def ^:private stated-attributes
   "The task attributes a declaration states (its members, config flattened), as stored."
   [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
-   :seon.task/kind :seon.task/evidence :seon.task/generation :seon.task/budget :seon.task/references
+   :seon.task/kind :seon.task/evidence :seon.task/references
    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
 
 (defn- file-refusal

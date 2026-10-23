@@ -132,28 +132,22 @@
  :seon.task/branch :keyword
  :seon.task/model :string
  :seon.task/execution [:and {:seon.db/index true} [:enum :held :running :cancelled]]
- :seon.task/problem :string
  :seon.task/kind [:enum :work :design :implement :test :merge]
- ;; measured evidence a task starts from: a failed attempt's conflicts, red proofs and problem
+ ;; measured evidence a task starts from: its last failed attempt's conflicts, unmerged keys, red
+ ;; proofs and problem (seon.reconcile/hold-tx), read by the attempt root releases next
  :seon.task/evidence [:map {:seon.db/data true}
                       [:from :seon.attempt/id] [:conflicts [:vector :seon.merge/conflict]]
                       [:unmerged [:vector :string]] [:red [:vector :qualified-symbol]]
                       ;; why the attempt failed: its refusals or its death, as the reconciler stated it
                       [:problem {:optional true} :string]]
- :seon.task/generation :int
- ;; the refinement chains a task's failures may attach (generations; :seon.reconcile/default-budget
- ;; when absent); replaces :seon.config.merge/max-attach
- :seon.task/budget [:int {:min 0}]
  ;; root's go (my.root/gate!): the process tests this task's change reaches run on the gate
  ;; checkout before it merges; without it they are never run automatically (owner, 2026-10-23)
  :seon.task/gate? :boolean
- ;; derived by the reconciler when a failure finds the budget spent: the attempt, the root cause
- ;; and the tasks it blocks (the task stays released; it is not ready while this holds)
- :seon.task/stuck [:map {:seon.db/data true} [:attempt :seon.attempt/id] [:cause :string] [:blocks [:vector :seon.task/id]]]
- ;; the task marked failed (my.task/fail!, or root, or a check): why, the value that shows it,
- ;; and the attempt that marked it; root's judge carries an attempt's own onto main and holds
- ;; the task (state :failed), where it stays as a record after a release
- :seon.task/failure [:map {:seon.db/data true} [:reason :string] [:counterexample :string] [:attempt {:optional true} [:maybe :seon.attempt/id]]]
+ ;; the task held for root with a failure: an attempt the reconciler refused, whose agent died or
+ ;; whose merge was refused (seon.reconcile/hold-tx: why, the attempt), or marked failed
+ ;; (my.task/fail!, root or a check: why, the value that shows it, the attempt); root's judge
+ ;; carries an attempt's own onto main (state :failed), where it stays as a record after a release
+ :seon.task/failure [:map {:seon.db/data true} [:reason :string] [:counterexample {:optional true} :string] [:attempt {:optional true} [:maybe :seon.attempt/id]]]
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
  ;; config keys are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
@@ -164,10 +158,8 @@
                           [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/needs {:optional true} :seon.task/needs]
                           [:seon.task/references {:optional true} :seon.task/references]
                           [:seon.task/instructions {:optional true} :seon.task/instructions]
-                          [:seon.task/model {:optional true} :seon.task/model] [:seon.task/problem {:optional true} :seon.task/problem]
+                          [:seon.task/model {:optional true} :seon.task/model]
                           [:seon.task/evidence {:optional true} :seon.task/evidence]
-                          [:seon.task/generation {:optional true} :seon.task/generation]
-                          [:seon.task/budget {:optional true} :seon.task/budget] [:seon.task/stuck {:optional true} :seon.task/stuck]
                           [:seon.task/gate? {:optional true} :seon.task/gate?]
                           [:seon.task/failure {:optional true} :seon.task/failure]
                           [:seon.task/declared {:optional true} :seon.task/declared]
@@ -179,7 +171,7 @@
  :seon.attempt/task [:and {:seon.db/index true} :seon.db/ref]
  ;; finished: its task is done (seon.reconcile/finished); judged: ended or dead, the done rule's to judge;
  ;; failed: its agent died or was lost, a death (seon.problems/report)
- :seon.attempt/status [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ended :dead} :seon.status/failed #{:dead :lost}} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed :refused]]
+ :seon.attempt/status [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ended :dead} :seon.status/failed #{:dead :lost}} [:enum :running :ended :killed :dead :lost :done :merged :behind :closed :refused]]
  :seon.attempt/boot :string
  :seon.attempt/agent :keyword
  :seon.attempt/pid :int
