@@ -5,7 +5,7 @@
   it leaves dead, the latest redefinition winning, scratch data and observations never
   merging, unmerged entries derived from the branch, and behind meaning main's program
   moved."
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is are testing]]
+  (:require [seon.test-store :as ts] [seon.proofs :as proofs] [clojure.test :refer [deftest is are testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.merge :as pm]
@@ -158,9 +158,10 @@
         e (d/q '[:find ?e . :where [?e :seon.merge/key]] db)]
     (is (= c (pm/conflict-value (pm/conflict-tx c))) "the inverse of conflict-tx")
     (is (= c (pm/conflict-value (d/pull db '[*] e))) "a pulled entry")
-    (is (nil? (mg/check (m/deref (contract/schema (contract/contract #'pm/conflict-value))) pm/conflict-value
-                        {:registry contract/registry :num-tests 100 :seed 42}))
-        "mg/check: every input its contract generates states a conflict")))
+    (let [seed (proofs/test-seed)]
+      (is (nil? (mg/check (m/deref (contract/schema (contract/contract #'pm/conflict-value))) pm/conflict-value
+                          {:registry contract/registry ::mg/=>seed seed}))
+          (str "mg/check: every input its contract generates states a conflict; seed " seed)))))
 
 (deftest behind-means-main-program-moved
   (let [observed (with (base) [{:seon.agent/id :root :seon.agent/answered-t 9} {:note/text "attempt facts"}])]
@@ -171,7 +172,7 @@
   ;; root's records on main (boot, quiescence, recorded errors) are platform records: with
   ;; all data merged (the writer's :all) they change no key a branch carries; the task
   ;; content an agent may improve (my.task/update!) is carried
-  (let [rooted (with (base) [{:seon.root/id :root :seon.root/quiescent {:t 9 :stuck []}}])
+  (let [rooted (with (base) [{:seon.root/id :root :seon.root/quiescent {:t 9 :root-causes []}}])
         tasked (with (base) [{:seon.task/id "t/x" :seon.task/plan "better"}])
         p #(pm/program % :all)]
     (is (empty? (:theirs (pm/three-way (p (base)) (p (base)) (p rooted)))))

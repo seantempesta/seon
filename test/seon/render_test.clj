@@ -153,9 +153,20 @@
 
 (deftest problems-tile
   (is (str/includes? (h/html (:seon.render/html (ui/tile-problems [] {}))) "no problems"))
-  (let [html (h/html (:seon.render/html (ui/tile-problems ["proc writer UNKNOWN"] {})))]
-    (is (str/includes? html "1 problem"))
+  (let [html (h/html (:seon.render/html (ui/tile-problems [[:root ["proc writer UNKNOWN"]]] {})))]
+    (is (str/includes? html "1 kind of problem open"))
     (is (str/includes? html "proc writer UNKNOWN")))
+  (testing "grouped by the area each class declares (:seon.problems/class): a dead citation under docs"
+    (let [areas (ai/problem-areas (assoc sys :root-errors []
+                                         :recorded {:classes {:dead-citation {:n 1 :rows [{:signature "s" :message "docs/x.md#y cites app/f, which names nothing"
+                                                                                           :open? true :producer nil :owner-ns 'app :proofs [] :evidence {} :answered-by [] :at-ms nil}]}
+                                                              :agent {:n 1 :rows [{:signature "s1" :count 1 :message "agent a2 died"}]}}}))
+          html (h/html (:seon.render/html (ui/tile-problems areas {})))]
+      (is (= [:docs :errors] (mapv first areas)))
+      (is (str/includes? (first (second (first areas))) "derived dead-citation 1: docs/x.md#y cites app/f, which names nothing"))
+      (is (str/includes? html "area-docs"))
+      (is (= 2 (count (ai/problems (assoc sys :root-errors [] :recorded {:classes {:dead-citation {:n 1 :rows [{:signature "s" :message "m" :open? true}]}
+                                                                                      :agent {:n 1 :rows [{:signature "s1" :count 1 :message "a"}]}}})))))))
   (testing "a dead agent whose attempt finished is not a problem"
     (is (empty? (ai/problems (assoc sys :agents {:a2 {:status :dead}} :health {} :root-errors [] :recorded {}
                                     :agent-attempt {:a2 {:seon.attempt/status :done}}))))))
@@ -302,7 +313,7 @@
         (is (< (str/index-of page "id=\"hr-v_2\"") (str/index-of page "id=\"hr-v_1\"") (str/index-of page "id=\"hr-v_0\"")))))))
 
 (deftest a-context-read-is-shown-once
-  (let [ctx (str "{:turn \"1 of 8\" :refused [{:refusal :contract-gap :vars [" (str/join " " (for [i (range 360)] (str "app.m/f" i))) "]}]}")
+  (let [ctx (str "{:turn \"1 of 8\" :refused [{:reason :contract-gap :vars [" (str/join " " (for [i (range 360)] (str "app.m/f" i))) "]}]}")
         read {:id 0 :tag :ret :form "(print (seon.turn/context-block \"t/x\" \"t/x#1\"))" :printed "nil" :out ctx :origin :context}
         card (h/html (:seon.render/html (ui/agent-card {:id :a14 :status :idle :evals [read]} {})))
         row (h/html (:seon.render/html (ui/history-row read {})))]
@@ -324,7 +335,7 @@
             ;; an outside read whose done rule refused 360 contract gaps: its basis, never its text
             b {:commit (d/commit-id @conn) :task "t/x" :attempt "t/x#1" :turn 1 :max-turns 1 :origin :outside
                :observed {:results {} :reds [] :run-errors []
-                          :refusals (vec (for [i (range 360)] {:refusal :contract-gap :symbol (symbol "app.m" (str "f" i))}))}}
+                          :reasons (vec (for [i (range 360)] {:reason :contract-gap :symbol (symbol "app.m" (str "f" i))}))}}
             _ (d/transact conn [{:seon.turn/id "t/x#1/read-1" :seon.turn/attempt "t/x#1" :seon.turn/n 1
                                  :seon.turn/origin :outside :seon.turn/basis b}])
             db @conn
@@ -433,7 +444,7 @@
       (is (not (str/includes? html "seon.error/type")) what))))
 
 (deftest a-refused-merge-says-why-once
-  ;; task seon.render/one-owner-per-view-path (B2, A14): a refusal is the one error map; the
+  ;; task seon.render/one-owner-per-view-path (B2, A14): a reason is the one error map; the
   ;; card's pill and the stream's row read its message, once
   (let [r (seon.contract/error :seon.root/refused 'seon.root/merge! "2 functions have no contract" {:agent :a1})
         card (h/html (:seon.render/html (ui/agent-card {:id :a1 :status :idle :evals [] :merged r} {})))
@@ -445,7 +456,7 @@
 ;;; --- the values agents and root read: declared AI and HTML renders, one per value --------
 
 (def ^:private behind
-  ;; as seon.writer/merge-refusal makes it
+  ;; as seon.writer/merge-reason makes it
   (seon.contract/error :seon.merge/behind 'seon.writer/merge-branch
                        "main changed 3 key(s) since the branch's merge base: merge main into the branch first"
                        {:tx 812 :behind 3
@@ -618,3 +629,13 @@
       (is (not (str/includes? (:text shown) "\\n"))))
     (is (not (str/includes? (:text shown) ":seon.task/accumulated")))
     (is (str/includes? (:text plain) ":value {:n 1}"))))
+
+(deftest every-part-names-its-inputs-schema
+  (testing "a unit names its input's schema, whose declared render shows it, never a render function (docs/render.md#the-frame-and-its-units)"
+    (let [units (concat (:seon.render/units (r/render-face :html (assoc sys :order [:a1] :series {} :agent-attempt {}) {:seon.render/schema :seon.render/system}))
+                        (:seon.render/units (r/render-face :html {:agent {:id :a1 :status :idle} :context {:why "none"}}
+                                                           {:seon.render/schema :seon.render/agent-page})))]
+      (is (= #{"z-history-more"} (set (map :id (filter :render units))))
+          "only the history's count line and its rows, serialized ahead (jolt/printer-eval makes the rows units); an event row names :seon.render/event")
+      (doseq [{:keys [id schema]} (remove :render units)]
+        (is (r/declared schema :html) (str id " names " schema ", which declares an HTML render"))))))

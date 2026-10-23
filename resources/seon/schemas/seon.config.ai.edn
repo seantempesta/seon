@@ -28,7 +28,7 @@
                                 [:seon.ai.model/input-usd-per-mtok :seon.ai.model/input-usd-per-mtok]
                                 [:seon.ai.model/cached-input-usd-per-mtok :seon.ai.model/cached-input-usd-per-mtok]
                                 [:seon.ai.model/output-usd-per-mtok :seon.ai.model/output-usd-per-mtok]
-                                [:seon.ai.model/thinking-dials :seon.ai.model/thinking-dials]
+                                [:seon.ai.model/thinking-modes :seon.ai.model/thinking-modes]
                                 [:seon.ai.model/provider-max-in-flight :seon.ai.model/provider-max-in-flight]
                                 [:seon.ai.model/source :seon.ai.model/source]
                                 [:seon.config.ai/max-in-flight {:optional true} :seon.config.ai/max-in-flight]
@@ -43,7 +43,7 @@
  :seon.ai.model/input-usd-per-mtok [:double {:min 0.0 :seon.config/unit "USD / M tokens"}]
  :seon.ai.model/cached-input-usd-per-mtok [:double {:min 0.0 :seon.config/unit "USD / M tokens"}]
  :seon.ai.model/output-usd-per-mtok [:double {:min 0.0 :seon.config/unit "USD / M tokens"}]
- :seon.ai.model/thinking-dials [:set :keyword]
+ :seon.ai.model/thinking-modes [:set :keyword]
  :seon.ai.model/provider-max-in-flight [:int {:min 1 :seon.config/unit "calls" :description "The provider's documented concurrency ceiling for this model, per account."}]
  :seon.ai.model/source [:string {:min 1 :description "Where the prices and limits were read, and when."}]
  :seon.ai.model/provider-fact [:map {:seon.db/attributes true}
@@ -60,7 +60,7 @@
                             [:seon.ai.model/input-usd-per-mtok :seon.ai.model/input-usd-per-mtok]
                             [:seon.ai.model/cached-input-usd-per-mtok :seon.ai.model/cached-input-usd-per-mtok]
                             [:seon.ai.model/output-usd-per-mtok :seon.ai.model/output-usd-per-mtok]
-                            [:seon.ai.model/thinking-dials :seon.ai.model/thinking-dials]
+                            [:seon.ai.model/thinking-modes :seon.ai.model/thinking-modes]
                             [:seon.ai.model/provider-max-in-flight :seon.ai.model/provider-max-in-flight]
                             [:seon.ai.model/source :seon.ai.model/source]]
  ;; a setting resolved (seon.config/resolve): its value and where it came from

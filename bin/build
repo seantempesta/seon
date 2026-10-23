@@ -1,7 +1,7 @@
 #!/bin/sh
 # bin/build — the runtime from the pinned sources: Chez (our fork) -> Jolt (our fork)
 # -> target/hello (a binary that requires Datahike and opens an in-memory db), then
-# target/lib/libprobe.dylib (native/probe.c), target/lib/liblmdb.dylib (LMDB, robust locks),
+# target/lib/libprobe.dylib (native/probe.c), target/watch (native/watch.c, root's file events), target/lib/liblmdb.dylib (LMDB, robust locks),
 # target/lib/liblz4.dylib and target/lib/libzstd.dylib (the store's compressors) and target/seon (the platform, -main seon.check).
 #
 #   bin/build            every step; chez, jolt, native, lmdb, lz4 and zstd are skipped when their stamp matches their pin
@@ -19,6 +19,7 @@
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+"$ROOT/bin/ports" --write   # the port keys under their current names (bin/ports)
 T=$ROOT/target
 RC=$ROOT/reference-code
 STEP=${1:-all}
@@ -49,8 +50,18 @@ copy_tree() {
 fresh() { [ -f "$T/$1.stamp" ] && [ "$(cat "$T/$1.stamp")" = "$2" ]; }
 [ -z "${BUILD_FORCE:-}" ] || rm -f "$T"/chez.stamp "$T"/jolt.stamp "$T"/native.stamp "$T"/lmdb.stamp "$T"/lz4.stamp "$T"/zstd.stamp
 
-CHEZ_PIN=$(git -C "$RC/chez" rev-parse HEAD)
-JOLT_PIN=$(git -C "$RC/jolt" rev-parse HEAD)
+# pin DIR: what a build reads from the checkout at DIR, by content: its HEAD when its files are
+# HEAD's, else HEAD+ the tree of its files as they are (untracked ones too, in an index of its
+# own), so an uncommitted edit in a submodule is built, and named (seon.fx/pin computes the same)
+pin() {
+  if [ -z "$(git -C "$1" status --porcelain -uall --ignore-submodules=all)" ]; then git -C "$1" rev-parse HEAD; return; fi
+  i=$(mktemp -u "${TMPDIR:-/tmp}/seon-pin.XXXXXX")
+  t=$(GIT_INDEX_FILE=$i git -C "$1" add -A && GIT_INDEX_FILE=$i git -C "$1" write-tree) || { rm -f "$i"; die "pin $1: git add or write-tree failed"; }
+  rm -f "$i"
+  echo "$(git -C "$1" rev-parse HEAD)+$t"
+}
+CHEZ_PIN=$(pin "$RC/chez")
+JOLT_PIN=$(pin "$RC/jolt")
 CHEZ=$T/chez/bin/scheme
 JOLT=$T/jolt/jolt
 
@@ -100,11 +111,12 @@ build_hello() {
 }
 
 build_native() {
-  pin=$(git -C "$ROOT" hash-object native/probe.c)
-  if fresh native "$pin" && [ -f "$T/lib/libprobe.dylib" ]; then say "native up to date ($pin)"; return; fi
+  pin=$(git -C "$ROOT" hash-object native/probe.c native/watch.c | tr '\n' ' ')
+  if fresh native "$pin" && [ -f "$T/lib/libprobe.dylib" ] && [ -x "$T/watch" ]; then say "native up to date ($pin)"; return; fi
   mkdir -p "$T/lib"
-  say "native: native/probe.c -> target/lib/libprobe.dylib"
+  say "native: native/probe.c -> target/lib/libprobe.dylib, native/watch.c -> target/watch"
   cc -O2 -shared -o "$T/lib/libprobe.dylib" "$ROOT/native/probe.c" || die "native build failed"
+  cc -O2 -o "$T/watch" "$ROOT/native/watch.c" -framework CoreServices || die "native build failed (watch)"
   echo "$pin" > "$T/native.stamp"
 }
 
@@ -117,7 +129,7 @@ build_native() {
 LMDB_SRC=$RC/lmdb/libraries/liblmdb
 build_lmdb() {
   [ -f "$LMDB_SRC/mdb.c" ] || die "missing LMDB source at $LMDB_SRC (the reference-code/lmdb submodule)"
-  pin="$(git -C "$LMDB_SRC" rev-parse HEAD) robust"
+  pin="$(pin "$LMDB_SRC") robust"
   if fresh lmdb "$pin" && [ -f "$T/lib/liblmdb.dylib" ]; then say "lmdb up to date ($pin)"; return; fi
   mkdir -p "$T/lib"
   say "lmdb: $LMDB_SRC at $pin -> target/lib/liblmdb.dylib (MDB_USE_ROBUST)"
@@ -151,7 +163,7 @@ build_lz4() {
 ZSTD_SRC=$RC/zstd/lib
 build_zstd() {
   [ -f "$ZSTD_SRC/zstd.h" ] || die "missing zstd source at $ZSTD_SRC (the reference-code/zstd submodule)"
-  pin="$(git -C "$RC/zstd" rev-parse HEAD)"
+  pin="$(pin "$RC/zstd")"
   if fresh zstd "$pin" && [ -f "$T/lib/libzstd.dylib" ]; then say "zstd up to date ($pin)"; return; fi
   mkdir -p "$T/lib"
   say "zstd: $ZSTD_SRC at $pin -> target/lib/libzstd.dylib"

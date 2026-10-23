@@ -67,8 +67,10 @@
 
 (defn with-merge
   "decls (task declarations of work) followed by their merge tasks; needs on a work task
-  of decls become needs on its merge."
-  {:malli/schema [:=> [:cat [:vector :seon.task/declaration]] [:vector :seon.task/declaration]]}
+  of decls become needs on its merge. (A generated input holds at most 4 declarations: each is
+  a large nested map, and up to ~100 of them made this one contract's mg/check 78 s of the
+  step's 136, pure-tests 2026-10-23; 4 already cover a need on work, on a merge and outside.)"
+  {:malli/schema [:=> [:cat [:vector {:gen/max 4} :seon.task/declaration]] [:vector :seon.task/declaration]]}
   [decls]
   (let [id #(task/task-id (:seon.task/ns %) (:seon.task/name %))
         work (set (map id decls))
@@ -101,7 +103,7 @@
 (defn request-tx
   "The one transaction that writes request decl's linked tasks (request) on main, released:
   the reconciler sees the whole set at once and forks its first agent only once it is
-  committed. A refusal (seon.task/create-tx's) answers as it is."
+  committed. An error (seon.task/create-tx's) answers as it is."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/declaration]
                   [:or [:vector :any] [:map [:seon.error/type [:= :seon.task/refused]] [:seon.error/message :string]]]]}
   [db decl]

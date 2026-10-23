@@ -91,9 +91,43 @@
         (is (= (set (keys proofs/check-steps)) (set (keys (:digests sd)))))
         (is (= [] (:missing sd)))
         (is (not= ((:digests sd) "laws") ((:digests (proofs/step-digests all {:env "e" :tree "t2"})) "laws")))))
+    (testing "a step runs a seon.check mode (the binary, a store branch) exactly when check-steps names functions for it"
+      (is (= #{"laws" "lmdb-kill"} (set (remove proofs/step-needs-binary? (keys proofs/check-steps)))) "laws reads the tree, lmdb-kill has a binary of its own")
+      (is (every? proofs/step-needs-binary? ["smoke" "fx" "durable" "e2e-loop" "mg-check"])))
     (testing "a step whose function the program does not define (renamed) has no digest and is named missing"
       (is (= {} (program/reach-digests db {:env "e" :tree "t"} {"gone" '[app.pv-check/renamed]})))
       (is (= ["smoke"] (:missing (proofs/step-digests (fn [roots] (dissoc (zipmap (keys roots) (map str (keys roots))) "smoke")) {:env "e" :tree "t"})))))))
+
+(deftest a-run-that-names-nothing-leaves-out-what-reaches-a-process
+  ;; owner, 2026-10-23: tests shouldn't be running agent turns, not automatically at least. A
+  ;; step (or test) whose function reaches a process var (a fork, a shell, a root booted for it:
+  ;; seon.program/process-vars) is classified by the one walk and left out of a run that names
+  ;; nothing; it runs when named
+  (let [db (record (prog) 'user "(ns app.pv-boot (:require [app.pv-calc :as c] [seon.lib]))"
+                   'app.pv-boot "(defn smoke [] (seon.lib/fork! {:child (fn [] nil) :refused identity :parent identity}))"
+                   'app.pv-boot "(defn calc [] (c/add 1 2))")
+        idx (program/reach-index db {:env "e" :tree "t"} {"smoke" '[app.pv-boot/smoke] "calc" '[app.pv-boot/calc]})
+        process (set (keep (fn [[k v]] (when (:process? v) k)) idx))
+        cand {"smoke" (:digest (idx "smoke")) "calc" (:digest (idx "calc")) 'app.pv-calc-test/add-test "d"}]
+    (is (= #{"smoke"} process) "the step that forks reaches a process; the one that adds does not")
+    (is (= (program/reach-digests db {:env "e" :tree "t"} {"smoke" '[app.pv-boot/smoke] "calc" '[app.pv-boot/calc]})
+           (update-vals idx :digest))
+        "the walk's digests are reach-digests'")
+    (is (= {"calc" (:digest (idx "calc")) 'app.pv-calc-test/add-test "d"} (runner/automatic cand process))
+        "a run that names nothing selects every key but it"))
+  (testing "through the plan bin/prove and bin/test run (test-runner/plan-of), on a checkout of two tests"
+    (let [d (scratch-dir)
+          files {"deps.edn" "{}"
+                 "test/app/pt_calc_test.clj" "(ns app.pt-calc-test (:require [clojure.test :refer [deftest is]]))\n(deftest adds (is (= 3 (+ 1 2))))\n"
+                 "test/app/pt_shell_test.clj" "(ns app.pt-shell-test (:require [clojure.test :refer [deftest is]] [clojure.java.shell :as sh]))\n(deftest shells (is (zero? (:exit (sh/sh \"true\")))))\n"}
+          _ (doseq [[p t] files] (.mkdirs (.getParentFile (java.io.File. (str d "/" p)))) (spit (str d "/" p) t))
+          _ (clojure.java.shell/sh "git" "-C" d "init" "-q")
+          _ (clojure.java.shell/sh "git" "-C" d "add" ".")
+          auto (runner/plan-of d "tests" false nil)
+          named (runner/plan-of d "tests" false ["app.pt-shell-test"])]
+      (is (= ['app.pt-calc-test/adds] (:run-tests auto)) "named nothing: the in-process test runs, the shelling one does not")
+      (is (= ['app.pt-shell-test/shells] (:left auto)) "and the plan says it left that one out")
+      (is (= ['app.pt-shell-test/shells] (:run-tests named)) "named, it runs"))))
 
 (deftest shards-split-by-namespace-and-each-result-is-stored
   (record (ts/test-db) 'user "(ns app.pv-red-test (:require [clojure.test :refer [deftest is use-fixtures]]))"
@@ -108,9 +142,10 @@
         notes (atom [])
         ran (proofs/run-tests! tests dg #(swap! notes conj %))
         unstored (proofs/store-greens! #(fx/write-file {:req %}) dir ran)]
-    (is (= [["app.pv-calc-test/add-test" "app.pv-calc-test/twice-test"] ["app.pv-neg-test/neg-test"] ["app.pv-red-test/red-test" "app.pv-red-test/fixture-test"]]
-           (sort-by first (map #(mapv str %) (runner/shards tests 3)))) "a namespace's tests stay in one shard")
-    (is (= 2 (count (runner/shards tests 2))) "never more shards than jobs")
+    (is (= [["app.pv-calc-test/add-test" "app.pv-calc-test/twice-test"] ["app.pv-neg-test/neg-test"] ["app.pv-red-test/fixture-test" "app.pv-red-test/red-test"]]
+           (sort-by first (map #(sort (mapv str %)) (runner/shards tests 3 (zipmap tests [1 1 1 1 2])))))
+        "a namespace within its share of the measured ms stays in one shard")
+    (is (= 2 (count (runner/shards tests 2 {}))) "never more shards than jobs")
     (is (= [] unstored) "every green written")
     (is (= (set tests) (set (keys ran))) "every test has a result")
     (is (= {:pass 0 :fail 1 :error 0} (select-keys (ran 'app.pv-red-test/red-test) [:pass :fail :error])))
@@ -138,6 +173,15 @@
     (is (some #(and (= 'app.pv-fx-test/never-runs (:test %)) (= :error (:type (:seon.test/report %)))) @notes) "the unreported test is reported, as an error")
     (is (re-find #"the fixture's store is gone" (:message t)) "the throw's own message, not a guess")
     (is (= "{:store :gone}" (:data t)) "and its data")))
+
+(deftest shards-are-dealt-by-measured-work
+  ;; pure-tests 2026-10-23: dealt by count, the full run's shards ended 437, 397, 110 and 68 s
+  ;; into it; by each test's last measured ms they end together
+  (is (= '#{[x/a] [y/b y/c z/d]} (set (runner/shards '[x/a y/b y/c z/d] 2 '{x/a 10 y/b 3 y/c 3 z/d 3})))
+      "the longest alone, the rest together")
+  (is (= '#{[p/a p/c q/e] [p/b p/d]} (set (runner/shards '[p/a p/b p/c p/d q/e] 2 '{p/a 5 p/b 5 p/c 5 p/d 5 q/e 1})))
+      "a namespace longer than a shard's share is split into share-sized parts")
+  (is (= 2 (count (runner/shards '[x/a y/b y/c] 2 '{x/a 10}))) "a test never measured counts as the mean of those measured"))
 
 (deftest a-tree-changed-since-the-plan-stores-nothing
   ;; re-review 2026-10-22: a shard requires its namespaces from disk seconds or minutes after the

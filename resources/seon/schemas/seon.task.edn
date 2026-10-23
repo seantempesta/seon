@@ -66,13 +66,14 @@
                         [:seon.attempt/results {:optional true} :seon.proof/results]
                         [:seon.attempt/conflicts {:optional true} [:vector :seon.merge/conflict]]
                         [:seon.attempt/unmerged {:optional true} [:vector :string]]
-                        [:seon.attempt/changed {:optional true} [:set :string]]]
+                        [:seon.attempt/changed {:optional true} [:set :string]]
+                        [:seon.attempt/caused {:optional true} [:set :string]]]
  ;; ---- the done rule and the reconciler's answer ----
  :seon.reconcile/merge-limits [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?]]
  ;; a released task not done at quiescence: a root cause (held for root with its failure, a
  ;; refused spawn, or cancelled or held)
  ;; and the released tasks it blocks, transitively
- :seon.reconcile/stuck-row [:map {:closed true} [:task :seon.task/id] [:cause :string]
+ :seon.reconcile/root-cause [:map {:closed true} [:task :seon.task/id] [:cause :string]
                             [:attempt {:optional true} :seon.attempt/id] [:blocks [:vector :seon.task/id]]]
  ;; the reconciler proc's state, and the steps of a flight
  :seon.reconcile/state [:map [:db :seon.host/db] [:boot :string]
@@ -107,11 +108,13 @@
                              [:proofs :seon.task/proofs] [:results :seon.proof/results]
                              [:main-green [:set :qualified-symbol]] [:allowed-red [:set :qualified-symbol]]
                              [:uncontracted [:set :qualified-symbol]] [:unmerged {:optional true} [:vector :string]]
+                             ;; the derived problems the branch's work made true (seon.problems/caused)
+                             [:caused {:optional true} [:set :string]]
                              [:kind {:optional true} :seon.task/kind]
                              ;; a :design task's accumulated plan now and as its attempt began
                              [:plan {:optional true} :seon.task/plan] [:plan-before {:optional true} :seon.task/plan]]
- :seon.reconcile/refusal [:map {:closed true}
-                          [:refusal [:enum :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design]]
+ :seon.reconcile/not-done [:map {:closed true}
+                          [:reason [:enum :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem]]
                           [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string]]
  :seon.reconcile/action [:multi {:dispatch :op}
                          [:reap [:map {:closed true} [:op [:= :reap]] [:attempt :seon.attempt/id]]]
@@ -163,4 +166,5 @@
                  [:reason {:optional true} :string] [:ms {:optional true} number?]
                  [:conflicts {:optional true} [:vector :seon.merge/conflict]]
                  [:unmerged {:optional true} [:vector :string]]
-                 [:changed {:optional true} [:set :string]]]}
+                 [:changed {:optional true} [:set :string]]
+                 [:caused {:optional true} [:set :string]]]}

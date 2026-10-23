@@ -251,38 +251,25 @@
   ;; turns (~14 s each), three boots (~3-9 s each with the import) and one build (~25-60 s).
   (let [dir (scratch-dir "nextgen")
         tree (str dir "/tree")
-        port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
-        ;; its root's own store and main, named: an inherited SEON_STORE or SEON_MAIN (a bin/check
-        ;; run's) otherwise opens a store whose main already holds these merges, made in another
-        ;; run's clone (task seon.source/the-restart-test-runs-its-root-on-its-own-store)
-        env ["env" (str "SEON_RUNS=" dir "/runs") (str "SEON_STORE=" dir "/runs/store") "SEON_MAIN=main"
-             (str "SEON_ENTRANCE_PORT=" port) "SEON_WEB_PORT=0"]
-        root! (fn [& args] (apply ts/binary-sh (concat env [(str here "/bin/root")] args)))
-        ;; one request line, then its one reply line: the read ends on the reply, or on EOF when the
-        ;; root closes the connection or dies (nil, a recorded verdict); nc -w never times out on macOS
-        ask (fn [code] (with-open [s (java.net.Socket. "127.0.0.1" (int port))]
-                         (let [out (.getOutputStream s)
-                               _ (doto out (.write (.getBytes (str (pr-str {:op :eval :agent "root" :code code}) "\n") "UTF-8")) (.flush))
-                               line (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s) "UTF-8")))
-                               a (try (clojure.edn/read-string {:default tagged-literal} line) (catch Exception _ nil))]
-                           (some-> a :items first :printed clojure.edn/read-string))))
-        pids (fn [] (str/split (str/trim (slurp (str dir "/runs/root.pids"))) #" "))
+        ;; its root's own store and main, named (seon.test-store/start-root!: an inherited
+        ;; SEON_STORE or SEON_MAIN opened a store whose main already held these merges)
+        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")}
         cloned (sh/sh "git" "clone" "-q" "--local" here tree)
-        started (root! "start" "--set" (str ":seon.config.source/root=" (pr-str tree))
-                       "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]")]
+        root (atom (ts/start-root! (assoc root0 :args ["--set" (str ":seon.config.source/root=" (pr-str tree))
+                                                       "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]"])))
+        ;; the printed value of a root eval; a reply that is an error stays the error value
+        ask (fn [code] (let [a (ts/ask @root {:op :eval :agent "root" :code code})]
+                         (if (:error a) a (clojure.edn/read-string (:printed (first (:items a)))))))]
     (try
       (is (zero? (:exit cloned)) (:err cloned))
-      (is (zero? (:exit started)) (str (:out started) (:err started)))
+      (is (some? (:port @root)) (str "the root started: " (slurp (str dir "/runs/root.log"))))
       (let [t1 (ask "(seon.e2e/loop-turn! sys)")
             t2 (ask "(seon.e2e/loop-turn! sys :loop-2)")
             args (ask "(my.root/resume-args sys)")]
         (is (= [2 2] [(:root t1) (:root t2)]) (str "each merge live in place: " (pr-str [t1 t2])))
         (is (= 2 (count (:commits t2))) "two merges committed")
-        (let [[holder pid] (pids)]
-          (sh/sh "kill" "-9" pid)
-          (while (zero? (:exit (sh/sh "kill" "-0" pid))) (Thread/sleep 50))
-          ;; bin/root's holder of the dead root's stdin
-          (sh/sh "kill" holder))
+        ;; a crash: answered at the root's death, as its holder reaped it
+        (ts/kill-root! @root)
         ;; the tree changes a test namespace's ns form while root is down (as a merge to test/
         ;; does): main still holds the old one, which load-all! runs at boot (and another test
         ;; namespace's require marks it loaded), and the import must still apply the new
@@ -290,20 +277,20 @@
         (let [f (str tree "/test/seon/program_test.clj")]
           (spit f (str (str/replace-first (slurp f) "(:require " "(:require [clojure.set :as restart-set] ")
                        "\n(defn restart-probe [] (restart-set/union #{1} #{2}))\n")))
-        (let [restarted (apply root! "start" args)]
-          (is (zero? (:exit restarted)) (str (:out restarted) (:err restarted)))
+        (let [restarted (reset! root (ts/start-root! (assoc root0 :args args)))]
+          (is (some? (:port restarted)) (str "restarted: " (slurp (str dir "/runs/root.log"))))
           (is (true? (ask "(some? (seon.db/eid @(:conn sys) :var/name 'seon.program-test/restart-probe))"))
               "the changed ns form's alias analyzed: the form using it is main's program")
           (is (= [2 [1 2]] (ask "[(seon.fixtures/generation) (seon.fixtures/generations)]"))
               "the binary older than both merges runs both, caught up at boot on the same main"))
         (let [g (ask "(my.root/build! sys)")
-              nxt (root! "next")]
+              nxt (reset! root (ts/next-root! @root))]
           (is (nil? (:error g)) (str "the generation built: " (pr-str g)))
-          (is (zero? (:exit nxt)) (str (:out nxt) (:err nxt)))
+          (is (some? (:port nxt)) (str "the next generation started: " (slurp (str dir "/runs/root.log"))))
           (is (= [2 [1 2] (:commit g)] (ask "[(seon.fixtures/generation) (seon.fixtures/generations) (:commit (my.root/generation sys))]"))
               "the new generation runs both, resumed on main holding its generation")))
       (finally
-        (root! "stop")
+        (ts/stop-root! @root)
         (doseq [g (.listFiles (java.io.File. (str dir "/runs/generations")))]
           (sh/sh (str here "/bin/worktree") "--remove-at" (.getPath g)))
         (sh/sh "rm" "-rf" dir)))))
@@ -352,9 +339,9 @@
       (is (= (str/replace text "\n :seon.attempt/pid :int" "")
              (edit [[:db/retractEntity [:schema/key :seon.attempt/pid]]]))))
     (testing "a new key after the last entry, read back as written"
-      (let [out (edit [{:schema/key :seon.attempt/refusal :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]
-        (is (= (str (subs text 0 (- (count text) 2)) "\n :seon.attempt/refusal [:map [:seon.error/message :string]]}\n") out))
-        (is (= (assoc (edn/read-string text) :seon.attempt/refusal [:map [:seon.error/message :string]])
+      (let [out (edit [{:schema/key :seon.attempt/invalid :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]
+        (is (= (str (subs text 0 (- (count text) 2)) "\n :seon.attempt/invalid [:map [:seon.error/message :string]]}\n") out))
+        (is (= (assoc (edn/read-string text) :seon.attempt/invalid [:map [:seon.error/message :string]])
                (edn/read-string out)))))))
 
 ;; ---- a merge loads in place (BUILD plan P4) ---------------------------------------------
@@ -421,3 +408,39 @@
         head-tree (str/trim (:out (sh/sh "git" "rev-parse" "HEAD:reference-code/malli")))]
     (is (= head-tree (get (:pins r) "reference-code/malli")) "the gitlink HEAD's tree records for it")
     (is (every? #(str/starts-with? % "reference-code/") (keys (:pins r))))))
+
+(deftest a-test-that-reaches-a-process-is-found-by-the-reach-walk
+  ;; root's ruling (2026-10-22, owner 2026-10-23): a test that reaches a process (a shell, a
+  ;; fork, a root of its own, the binary) never runs automatically, only when named; it is
+  ;; found by the compiler's facts (the one reach walk, :seon.config.source/process-vars),
+  ;; never a marker. Each process var, reached directly or through a helper, and a test that
+  ;; reaches none. Step E's run 4: a change to seon.problems/report reached tests that boot a
+  ;; root, and an agent's proof run spun for minutes in its fork
+  (let [text (str "(ns app.proc-test (:require [clojure.java.shell :as sh] [clojure.test :refer [deftest is]] [app.proc :as p]"
+                  " [seon.lib :as lib] [seon.test-store :as ts] [seon.agent-test :as at] [seon.program :as sp]))\n\n"
+                  "(defn- shell-ok? [] (zero? (:exit (sh/sh \"true\"))))\n\n"
+                  "(deftest via-shell (is (shell-ok?)) (is (= 2 (p/twice 1))))\n\n"
+                  "(deftest via-fork (is (lib/fork! (fn [] 0))))\n\n"
+                  "(deftest via-binary (is (ts/binary-sh \"./seon\" \"version\")))\n\n"
+                  "(deftest via-root (is (at/in-agent [\"1\"])))\n\n"
+                  ;; tree-readers names binary-sh and a shell as quoted data: a test that only reaches that list
+                  ;; uses neither (the reach walk's own tests read it)
+                  "(deftest via-names (is (seq sp/tree-readers)))\n\n"
+                  "(deftest pure (is (= 2 (p/twice 1))))\n")
+        db (d/db-with (empty-db) (source/import-tx (empty-db) {"src/app/proc.clj" "(ns app.proc)\n\n(defn twice [x] (* 2 x))\n"
+                                                               "src/seon/program.clj" "(ns seon.program)\n\n(def tree-readers '#{seon.test-store/binary-sh clojure.java.shell/sh})\n"
+                                                               "test/app/proc_test.clj" text}))
+        idx (program/reach-index db {:env "" :tree ""})
+        mine (into {} (filter #(= "app.proc-test" (namespace (key %)))) idx)]
+    (is (= {'app.proc-test/via-shell true 'app.proc-test/via-fork true 'app.proc-test/via-binary true
+            'app.proc-test/via-root true 'app.proc-test/via-names false 'app.proc-test/pure false}
+           (update-vals mine :process?))
+        "each process var marks the test that reaches it, and only that")
+    (is (= #{'app.proc-test/via-shell 'app.proc-test/via-fork 'app.proc-test/via-binary 'app.proc-test/via-root}
+           (set (filter #(= "app.proc-test" (namespace %)) (program/process-tests idx)))))
+    ;; only seon.test-store/binary-sh runs target/seon (:seon.config.source/binary-vars): a shell
+    ;; or a fork is a process, not the binary, so a run of only those builds nothing (via-root
+    ;; reaches the binary through the real program's start-root!, which this program lacks)
+    (is (= {'app.proc-test/via-shell false 'app.proc-test/via-fork false 'app.proc-test/via-binary true
+            'app.proc-test/via-root false 'app.proc-test/via-names false 'app.proc-test/pure false}
+           (update-vals mine :binary?)))))

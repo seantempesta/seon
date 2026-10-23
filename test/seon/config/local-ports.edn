@@ -1,2 +1,2 @@
 ;; a --config layer: a worktree's ports, as bin/worktree writes them into config/local.edn
-{:seon.config.root/entrance-port 7910 :seon.config.web/port 7911}
+{:seon.config.root/server-port 7910 :seon.config.web/port 7911}
