@@ -668,7 +668,7 @@
       text? (assoc :seon.print/prefix (subs (if (= :name (:kind node)) (:text node) (:value node)) 0 (:shown node)))
       (= :string (:kind node)) (assoc :seon.print/lines (lines-after (:breaks node) (:total node) (:shown node)))
       form (assoc :seon.print/continuation form)
-      (nil? form) (assoc :seon.print/requery-refusal (get-in context [:requery :seon.print/requery-refusal] "the source has no stable requery identity")))))
+      (nil? form) (assoc :seon.print/requery-refused (get-in context [:requery :seon.print/requery-refused] "the source has no stable requery identity")))))
 
 (defn- tree-node
   "The print node of allotted `node`, its kids' first; each node that shows less than it holds
