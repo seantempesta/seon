@@ -8,7 +8,9 @@ A line opening `{"` is MCP's JSON-RPC; every other line is an EDN request, a key
 
 ## Ops
 
-The ops are one table, ```seon.server/ops```, keyed by a request's `:op`; each entry holds its description, its arguments as JSON Schema and its answer function, and nothing else lists them.
+The ops are one table, ```seon.server/ops```, keyed by a request's `:op`; each entry holds its description, its arguments as JSON Schema and its answer function, and nothing else lists them: a new op is a new MCP tool `seon_<op>` (`seon_agents`, `seon_eval`, `seon_context`, `seon_attach`, `seon_done`, `seon_prove`), and `bin/check mcp` compares the tools the server lists with the table, never a count.
+
+`:prove` runs the tests a branch's change reaches, once per branch and tx however many ask ([merging](merging.md#the-test-service)): it names an agent (its branch at its head) or main, and optionally the test namespaces.
 
 - `:agents`: live agents and every task's summary (`seon.server/task-summaries`: execution, done, blocked-by, its attempts, its problem).
 - `:eval`: Clojure evaluated in a running agent's process (recorded on its branch, origin `:outside`) or as `"root"` in root's process, with `sys` bound to root (`seon.server/*sys*`). Both go through the one REPL path, `seon.repl/eval-string` ([processes](processes.md#the-agent-process)).
