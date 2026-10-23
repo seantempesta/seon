@@ -45,11 +45,9 @@
   ([] {:ins {:cmd "main's commits and fork requests, FIFO; :tick when idle"} :outs {:ev "events for root"}
        :workload :io
        :ping-map-fn (fn [st] {:t (:max-tx (:db st)) :mismatch (:mismatch st)})})
-  ;; :graph, main's reach graph (seon.program/reach-graph), kept with :db through each commit and
-  ;; handed to every agent forked (seon.agent/base-graph): built here once per root boot, a
-  ;; standby inherits it
-  ([{:keys [db conn graph]}] {:db db :graph (or graph (program/reach-graph db (fx/declared-refs (cfg/value :seon.config.root/system-path))))
-                              :mismatch 0 :conn conn :status-buf (ffi/alloc 4) :children #{}})
+  ;; :graph, main's reach graph (seon.program/reach-graph) for :db as of the last fork, handed
+  ;; to every agent forked (seon.agent/base-graph); a standby inherits it
+  ([{:keys [db conn graph]}] (cond-> {:db db :mismatch 0 :conn conn :status-buf (ffi/alloc 4) :children #{}} graph (assoc :graph graph)))
   ;; stop (root closed its end, or died): every child (agents, the standby) killed and reaped
   ;; before this process exits, so root's waitpid of this server is the end of every one of
   ;; them. An agent that had closed its socket but not yet exited was handed to launchd when
@@ -67,13 +65,18 @@
            (let [t0 (profile/now-ns)
                  ;; main's commit as main's own transaction t (seon.db/replay)
                  db' (pdb/replay (:db st) (:t m) (:tx-data m) (:tx-meta m {}))
-                 st (cond-> (assoc st :db db' :graph (program/reach-update (:graph st) db')) (not= (:max-tx db') (:t m)) (update :mismatch inc))
+                 st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled
                  errs (seq (program/load-changes! db' (:tx-data m)))]
              [st {:ev (cond-> [] errs (conj {:ev :load-errors :t (:t m) :errors (vec errs)})
                         true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (profile/ms-since t0)
                                     :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}]))
-     :fork (let [t0 (profile/now-ns)]
+     :fork (let [t0 (profile/now-ns)
+                 ;; main's reach graph brought to :db when a fork needs it, not at each commit: the
+                 ;; first fork builds it, a later one updates it by the commits since (reach-update)
+                 st (assoc st :graph (if-let [g (:graph st)]
+                                       (program/reach-update g (:db st))
+                                       (program/reach-graph (:db st) (fx/declared-refs (cfg/value :seon.config.root/system-path)))))]
              (fork-carrying! st #(repl/run! % (assoc m :graph (:graph st)) (:db st) (:ns m))
                              (fn [n] [st {:ev [{:ev :fork-failed :agent (:agent m) :active-threads n}]}])
                              (fn [pid] (let [[st evs] (reap (update st :children conj pid))]
