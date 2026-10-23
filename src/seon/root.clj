@@ -63,7 +63,6 @@
   {:malli/schema [:=> [:cat :qualified-symbol :string :map] :seon.root/refused]}
   [op why members] (contract/error :seon.root/refused op why members))
 
-
 (defn stderr-tail
   "The last :seon.config.root/death-stderr-bytes of the stderr file at path (seon.agent/stderr-path), or nil: no path
   (an in-memory store), the file gone, or nothing written."
@@ -180,7 +179,7 @@
   (if-let [a (get-in st [:view :agents id])]
     (let [a' (cond-> (merge a (dissoc m :ready :evals-add))
                (and (:ready m) (= :spawning (:status a))) (assoc :status :idle)
-               (:evals-add m) (update :evals #(reduce (fn [v x] (lib/push-window v x (cfg/value :seon.config.root/view-window))) % (:evals-add m))))
+               (:evals-add m) (update :evals #(let [n (cfg/value :seon.config.root/view-window)] (reduce (fn [v x] (lib/push-window v x n)) (or % []) (:evals-add m)))))
           e (failed id a m)]
       (cond-> (assoc-in st [:view :agents id] (if (and (stopped-statuses (:status a)) (not (gone-statuses (:status a')))) (assoc a' :status (:status a)) a'))
         e (problem (err/occurrence e :agent {:agent id :task (:task a)} (System/currentTimeMillis)))

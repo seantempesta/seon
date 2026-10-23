@@ -103,7 +103,9 @@
 (def ^:private structural-kinds
   #{:seon.print/vector :seon.print/list :seon.print/set :seon.print/map :seon.print/throwable})
 
-;; Indentation stops growing past this many open collections.
+(def ^:private nest-depth
+  "Open collections past which indentation stops growing (:seon.config.render/nest-depth), read once."
+  (config/value :seon.config.render/nest-depth))
 
 ;; The ops every collection shares, made once.
 (def ^:private line {:op :line :inline " " :terminate ""})
@@ -209,7 +211,7 @@
                :seon.print/vector "[" :seon.print/list (if quoted? "'" "(") :seon.print/set "#{"
                :seon.print/map (str (when lifted (str "#:" lifted)) "{"))
         close (case (:seon.print/face node) :seon.print/vector "]" :seon.print/list (if quoted? "" ")") "}")
-        nest (fn [offset] (nests (if (< depth (config/value :seon.config.render/nest-depth)) offset 0)))
+        nest (fn [offset] (nests (if (< depth nest-depth) offset 0)))
         d (inc depth)
         fill? (and (not map-like?) (every? (comp scalar-kinds :seon.print/face) shown))
         ;; a member's path, `path` then its index (and 0 for a key, 1 for a value)
