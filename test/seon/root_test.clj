@@ -59,10 +59,13 @@
   request, then EXIT and its log. opts: :args more root arguments, :env more variables."
   ([path main requests] (root-answers path main requests {}))
   ([path main requests {:keys [args env]}]
-   (let [root (ts/start-root! (cond-> {:store path :main main :runs (str path "-runs") :args (vec args)} env (assoc :env env)))
+   ;; runs: this main's own, beside the store (every root-answers call on the one test store
+   ;; shared path-runs, and a test asked another test's root: task seon.test-store/a-test-root-is-its-own)
+   (let [runs (str path "-" main "-runs")
+         root (ts/start-root! (cond-> {:store path :main main :runs runs :args (vec args)} env (assoc :env env)))
          answers (when (:port root) (mapv #(ts/ask root %) requests))
          stopped (ts/stop-root! root)]
-     (sh/sh "rm" "-rf" (str path "-runs"))
+     (sh/sh "rm" "-rf" runs)
      ;; each answer as the data it is (an error value among them), one per line
      (str (str/join "\n" (map pr-str answers)) (when (seq answers) "\n") "EXIT " (or (:exit stopped) (pr-str stopped)) "\n" (:log stopped)))))
 

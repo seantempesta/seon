@@ -113,12 +113,17 @@
   read back from its ROOT LISTENING line: bin/root returns at that line or at the root's death,
   never on a clock. runs: its pids, log and port; env: more variables {name value}; args: more
   root arguments. Answers the options with :port, nil when the root died before listening (its
-  log says why)."
+  log says why). runs is one root's: a root already running there is refused, never answered
+  (bin/root start in it would only report that root, and the test would ask another test's
+  root: task seon.test-store/a-test-root-is-its-own)."
   {:malli/schema [:=> [:cat [:map [:store :string] [:main :string] [:runs :string]
                              [:env {:optional true} [:map-of :string :string]] [:args {:optional true} [:sequential :string]]]]
                   :map]}
   [{:keys [runs args] :as root}]
   (.mkdirs (java.io.File. ^String runs))
+  (when (zero? (:exit (root-sh root "status" [])))
+    (throw (ex-info (str "a root is already running in " runs ": a test's root takes a runs directory of its own")
+                    {:seon.error/type :seon.test-store/runs-in-use :runs runs})))
   (root-sh root "start" (vec args))
   (assoc root :port (bound-port runs)))
 
