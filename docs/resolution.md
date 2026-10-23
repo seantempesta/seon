@@ -21,8 +21,10 @@ is judged from the compiler's facts at merge (the vars of `seon.program/banned` 
 - `seon.render/render-face`, `seon.render.proc/render-unit`: a schema's declared render (or a unit's) is a symbol in data, resolved when the value is shown.
 - `seon.cost/run`: a cost estimate names its function and its input as symbols in data.
 - `seon.agent/test-plan`, `seon.proofs/run-tests!`: a task's proofs and the tests a plan selects are symbols in data (reach digests' keys), resolved to their Vars to run.
-- `seon.program/account`, `seon.program/macro-uses`, `seon.source/head-var`, `seon.source/analyze-form`, `seon.repl/ns-form?`: the compiler's facts, what a form's head or a method's multi names in its namespace; read, never defined.
-- `seon.repl/eval-code`: each result's handle (``result/hN``, interned in the `result` namespace), the agent REPL's own `*1`, defined by the REPL as it answers.
+- `seon.program/account`, `seon.program/macro-uses`, `seon.context/callees`, `seon.source/head-var`, `seon.source/analyze-form`, `seon.repl/ns-form?`: the compiler's facts, what a form's head or a method's multi names in its namespace; read, never defined.
+- `seon.model/scripted`: the scripted provider's `:seon.config.ai/script` names its reply function as data (a test fixture in `test/`, loaded by name; one not found is `:seon.model/no-script`).
+- `seon.main/driver!`: the check driver (`seon.check`, in `test/`, outside the release binary: task `seon.main/drivers-leave-src`) is loaded from the checkout's source when a check mode runs, so its `-main` is resolved by name then; the program never names it.
+- `seon.repl/eval-code`: each result's handle (``result/hN``), the agent REPL's own `*1`, defined by the REPL as it answers.
 
 ## Owed its owner's fix
 

@@ -68,7 +68,7 @@ Nothing gates an evaluation. An agent may break a citation in one eval and fix i
 Root watches its checkout and its repository's refs, so whoever writes (a Claude session, a Seon agent, the owner's editor, git) reaches the same facts with no script of their own (owner, 2026-10-23: "seon code detecting and updating, not external scripts").
 - `target/watch` (native/watch.c, built by `bin/build`) is an OS child over macOS FSEvents (latency 0, no timer, no poll). It prints one record per change: its kind letter, the absolute path, then NUL, since a path may hold a newline. It exits when its parent does.
 - `seon.watch/start!` reads it on one edge thread, the blocking read AGENTS §5 allows. That thread is an outside caller of root's API, as a server connection is: a proc's step must never wait on the api's answers. Each batch is what the stream holds when a read returns, so no clock decides.
-- `my.root/watch!` (started by `seon.check/root-serve`, the standing root `bin/root` runs) decides what each batch makes root load (`my.root/watch-kinds`):
+- `my.root/watch!` (started by ```seon.main/root-serve```, the standing root `bin/root` runs) decides what each batch makes root load (`my.root/watch-kinds`):
   - a path by its loader: a page under docs/, a task file, Seon's source;
   - a moved ref (a commit or merge on any branch): the source;
   - a rescan or a moved root, where FSEvents coalesced or dropped events under a subtree: every kind.

@@ -1,0 +1,27 @@
+(require '[test-runner :as runner] '[seon.fx :as fx] '[seon.source :as source] '[seon.program :as program] '[seon.proofs :as proofs]
+         '[seon.profile :as profile] '[seon.test-store :as ts] '[seon.config :as config] '[datahike.api :as d] '[clojure.string :as str])
+(defmacro ph [label & body]
+  `(let [c0# (profile/cpu-ns) b0# (profile/alloc-bytes) _# (profile/begin!) r# (volatile! nil)
+         k# (jolt.host/ticks-of #(vreset! r# (do ~@body)))]
+     (println (format "%-34s ticks %12d  cpu %8.0f ms  alloc %7.0f MB  calls %7d" ~label k# (/ (- (profile/cpu-ns) c0#) 1e6) (/ (- (profile/alloc-bytes) b0#) 1e6) (profile/calls)))
+     @r#))
+(let [root (System/getProperty "user.dir")
+      src (ph "read-source (src+test)" (:value (fx/read-source {:req {:root root :dirs ["src" "test"]}})))
+      files (into {} (filter #(str/ends-with? (key %) ".clj")) src)
+      _ (println (count files) "files," (reduce + (map count (vals files))) "chars")
+      db0 (ph "ts/test-db" (ts/test-db))
+      tx (ph "import-tx (read+analyze)" (source/import-tx db0 files))
+      _ (println (count tx) "tx ops")
+      db (ph "d/db-with of the import" (d/db-with db0 tx))
+      _ (println (count (d/datoms db :aevt :form/id)) "forms")
+      in (ph "fx/inputs" (fx/inputs root))
+      idx (ph "reach-index (every test)" (program/reach-index db in))
+      _ (println (count idx) "keys in the test index")
+      sidx (ph "reach-index (check steps)" (program/reach-index db in (into {} (filter (comp vector? val)) proofs/check-steps)))
+      dir (config/value :seon.config.source/test-results-dir)
+      _ (ph "greens lookup" (proofs/greens dir (vec (vals (update-vals idx :digest)))))]
+  (profile/begin!)
+  (source/import-tx db0 files)
+  (println "--- import-tx top (inclusive, 1-in-64 timed)")
+  (doseq [x (profile/top (profile/touched) 14)] (println (format "  %9.1f ms %8d calls %s" (double (:ms x)) (:calls x) (:var x)))))
+(System/exit 0)

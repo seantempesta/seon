@@ -95,11 +95,11 @@ Text for the wire, storage, a digest, a file, a URL, a command line or code to e
 
 - `seon.edn/encode`: EDN for storage and the wire, whole.
 
-An agent's namespace refers `clojure.pprint`'s `pp` and `pprint` (`seon.agent/make-ns!`), as a plain Clojure REPL does (AGENTS §4, "what would a plain REPL do"); what they write reaches the model as the evaluation's `:out`, budgeted as prose. A check's console lines are the printer's whole text (`seon.check/shown`).
+An agent's namespace refers `clojure.pprint`'s `pp` and `pprint` (`seon.agent/make-ns!`), as a plain Clojure REPL does (AGENTS §4, "what would a plain REPL do"); what they write reaches the model as the evaluation's `:out`, budgeted as prose. A check's console lines are the printer's whole text (`seon.main/shown`).
 
 ### Cut where a value is made
 
-- `seon.check/shown`: names a budget only to print whole (the value's ``:seon.print/full`` metadata).
+- `seon.main/shown`: names a budget only to print whole (the value's ``:seon.print/full`` metadata).
 - `seon.contract/problems`, `seon.task/file-declarations`: a refused value (a function's argument, a task file's entry) may be infinite, lazy or a host object, and travels on the wire as text, so its error keeps the printer's cut, which says what it omitted; the live value stays with the caller.
 
 ### Cuts in a display namespace that are not cuts of output

@@ -25,9 +25,14 @@ way in [failure points](failure-points.md).
 
 ## Time decides (a check's measurement, and a check's ping)
 
-`bin/laws clocks` reads the check harness too (`seon.check`, `seon.e2e`): a wait there that stands for an event is the event instead ([machine](machine.md#builds-and-checks)).
-- `seon.check/backpressure`, `seon.check/scale`, `seon.check/idle`: the window over which a check measures that something does not happen or what it costs (backpressure sleeps `hold-ms` between two pings of a paused agent, and compares the counts its proc had taken; `:seon.config.check/hold-ms`: a paused agent's request unanswered, a paused proc's flood and a paused writer's commits held; `:seon.config.check/pages-ms`: memory the kernel returns after the kill; idle's window, bin/check's argument). The measurement, never a dependency: load only makes what it measures likelier.
+`bin/laws clocks` reads `src` and `test`: the check harness (`seon.check`, a driver in `test/`, and `seon.e2e`) and every test, so a wait there that stands for an event is the event instead ([machine](machine.md#builds-and-checks)).
+- `seon.check/backpressure`, `seon.check/scale`, `seon.check/idle`: the window over which a check measures that something does not happen or what it costs (`:seon.config.check/hold-ms`: a paused agent's request unanswered, a paused proc's flood and a paused writer's commits held; `:seon.config.check/pages-ms`: memory the kernel returns after the kill; idle's window, bin/check's argument). The measurement, never a dependency: load only makes what it measures likelier.
 - `seon.check/ping`, `seon.check/system-check`: Flow's ping takes a bound (`:seon.config.check/ping-ms`); a proc that has not taken its control message by then is mid-step that long, and the check records it `:blocked` (an expected proc missing from a graph ping is reported under `:no-answer`), never reads it as nil.
+
+## Time decides (a test's subject)
+
+- `seon.lib-test/in-child`: what it tests is a timeout in a forked child (core.async's `timeout` fires there; the child's wait has a bound so a child whose runtime threads are gone ends).
+- `seon.profile-test/allocating-thread`: the window over which it measures another thread's allocation, and a call that sleeps to show ticks count work, not waiting.
 
 ## Time decides, owed its owner's fix
 
@@ -37,6 +42,7 @@ site is red, and a fixed one leaves this list in the fix's commit.
 - `seon.root/api-proc` (the stall timer: while an agent has an eval in flight, a `timeout` of half the stall bound): with `seon.root/back-op` (its `:stall-check`, a clock read compared to the bound) and `seon.agent-proc/agent-proc` (the `:last-frame-ms` the stall compares), task `seon.fences/a-stall-is-past-the-requests-own-bound`.
 - `seon.render.proc/RETIRE-MS`, `seon.render.proc/order` (an ended agent leaves the grid by elapsed time; the order is re-derived when a second passed), and `seon.render.proc/system-value` (carries the bound to the tile's caption): task `seon.render/an-ended-agent-leaves-the-grid-by-an-event`.
 - `seon.web/web-proc` (the HTTP adapter's keep-alive and write timeouts, literals): task `seon.web/web-server-threads-are-joined-at-stop`.
+- `seon.model-test/chunks`: a `Thread/sleep` between a streamed reply's chunks (each `>!!` is its own write without it): task `seon.model/a-streamed-reply-test-sleeps-not`.
 
 ## Decides by time, unmarked
 
@@ -46,7 +52,8 @@ A bound passed under another name, which the marks do not see; each is owed its 
 
 ## Time decides nothing here: clock reads named as data
 
-- `seon.check/hidden-inputs`, `seon.check/named-test-inputs`: the set of reads no test digest holds (a clock read, a sleep, a timeout among its names) and the map of those a test form may reference, each with why its verdict does not depend on it, which the `test-inputs` check step compares to the compiler's facts of `test/`; they name those vars as data and read no clock.
+- `seon.program-test/var-row` (the form after it records a guarded function's source, `Thread/sleep` and a timed `deref` as text) and `seon.render-test/long-text` (the test after it names the removed `SAMPLE-MS` to show it is gone): clock reads quoted as data.
+- `seon.check/hidden-inputs`, `seon.check/named-test-inputs`: the lists the `test-inputs` check step reads test forms against (a clock read, a sleep, a timeout among the names they hold); they name those vars as data and read no clock.
 
 ## Time orders a queue (measured workload)
 

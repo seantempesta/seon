@@ -34,7 +34,7 @@ A merge of main runs where main's program runs, at once: root's writer (`seon.wr
 
 One load adds what a change reaches, as v1's declaration-reload-rule and clj-reload do: the forms a changed macro expanded in (its namespace and every namespace requiring it, since an expansion leaves no reference: ```seon.program/dependents```) and the forms whose contracts a changed schema entry reaches, through the schemas naming it, loaded against main's population so their contracts re-arm (```seon.program/schema-dependents```). A protocol or a record needs none on Jolt: a record's dispatch and an `instance?` test held by the binary see the redefinition. A redefinition reaches the binary's compiled callers because a direct-linked call reads its var's linked binding, which every redefinition writes through, and a contracted definition is never spliced (`bin/check hotreload`).
 
-Measured by `bin/check loop` on a clone (1,646 forms): the merged `seon.fixtures/generation` answers 2 in root and in an agent forked after the merge; the turn from release to quiet is 13.4-13.9 s (the implement attempt ~5 s, the merge attempt ~7 s, the commit and quiescence ~1.6 s). What remains is whole-program reads per merge (`seon.merge/program-cost-follows-what-changed`).
+Measured by `bin/check loop` on a clone (1,646 forms): the merged `seon.generation/generation` answers 2 in root and in an agent forked after the merge; the turn from release to quiet is 13.4-13.9 s (the implement attempt ~5 s, the merge attempt ~7 s, the commit and quiescence ~1.6 s). What remains is whole-program reads per merge (`seon.merge/program-cost-follows-what-changed`).
 
 ## An agent changes code at its REPL
 
@@ -95,7 +95,7 @@ A binary is a cold-start artifact, built only for what cannot load in place: a J
 
 Proven by `seon.source-test/a-restart-catches-up-and-a-new-generation-resumes` (on a clone of this checkout): two merges live in place; root SIGKILLed and the same binary started on the same main runs both; `my.root/build!` then `bin/root next` runs both on the new binary, main holding its generation. 96 s for the whole test. The tree's own commits made outside Seon reach a resumed main at its next boot ([Main's program follows the tree](#mains-program-follows-the-tree)). Old generations' trees are kept with the run until the owner reclaims them.
 
-```seon.fx/build``` builds, ```my.root/build!``` asks and records, ```seon.reconcile/generation``` and ```my.root/generation``` read the fact, ```my.root/next-generation``` is what `bin/root next` starts; ```seon.e2e/loop-turn!``` is the turn (`bin/check loop` runs it on a clone); ```seon.fixtures/generation``` is the function it changes.
+```seon.fx/build``` builds, ```my.root/build!``` asks and records, ```seon.reconcile/generation``` and ```my.root/generation``` read the fact, ```my.root/next-generation``` is what `bin/root next` starts; ```seon.e2e/loop-turn!``` is the turn (`bin/check loop` runs it on a clone); ```seon.generation/generation``` is the function it changes.
 
 ## Dependencies
 
