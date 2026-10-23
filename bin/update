@@ -1,16 +1,16 @@
 #!/bin/zsh
 # bin/update   bring the standing root up to date with main, from the main tree, in one go:
 #   1. merge Seon's own merges (jolt/merges: what the standing root's merges committed in
-#      ../next-merges) into main;
+#      the merges worktree, bin/worktree --path merges) into main;
 #   2. fast-forward jolt/merges to main, so the standing root's source tree is main's;
-#   3. move both trees' submodules to main's pins (bin/worktree --sync merges for ../next-merges);
+#   3. move both trees' submodules to main's pins (bin/worktree --sync merges for the merges worktree);
 #   4. build (bin/build: each step skips what is up to date);
 #   5. restart the standing root on its store (bin/root stop, start): it boots on main's build and
 #      imports its source tree (docs/source.md).
 # Worktree sessions merge first (root merges their branches into main, docs/merging.md); then bin/update.
 # Every step's exit status counts; the last line is UPDATE OK or UPDATE FAILED.
 setopt pipefail
-MAIN=$(cd "$(dirname "$0")/.." && pwd); MERGES=${MAIN:h}/next-merges
+MAIN=$(cd "$(dirname "$0")/.." && pwd); MERGES=$("$MAIN/bin/worktree" --path merges)
 fail() { print -u2 "update: $*"; print "UPDATE FAILED"; exit 1 }
 cd "$MAIN" || fail "no main tree"
 [[ $(git branch --show-current) == main ]] || fail "the main tree is not on main"

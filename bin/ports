@@ -5,8 +5,8 @@
 # nothing: what bin/build, bin/test and bin/check run first, since their config reads the file.
 #
 # The ports live in the checkout's own config layer, config/local.edn (gitignored, or FILE): the
-# main tree (next/) gets 7888 7777, the owner's; each worktree (next-NAME) its own block K from
-# ../worktree-ports (one line per worktree, "NAME K"; server 7900+10K, web 7901+10K), allocated
+# main tree (git's common dir; next/) gets 7888 7777, the owner's; each worktree its own block K from
+# the main tree's config/worktree-ports (gitignored; one line per worktree, "DIRNAME K"; server 7900+10K, web 7901+10K), allocated
 # once under a lock and freed by bin/worktree --remove. No two checkouts share a port, so every
 # worktree session can run its own root beside the owner's. This owns the port keys: each run
 # writes them under their current names, keeping the ports the file holds (under a key's
@@ -14,6 +14,7 @@
 # Edit the numbers to move this checkout's ports; this reads what the config resolves.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 NAME=${ROOT:t}
+MAIN_TREE=$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
 WRITE=; [[ ${1:-} == --write ]] && { WRITE=1; shift }
 LOCAL=${1:-$ROOT/config/local.edn}
 [[ -n $WRITE && ! -f $LOCAL ]] && exit 0
@@ -21,9 +22,9 @@ port_of() { [[ -f $LOCAL ]] && sed -nE "s#.*$1 .*[^0-9]([0-9]+)\].*#\1#p" "$LOCA
 E=$(port_of ':seon\.config\.root/server-port'); E=${E:-$(port_of ':seon\.config\.root/entrance-port')}
 W=$(port_of ':seon\.config\.web/port')
 if [[ -z $E || -z $W ]]; then
-  if [[ $NAME == next ]]; then E=7888 W=7777
+  if [[ ${ROOT:A} == ${MAIN_TREE:A} ]]; then E=7888 W=7777
   else
-    REG=${ROOT:h}/worktree-ports
+    REG=$MAIN_TREE/config/worktree-ports
     K=$(/usr/bin/lockf -k "$REG.lock" zsh -c '
       touch "$1"
       k=$(awk -v n="$2" "\$1==n {print \$2}" "$1")
@@ -41,7 +42,7 @@ if [[ -f $LOCAL ]]; then
   while IFS= read -r line; do
     case $line in
       *:seon.config.root/entrance-port*|*:seon.config.root/server-port*|*:seon.config.web/port*) ;;
-      ";; This checkout's own config layer"*|";; under the command line's --config"*|";; ../worktree-ports"*) ;;
+      ";; This checkout's own config layer"*|";; under the command line's --config"*|";; "*"worktree-ports"*) ;;
       *";; root's entrance (bin/root, bin/mcp)"|*";; root's server (bin/root, bin/mcp)"|*";; the dashboard; bin/check and bin/test set"*) ;;
       *) [[ -n ${line//[[:space:]]/} ]] && others+=("$line") ;;
     esac
@@ -53,7 +54,7 @@ mkdir -p "${LOCAL:h}"
 {
   print ";; This checkout's own config layer (gitignored), over resources/seon/config/default.edn and"
   print ";; under the command line's --config and --set (seon.config). Written by bin/ports from"
-  print ";; ../worktree-ports ($NAME); edit it to move this checkout's ports."
+  print ";; the main tree's config/worktree-ports ($NAME); edit it to move this checkout's ports."
   print "{;; root's server (bin/root, bin/mcp)"
   print " :seon.config.root/server-port #long #or [#env SEON_SERVER_PORT $E]"
   print " ;; the dashboard; bin/check and bin/test set SEON_WEB_PORT=0, so their roots serve none"
