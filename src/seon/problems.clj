@@ -65,8 +65,21 @@
 
 ;; ---- recorded errors ------------------------------------------------------------------
 
+(defn- closed?
+  "Is the recorded error r (entity e) closed: its subject (a var's name or a section's address,
+  :seon.error/subject, or, on a store from before the type left the code, the target address of a
+  :seon.docs/refused link) has a fact written after the error's last one. Nothing is written to
+  close it, and a subject that does not exist yet has changed nothing."
+  {:malli/schema [:=> [:cat :seon.host/db :map :int] :boolean]}
+  [db r e]
+  (let [subject (or (:seon.error/subject r)
+                    (when (= :seon.docs/refused (:seon.error/type r)) (:seon.ref/address (:seon.error/example r))))
+        s (when subject (pdb/eid db (if (symbol? subject) :var/name :seon.section/address) subject))
+        last-tx (reduce max (map :tx (d/datoms db :eavt e)))]
+    (boolean (and s (some #(> (:tx %) last-tx) (d/datoms db :eavt s))))))
+
 (defn- error-row
-  "One recorded error (entity e) as a row."
+  "One recorded error (entity e) as a row, :open? false once its subject changed (`closed?`)."
   {:malli/schema [:=> [:cat :seon.host/db :map :int] :seon.problems/row]}
   [db ans e]
   (let [r (d/pull db '[*] e)
@@ -81,7 +94,8 @@
              :evidence (cond-> {:kind :error :signature s :count (:seon.error/count r) :agents (:seon.error/agents r 0) :example ex}
                          (:seon.error/form r) (assoc :form (:seon.error/form r)))
              :proofs [] :answered-by (get-in ans [:signature s] []) :at-ms (:seon.error/last-ms r)}
-      (:seon.error/form r) (assoc :form (:seon.error/form r)))))
+      (:seon.error/form r) (assoc :form (:seon.error/form r))
+      (closed? db r e) (assoc :open? false))))
 
 ;; ---- derived: what the program's facts make true now ------------------------------------
 

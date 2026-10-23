@@ -90,6 +90,7 @@
                             [:seon.error/last-agent {:optional true} :seon.error/last-agent]
                             [:seon.error/last-task {:optional true} :seon.error/last-task]
                             [:seon.error/form {:optional true} :seon.error/form]
+                            [:seon.error/subject {:optional true} :seon.error/subject]
                             [:seon.error/example {:optional true} :seon.error/example]]
  ;; one occurrence as its observer sees it (a value; never stored whole)
  :seon.error/occurrence [:map [:error :map] [:class :seon.error/class] [:cause [:vector :any]]

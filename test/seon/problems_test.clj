@@ -7,7 +7,7 @@
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
             [seon.repl :as repl] [seon.proofs :as proofs] [seon.root :as root] [seon.agent-proc :as ap]
             [seon.reconcile :as rec] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.cost :as cost] [seon.docs]))
+            [seon.render :as render] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.cost :as cost] [seon.docs]))
 
 (defn- invalid [op v]
   (contract/error :seon.instrument/contract-error op (str op " invalid-input: its arguments do not satisfy its contract")
@@ -501,3 +501,30 @@
     (is (= [] (pinned {"reference-code/jolt" "4342b73cdeadbeef" "reference-code/chez" "80e4b9f0"})))
     (is (= [["reference-code/chez" "80e4b9f" "d19eb3b0"]] (pinned {"reference-code/jolt" "4342b73cdeadbeef" "reference-code/chez" "d19eb3b0"})))
     (is (= [["reference-code/jolt" "4342b73c" nil]] (pinned {"reference-code/chez" "80e4b9f0"})) "a pin with no gitlink")))
+
+(deftest an-error-closes-when-its-subject-changes
+  ;; an old store's :seon.docs/refused error (the type left the code) names its link's target in
+  ;; its example; a new error may name :seon.error/subject. Neither is ever retracted.
+  (let [db0 (ts/test-db)
+        refused (fn [db] (d/db-with db [{:seon.error/signature "aaaaaaaaaaaaaaaa" :seon.error/class :platform :seon.error/count 1
+                                         :seon.error/agents 0 :seon.error/first-ms 1 :seon.error/last-ms 1
+                                         :seon.error/type :seon.docs/refused :seon.error/message "demo/a.md#a links to demo/b.md#b, which is no section"
+                                         :seon.error/example {:seon.error/type :seon.docs/refused :seon.ref/address "demo/b.md#b"}}]))
+        row #(first (get-in (problems/report %) [:classes :platform :rows]))
+        db (refused db0)]
+    (testing "the target section is missing: the error is open"
+      (is (not (false? (:open? (row db))))))
+    (let [after (d/db-with db (seon.docs/load-tx db "demo" {"demo/b.md" "# B\n\nThe target.\n"}))]
+      (testing "the section exists now: closed, with nothing written to close it"
+        (is (some? (pdb/eid after :seon.section/address "demo/b.md#b")))
+        (is (false? (:open? (row after))))
+        (is (= 1 (:count (row after))) "the record is kept"))
+      (testing "the context marks it closed"
+        (is (re-find #"\(closed\)" (render/ai (problems/report after) {})))))
+    (testing "a named subject: open until a fact of the var is written after the error"
+      (let [v (:v (first (d/datoms db0 :aevt :var/name)))
+            e (:e (first (d/datoms db0 :aevt :var/name)))
+            err (d/db-with db0 [{:seon.error/signature "bbbbbbbbbbbbbbbb" :seon.error/class :platform :seon.error/count 1
+                                 :seon.error/agents 0 :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/subject v}])]
+        (is (not (false? (:open? (row err)))))
+        (is (false? (:open? (row (d/db-with err [{:db/id e :var/doc "changed"}])))))))))
