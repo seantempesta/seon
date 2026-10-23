@@ -117,7 +117,8 @@
   [] {:seon.tx/runtime (jolt.host/runtime-fingerprint)})
 
 (defn- install-missing!
-  "Transact the attributes of `schema` the db under conn lacks and answer how many: first
+  "Transact the attributes of `schema` the db under conn lacks, or holds without their
+  declared :db/contentId, and answer how many: first
   :seon.tx/runtime alone when it is missing (the one transaction that cannot name its
   runtime, since it installs the attribute), then the rest in one transaction carrying
   tx-meta (an attribute it holds as another value type is refused, :seon.db/types-differ:
@@ -137,7 +138,11 @@
                                     {:seon.db/attributes differ
                                      :seon.error/fix "An attribute's value type is fixed once installed: open a store made with this schema (a fresh one), or keep running the build that made this store."})]
               (throw (ex-info (:seon.error/message e) e))))
-        missing (vec (remove #(contains? have (:db/ident %)) schema))]
+        ;; an identity a kept store holds without its content id gains it (Datahike admits
+        ;; adding :db/contentId: its entities keep their ids, new ones mint at content ids)
+        missing (vec (remove #(and (contains? have (:db/ident %))
+                                   (= (:db/contentId %) (get-in have [(:db/ident %) :db/contentId])))
+                             schema))]
     (let [[runtime others] ((juxt filter remove) #(= :seon.tx/runtime (:db/ident %)) missing)]
       (when (seq runtime) (d/transact conn {:tx-data (vec runtime)}))
       (when (seq others) (d/transact conn {:tx-data (vec others) :tx-meta (tx-meta)})))

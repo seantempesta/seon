@@ -136,6 +136,26 @@
         (d/release c2))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
+(deftest a-kept-store-gains-content-ids-and-keeps-its-entities
+  ;; a store seeded before content ids (its identities without :db/contentId): opening it
+  ;; gives them their content ids; an entity it holds keeps its id, a new identity takes its
+  ;; content id. A store on disk of this test's own, the last resort; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))
+        cfg (pdb/store-cfg :lmdb path)
+        _ (d/create-database (pdb/made-cfg cfg))
+        c0 (d/connect cfg)
+        _ (d/transact c0 {:tx-data (mapv #(dissoc % :db/contentId) pdb/schema)})
+        old (get-in (d/transact c0 [{:db/id "f" :form/id "app.k/old" :form/src "(def old 1)"}]) [:tempids "f"])
+        _ (d/release c0)
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
+    (try
+      (is (< old datahike.constants/tx0) "minted before: a counter id")
+      (is (true? (get-in (d/schema @conn) [:form/id :db/contentId])) "the identity gained its content id")
+      (is (= old (pdb/eid @conn :form/id "app.k/old")) "the entity it held keeps its id")
+      (let [new (get-in (d/transact conn [{:db/id "f" :form/id "app.k/new" :form/src "(def new 1)"}]) [:tempids "f"])]
+        (is (= (datahike.db.transaction/content-eid :form/id "app.k/new") new) "a new identity takes its content id"))
+      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+
 (deftest a-kept-store-from-before-the-runtime-attribute-opens
   ;; the transaction that installs :seon.tx/runtime cannot carry it in its tx-meta: a kept
   ;; store made before the attribute existed (every store before 2026-10-22) failed to open

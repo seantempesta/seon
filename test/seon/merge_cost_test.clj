@@ -44,8 +44,9 @@
                   "their entities bear, and each key's content read on base, ours and theirs by index seeks "
                   "(log n each): a fixed number of keys, whatever n")
        :growth :log
-       :per-n {:ns 100000 :bytes 100000}
-       :fixed {:ns 7000000 :bytes 7000000}
+       ;; measured 2026-10-23 (load ~60): 6.2, 7.1 and 8.4 ms, 6.5, 7.6 and 7.8 MB at 100, 1k and 10k
+       :per-n {:ns 400000 :bytes 300000}
+       :fixed {:ns 4000000 :bytes 5000000}
        :sizes [100 1000 10000]})
     (finally (when (realized? store)
                (let [path (get-in @@store [:config :store :path])]
