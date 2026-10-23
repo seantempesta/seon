@@ -63,6 +63,7 @@
   [:seon.config.source/generations-dir :seon.config.source/generations-dir]
   [:seon.config.source/test-results-dir :seon.config.source/test-results-dir]
   [:seon.config.proofs/jobs :seon.config.proofs/jobs]
+  [:seon.config.proofs/seed-salt :seon.config.proofs/seed-salt]
   [:seon.config.proofs/cost-max-n :seon.config.proofs/cost-max-n]
   ;; effects and the model
   [:seon.config.fx/buf :seon.config.fx/buf]
