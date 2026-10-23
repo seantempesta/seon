@@ -35,7 +35,8 @@
  :seon.render/units [:vector :keyword]
  :seon.render/depth :seon.ref/depth
  :seon.render/value :any
- :seon.render/schema [:maybe :qualified-keyword]
+ ;; the schema of a node's value: its entity schema, or a value's attribute (absent: no entity schema names it)
+ :seon.render/schema :qualified-keyword
  :seon.render/eid pos-int?
  :seon.render/attr :keyword
  :seon.render/line pos-int?
@@ -59,11 +60,11 @@
  ;; a part rendered (seon.render/rendered): how it is shown, its two faces and their makers
  :seon.render/shown [:map [:seon.render/as {:optional true} :seon.render/as] [:seon.render/ai-by {:optional true} :seon.render/ai-by]
                      [:seon.render/html-by {:optional true} :seon.render/html-by] [:seon.render/ai-text {:optional true} :seon.render/ai-text]
-                     [:seon.render/truncated? {:optional true} :seon.render/truncated?] [:seon.render/hiccup {:optional true} :any]]
+                     [:seon.render/truncated? {:optional true} :seon.render/truncated?] [:seon.render/hiccup {:optional true} :seon.render/hiccup]]
  ;; an entity, or a value of the walked entity (a unit that is no entity: its schema its attribute)
  :seon.render/node [:and :seon.render/shown
                     [:map [:seon.render/kind :seon.render/kind] [:seon.render/value :seon.render/value]
-                     [:seon.render/schema :seon.render/schema] [:seon.render/eid :seon.render/eid]
+                     [:seon.render/schema {:optional true} :seon.render/schema] [:seon.render/eid :seon.render/eid]
                      [:seon.render/from {:optional true} :seon.render/from] [:seon.render/cites {:optional true} :seon.render/cites]]]
  ;; a citation's content, pulled once at the depth it was first cited (seon.docs/cited), and every place citing it
  :seon.render/ref [:and :seon.render/shown
@@ -73,6 +74,8 @@
  :seon.render/root :seon.render/node
  :seon.render/nodes [:vector :seon.render/node]
  :seon.render/refs [:vector :seon.render/ref]
+ ;; the walk's citation pass (seon.render/cite): the refs so far, each one's position by its address, the next number
+ :seon.render/cite-state [:map [:refs :seon.render/refs] [:index [:map-of :string nat-int?]] [:next :seon.render/n]]
  :seon.render/walk [:map [:seon.render/root :seon.render/root] [:seon.render/nodes :seon.render/nodes] [:seon.render/refs :seon.render/refs]]
  :seon.render/no-entity [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-entity]] [:seon.render/eid :seon.render/eid]]]
  ;; ---- what root's dashboard shows: the whole system as one value ----

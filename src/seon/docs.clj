@@ -216,18 +216,28 @@
       :else (assoc doc :left-out (str "its source, about " n " tokens, over the context's " reference-tokens)
                        :read (list 'clojure.repl/source sym)))))
 
-(defn cited-view
-  "What citation c asks to see, at its depth: a wiki section from main's sections, else a file of
-  the checkout read now (never stored), else a task by its ns/name, else a namespace; a
-  citation that reaches nothing says so, as an unresolved name does."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :map]}
+(defn- reached
+  "What citation c asks to see, at its depth, and what that is: a wiki section from main's
+  sections (:section), else a file of the checkout read now, never stored (:file), else a task by
+  its ns/name (:task), else a namespace (:namespace); a citation that reaches nothing says so, as
+  an unresolved name does (:unresolved). Answers [kind view]."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] [:tuple :seon.render/kind :map]]}
   [db {:seon.ref/keys [name path anchor depth]}]
-  (let [a (or (some-> name str) (str path (when anchor (str "#" anchor))))]
-    (or (some-> (if name
-                  (if (qualified-symbol? name) (ref/task-view db name depth) (ref/namespace-view db name depth))
-                  (or (when anchor (view db a depth)) (ref/file-view db (cfg/checkout) path anchor depth)))
-                (assoc :seon.ref/depth depth))
-        {:seon.ref/address a :unresolved true :problem (:unresolved ref/problem-messages)})))
+  (let [a (or (some-> name str) (str path (when anchor (str "#" anchor))))
+        [kind v] (cond (qualified-symbol? name) [:task (ref/task-view db name depth)]
+                       name [:namespace (ref/namespace-view db name depth)]
+                       :else (if-let [sv (when anchor (view db a depth))]
+                               [:section sv]
+                               [:file (ref/file-view db (cfg/checkout) path anchor depth)]))]
+    (if v
+      [kind (assoc v :seon.ref/depth depth)]
+      [:unresolved {:seon.ref/address a :unresolved true :problem (:unresolved ref/problem-messages)}])))
+
+(defn cited-view
+  "What citation c asks to see, at its depth (reached's view): a section, a file, a task, a
+  namespace, or that it reaches nothing."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :map]}
+  [db c] (second (reached db c)))
 
 (defn citation-kind
   "What citation c reaches on db: :var, a qualified name that is no task (resolve-ref); :view, a
@@ -239,11 +249,12 @@
         (or (symbol? name) (and path (not problem-kind))) :view))
 
 (defn cited
-  "Citation c pulled at its depth, as citation-kind reaches it (a var by resolve-ref, anything
-  else by cited-view), or nil when it reaches nothing pulled."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] [:maybe :map]]}
+  "Citation c pulled at its depth, as citation-kind reaches it, and what it reached: [:var view]
+  by resolve-ref ([:unresolved view] when it resolves to nothing), anything else by reached; nil
+  when it reaches nothing pulled (a keyword, a path:N line reference)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] [:maybe [:tuple :seon.render/kind :map]]]}
   [db c]
   (case (citation-kind db c)
-    :var (resolve-ref db (:seon.ref/name c) (:seon.ref/depth c))
-    :view (cited-view db c)
+    :var (let [v (resolve-ref db (:seon.ref/name c) (:seon.ref/depth c))] [(if (:unresolved v) :unresolved :var) v])
+    :view (reached db c)
     nil))

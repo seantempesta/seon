@@ -980,11 +980,12 @@
     (testing "an eid with nothing on db is an error to the asker, not an empty entity"
       (is (= :seon.render/no-entity (:seon.error/type (r/walk db 99999999)))))
     (testing "every identity and ref attribute is named by one entity schema (the walk's schema of an entity)"
-      (let [named (frequencies (for [[k form] seon.contract/forms :when (:seon.db/attributes (seon.contract/properties k))
-                                     [a] (filter vector? (rest form))
-                                     :when (#{:seon.agent/key :seon.attempt/id :seon.task/id :seon.root/id :seon.turn/id :seon.message/id
-                                              :seon.attempt/agent :seon.turn/attempt :seon.message/to :seon.agent/root :seon.cluster.eval/agent :seon.attempt/task} a)]
+      (let [attrs #{:seon.agent/key :seon.attempt/id :seon.task/id :seon.root/id :seon.turn/id :seon.message/id
+                    :seon.attempt/agent :seon.turn/attempt :seon.message/to :seon.agent/root :seon.cluster.eval/agent :seon.attempt/task}
+            named (frequencies (for [[k form] seon.contract/forms :when (:seon.db/attributes (seon.contract/properties k))
+                                     [a] (filter vector? (rest form)) :when (attrs a)]
                                  a))]
+        (is (= attrs (set (keys named))) "each is named by an entity schema")
         (is (every? #{1} (vals named)) (pr-str named))))))
 
 (deftest a-walk-pulls-what-its-strings-cite
@@ -993,7 +994,8 @@
         w (r/walk db task)
         refs (:seon.render/refs w)]
     (testing "the plan's citations, each pulled once at its delimiter's depth (seon.docs/cited, the context's pull), numbered"
-      (is (= [[1 :var "seon.render/walk" :doc] [2 :namespace "seon.print" :doc] [3 :section "docs/render.md#no-clipping" :doc]]
+      ;; the test store holds no wiki sections, so the link reaches the checkout's file, and says so
+      (is (= [[1 :var "seon.render/walk" :doc] [2 :namespace "seon.print" :doc] [3 :file "docs/render.md#no-clipping" :doc]]
              (mapv (juxt :seon.render/n :seon.render/kind :seon.render/address :seon.render/depth) refs)))
       (is (= 'seon.render/walk (get-in refs [0 :seon.render/value :symbol])))
       (is (string? (get-in refs [0 :seon.render/value :doc])))

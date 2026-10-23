@@ -236,47 +236,35 @@
     (if (and (string? value) (prose? schema)) [[schema value]] [])
     (vec (for [[a v] (sort-by (comp str key) value) :when (and (string? v) (prose? a))] [a v]))))
 
-(defn- ref-kind
-  "What citation c reaches, as a ref says it: a var, a namespace, a task, a doc section
-  (path#anchor), a file, or :unresolved when its view says so."
-  {:malli/schema [:=> [:cat :seon.ref/citation :map] :seon.render/kind]}
-  [{:seon.ref/keys [name anchor]} view]
-  (cond (:unresolved view) :unresolved
-        (simple-symbol? name) :namespace
-        (qualified-symbol? name) (if (:symbol view) :var :task)
-        anchor :section
-        :else :file))
-
 (defn- address
   "Citation c's address: its name, or its path and anchor."
   {:malli/schema [:=> [:cat :seon.ref/citation] :string]}
   [{:seon.ref/keys [name path anchor]}] (if name (str name) (str path (when anchor (str "#" anchor)))))
 
 (defn- cite
-  "State st ({:refs, numbered: :seon.render/n its index + 1; :index, each ref's index by its
-  address}) with what node nd's prose cites added: a citation already there gains this place; a
-  new one is pulled once (seon.docs/cited, at the depth it is first cited) and numbered next; one
-  that reaches nothing pulled is left out. Answers [st' nd'], nd' naming the numbers it cites
-  (:seon.render/cites)."
-  {:malli/schema [:=> [:cat :seon.host/db [:map [:refs [:vector :seon.render/ref]] [:index [:map-of :string nat-int?]]] :seon.render/node]
-                  [:tuple [:map [:refs [:vector :seon.render/ref]] [:index [:map-of :string nat-int?]]] :seon.render/node]]}
+  "State st ({:refs, each numbered :seon.render/n; :index, each ref's position by its address;
+  :next, the number a new ref takes}) with what node nd's prose cites added: a citation already
+  there gains this place; a new one is pulled once (seon.docs/cited, at the depth it is first
+  cited: a later, deeper citation of it is not pulled again) and numbered next; one that reaches
+  nothing pulled (a keyword, a path:N line reference) is left out. Answers [st' nd'], nd' naming
+  the numbers it cites (:seon.render/cites)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.render/cite-state :seon.render/node] [:tuple :seon.render/cite-state :seon.render/node]]}
   [db st nd]
-  (let [[st ns]
-        (reduce (fn [[{:keys [refs index] :as st} ns] [a c]]
+  (let [[st nums]
+        (reduce (fn [[{:keys [refs index next] :as st} nums] [a c]]
                   (let [at (cond-> {:seon.render/eid (:seon.render/eid nd) :seon.render/attr a} (:seon.ref/line c) (assoc :seon.render/line (:seon.ref/line c)))
                         k (address c)]
                     (if-let [i (get index k)]
-                      [(update-in st [:refs i :seon.render/cited-at] conj at) (conj ns (inc i))]
-                      (if-let [v (docs/cited db c)]
-                        (let [n (inc (count refs))]
-                          [{:refs (conj refs {:seon.render/n n :seon.render/kind (ref-kind c v) :seon.render/address k
-                                              :seon.render/depth (:seon.ref/depth c) :seon.render/value v :seon.render/cited-at [at]})
-                            :index (assoc index k (dec n))}
-                           (conj ns n)])
-                        [st ns]))))
+                      [(update-in st [:refs i :seon.render/cited-at] conj at) (conj nums (get-in refs [i :seon.render/n]))]
+                      (if-let [[kind v] (docs/cited db c)]
+                        [{:refs (conj refs {:seon.render/n next :seon.render/kind kind :seon.render/address k
+                                            :seon.render/depth (:seon.ref/depth c) :seon.render/value v :seon.render/cited-at [at]})
+                          :index (assoc index k (count refs)) :next (inc next)}
+                         (conj nums next)]
+                        [st nums]))))
                 [st []]
                 (for [[a text] (texts nd) c (ref/references db text)] [a c]))]
-    [st (cond-> nd (seq ns) (assoc :seon.render/cites (vec (distinct ns))))]))
+    [st (cond-> nd (seq nums) (assoc :seon.render/cites (vec (distinct nums))))]))
 
 (defn walk
   "Entity eid on db as one map: :seon.render/root, the entity's node (its own attributes less its
@@ -298,18 +286,21 @@
            ref? (fn [a] (or (not= a (forward a)) (= :db.type/ref (get-in (d/schema db) [a :db/valueType]))))
            refs (when (some ref? units) (d/pull db (into [] (comp (filter ref?) (map (fn [a] {a ['*]}))) units) eid))
            from (fn [a] {:seon.render/eid eid :seon.render/attr a})
-           root {:seon.render/kind :entity :seon.render/value (apply dissoc own units) :seon.render/schema schema :seon.render/eid eid}
+           root (cond-> {:seon.render/kind :entity :seon.render/value (apply dissoc own units) :seon.render/eid eid}
+                  schema (assoc :seon.render/schema schema))
            nodes (into [] (mapcat (fn [a]
                                     (if (ref? a)
                                       (let [v (get refs a) via (forward a)]
-                                        (map (fn [m] {:seon.render/kind :entity :seon.render/value m :seon.render/eid (:db/id m)
-                                                      :seon.render/schema (entity-schema m via) :seon.render/from (from a)})
+                                        (map (fn [m] (let [s (entity-schema m via)]
+                                                       (cond-> {:seon.render/kind :entity :seon.render/value m :seon.render/eid (:db/id m) :seon.render/from (from a)}
+                                                         s (assoc :seon.render/schema s))))
                                              (if (map? v) [v] v)))
                                       (when (contains? own a)
                                         [{:seon.render/kind :value :seon.render/value (get own a) :seon.render/schema a
                                           :seon.render/eid eid :seon.render/from (from a)}]))))
                        units)
-           st {:refs seen :index (into {} (map-indexed (fn [i r] [(:seon.render/address r) i])) seen)}
+           st {:refs seen :index (into {} (map-indexed (fn [i r] [(:seon.render/address r) i])) seen)
+               :next (inc (reduce max 0 (map :seon.render/n seen)))}
            [st root] (cite db st root)
            [st nodes] (reduce (fn [[st out] nd] (let [[st nd] (cite db st nd)] [st (conj out nd)])) [st []] nodes)]
        {:seon.render/root root :seon.render/nodes nodes :seon.render/refs (:refs st)})
