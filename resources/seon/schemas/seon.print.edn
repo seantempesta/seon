@@ -4,7 +4,7 @@
                    [:max-depth {:optional true} pos-int?] [:width {:optional true} nat-int?]
                    [:outputs {:optional true} [:set [:enum :text :hiccup]]]]
  :seon.print/answer [:map [:text :string] [:tokens nat-int?] [:truncated? :boolean] [:elisions nat-int?]
-                     [:cuts [:vector :any]] [:html {:optional true} :seon.print/hiccup]]
+                     [:html {:optional true} :seon.print/hiccup]]
  ;; printed, or the budget refused the value's first part (an error map)
  :seon.print/result [:or :seon.print/answer [:map [:seon.error/type :qualified-keyword] [:seon.error/message :string]]]
  :seon.print/hiccup [:vector :any]

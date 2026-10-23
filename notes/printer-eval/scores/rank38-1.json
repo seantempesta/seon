@@ -1,0 +1,74 @@
+[
+ {
+  "section": 1,
+  "ranking": [
+   "Q",
+   "R",
+   "P"
+  ],
+  "why": "Q gives the most readable cut with a clear '\u2026+26690' count and the exact subs form, R's cut is slightly tighter but truncates mid-word, and P has the clearest 'chars in 244 more lines' note but spends an extra token on it; all three say what was left out and how to read the rest."
+ },
+ {
+  "section": 2,
+  "ranking": [
+   "R",
+   "P",
+   "Q"
+  ],
+  "why": "R states the remaining size in both chars and lines and is the most information per token, while P and Q give a char count only and P adds the least structure about where the rest lives."
+ },
+ {
+  "section": 3,
+  "ranking": [
+   "R",
+   "P",
+   "Q"
+  ],
+  "why": "R keeps the most of the provider's error (HTTP 400 status) and gives the reader the exact subs form, while Q cuts the status code entirely and P's cut is about the same length but less informative."
+ },
+ {
+  "section": 4,
+  "ranking": [
+   "R",
+   "P",
+   "Q"
+  ],
+  "why": "R shows the most distinct log entries before the cut and says the rest spans 19 more lines, which is a more actionable count for a one-line cell than P's or Q's bare char totals."
+ },
+ {
+  "section": 5,
+  "ranking": [
+   "R",
+   "P",
+   "Q"
+  ],
+  "why": "R shows the attempt id that P and Q drop and gives a readable tail, though its cut has no stated size or form to read the rest, so it is still weaker than a rendering that names what was left out."
+ },
+ {
+  "section": 6,
+  "ranking": [
+   "R",
+   "Q",
+   "P"
+  ],
+  "why": "R gives the title, the size of the remainder, and the exact subs form, though it spends more on the title than Q, which is cut shorter but states the same facts; P gives the same facts but with the least information per token."
+ },
+ {
+  "section": 7,
+  "ranking": [
+   "R",
+   "P",
+   "Q"
+  ],
+  "why": "R shows the expected and actual values of the first failure and gives a count of what was left out, whereas Q's cut hides the second failure's actual value and P's cut leaves the remainder unsized beyond a line count."
+ },
+ {
+  "section": 8,
+  "ranking": [
+   "R",
+   "P",
+   "Q"
+  ],
+  "why": "R is the shortest and shows the most of the call's leading arguments, but it gives no explicit form to read the rest, while P and Q each name a count without being clearer."
+ }
+]

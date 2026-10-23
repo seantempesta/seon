@@ -1,0 +1,72 @@
+[
+ {
+  "section": 1,
+  "answer": "No. Section 8 (The machine) is not shown; the text stops partway through section 5 (Laws), at the step-fn contract bullets. The value holds 7279 characters that are not shown.",
+  "left_out": "7279 characters: the rest of AGENTS.md, from section 5's step-fn contract bullets through section 8 and beyond",
+  "read_form": "(subs result/h3 19523)",
+  "confident": true
+ },
+ {
+  "section": 2,
+  "answer": "The value holds 400 datoms: 364 are shown and 36 are not shown.",
+  "left_out": "36 datoms (rows)",
+  "read_form": "(drop 364 result/h3)",
+  "confident": true
+ },
+ {
+  "section": 3,
+  "answer": "The value holds 2 turns; the first is shown and the second is elided. The eval calls of the first turn (:seon.turn/calls) are a 1-member vector that is elided in the display and read with the form below.",
+  "left_out": "the second turn (1 member); in turn 0, 2 keys of :basis (not shown) and the 1 call in :calls",
+  "read_form": "(get-in result/h3 [0 :seon.turn/calls])",
+  "confident": true
+ },
+ {
+  "section": 4,
+  "answer": "Not shown. The calc/neg entry is elided as a whole, so its :seon.task/execution is not in the text.",
+  "left_out": "all 11 members of the calc/neg task map",
+  "read_form": "(val (nth (seq result/h3) 4))",
+  "confident": true
+ },
+ {
+  "section": 5,
+  "answer": "Not shown. The :stuck class is elided, so neither the stuck task nor its reason appears in the text.",
+  "left_out": "2 members of :classes :stuck (its rows); also 2 members of :classes :red and 1 more member of :classes",
+  "read_form": "(get-in result/h3 [:classes :stuck])",
+  "confident": true
+ },
+ {
+  "section": 6,
+  "answer": "The provider answered HTTP 400 (the request's messages exceed the model's context window).",
+  "left_out": "10964 characters of the response body",
+  "read_form": "(subs (get-in result/h3 [:seon.error/data :body]) 289)",
+  "confident": true
+ },
+ {
+  "section": 7,
+  "answer": "Not shown. :seon.config.root/max-agents is not among the 17 keys shown, and the text does not include it.",
+  "left_out": "73 config keys",
+  "read_form": "(drop 17 result/h3)",
+  "confident": true
+ },
+ {
+  "section": 8,
+  "answer": "Not shown. The calc/neg#1 entry is elided, so its final status is not in the text.",
+  "left_out": "10 members of the calc/neg#1 attempt map",
+  "read_form": "(val (nth (seq result/h3) 2))",
+  "confident": true
+ },
+ {
+  "section": 9,
+  "answer": "The d/datoms evaluation returned 400 datoms in total: 66 are shown and 334 are not shown.",
+  "left_out": "334 datoms",
+  "read_form": "(drop 66 (get-in (nth (my.turn/evals) 2) [:value]))",
+  "confident": true
+ },
+ {
+  "section": 10,
+  "answer": "The evaluation that raised an error is (seon.model/call provider request). Its message is: The provider answered HTTP 400: the request's messages exceed the model's context window.",
+  "left_out": "5524 characters of the error's response body",
+  "read_form": "(subs (get-in (nth (my.turn/evals) 2) [:value :seon.error/data :body]) 5729)",
+  "confident": true
+ }
+]
