@@ -83,8 +83,10 @@
   seon.check mode functions its body runs, whose reach is the step's (seon.program/
   reach-digests with roots), with the checkout's :env (bin/, native/, resources/, the pins:
   the binary's other inputs) in every digest. laws (bin/laws) reads the whole tree and has no
-  functions: its key is the tree's digest (step-digests)."
-  '{"laws" :tree "lmdb-kill" [] "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
+  functions: its key is the tree's digest (step-digests). health (seon.problems/health over the
+  program and the wiki, booted on the checkout's source) is keyed by the tree the same way: a moved var
+  leaves the citations of docs/ dead, which no function's reach shows."
+  '{"laws" :tree "health" :tree "lmdb-kill" [] "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
     "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]
     "problems" [seon.check/problems-check] "smoke" [seon.check/smoke] "robust" [seon.check/robust]
@@ -95,12 +97,16 @@
     "e2e-hairy" [seon.e2e/run] "e2e-newns" [seon.e2e/run] "e2e-sibling" [seon.e2e/run] "swarm" [seon.e2e/run]
     "e2e-loop" [seon.e2e/run] "e2e-held" [seon.e2e/run] "resume" [seon.e2e/run] "scale" [seon.check/scale]})
 
+(def binary-free
+  "The steps that run no seon.check mode on target/seon: laws (bin/laws over the files) and lmdb-kill
+  (a binary of its own)."
+  #{"laws" "lmdb-kill"})
+
 (defn step-needs-binary?
-  "Does bin/check's step run a seon.check mode on target/seon (and a store branch): does
-  check-steps name functions for it? laws (the tree's digest) and lmdb-kill (a binary of its
-  own, no functions) do not, so a run of only those builds nothing and seeds nothing."
+  "Does bin/check's step run a seon.check mode on target/seon (and a store branch)? Every step
+  does but binary-free's, so a run of only those builds nothing and seeds nothing."
   {:malli/schema [:=> [:cat :string] :boolean]}
-  [step] (let [fns (get check-steps step)] (boolean (and (vector? fns) (seq fns)))))
+  [step] (boolean (and (contains? check-steps step) (not (binary-free step)))))
 
 (defn step-digests
   "Of check-steps, {:digests {step digest} :missing [step ...]}: the reach digests (digests-of,

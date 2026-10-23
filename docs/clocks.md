@@ -40,7 +40,6 @@ Each is a defect named with the task that removes it, so the laws check stays a 
 site is red, and a fixed one leaves this list in the fix's commit.
 - `seon.root/start!` (Flow's `:stop-timeout-ms`), `seon.root/stop!` (timed derefs and a `.join`), `seon.agent-proc/await-dead` (the SIGKILL ladder), `seon.fork-server/main` and `seon.sock/recv-within!` (the 100 ms poll by which a child's death is seen): task `seon.root/shutdown-and-death-are-dataflow`.
 - `seon.root/api-proc` (the stall timer): with `seon.root/back-op` (its `:stall-check`, a clock read compared to the bound) and `seon.agent-proc/agent-proc` (the `:last-frame-ms` the stall compares), task `seon.fences/a-stall-is-past-the-requests-own-bound`.
-- `seon.render.proc/RETIRE-MS`, `seon.render.proc/order` (an ended agent leaves the grid by elapsed time; the order is re-derived when a second passed), and `seon.render.proc/system-value` (carries the bound to the tile's caption): task `seon.render/an-ended-agent-leaves-the-grid-by-an-event`.
 - `seon.web/web-proc` (the HTTP adapter's keep-alive and write timeouts, literals): task `seon.web/web-server-threads-are-joined-at-stop`.
 - `seon.model-test/chunks`: a `Thread/sleep` between a streamed reply's chunks (each `>!!` is its own write without it): task `seon.model/a-streamed-reply-test-sleeps-not`.
 
@@ -48,7 +47,6 @@ site is red, and a fixed one leaves this list in the fix's commit.
 
 A bound passed under another name, which the marks do not see; each is owed its mark or its fix.
 - `seon.check/lifecycle`: its bound is a 3-arity `deref` over `:seon.config.check/hold-ms`, a check's measurement window like `seon.check/backpressure`'s.
-- `seon.render.proc/ordered`: re-derives the grid's order when a second has passed, for `seon.render.proc/order`; task `seon.render/an-ended-agent-leaves-the-grid-by-an-event`.
 - `seon.agent/mem-mb`: memory re-read at most once a second, a cache keyed by time (a `now-ns` difference compared to a literal); task `seon.agent/memory-is-read-when-asked`.
 
 ## Time decides nothing here: clock reads named as data
@@ -72,6 +70,7 @@ A measured time chooses which work goes first, never whether a result is green (
 - `my.root/watch!`: the time a file watcher's death was seen, stamped on its `:platform` error ([health](health.md#every-writer-root-loads-what-changed)).
 - `seon.root/state`: the writer's transactions per second over the last second, shown.
 - `seon.render.proc/pass`: a render pass's duration and the events' age, shown on the dashboard.
+- `seon.render.proc/system-value`: carries the pass's wall time (`:now-ms`) to the dashboard, which shows ages from it; nothing here decides by it.
 - `seon.agent/handle!`, `seon.root/ext-op`, `seon.reconcile/advance`, `seon.reconcile/reconciler-proc`: stamps and durations.
 
 The thread CPU clock (`seon.profile/cpu-ns`, what a cost proof's `seon.cost/measure` times) orders nothing and carries no mark; [cost](cost.md) says what it measures.
