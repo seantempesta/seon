@@ -42,12 +42,6 @@ runner --plan $WHAT "$OUT" "$@" || { echo "TEST FAILED (the plan)"; exit 1 }
 F=($OUT/shard-*.edn(N))
 if [[ -s $OUT/binary ]]; then
   nice -n 15 "$ROOT/bin/build" seon > "$OUT/build.log" 2>&1 || { tail -5 "$OUT/build.log"; echo "TEST FAILED (bin/build seon: $OUT/build.log)"; exit 1 }
-  # the one store the process tests' roots branch (seon.test-store/process-store), made here once
-  # when missing, before any shard starts: shards' roots that made it at once raced (one opened
-  # the store another was still creating: "Database does not exist"); one that exists is left as it is
-  [[ -f $ROOT/target/runs/test-store/data.mdb ]] ||
-    ( cd "$ROOT/target" && SEON_STORE=$ROOT/target/runs/test-store ./seon seed 0 ) > "$OUT/seed.log" 2>&1 ||
-    { tail -5 "$OUT/seed.log"; echo "TEST FAILED (the process store: $OUT/seed.log)"; exit 1 }
 fi
 st=0 P=()
 # each shard's wall and CPU seconds kept beside its log (shard-<i>.time); its tests' own in their results (:ms)

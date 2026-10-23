@@ -11,7 +11,7 @@
   ;; tree). bin/test makes it before any shard starts; a test asking for it where it is not
   ;; made is refused, naming who makes it, and never creates it
   (let [co (str (System/getProperty "java.io.tmpdir") "/seon-process-store-" (random-uuid))
-        path (str co "/target/runs/test-store")]
+        path (str co "/target/runs/test-store-" pdb/schema-digest)]
     (try
       (let [e (is (thrown? ExceptionInfo (ts/process-store co)))]
         (is (= :seon.test-store/no-process-store (:seon.error/type (ex-data e))))
@@ -38,3 +38,33 @@
       (finally (ts/stop-root! a) (sh/sh "rm" "-rf" runs)
                ;; its main and its branches leave the one store (as root_test's drop-main!)
                (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")))))
+
+(deftest a-kept-store-is-keyed-by-its-schema
+  ;; task seon.test-store/a-kept-store-is-keyed-by-its-schema: the page merge changed three
+  ;; attributes to refs, and every checkout's kept program store and process store refused to open
+  ;; (:seon.db/types-differ): bin/test failed at its plan, process tests at root start. A kept store
+  ;; of output is named by the schema's digest; one made with another schema is removed, and the
+  ;; new path is made fresh, nothing migrated or refused
+  (let [dir (str (java.io.File. (System/getProperty "java.io.tmpdir") (str "seon-kept-" (random-uuid))))
+        base (str dir "/test-store")
+        old (str base "-00000000")
+        runs (str base "-" pdb/schema-digest "-some-main-runs")]
+    (try
+      (.mkdirs (java.io.File. dir))
+      ;; a store made under another schema's digest (what it holds is not read: its name says it)
+      (let [cfg (pdb/store-cfg :lmdb old)]
+        (d/create-database cfg)
+        (let [c (d/connect cfg)]
+          (d/transact c {:tx-data [{:db/ident :task/name :db/valueType :db.type/long :db/cardinality :db.cardinality/one}]})
+          (d/release c)))
+      (.mkdirs (java.io.File. base))
+      (.mkdirs (java.io.File. runs))
+      (let [path (ts/kept-store! base)]
+        (is (= (str base "-" pdb/schema-digest) path) "named by this schema's digest")
+        (is (not (.exists (java.io.File. old))) "the store of another schema is removed")
+        (is (not (.exists (java.io.File. base))) "and the unkeyed one")
+        (is (.exists (java.io.File. runs)) "a runs directory beside them is no store, and stays")
+        (let [{:keys [conn seeded?]} (pdb/open! :lmdb path 0 :db)]
+          (is seeded? "the new path is made fresh")
+          (d/release conn)))
+      (finally (sh/sh "rm" "-rf" dir)))))

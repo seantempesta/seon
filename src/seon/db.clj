@@ -5,7 +5,7 @@
   (konserve.jolt.fasl-store, FaslSerializer), and the JVM-written-store reader stays behind
   (BAGGAGE.md)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-] :as contract] [seon.schema.datahike :as sd] [seon.config :as cfg]
+  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-] :as contract] [clojure.string] [seon.schema.datahike :as sd] [seon.config :as cfg]
             [datahike.connections] [datahike.writing] [datahike.config] [datahike.store] [konserve.store] [hasch.core :as hasch] [datahike.api :as d] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
             [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix] [seon.lib :as lib] [jolt.ffi :as ffi] [datahike.ids] [datahike.core]))
 
@@ -13,6 +13,12 @@
   "The Datahike schema, derived from the registry's entity schemas (resources/seon/schemas,
   seon.schema.datahike; session D1): one source of truth with the contracts."
   (sd/declarations contract/registry))
+
+(def schema-digest
+  "The schema's digest, 8 hex digits of its hasch uuid: a kept store of regenerable output is
+  named by it (seon.test-store/kept-store!), so a changed schema makes a new store rather than
+  one that refuses to open (:seon.db/types-differ) or is migrated."
+  (subs (clojure.string/replace (str (hasch/uuid schema)) "-" "") 0 8))
 
 (defn eid
   "The entity id of the entity whose unique attribute a has value v on db, or nil: one seek
