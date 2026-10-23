@@ -94,7 +94,8 @@
 (deftest an-errors-message-is-read-one-way
   ;; task seon.step/an-errors-message-is-read-one-way: an exception's message, or its class, is
   ;; seon.step/error-msg; no src form outside seon.step writes (or (ex-message e) (str (type e)))
-  ;; again. src's forms read as data from the compiler's facts
+  ;; again. src's forms read as data from the compiler's facts. Not covered: the same read written
+  ;; another way ((.getMessage e), (str (class e)), the two in the other order)
   (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
         forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
                      [(clojure.string/starts-with? ?file "src/")]] db)
