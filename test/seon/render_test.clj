@@ -394,12 +394,12 @@
         (is (= ["m-1"] (values-of w :seon.message/_to :seon.message/id)))))
     (testing "root: its agents"
       (is (= [:a3] (values-of (r/walk [db] (eid-of db [:seon.root/id :root])) :seon.agent/_root :seon.agent/id))))
-    (testing "a task: units that are its own values, plan then proofs, each its attribute's schema"
+    (testing "a task: its proofs a unit of their own, its attribute's schema; its plan its own value, which its view shows"
       (let [eid (eid-of db [:seon.task/id "demo/f"])
             w (r/walk [db] eid)]
-        (is (= [[:value :seon.task/plan walked-plan eid] [:value :seon.task/proofs ['demo/f-test] eid]]
+        (is (= [[:value :seon.task/proofs ['demo/f-test] eid]]
                (mapv (juxt :seon.render/kind :seon.render/schema :seon.render/value :seon.render/eid) (:seon.render/nodes w))))
-        (is (not (contains? (get-in w [:seon.render/root :seon.render/value]) :seon.task/plan)))))
+        (is (= walked-plan (get-in w [:seon.render/root :seon.render/value :seon.task/plan])))))
     (testing "an eid with nothing on db is an error to the asker, not an empty entity"
       (is (= :seon.render/no-entity (:seon.error/type (r/walk [db] 99999999)))))
     (testing "every identity and ref attribute is named by one entity schema (the walk's schema of an entity)"
@@ -490,7 +490,7 @@
     (testing "the entity as main holds it: what root observed wins over the branch's older copy"
       (is (= :busy (get-in w [:seon.render/root :seon.render/value :seon.agent/status])))
       (is (= ["p-head" [0 eid :block]] ((juxt :id :comp) (first units))) "a component on main")
-      (is (every? #(str/includes? (unit-html dbs (first units)) %) [":a3" ":busy" ":task-demo-f"]) "its relevant facts, by the one printer at the page's budget"))
+      (is (every? #(str/includes? (unit-html dbs (first units)) %) ["a3" "busy" "on branch task-demo-f"]) (str "its head, in words: its id, status and branch: " (unit-html dbs (first units)))))
     (testing "its units from every db, each once: main's run, the branch's evaluations"
       (is (= 3 (count (filter #(= :seon.db/eval-fact (:seon.render/schema %)) (:seon.render/nodes w)))))
       (is (= (count (distinct (map :seon.render/eid (:seon.render/nodes w)))) (count (:seon.render/nodes w))))
@@ -748,13 +748,14 @@
         {:keys [t page]} (p/screen-of st1 :a3)
         text (pr-str page)]
     (is (= (:max-tx main) t))
-    (is (str/includes? text ":a3") "the agent's head")
-    (is (str/includes? text "/agent/a3") "root's agents, the sidebar")
-    (is (str/includes? text "demo/f#1") "the run's tile")
+    (is (every? string? page) "the lines a person reads on it")
+    (is (some #(str/starts-with? % "a3 ") page) "the agent's head, in words")
+    (is (some #(re-matches #"[●○] a3 .*" %) page) "root's agents, the sidebar")
+    (is (some #(str/starts-with? % "run demo/f#1 · ") page) "the run's tile, in words")
+    (is (not (str/includes? text "#:seon")) "no value printed raw")
     (is (not (str/includes? text "(f 2)")) "no part of its conversation")
     (is (not (str/includes? text "release")) "no input")
-    (is (not-any? #(and (map? %) (some (fn [k] (or (#{:class :style :id} k) (str/starts-with? (name k) "data"))) (keys %))) (tree-seq coll? seq page))
-        "no presentation attributes")))
+    (is (not-any? #(re-find #"class=|data-|text-text|seon/" %) page) "no presentation")))
 
 (deftest nothing-is-shown-twice
   ;; what the conversation holds (each eval, as its own message) is never on the screen too
@@ -776,7 +777,7 @@
         reply (first (get @o [:a3 :in]))]
     (is (contains? (:screens st1) [[:a3 :in] 9]) "held while its page is not yet whole")
     (is (= 9 (:tag reply)))
-    (is (str/includes? (pr-str (:page (:r reply))) "/agent/a3"))
+    (is (some #(str/starts-with? % "a3 ") (:page (:r reply))))
     (is (empty? (:screens st2)) "answered once")
     (is (nil? (get-in st2 [:views :a3])) "a page only a screen needed keeps nothing")
     (testing "two agents asking with the same counter are two requests, each answered on its route"

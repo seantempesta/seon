@@ -525,12 +525,33 @@
     (seq? x) (seq (keep #(screen-hiccup % units) x))
     :else x))
 
+(def ^:private block-tags
+  "The elements a person reads as lines of their own (a block's text is one line when it holds no block)."
+  #{:div :section :main :aside :nav :ol :ul :li :p :pre :details :summary :h1 :h2 :h3 :form :tr :button})
+
+(defn- screen-lines
+  "Hiccup x (screen-hiccup's) as the lines a person reads on it: each block that holds no block
+  one line of its text, whitespace runs closed up, the empty left out. The one printer prints a
+  value; this is a page's text (what a browser's innerText is), which the printer then prints as
+  the screen's value whole."
+  {:malli/schema [:=> [:cat :any] [:vector :string]]}
+  [x]
+  (let [block? #(and (vector? %) (block-tags (first %)))
+        kids (fn [[_ & more]] (mapcat #(if (seq? %) % [%]) (if (map? (first more)) (rest more) more)))
+        text (fn text [y] (cond (string? y) y (vector? y) (str/join " " (map text (kids y))) (seq? y) (str/join " " (map text y)) (h/raw? y) (:seon.web.html/raw y) (nil? y) "" :else (str y)))
+        line #(let [t (str/trim (str/replace (text %) #"[ \t]+" " "))] (if (str/blank? t) [] [t]))]
+    (cond (seq? x) (into [] (mapcat screen-lines) x)
+          (not (block? x)) (line x)
+          (some block? (kids x)) (into [] (mapcat #(if (block? %) (screen-lines %) (line %))) (kids x))
+          :else (line x))))
+
 (defn screen-of
-  "The agent's screen (seon.screen/show): view's page as this proc holds it, its hiccup without the
-  conversation (the model's own messages) and without presentation, at main's t."
-  {:malli/schema [:=> [:cat :map :any] :map]}
+  "The agent's screen (seon.screen/show): view's page as this proc holds it, without the
+  conversation (the model's own messages) and without presentation, as the lines a person reads
+  on it, at main's t."
+  {:malli/schema [:=> [:cat :map :any] [:map [:t :any] [:page [:vector :string]]]]}
   [st v]
-  {:t (:max-tx (:main-db st)) :page (screen-hiccup (get-in st [:views v :layout]) (get-in st [:views v :units]))})
+  {:t (:max-tx (:main-db st)) :page (screen-lines (screen-hiccup (get-in st [:views v :layout]) (get-in st [:views v :units])))})
 
 (defn- index-of
   "What the web proc needs to turn a UI call into root's request: each agent's pid, branch

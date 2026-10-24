@@ -31,8 +31,9 @@
  :seon.render/text [:map [:text :string] [:truncated? {:optional true} :boolean]]
  ;; ---- the walk (seon.render/walk): an entity and its units one hop away, the default view of any entity ----
  ;; a schema whose values are prose ({:seon.render/prose true}: a plan, a message, a reply) renders as markdown
- ;; what a node is: an entity, or a value of the walked entity
- :seon.render/kind [:enum :entity :value]
+ ;; what a node is: an entity, or a value of the walked entity; what a citation reached
+ ;; (seon.docs/reached: a var, a namespace, a task, a section, a file, or nothing)
+ :seon.render/kind [:enum :entity :value :var :namespace :task :section :file :unresolved]
  ;; an entity schema's units (a schema property): the attributes a view of its entity shows, in
  ;; pull's syntax, a leading _ the reverse ref
  :seon.render/units [:vector :keyword]
@@ -59,8 +60,8 @@
  ;; service recorded them for its branch (test -> its newest {:status :t}), what its branch changes
  ;; against main's head (seon.program/divergence; the fork point is not the render proc's to read,
  ;; so what main gained since shows too, and the tile says so)
- :seon.render/proofs [:map-of :symbol [:map [:status :keyword] [:t :int]]]
- :seon.render/changes [:map [:against :string] [:changes :map]]
+ :seon.render/proofs [:map-of {:seon.render/html seon.render.ui/proofs} :symbol [:map [:status :keyword] [:t :int]]]
+ :seon.render/changes [:map {:seon.render/html seon.render.ui/changes} [:against :string] [:changes :map]]
  :seon.render/root :seon.render/node
  :seon.render/nodes [:vector :seon.render/node]
  :seon.render/walk [:map [:seon.render/root :seon.render/root] [:seon.render/nodes :seon.render/nodes]]

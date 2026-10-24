@@ -399,10 +399,10 @@
    (if live?
      [:form {:class "flex gap-2" :seon/call 'seon.root/submit! :seon/agent id}
       [:span {:class "text-signal"} (str (kname id) "=>")]
-      ;; Enter sends, Shift+Enter is a new line: a form with its ;; thought spans lines
+      ;; Enter sends, Shift+Enter is a new line: a form may span lines
       [:textarea {:name "forms" :class "flex-1 min-w-0" :rows 3 :autocomplete "off" :spellcheck "false" :autofocus true
                   (keyword "data-on:keydown") "if (evt.key==='Enter' && !evt.shiftKey) { evt.preventDefault(); el.form.requestSubmit() }"
-                  :placeholder ";; your thought\n(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)\n> a message, read at its next turn"}]
+                  :placeholder "(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)\n> a message, read at its next turn"}]
       [:button {:type "button" :class "rounded border border-base-700 px-2" :title "interrupt the running form; the agent keeps its state"
                 :seon/call 'seon.root/interrupt! :seon/agent id} "⏹ interrupt"]]
      [:p {:class "text-text-500"} "no process of it in root's view: no REPL to evaluate in, no turn to read a message; what it did is below, read from the store"])
@@ -489,6 +489,57 @@
     [:div {:class "border-l-2 border-info pl-3 py-1"}
      [:span {:class "text-2xs text-text-500"} (str "message from " from)]
      [:p {:class "whitespace-pre-wrap text-text-100"} (prose body (part))]]))
+
+(defn run
+  "A run (the declared html render of :seon.run/run-fact) as a person reads it: its id, status,
+  turn n of its max, its model, and how it ended and why."
+  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
+  [{:seon.run/keys [id status outcome reason model turns max-turns]} opts]
+  ;; main records :seon.run/turns at the run's end; a running run says its cap (its newest turn's
+  ;; row in the conversation names the turn it is on)
+  (let [line (str "run " id " · " (kname status) (cond turns (str " · turn " turns (when max-turns (str " of " max-turns)))
+                                                       max-turns (str " · up to " max-turns " turns"))
+                  (when model (str " · " model)) (when outcome (str " · " (kname outcome))))]
+    (if (= :inline (:as opts))
+      [:span line]
+      [:div {:class "flex flex-col gap-1 text-xs"}
+       [:span {:class "text-text-100"} line]
+       (when-not (str/blank? reason) [:p {:class "whitespace-pre-wrap text-text-400"} (prose reason (part))])])))
+
+(defn task
+  "A task (the declared html render of :seon.task/task-fact) as a person reads it: its id, kind
+  and execution, then its plan as prose; its proofs are its unit, shown beside it."
+  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
+  [{:seon.task/keys [id kind execution plan]} opts]
+  (let [line (str "task " id (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
+    (if (= :inline (:as opts))
+      [:span line]
+      [:div {:class "flex flex-col gap-1 text-xs"}
+       [:span {:class "text-text-100"} line]
+       (when-not (str/blank? plan) [:p {:class "whitespace-pre-wrap text-text-300"} (prose plan (part))])])))
+
+(defn proofs
+  "An agent's proofs as the test service recorded them for its branch (the declared html render
+  of :seon.render/proofs): how many are green and red, each test's name and status on open."
+  {:malli/schema [:=> [:cat :seon.render/proofs :seon.render/opts] :any]}
+  [ps _]
+  (let [by (group-by (comp :status val) ps)]
+    [:details {:class "text-xs"}
+     [:summary {:class "cursor-pointer text-text-100"}
+      (str (count ps) (if (= 1 (count ps)) " proof: " " proofs: ") (str/join ", " (for [[s xs] (sort-by (comp str key) by)] (str (count xs) " " (kname s)))))]
+     [:ul (for [[t {:keys [status]}] ps] [:li (str (kname status) " " t)])]]))
+
+(defn changes
+  "What an agent's branch changes against main (the declared html render of :seon.render/changes):
+  how many vars and schemas per kind, and what it is compared against; their names on open."
+  {:malli/schema [:=> [:cat :seon.render/changes :seon.render/opts] :any]}
+  [{:keys [against] by-kind :changes} _]
+  (let [n (reduce + (map count (vals by-kind)))]
+    [:details {:class "text-xs"}
+     [:summary {:class "cursor-pointer text-text-100"}
+      (if (zero? n) "no changes against main" (str n " changes: " (str/join ", " (for [[k xs] by-kind] (str (count xs) " " (name k))))))]
+     [:p {:class "text-text-500"} (str "against " against)]
+     (for [[k xs] by-kind] [:p [:span {:class "text-text-400"} (str (name k) ": ")] (str/join " " xs)])]))
 
 (defn- shown-as
   "How node nd's schema says it is shown on a page (:seon.render/as on its entity schema), else as a tile."
@@ -686,7 +737,7 @@
 (defn agent
   "An agent's view (the declared html render of :seon.db/agent-fact). Shown as its page (:as :page,
   opts :page {:walk :dbs ...}): its conversation (chat), its sidebar root's agents, read on main;
-  at any other size, its value by the one printer."
+  at any other size, its head: its id, status, what it runs and on which branch."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [v opts]
   (if-let [{:keys [walk dbs] :as page} (when (= :page (:as opts)) (:page opts))]
@@ -707,7 +758,16 @@
       (chat walk (assoc page :sides (vec (when root (for [nd (:seon.render/nodes (render/walk [main] root))
                                                           :when (= :seon.db/agent-fact (:seon.render/schema nd))]
                                                       {:eid (:seon.render/eid nd) :db 0}))))))
-    (render/print-html v opts)))
+    ;; its head, as a person reads it: its id, status, what it runs and where
+    ;; (what it evaluates now, :seon.agent/running, is its conversation's newest part)
+    (let [{:seon.agent/keys [id status branch pid description]} v]
+      [:div {:class "flex flex-col gap-1"}
+       [:div {:class "flex flex-wrap items-baseline gap-3"}
+        [:b {:class "text-base text-signal"} (kname id)]
+        [:span (kname status)]
+        (when branch [:span {:class "text-text-300"} (str "on branch " (kname branch))])
+        (when pid [:span {:class "text-text-500"} (str "pid " pid)])]
+       (when-not (str/blank? description) [:p {:class "text-text-300"} (prose description (part))])])))
 
 (defn root-input
   "Root's input at the top of its page: spawn agents (seon.root/spawn!), or evaluate forms in

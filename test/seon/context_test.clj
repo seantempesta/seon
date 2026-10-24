@@ -647,3 +647,10 @@
             "the screen eval, last")
         (is (not-any? #(str/includes? (str (:content %)) ":value :red") r1) "the earlier screen is gone")
         (is (not-any? #(str/includes? (str (:content %)) ";;") (rest r1)) "no ;; reaches the model")))))
+
+(deftest an-assertion-message-of-any-value-is-kept-as-text
+  ;; clojure.test's is takes any message (a doseq's keyword, say); a run whose test reported one
+  ;; ended on seon.proofs/failures' contract (dbg/live#4, 2026-10-24) until the report kept it as text
+  (let [rep (agent/test-report {:type :fail :message :scripted :expected '(= 1 2) :actual '(not (= 1 2))} "#'demo-test/t")]
+    (is (= ":scripted" (:message rep)))
+    (is (= [":scripted"] (map :message (get (proofs/failures {:reports [rep]}) 'demo-test/t))))))

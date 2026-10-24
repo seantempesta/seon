@@ -179,7 +179,7 @@
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
  ;; config keys are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
- :seon.task/task-fact [:map {:seon.db/attributes true :seon.render/units [:seon.task/plan :seon.task/proofs]}
+ :seon.task/task-fact [:map {:seon.db/attributes true :seon.render/units [:seon.task/proofs] :seon.render/html seon.render.ui/task}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                           [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]
@@ -248,7 +248,7 @@
  ;; measured at the run's end from the branch (seon.problems/caused): the derived problems
  ;; its work made true since its merge base, by message; the done rule refuses while any is open
  :seon.run/caused [:set :string]
- :seon.run/run-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/model :seon.run/turns :seon.run/max-turns :seon.run/branch] :seon.render/units [:seon.run/task :seon.turn/_run :seon.message/_to]}
+ :seon.run/run-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/model :seon.run/turns :seon.run/max-turns :seon.run/branch] :seon.render/units [:seon.run/task :seon.turn/_run :seon.message/_to] :seon.render/html seon.render.ui/run}
                              [:seon.run/id :seon.run/id] [:seon.run/task :seon.run/task]
                              [:seon.run/status :seon.run/status] [:seon.run/boot :seon.run/boot]
                              [:seon.run/agent {:optional true} :seon.run/agent] [:seon.run/start-ms :seon.run/start-ms]

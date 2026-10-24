@@ -341,7 +341,8 @@
   {:malli/schema [:=> [:cat :map [:maybe :string]] :map]}
   [m var]
   (let [cost (when (map? (:actual m)) (select-keys (:actual m) [:rows :verdict]))]
-    (cond-> {:type (:type m) :var var :message (:message m)}
+    ;; clojure.test's is takes any message and prints it; the run keeps it as that text
+    (cond-> {:type (:type m) :var var :message (let [msg (:message m)] (cond-> msg (not (or (nil? msg) (string? msg))) (print/text (:part print/budgets))))}
       (not= :pass (:type m)) (assoc :expected (print/text (:expected m) (:part print/budgets))
                                     :actual (print/text (:actual m) (:part print/budgets)))
       ;; what the assertion evaluated to: clojure.test reports a failed (is (pred a b)) as

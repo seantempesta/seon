@@ -529,7 +529,7 @@
     (is (= :error (:outcome (:value end))) (pr-str end))
     (is (= [:section :task :eval] (:sent (:value turn))) "the help page, the task story, the screen's one eval")
     (is (str/includes? (str (:screen (:value turn))) ":page") (str "the screen is root's page of it: " (:screen (:value turn))))
-    (is (every? #(str/includes? (str (:screen (:value turn))) %) [":aside" ":main" ":t "]) "its layout: the side, the main pane, main's t")
+    (is (re-find #"\"a1 (busy|idle|running)" (str (:screen (:value turn)))) (str "its head in words, read whole at the screen's budget: " (:screen (:value turn))))
     (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")
     (is (= 3 (:read (:value turn))) "read back from its records")))
 
