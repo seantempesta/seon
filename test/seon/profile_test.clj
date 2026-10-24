@@ -2,7 +2,7 @@
   "seon.profile: every contracted call counted exactly, one in 64 timed, read per epoch."
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :as contract :refer [defn defn-]]
-            [seon.profile :as profile] [seon.cost] [seon.repl :as repl] [seon.agent :as agent] [jolt.ffi :as ffi]))
+            [seon.profile :as profile] [seon.cost] [seon.lib] [seon.repl :as repl] [seon.agent :as agent] [jolt.ffi :as ffi]))
 
 (defn- leaf {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))
 
@@ -104,6 +104,37 @@
            (finally (end-threads! busy))))
     (let [a0 (profile/alloc-bytes) b (byte-array 1000000) a1 (profile/alloc-bytes)]
       (is (<= 1000000 (- a1 a0) 1100000) (str "the caller's own " (count b) " bytes counted as " (- a1 a0))))))
+
+(deftest a-collection-in-a-measured-call-is-not-its-bytes
+  ;; task seon.cost/a-cost-proof-is-the-same-under-load: a collection tripped inside a measured
+  ;; call charged the call the collector's bookkeeping (17,344 B for an explicit collect, 67,264 B
+  ;; a call of seon.vector/near beside an allocating thread), so a proof's sizes read different
+  ;; offsets under load and its growth fit went red. A call of ~5 MB beside a thread allocating
+  ;; takes a collection in every sample; its bytes are the same as alone. (into, not vec: Jolt's
+  ;; vec of a seq applies jolt-vector to n arguments, and the stack that grows is kept until a
+  ;; collection, so vec's own bytes depend on whether one ran since the last call: task
+  ;; jolt.core/vec-builds-by-reduction.)
+  (let [f (fn [] (count (into [] (range 600000))))
+        alone (seon.cost/measure f [])
+        busy (allocating-thread)
+        g0 (:count (seon.lib/gc-stats))
+        beside (try (seon.cost/measure f []) (finally (end-threads! busy)))
+        gcs (- (:count (seon.lib/gc-stats)) g0)]
+    (is (pos? gcs) "the measure beside the allocating thread ran collections")
+    (is (<= (Math/abs (- (:bytes beside) (:bytes alone))) 4096.0)
+        (str "alone " (long (:bytes alone)) " B, beside " (long (:bytes beside)) " B, over " gcs " collections"))))
+
+(deftest a-new-stack-is-not-the-calls-bytes
+  ;; task seon.cost/a-cost-proof-is-the-same-under-load: a call deep enough to overflow its stack
+  ;; takes a cached stack segment, or allocates one when a collection has emptied the cache, so
+  ;; the same call read 5,794,784 B or ~65 KB more (seon.vector/near at 500, alone), and beside an
+  ;; allocating thread the more every time. In plain Chez a 50,000-deep recursion read 384 B
+  ;; warm and 393,504 B after a collection. A stack is the runtime's; the call's depth is its ticks.
+  (let [deep (fn deep [n] (if (zero? n) 0 (inc (deep (dec n)))))
+        window #(let [a0 (profile/alloc-bytes) _ (deep 20000) a1 (profile/alloc-bytes)] (- a1 a0))
+        warm (do (window) (window))
+        cold (do (System/gc) (window))]
+    (is (<= (Math/abs (- cold warm)) 4096) (str "warm " warm " B, after a collection " cold " B"))))
 
 (deftest a-measure-is-the-same-beside-another-thread
   ;; the measured call's bytes are the same alone and while another thread allocates
