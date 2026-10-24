@@ -167,3 +167,21 @@
                                    (seq? (second b)) (symbol? (first (second b))) (= "type" (name (first (second b))))))))
         writers (into (sorted-set) (for [[nsn src] forms :when (some shape? (tree-seq coll? seq (read-in nsn src)))] nsn))]
     (is (= #{'seon.step} writers))))
+
+(deftest git-is-read-through-fx
+  ;; task seon.fx/git-is-read-through-fx: git is read through seon.fx's two readers, git! (a failure
+  ;; throws its words) and git-try (git's no is nil), and a checkout told by its .git through
+  ;; checked-out?; no other src form names the git command or a repository's own files (".git").
+  ;; src's forms read as data from the compiler's facts
+  (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
+        forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
+                     [(clojure.string/starts-with? ?file "src/")]] db)
+        read-in (fn [nsn src] (require nsn)
+                  (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))
+        readers (into (sorted-set)
+                      (for [[nsn src] forms
+                            :let [f (read-in nsn src)
+                                  v (when (and (seq? f) (symbol? (second f))) (symbol (str nsn) (name (second f))))]
+                            :when (some #{"git" ".git"} (tree-seq coll? seq f))]
+                        (or v nsn)))]
+    (is (= #{'seon.fx/git! 'seon.fx/git-try 'seon.fx/checked-out?} readers))))
