@@ -1198,9 +1198,10 @@
           :checks checks})))))
 
 (defn- eval-records
-  "The evaluation records on db of agent id: [{:form :origin ...}]."
-  [db id]
-  (vec (d/q '[:find [?r ...] :in $ ?id :where [?a :seon.agent/id ?id] [?e :seon.cluster.eval/agent ?a] [?e :seon.cluster.eval/record ?r]] db id)))
+  "The evaluation records on db of who evaluated, by its identity (seon.repl/record-tx): an
+  agent's [:seon.agent/id id], or root's [:seon.root/id :root]: [{:form :origin ...}]."
+  [db [attr id]]
+  (vec (d/q '[:find [?r ...] :in $ ?attr ?id :where [?a ?attr ?id] [?e :seon.cluster.eval/agent ?a] [?e :seon.cluster.eval/record ?r]] db attr id)))
 
 (defn await-records
   "What (read) answers once (enough? it) holds, read again at each :commit event of agent a
@@ -1248,10 +1249,10 @@
         ;; the agent's record is on its branch at its commit (await-records); answers 2 when
         ;; recorded, else waits on the next commit (the eval failed: its text check says so)
         mine (if (clojure.string/includes? (str (text 4)) "42")
-               (await-records ev a #(filter (fn [r] (= :outside (:origin r))) (eval-records (:db @(c/branch-db sys :mcp1)) a)) #(= 2 (count %)))
+               (await-records ev a #(filter (fn [r] (= :outside (:origin r))) (eval-records (:db @(c/branch-db sys :mcp1)) [:seon.agent/id a])) #(= 2 (count %)))
                [])
         _ (a/untap (:events-mult sys) ev)
-        roots (filter #(= :outside (:origin %)) (eval-records @(:conn sys) :root))
+        roots (filter #(= :outside (:origin %)) (eval-records @(:conn sys) [:seon.root/id :root]))
         bound (seon.config/value :seon.config.machine/relay-mb)]
       {:report {:tools (count (get-in answers [2 "result" "tools"]))
                 :agents-text (text 3) :agent-eval (text 4) :root-eval (text 5)
