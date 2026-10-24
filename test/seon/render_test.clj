@@ -718,7 +718,26 @@
         [st1 _] (#'p/pass-view st :a3)
         side (filter #(= "#c-side" (:container %)) (vals (get-in st1 [:views :a3 :units])))]
     (is (= [[:main eid :side]] (map #(get-in % [:input :comp]) side)) "root's one agent, a3")
-    (is (str/includes? (p/page-html st1 :a3) "href=\"/agent/a3\"") "a link to its page")))
+    (is (str/includes? (p/page-html st1 :a3) "href=\"/agent/a3\"") "a link to its page")
+    (testing "a new agent of root's is a new line in the sidebar, its component; the others stay"
+      (let [r (d/with main (seon.task/agent-tx "b1" :a4 {:status :busy}))
+            ds (map (fn [d] {:e (:e d) :a (:a d) :v (:v d)}) (:tx-data r))
+            st2 (-> (assoc st1 :main-db (:db-after r)) (update :dirty (fnil into #{}) (p/touched st1 ds)) (#'p/invalidate (p/comps-touched st1 :main ds)))
+            [st3 patch] (#'p/pass-view st2 :a3)
+            a4 (:db/id (d/entity (:db-after r) [:seon.agent/key "b1/a4"]))]
+        (is (= #{eid a4} (set (map #(second (get-in % [:input :comp])) (filter #(= "#c-side" (:container %)) (vals (get-in st3 [:views :a3 :units])))))))
+        (is (some #(str/includes? (second %) "href=\"/agent/a4\"") (concat (:appends patch) (:afters patch) (:prepends patch))) "its line is sent")
+        (is (not-any? #(= (str "s-" eid) (first %)) (:frags patch)) "a3's line is not sent again")))))
+
+(deftest a-part-that-sorts-into-the-middle-goes-there
+  ;; a new unit with held units on both sides of it in its container is placed after the one
+  ;; before it, not at the container's end
+  (let [u (fn [id] {:id id :input {:older 0 :view id} :schema :seon.render/page-more :container "#c-rows"})
+        held {:units (into {} (for [id ["a" "c"]] [id {:input {:older 0 :view id} :html (str "<li id=\"" id "\"></li>") :container "#c-rows"}]))}
+        [_ patch] (#'p/step-units held [(u "a") (u "b") (u "c")])]
+    (is (= [["a" "b"]] (:afters patch)) "b after a")
+    (is (empty? (:appends patch)))
+    (is (empty? (:prepends patch)))))
 
 (deftest a-units-change-rerenders-that-unit
   (let [[main branch eid] (paged-dbs)

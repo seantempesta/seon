@@ -650,7 +650,7 @@
         as (fn [nd] (if (= :seon.db/eval-fact (:seon.render/schema nd))
                       (let [id (comp-id (:seon.render/eid nd) :chat)] [:chat (contains? (or open #{}) id)])
                       :chat))
-        tile-id tile-id]
+]
     {:seon.render/html
      [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4"}
       [:nav {:class "flex items-baseline gap-3"}
@@ -701,7 +701,7 @@
         rs (rows listed)
         on (take shown rs)
         older (- (count rs) (count on))
-        tile-id tile-id]
+]
     {:seon.render/html
      [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4"}
       [:nav {:class "flex items-baseline gap-3"}

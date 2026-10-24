@@ -148,9 +148,10 @@
 (defn- step-units
   "Run a layout's units, in the order the layout shows them, against what the view retained: a
   unit whose input is unchanged is skipped; one whose bytes are unchanged sends nothing; a new one
-  with a container is added to it, before what the container holds when a unit after it in the
-  layout is already there (a list's newest row), else after (a list's older rows, loaded as they
-  scroll into view). Answers [view' patch counts]."
+  with a container is added to it where the layout puts it: after the unit before it in its
+  container when one is held or placed in this patch and a unit after it is held (a part that sorts
+  into the middle), before what the container holds when none is before it (a list's newest row
+  at its top, a conversation's older parts), else at its end. Answers [view' patch counts]."
   {:malli/schema [:=> [:cat [:maybe :map] [:sequential :map]] [:tuple :map :map :map]]}
   [view units]
   (let [held (:units (or view {}))
@@ -159,18 +160,28 @@
                                   [(cond-> seen (and container (contains? held id)) (conj container))
                                    (assoc acc id (contains? seen container))])
                                 [#{} {}] (rseq (vec units))))]
-    (reduce (fn [[view patch n] {:keys [id input container] :as u}]
-              (let [old (get-in view [:units id])]
-                (if (and old (= input (:input old)))
-                  [view patch n]
-                  (let [html (render-unit u)
-                        view (assoc-in view [:units id] (cond-> {:input input :html html} container (assoc :container container)))]
-                    (cond
-                      (= html (:html old)) [view patch (update n :same inc)]
-                      (and container (nil? old)) [view (update patch (if (before? id) :prepends :appends) conj [container id]) (update n :rendered inc)]
-                      :else [view (update patch :frags conj [id html]) (update n :rendered inc)])))))
-            [(or view {}) {:frags [] :appends [] :prepends [] :removes []} {:rendered 0 :same 0}]
-            units)))
+    (first
+     (reduce (fn [[[view patch n] prev placed] {:keys [id input container] :as u}]
+               (let [old (get-in view [:units id])
+                     p (get prev container)
+                     prev (cond-> prev container (assoc container id))]
+                 (if (and old (= input (:input old)))
+                   [[view patch n] prev placed]
+                   (let [html (render-unit u)
+                         view (assoc-in view [:units id] (cond-> {:input input :html html} container (assoc :container container)))]
+                     (cond
+                       (= html (:html old)) [[view patch (update n :same inc)] prev placed]
+                       (and container (nil? old))
+                       ;; where it goes: after the unit before it (held, or placed after one), into the
+                       ;; prepend before it (a run of new units at the container's start), or at the end
+                       (let [how (cond (not (before? id)) :appends
+                                       (and p (not= :prepends (get placed p))) :afters
+                                       (and p (= :prepends (get placed p))) :prepends
+                                       :else :prepends)]
+                         [[view (update patch how conj (if (= :afters how) [p id] [container id])) (update n :rendered inc)] prev (assoc placed id how)])
+                       :else [[view (update patch :frags conj [id html]) (update n :rendered inc)] prev placed])))))
+             [[(or view {}) {:frags [] :appends [] :prepends [] :afters [] :removes []} {:rendered 0 :same 0}] {} {}]
+             units))))
 
 (defn compose
   "html with every slot marker replaced by its unit's retained HTML, recursively."
@@ -189,6 +200,8 @@
     [view (-> patch
               (update :appends (fn [as] (vec (for [[c el] as] [c (html el)]))))
               (update :prepends (fn [ps] (vec (for [[c group] (group-by first ps)] [c (apply str (map (comp html second) group))]))))
+              ;; a unit placed after its sibling: by the sibling's element id
+              (update :afters (fn [as] (vec (for [[sib el] as] [(str "#" sib) (html el)]))))
               (assoc :removes (vec gone)))]))
 
 ;;; --- a location's page ------------------------------------------------------------------------
@@ -280,8 +293,8 @@
                 (update :seon.render/nodes conj {:seon.render/kind :value :seon.render/value berr :seon.render/eid eid}))]
         (if (:seon.error/type w)
           w
-          (if (= :seon.db/agent-fact (get-in w [:seon.render/root :seon.render/schema]))
-            ;; an agent's page is its conversation; its sidebar root's agents, read on main
+          (if (= :chat (:seon.render/layout (contract/properties (get-in w [:seon.render/root :seon.render/schema]))))
+            ;; a page its entity's schema lays out as a conversation (an agent's); its sidebar root's agents, read on main
             (let [root (:db/id (d/entity db [:seon.root/id :root]))
                   sides (when root (for [nd (:seon.render/nodes (render/walk [db] root))
                                          :when (= :seon.db/agent-fact (:seon.render/schema nd))]
@@ -466,7 +479,7 @@
           [view patch] (finish-patch view patch (set (map :id units)))
           view (assoc view :skeleton (h/html (:seon.render/html out)))]
       [(-> (hold st view) (update-in [:counts :rendered] (fnil + 0) (:rendered n)) (update-in [:counts :same] (fnil + 0) (:same n)))
-       (when (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:removes patch)))
+       (when (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:afters patch)) (seq (:removes patch)))
          (assoc patch :op :patch :view view-id))]))))
 
 (defn page-html

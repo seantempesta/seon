@@ -35,6 +35,9 @@
  ;; an entity schema's units whose entities are part of its page (a schema property): their units
  ;; are walked one hop more and join the page's (an agent's run: its task, turns and messages)
  :seon.render/parts [:vector :keyword]
+ ;; how an entity schema's page is laid out (a schema property): :chat, its conversation (seon.render.ui/chat:
+ ;; an agent's); else the walk's list and tiles (seon.render.ui/page)
+ :seon.render/layout [:enum :page :chat]
  :seon.render/value :any
  ;; the schema of a node's value: its entity schema, or a value's attribute (absent: no entity schema names it)
  :seon.render/schema :qualified-keyword
@@ -97,8 +100,10 @@
  :seon.render/call [:map [:var :symbol] [:agent {:optional true} [:maybe :keyword]]
                     [:args {:optional true} [:maybe :map]] [:forms {:optional true} [:maybe :string]]]
  ;; what the render proc sends the web proc: per view, the fragments whose bytes changed
- ;; (element id -> html), the ones to remove, and the ones appended to a container
+ ;; (element id -> html), the ones to remove, the ones added at a container's end or start, and
+ ;; the ones placed after a sibling (#id -> html: a part that sorts into the middle)
  :seon.render/patch [:map [:view :any] [:frags [:vector [:tuple :string :string]]]
                      [:removes {:optional true} [:vector :string]]
                      [:appends {:optional true} [:vector [:tuple :string :string]]]
-                     [:prepends {:optional true} [:vector [:tuple :string :string]]]]}
+                     [:prepends {:optional true} [:vector [:tuple :string :string]]]
+                     [:afters {:optional true} [:vector [:tuple :string :string]]]]}

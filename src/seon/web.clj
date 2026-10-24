@@ -52,10 +52,12 @@
 (defn chunk-of
   "A render patch as one SSE chunk, serialized once for every tab of its view."
   {:malli/schema [:=> [:cat :seon.render/patch] :string]}
-  [{:keys [frags appends prepends removes]}]
+  [{:keys [frags appends prepends afters removes]}]
   (str (apply str (for [[_ html] frags] (patch-event html)))
        (apply str (for [[sel html] appends] (patch-event html sel "append")))
        (apply str (for [[sel html] prepends] (patch-event html sel "prepend")))
+       ;; after their siblings, once those are placed (in layout order)
+       (apply str (for [[sel html] afters] (patch-event html sel "after")))
        (apply str (for [id removes] (patch-event "" (str "#" id) "remove")))))
 
 ;;; --- UI calls ------------------------------------------------------------------------------
