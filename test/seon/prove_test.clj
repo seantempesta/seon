@@ -11,7 +11,9 @@
   [st msgs]
   (reduce (fn [[st outs] [in m]] (let [[st o] (prove/prove-proc st in m)] [st (into outs (:to-api o))])) [st []] msgs))
 
-(defn- req [rid branch t & [agent]] [:req (cond-> {:rid rid :branch branch :t t} agent (assoc :agent agent))])
+(defn- req
+  "A request for branch at tx t, the digest of what it reads moving with t (a change at each tx)."
+  [rid branch t & [agent]] [:req (cond-> {:rid rid :branch branch :t t :digest (str "d" t)} agent (assoc :agent agent))])
 (defn- asks [outs op] (filterv #(= op (get-in % [:req :op])) outs))
 (defn- answer-of [m r] [:answers {:tag (:tag m) :r r}])
 (defn- waiters-answered [outs] (sort (map :rid (filter #(= :prove-answer (:op %)) outs))))
@@ -41,11 +43,22 @@
       (testing "the key again after its run: answered at once, nothing runs"
         (let [[_ o] (feed st [(req 4 :main 5)])]
           (is (= [4] (waiters-answered o)))
-          (is (empty? (filter :req o)))))
-      (testing "main at the tx the run's own results were written at is the same run, not a new one"
-        (let [[_ o] (feed st [(req 5 :main 6)])]
-          (is (= [5] (waiters-answered o)))
           (is (empty? (filter :req o))))))))
+
+(deftest a-run-is-keyed-by-what-it-reads
+  ;; seon.root/prove! and seon.agent/prove! name the digest of what the run reads: a branch's tx
+  ;; moves with any write, the run's own facts, its prove agent's end and the eval that asked among them
+  (let [main (fn [rid t digest] [:req {:rid rid :branch :main :t t :digest digest}])
+        [st outs] (feed (prove/prove-proc {}) [(main 1 5 "d0")])
+        [st _] (run-through st outs test-run-answer)]
+    (testing "main at a later tx, nothing it reads changed: the ended run's answer, nothing runs"
+      (let [[_ o] (feed st [(main 2 9 "d0")])]
+        (is (= [2] (waiters-answered o)))
+        (is (empty? (filter :req o)))))
+    (testing "a change to the code or the tests moves the digest: a new run"
+      (let [[_ o] (feed st [(main 3 9 "d1")])]
+        (is (empty? (waiters-answered o)))
+        (is (= 1 (count (asks o :spawn))))))))
 
 (deftest a-session-and-an-agents-turn-for-one-digest-are-one-run
   ;; the session's seon_prove for agent a3's branch at tx 7, and a3's turn asking for the same
@@ -120,8 +133,9 @@
 
 (deftest a-session-and-an-agents-turn-for-one-digest-end-in-one-run
   ;; a real root and agent a1. The agent's turn asks the service (seon.agent/prove!, what
-  ;; seon.turn/observe calls) while a session asks for the same branch at the same tx
-  ;; (seon.root/prove!, the server's :prove op / seon_prove): the service runs it once, for both.
+  ;; seon.turn/observe calls) while a session asks for the same branch's head (seon.root/prove!,
+  ;; the server's :prove op / seon_prove): the service runs it once, for both, and once more for a
+  ;; session asking after the eval that asked recorded itself (the tx moved, nothing the run reads did).
   (let [code (str "(let [ap (c/submit! sys :a1 \"(select-keys (seon.agent/prove!) [:key :pass :fail :error])\" {:origin :outside})"
                   "      sp (c/prove! sys :a1)"
                   "      s (select-keys @sp [:key :pass :fail :error])"
@@ -132,8 +146,8 @@
         [r] (at/in-agent [{:op :eval :agent "root" :code code}])
         v (clojure.edn/read-string (clojure.edn/read-string (:printed r)))]
     (is (map? v) (pr-str r))
-    (is (re-find #"@\d+!turn$" (:key (:session v))) "the key is the agent's branch at its tx")
-    (is (= (:key (:session v)) (:key (:again v))) "asked again at the same tx: the same run's answer")
+    (is (re-find #"@[0-9a-f]+!turn$" (:key (:session v))) "the key is the agent's branch at the digest of its program")
+    (is (= (:key (:session v)) (:key (:again v))) "asked again, nothing the run reads changed: the same run's answer")
     (is (re-find (re-pattern (java.util.regex.Pattern/quote (:key (:session v)))) (:agent v)) "the agent's turn got the same run")
     (is (= [(:key (:session v))] (:runs v)) "ONE run fact for the three askers")))
 
@@ -210,7 +224,7 @@
 
 (deftest a-request-naming-other-tests-never-takes-over-a-pending-run
   (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :main 1)])
-        names (fn [rid ns] [:req {:rid rid :branch :main :t 2 :names ns}])
+        names (fn [rid ns] [:req {:rid rid :branch :main :t 2 :digest "d2" :names ns}])
         [st more] (feed st [(names 2 '#{a.x-test}) (names 3 '#{a.y-test}) (names 4 '#{a.x-test})])]
     (is (empty? more))
     (is (= 2 (count (:next st))) "two slots pending: the namespaces named differ")

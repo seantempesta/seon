@@ -435,14 +435,15 @@
 (defn prove!
   "Ask the test service (seon.prove) to prove this branch at its head, and wait for its answer:
   the run's (run-tests-forked's answer, with :key). The service runs one run per key whoever
-  asks, so a session's request for this branch at this tx and this ask are one run; when it is
+  asks, the key naming what the run reads (seon.program/program-digest of this branch, as
+  seon.root/prove! takes it of the same head), so a session's request for this branch and this ask are one run; when it is
   this agent's to run, root's :tests request arrives while it waits and is taken here. Other
   messages wait for the loop. :dead when root is gone (the process then ends)."
   {:malli/schema [:=> [:cat] :map]}
   []
   (commit!)
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
-    (when (= :dead (send! {:op :prove :k k :t (:max-tx (db)) :mode :turn})) (lib/c-exit 0))
+    (when (= :dead (send! {:op :prove :k k :t (:max-tx (db)) :digest (program/program-digest (db)) :mode :turn})) (lib/c-exit 0))
     (loop []
       (let [m (recv-raw!)]
         (cond (= m :dead) (lib/c-exit 0)

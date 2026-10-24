@@ -387,7 +387,7 @@
       ;; the test service (seon.prove): the request goes to its proc, the caller (a session, or an
       ;; agent's turn through its proc) is answered when the run it joined ends
       :prove (let [[st rid] (pend st p :prove (:agent m))]
-               (step/out! o [:prove :req] (assoc (select-keys m [:branch :t :agent :proofs :names :mode]) :rid rid))
+               (step/out! o [:prove :req] (assoc (select-keys m [:branch :t :digest :agent :proofs :names :mode]) :rid rid))
                st)
       :kill (cond-> (if (get-in st [:agents id])
                       ;; :ended when root stops it because its run ended (the reconciler says so)
@@ -1018,8 +1018,10 @@
   ([sys agent-id ticks] (request! sys 'run-tests! agent-id {:ticks ticks})))
 
 (defn prove!
-  "Ask the test service (seon.prove) to prove a branch at a tx: agent id's own branch at its head,
-  or main (agent nil) at its head (an agent's branch is proved as its turn proves it, mode :turn, so a session's request and the agent's turn are one run; main as the judge does), the tests of namespaces names (a set of symbols; none: all it selects). A promise of the run's answer ({:key :ran :pass :fail :error
+  "Ask the test service (seon.prove) to prove a branch at its head, keyed by the digest of what
+  its run reads: agent id's own branch, its program (seon.program/program-digest, as its turn's
+  seon.agent/prove! takes it); main (agent nil), the checkout's seon.fx/inputs (its tests come
+  from there) and main's program (an agent's branch is proved as its turn proves it, mode :turn, so a session's request and the agent's turn are one run; main as the judge does), the tests of namespaces names (a set of symbols; none: all it selects). A promise of the run's answer ({:key :ran :pass :fail :error
   :red :reports ...}), the same run for every asker of that key: a session here, and the agent's
   turn."
   {:malli/schema [:function [:=> [:cat :seon.root/sys [:maybe :seon.agent/id]] :seon.host/promise]
@@ -1027,7 +1029,15 @@
   ([sys agent-id] (prove! sys agent-id #{}))
   ([sys agent-id names]
   (if-let [b (if agent-id (get-in @(call! sys {:op :state}) [:agents agent-id :branch]) (pdb/conn-main (:conn sys)))]
-    (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx (pdb/head (:conn sys) b)) :mode (if agent-id :turn :judge)} agent-id (assoc :agent agent-id) (seq names) (assoc :names names)))
+    (let [db (pdb/head (:conn sys) b)
+          ;; main's key is what its run reads: the checkout (its tests, files and env: seon.fx/inputs,
+          ;; through the :source read with no dirs) and main's program; a write of data moves neither
+          in (when-not agent-id @(call! sys {:op :fx :kind :source :req {:root (cfg/checkout) :dirs [] :binary-tree (str (cfg/checkout) "/target/seon.tree")}}))]
+      (if (contract/error? in)
+        (doto (promise) (deliver in))
+        (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx db) :mode (if agent-id :turn :judge)
+                            :digest (if in (err/digest (sedn/encode [(select-keys (:inputs in) [:tree :env]) (program/program-digest db)])) (program/program-digest db))}
+                     agent-id (assoc :agent agent-id) (seq names) (assoc :names names)))))
     (doto (promise) (deliver (absent (get-in @(call! sys {:op :state}) [:agents agent-id]) agent-id))))))
 
 (defn- write! {:malli/schema [:=> [:cat :seon.root/sys :seon.writer/request] :seon.host/promise]}
