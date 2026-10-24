@@ -405,7 +405,7 @@
   (let [[end msgs] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#calls\" :max-turns 2})"
                               (str "(let [db (seon.agent/db)]"
                                    " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task \"demo/t\" :run \"demo/t#calls\""
-                                   "                                       :turn 2 :max-turns 2 :origin :model :observed {}}))"
+                                   "                                       :turn 2 :max-turns 2 :origin :model :observed {} :agent (:key @seon.agent/state)}))"
                                    "      (filter #(#{\"assistant\" \"tool\"} (:role %))) (mapv #(select-keys % [:role :tool-calls :tool-call-id :content]))))")]
                              {:sets [":seon.config.ai/script=seon.fixtures/two-calls"]})
         end (:value end)
@@ -565,7 +565,9 @@
     (is (= [["owner" "demo/t#1" "use demo/g"]] (mapv #(subvec % 1) facts)) "one fact on main: from the owner, to the run a1 works")
     (is (= [mid] ids) "the turn's basis names the fact root wrote, by its id")
     (is (= [{:id mid :from "owner" :body "use demo/g"}] committed) "and its text is read from the commit the turn read")
-    (is (= "check the sum before the proof" reply) "the reply's prose, the turn's")
+    ;; the prose comes in the eval call (its first argument, notes/design-agent-view-2026-10-24.md
+    ;; section 1), so the reply's own text is empty and the prose is the eval's
+    (is (= "" reply) "the reply's text: the prose came in its call")
     (is (string? (:eval (first calls))) (str "the call names its one eval: " (pr-str calls)))
     (is (= ["check the sum before the proof"] prose) "whose record keeps the prose beside it")))
 
