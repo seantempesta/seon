@@ -6,10 +6,14 @@
 {:seon.render/face [:enum :ai :html]
  ;; how a value is shown: in one line, as the page's main pane, a tile of its column, a row of its
  ;; list (an entity schema's {:seon.render/as :row} puts its entities in the page's list, newest first)
- :seon.render/as [:enum :inline :block :tile :row]
+ ;; :page, the whole page of the entity (opts :walk, its walk, and :dbs): a view that answers a layout
+ ;; ({:seon.render/html :seon.render/units}) lays out its entity's page (an agent's, its conversation)
+ :seon.render/as [:enum :inline :block :tile :row :page]
  ;; a render's props (its second argument), every one optional: like React's, a render that
  ;; does not care about one ignores it
  :seon.render/opts [:map
+                    ;; shown :as :page: the page's walk, its dbs and its tab's state (seon.render.proc/page-value)
+                    [:page {:optional true} :map]
                     ;; the face (:html, the default, or :ai), when rendering through seon.render/render
                     [:face {:optional true} :seon.render/face]
                     ;; the room it is shown in: one line (a chat stream, a table cell), a full panel
@@ -35,9 +39,6 @@
  ;; an entity schema's units whose entities are part of its page (a schema property): their units
  ;; are walked one hop more and join the page's (an agent's run: its task, turns and messages)
  :seon.render/parts [:vector :keyword]
- ;; how an entity schema's page is laid out (a schema property): :chat, its conversation (seon.render.ui/chat:
- ;; an agent's); else the walk's list and tiles (seon.render.ui/page)
- :seon.render/layout [:enum :page :chat]
  :seon.render/value :any
  ;; the schema of a node's value: its entity schema, or a value's attribute (absent: no entity schema names it)
  :seon.render/schema :qualified-keyword

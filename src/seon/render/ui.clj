@@ -673,6 +673,20 @@
                                    {:id (tile-id t) :comp [(:seon.render/db t 0) (:seon.render/eid t) :tile] :container "#p-tiles"}
                                    {:id (tile-id t) :input t :schema :seon.render/page-tile :container "#p-tiles"}))))}))
 
+(defn agent
+  "An agent's view (the declared html render of :seon.db/agent-fact). Shown as its page (:as :page,
+  opts :page {:walk :dbs ...}): its conversation (chat), its sidebar root's agents, read on main;
+  at any other size, its value by the one printer."
+  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
+  [v opts]
+  (if-let [{:keys [walk dbs] :as page} (when (= :page (:as opts)) (:page opts))]
+    (let [main (first dbs)
+          root (:db/id (d/entity main [:seon.root/id :root]))]
+      (chat walk (assoc page :sides (vec (when root (for [nd (:seon.render/nodes (render/walk [main] root))
+                                                          :when (= :seon.db/agent-fact (:seon.render/schema nd))]
+                                                      {:eid (:seon.render/eid nd) :db 0}))))))
+    (render/print-html v opts)))
+
 (defn root-input
   "Root's input at the top of its page: spawn agents (seon.root/spawn!), or evaluate forms in
   every live agent (seon.root/submit! to :all)."

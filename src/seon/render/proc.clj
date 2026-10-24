@@ -272,7 +272,8 @@
                           " /walk/<its eid>, linked from its root's page")
                      {:view (ui/kname view)})
      eid
-      (let [w (render/walk (into [db] (keep identity) [(get-in st [:branches view :db])]) eid)
+      (let [dbs (into [db] (keep identity) [(get-in st [:branches view :db])])
+            w (render/walk dbs eid)
             agent (get-in w [:seon.render/root :seon.render/value])
             task (some #(when (= :seon.task/task-fact (:seon.render/schema %)) (:seon.render/value %)) (:seon.render/nodes w))
             input (cond (= :root view) {:schema :seon.render/root-input :value {}}
@@ -293,15 +294,13 @@
                 (update :seon.render/nodes conj {:seon.render/kind :value :seon.render/value berr :seon.render/eid eid}))]
         (if (:seon.error/type w)
           w
-          (if (= :chat (:seon.render/layout (contract/properties (get-in w [:seon.render/root :seon.render/schema]))))
-            ;; a page its entity's schema lays out as a conversation (an agent's); its sidebar root's agents, read on main
-            (let [root (:db/id (d/entity db [:seon.root/id :root]))
-                  sides (when root (for [nd (:seon.render/nodes (render/walk [db] root))
-                                         :when (= :seon.db/agent-fact (:seon.render/schema nd))]
-                                     {:eid (:seon.render/eid nd) :db 0}))]
-              (ui/chat w {:shown (get-in st [:shown view] (history-cap)) :view (ui/view-param view) :input input
-                          :open (get-in st [:open view] #{}) :sides (vec sides)}))
-            (ui/page w {:shown (get-in st [:shown view] (history-cap)) :view (ui/view-param view) :input input})))))))
+          ;; the entity's own view, shown as its page: a view that answers a layout lays it out (an
+          ;; agent's, its conversation); any other entity's page is the walk's (seon.render.ui/page)
+          (let [opts {:shown (get-in st [:shown view] (history-cap)) :view (ui/view-param view) :input input}
+                {:seon.render/keys [value schema]} (:seon.render/root w)
+                own (when (render/declared schema :html)
+                      (render/html value {:as :page :schema schema :page (assoc opts :walk w :dbs dbs :open (get-in st [:open view] #{}))}))]
+            (if (and (map? own) (:seon.render/units own)) own (ui/page w opts))))))))
 
 (defn- ready?
   "Is view's page whole to answer: rendered, and, when its entity is an agent with a branch, that

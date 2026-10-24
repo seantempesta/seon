@@ -139,7 +139,7 @@
                      [:seon.eval/record :seon.eval/record]]
  ;; an entity's units (seon.render/walk): the neighbours a view of it shows, one hop, as pull's
  ;; attributes (a leading _ the reverse ref), each rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] :seon.render/units [:seon.run/_agent :seon.eval/_agent] :seon.render/parts [:seon.run/_agent] :seon.render/layout :chat}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] :seon.render/units [:seon.run/_agent :seon.eval/_agent] :seon.render/parts [:seon.run/_agent] :seon.render/html seon.render.ui/agent}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/id {:optional true} :seon.agent/id]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status] [:seon.agent/pid {:optional true} :seon.agent/pid]
