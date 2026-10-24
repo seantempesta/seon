@@ -420,23 +420,28 @@
 
 (declare render story)
 
-(defn sent-messages
-  "The messages turn entity e on db sent, from the records its :seon.turn/sent names, each by
-  its own render: the help page's section as of its t (help-text), the task's run sections as
-  of its t (run-state), an eval or message by its :seon.render/ai render, the history note by
-  its count. No request is built again: the same records, rendered. nil for a turn that
-  recorded none."
-  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe [:vector :seon.model/message]]]}
+(defn sent-parts
+  "What turn entity e on db sent, from the records its :seon.turn/sent names: each ref beside its
+  messages, each record by its own render: the help page's section as of its t (help-text), the
+  task's run sections as of its t (story), an eval or message by its :seon.render/ai render, the
+  history note by its count. No request is built again: the same records, rendered. nil for a
+  turn that recorded none."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe [:vector [:tuple :any [:vector :seon.model/message]]]]]}
   [db e]
   (when-let [sent (:seon.turn/sent (d/pull db [:seon.turn/sent] e))]
-    (vec (mapcat (fn [[kind x t]]
-                   (case kind
-                     :section [{:role "system" :content (help-text (d/as-of db t))}]
-                     :task [{:role "user" :content (story db x t)}]
-                     :eval (ai-messages (d/pull db [:seon.eval/id :seon.eval/by :seon.eval/record] [:seon.eval/id x]) :seon.db/eval-fact)
-                     :message (ai-messages (d/pull db [:seon.message/id :seon.message/from :seon.message/body] [:seon.message/id x]) :seon.message/fact)
-                     :history [{:role "user" :content (pr-str {:history {:left-out x}})}]))
-                 sent))))
+    (mapv (fn [[kind x t :as ref]]
+            [ref (case kind
+                   :section [{:role "system" :content (help-text (d/as-of db t))}]
+                   :task [{:role "user" :content (story db x t)}]
+                   :eval (ai-messages (d/pull db [:seon.eval/id :seon.eval/by :seon.eval/record] [:seon.eval/id x]) :seon.db/eval-fact)
+                   :message (ai-messages (d/pull db [:seon.message/id :seon.message/from :seon.message/body] [:seon.message/id x]) :seon.message/fact)
+                   :history [{:role "user" :content (pr-str {:history {:left-out x}})}])])
+          sent)))
+
+(defn sent-messages
+  "The messages turn entity e on db sent (sent-parts, in order), nil for a turn that recorded none."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe [:vector :seon.model/message]]]}
+  [db e] (some->> (sent-parts db e) (into [] (mapcat second))))
 
 (defn turn-text
   "What the reader of turn entity e on db got (reader-text), from the records it sent (sent-messages)."
@@ -509,6 +514,6 @@
         task-e (pdb/eid db :seon.task/id task)
         r (request a {:db db :basis basis :block block :help (help-text db)
                       :run (when (seq prev) (story db task-e story-t))
-                      :help-ref [:section (pdb/eid db :seon.section/address help-page) (:max-tx db)]
+                      :help-ref [:section (docs/page-top db help-page) (:max-tx db)]
                       :run-ref [:task task-e story-t]})]
     {:block block :messages (:messages r) :sent (:sent r)}))

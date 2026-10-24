@@ -85,6 +85,12 @@
  ;; ---- the parts of a page (seon.render.ui/page): each unit's input, its render declared here ----
  ;; (a unit names its input's schema, never a render function: docs/render.md#the-page-is-units)
  ;; the entity a page is of, its main pane
+ ;; a model turn's request as it recorded it, for the debug page (seon.render.proc/debug-value):
+ ;; each part [ref messages] beside the record that made it, and the turn's usage
+ :seon.render/sent-request [:map {:seon.render/html seon.render.ui/sent-request} [:turn :int] [:run :string]
+                            [:parts [:vector [:tuple :any [:vector :seon.model/message]]]]
+                            [:seon.turn/tokens {:optional true} :int] [:seon.turn/cache-hit-tokens {:optional true} :int]
+                            [:seon.turn/cache-miss-tokens {:optional true} :int]]
  :seon.render/page-head [:and {:seon.render/html seon.render.ui/head} :seon.render/node]
  ;; one row of its list: a turn and the evaluations it ran, or one evaluation or message
  :seon.render/page-row [:vector {:seon.render/html seon.render.ui/row :min 1} :seon.render/node]

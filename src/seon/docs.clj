@@ -190,15 +190,21 @@
                    (and text (= :code depth)) (assoc :seon.ref/text text))
                  depth))))
 
+(defn page-top
+  "The entity of the page at path's own section (the one with no parent), or nil."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe pos-int?]]}
+  [db path]
+  (d/q '[:find ?e . :in $ ?pre :where [?e :seon.section/address ?a] [(clojure.string/starts-with? ?a ?pre)]
+         (not [?e :seon.section/parent _])]
+       db (str path "#")))
+
 (defn page
   "The page at path as db holds it, its sections in the order the wiki was written (as view
   shows the sections below): each its address, heading, level (1 for the page's own), lead
   and own text; nil when db holds no section of it."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe [:vector [:map [:address :string] [:heading :string] [:level pos-int?]]]]]}
   [db path]
-  (when-let [top (d/q '[:find ?e . :in $ ?pre :where [?e :seon.section/address ?a] [(clojure.string/starts-with? ?a ?pre)]
-                        (not [?e :seon.section/parent _])]
-                      db (str path "#"))]
+  (when-let [top (page-top db path)]
     (letfn [(walk [e level]
               (let [{:seon.section/keys [address heading lead text]}
                     (d/pull db [:seon.section/address :seon.section/heading :seon.section/lead :seon.section/text] e)]

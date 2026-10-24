@@ -590,6 +590,7 @@
       (let [[db [r0 r1] [e0 e1]] (sent-turns conn)
             sent #(:seon.turn/sent (d/pull db [:seon.turn/sent] %))]
         (is (= [:section :task :eval] (mapv first (sent e0))) "turn 0: the help page, the task story, the screen eval")
+        (is (every? pos-int? (map second (take 2 (sent e0)))) "the help page's own section and the task, by entity")
         (is (= [:section :task :eval :eval] (mapv first (sent e1))) "turn 1: then its call's eval, then the screen eval")
         (is (= (second (sent e0)) (second (sent e1))) "the task story is the run's first turn's: the same task as of the same t")
         (is (= r0 (context/sent-messages db e0)) "turn 0's messages, read from its records")

@@ -29,7 +29,7 @@
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile]
-            [seon.config :as config] [seon.step :as step]))
+            [seon.config :as config] [seon.step :as step] [seon.context :as context]))
 
 (defn- event-cap "Events the stream keeps (:seon.config.render.list/stream)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/stream))
 (defn- history-cap "Rows a page renders at first, and more each time its list's end scrolls into view (:seon.config.render.list/history)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/history))
@@ -203,7 +203,8 @@
   (no boot fact yet, or no agent of that id in this boot)."
   {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe pos-int?]]}
   [db view]
-  (cond (= :root view) (:db/id (d/entity db [:seon.root/id :root]))
+  (cond (vector? view) (location db (second view))
+        (= :root view) (:db/id (d/entity db [:seon.root/id :root]))
         (keyword? view) (when-let [boot (boot-of db)] (:db/id (d/entity db [:seon.agent/key (task/agent-key boot view)])))
         :else view))
 
@@ -215,6 +216,24 @@
   ;; e an entity of main (its key: a walk shows only an agent's relevant attributes)
   (let [id (:seon.agent/id e) boot (boot-of db)]
     (when (and id boot (= (:seon.agent/key e) (task/agent-key boot id))) id)))
+
+(defn- debug-value
+  "View [:debug id]'s page: what agent id's model was sent, each model turn that recorded it
+  (:seon.turn/sent) on its branch as this proc last read it, read back from those records
+  (seon.context/sent-parts), with the turn's usage; newest first. A turn is written once, so a
+  turn this view holds keeps its input and is not read again. nil until the branch is read."
+  {:malli/schema [:=> [:cat :map [:tuple [:= :debug] :any]] [:maybe :map]]}
+  [st view]
+  (when-let [bdb (get-in st [:branches view :db])]
+    (let [held (get-in st [:views view :units])
+          ts (->> (d/q '[:find ?e ?n ?r :where [?e :seon.turn/sent _] [?e :seon.turn/n ?n] [?e :seon.turn/run ?ru] [?ru :seon.run/id ?r]] bdb)
+                  (sort-by (fn [[e n r]] [r n e])) reverse)]
+      (ui/debug (second view)
+                (vec (for [[e n r] ts :let [id (str "d-" e)]]
+                       {:id id
+                        :input (or (:input (get held id))
+                                   (merge (d/pull bdb [:seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens] e)
+                                          {:turn n :run r :parts (context/sent-parts bdb e)}))}))))))
 
 (defn- page-value
   "View's page: the entity it names walked on main and, for an agent, its branch as this proc last
@@ -228,6 +247,7 @@
   (let [db (:main-db st)
         eid (when db (location db view))]
     (cond
+     (and eid (vector? view)) (debug-value st view)
      (and db (nil? eid))
      (contract/error :seon.render/no-location `page-value
                      (str "no " (if (keyword? view) (str "agent " (ui/kname view) " in root's boot " (boot-of db)) (ui/kname view))

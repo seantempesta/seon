@@ -118,10 +118,12 @@
 
 (defn- view-of
   "The view a path names, each a location the render proc resolves to an entity on main: :root, an
-  agent's id in root's boot (a keyword), or an entity's id (a number)."
+  agent's id in root's boot (a keyword), or an entity's id (a number); `<view>/debug` is
+  [:debug view], what that agent's model was sent (design section 5, two pages, two audiences)."
   {:malli/schema [:=> [:cat [:maybe :string]] :any]}
   [s]
-  (cond (or (str/blank? s) (= "root" s)) :root
+  (cond (some->> s (re-matches #".+/debug")) [:debug (view-of (subs s 0 (- (count s) 6)))]
+        (or (str/blank? s) (= "root" s)) :root
         (re-matches #"\d+" s) (parse-long s)
         :else (keyword s)))
 
@@ -209,7 +211,9 @@
   [view body]
   (when body
     (str "<!doctype html>"
-         (h/html (ui/shell (if (= :root view) "Seon on Jolt · root" (str "Seon on Jolt · " (ui/kname view)))
+         (h/html (ui/shell (cond (= :root view) "Seon on Jolt · root"
+                                 (vector? view) (str "Seon on Jolt · " (ui/kname (second view)) " · what its model was sent")
+                                 :else (str "Seon on Jolt · " (ui/kname view)))
                            (str "/feed?view=" (ui/view-param view))
                            (h/raw body))))))
 

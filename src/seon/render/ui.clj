@@ -34,7 +34,10 @@
   "A view as its feed's ?view= names it (view-of reads it back)."
   {:malli/schema [:=> [:cat :any] :string]}
   [view]
-  (java.net.URLEncoder/encode ^String (cond (= :root view) "root" (keyword? view) (name view) :else (str view)) "UTF-8"))
+  (java.net.URLEncoder/encode ^String (cond (= :root view) "root" (keyword? view) (name view)
+                                            ;; [:debug v]: what agent v's model was sent (seon.web/view-of)
+                                            (vector? view) (str (java.net.URLDecoder/decode (view-param (second view)) "UTF-8") "/debug")
+                                            :else (str view)) "UTF-8"))
 
 (defn kname
   "A keyword's name with its namespace (:fx/model -> \"fx/model\"), \"–\" for nil, else as
@@ -381,6 +384,7 @@
   {:malli/schema [:=> [:cat :seon.render/agent-input :seon.render/opts] :any]}
   [{:keys [id live? held]} opts]
   [:section {:id (:unit opts) :class "flex flex-col gap-2"}
+   [:a {:class "text-xs text-text-400 underline" :href (str "/agent/" (kname id) "/debug")} "what its model was sent →"]
    (if live?
      [:form {:class "flex gap-2" :seon/call 'seon.root/submit! :seon/agent id}
       [:span {:class "text-signal"} (str (kname id) "=>")]
@@ -591,3 +595,66 @@
                   [{:id (str "p-more-" (count on)) :input {:older older :view view} :schema :seon.render/page-more :container "#p-foot"}]
                   (for [t tiles] {:id (tile-id t) :input t :schema :seon.render/page-tile :container "#p-tiles"})))}))
 
+;;; --- the debug page: what each turn sent, from its records ---------------------------------------
+
+(defn debug
+  "Agent id's debug page laid out: each model turn's request as it recorded it (turns: units,
+  newest first, each a :seon.render/sent-request input), a link back to its page. The render
+  proc renders a turn's unit once: a turn is written once."
+  {:malli/schema [:=> [:cat :any [:vector :map]] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
+  [id turns]
+  {:seon.render/html
+   [:div {:id "app" :class "mx-auto flex max-w-screen-lg flex-col gap-3 p-3 sm:p-4"}
+    [:nav {:class "flex items-baseline gap-3"}
+     [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:a {:href (str "/agent/" (kname id)) :class "text-text-400 underline"} (str "← " (kname id) "'s page")]]
+    [:h1 {:class "text-sm text-text-200"} (str "What " (kname id) "'s model was sent, each turn as it recorded it, newest first")]
+    (if (seq turns)
+      [:ol {:id "d-turns" :class "flex flex-col gap-3"} (for [u turns] (slot (:id u)))]
+      [:p {:class "text-text-500"} "no model turn recorded what it sent yet"])]
+   :seon.render/units (mapv #(assoc % :schema :seon.render/sent-request :container "#d-turns") turns)})
+
+(defn- source
+  "What made part ref of a sent request, as a line: the help page or the task as of a t, an eval,
+  a message, the history the budget left out."
+  {:malli/schema [:=> [:cat :any] :string]}
+  [[kind x t]]
+  (case kind
+    :section (str "the help page (its section, entity " x ") as of t " t)
+    :task (str "the task story: task entity " x "'s run sections as of t " t)
+    :eval (str "eval " x)
+    :message (str "message " x)
+    :history (str x " earlier records the history budget left out")))
+
+(defn sent-request
+  "A model turn's request as it recorded it (the declared html render of :seon.render/sent-request):
+  its turn, tokens and the share its provider served from cache, then each part in order beside
+  the record that made it, each message whole: the system prompt and the task story folded, an
+  assistant message's prose, reasoning (folded) and eval calls, a tool message under the call it
+  answers, the screen's evals as user messages. input {:turn :run :parts [[ref messages]]} and the
+  turn's usage (:seon.turn/tokens, cache-hit and cache-miss tokens)."
+  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
+  [{:keys [turn run parts] :seon.turn/keys [tokens cache-hit-tokens cache-miss-tokens]} opts]
+  (let [prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
+        text (fn [s] [:pre {:class "whitespace-pre-wrap break-words text-text-100"} s])
+        fold (fn [label s] [:details [:summary {:class "text-2xs text-text-500"} (str label ", " (count s) " characters")] (text s)])
+        msg (fn [{:keys [role content reasoning tool-calls tool-call-id]}]
+              [:div {:class (str "flex flex-col gap-1 rounded border-l-2 pl-2 py-1 "
+                                 (case role "assistant" "border-signal" "tool" "border-base-600" "user" "border-text-400" "border-base-700"))}
+               [:div {:class "text-2xs uppercase text-text-500"} role (when tool-call-id (str " · answers " tool-call-id))]
+               (when reasoning (fold "reasoning" reasoning))
+               (when-not (str/blank? content) (if (= "system" role) (fold "the help page" content) (text content)))
+               (for [{:keys [id code prose]} tool-calls]
+                 [:div {:class "flex flex-col gap-1"}
+                  [:div {:class "text-2xs text-text-500"} (str "eval call " id)]
+                  (when prose [:p {:class "whitespace-pre-wrap italic text-text-300"} prose])
+                  [:pre {:class "whitespace-pre-wrap break-words text-text-100"} [:code code]]])])]
+    [:li {:id (:unit opts) :class "flex flex-col gap-2 rounded-md bg-base-900 p-3 text-xs"}
+     [:div {:class "flex flex-wrap items-baseline gap-3"}
+      [:b {:class "text-signal"} (str "turn " (inc turn))] [:span {:class "text-text-400"} run]
+      (when tokens [:span {:class "tabular-nums text-text-400"} (str (group3 tokens) " tokens")])
+      (when (and prompt (pos? prompt)) [:span {:class "tabular-nums text-text-400"} (str (group3 cache-hit-tokens) " of " (group3 prompt) " prompt tokens cached (" (long (* 100 (/ cache-hit-tokens prompt))) "%)")])
+      [:span {:class "text-text-500"} (str (reduce + (map (comp count second) parts)) " messages")]]
+     (for [[ref ms] parts]
+       [:div {:class "grid gap-2 sm:grid-cols-[12rem_minmax(0,1fr)]"}
+        [:div {:class "text-2xs text-text-500 break-words"} (source ref)]
+        (into [:div {:class "flex flex-col gap-1 min-w-0"}] (map msg ms))])]))

@@ -7,7 +7,7 @@
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.render.proc :as p]
             [seon.web.html :as h] [seon.config] [seon.docs] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
-            [seon.fx] [seon.source] [seon.program] [seon.web] [seon.turn] [seon.model] [seon.problems]))
+            [seon.fx] [seon.source] [seon.program] [seon.web] [seon.context-test] [seon.turn] [seon.model] [seon.problems]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -698,6 +698,58 @@
         (is (nil? (get-in st2 [:branches :a3])))
         (is (nil? (get-in st2 [:shown :a3])))
         (is (= st2 (first (#'p/render-proc st2 :from-web {:op :more :view :a3}))) "and its end scrolling into view asks for nothing")))))
+
+(defn- debug-state
+  "The render proc's state holding agent a1's debug page: context-test's two model turns (each
+  recorded what it sent), root's boot b whose agent a1 is, main and the branch the same db."
+  [conn]
+  (let [[db sent [e0 e1]] (#'seon.context-test/sent-turns conn)
+        db (d/db-with db [{:seon.root/id :root :seon.root/boot "b"} {:seon.agent/key "b/a1" :seon.agent/id :a1}])]
+    [{:rid 1 :pending {} :watch #{[:debug :a1]} :waiting {} :kf-wanted #{} :views {} :main-db db
+      :branches {[:debug :a1] {:db db}} :view {:agents {}}}
+     sent [e0 e1]]))
+
+(deftest the-debug-page-shows-what-each-turn-sent
+  ;; task seon.context/a-turn-records-what-it-sent (B): /agent/{id}/debug renders each model turn's
+  ;; recorded parts, read from its records (no request built again); a turn's messages there are
+  ;; the ones it sent, and their wire body the one the provider got
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[st [r0 r1]] (debug-state conn)
+            {:seon.render/keys [units]} (#'p/page-value st [:debug :a1])
+            provider {:kind :openai-compat :base-url "https://api.example" :model "deepseek-flash" :api-key-env "NONE" :max-tokens 2048}
+            body #(seon.model/request-body provider {:messages % :task "demo/f" :turn 1})
+            messages (fn [u] (vec (mapcat second (get-in u [:input :parts]))))
+            [st' _] (#'p/pass-view st [:debug :a1])
+            html (p/page-html st' [:debug :a1])]
+        (is (= ["d-" "d-"] (mapv #(subs (:id %) 0 2) units)) "one row a model turn")
+        (is (= [1 0] (mapv #(get-in % [:input :turn]) units)) "newest first")
+        (is (= r1 (messages (first units))) "turn 1's messages as it sent them")
+        (is (= r0 (messages (second units))))
+        (is (= (body r1) (body (messages (first units)))) "the wire body the provider got, as data")
+        (is (str/includes? html "eval e2") "each part beside the record that made it")
+        (is (str/includes? html "the task story") "the task story's source")
+        (is (str/includes? html "I call f.") "the call's prose")
+        (is (= [:debug :a1] (#'seon.web/view-of (java.net.URLDecoder/decode (ui/view-param [:debug :a1]) "UTF-8"))) "its feed names it, and reads it back")
+        (is (= [:debug :a1] (#'seon.web/view-of "a1/debug")) "/agent/a1/debug")))))
+
+(deftest a-new-turn-is-one-new-row
+  ;; a turn is written once: a pass after a new turn renders only its row
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[st _] (debug-state conn)
+            [st1 _] (#'p/pass-view st [:debug :a1])
+            db (get-in st1 [:branches [:debug :a1] :db])
+            b {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn 2 :max-turns 4 :origin :model
+               :observed {:results {} :test-run-errors [] :reds [] :reasons []} :screen ["e3"] :agent "b/a1"}
+            db' (d/db-with db [{:seon.turn/id "demo/f#1/2" :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/n 2 :seon.turn/origin :model
+                                :seon.turn/basis b :seon.turn/sent (:sent (seon.context/render db b))
+                                :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 0 :seon.turn/ms 1}])
+            [st2 patch] (#'p/pass-view (assoc-in st1 [:branches [:debug :a1] :db] db') [:debug :a1])]
+        (is (= 2 (get-in st1 [:counts :rendered])) "the first pass renders both turns")
+        (is (= 3 (get-in st2 [:counts :rendered])) "the next renders the new turn alone")
+        (is (empty? (:frags patch)) "no held row changed")
+        (is (= 1 (count (:prepends patch))) "one row, above the others")))))
 
 (deftest the-html-fallback-folds-only-what-nests
   ;; the owner, 2026-10-23, on the default html: a fold and its "map 12 items, depth 0" header on
