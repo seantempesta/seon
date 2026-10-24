@@ -198,6 +198,16 @@
          (not [?e :seon.section/parent _])]
        db (str path "#")))
 
+(defn page-t
+  "The last transaction that changed the page at path on db: the newest datom, asserted or
+  retracted (db's history), of any section whose address is the page's; nil when db holds none.
+  The page as of it is the page as db holds it."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :int]]}
+  [db path]
+  (let [h (d/history db)
+        es (into #{} (comp (filter #(str/starts-with? (:v %) (str path "#"))) (map :e)) (d/datoms h :aevt :seon.section/address))]
+    (when (seq es) (reduce max (for [e es dt (d/datoms h :eavt e)] (:tx dt))))))
+
 (defn page
   "The page at path as db holds it, its sections in the order the wiki was written (as view
   shows the sections below): each its address, heading, level (1 for the page's own), lead

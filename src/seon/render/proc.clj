@@ -219,24 +219,42 @@
 
 (defn- debug-value
   "View [:debug id]'s page: what agent id's model was sent, each model turn that recorded it
-  (:seon.turn/sent) on its branch as this proc last read it, read back from those records
-  (seon.context/sent-parts), with the turn's usage or its call's error; newest first. A finished
-  turn is not written again, so a turn this view holds keeps its input and is not read again (a
-  turn in flight is written at its send and at its call's end: its row is held once it has its
-  usage or error). nil until the branch is read."
+  (:seon.turn/sent) on its branch as this proc last read it, newest first, only the rows its tab
+  scrolled to (:shown, as the agent's page: the rest are counted, and load as their end scrolls
+  into view). A row reads back only what its turn added to the request (seon.context/parts-of of
+  the refs the turn before it in its run did not send) and names what it shares with that turn;
+  the whole request is read back when its tab opens it (:open, seon.web's /open). A finished
+  turn is not written again, so a row this view holds, unchanged in whether it is open, keeps its
+  input (a turn in flight is written at its send and at its call's end: its row is held once it
+  has its usage or error). nil until the branch is read."
   {:malli/schema [:=> [:cat :map [:tuple [:= :debug] :any]] [:maybe :map]]}
   [st view]
   (when-let [bdb (get-in st [:branches view :db])]
     (let [held (get-in st [:views view :units])
+          open (get-in st [:open view] #{})
+          shown (get-in st [:shown view] (history-cap))
           ;; newest first: entity ids are issued in the order turns were written
           ts (->> (d/q '[:find ?e ?n ?r :where [?e :seon.turn/sent _] [?e :seon.turn/n ?n] [?e :seon.turn/run ?ru] [?ru :seon.run/id ?r]] bdb)
-                  (sort-by first) reverse)]
+                  (sort-by first) reverse vec)
+          on (take shown ts)
+          sent (fn [e] (:seon.turn/sent (d/pull bdb [:seon.turn/sent] e)))
+          ;; the turn before each shown one in its run, when there is one
+          before (into {} (map (fn [[[e _ r] [p _ pr]]] [e (when (= r pr) p)])) (partition 2 1 [nil] (take (inc shown) ts)))]
       (ui/debug (second view)
-                (vec (for [[e n r] ts :let [id (str "d-" e)]]
+                (vec (for [[e n r] on :let [id (str "d-" e) open? (contains? open id)]]
                        {:id id
-                        :input (or (let [h (:input (get held id))] (when (or (:seon.turn/tokens h) (:seon.turn/error h)) h))
-                                   (merge (d/pull bdb [:seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens :seon.turn/error] e)
-                                          {:turn n :run r :parts (context/sent-parts bdb e)}))}))))))
+                        :input (or (let [h (:input (get held id))]
+                                     (when (and (or (:seon.turn/tokens h) (:seon.turn/error h)) (= open? (boolean (:whole h)))) h))
+                                   (let [refs (sent e)
+                                         p (before e)
+                                         had (if p (set (sent p)) #{})
+                                         added (filterv (complement had) refs)]
+                                     (cond-> (merge (d/pull bdb [:seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens :seon.turn/error] e)
+                                                    {:turn n :run r :view (ui/view-param view) :refs (count refs)
+                                                     :added (context/parts-of bdb added)})
+                                       p (assoc :same {:turn (:seon.turn/n (d/pull bdb [:seon.turn/n] p)) :parts (- (count refs) (count added))})
+                                       open? (assoc :whole (context/parts-of bdb refs)))))}))
+                (- (count ts) (count on))))))
 
 (defn- page-value
   "View's page: the entity it names walked on main and, for an agent, its branch as this proc last
@@ -295,14 +313,14 @@
 ;;; --- the pass ------------------------------------------------------------------------------------
 
 (defn- extra-of
-  "What view's page reads besides its dbs: the rows its tab scrolled to, its branch's read
+  "What view's page reads besides its dbs: the rows its tab scrolled to and opened, its branch's read
   (whether there is one) and error, its agent's liveness in root's view of this boot, and for root's page main's open
   problems. A page whose dbs no transaction touched walks again only when this changed."
   {:malli/schema [:=> [:cat :map :any] :map]}
   [st view]
   (let [db (:main-db st)
         id (when db (when-let [eid (location db view)] (this-boots db (d/entity db eid))))]
-    {:shown (get-in st [:shown view]) :error (get-in st [:branches view :error])
+    {:shown (get-in st [:shown view]) :open (get-in st [:open view]) :error (get-in st [:branches view :error])
      ;; whether its branch is read at all: what moved on it after that is its datoms-diff
      :branch? (some? (get-in st [:branches view :db]))
      :live (when id (ui/live (ui/shown-status (get-in st [:view :agents id] {}))))
@@ -564,7 +582,7 @@
                                        drop #(into {} (filter (fn [[v]] (contains? w v))) %)]
                                    (ask-state (-> (reduce (fn [st v] (reindex st v (get-in st [:views v :reads]) #{}))
                                                           st (remove w (keys (:views st))))
-                                                  (assoc :watch w :tabs (:tabs m)) (update :views drop) (update :branches drop) (update :shown drop)
+                                                  (assoc :watch w :tabs (:tabs m)) (update :views drop) (update :branches drop) (update :shown drop) (update :open drop)
                                                   (update :dirty #(into #{} (filter w) %)))
                                               o))
                           ;; a UI call root refused before it became a request: answered as root's are
@@ -578,6 +596,10 @@
                           :context (do (step/out! o :to-web {:op :text :k (:k m) :text (:context st "")}) st)
                           ;; the end of a view's list scrolled into view: the next rows are rendered
                           :more (if (contains? (:watch st) (:view m)) (pass (update-in st [:shown (:view m)] (fnil + (history-cap)) (history-cap)) o) st)
+                          ;; a row's <details> opened or closed: its whole content is rendered while it is open
+                          :toggle (if (contains? (:watch st) (:view m))
+                                  (pass (update-in st [:open (:view m)] (fnil (if (:open m) conj disj) #{}) (:unit m)) o)
+                                  st)
                           :stats (do (step/out! o :to-web {:op :text :k (:k m) :text (sedn/encode (stats st))}) st)
                           st)
               st)]

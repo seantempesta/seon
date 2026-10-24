@@ -117,7 +117,7 @@ There is one value printer, `seon.print`, and nothing is cut before it. A value 
 Text for the wire, storage, a digest, a file, a URL, a command line or code to evaluate is `seon.edn/encode` (EDN that reads back, whole: no print limits), and only that var prints beside the printer:
 
 - `seon.edn/encode`: EDN for storage and the wire, whole.
-- `seon.context/eval-messages`, `seon.context/request`, `seon.context/sent-parts`: the EDN envelope of a user message (`{:by .. :code .. :response ..}`, `{:history {:left-out n}}`) around a response the one printer already printed: the wire, not output.
+- `seon.context/eval-messages`, `seon.context/request`, `seon.context/parts-of`: the EDN envelope of a user message (`{:by .. :code .. :response ..}`, `{:history {:left-out n}}`) around a response the one printer already printed: the wire, not output.
 - `seon.repl/seen`: the length of the form that reads a value again (`(:value result/e12)`): code text, not output.
 - `seon.config/resolved`: the config keys a refused combination names, in its error message.
 - `my.root/first-moves!`: the code text it sends an agent to evaluate (the call to `seon.judge/first-move` on a task id): code to evaluate, not output.
@@ -138,5 +138,6 @@ An agent's namespace refers `clojure.pprint`'s `pp` and `pprint` (`seon.agent/ma
 - `seon.web/handler`, `seon.web/view-of`, `seon.server/mcp-reply`: parsing a request's path and a tool's name.
 - `seon.context/near`: the whole line a repaired delimiter is on, the printer budgets it.
 - `seon.render.proc/pass`: root's context keeps the newest `:seon.config.render.list/stream` events; its events section (`seon.render.ai/section-events`) says how many older it did not keep.
+- `seon.render.proc/debug-value`: the debug page renders the newest rows its tab has scrolled to (`:shown`, as `seon.render.ui/page`), the rest counted by its list's end.
 - `seon.render.ui/page`: a page renders the newest rows its tab has scrolled to (`:seon.config.render.list/history` at first, as many more each time its end scrolls into view); its end (`seon.render.ui/more`) counts the older ones, unrendered.
 - `seon.render.ai/section-costly`: the newest `:seon.config.render.list/top` evaluations of each agent its costliest functions are summed from.

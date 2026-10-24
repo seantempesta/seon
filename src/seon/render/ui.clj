@@ -599,19 +599,21 @@
 
 (defn debug
   "Agent id's debug page laid out: each model turn's request as it recorded it (turns: units,
-  newest first, each a :seon.render/sent-request input), a link back to its page. The render
-  proc renders a turn's unit once: a turn is written once."
-  {:malli/schema [:=> [:cat :any [:vector :map]] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
-  [id turns]
-  {:seon.render/html
-   [:div {:id "app" :class "mx-auto flex max-w-screen-lg flex-col gap-3 p-3 sm:p-4"}
-    [:nav {:class "flex items-baseline gap-3"}
-     [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:a {:href (str "/agent/" (kname id)) :class "text-text-400 underline"} (str "← " (kname id) "'s page")]]
-    [:h1 {:class "text-sm text-text-200"} (str "What " (kname id) "'s model was sent, each turn as it recorded it, newest first")]
-    (if (seq turns)
+  newest first, each a :seon.render/sent-request input), only the rows its tab scrolled to and
+  older ones counted (the list's end, `more`, loads the next as it scrolls into view), a link back
+  to its page. The render proc renders a turn's unit once: a turn is written once."
+  {:malli/schema [:=> [:cat :any [:vector :map] nat-int?] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
+  [id turns older]
+  (let [view (view-param [:debug id])]
+    {:seon.render/html
+     [:div {:id "app" :class "mx-auto flex max-w-screen-lg flex-col gap-3 p-3 sm:p-4"}
+      [:nav {:class "flex items-baseline gap-3"}
+       [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:a {:href (str "/agent/" (kname id)) :class "text-text-400 underline"} (str "← " (kname id) "'s page")]]
+      [:h1 {:class "text-sm text-text-200"} (str "What " (kname id) "'s model was sent, newest first: each turn what it added to the request; its whole request opens on demand")]
       [:ol {:id "d-turns" :class "flex flex-col gap-3"} (for [u turns] (slot (:id u)))]
-      [:p {:class "text-text-500"} "no model turn recorded what it sent yet"])]
-   :seon.render/units (mapv #(assoc % :schema :seon.render/sent-request :container "#d-turns") turns)})
+      [:div {:id "d-foot"} (slot (str "d-more-" (count turns)))]]
+     :seon.render/units (conj (mapv #(assoc % :schema :seon.render/sent-request :container "#d-turns") turns)
+                              {:id (str "d-more-" (count turns)) :input {:older older :view view} :schema :seon.render/page-more :container "#d-foot"})}))
 
 (defn- source
   "What made part ref of a sent request, as a line: the help page or the task as of a t, an eval,
@@ -625,18 +627,13 @@
     :message (str "message " x)
     :history (str x " earlier records the history budget left out")))
 
-(defn sent-request
-  "A model turn's request as it recorded it (the declared html render of :seon.render/sent-request):
-  its turn, tokens and the share its provider served from cache, then each part in order beside
-  the record that made it, each message whole: the system prompt and the task story folded, an
-  assistant message's prose, reasoning (folded) and eval calls, a tool message under the call it
-  answers, the screen's evals as user messages. input {:turn :run :parts [[ref messages]]} and the
-  turn's usage (:seon.turn/tokens, cache-hit and cache-miss tokens) or its call's error
-  (:seon.turn/error)."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [{:keys [turn run parts] :seon.turn/keys [tokens cache-hit-tokens cache-miss-tokens error]} opts]
-  (let [prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
-        text (fn [s] [:pre {:class "whitespace-pre-wrap break-words text-text-100"} s])
+(defn- sent-parts-html
+  "Parts [[ref messages]] of a sent request, each beside the record that made it, each message
+  whole: the system prompt folded, an assistant message's prose, reasoning (folded) and eval
+  calls, a tool message under the call it answers."
+  {:malli/schema [:=> [:cat [:sequential :any]] :any]}
+  [parts]
+  (let [text (fn [s] [:pre {:class "whitespace-pre-wrap break-words text-text-100"} s])
         fold (fn [label s] [:details [:summary {:class "text-2xs text-text-500"} (str label ", " (count s) " characters")] (text s)])
         msg (fn [{:keys [role content reasoning tool-calls tool-call-id]}]
               [:div {:class (str "flex flex-col gap-1 rounded border-l-2 pl-2 py-1 "
@@ -650,16 +647,36 @@
                   [:div {:class "text-2xs text-text-500"} (str "eval call " id)]
                   (when prose [:p {:class "whitespace-pre-wrap italic text-text-300"} prose])
                   [:pre {:class "whitespace-pre-wrap break-words text-text-100"} [:code code]]])])]
-    [:li {:id (:unit opts) :class "flex flex-col gap-2 rounded-md bg-base-900 p-3 text-xs"}
+    (for [[ref ms] parts]
+      [:div {:class "grid gap-2 sm:grid-cols-[12rem_minmax(0,1fr)]"}
+       [:div {:class "text-2xs text-text-500 break-words"} (source ref)]
+       (into [:div {:class "flex flex-col gap-1 min-w-0"}] (map msg ms))])))
+
+(defn sent-request
+  "A model turn's request as it recorded it (the declared html render of :seon.render/sent-request):
+  its turn, tokens and the share its provider served from cache, then what this turn added to the
+  request (:added, each part beside the record that made it), a line naming what it sends as the
+  turn before it in its run did (:same), and its whole request in a <details> that is rendered
+  only while open (:whole: opening it posts /open, and the unit comes back with it). input {:turn
+  :run :view :refs :added [[ref messages]] :same {:turn :parts} :whole} and the turn's usage
+  (:seon.turn/tokens, cache-hit and cache-miss tokens) or its call's error (:seon.turn/error)."
+  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
+  [{:keys [turn run view refs added same whole] :seon.turn/keys [tokens cache-hit-tokens cache-miss-tokens error]} opts]
+  (let [prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
+        unit (:unit opts)]
+    [:li {:id unit :class "flex flex-col gap-2 rounded-md bg-base-900 p-3 text-xs"}
      [:div {:class "flex flex-wrap items-baseline gap-3"}
       [:b {:class "text-signal"} (str "turn " (inc turn))] [:span {:class "text-text-400"} run]
       (when tokens [:span {:class "tabular-nums text-text-400"} (str (group3 tokens) " tokens")])
       (when (and prompt (pos? prompt)) [:span {:class "tabular-nums text-text-400"} (str (group3 cache-hit-tokens) " of " (group3 prompt) " prompt tokens cached (" (long (* 100 (/ cache-hit-tokens prompt))) "%)")])
-      [:span {:class "text-text-500"} (str (reduce + (map (comp count second) parts)) " messages")]
+      [:span {:class "text-text-500"} (str refs " records sent")]
       (when-not (or tokens error) [:span {:class "text-text-500"} "the call is in flight"])]
      ;; a call that failed: its typed error, by its render
      (when error [:div {:class "rounded border border-error p-2"} (render/html error {})])
-     (for [[ref ms] parts]
-       [:div {:class "grid gap-2 sm:grid-cols-[12rem_minmax(0,1fr)]"}
-        [:div {:class "text-2xs text-text-500 break-words"} (source ref)]
-        (into [:div {:class "flex flex-col gap-1 min-w-0"}] (map msg ms))])]))
+     [:div {:class "text-2xs uppercase text-text-500"} (if same "what this turn added" "what this turn sent")]
+     (sent-parts-html added)
+     (when same [:p {:class "text-text-500"} (str "and " (:parts same) " records as turn " (inc (:turn same)) " sent them")])
+     [:details (cond-> {(keyword "data-on:toggle") (str "@post('/open?view=" view "&unit=" unit "&open=' + el.open)")}
+                 whole (assoc :open true))
+      [:summary {:class "text-2xs text-text-500 cursor-pointer"} (str "its whole request, " refs " records")]
+      (when whole (into [:div {:class "flex flex-col gap-2 pt-2"}] (sent-parts-html whole)))]]))

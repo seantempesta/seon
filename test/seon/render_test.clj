@@ -7,7 +7,7 @@
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.render.proc :as p]
             [seon.web.html :as h] [seon.config] [seon.docs] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
-            [seon.fx] [seon.source] [seon.program] [seon.web] [seon.context-test] [seon.turn] [seon.model] [seon.problems]))
+            [seon.fx] [seon.source] [seon.program] [seon.web] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -715,20 +715,27 @@
   ;; the ones it sent, and their wire body the one the provider got
   (ts/test-branch!
     (fn [_ conn]
-      (let [[st [r0 r1] [e0]] (debug-state conn)
-            {:seon.render/keys [units]} (#'p/page-value st [:debug :a1])
+      (let [[st [r0 r1] [e0 e1]] (debug-state conn)
+            rows #(filterv (fn [u] (= :seon.render/sent-request (:schema u))) (:seon.render/units (#'p/page-value % [:debug :a1])))
+            units (rows st)
+            ;; both rows opened, as a tab opening each row's <details> asks (/open)
+            opened (rows (assoc-in st [:open [:debug :a1]] #{(str "d-" e0) (str "d-" e1)}))
             provider {:kind :openai-compat :base-url "https://api.example" :model "deepseek-flash" :api-key-env "NONE" :max-tokens 2048}
             body #(seon.model/request-body provider {:messages % :task "demo/f" :turn 1})
-            messages (fn [u] (vec (mapcat second (get-in u [:input :parts]))))
+            messages (fn [parts] (vec (mapcat second parts)))
             [st' _] (#'p/pass-view st [:debug :a1])
             html (p/page-html st' [:debug :a1])]
         (is (= ["d-" "d-"] (mapv #(subs (:id %) 0 2) units)) "one row a model turn")
         (is (= [1 0] (mapv #(get-in % [:input :turn]) units)) "newest first")
-        (is (= r1 (messages (first units))) "turn 1's messages as it sent them")
-        (is (= r0 (messages (second units))))
-        (is (= (body r1) (body (messages (first units)))) "the wire body the provider got, as data")
+        (is (= [[:eval "e2"] [:eval "e3"]] (mapv first (get-in units [0 :input :added]))) "turn 1 adds its call's eval and its screen eval")
+        (is (= {:turn 0 :parts 2} (get-in units [0 :input :same])) "and sends the help page and the story as turn 0 did")
+        (is (nil? (get-in units [0 :input :whole])) "its whole request is not read back until it is opened")
+        (is (= r1 (messages (get-in opened [0 :input :whole]))) "opened: turn 1's messages as it sent them")
+        (is (= r0 (messages (get-in opened [1 :input :whole]))))
+        (is (= (body r1) (body (messages (get-in opened [0 :input :whole])))) "the wire body the provider got, as data")
         (is (str/includes? html "eval e2") "each part beside the record that made it")
-        (is (str/includes? html "the task story") "the task story's source")
+        (is (str/includes? html "the task story") "the task story's source, on the first turn's row")
+        (is (str/includes? html "and 2 records as turn 1 sent them") "a later row names what it shares")
         (is (str/includes? html "I call f.") "the call's prose")
         (is (= [:debug :a1] (#'seon.web/view-of (java.net.URLDecoder/decode (ui/view-param [:debug :a1]) "UTF-8"))) "its feed names it, and reads it back")
         (is (= [:debug :a1] (#'seon.web/view-of "a1/debug")) "/agent/a1/debug")
@@ -754,10 +761,21 @@
                                 :seon.turn/basis b :seon.turn/sent (:sent (seon.context/render db b))
                                 :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 0 :seon.turn/ms 1}])
             [st2 patch] (#'p/pass-view (assoc-in st1 [:branches [:debug :a1] :db] db') [:debug :a1])]
-        (is (= 2 (get-in st1 [:counts :rendered])) "the first pass renders both turns")
-        (is (= 3 (get-in st2 [:counts :rendered])) "the next renders the new turn alone")
+        (is (= 3 (get-in st1 [:counts :rendered])) "the first pass renders both turns and the list's end")
+        (is (= 5 (get-in st2 [:counts :rendered])) "the next renders the new turn alone, and the list's end it moved")
         (is (empty? (:frags patch)) "no held row changed")
-        (is (= 1 (count (:prepends patch))) "one row, above the others")))))
+        (is (= ["#d-turns"] (mapv first (:prepends patch))) "one row, above the others")))))
+
+(deftest the-debug-page-grows-with-its-rows-not-its-turns
+  ;; root, 2026-10-24: at ~560 turns the debug page was 135 MB of HTML and 1.9M elements, each row
+  ;; reprinting its whole request (O(turns^2)). A row now shows what its turn added and the rows a
+  ;; tab scrolled to render; the page's size follows the rows shown, flat in the run's turns.
+  ;; Measured 2026-10-24 before: 0.95 / 3.76 / 15.0 MB and 15,306 / 60,606 / 241,206 elements at 50 /
+  ;; 100 / 200 turns (seon.render-cost-test/page-size)
+  (let [[a b c] (map seon.render-cost-test/page-size [50 100 200])]
+    (is (< (:bytes c) (* 1.1 (:bytes a))) (pr-str [a b c]))
+    (is (< (:nodes c) (* 1.1 (:nodes a))) (pr-str [a b c]))
+    (is (< (:bytes c) 100000) "a page of the rows shown, not of the run")))
 
 (deftest the-html-fallback-folds-only-what-nests
   ;; the owner, 2026-10-23, on the default html: a fold and its "map 12 items, depth 0" header on

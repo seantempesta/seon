@@ -142,6 +142,9 @@
           (and (= m :get) (re-matches #"/walk/\d+" uri)) (html-response (ask! ch {:op :page :view (view-of (subs uri 6))}))
           ;; a page's list end scrolled into view: its next rows
           (and (= m :post) (= uri "/more")) (do (a/>!! ch {:op :more :view (view-of (get q "view"))}) {:status 204 :headers {}})
+          ;; a row's <details> toggled (the debug page): its unit renders its whole content while open
+          (and (= m :post) (= uri "/open")) (do (a/>!! ch {:op :toggle :view (view-of (get q "view")) :unit (get q "unit") :open (= "true" (get q "open"))})
+                                                {:status 204 :headers {}})
           (and (= m :get) (= uri "/feed"))
           (let [out (a/chan 64)]
             (a/>!! ch {:op :open :view (view-of (get q "view")) :ch out})
@@ -243,6 +246,7 @@
                (step/out! o :to-render {:op ({:context :context :render-stats :stats} (:op m)) :k k})
                st)
     :more (do (step/out! o :to-render {:op :more :view (:view m)}) st)
+    :toggle (do (step/out! o :to-render (select-keys m [:op :view :unit :open])) st)
     :stats (do (deliver (:p m) (stats st)) st)
     :call (let [c (:call m)
                 reqs (requests c (:index st {}))]

@@ -309,8 +309,40 @@
                 "render: the page's walk lists every turn again (its query, recorded reads, the held input compared), "
                 "about 34 KB a turn, until step 4 makes each turn its own component (task seon.render/a-page-is-its-entitys-view)")
      :growth :linear
-     ;; measured 2026-10-24: 88 / 88 calls and 3.90 / 34.3 MB at 100 / 1,000 held turns
+     ;; measured 2026-10-24: 88 / 88 calls and 3.90 / 34.3 MB at 100 / 1,000 held turns; 130 / 130
+     ;; calls once rows show what their turn added (parts-of of the added refs, the row before
+     ;; each read for its refs) and the rows shown are a window (:shown)
      :per-n {:bytes 34500}
-     :fixed {:calls 88 :bytes 500000}
+     :fixed {:calls 130 :bytes 500000}
      ;; the full run measures 4,000 too (:seon.config.proofs/cost-max-n)
      :sizes [100 1000 4000]}))
+
+(defn growing-debug
+  "The render proc's state holding agent a1's debug page after n model turns as a real run
+  sends them: turn i sent every eval of the run so far (e0 .. e(i-1), its conversation) and its
+  screen eval (s<i>), so each request is one record longer than the one before; and the view."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
+  [n]
+  (let [k (seon.task/agent-key "b1" :a1)
+        ev (fn [id by more] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id by (merge {:code "(+ 1 2)" :text "{:handle result/e1, :value 3}" :run "t/x#1"} more) nil))
+        db (reduce d/db-with (ts/test-db)
+                   [[{:seon.root/id :root :seon.root/boot "b1"}]
+                    (seon.task/agent-tx "b1" :a1 {:status :busy})
+                    [{:db/id "run" :seon.run/id "t/x#1"}]
+                    (into [] (mapcat (fn [i] (concat (ev (str "e" i) "a1" {:call-id (str "c" i) :call 0}) (ev (str "s" i) "screen" {})))) (range n))
+                    (vec (for [i (range n)]
+                           {:seon.turn/id (str "t/x#1/" i) :seon.turn/run [:seon.run/id "t/x#1"] :seon.turn/n i :seon.turn/origin :model
+                            :seon.turn/sent (conj (mapv #(vector :eval (str "e" %)) (range i)) [:eval (str "s" i)])
+                            :seon.turn/tokens 100 :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 0 :seon.turn/ms 1}))])
+        view [:debug :a1]]
+    [{:rid 1 :pending {} :watch #{view} :waiting {} :kf-wanted #{} :views {} :main-db db :branches {view {:db db}} :view {:agents {}}} view]))
+
+(defn page-size
+  "Agent a1's debug page after n turns (growing-debug), its first pass: {:bytes :nodes}, the
+  composed HTML's characters and its elements."
+  {:malli/schema [:=> [:cat pos-int?] :map]}
+  [n]
+  (let [[st v] (growing-debug n)
+        [st _] (#'seon.render.proc/pass-view st v)
+        html (seon.render.proc/page-html st v)]
+    {:bytes (count html) :nodes (count (re-seq #"<[a-z]" html))}))
