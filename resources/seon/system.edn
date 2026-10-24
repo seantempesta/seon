@@ -46,6 +46,8 @@
   ;; (:compute, never waits); the web proc owns the listener and the tabs (:io). Port:
   ;; 127.0.0.1 only, :seon.config.web/port; 0 serves nothing
   :render {:proc seon.render.proc/render-proc
+           ;; main's commits, as the reconciler takes them: every commit's datoms, a full buffer parks the writer
+           :chan-opts {:main {:buf-or-n :bind/reconciler-buf}}
            :args {:events-mult :bind/events-mult :graph :bind/graph :system :bind/system}}
   :web {:proc seon.web/web-proc
         :args {:port :bind/web-port}}}
@@ -74,6 +76,7 @@
   [[:writer :main] [:reconciler :main]]
   [[:writer :main] [:prove :main]]
   [[:writer :main] [:vectors :main]]
+  [[:writer :main] [:render :main]]
   [[:vectors :to-api] [:api :from-writer]]
   [[:prove :to-api] [:api :from-writer]]
   [[:fork-server :to-api] [:api :from-fs]]

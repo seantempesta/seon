@@ -126,7 +126,8 @@
 (deftest render-proc-has-no-beat
   (let [d (p/render-proc)]
     (is (not (contains? (:ins d) :tick)) "no beat in-port")
-    (is (= #{:answers :from-web} (set (keys (:ins d)))))
+    ;; :main, main's commits from the writer: a pass follows a commit, never a clock
+    (is (= #{:answers :from-web :main} (set (keys (:ins d)))))
     (is (nil? (resolve 'seon.render.proc/SAMPLE-MS)))
     (is (nil? (resolve 'seon.render.proc/start-sampler!))))
   (testing "a proc's health from root's view: its declared procs, its defects by pid"
@@ -588,11 +589,48 @@
   (let [[main branch eid] (paged-dbs)
         [st _] (#'p/pass-view (proc-state main branch) :a3)
         e1 (:db/id (d/entity branch [:seon.eval/id "e1"]))
-        touched (fn [db tx-data] (#'p/touched st (:tx-data (d/with db tx-data))))]
+        touched (fn [db tx-data] (#'p/touched st (:tx-data (d/with db tx-data))))
+        ;; an entity of main the page did not read (ids from separate speculative d/with calls can
+        ;; repeat in a test; on a store they are issued once)
+        unread (first (remove #(contains? (get-in st [:views :a3 :reads]) [:e %]) (d/q '[:find [?e ...] :where [?e :ns/name]] main)))]
     (is (seq (get-in st [:views :a3 :reads])) "the page holds what it read")
     (is (= #{:a3} (touched main [{:db/id eid :seon.agent/status :idle}])) "the agent's own datom")
     (is (= #{:a3} (touched branch [{:db/id e1 :seon.eval/by "user"}])) "a row's entity, on the branch")
-    (is (empty? (touched main [{:seon.task/id "other/t" :seon.task/plan "Elsewhere."}])) "an entity the page did not read")))
+    (is (empty? (touched main [[:db/retractEntity unread]])) "an entity the page did not read")))
+
+(deftest a-transaction-touching-no-page-walks-nothing
+  ;; task seon.render/a-view-renders-once-per-change-of-its-reads (C): main's commits come from
+  ;; the writer ({:t :ops :db}); the pass walks only the pages whose reads a commit's datoms touch
+  (let [[main branch eid] (paged-dbs)
+        ;; a whole pass reads root's config on main (seon.task/root), as root writes it at boot
+        main (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])
+        o (volatile! {})
+        st (#'p/pass (proc-state main branch) o)
+        walked #(get-in % [:counts :walked] 0)
+        commit (fn [st tx-data] (let [r (d/with (:main-db st) tx-data)]
+                                  (first (#'p/render-proc st :main {:t (:max-tx (:db-after r)) :db (:db-after r)
+                                                                    :ops (mapv (fn [d] [(if (:added d) :db/add :db/retract) (:e d) (:a d) (:v d)]) (:tx-data r))}))))]
+    (is (= 2 (walked st)) "the first pass walks each watched page")
+    (let [unread (first (remove #(contains? (get-in st [:views :a3 :reads]) [:e %]) (d/q '[:find [?e ...] :where [?e :ns/name]] main)))
+          ;; a commit's datoms as the writer reports them, on an entity of main the page did not read
+          st' (first (#'p/render-proc st :main {:t (:max-tx main) :db main :ops [[:db/add unread :ns/name 'unrelated.ns]]}))]
+      (is (<= (walked st') (inc (walked st))) "an unrelated commit walks at most root's page")
+      (is (not (some #{:a3} (:last-walked st'))) "the agent's page is not walked"))
+    (let [st' (commit st [{:db/id eid :seon.agent/status :idle}])]
+      (is (some #{:a3} (:last-walked st')) "a commit on the agent walks its page"))))
+
+(deftest a-branch-commit-touches-its-page-by-its-datoms-diff
+  ;; an agent's commit: its branch read again, and what moved is the datoms-diff of the held and
+  ;; the new branch db; the page walks only when the diff touches its reads
+  (let [[main branch _] (paged-dbs)
+        main (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])
+        o (volatile! {})
+        st (#'p/pass (proc-state main branch) o)
+        k (seon.task/agent-key "b1" :a3)
+        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:code "(h)" :text "{:handle result/e4, :value 1}"} nil))
+        answer (fn [st db] (#'p/answered (assoc-in st [:pending 9] [:branch :a3]) o [:branch :a3] {:db db}))]
+    (is (not (some #{:a3} (:last-walked (answer st branch)))) "the same branch db: nothing moved, nothing walked")
+    (is (some #{:a3} (:last-walked (answer st branch'))) "a new evaluation on it: the page walks")))
 
 (deftest a-units-change-rerenders-that-unit
   (let [[main branch eid] (paged-dbs)

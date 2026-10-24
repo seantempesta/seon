@@ -270,6 +270,28 @@
 
 ;;; --- the pass ------------------------------------------------------------------------------------
 
+(defn- extra-of
+  "What view's page reads besides its dbs: the rows its tab scrolled to, its branch's read
+  (whether there is one) and error, its agent's liveness in root's view of this boot, and for root's page main's open
+  problems. A page whose dbs no transaction touched walks again only when this changed."
+  {:malli/schema [:=> [:cat :map :any] :map]}
+  [st view]
+  (let [db (:main-db st)
+        id (when db (when-let [eid (location db view)] (this-boots db (d/entity db eid))))]
+    {:shown (get-in st [:shown view]) :error (get-in st [:branches view :error])
+     ;; whether its branch is read at all: what moved on it after that is its datoms-diff
+     :branch? (some? (get-in st [:branches view :db]))
+     :live (when id (ui/live (ui/shown-status (get-in st [:view :agents id] {}))))
+     :recorded (when (= :root view) (:recorded st))}))
+
+(defn- walk?
+  "Does view's page walk this pass: not held yet, a transaction touched what it read (:dirty),
+  or what it reads besides its dbs changed (extra-of)."
+  {:malli/schema [:=> [:cat :map :any] :boolean]}
+  [st view]
+  (let [v (get-in st [:views view])]
+    (boolean (or (nil? v) (contains? (:dirty st) view) (not= (:extra v) (extra-of st view))))))
+
 (defn- reindex
   "St with view-id's reads (keys, d/reads-index) in the proc's one index from a read key to the
   views that read it (:read-index), its earlier reads (old) taken out."
@@ -295,19 +317,20 @@
   {:malli/schema [:=> [:cat :map :any] [:tuple :map [:maybe :map]]]}
   [st view-id]
   (let [[out reads] (d/with-reads #(page-value st view-id))
+        st (-> st (update-in [:counts :walked] (fnil inc 0)) (update :last-walked (fnil conj []) view-id) (update :dirty disj view-id))
         read-keys (d/reads-index reads)
         st (reindex st view-id (get-in st [:views view-id :reads]) read-keys)
-        st (if (get-in st [:views view-id]) (assoc-in st [:views view-id :reads] read-keys) st)]
+        st (if (get-in st [:views view-id]) (update-in st [:views view-id] assoc :reads read-keys :extra (extra-of st view-id)) st)]
    (cond
     (nil? out) [st nil]
     ;; a location naming no entity: its page is that error, by its render
-    (:seon.error/type out) [(assoc-in st [:views view-id] {:skeleton (h/html (render/html out {})) :units {} :reads read-keys}) nil]
+    (:seon.error/type out) [(assoc-in st [:views view-id] {:skeleton (h/html (render/html out {})) :units {} :reads read-keys :extra (extra-of st view-id)}) nil]
     :else
     (let [units (:seon.render/units out)
           skeleton (h/html (:seon.render/html out))
           [view patch n] (step-units (get-in st [:views view-id]) units)
           [view patch] (finish-patch view patch (set (map :id units)))
-          view (assoc view :skeleton skeleton :reads read-keys)
+          view (assoc view :skeleton skeleton :reads read-keys :extra (extra-of st view-id))
           st (-> st (assoc-in [:views view-id] view)
                  (update-in [:counts :rendered] (fnil + 0) (:rendered n)) (update-in [:counts :same] (fnil + 0) (:same n)))]
       [st (when (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:removes patch)))
@@ -348,10 +371,11 @@
           sys (assoc sys :context {:text ctx :tokens (select/estimate ctx)} :problem-areas (ai/problem-areas sys))
           st (assoc st :context ctx)
           views (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st)))
+          st (assoc st :last-walked [])
           [st patches] (reduce (fn [[st ps] v]
                                  (let [[st p] (pass-view st v)]
                                    [st (cond-> ps p (conj p))]))
-                               [st []] (sort-by str views))
+                               [st []] (filter #(walk? st %) (sort-by str views)))
           idx (index-of (:agents sys))
           ms (profile/ms-since t0)]
       (doseq [p patches] (step/out! o :to-web p))
@@ -446,17 +470,22 @@
     (and (= :state kind) (seon.contract/error? r)) st
     (= :state kind)
     (let [st (assoc st :view r)
-          tx (get-in r [:writer :tx-count])
-          st (if (not= tx (:main-tx st)) (-> st (assoc :main-tx tx) (ask o :main {:op :write :req {:op :branch-db :branch :db}})) st)]
+          ;; main's first read; after it, main comes in the writer's commits (:main)
+          st (if (and (nil? (:main-db st)) (not (some #{:main} (vals (:pending st))))) (ask st o :main {:op :write :req {:op :branch-db :branch :db}}) st)]
       ;; a watched agent's branch moved: read its branch db (its turns, evaluations and task)
       (pass (ask-branches st o) o))
     (= :main kind) (if (seon.contract/error? r) st (pass (ask-branches (main-info st (:db r)) o) o))
     ;; an agent's branch db; a branch that is gone (merged and removed) is recorded as such
     (and (vector? kind) (= :branch (first kind)))
-    (let [z [:branches (second kind)]]
-      (pass (if (seon.contract/error? r)
-              (-> st (update-in z dissoc :db) (assoc-in (conj z :error) r))
-              (-> st (update-in z dissoc :error) (assoc-in (conj z :db) (:db r))))
+    (let [view (second kind) z [:branches view]
+          held (get-in st (conj z :db))
+          ;; what moved on the branch: the datoms either db holds alone (O(changed))
+          moved (when (and held (not (seon.contract/error? r))) (apply concat (d/datoms-diff held (:db r) :eavt [])))]
+      (pass (cond-> (if (seon.contract/error? r)
+                      (-> st (update-in z dissoc :db) (assoc-in (conj z :error) r))
+                      (-> st (update-in z dissoc :error) (assoc-in (conj z :db) (:db r))))
+              (and (not (seon.contract/error? r)) (nil? held)) (update :dirty (fnil conj #{}) view)
+              (seq moved) (update :dirty (fnil into #{}) (touched st moved)))
             o))
     :else st))
 
@@ -465,7 +494,8 @@
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:events-mult "the api's events, a mult this proc taps" :graph "a promise of the root graph (unused: nothing is pinged)"
                 :system "a promise of the built system (its declared procs, for the health tile)"}
-       :ins {:answers "the api's answers" :from-web "views open, page and keyframe requests"}
+       :ins {:answers "the api's answers" :from-web "views open, page and keyframe requests"
+             :main "main's commits from the writer {:t :ops :db}: each one's datoms find the pages whose reads they touched"}
        :outs {:to-api "requests to the api" :to-web "patches, keyframes, pages, the agents' index"}
        ;; a pass renders what changed; it never waits. :mixed: one thread of its own for
        ;; its life, joined at stop. :compute futurized each pass onto Jolt's cached pool,
@@ -489,6 +519,10 @@
          busy? (seq (:pending st))
          st (case in
               :events (if (nil? m) st (ask-state (reduce on-event st (drain m (:events-ch st) 2048)) o))
+              ;; a commit on main: the pages its datoms touched walk in the pass
+              :main (pass (-> (main-info st (:db m))
+                              (update :dirty (fnil into #{}) (touched st (map (fn [[_ e a v]] {:e e :a a :v v}) (:ops m)))))
+                          o)
               :answers (let [[st' kind] (step/answered st (:tag m))
                              r (:r m)
                              err (:seon.error/message r)]

@@ -235,3 +235,40 @@
      :per-n {:calls 4 :bytes 42000}
      :fixed {:calls 30 :bytes 100000}
      :sizes [100 1000 4000]}))
+
+(defn- watching
+  "The render proc's state as it holds pages watched pages, each having read 100 entities."
+  {:malli/schema [:=> [:cat pos-int?] :map]}
+  [pages] {:views (into {} (for [v (range pages)] [v {}]))
+           :read-index (into {} (for [v (range pages) e (range 100)] [[:e (+ (* v 1000) e)] #{v}]))})
+
+(defn- commit-of
+  "n datoms of a commit, none on an entity a page read."
+  {:malli/schema [:=> [:cat pos-int?] [:vector :map]]}
+  [n] (vec (for [i (range n)] {:e (+ 9000000 i) :a :seon.task/plan :v (str i)})))
+
+(defn by-datoms "The input of size n: 100 watched pages, a commit of n datoms." {:malli/schema [:=> [:cat pos-int?] [:tuple :map [:vector :map]]]} [n] [(watching 100) (commit-of n)])
+(defn by-pages "The input of size n: n/10 watched pages, a commit of 100 datoms." {:malli/schema [:=> [:cat pos-int?] [:tuple :map [:vector :map]]]} [n] [(watching (quot n 10)) (commit-of 100)])
+
+(deftest a-transaction-costs-its-datoms-to-match
+  ;; task seon.render/a-view-renders-once-per-change-of-its-reads (C): the pages a commit touched
+  ;; are found by its datoms' keys in the proc's one index (seon.render.proc/touched)
+  (cost/proof
+    {:of 'seon.render.proc/touched :input 'seon.render-cost-test/by-datoms
+     :n "datoms in the commit"
+     :work "per datom, its five keys (d/datom-keys) and one map lookup a key; nothing per page watched"
+     :growth :linear
+     ;; measured 2026-10-24: 207 KB / 2.06 MB / 21.2 MB at 100 / 1,000 / 10,000 datoms; one contracted call
+     :per-n {:bytes 2120}
+     :fixed {:calls 1 :bytes 2000}
+     :sizes [100 1000 10000]}))
+
+(deftest matching-a-commit-is-flat-in-the-pages-watched
+  (cost/proof
+    {:of 'seon.render.proc/touched :input 'seon.render-cost-test/by-pages
+     :n "ten times the pages watched (each having read 100 entities)"
+     :work "the 100 datoms' keys, each one map lookup, whatever the index holds"
+     :growth :constant
+     ;; measured 2026-10-24: 209 / 207 / 207 KB at 10 / 100 / 1,000 pages
+     :fixed {:calls 1 :bytes 212000}
+     :sizes [100 1000 10000]}))
