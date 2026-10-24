@@ -715,7 +715,7 @@
   ;; the ones it sent, and their wire body the one the provider got
   (ts/test-branch!
     (fn [_ conn]
-      (let [[st [r0 r1]] (debug-state conn)
+      (let [[st [r0 r1] [e0]] (debug-state conn)
             {:seon.render/keys [units]} (#'p/page-value st [:debug :a1])
             provider {:kind :openai-compat :base-url "https://api.example" :model "deepseek-flash" :api-key-env "NONE" :max-tokens 2048}
             body #(seon.model/request-body provider {:messages % :task "demo/f" :turn 1})
@@ -731,7 +731,15 @@
         (is (str/includes? html "the task story") "the task story's source")
         (is (str/includes? html "I call f.") "the call's prose")
         (is (= [:debug :a1] (#'seon.web/view-of (java.net.URLDecoder/decode (ui/view-param [:debug :a1]) "UTF-8"))) "its feed names it, and reads it back")
-        (is (= [:debug :a1] (#'seon.web/view-of "a1/debug")) "/agent/a1/debug")))))
+        (is (= [:debug :a1] (#'seon.web/view-of "a1/debug")) "/agent/a1/debug")
+        (testing "a turn whose call failed shows what it sent and its typed error"
+          (let [db (d/db-with (get-in st [:branches [:debug :a1] :db])
+                              [{:db/id e0 :seon.turn/error {:seon.error/type :seon.model/no-provider :seon.error/operation 'seon.model/complete
+                                                            :seon.error/message "no model provider"}}])
+                [st'' _] (#'p/pass-view (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db)) [:debug :a1])
+                html (p/page-html st'' [:debug :a1])]
+            (is (str/includes? html "no model provider") "its error, by the error's render")
+            (is (str/includes? html "eval e1") "beside what it sent")))))))
 
 (deftest a-new-turn-is-one-new-row
   ;; a turn is written once: a pass after a new turn renders only its row

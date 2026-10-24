@@ -303,7 +303,9 @@
     {:of 'seon.render.proc/pass-view :input 'seon.render-cost-test/debug-of
      :n "model turns the debug page already holds"
      :work (str "the new turn read back from its records (its two evals, each by its :seon.render/ai render) and "
-                "rendered once: the contracted calls, flat in the turns held. Per held turn, no read back and no "
+                "rendered once: the contracted calls, flat in the turns held. A real turn also reads back its help page "
+                "and its task story as of their t (seon.context/sent-parts: 2.24M ticks, 9.3 MB on context-test's "
+                "fixture, mostly the story's run sections), once: a finished turn's row is held and never read again. Per held turn, no read back and no "
                 "render: the page's walk lists every turn again (its query, recorded reads, the held input compared), "
                 "about 34 KB a turn, until step 4 makes each turn its own component (task seon.render/a-page-is-its-entitys-view)")
      :growth :linear

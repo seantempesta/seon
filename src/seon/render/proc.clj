@@ -220,19 +220,22 @@
 (defn- debug-value
   "View [:debug id]'s page: what agent id's model was sent, each model turn that recorded it
   (:seon.turn/sent) on its branch as this proc last read it, read back from those records
-  (seon.context/sent-parts), with the turn's usage; newest first. A turn is written once, so a
-  turn this view holds keeps its input and is not read again. nil until the branch is read."
+  (seon.context/sent-parts), with the turn's usage or its call's error; newest first. A finished
+  turn is not written again, so a turn this view holds keeps its input and is not read again (a
+  turn in flight is written at its send and at its call's end: its row is held once it has its
+  usage or error). nil until the branch is read."
   {:malli/schema [:=> [:cat :map [:tuple [:= :debug] :any]] [:maybe :map]]}
   [st view]
   (when-let [bdb (get-in st [:branches view :db])]
     (let [held (get-in st [:views view :units])
+          ;; newest first: entity ids are issued in the order turns were written
           ts (->> (d/q '[:find ?e ?n ?r :where [?e :seon.turn/sent _] [?e :seon.turn/n ?n] [?e :seon.turn/run ?ru] [?ru :seon.run/id ?r]] bdb)
-                  (sort-by (fn [[e n r]] [r n e])) reverse)]
+                  (sort-by first) reverse)]
       (ui/debug (second view)
                 (vec (for [[e n r] ts :let [id (str "d-" e)]]
                        {:id id
-                        :input (or (:input (get held id))
-                                   (merge (d/pull bdb [:seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens] e)
+                        :input (or (let [h (:input (get held id))] (when (or (:seon.turn/tokens h) (:seon.turn/error h)) h))
+                                   (merge (d/pull bdb [:seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens :seon.turn/error] e)
                                           {:turn n :run r :parts (context/sent-parts bdb e)}))}))))))
 
 (defn- page-value

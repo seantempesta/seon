@@ -204,6 +204,13 @@
                 (seq screen) (assoc :screen screen))
         {:keys [block messages sent]} (context/render (agent/db) basis)
         context-ms (long (profile/ms-since t0))
+        id (str run "/" turn)
+        ;; the turn as its request goes: what it was made from and what it sent, committed, so a
+        ;; page shows the call in flight and a call that fails keeps what it sent
+        _ (agent/transact! [{:db/id "run" :seon.run/id run}
+                            (cond-> {:seon.turn/id id :seon.turn/run "run" :seon.turn/n turn :seon.turn/origin :model :seon.turn/basis basis}
+                              sent (assoc :seon.turn/sent sent))])
+        _ (agent/commit!)
         t1 (profile/now-ns)
         r (agent/fx! :model (cond-> {:messages messages :task (:seon.task/id t) :turn turn}
                               model-name (assoc :model model-name))
@@ -211,7 +218,10 @@
         model-ms (long (profile/ms-since t1))
         c (:value r)]
     (if (contract/error? r)
-      r
+      ;; the call failed: its typed error on the turn (an error is data), and to the run's end
+      (do (agent/transact! [{:seon.turn/id id :seon.turn/error r :seon.turn/ms model-ms
+                             :seon.turn/split {:context-ms context-ms :model-ms model-ms}}])
+          r)
       (let [t2 (profile/now-ns)
             ;; an interrupt left from before this turn's evals is not theirs
             _ (intr/clear-pending!)
@@ -245,8 +255,7 @@
         ;; it answered and how it stopped, which evals its calls are, and where the turn's time
         ;; went as this agent saw it
         (agent/transact! [{:db/id "run" :seon.run/id run}
-                          (cond-> (merge (usage c) {:seon.turn/id (str run "/" turn) :seon.turn/run "run" :seon.turn/n turn
-                                   :seon.turn/origin :model :seon.turn/basis basis
+                          (cond-> (merge (usage c) {:seon.turn/id id :seon.turn/run "run" :seon.turn/n turn
                                    :seon.turn/calls (mapv (fn [{:keys [id code response]}]
                                                             (cond-> {:id id :code code} (:record response) (assoc :eval (:record response))))
                                                           calls)
@@ -254,9 +263,6 @@
                                    :seon.turn/errors (count (filter :ex rs))
                                    :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))
                                    :seon.turn/ms (+ model-ms eval-ms)})
-                            ;; what the request sent, the records in order, as context/render answered them before
-                            ;; it went (seon.context/sent-messages reads them back; nothing is built again)
-                            sent (assoc :seon.turn/sent sent)
                             (:truncated? c) (assoc :seon.turn/truncated true)
                             (:finish-reason c) (assoc :seon.turn/finish (:finish-reason c))
                             (:model c) (assoc :seon.turn/model (:model c))

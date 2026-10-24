@@ -631,9 +631,10 @@
   the record that made it, each message whole: the system prompt and the task story folded, an
   assistant message's prose, reasoning (folded) and eval calls, a tool message under the call it
   answers, the screen's evals as user messages. input {:turn :run :parts [[ref messages]]} and the
-  turn's usage (:seon.turn/tokens, cache-hit and cache-miss tokens)."
+  turn's usage (:seon.turn/tokens, cache-hit and cache-miss tokens) or its call's error
+  (:seon.turn/error)."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [{:keys [turn run parts] :seon.turn/keys [tokens cache-hit-tokens cache-miss-tokens]} opts]
+  [{:keys [turn run parts] :seon.turn/keys [tokens cache-hit-tokens cache-miss-tokens error]} opts]
   (let [prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
         text (fn [s] [:pre {:class "whitespace-pre-wrap break-words text-text-100"} s])
         fold (fn [label s] [:details [:summary {:class "text-2xs text-text-500"} (str label ", " (count s) " characters")] (text s)])
@@ -641,7 +642,8 @@
               [:div {:class (str "flex flex-col gap-1 rounded border-l-2 pl-2 py-1 "
                                  (case role "assistant" "border-signal" "tool" "border-base-600" "user" "border-text-400" "border-base-700"))}
                [:div {:class "text-2xs uppercase text-text-500"} role (when tool-call-id (str " · answers " tool-call-id))]
-               (when reasoning (fold "reasoning" reasoning))
+               ;; the provider's format sends it back unless :seon.config.ai/replay-reasoning is false
+               (when reasoning (fold "reasoning, as returned (sent back unless replay-reasoning is off)" reasoning))
                (when-not (str/blank? content) (if (= "system" role) (fold "the help page" content) (text content)))
                (for [{:keys [id code prose]} tool-calls]
                  [:div {:class "flex flex-col gap-1"}
@@ -653,7 +655,10 @@
       [:b {:class "text-signal"} (str "turn " (inc turn))] [:span {:class "text-text-400"} run]
       (when tokens [:span {:class "tabular-nums text-text-400"} (str (group3 tokens) " tokens")])
       (when (and prompt (pos? prompt)) [:span {:class "tabular-nums text-text-400"} (str (group3 cache-hit-tokens) " of " (group3 prompt) " prompt tokens cached (" (long (* 100 (/ cache-hit-tokens prompt))) "%)")])
-      [:span {:class "text-text-500"} (str (reduce + (map (comp count second) parts)) " messages")]]
+      [:span {:class "text-text-500"} (str (reduce + (map (comp count second) parts)) " messages")]
+      (when-not (or tokens error) [:span {:class "text-text-500"} "the call is in flight"])]
+     ;; a call that failed: its typed error, by its render
+     (when error [:div {:class "rounded border border-error p-2"} (render/html error {})])
      (for [[ref ms] parts]
        [:div {:class "grid gap-2 sm:grid-cols-[12rem_minmax(0,1fr)]"}
         [:div {:class "text-2xs text-text-500 break-words"} (source ref)]

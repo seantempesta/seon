@@ -576,6 +576,8 @@
         _ (ev! "e3" "screen" "(my.task/status)" "{:handle result/e3, :value :green}")
         r1 (turn! 1 ["e3"] {})
         _ (plan! "Later.")
+        ;; and the help page changes: a turn's system prompt is its section as of the turn's t
+        _ (d/transact conn [{:db/id (seon.docs/page-top @conn context/help-page) :seon.section/text "Changed after the turns."}])
         db @conn
         e-of (fn [id] (d/q '[:find ?e . :in $ ?id :where [?e :seon.turn/id ?id]] db id))]
     [db [r0 r1] [(e-of "demo/f#1/0") (e-of "demo/f#1/1")]]))
@@ -595,7 +597,9 @@
         (is (= (second (sent e0)) (second (sent e1))) "the task story is the run's first turn's: the same task as of the same t")
         (is (= r0 (context/sent-messages db e0)) "turn 0's messages, read from its records")
         (is (= r1 (context/sent-messages db e1)) "turn 1's, though the plan changed after both")
-        (is (not (str/includes? (str (context/sent-messages db e1)) "Later.")) "the task as it was sent, not as it is")))))
+        (is (not (str/includes? (str (context/sent-messages db e1)) "Later.")) "the task as it was sent, not as it is")
+        (is (str/includes? (context/help-text db) "Changed after the turns.") "the help page changed after them")
+        (is (not (str/includes? (str (context/sent-messages db e0)) "Changed after the turns.")) "the help page as it was sent")))))
 
 (deftest a-turn-records-one-turns-messages
   ;; what a turn writes is its refs, one a record it sent: the record grows with that turn's
@@ -607,16 +611,6 @@
             bytes #(count (seon.edn/encode (sent %)))]
         (is (= (count (sent e1)) (- (count r1) (count (filter #(= "tool" (:role %)) r1)))) "one ref a record: a model eval's call and answer are one record")
         (is (< (bytes e1) (* 60 (count (sent e1)))) (str "no text in the record: " (bytes e1) " bytes for " (count (sent e1)) " refs"))))))
-
-(deftest the-sent-records-are-the-wire-body
-  ;; the debug page shows the records a turn sent; the provider got their wire shape: the same
-  ;; body, compared as data (seon.model/request-body over the recorded and over the sent messages)
-  (ts/test-branch!
-    (fn [_ conn]
-      (let [[db [_ r1] [_ e1]] (sent-turns conn)
-            provider {:kind :openai-compat :base-url "https://api.example" :model "deepseek-flash" :api-key-env "NONE" :max-tokens 2048}
-            body #(seon.model/request-body provider {:messages % :task "demo/f" :turn 1})]
-        (is (= (body r1) (body (context/sent-messages db e1))))))))
 
 (deftest the-request-is-a-conversation-of-evals-then-the-screen
   ;; notes/design-agent-view-2026-10-24.md §1: each turn's prose and eval calls with their

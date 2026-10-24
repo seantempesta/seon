@@ -90,7 +90,7 @@
  :seon.render/sent-request [:map {:seon.render/html seon.render.ui/sent-request} [:turn :int] [:run :string]
                             [:parts [:vector [:tuple :any [:vector :seon.model/message]]]]
                             [:seon.turn/tokens {:optional true} :int] [:seon.turn/cache-hit-tokens {:optional true} :int]
-                            [:seon.turn/cache-miss-tokens {:optional true} :int]]
+                            [:seon.turn/cache-miss-tokens {:optional true} :int] [:seon.turn/error {:optional true} :map]]
  :seon.render/page-head [:and {:seon.render/html seon.render.ui/head} :seon.render/node]
  ;; one row of its list: a turn and the evaluations it ran, or one evaluation or message
  :seon.render/page-row [:vector {:seon.render/html seon.render.ui/row :min 1} :seon.render/node]

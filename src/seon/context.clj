@@ -371,6 +371,8 @@
   seon.model/wire-messages) and the records they render, in order (:seon.turn/sent, `sent`):
   [:section eid t], the help page's own section as of t; [:task eid t], the task as of its
   run's first turn; [:eval id]; [:message id]; [:history n], the n records the budget left out.
+  :sent is nil for a read with no screen evals (an outside agent's): its last message is the
+  block's turn sections, no record; every model turn has screen evals.
   Called by the turn, not declared as the agent fact's :seon.render/ai until the render cache
   makes it once per change (design section 10, step 4)."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:map [:messages [:vector :seon.model/message]] [:sent [:maybe [:vector :any]]]]]}

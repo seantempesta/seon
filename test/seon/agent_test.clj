@@ -517,6 +517,19 @@
                        :decls [{:seon.task/name "m" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= [:error :seon.model/no-provider [:seon.model/no-provider]] (:value r)) (pr-str r))))
 
+(deftest a-failed-call-keeps-what-it-sent
+  ;; root, 2026-10-24: a turn whose model call fails still records what it sent (written as the
+  ;; request goes) and its typed error (an error is data, AGENTS section 4); the debug page shows both
+  (let [[end turn] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#fail\" :max-turns 1})"
+                              (str "(let [db (seon.agent/db) t (datahike.api/pull db '[:db/id :seon.turn/sent :seon.turn/error] [:seon.turn/id \"demo/t#fail/0\"])]"
+                                   "  {:sent (mapv first (:seon.turn/sent t)) :error (:seon.error/type (:seon.turn/error t))"
+                                   "   :read (count (seon.context/sent-messages db (:db/id t)))})")]
+                             {:sets [":seon.config.ai/provider=:none"]})]
+    (is (= :error (:outcome (:value end))) (pr-str end))
+    (is (= [:section :task :eval :eval] (:sent (:value turn))) "the help page, the task story, the screen's two evals")
+    (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")
+    (is (= 4 (:read (:value turn))) "read back from its records")))
+
 (deftest a-turn-that-repeats-the-last-from-the-same-state-ends-the-run
   ;; root's research, lever 2 (2026-10-22): loops took 45% of tokens, and the step E dry run's
   ;; first real design made one pair of calls 18 times from an unchanged state. A turn whose
