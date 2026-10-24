@@ -3,6 +3,8 @@
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in notes/archive/DECISIONS-superseded.md.
 
 ## 2026-10-24 rulings
+### A prove run is keyed by the digest of what it reads
+Owner, 2026-10-24: "okay lets try the digest". The test service's run key (`seon.prove/run-key`) names the digest of the code and tests the run reaches, as each test's result is already keyed (AGENTS §5), not `branch@t`: a write to main that touches none of it never starts a second run. Stated in: not yet (owed docs/merging.md#the-test-service, task seon.proofs/a-prove-runs-key-does-not-move-between-two-asks).
 ### Root merges verified fixes as they come in
 Owner, 2026-10-24: "merge fixes as they come in". A fix branch whose report carries its numbers, its self-review rating and a green bin/prove is merged by root without asking (bin/prove and smoke on the merged tree, then bin/update); a branch that adds a namespace, config key, schema attribute, proc or route still needs the owner's gate. Stated in: AGENTS §2, root's working rules (owed).
 ### One render per schema, declared where the schema is registered
