@@ -3,13 +3,15 @@
   run tests, whoever asks (a Claude session through the `prove` server op / seon_prove, an agent's
   turn), so a change is proved once.
 
-  - A request names a branch and its tx (t); its key is \"branch@t\", the digest of what would run.
+  - A request names a branch, its tx (t) and the digest of what its run reads (seon.root/prove!,
+    seon.agent/prove!); its key (run-key) is \"branch@digest\", so a write that changes nothing
+    the run reads (its own facts, the eval that asked) never makes a second run.
   - One run at a time per checkout. A request whose key is running, or is the next to run,
     joins that run's waiters; it never starts a second run.
   - A request for another key while a run is in flight replaces the next run of its branch (the
     latest wins; the replaced request's waiters follow the newer one). Branches take turns: after
     a run, the next branch in name order after the one that ran goes first.
-  - A key whose run ended is answered at once from that answer, until its branch moves.
+  - A key whose run ended is answered at once from that answer, until its key moves.
   - Every waiter is answered exactly once, with the run's answer.
   A run is a chain of requests to the api (this proc's `:to-api`, answers on `:answers`): the
   agent that holds the branch runs its tests (`:tests`); a branch no agent holds (main, `tests`)
@@ -18,14 +20,27 @@
   `:main` is the writer's commit notice (a sliding buffer of one: a notice is replaced by the next,
   a reader catches up from main's head); it keeps the latest main t for a request that names none."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.proofs :as proofs]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.proofs :as proofs] [seon.error :as error]
             [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
+(defn read-digest
+  "The digest of what a run reads, its key's (run-key): the program of the branch it runs (pd,
+  seon.program/program-digest of its head) and, for main, the checkout's inputs (seon.fx/inputs:
+  :tree, every file, and :env; main's prove agent loads its tests from the checkout). An agent's
+  run reads its branch's program, its tests among them, and this root's inputs, fixed for the
+  boot as this proc's state is, so inputs is nil. Not read: an agent's merge base (:turn selects
+  what the branch changed since it), which moves with a merge of main that changes the branch's
+  program, except when the branch already held what main gained; then the answer kept covers
+  more tests than the new selection, not fewer."
+  {:malli/schema [:=> [:cat [:maybe [:map [:tree :string] [:env :string]]] :string] :string]}
+  [inputs pd] (if inputs (error/digest (str (:tree inputs) "\n" (:env inputs) "\n" pd)) pd))
+
 (defn run-key
-  "The key of the run of branch at tx t, of the tests of namespaces names (nil: all it selects), in
-  mode (:judge: the plan's tests; :turn: the proofs and what the branch changed, an agent's turn)."
-  {:malli/schema [:=> [:cat :keyword :int [:maybe [:set :symbol]] [:enum :turn :judge]] :string]}
-  [branch t names mode] (str (name branch) "@" t (when (seq names) (str ":" (str/join "," (sort names)))) (when (= :turn mode) "!turn")))
+  "The key of the run of branch whose reads have digest dg (seon.root/prove!), of the tests of
+  namespaces names (nil: all it selects), in mode (:judge: the plan's tests; :turn: the proofs and
+  what the branch changed, an agent's turn)."
+  {:malli/schema [:=> [:cat :keyword :string [:maybe [:set :symbol]] [:enum :turn :judge]] :string]}
+  [branch dg names mode] (str (name branch) "@" dg (when (seq names) (str ":" (str/join "," (sort names)))) (when (= :turn mode) "!turn")))
 
 ;; ---- the facts of a run ------------------------------------------------------------------
 
@@ -61,13 +76,13 @@
   [outs rids r] (into outs (for [rid rids] {:op :prove-answer :rid rid :r r})))
 
 (defn- slot
-  "The identity of what a request asks for apart from its tx: the branch and the namespaces named.
+  "The identity of what a request asks for apart from its digest: the branch, the namespaces named and the mode.
   A newer request of one slot replaces an older pending one; requests of different slots never do."
   {:malli/schema [:=> [:cat :map] [:tuple :keyword [:maybe [:set :symbol]] [:enum :turn :judge]]]}
   [{:keys [branch names mode]}] [branch names mode])
 
 (defn- same?
-  "Is request r the one req asks: the same key (branch, tx, names) and the same agent?"
+  "Is request r the one req asks: the same key (branch, digest, names) and the same agent?"
   {:malli/schema [:=> [:cat [:maybe :map] :map] :boolean]}
   [r req] (boolean (and r (= (:key r) (:key req)) (= (:agent r) (:agent req)))))
 
@@ -105,30 +120,31 @@
   Answers [st outputs]."
   {:malli/schema [:=> [:cat :map :any] [:tuple :map [:vector :map]]]}
   [st r]
-  (let [{:keys [key branch waiters recorded-t] :as run} (:running st)
+  (let [{:keys [key branch waiters] :as run} (:running st)
         err? (contract/error? r)
         ended? (= :seon.root/ended (:seon.error/type r))
         st (cond-> (-> st (dissoc :running) (assoc :last branch))
-             (not err?) (assoc-in [:done (slot run)] {:key key :r r :after recorded-t}))
+             (not err?) (assoc-in [:done (slot run)] {:key key :r r}))
         [st more] (take-next st branch)]
     [st (cond-> (into (reply [] waiters r) more) (and err? (not ended?)) (conj {:op :problem :class :platform :error r}))]))
 
 (defn- request
-  "Admit request m ({:rid :branch :t :agent :names}) of the api. Answers [st outputs]."
+  "Admit request m ({:rid :branch :t :digest :agent :names}) of the api, keyed by its :digest
+  (run-key). Answers [st outputs]."
   {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
   [st {:keys [rid branch] :as m}]
   (let [t (or (:t m) (:main-t st))
         names (not-empty (:names m))
         mode (or (:mode m) :judge)
-        key (run-key branch t names mode)
+        key (run-key branch (:digest m) names mode)
         req (-> m (select-keys [:branch :agent :proofs]) (assoc :key key :t t :names names :mode mode))
         k (slot req)
         done (get-in st [:done k])]
     (cond
       (same? (:running st) req) [(update-in st [:running :waiters] conj rid) []]
       (same? (get-in st [:next k]) req) [(update-in st [:next k :waiters] conj rid) []]
-      ;; asked again after its run; or at the tx the run's own results were written at (main)
-      (and done (or (= key (:key done)) (= t (:after done)))) [st (reply [] [rid] (:r done))]
+      ;; asked again after its run, nothing it reads changed
+      (and done (= key (:key done))) [st (reply [] [rid] (:r done))]
       ;; another tx of the same slot while a run is in flight: the latest wins, the asker it replaces follows it
       (:running st) [(update-in st [:next k] (fn [old] (assoc req :waiters (conj (:waiters old #{}) rid)))) []]
       :else (go st req #{rid}))))
@@ -170,14 +186,14 @@
                    (let [[st w] (step/ask st [:prove :answers] [:recorded key] {:op :write :req {:op :tx :branch :db :tx-data (result-tx run r)}})]
                      [(assoc-in st [:running :stage] :recording) (cond-> [w] kill (conj kill))])))
         ;; the run's answer, whole (its reports are what the done rule reads), once its facts are written
-        :recorded (finish (assoc-in st [:running :recorded-t] (when-not (contract/error? r) (:t r)))
+        :recorded (finish st
                           (if (contract/error? r)
                             r
                             (assoc (:answer run) :key key :ran true :red (vec (sort-by str (keys (proofs/failures (:answer run)))))))))))) 
 
 (defn prove-proc
   "The test service's admission (see the namespace doc). In :req (requests the api forwards,
-  {:rid :branch :t :agent :names}), :answers (the api's answers to this proc's requests) and
+  {:rid :branch :t :digest :agent :names}), :answers (the api's answers to this proc's requests) and
   :main (the writer's commit notice); out :to-api (its requests; {:op :prove-answer :rid :r} for
   each waiter, one message each; {:op :problem} for a failed run). Buffers (system.edn): :req and
   :answers are lossless and bounded (a full one parks the sender: the api); :main is a sliding

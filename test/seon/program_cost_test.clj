@@ -327,3 +327,21 @@
      :per-n {:ticks 55000.0 :bytes 480000.0}
      :fixed {:ticks 100000.0 :bytes 100000.0}
      :sizes [10 100 1000]}))
+
+(defn digested-of
+  "program-digest's argument: a branch db holding n forms (branch-of's)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db]]}
+  [n] [(first (branch-of n))])
+
+(deftest the-program-digest-is-one-read-of-the-program
+  (cost/proof
+    {:of 'seon.program/program-digest :input 'seon.program-cost-test/digested-of
+     :n "forms the db holds"
+     :work (str "one read of the :form/id, :schema/form and :ns/tail datoms in index order (no query, no sort), "
+                "each entity id (and value) appended once, then one digest of the text")
+     :growth :linear
+     ;; measured 2026-10-24: 116k ticks / 580 KB at 100 forms, 325k / 1.62 MB at 1,000 (the fixed part is
+     ;; the test db's schema entries); 0.79M / 5.0 MB on the standing root's main (2699 forms, 660 entries)
+     :per-n {:ticks 235.0 :bytes 1160.0}
+     :fixed {:ticks 93000.0 :bytes 465000.0}
+     :sizes [100 1000 10000]}))

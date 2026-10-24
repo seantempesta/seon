@@ -1080,6 +1080,23 @@
   ([db inputs] (reach-digests db inputs nil))
   ([db inputs roots] (update-vals (graph-index (reach-graph db (:data-refs inputs)) inputs roots) :digest)))
 
+(defn program-digest
+  "The digest of db's program as a whole: its live forms (:form/id, hasch of a form's namespace
+  and text, docs/storage.md#ids: a replaced form is retracted), its schema entries (:schema/form)
+  and its namespaces' tails, each by its entity, a content id of its identity (docs/storage.md#ids),
+  so the index's order is the same on every branch and nothing is sorted. It moves when a form, schema entry or
+  ns tail is added, replaced or removed, and not on a write of data. What a main run of the test
+  service reads of main's program (seon.root/prove!): per-test digests (reach-digests) need the
+  checkout's tests loaded, which is the run's own work. Cost: one read of three attributes'
+  datoms (measured 2026-10-24 on the standing root's main, 2699 forms, 660 schema entries, 129
+  namespaces: 0.79M ticks, 5.0 MB, of which the index read is 0.52M ticks, 3.9 MB)."
+  {:malli/schema [:=> [:cat :seon.host/db] :string]}
+  [db]
+  (let [b (StringBuilder.)]
+    (doseq [dt (d/datoms db :aevt :form/id)] (.append b (:e dt)) (.append b "\n"))
+    (doseq [a [:schema/form :ns/tail] dt (d/datoms db :aevt a)] (.append b (:e dt)) (.append b " ") (.append b (:v dt)) (.append b "\n"))
+    (error/digest (.toString b))))
+
 (defn reach-index
   "{test {:digest :process? :binary?}} of db's tests under inputs, from the one graph (reach-graph, graph-index):
   its reach digest (reach-digests), whether it reaches a process of its own (a var of
