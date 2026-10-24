@@ -424,9 +424,9 @@
         t (eid-of db [:seon.task/id "demo/f"])]
     (is (str/includes? (h/html (ui/tile nd {:unit "t-7"})) "task · calc/add") "a value's tile, by its view")
     (testing "an entity's component, read from its db, by its schema's view at each size"
-      (is (str/includes? (h/html (ui/component db t :block "p-head")) "demo/f") "the main pane")
-      (is (str/includes? (h/html (ui/component db t :tile (str "t-" t))) "demo/f") "a tile")
-      (is (str/includes? (h/html (ui/component db t :row (str "r-" t))) "demo/f") "a row"))))
+      (is (str/includes? (h/html (ui/component db t :block)) "demo/f") "the main pane")
+      (is (str/includes? (h/html (ui/component db t :tile)) "demo/f") "a tile")
+      (is (str/includes? (h/html (ui/component db t :row)) "demo/f") "a row"))))
 
 ;; ---- the page (task seon.render/page): every page is the walk of one entity ----
 
@@ -478,7 +478,7 @@
 
 (defn- unit-html "Unit u of a layout on dbs, rendered as the render proc renders it." [dbs u]
   (if-let [[i e as] (:comp u)]
-    (h/html (ui/component (nth dbs i) e as (:id u)))
+    (h/html (ui/component (nth dbs i) e as))
     (h/html (r/html (:input u) {:schema (:schema u) :unit (:id u)}))))
 
 (deftest a-page-is-the-walk-of-its-entity
@@ -663,6 +663,19 @@
     (is (empty? (:frags patch)) "no held row changed")
     (is (= ["#p-rows"] (mapv first (:prepends patch))) "one row, above the others")
     (is (str/includes? (second (first (:prepends patch))) "(h)"))))
+
+(deftest a-branch-read-anew-renders-its-components-again
+  ;; a branch read after an error has nothing held to diff against: what was cached from that
+  ;; branch is rendered again, so a change made while it could not be read is shown
+  (let [[main branch eid] (paged-dbs)
+        o (volatile! {})
+        st (assoc (comp-state main branch eid) :watch #{:a3})
+        [st1 _] (#'p/pass-view st :a3)
+        err (seon.contract/error :seon.writer/refused 'seon.writer/writer-proc "no branch :task-demo-f" {})
+        st2 (#'p/answered st1 o [:branch :a3] err)
+        branch' (d/db-with branch [{:seon.turn/id "demo/f#1/0" :seon.turn/reply "a reply written while unread"}])
+        st3 (#'p/answered st2 o [:branch :a3] {:db branch'})]
+    (is (str/includes? (p/page-html st3 :a3) "a reply written while unread"))))
 
 (deftest a-component-on-two-pages-renders-once
   ;; /agent/a3 and /walk/<its eid> are two pages showing the same rows: each row renders once, for both

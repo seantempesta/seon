@@ -491,6 +491,13 @@
   {:malli/schema [:=> [:cat :map :seon.render/as] :any]}
   [nd as] (render/html (:seon.render/value nd) {:as as :schema (:seon.render/schema nd)}))
 
+(defn comp-id
+  "The element id of entity eid's component shown as as: the main pane p-head, a row r-<eid>, a
+  tile t-<eid>, a debug-page turn d-<eid>. The same on every page, so the cache's key names it."
+  {:malli/schema [:=> [:cat pos-int? :any] :string]}
+  [eid as]
+  (if (vector? as) (str "d-" eid) (case as :block "p-head" :row (str "r-" eid) :tile (str "t-" eid))))
+
 (defn rows
   "A page's list (node nds that show :as :row), in the walk's order (newest first), each row a component: a turn, whose component shows the evals its calls name (:eval)
   under it; an evaluation no turn names (the owner's, root's, one of a turn still running) or a
@@ -500,7 +507,7 @@
   (let [taken (set (for [t nds :when (= :seon.turn/turn-fact (:seon.render/schema t)) c (get-in t [:seon.render/value :seon.turn/calls]) :when (:eval c)] (:eval c)))]
     (->> nds
          (remove #(taken (get-in % [:seon.render/value :seon.eval/id])))
-         (mapv (fn [nd] {:id (str "r-" (:seon.render/eid nd)) :eid (:seon.render/eid nd) :db (:seon.render/db nd 0)})))))
+         (mapv (fn [nd] {:id (comp-id (:seon.render/eid nd) :row) :eid (:seon.render/eid nd) :db (:seon.render/db nd 0)})))))
 
 (declare sent-request)
 
@@ -524,12 +531,13 @@
 
 (defn component
   "Entity eid on db as a page part shows it, as as (:row, :tile, :block; [:debug open? view], a
-  turn on the debug page), its element id: what the render proc caches by what it read
+  turn on the debug page), its element id comp-id: what the render proc caches by what it read
   (d/with-reads) and renders again only when a transaction touches that. Its value by its
   schema's :html render (`view`; its relevant attributes); a turn's row with the evals its calls
   name under it; a tile with a link to its own page; the main pane."
-  {:malli/schema [:=> [:cat :seon.host/db pos-int? :any :string] :any]}
-  [db eid as id]
+  {:malli/schema [:=> [:cat :seon.host/db pos-int? :any] :any]}
+  [db eid as]
+  (let [id (comp-id eid as)]
   (if (vector? as)
     (let [[_ open? view] as] (sent-request (debug-input db eid open? view) {:unit id}))
   (let [own (d/pull db '[*] eid)
@@ -546,7 +554,7 @@
       :tile [:div {:id id :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
              [:a {:href (str "/walk/" eid) :class "text-2xs uppercase tracking-wider"} (str (name (or schema :entity)) " · its page →")]
              (view nd :tile)]
-      [:section {:id id :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (view nd :block)]))))
+      [:section {:id id :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (view nd :block)])))))
 
 (defn tile
   "One tile of a page's column that is a value, not an entity (a task's plan, root's open
@@ -597,7 +605,9 @@
         rs (rows listed)
         on (take shown rs)
         older (- (count rs) (count on))
-        tile-id #(str "t-" (:seon.render/eid %) (when (= :value (:seon.render/kind %)) (str "-" (dom-id (get-in % [:seon.render/from :seon.render/attr])))))]
+        tile-id #(if (= :value (:seon.render/kind %))
+                   (str "t-" (:seon.render/eid %) "-" (dom-id (get-in % [:seon.render/from :seon.render/attr])))
+                   (comp-id (:seon.render/eid %) :tile))]
     {:seon.render/html
      [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4"}
       [:nav {:class "flex items-baseline gap-3"}

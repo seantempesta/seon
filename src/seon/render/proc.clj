@@ -236,7 +236,7 @@
           on (take shown ts)
           vp (ui/view-param view)]
       (ui/debug (second view)
-                (vec (for [e on :let [id (str "d-" e)]] {:id id :comp [1 e [:debug (contains? open id) vp]]}))
+                (vec (for [e on :let [id (ui/comp-id e [:debug])]] {:id id :comp [1 e [:debug (contains? open id) vp]]}))
                 (- (count ts) (count on))))))
 
 (defn- page-value
@@ -317,13 +317,29 @@
   (let [v (get-in st [:views view])]
     (boolean (or (nil? v) (contains? (:dirty st) view) (not= (:extra v) (extra-of st view))))))
 
+(defn- unindex
+  "Index ix (key -> set of x) without x under keys ks; a key left with none is gone."
+  {:malli/schema [:=> [:cat [:maybe :map] [:maybe [:sequential :any]] :any] :map]}
+  [ix ks x]
+  (reduce (fn [ix k] (let [vs (disj (get ix k) x)] (if (seq vs) (assoc ix k vs) (dissoc ix k)))) (or ix {}) ks))
+
+(defn- index
+  "Index ix (key -> set of x) with x under keys ks."
+  {:malli/schema [:=> [:cat [:maybe :map] [:maybe [:sequential :any]] :any] :map]}
+  [ix ks x]
+  (reduce (fn [ix k] (update ix k (fnil conj #{}) x)) (or ix {}) ks))
+
+(defn- index-each
+  "Index ix (component -> set of views) with view under each of cks."
+  {:malli/schema [:=> [:cat [:maybe :map] [:sequential :any] :any] :map]}
+  [ix cks view] (reduce (fn [ix ck] (update ix ck (fnil conj #{}) view)) (or ix {}) cks))
+
 (defn- reindex
   "St with view-id's reads (keys, d/reads-index) in the proc's one index from a read key to the
   views that read it (:read-index), its earlier reads (old) taken out."
   {:malli/schema [:=> [:cat :map :any [:maybe [:set :any]] [:set :any]] :map]}
   [st view-id old keys]
-  (let [drop (reduce (fn [ix k] (let [vs (disj (get ix k) view-id)] (if (seq vs) (assoc ix k vs) (dissoc ix k)))) (:read-index st {}) old)]
-    (assoc st :read-index (reduce (fn [ix k] (update ix k (fnil conj #{}) view-id)) drop keys))))
+  (assoc st :read-index (-> (:read-index st) (unindex (seq old) view-id) (index (seq keys) view-id))))
 
 (defn touched
   "The views a transaction's datoms touched: those whose last walk read a key one of the datoms
@@ -343,20 +359,20 @@
   (if (zero? i) :main (or (first (get-in st [:branches view :read])) [:view view])))
 
 (defn- comp-entry
-  "Component [i eid as] of view's page (element id) from the proc's one cache of components,
-  keyed by [db eid as], rendered inside d/with-reads when the cache has none (what it read is
-  indexed by db: :comp-index): [st' {:html :keys :rev}], a new :rev each time it renders."
-  {:malli/schema [:=> [:cat :map :any :seon.host/db [:tuple nat-int? pos-int? :any] :string] [:tuple :map :map]]}
-  [st view db [i eid as] id]
+  "Component [i eid as] of view's page from the proc's one cache of components, keyed by
+  [db eid as], rendered inside d/with-reads when the cache has none (what it read is indexed by
+  db: :comp-index): [st' {:html :keys :rev}], a new :rev each time it renders."
+  {:malli/schema [:=> [:cat :map :any :seon.host/db [:tuple nat-int? pos-int? :any]] [:tuple :map :map]]}
+  [st view db [i eid as]]
   (let [dk (db-key st view i) ck [dk eid as]]
     (if-let [e (get-in st [:components ck])]
       [st e]
-      (let [[html reads] (d/with-reads #(h/html (ui/component db eid as id)))
+      (let [[html reads] (d/with-reads #(h/html (ui/component db eid as)))
             ks (d/reads-index reads)
             rev (inc (:comp-rev st 0))
             e {:html html :keys ks :rev rev}]
         [(-> st (assoc-in [:components ck] e) (assoc :comp-rev rev) (update-in [:counts :components] (fnil inc 0))
-             (update-in [:comp-index dk] (fn [ix] (reduce (fn [ix k] (update ix k (fnil conj #{}) ck)) (or ix {}) ks))))
+             (update-in [:comp-index dk] index (seq ks) ck))
          e]))))
 
 (defn comps-touched
@@ -367,33 +383,44 @@
   (let [ix (get-in st [:comp-index dk] {})]
     (into #{} (mapcat (fn [d] (mapcat #(if (= :all %) (into #{} cat (vals ix)) (get ix %)) (d/datom-keys d)))) datoms)))
 
+(defn- comps-of
+  "The cached components read from db dk: every one, when that db is read anew with nothing held
+  to diff against (a first read, a read after an error)."
+  {:malli/schema [:=> [:cat :map :any] [:set :any]]}
+  [st dk] (into #{} (filter #(= dk (first %))) (keys (:components st))))
+
+(defn- drop-comps
+  "St without cached components cks and their reads in :comp-index."
+  {:malli/schema [:=> [:cat :map [:sequential :any]] :map]}
+  [st cks]
+  (reduce (fn [st [dk :as ck]]
+            (-> st (update :components dissoc ck) (update-in [:comp-index dk] unindex (seq (get-in st [:components ck :keys])) ck)))
+          st cks))
+
 (defn- invalidate
-  "St without cached components cks (they render again when a page next shows them), their reads
-  out of :comp-index, and every view holding one of them dirty."
+  "St without cached components cks (they render again when a page next shows them), and every
+  view holding one of them (:comp-views) dirty."
   {:malli/schema [:=> [:cat :map [:set :any]] :map]}
   [st cks]
   (if (empty? cks)
     st
-    (let [st (reduce (fn [st [dk :as ck]]
-                       (let [ks (get-in st [:components ck :keys])]
-                         (-> st (update :components dissoc ck)
-                             (update-in [:comp-index dk] (fn [ix] (reduce (fn [ix k] (let [vs (disj (get ix k) ck)] (if (seq vs) (assoc ix k vs) (dissoc ix k)))) ix ks))))))
-                     st cks)
-          holding (for [[v vw] (:views st) [_ u] (:units vw) :when (cks (get-in u [:input :comp]))] v)]
-      (update st :dirty (fnil into #{}) holding))))
+    (-> (drop-comps st (seq cks))
+        (update :dirty (fnil into #{}) (mapcat #(get-in st [:comp-views %]) cks)))))
 
 (defn- forget
-  "St without the cached components no view holds any more (the views a tab watches changed):
-  the cache holds what pages show, nothing else."
+  "St without the cached components no view holds (:comp-views): the cache holds what pages show,
+  nothing else."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
-  (let [live (set (for [[_ vw] (:views st) [_ u] (:units vw) :let [c (get-in u [:input :comp])] :when c] c))
-        gone (remove live (keys (:components st)))]
-    (reduce (fn [st [dk :as ck]]
-              (let [ks (get-in st [:components ck :keys])]
-                (-> st (update :components dissoc ck)
-                    (update-in [:comp-index dk] (fn [ix] (reduce (fn [ix k] (let [vs (disj (get ix k) ck)] (if (seq vs) (assoc ix k vs) (dissoc ix k)))) ix ks))))))
-            st gone)))
+  (drop-comps st (remove #(seq (get-in st [:comp-views %])) (keys (:components st)))))
+
+(defn- hold-comps
+  "St with view-id holding components cks now (:comp-views, each component to the views holding
+  it), in place of what it held before (old)."
+  {:malli/schema [:=> [:cat :map :any [:sequential :any] [:sequential :any]] :map]}
+  [st view-id old cks]
+  (assoc st :comp-views (-> (reduce (fn [ix ck] (unindex ix [ck] view-id)) (:comp-views st) old)
+                            (index-each cks view-id))))
 
 (defn- pass-view
   "One view rendered: [st' patch-message-or-nil]; a view whose entity main does not hold yet renders
@@ -408,7 +435,9 @@
         [out reads] (d/with-reads #(page-value st view-id))
         st (-> st (update-in [:counts :walked] (fnil inc 0)) (update :last-walked (fnil conj []) view-id) (update :dirty disj view-id))
         read-keys (d/reads-index reads)
+        cks (fn [vw] (keep #(get-in % [:input :comp]) (vals (:units vw))))
         hold (fn [st v] (-> (reindex st view-id (:reads held) read-keys)
+                            (hold-comps view-id (cks held) (cks v))
                             (assoc-in [:views view-id] (assoc v :reads read-keys :extra (extra-of st view-id)))))]
    (cond
     ;; main not read yet: nothing held, nothing indexed; the next pass walks it
@@ -421,7 +450,7 @@
           ;; it and its revision, so a unit renders again only when its component did
           [st units] (reduce (fn [[st us] {:keys [id comp] :as u}]
                                (if comp
-                                 (let [[st e] (comp-entry st view-id (nth dbs (first comp) (first dbs)) comp id)]
+                                 (let [[st e] (comp-entry st view-id (nth dbs (first comp) (first dbs)) comp)]
                                    [st (conj us (assoc u :input {:comp [(db-key st view-id (first comp)) (second comp) (peek comp)] :rev (:rev e)} :html (:html e)))])
                                  [st (conj us u)]))
                              [st []] (:seon.render/units out))
@@ -581,6 +610,9 @@
                       (-> st (update-in z dissoc :db) (assoc-in (conj z :error) r))
                       (-> st (update-in z dissoc :error) (assoc-in (conj z :db) (:db r))))
               (and (not (seon.contract/error? r)) (nil? held)) (update :dirty (fnil conj #{}) view)
+              ;; read anew with nothing held to diff against (a first read, a read after an error):
+              ;; what was cached from that branch is not known to be current
+              (nil? held) (as-> st (invalidate st (comps-of st (db-key st view 1))))
               (seq moved) (-> (update :dirty (fnil into #{}) (touched st moved))
                               (invalidate (comps-touched st (db-key st view 1) moved))))
             o))
@@ -634,7 +666,8 @@
                           :views (let [w (:views m)
                                        ;; a view no tab watches keeps nothing: its retained page, its branch read, its rows
                                        drop #(into {} (filter (fn [[v]] (contains? w v))) %)]
-                                   (ask-state (-> (reduce (fn [st v] (reindex st v (get-in st [:views v :reads]) #{}))
+                                   (ask-state (-> (reduce (fn [st v] (-> (reindex st v (get-in st [:views v :reads]) #{})
+                                                                         (hold-comps v (keep #(get-in % [:input :comp]) (vals (get-in st [:views v :units]))) [])))
                                                           st (remove w (keys (:views st))))
                                                   (assoc :watch w :tabs (:tabs m)) (update :views drop) (update :branches drop) (update :shown drop) (update :open drop)
                                                   (update :dirty #(into #{} (filter w) %))

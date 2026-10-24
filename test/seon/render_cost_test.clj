@@ -164,7 +164,8 @@
      ;; row's parts as values and a sort by transaction, 510 KB / 5.2 MB)
      :growth :linear
      ;; shown-as twice a node (the list, then the tiles), each armed (~353 B), and the node's row id
-     :per-n {:calls 2 :bytes 1300}
+     ;; (seon.render.ui/comp-id, one more call: 306 / 3,006 at 100 / 1,000)
+     :per-n {:calls 3 :bytes 1300}
      ;; page, rows, and a slot per shown row and the list's end; what the first page's units hold
      :fixed {:calls 6 :bytes 30000}
      :sizes [100 1000 4000]}))
@@ -269,7 +270,8 @@
      ;; measured 2026-10-24: 357 / 357 calls and 1.20 / 4.37 MB at 100 / 1,000 held turns, one component
      ;; rendered (before rows were components: 130 calls and 3.90 / 34.3 MB, ~34 KB a held turn)
      :per-n {:bytes 3600}
-     :fixed {:calls 357 :bytes 900000}
+     ;; 403 once each row's id is seon.render.ui/comp-id and each view's components are indexed (hold-comps)
+     :fixed {:calls 403 :bytes 900000}
      ;; the full run measures 4,000 too (:seon.config.proofs/cost-max-n)
      :sizes [100 1000 4000]}))
 
