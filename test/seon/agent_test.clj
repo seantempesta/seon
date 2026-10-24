@@ -540,6 +540,21 @@
     (is (= :seon.test/ticks-spent type) (:text r))
     (is (= "#'spin-test/spin" test) "naming the test that was running")))
 
+(deftest an-agent-commits-after-each-eval
+  ;; task seon.render/a-view-renders-once-per-change-of-its-reads (D; design section 11, item 1):
+  ;; each eval of a turn (the screen's two, then the model's) is committed as it lands, so a page
+  ;; shows it then, not at the turn's end. Walked back from the branch's head, no commit adds more
+  ;; than one eval record (one commit at the turn's end added the turn's evals at once: 2 -> 4)
+  (let [[_ counts] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#each\" :max-turns 1})"
+                              (str "(let [db (seon.agent/db)"
+                                   "      n (fn [db] (count (datahike.api/q '[:find ?e :where [?e :seon.eval/id]] db)))"
+                                   "      back (fn [db] (when-let [p (first (datahike.api/parent-commit-ids db))] (datahike.api/commit-as-db db p)))]"
+                                   "  (vec (distinct (map n (take 30 (take-while some? (iterate back db)))))))")]
+                             {:sets [":seon.config.ai/script=seon.fixtures/same-call"]})
+        ns (:value counts)]
+    (is (< 3 (count ns)) (pr-str ns))
+    (is (every? #(<= % 1) (map - ns (rest ns))) (str "each eval its own commit: " (pr-str ns)))))
+
 (deftest a-model-turn-records-its-prose-and-the-message-it-took
   ;; task seon.render/a-debug-view-of-any-agent: the owner's message is a fact root writes on
   ;; main (from "owner", to the run the agent works); the turn that takes it writes the same

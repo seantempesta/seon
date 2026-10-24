@@ -172,6 +172,16 @@
       (:merge? observed) (assoc :merge? true)
       ev (assoc :last-evals ev))))
 
+(defn- evaluated!
+  "Code through the one REPL path (seon.repl/eval-string, req) and its record committed to the
+  branch as it lands (seon.agent/commit!), so a page shows each eval then, not at the turn's end
+  (design section 11, item 1). Answers the response."
+  {:malli/schema [:=> [:cat :string :map] :seon.eval/response]}
+  [code req]
+  (let [r (repl/eval-string code req)]
+    (agent/commit!)
+    r))
+
 (defn- act!
   "One model turn: the context of what was observed to the model, the reply's eval calls
   through the one REPL path, each answered as its own result, the turn's facts on the branch. Answers the loop state after it, or the
@@ -189,7 +199,7 @@
         _ (swap! agent/state assoc-in [:turn :screen]
                  {:task (:seon.task/id t)
                   :input (context/turn-input (agent/db) {:turn turn :max-turns max-turns :origin :model :observed ob :merge? merge?} last)})
-        screen (vec (keep #(:record (repl/eval-string % {:origin :screen})) screen/forms))
+        screen (vec (keep #(:record (evaluated! % {:origin :screen})) screen/forms))
         basis (cond-> (assoc (basis! (:seon.task/id t) run turn max-turns :model ob true) :agent (:key @agent/state))
                 (seq screen) (assoc :screen screen))
         {:keys [block messages]} (context/render (agent/db) basis)
@@ -212,7 +222,7 @@
                                       (let [content (when (and (zero? i) (not (str/blank? (:text c)))) (:text c))
                                             shown (not-empty (str/join "\n\n" (remove str/blank? [content prose])))]
                                         {:id id :code code :prose shown
-                                         :response (repl/eval-string (:text (reader/forgive code))
+                                         :response (evaluated! (:text (reader/forgive code))
                                                                      (cond-> {:origin :model :call-id id :call i}
                                                                        shown (assoc :prose shown)
                                                                        content (assoc :content content)
