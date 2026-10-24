@@ -30,7 +30,10 @@
               ["(some? *e)" :text "true"]
               ["(pst)" :text "Divide by zero"]
               ["(in-ns 'seon.reconcile)" :text "seon.reconcile"]
-              ["(clojure.repl/source root-causes)" :text "(defn root-causes"]
+              ;; the same source a row above printed: an earlier response's output prints as the form
+              ;; that reads it again, never twice (notes/design-agent-view-2026-10-24.md section 1)
+              ["(clojure.repl/source root-causes)" :text "(:out result/e"]
+              ["(with-out-str (clojure.repl/source seon.reconcile/root-causes))" :text "(:out result/e"]
               ;; a namespace's ns form, its requires and aliases (step E's run 3: the real design
               ;; asked for seon.problems-test/ns 18 turns running, to write its deftest)
               ["(my.schema/forms :seon.run/status)" :text ":enum"]
@@ -42,7 +45,9 @@
               ["(do (in-ns 'user) (clojure.test/deftest red (clojure.test/is (= 1 2))) (clojure.test/run-tests))" :text "FAIL in (red)"]
               ;; every value is data, printed by the one printer (notes/design-agent-view-2026-10-24.md:
               ;; nothing renders an eval's value), its producer's schema or not
-              ["(my.task/current)" :text ":seon.task/id \"demo/t\""]
+              ;; a namespaced map as Clojure's REPL prints one (*print-namespace-maps*)
+              ["(my.task/current)" :text "#:seon.task{"]
+              ["(my.task/current)" :text ":id \"demo/t\""]
               ["(:seon.task/id (with-meta (my.task/current) nil))" :text "\"demo/t\""]
               ["(pr-str (keys (with-meta (my.task/current) nil)))" :text ":seon.task/plan"]
               ["{:seon.task/id \"x/y\" :n 1}" :text ":n 1"]
