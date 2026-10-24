@@ -35,6 +35,14 @@ Old branches that are probably superseded: ``jolt/land2``, ``jolt/land11``, ``jo
 
 The cutover is done (2026-10-23): `~/src/seon-next` is the repo, its main is next's history joined to Seon v1's (merge "Seon on Jolt replaces Seon v1", tag `v1-final`), and every live branch was fetched into it; the old tree `~/src/seon-jolt/next` is an archive. What is in flight is [plan](plan.md) "In flight"; THE PLAN there is the order.
 
+## Restarting root on the same account
+
+The sessions keep running: a new root does not restart them. It reads AGENTS.md, this page, docs/plan.md ("In flight" lists every session), docs/decisions.md and the tail of notes/merge-log.md, then finds the sessions with list_sessions (the sidebar group seon-jolt) and messages them by id. They were started by the old root, so they are not linked to the new one: their notes do not arrive by themselves, and a session's state is read with list_events or asked for. The old root's working notes are in `notes/root/`, its memories in `notes/root/memory/`.
+
+```
+You are root for Seon on Jolt, taking over from an earlier root session on the same account. Work in ~/src/seon-next. Read, in order: AGENTS.md (all of it), docs/restart.md, docs/plan.md, docs/decisions.md, and the tail of notes/merge-log.md. The sessions in docs/plan.md "In flight" are still running: find them with list_sessions (group seon-jolt), ask each for one line on where it stands, and write me a five-line state summary. Do not restart them. Delegate; investigate personally only what fits in a few tool calls.
+```
+
 ## The prompt for a fresh account
 
 ```
