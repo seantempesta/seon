@@ -217,14 +217,19 @@
   (let [form (get contract/forms a)]
     (boolean (or (:seon.render/prose (contract/properties a)) (and (qualified-keyword? form) (prose? form))))))
 
+(def ^:private prose-attrs
+  "The attributes whose values are prose (prose?), derived once from the registry (as
+  entity-schemas): a walk asks a set, not a contracted call per string."
+  (into #{} (filter prose?) (keys contract/forms)))
+
 (defn- texts
   "Node nd's prose, as [attribute text] pairs: a :value node's own value when its schema is
   prose, an entity node's prose attributes in name order."
   {:malli/schema [:=> [:cat :seon.render/node] [:vector [:tuple :keyword :string]]]}
   [{:seon.render/keys [kind value schema]}]
   (if (= :value kind)
-    (if (and (string? value) (prose? schema)) [[schema value]] [])
-    (vec (for [[a v] (sort-by (comp str key) value) :when (and (string? v) (prose? a))] [a v]))))
+    (if (and (string? value) (prose-attrs schema)) [[schema value]] [])
+    (vec (for [[a v] (sort-by (comp str key) value) :when (and (string? v) (prose-attrs a))] [a v]))))
 
 (defn- address
   "Citation c's address: its name, or its path and anchor."

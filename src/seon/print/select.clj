@@ -587,10 +587,10 @@
 (defn- grow-values
   "`entries` at their least grown into `extra` characters: each cut one whole when its growth
   fits, else filled to its room. A map's (map? true: its entries' values) strings before
-  collections, smallest first. A sequence's members in their order, breadth before depth: each
-  member's room keeps back a share for every later member that shows less than it holds (half
-  the extra, split between them), so each shows its first part and the first grow most. One
-  allot a member, at every depth."
+  collections, smallest first. A sequence's members in their order, breadth before depth: the
+  extra is split in equal shares, one for each member that does not fit whole in it and one more
+  for layout order, and each member's room keeps back a share for every later such member, so
+  each shows its first part and the first grows most. One allot a member, at every depth."
   {:malli/schema [:=> [:cat :seon.print/context [:vector :seon.print/alloc] number? :boolean] [:vector :seon.print/alloc]]}
   [context entries extra map?]
   (let [value-of (if map? #(second (:kids (nth entries %))) #(nth entries %))
@@ -601,7 +601,9 @@
                 {:i i :grown w :string-rank (if (#{:string :name} (:kind v)) 0 1)
                  :width (if w (:ub w) Long/MAX_VALUE)})
         order (vec (if map? (sort-by (juxt :string-rank :width :i) grown) grown))
-        share (if map? 0 (quot extra (* 2 (max 1 (count order)))))
+        ;; the members that will show less than they hold: no whole form fits the extra
+        cut? (fn [g] (nil? (:grown g)))
+        share (if map? 0 (quot extra (inc (count (filter cut? order)))))
         with-value (if map?
                      (fn [entries i v] (update entries i #(sized context (assoc-in % [:kids 1] v))))
                      (fn [entries i v] (assoc entries i v)))]
@@ -609,7 +611,7 @@
       (if (nil? i)
         entries
         (let [least (value-of i)
-              room (max 0 (- extra (* share (count more))))]
+              room (max 0 (- extra (* share (count (filter cut? more)))))]
           (if (and grown (<= (- (:ub grown) (:ub least)) room))
             (recur (with-value entries i grown) (- extra (- (:ub grown) (:ub least))) more)
             (let [allotted (allot context least (+ (:ub least) room))]
@@ -641,10 +643,10 @@
   {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc number?] :seon.print/alloc]}
   [context node budget]
   (or (whole context node budget)
-        (case (:kind node)
-          (:string :name) (fill-string context node budget)
-          (:map :coll) (if (bound? context node) (collapsed context node) (fill-members context node budget))
-          (sized context node))))
+      (case (:kind node)
+        (:string :name) (fill-string context node budget)
+        (:map :coll) (if (bound? context node) (collapsed context node) (fill-members context node budget))
+        (sized context node))))
 
 (defn- select
   "`value` allotted under the context's budget, or the insufficient-budget error when its least
