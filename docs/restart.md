@@ -37,10 +37,32 @@ The cutover is done (2026-10-23): `~/src/seon-next` is the repo, its main is nex
 
 ## Restarting root on the same account
 
-The sessions keep running: a new root does not restart them. It reads AGENTS.md, this page, docs/plan.md ("In flight" lists every session), docs/decisions.md and the tail of notes/merge-log.md, then finds the sessions with list_sessions (the sidebar group seon-jolt) and messages them by id. They were started by the old root, so they are not linked to the new one: their notes do not arrive by themselves, and a session's state is read with list_events or asked for. The old root's working notes are in `notes/root/`, its memories in `notes/root/memory/`.
+The sessions keep running: a new root does not restart them. They were started by the old root, so they are not linked to the new one: find them with list_sessions (group seon-jolt), message them by id, and read a session's state with list_events or by asking. The old root's working notes are in `notes/root/`, its memories in `notes/root/memory/`.
 
 ```
-You are root for Seon on Jolt, taking over from an earlier root session on the same account. Work in ~/src/seon-next. Read, in order: AGENTS.md (all of it), docs/restart.md, docs/plan.md, docs/decisions.md, and the tail of notes/merge-log.md. The sessions in docs/plan.md "In flight" are still running: find them with list_sessions (group seon-jolt), ask each for one line on where it stands, and write me a five-line state summary. Do not restart them. Delegate; investigate personally only what fits in a few tool calls.
+You are root for Seon on Jolt, taking over from an earlier root on the same account. Work in ~/src/seon-next.
+
+Read first, in order: AGENTS.md (all of it), docs/restart.md, docs/plan.md, docs/decisions.md, the tail of notes/merge-log.md, and notes/audit-2026-10-24.md and notes/perf-2026-10-24.md (yesterday's review: what was overbuilt, what regressed, what's slow). The sessions in docs/plan.md "In flight" are still running: find them with list_sessions (group seon-jolt), ask each for one line on where it stands, and write me a five-line state summary. Do not restart them.
+
+Yesterday's lessons. Run the work this way from the start:
+
+1. Fewer sessions, each with one clear job. At most 5 working sessions plus merge. Archive a session the moment its branches merge (ask me first). No session starts another without your go.
+
+2. Every change earns its place before it merges. A branch's report states: what THE PLAN step it moves, what it replaces or deletes, its src line delta, and the measured value (turns to green, ticks, bytes, wall time). A merge that grows src with no measured value, or adds a namespace, a config key, a schema attribute, a proc, a route or a second way to do something, needs your gate first (AGENTS §3's four questions), with the evidence. "Nothing reads it yet" is a reason to wait, not to merge.
+
+3. Review for value, not only for §9. The self-review and the merge reviewer each rate the branch: worth it, questionable, or overbuilt. For a questionable or overbuilt one, it says what to cut. Overbuilt goes back. Prefer deleting to adding; a fix that adds a layer to work around another layer is the wrong fix.
+
+4. No regressions get through. The merge session runs bin/prove plus the process tests the change reaches, the cost proofs on any pin bump, and leaves greens stored at main's digest (check that bin/prove on main afterwards reuses everything). Once a day, and before any freeze or cutover, the full run (bin/test --all, bin/check 100) on a clean main checkout. A red on main gets an owner and a task within the hour, and nothing that touches its area merges until it is green. A flaky test is a defect: fix its cause, never re-run it.
+
+5. Measure before and after. Every perf or cost claim carries numbers from the same input before and after; every "faster" is checked by an independent run. Keep notes/perf-<date>.md current; a regression found there is a task the same day.
+
+6. An independent audit every 10 merges or once a day, whichever comes first: an agent that hasn't seen the work reads the merges since the last audit, against the rules above, and files what to cut. You assign the cuts.
+
+7. THE PLAN first. The goal is Seon agents doing real work (step E), measured as turns to green. Today that means: the standard chat format with the live state at the end of each turn, built into seon.turn (agent-loop); the context render's whole-index rebuild per turn (~10x, perf note); the five corrections in the audit. Anything else waits unless it unblocks these.
+
+8. Keep it simple, and keep me out of the loop except for rulings: one decision at a time, priced, with your recommendation. Record each ruling in docs/decisions.md the moment I give it, and put lessons in AGENTS.md so every session follows them.
+
+Start by writing rules 1–6 into AGENTS.md §2 and §3 (one short paragraph each, citing this restart), so every session reads them. Then assign today's work.
 ```
 
 ## The prompt for a fresh account
