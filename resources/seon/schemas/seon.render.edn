@@ -78,7 +78,7 @@
  ;; one tile of its column that is a value, not an entity (an entity's tile is a component: seon.render.ui/component)
  :seon.render/page-tile [:and {:seon.render/html seon.render.ui/tile} :seon.render/node]
  ;; its list's end: the older rows, counted and unrendered, and the view that asks for them
- :seon.render/page-more [:map {:seon.render/html seon.render.ui/more} [:older nat-int?] [:view :string]]
+ :seon.render/page-more [:map {:seon.render/html seon.render.ui/more} [:older nat-int?] [:view :string] [:click? {:optional true} :boolean]]
  ;; the input at the top of root's page
  :seon.render/root-input [:map {:seon.render/html seon.render.ui/root-input}]
  ;; the input at the top of an agent's page: its REPL, its messages, its held task's release

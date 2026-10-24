@@ -155,6 +155,6 @@
         db3 (d/db-with db2 (task/agent-tx "b2" :a1 {:status :spawning}))
         agents (fn [db] (set (map :seon.agent/key (:seon.agent/_root (d/pull db '[{:seon.agent/_root [:seon.agent/key]}] [:seon.root/id :root]))))) ]
     (is (= #{"b1/a1"} (agents db)))
-    (is (= #{} (agents db2)) "the new boot holds none of the earlier boot's")
-    (is (= #{"b2/a1"} (agents db3)) "and its own as they start")
+    (is (= #{"b2/user"} (agents db2)) "the new boot holds none of the earlier boot's: only its user, an agent with no process")
+    (is (= #{"b2/user" "b2/a1"} (agents db3)) "and its own as they start")
     (is (some? (d/entity db3 [:seon.agent/key "b1/a1"])) "the earlier agent is kept, not deleted")))

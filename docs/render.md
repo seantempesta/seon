@@ -133,6 +133,7 @@ An agent's namespace refers `clojure.pprint`'s `pp` and `pprint` (`seon.agent/ma
 - `seon.web/handler`, `seon.web/view-of`, `seon.server/mcp-reply`: parsing a request's path and a tool's name.
 - `seon.context/near`: the whole line a repaired delimiter is on, the printer budgets it.
 - `seon.render.proc/pass`: root's context keeps the newest `:seon.config.render.list/stream` events; its events section (`seon.render.ai/section-events`) says how many older it did not keep.
+- `seon.render.ui/chat`: an agent's page renders the newest parts of its conversation its tab has scrolled to (`:shown`, as `seon.render.ui/page`), the older counted at its top.
 - `seon.render.proc/debug-value`: the debug page renders the newest rows its tab has scrolled to (`:shown`, as `seon.render.ui/page`), the rest counted by its list's end.
 - `seon.render.ui/page`: a page renders the newest rows its tab has scrolled to (`:seon.config.render.list/history` at first, as many more each time its end scrolls into view); its end (`seon.render.ui/more`) counts the older ones, unrendered.
 - `seon.render.ai/section-costly`: the newest `:seon.config.render.list/top` evaluations of each agent its costliest functions are summed from.

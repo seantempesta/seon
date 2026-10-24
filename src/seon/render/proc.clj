@@ -280,7 +280,15 @@
                 (update :seon.render/nodes conj {:seon.render/kind :value :seon.render/value berr :seon.render/eid eid}))]
         (if (:seon.error/type w)
           w
-          (ui/page w {:shown (get-in st [:shown view] (history-cap)) :view (ui/view-param view) :input input}))))))
+          (if (= :seon.db/agent-fact (get-in w [:seon.render/root :seon.render/schema]))
+            ;; an agent's page is its conversation; its sidebar root's agents, read on main
+            (let [root (:db/id (d/entity db [:seon.root/id :root]))
+                  sides (when root (for [nd (:seon.render/nodes (render/walk [db] root))
+                                         :when (= :seon.db/agent-fact (:seon.render/schema nd))]
+                                     {:eid (:seon.render/eid nd) :db 0}))]
+              (ui/chat w {:shown (get-in st [:shown view] (history-cap)) :view (ui/view-param view) :input input
+                          :open (get-in st [:open view] #{}) :sides (vec sides)}))
+            (ui/page w {:shown (get-in st [:shown view] (history-cap)) :view (ui/view-param view) :input input})))))))
 
 (defn- ready?
   "Is view's page whole to answer: rendered, and, when its entity is an agent with a branch, that

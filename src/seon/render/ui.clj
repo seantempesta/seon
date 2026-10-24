@@ -493,10 +493,13 @@
 
 (defn comp-id
   "The element id of entity eid's component shown as as: the main pane p-head, a row r-<eid>, a
-  tile t-<eid>, a debug-page turn d-<eid>. The same on every page, so the cache's key names it."
+  tile t-<eid>, a debug-page turn d-<eid>, a part of an agent's conversation c-<eid>, an agent
+  in the sidebar s-<eid>. The same on every page, so the cache's key names it."
   {:malli/schema [:=> [:cat pos-int? :any] :string]}
   [eid as]
-  (if (vector? as) (str "d-" eid) (case as :block "p-head" :row (str "r-" eid) :tile (str "t-" eid))))
+  (if (vector? as)
+    (str (case (first as) :debug "d-" :chat "c-") eid)
+    (case as :block "p-head" :row (str "r-" eid) :tile (str "t-" eid) :chat (str "c-" eid) :side (str "s-" eid))))
 
 (defn rows
   "A page's list (node nds that show :as :row), in the walk's order (newest first), each row a component: a turn, whose component shows the evals its calls name (:eval)
@@ -529,6 +532,44 @@
       prev (assoc :same {:turn (dec n) :parts (- (count refs) (count added))})
       open? (assoc :whole (context/parts-of db refs)))))
 
+(defn- tile-id
+  "The element id of tile nd: an entity's, its component's (comp-id); a value's, its entity and
+  the attribute it came by, else its schema (a branch's read error, root's open problems)."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [nd]
+  (if (= :value (:seon.render/kind nd))
+    (str "t-" (:seon.render/eid nd) "-" (dom-id (or (get-in nd [:seon.render/from :seon.render/attr]) (:seon.render/schema nd) :value)))
+    (comp-id (:seon.render/eid nd) :tile)))
+
+(defn- chat-part
+  "Entity eid on db as a part of an agent's conversation (element id): a model turn, its header
+  and its reasoning folded; an eval, its prose (what the model or the user said it does), then one
+  line, its code's first line, its cost and its response's first line, that opens (opts [open?]:
+  posting /open with the view its list names in data-view, so the whole of it is rendered only
+  while open, and its html is the same on every page) to its form and response;
+  a message, who sent it and its body."
+  {:malli/schema [:=> [:cat :seon.host/db pos-int? [:maybe [:sequential :any]] :string] :any]}
+  [db eid [open?] id]
+  (let [own (d/pull db '[*] eid)
+        schema (render/entity-schema own :seon.eval/agent)]
+    (case schema
+      :seon.turn/turn-fact [:li {:id id :class "flex flex-col gap-1 py-1"} (turn (dissoc own :seon.turn/reply) {})]
+      :seon.db/eval-fact
+      (let [rec (:seon.eval/record own)
+            r (merge (:response rec) (select-keys rec [:code :text :prose]))
+            line #(first (str/split-lines (or % "")))]
+        [:li {:id id :class "flex flex-col gap-1 py-1"}
+         (when-not (str/blank? (:prose r)) [:p {:class "whitespace-pre-wrap text-text-200"} (prose (:prose r) (part))])
+         [:details (cond-> {(keyword "data-on:toggle") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=" id "&open=' + el.open)")}
+                     open? (assoc :open true))
+          [:summary {:class "flex flex-wrap items-baseline gap-2 cursor-pointer text-xs"}
+           [:code {:class "text-text-100"} (line (:code r))]
+           [:span {:class (if (:ex r) "text-error" "text-text-500")} (if (:ex r) "✕" "⇒")]
+           [:code {:class "text-text-400"} (line (:text r))]
+           (cost-line r)]
+          (when open? (evaluation own {}))]])
+      [:li {:id id :class "py-1"} (render/html (dissoc own :db/id) {:schema schema})])))
+
 (defn component
   "Entity eid on db as a page part shows it, as as (:row, :tile, :block; [:debug open? view], a
   turn on the debug page), its element id comp-id: what the render proc caches by what it read
@@ -538,8 +579,18 @@
   {:malli/schema [:=> [:cat :seon.host/db pos-int? :any] :any]}
   [db eid as]
   (let [id (comp-id eid as)]
-  (if (vector? as)
+  (cond
+    (and (vector? as) (= :debug (first as)))
     (let [[_ open? view] as] (sent-request (debug-input db eid open? view) {:unit id}))
+    (or (= :chat as) (and (vector? as) (= :chat (first as))))
+    (chat-part db eid (when (vector? as) (rest as)) id)
+    (= :side as)
+    (let [{:seon.agent/keys [id status]} (d/pull db [:seon.agent/id :seon.agent/status] eid)]
+      [:li {:id (comp-id eid as) :class "flex items-baseline gap-2"}
+       [:span {:class (if (#{:busy :running} status) "text-signal" "text-text-500")} (if (#{:busy :running} status) "●" "○")]
+       [:a {:href (str "/agent/" (kname id)) :class "text-text-200 underline"} (kname id)]
+       [:span {:class "text-2xs text-text-500"} (some-> status name)]])
+    :else
   (let [own (d/pull db '[*] eid)
         schema (render/entity-schema own nil)
         units (:seon.render/units (contract/properties schema))
@@ -562,20 +613,65 @@
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [nd opts]
   [:div {:id (:unit opts) :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
-   [:div {:class "text-2xs uppercase tracking-wider text-text-500"} (name (or (:seon.render/schema nd) (get-in nd [:seon.render/from :seon.render/attr])))]
+   [:div {:class "text-2xs uppercase tracking-wider text-text-500"}
+    (name (or (:seon.render/schema nd) (get-in nd [:seon.render/from :seon.render/attr]) (render/schema-of (:seon.render/value nd) nil) :value))]
    (view nd :tile)])
 
 (defn more
   "The list's end, the unit's element (opts :unit): how many older rows there are, unrendered; it
   asks for the next ones when it scrolls into view (Datastar's data-on-intersect posting /more).
   Its id carries how many rows are shown, so each next is a new element whose view is watched anew.
-  input {:older n :view param}."
-  {:malli/schema [:=> [:cat [:map [:older nat-int?] [:view :string]] :seon.render/opts] :any]}
-  [{:keys [older view]} opts]
+  input {:older n :view param :click? b}: click?, the next come when it is clicked (a list whose
+  older end is at its top, an agent's conversation: in view as the page opens, it would ask for
+  every row)."
+  {:malli/schema [:=> [:cat [:map [:older nat-int?] [:view :string] [:click? {:optional true} :boolean]] :seon.render/opts] :any]}
+  [{:keys [older view click?]} opts]
   (if (pos? older)
-    [:p {:id (:unit opts) :class "py-3 text-center text-text-500" :data-on-intersect (str "@post('/more?view=" view "')")}
-     (str older (if (= 1 older) " older row" " older rows") ", rendered as this line scrolls into view")]
+    (if click?
+      [:button {:id (:unit opts) :type "button" :class "py-2 text-center text-text-500 underline" (keyword "data-on:click") (str "@post('/more?view=" view "')")}
+       (str older (if (= 1 older) " older part" " older parts") ", shown when this is clicked")]
+      [:p {:id (:unit opts) :class "py-3 text-center text-text-500" :data-on-intersect (str "@post('/more?view=" view "')")}
+       (str older (if (= 1 older) " older row" " older rows") ", rendered as this line scrolls into view")])
     [:p {:id (:unit opts) :class "py-3 text-center text-text-500"} "nothing older"]))
+
+(defn chat
+  "An agent's page as its conversation (design section 5): the sidebar, root's agents (sides,
+  each a component); the agent's head; its conversation oldest first, its newest opts :shown
+  parts rendered and the older counted at the top (they load as that end scrolls into view),
+  each a component (a turn, an eval, a message: chat-part); the input under it; its other units
+  as tiles beside it. opts {:shown n :view param :input {:schema k :value v} :open #{ids}
+  :sides [{:eid :db}]}."
+  {:malli/schema [:=> [:cat :seon.render/walk :map] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
+  [{:seon.render/keys [root nodes]} {:keys [shown view input open sides]}]
+  (let [listed (filterv #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))) nodes)
+        tiles (remove #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))) nodes)
+        on (vec (reverse (take shown listed)))
+        older (- (count listed) (count on))
+        as (fn [nd] (if (= :seon.db/eval-fact (:seon.render/schema nd))
+                      (let [id (comp-id (:seon.render/eid nd) :chat)] [:chat (contains? (or open #{}) id)])
+                      :chat))
+        tile-id tile-id]
+    {:seon.render/html
+     [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4"}
+      [:nav {:class "flex items-baseline gap-3"}
+       [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "text-text-500"} "on jolt"]]
+      [:div {:class "grid gap-4 lg:grid-cols-[12rem_minmax(0,1fr)_20rem]"}
+       [:aside {:class "hidden lg:block"} [:ol {:id "c-side" :class "flex flex-col gap-1 text-xs"} (for [a sides] (slot (comp-id (:eid a) :side)))]]
+       [:main {:class "flex min-w-0 flex-col gap-3"}
+        (slot "p-head")
+        [:div {:id "c-older"} (slot (str "c-more-" (count on)))]
+        [:ol {:id "c-rows" :class "flex flex-col gap-1" :data-view view} (for [nd on] (slot (comp-id (:seon.render/eid nd) :chat)))]
+        (when input (slot "p-input"))]
+       [:aside {:id "p-tiles" :class "grid content-start gap-2"} (for [t tiles] (slot (tile-id t)))]]]
+     :seon.render/units
+     (vec (concat [{:id "p-head" :comp [(:seon.render/db root 0) (:seon.render/eid root) :block]}]
+                  (for [a sides] {:id (comp-id (:eid a) :side) :comp [(:db a 0) (:eid a) :side] :container "#c-side"})
+                  [{:id (str "c-more-" (count on)) :input {:older older :view view :click? true} :schema :seon.render/page-more :container "#c-older"}]
+                  (for [nd on] {:id (comp-id (:seon.render/eid nd) :chat) :comp [(:seon.render/db nd 0) (:seon.render/eid nd) (as nd)] :container "#c-rows"})
+                  (when input [{:id "p-input" :input (:value input) :schema (:schema input)}])
+                  (for [t tiles] (if (= :entity (:seon.render/kind t))
+                                   {:id (tile-id t) :comp [(:seon.render/db t 0) (:seon.render/eid t) :tile] :container "#p-tiles"}
+                                   {:id (tile-id t) :input t :schema :seon.render/page-tile :container "#p-tiles"}))))}))
 
 (defn root-input
   "Root's input at the top of its page: spawn agents (seon.root/spawn!), or evaluate forms in
@@ -605,9 +701,7 @@
         rs (rows listed)
         on (take shown rs)
         older (- (count rs) (count on))
-        tile-id #(if (= :value (:seon.render/kind %))
-                   (str "t-" (:seon.render/eid %) "-" (dom-id (get-in % [:seon.render/from :seon.render/attr])))
-                   (comp-id (:seon.render/eid %) :tile))]
+        tile-id tile-id]
     {:seon.render/html
      [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4"}
       [:nav {:class "flex items-baseline gap-3"}

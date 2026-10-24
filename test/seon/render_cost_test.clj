@@ -316,4 +316,5 @@
           r (d/with main (seon.task/agent-tx "b1" :a1 {:status :idle}))
           touched (seon.render.proc/comps-touched st1 :main (map (fn [d] {:e (:e d) :a (:a d) :v (:v d)}) (:tx-data r)))
           [st2 _] (#'seon.render.proc/pass-view (#'seon.render.proc/invalidate (assoc st1 :main-db (:db-after r)) touched) :a1)]
-      (clojure.test/is (= 1 (- (get-in st2 [:counts :components]) (get-in st1 [:counts :components]))) (str n " rows: one component rendered")))))
+      ;; the agent's two components (its head, its line in the sidebar of root's agents), whatever the rows
+      (clojure.test/is (= 2 (- (get-in st2 [:counts :components]) (get-in st1 [:counts :components]))) (str n " rows: the agent's components rendered, nothing else")))))

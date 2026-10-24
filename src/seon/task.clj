@@ -130,13 +130,6 @@
   [db] (vec (for [[a r] (d/q '[:find ?a ?r :where [?r :seon.root/id :root] [?a :seon.agent/root ?r]] db)]
               [:db/retract a :seon.agent/root r])))
 
-(defn boot-tx
-  "Root's boot: its id for this process lifetime and its max-running config key (merges at once,
-  :seon.config.merge/max-running, is written with the config in force, seon.config/facts)."
-  {:malli/schema [:=> [:cat :string pos-int?] [:vector :map]]}
-  [boot max-running]
-  [{:seon.root/id :root :seon.root/boot boot :seon.config.agent/max-running max-running}])
-
 (defn run-id
   "Task id's nth run's id: runs are numbered from 1, in the order they start."
   {:malli/schema [:=> [:cat :seon.task/id pos-int?] :seon.run/id]}
@@ -167,6 +160,16 @@
                  (for [[member a] agent-attrs :let [x (some->> (get m member) (v member))] :when (some? x)] [a x]))]
           (for [[member a] agent-attrs :when (and (contains? m member) (nil? (get m member)))]
             [:db.fn/retractAttribute [:seon.agent/key k] a]))))
+
+(defn boot-tx
+  "Root's boot: its id for this process lifetime and its max-running config key (merges at once,
+  :seon.config.merge/max-running, is written with the config in force, seon.config/facts), and
+  the user, an agent of the boot with no process (design section 2): the evals and messages it
+  makes name it (:seon.eval/by its id), and root's page lists it with its agents."
+  {:malli/schema [:=> [:cat :string pos-int?] [:vector :any]]}
+  [boot max-running]
+  (into [{:seon.root/id :root :seon.root/boot boot :seon.config.agent/max-running max-running}]
+        (agent-tx boot :user {})))
 
 (defn message-tx
   "Message mid from from to run aid, its body: the one message fact, written by root on main
