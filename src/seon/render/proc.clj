@@ -467,7 +467,7 @@
     ;; main not read yet: nothing held, nothing indexed; the next pass walks it
     (nil? out) [st nil]
     ;; a location naming no entity: its page is that error, by its render
-    (:seon.error/type out) [(hold st {:skeleton (h/html (render/html out {})) :units {}}) nil]
+    (:seon.error/type out) [(let [hc (render/html out {})] (hold st {:skeleton (h/html hc) :layout hc :units {}})) nil]
     :else
     (let [dbs (into [(:main-db st)] (keep identity) [(get-in st [:branches view-id :db])])
           ;; each component's html from the cache (rendered there when missing); its input names
@@ -507,24 +507,19 @@
       (update :views dissoc v) (update :branches dissoc v) (update :shown dissoc v) (update :open dissoc v)
       (update :dirty #(disj (or % #{}) v))))
 
-(def ^:private chat-parts
-  "The element ids a screen leaves out: the conversation (the model has it already), its older
-  end, and the input."
-  #{"c-rows" "c-older" "p-input"})
-
 (defn- screen-hiccup
   "Hiccup x of a page with each slot filled by its unit's cached hiccup (units), the chat parts
   left out, and no presentation attributes (class, style, data-*, the UI's seon/ calls, ids)."
   {:malli/schema [:=> [:cat :any :map] :any]}
   [x units]
   (cond
-    (h/raw? x) (if-let [[_ id] (re-matches #"<!--s:(.*)-->" (:seon.web.html/raw x))]
-                 (when-not (chat-parts id) (some-> (get-in units [id :hiccup]) (screen-hiccup units)))
+    (h/raw? x) (if-let [id (ui/slot-id x)]
+                 (when-not (ui/chat-parts id) (some-> (get-in units [id :hiccup]) (screen-hiccup units)))
                  x)
     (and (vector? x) (keyword? (first x)))
     (let [[tag & more] x
           [attrs kids] (if (and (map? (first more)) (not (h/raw? (first more)))) [(first more) (rest more)] [nil more])]
-      (when-not (chat-parts (:id attrs))
+      (when-not (ui/chat-parts (:id attrs))
         (let [kept (into {} (remove (fn [[k]] (or (#{:class :style :id} k) (= "seon" (namespace k)) (str/starts-with? (name k) "data")))) attrs)]
           (into (if (seq kept) [tag kept] [tag]) (keep #(screen-hiccup % units)) kids))))
     (seq? x) (seq (keep #(screen-hiccup % units) x))
@@ -750,7 +745,7 @@
                           ;; an agent's screen (seon.screen/show, through the api): its page's request, answered
                           ;; on the asker's route once the page is whole
                           :page (if (:screen m)
-                                  (ask-state (assoc-in st [:screens (:tag (:screen m))] {:view (:view m) :reply (:screen m)}) o)
+                                  (ask-state (assoc-in st [:screens [(:route (:screen m)) (:tag (:screen m))]] {:view (:view m) :reply (:screen m)}) o)
                                   (if (and (get-in st [:views (:view m)]) (contains? (:watch st) (:view m)))
                                   (do (step/out! o :to-web {:op :page :k (:k m) :view (:view m) :html (page-html st (:view m))}) st)
                                   (ask-state (assoc-in st [:waiting (:k m)] (:view m)) o)))

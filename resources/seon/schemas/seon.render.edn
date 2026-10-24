@@ -57,9 +57,10 @@
                      [:seon.render/db {:optional true} :seon.render/db]]
  ;; an agent's page's tiles beside its conversation (seon.render.ui/agent): its proofs as the test
  ;; service recorded them for its branch (test -> its newest {:status :t}), what its branch changes
- ;; against main now (seon.program/divergence)
+ ;; against main's head (seon.program/divergence; the fork point is not the render proc's to read,
+ ;; so what main gained since shows too, and the tile says so)
  :seon.render/proofs [:map-of :symbol [:map [:status :keyword] [:t :int]]]
- :seon.render/changes :map
+ :seon.render/changes [:map [:against :string] [:changes :map]]
  :seon.render/root :seon.render/node
  :seon.render/nodes [:vector :seon.render/node]
  :seon.render/walk [:map [:seon.render/root :seon.render/root] [:seon.render/nodes :seon.render/nodes]]

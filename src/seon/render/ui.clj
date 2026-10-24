@@ -104,6 +104,16 @@
   {:malli/schema [:=> [:cat :string] :any]}
   [id] (h/raw (str "<!--s:" id "-->")))
 
+(defn slot-id
+  "The element id slot marker x holds (`slot`), or nil when x is no slot."
+  {:malli/schema [:=> [:cat :any] [:maybe :string]]}
+  [x] (when (h/raw? x) (second (re-matches #"<!--s:(.*)-->" (:seon.web.html/raw x)))))
+
+(def chat-parts
+  "The element ids of an agent's page (`chat`) its screen leaves out (seon.render.proc/screen-of):
+  its conversation (the model has it as its messages), its older end, and the input."
+  #{"c-rows" "c-older" "p-input"})
+
 (defn- kicker {:malli/schema [:=> [:cat :any :any] :any]}
   [k sub] [:header [:span {:class "kicker"} k] (if (vector? sub) sub [:span {:class "sub"} sub])])
 
@@ -687,8 +697,10 @@
           ;; its proofs as the test service last recorded them on main for its branch, each test's newest
           proofs (when b (->> (d/q '[:find ?t ?at ?s :in $ ?b :where [?p :seon.proof/branch ?b] [?p :seon.proof/test ?t] [?p :seon.proof/t ?at] [?p :seon.proof/status ?s]] main b)
                               (group-by first) (map (fn [[t rs]] [t (peek (vec (sort-by second rs)))])) (into (sorted-map) (map (fn [[t [_ at s]]] [t {:status s :t at}])))))
-          ;; what its branch changes against main now (seon.program/divergence)
-          changes (when branch (program/divergence main branch))
+          ;; what its branch changes against main now (seon.program/divergence of main's head, not the
+          ;; branch's fork point: what main gained since is shown too, as the branch not having it)
+          changes (when branch {:against "main now: what main gained since this branch forked shows as missing here"
+                                :changes (program/divergence main branch)})
           tile (fn [k x] {:seon.render/kind :value :seon.render/value x :seon.render/schema k :seon.render/eid eid})
           walk (update walk :seon.render/nodes into (remove nil? [(when (seq proofs) (tile :seon.render/proofs proofs))
                                                                   (when branch (tile :seon.render/changes changes))]))]

@@ -774,11 +774,18 @@
         o (volatile! {})
         st2 (#'p/pass st1 o)
         reply (first (get @o [:a3 :in]))]
-    (is (contains? (:screens st1) 9) "held while its page is not yet whole")
+    (is (contains? (:screens st1) [[:a3 :in] 9]) "held while its page is not yet whole")
     (is (= 9 (:tag reply)))
     (is (str/includes? (pr-str (:page (:r reply))) "/agent/a3"))
     (is (empty? (:screens st2)) "answered once")
-    (is (nil? (get-in st2 [:views :a3])) "a page only a screen needed keeps nothing")))
+    (is (nil? (get-in st2 [:views :a3])) "a page only a screen needed keeps nothing")
+    (testing "two agents asking with the same counter are two requests, each answered on its route"
+      (let [[st1 _] (#'p/render-proc st :from-web {:op :page :view :a3 :screen {:route [:a3 :in] :tag 9}})
+            [st1 _] (#'p/render-proc st1 :from-web {:op :page :view :root :screen {:route [:a9 :in] :tag 9}})
+            o (volatile! {})
+            _ (#'p/pass st1 o)]
+        (is (= 2 (count (:screens st1))))
+        (is (= [9 9] [(:tag (first (get @o [:a3 :in]))) (:tag (first (get @o [:a9 :in])))]))))))
 
 (deftest a-units-change-rerenders-that-unit
   (let [[main branch eid] (paged-dbs)
