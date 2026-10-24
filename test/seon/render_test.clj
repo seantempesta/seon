@@ -739,6 +739,8 @@
     (is (empty? (:appends patch)))
     (is (empty? (:prepends patch)))))
 
+(defn- depth "Hiccup x's nesting." [x] (if (vector? x) (inc (reduce max 0 (map depth x))) 0))
+
 (deftest the-screen-is-the-page-without-its-chat
   ;; task seon.render/a-page-is-its-entitys-view (4c): the agent's screen is root's page of it, as
   ;; the render proc holds it, without its conversation (the model has it as its messages), its
@@ -748,14 +750,16 @@
         {:keys [t page]} (p/screen-of st1 :a3)
         text (pr-str page)]
     (is (= (:max-tx main) t))
-    (is (every? string? page) "the lines a person reads on it")
-    (is (some #(str/starts-with? % "a3 ") page) "the agent's head, in words")
-    (is (some #(re-matches #"[●○] a3 .*" %) page) "root's agents, the sidebar")
-    (is (some #(str/starts-with? % "run demo/f#1 · ") page) "the run's tile, in words")
+    (is (vector? page) "hiccup, as the page is")
+    (is (some #{[:h1 "a3"]} (tree-seq coll? seq page)) "the agent's head")
+    (is (some #(and (vector? %) (= :li (first %)) (some #{"a3"} %)) (tree-seq coll? seq page)) "root's agents, the sidebar")
+    (is (some #{[:section [:h2 "run"] [:p "demo/f#1 · running · up to 8 turns · m"]]} (tree-seq coll? seq page))
+        (str "the run's tile, by the thing it shows: " (pr-str page)))
     (is (not (str/includes? text "#:seon")) "no value printed raw")
-    (is (not (str/includes? text "(f 2)")) "no part of its conversation")
+    (is (not-any? #(str/includes? text %) ["(f 2)" "◆ seon" "its page" "fact"]) "no conversation, no chrome, no schema names")
     (is (not (str/includes? text "release")) "no input")
-    (is (not-any? #(re-find #"class=|data-|text-text|seon/" %) page) "no presentation")))
+    (is (not-any? map? (tree-seq coll? seq page)) "no attributes")
+    (is (<= (depth page) 5) (str "shallow: " (depth page)))))
 
 (deftest nothing-is-shown-twice
   ;; what the conversation holds (each eval, as its own message) is never on the screen too
@@ -777,7 +781,7 @@
         reply (first (get @o [:a3 :in]))]
     (is (contains? (:screens st1) [[:a3 :in] 9]) "held while its page is not yet whole")
     (is (= 9 (:tag reply)))
-    (is (some #(str/starts-with? % "a3 ") (:page (:r reply))))
+    (is (some #{[:h1 "a3"]} (tree-seq coll? seq (:page (:r reply)))))
     (is (empty? (:screens st2)) "answered once")
     (is (nil? (get-in st2 [:views :a3])) "a page only a screen needed keeps nothing")
     (testing "two agents asking with the same counter are two requests, each answered on its route"

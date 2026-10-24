@@ -109,6 +109,17 @@
   {:malli/schema [:=> [:cat :any] [:maybe :string]]}
   [x] (when (h/raw? x) (second (re-matches #"<!--s:(.*)-->" (:seon.web.html/raw x)))))
 
+(def wrapper-tags
+  "The elements that only lay a page out (seon.render.proc/screen-of shows their children in
+  their place)."
+  #{:div :span :a})
+
+(defn chrome?
+  "Whether an element's attrs mark it chrome ({:seon/chrome true}): a link or label to another
+  page, the navigation, which a screen leaves out (seon.render.proc/screen-of)."
+  {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
+  [attrs] (boolean (:seon/chrome attrs)))
+
 (def chat-parts
   "The element ids of an agent's page (`chat`) its screen leaves out (seon.render.proc/screen-of):
   its conversation (the model has it as its messages), its older end, and the input."
@@ -497,13 +508,14 @@
   [{:seon.run/keys [id status outcome reason model turns max-turns]} opts]
   ;; main records :seon.run/turns at the run's end; a running run says its cap (its newest turn's
   ;; row in the conversation names the turn it is on)
-  (let [line (str "run " id " · " (kname status) (cond turns (str " · turn " turns (when max-turns (str " of " max-turns)))
+  (let [line (str id " · " (kname status) (cond turns (str " · turn " turns (when max-turns (str " of " max-turns)))
                                                        max-turns (str " · up to " max-turns " turns"))
                   (when model (str " · " model)) (when outcome (str " · " (kname outcome))))]
     (if (= :inline (:as opts))
-      [:span line]
-      [:div {:class "flex flex-col gap-1 text-xs"}
-       [:span {:class "text-text-100"} line]
+      [:span (str "run " line)]
+      [:section {:class "flex flex-col gap-1 text-xs"}
+       [:h2 {:class "text-2xs uppercase tracking-wider text-text-500"} "run"]
+       [:p {:class "text-text-100"} line]
        (when-not (str/blank? reason) [:p {:class "whitespace-pre-wrap text-text-400"} (prose reason (part))])])))
 
 (defn task
@@ -511,11 +523,12 @@
   and execution, then its plan as prose; its proofs are its unit, shown beside it."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [{:seon.task/keys [id kind execution plan]} opts]
-  (let [line (str "task " id (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
+  (let [line (str id (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
     (if (= :inline (:as opts))
-      [:span line]
-      [:div {:class "flex flex-col gap-1 text-xs"}
-       [:span {:class "text-text-100"} line]
+      [:span (str "task " line)]
+      [:section {:class "flex flex-col gap-1 text-xs"}
+       [:h2 {:class "text-2xs uppercase tracking-wider text-text-500"} "task"]
+       [:p {:class "text-text-100"} line]
        (when-not (str/blank? plan) [:p {:class "whitespace-pre-wrap text-text-300"} (prose plan (part))])])))
 
 (defn proofs
@@ -647,7 +660,8 @@
     (chat-part db eid (when (vector? as) (rest as)) id)
     (= :side as)
     (let [{:seon.agent/keys [id status]} (d/pull db [:seon.agent/id :seon.agent/status] eid)]
-      [:li {:id (comp-id eid as) :class "flex items-baseline gap-2"}
+      ;; the user's own entry links to its page: chrome on a screen
+      [:li (cond-> {:id (comp-id eid as) :class "flex items-baseline gap-2"} (= :user id) (assoc :seon/chrome true))
        [:span {:class (if (#{:busy :running} status) "text-signal" "text-text-500")} (if (#{:busy :running} status) "●" "○")]
        [:a {:href (str "/agent/" (kname id)) :class "text-text-200 underline"} (kname id)]
        [:span {:class "text-2xs text-text-500"} (some-> status name)]])
@@ -664,7 +678,7 @@
              [:li {:id id :class "flex flex-col gap-2 rounded-md bg-base-900 p-3"}
               (view nd :row) (when (seq evals) [:ol {:class "flex flex-col gap-2 pl-2"} (for [e evals] [:li (view e :row)])])])
       :tile [:div {:id id :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
-             [:a {:href (str "/walk/" eid) :class "text-2xs uppercase tracking-wider"} (str (name (or schema :entity)) " · its page →")]
+             [:a {:href (str "/walk/" eid) :class "text-2xs text-text-500 float-right" :seon/chrome true} "its page →"]
              (view nd :tile)]
       [:section {:id id :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (view nd :block)])))))
 
@@ -673,8 +687,8 @@
   problems, a branch's read error), the unit's element (opts :unit): by its own render."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [nd opts]
-  [:div {:id (:unit opts) :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
-   [:div {:class "text-2xs uppercase tracking-wider text-text-500"}
+  [:section {:id (:unit opts) :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
+   [:h2 {:class "text-2xs uppercase tracking-wider text-text-500"}
     (name (or (:seon.render/schema nd) (get-in nd [:seon.render/from :seon.render/attr]) (render/schema-of (:seon.render/value nd) nil) :value))]
    (view nd :tile)])
 
@@ -714,7 +728,7 @@
 ]
     {:seon.render/html
      [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4"}
-      [:nav {:class "flex items-baseline gap-3"}
+      [:nav {:class "flex items-baseline gap-3" :seon/chrome true}
        [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "text-text-500"} "on jolt"]]
       [:div {:class "grid gap-4 lg:grid-cols-[12rem_minmax(0,1fr)_20rem]"}
        [:aside {:class "hidden lg:block"} [:ol {:id "c-side" :class "flex flex-col gap-1 text-xs"} (for [a sides] (slot (comp-id (:eid a) :side)))]]
@@ -762,11 +776,8 @@
     ;; (what it evaluates now, :seon.agent/running, is its conversation's newest part)
     (let [{:seon.agent/keys [id status branch pid description]} v]
       [:div {:class "flex flex-col gap-1"}
-       [:div {:class "flex flex-wrap items-baseline gap-3"}
-        [:b {:class "text-base text-signal"} (kname id)]
-        [:span (kname status)]
-        (when branch [:span {:class "text-text-300"} (str "on branch " (kname branch))])
-        (when pid [:span {:class "text-text-500"} (str "pid " pid)])]
+       [:h1 {:class "text-base font-bold text-signal"} (kname id)]
+       [:p {:class "text-text-300"} (str/join " · " (remove nil? [(kname status) (when branch (str "on branch " (kname branch))) (when pid (str "pid " pid))]))]
        (when-not (str/blank? description) [:p {:class "text-text-300"} (prose description (part))])])))
 
 (defn root-input
