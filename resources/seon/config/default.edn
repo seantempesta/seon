@@ -559,21 +559,6 @@
  ;; (clojure.repl/source ns/f). Provenance: v1's must-reads per-function cap, reference-tokens
  ;; 3000 (audit notes/AUDIT-v1-to-next-2026-10-22.md 2.3).
  :seon.config.render/reference-tokens 3000
- ;; Unit: vars. The helpers the context names that the plan does not (:found): program functions
- ;; the plan's cited vars and the proofs call. 0 shows none. Provenance: R4's k = 5
- ;; (notes/option3-R4-learning.md 5: 14 of 16 needed helpers in the top 5).
- :seon.config.render/found 5
- ;; Unit: forms. The program forms nearest the task's plan (seon.vector/near over the plan's
- ;; vector), fused with the call graph's helpers by reciprocal rank (seon.context/found). 0 fuses
- ;; none. Measured 2026-10-23 on 283 pairs from main's history (each commit's message, the
- ;; functions its diff touched less those it names; docs/vector.md#fused-with-the-call-graph): recall@10 call graph
- ;; 0.042, embeddings 0.495, fused 0.451; 30 covers every rank a top-5 can come from.
- :seon.config.render/found-near 30
- ;; Unit: tokens (seon.print.select/estimate). The run's map of the namespaces its proofs and
- ;; cited vars live in (seon.context/ns-map): each namespace's functions, most referenced first,
- ;; within an equal share. Provenance: root's research (2026-10-22, lever 1), aider's default
- ;; --map-tokens 1k. At the bound a namespace's rest is (clojure.repl/dir ns).
- :seon.config.render/map-tokens 1000
  ;; Semantic search's pyramid (seon.vector/near, docs/vector.md#the-pyramid), measured against an
  ;; exact 768-dim search, recall@10 (EmbeddingGemma-2):
  ;; - bin/check vectors, Seon's whole text (2,681: 1,783 forms with the schemas, 321 sections, the
@@ -617,9 +602,6 @@
  ;; Unit: requests. What one :embed step takes from the queue (seon.fx :batch): queries queued
  ;; behind a round are embedded together.
  :seon.config.vector/batch 16
- ;; Unit: ranks. Reciprocal rank fusion's k (Cormack et al. 2009 use 60; v1 used 10): measured on
- ;; the 283 pairs, 10 gave recall@10 0.451 and 60 0.448.
- :seon.config.vector/rrf-k 10
  ;; Unit: items. A list shown in part (seon.print/bounded) shows this many, then `+N more:
  ;; where` (docs/render.md#bounded-lists). Provenance: the literals each list carried before
  ;; (render.ui and render.ai, 2026-10-22), kept as they were.

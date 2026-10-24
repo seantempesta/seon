@@ -56,11 +56,15 @@
                      [:seon.render/schema {:optional true} :seon.render/schema] [:seon.render/eid :seon.render/eid]
                      [:seon.render/from {:optional true} :seon.render/from] [:seon.render/tx {:optional true} :seon.render/tx]
                      [:seon.render/db {:optional true} :seon.render/db]]
- ;; an agent's page's tiles beside its conversation (seon.render.ui/agent): its proofs as the test
- ;; service recorded them for its branch (test -> its newest {:status :t}), what its branch changes
+ ;; an agent's page's tiles beside its conversation (seon.render.ui/agent): its proofs as its newest
+ ;; turn measured them (test -> {:status :failure}), what its branch changes
  ;; against main's head (seon.program/divergence; the fork point is not the render proc's to read,
  ;; so what main gained since shows too, and the tile says so)
- :seon.render/proofs [:map-of {:seon.render/html seon.render.ui/proofs} :symbol [:map [:status :keyword] [:t :int]]]
+ :seon.render/proofs [:map-of {:seon.render/html seon.render.ui/proofs} :symbol [:map [:status :keyword] [:failure {:optional true} [:map [:assert :any] [:got :any]]]]]
+ ;; what a run did, from its eval records (seon.render.ui/did): vars read (each with how many
+ ;; times), defined and evaluated, and the forms that ran its tests (their eval ids)
+ :seon.render/this-run [:map {:seon.render/html seon.render.ui/this-run} [:read [:map-of :symbol pos-int?]] [:defined [:vector :symbol]]
+                        [:evaluated [:vector :symbol]] [:tests [:vector [:map [:form :string] [:handle :string]]]]]
  :seon.render/changes [:map {:seon.render/html seon.render.ui/changes} [:against :string] [:changes :map]]
  :seon.render/root :seon.render/node
  :seon.render/nodes [:vector :seon.render/node]

@@ -38,8 +38,10 @@
     (is (string? (:source (by 'demo-test/g-test))) "a red proof shows its source")
     (is (= [{:assert "(= 1 (g))" :got "(= 1 0)"}] (:failures (by 'demo-test/g-test)))
         "a failure is the assertion and what it evaluated to")
-    (is (= ['demo/f] (mapv :symbol (:references block))) "a proof named in the plan is not shown again as a reference")
-    (is (nil? (:doc (first (:references block)))) "a program reference's source already holds its doc")))
+    (is (= ['demo/f] (mapv :symbol (:write-set block))) "a proof named in the plan is not shown again in the write set")
+    (is (string? (:source (first (:write-set block)))) "a var of the write set shows its source")
+    (is (= {'demo-test/f-test '(my.agent/prove #{demo-test/f-test}) 'demo-test/g-test '(my.agent/prove #{demo-test/g-test})} (:to-prove block))
+        "each proof and the form that runs it")))
 
 (deftest a-merge-plan-stays-its-own
   (let [db (d/db-with (db-with-program) [])
@@ -316,7 +318,7 @@
     (is (= 1 (times "Make ```demo/g``` exact.")) "the plan once")
     (is (= 1 (times "(defn g \\\"Halves.\\\"")) "a cited source once")
     (is (= 1 (times ":test demo-test/f-test")) "the proofs once, in the turn sections")
-    (is (not (str/includes? (:content (peek ms)) ":references")) "the turn sections hold no run section")))
+    (is (not (str/includes? (:content (peek ms)) ":write-set")) "the turn sections hold no run section")))
 
 (deftest a-cited-var-shows-at-its-citations-depth
   ;; task seon.context/a-cited-var-shows-at-its-citation-depth: the delimiter picks the depth
@@ -333,7 +335,9 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "d"
                                                :seon.task/plan "Build on ctx-depth/sq, `ctx-depth/cube` and ```ctx-depth/tri```."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-        by (into {} (map (juxt :symbol identity)) (:references (context/current-state db (task/task db "demo/d") {:turn 0 :max-turns 4})))]
+        ;; the rule lives in docs/resolve-ref (the task story shows its write set's vars whole: their source)
+        by (into {} (for [r (seon.ref/references db (:seon.task/plan (task/task db "demo/d")))]
+                      [(:seon.ref/name r) (seon.docs/resolve-ref db (:seon.ref/name r) (:seon.ref/depth r))]))]
     (is (= {:symbol 'ctx-depth/sq :arglists '([x]) :summary "Squares x."} (by 'ctx-depth/sq)) "bare: arglists and the first sentence")
     (is (= {:symbol 'ctx-depth/cube :arglists '([x]) :doc "Cubes x." :contract [:=> [:cat :int] :int]} (by 'ctx-depth/cube))
         "one backtick: arglists, doc and contract")
@@ -359,61 +363,6 @@
         n (Math/sqrt (reduce + (map #(* % %) v)))]
     (mapv #(/ % n) v)))
 
-(deftest similar-finds-a-helper-the-call-graph-misses
-  ;; task seon.context/similar-finds-helpers-by-embedding: a helper nothing cited calls is found by
-  ;; its meaning, the program form nearest the plan, fused with the call graph's own
-  (let [plan (made-vector 1)
-        near-plan (let [v (mapv + plan (map #(* 0.1 %) (made-vector 2)))
-                        n (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % n) v))
-        db (d/db-with (ts/test-db)
-                      (program-facts [['geo/vol "(defn vol [r h] (* h (sq r)))" '[geo/sq]]
-                                      ['geo/sq "(defn sq [x] (* x x))" []]
-                                      ['geo/clamp-radius "(defn clamp-radius [r] (max 0 r))" []]
-                                      ['geo/unrelated "(defn unrelated [] :x)" []]
-                                      ['geo-test/vol-test "(deftest vol-test (is (= 2 (vol 1 1))))" '[geo/vol]]]))
-        form (fn [db sym] (:db/id (:var/form (d/entity db [:var/name sym]))))
-        db (d/db-with db (task/create-tx db [{:seon.task/ns 'geo :seon.task/name "v" :seon.task/plan "Make `geo/vol` refuse a negative radius."
-                                               :seon.task/proofs #{'geo-test/vol-test}}]))
-        task-e (:db/id (d/entity db [:seon.task/id "geo/v"]))
-        found-of (fn [db] (mapv :symbol (filter map? (:found (context/current-state db (task/task db "geo/v") {:turn 0 :max-turns 4})))))
-        _ (is (= ['geo/sq] (found-of db)) "without vectors the call graph names only what vol calls")
-        db (d/db-with db (seon.vector/tx-data [task-e (form db 'geo/clamp-radius) (form db 'geo/unrelated) (form db 'geo/sq)] [1 1 1 1]
-                                              [plan near-plan (made-vector 7) (made-vector 9)] [10 10 10 10] "m"))
-        fs (found-of db)]
-    (is (some #{'geo/clamp-radius} fs) "the helper nearest the plan is found, though nothing cited calls it")
-    (is (some #{'geo/sq} fs) "the call graph's helper stays")
-    (is (= ['geo/clamp-radius 'geo/unrelated] (filterv #{'geo/clamp-radius 'geo/unrelated} fs)) "nearer the plan ranks first")
-    (is (not-any? #{'geo/vol 'geo-test/vol-test} fs) "what the plan names is no helper")))
-
-(deftest found-names-the-helpers-the-plan-does-not
-  ;; task seon.context/the-context-names-the-helpers-a-task-needs: R4's lever, from the call
-  ;; graph: what the cited vars and the proofs call, most-called first, the named left out
-  (let [helpers (for [i (range 3)] (symbol "geo" (str "h" i)))
-        db (d/db-with (ts/test-db)
-                      (program-facts (concat [['geo/area "(defn area [r] (* pi (sq r)))" (into '[geo/sq geo/pi clojure.core/* geo/defg geo/wrap geo/plumb] helpers)]
-                                              ['geo/defg "(defmacro defg [n] `(wrap ~n))" '[geo/wrap]]
-                                              ['geo/wrap "(defn wrap [x] x)" []]
-                                              ['geo/plumb "(defn plumb [f] f)" []]
-                                              ['geo/vol "(defn vol [r h] (* h (sq r)))" '[geo/sq geo/area geo/plumb]]
-                                              ['geo/sq "(defn sq [x] (* x x))" []]
-                                              ['geo/pi "(def pi 3.14)" []]
-                                              ['geo-test/vol-test "(deftest vol-test (is (= 2 (vol 1 1))))" '[geo/vol geo/pi geo/plumb]]]
-                                             (for [h helpers] [h (str "(defn " (name h) " [] 0)") []])
-                                             ;; plumb is the program's plumbing: as many more forms name it as the
-                                             ;; seed's program holds (seon.contract/checked: 864 of about 1,700)
-                                             (for [i (range (max 8 (count (d/datoms (ts/test-db) :aevt :form/id))))]
-                                               [(symbol "geo" (str "u" i)) (str "(defn u" i " [] (plumb " i "))") '[geo/plumb]]))))
-        db (d/db-with db [{:var/name 'geo/defg :var/kind :macro}])
-        db (d/db-with db (task/create-tx db [{:seon.task/ns 'geo :seon.task/name "v" :seon.task/plan "Make `geo/vol` right; see `geo/area`."
-                                               :seon.task/proofs #{'geo-test/vol-test}}]))
-        fs (:found (context/current-state db (task/task db "geo/v") {:turn 0 :max-turns 4}))]
-    (is (= ['geo/pi 'geo/sq 'geo/h0 'geo/h1 'geo/h2] (mapv :symbol (butlast fs)))
-        "pi (called by area and the proof) and sq (by area and vol) first, then the most specific; area and vol are named")
-    (is (= "+2 more: (my.agent/callees 'ns/f) of each cited var, (my.agent/similar \"text\")" (last fs))
-        "what it left and how to read it: wrap and plumb (called by three of the sources, and across the program) rank after the specific helpers")
-    (is (not-any? #{'geo/defg} (map :symbol (butlast fs))) "a macro is no helper")
-    (is (not-any? #{'clojure.core/*} (map :symbol (butlast fs))) "only program functions")))
-
 (deftest the-turn-names-what-the-merge-will-carry
   ;; owner D4 (2026-10-22): the branch's divergence from main, compact, every turn; it changes
   ;; as the agent works, so it is turn content, never the cached prefix
@@ -434,7 +383,7 @@
   (let [db (db-with-program)
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "u" :seon.task/plan "Use `demo/f`, `demo/x` and `demo/y`."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-        refs (:references (context/current-state db (task/task db "demo/u") {:turn 0 :max-turns 4}))]
+        refs (:write-set (context/current-state db (task/task db "demo/u") {:turn 0 :max-turns 4}))]
     (is (= ['demo/f] (keep :symbol refs)) "the resolved name as itself")
     (is (= {:unresolved ['demo/x 'demo/y] :problem (:unresolved seon.ref/problem-messages)} (last refs)) "the others, one problem")))
 
@@ -495,35 +444,6 @@
            (:tests b)))
     (is (nil? (:tests (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4}))) "not measured: nothing said")))
 
-(deftest the-map-names-each-cited-namespaces-functions
-  ;; root's research, lever 1 (aider's ranked repo map; v1 R4: naming the helpers took 7/32
-  ;; green to 22/24): the run shows the functions of the namespaces its proofs and cited
-  ;; vars live in, each a line (arglists, first sentence), most referenced first, within its
-  ;; token budget, and the form that lists the rest. Step E's runs 1-5: designs spent 15-25
-  ;; turns reading sources one pair at a time before writing anything
-  (let [db (db-with-program)
-        m (context/ns-map db '[demo/f demo-test/f-test])]
-    (is (= '[demo demo-test] (mapv :ns m)))
-    (is (= '[demo/f] (mapv :symbol (:vars (first m)))))
-    (is (= "Doubles." (:summary (first (:vars (first m))))))
-    (is (= '(clojure.repl/dir demo) (:all (first m))))
-    (is (= '#{demo-test/f-test demo-test/g-test} (set (map :symbol (:vars (second m))))))))
-
-(deftest the-map-shows-the-most-used-first-then-by-name
-  ;; each var's uses are counted once and sorted with its name (a ranking takes each key once):
-  ;; the order is uses descending, the name breaking a tie
-  (let [db (db-with-program)
-        ne (fn [db n] (pdb/eid db :ns/name n))
-        db (d/db-with db (vec (for [v '[rank/d rank/c rank/b rank/a]
-                                    x [{:db/id (str v) :var/name v :var/ns (str "ns rank") :var/form (str "form " v)}
-                                       {:db/id (str "form " v) :form/id (str v) :form/src (str "(defn " (name v) " [])") :form/ns "ns rank" :form/order 0 :form/defines [(str v)]}
-                                       {:db/id "ns rank" :ns/name 'rank}]]
-                                x)))
-        db (d/db-with db (vec (for [[i refs] (map-indexed vector '[[rank/c rank/b] [rank/c] [rank/c rank/a] [rank/d]])]
-                                {:form/id (str "user " i) :form/src "(use)" :form/ns (ne db 'demo) :form/order (inc i) :form/refs refs})))]
-    (is (= '[rank/c rank/a rank/b rank/d] (mapv :symbol (:vars (first (context/ns-map db '[rank/a])))))
-        "c named by three forms, then a, b and d by one each, by name")))
-
 (deftest a-cited-task-shows-its-plan-at-that-depth
   ;; wiki audit 2026-10-23 R4: a plan citing another task by its ns/name sees that task's
   ;; plan as a section at the citation's depth, not an unresolved name
@@ -537,7 +457,7 @@
         block (context/current-state db (task/task db "demo/f") {:results {} :reds [] :turn 0 :max-turns 4})
         shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))]
     (is (= "G is defined first. Then f calls it." (:seon.ref/lead (shown "demo.other/g"))) "doc depth: the task's plan")
-    (is (not (clojure.string/includes? (str (:references block)) "demo.other/g")) "and not an unresolved name")))
+    (is (= [] (:write-set block)) "and not a var of the write set, nor an unresolved name")))
 
 
 (deftest a-taken-message-is-read-from-its-fact
@@ -654,3 +574,21 @@
   (let [rep (agent/test-report {:type :fail :message :scripted :expected '(= 1 2) :actual '(not (= 1 2))} "#'demo-test/t")]
     (is (= ":scripted" (:message rep)))
     (is (= [":scripted"] (map :message (get (proofs/failures {:reports [rep]}) 'demo-test/t))))))
+
+(deftest the-task-story-is-plan-write-set-and-proofs
+  ;; task seon.render/a-page-is-its-entitys-view (4d): the story is the plan, the write set (each
+  ;; cited var's source and callers), and each proof's run form or what it should assert; no
+  ;; helpers by embedding, no namespace map, no evidence
+  (let [db (d/db-with (db-with-program) (program-facts '[[demo/area "(defn area [x] (demo/f x))" [demo/f]]
+                                                          [demo/vol "(defn vol [x] (demo/f (demo/f x)))" [demo/f]]]))
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "s"
+                                               :seon.task/plan "Make `demo/f` triple. demo-test/h-test asserts (f 2) is 6."
+                                               :seon.task/proofs #{'demo-test/f-test 'demo-test/h-test}}]))
+        story (context/run-state db (task/task db "demo/s"))]
+    (is (= [:task :write-set :to-prove] (vec (keys story))) "plan, write set, proofs; nothing else uncited")
+    (is (= [{:symbol 'demo/f :source "(defn f \"Doubles.\" [x] (* 2 x))" :callers '[demo/area demo/vol]}] (:write-set story))
+        "each cited var with its source and its callers")
+    (is (= '(my.agent/prove #{demo-test/f-test}) (get (:to-prove story) 'demo-test/f-test)) "a written proof: the form that runs it")
+    (is (= "not written yet; it should assert what the plan says: demo-test/h-test asserts (f 2) is 6."
+           (get (:to-prove story) 'demo-test/h-test))
+        "an unwritten proof: what the plan says it should assert")))

@@ -33,10 +33,7 @@
   "The program vars whose recorded definition names var sym (its :form/refs on this branch),
   sorted; sym itself left out."
   {:malli/schema [:=> [:cat :qualified-symbol] [:vector :qualified-symbol]]}
-  [sym]
-  (vec (sort (disj (set (d/q '[:find [?v ...] :in $ ?s :where [?f :form/refs ?s] [?f :form/defines ?e] [?e :var/name ?v]]
-                             (agent/db) sym))
-                   sym))))
+  [sym] (docs/callers (agent/db) sym))
 
 (defn callees
   "The vars var sym's recorded definition names on this branch (its :form/refs: program,

@@ -21,11 +21,10 @@ Your context comes in two parts: the run's, sent once and unchanged while you wo
 
 The run's part:
 - `:task`: its id, kind and instructions, and its plan as it accumulated along its needs, prerequisites first.
-- `:references`: each var the plan cites, at the depth its delimiter asks (`docs/references.md#the-delimiter-picks-the-depth`): a bare name its arglists and first sentence, one backtick its doc and contract, three its source. A source past the cap shows `:left-out` and `:read`, the form that reads it.
-- `:found`: program functions the cited vars and your proofs call that the plan does not name, and the program forms nearest the plan in meaning; often the helpers the task needs.
-- `:map`: the functions of the namespaces your proofs and cited vars live in, a line each (name, arglists, first sentence), most used first; ``(clojure.repl/dir the.ns)`` lists them all. Before writing a helper, look here for one.
+- `:write-set`: each var the plan cites, the code you are likely to change: its source and `:callers`, the program vars whose definitions name it. A source past the cap shows `:left-out` and `:read`, the form that reads it.
+- `:to-prove`: each of your proofs and the form that runs it at your REPL, or, for one not written yet, that it is not and what the plan says it should assert.
 - `:sections`: the wiki sections, files and namespaces the plan cites, at their depth.
-- `:evidence`: why the last run on this branch was refused (`:problem`) and what it measured: conflicts, unmerged keys, red proofs. Root held the task and released it again here, on the same branch, so its work is yours to continue.
+- Helpers the plan does not name: ``(my.agent/callees 'ns/f)``, ``(my.agent/callers 'ns/f)``, ``(my.agent/similar "text")``, ``(clojure.repl/dir the.ns)``.
 
 The conversation: each of your replies with its eval calls and their responses, and the messages sent to you, each `{:from :body}` (the owner's words, `:from "owner"`; root's; another agent's, its run id), where they arrived. The owner's is a fact (`:seon.message/*`) your turn writes on your branch.
 

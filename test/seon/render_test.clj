@@ -756,7 +756,7 @@
     (is (some #{[:section [:h2 "run"] [:p "demo/f#1 · running · up to 8 turns · m"]]} (tree-seq coll? seq page))
         (str "the run's tile, by the thing it shows: " (pr-str page)))
     (is (not (str/includes? text "#:seon")) "no value printed raw")
-    (is (not-any? #(str/includes? text %) ["(f 2)" "◆ seon" "its page" "fact"]) "no conversation, no chrome, no schema names")
+    (is (not-any? #(str/includes? text %) ["(f 2)" "◆ seon" "its page" "fact" walked-plan]) "no conversation, no chrome, no schema names, no plan (the story's)")
     (is (not (str/includes? text "release")) "no input")
     (is (not-any? map? (tree-seq coll? seq page)) "no attributes")
     (is (<= (depth page) 5) (str "shallow: " (depth page)))))
@@ -953,3 +953,20 @@
     (is (str/includes? flat "demo-test/f-test") "the value is all there")
     (is (= 1 (count (re-seq #"<details" nested))) "only the vector of maps folds")
     (is (str/includes? nested "vector 2 items"))))
+
+(deftest the-screen-says-what-the-run-did
+  ;; task seon.render/a-page-is-its-entitys-view (4d): from the run's eval records, the vars it
+  ;; read (a repeated read shows its count), defined and evaluated, and the forms that ran its
+  ;; tests; the screen's own evals are not the run's doing
+  (let [ev (fn [id by rec] {:seon.eval/id id :seon.eval/by by :seon.eval/record (merge {:text "" :run "demo/f#1"} rec)})
+        evals [(ev "e1" "a3" {:code "(clojure.repl/source demo/f)"})
+               (ev "e2" "screen" {:code "(seon.screen/show)" :fns [{:var 'seon.screen/show :calls 1 :ms 1.0}]})
+               (ev "e3" "a3" {:code "(source demo/f)"})
+               (ev "e4" "a3" {:code "(defn g [x] (demo/f x))" :recorded ['demo/g] :fns [{:var 'demo/f :calls 2 :ms 0.1} {:var 'clojure.core/inc :calls 1 :ms 0.1}]})
+               (ev "e5" "a3" {:code "(my.agent/prove)"})]
+        did (ui/did evals)]
+    (is (= {'demo/f 2} (:read did)) "read twice, shown once with its count")
+    (is (= ['demo/g] (:defined did)))
+    (is (= ['demo/f] (:evaluated did)) "program functions, the library's left out, the screen's not the run's")
+    (is (= [{:form "(my.agent/prove)" :handle "e5"}] (:tests did)))
+    (is (str/includes? (h/html (ui/this-run did {})) "demo/f ×2"))))

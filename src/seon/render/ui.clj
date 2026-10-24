@@ -15,7 +15,7 @@
   Every number shown is measured by the system and carried in the value; nothing here
   invents one."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
+  (:require [seon.learn :as learn] [seon.docs :as docs] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
             [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.proofs :as proofs] [seon.cost :as cost] [seon.task :as task]))
 
 ;;; --- small formatting helpers -------------------------------------------------
@@ -114,11 +114,12 @@
   their place)."
   #{:div :span :a})
 
-(defn chrome?
-  "Whether an element's attrs mark it chrome ({:seon/chrome true}): a link or label to another
-  page, the navigation, which a screen leaves out (seon.render.proc/screen-of)."
+(defn off-screen?
+  "Whether an element's attrs mark it left off the screen ({:seon/off-screen true}, seon.render.proc/
+  screen-of): chrome (a link or label to another page, the navigation), or what the model already
+  reads in its messages (the task's plan, in its task story)."
   {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
-  [attrs] (boolean (:seon/chrome attrs)))
+  [attrs] (boolean (:seon/off-screen attrs)))
 
 (def chat-parts
   "The element ids of an agent's page (`chat`) its screen leaves out (seon.render.proc/screen-of):
@@ -529,18 +530,53 @@
       [:section {:class "flex flex-col gap-1 text-xs"}
        [:h2 {:class "text-2xs uppercase tracking-wider text-text-500"} "task"]
        [:p {:class "text-text-100"} line]
-       (when-not (str/blank? plan) [:p {:class "whitespace-pre-wrap text-text-300"} (prose plan (part))])])))
+       ;; the model reads the plan in its task story: not on its screen too
+       (when-not (str/blank? plan) [:p {:class "whitespace-pre-wrap text-text-300" :seon/off-screen true} (prose plan (part))])])))
+
+(defn did
+  "What a run did, from its eval records (evals: eval facts, the screen's left out): the vars
+  it read (a form that looks for code, seon.learn/form-reads) with how many times, so a
+  repeated read shows as one; the vars it defined (each record's :recorded); the program
+  functions it evaluated (its :fns, clojure.* left out); the forms that ran its tests, by their
+  handle. Cost: the run's evals, read once each when the agent's page is laid out again, which
+  its walk already reads (they are its nodes); never per component render."
+  {:malli/schema [:=> [:cat [:sequential :map]] :seon.render/this-run]}
+  [evals]
+  (let [mine (remove #(= "screen" (:seon.eval/by %)) evals)
+        recs (map :seon.eval/record mine)
+        as (learn/aliases (map :code recs))
+        reads (map #(learn/form-reads (:code %) as) recs)
+        lib? #(str/starts-with? (str (namespace %)) "clojure.")]
+    {:read (into (sorted-map-by #(compare (str %1) (str %2))) (frequencies (mapcat #(when (:explore? %) (:targets %)) reads)))
+     :defined (vec (distinct (mapcat :recorded recs)))
+     :evaluated (vec (distinct (remove lib? (keep :var (mapcat :fns recs)))))
+     :tests (vec (for [[r rd] (map vector mine reads) :when (contains? (:targets rd) 'my.agent/prove)]
+                   {:form (:code (:seon.eval/record r)) :handle (:seon.eval/id r)}))}))
+
+(defn this-run
+  "What a run did (the declared html render of :seon.render/this-run, `did`): the vars it read,
+  a repeat with its count; what it defined and evaluated; the forms that ran its tests."
+  {:malli/schema [:=> [:cat :seon.render/this-run :seon.render/opts] :any]}
+  [{:keys [read defined evaluated tests]} _]
+  [:ul {:class "text-xs"}
+   (when (seq read) [:li "read " (str/join ", " (for [[s n] read] (str s (when (< 1 n) (str " ×" n)))))])
+   (when (seq defined) [:li "defined " (str/join ", " defined)])
+   (when (seq evaluated) [:li "evaluated " (str/join ", " evaluated)])
+   (for [{:keys [form handle]} tests] [:li (str "ran " form " (result/" handle ")")])
+   (when-not (or (seq read) (seq defined) (seq evaluated) (seq tests)) [:li "nothing read, defined or tested yet"])])
 
 (defn proofs
-  "An agent's proofs as the test service recorded them for its branch (the declared html render
-  of :seon.render/proofs): how many are green and red, each test's name and status on open."
+  "An agent's proofs as its newest turn measured them (the declared html render of
+  :seon.render/proofs): how many are green, red, not run or not written, each test's name,
+  status and first failing assertion on open."
   {:malli/schema [:=> [:cat :seon.render/proofs :seon.render/opts] :any]}
   [ps _]
   (let [by (group-by (comp :status val) ps)]
     [:details {:class "text-xs"}
      [:summary {:class "cursor-pointer text-text-100"}
       (str (count ps) (if (= 1 (count ps)) " proof: " " proofs: ") (str/join ", " (for [[s xs] (sort-by (comp str key) by)] (str (count xs) " " (kname s)))))]
-     [:ul (for [[t {:keys [status]}] ps] [:li (str (kname status) " " t)])]]))
+     (for [[t {:keys [status failure]}] ps]
+       [:p (str (kname status) " " t) (when failure (str ": " (:assert failure) " got " (:got failure)))])]))
 
 (defn changes
   "What an agent's branch changes against main (the declared html render of :seon.render/changes):
@@ -660,8 +696,8 @@
     (chat-part db eid (when (vector? as) (rest as)) id)
     (= :side as)
     (let [{:seon.agent/keys [id status]} (d/pull db [:seon.agent/id :seon.agent/status] eid)]
-      ;; the user's own entry links to its page: chrome on a screen
-      [:li (cond-> {:id (comp-id eid as) :class "flex items-baseline gap-2"} (= :user id) (assoc :seon/chrome true))
+      ;; the user's own entry links to its page: off a screen
+      [:li (cond-> {:id (comp-id eid as) :class "flex items-baseline gap-2"} (= :user id) (assoc :seon/off-screen true))
        [:span {:class (if (#{:busy :running} status) "text-signal" "text-text-500")} (if (#{:busy :running} status) "●" "○")]
        [:a {:href (str "/agent/" (kname id)) :class "text-text-200 underline"} (kname id)]
        [:span {:class "text-2xs text-text-500"} (some-> status name)]])
@@ -678,7 +714,7 @@
              [:li {:id id :class "flex flex-col gap-2 rounded-md bg-base-900 p-3"}
               (view nd :row) (when (seq evals) [:ol {:class "flex flex-col gap-2 pl-2"} (for [e evals] [:li (view e :row)])])])
       :tile [:div {:id id :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
-             [:a {:href (str "/walk/" eid) :class "text-2xs text-text-500 float-right" :seon/chrome true} "its page →"]
+             [:a {:href (str "/walk/" eid) :class "text-2xs text-text-500 float-right" :seon/off-screen true} "its page →"]
              (view nd :tile)]
       [:section {:id id :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (view nd :block)])))))
 
@@ -728,7 +764,7 @@
 ]
     {:seon.render/html
      [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4"}
-      [:nav {:class "flex items-baseline gap-3" :seon/chrome true}
+      [:nav {:class "flex items-baseline gap-3" :seon/off-screen true}
        [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "text-text-500"} "on jolt"]]
       [:div {:class "grid gap-4 lg:grid-cols-[12rem_minmax(0,1fr)_20rem]"}
        [:aside {:class "hidden lg:block"} [:ol {:id "c-side" :class "flex flex-col gap-1 text-xs"} (for [a sides] (slot (comp-id (:eid a) :side)))]]
@@ -758,16 +794,31 @@
     (let [[main branch] dbs
           root (:db/id (d/entity main [:seon.root/id :root]))
           eid (get-in walk [:seon.render/root :seon.render/eid])
-          b (some-> (:seon.agent/branch v) name)
-          ;; its proofs as the test service last recorded them on main for its branch, each test's newest
-          proofs (when b (->> (d/q '[:find ?t ?at ?s :in $ ?b :where [?p :seon.proof/branch ?b] [?p :seon.proof/test ?t] [?p :seon.proof/t ?at] [?p :seon.proof/status ?s]] main b)
-                              (group-by first) (map (fn [[t rs]] [t (peek (vec (sort-by second rs)))])) (into (sorted-map) (map (fn [[t [_ at s]]] [t {:status s :t at}])))))
+          ;; its newest run (the walk's nodes are newest first) and the evals of it
+          run (some #(when (= :seon.run/run-fact (:seon.render/schema %)) (:seon.render/value %)) (:seon.render/nodes walk))
+          rid (:seon.run/id run)
+          evals (when rid (for [nd (:seon.render/nodes walk) :let [e (:seon.render/value nd)]
+                                :when (and (= :seon.db/eval-fact (:seon.render/schema nd)) (= rid (:run (:seon.eval/record e))))]
+                            e))
+          ;; its proofs as its newest turn measured them (that turn's basis, on its branch): each
+          ;; test's status and its first failing assertion; how to run each is the task story's
+          task-eid (some #(when (= :seon.task/task-fact (:seon.render/schema %)) (:seon.render/eid %)) (:seon.render/nodes walk))
+          proofs (when (and branch rid task-eid)
+                   (let [{:keys [results reds]} (->> (d/q '[:find ?n ?b :in $ ?rid :where [?r :seon.run/id ?rid] [?t :seon.turn/run ?r] [?t :seon.turn/n ?n] [?t :seon.turn/basis ?b]] branch rid)
+                                                     (sort-by first) last second :observed)]
+                     (into (sorted-map-by #(compare (str %1) (str %2)))
+                           (for [t (:seon.task/proofs (d/pull main [:seon.task/proofs] task-eid))
+                                 :let [r (first (filter #(= t (:test %)) reds))]]
+                             [t (cond-> {:status (or (get results t) (if (docs/source-of branch t) :not-run :not-written))}
+                                  r (assoc :failure {:assert (:expected r) :got (or (:got r) (:actual r))}))]))))
+          this-run (when (seq evals) (did evals))
           ;; what its branch changes against main now (seon.program/divergence of main's head, not the
           ;; branch's fork point: what main gained since is shown too, as the branch not having it)
           changes (when branch {:against "main now: what main gained since this branch forked shows as missing here"
                                 :changes (program/divergence main branch)})
           tile (fn [k x] {:seon.render/kind :value :seon.render/value x :seon.render/schema k :seon.render/eid eid})
           walk (update walk :seon.render/nodes into (remove nil? [(when (seq proofs) (tile :seon.render/proofs proofs))
+                                                                  (when this-run (tile :seon.render/this-run this-run))
                                                                   (when branch (tile :seon.render/changes changes))]))]
       (chat walk (assoc page :sides (vec (when root (for [nd (:seon.render/nodes (render/walk [main] root))
                                                           :when (= :seon.db/agent-fact (:seon.render/schema nd))]

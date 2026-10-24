@@ -509,7 +509,7 @@
 
 (defn- screen-hiccup
   "Hiccup x of a page as its screen shows it, as the children it stands for (a seq): each slot
-  filled by its unit's cached hiccup (units); the chat parts and the chrome (ui/chrome?: links
+  filled by its unit's cached hiccup (units); the chat parts and the chrome (ui/off-screen?: links
   and labels to other pages) left out; no attributes (presentation, ids, calls); a wrapper that
   only lays out (ui/wrapper-tags) replaced by its children, so the content sits shallow."
   {:malli/schema [:=> [:cat :any :map] [:sequential :any]]}
@@ -522,7 +522,7 @@
     (let [[tag & more] x
           [attrs kids] (if (and (map? (first more)) (not (h/raw? (first more)))) [(first more) (rest more)] [nil more])
           kids (mapcat #(screen-hiccup % units) kids)]
-      (cond (or (ui/chat-parts (:id attrs)) (ui/chrome? attrs)) ()
+      (cond (or (ui/chat-parts (:id attrs)) (ui/off-screen? attrs)) ()
             (ui/wrapper-tags tag) kids
             :else (list (into [tag] kids))))
     (seq? x) (mapcat #(screen-hiccup % units) x)

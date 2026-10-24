@@ -336,6 +336,14 @@
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :string]]}
   [db sym] (some->> (pdb/eid db :var/name sym) (d/entity db) :var/form :form/src))
 
+(defn callers
+  "The program vars whose recorded definition names var sym on db (its :form/refs), sorted; sym
+  itself left out: the one query my.agent/callers and the task story ask."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :qualified-symbol]]}
+  [db sym]
+  (vec (sort (disj (set (d/q '[:find [?v ...] :in $ ?s :where [?f :form/refs ?s] [?f :form/defines ?e] [?e :var/name ?v]] db sym))
+                   sym))))
+
 (def reference-tokens
   "Tokens a cited var's source may take in the context: the config's."
   (cfg/value :seon.config.render/reference-tokens))

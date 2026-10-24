@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [clojure.edn]))
+            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [clojure.edn]))
 
 (def help-page
   "The help page, docs/agent.md: what every agent reads first (its system message, the same
@@ -21,80 +21,6 @@
   without it (no root booted on it) is refused by this contract, never answered empty."
   {:malli/schema [:=> [:cat :seon.host/db] :string]}
   [db] (docs/page-text db help-page))
-
-(defn- rrf
-  "Rankings fused by reciprocal rank (Cormack et al. 2009): each item scores the sum of 1/(k + rank)
-  over the rankings it is in, k :seon.config.vector/rrf-k; best first, the name breaking a tie."
-  {:malli/schema [:=> [:cat [:sequential [:sequential :qualified-symbol]]] [:vector :qualified-symbol]]}
-  [rankings]
-  (let [k (cfg/value :seon.config.vector/rrf-k)
-        s (apply merge-with + {} (for [r rankings] (into {} (map-indexed (fn [i x] [x (/ 1.0 (+ k i 1))])) r)))]
-    (mapv peek (sort (map (fn [[x v]] [(- v) (str x) x]) s)))))
-
-(defn found
-  "The helpers the plan does not name (R4's lever), from two rankings fused by reciprocal rank
-  (rrf): the call graph's, the program functions that sources (the plan's cited vars and the
-  proofs) name in their recorded definitions, one hop, ranked as a search ranks terms (tf-idf:
-  called by more of the sources, and by fewer forms of the whole program); and the program's
-  forms nearest the task's plan (seon.vector/near over its vector, the :seon.config.render/found-near
-  nearest), which finds a helper nothing cited calls. Less named and less macros; each at doc
-  depth; at most the config's :seon.config.render/found, then a line saying how many it left and
-  how to read them. A task with no vector yet (nil, or not embedded) ranks by the call graph alone."
-  {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-symbol] [:vector :qualified-symbol] [:maybe :int]] [:vector :any]]}
-  [db named sources task]
-  (let [pairs (d/q '[:find ?s ?r :in $ [?s ...] :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r] [?v :var/name ?r] [?v :var/form _]]
-                   db sources)
-        macro? #(= :macro (:var/kind (d/entity db [:var/name %])))
-        ;; tf-idf: called by more of the sources (k), and by fewer of the program's n forms (a
-        ;; defn's contract plumbing is named by every contracted form, so it sinks)
-        n (count (d/datoms db :aevt :form/id))
-        score (fn [[r k]] (* k (Math/log (/ n (inc (count (d/datoms db :avet :form/refs r)))))))
-        ;; each hit's score taken once (sort-by would take it per comparison: an index count each)
-        calls (->> pairs (map second) (remove #(or (named %) (macro? %))) frequencies
-                   (map (fn [e] [(- (score e)) (str (key e)) (key e)])) sort (mapv peek))
-        ;; the forms nearest the plan, as the vars they define, in their order
-        similar (when task
-                  (into [] (comp (mapcat (fn [[f _]] (map :var/name (:var/_form (d/entity db f)))))
-                                 (remove #(or (named %) (macro? %))) (distinct))
-                        (vector/near db task (+ (cfg/value :seon.config.render/found-near) (count named)) {:of :form/id})))
-        hits (if (seq similar) (rrf [calls similar]) calls)
-        [shown more] (print/bounded hits :seon.config.render/found "(my.agent/callees 'ns/f) of each cited var, (my.agent/similar \"text\")")]
-    (cond-> (mapv #(docs/resolve-ref db % :doc) shown) more (conj more))))
-
-(defn- summary-of
-  "Var sym's first doc sentence: its runtime doc, else the docstring of its recorded form;
-  nil when it has none."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :string]]}
-  [db sym]
-  (some-> (or (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))) meta :doc)
-              (let [f (binding [*read-eval* false] (read-string (or (docs/source-of db sym) "nil")))]
-                (when (and (seq? f) (string? (nth f 2 nil))) (nth f 2))))
-          ref/lead-sentence))
-
-(defn ns-map
-  "The map of the namespaces syms live in (the proofs and the vars the plan cites): each
-  namespace's functions as a line (name, arglists, first doc sentence), most referenced by the
-  program first, within an equal share of :seon.config.render/map-tokens, and the form that
-  lists them all (root's research, lever 1: aider's ranked map; v1 R4's helper naming)."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :qualified-symbol]] [:vector :map]]}
-  [db syms]
-  (let [nss (vec (distinct (map (comp symbol namespace) syms)))
-        share (quot (cfg/value :seon.config.render/map-tokens) (max 1 (count nss)))
-        uses #(count (d/datoms db :avet :form/refs %))
-        line (fn [s] (let [m (some-> (find-ns (symbol (namespace s))) ns-interns (get (symbol (name s))) meta)
-                           sm (summary-of db s)]
-                       (cond-> {:symbol s}
-                         (:arglists m) (assoc :arglists (:arglists m))
-                         sm (assoc :summary sm))))]
-    (vec (for [ns nss
-               :let [vs (d/q '[:find [?n ...] :in $ ?ns :where [?e :ns/name ?ns] [?v :var/ns ?e] [?v :var/name ?n] [?v :var/form _]] db ns)
-                     ;; each var's uses counted once (sort-by would count per comparison)
-                     lines (map line (map peek (sort (map (fn [v] [(- (uses v)) (str v) v]) vs))))
-                     shown (reduce (fn [[acc spent] l] (let [s (+ spent (:tokens (print/print-value l {:budget share}) share))]
-                                                         (if (<= s share) [(conj acc l) s] (reduced [acc spent]))))
-                                   [[] 0] lines)]
-               :when (seq vs)]
-           {:ns ns :vars (first shown) :all (list 'clojure.repl/dir ns)}))))
 
 (defn- failure
   "A failing assertion as the agent reads it (the test AI render): the assertion as written
@@ -187,35 +113,46 @@
                {:id mid :from (:seon.message/from m) :body (:seon.message/body m)}))
         messages))
 
+(defn- not-written
+  "What proof p should assert, by the plan's own words: its sentences that name it, else the
+  plan whole."
+  {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
+  [p plan]
+  (let [ss (str/split plan #"(?<=[.!?])\s+")]
+    (or (not-empty (str/join " " (filter #(str/includes? % (name p)) ss))) plan)))
+
 (defn run-state
-  "The run sections of task t's current state as data, the same each turn of a run: the
-  task (its plan as it accumulated along :needs, prerequisites first), its cited vars resolved
-  each at its citation's depth, the helpers the plan does not name (:found), the namespaces'
-  map, the wiki sections it cites, and the measured evidence it starts from."
+  "The task story: task t's run sections as data, the same each turn of a run: the task (its
+  plan as it accumulated along :needs, prerequisites first); its write set, each var the plan
+  cites with its source and its callers (docs/callers), the names that resolve to nothing said
+  once; each proof to the form that runs it at the REPL, or, when it is not written, that it
+  is not and what it should assert in the plan's words (whether it fails, and why, is the
+  screen's: it changes each turn); the wiki sections it cites."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] :map]}
   [db t]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
         refs (filterv #(= :var (docs/citation-kind db %)) cites)
-        named (into (set proofs) (map :seon.ref/name) refs)
-        helpers (found db named (into (mapv :seon.ref/name refs) (sort-by str proofs)) (some->> (:seon.task/id t) (pdb/eid db :seon.task/id)))
-        nsmap (ns-map db (into (vec (sort-by str proofs)) (map :seon.ref/name) refs))
         sections (into [] (comp (filter #(= :view (docs/citation-kind db %))) (map #(docs/cited-view db %)))
                        cites)]
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])
                           :seon.task/plan plan)
-             ;; a reference already shown as a proof is not shown twice; the names that resolve
-             ;; to nothing are one entry, their problem said once
-             :references (let [rs (into [] (comp (remove (comp (set proofs) :seon.ref/name))
-                                                 (map #(docs/resolve-ref db (:seon.ref/name %) (:seon.ref/depth %))))
-                                        refs)
-                               {gone true there false} (group-by (comp boolean :unresolved) rs)]
-                           (cond-> (vec there)
-                             gone (conj {:unresolved (mapv :symbol gone) :problem (:unresolved ref/problem-messages)})))}
-      (seq sections) (assoc :sections sections)
-      (seq helpers) (assoc :found helpers)
-      (seq nsmap) (assoc :map nsmap)
-      (:seon.task/evidence t) (assoc :evidence (:seon.task/evidence t)))))
+             ;; a proof is shown with the proofs, not again in the write set; the names that
+             ;; resolve to nothing are one entry, their problem said once
+             :write-set (let [rs (into [] (comp (remove (comp (set proofs) :seon.ref/name))
+                                                (map #(let [v (docs/resolve-ref db (:seon.ref/name %) :code)]
+                                                        (cond-> v (not (:unresolved v)) (assoc :callers (docs/callers db (:seon.ref/name %)))))))
+                                       refs)
+                              {gone true there false} (group-by (comp boolean :unresolved) rs)]
+                          (cond-> (vec there)
+                            gone (conj {:unresolved (mapv :symbol gone) :problem (:unresolved ref/problem-messages)})))
+             ;; (the turn sections' :proofs are each turn's statuses; these are how to run them)
+             :to-prove (into (sorted-map-by #(compare (str %1) (str %2)))
+                             (for [p proofs]
+                               [p (if (docs/source-of db p)
+                                    (list 'my.agent/prove #{p})
+                                    (str "not written yet; it should assert what the plan says: " (not-written p plan)))]))}
+      (seq sections) (assoc :sections sections))))
 
 (defn turn-state
   "The turn sections of task t's current state as data, measured again each turn from
@@ -338,7 +275,7 @@
 (def run-keys
   "The block's run sections: what the task is and what it cites, the same each turn of an
   run (made from its first turn's basis), so they are sent once, in the cached prefix."
-  [:task :references :found :map :sections :evidence])
+  [:task :write-set :to-prove :sections])
 
 (defn- run-message
   "The run sections of block, printed by the one printer under the context's budget."
