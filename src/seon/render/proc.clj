@@ -119,7 +119,8 @@
   state's on demand ((c/state sys {:datoms true}))."
   {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
   [st db]
-  (if (= (:max-tx db) (get-in st [:main :t]))
+  ;; a db no newer than the one held (a first read answered after a commit already came) changes nothing
+  (if (<= (:max-tx db) (get-in st [:main :t] -1))
     st
     (let [tasks (task/tasks db) idx (reconcile/index db) runs (:runs idx)
           vars (count (d/datoms db :aevt :var/name))]
@@ -311,30 +312,34 @@
 
 (defn- pass-view
   "One view rendered: [st' patch-message-or-nil]; a view whose entity main does not hold yet renders
-  nothing. Its walk runs inside d/with-reads, and what it read is kept (reindex): one index for
-  the dbs it reads, main's and its agent's branch's (a datom of either is matched against both:
-  a needless walk at worst, never a missed one)."
+  nothing. Its walk and its units' renders run inside d/with-reads, and what they read is kept
+  (reindex): one index for the dbs it reads, main's and its agent's branch's (a datom of either
+  is matched against both: a needless walk at worst, never a missed one)."
   {:malli/schema [:=> [:cat :map :any] [:tuple :map [:maybe :map]]]}
   [st view-id]
-  (let [[out reads] (d/with-reads #(page-value st view-id))
+  (let [held (get-in st [:views view-id])
+        [{:keys [out view patch n]} reads]
+        (d/with-reads
+          #(let [out (page-value st view-id)]
+             (if (or (nil? out) (:seon.error/type out))
+               {:out out}
+               (let [units (:seon.render/units out)
+                     [view patch n] (step-units held units)
+                     [view patch] (finish-patch view patch (set (map :id units)))]
+                 {:out out :view (assoc view :skeleton (h/html (:seon.render/html out))) :patch patch :n n}))))
         st (-> st (update-in [:counts :walked] (fnil inc 0)) (update :last-walked (fnil conj []) view-id) (update :dirty disj view-id))
         read-keys (d/reads-index reads)
-        st (reindex st view-id (get-in st [:views view-id :reads]) read-keys)
-        st (if (get-in st [:views view-id]) (update-in st [:views view-id] assoc :reads read-keys :extra (extra-of st view-id)) st)]
+        keep (fn [st v] (-> (reindex st view-id (:reads held) read-keys)
+                            (assoc-in [:views view-id] (assoc v :reads read-keys :extra (extra-of st view-id)))))]
    (cond
+    ;; main not read yet: nothing held, nothing indexed; the next pass walks it
     (nil? out) [st nil]
     ;; a location naming no entity: its page is that error, by its render
-    (:seon.error/type out) [(assoc-in st [:views view-id] {:skeleton (h/html (render/html out {})) :units {} :reads read-keys :extra (extra-of st view-id)}) nil]
+    (:seon.error/type out) [(keep st {:skeleton (h/html (render/html out {})) :units {}}) nil]
     :else
-    (let [units (:seon.render/units out)
-          skeleton (h/html (:seon.render/html out))
-          [view patch n] (step-units (get-in st [:views view-id]) units)
-          [view patch] (finish-patch view patch (set (map :id units)))
-          view (assoc view :skeleton skeleton :reads read-keys :extra (extra-of st view-id))
-          st (-> st (assoc-in [:views view-id] view)
-                 (update-in [:counts :rendered] (fnil + 0) (:rendered n)) (update-in [:counts :same] (fnil + 0) (:same n)))]
-      [st (when (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:removes patch)))
-            (assoc patch :op :patch :view view-id))]))))
+    [(-> (keep st view) (update-in [:counts :rendered] (fnil + 0) (:rendered n)) (update-in [:counts :same] (fnil + 0) (:same n)))
+     (when (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:removes patch)))
+       (assoc patch :op :patch :view view-id))])))
 
 (defn page-html
   "The composed document of view-id from its retained fragments (renders nothing)."
@@ -534,7 +539,11 @@
                           :views (let [w (:views m)
                                        ;; a view no tab watches keeps nothing: its retained page, its branch read, its rows
                                        drop #(into {} (filter (fn [[v]] (contains? w v))) %)]
-                                   (ask-state (-> st (assoc :watch w :tabs (:tabs m)) (update :views drop) (update :branches drop) (update :shown drop)) o))
+                                   (ask-state (-> (reduce (fn [st v] (reindex st v (get-in st [:views v :reads]) #{}))
+                                                          st (remove w (keys (:views st))))
+                                                  (assoc :watch w :tabs (:tabs m)) (update :views drop) (update :branches drop) (update :shown drop)
+                                                  (update :dirty #(into #{} (filter w) %)))
+                                              o))
                           ;; a UI call root refused before it became a request: answered as root's are
                           :refused (web-answered st o (:tag m) (:r m))
                           :page (if (and (get-in st [:views (:view m)]) (contains? (:watch st) (:view m)))

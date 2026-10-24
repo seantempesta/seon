@@ -426,8 +426,9 @@
   ;; the render proc says when nothing it asked is in flight any more (after an answer, or
   ;; after what it sent the tabs), never while a request is out; the web proc puts a
   ;; settled comment on every feed
+  ;; main already read (:main-db): after its first read, main comes in the writer's commits
   (let [st {:events-ch (a/chan 8) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events []
-            :views {} :zoom {} :merges 0 :main {:t 1}}
+            :views {} :zoom {} :merges 0 :main {:t 1} :main-db (ts/test-db)}
         settled? (fn [outs] (some #(= :settled (:op %)) (:to-web outs)))
         [st o1] (#'seon.render.proc/render-proc st :events {:type :spawned :agent :a1 :at-ms 1})
         tag (:tag (first (filter #(= {:op :state} (:req %)) (:to-api o1))))

@@ -611,13 +611,17 @@
                                   (first (#'p/render-proc st :main {:t (:max-tx (:db-after r)) :db (:db-after r)
                                                                     :ops (mapv (fn [d] [(if (:added d) :db/add :db/retract) (:e d) (:a d) (:v d)]) (:tx-data r))}))))]
     (is (= 2 (walked st)) "the first pass walks each watched page")
-    (let [unread (first (remove #(contains? (get-in st [:views :a3 :reads]) [:e %]) (d/q '[:find [?e ...] :where [?e :ns/name]] main)))
+    (let [unread (first (remove #(some (fn [v] (contains? (get-in st [:views v :reads]) [:e %])) [:root :a3]) (d/q '[:find [?e ...] :where [?e :ns/name]] main)))
           ;; a commit's datoms as the writer reports them, on an entity of main the page did not read
           st' (first (#'p/render-proc st :main {:t (:max-tx main) :db main :ops [[:db/add unread :ns/name 'unrelated.ns]]}))]
-      (is (<= (walked st') (inc (walked st))) "an unrelated commit walks at most root's page")
-      (is (not (some #{:a3} (:last-walked st'))) "the agent's page is not walked"))
+      (is (= (walked st) (walked st')) "a commit on an entity no page read walks nothing")
+      (is (empty? (:last-walked st'))))
     (let [st' (commit st [{:db/id eid :seon.agent/status :idle}])]
-      (is (some #{:a3} (:last-walked st')) "a commit on the agent walks its page"))))
+      (is (= #{:root :a3} (set (:last-walked st'))) "a commit on the agent walks its page, and root's, which lists it"))
+    (testing "a view no tab watches leaves the index: no commit names it again"
+      (let [[st' _] (#'p/render-proc st :from-web {:op :views :views #{:root} :tabs 1})]
+        (is (= #{:root} (#'p/touched st' [{:e eid :a :seon.agent/status :v :idle}])))
+        (is (not (some (fn [[_ vs]] (contains? vs :a3)) (:read-index st'))))))))
 
 (deftest a-branch-commit-touches-its-page-by-its-datoms-diff
   ;; an agent's commit: its branch read again, and what moved is the datoms-diff of the held and
