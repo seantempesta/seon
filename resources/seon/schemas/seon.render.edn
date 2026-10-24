@@ -69,6 +69,10 @@
  :seon.render/this-run [:map {:seon.render/html seon.render.ui/this-run} [:read [:map-of :symbol pos-int?]] [:defined [:vector :symbol]]
                         [:evaluated [:vector :symbol]] [:tests [:vector [:map [:form :string] [:handle :string]]]]]
  :seon.render/changes [:map {:seon.render/html seon.render.ui/changes} [:against :string] [:changes :map]]
+ ;; root's page's tile of main's problems (seon.render.proc/page-value): the report, by its own view
+ :seon.render/problems [:and :seon.problems/report]
+ ;; root's page's tile of main's runs (seon.render.ui/root): how many by status, and each running one
+ :seon.render/runs [:map {:seon.render/html seon.render.ui/runs} [:by-status [:map-of :keyword nat-int?]] [:running [:vector :map]]]
  :seon.render/root :seon.render/node
  :seon.render/nodes [:vector :seon.render/node]
  :seon.render/walk [:map [:seon.render/root :seon.render/root] [:seon.render/nodes :seon.render/nodes]]

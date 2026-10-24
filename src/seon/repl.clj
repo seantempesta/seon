@@ -394,12 +394,15 @@
   response without its live value, the prose beside it and what that prose cites (its
   references on db, parsed here once by the one reference parser, seon.ref/references, so no
   render parses it again; read on db, the branch as the eval began, so a name the eval itself
-  defines is not yet one), the provider's call id, its reasoning, its run, its costliest
+  defines is not yet one), its value in one line, or its error's message (:line, the one printer
+  under the line budget: what a collapsed eval shows), the provider's call id, its reasoning, its run, its costliest
   functions and what it recorded."
   {:malli/schema [:=> [:cat :seon.host/db :string :map :map [:maybe :string]] :seon.eval/record]}
   [db code r req run]
   (let [cites (some->> (:prose req) (ref/references db))]
     (cond-> {:code code :text (:text r) :response (dissoc r :value :text :recorded :fns)}
+      (or (contains? r :value) (:ex r))
+      (assoc :line (print/line (if (:ex r) (or (get-in r [:ex :seon.error/message]) (:ex r)) (:value r)) (cfg/value :seon.config.render/line-budget) nil))
       (:prose req) (assoc :prose (:prose req))
       (seq cites) (assoc :cites cites)
       (:call-id req) (assoc :call-id (:call-id req) :call (:call req 0))

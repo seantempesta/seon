@@ -162,7 +162,7 @@
         why (or why
                 (when (= :task-conflict (:class r)) (value-part (select-keys ev [:base :ours :theirs]) (line-budget) (read-of opts :evidence)))
                 (some-> (:outcome r) ui/kname (vector false)))
-        what (remove nil? [(:task r) (:run r) (some-> (:test r) str) (some-> (:attr r) ui/kname)])]
+        what (ui/problem-about r)]
     (out ""
       [[(str (ui/kname (:class r)) (if-let [n (:n r)] (str " " n) (some->> (:count r) (str " ×"))) (when (seq what) (str " " (str/join " " what)))) false]
        (when why (cat-parts [[": " false] why]))

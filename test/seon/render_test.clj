@@ -528,14 +528,15 @@
         root (#'p/page-value st :root)
         agent (#'p/page-value st :a3)
         tiles (fn [l] (tiles-of [main branch] l))]
-    (testing "root's page is seon.render.ui/page's layout; an agent's, its conversation (seon.render.ui/chat): each with its head, its list, its tiles"
-      (is (= #{nil "#p-rows" "#p-foot" "#p-tiles"} (set (map :container (:seon.render/units root)))))
-      (is (= #{nil "#c-side" "#c-older" "#c-rows" "#p-tiles"} (set (map :container (:seon.render/units agent)))))
-      (is (= [[:seon.db/eval-fact]] (rows-of [main] root)) "root's list: its own evaluations")
+    (testing "root is an agent: its page and an agent's are each its conversation (seon.render.ui/chat), with its head, its list, its tiles"
+      (is (= #{nil "#c-side" "#c-older" "#c-rows" "#p-tiles"} (set (map :container (:seon.render/units root))) (set (map :container (:seon.render/units agent)))))
+      (is (= [:seon.db/eval-fact] (for [u (:seon.render/units root) :when (= "#c-rows" (:container u))] (schema-of main (second (:comp u)))))
+          "root's list: its own evaluations")
       (is (= "p-head" (:id (first (:seon.render/units root))) (:id (first (:seon.render/units agent))))))
-    (testing "root's focus: its agents as tiles, main's open problems a tile by their own schema, its input spawns"
-      (is (= [:seon.db/agent-fact :seon.problems/report] (tiles root)))
-      (is (= :seon.render/root-input (:schema (second (:seon.render/units root))))))
+    (testing "root's focus: its agents the sidebar, main's open problems and runs tiles by their own schemas, its input spawns"
+      (is (= [:seon.db/agent-fact] (for [u (:seon.render/units root) :when (= "#c-side" (:container u))] (schema-of main (second (:comp u))))))
+      (is (= [:seon.render/problems :seon.render/runs] (tiles root)))
+      (is (= :seon.render/root-input (:schema (first (filter #(= "p-input" (:id %)) (:seon.render/units root)))))))
     (testing "an agent's focus: its REPL and messages at the top, live while root's view holds it in this boot"
       (let [in (first (filter #(= "p-input" (:id %)) (:seon.render/units agent)))]
         (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil}] [(:schema in) (:input in)]))))
@@ -987,3 +988,54 @@
       (let [branch' (d/db-with branch [{:seon.eval/id "e1" :seon.eval/record {:code "(f 2)" :text "x" :run "demo/f#1"}}])
             [st2 _] (#'p/pass-view (comp-state main branch' eid) :a3)]
         (is (not (str/includes? (pr-str (:page (p/screen-of st2 :a3))) "[:h2 \"cited\"]")))))))
+
+(deftest a-turns-screen-folds-into-it-and-an-eval-collapses-to-its-value
+  ;; root, 2026-10-24: the screen's evals are the system's, folded into their turn's header (they
+  ;; stay recorded, and on the debug page as sent); a collapsed eval is code ⇒ value · ms
+  (let [[main branch eid] (paged-dbs)
+        k (:seon.agent/key (d/pull main [:seon.agent/key] eid))
+        branch (reduce d/db-with branch
+                       [(seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "s1" "screen"
+                                             {:code "(seon.screen/show)" :text "{:handle result/s1, :value {:page []}}" :line "{:page []}"
+                                              :response {:handle 'result/s1 :ms 3.0}} nil)
+                        [{:seon.turn/id "demo/f#1/0" :seon.turn/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1"
+                                                                      :turn 0 :max-turns 8 :origin :model :observed {} :screen ["s1"]}}]
+                        (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e9" "a3"
+                                             {:code "(+ 2 2)" :text "{:handle result/e9, :ms 0.2, :ticks 900, :value 4}" :line "4"
+                                              :response {:handle 'result/e9 :ms 0.2 :ticks 900}} nil)])
+        st (proc-state main branch)
+        l (#'p/page-value st :a3)
+        rows (for [u (:seon.render/units l) :when (= "#c-rows" (:container u))] (:comp u))
+        html-of (fn [e as] (h/html (ui/component branch e as)))
+        e-of #(:db/id (d/entity branch [:seon.eval/id %]))
+        turn (:db/id (d/entity branch [:seon.turn/id "demo/f#1/0"]))]
+    (is (not-any? #(= (e-of "s1") (second %)) rows) "the screen's eval is no part of the conversation")
+    (is (str/includes? (html-of turn [:chat false]) ">screen<") "its turn says it had a screen")
+    (is (not (str/includes? (html-of turn [:chat false]) "seon.screen/show")) "rendered only while open")
+    (is (str/includes? (html-of turn [:chat true]) "seon.screen/show") "open: the screen eval as it ran")
+    (let [closed (html-of (e-of "e9") [:chat false])]
+      (is (str/includes? closed ">4<") "collapsed: its value in one line")
+      (is (str/includes? closed "0.20 ms") closed)
+      (is (not (str/includes? closed "ticks")) "and no response map or cost line twice"))))
+
+(deftest roots-page-reads-in-words
+  ;; root, 2026-10-24: root is an agent; its head, problems and runs read as a person reads them,
+  ;; each problem one line by its own :html view
+  (let [row {:class :error :count 3 :task "demo/f" :run "demo/f#1" :message "boom" :answered-by ["demo/fix"]
+             :producer 'demo/f :owner-ns 'demo :evidence {:kind :error} :proofs [] :at-ms nil}]
+    (is (= "<p class=\"text-xs\">error ×3 demo/f demo/f#1: boom (answered by demo/fix)</p>" (h/html (ui/problem-row row {}))))
+    (let [html (h/html (ui/problems {:t 1 :classes {:error {:n 1 :rows [(dissoc row :class)]} :red {:n 0 :rows []}}} {}))]
+      (is (str/includes? html "<summary class=\"cursor-pointer\">error 1</summary>"))
+      (is (str/includes? html "error ×3 demo/f") "its rows, each by the row's view")
+      (is (not (str/includes? html ">red 0<")) "a class with no rows is left out"))
+    (is (= ["none open"] (re-seq #"none open" (h/html (ui/problems {:t 1 :classes {}} {}))))))
+  (let [html (h/html (ui/runs {:by-status {:running 1 :closed 2} :running [{:seon.run/id "demo/f#1" :seon.run/status :running :seon.run/max-turns 8}]} {}))]
+    (is (str/includes? html "2 closed · 1 running"))
+    (is (str/includes? html "run demo/f#1 · running · up to 8 turns") "each running one by the run's view"))
+  (let [html (h/html (ui/root {:seon.root/id :root :seon.root/boot "b1" :seon.root/generation {:commit "abc" :ms 1}
+                              :seon.root/quiescent {:t 9 :root-causes [{:task "demo/f" :cause "red proof" :blocks ["demo/g"]}]}}
+                             {:as :block}))]
+    (is (str/includes? html "boot b1 · generation abc"))
+    (is (str/includes? html "1 root causes when it went quiet at t 9"))
+    (is (str/includes? html "demo/f: red proof · blocks 1") "each cause one line")
+    (is (not (str/includes? html "#:seon")) "nothing printed raw")))

@@ -255,6 +255,15 @@
                 (vec (for [e on :let [id (ui/comp-id e [:debug])]] {:id id :comp [1 e [:debug (contains? open id) vp]]}))
                 (- (count ts) (count on))))))
 
+(defn- runs-of
+  "Main's runs as root's page shows them: how many by status (the status index, counted), and
+  each running one (its status's index entries, pulled)."
+  {:malli/schema [:=> [:cat :seon.host/db] :seon.render/runs]}
+  [db]
+  {:by-status (frequencies (map :v (d/datoms db :aevt :seon.run/status)))
+   :running (vec (for [dt (d/datoms db :avet :seon.run/status :running)]
+                   (d/pull db [:seon.run/id :seon.run/status :seon.run/turns :seon.run/max-turns :seon.run/model] (:e dt))))})
+
 (defn- page-value
   "View's page: the entity it names walked on main and, for an agent, its branch as this proc last
   read it (seon.render/walk), laid out by seon.render.ui/page with its focus's input at the top
@@ -292,7 +301,8 @@
             w (cond-> w
                 (and (= :root view) (not (:seon.error/type w)))
                 (update :seon.render/nodes conj {:seon.render/kind :value :seon.render/value (:recorded st)
-                                                 :seon.render/schema :seon.problems/report :seon.render/eid eid})
+                                                 :seon.render/schema :seon.render/problems :seon.render/eid eid}
+                        {:seon.render/kind :value :seon.render/value (runs-of db) :seon.render/schema :seon.render/runs :seon.render/eid eid})
                 (and berr (not (:seon.error/type w)))
                 (update :seon.render/nodes conj {:seon.render/kind :value :seon.render/value berr :seon.render/eid eid}))]
         (if (:seon.error/type w)

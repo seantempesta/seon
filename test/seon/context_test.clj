@@ -602,6 +602,7 @@
     (is (= ['demo/f] (mapv :seon.ref/name (:cites rec))) "the citation, kept in the record")
     (is (= (seon.ref/references db "Reading `demo/f` before I change it.") (:cites rec)) "as the one parser reads it")
     (is (= "demo/s#1" (:run rec)))
+    (is (= "{:a 1}" (:line (repl/record-details db "{:a 1}" {:text "x" :value {:a 1}} {} nil))) "its value in one line, for the collapsed eval")
     (is (not (contains? (repl/record-details db "(f 1)" {:text "2"} {:prose "No names here."} nil) :cites)) "prose citing nothing records none")))
 
 (deftest the-story-names-the-functions-nearest-its-plan

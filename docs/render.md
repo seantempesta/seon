@@ -127,6 +127,7 @@ An agent's namespace refers `clojure.pprint`'s `pp` and `pprint` (`seon.agent/ma
 ### Cuts in a display namespace that are not cuts of output
 
 - `seon.render.ui/kname`, `seon.render.ui/dom-id`: a keyword's text without its colon.
+- `seon.context/similar`: the top k of a search (`take` the config's `:seon.config.render/similar` of its ranking), and the forms that search further beside them: a search's answer, not a cut of output.
 - `my.agent/file-source`, `seon.repl/form-src`: a form's own text out of its file or its reply (`subs` at a reader's offsets).
 - `my.root/task-files`: a task file's owning namespace from its file name (`subs` off the `.edn`).
 - `seon.render.ui/utc-offset-ms`: parsing `:seon.config.web/utc-offset`.

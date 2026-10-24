@@ -574,6 +574,46 @@
   [:div {:class "flex flex-col gap-1 text-xs"}
    (for [view cs] [:pre {:class "whitespace-pre-wrap break-words text-text-200"} (print/text view (:part print/budgets))])])
 
+(defn problem-about
+  "What problem row r is about, as words: its task, run, test and attribute, those it has (the
+  one wording seon.render.ai/problem-row and `problem-row` share)."
+  {:malli/schema [:=> [:cat :map] [:sequential :string]]}
+  [r] (remove nil? [(:task r) (:run r) (some-> (:test r) str) (some-> (:attr r) kname)]))
+
+(defn problem-row
+  "One problem (the declared html render of :seon.problems/row, :class assoc'd by its reader) as
+  one line: its class and count, what it is about, then why (its message, its error's, its
+  reason, else its outcome) and what answered it."
+  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
+  [r _]
+  (let [why (or (:message r) (get-in r [:error :seon.error/message]) (:reason r) (some-> (:outcome r) kname))]
+    [:p {:class "text-xs"}
+     (str (kname (:class r)) (some->> (:count r) (str " ×")) (when-let [w (seq (problem-about r))] (str " " (str/join " " w))))
+     (when why (list ": " (prose why (cell) {:one-line? true})))
+     (when-let [ts (seq (:answered-by r))] (str " (answered by " (str/join ", " ts) ")"))]))
+
+(defn problems
+  "Main's problems (the declared html render of :seon.problems/report): each class with rows,
+  its count, its rows a line each (`problem-row`) on open, open ones first."
+  {:malli/schema [:=> [:cat :seon.problems/report :seon.render/opts] :any]}
+  [{:keys [classes]} _]
+  (let [cs (for [[c {:keys [n rows]}] (sort-by (comp str key) classes) :when (seq rows)] [c n rows])]
+    [:div {:class "flex flex-col gap-1 text-xs"}
+     (if (empty? cs)
+       [:p "none open"]
+       (for [[c n rows] cs]
+         [:details [:summary {:class "cursor-pointer"} (str (kname c) " " n)]
+          (for [r (sort-by #(if (false? (:open? %)) 1 0) rows)] (render/html (assoc r :class c) {:schema :seon.problems/row}))]))]))
+
+(defn runs
+  "Main's runs (the declared html render of :seon.render/runs): how many by status, and each
+  running one by its own view (`run`, a line)."
+  {:malli/schema [:=> [:cat :seon.render/runs :seon.render/opts] :any]}
+  [{:keys [by-status running]} _]
+  [:div {:class "flex flex-col gap-1 text-xs"}
+   [:p (if (empty? by-status) "none yet" (str/join " · " (for [[s n] (sort-by (comp str key) by-status)] (str n " " (kname s)))))]
+   (for [r running] [:p (render/html r {:schema :seon.run/run-fact :as :inline})])])
+
 (defn proofs
   "An agent's proofs as its newest turn measured them (the declared html render of
   :seon.render/proofs): how many are green, red, not run or not written, each test's name,
@@ -660,6 +700,12 @@
     (str "t-" (:seon.render/eid nd) "-" (dom-id (or (get-in nd [:seon.render/from :seon.render/attr]) (:seon.render/schema nd) :value)))
     (comp-id (:seon.render/eid nd) :tile)))
 
+(defn- toggle
+  "A <details>' attrs that tell the render proc it opened or closed (/open), for the conversation's
+  part with element id: its view read from the list it sits in (data-view)."
+  {:malli/schema [:=> [:cat :string] :map]}
+  [id] {(keyword "data-on:toggle") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=" id "&open=' + el.open)")})
+
 (defn- chat-part
   "Entity eid on db as a part of an agent's conversation (element id): a model turn, its header
   and its reasoning folded; an eval, its prose (what the model or the user said it does), then one
@@ -672,20 +718,32 @@
   (let [own (d/pull db '[*] eid)
         schema (render/entity-schema own :seon.eval/agent)]
     (case schema
-      :seon.turn/turn-fact [:li {:id id :class "flex flex-col gap-1 py-1"} (turn (dissoc own :seon.turn/reply) {})]
+      ;; a turn's header, its screen evals folded under it (the system's, not the agent's work):
+      ;; rendered only while open, as sent (the debug page shows them in its requests)
+      :seon.turn/turn-fact
+      (let [screens (get-in own [:seon.turn/basis :screen])]
+        [:li {:id id :class "flex flex-col gap-1 py-1"}
+         (turn (dissoc own :seon.turn/reply) {})
+         (when (seq screens)
+           [:details (cond-> (toggle id)
+                       open? (assoc :open true))
+            [:summary {:class "cursor-pointer text-2xs text-text-500"} "screen"]
+            (when open? (for [sid screens :let [e (d/pull db '[*] [:seon.eval/id sid])]]
+                          (if (:db/id e) (evaluation e {}) [:p {:class "text-error"} (str "screen eval " sid " is not on this branch")])))])])
       :seon.db/eval-fact
       (let [rec (:seon.eval/record own)
             r (merge (:response rec) (select-keys rec [:code :text :prose]))
             line #(first (str/split-lines (or % "")))]
         [:li {:id id :class "flex flex-col gap-1 py-1"}
          (when-not (str/blank? (:prose r)) [:p {:class "whitespace-pre-wrap text-text-200"} (prose (:prose r) (part))])
-         [:details (cond-> {(keyword "data-on:toggle") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=" id "&open=' + el.open)")}
+         [:details (cond-> (toggle id)
                      open? (assoc :open true))
+          ;; collapsed: code ⇒ its value in one line · ms (an error: its message); open: the whole
           [:summary {:class "flex flex-wrap items-baseline gap-2 cursor-pointer text-xs"}
            [:code {:class "text-text-100"} (line (:code r))]
            [:span {:class (if (:ex r) "text-error" "text-text-500")} (if (:ex r) "✕" "⇒")]
-           [:code {:class "text-text-400"} (line (:text r))]
-           (cost-line r)]
+           [:code {:class "text-text-400"} (:line rec)]
+           (when (:ms r) [:span {:class "tabular-nums text-text-500"} (ms-str (:ms r))])]
           (when open? (evaluation own {}))]])
       [:li {:id id :class "py-1"} (render/html (dissoc own :db/id) {:schema schema})])))
 
@@ -763,11 +821,14 @@
   :sides [{:eid :db}]}."
   {:malli/schema [:=> [:cat :seon.render/walk :map] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
   [{:seon.render/keys [root nodes]} {:keys [shown view input open sides]}]
-  (let [listed (filterv #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))) nodes)
+  ;; the screen's evals are the system's, folded into their turn (chat-part), not parts of their own
+  (let [listed (filterv #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))
+                              (not= "screen" (get-in % [:seon.render/value :seon.eval/by])))
+                        nodes)
         tiles (remove #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))) nodes)
         on (vec (reverse (take shown listed)))
         older (- (count listed) (count on))
-        as (fn [nd] (if (= :seon.db/eval-fact (:seon.render/schema nd))
+        as (fn [nd] (if (#{:seon.db/eval-fact :seon.turn/turn-fact} (:seon.render/schema nd))
                       (let [id (comp-id (:seon.render/eid nd) :chat)] [:chat (contains? (or open #{}) id)])
                       :chat))
 ]
@@ -844,6 +905,26 @@
        [:h1 {:class "text-base font-bold text-signal"} (kname id)]
        [:p {:class "text-text-300"} (str/join " · " (remove nil? [(kname status) (when branch (str "on branch " (kname branch))) (when pid (str "pid " pid))]))]
        (when-not (str/blank? description) [:p {:class "text-text-300"} (prose description (part))])])))
+
+(defn root
+  "Root's view (the declared html render of :seon.root/root-fact). Shown as its page (:as :page,
+  opts :page {:walk :dbs ...}): its conversation (chat: its evals), its agents as the sidebar,
+  its walk's other nodes as tiles (main's problems and runs, seon.render.proc/page-value); at any other size, its head: its boot, its generation and,
+  when it last went quiet, its root causes a line each."
+  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
+  [v opts]
+  (if-let [{:keys [walk dbs] :as page} (when (= :page (:as opts)) (:page opts))]
+    (let [agent? #(= :seon.db/agent-fact (:seon.render/schema %))]
+      (chat (update walk :seon.render/nodes #(vec (remove agent? %)))
+            (assoc page :sides (vec (for [nd (:seon.render/nodes walk) :when (agent? nd)] {:eid (:seon.render/eid nd) :db 0})))))
+    (let [{:seon.root/keys [boot generation quiescent]} v]
+      [:div {:class "flex flex-col gap-1"}
+       [:h1 {:class "text-base font-bold text-signal"} "root"]
+       [:p {:class "text-text-300"} (str/join " · " (remove nil? [(str "boot " boot) (some->> (:commit generation) (str "generation "))]))]
+       (when-let [cs (seq (:root-causes quiescent))]
+         [:details [:summary {:class "cursor-pointer text-text-300"} (str (count cs) " root causes when it went quiet at t " (:t quiescent))]
+          (for [{:keys [task cause run blocks]} cs]
+            [:p (str task ": " cause (when run (str " (" run ")")) (when (seq blocks) (str " · blocks " (count blocks))))])])])))
 
 (defn root-input
   "Root's input at the top of its page: spawn agents (seon.root/spawn!), or evaluate forms in
