@@ -86,14 +86,15 @@
     (let [rp {:rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :zoom {} :merges 0}
           [_ o] (#'p/render-proc rp :answers {:tag (:tag req) :r {:ok true :killed :a1}})
           w (first (filter #(= :write (get-in % [:req :op])) (:to-api o)))
-          rec (some :seon.cluster.eval/record (get-in w [:req :req :tx-data]))]
-      (is (= "(seon.root/kill! :a1)" (:form rec)))
-      (is (= :ui (:origin rec)))
-      (is (str/includes? (str (:shown rec)) ":killed :a1") "what root answered"))))
+          e (some #(when (:seon.eval/record %) %) (get-in w [:req :req :tx-data]))
+          rec (:seon.eval/record e)]
+      (is (= "(seon.root/kill! :a1)" (:code rec)))
+      (is (= "user" (:seon.eval/by e)))
+      (is (str/includes? (str (:text rec)) ":killed :a1") "what root answered"))))
 
 (deftest a-refused-ui-call-reaches-the-stream-and-main
   ;; root refuses merge! of an ended agent before any request: the refused answer goes to the render
-  ;; proc as the call's answer (shown, and recorded on main as an :err item), not dropped
+  ;; proc as the call's answer (shown, and recorded on main with its error), not dropped
   (let [st (#'w/web-proc {:port 0})
         [_ out] (#'w/web-proc (assoc st :index index) :http {:op :call :call {:var 'seon.root/merge! :agent :a2}})
         [m] (:to-render out)]
@@ -103,9 +104,9 @@
     (let [rp {:rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :zoom {} :merges 0}
           [_ o] (#'p/render-proc rp :from-web m)
           w (first (filter #(= :write (get-in % [:req :op])) (:to-api o)))
-          rec (some :seon.cluster.eval/record (get-in w [:req :req :tx-data]))]
-      (is (= "(seon.root/merge! :a2)" (:form rec)))
-      (is (str/includes? (str (:shown rec)) "agent not running") "what root refused, and why"))))
+          rec (some :seon.eval/record (get-in w [:req :req :tx-data]))]
+      (is (= "(seon.root/merge! :a2)" (:code rec)))
+      (is (str/includes? (str (:text rec)) "agent not running") "what root refused, and why"))))
 
 (deftest a-listener-that-cannot-bind-is-the-one-error-map
   ;; task seon.render/one-owner-per-view-path (B2): a port taken is data, the one error map

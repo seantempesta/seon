@@ -1,0 +1,55 @@
+[{:turn 1,
+  :status 200,
+  :body-if-error nil,
+  :usage
+  {:prompt-tokens 3146,
+   :completion-tokens 418,
+   :reasoning-tokens 305,
+   :cache-hit-tokens 128,
+   :cache-miss-tokens 3018,
+   :finish-reason "tool_calls"},
+  :calls
+  [";; First of the three requested computations: sum of 0..9, which should be 45... let me let the REPL say.\n(reduce + (range 10))"],
+  :text "",
+  :reasoning-chars 1164}
+ {:turn 2,
+  :status 200,
+  :body-if-error nil,
+  :usage
+  {:prompt-tokens 3546,
+   :completion-tokens 66,
+   :reasoning-tokens 14,
+   :cache-hit-tokens 3072,
+   :cache-miss-tokens 474,
+   :finish-reason "tool_calls"},
+  :calls [";; Second requested computation: 6 times 7.\n(* 6 7)"],
+  :text "",
+  :reasoning-chars 22}
+ {:turn 3,
+  :status 200,
+  :body-if-error nil,
+  :usage
+  {:prompt-tokens 3634,
+   :completion-tokens 87,
+   :reasoning-tokens 37,
+   :cache-hit-tokens 3456,
+   :cache-miss-tokens 178,
+   :finish-reason "tool_calls"},
+  :calls
+  [";; Third requested computation: the string \"done\".\n(str \"done\")"],
+  :text "",
+  :reasoning-chars 148}
+ {:turn 4,
+  :status 200,
+  :body-if-error nil,
+  :usage
+  {:prompt-tokens 3744,
+   :completion-tokens 263,
+   :reasoning-tokens 192,
+   :cache-hit-tokens 3584,
+   :cache-miss-tokens 160,
+   :finish-reason "stop"},
+  :calls [],
+  :text
+  "The three computations are done, one eval call each:\n\n1. `(reduce + (range 10))` → **45**\n2. `(* 6 7)` → **42**\n3. `(str \"done\")` → **\"done\"**\n\nNo further evaluations from me — this reply is prose only, as instructed.",
+  :reasoning-chars 746}]

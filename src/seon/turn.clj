@@ -19,7 +19,7 @@
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.intr :as intr] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context] [seon.program :as program] [seon.merge :as pm] [seon.problems :as problems]
-            [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
+            [seon.stage :as stage] [seon.screen :as screen] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
             [datahike.api :as d]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: the run it
@@ -44,14 +44,10 @@
                                              :plan-before (:plan (:seon.task/accumulated (task/task db task)))})))))
 
 (defn last-evals
-  "The items of this process's last model turn, in order: each one's form, printed value or
-  error (an error's map, :err), output, and its live value (:value) while this process holds it."
+  "The responses of this process's last model turn, one per eval call, in order, each with its
+  live value while this process holds it (:seon.eval/response)."
   {:malli/schema [:=> [:cat] [:vector :map]]}
-  []
-  (let [rs (:results @agent/state)]
-    (mapv (fn [it] (cond-> (select-keys it [:id :tag :form :printed :out :err :handle])
-                     (contains? rs (:handle it)) (assoc :value (get rs (:handle it)))))
-          (get-in @agent/state [:turn :evals]))))
+  [] (vec (get-in @agent/state [:turn :evals])))
 
 (defn request-stop!
   "A function ends the loop after this turn's forms: :waiting (my.turn/wait) or :failed (my.task/fail!)."
@@ -154,7 +150,7 @@
   messages delivered since the last turn (taken: the turn is their reader; a message that is
   a fact is written on this branch first, the same fact root wrote on main, and the basis
   names it by id, so its text is read again from the commit), and the last evaluations'
-  transcript while no earlier turn shows them. A read that is not the run's turn (take?
+  responses while no earlier turn shows them. A read that is not the run's turn (take?
   false: an observer's read of an agent its model drives) shows the inbox and leaves it, each
   message as it was sent."
   {:malli/schema [:=> [:cat :seon.task/id :seon.run/id :int :int :seon.turn/origin :map :boolean] :seon.turn/basis]}
@@ -166,8 +162,8 @@
         _ (agent/commit!)
         ;; taken once their facts are committed: a refused write leaves them in the inbox
         _ (when take? (agent/taken! (count msgs)))
-        items (when (or (= :outside origin) (zero? turn)) (last-evals))
-        ev (when (seq items) (context/evaluations-text items))]
+        rs (when (or (= :outside origin) (zero? turn)) (last-evals))
+        ev (when (seq rs) (context/evaluations-text rs))]
     (cond-> {:commit (d/commit-id (agent/db)) :task task :run run :turn turn :max-turns max-turns
              :origin origin :observed (cond-> (dissoc observed :merge?)
                                         (seq facts) (assoc :message-ids (mapv :id facts))
@@ -186,8 +182,16 @@
   (let [t (:task obs)
         proofs (:proofs (:seon.task/accumulated t))
         t0 (profile/now-ns)
-        basis (basis! (:seon.task/id t) run turn max-turns :model
-                      (cond-> (observed obs) merge? (assoc :merge? true)) true)
+        ob (cond-> (observed obs) merge? (assoc :merge? true))
+        last (get-in @agent/state [:turn :last])
+        ;; the screen: its forms evaluated now, each recorded by the screen, so the request (and
+        ;; any later reading of it) ends with their responses (seon.context/request)
+        _ (swap! agent/state assoc-in [:turn :screen]
+                 {:task (:seon.task/id t) :last last
+                  :input (context/turn-input (agent/db) {:turn turn :max-turns max-turns :origin :model :observed ob :merge? merge?} last)})
+        screen (vec (keep #(:record (repl/eval-string % {:origin :screen})) screen/forms))
+        basis (cond-> (assoc (basis! (:seon.task/id t) run turn max-turns :model ob true) :agent (:key @agent/state))
+                (seq screen) (assoc :screen screen))
         {:keys [block messages]} (context/render (agent/db) basis)
         context-ms (long (profile/ms-since t0))
         t1 (profile/now-ns)
@@ -201,27 +205,36 @@
       (let [t2 (profile/now-ns)
             ;; an interrupt left from before this turn's evals is not theirs
             _ (intr/clear-pending!)
-            ;; each eval call through the one REPL path, in order; its answer is the call's result
-            calls (mapv (fn [{:keys [id code thinking]}] (cond-> {:id id :code code :items (repl/eval-string (:text (reader/forgive code)))}
-                                                             thinking (assoc :thinking thinking)))
-                        (:tool-calls c))
-            items (into [] (mapcat :items) calls)
+            ;; each eval call through the one REPL path, in order; its response is the call's
+            ;; result; the reply's prose is the first call's
+            calls (vec (map-indexed (fn [i {:keys [id code]}]
+                                      {:id id :code code
+                                       :response (repl/eval-string (:text (reader/forgive code))
+                                                                   (cond-> {:origin :model :call-id id :call i}
+                                                                     (and (zero? i) (not (str/blank? (:text c)))) (assoc :prose (:text c))
+                                                                     (and (zero? i) (:reasoning c)) (assoc :reasoning (:reasoning c))))})
+                                    (:tool-calls c)))
+            rs (mapv :response calls)
             eval-ms (long (profile/ms-since t2))
-            _ (swap! agent/state assoc-in [:turn :evals] items)
+            _ (swap! agent/state assoc-in [:turn :evals] rs)
             used (:seon.turn/tokens (usage c))
             t3 (profile/now-ns)]
+        ;; a reply with prose and no call is a message to the user: the turn ends, and the run
+        ;; waits for the user (the design's tool_choice auto)
+        ;; (a blank or cut reply is no message: the next turn reads the same state)
+        (when (and (empty? calls) (not (str/blank? (:text c))) (not (:truncated? c))) (request-stop! :waiting (:text c)))
+        (swap! agent/state assoc-in [:turn :last] (cond-> {:seon.turn/calls (mapv #(select-keys % [:id :code]) calls)} (:truncated? c) (assoc :seon.turn/truncated true)))
         ;; what the model read, as its basis (seon.context/render makes the text from it), what
-        ;; it answered and how it stopped, what its forms evaluated to as the next turns show it,
-        ;; and where the turn's time went as this agent saw it
+        ;; it answered and how it stopped, which evals its calls are, and where the turn's time
+        ;; went as this agent saw it
         (agent/transact! [{:db/id "run" :seon.run/id run}
                           (cond-> (merge (usage c) {:seon.turn/id (str run "/" turn) :seon.turn/run "run" :seon.turn/n turn
                                    :seon.turn/origin :model :seon.turn/basis basis
-                                   :seon.turn/calls (mapv (fn [{:keys [id code thinking items]}]
-                                                            (cond-> {:id id :code code :evals (context/evaluations-text items) :items (vec (keep :record items))}
-                                                              thinking (assoc :thinking thinking)))
+                                   :seon.turn/calls (mapv (fn [{:keys [id code response]}]
+                                                            (cond-> {:id id :code code} (:record response) (assoc :eval (:record response))))
                                                           calls)
-                                   :seon.turn/reply (:text c) :seon.turn/forms (count items)
-                                   :seon.turn/errors (count (filter #(= :err (:tag %)) items))
+                                   :seon.turn/reply (:text c) :seon.turn/forms (count calls)
+                                   :seon.turn/errors (count (filter :ex rs))
                                    :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))
                                    :seon.turn/ms (+ model-ms eval-ms)})
                             (:truncated? c) (assoc :seon.turn/truncated true)
@@ -238,7 +251,7 @@
                                                  :shown {'seon.docs/resolve-ref (set (keep :symbol (:references block)))
                                                          'seon.context/found (set (keep :symbol (:found block)))
                                                          'seon.context/current-state (set (map :test (:proofs block)))}
-                                                 :items (mapv (fn [it] {:form (:form it) :error (:err it)}) items)}))
+                                                 :items (mapv (fn [{:keys [code response]}] {:form code :error (:ex response)}) calls)}))
           merge? (update :merge-turns inc))))))
 
 (defn context-block

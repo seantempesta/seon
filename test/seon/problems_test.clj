@@ -104,13 +104,13 @@
     (let [r (invalid 'app/f "x")
           e (agent/error-map (ex-info (:seon.error/message r) r))]
       (is (= r e))))
-  (testing "the reply item carries the map, and the stored eval record holds it as data"
+  (testing "the response carries the map as :ex, and the stored eval record holds it as data"
     (let [em (agent/error-map (ArithmeticException. "Divide by zero"))
-          it (first (repl/fold [{"status" ["eval-error"] :tag :err :err em :printed (:seon.error/message em) :id 0 :form "(/ 1 0)"}]))
-          rec (some :seon.cluster.eval/record (repl/record-tx {:seon.agent/key "b/a1" :seon.agent/id :a1} "r1" [it] nil))]
-      (is (= em (:err it)))
-      (is (= "Divide by zero" (:printed it)))
-      (is (= em (:error rec)) "grouped by type and producer without parsing text")))
+          r (repl/response [{"status" ["eval-error"] :tag :err :err em :id 0 :form "(/ 1 0)"}] 'result/e1)
+          rec (some :seon.eval/record (repl/record-tx {:seon.agent/key "b/a1" :seon.agent/id :a1} "e1" "a1"
+                                                      {:code "(/ 1 0)" :text (repl/printed r) :response r} nil))]
+      (is (= em (:ex r)))
+      (is (= em (get-in rec [:response :ex])) "grouped by type and producer without parsing text")))
   (testing "the agent folds its errors until its commit; root folds them as :eval occurrences"
     (let [em (agent/error-map (ArithmeticException. "Divide by zero"))
           m (-> nil (err/note em "(/ 1 0)" 10) (err/note em "(/ 2 0)" 12))

@@ -28,7 +28,7 @@
     (let [pending (drop seen all)]
       (if-let [m (first (filter :req pending))]
         (let [op (get-in m [:req :op])
-              r (case op :spawn {:id :p1} :eval [{:tag :ret :printed "1"}] :tests answer :write {:ok true :t 6} :kill {:killed :p1})
+              r (case op :spawn {:id :p1} :eval {:handle 'result/e1 :text "{:handle result/e1, :value 1}"} :tests answer :write {:ok true :t 6} :kill {:killed :p1})
               [st o] (feed st [(answer-of m r)])]
           (recur st (into all o) (inc (.indexOf all m))))
         [st all]))))
@@ -99,7 +99,7 @@
                    (if-let [m (first (filter :req (drop seen all)))]
                      (let [op (get-in m [:req :op])
                            _ (when (= :tests op) (swap! order conj (get-in m [:req :id])))
-                           r (case op :spawn {:id :p1} :eval [{:tag :ret}] :tests test-run-answer :write {:ok true} :kill {:killed 1})
+                           r (case op :spawn {:id :p1} :eval {:handle 'result/e1 :text "{:handle result/e1, :value nil}"} :tests test-run-answer :write {:ok true} :kill {:killed 1})
                            [st o] (feed st [(answer-of m r)])]
                        (recur st (into all o) (inc (.indexOf all m))))
                      [st all]))]
@@ -150,9 +150,9 @@
                   "      a @ap"
                   "      again (select-keys @(c/prove! sys :a1) [:key])"
                   "      runs (d/q '[:find [?id ...] :where [?r :seon.proof.run/id ?id]] @(:conn sys))]"
-                  "  (pr-str {:session s :agent (:printed (first a)) :again again :runs (vec runs)}))")
+                  "  (pr-str {:session s :agent (:text a) :again again :runs (vec runs)}))")
         [r] (at/in-agent [{:op :eval :agent "root" :code code}])
-        v (clojure.edn/read-string (clojure.edn/read-string (:printed r)))]
+        v (clojure.edn/read-string (:value r))]
     (is (map? v) (pr-str r))
     (is (re-find #"@[0-9a-f]+!turn$" (:key (:session v))) "the key is the agent's branch at the digest of its program")
     (is (= (:key (:session v)) (:key (:again v))) "asked again, nothing the run reads changed: the same run's answer")
@@ -172,7 +172,7 @@
                   "  (pr-str {:facts (vec (sort (map (juxt first second) facts))) :runs (vec runs) :green (count green)"
                   "           :latest (vec (sort (map first (d/q '[:find ?l :where [?e :seon.proof/latest ?l]] @(:conn sys)))))}))")
         [r1 r2] (at/in-agent [{:op :eval :agent "root" :code ask} {:op :eval :agent "root" :code read}])
-        v (merge (clojure.edn/read-string (clojure.edn/read-string (:printed r1))) (clojure.edn/read-string (clojure.edn/read-string (:printed r2))))]
+        v (merge (clojure.edn/read-string (:value r1)) (clojure.edn/read-string (:value r2)))]
     (is (map? v) (pr-str r1 r2))
     (is (= [0 0 true []] ((juxt :fail :error :ran :red) v)))
     (is (pos? (:pass v)))
@@ -278,7 +278,7 @@
     (is (nil? (:running st))))
   (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :main 1)])
         [st o] (feed st [(answer-of (first (asks outs :spawn)) {:id :p1})])
-        [st o2] (feed st [(answer-of (first (asks o :eval)) [{:tag :ret}])])
+        [st o2] (feed st [(answer-of (first (asks o :eval)) {:handle 'result/e1 :text "{:handle result/e1, :value nil}"})])
         died (seon.contract/error :seon.agent/died 'seon.root/api-proc "agent p1 died" {:agent :p1})
         [st o3] (feed st [(answer-of (first (asks o2 :tests)) died)])]
     (is (= [1] (waiters-answered o3)) "the prove agent died mid-run: its waiter is answered the error")

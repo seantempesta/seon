@@ -179,9 +179,9 @@
                                                          (get-in st [:inflight (:id m) :form]) (assoc :form (get-in st [:inflight (:id m) :form])))))
                    st)
       :tests-started (do (step/out! o :events (step/event {:type :tests-started :agent id :rid (:id m) :pid (:pid m)})) st)
-      :reply (let [st (answer-rid st o (:id m) (:items m))]
-               (step/out! o :to-api (status st {:evals-add (:items m) :t (:t m) :status (busy st) :running nil}))
-               (step/out! o :events (step/event {:type :reply :agent id :items (:items m)}))
+      :reply (let [st (answer-rid st o (:id m) (:response m))]
+               (step/out! o :to-api (status st {:evals-add [(:response m)] :t (:t m) :status (busy st) :running nil}))
+               (step/out! o :events (step/event {:type :reply :agent id :response (:response m)}))
                st)
       :tests (let [{:keys [kind merge-branch data-attrs]} (get-in st [:inflight (:id m)])
                    result (:result m)

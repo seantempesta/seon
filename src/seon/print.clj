@@ -33,16 +33,19 @@
   (:seon.config.render.agent/max-depth); :width (:seon.config.render/width); :outputs, a
   subset of #{:text :hiccup} (#{:text}); :render, a nested value's own render (seon.render's
   default renders pass it: a value inside the printed one whose schema declares a render shows
-  as that render, one line, in its place). Answers {:text :tokens :truncated? :elisions}
+  as that render, one line, in its place); :seen, values earlier responses showed, each printed
+  as the form that reads it again (seon.print.select/seen-form). Answers {:text :tokens :truncated? :elisions}
   plus :html (hiccup) when asked, or the insufficient-budget error (an error map) when the
   budget cannot show the value's first part."
   {:malli/schema [:function [:=> [:cat :any] :seon.print/result] [:=> [:cat :any :seon.print/opts] :seon.print/result]]}
   ([v] (print-value v {}))
-  ([v {:keys [handle budget max-depth width outputs render]
+  ([v {:keys [handle budget max-depth width outputs render seen]
        :or {budget default-budget max-depth (config/value :seon.config.render.agent/max-depth)
             width (config/value :seon.config.render/width) outputs #{:text}}}]
    ;; without a handle a cut names no form (its reader would hold no such result)
-   (select/show v (cond-> {:handle handle :budget budget :max-depth max-depth :width width :outputs outputs} render (assoc :render render)))))
+   (select/show v (cond-> {:handle handle :budget budget :max-depth max-depth :width width :outputs outputs}
+                    render (assoc :render render)
+                    seen (assoc :seen seen)))))
 
 (defn text
   "`v` as text under budget tokens: the printed text, or the error's message when even

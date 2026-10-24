@@ -189,16 +189,6 @@
          (boolean (or more (some second lines)))])
       [(whole opts)])))
 
-(defn items
-  "An evaluation's reply items as the REPL's own text, what an outside model reads from
-  seon_eval: each form, what it wrote, and its answer (=> its printed value and its result
-  handle, or x its error's render), never the items' map printed as data."
-  {:malli/schema [:=> [:cat [:sequential :map]] :string]}
-  [its]
-  (str/join "\n\n" (for [{:keys [form out printed tag handle]} its]
-                      (str form "\n" (when (seq out) (str out (when-not (str/ends-with? out "\n") "\n")))
-                           (if (= :err tag) "x " "=> ") printed (some->> handle ui/kname (str "\n;; result/"))))))
-
 (defn- counts {:malli/schema [:=> [:cat :map] :string]}
   [freq] (str/join " " (for [[k n] (sort-by (comp str key) freq)] (str (ui/kname k) " " n))))
 

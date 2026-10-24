@@ -13,65 +13,56 @@
   ;; the improvements: source reads the agent's own redefinitions and Seon's program (task
   ;; seon.repl/source-reads-the-program: a compiled platform var's form from the program facts,
   ;; a library var's from its :file and :line; a live agent spent all 8 turns on
-  ;; (source datahike.connector/connect), 2026-10-21).
-  (let [rows [["(source seon.reconcile/root-causes)" :out "(defn root-causes"]
-              ["(clojure.repl/source-fn 'seon.reconcile/root-causes)" :printed "(defn root-causes"]
-              ["(do (require 'datahike.connector) (source datahike.connector/connect))" :out "(defn connect"]
-              ["(defn twice [x] (* 2 x))" :printed "twice"]
-              ["(source twice)" :out "(defn twice [x] (* 2 x))"]
-              ["(doc twice)" :out "twice"]
-              ["(dir clojure.string)" :out "join"]
-              ["(apropos \"index-of\")" :printed "index-of"]
-              ["(+ 1 2)" :printed "3"]
-              ["*1" :printed "3"]
-              ["(pprint {:a 1})" :out "{:a 1}"]
-              ["(/ 1 0)" :printed ""]
-              ["(some? *e)" :printed "true"]
-              ["(pst)" :out "Divide by zero"]
-              ["(in-ns 'seon.reconcile)" :printed "seon.reconcile"]
-              ["(clojure.repl/source root-causes)" :out "(defn root-causes"]
+  ;; (source datahike.connector/connect), 2026-10-21). Each answer is read in the response as
+  ;; printed under its handle (its :text), where the value and what the form wrote both are.
+  (let [rows [["(source seon.reconcile/root-causes)" :text "(defn root-causes"]
+              ["(clojure.repl/source-fn 'seon.reconcile/root-causes)" :text "(defn root-causes"]
+              ["(do (require 'datahike.connector) (source datahike.connector/connect))" :text "(defn connect"]
+              ["(defn twice [x] (* 2 x))" :text "twice"]
+              ["(source twice)" :text "(defn twice [x] (* 2 x))"]
+              ["(doc twice)" :text "twice"]
+              ["(dir clojure.string)" :text "join"]
+              ["(apropos \"index-of\")" :text "index-of"]
+              ["(+ 1 2)" :text "3"]
+              ["*1" :text "3"]
+              ["(pprint {:a 1})" :text "{:a 1}"]
+              ["(/ 1 0)" :text ""]
+              ["(some? *e)" :text "true"]
+              ["(pst)" :text "Divide by zero"]
+              ["(in-ns 'seon.reconcile)" :text "seon.reconcile"]
+              ["(clojure.repl/source root-causes)" :text "(defn root-causes"]
               ;; a namespace's ns form, its requires and aliases (step E's run 3: the real design
               ;; asked for seon.problems-test/ns 18 turns running, to write its deftest)
-              ["(my.schema/forms :seon.run/status)" :printed ":enum"]
-              ["(clojure.repl/source seon.reconcile)" :out "(ns seon.reconcile"]
-              ["(clojure.repl/source seon.reconcile/ns)" :out "(source seon.reconcile)"]
-              ["(clojure.repl/source seon.reconcile/not-yet)" :out "no such var is defined"]
+              ["(my.schema/forms :seon.run/status)" :text ":enum"]
+              ["(clojure.repl/source seon.reconcile)" :text "(ns seon.reconcile"]
+              ["(clojure.repl/source seon.reconcile/ns)" :text "(source seon.reconcile)"]
+              ["(clojure.repl/source seon.reconcile/not-yet)" :text "no such var is defined"]
               ;; clojure.test reports to *test-out*: the step E dry run's agent ran a red
               ;; proof and saw nothing (2026-10-22)
-              ["(do (in-ns 'user) (clojure.test/deftest red (clojure.test/is (= 1 2))) (clojure.test/run-tests))" :out "FAIL in (red)"]
-              ;; a value its producer names the schema of reads by its declared render, and
-              ;; shows whole as data without that metadata; a map that only holds a key is data
-              ["(my.task/current)" :printed "task demo/t · work"]
-              ["(my.task/current)" :printed "the whole value as data: (with-meta result/h"]
-              ["(:seon.task/id (with-meta (my.task/current) nil))" :printed "\"demo/t\""]
-              ["(pr-str (keys (with-meta (my.task/current) nil)))" :printed ":seon.task/plan"]
-              ["{:seon.task/id \"x/y\" :n 1}" :printed ":n 1"]
-              ["(seon.contract/error :seon.root/refused 'a/b \"m\")" :printed "#:seon.error{:type :seon.root/refused"]]
+              ["(do (in-ns 'user) (clojure.test/deftest red (clojure.test/is (= 1 2))) (clojure.test/run-tests))" :text "FAIL in (red)"]
+              ;; every value is data, printed by the one printer (notes/design-agent-view-2026-10-24.md:
+              ;; nothing renders an eval's value), its producer's schema or not
+              ["(my.task/current)" :text ":seon.task/id \"demo/t\""]
+              ["(:seon.task/id (with-meta (my.task/current) nil))" :text "\"demo/t\""]
+              ["(pr-str (keys (with-meta (my.task/current) nil)))" :text ":seon.task/plan"]
+              ["{:seon.task/id \"x/y\" :n 1}" :text ":n 1"]
+              ["(seon.contract/error :seon.root/refused 'a/b \"m\")" :text "#:seon.error{:type :seon.root/refused"]]
         items (at/in-agent (mapv first rows))]
     (doseq [[[form k expected] item] (map vector rows items)]
       (is (str/includes? (str (get item k)) expected) (str form " -> " (pr-str item))))))
 
-(deftest a-reply-item-carries-values-not-their-printed-text
-  ;; convergence item 9: the middleware answer under the item's own keys, so nothing is
-  ;; printed and read back in the agent. The REPL's own handler in this process, as a
-  ;; scratch session (not agent mode: nothing is transacted)
-  (let [answers (volatile! [])
-        old @agent/state]
-    (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
-    (try ((repl/handler) {"op" "eval" "code" "(defn uncontracted-g [x] x) (/ 1 0)" :reply #(vswap! answers conj %)})
-         (finally (reset! agent/state old)))
-    (let [[d e] (repl/fold @answers)]
-      (is (= [:ret :err] (mapv :tag [d e])) (pr-str @answers))
-      (is (= [0 1] (mapv :id [d e])))
-      (is (= :h0 (:handle d)))
-      (is (= :uncontracted-definition (:seon.repl/finding (first (:warnings d)))) "the warning, a map")
-      (is (= ['seon.repl-test.scratch/uncontracted-g] (:uncontracted (first (:warnings d)))))
-      (is (every? number? (map :ms [d e])))
-      (is (= :seon.agent/eval-error (:seon.error/type (:err e))) "the error map itself")
-      (testing "its text is the error's render: the message first, then its type and where it was raised"
-        (is (str/starts-with? (:printed e) (:seon.error/message (:err e))))
-        (is (str/includes? (:printed e) "(seon.agent/eval-error in seon.repl/eval-code")))
-      (is (str/includes? (str (:err-text e)) "Divide by zero") (pr-str e)))))
+(deftest a-response-carries-values-not-their-printed-text
+  ;; convergence item 9: the response holds values under its own keys, so nothing is printed
+  ;; and read back in the agent; only :text is the printed response. The REPL in this process,
+  ;; as a scratch session (not agent mode: nothing is transacted)
+  (let [old @agent/state
+        r (try (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
+               (repl/eval-string "(defn uncontracted-g [x] x) (/ 1 0)" {})
+               (finally (reset! agent/state old)))]
+    (is (qualified-symbol? (:handle r)) (pr-str r))
+    (is (number? (:ms r)))
+    (is (= :seon.agent/eval-error (:seon.error/type (:ex r))) "the error map itself")
+    (is (str/includes? (:text r) "Divide by zero") "and printed under its handle")))
 
 (defn- runnable
   "The forms text tells an agent to run, in order: each single-backticked code span that is a
@@ -94,10 +85,10 @@
                       (filter ends forms))
         cited "(seon.task/citation-problems (my.db/db) (vec (for [[k v] seon.template/instructions] {:seon.task/ns 'demo :seon.task/name (name k) :seon.task/plan \"\" :seon.task/instructions v})))"
         [problems & items] (rest (at/in-agent (into [{:op :context :agent "a1"} cited] forms)))]
-    (is (= "[]" (:printed problems)) (str "every name the instructions cite resolves in the program: " (pr-str problems)))
+    (is (= [] (:value problems)) (str "every name the instructions cite resolves in the program: " (pr-str problems)))
     (is (some #{"(my.branch/unmerged)"} forms) "merge's own: the entries it resolves")
     (doseq [[form item] (map vector forms items)]
-      (is (not= :err (:tag item)) (str form " -> " (pr-str item))))
+      (is (not (:ex item)) (str form " -> " (pr-str item))))
     (is (= (count forms) (count items)) "every form answered")))
 
 (deftest the-help-page-runs
@@ -110,13 +101,13 @@
         forms (concat (remove end? forms) (sort-by #(= "(my.turn/wait)" %) (filter end? forms)))
         cited (str "(seon.task/citation-problems (my.db/db) [{:seon.task/ns 'demo :seon.task/name \"help\" :seon.task/plan (seon.context/help-text (my.db/db))}])")
         [problems & items] (rest (at/in-agent (into [{:op :context :agent "a1"} cited] forms)))]
-    (is (= "[]" (:printed problems)) (str "every name the help page cites resolves in the program: " (pr-str problems)))
+    (is (= [] (:value problems)) (str "every name the help page cites resolves in the program: " (pr-str problems)))
     (is (< 20 (count forms)) "the page shows the agent how to work")
     (doseq [[form item] (map vector forms items)]
-      (is (not= :err (:tag item)) (str form " -> " (pr-str item))))
+      (is (not (:ex item)) (str form " -> " (pr-str item))))
     (is (= (count forms) (count items)) "every form answered")
     (let [by (zipmap forms items)
-          printed #(str (:printed (by %)))]
+          printed #(str (:text (by %)))]
       ;; the navigation functions answer from the program facts the branch records
       (is (str/includes? (printed "(my.agent/callers 'seon.task/accumulate)") "seon.task/tasks") "callers, from :form/refs")
       (is (str/includes? (printed "(my.agent/callees 'seon.task/accumulate)") "clojure.core/reduce") "callees, from its form's :form/refs")
@@ -164,9 +155,9 @@
                       "(+ 1 2)"
                       "(do (seon.lib/c-kill (seon.lib/c-getpid) seon.lib/SIGUSR1) (loop [] (recur)))"
                       "(+ 2 2)"])]
-    (is (= "3" (:printed after-idle)) (str "the request after an idle interrupt runs: " (pr-str after-idle)))
-    (is (str/starts-with? (:printed stopped) "interrupted by root\n") (pr-str stopped))
-    (is (= "4" (:printed after-stop)) (pr-str after-stop))))
+    (is (= 3 (:value after-idle)) (str "the request after an idle interrupt runs: " (pr-str after-idle)))
+    (is (str/starts-with? (str (:seon.error/message (:ex stopped))) "interrupted by root") (pr-str stopped))
+    (is (= 4 (:value after-stop)) (pr-str after-stop))))
 
 (deftest an-interrupt-after-the-request-began-stops-it
   ;; land6 review, must-fix 1: root waits on the agent's :started, then sends SIGUSR1. One that
@@ -174,52 +165,35 @@
   ;; is pending; the request it was meant for must start stopped, never have it cleared
   (intr/clear-pending!)
   (#'intr/on-usr1)
-  (try (let [[it] (repl/eval-string "(+ 1 2)" {"ns" "user" :origin :outside})]
-         (is (= :err (:tag it)) (pr-str it))
-         (is (str/starts-with? (:printed it) "interrupted by root\n")))
+  (try (let [r (repl/eval-string "(+ 1 2)" {"ns" "user" :origin :outside})]
+         (is (not (contains? r :value)) (pr-str r))
+         (is (str/starts-with? (str (:seon.error/message (:ex r))) "interrupted by root") (pr-str r)))
        (finally (intr/clear-pending!))))
 
-(deftest a-handler-defect-answers-what-ran-and-its-error
+(deftest a-handler-defect-answers-its-error
   ;; land6 review, must-fix 2: a defect past a form's own boundary (here the printer meets a lazy
-  ;; value that throws as it is realized) keeps every answer before it and adds one :err item
-  ;; with its error map and id, so the record holds what ran and why the request stopped
-  (let [items (repl/eval-string "(+ 1 2) (map (fn [_] (throw (ex-info \"boom\" {}))) [1]) (+ 3 4)" {"ns" "user" :origin :outside})
-        [ok bad] items]
-    (is (= "3" (:printed ok)) (pr-str items))
-    (is (= :err (:tag bad)) (pr-str items))
-    (is (= "boom" (:seon.error/message (:err bad))) "the defect as its error map")
-    (is (int? (:id bad)) "an id, so record-tx records it")
-    (is (= 2 (count (filter :seon.cluster.eval/record (repl/record-tx {:seon.agent/key "b/a1" :seon.agent/id :a1} "r" items nil))))
-        "both items are recorded: the form that ran and the defect")))
+  ;; value that throws as it is realized) ends the request with its error map as the response's
+  ;; :ex, so the record holds why the request stopped
+  (let [r (repl/eval-string "(+ 1 2) (map (fn [_] (throw (ex-info \"boom\" {}))) [1])" {"ns" "user" :origin :outside})]
+    (is (= "boom" (:seon.error/message (:ex r))) (pr-str (dissoc r :value)))
+    (is (string? (:text r)) "and still a text every reader reads")))
 
-(deftest a-forms-lead-is-recorded-with-its-eval
-  ;; owner, 2026-10-23: the agent thinks in ;; comments beside the forms it evaluates; each
-  ;; form's comments are recorded with its evaluation (as :form/lead keeps a definition's), so
-  ;; its page reads thought -> form -> result. A form with none has no :lead; a comment on the
-  ;; line a form ends on is that form's, not the next one's; a comment after the last form leads
-  ;; nothing
-  (let [items (repl/eval-string ";; first, the sum\n;; of two\n(+ 1 2)\n\n(+ 3 4) ; trailing\n;; why: the product\n(* 2 3)\n;; left over" {"ns" "user" :origin :outside})
-        recs (map :seon.cluster.eval/record (filter :seon.cluster.eval/record (repl/record-tx {:seon.agent/key "b/a1" :seon.agent/id :a1} "r" items nil)))]
-    (is (= [";; first, the sum\n;; of two" nil ";; why: the product"] (mapv :lead items)) (pr-str items))
-    (is (= ["3" "7" "6"] (mapv :printed items)))
-    (is (= (mapv :lead items) (mapv :lead recs)) "its record keeps it")))
-
-(defn- eval-item
-  "The one reply item of `code` asked of the REPL's own handler in this process, as a scratch session."
-  {:malli/schema [:=> [:cat :string] :map]}
-  [code]
-  (let [answers (volatile! [])
-        old @agent/state]
-    (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
-    (try ((repl/handler) {"op" "eval" "code" code :reply #(vswap! answers conj %)})
-         (finally (reset! agent/state old)))
-    (last (repl/fold @answers))))
+(defn- eval-in
+  "The response of `code` asked of the REPL in this process, as a scratch session in namespace
+  nsym (seon.repl-test.scratch by default; not agent mode: nothing is transacted)."
+  {:malli/schema [:function [:=> [:cat :string] :map] [:=> [:cat :string :symbol] :map]]}
+  ([code] (eval-in code 'seon.repl-test.scratch))
+  ([code nsym]
+   (let [old @agent/state]
+     (try (reset! agent/state {:n 0 :ns (create-ns nsym)})
+          (repl/eval-string code {})
+          (finally (reset! agent/state old))))))
 
 (deftest an-eval-errors-data-is-printed-once
   ;; a compile error's Jolt diagnostics (:jolt.error/*, ex-data) are keys of the error map, the
-  ;; suggestions its fix, and the item prints each once
-  (let [item (eval-item "(prinltn 1)")
-        em (:err item)]
+  ;; suggestions its fix, and the response prints each once
+  (let [r (eval-in "(prinltn 1)")
+        em (:ex r)]
     (is (= :seon.agent/eval-error (:seon.error/type em)))
     (is (= 1 (:jolt.error/line em)))
     (is (= "prinltn" (:jolt.error/symbol em)) "Jolt answers the symbol as a string, as the schema says")
@@ -227,22 +201,20 @@
     (is (str/includes? (str (:seon.error/fix em)) "println"))
     (is (nil? (:data em)) "no printed copy of the ex-data")
     (is (contract/valid? :seon.agent/eval-error em) "the error is the declared variant")
-    (is (= 1 (count (re-seq #"did you mean" (:printed item)))) (:printed item))
-    (is (= 1 (count (re-seq #"println" (:printed item)))) (:printed item))
-    (is (str/includes? (:printed item) "fix: did you mean print, printf, println") (:printed item))))
+    (is (= 1 (count (re-seq #"did you mean" (:text r)))) (:text r))
+    (is (= 1 (count (re-seq #":jolt.error/suggestions" (:text r)))) (:text r))))
 
-(deftest an-ordinary-exception-renders-its-message
-  (let [item (eval-item "(+ 1 :a)")]
-    (is (= :err (:tag item)))
-    (is (str/includes? (:seon.error/message (:err item)) "cannot be cast") (pr-str (:err item)))
-    (is (= "class java.lang.ClassCastException" (:class (:err item))))
-    (is (str/starts-with? (:printed item) (:seon.error/message (:err item))))
-    (is (nil? (:seon.error/fix (:err item))))
+(deftest an-ordinary-exception-is-its-error-map
+  (let [r (eval-in "(+ 1 :a)")
+        em (:ex r)]
+    (is (str/includes? (:seon.error/message em) "cannot be cast") (pr-str em))
+    (is (= "class java.lang.ClassCastException" (:class em)))
+    (is (str/includes? (:text r) (:seon.error/message em)))
+    (is (nil? (:seon.error/fix em)))
     ;; on main :data was the printed string "{:k 1}": the map assertion below is the one that fails there
-    (let [item (eval-item "(throw (ex-info \"boom\" {:k 1}))")]
-      (is (str/starts-with? (:printed item) "boom"))
-      (is (= 1 (count (re-seq #"boom" (:printed item)))) (:printed item))
-      (is (= {:k 1} (:data (:err item))) "an ordinary ex-data stays data"))
+    (let [r (eval-in "(throw (ex-info \"boom\" {:k 1}))")]
+      (is (= 1 (count (re-seq #"boom" (:text r)))) (:text r))
+      (is (= {:k 1} (:data (:ex r))) "an ordinary ex-data stays data"))
     (let [em (agent/error-map (ex-info "x" {:my/id 1 :seon.error/message "shadow" :jolt.error/line 7}))]
       (is (= "x" (:seon.error/message em)) "a qualified key of someone else's cannot shadow the error's own")
       (is (= {:my/id 1 :seon.error/message "shadow"} (:data em)))
@@ -250,39 +222,28 @@
 
 (deftest an-eval-error-says-where-in-its-forms-own-text
   ;; positions are the form's own (what (source f) prints), not the request's: a form on lines
-  ;; 5-7 of a request whose line 7 fails is line 3 of it, whichever request ran it
-  (let [defs "(def ok 1)\n(defn f [x]\n  (+ x\n     (prinltn 2)))\n(defn g [x]\n  (inc x)\n  (+ 1 (first :k)))"
-        answers (volatile! [])
-        old @agent/state]
-    (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.where)})
-    (try ((repl/handler) {"op" "eval" "code" (str defs "\n(g 1)") :reply #(vswap! answers conj %)})
-         (finally (reset! agent/state old)))
-    (let [[_ compile-err _ run-err] (repl/fold @answers)]
-      (is (= {:line 3 :column 6} (:seon.error/at (:err compile-err))) (pr-str (:err compile-err)))
-      (is (nil? (:seon.error/in (:err compile-err))))
-      (is (= 'seon.repl-test.where/g (:seon.error/in (:err run-err))) (pr-str (:err run-err)))
-      (is (= {:line 3} (:seon.error/at (:err run-err))))
-      (is (some #{"at line 3:6"} (str/split-lines (:printed compile-err))) "the form's own position, once")
-      (is (not (str/includes? (:printed compile-err) "4")) "not also the request's 4:6")
-      (is (some #{"at line 3 of seon.repl-test.where/g"} (str/split-lines (:printed run-err))) (:printed run-err))
-      (is (not (str/includes? (:printed compile-err) ":jolt.error/line"))))))
+  ;; 2-4 of a request whose line 4 fails is line 3 of it, and a fn defined on lines 1-3 of a
+  ;; request that fails at its line 3 when called is line 3 of it. The first error stops a
+  ;; request, so each error is its own request
+  (let [compile-err (:ex (eval-in "(def ok 1)\n(defn f [x]\n  (+ x\n     (prinltn 2)))" 'seon.repl-test.where))
+        run-err (:ex (eval-in "(defn g [x]\n  (inc x)\n  (+ 1 (first :k)))\n(g 1)" 'seon.repl-test.where))]
+    (is (= {:line 3 :column 6} (:seon.error/at compile-err)) (pr-str compile-err))
+    (is (nil? (:seon.error/in compile-err)))
+    (is (= 'seon.repl-test.where/g (:seon.error/in run-err)) (pr-str run-err))
+    (is (= {:line 3} (:seon.error/at run-err)))))
 
 (deftest an-error-in-an-anonymous-fn-is-in-the-fn-around-it
   ;; what Jolt names for a frame inside an anonymous fn: the var that holds it when the call is
   ;; inside that var, nothing when the fn runs from the top of a request (never a core var)
-  (let [answers (volatile! [])
-        old @agent/state]
-    (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.anon)})
-    (try ((repl/handler) {"op" "eval" :reply #(vswap! answers conj %)
-                          "code" "(defn h [x]\n  ((fn [y]\n     (inc y))\n   x))\n(h \"a\")\n(doall (map (fn [y] (inc y)) [\"a\"]))\n(first :k)"})
-         (finally (reset! agent/state old)))
-    (let [[_ in-fn lazy top] (repl/fold @answers)]
-      (is (= 'seon.repl-test.anon/h (:seon.error/in (:err in-fn))) (pr-str (:err in-fn)))
-      (is (= 2 (:line (:seon.error/at (:err in-fn)))) "the line in h that runs the anonymous fn, as Jolt frames it")
-      (doseq [item [lazy top]]
-        (is (nil? (:seon.error/in (:err item))) (pr-str (:err item)))
-        (is (not (re-find #"clojure\.core" (str (:seon.error/in (:err item))))))
-        (is (not (str/includes? (:printed item) "\nat ")) "no position is claimed that Jolt did not give")))))
+  (let [in-fn (:ex (eval-in "(defn h [x]\n  ((fn [y]\n     (inc y))\n   x))\n(h \"a\")" 'seon.repl-test.anon))
+        lazy (eval-in "(doall (map (fn [y] (inc y)) [\"a\"]))" 'seon.repl-test.anon)
+        top (eval-in "(first :k)" 'seon.repl-test.anon)]
+    (is (= 'seon.repl-test.anon/h (:seon.error/in in-fn)) (pr-str in-fn))
+    (is (= 2 (:line (:seon.error/at in-fn))) "the line in h that runs the anonymous fn, as Jolt frames it")
+    (doseq [r [lazy top]]
+      (is (nil? (:seon.error/in (:ex r))) (pr-str (:ex r)))
+      (is (not (re-find #"clojure\.core" (str (:seon.error/in (:ex r))))))
+      (is (nil? (:seon.error/at (:ex r))) "no position is claimed that Jolt did not give"))))
 
 (deftest a-request-relative-position-shows-unless-the-forms-own-does
   ;; when located cannot move a position into the form's terms (no :seon.error/at), the
@@ -297,25 +258,30 @@
   "How many times the ticks proof's form ran."
   (atom 0))
 
-(deftest an-evals-record-carries-its-ticks
+(deftest an-evals-response-carries-its-ticks
   ;; task seon.turn/a-turn-shows-its-cost-against-its-budget (1), owner 2026-10-23 (the model sees
-  ;; cost, stable across turns): the work a form did is taken once, when it ran
-  ;; (jolt.host/ticks-of, bytes), and the reply item and the stored record carry
-  ;; the same values, so nothing is measured again in a later turn.
-  (let [old @agent/state
-        run! (fn [code] (let [answers (volatile! [])]
-                          (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
-                          ((repl/handler) {"op" "eval" "code" code :reply #(vswap! answers conj %)})
-                          (first (repl/fold @answers))))
-        cost [:ms :alloc-bytes :ticks]]
-    (try
-      (let [small (run! "(reduce + (range 100))")
-            big (run! "(reduce + (range 1000000))")
-            bad (run! "(/ 1 0)")]
-        (is (pos? (:ticks small)) (pr-str small))
-        (is (> (:ticks big) (* 10 (:ticks small))) "ticks are the work done: 10,000x the loop is >10x the ticks (the form's compile is a constant)")
-        (is (pos? (:ticks bad)) "a form that threw still did work")
-        (doseq [it [small big bad]
-                :let [rec (-> (repl/record-tx {:seon.agent/key "b/a" :seon.agent/id :a} "run" [(assoc it :id 0)] nil) first :seon.cluster.eval/record)]]
-          (is (= (select-keys it cost) (select-keys rec cost)) "the record stores the values the reply shows")))
-      (finally (reset! agent/state old)))))
+  ;; cost, stable across turns): the work a call's forms did is taken once, when they ran
+  ;; (jolt.host/ticks-of, bytes), summed into its response, which its record stores
+  ;; (seon.repl/record-tx: the response without its live value), so nothing is measured again
+  (let [small (eval-in "(reduce + (range 100))")
+        big (eval-in "(reduce + (range 1000000))")
+        bad (eval-in "(/ 1 0)")]
+    (is (pos? (:ticks small)) (pr-str small))
+    (is (> (:ticks big) (* 10 (:ticks small))) "ticks are the work done: 10,000x the loop is >10x the ticks (the form's compile is a constant)")
+    (is (pos? (:ticks bad)) "a form that threw still did work")
+    (is (every? #(and (number? (:ms %)) (pos? (:bytes %))) [small big bad]) "its ms and bytes too")))
+
+(deftest a-call-is-one-response
+  ;; notes/design-agent-view-2026-10-24.md §1: one response per eval call, {:handle :value :out
+  ;; :err :ex}, each key only when present; its forms run in order as load-string runs them,
+  ;; and the first exception stops them; its handle result/e<n> holds it
+  (let [r (repl/eval-string "(println \"a\") (+ 1 2) (str \"x\")" {"ns" "user" :origin :outside})]
+    (is (= "x" (:value r)) (pr-str r))
+    (is (= "a\n" (:out r)))
+    (is (not-any? #(contains? r %) [:ex :err]) "keys only when present")
+    (is (= "x" (:value @(find-var (:handle r)))) "the handle holds the response")
+    (is (str/starts-with? (:text r) (str "{:handle " (:handle r))) "printed under its handle"))
+  (let [r (repl/eval-string "(+ 1 2) (/ 1 0) (def a-call-is-one-response-never 1)" {"ns" "user" :origin :outside})]
+    (is (= "Divide by zero" (:seon.error/message (:ex r))) (pr-str r))
+    (is (not (contains? r :value)) "an exception is the response: no value")
+    (is (nil? (resolve 'user/a-call-is-one-response-never)) "a form after the exception never ran")))

@@ -3,7 +3,7 @@
   Writes go to the agent's own branch; root sees them when the branch merges, and a
   failure at the run's end (root's judge reads the branch)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.turn :as turn]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.turn :as turn] [seon.screen :as screen] [seon.context :as context] [seon.contract :as contract]))
 
 (defn current
   "The task this agent works, as data (:seon.task/task)."
@@ -30,3 +30,16 @@
     (agent/transact! [{:seon.task/id (turn/current-task) :seon.task/failure f}])
     (turn/request-stop! :failed reason)
     f))
+
+(defn status
+  "This agent's task now, as its turn reads it: each proof's status (a red one with its
+  failures, source and calls), what else the done rule refuses, a failed test run, the turn of
+  how many, what happened to its last reply, its unmerged entries, the stale wiki sections, the
+  tests run (seon.context/turn-state), as this turn's observe measured them; what the branch's
+  merge carries is my.branch/changes. Before any turn has observed the task in this process:
+  :seon.turn/not-observed, and (my.agent/prove) runs its proofs."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (if-let [{:keys [input]} (screen/input)]
+    (dissoc (context/turn-state (agent/db) (current) input) :will-merge)
+    (contract/error :seon.turn/not-observed 'my.task/status "no turn has observed this agent's task yet: (my.agent/prove) runs its proofs" {})))

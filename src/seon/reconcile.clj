@@ -678,7 +678,7 @@
       ;; names the run's end when the loop wrote none
       :worked (if (contract/error? r)
                 (dead st r)
-                (one (request (cond-> st (= :err (:tag (first r))) (assoc-in [:flights aid :worked-error] (:err (first r))))
+                (one (request (cond-> st (:ex r) (assoc-in [:flights aid :worked-error] (:ex r)))
                               aid :tested {:op :tests :id agent})))
       :tested (if (contract/error? r)
                 (dead st r)

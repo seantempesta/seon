@@ -48,11 +48,10 @@
     (if-not f
       (contract/error :seon.model/no-script 'seon.model/complete
                       (str "the scripted provider's " script " is not on this process's source roots") {:script script})
-      ;; a script answers its call's code, or the code and the thinking the eval tool takes
+      ;; a script answers its call's code, or the code and the prose beside it (the reply's text)
       (let [out (f request)
             {text :code thinking :thinking} (if (string? out) {:code out} out)]
-        {:text "" :tool-calls [(cond-> {:id (str "call-" (:turn request)) :code (:text (reader/forgive text))}
-                                 thinking (assoc :thinking thinking))]
+        {:text (or thinking "") :tool-calls [{:id (str "call-" (:turn request)) :code (:text (reader/forgive text))}]
          :prompt-tokens (reduce + (map (comp select/estimate :content) (:messages request)))
          :completion-tokens (select/estimate text) :estimated true :ms (profile/ms-since t0)}))))
 
@@ -91,10 +90,9 @@
   "The model's one tool (v1's): its code is the REPL's input, read as reply text is."
   {:type "function"
    :function {:name "eval"
-              :description "Evaluate Clojure forms at your REPL; the answer is this call's result."
+              :description "Evaluate Clojure forms at your REPL, in order. The response is {:handle :value :out :err :ex}: the last form's value, what the forms wrote, and the exception that stopped them; result/e<n>, its handle, holds it."
               :parameters {:type "object"
-                           :properties {:code {:type "string" :description "Clojure forms; your thought about each in ;; comments before it."}
-                                        :thinking {:type "string" :description "Optional: why this call, what you expect it to show."}}
+                           :properties {:code {:type "string" :description "Clojure forms"}}
                            :required ["code"]}}})
 
 (defn- wire-message
@@ -106,36 +104,50 @@
   [{:keys [role content tool-calls tool-call-id reasoning]}]
   (cond-> {:role role :content content}
     reasoning (assoc :reasoning_content reasoning)
-    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code thinking]}]
-                                                {:id id :type "function"
-                                                 :function {:name "eval" :arguments (json/write-str (cond-> {:code code} thinking (assoc :thinking thinking)))}})
+    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code]}]
+                                                {:id id :type "function" :function {:name "eval" :arguments (json/write-str {:code code})}})
                                               tool-calls))
     tool-call-id (assoc :tool_call_id tool-call-id)))
 
+(defn wire-messages
+  "The provider-neutral messages (seon.context/request) in the OpenAI-compatible shape
+  (DeepSeek's), the one provider format function: a reply's calls folded into one assistant
+  message (a message whose :call is past 0 continues the reply before it), each tool message
+  after it in order; reasoning as reasoning_content, left out only when replay is false
+  (:seon.config.ai/replay-reasoning; a config with thinking on refuses that at load)."
+  {:malli/schema [:=> [:cat [:maybe :boolean] [:vector :seon.model/message]] [:vector :map]]}
+  [replay msgs]
+  (let [folded (reduce (fn [acc m]
+                         (if (and (= "assistant" (:role m)) (pos? (:call m 0)))
+                           (let [i (some #(when (= "assistant" (:role (nth acc %))) %) (range (dec (count acc)) -1 -1))]
+                             (update acc i update :tool-calls into (:tool-calls m)))
+                           (conj acc m)))
+                       [] msgs)]
+    (mapv #(wire-message (cond-> (dissoc % :call) (false? replay) (dissoc :reasoning))) folded)))
+
 (defn request-body
   "The chat-completions request (data, before JSON) for request under an :openai-compat
-  provider, streamed with its usage: its model, the messages, the one tool `eval-tool`, its
-  :max-tokens, and DeepSeek's thinking mode and effort only when the provider sets them
-  (absent: the provider's own default)."
+  provider, streamed with its usage: its model, the messages, the one tool `eval-tool` the
+  model may call or not (tool_choice auto: a reply with no call is prose to the user; DeepSeek
+  refuses `required` with thinking on), its :max-tokens, earlier turns' reasoning as
+  returned unless :replay-reasoning is false, and DeepSeek's thinking mode and effort only
+  when the provider sets them (absent: the provider's own default)."
   {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request] :map]}
-  [{:keys [model max-tokens thinking reasoning-effort]} request]
-  (cond-> {:model model :messages (mapv wire-message (:messages request)) :tools [eval-tool] :max_tokens max-tokens
+  [{:keys [model max-tokens thinking reasoning-effort replay-reasoning]} request]
+  (cond-> {:model model :messages (wire-messages replay-reasoning (:messages request)) :tools [eval-tool] :tool_choice "auto" :max_tokens max-tokens
            ;; streamed: the reply arrives as it is made, so no clock has to guess its length
            :temperature 0 :stream true :stream_options {:include_usage true}}
     thinking (assoc :thinking {:type (name thinking)})
     reasoning-effort (assoc :reasoning_effort (name reasoning-effort))))
 
 (defn- call-code
-  "An eval call's code and its thinking: the `code` of its JSON arguments (and `thinking`, when
-  the model gave it), or the arguments as they came when they are not that JSON (a reply cut
-  mid-call): the reader shows what they hold."
-  {:malli/schema [:=> [:cat [:maybe :string]] [:map [:code :string] [:thinking {:optional true} :string]]]}
+  "An eval call's code: the `code` of its JSON arguments, or the arguments as they came when
+  they are not that JSON (a reply cut mid-call): the reader shows what they hold."
+  {:malli/schema [:=> [:cat [:maybe :string]] [:map [:code :string]]]}
   [arguments]
   (let [a (or arguments "")
         j (try (json/read-str a) (catch Throwable _ nil))]
-    (if (and (map? j) (string? (get j "code")))
-      (cond-> {:code (get j "code")} (and (string? (get j "thinking")) (not (str/blank? (get j "thinking")))) (assoc :thinking (get j "thinking")))
-      {:code a})))
+    {:code (if (and (map? j) (string? (get j "code"))) (get j "code") a)}))
 
 (defn reply-of
   "A 200 reply (its chat-completion JSON as data) as the completion: its text, its eval calls

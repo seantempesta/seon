@@ -432,6 +432,14 @@
  ;; fix, not a cost to pay every turn. A model or task can turn it on through the resolver
  ;; (task -> model -> provider -> config); effort is :seon.config.ai/reasoning-effort.
  :seon.config.ai/thinking :disabled
+ ;; Whether a request sends earlier turns' stored reasoning back. Unit: flag. Provenance: owner
+ ;; ruling 2026-10-24 (docs/decisions.md, "A config key does what it says"). true: every earlier
+ ;; reply's reasoning goes back exactly as it was returned (seon.model/request-body); false: it
+ ;; is left out of the request, and still stored on the turn and shown. With thinking :enabled
+ ;; and tools (every request) false is refused at load (:seon.config.ai/reasoning-pair):
+ ;; DeepSeek answers 400 when it is left out (measured 2026-10-24, notes/step0/no-replay.edn).
+ ;; With thinking off there is no reasoning to send.
+ :seon.config.ai/replay-reasoning true
  ;; Unit: USD. One first-move pass's spend (my.root/first-moves!: one call per task, ~6k
  ;; prompt tokens at turn 0, ~$0.001 a task off-peak, twice at DeepSeek's peak); at the bound
  ;; the pass stops and writes :seon.judge/stopped. 0.10 is about a hundred tasks' first moves,

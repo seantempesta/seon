@@ -88,8 +88,8 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
   [{} (d/db-with (ts/test-db) (into [{:db/id "a" :seon.agent/id :a1}]
-                                    (for [i (range (* 20 n))] {:seon.cluster.eval/id (str "a1-1-1/" i) :seon.cluster.eval/agent "a"
-                                                        :seon.cluster.eval/record {:tag :ret :form "(+ 1 2)" :shown "3"}})))])
+                                    (for [i (range (* 20 n))] {:seon.eval/id (str "a1-1-1/" i) :seon.eval/agent "a"
+                                                        :seon.eval/record {:code "(+ 1 2)" :text "3"}})))])
 
 (deftest main-info-reads-what-the-page-shows
   ;; global-ids' profile (2026-10-23): main-info took 174 ms a call on the owner's main, 695 ms
@@ -115,21 +115,22 @@
 
 (defn agent-of
   "The input of size n: the test store's seed with root, its agent a1 and n evaluations of a1 (one
-  neighbour each, by the reverse ref :seon.cluster.eval/_agent), each evaluation's record as an
+  neighbour each, by the reverse ref :seon.eval/_agent), each evaluation's record as an
   agent's REPL writes it (seon.repl/record-tx); and a1's eid."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :any pos-int?]]}
   [n]
   (let [db (reduce d/db-with (ts/test-db)
                    [[{:seon.root/id :root :seon.root/boot "b1"}]
                     (seon.task/agent-tx "b1" :a1 {:status :idle})
-                    (seon.repl/record-tx {:seon.agent/key "b1/a1" :seon.agent/id :a1} "a1-7-1"
-                                         (vec (for [i (range n)] {:id i :tag :ret :form "(+ 1 2)" :printed "3"})) nil)])]
+                    (into [] (mapcat #(seon.repl/record-tx {:seon.agent/key "b1/a1" :seon.agent/id :a1} (str "e" %) "a1"
+                                                           {:code "(+ 1 2)" :text "{:handle result/e1, :value 3}"} nil))
+                          (range n))])]
     [db (:db/id (d/entity db [:seon.agent/key "b1/a1"]))]))
 
 (deftest a-walk-reads-its-entity-and-one-hop
   (cost/proof
     {:of 'seon.render/walk :input 'seon.render-cost-test/agent-of
-     :n "evaluations of the walked agent (its neighbours by :seon.cluster.eval/_agent)"
+     :n "evaluations of the walked agent (its neighbours by :seon.eval/_agent)"
      :work (str "two pulls: the agent's own attributes, then its ref units (its runs, its evaluations, its root), "
                 "each neighbour's own attributes and no further (its refs stay {:db/id}); per evaluation, one node: "
                 "its schema by one map lookup per key (seon.render/entity-schema), its prose (texts: prose? of its one "
@@ -137,7 +138,7 @@
                 "Not sized here: card-many forward refs and components (pulled whole, as pull gives them); "
                 "citations: a-walk-pulls-each-citation-once")
      :growth :linear
-     ;; entity-schema, relevant (its declared keys), texts, prose? of :seon.cluster.eval/id, cite: measured 512 calls at 100
+     ;; entity-schema, relevant (its declared keys), texts, prose? of :seon.eval/id, cite: measured 512 calls at 100
      :per-n {:calls 5}
      ;; walk, the root's schema, its prose and citations, each unit attribute read forward and its ref test
      :fixed {:calls 19}

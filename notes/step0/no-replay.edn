@@ -1,0 +1,1 @@
+{:turn1-status 200, :turn1-reasoning-chars 1131, :turn1-call "(my.task/current)", :turn2-without-reasoning-status 400, :turn2 "{\"error\":{\"message\":\"The `reasoning_content` in the thinking mode must be passed back to the API. (request_id: 80734a60-d576-435c-b8cf-d9f75c5c3f75)\",\"type\":\"invalid_request_error\",\"param\":null,\"code\":\"invalid_request_error\"}}"}

@@ -1,7 +1,7 @@
 (ns my.agent
   "An agent's own functions (from proto/flow f2-final proto.agent's agent API). Referred into
   every agent namespace.
-    ($ handle)                the live value of an earlier result (also result/h3)
+    ($ handle)                an earlier eval's response, its live value under :value (also result/e3)
     (whoami)                  {:id :branch :pid}
     (messages)                the messages delivered and not yet taken, taken
     (send-message tos body)   body to the agents tos (ids), delivered by root
@@ -20,7 +20,7 @@
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract]
             [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
-(defn $ "The live value of an earlier result, by handle (:h3)." {:malli/schema [:=> [:cat :keyword] :any]}
+(defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
 (defn whoami "This agent: {:id :branch :pid}." {:malli/schema [:=> [:cat] [:map [:id :seon.agent/id] [:branch :seon.db/branch] [:pid :seon.lib/pid]]]}
   [] {:id (:id @agent/state) :branch (:branch @agent/state) :pid (lib/c-getpid)})

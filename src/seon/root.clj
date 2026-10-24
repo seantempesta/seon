@@ -652,9 +652,9 @@
       (d/pull db '[:task/name {:task/refs [:var/name]}] [:task/name :seon.warm/tidy])
       (d/db-with db [{:note/text "warm" :note/agent :warm}])
       (d/with db [{:note/text "warm" :note/agent :warm}])
-      (sock/frame {:op :reply :items [{:id 1 :printed "x" :ms 0.1}]})
+      (sock/frame {:op :reply :response {:handle 'result/e1 :text "x" :ms 0.1}})
       ;; the one value printer, its text and hiccup paths and a cut
-      (print/print-value {:a [1 2 3] :b "x" :c (vec (range 300))} {:handle 'result/h0 :budget 200 :outputs #{:text :hiccup}}))
+      (print/print-value {:a [1 2 3] :b "x" :c (vec (range 300))} {:handle 'result/e0 :budget 200 :outputs #{:text :hiccup}}))
     (let [nsx (create-ns 'seon.warm)]
       (binding [*ns* nsx]
         (refer-clojure)

@@ -112,7 +112,7 @@
            ;; on the branch, which forked before main held the run or the message
            (d/transact bc [{:db/id "run" :seon.run/id "demo/f#1"} {:seon.turn/id "demo/f#1/0" :seon.turn/run "run" :seon.turn/n 0 :seon.turn/origin :model}])
            (d/transact bc (task/message-tx "m-1" "owner" "demo/f#1" "check g"))
-           (d/transact bc (repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "a3-77-1" [{:id 1 :tag :ret :form "(f 2)" :printed "4"}] nil))
+           (d/transact bc (repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e1" "a3" {:code "(f 2)" :text "{:handle result/e1, :value 4}"} nil))
            (testing "from root on main: its agents, each agent's run"
              (is (= [{:seon.agent/id :a3 :seon.agent/status :idle :seon.agent/pid 77 :seon.agent/running "(f 2)"
                       :seon.run/_agent [{:seon.run/id "demo/f#1"}]}]
@@ -125,7 +125,7 @@
              (let [run (d/pull @bc '[{:seon.turn/_run [:seon.turn/id]} {:seon.message/_to [:seon.message/id]}] [:seon.run/id "demo/f#1"])]
                (is (= [{:seon.turn/id "demo/f#1/0"}] (:seon.turn/_run run)))
                (is (= [{:seon.message/id "m-1"}] (:seon.message/_to run))))
-             (is (= ["a3-77-1/1"] (mapv :seon.cluster.eval/id (:seon.cluster.eval/_agent (d/pull @bc '[{:seon.cluster.eval/_agent [:seon.cluster.eval/id]}] [:seon.agent/key k]))))))
+             (is (= ["e1"] (mapv :seon.eval/id (:seon.eval/_agent (d/pull @bc '[{:seon.eval/_agent [:seon.eval/id]}] [:seon.agent/key k]))))))
            (testing "the run, the message and the agent are one entity on the branch and on main (content ids)"
              (doseq [ref [[:seon.run/id "demo/f#1"] [:seon.message/id "m-1"] [:seon.agent/key k]]]
                (is (= (:db/id (d/entity @conn ref)) (:db/id (d/entity @bc ref))) (pr-str ref))))

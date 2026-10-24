@@ -164,7 +164,10 @@
       (and (some? own) (not (symbol? own))) (if (= :ai face) {:text (if (string? own) own (print/text own)) :truncated? false} own)
       :else (let [f (render-of v face (:schema opts))
                   r (if f (f v opts) ((if (= :ai face) print-ai print-html) v opts))]
-              (if (and (= :ai face) (string? r)) {:text r :truncated? false} r)))))
+              ;; a record's part of the conversation (messages) reads as their contents
+              (cond (and (= :ai face) (string? r)) {:text r :truncated? false}
+                    (and (= :ai face) (vector? r)) {:text (str/join "\n\n" (map :content r)) :truncated? false :messages r}
+                    :else r)))))
 
 (defn html
   "v's :html render under opts (its hiccup)."

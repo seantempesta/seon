@@ -308,3 +308,16 @@
         (is (= text (do (clojure.java.shell/sh "env" "-u" "SEON_WEB_PORT" (str root "/bin/ports") f) (slurp f))) "a second run writes the same file"))
       (finally (clojure.java.io/delete-file f true)))))
 
+
+(deftest thinking-on-refuses-reasoning-left-out
+  ;; owner ruling 2026-10-24 (docs/decisions.md, "A config key does what it says"): with
+  ;; thinking :enabled and tools, DeepSeek answers 400 when earlier reasoning_content is left
+  ;; out (measured live, notes/step0/no-replay.edn), so that config is refused at load, naming
+  ;; each model and explained by m/explain; thinking off may leave it out
+  (let [r (refused #(config/resolved (assoc config/config :seon.config.ai/thinking :enabled :seon.config.ai/replay-reasoning false)))]
+    (is (= :seon.config/refused (:seon.error/type r)) (pr-str r))
+    (is (= (set (for [id (keys (:seon.config.ai/models config/config))] [:seon.config.ai/models id])) (set (map :key (:seon.config/problems r)))))
+    (is (str/includes? (:value (first (:seon.config/problems r))) "replay-reasoning") "explained"))
+  (is (false? (:seon.config.ai/replay-reasoning (config/resolved (assoc config/config :seon.config.ai/thinking :disabled :seon.config.ai/replay-reasoning false))))
+      "thinking off: nothing to send, left out is valid")
+  (is (true? (:seon.config.ai/replay-reasoning (config/resolved (assoc config/config :seon.config.ai/thinking :enabled)))) "the default replays"))

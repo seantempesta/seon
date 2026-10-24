@@ -254,7 +254,7 @@
         st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
         st (assoc st :pid 42 :inflight {7 {:kind :eval}})]
     (testing "a reply answers its request by id and reports the agent idle"
-      (let [[st outs] (step #'ap/agent-proc st :from {:op :reply :id 7 :items [{:printed "3"}] :t 1})]
+      (let [[st outs] (step #'ap/agent-proc st :from {:op :reply :id 7 :response {:handle 'result/e1 :text "{:handle result/e1, :value 3}"} :t 1})]
         (is (= {:rid 7} (:dest (first (:to-api outs)))))
         (is (empty? (:inflight st)))
         (is (some #(= :idle (get-in % [:set :status])) (:to-api outs)))))

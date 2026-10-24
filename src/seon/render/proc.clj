@@ -408,8 +408,8 @@
         ;; stream's row cuts it to a cell, seon.render.ui/event-detail)
         detail (if err (render/ai r {}) (:text (render/printed r nil)))]
     (when form
-      (let [it (cond-> {:id 0 :tag (if err :err :ret) :form form :origin :ui :printed detail} err (assoc :err r))]
-        (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx {:seon.root/id :root} (str "root-ui-" (profile/now-ns)) [it] nil)}}
+      (let [rec (cond-> {:code form :text (or detail "")} err (assoc :response {:ex r}))]
+        (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx {:seon.root/id :root} (str "root-ui-" (profile/now-ns)) "user" rec nil)}}
                               :route [:render :answers] :tag [:web-record]})))
     (ask-state (on-event st {:type :ui :call (str v) :agent agent :at-ms (System/currentTimeMillis) :error err :detail detail}) o)))
 

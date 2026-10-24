@@ -324,8 +324,8 @@
 (defn- turn-facts
   "Turn k of a run as seon.turn/act! records it: the basis its context was built from
   (the commit, its red assertion; the text is made again from it, seon.context/render), its
-  reply (1,500 bytes) and its eval call with what it evaluated to as the next turn shows it
-  (2,000). The reply is real prose and the evaluated value real source, each turn its own
+  reply (1,500 bytes) and its eval call, whose eval's record holds what it evaluated to as the
+  next turn shows it (2,000). The reply is real prose and the evaluated value real source, each turn its own
   (a real turn's reply is the model's prose and code; its evals are mostly source and
   printed data: a slurp, a source, a test's report): a repeated letter compressed ~3x better
   than real turn text and made LZ4 look like the fix (2026-10-22)."
@@ -335,7 +335,9 @@
                                        :observed {:results {'t-test/x :fail} :test-run-errors [] :reasons [{:reason :proof-red :symbol 't-test/x}]
                                                   :reds [{:test 't-test/x :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))"}]}}
     :seon.turn/reply (slice @prose k 1500)
-    :seon.turn/calls [{:id "call-0" :code "(f 2)" :evals (slice @code k 2000)}]}])
+    :seon.turn/calls [{:id "call-0" :code "(f 2)" :eval (str "e" k)}]}
+   ;; the call's eval, whose record holds its response as the next turn reads it
+   {:seon.eval/id (str "e" k) :seon.eval/by "a1" :seon.eval/record {:code "(f 2)" :text (slice @code k 2000)}}])
 
 (defn- write-turns!
   "Bytes the store at path gains when branch b gets n turns through the agent's run-ahead

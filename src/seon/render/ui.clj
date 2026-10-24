@@ -104,10 +104,10 @@
   [k sub] [:header [:span {:class "kicker"} k] (if (vector? sub) sub [:span {:class "sub"} sub])])
 
 (defn context-read?
-  "Is evaluation e a context read: an outside agent reading its current-state block through
-  root's server (origin :context; seon.server)? Its output is the block itself."
+  "Is eval record e a context read: an outside agent reading its current-state block through
+  root's server (by \"context\"; seon.server)? Its output is the block itself."
   {:malli/schema [:=> [:cat :any] :boolean]}
-  [e] (and (map? e) (= :context (:origin e))))
+  [e] (and (map? e) (= "context" (:by e))))
 
 ;;; --- status -------------------------------------------------------------------
 
@@ -271,14 +271,10 @@
   {:malli/schema [:=> [:cat :map] :string]}
   [ev]
   (case (:type ev)
-    :reply (let [items (:items ev) r (last items)]
-             (if (context-read? r)
-               (str "read its current-state block · ≈" (select/estimate (or (:out r) "")) " tokens")
-             (str (when (> (count items) 1) (str (count items) " forms · "))
-                  (let [n (count (filter #(= :err (:tag %)) items))] (when (pos? n) (str n " error" (when (> n 1) "s") " · ")))
-                  (when-not (str/blank? (:form r)) (str (print/line (:form r) (cell)) " ⇒ "))
-                  (print/line (:printed r) (cell))
-                  (when (:ms r) (str " · " (ms-str (:ms r)))))))
+    :reply (let [r (:response ev)]
+             (str (when (:ex r) "error · ")
+                  (print/line (:text r) (cell))
+                  (when (:ms r) (str " · " (ms-str (:ms r))))))
     :commit (str (kname (:branch ev)) " t " (:t ev) (when (:txs ev) (str " · " (:txs ev) " tx")))
     :merged (let [[k why] (merge-words (:result ev))] (if (= :merged k) why (str (str/upper-case (name k)) " · " (print/line why (cell)))))
     :tests (str (run-words ev) (when (:ms ev) (str " · " (ms-str (:ms ev)))))
@@ -402,48 +398,43 @@
 
 ;;; --- the page: an entity and its neighbours (seon.render/page), laid out --------------
 
-(defn- thought
-  "A form's leading ;; comment as the prose it is (its comment marks gone)."
-  {:malli/schema [:=> [:cat [:maybe :string]] [:maybe :string]]}
-  [lead] (when-not (str/blank? lead) (str/trim (str/replace lead #"(?m)^\s*;+ ?" ""))))
-
 (defn- cost-line
   "What an evaluation cost, as recorded when it ran: ticks, ms and bytes allocated, each with its
   unit; one not recorded is left out, never shown as 0."
   {:malli/schema [:=> [:cat :map] :any]}
   [r]
   (when-let [parts (seq (remove nil? [(when (:ticks r) (str (group3 (:ticks r)) " ticks")) (when (:ms r) (ms-str (:ms r)))
-                                       (when (:alloc-bytes r) (alloc-span (:alloc-bytes r)))]))]
+                                       (when (:bytes r) (alloc-span (:bytes r)))]))]
     [:span {:class "tabular-nums text-text-400"} (interpose " · " parts)]))
 
 (def ^:private asked-by
-  "Who asked for an evaluation, by its record's :origin (absent: the agent's own, its model's turn)."
-  {:ui "the owner, from this page" :outside "an outside agent, through root's server" :context "the context, read for a turn"})
+  "Who evaluated, by its :seon.eval/by (any other: the agent's own, its model's turn)."
+  {"user" "the owner, from this page" "outside" "an outside agent, through root's server" "context" "the context, read for a turn"})
 
 (defn evaluation
-  "One evaluation (the declared html render of :seon.db/eval-fact, its record and a reply item), as
-  it ran: its ;; thought as prose, its form, its result as the REPL printed it when it ran (the
-  result's own render then; an error by its error map's render), what it printed, and its cost as
-  recorded; :as :inline, its form and result in one line. Rendered from the record, which never
-  changes; a reply item names its text :printed and its error :err, as the REPL answered it."
+  "One eval (the declared html render of :seon.db/eval-fact, its record, and of a response), as
+  it ran: the prose beside it, its code, its response as every reader read it (its :text,
+  printed under its handle; an error's by its error map's render), and its cost and who
+  evaluated it as recorded; :as :inline, its code and response in one line. Rendered from the
+  record, which never changes."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [e opts]
-  (let [it (or (:seon.cluster.eval/record e) e)
-        r (cond-> it (:printed it) (assoc :shown (:printed it)) (:err it) (assoc :error (:err it)))
-        err? (= :err (:tag r))]
+  (let [rec (or (:seon.eval/record e) e)
+        r (merge (:response rec) (select-keys rec [:code :text :prose :fns]) (dissoc e :seon.eval/record))
+        by (or (:seon.eval/by e) (:by r))
+        err? (some? (:ex r))]
     (if (= :inline (:as opts))
-      [:span {:class "font-mono"} [:code (prose (:form r) (cell) {:one-line? true})] (if err? " ✕ " " ⇒ ")
-       [:code (prose (or (:shown r) (:seon.error/message (:error r)) "") (cell) {:one-line? true})]]
+      [:span {:class "font-mono"} [:code (prose (or (:code r) "") (cell) {:one-line? true})] (if err? " ✕ " " ⇒ ")
+       [:code (prose (or (:text r) "") (cell) {:one-line? true})]]
       [:div {:class (str "flex flex-col gap-1 border-l-2 pl-3 py-1 " (if err? "border-error" "border-base-700"))}
-       (when-let [t (thought (:lead r))] [:p {:class "whitespace-pre-wrap text-text-300 italic"} (prose t (form-budget))])
-       [:pre {:class "text-text-100"} [:code (prose (:form r) (form-budget))]]
-       (cond (map? (:error r)) (render/html (:error r) {})
-             err? [:pre {:class "text-error"} (prose (str (:error r)) (part))]
-             :else [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (prose (or (:shown r) "") (part))])
-       (when-not (str/blank? (:out r)) [:pre {:class "text-text-400"} (prose (:out r) (part))])
+       (when-not (str/blank? (:prose r)) [:p {:class "whitespace-pre-wrap text-text-300 italic"} (prose (:prose r) (form-budget))])
+       (when (:code r) [:pre {:class "text-text-100"} [:code (prose (:code r) (form-budget))]])
+       (if (map? (:ex r))
+         (render/html (:ex r) {})
+         [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (prose (or (:text r) "") (part))])
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
-        [:span (if (:origin r) (get asked-by (:origin r) (kname (:origin r))) "its own turn")]
+        [:span (get asked-by by "its own turn")]
         (when (seq (:fns r))
           [:details [:summary (str "costliest: " (:var (first (:fns r))) " · " (count (:fns r)) (if (= 1 (count (:fns r))) " function" " functions"))]
            [:table [:tbody (for [{:keys [var calls ms]} (:fns r)]
@@ -491,15 +482,15 @@
 
 (defn rows
   "A page's list (node nds that show :as :row), newest first, each row a unit: a turn with the
-  evaluations its calls name (:items) under it, in the order it ran them; an evaluation no turn
+  evals its calls name (:eval) under it, in the order it ran them; an evaluation no turn
   names (the owner's, root's, one of a turn still running) or a message, alone. Each evaluation is
   in one row only. A row is ordered by the newest transaction that made one of its entities
   (:seon.render/t)."
   {:malli/schema [:=> [:cat [:sequential :map]] [:vector [:map [:id :string] [:parts [:vector :map]] [:newest nat-int?]]]]}
   [nds]
-  (let [evals (into {} (for [nd nds :let [id (get-in nd [:seon.render/value :seon.cluster.eval/id])] :when id] [id nd]))
+  (let [evals (into {} (for [nd nds :let [id (get-in nd [:seon.render/value :seon.eval/id])] :when id] [id nd]))
         turns (filter #(= :seon.turn/turn-fact (:seon.render/schema %)) nds)
-        in-turn (fn [t] (vec (keep evals (for [c (get-in t [:seon.render/value :seon.turn/calls]) i (:items c)] i))))
+        in-turn (fn [t] (vec (keep evals (keep :eval (get-in t [:seon.render/value :seon.turn/calls])))))
         taken (set (for [t turns e (in-turn t)] (:seon.render/eid e)))
         row (fn [parts] {:id (str "r-" (:seon.render/eid (first parts))) :parts parts :newest (reduce max (map #(:seon.render/t % 0) parts))})]
     (->> (concat (for [t turns] (row (into [t] (in-turn t))))

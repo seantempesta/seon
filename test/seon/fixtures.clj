@@ -213,19 +213,19 @@
 
 (defn two-calls
   "The scripted model that proves a turn's rhythm (seon.agent-test): its first call evaluates
-  (+ 20 21); each later call adds one to the answer the last call's result printed, so its
+  (+ 20 21); each later call adds one to the value the last call's response showed, so its
   code holds what it saw before it was made."
   {:malli/schema [:=> [:cat :seon.model/request] :string]}
   [{:keys [messages]}]
   (if-let [seen (some #(when (= "tool" (:role %)) (edn/read-string (:content %))) (rseq messages))]
-    (str "(+ 1 " (or (:printed seen) (:value seen)) ")")
+    (str "(+ 1 " (:value seen) ")")
     "(+ 20 21)"))
 
 (defn thinking-call
-  "The scripted model that proves a call's thought is recorded with it (seon.agent-test): one
-  form with its ;; lead, and the eval tool's thinking."
+  "The scripted model that proves a reply's prose is recorded with its call (seon.agent-test):
+  one form, and the prose beside it (the scripted provider's reply text)."
   {:malli/schema [:=> [:cat :seon.model/request] [:map [:code :string] [:thinking :string]]]}
-  [_] {:code ";; the sum first\n(+ 1 2)" :thinking "check the sum before the proof"})
+  [_] {:code "(+ 1 2)" :thinking "check the sum before the proof"})
 
 (defn reply
   "The scripted model: the scripted reply for the request's task and turn (the last one

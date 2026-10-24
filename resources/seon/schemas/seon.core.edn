@@ -64,13 +64,16 @@
                             :seon.status/gone #{:ended :killed :dead}}
                      :spawning :busy :idle :ended :killed :dead]
  :seon.agent/tx-result [:map [:t :int] [:datoms nat-int?]]
- :seon.agent/item [:map {:seon.render/html seon.render.ui/evaluation :description "One form's reply at root: the printed value (the live one stays in the agent under :handle) or the error."}
-                   [:tag [:enum :ret :err]] [:printed {:optional true} [:maybe :string]]
-                   ;; the ; comments its writer put before the form (seon.reader/lead): the thought beside it
-                   [:lead {:optional true} :string]
-                   ;; the id of the evaluation's record on the agent's branch, once recorded
-                   [:record {:optional true} :string]]
- :seon.agent/items [:vector :seon.agent/item]
+ ;; an eval's response (nREPL's keys): its handle (result/e<n>, bound to it in the agent), the last
+ ;; form's value (in the agent only; every reader reads :text, the response printed under its
+ ;; handle), what its forms wrote, the error that stopped it (the one error map), its summed cost;
+ ;; each key only when present. Beside them as answered: its record's id and the vars it recorded
+ :seon.eval/response [:map {:seon.render/html seon.render.ui/evaluation}
+                      [:handle :qualified-symbol] [:value {:optional true} :any] [:out {:optional true} :string]
+                      [:err {:optional true} :string] [:ex {:optional true} :map]
+                      [:ms {:optional true} number?] [:ticks {:optional true} :int] [:bytes {:optional true} :int]
+                      [:text {:optional true} :string] [:record {:optional true} :string]
+                      [:recorded {:optional true} [:vector :any]] [:fns {:optional true} [:vector :map]]]
  :seon.test/result [:map [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]
  ;; root's API
  :seon.root/sys [:map [:graph :any] [:ext :seon.host/chan] [:conn :seon.host/conn]]

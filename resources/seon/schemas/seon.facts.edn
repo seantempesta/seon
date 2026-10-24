@@ -108,11 +108,16 @@
                       [:note/text :note/text] [:note/agent :note/agent] [:note/about {:optional true} :note/about]]
  ;; ---- the recording transaction of each eval request, and the agent's answered t.
  ;; Observations: data on the branch that recorded them, never carried by a merge ----
- :seon.cluster.eval/id :string
- :seon.cluster.eval/agent :seon.db/ref
- ;; the evaluation's details as one EDN value: {:tag :form :shown|:error :out :ms :alloc-bytes :ticks :fns}
- ;; (:fns: its 10 costliest contracted functions, [{:var :calls :ms}], seon.profile)
- :seon.cluster.eval/record [:map {:seon.db/data true :seon.render/html seon.render.ui/evaluation} [:tag [:enum :ret :err]]]
+ ;; an eval: one per eval request (a model's tool call, a form the user or a session typed),
+ ;; its id the handle's name (e43); who evaluated it (the agent's id, "user", "outside", "context")
+ :seon.eval/id [:and {:seon.db/identity true} :string]
+ :seon.eval/agent :seon.db/ref
+ :seon.eval/by [:and {:seon.db/index true} :string]
+ ;; its details as one EDN value: {:code :text :response :prose :call-id :fns :recorded}: the code,
+ ;; the text every reader read (seon.repl/printed), the response without its live value, the
+ ;; model's prose beside the call and the provider's call id, its 10 costliest contracted
+ ;; functions ([{:var :calls :ms}], seon.profile), the vars it recorded
+ :seon.eval/record [:map {:seon.db/data true :seon.render/html seon.render.ui/evaluation} [:code :string] [:text :string]]
  ;; an agent: one entity per agent per boot of its root (an id like :a3 starts again each boot),
  ;; named by its key (seon.task/agent-key: "<boot>/<id>"), a content id so root's entity on main
  ;; and the one its branch's records name are one; it refs the root that started it. What root
@@ -129,12 +134,12 @@
  :seon.agent/forked-ms :double
  :seon.agent/ended-ms :int
  :seon.agent/answered-t :int
- :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/as :row :seon.render/html seon.render.ui/evaluation}
-                     [:seon.cluster.eval/id :seon.cluster.eval/id] [:seon.cluster.eval/agent :seon.cluster.eval/agent]
-                     [:seon.cluster.eval/record :seon.cluster.eval/record]]
+ :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/as :row :seon.render/html seon.render.ui/evaluation :seon.render/ai seon.context/eval-messages}
+                     [:seon.eval/id :seon.eval/id] [:seon.eval/agent :seon.eval/agent] [:seon.eval/by {:optional true} :seon.eval/by]
+                     [:seon.eval/record :seon.eval/record]]
  ;; an entity's units (seon.render/walk): the neighbours a view of it shows, one hop, as pull's
  ;; attributes (a leading _ the reverse ref), each rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] :seon.render/units [:seon.run/_agent :seon.cluster.eval/_agent] :seon.render/parts [:seon.run/_agent]}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] :seon.render/units [:seon.run/_agent :seon.eval/_agent] :seon.render/parts [:seon.run/_agent]}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/id {:optional true} :seon.agent/id]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status] [:seon.agent/pid {:optional true} :seon.agent/pid]
@@ -315,7 +320,7 @@
  :seon.root/stopped :seon.root/end
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
  :seon.root/previous-end :seon.root/end
- :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/quiescent] :seon.render/units [:seon.agent/_root :seon.cluster.eval/_agent]}
+ :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/quiescent] :seon.render/units [:seon.agent/_root :seon.eval/_agent]}
                           [:seon.root/id :seon.root/id] [:seon.root/boot :seon.root/boot]
                           [:seon.root/stopped {:optional true} :seon.root/stopped]
                           [:seon.root/previous-end {:optional true} :seon.root/previous-end]
@@ -349,7 +354,7 @@
  :seon.message/to [:and {:seon.db/index true} :seon.db/ref]
  :seon.message/body [:string {:seon.render/prose true}]
  :seon.message/reply-to [:and {:seon.db/index true} :string]
- :seon.message/fact [:map {:seon.db/attributes true :seon.render/as :row :seon.render/html seon.render.ui/message} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
+ :seon.message/fact [:map {:seon.db/attributes true :seon.render/as :row :seon.render/html seon.render.ui/message :seon.render/ai seon.context/message-messages} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
                      [:seon.message/to {:optional true} :seon.message/to] [:seon.message/body :seon.message/body]
                      [:seon.message/reply-to {:optional true} :seon.message/reply-to]]
  ;; ---- written by an agent on its own branch; they reach main with its merge ----
@@ -377,13 +382,16 @@
  ;; shows them. seon.context/render makes the exact user message from it on that commit.
  :seon.turn/basis [:map {:seon.db/data true} [:commit :uuid] [:task :seon.task/id] [:run :seon.run/id]
                    [:turn :int] [:max-turns :int] [:origin :seon.turn/origin] [:observed :map]
-                   [:merge? {:optional true} :boolean] [:last-evals {:optional true} :string]]
+                   [:merge? {:optional true} :boolean] [:last-evals {:optional true} :string]
+                   ;; the screen evals run before the request (their ids), whose responses end it
+                   [:screen {:optional true} [:vector :string]]
+                   ;; the agent whose record the request renders (its key)
+                   [:agent {:optional true} :string]]
  ;; a model turn's eval calls, each its id, its code and what it evaluated to as the later
  ;; turns' tool messages show it (seon.context/evaluations-text: folded, within the evals budget)
- :seon.turn/calls [:vector {:seon.db/data true} [:map [:id :string] [:code :string] [:evals :string]
-                                                    ;; the ids of the call's evaluation records (:seon.cluster.eval/id), and the
-                                                    ;; model's thinking about the call (the eval tool's optional argument)
-                                                    [:items {:optional true} [:vector :string]] [:thinking {:optional true} :string]]]
+ :seon.turn/calls [:vector {:seon.db/data true} [:map [:id :string] [:code :string]
+                                                    ;; the id of the call's eval (:seon.eval/id), whose record holds its response
+                                                    [:eval {:optional true} :string]]]
  ;; the provider's finish_reason, the model that answered, and its reasoning text
  :seon.turn/finish :string
  :seon.turn/model :string

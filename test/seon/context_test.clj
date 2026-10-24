@@ -5,7 +5,7 @@
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.task :as task] [seon.context :as context] [seon.print :as print]
             [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs]
-            [seon.print.select :as select] [clojure.string :as str] [seon.edn] [seon.print-test :as print-test]))
+            [seon.print.select :as select] [clojure.string :as str] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model]))
 
 (defn- db-with-program []
   (let [db (ts/test-db)]
@@ -169,41 +169,6 @@
              (into {} (map (juxt :test :status)) (:proofs b)))
           "when the run failed as a whole, a written proof did not run"))))
 
-(defn- evals
-  "n evaluations cycling over k distinct forms, each answering a large value and printing
-  a large output (inv3's edit/forms: 259 items, 11 distinct)."
-  [n k]
-  (let [kinds (vec (for [j (range k) :let [v (vec (range (* 2000 (inc j))))]]
-                     {:tag :ret :form (str "(code-of " j ")") :handle (keyword (str "h" j))
-                      :printed (print/text v) :value v
-                      :out (apply str (repeat 400 (str "line " j " of pprint output\n")))}))]
-    (vec (for [i (range n)] (assoc (nth kinds (mod i k)) :id i)))))
-
-(deftest repeated-evals-fold-and-every-item-fits-its-share
-  (let [db (db-with-program)
-        t (task-f db)
-        text-of (fn [items] (:content (peek (context/messages "H" (context/current-state db t {:turn 1 :max-turns 4 :last-items items})))))]
-    (testing "259 items, 11 distinct: 11 folded items whose times sum to 259"
-      (let [le (context/fold-evals (evals 259 11))]
-        (is (= 11 (count le)))
-        (is (= (range 11) (map :k le)) "each folded item is the first of its kind")
-        (is (= [24 24 24 24 24 24 23 23 23 23 23] (mapv :times le)) "259 = 6x24 + 5x23")))
-    (testing "the block and the evaluations each stay inside their own budget at 259 items and at 10x that, every distinct item shown"
-      (doseq [n [259 2590]]
-        (let [items (evals n 11) text (text-of items)]
-          (is (<= (select/estimate text) (+ (:context print/budgets) context/last-evals-budget)) (str n " items"))
-          (is (every? #(str/includes? text (str "\"(code-of " % ")\"")) (range 11)) "no item starves another")
-          (is (str/includes? text (str ";; " (count (filter #(= "(code-of 0)" (:form %)) items)) "x, the same form and answer"))))))
-    (testing "each item within its equal share; every cut's form reads exactly the rest from (my.turn/evals)"
-      (let [items (evals 259 11)
-            shown (context/shown-evals (context/fold-evals items))
-            share (quot context/last-evals-budget 11)]
-        (is (every? #(<= (:tokens %) share) shown))
-        (let [cuts (for [{:keys [text]} shown c (print-test/cuts-of text)] [text c])]
-          (is (= 22 (count cuts)) "each of 11 items cuts its value and its output")
-          (doseq [[text c] cuts]
-            (is (print-test/reads-exactly? text '(my.turn/evals) items c) (pr-str c))))))))
-
 (deftest a-turn-records-its-basis-and-its-context-is-made-again-from-it
   ;; task seon.db/the-store-grows-with-what-it-keeps (owner, 2026-10-22: store each turn's
   ;; basis, not its context text): the text the model was sent, built as the turn loop built
@@ -239,9 +204,9 @@
         db1 @conn
         b1 (basis db1 1)
         {:keys [text repairs]} (reader/forgive code0)
-        sent1 (context/reader-text (context/messages "H" (context/current-state db1 (task/task db1 "demo/f")
-                                                                            (assoc observed :turn 1 :max-turns 4 :truncated? true :source text :repairs repairs))
-                                                     [{:reply "f triples." :calls calls0 :run (:content (second msgs0))}]))
+        sent1 (str (:content (second msgs0)) "\n\n"
+                   (:content (peek (context/messages "H" (context/current-state db1 (task/task db1 "demo/f")
+                                                                                (assoc observed :turn 1 :max-turns 4 :truncated? true :source text :repairs repairs))))))
         _ (record! b1 {:seon.turn/reply "" :seon.turn/calls [{:id "call-1" :code "(my.turn/wait)" :evals ""}]})
         _ (d/transact conn (program "(defn f \"Later.\" [x] x)"))
         db @conn
@@ -254,21 +219,6 @@
     (is (= {:text sent1 :origin :model :turn "demo/f#1/1"} (context/recorded db "demo/f#1")) "the page reads the last turn's")
     (is (nil? (context/recorded db "c#1")) "a run that read nothing has no context")
     (is (< (count (seon.edn/encode b1)) 600) "the basis is small: no text the db already holds")))))
-
-(deftest a-context-read-as-a-value-does-not-grow-the-next-context
-  ;; the model evaluates something that answers a whole context (its own block, say): the
-  ;; item gets its one share like any other, so turn after turn the context cannot nest
-  (let [db (db-with-program)
-        t (task-f db)
-        text-of (fn [items] (:content (peek (context/messages "H" (context/current-state db t {:turn 1 :max-turns 4 :last-items items})))))
-        c0 (text-of (evals 259 11))
-        item (fn [c] {:id 0 :tag :ret :form "(seon.turn/context-block \"demo/f\" \"demo/f#1\" true)" :printed (pr-str c) :value c})
-        c1 (text-of [(item c0)])
-        c2 (text-of [(item c1)])]
-    (is (< (select/estimate c0) (+ (:context print/budgets) context/last-evals-budget)))
-    (is (<= (select/estimate c1) (+ (:context print/budgets) context/last-evals-budget)))
-    (is (<= (- (select/estimate c2) (select/estimate c1)) 16) "reading a context of a context adds nothing")
-    (is (= 1 (count (context/shown-evals (context/fold-evals [(item c0) (item c0)])))) "a repeated read is one item")))
 
 (deftest an-unresolved-citation-says-what-to-do
   ;; task seon.task/a-task-cites-what-it-needs: a name the plan cites that resolves to
@@ -329,26 +279,29 @@
 (deftest an-agent-reads-its-conversation-so-far
   ;; a live DeepSeek agent re-read the same Datahike source every other turn because each
   ;; context showed only the previous turn's evaluations (2026-10-21); a REPL keeps its
-  ;; scrollback. Owner, 2026-10-22: a turn is native tool calls, so each eval call's answer is
-  ;; its own tool message, read before the next call
-  (let [turns [{:run "C0" :reply "R0" :calls [{:id "a" :code "(def x 41)" :evals "E0"}]}
-               {:reply "" :calls [{:id "b" :code "(inc x)" :evals "E1"} {:id "c" :code "(dec x)" :evals "E2"}]}
-               {:reply "R2" :calls []}]
-        ms (context/messages "H" {:task "t"} turns)]
-    (is (= ["system" "user" "assistant" "tool" "assistant" "tool" "tool" "assistant" "user"] (mapv :role ms))
-        "the first context, then each reply with its calls' answers, then the current state")
-    (is (= [[{:id "a" :code "(def x 41)"}] "a" "E0"] [(:tool-calls (nth ms 2)) (:tool-call-id (nth ms 3)) (:content (nth ms 3))])
-        "a call and its answer, named by the call's id")
-    (is (= ["b" "c"] (mapv :tool-call-id (subvec ms 5 7))) "each call of a reply answered, in order")
-    (is (not (contains? (nth ms 7) :tool-calls)) "a reply that called nothing carries no calls")
-    (is (str/starts-with? (:content (peek ms)) "The current state") "the current state comes last"))
-  (testing "a reply that called nothing is followed by a user message, so two replies never meet"
-    (let [ms (context/messages "H" {:task "t"} [{:run "C0" :reply "R0" :calls []} {:reply "R1" :calls []}])]
-      (is (= ["system" "user" "assistant" "user" "assistant" "user"] (mapv :role ms)))))
-  (testing "the history budget keeps whole turns, the newest always"
-    (let [turns [{:reply (apply str (repeat 400 "a")) :calls []} {:reply "R1" :calls [{:id "b" :code "(f)" :evals "E1"}]} {:reply "R2" :calls []}]]
-      (is (= ["R1" "R2"] (mapv :reply (#'context/kept-turns turns 10))) "an older turn past the budget is left out whole")
-      (is (= ["R2"] (mapv :reply (#'context/kept-turns turns 0))) "the newest stays at budget 0"))))
+  ;; scrollback. Each eval renders its own part (its :seon.render/ai): the assistant message with
+  ;; the call, then the response as a tool message; the provider's format folds a reply's calls
+  ;; into one assistant message (notes/design-agent-view-2026-10-24.md §3, the request is a render)
+  (let [ev (fn [id call prose text] {:seon.eval/id id :seon.eval/by "a1" :seon.eval/record (cond-> {:code (str "(" id ")") :text text :call-id (str "c-" id) :call call} prose (assoc :prose prose))})
+        ms (into [] (mapcat #(context/eval-messages % {})) [(ev "e1" 0 "R0" "E1") (ev "e2" 0 nil "E2") (ev "e3" 1 nil "E3")])]
+    (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each eval its call and its response")
+    (is (= {:role "assistant" :content "R0" :tool-calls [{:id "c-e1" :code "(e1)"}] :call 0} (first ms)))
+    (is (= {:role "tool" :tool-call-id "c-e1" :content "E1"} (second ms)))
+    (let [wire (seon.model/wire-messages true ms)]
+      (is (= ["assistant" "tool" "assistant" "tool" "tool"] (mapv :role wire)) "a reply's two calls are one assistant message")
+      (is (= ["c-e2" "c-e3"] (mapv :id (:tool_calls (nth wire 2)))))
+      (is (= ["c-e2" "c-e3"] (mapv :tool_call_id (subvec wire 3 5))) "each call answered, in order")))
+  (testing "a user's form is one user message carrying its response"
+    (is (= [{:role "user" :content "{:by \"user\" :code \"(+ 1 2)\" :response {:handle result/e4, :value 3}}"}]
+           (context/eval-messages {:seon.eval/by "user" :seon.eval/record {:code "(+ 1 2)" :text "{:handle result/e4, :value 3}"}} {}))))
+  (testing "the history budget keeps whole records, the newest always, never starting inside a reply"
+    (let [part (fn [c call] [{:role "assistant" :content (str c " " (apply str (repeat 30 "x"))) :call call}])
+          parts [(part (apply str (repeat 400 "a")) 0) (part "R1" 0) (part "R2" 1) (part "R3" 0)]
+          names (fn [ps] (mapv #(subs (:content (first %)) 0 2) ps))
+          one (select/estimate (:content (first (part "R1" 0))))]
+      (is (= [["R1" "R2" "R3"] 1] [(names (first (#'context/kept parts (* 3 one)))) (second (#'context/kept parts (* 3 one)))]))
+      (is (= ["R3"] (names (first (#'context/kept parts 0)))) "the newest stays at budget 0")
+      (is (= ["R3"] (names (first (#'context/kept (subvec parts 2) (* 2 one))))) "a cut never starts inside a reply"))))
 ;; ---- context v2: a stable prefix, each var at its citation's depth, the helpers -----------
 
 (defn- program-facts
@@ -409,7 +362,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/g``` exact."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
         block (context/current-state db (task/task db "demo/f") {:results {'demo-test/f-test :fail} :turn 1 :max-turns 4})
-        ms (context/messages "H" block [{:run (:content (second (context/messages "H" block))) :reply "R0" :calls [{:id "a" :code "(g 2)" :evals "1"}]}])
+        ms (context/messages "H" block)
         times (fn [s] (count (filter #(str/includes? (str (:content %)) s) ms)))]
     (is (= 1 (times "Make ```demo/g``` exact.")) "the plan once")
     (is (= 1 (times "(defn g \\\"Halves.\\\"")) "a cited source once")
@@ -538,19 +491,16 @@
 
 (deftest an-owners-message-reaches-the-next-turn
   ;; owner, 2026-10-23 (parity row 73): the page's message bar sends the owner's words through
-  ;; root's delivery; the agent's next turn takes its inbox into its basis (seon.turn/basis!),
-  ;; so the block it reads shows them, in the turn sections, and every later reading of that
-  ;; turn shows them again from the basis
-  (let [db (db-with-program)
-        msgs [{:from "owner" :body "use demo/g, not a new helper"}]
-        ms (context/messages "H" (context/current-state db (task-f db) {:turn 1 :max-turns 4 :messages msgs}))]
-    (is (str/includes? (:content (peek ms)) "use demo/g, not a new helper") "in the turn sections")
-    (is (str/includes? (:content (peek ms)) ":from \"owner\"") "who sent it")
-    (is (not (str/includes? (:content (second ms)) "use demo/g")) "not in the cached run sections")
-    (is (not (contains? (context/current-state db (task-f db) {:turn 1 :max-turns 4}) :messages)) "none delivered: no section")))
-
+  ;; root's delivery; the turn that takes them writes the message fact on its branch, so the
+  ;; conversation holds it in tx order (seon.context/records), rendered by the message fact's
+  ;; own :seon.render/ai (notes/design-agent-view-2026-10-24.md §3)
+  (let [[m] (context/message-messages {:seon.message/from "owner" :seon.message/body "use demo/g, not a new helper"} {})]
+    (is (= "user" (:role m)))
+    (is (str/includes? (:content m) "use demo/g, not a new helper"))
+    (is (str/includes? (:content m) ":from \"owner\"") "who sent it"))
+  (is (not (contains? (context/current-state (db-with-program) (task-f (db-with-program)) {:turn 1 :max-turns 4}) :messages)) "never in the block"))
 (deftest an-error-shows-what-its-contract-says
-  ;; a contract invalid is data (its problems, the fix): the transcript shows that, not only
+  ;; a contract invalid is data (its problems, the fix): the response shows that, not only
   ;; the message (the step E dry run's agent read "invalid-input: its arguments do not
   ;; satisfy its contract" with no word of which, 2026-10-22)
   (let [em {:seon.error/type :seon.instrument/contract-error :seon.error/operation 'seon.e2e/agents-reused
@@ -558,22 +508,21 @@
             :seon.error/message "seon.e2e/agents-reused invalid-output: its value does not satisfy its contract"
             :seon.error/fix "Fix seon.e2e/agents-reused (the producer), or its contract."
             :seon.error/problems [{:path [0] :in [0] :expected :keyword :value nil}]}
-        text (context/evaluations-text [{:id 0 :tag :err :form "(seon.e2e/agents-reused db)" :printed (:seon.error/message em) :err em}])]
+        text (repl/printed {:handle 'result/e1 :ex em})]
     (is (str/includes? text ":expected :keyword") text)
     (is (str/includes? text "Fix seon.e2e/agents-reused") text)
     (is (= 1 (count (re-seq #"its value does not satisfy" text))) "the message once")))
 
 (deftest a-turns-reasoning-goes-back-with-its-reply
   ;; DeepSeek's thinking mode with tools needs each earlier reply's reasoning_content sent back
-  ;; (a 400 otherwise): the scrollback's assistant message carries the turn's recorded reasoning
-  (let [db (db-with-program)
-        block (context/current-state db (task-f db) {:turn 1 :max-turns 4})
-        msgs (context/messages "H" block [{:run "A" :reply "f triples." :reasoning "Square it first."
-                                           :calls [{:id "c1" :code "(f 3)" :evals "9"}]}])
-        assistant (first (filter #(= "assistant" (:role %)) msgs))]
+  ;; (a 400 otherwise, measured: notes/step0/no-replay.edn): the reply's first eval carries it,
+  ;; exactly as returned, and the provider's format sends it unless replay-reasoning is false
+  (let [ms (context/eval-messages {:seon.eval/by "a1" :seon.eval/record {:code "(f 3)" :text "9" :call-id "c1" :call 0 :prose "f triples." :reasoning "Square it first."}} {})
+        assistant (first ms)]
     (is (= "Square it first." (:reasoning assistant)))
-    (is (not-any? :reasoning (remove #{assistant} msgs)))))
-
+    (is (not-any? :reasoning (rest ms)))
+    (is (= "Square it first." (:reasoning_content (first (seon.model/wire-messages true ms)))))
+    (is (not (contains? (first (seon.model/wire-messages false ms)) :reasoning_content)) "replay false leaves it out")))
 (deftest an-unknown-proof-says-what-to-write
   ;; a proof with no result: the reason names the deftest to write in its namespace and how
   ;; to run it (the dry run's agents read `{:reason :proof-unknown}` and searched for 25 turns)
@@ -644,10 +593,42 @@
 
 (deftest a-taken-message-is-read-from-its-fact
   ;; root's ruling (2026-10-23): a message is a fact. Root writes the owner's on main; the turn
-  ;; that takes it writes the same fact on its branch and names it in its basis by id, so its
-  ;; block (and every later reading of that turn) reads the text from the commit
+  ;; that takes it writes the same fact on its branch and names it in its basis by id
   (let [db (d/db-with (db-with-program) [{:seon.message/id "m-1" :seon.message/from "owner" :seon.message/to {:seon.run/id "demo/f#1"}
-                                          :seon.message/body "use demo/g, not a new helper"}])
-        b (context/current-state db (task-f db) {:turn 1 :max-turns 4 :message-ids ["m-1"]})]
-    (is (= [{:from "owner" :body "use demo/g, not a new helper"}] (:messages b)))
-    (is (str/includes? (:content (peek (context/messages "H" b))) "use demo/g") "in the turn sections")))
+                                          :seon.message/body "use demo/g, not a new helper"}])]
+    (is (= [{:id "m-1" :from "owner" :body "use demo/g, not a new helper"}] (context/taken-messages db {:message-ids ["m-1"]})))))
+(deftest the-request-is-a-conversation-of-evals-then-the-screen
+  ;; notes/design-agent-view-2026-10-24.md §1: each turn's prose and eval calls with their
+  ;; responses as tool messages (read from the eval records), the reasoning as returned, then
+  ;; the screen evals, last, replaced by the next request's; the prefix stays byte-identical
+  (ts/test-branch!
+    (fn [_ conn]
+      (wiki! conn)
+      (d/transact conn (program-facts '[[demo/f "(defn f [x] x)" []]]))
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+      (let [observed {:results {'demo-test/f-test :fail} :test-run-errors [] :reds [] :reasons []}
+            ev! (fn [id by code text & [more]] (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
+                                                                  :seon.eval/record (merge {:code code :text text :run "demo/f#1"} more)}]))
+            request (fn [n screen] (let [db @conn
+                                         b {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4
+                                            :origin :model :observed observed :screen screen :agent "b/a1"}]
+                                     [b (:messages (context/render db b))]))
+            _ (ev! "e1" "screen" "(my.task/status)" "{:handle result/e1, :value :red}")
+            [b0 r0] (request 0 ["e1"])
+            _ (ev! "e2" "a1" "(f 1)" "{:handle result/e2, :value 1}" {:call-id "call-0" :call 0 :prose "I call f." :reasoning "why"})
+            _ (d/transact conn [{:seon.turn/id "demo/f#1/0" :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/n 0 :seon.turn/origin :model
+                                 :seon.turn/basis b0 :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1
+                                 :seon.turn/reply "I call f." :seon.turn/reasoning "why" :seon.turn/calls [{:id "call-0" :code "(f 1)" :eval "e2"}]}])
+            _ (ev! "e3" "screen" "(my.task/status)" "{:handle result/e3, :value :green}")
+            [_ r1] (request 1 ["e3"])]
+        (is (= ["system" "user" "user"] (mapv :role r0)) "turn 0: the task, then the screen")
+        (is (= ["system" "user" "assistant" "tool" "user"] (mapv :role r1)) (pr-str (mapv :role r1)))
+        (is (= {:role "assistant" :content "I call f." :reasoning "why" :tool-calls [{:id "call-0" :code "(f 1)"}] :call 0} (nth r1 2))
+            "prose as content, the reasoning as returned, the call")
+        (is (= "{:handle result/e2, :value 1}" (:content (nth r1 3))) "the call's response, as recorded")
+        (is (= (pop r0) (subvec r1 0 2)) "the prefix carries over")
+        (is (= "{:by \"screen\" :code \"(my.task/status)\" :response {:handle result/e3, :value :green}}" (:content (peek r1)))
+            "the screen eval, last")
+        (is (not-any? #(str/includes? (str (:content %)) ":value :red") r1) "the earlier screen is gone")
+        (is (not-any? #(str/includes? (str (:content %)) ";;") (rest r1)) "no ;; reaches the model")))))
