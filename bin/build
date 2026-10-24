@@ -101,9 +101,12 @@ build_jolt() {
 
 # TREE_KEY: what hello and seon are built from: this checkout's tree as git names it (bin/tree) and
 # the pins of the toolchain beneath it. Computed once, by the first of them to ask.
+REFS=
 tree_key() {
   [ -n "${TREE:-}" ] || TREE=$("$ROOT/bin/tree" "$ROOT") || TREE=
-  KEY=; [ -z "$TREE" ] || KEY="$TREE $CHEZ_PIN $JOLT_PIN"
+  # every checkout under reference-code/ by content (pin): the tree names a submodule by its commit only
+  [ -n "$REFS" ] || for d in "$RC"/*/; do REFS="$REFS $(pin "${d%/}")"; done
+  KEY=; [ -z "$TREE" ] || KEY="$TREE$REFS"
 }
 
 build_hello() {
@@ -268,7 +271,7 @@ build_seon() {
   # from that very tree (seon.root/import-source!), and bin/check runs no binary built from another
   tree_key; key=$KEY
   tree=${TREE:-}
-  if [ -n "$key" ] && fresh seon "$key" && [ -x "$T/seon" ]; then say "seon up to date (tree $tree)"; return; fi
+  if [ -n "$key" ] && fresh seon "$key" && [ -x "$T/seon" ] && [ "$(cat "$T/seon.tree" 2>/dev/null)" = "$tree" ]; then say "seon up to date (tree $tree)"; return; fi
   rm -f "$T/seon.tree" "$T/seon.stamp"
   # the program's main: seon.main serves root and ports, and loads the check driver
   # (seon.check, in test/, outside src; task seon.main/drivers-leave-src) from the checkout's
