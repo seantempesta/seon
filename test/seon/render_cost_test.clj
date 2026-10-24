@@ -133,13 +133,16 @@
      :n "evaluations of the walked agent (its neighbours by :seon.eval/_agent)"
      :work (str "two pulls: the agent's own attributes, then its ref units (its runs, its evaluations, its root), "
                 "each neighbour's own attributes and no further (its refs stay {:db/id}); per evaluation, one node: "
-                "its schema by one map lookup per key (seon.render/entity-schema), its prose (texts: prose? of its one "
-                "string, its id, which is no prose, so nothing is parsed) and the citation pass over none (cite). "
+                "its schema by one map lookup per key (seon.render/entity-schema), its prose (texts: prose? of each of its "
+                "two strings, its id and :seon.eval/by, its author, neither prose, so nothing is parsed) and the citation "
+                "pass over none (cite). "
                 "Not sized here: card-many forward refs and components (pulled whole, as pull gives them); "
                 "citations: a-walk-pulls-each-citation-once")
      :growth :linear
-     ;; entity-schema, relevant (its declared keys), texts, prose? of :seon.eval/id, cite: measured 512 calls at 100
-     :per-n {:calls 5}
+     ;; entity-schema, relevant (its declared keys), texts, prose? of :seon.eval/id and of :seon.eval/by (a
+     ;; string since the design's record, notes/design-agent-view-2026-10-24.md section 7: was the :origin
+     ;; keyword, which prose? is not asked of), cite: measured 512 calls at 100 before, 612 after
+     :per-n {:calls 6}
      ;; walk, the root's schema, its prose and citations, each unit attribute read forward and its ref test
      :fixed {:calls 19}
      :sizes [100 1000 4000]}))
@@ -228,7 +231,9 @@
                 "Every pass walks every row, though the page renders only the first: the walk pulling only the rows "
                 "shown is owed (task seon.render/page-walks-only-the-rows-shown)")
      :growth :linear
-     ;; measured 2026-10-23: 526 / 5,026 calls and 4.19 / 41.1 MB at 100 / 1,000 evaluations
-     :per-n {:calls 5 :bytes 42000}
+     ;; measured 2026-10-23: 526 / 5,026 calls and 4.19 / 41.1 MB at 100 / 1,000 evaluations; 2026-10-24:
+     ;; 626 calls at 100, the walk's one more prose? an evaluation (its :seon.eval/by, a string, the
+     ;; design's record: a-walk-reads-its-entity-and-one-hop)
+     :per-n {:calls 6 :bytes 42000}
      :fixed {:calls 30 :bytes 100000}
      :sizes [100 1000 4000]}))

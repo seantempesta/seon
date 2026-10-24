@@ -176,8 +176,9 @@
   (let [c (class x) limit (:max-children context)
         ;; a nested map whose schema declares a render shows as that render, one line, in its place
         rendered (when (and (:render context) (map-classes c) (not (identical? x (:root context)))) ((:render context) x))
-        ;; a value an earlier response showed is the form that reads it again (seen-form)
-        again (seen-form x c context)]
+        ;; a value an earlier response showed is the form that reads it again (seen-form); a
+        ;; print given no earlier responses looks nothing up
+        again (when (:seen context) (seen-form x c context))]
     (cond
       again (scalar :seon.print/rendered x (pr-str again))
       rendered (assoc (scalar :seon.print/rendered x (:text rendered)) :seon.print/html (:html rendered))
@@ -635,17 +636,15 @@
     (sized context (assoc skeleton :kids (grow-values context entries (- budget (:ub skeleton)) (= :map (:kind node)))))))
 
 (defn- allot
-  "`node` within `budget` characters: whole when it fits, else filled to the budget; a collection
-  at the depth bound collapsed."
+  "`node` within `budget` characters: whole when it fits, else filled to the budget (a collection
+  breadth before depth, fill-members); a collection at the depth bound collapsed."
   {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc number?] :seon.print/alloc]}
   [context node budget]
-  (if (and (= :coll (:kind node)) (not (bound? context node)))
-    (fill-members context node budget)
-    (or (whole context node budget)
+  (or (whole context node budget)
         (case (:kind node)
           (:string :name) (fill-string context node budget)
           (:map :coll) (if (bound? context node) (collapsed context node) (fill-members context node budget))
-          (sized context node)))))
+          (sized context node))))
 
 (defn- select
   "`value` allotted under the context's budget, or the insufficient-budget error when its least
