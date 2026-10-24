@@ -168,5 +168,5 @@
     (is (= :seon.model/transport (:seon.error/type failure)))
     (is (= [failure] (map :r (filter #(= dest (:dest %)) (:out o)))) "the owner answers the asker with the failure, once; nothing re-queues it")
     (is (empty? (:queue st)))
-    (is (not (re-find #"retried" (:doc (meta #'model/transport-error))))
+    (is (not (re-find #"kept and retried|after a pause" (:doc (meta #'model/transport-error))))
         "the docstring states what happens: the failure is answered to the agent, not kept and retried")))

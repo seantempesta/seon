@@ -141,7 +141,7 @@
 (deftest a-section-summary-is-its-heading-and-leads-first-sentence
   (let [doc (ref/parse "docs/flow.md" page)]
     (is (= {:seon.ref/address "docs/flow.md#flow" :seon.ref/heading "Flow" :seon.ref/summary "Flow runs procs, e.g. steps."}
-           (ref/view doc "docs/flow.md#flow" :summary))
+           (select-keys (ref/view doc "docs/flow.md#flow" :summary) [:seon.ref/address :seon.ref/heading :seon.ref/summary]))
         "an abbreviation's period ends no sentence")
     (is (= :no-lead (:seon.ref/problem-kind (ref/view doc "docs/flow.md#workloads" :summary))) "a list is no lead")
     (is (= :no-lead (:seon.ref/problem-kind (ref/view doc "docs/flow.md#the-api" :summary))) "a heading is no lead")

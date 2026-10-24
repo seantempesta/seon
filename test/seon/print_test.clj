@@ -225,7 +225,8 @@
   (let [m (zipmap (range 30) (range 30))
         {:keys [text] :as r} (seon/print-value m {:budget 10 :handle 'result/h1})]
     (is (nil? (:seon.error/type r)) (pr-str r))
-    (is (str/starts-with? (str text) "{0 0") "the first entry, then a cut that names the form that reads the rest")))
+    (is (str/starts-with? (str text) "{0 0") "the first entry, then a cut")
+    (is (every? :form (cuts-of (str text))) "every cut names the form that reads the rest")))
 
 (deftest a-long-name-is-cut-in-chars-and-names-its-form
   (let [v (keyword (apply str (repeat 300 "n")))
