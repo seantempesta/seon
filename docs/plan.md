@@ -23,6 +23,8 @@ Updated 2026-10-24 morning by root. The repo is `~/src/seon-next`; every session
 | **Reuse** | option B (program db per tree), emitter −49%, image registration opt-in | its next cost task; the memo waits on the data context |
 | **Vocab** | the rename, the cutover, GC sweepers | the decider's open reds (prove-agent run key, mcp relay, durable-read) |
 
+Not yet assigned (for the next root): the morning audit's five corrections (notes/audit-2026-10-24.md) and the perf wins (notes/perf-2026-10-24.md), first the context render's whole-index rebuild per turn (~10x).
+
 Open on main: the decider's reds above; `seon.cost/ticks-are-exact` (a Chez timer quantum, allowed for).
 
 **src size** (owner, 2026-10-23): not a line target; resistance to growth, so agents reuse and improve the core rather than add one-offs.
