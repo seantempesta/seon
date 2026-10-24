@@ -5,7 +5,7 @@
   The model edge as data: a provider's reply body read into the completion (task
   seon.model/budgets-are-data-and-spend-is-measured). Run: bin/test seon.model-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [clojure.data.json :as json]
-            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.turn :as turn] [seon.contract]))
+            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.fx :as fx] [seon.turn :as turn] [seon.contract]))
 
 (defn- chunk-line [m] (str "data: " (json/write-str m) "\n\n"))
 
@@ -159,3 +159,14 @@
     (is (= "Square multiplies." (:reasoning c)))
     (is (= "Square multiplies." (:reasoning_content (second (:messages b)))) "the earlier reply's reasoning goes back with it")
     (is (not-any? :reasoning_content [(first (:messages b)) (nth (:messages b) 2)]) "and only on the assistant's message")))
+
+(deftest a-transport-failure-is-answered-to-the-agent
+  (let [failure (model/complete {:kind :openai-compat :base-url "http://127.0.0.1:1" :model "m" :api-key-env "HOME" :max-tokens 2048}
+                                {:messages [{:role "user" :content "x"}] :task "t/x" :turn 0})
+        dest {:agent :a1 :op :fx-reply :k 1}
+        [st o] (fx/owner-proc (fx/owner-proc {:kind :t :workers 1 :work nil :back nil}) :done {:dest dest :outcome failure :request {:req {:k 1}}})]
+    (is (= :seon.model/transport (:seon.error/type failure)))
+    (is (= [failure] (map :r (filter #(= dest (:dest %)) (:out o)))) "the owner answers the asker with the failure, once; nothing re-queues it")
+    (is (empty? (:queue st)))
+    (is (not (re-find #"retried" (:doc (meta #'model/transport-error))))
+        "the docstring states what happens: the failure is answered to the agent, not kept and retried")))

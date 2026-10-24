@@ -323,3 +323,13 @@
            (ref/task-view db 'demo.ops/add-works :doc)))
     (is (= "Add two numbers." (:seon.ref/summary (ref/task-view db 'demo.ops/add-works :summary))))
     (is (nil? (ref/task-view db 'demo.ops/no-such-task :doc)))))
+
+(deftest a-summary-names-the-citation-that-reads-the-rest
+  (let [doc (ref/parse "docs/flow.md" page)
+        more (fn [a] (ref/view doc a :summary))]
+    (is (= "docs/flow.md#flow" (:seon.ref/read-at (more "docs/flow.md#flow")))
+        "a lead with more than its first sentence: the summary names the address that reads it at :doc")
+    (is (= (count "Each proc is a Var. See `seon.step/step`.") (:seon.ref/left (more "docs/flow.md#flow")))
+        "and how many characters of the lead it left (the lead's text after the summary sentence, trimmed)")
+    (is (nil? (:seon.ref/read-at (more "docs/flow.md#the-api-1"))) "a lead that is one sentence left nothing: no key")
+    (is (nil? (:seon.ref/left (more "docs/flow.md#the-api-1"))))))
