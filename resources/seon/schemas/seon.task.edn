@@ -16,7 +16,9 @@
                    :running :blocked :open :failed :held :done :merged :cancelled]
  :seon.task/config [:map {:closed true} [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
                     [:seon.config.merge/max-conflicts {:optional true} nat-int?]
-                    [:seon.config.merge/max-merge-turns {:optional true} nat-int?]]
+                    [:seon.config.merge/max-merge-turns {:optional true} nat-int?]
+                    ;; the functions near its plan its story lists (seon.context/similar: off by default, on to measure it)
+                    [:seon.config.render/similar {:optional true} :seon.config.render/similar]]
  :seon.task/need-ids [:set :seon.task/id]
  :seon.task/declaration [:map {:closed true}
                          [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]

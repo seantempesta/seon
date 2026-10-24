@@ -563,8 +563,12 @@
  ;; exact) that its write set and proofs do not name, each a line in its task story (:similar);
  ;; 0 shows none. Provenance: the owner's ruling (2026-10-24, DECISIONS "Embeddings join the
  ;; context"): a small measured list; embeddings alone recalled 0.495 at 10 on 283 pairs
- ;; (docs/vector.md#fused-with-the-call-graph). Measured in step 6: kept on only if agents read them.
- :seon.config.render/similar 5
+ ;; (docs/vector.md#fused-with-the-call-graph). Off (0) by the owner's ruling ("if it's not working
+ ;; well leave them out"), on step 6's measurement (2026-10-25, notes/measure/step6: the 5 fit tasks,
+ ;; 3 runs each, deepseek-flash, thinking off): green 8/15 with 5 listed, 7/15 with none; the runs
+ ;; that listed them named the same functions as a run listing none (my.agent/prove,
+ ;; seon.model/provider-error, seon.docs/view, seon.print/print-value): no measured gain.
+ :seon.config.render/similar 0
  ;; Semantic search's pyramid (seon.vector/near, docs/vector.md#the-pyramid), measured against an
  ;; exact 768-dim search, recall@10 (EmbeddingGemma-2):
  ;; - bin/check vectors, Seon's whole text (2,681: 1,783 forms with the schemas, 321 sections, the

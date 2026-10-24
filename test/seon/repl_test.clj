@@ -40,6 +40,12 @@
               ["(clojure.repl/source seon.reconcile)" :text "(ns seon.reconcile"]
               ["(clojure.repl/source seon.reconcile/ns)" :text "(source seon.reconcile)"]
               ["(clojure.repl/source seon.reconcile/not-yet)" :text "no such var is defined"]
+              ;; what an agent naturally types answers as it reads (step 6, 2026-10-25: a run read its
+              ;; helpers by a doseq over quoted names, then by #'f, and got invalid-input each time)
+              ["(clojure.repl/source 'seon.reconcile/merge-limits)" :text "(defn merge-limits"]
+              ["(clojure.repl/source #'seon.reconcile/desired-env)" :text "(defn desired-env"]
+              ["(doseq [s '[seon.reconcile/done-explain]] (clojure.repl/source s))" :text "(defn done-explain"]
+              ["(some? (clojure.repl/source-fn #'seon.reconcile/hairy))" :text "true"]
               ;; clojure.test reports to *test-out*: the step E dry run's agent ran a red
               ;; proof and saw nothing (2026-10-22)
               ["(do (in-ns 'user) (clojure.test/deftest red (clojure.test/is (= 1 2))) (clojure.test/run-tests))" :text "FAIL in (red)"]

@@ -763,7 +763,11 @@
     (is (not-any? #(str/includes? text %) ["(f 2)" "◆ seon" "its page" "fact" walked-plan]) "no conversation, no chrome, no schema names, no plan (the story's)")
     (is (not (str/includes? text "release")) "no input")
     (is (not-any? map? (tree-seq coll? seq page)) "no attributes")
-    (is (<= (depth page) 5) (str "shallow: " (depth page)))))
+    (is (<= (depth page) 5) (str "shallow: " (depth page)))
+    (is (some #(and (vector? %) (= :h2 (first %)) (some #{"changes"} %)) (tree-seq coll? seq (map :hiccup (vals (get-in st1 [:views :a3 :units])))))
+        "the page itself shows the branch's changes")
+    (is (not-any? #(and (vector? %) (= :h2 (first %)) (some #{"proofs" "changes"} %)) (tree-seq coll? seq page))
+        "the proofs and the changes are the turn's own forms (my.task/status, my.branch/changes), not the screen's")))
 
 (deftest nothing-is-shown-twice
   ;; what the conversation holds (each eval, as its own message) is never on the screen too
@@ -774,16 +778,46 @@
     (is (seq codes))
     (is (not-any? #(str/includes? text (pr-str %)) codes) "no eval's code")))
 
+(defn- answer-main
+  "The render proc after the api answers st's pending read of main for a screen (its
+  [:screen-main k] request) with db: [st outputs]."
+  [st db]
+  (let [tag (some (fn [[rid kind]] (when (and (vector? kind) (= :screen-main (first kind))) rid)) (:pending st))]
+    (#'p/render-proc st :answers {:tag tag :r {:db db}})))
+
+(deftest an-agent-admitted-after-the-others-gets-its-screen
+  ;; task seon.render/a-late-agent-gets-its-screen: the proc's own read of main can lag main's
+  ;; commits (it takes them one message at a time), so an agent admitted after the others asked for
+  ;; its screen while that read held no entity of it, and was answered "no agent a5 in root's boot"
+  ;; every turn of its run (step 6, 2026-10-25). Its screen is answered on main as of its request.
+  (let [[main branch eid] (paged-dbs)
+        ;; main as root writes it at boot: its config on root's entity (a pass reads it, seon.task/root)
+        main (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])
+        a3 (:db/id (d/entity main [:seon.agent/key (seon.task/agent-key "b1" :a3)]))
+        before (d/db-with main [[:db/retractEntity a3]])
+        st (assoc (comp-state before branch eid) :watch #{})
+        [st1 out1] (#'p/render-proc st :from-web {:op :page :view :a3 :screen {:route [:a3 :in] :tag 9}})]
+    (is (empty? (get out1 [:a3 :in])) "not answered from the proc's older read of main")
+    (let [[st2 out2] (answer-main st1 main)
+          o (volatile! {})
+          _ (#'p/pass st2 o)
+          reply (first (concat (get out2 [:a3 :in]) (get @o [:a3 :in])))]
+      (is (= 9 (:tag reply)))
+      (is (some #{[:h1 "a3"]} (tree-seq coll? seq (:page (:r reply)))) (str "its page, not no-location: " (pr-str (:r reply)))))))
+
 (deftest a-screen-is-asked-as-a-page-and-answered-on-its-route
   ;; the agent's {:op :screen} reaches the render proc as its page's request (seon.root's :screen),
-  ;; is held until the page is whole, and is answered on the asker's route
+  ;; is held until the page is whole on main as of the request (its own read of main), and is
+  ;; answered on the asker's route
   (let [[main branch eid] (paged-dbs)
+        ;; main as root writes it at boot: its config on root's entity (a pass reads it, seon.task/root)
+        main (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])
         st (assoc (comp-state main branch eid) :watch #{})
         [st1 out1] (#'p/render-proc st :from-web {:op :page :view :a3 :screen {:route [:a3 :in] :tag 9}})
-        o (volatile! {})
-        st2 (#'p/pass st1 o)
-        reply (first (get @o [:a3 :in]))]
-    (is (contains? (:screens st1) [[:a3 :in] 9]) "held while its page is not yet whole")
+        [st2 out2] (answer-main st1 main)
+        reply (first (get out2 [:a3 :in]))]
+    (is (contains? (:screens st1) [[:a3 :in] 9]) "held while main as of the request is not read")
+    (is (empty? (get out1 [:a3 :in])))
     (is (= 9 (:tag reply)))
     (is (some #{[:h1 "a3"]} (tree-seq coll? seq (:page (:r reply)))))
     (is (empty? (:screens st2)) "answered once")
@@ -791,10 +825,11 @@
     (testing "two agents asking with the same counter are two requests, each answered on its route"
       (let [[st1 _] (#'p/render-proc st :from-web {:op :page :view :a3 :screen {:route [:a3 :in] :tag 9}})
             [st1 _] (#'p/render-proc st1 :from-web {:op :page :view :root :screen {:route [:a9 :in] :tag 9}})
-            o (volatile! {})
-            _ (#'p/pass st1 o)]
-        (is (= 2 (count (:screens st1))))
-        (is (= [9 9] [(:tag (first (get @o [:a3 :in]))) (:tag (first (get @o [:a9 :in])))]))))))
+            _ (is (= 2 (count (:screens st1))))
+            [st1 o1] (answer-main st1 main)
+            [_ o2] (answer-main st1 main)
+            replies (merge-with into o1 o2)]
+        (is (= [9 9] [(:tag (first (get replies [:a3 :in]))) (:tag (first (get replies [:a9 :in])))]))))))
 
 (deftest a-units-change-rerenders-that-unit
   (let [[main branch eid] (paged-dbs)

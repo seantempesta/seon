@@ -793,7 +793,7 @@
   problems, a branch's read error), the unit's element (opts :unit): by its own render."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [nd opts]
-  [:section {:id (:unit opts) :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
+  [:section (cond-> {:id (:unit opts) :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"} (:seon/off-screen nd) (assoc :seon/off-screen true))
    [:h2 {:class "text-2xs uppercase tracking-wider text-text-500"}
     (name (or (:seon.render/schema nd) (get-in nd [:seon.render/from :seon.render/attr]) (render/schema-of (:seon.render/value nd) nil) :value))]
    (view nd :tile)])
@@ -895,10 +895,14 @@
           changes (when branch {:against "main now: what main gained since this branch forked shows as missing here"
                                 :changes (program/divergence main branch)})
           tile (fn [k x] {:seon.render/kind :value :seon.render/value x :seon.render/schema k :seon.render/eid eid})
-          walk (update walk :seon.render/nodes into (remove nil? [(when (seq proofs) (tile :seon.render/proofs proofs))
+          ;; the proofs and the changes are the page's tiles and, for the model, the turn's own forms
+          ;; (my.task/status, my.branch/changes: seon.screen/forms), run fresh each turn: off its screen,
+          ;; so nothing is shown twice (owner, 2026-10-23)
+          off (fn [nd] (assoc nd :seon/off-screen true))
+          walk (update walk :seon.render/nodes into (remove nil? [(when (seq proofs) (off (tile :seon.render/proofs proofs)))
                                                                   (when this-run (tile :seon.render/this-run this-run))
                                                                   (when (seq cites) (tile :seon.render/cited cites))
-                                                                  (when branch (tile :seon.render/changes changes))]))]
+                                                                  (when branch (off (tile :seon.render/changes changes)))]))]
       (chat walk (assoc page :sides (vec (when root (for [nd (:seon.render/nodes (render/walk [main] root))
                                                           :when (= :seon.db/agent-fact (:seon.render/schema nd))]
                                                       {:eid (:seon.render/eid nd) :db 0}))))))

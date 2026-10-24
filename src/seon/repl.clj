@@ -402,7 +402,7 @@
   (let [cites (some->> (:prose req) (ref/references db))]
     (cond-> {:code code :text (:text r) :response (dissoc r :value :text :recorded :fns)}
       (or (contains? r :value) (:ex r))
-      (assoc :line (print/line (if (:ex r) (or (get-in r [:ex :seon.error/message]) (:ex r)) (:value r)) (cfg/value :seon.config.render/line-budget) nil))
+      (assoc :line (print/line (cond (:ex r) (or (get-in r [:ex :seon.error/message]) (:ex r)) (nil? (:value r)) "nil" :else (:value r)) (cfg/value :seon.config.render/line-budget) nil))
       (:prose req) (assoc :prose (:prose req))
       (seq cites) (assoc :cites cites)
       (:call-id req) (assoc :call-id (:call-id req) :call (:call req 0))

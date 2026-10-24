@@ -589,14 +589,14 @@
       (doseq [[k v] (:waiting st) :when (ready? st v)] (step/out! o :to-web {:op :page :k k :view v :html (page-html st v)}))
       (doseq [v (:kf-wanted st) :when (ready? st v)] (step/out! o :to-web {:op :keyframe :view v :html (page-html st v)}))
       ;; an agent's screen, answered on its asker's route (the api's request, seon.root/screen)
-      (doseq [[_ {:keys [view reply]}] (:screens st) :when (ready? st view)]
+      (doseq [[_ {:keys [view reply read?]}] (:screens st) :when (and read? (ready? st view))]
         (step/out! o (:route reply) {:tag (:tag reply) :r (screen-of st view)}))
       (-> st (assoc :index idx
                     :waiting (into {} (remove (fn [[_ v]] (ready? st v))) (:waiting st))
                     :kf-wanted (into #{} (remove #(ready? st %)) (:kf-wanted st))
-                    :screens (into {} (remove (fn [[_ {:keys [view]}]] (ready? st view))) (:screens st)))
+                    :screens (into {} (remove (fn [[_ {:keys [view read?]}]] (and read? (ready? st view)))) (:screens st)))
           ;; a view only an answered screen needed keeps nothing
-          (as-> x (reduce drop-view x (for [[_ {:keys [view]}] (:screens st) :when (and (ready? st view) (not (contains? (:watch st) view)) (not (some #{view} (vals (:waiting st)))))] view)))
+          (as-> x (reduce drop-view x (for [[_ {:keys [view read?]}] (:screens st) :when (and read? (ready? st view) (not (contains? (:watch st) view)) (not (some #{view} (vals (:waiting st)))))] view)))
           (update :passes (fnil inc 0))
           (cond-> (seq patches) (assoc :render-ms (lib/r2 ms) :patches (reduce + (map #(+ (count (:frags %)) (count (:appends %)) (count (:prepends %)) (count (:removes %))) patches))))
           (update :pass-ms #(lib/push-window % ms 200))
@@ -685,6 +685,15 @@
       ;; a watched agent's branch moved: read its branch db (its turns, evaluations and task)
       (pass (ask-branches st o) o))
     (= :main kind) (if (seon.contract/error? r) st (pass (ask-branches (main-info st (:db r)) o) o))
+    ;; main as of a screen's request (each request's own: its key is its asker's route and counter):
+    ;; the screen is answered once its page is whole on it, its view walked again on it (a page held
+    ;; from an older main read nothing the newer one wrote); a read that failed is the screen's answer
+    (and (vector? kind) (= :screen-main (first kind)))
+    (let [k (second kind) {:keys [view reply]} (get-in st [:screens k])]
+      (cond
+        (nil? view) st
+        (seon.contract/error? r) (do (step/out! o (:route reply) {:tag (:tag reply) :r r}) (update st :screens dissoc k))
+        :else (pass (ask-branches (-> (assoc-in st [:screens k :read?] true) (update :dirty (fnil conj #{}) view) (main-info (:db r))) o) o)))
     ;; an agent's branch db; a branch that is gone (merged and removed) is recorded as such
     (and (vector? kind) (= :branch (first kind)))
     (let [view (second kind) z [:branches view]
@@ -758,9 +767,14 @@
                           ;; a UI call root refused before it became a request: answered as root's are
                           :refused (web-answered st o (:tag m) (:r m))
                           ;; an agent's screen (seon.screen/show, through the api): its page's request, answered
-                          ;; on the asker's route once the page is whole
+                          ;; on the asker's route once the page is whole on main as of the request (main
+                          ;; read for it: the commits this proc takes can lag main's, and an agent admitted
+                          ;; since is then on main and not yet here)
                           :page (if (:screen m)
-                                  (ask-state (assoc-in st [:screens [(:route (:screen m)) (:tag (:screen m))]] {:view (:view m) :reply (:screen m)}) o)
+                                  (let [k [(:route (:screen m)) (:tag (:screen m))]]
+                                    (-> (assoc-in st [:screens k] {:view (:view m) :reply (:screen m)})
+                                        (ask o [:screen-main k] {:op :write :req {:op :branch-db :branch :db}})
+                                        (ask-state o)))
                                   (if (and (get-in st [:views (:view m)]) (contains? (:watch st) (:view m)))
                                   (do (step/out! o :to-web {:op :page :k (:k m) :view (:view m) :html (page-html st (:view m))}) st)
                                   (ask-state (assoc-in st [:waiting (:k m)] (:view m)) o)))

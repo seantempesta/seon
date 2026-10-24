@@ -10,9 +10,12 @@
 
 (def forms
   "The screen's forms, evaluated in order before each model request: the agent's page, as root
-  shows it (`show`; its proofs and its branch's changes are its tiles). An agent changes what it is shown by redefining this var: rewriting its own interface is an
-  eval."
-  ["(seon.screen/show)"])
+  shows it (`show`: its peers, status, plan and this run), then its task's live state run fresh
+  (my.task/status: the turn of how many, each proof's status, first failing assertion and how to
+  run it), then what its branch changes against main (my.branch/changes) (owner, 2026-10-23: the
+  turn's live state is REPL forms, run fresh each turn). An agent changes what it is shown by
+  redefining this var: rewriting its own interface is an eval."
+  ["(seon.screen/show)" "(my.task/status)" "(my.branch/changes)"])
 
 (defn show
   "The agent's screen: its page as root's render proc holds it, without its conversation (the model

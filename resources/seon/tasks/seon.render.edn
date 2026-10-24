@@ -134,4 +134,14 @@ No part needs a paid run (step 6 measures). New attributes: none."
                       seon.context-test/the-task-story-is-plan-write-set-and-proofs
                       seon.context-test/the-screen-says-what-the-run-did
                       seon.context-test/prose-references-are-parsed-once
-                      seon.context-test/the-screen-shows-what-the-prose-cites}}]
+                      seon.context-test/the-screen-shows-what-the-prose-cites}}
+ {:seon.task/name "a-late-agent-gets-its-screen"
+  :seon.task/plan "What happened (step 6 of notes/design-agent-view-2026-10-24.md, 2026-10-25): with five runs and :seon.config.agent/max-running 4, the fifth run's agent (admitted when one ended) asked for its screen every turn and was answered :seon.render/no-location, \"no agent a5 in root's boot\", for its whole run. The cause: `seon.render.proc/page-value` looks the agent up on the render proc's own read of main (:main-db), which advances one :main commit per message the proc takes (Flow reads its ins by priority, so :answers and :from-web are taken first), and lagged main by tens of transactions while agents were busy (scripted repro, max-running 1, two tasks: main t moved 2-10 per sample, the proc's 1). The fix, in `seon.render.proc`: a screen request reads main as of the request (its own [:screen-main k] read, `seon.render.proc/answered`), and the screen is answered only once its page is whole on that read; its view walks again on it. The lag itself is a separate task (pages a browser watches read the same lagging main). Reuses: the branch-db request, main-info, ready?. Deletes nothing. ~15 lines."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.render-test/an-agent-admitted-after-the-others-gets-its-screen
+                      seon.render-test/a-screen-is-asked-as-a-page-and-answered-on-its-route}}
+ {:seon.task/name "what-an-agent-types-reads-as-it-reads"
+  :seon.task/plan "Step 6's runs (2026-10-25, notes/measure/step6) read helpers by a doseq over quoted names and by #'f, and `my.agent/source-fn` answered invalid-input each time; an eval that printed and returned nil recorded :line \"\" (`seon.repl/record-details`), so its collapsed row showed nothing. Now `my.agent/named` takes a symbol or a var for source-fn, callers and callees; the source macro evaluates any form that is not a bare global name; record-details' line of a nil value is \"nil\". Reuses: the one printer, clojure.repl's interning of my.agent's source. ~20 lines."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.repl-test/an-agent-repl-answers-what-a-clojure-repl-answers
+                      seon.context-test/prose-references-are-parsed-once}}]

@@ -69,8 +69,10 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int [:set :qualified-symbol]]]}
   [n] (let [db (store-of n)
             ;; each form defines a test, so every rank's vars are read and none is a function
-            db (d/db-with db (vec (for [i (range n)] {:var/name (symbol "vc-test" (str "t" i)) :var/kind :test :var/form [:form/id (str "vf" i)]})))]
-        [db (:e (first (d/datoms db :avet :form/id "vf0"))) #{}]))
+            db (d/db-with db (vec (for [i (range n)] {:var/name (symbol "vc-test" (str "t" i)) :var/kind :test :var/form [:form/id (str "vf" i)]})))
+            q (:e (first (d/datoms db :avet :form/id "vf0")))]
+        ;; the query asks for five (its own setting, as a task's :seon.task/config is: off by default)
+        [(d/db-with db [{:db/id q :seon.config.render/similar 5}]) q #{}]))
 
 (deftest the-story-ranks-every-form-once
   ;; the owner's ruling (2026-10-24, DECISIONS "Embeddings join the context"): :similar is an

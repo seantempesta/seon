@@ -29,20 +29,28 @@
 (defn send-message "Send body to the agents tos (ids); root delivers it by id. nil." {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
   [tos body] (agent/send-message tos body))
 
+(defn named
+  "The symbol x names a definition by: x as it is, or a var's ns-qualified name (what a REPL hands
+  a function of a name when its caller passes #'f or a value of (resolve 'f))."
+  {:malli/schema [:=> [:cat [:or :symbol :seon.host/var]] :symbol]}
+  [x] (if (var? x) (symbol (str (ns-name (:ns (meta x)))) (str (:name (meta x)))) x))
+
 (defn callers
   "The program vars whose recorded definition names var sym (its :form/refs on this branch),
-  sorted; sym itself left out."
-  {:malli/schema [:=> [:cat :qualified-symbol] [:vector :qualified-symbol]]}
-  [sym] (docs/callers (agent/db) sym))
+  sorted; sym itself left out. sym is a qualified symbol or the var (named)."
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:vector :qualified-symbol]]}
+  [sym] (docs/callers (agent/db) (named sym)))
 
 (defn callees
   "The vars var sym's recorded definition names on this branch (its :form/refs: program,
-  library and clojure.core alike), sorted; sym itself left out."
-  {:malli/schema [:=> [:cat :qualified-symbol] [:vector :qualified-symbol]]}
+  library and clojure.core alike), sorted; sym itself left out. sym is a qualified symbol or
+  the var (named)."
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:vector :qualified-symbol]]}
   [sym]
-  (vec (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]]
-                             (agent/db) sym))
-                   sym))))
+  (let [sym (named sym)]
+    (vec (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]]
+                               (agent/db) sym))
+                     sym)))))
 
 (defn similar
   "What on this branch is nearest x by meaning (seon.vector/near): x a var, by its definition's
@@ -100,12 +108,13 @@
   "The source of the var sym names, or nil: clojure.repl/source-fn. The text its last definition
   in this process kept (seon.repl), else what this branch records for it, else the form at its
   :file and :line (a library's). A namespace's name answers its ns form as this branch records
-  it (its requires and aliases), which clojure.repl's does not."
-  {:malli/schema [:=> [:cat :symbol] [:maybe :string]]}
+  it (its requires and aliases), which clojure.repl's does not. sym is a symbol or the var
+  (named)."
+  {:malli/schema [:=> [:cat [:or :symbol :seon.host/var]] [:maybe :string]]}
   [sym]
-  (if-let [v (resolve sym)]
+  (if-let [v (if (var? sym) sym (resolve sym))]
     (or (:source (meta v))
-        (docs/source-of (agent/db) (symbol (str (ns-name (:ns (meta v)))) (str (:name (meta v)))))
+        (docs/source-of (agent/db) (named v))
         (file-source v))
     (when-not (namespace sym)
       (d/q '[:find ?src . :in $ ?s :where [?n :ns/name ?s] [?f :form/defines ?n] [?f :form/src ?src]] (agent/db) sym))))
@@ -143,8 +152,12 @@
            (println "Caused by:" type message)))))
 
 (defmacro source
-  "Print the recorded source of the definition named by sym (as clojure.repl/source does)."
-  [sym] `(println (or (source-fn '~sym) (not-found '~sym))))
+  "Print the recorded source of the definition named by sym (as clojure.repl/source does). A
+  name is taken as written; any other form (a quoted symbol, #'f, a local of a doseq) is
+  evaluated to the symbol or var it holds, as the call reads naturally."
+  [sym]
+  (let [x (if (and (symbol? sym) (not (contains? &env sym))) (list 'quote sym) sym)]
+    `(let [s# (named ~x)] (println (or (source-fn s#) (not-found s#))))))
 
 (defn help
   "The help page every agent reads first (seon.context/help-page), as this branch holds it

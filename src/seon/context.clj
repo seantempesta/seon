@@ -126,11 +126,14 @@
   exact: every form's vector at every dim, no coarse first pass), those in named left out, the
   first :seon.config.render/similar of them, each one line: its name and its doc's first
   sentence ({:nearest :more}, :more the forms that search further). nil when the count is 0
-  (off); a plan with no vector yet says so ({:not-embedded}), never an empty list."
+  (off, the default; a task turns it on in its :seon.task/config); a plan with no vector yet says
+  so ({:not-embedded}), never an empty list."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :int] [:set :qualified-symbol]]
                   [:maybe [:or [:map [:nearest [:vector :string]] [:more :string]] [:map [:not-embedded :string]]]]]}
   [db te named]
-  (let [k (cfg/value :seon.config.render/similar)
+  (let [;; through the one resolver: a task's own setting (its flattened :seon.task/config), else its model's, else the config's
+        t (when te (d/pull db [:seon.config.render/similar :seon.task/model] te))
+        k (cfg/value :seon.config.render/similar {:task t :model (:seon.task/model t)})
         function? #(= :fn (:var/kind (d/entity db [:var/name %])))
         ;; every vector, every dim, every rank: the exact ranking (near's shortlist and fine level
         ;; over all of them; it sorts them all anyway), walked until k functions are found, as the
