@@ -169,57 +169,6 @@
              (into {} (map (juxt :test :status)) (:proofs b)))
           "when the run failed as a whole, a written proof did not run"))))
 
-(deftest a-turn-records-its-basis-and-its-context-is-made-again-from-it
-  ;; task seon.db/the-store-grows-with-what-it-keeps (owner, 2026-10-22: store each turn's
-  ;; basis, not its context text): the text the model was sent, built as the turn loop built
-  ;; it before (current-state and messages, the first turn's text carried in the scrollback),
-  ;; equals the text seon.context/render makes again from the recorded basis on the commit it
-  ;; names, after the branch moved on (the program changed, later turns were written)
-  (ts/test-branch! (fn [_ conn] (let [_ (wiki! conn)
-        program (fn [src] [{:db/id "f" :var/name 'demo/f :var/ns "ns" :var/form "form"}
-                           {:db/id "form" :form/id (str "demo/f " src) :form/src src :form/ns "ns" :form/order 0 :form/defines ["f"]}
-                           {:db/id "ns" :ns/name 'demo}])
-        _ (d/transact conn (program "(defn f \"Doubles.\" [x] (* 2 x))"))
-        _ (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make `demo/f` triple."
-                                                   :seon.task/proofs #{'demo-test/f-test}}]))
-        observed {:results {'demo-test/f-test :fail} :test-run-errors []
-                  :reds [{:test 'demo-test/f-test :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))" :got "(= 6 4)"}]
-                  :reasons [{:reason :proof-red :symbol 'demo-test/f-test} {:reason :contract-gap :symbol 'demo/helper}]}
-        basis (fn [db n] {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4 :origin :model :observed observed})
-        record! (fn [b more] (d/transact conn [(merge {:seon.turn/id (str "demo/f#1/" (:turn b)) :seon.turn/run {:seon.run/id "demo/f#1"}
-                                                       :seon.turn/n (:turn b) :seon.turn/origin :model :seon.turn/basis b
-                                                       :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1 :seon.turn/tokens 1}
-                                                      more)]))
-        ;; turn 0: what the model was sent, the old way
-        db0 @conn
-        b0 (basis db0 0)
-        msgs0 (context/messages "H" (context/current-state db0 (task/task db0 "demo/f") (assoc observed :turn 0 :max-turns 4 :repairs [])))
-        sent0 (context/reader-text msgs0)
-        code0 "(defn f [x] (* 3 x)"
-        evals0 (context/evaluations-text [{:id 0 :tag :ret :form "(defn f [x] (* 3 x))" :printed "#'demo/f"}])
-        calls0 [{:id "call-0" :code code0 :evals evals0}]
-        _ (record! b0 {:seon.turn/reply "f triples." :seon.turn/calls calls0 :seon.turn/truncated true})
-        ;; the reply changed the program: turn 0's text must come from its own commit
-        _ (d/transact conn (program "(defn f \"Triples.\" [x] (* 3 x))"))
-        db1 @conn
-        b1 (basis db1 1)
-        {:keys [text repairs]} (reader/forgive code0)
-        sent1 (str (:content (second msgs0)) "\n\n"
-                   (:content (peek (context/messages "H" (context/current-state db1 (task/task db1 "demo/f")
-                                                                                (assoc observed :turn 1 :max-turns 4 :truncated? true :source text :repairs repairs))))))
-        _ (record! b1 {:seon.turn/reply "" :seon.turn/calls [{:id "call-1" :code "(my.turn/wait)" :evals ""}]})
-        _ (d/transact conn (program "(defn f \"Later.\" [x] x)"))
-        db @conn
-        e-of (fn [id] (d/q '[:find ?e . :in $ ?id :where [?e :seon.turn/id ?id]] db id))]
-    (is (str/includes? sent0 "Doubles.") "turn 0 read the program as it stood")
-    (is (not (str/includes? sent1 "Triples.")) "turn 1's run sections are turn 0's: the prefix stays")
-    (is (= sent0 (context/turn-text db (e-of "demo/f#1/0"))) "turn 0's text, made again from its basis")
-    (is (= sent1 (context/turn-text db (e-of "demo/f#1/1"))) "turn 1's text, its scrollback included")
-    (is (= sent1 (context/reader-text (:messages (context/render db1 b1)))) "the turn loop's own render is the same text")
-    (is (= {:text sent1 :origin :model :turn "demo/f#1/1"} (context/recorded db "demo/f#1")) "the page reads the last turn's")
-    (is (nil? (context/recorded db "c#1")) "a run that read nothing has no context")
-    (is (< (count (seon.edn/encode b1)) 600) "the basis is small: no text the db already holds")))))
-
 (deftest an-unresolved-citation-says-what-to-do
   ;; task seon.task/a-task-cites-what-it-needs: a name the plan cites that resolves to
   ;; nothing tells the agent what that means and what to do, not only that it is unresolved
@@ -597,6 +546,77 @@
   (let [db (d/db-with (db-with-program) [{:seon.message/id "m-1" :seon.message/from "owner" :seon.message/to {:seon.run/id "demo/f#1"}
                                           :seon.message/body "use demo/g, not a new helper"}])]
     (is (= [{:id "m-1" :from "owner" :body "use demo/g, not a new helper"}] (context/taken-messages db {:message-ids ["m-1"]})))))
+(defn- sent-turns
+  "A run of two model turns as seon.turn records them (owner's ruling 2026-10-24: each turn
+  records what it sent as refs, :seon.turn/sent), with the task's plan changed after turn 0 and
+  again after turn 1. Answers [db [r0 r1] [e0 e1]]: the requests' messages as sent, and the turns."
+  [conn]
+  (wiki! conn)
+  (d/transact conn (program-facts '[[demo/f "(defn f [x] x)" []]]))
+  (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f."
+                                           :seon.task/proofs #{'demo-test/f-test}}]))
+  (let [observed {:results {'demo-test/f-test :fail} :test-run-errors [] :reds [] :reasons []}
+        ev! (fn [id by code text & [more]] (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
+                                                              :seon.eval/record (merge {:code code :text text :run "demo/f#1"} more)}]))
+        turn! (fn [n screen more]
+                (let [db @conn
+                      b {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4
+                         :origin :model :observed observed :screen screen :agent "b/a1"}
+                      {:keys [messages sent]} (context/render db b)]
+                  (d/transact conn [(merge {:seon.turn/id (str "demo/f#1/" n) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/n n
+                                            :seon.turn/origin :model :seon.turn/basis b :seon.turn/sent sent :seon.turn/forms 1
+                                            :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1}
+                                           more)])
+                  messages))
+        plan! (fn [p] (d/transact conn [{:seon.task/id "demo/f" :seon.task/plan p}]))
+        _ (ev! "e1" "screen" "(my.task/status)" "{:handle result/e1, :value :red}")
+        r0 (turn! 0 ["e1"] {})
+        _ (ev! "e2" "a1" "(f 1)" "{:handle result/e2, :value 1}" {:call-id "call-0" :call 0 :prose "I call f." :reasoning "why"})
+        _ (plan! "Make f triple.")
+        _ (ev! "e3" "screen" "(my.task/status)" "{:handle result/e3, :value :green}")
+        r1 (turn! 1 ["e3"] {})
+        _ (plan! "Later.")
+        db @conn
+        e-of (fn [id] (d/q '[:find ?e . :in $ ?id :where [?e :seon.turn/id ?id]] db id))]
+    [db [r0 r1] [(e-of "demo/f#1/0") (e-of "demo/f#1/1")]]))
+
+(deftest a-turn-records-what-it-sent
+  ;; task seon.context/a-turn-records-what-it-sent (A): a turn records the records its request
+  ;; rendered, in order; read back, each by its own render as of the turn (the help page's
+  ;; section and the task as of their t), they are the messages it sent, though the task changed
+  ;; after it: nothing is built again
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[db [r0 r1] [e0 e1]] (sent-turns conn)
+            sent #(:seon.turn/sent (d/pull db [:seon.turn/sent] %))]
+        (is (= [:section :task :eval] (mapv first (sent e0))) "turn 0: the help page, the task story, the screen eval")
+        (is (= [:section :task :eval :eval] (mapv first (sent e1))) "turn 1: then its call's eval, then the screen eval")
+        (is (= (second (sent e0)) (second (sent e1))) "the task story is the run's first turn's: the same task as of the same t")
+        (is (= r0 (context/sent-messages db e0)) "turn 0's messages, read from its records")
+        (is (= r1 (context/sent-messages db e1)) "turn 1's, though the plan changed after both")
+        (is (not (str/includes? (str (context/sent-messages db e1)) "Later.")) "the task as it was sent, not as it is")))))
+
+(deftest a-turn-records-one-turns-messages
+  ;; what a turn writes is its refs, one a record it sent: the record grows with that turn's
+  ;; messages, never with their text: a few dozen bytes a ref, whatever the records hold
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[db [_ r1] [e0 e1]] (sent-turns conn)
+            sent #(:seon.turn/sent (d/pull db [:seon.turn/sent] %))
+            bytes #(count (seon.edn/encode (sent %)))]
+        (is (= (count (sent e1)) (- (count r1) (count (filter #(= "tool" (:role %)) r1)))) "one ref a record: a model eval's call and answer are one record")
+        (is (< (bytes e1) (* 60 (count (sent e1)))) (str "no text in the record: " (bytes e1) " bytes for " (count (sent e1)) " refs"))))))
+
+(deftest the-sent-records-are-the-wire-body
+  ;; the debug page shows the records a turn sent; the provider got their wire shape: the same
+  ;; body, compared as data (seon.model/request-body over the recorded and over the sent messages)
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[db [_ r1] [_ e1]] (sent-turns conn)
+            provider {:kind :openai-compat :base-url "https://api.example" :model "deepseek-flash" :api-key-env "NONE" :max-tokens 2048}
+            body #(seon.model/request-body provider {:messages % :task "demo/f" :turn 1})]
+        (is (= (body r1) (body (context/sent-messages db e1))))))))
+
 (deftest the-request-is-a-conversation-of-evals-then-the-screen
   ;; notes/design-agent-view-2026-10-24.md §1: each turn's prose and eval calls with their
   ;; responses as tool messages (read from the eval records), the reasoning as returned, then

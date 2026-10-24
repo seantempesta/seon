@@ -389,6 +389,9 @@
                    [:agent {:optional true} :string]]
  ;; a model turn's eval calls, each its id, its code and what it evaluated to as the later
  ;; turns' tool messages show it (seon.context/evaluations-text: folded, within the evals budget)
+ ;; what a model turn's request sent, the records it rendered in order (seon.context/request, sent-messages):
+ ;; the help page's section and the task, each as of a t; an eval or message by id; the history note's count
+ :seon.turn/sent [:vector {:seon.db/data true} [:or [:tuple [:enum :section :task] :int :int] [:tuple [:enum :eval :message] :string] [:tuple [:= :history] :int]]]
  :seon.turn/calls [:vector {:seon.db/data true} [:map [:id :string] [:code :string]
                                                     ;; the id of the call's eval (:seon.eval/id), whose record holds its response
                                                     [:eval {:optional true} :string]]]
@@ -413,7 +416,7 @@
                           [:seon.turn/cache-miss-tokens {:optional true} :seon.turn/cache-miss-tokens]
                           [:seon.turn/truncated {:optional true} :seon.turn/truncated]
                           [:seon.turn/origin {:optional true} :seon.turn/origin] [:seon.turn/basis {:optional true} :seon.turn/basis]
-                          [:seon.turn/calls {:optional true} :seon.turn/calls]
+                          [:seon.turn/calls {:optional true} :seon.turn/calls] [:seon.turn/sent {:optional true} :seon.turn/sent]
                           [:seon.turn/finish {:optional true} :seon.turn/finish] [:seon.turn/model {:optional true} :seon.turn/model]
                           [:seon.turn/reasoning {:optional true} :seon.turn/reasoning] [:seon.turn/split {:optional true} :seon.turn/split]]
  :seon.end/end-fact [:map {:seon.db/attributes true}

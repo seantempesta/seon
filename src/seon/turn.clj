@@ -202,7 +202,7 @@
         screen (vec (keep #(:record (evaluated! % {:origin :screen})) screen/forms))
         basis (cond-> (assoc (basis! (:seon.task/id t) run turn max-turns :model ob true) :agent (:key @agent/state))
                 (seq screen) (assoc :screen screen))
-        {:keys [block messages]} (context/render (agent/db) basis)
+        {:keys [block messages sent]} (context/render (agent/db) basis)
         context-ms (long (profile/ms-since t0))
         t1 (profile/now-ns)
         r (agent/fx! :model (cond-> {:messages messages :task (:seon.task/id t) :turn turn}
@@ -254,6 +254,9 @@
                                    :seon.turn/errors (count (filter :ex rs))
                                    :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))
                                    :seon.turn/ms (+ model-ms eval-ms)})
+                            ;; what the request sent, the records in order, as context/render answered them before
+                            ;; it went (seon.context/sent-messages reads them back; nothing is built again)
+                            sent (assoc :seon.turn/sent sent)
                             (:truncated? c) (assoc :seon.turn/truncated true)
                             (:finish-reason c) (assoc :seon.turn/finish (:finish-reason c))
                             (:model c) (assoc :seon.turn/model (:model c))
