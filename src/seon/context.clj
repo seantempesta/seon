@@ -280,9 +280,12 @@
   screen's) is one user message {:by :code :response}, the response spliced as printed."
   {:malli/schema [:=> [:cat :map :any] [:vector :seon.model/message]]}
   [{:seon.eval/keys [by record]} _]
-  (let [{:keys [code text prose reasoning call-id call]} record]
+  (let [{:keys [code text prose content call-prose reasoning call-id call]} record]
     (if call-id
-      [(cond-> {:role "assistant" :content (or prose "") :tool-calls [{:id call-id :code code}]}
+      ;; as the model sent it: the reply's text, and the call's own prose argument when it gave one
+      ;; (a record with neither, from before the prose argument, replays its prose as the text)
+      [(cond-> {:role "assistant" :content (or content (when-not call-prose prose) "")
+                :tool-calls [(cond-> {:id call-id :code code} call-prose (assoc :prose call-prose))]}
          reasoning (assoc :reasoning reasoning)
          call (assoc :call call))
        {:role "tool" :tool-call-id call-id :content text}]

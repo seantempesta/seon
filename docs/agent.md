@@ -8,7 +8,8 @@ This page is what every agent reads first, and `(my.agent/help)` lists its secti
 
 You have one tool, eval: call it with Clojure forms, and you see what the REPL answered before your next call.
 
-- Evaluate a little, read the answer, then take the next step. Every reply's text, before its call, says in a sentence or two what the last response told you and what you expect this call to show: that is your thinking, kept beside the call, and the owner reads it. Text outside an eval call is never evaluated.
+- Evaluate a little, read the answer, then take the next step. Each eval call takes ``prose`` first, then ``code``: in the prose, say what you are doing and what you expect to see. The user sees all your prose, rendered as markdown.
+- A reference in your prose is looked up and shown on your screen at your next turn: a var written as ``ns/name`` shows its source and docstring, a task (``ns/task-name``) its plan and proofs, a wiki section (``docs/page.md#section``) its text, as docs/references.md reads them. Name what you want to see.
 - A call's forms run in order, as ``load-string`` runs them, and stop at the first exception. Its response is ``{:handle :value :out :err :ex}``: the last form's value, what the forms wrote, the exception that stopped them; each key only when present. Its handle, ``result/e12``, holds it, so ``(:value result/e12)`` is that value again.
 - A reply with no eval call is a message to the user: your turn ends there, and the run waits for the user's answer. Finishing is an eval, not a reply.
 - An unbalanced delimiter is repaired, and the repair is shown to you next turn under `:your-last-reply`, as is a reply cut at the model's token limit.

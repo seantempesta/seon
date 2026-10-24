@@ -170,7 +170,7 @@
                                           {:role "tool" :tool-call-id "c1" :content "{:handle result/e1, :value 1}"}]
                                :task "t/x" :turn 1})]
     (is (= "auto" (:tool_choice b)))
-    (is (= [:code] (keys (get-in b [:tools 0 :function :parameters :properties]))) "code only: prose is the reply's text")
+    (is (= [:prose :code] (keys (get-in b [:tools 0 :function :parameters :properties]))) "prose first, then code: the model states its intent before the code")
     (is (not (str/includes? (pr-str (:tools b)) ";;")) "no ;; in the tool")
     (is (= {:role "assistant" :content "I read f." :reasoning_content "r"
             :tool_calls [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"code\":\"(f)\"}"}}]}

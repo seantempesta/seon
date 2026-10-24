@@ -207,12 +207,17 @@
             _ (intr/clear-pending!)
             ;; each eval call through the one REPL path, in order; its response is the call's
             ;; result; the reply's prose is the first call's
-            calls (vec (map-indexed (fn [i {:keys [id code]}]
-                                      {:id id :code code
-                                       :response (repl/eval-string (:text (reader/forgive code))
-                                                                   (cond-> {:origin :model :call-id id :call i}
-                                                                     (and (zero? i) (not (str/blank? (:text c)))) (assoc :prose (:text c))
-                                                                     (and (zero? i) (:reasoning c)) (assoc :reasoning (:reasoning c))))})
+            ;; each eval's prose: the reply's text (on its first call) then the call's own, as the user reads it
+            calls (vec (map-indexed (fn [i {:keys [id code prose]}]
+                                      (let [content (when (and (zero? i) (not (str/blank? (:text c)))) (:text c))
+                                            shown (not-empty (str/join "\n\n" (remove str/blank? [content prose])))]
+                                        {:id id :code code :prose shown
+                                         :response (repl/eval-string (:text (reader/forgive code))
+                                                                     (cond-> {:origin :model :call-id id :call i}
+                                                                       shown (assoc :prose shown)
+                                                                       content (assoc :content content)
+                                                                       (not (str/blank? prose)) (assoc :call-prose prose)
+                                                                       (and (zero? i) (:reasoning c)) (assoc :reasoning (:reasoning c))))}))
                                     (:tool-calls c)))
             rs (mapv :response calls)
             eval-ms (long (profile/ms-since t2))
@@ -223,7 +228,9 @@
         ;; waits for the user (the design's tool_choice auto)
         ;; (a blank or cut reply is no message: the next turn reads the same state)
         (when (and (empty? calls) (not (str/blank? (:text c))) (not (:truncated? c))) (request-stop! :waiting (:text c)))
-        (swap! agent/state assoc-in [:turn :last] (cond-> {:seon.turn/calls (mapv #(select-keys % [:id :code]) calls)} (:truncated? c) (assoc :seon.turn/truncated true)))
+        (swap! agent/state assoc-in [:turn :last] (cond-> {:seon.turn/calls (mapv #(select-keys % [:id :code]) calls)
+                                                           :prose (str/join "\n\n" (keep :prose calls))}
+                                                    (:truncated? c) (assoc :seon.turn/truncated true)))
         ;; what the model read, as its basis (seon.context/render makes the text from it), what
         ;; it answered and how it stopped, which evals its calls are, and where the turn's time
         ;; went as this agent saw it

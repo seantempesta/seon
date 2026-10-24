@@ -48,10 +48,10 @@
     (if-not f
       (contract/error :seon.model/no-script 'seon.model/complete
                       (str "the scripted provider's " script " is not on this process's source roots") {:script script})
-      ;; a script answers its call's code, or the code and the prose beside it (the reply's text)
+      ;; a script answers its call's code, or the code and the prose the eval tool takes
       (let [out (f request)
             {text :code thinking :thinking} (if (string? out) {:code out} out)]
-        {:text (or thinking "") :tool-calls [{:id (str "call-" (:turn request)) :code (:text (reader/forgive text))}]
+        {:text "" :tool-calls [(cond-> {:id (str "call-" (:turn request)) :code (:text (reader/forgive text))} thinking (assoc :prose thinking))]
          :prompt-tokens (reduce + (map (comp select/estimate :content) (:messages request)))
          :completion-tokens (select/estimate text) :estimated true :ms (profile/ms-since t0)}))))
 
@@ -91,9 +91,11 @@
   {:type "function"
    :function {:name "eval"
               :description "Evaluate Clojure forms at your REPL, in order. The response is {:handle :value :out :err :ex}: the last form's value, what the forms wrote, and the exception that stopped them; result/e<n>, its handle, holds it."
+              ;; prose first: a model fills arguments in order, so it says what it expects before the code
               :parameters {:type "object"
-                           :properties {:code {:type "string" :description "Clojure forms"}}
-                           :required ["code"]}}})
+                           :properties (array-map :prose {:type "string" :description "What you are doing and what you expect to see, in markdown; the user reads it."}
+                                                  :code {:type "string" :description "Clojure forms"})
+                           :required ["prose" "code"]}}})
 
 (defn- wire-message
   "A conversation message as the chat API reads it: an assistant's eval calls as tool_calls
@@ -104,8 +106,9 @@
   [{:keys [role content tool-calls tool-call-id reasoning]}]
   (cond-> {:role role :content content}
     reasoning (assoc :reasoning_content reasoning)
-    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code]}]
-                                                {:id id :type "function" :function {:name "eval" :arguments (json/write-str {:code code})}})
+    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code prose]}]
+                                                ;; the call's arguments as it sent them, prose first
+                                                {:id id :type "function" :function {:name "eval" :arguments (json/write-str (if prose (array-map :prose prose :code code) {:code code}))}})
                                               tool-calls))
     tool-call-id (assoc :tool_call_id tool-call-id)))
 
@@ -141,13 +144,15 @@
     reasoning-effort (assoc :reasoning_effort (name reasoning-effort))))
 
 (defn- call-code
-  "An eval call's code: the `code` of its JSON arguments, or the arguments as they came when
-  they are not that JSON (a reply cut mid-call): the reader shows what they hold."
-  {:malli/schema [:=> [:cat [:maybe :string]] [:map [:code :string]]]}
+  "An eval call's code and prose: the `code` and `prose` of its JSON arguments, or the arguments
+  as they came when they are not that JSON (a reply cut mid-call): the reader shows what they hold."
+  {:malli/schema [:=> [:cat [:maybe :string]] [:map [:code :string] [:prose {:optional true} :string]]]}
   [arguments]
   (let [a (or arguments "")
         j (try (json/read-str a) (catch Throwable _ nil))]
-    {:code (if (and (map? j) (string? (get j "code"))) (get j "code") a)}))
+    (if (and (map? j) (string? (get j "code")))
+      (cond-> {:code (get j "code")} (string? (get j "prose")) (assoc :prose (get j "prose")))
+      {:code a})))
 
 (defn reply-of
   "A 200 reply (its chat-completion JSON as data) as the completion: its text, its eval calls

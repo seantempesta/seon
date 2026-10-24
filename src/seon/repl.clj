@@ -404,6 +404,8 @@
                                                    (:prose req) (assoc :prose (:prose req))
                                                    (:call-id req) (assoc :call-id (:call-id req) :call (:call req 0))
                                                    (:reasoning req) (assoc :reasoning (:reasoning req))
+                                                   (:content req) (assoc :content (:content req))
+                                                   (:call-prose req) (assoc :call-prose (:call-prose req))
                                                    (get-in @agent/state [:turn :run]) (assoc :run (get-in @agent/state [:turn :run]))
                                                    (seq (:fns r)) (assoc :fns (:fns r))
                                                    (seq (:recorded r)) (assoc :recorded (:recorded r)))
