@@ -128,6 +128,21 @@
         (is (< (:exponent r) (:allowed r)))))
     (is (nil? (cost/growth e [(first (rows e (fn [n] {:bytes (* 90.0 n)})))] :bytes)) "one size has no growth")))
 
+(deftest one-timer-chunk-is-not-a-red-and-a-real-regression-is
+  ;; task seon.cost/ticks-are-exact: one measure of a call's ticks may read one 1,000-tick timer
+  ;; chunk more than another on the same input (:seon.config.proofs/tick-quantum)
+  (let [q (double (seon.config/value :seon.config.proofs/tick-quantum))
+        e (assoc linear :per-n {:ticks 100.0} :fixed {} :sizes [100 1000 10000])
+        x (fn [n] (:ticks (cost/expected e cost/units n)))
+        at (fn [f] (rows e (fn [n] {:ticks (f n)})))
+        bound (fn [n] (* (cost/slack :ticks) (x n)))]
+    (is (:ok? (cost/judge e (at #(if (= % 1000) (+ (bound %) q -1.0) (x %)))))
+        "a size over its bound by less than one chunk is not over (red without the quantum)")
+    (is (not (:ok? (cost/judge e (at #(if (= % 1000) (+ (bound %) q 1.0) (x %))))))
+        "past the bound by more than one chunk it is over")
+    (is (not (:ok? (cost/judge e (at #(* 2.0 (bound %)))))) "every size twice its bound is red")
+    (is (seq (:steeper (cost/judge e (at #(* 0.5 (x %) (/ % 100.0)))))) "a second pass, quadratic in n, is still steeper")))
+
 (deftest n-log-n-under-a-linear-estimate-is-not-steeper
   (let [e (assoc linear :per-n {:ns 1000.0} :fixed {})]
     (is (empty? (:steeper (cost/judge e (rows e (fn [n] {:ns (cost/work :n-log-n n)}))))))))

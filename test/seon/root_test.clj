@@ -26,6 +26,17 @@
     (is (= [{} {} {}] (:running res)))
     (is (= [{} {} {}] (:stopped res)))))
 
+(deftest the-sweeper-pool-is-fixed-before-anything-collects
+  ;; task seon.root/the-sweeper-pool-is-fixed-before-anything-collects: six threads allocate through 30
+  ;; collections in a fresh binary; Chez starts a sweeper per waiting thread and never stops one, so a
+  ;; pool not fixed first ends at 6 (measured) and root-threads-are-what-root-declares reads whatever
+  ;; its boot happened to start. seon.main/-main fixes the pool at 0 before anything runs: 0 sweepers.
+  (let [{:keys [exit out err]} (ts/binary-sh "./seon" "sweepers-held" :dir "target")
+        res (edn/read-string (last (str/split-lines out)))]
+    (is (= 0 exit) (str out err))
+    (is (<= 30 (:collections res)) "the workers collect on until joined: at least the 30 waited for")
+    (is (= 0 (:sweepers res)))))
+
 (deftest a-root-binary-requires-a-library-it-did-not-compile
   ;; task jolt.ns/a-built-binary-requires-a-stdlib-namespace-it-did-not-compile: a root
   ;; importing src and test runs each test file's ns form, and seon.print-test's requires

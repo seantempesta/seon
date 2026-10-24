@@ -13,9 +13,43 @@ OUTER=${OUTER:-$HOME/src/seon-jolt}
 BR=${BRANCH:-main}
 REHEARSE=${REHEARSE:-}
 
+sync_old() {   # in $NEW: the old repo's main fast-forwarded here, every unmerged jolt/* and claude/* branch of it fetched (fast-forward only: a branch that diverged stops the script), and nothing missed
+  git fetch -q $OLD "refs/heads/$BR" && git merge --ff-only -q FETCH_HEAD
+  git submodule update --init --recursive -q
+  for b in $(git -C $OLD branch --no-merged $BR --format='%(refname:short)' --list 'jolt/*' 'claude/*' | grep -vx 'jolt/merges'); do
+    git fetch -q $OLD "refs/heads/${b}:refs/heads/${b}"
+  done
+  git -C $OLD for-each-ref --format='%(refname:short) %(objectname)' refs/heads/jolt refs/heads/claude | while read b sha; do
+    [ "$b" = jolt/merges ] || git merge-base --is-ancestor $sha $BR || [ "$(git rev-parse -q --verify $b)" = "$sha" ] || { echo "NOT FETCHED $b"; exit 1; }; done
+  [ "$(git rev-parse $BR)" = "$(git -C $OLD rev-parse $BR)" ] || { echo "main differs: here $(git rev-parse --short $BR), old $(git -C $OLD rev-parse --short $BR)"; exit 1; }
+}
+join_v1() {   # in $NEW, main checked out: Seon v1's history (read only) joins as the second parent of ONE merge commit that keeps next's tree
+  V1=${V1:-$HOME/src/seon}
+  git fetch -q --no-tags --recurse-submodules=no $V1 refs/heads/main:refs/heads/v1-main        # reads $V1; nothing is written there, nothing is pushed anywhere
+  git tag v1-final v1-main
+  tree=$(git rev-parse $BR^{tree}); next_tip=$(git rev-parse $BR)
+  git merge -q --allow-unrelated-histories -s ours v1-main -m "Seon on Jolt replaces Seon v1
+
+This repository continues Seon v1 (seantempesta/seon, $(git rev-list --count v1-main) commits, tagged v1-final): the second parent is v1's main, the first is the Jolt rewrite's, so git log holds both histories. The tree is the rewrite's alone (the merge is -s ours): v1's files leave in this commit and stay readable in history (git show v1-final:PATH). The rewrite is smaller, faster and more certain than v1, and every v1 capability it lacks is named in BAGGAGE.md; the prototype's history before it is the history/* tags."
+  [ "$(git rev-parse $BR^{tree})" = "$tree" ] || { echo "join_v1: the tree changed"; exit 1; }
+  [ "$(git rev-parse $BR^1)" = "$next_tip" ] && [ "$(git rev-parse $BR^2)" = "$(git rev-parse v1-main)" ] || { echo "join_v1: the parents are not next's main then v1's main"; exit 1; }
+  [ "$(git rev-list --first-parent --count $BR)" = "$(( $(git rev-list --first-parent --count $next_tip) + 1 ))" ] || { echo "join_v1: first-parent history is not next's plus the merge"; exit 1; }
+  git merge-base --is-ancestor v1-final $BR
+  echo "join_v1 ok: $BR $(git rev-parse --short $BR) = next's tree, parents next $(git rev-parse --short $next_tip) and v1 $(git rev-parse --short v1-main); $(git rev-list --count $BR) commits"
+}
+r8() {
+  cd "$NEW"
+  ### R8 The standing root, on a store it makes itself
+  bin/worktree merges                                          # .worktrees/merges, on jolt/merges from main
+  bin/root start
+  bin/root status                                              # up, on 7888 / 7777
+  echo "R8 ok"
+}
+# R8 starts a root on 7888/7777, the old root's ports: GO_R8=1 runs it alone, after root has stopped the old root (bin/root stop in the old tree)
+if [ -n "${GO_R8:-}" ]; then r8; exit 0; fi
+
 ### D (a precondition of R0; check first: `git -C $OLD tag -l 'history/*' | wc -l` is 0 until it has run, 2026-10-23)
-# D1 root commits the outer repo's pending work: the staged renames, RESUME, DECISIONS (history-bundles/uncommitted/ holds copies made by old-cleanup)
-[ -n "$REHEARSE" ] || [ -z "$(git -C $OUTER status --porcelain)" ] || { git -C $OUTER add -A && git -C $OUTER commit -q -m "Checkpoint before the cutover"; }
+# D1 (none: the outer repo's committed state is the history; its uncommitted changes are 3070 tracked files deleted on disk by old-cleanup, which the tag keeps. `git add -A` here once swept 81k untracked test-results files into a commit: nothing is committed in the outer repo)
 # D2 the outer repo's history as one tag, then the nested repos from the bundles old-cleanup made (the Chez, Jolt, Datahike, konserve and
 #    persistent-sorted-set bundles are fork-family: they went to their modules as attic/* in step B, not here)
 git -C $OLD rev-parse -q --verify refs/tags/history/prototype >/dev/null || git -C $OLD fetch --no-tags $OUTER refs/heads/main:refs/tags/history/prototype
@@ -49,22 +83,17 @@ dirty=$(git -C $OLD worktree list --porcelain | awk '/^worktree /{print $2}' | w
 echo "R0 ok: preconditions hold, every pin is on GitHub, no worktree is dirty"
 
 ### R1 The clone, with its submodules from GitHub (the tags, the history/prototype history among them, come with it)
-git clone --recurse-submodules $OLD $NEW
+git clone --no-local --recurse-submodules $OLD $NEW   # --no-local: only the objects the old repo's refs reach are copied, not its unreachable ones
 cd $NEW
 [ -z "$(git submodule status | grep -v '^ ')" ]              # every submodule at its pin
 [ "$(git rev-parse HEAD)" = "$(git -C $OLD rev-parse $BR)" ]
 echo "R1 ok: $(git rev-parse --short HEAD), $(git tag | wc -l) tags"
 
 ### R2 The unmerged branches of the old repo, as local branches here (not jolt/merges: the new root starts that from main)
-# every branch of the old repo main does not contain, jolt/* and claude/* (the sessions' work), as a local branch of the same name; the list is kept
-for b in $(git -C $OLD branch --no-merged $BR --format='%(refname:short)' --list 'jolt/*' 'claude/*' | grep -vx 'jolt/merges'); do
-  git fetch -q $OLD "refs/heads/$b:refs/heads/$b"
-  echo "$b $(git rev-parse --short $b) ahead $(git rev-list --count $BR..$b)" >> fetched-branches.txt
-done
-# nothing missed: every unmerged tip of the old repo is a tip here
-git -C $OLD for-each-ref --format='%(refname:short) %(objectname)' refs/heads/jolt refs/heads/claude | while read b sha; do
-  [ "$b" = jolt/merges ] || git merge-base --is-ancestor $sha $BR || [ "$(git rev-parse -q --verify $b)" = "$sha" ] || echo "NOT FETCHED $b"; done
+sync_old     # the function defined at the top; the list of what it fetched:
+git for-each-ref --format='%(refname:short)' refs/heads/jolt refs/heads/claude | while read b; do [ "$b" = jolt/merges ] || git merge-base --is-ancestor $b $BR || echo "$b $(git rev-parse --short $b) ahead $(git rev-list --count $BR..$b)"; done > fetched-branches.txt
 git remote remove origin                                     # nothing to fetch from or push to by accident
+echo "FREEZE MAY END: the clone and the fetch are done; main can merge in the old repo again (R7b catches up)"
 echo "R2 ok: $(git branch --list 'jolt/*' 'claude/*' | wc -l) branches, listed in fetched-branches.txt"
 
 ### R2b Each live session's new worktree path (print only; sessions move after R8, each running the one command in the right column)
@@ -97,7 +126,8 @@ echo "R3 ok: config/local.edn"
 # REHEARSE=1 stops here after the grep that must find nothing (the build, prove and full run are the long parts)
 if [ -n "$REHEARSE" ]; then
   git grep -nE 'seon-jolt|/Users/' -- . ':!notes' ':!reference-code' && { echo "R6 FAILED"; exit 1; }
-  echo "REHEARSAL ok through R3 and the R6 grep"; exit 0
+  join_v1
+  echo "REHEARSAL ok through R3, the R6 grep and the v1 join"; exit 0
 fi
 
 ### R4 The build, from the sources only (target/ is not carried over; `cp -cR $OLD/target` would be the shortcut, but this is the proof that the repo builds by itself)
@@ -111,15 +141,21 @@ nice -n 15 bin/prove
 
 ### R6 Nothing refers to the old folder or to an absolute path (notes/ are dated records and reference-code is other people's code)
 if git grep -nE 'seon-jolt|/Users/' -- . ':!notes' ':!reference-code'; then echo "R6 FAILED: the lines above"; exit 1; fi
-if git grep -nE '(^|[^.[:alnum:]/])\.\./' -- . ':!notes' ':!reference-code' | grep -vE '\]\(\.\./|#include "(\.\./)+resources|dirname "\$0"\)/\.\.|\)/\.\.\)|\.\./\.\.\)'; then echo "R6 FAILED: a path leaves the root"; exit 1; fi
+if git grep -nE '(^|[^.[:alnum:]/])\.\./' -- . ':!notes' ':!reference-code' | grep -vE '\]\(\.\./|#include "(\.\./)+resources|dirname "\$0"\)/\.\.|\)/\.\.\)|\.\./\.\.\)|@source "(\.\./)+src|(\.\./){3}'; then echo "R6 FAILED: a path leaves the root"; exit 1; fi
 echo "R6 ok: nothing outside the root is named ($(git grep -lE 'seon-jolt|/Users/' -- notes | wc -l) dated notes still name the old paths as they were)"
 
 ### R7 The full run, once (about 10 minutes, niced; AGENTS section 3)
 nice -n 15 bin/test --all
 nice -n 15 bin/check 100
 
-### R8 The standing root, on a store it makes itself
-bin/worktree merges                                          # .worktrees/merges, on jolt/merges from main
-bin/root start
-bin/root status                                              # up, on 7888 / 7777
-echo "R8 ok"
+### R7b Catch up: main and every live branch moved in the old repo while R4-R7 ran; fast-forward here, confirm main matches, build and prove what moved (results are reused by digest), grep again
+sync_old
+nice -n 15 bin/build > /dev/null
+nice -n 15 bin/prove
+if git grep -nE 'seon-jolt|/Users/' -- . ':!notes' ':!reference-code'; then echo "R7b FAILED: the lines above"; exit 1; fi
+echo "R7b ok: main $(git rev-parse --short $BR) here and in the old repo"
+
+### R7c v1's history joins (after the catch-up: main here is no longer a fast-forward of the old repo's)
+join_v1
+
+if [ -z "${GO_R8:-}" ]; then echo "R4-R7b ok. Stopped before R8: stop the old root, then: GO_R8=1 NEW=$NEW zsh $0"; exit 0; fi

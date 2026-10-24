@@ -95,6 +95,12 @@
   and bin/root run the binary in target/)."
   {:malli/schema [:=> [:cat [:* :string]] :any]}
   [& args]
+  ;; first of all: Chez starts a GC sweeper per thread it finds waiting in a collection and never stops one,
+  ;; so a pool left unfixed is as big as the busiest collection before root fixes it (seon.root/start!,
+  ;; after the fork server), a number that follows timing. Fixed at 0 now (the first act of -main; a collection while
+  ;; this namespace loads is earlier, and seon.root-test/the-sweeper-pool-is-fixed-before-anything-collects is the proof it starts none),
+  ;; nothing starts before then.
+  (lib/gc-sweepers! 0)
   (case (first (seon.config/without-overrides args))
     "root" (root-serve)
     "ports" (ports)

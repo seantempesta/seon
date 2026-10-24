@@ -9,7 +9,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.contract :refer [defn defn-]] [seon.ref :as ref] [seon.source :as source] [seon.task :as task] [seon.db :as pdb]
             [datahike.api :as d] [clojure.string :as str] [clojure.java.io :as io]
-            [seon.print.select :as select] [seon.config :as cfg]))
+            [seon.print.select :as select] [seon.config :as cfg] [seon.lib :as lib]))
 
 ;; ---- one page, parsed into sections ----------------------------------------------------
 
@@ -220,10 +220,7 @@
   relative to the checkout (docs/flow.md)."
   {:malli/schema [:=> [:cat :string :string] [:map-of :string :string]]}
   [checkout dir]
-  (into (sorted-map)
-        (for [f (sort-by #(.getName %) (or (seq (.listFiles (io/file checkout dir))) []))
-              :let [n (.getName f)] :when (.endsWith n ".md")]
-          [(str dir "/" n) (slurp f)])))
+  (into (sorted-map) (for [[n text] (lib/dir-texts (str checkout "/" dir) ".md")] [(str dir "/" n) text])))
 
 (defn load-dir-tx
   "The one load of the wiki under dir of the checkout onto db: load-tx over its pages (an

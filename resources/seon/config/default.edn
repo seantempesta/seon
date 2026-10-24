@@ -67,7 +67,8 @@
  ;; log of commits a promoted standby is sent. Provenance: f2-final.
  :seon.config.root/standby-every 256
  ;; Unit: threads, Chez's parallel-collector sweepers in root, fixed at boot right after the
- ;; fork server is forked (seon.lib/gc-sweepers!). 0: root collects on the thread that triggers
+ ;; fork server is forked (seon.lib/gc-sweepers!; seon.main/-main fixed the pool at 0 before that, so the
+ ;; fork server never has one). 0: root collects on the thread that triggers
  ;; it. Provenance: session THREADS, 2026-10-21: unfixed, Chez kept one per thread a collection
  ;; found waiting, so root's count drifted with load (0, 5, 15 across identical runs); A/B at
  ;; 0/2/4/8 gave the same GC real time, GC CPU rising with n, threads 37/39/41/45. At the bound: none.
@@ -255,6 +256,16 @@
  :seon.config.merge/max-merge-turns 2
 
 
+ ;; ==== the build ==============================================================================
+ ;; Unit: an EDN map, as text: Jolt's compile options for everything a Seon process compiles (its
+ ;; build, the test runner, root's and agents' evals). bin/env exports it as JOLT_COMPILER_OPTIONS,
+ ;; which Jolt reads into *compiler-options*' root at start (Jolt jolt/image-fn-forms-opt-in).
+ ;; {:image-fn-forms false}: Seon writes no state image, so its fn literals register no source for
+ ;; one, a third less allocation a compile (task jolt.backend/image-registration-is-opt-in;
+ ;; measured 2026-10-23). Read by bin/env from this line, so it stays one line of text. At the
+ ;; bound: none; a value that is no EDN map stops every Jolt process at start, naming it.
+ :seon.config.build/jolt-compiler-options "{:image-fn-forms false}"
+
  ;; ==== Seon's own source ======================================================================
 
  ;; Unit: path. The repository whose source is the program (session LOOP, resources/seon/tasks/
@@ -367,6 +378,15 @@
  ;; bin/test --all sets SEON_COST_MAX_N=100000, so the full run measures each proof as written.
  ;; At the bound: the proof measures no size past this but its two smallest.
  :seon.config.proofs/cost-max-n #long #or [#env SEON_COST_MAX_N 1000]
+ ;; Unit: engine ticks. What one measure of a call's ticks may be off by, whatever the load: Chez
+ ;; feeds the timer in chunks of 1,000 ticks, and some calls are charged one whole chunk more
+ ;; than others on the same input, plus up to ~50 ticks. Provenance: worktree session store,
+ ;; 2026-10-23, task seon.cost/ticks-are-exact: 40 calls of d/db-with on one pinned input read
+ ;; 407,097 + 0..46 on 17 and + 1,041..1,048 on 23, with no collection in any of them; the
+ ;; chunk's cause in Chez is open on that task. At the bound: seon.cost/judge takes this off a
+ ;; size's ticks before judging it over its estimate, and against the growth before fitting it
+ ;; (the smallest size's up, the others' down), so one stray chunk is never a red.
+ :seon.config.proofs/tick-quantum #long 1050
  ;; Unit: seeds (a count). How many seeds a randomized property test draws in this run, each
  ;; from its own test-seed (seon.proofs/test-seed) and the next ones after it. Provenance: root,
  ;; 2026-10-23 (notes/test-time-2026-10-23.md: r3.inc-test's 5 seeds x 150 steps took 47 s, the

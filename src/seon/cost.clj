@@ -27,7 +27,7 @@
   contracted functions (seon.profile) are exact, so they are judged tightly; wall ns is the
   minimum over repeats, judged at 3x (the machine is shared). It stops at the first size
   over its estimate, so a quadratic body under a linear estimate costs one size too many,
-  not hours. `judge` is pure: over (a size above slack x estimate), steeper (a dimension
+  not hours. `judge` is a function of its rows, its estimate and the config (the tick quantum): over (a size above slack x estimate), steeper (a dimension
   grew faster than :growth allows over the sizes: the extra pass, the scan inside a loop),
   under (a third of the estimate or less at the largest size: the estimate is loose, a
   finding, not red), unmeasured (a stated dimension with nothing measured)."
@@ -163,14 +163,26 @@
   {:malli/schema [:=> [:cat :seon.cost/estimate [:vector :seon.cost/row]] :seon.cost/verdict]}
   [e rows]
   (let [dims (into #{} (mapcat (comp keys :expected)) rows)
+        ;; one measure of ticks may be off by a timer chunk (:seon.config.proofs/tick-quantum, task
+        ;; seon.cost/ticks-are-exact): taken off a size before it is judged over, and off every size
+        ;; but the smallest before growth is fitted (one chunk, never more; a measure under it is
+        ;; left as it is, so no point is dropped from the fit)
+        quantum {:ticks (double (config/value :seon.config.proofs/tick-quantum))}
         ratio (fn [{:keys [measured expected]} d]
                 (let [m (get measured d) x (get expected d)]
                   (when (and (some? m) (some? x)) (if (pos? x) (/ (double m) x) (if (pos? m) Double/POSITIVE_INFINITY 1.0)))))
+        less-quantum (fn [m d] (let [q (get quantum d 0.0)] (if (> m q) (- m q) m)))
+        allowed-ratio (fn [{:keys [measured] :as r} d]
+                        (ratio (cond-> r (get measured d) (update-in [:measured d] #(less-quantum % d))) d))
         over (vec (for [r rows d dimensions :when (dims d)
-                        :let [q (ratio r d)] :when (and q (> q (slack d)))]
+                        :let [q (ratio r d)] :when (and q (> (allowed-ratio r d) (slack d)))]
                     {:dim d :n (:n r) :ratio q}))
+        toward-flat (fn [d] (let [first-n (:n (first (filter #(get-in % [:measured d]) rows)))]
+                              (mapv (fn [r] (cond-> r (and (get-in r [:measured d]) (not= first-n (:n r)))
+                                              (update-in [:measured d] #(less-quantum % d))))
+                                    rows)))
         steeper (vec (for [d dimensions :when (dims d)
-                           :let [{:keys [exponent allowed]} (growth e rows d)]
+                           :let [{:keys [exponent allowed]} (growth e (toward-flat d) d)]
                            :when (and exponent (> exponent allowed))]
                        {:dim d :exponent exponent :allowed allowed}))
         largest (peek rows)

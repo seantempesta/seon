@@ -14,10 +14,11 @@ Root's procs are declared as data in `resources/seon/system.edn` and started all
 | `:fork-server` | `seon.fork-server/fork-server-proc` | the fork server's command pipe, its events, its standby ([processes](processes.md#the-fork-server)) |
 | `:reconciler` | `seon.reconcile/reconciler-proc` | main's commits, turned into actions ([runs](#runs-and-judging)) |
 | `:prove` | `seon.prove/prove-proc` | the test service's admission: one run at a time per checkout, whoever asks ([merging](merging.md#the-test-service)) |
+| `:vectors` | `seon.vector/vectors-proc` | main's missing text vectors: sends due texts to `:embed`, writes their vectors through the writer ([vectors](vector.md)) |
 | `:render` | `seon.render.proc/render-proc` | the dashboard's views ([dashboard](dashboard.md)) |
 | `:web` | `seon.web/web-proc` | the HTTP listener and the tabs ([dashboard](dashboard.md)) |
 
-The file's `:fx` map declares the effect kinds (`:echo`, `:file`, `:source`, `:git`, `:deps`, `:build`, `:tests`, `:history`, `:model`), each built into an owner proc ``:fx/<kind>`` and its workers. Each agent adds one more proc, `seon.agent-proc/agent-proc`, added and removed with `flow/update!` ([processes](processes.md#the-agent-process)).
+The file's `:fx` map declares the effect kinds (`:echo`, `:file`, `:source`, `:git`, `:deps`, `:build`, `:tests`, `:history`, `:embed`, `:model`), each built into an owner proc ``:fx/<kind>`` and its workers. Each agent adds one more proc, `seon.agent-proc/agent-proc`, added and removed with `flow/update!` ([processes](processes.md#the-agent-process)).
 
 ```seon.system/build``` turns the declaration into procs and conns, filling each ``:bind/<name>`` keyword from the values boot holds; `seon.system/read-decl` reads the file. ```seon.root/apply!``` re-reads it while root runs and rebuilds only the procs whose declaration changed; an unchanged proc keeps its queue (`bin/check system` proves both). The proc contract they all follow: [flow](flow.md).
 
