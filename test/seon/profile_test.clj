@@ -134,7 +134,14 @@
         window #(let [a0 (profile/alloc-bytes) _ (deep 20000) a1 (profile/alloc-bytes)] (- a1 a0))
         warm (do (window) (window))
         cold (do (System/gc) (window))]
-    (is (<= (Math/abs (- cold warm)) 4096) (str "warm " warm " B, after a collection " cold " B"))))
+    (is (<= (Math/abs (- cold warm)) 4096) (str "warm " warm " B, after a collection " cold " B")))
+  ;; a try is a call/1cc, which takes a new stack when the cache is empty: 144 B warm and
+  ;; 65,664 B after a collection, so seon.vector/near read 65.5 KB more for each collection
+  ;; in its window (datahike.datom/compare-value's try, on every f16 datom it compares)
+  (let [window #(let [a0 (profile/alloc-bytes) _ (try 1 (catch Exception _ 0)) a1 (profile/alloc-bytes)] (- a1 a0))
+        warm (do (window) (window))
+        cold (do (System/gc) (window))]
+    (is (<= (Math/abs (- cold warm)) 4096) (str "a try: warm " warm " B, after a collection " cold " B"))))
 
 (deftest a-measure-is-the-same-beside-another-thread
   ;; the measured call's bytes are the same alone and while another thread allocates
