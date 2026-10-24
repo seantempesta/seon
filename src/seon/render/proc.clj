@@ -139,11 +139,14 @@
 ;;; --- units, rendered incrementally ---------------------------------------------------------
 
 (defn- render-unit
-  "A unit's HTML: its input by the render its schema declares, its unit named (its element's id: :unit)."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [{:keys [id input schema html]}]
-  ;; a component's html comes from the proc's cache (comp-entry)
-  (or html (h/html (render/html input {:schema schema :unit id}))))
+  "A unit as [hiccup html]: its input by the render its schema declares, its unit named (its
+  element's id: :unit); a component's from the proc's cache (comp-entry). The hiccup is kept
+  beside the html: a screen is the page's hiccup (screen-of)."
+  {:malli/schema [:=> [:cat :map] [:tuple :any :string]]}
+  [{:keys [id input schema html hiccup]}]
+  (if html
+    [hiccup html]
+    (let [hc (render/html input {:schema schema :unit id})] [hc (h/html hc)])))
 
 (defn- step-units
   "Run a layout's units, in the order the layout shows them, against what the view retained: a
@@ -167,8 +170,8 @@
                      prev (cond-> prev container (assoc container id))]
                  (if (and old (= input (:input old)))
                    [[view patch n] prev placed]
-                   (let [html (render-unit u)
-                         view (assoc-in view [:units id] (cond-> {:input input :html html} container (assoc :container container)))]
+                   (let [[hiccup html] (render-unit u)
+                         view (assoc-in view [:units id] (cond-> {:input input :html html :hiccup hiccup} container (assoc :container container)))]
                      (cond
                        (= html (:html old)) [[view patch (update n :same inc)] prev placed]
                        (and container (nil? old))
@@ -387,10 +390,11 @@
   (let [dk (db-key st view i) ck [dk eid as]]
     (if-let [e (get-in st [:components ck])]
       [st e]
-      (let [[html reads] (d/with-reads #(h/html (ui/component db eid as)))
+      ;; serialized inside the read, so a lazy part is read (and recorded) there
+      (let [[[hiccup html] reads] (d/with-reads #(let [hc (ui/component db eid as)] [hc (h/html hc)]))
             ks (d/reads-index reads)
             rev (inc (:comp-rev st 0))
-            e {:html html :keys ks :rev rev}]
+            e {:html html :hiccup hiccup :keys ks :rev rev}]
         [(-> st (assoc-in [:components ck] e) (assoc :comp-rev rev) (update-in [:counts :components] (fnil inc 0))
              (update-in [:comp-index dk] index (seq ks) ck))
          e]))))
@@ -471,12 +475,12 @@
           [st units] (reduce (fn [[st us] {:keys [id comp] :as u}]
                                (if comp
                                  (let [[st e] (comp-entry st view-id (nth dbs (first comp) (first dbs)) comp)]
-                                   [st (conj us (assoc u :input {:comp [(db-key st view-id (first comp)) (second comp) (peek comp)] :rev (:rev e)} :html (:html e)))])
+                                   [st (conj us (assoc u :input {:comp [(db-key st view-id (first comp)) (second comp) (peek comp)] :rev (:rev e)} :html (:html e) :hiccup (:hiccup e)))])
                                  [st (conj us u)]))
                              [st []] (:seon.render/units out))
           [view patch n] (step-units held units)
           [view patch] (finish-patch view patch (set (map :id units)))
-          view (assoc view :skeleton (h/html (:seon.render/html out)))]
+          view (assoc view :skeleton (h/html (:seon.render/html out)) :layout (:seon.render/html out))]
       [(-> (hold st view) (update-in [:counts :rendered] (fnil + 0) (:rendered n)) (update-in [:counts :same] (fnil + 0) (:same n)))
        (when (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:afters patch)) (seq (:removes patch)))
          (assoc patch :op :patch :view view-id))]))))
@@ -487,6 +491,51 @@
   [st view-id]
   (when-let [{:keys [skeleton units]} (get-in st [:views view-id])]
     (compose skeleton units)))
+
+(defn- screen-view?
+  "Does an agent's screen still wait on view v?"
+  {:malli/schema [:=> [:cat :map :any] :boolean]}
+  [st v] (boolean (some #(= v (:view %)) (vals (:screens st)))))
+
+(defn- drop-view
+  "St without view v (no tab watches it, nothing waits on it): its page, its reads in :read-index,
+  the components it held (forget drops those no view holds), its branch read, its rows and opens."
+  {:malli/schema [:=> [:cat :map :any] :map]}
+  [st v]
+  (-> (reindex st v (get-in st [:views v :reads]) #{})
+      (hold-comps v (keep #(get-in % [:input :comp]) (vals (get-in st [:views v :units]))) [])
+      (update :views dissoc v) (update :branches dissoc v) (update :shown dissoc v) (update :open dissoc v)
+      (update :dirty #(disj (or % #{}) v))))
+
+(def ^:private chat-parts
+  "The element ids a screen leaves out: the conversation (the model has it already), its older
+  end, and the input."
+  #{"c-rows" "c-older" "p-input"})
+
+(defn- screen-hiccup
+  "Hiccup x of a page with each slot filled by its unit's cached hiccup (units), the chat parts
+  left out, and no presentation attributes (class, style, data-*, the UI's seon/ calls, ids)."
+  {:malli/schema [:=> [:cat :any :map] :any]}
+  [x units]
+  (cond
+    (h/raw? x) (if-let [[_ id] (re-matches #"<!--s:(.*)-->" (:seon.web.html/raw x))]
+                 (when-not (chat-parts id) (some-> (get-in units [id :hiccup]) (screen-hiccup units)))
+                 x)
+    (and (vector? x) (keyword? (first x)))
+    (let [[tag & more] x
+          [attrs kids] (if (and (map? (first more)) (not (h/raw? (first more)))) [(first more) (rest more)] [nil more])]
+      (when-not (chat-parts (:id attrs))
+        (let [kept (into {} (remove (fn [[k]] (or (#{:class :style :id} k) (= "seon" (namespace k)) (str/starts-with? (name k) "data")))) attrs)]
+          (into (if (seq kept) [tag kept] [tag]) (keep #(screen-hiccup % units)) kids))))
+    (seq? x) (seq (keep #(screen-hiccup % units) x))
+    :else x))
+
+(defn screen-of
+  "The agent's screen (seon.screen/show): view's page as this proc holds it, its hiccup without the
+  conversation (the model's own messages) and without presentation, at main's t."
+  {:malli/schema [:=> [:cat :map :any] :map]}
+  [st v]
+  {:t (:max-tx (:main-db st)) :page (screen-hiccup (get-in st [:views v :layout]) (get-in st [:views v :units]))})
 
 (defn- index-of
   "What the web proc needs to turn a UI call into root's request: each agent's pid, branch
@@ -515,7 +564,7 @@
           ctx (render/ai sys {:schema :seon.render/system})
           sys (assoc sys :context {:text ctx :tokens (select/estimate ctx)} :problem-areas (ai/problem-areas sys))
           st (assoc st :context ctx)
-          views (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st)))
+          views (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st) (map :view (vals (:screens st)))))
           st (assoc st :last-walked [])
           [st patches] (reduce (fn [[st ps] v]
                                  (let [[st p] (pass-view st v)]
@@ -529,9 +578,15 @@
       ;; branch was read waits for the pass that read's answer brings
       (doseq [[k v] (:waiting st) :when (ready? st v)] (step/out! o :to-web {:op :page :k k :view v :html (page-html st v)}))
       (doseq [v (:kf-wanted st) :when (ready? st v)] (step/out! o :to-web {:op :keyframe :view v :html (page-html st v)}))
+      ;; an agent's screen, answered on its asker's route (the api's request, seon.root/screen)
+      (doseq [[_ {:keys [view reply]}] (:screens st) :when (ready? st view)]
+        (step/out! o (:route reply) {:tag (:tag reply) :r (screen-of st view)}))
       (-> st (assoc :index idx
                     :waiting (into {} (remove (fn [[_ v]] (ready? st v))) (:waiting st))
-                    :kf-wanted (into #{} (remove #(ready? st %)) (:kf-wanted st)))
+                    :kf-wanted (into #{} (remove #(ready? st %)) (:kf-wanted st))
+                    :screens (into {} (remove (fn [[_ {:keys [view]}]] (ready? st view))) (:screens st)))
+          ;; a view only an answered screen needed keeps nothing
+          (as-> x (reduce drop-view x (for [[_ {:keys [view]}] (:screens st) :when (and (ready? st view) (not (contains? (:watch st) view)) (not (some #{view} (vals (:waiting st)))))] view)))
           (update :passes (fnil inc 0))
           (cond-> (seq patches) (assoc :render-ms (lib/r2 ms) :patches (reduce + (map #(+ (count (:frags %)) (count (:appends %)) (count (:prepends %)) (count (:removes %))) patches))))
           (update :pass-ms #(lib/push-window % ms 200))
@@ -588,7 +643,7 @@
                   (-> st (assoc-in [:branches view :read] at) (ask o kind {:op :write :req {:op :branch-db :branch b}}))
                   st)))
             ;; the views a tab watches, and a page or keyframe waiting for its pass
-            st (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st))))))
+            st (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st) (map :view (vals (:screens st))))))))
 
 (defn- web-answered
   "The web proc's call (tag [:web var agent form?]) answered r: shown in the stream; root's
@@ -686,18 +741,19 @@
                           :views (let [w (:views m)
                                        ;; a view no tab watches keeps nothing: its retained page, its branch read, its rows
                                        drop #(into {} (filter (fn [[v]] (contains? w v))) %)]
-                                   (ask-state (-> (reduce (fn [st v] (-> (reindex st v (get-in st [:views v :reads]) #{})
-                                                                         (hold-comps v (keep #(get-in % [:input :comp]) (vals (get-in st [:views v :units]))) [])))
-                                                          st (remove w (keys (:views st))))
-                                                  (assoc :watch w :tabs (:tabs m)) (update :views drop) (update :branches drop) (update :shown drop) (update :open drop)
-                                                  (update :dirty #(into #{} (filter w) %))
+                                   (ask-state (-> (reduce drop-view st (remove #(or (contains? w %) (screen-view? st %)) (keys (:views st))))
+                                                  (assoc :watch w :tabs (:tabs m))
                                                   forget)
                                               o))
                           ;; a UI call root refused before it became a request: answered as root's are
                           :refused (web-answered st o (:tag m) (:r m))
-                          :page (if (and (get-in st [:views (:view m)]) (contains? (:watch st) (:view m)))
+                          ;; an agent's screen (seon.screen/show, through the api): its page's request, answered
+                          ;; on the asker's route once the page is whole
+                          :page (if (:screen m)
+                                  (ask-state (assoc-in st [:screens (:tag (:screen m))] {:view (:view m) :reply (:screen m)}) o)
+                                  (if (and (get-in st [:views (:view m)]) (contains? (:watch st) (:view m)))
                                   (do (step/out! o :to-web {:op :page :k (:k m) :view (:view m) :html (page-html st (:view m))}) st)
-                                  (ask-state (assoc-in st [:waiting (:k m)] (:view m)) o))
+                                  (ask-state (assoc-in st [:waiting (:k m)] (:view m)) o)))
                           :keyframe (if (ready? st (:view m))
                                       (do (step/out! o :to-web {:op :keyframe :view (:view m) :html (page-html st (:view m))}) st)
                                       (ask-state (update st :kf-wanted conj (:view m)) o))

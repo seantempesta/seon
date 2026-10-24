@@ -433,6 +433,19 @@
         (count files))
       r)))
 
+(defn- await-reply!
+  "Wait for root's answer k to this agent's ask (a :reply on the api's route back to its proc):
+  root's :tests request arriving meanwhile is taken here (its test service may need this agent to
+  run them); other messages wait for the loop. The process ends when root is gone."
+  {:malli/schema [:=> [:cat :int] :any]}
+  [k]
+  (loop []
+    (let [m (recv-raw!)]
+      (cond (= m :dead) (lib/c-exit 0)
+            (and (= :reply (:op m)) (= k (:k m))) (:result m)
+            (= :tests (:op m)) (do (doseq [r (handle! m)] (send! r)) (recur))
+            :else (do (swap! state update :pending conj m) (recur))))))
+
 (defn prove!
   "Ask the test service (seon.prove) to prove this branch at its head, and wait for its answer:
   the run's (run-tests-forked's answer, with :key). The service runs one run per key whoever
@@ -445,12 +458,17 @@
   (commit!)
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
     (when (= :dead (send! {:op :prove :k k :t (:max-tx (db)) :digest (seon.prove/read-digest nil (program/program-digest (db))) :mode :turn})) (lib/c-exit 0))
-    (loop []
-      (let [m (recv-raw!)]
-        (cond (= m :dead) (lib/c-exit 0)
-              (and (= :prove-reply (:op m)) (= k (:k m))) (:result m)
-              (= :tests (:op m)) (do (doseq [r (handle! m)] (send! r)) (recur))
-              :else (do (swap! state update :pending conj m) (recur)))))))
+    (await-reply! k)))
+
+(defn screen
+  "This agent's screen: its page as root's render proc holds it (seon.render.proc/screen-of), without
+  its conversation and without presentation, at main's t: {:t :page}. Asked of root on its request
+  channel; root renders it, never this process (an agent cannot draw its own view)."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (let [k (:tx-seq (swap! state update :tx-seq inc))]
+    (when (= :dead (send! {:op :screen :k k})) (lib/c-exit 0))
+    (await-reply! k)))
 
 (defn- run-tests-here
   "The tests a test-plan runs (var symbols), by the one runner (seon.proofs/run-tests!, nothing

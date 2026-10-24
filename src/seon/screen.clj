@@ -9,10 +9,18 @@
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent]))
 
 (def forms
-  "The screen's forms, evaluated in order before each model request: the live state
-  (its task's proofs and what refuses done; what its branch's merge carries). An agent changes what it is shown by redefining this var: rewriting its own interface is an
+  "The screen's forms, evaluated in order before each model request: the agent's page, as root
+  shows it (`show`; its proofs and its branch's changes are its tiles). An agent changes what it is shown by redefining this var: rewriting its own interface is an
   eval."
-  ["(my.task/status)" "(my.branch/changes)"])
+  ["(seon.screen/show)"])
+
+(defn show
+  "The agent's screen: its page as root's render proc holds it, without its conversation (the model
+  has it as its messages) and without presentation, at main's t (seon.agent/screen): its task, its
+  proofs and its branch's changes as the page's tiles, root's agents. Asked of root, never drawn
+  here."
+  {:malli/schema [:=> [:cat] :any]}
+  [] (agent/screen))
 
 (defn input
   "What this turn's screen forms read (my.task/status): {:task :input}, the task and the turn

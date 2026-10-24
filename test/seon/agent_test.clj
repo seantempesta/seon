@@ -523,12 +523,14 @@
   (let [[end turn] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#fail\" :max-turns 1})"
                               (str "(let [db (seon.agent/db) t (datahike.api/pull db '[:db/id :seon.turn/sent :seon.turn/error] [:seon.turn/id \"demo/t#fail/0\"])]"
                                    "  {:sent (mapv first (:seon.turn/sent t)) :error (:seon.error/type (:seon.turn/error t))"
-                                   "   :read (count (seon.context/sent-messages db (:db/id t)))})")]
+                                   "   :read (count (seon.context/sent-messages db (:db/id t)))"
+                                   "   :screen (:text (:seon.eval/record (datahike.api/pull db '[:seon.eval/record] [:seon.eval/id (second (last (:seon.turn/sent t)))])))})")]
                              {:sets [":seon.config.ai/provider=:none"]})]
     (is (= :error (:outcome (:value end))) (pr-str end))
-    (is (= [:section :task :eval :eval] (:sent (:value turn))) "the help page, the task story, the screen's two evals")
+    (is (= [:section :task :eval] (:sent (:value turn))) "the help page, the task story, the screen's one eval")
+    (is (str/includes? (str (:screen (:value turn))) ":page") (str "the screen is root's page of it: " (:screen (:value turn))))
     (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")
-    (is (= 4 (:read (:value turn))) "read back from its records")))
+    (is (= 3 (:read (:value turn))) "read back from its records")))
 
 (deftest a-turn-that-repeats-the-last-from-the-same-state-ends-the-run
   ;; root's research, lever 2 (2026-10-22): loops took 45% of tokens, and the step E dry run's

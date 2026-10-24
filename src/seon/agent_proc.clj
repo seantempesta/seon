@@ -76,8 +76,9 @@
   {:malli/schema [:=> [:cat :map :map] [:tuple :map :seon.step/outputs]]}
   [st m]
   (case (:op m)
-    ;; the test service's answer to this agent's ask (seon.prove, the api's reply route)
-    nil [(to-proc! st {:op :prove-reply :k (:tag m) :result (:r m)}) nil]
+    ;; an answer to this agent's ask on the api's reply route (the test service's, seon.prove; its
+    ;; screen's, the render proc's)
+    nil [(to-proc! st {:op :reply :k (:tag m) :result (:r m)}) nil]
     :req (let [{:keys [rid msg kind]} m]
            (let [st (cond-> (to-proc! st (assoc msg (if (= kind :clone) :k :id) rid))
                       ;; a clone's socket follows in its own frame once the agent asks
@@ -228,6 +229,9 @@
       ;; whoever asked for that key; the answer comes back on this proc's :in
       :prove (do (step/out! o :to-api {:op :request :req {:op :prove :agent id :branch (:branch st) :t (:t m) :digest (:digest m) :mode (:mode m)} :route [id :in] :tag (:k m)})
                  st)
+      ;; the agent asks for its screen (seon.screen/show): its page, from root's render proc
+      :screen (do (step/out! o :to-api {:op :request :req {:op :screen :agent id} :route [id :in] :tag (:k m)})
+                  st)
       :merged-main (let [st (answer-rid st o (:id m) (:result m))]
                      (step/out! o :events (step/event {:type :merged-main :agent id :result (:result m)}))
                      (step/out! o :to-api (status st {:status (busy st)}))

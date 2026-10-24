@@ -389,6 +389,9 @@
       :prove (let [[st rid] (pend st p :prove (:agent m))]
                (step/out! o [:prove :req] (assoc (select-keys m [:branch :t :digest :agent :proofs :names :mode]) :rid rid))
                st)
+      ;; an agent's screen (seon.screen/show): its page's request to the render proc, which answers
+      ;; the caller's route itself once the page is whole (the cached page, without its conversation)
+      :screen (do (step/out! o [:render :from-web] {:op :page :view (:agent m) :screen p}) st)
       :kill (cond-> (if (get-in st [:agents id])
                       ;; :ended when root stops it because its run ended (the reconciler says so)
                       (-> st (set-agent o id {:status (if (:ended m) :ended :killed)}) (to-agent o id {:op :kill}))

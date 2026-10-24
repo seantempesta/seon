@@ -16,7 +16,7 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
-            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.proofs :as proofs] [seon.cost :as cost] [seon.task :as task]))
+            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.proofs :as proofs] [seon.cost :as cost] [seon.task :as task]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -680,8 +680,18 @@
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [v opts]
   (if-let [{:keys [walk dbs] :as page} (when (= :page (:as opts)) (:page opts))]
-    (let [main (first dbs)
-          root (:db/id (d/entity main [:seon.root/id :root]))]
+    (let [[main branch] dbs
+          root (:db/id (d/entity main [:seon.root/id :root]))
+          eid (get-in walk [:seon.render/root :seon.render/eid])
+          b (some-> (:seon.agent/branch v) name)
+          ;; its proofs as the test service last recorded them on main for its branch, each test's newest
+          proofs (when b (->> (d/q '[:find ?t ?at ?s :in $ ?b :where [?p :seon.proof/branch ?b] [?p :seon.proof/test ?t] [?p :seon.proof/t ?at] [?p :seon.proof/status ?s]] main b)
+                              (group-by first) (map (fn [[t rs]] [t (peek (vec (sort-by second rs)))])) (into (sorted-map) (map (fn [[t [_ at s]]] [t {:status s :t at}])))))
+          ;; what its branch changes against main now (seon.program/divergence)
+          changes (when branch (program/divergence main branch))
+          tile (fn [k x] {:seon.render/kind :value :seon.render/value x :seon.render/schema k :seon.render/eid eid})
+          walk (update walk :seon.render/nodes into (remove nil? [(when (seq proofs) (tile :seon.render/proofs proofs))
+                                                                  (when branch (tile :seon.render/changes changes))]))]
       (chat walk (assoc page :sides (vec (when root (for [nd (:seon.render/nodes (render/walk [main] root))
                                                           :when (= :seon.db/agent-fact (:seon.render/schema nd))]
                                                       {:eid (:seon.render/eid nd) :db 0}))))))

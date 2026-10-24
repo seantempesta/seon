@@ -739,6 +739,47 @@
     (is (empty? (:appends patch)))
     (is (empty? (:prepends patch)))))
 
+(deftest the-screen-is-the-page-without-its-chat
+  ;; task seon.render/a-page-is-its-entitys-view (4c): the agent's screen is root's page of it, as
+  ;; the render proc holds it, without its conversation (the model has it as its messages), its
+  ;; input, or presentation; at main's t
+  (let [[main branch eid] (paged-dbs)
+        [st1 _] (#'p/pass-view (comp-state main branch eid) :a3)
+        {:keys [t page]} (p/screen-of st1 :a3)
+        text (pr-str page)]
+    (is (= (:max-tx main) t))
+    (is (str/includes? text ":a3") "the agent's head")
+    (is (str/includes? text "/agent/a3") "root's agents, the sidebar")
+    (is (str/includes? text "demo/f#1") "the run's tile")
+    (is (not (str/includes? text "(f 2)")) "no part of its conversation")
+    (is (not (str/includes? text "release")) "no input")
+    (is (not-any? #(and (map? %) (some (fn [k] (or (#{:class :style :id} k) (str/starts-with? (name k) "data"))) (keys %))) (tree-seq coll? seq page))
+        "no presentation attributes")))
+
+(deftest nothing-is-shown-twice
+  ;; what the conversation holds (each eval, as its own message) is never on the screen too
+  (let [[main branch eid] (paged-dbs)
+        [st1 _] (#'p/pass-view (comp-state main branch eid) :a3)
+        text (pr-str (:page (p/screen-of st1 :a3)))
+        codes (keep #(get-in % [:seon.eval/record :code]) (d/q '[:find [(pull ?e [:seon.eval/record]) ...] :where [?e :seon.eval/id]] branch))]
+    (is (seq codes))
+    (is (not-any? #(str/includes? text (pr-str %)) codes) "no eval's code")))
+
+(deftest a-screen-is-asked-as-a-page-and-answered-on-its-route
+  ;; the agent's {:op :screen} reaches the render proc as its page's request (seon.root's :screen),
+  ;; is held until the page is whole, and is answered on the asker's route
+  (let [[main branch eid] (paged-dbs)
+        st (assoc (comp-state main branch eid) :watch #{})
+        [st1 out1] (#'p/render-proc st :from-web {:op :page :view :a3 :screen {:route [:a3 :in] :tag 9}})
+        o (volatile! {})
+        st2 (#'p/pass st1 o)
+        reply (first (get @o [:a3 :in]))]
+    (is (contains? (:screens st1) 9) "held while its page is not yet whole")
+    (is (= 9 (:tag reply)))
+    (is (str/includes? (pr-str (:page (:r reply))) "/agent/a3"))
+    (is (empty? (:screens st2)) "answered once")
+    (is (nil? (get-in st2 [:views :a3])) "a page only a screen needed keeps nothing")))
+
 (deftest a-units-change-rerenders-that-unit
   (let [[main branch eid] (paged-dbs)
         st (proc-state main branch)
