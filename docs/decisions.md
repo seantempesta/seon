@@ -3,6 +3,8 @@
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in notes/archive/DECISIONS-superseded.md.
 
 ## 2026-10-24 rulings
+### A failed model call keeps what it sent and its typed error
+Owner, 2026-10-24: "Approve :seon.turn/error." A turn is written with its sent refs as the request goes; when the call ends it gains its reply and usage, or `:seon.turn/error` (the typed error as data, as the run's end has `:seon.end/error`). One turn entity either way. Stated in: not yet (owed docs/context.md with step 3).
 ### A turn records what it sent as refs; texts are read as of the turn
 Owner, 2026-10-24: "Approve :seon.turn/sent only; refer to the system prompt's wiki section and the task entity as of the turn's t instead of new :seon.text attributes." One new attribute, `:seon.turn/sent`: the ordered refs to what the turn's request carried (its evals, messages, the system prompt's wiki section and the task entity), resolved as of the turn's t (history is kept); no separate text store. Stated in: not yet (owed the design note §3 and docs/context.md with step 3).
 ### A config key does what it says; a provider's schema refuses a combination it forbids
