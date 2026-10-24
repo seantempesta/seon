@@ -272,3 +272,43 @@
      ;; measured 2026-10-24: 209 / 207 / 207 KB at 10 / 100 / 1,000 pages
      :fixed {:calls 1 :bytes 212000}
      :sizes [100 1000 10000]}))
+
+(defn debug-of
+  "The input of size n: the render proc's state holding agent a1's debug page with n model turns
+  held, and one turn more on the branch: each turn sent the same two evals (:seon.turn/sent), so
+  a held turn's input is what the page answered for it; and the view."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
+  [n]
+  (let [k (seon.task/agent-key "b1" :a1)
+        sent [[:eval "e1"] [:eval "e2"]]
+        db (reduce d/db-with (ts/test-db)
+                   [[{:seon.root/id :root :seon.root/boot "b1"}]
+                    (seon.task/agent-tx "b1" :a1 {:status :busy})
+                    (into [] (mapcat #(seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} % "a1" {:code "(+ 1 2)" :text "{:handle result/e1, :value 3}" :run "t/x#1" :call-id (str "c-" %) :call 0} nil)) ["e1" "e2"])
+                    [{:db/id "run" :seon.run/id "t/x#1"}]
+                    (vec (for [i (range (inc n))]
+                           {:seon.turn/id (str "t/x#1/" i) :seon.turn/run "run" :seon.turn/n i :seon.turn/origin :model :seon.turn/sent sent
+                            :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 0 :seon.turn/ms 1}))])
+        view [:debug :a1]
+        st {:rid 1 :pending {} :watch #{view} :waiting {} :kf-wanted #{} :views {} :main-db db :branches {view {:db db}} :view {:agents {}}}
+        ;; the first n turns held: their units as a pass left them
+        held (into {} (for [[e i] (d/q '[:find ?e ?i :where [?e :seon.turn/n ?i]] db) :when (< i n)]
+                        [(str "d-" e) {:input {:turn i :run "t/x#1" :parts (seon.context/sent-parts db e)} :html "<li></li>" :container "#d-turns"}]))]
+    [(assoc-in st [:views view] {:units held :skeleton "" :reads #{}}) view]))
+
+(deftest a-new-turn-costs-one-turns-messages
+  ;; task seon.context/a-turn-records-what-it-sent (C): a pass of the debug page after one new turn
+  ;; reads back that turn's records alone (seon.context/sent-parts); every held turn keeps its input
+  (cost/proof
+    {:of 'seon.render.proc/pass-view :input 'seon.render-cost-test/debug-of
+     :n "model turns the debug page already holds"
+     :work (str "the new turn read back from its records (its two evals, each by its :seon.render/ai render) and "
+                "rendered once: the contracted calls, flat in the turns held. Per held turn, no read back and no "
+                "render: the page's walk lists every turn again (its query, recorded reads, the held input compared), "
+                "about 34 KB a turn, until step 4 makes each turn its own component (task seon.render/a-page-is-its-entitys-view)")
+     :growth :linear
+     ;; measured 2026-10-24: 88 / 88 calls and 3.90 / 34.3 MB at 100 / 1,000 held turns
+     :per-n {:bytes 34500}
+     :fixed {:calls 88 :bytes 500000}
+     ;; the full run measures 4,000 too (:seon.config.proofs/cost-max-n)
+     :sizes [100 1000 4000]}))

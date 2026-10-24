@@ -114,4 +114,5 @@ Not in this step: per-entity components and the screen as a read of root's page 
                       seon.context-test/the-sent-records-are-the-wire-body
                       seon.context-test/a-turn-records-one-turns-messages
                       seon.render-test/the-debug-page-shows-what-each-turn-sent
-                      seon.render-test/a-new-turn-is-one-new-row}}]
+                      seon.render-test/a-new-turn-is-one-new-row
+                      seon.render-cost-test/a-new-turn-costs-one-turns-messages}}]
