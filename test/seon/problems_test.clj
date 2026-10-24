@@ -347,8 +347,9 @@
 (def ^:private req {:messages [{:role "user" :content "hi"}] :task "t/a" :turn 0})
 
 (deftest the-request-sets-thinking-only-when-the-provider-does
-  (is (= {:model "deepseek-flash" :messages (:messages req) :tools [model/eval-tool] :max_tokens 2048 :temperature 0 :stream true :stream_options {:include_usage true}}
-         (model/request-body deepseek req)) "thinking absent: the provider's default; max-tokens the provider's; streamed with its usage")
+  ;; tool_choice auto: the model may reply in prose alone, which ends the turn (design, owner 2026-10-24)
+  (is (= {:model "deepseek-flash" :messages (:messages req) :tools [model/eval-tool] :tool_choice "auto" :max_tokens 2048 :temperature 0 :stream true :stream_options {:include_usage true}}
+         (model/request-body deepseek req)) "thinking absent: the provider's default; max-tokens the provider's; the model chooses whether to call; streamed with its usage")
   (is (= {:type "disabled"} (:thinking (model/request-body (assoc deepseek :thinking :disabled) req))))
   (is (= ["high" 512] ((juxt :reasoning_effort :max_tokens) (model/request-body (assoc deepseek :reasoning-effort :high :max-tokens 512) req))))
   (is (contract/valid? :seon.model/provider (assoc deepseek :thinking :enabled :reasoning-effort :low))))

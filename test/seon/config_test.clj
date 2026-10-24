@@ -126,8 +126,11 @@
   (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider config/config)))
   (let [p (config/provider (assoc config/config :seon.config.ai/provider :openai-compat :seon.config.ai/thinking :disabled))]
     (is (= {:kind :openai-compat :base-url "https://api.deepseek.com" :model "deepseek-flash" :api-key-env "DEEPSEEK_API_KEY"
-            :max-tokens (config/value :seon.config.ai/max-tokens) :thinking :disabled}
+            :max-tokens (config/value :seon.config.ai/max-tokens) :replay-reasoning (config/value :seon.config.ai/replay-reasoning) :thinking :disabled}
            p))
+    ;; whether earlier reasoning goes back is the config key, obeyed as written (owner, 2026-10-24)
+    (is (false? (:replay-reasoning (config/provider (assoc config/config :seon.config.ai/provider :openai-compat :seon.config.ai/thinking :disabled
+                                                                         :seon.config.ai/replay-reasoning false)))))
     ;; the facts say what a run handed another provider really used
     (is (= p (config/provider (config/with-provider config/config p))))
     (is (= "https://example.test" (:base-url (config/provider (config/with-provider config/config (assoc p :base-url "https://example.test"))))))))

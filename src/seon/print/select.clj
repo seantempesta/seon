@@ -585,8 +585,11 @@
 
 (defn- grow-values
   "`entries` at their least grown into `extra` characters: each cut one whole when its growth
-  fits, else filled to what is left. A map's (map? true: its entries' values) strings before
-  collections, smallest first; a sequence's members in their order, so its layout is its priority."
+  fits, else filled to its room. A map's (map? true: its entries' values) strings before
+  collections, smallest first. A sequence's members in their order, breadth before depth: each
+  member's room keeps back a share for every later member that shows less than it holds (half
+  the extra, split between them), so each shows its first part and the first grow most. One
+  allot a member, at every depth."
   {:malli/schema [:=> [:cat :seon.print/context [:vector :seon.print/alloc] number? :boolean] [:vector :seon.print/alloc]]}
   [context entries extra map?]
   (let [value-of (if map? #(second (:kids (nth entries %))) #(nth entries %))
@@ -596,18 +599,20 @@
                     :let [w (whole context v (+ (:ub v) extra))]]
                 {:i i :grown w :string-rank (if (#{:string :name} (:kind v)) 0 1)
                  :width (if w (:ub w) Long/MAX_VALUE)})
-        order (if map? (sort-by (juxt :string-rank :width :i) grown) grown)
+        order (vec (if map? (sort-by (juxt :string-rank :width :i) grown) grown))
+        share (if map? 0 (quot extra (* 2 (max 1 (count order)))))
         with-value (if map?
                      (fn [entries i v] (update entries i #(sized context (assoc-in % [:kids 1] v))))
                      (fn [entries i v] (assoc entries i v)))]
     (loop [entries entries extra extra [{:keys [i grown]} & more] order]
       (if (nil? i)
         entries
-        (let [least (value-of i)]
-          (if (and grown (<= (- (:ub grown) (:ub least)) extra))
+        (let [least (value-of i)
+              room (max 0 (- extra (* share (count more))))]
+          (if (and grown (<= (- (:ub grown) (:ub least)) room))
             (recur (with-value entries i grown) (- extra (- (:ub grown) (:ub least))) more)
-            (let [allotted (allot context least (+ (:ub least) extra))]
-              (if (< (:ub least) (:ub allotted) (+ (:ub least) extra 1))
+            (let [allotted (allot context least (+ (:ub least) room))]
+              (if (< (:ub least) (:ub allotted) (+ (:ub least) room 1))
                 (recur (with-value entries i allotted) (- extra (- (:ub allotted) (:ub least))) more)
                 (recur entries extra more)))))))))
 
