@@ -3,6 +3,8 @@
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in notes/archive/DECISIONS-superseded.md.
 
 ## 2026-10-24 rulings
+### Names tell a story; the printer shows every value well
+Owner, 2026-10-24: "Beautiful naming and the render tree should tell a story and not just be full of random words" and "We can adjust the value printer too as we want a general printer which shows all values well". Records and views are named by what they are, in Clojure's, nREPL's, Reagent's or the chat API's words (an agent's conversation of turns, each eval's response, the user's screen); a fix to how a value prints goes in the one printer, for every value. Stated in: notes/design-agent-view-2026-10-24.md "Names" (owed AGENTS §7a when it merges).
 ### A prove run is keyed by the digest of what it reads
 Owner, 2026-10-24: "okay lets try the digest". The test service's run key (`seon.prove/run-key`) names the digest of the code and tests the run reaches, as each test's result is already keyed (AGENTS §5), not `branch@t`: a write to main that touches none of it never starts a second run. Stated in: not yet (owed docs/merging.md#the-test-service, task seon.proofs/a-prove-runs-key-does-not-move-between-two-asks).
 ### Root merges verified fixes as they come in
