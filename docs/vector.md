@@ -38,7 +38,7 @@ The C levels take 0.08 ms at 1,393 vectors and 0.31 ms at 100k (v1's f32 brute f
 
 ## Fused with the call graph
 
-Fusing the call graph's helpers (the cited vars' and proofs' one-hop callees, tf-idf) with the forms nearest a task's plan by reciprocal rank (k 10) was measured below, when the task story showed the fused list to every run. The story no longer shows it: in measured runs it was mostly unrelated source, so an agent asks at its REPL instead (`my.agent/callees` for the call graph, `my.agent/similar` by meaning). What the two rankings are worth stays measured here.
+The task story shows `:similar` (```seon.context/similar```): the first `:seon.config.render/similar` program functions nearest the plan's vector, by an exact search (`near` with every vector its shortlist, at every dim), that the plan and proofs do not name, a line each. On Seon's own program (3,843 vectors) it costs about 9.7M ticks and 52 MB (40 ms) and 397 of a story's 1,749 tokens; ```seon.vector-cost-test/the-story-ranks-every-form-once``` holds it. Step 6 measures how often agents read one; 0 turns it off. Fusing the call graph's helpers (the cited vars' and proofs' one-hop callees, tf-idf) with the forms nearest a task's plan by reciprocal rank (```seon.vector/rrf```, k `:seon.config.vector/rrf-k`) was measured below; embeddings alone did as well, so the story uses them alone, and the fusion stays for further exploration.
 
 Measured on 283 pairs from main's history (each non-merge commit's message as the plan; the functions its diff touched, still in the program, less those the message names, as what it needed), recall@10:
 

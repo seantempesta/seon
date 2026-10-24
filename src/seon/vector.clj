@@ -102,6 +102,17 @@
                (->> (map (fn [e s] [(- s) e]) es (ffi/read-array fs :float m 0))
                     sort (take k) (mapv (fn [[s e]] [e (- (double s))])))))))))))
 
+(defn rrf
+  "Rankings fused by reciprocal rank (Cormack et al. 2009): each item scores the sum of 1/(k + rank)
+  over the rankings it is in, k :seon.config.vector/rrf-k; best first, the name breaking a tie.
+  Measured fusing the call graph with embeddings (docs/vector.md#fused-with-the-call-graph); kept
+  for that exploration, nothing in the context calls it now."
+  {:malli/schema [:=> [:cat [:sequential [:sequential :any]]] [:vector :any]]}
+  [rankings]
+  (let [k (cfg/value :seon.config.vector/rrf-k)
+        s (apply merge-with + {} (for [r rankings] (into {} (map-indexed (fn [i x] [x (/ 1.0 (+ k i 1))])) r)))]
+    (mapv peek (sort (map (fn [[x v]] [(- v) (str x) x]) s)))))
+
 ;; ---- what is embedded --------------------------------------------------------------------
 ;; EmbeddingGemma's prompts (its model card; v1's script/embed/gemma_text.py): a document is
 ;; embedded with the document prompt, a task's plan as what a search asks.

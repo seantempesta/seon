@@ -63,6 +63,9 @@
  :seon.render/proofs [:map-of {:seon.render/html seon.render.ui/proofs} :symbol [:map [:status :keyword] [:failure {:optional true} [:map [:assert :any] [:got :any]]]]]
  ;; what a run did, from its eval records (seon.render.ui/did): vars read (each with how many
  ;; times), defined and evaluated, and the forms that ran its tests (their eval ids)
+ ;; what a run's prose cites (seon.render.ui/agent), from its eval records' :cites: each as its
+ ;; citation reached it on the branch (seon.docs/cited)
+ :seon.render/cited [:vector {:seon.render/html seon.render.ui/cited} :map]
  :seon.render/this-run [:map {:seon.render/html seon.render.ui/this-run} [:read [:map-of :symbol pos-int?]] [:defined [:vector :symbol]]
                         [:evaluated [:vector :symbol]] [:tests [:vector [:map [:form :string] [:handle :string]]]]]
  :seon.render/changes [:map {:seon.render/html seon.render.ui/changes} [:against :string] [:changes :map]]

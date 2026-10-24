@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [clojure.edn]))
+            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [clojure.edn]))
 
 (def help-page
   "The help page, docs/agent.md: what every agent reads first (its system message, the same
@@ -121,20 +121,46 @@
   (let [ss (str/split plan #"(?<=[.!?])\s+")]
     (or (not-empty (str/join " " (filter #(str/includes? % (name p)) ss))) plan)))
 
+(defn similar
+  "The program functions nearest task entity te's plan by meaning (its vector: seon.vector/near,
+  exact: every form's vector at every dim, no coarse first pass), those in named left out, the
+  first :seon.config.render/similar of them, each one line: its name and its doc's first
+  sentence ({:nearest :more}, :more the forms that search further). nil when the count is 0
+  (off); a plan with no vector yet says so ({:not-embedded}), never an empty list."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :int] [:set :qualified-symbol]]
+                  [:maybe [:or [:map [:nearest [:vector :string]] [:more :string]] [:map [:not-embedded :string]]]]]}
+  [db te named]
+  (let [k (cfg/value :seon.config.render/similar)
+        function? #(= :fn (:var/kind (d/entity db [:var/name %])))
+        ;; every vector, every dim, every rank: the exact ranking (near's shortlist and fine level
+        ;; over all of them; it sorts them all anyway), walked until k functions are found, as the
+        ;; nearest forms are often tests
+        all Long/MAX_VALUE]
+    (cond
+      (zero? k) nil
+      (nil? (some->> te (vector/vector-of db))) {:not-embedded "this plan has no vector yet: (my.agent/similar \"text\") searches by any text"}
+      :else {:nearest (into [] (comp (mapcat (fn [[f _]] (map :var/name (:var/_form (d/entity db f)))))
+                                     (remove named) (filter function?) (distinct) (take k)
+                                     (map (fn [s] (str s (some->> (:var/doc (d/entity db [:var/name s])) ref/lead-sentence (str ": "))))))
+                            (vector/near db te all {:of :form/id :shortlist all :fine-dims all}))
+             :more "(my.agent/similar 'ns/f) or (my.agent/similar \"text\"): more by meaning"})))
+
 (defn run-state
   "The task story: task t's run sections as data, the same each turn of a run: the task (its
   plan as it accumulated along :needs, prerequisites first); its write set, each var the plan
   cites with its source and its callers (docs/callers), the names that resolve to nothing said
   once; each proof to the form that runs it at the REPL, or, when it is not written, that it
   is not and what it should assert in the plan's words (whether it fails, and why, is the
-  screen's: it changes each turn); the wiki sections it cites."
+  screen's: it changes each turn); the wiki sections it cites; the functions nearest its plan
+  by meaning that it does not name (`similar`)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] :map]}
   [db t]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
         refs (filterv #(= :var (docs/citation-kind db %)) cites)
         sections (into [] (comp (filter #(= :view (docs/citation-kind db %))) (map #(docs/cited-view db %)))
-                       cites)]
+                       cites)
+        near (similar db (some->> (:seon.task/id t) (pdb/eid db :seon.task/id)) (into (set proofs) (map :seon.ref/name) refs))]
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])
                           :seon.task/plan plan)
              ;; a proof is shown with the proofs, not again in the write set; the names that
@@ -152,7 +178,8 @@
                                [p (if (docs/source-of db p)
                                     (list 'my.agent/prove #{p})
                                     (str "not written yet; it should assert what the plan says: " (not-written p plan)))]))}
-      (seq sections) (assoc :sections sections))))
+      (seq sections) (assoc :sections sections)
+      near (assoc :similar near))))
 
 (defn turn-state
   "The turn sections of task t's current state as data, measured again each turn from
@@ -275,7 +302,7 @@
 (def run-keys
   "The block's run sections: what the task is and what it cites, the same each turn of an
   run (made from its first turn's basis), so they are sent once, in the cached prefix."
-  [:task :write-set :to-prove :sections])
+  [:task :write-set :to-prove :sections :similar])
 
 (defn- run-message
   "The run sections of block, printed by the one printer under the context's budget."

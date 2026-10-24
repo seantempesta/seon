@@ -28,7 +28,7 @@
   arrives in and nothing after it. Seon's platform ops (tests, stats, clone,
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
+  (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.ref :as ref] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
             [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d]))
 
@@ -389,6 +389,27 @@
   [{:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by by :seon.eval/record details}
    (cond-> (assoc who :db/id "agent") t-basis (assoc :seon.agent/answered-t t-basis))])
 
+(defn record-details
+  "What an eval's record holds (:seon.eval/record): its code, the text every reader read, the
+  response without its live value, the prose beside it and what that prose cites (its
+  references on db, parsed here once by the one reference parser, seon.ref/references, so no
+  render parses it again; read on db, the branch as the eval began, so a name the eval itself
+  defines is not yet one), the provider's call id, its reasoning, its run, its costliest
+  functions and what it recorded."
+  {:malli/schema [:=> [:cat :seon.host/db :string :map :map [:maybe :string]] :seon.eval/record]}
+  [db code r req run]
+  (let [cites (some->> (:prose req) (ref/references db))]
+    (cond-> {:code code :text (:text r) :response (dissoc r :value :text :recorded :fns)}
+      (:prose req) (assoc :prose (:prose req))
+      (seq cites) (assoc :cites cites)
+      (:call-id req) (assoc :call-id (:call-id req) :call (:call req 0))
+      (:reasoning req) (assoc :reasoning (:reasoning req))
+      (:content req) (assoc :content (:content req))
+      (:call-prose req) (assoc :call-prose (:call-prose req))
+      run (assoc :run run)
+      (seq (:fns r)) (assoc :fns (:fns r))
+      (seq (:recorded r)) (assoc :recorded (:recorded r)))))
+
 (defn- record!
   "Record response r of code on this branch through the agent's write path (an agent's
   only), with the defs its forms recorded and the effects asked during it (seon.agent/fx-record!).
@@ -400,15 +421,7 @@
     (swap! agent/state dissoc :defs)
     (if (and contract/record? (= :agent (:mode @agent/state)))
       (do (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by (:origin req))
-                                                 (cond-> {:code code :text (:text r) :response (dissoc r :value :text :recorded :fns)}
-                                                   (:prose req) (assoc :prose (:prose req))
-                                                   (:call-id req) (assoc :call-id (:call-id req) :call (:call req 0))
-                                                   (:reasoning req) (assoc :reasoning (:reasoning req))
-                                                   (:content req) (assoc :content (:content req))
-                                                   (:call-prose req) (assoc :call-prose (:call-prose req))
-                                                   (get-in @agent/state [:turn :run]) (assoc :run (get-in @agent/state [:turn :run]))
-                                                   (seq (:fns r)) (assoc :fns (:fns r))
-                                                   (seq (:recorded r)) (assoc :recorded (:recorded r)))
+                                                 (record-details (agent/db) code r req (get-in @agent/state [:turn :run]))
                                                  (:max-tx (agent/db)))))
           (assoc r :record id))
       r)))

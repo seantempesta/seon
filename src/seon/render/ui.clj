@@ -565,6 +565,15 @@
    (for [{:keys [form handle]} tests] [:li (str "ran " form " (result/" handle ")")])
    (when-not (or (seq read) (seq defined) (seq evaluated) (seq tests)) [:li "nothing read, defined or tested yet"])])
 
+(defn cited
+  "What the run's prose cites (the declared html render of :seon.render/cited): each cited thing
+  as its citation reached it (a var's card, a task's plan and proofs, a wiki section), by the
+  one printer at a part's budget; every one of them, the screen's printer cutting the whole."
+  {:malli/schema [:=> [:cat :seon.render/cited :seon.render/opts] :any]}
+  [cs _]
+  [:div {:class "flex flex-col gap-1 text-xs"}
+   (for [view cs] [:pre {:class "whitespace-pre-wrap break-words text-text-200"} (print/text view (:part print/budgets))])])
+
 (defn proofs
   "An agent's proofs as its newest turn measured them (the declared html render of
   :seon.render/proofs): how many are green, red, not run or not written, each test's name,
@@ -812,6 +821,10 @@
                              [t (cond-> {:status (or (get results t) (if (docs/source-of branch t) :not-run :not-written))}
                                   r (assoc :failure {:assert (:expected r) :got (or (:got r) (:actual r))}))]))))
           this-run (when (seq evals) (did evals))
+          ;; what the run's prose cites, as each eval's record holds it (parsed once, as it was
+          ;; recorded: seon.repl/record-details), newest first, each once, read on its branch
+          cites (when branch (into [] (comp (mapcat (comp :cites :seon.eval/record)) (distinct) (keep #(second (docs/cited branch %))))
+                                   evals))
           ;; what its branch changes against main now (seon.program/divergence of main's head, not the
           ;; branch's fork point: what main gained since is shown too, as the branch not having it)
           changes (when branch {:against "main now: what main gained since this branch forked shows as missing here"
@@ -819,6 +832,7 @@
           tile (fn [k x] {:seon.render/kind :value :seon.render/value x :seon.render/schema k :seon.render/eid eid})
           walk (update walk :seon.render/nodes into (remove nil? [(when (seq proofs) (tile :seon.render/proofs proofs))
                                                                   (when this-run (tile :seon.render/this-run this-run))
+                                                                  (when (seq cites) (tile :seon.render/cited cites))
                                                                   (when branch (tile :seon.render/changes changes))]))]
       (chat walk (assoc page :sides (vec (when root (for [nd (:seon.render/nodes (render/walk [main] root))
                                                           :when (= :seon.db/agent-fact (:seon.render/schema nd))]

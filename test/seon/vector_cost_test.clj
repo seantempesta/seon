@@ -4,7 +4,7 @@
   facts once."
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost]
-            [datahike.api :as d] [seon.test-store :as ts] [seon.vector :as vector]))
+            [datahike.api :as d] [seon.test-store :as ts] [seon.vector :as vector] [seon.context :as context]))
 
 (defn- unit-vector
   "A unit vector of 768 dims, seeded, its weight falling off along the dims as a Matryoshka
@@ -62,3 +62,26 @@
      :per-n {:ticks 900.0 :bytes 5500.0}
      :fixed {:ticks 150000.0 :bytes 900000.0}
      :sizes [100 300 1000]}))
+
+(defn similar-of
+  "seon.context/similar's arguments: n forms with vectors and none a function, so it ranks every
+  one and walks every rank (its worst case); the query one of them, nothing named."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int [:set :qualified-symbol]]]}
+  [n] (let [db (store-of n)
+            ;; each form defines a test, so every rank's vars are read and none is a function
+            db (d/db-with db (vec (for [i (range n)] {:var/name (symbol "vc-test" (str "t" i)) :var/kind :test :var/form [:form/id (str "vf" i)]})))]
+        [db (:e (first (d/datoms db :avet :form/id "vf0"))) #{}]))
+
+(deftest the-story-ranks-every-form-once
+  ;; the owner's ruling (2026-10-24, DECISIONS "Embeddings join the context"): :similar is an
+  ;; exact search, measured
+  (cost/proof
+    {:of 'seon.context/similar :input 'seon.vector-cost-test/similar-of
+     :n "forms with vectors"
+     :work (str "near with every vector its shortlist at every dim (each coarse row and each whole vector "
+                "read once, one C scan and one C rerank of all of them, one sort), then each rank's form's "
+                "vars read until :seon.config.render/similar functions are found (here none: every rank)")
+     :growth :n-log-n
+     :per-n {:ticks 4000.0 :bytes 20000.0}
+     :fixed {:ticks 300000.0 :bytes 1500000.0}
+     :sizes [1000 2000 4000]}))

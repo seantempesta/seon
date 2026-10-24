@@ -559,6 +559,12 @@
  ;; (clojure.repl/source ns/f). Provenance: v1's must-reads per-function cap, reference-tokens
  ;; 3000 (audit notes/AUDIT-v1-to-next-2026-10-22.md 2.3).
  :seon.config.render/reference-tokens 3000
+ ;; Unit: functions. The program functions nearest the task's plan by meaning (seon.vector/near,
+ ;; exact) that its write set and proofs do not name, each a line in its task story (:similar);
+ ;; 0 shows none. Provenance: the owner's ruling (2026-10-24, DECISIONS "Embeddings join the
+ ;; context"): a small measured list; embeddings alone recalled 0.495 at 10 on 283 pairs
+ ;; (docs/vector.md#fused-with-the-call-graph). Measured in step 6: kept on only if agents read them.
+ :seon.config.render/similar 5
  ;; Semantic search's pyramid (seon.vector/near, docs/vector.md#the-pyramid), measured against an
  ;; exact 768-dim search, recall@10 (EmbeddingGemma-2):
  ;; - bin/check vectors, Seon's whole text (2,681: 1,783 forms with the schemas, 321 sections, the
@@ -602,6 +608,9 @@
  ;; Unit: requests. What one :embed step takes from the queue (seon.fx :batch): queries queued
  ;; behind a round are embedded together.
  :seon.config.vector/batch 16
+ ;; Unit: ranks. Reciprocal rank fusion's k (Cormack et al. 2009 use 60; v1 used 10): measured on
+ ;; the 283 pairs, 10 gave recall@10 0.451 and 60 0.448. Read by seon.vector/rrf.
+ :seon.config.vector/rrf-k 10
  ;; Unit: items. A list shown in part (seon.print/bounded) shows this many, then `+N more:
  ;; where` (docs/render.md#bounded-lists). Provenance: the literals each list carried before
  ;; (render.ui and render.ai, 2026-10-22), kept as they were.

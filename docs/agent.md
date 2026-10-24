@@ -24,7 +24,8 @@ The run's part:
 - `:write-set`: each var the plan cites, the code you are likely to change: its source and `:callers`, the program vars whose definitions name it. A source past the cap shows `:left-out` and `:read`, the form that reads it.
 - `:to-prove`: each of your proofs and the form that runs it at your REPL, or, for one not written yet, that it is not and what the plan says it should assert.
 - `:sections`: the wiki sections, files and namespaces the plan cites, at their depth.
-- Helpers the plan does not name: ``(my.agent/callees 'ns/f)``, ``(my.agent/callers 'ns/f)``, ``(my.agent/similar "text")``, ``(clojure.repl/dir the.ns)``.
+- `:similar`: a few program functions nearest the plan in meaning that it does not name, a line each (name and first sentence); often a helper the task needs.
+- More helpers the plan does not name: ``(my.agent/callees 'ns/f)``, ``(my.agent/callers 'ns/f)``, ``(my.agent/similar "text")``, ``(clojure.repl/dir the.ns)``.
 
 The conversation: each of your replies with its eval calls and their responses, and the messages sent to you, each `{:from :body}` (the owner's words, `:from "owner"`; root's; another agent's, its run id), where they arrived. The owner's is a fact (`:seon.message/*`) your turn writes on your branch.
 

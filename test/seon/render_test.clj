@@ -449,7 +449,10 @@
                        (seon.repl/record-tx {:seon.root/id :root} "root-1" "outside" {:code "(my.root/problems sys)" :text "{:handle result/e1, :value {}}"} nil)])
         branch (reduce d/db-with main0
                        [(seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e1" "a3"
-                                             {:code "(f 2)" :prose "f doubles?" :text "{:handle result/e1, :value 4}"
+                                             ;; its prose's citations as the record holds them (seon.repl/record-details):
+                                             ;; what the screen shows is read from here, never parsed from the prose again
+                                             {:code "(f 2)" :prose "f doubles?" :text "{:handle result/e1, :value 4}" :run "demo/f#1"
+                                              :cites (seon.ref/references main0 "`seon.docs/source-of`")
                                               :response {:handle 'result/e1 :ms 1.5 :bytes 2048 :ticks 120}} nil)
                         (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e2" "a3"
                                              {:code "(f 3)" :text "{:handle result/e2, :value 6}" :response {:handle 'result/e2 :ms 0.4 :bytes 512 :ticks 40}} nil)
@@ -970,3 +973,17 @@
     (is (= ['demo/f] (:evaluated did)) "program functions, the library's left out, the screen's not the run's")
     (is (= [{:form "(my.agent/prove)" :handle "e5"}] (:tests did)))
     (is (str/includes? (h/html (ui/this-run did {})) "demo/f ×2"))))
+
+(deftest the-screen-shows-what-the-prose-cites
+  ;; task seon.render/a-page-is-its-entitys-view (4e): what the run's prose cited, as its eval
+  ;; records hold it, is on the screen, each cited thing at its citation's depth
+  (let [[main branch eid] (paged-dbs)
+        [st1 _] (#'p/pass-view (comp-state main branch eid) :a3)
+        text (pr-str (:page (p/screen-of st1 :a3)))]
+    (is (some #(and (vector? %) (= [:h2 "cited"] (second %)) (str/includes? (pr-str %) "seon.docs/source-of"))
+              (tree-seq coll? seq (:page (p/screen-of st1 :a3))))
+        (str "the var the prose cited, in the cited tile, read from the record (its prose names none): " text))
+    (testing "a run whose records cite nothing has no cited tile"
+      (let [branch' (d/db-with branch [{:seon.eval/id "e1" :seon.eval/record {:code "(f 2)" :text "x" :run "demo/f#1"}}])
+            [st2 _] (#'p/pass-view (comp-state main branch' eid) :a3)]
+        (is (not (str/includes? (pr-str (:page (p/screen-of st2 :a3))) "[:h2 \"cited\"]")))))))

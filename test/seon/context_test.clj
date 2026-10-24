@@ -3,7 +3,7 @@
   red one its source and its failures (expected and actual), a reference already shown as a
   proof is not shown again, a merge task's plan stays its own."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
-            [seon.db :as pdb] [seon.task :as task] [seon.context :as context] [seon.print :as print]
+            [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.context :as context] [seon.print :as print]
             [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs]
             [seon.print.select :as select] [clojure.string :as str] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model]))
 
@@ -585,10 +585,48 @@
                                                :seon.task/plan "Make `demo/f` triple. demo-test/h-test asserts (f 2) is 6."
                                                :seon.task/proofs #{'demo-test/f-test 'demo-test/h-test}}]))
         story (context/run-state db (task/task db "demo/s"))]
-    (is (= [:task :write-set :to-prove] (vec (keys story))) "plan, write set, proofs; nothing else uncited")
+    (is (= [:task :write-set :to-prove :similar] (vec (keys story))) "plan, write set, proofs, what is near; nothing else uncited")
+    (is (contains? (:similar story) :not-embedded) "a plan with no vector yet says so")
     (is (= [{:symbol 'demo/f :source "(defn f \"Doubles.\" [x] (* 2 x))" :callers '[demo/area demo/vol]}] (:write-set story))
         "each cited var with its source and its callers")
     (is (= '(my.agent/prove #{demo-test/f-test}) (get (:to-prove story) 'demo-test/f-test)) "a written proof: the form that runs it")
     (is (= "not written yet; it should assert what the plan says: demo-test/h-test asserts (f 2) is 6."
            (get (:to-prove story) 'demo-test/h-test))
         "an unwritten proof: what the plan says it should assert")))
+
+(deftest prose-references-are-parsed-once
+  ;; task seon.render/a-page-is-its-entitys-view (4e): an eval's prose is parsed once, as it is
+  ;; recorded, by the one reference parser; its record holds what it cites
+  (let [db (db-with-program)
+        rec (repl/record-details db "(f 1)" {:text "2"} {:prose "Reading `demo/f` before I change it."} "demo/s#1")]
+    (is (= ['demo/f] (mapv :seon.ref/name (:cites rec))) "the citation, kept in the record")
+    (is (= (seon.ref/references db "Reading `demo/f` before I change it.") (:cites rec)) "as the one parser reads it")
+    (is (= "demo/s#1" (:run rec)))
+    (is (not (contains? (repl/record-details db "(f 1)" {:text "2"} {:prose "No names here."} nil) :cites)) "prose citing nothing records none")))
+
+(deftest the-story-names-the-functions-nearest-its-plan
+  ;; the owner's ruling (2026-10-24, DECISIONS "Embeddings join the context"): the task story's
+  ;; :similar, the program functions nearest the plan by meaning (exact), those it names and
+  ;; what is no function left out, the first :seon.config.render/similar (5), each a line: its
+  ;; name and its doc's first sentence; a plan with no vector says so
+  (let [fns '[demo/area demo/pi demo/noise demo/e1 demo/e2 demo/e3]
+        db (d/db-with (db-with-program) (program-facts (vec (for [s (conj fns 'demo-test/near-test)] [s (str "(defn " (name s) " [])") []]))))
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "c" :seon.task/plan "Make `demo/f` use the circle's area."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+        db (d/db-with db (vec (concat (for [s (conj fns 'demo/f)] {:var/name s :var/kind :fn :var/doc (str (name s) " does it. More.")})
+                                      [{:var/name 'demo-test/near-test :var/kind :test}])))
+        dir (fn [& xs] (let [v (vec (concat xs (repeat (- 768 (count xs)) 0.0))) n (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % n) v)))
+        form (fn [s] (:db/id (:var/form (d/entity db [:var/name s]))))
+        te (pdb/eid db :seon.task/id "demo/c")
+        ;; nearest first: the named f, a test, then the six functions in order
+        order (into '[demo/f demo-test/near-test] fns)
+        es (into [te] (map form) order)
+        vs (into [(dir 1.0)] (map-indexed (fn [i _] (dir 1.0 (* 0.05 (inc i)))) order))
+        db (d/db-with db (vector/tx-data es (repeat (count es) 1) vs (repeat (count es) 10) "m"))
+        sim (context/similar db te #{'demo/f 'demo-test/f-test})]
+    (is (= ["demo/area: area does it." "demo/pi: pi does it." "demo/noise: noise does it." "demo/e1: e1 does it." "demo/e2: e2 does it."]
+           (:nearest sim))
+        "nearest first, the named one and the test left out, the first five, each its name and first sentence")
+    (is (string? (:more sim)) "and the form that searches further")
+    (is (= sim (:similar (context/run-state db (task/task db "demo/c")))) "in the story")
+    (is (contains? (context/similar db nil #{}) :not-embedded) "a plan with no vector says so")))

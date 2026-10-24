@@ -116,7 +116,8 @@
  ;; its details as one EDN value: {:code :text :response :prose :call-id :fns :recorded}: the code,
  ;; the text every reader read (seon.repl/printed), the response without its live value, the
  ;; model's prose beside the call and the provider's call id, its 10 costliest contracted
- ;; functions ([{:var :calls :ms}], seon.profile), the vars it recorded
+ ;; functions ([{:var :calls :ms}], seon.profile), the vars it recorded, and what its prose cites
+ ;; (:cites, seon.ref/references parsed once as it is recorded: seon.repl/record-details)
  :seon.eval/record [:map {:seon.db/data true :seon.render/html seon.render.ui/evaluation} [:code :string] [:text :string]]
  ;; an agent: one entity per agent per boot of its root (an id like :a3 starts again each boot),
  ;; named by its key (seon.task/agent-key: "<boot>/<id>"), a content id so root's entity on main
