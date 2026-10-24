@@ -1028,7 +1028,12 @@
       (is (str/includes? html "<summary class=\"cursor-pointer\">error 1</summary>"))
       (is (str/includes? html "error ×3 demo/f") "its rows, each by the row's view")
       (is (not (str/includes? html ">red 0<")) "a class with no rows is left out"))
-    (is (= ["none open"] (re-seq #"none open" (h/html (ui/problems {:t 1 :classes {}} {}))))))
+    (is (= ["none open"] (re-seq #"none open" (h/html (ui/problems {:t 1 :classes {}} {})))))
+    (testing "on root's page a closed class renders no rows; the tab opens it (/open)"
+      (let [r {:t 1 :classes {:error {:n 1 :rows [(dissoc row :class)]}}}]
+        (is (not (str/includes? (h/html (ui/problems (assoc r :open #{}) {})) "boom")))
+        (is (str/includes? (h/html (ui/problems (assoc r :open #{"pc-error"}) {})) "boom"))
+        (is (str/includes? (h/html (ui/problems (assoc r :open #{}) {})) "unit=pc-error") "its toggle"))))
   (let [html (h/html (ui/runs {:by-status {:running 1 :closed 2} :running [{:seon.run/id "demo/f#1" :seon.run/status :running :seon.run/max-turns 8}]} {}))]
     (is (str/includes? html "2 closed · 1 running"))
     (is (str/includes? html "run demo/f#1 · running · up to 8 turns") "each running one by the run's view"))

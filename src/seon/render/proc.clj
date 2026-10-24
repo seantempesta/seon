@@ -300,7 +300,8 @@
             berr (get-in st [:branches view :error])
             w (cond-> w
                 (and (= :root view) (not (:seon.error/type w)))
-                (update :seon.render/nodes conj {:seon.render/kind :value :seon.render/value (:recorded st)
+                ;; main's problems as this view shows them: the classes its tab opened render their rows
+                (update :seon.render/nodes conj {:seon.render/kind :value :seon.render/value (assoc (:recorded st) :open (get-in st [:open view] #{}))
                                                  :seon.render/schema :seon.render/problems :seon.render/eid eid}
                         {:seon.render/kind :value :seon.render/value (runs-of db) :seon.render/schema :seon.render/runs :seon.render/eid eid})
                 (and berr (not (:seon.error/type w)))

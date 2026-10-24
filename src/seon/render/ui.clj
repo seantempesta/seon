@@ -574,6 +574,12 @@
   [:div {:class "flex flex-col gap-1 text-xs"}
    (for [view cs] [:pre {:class "whitespace-pre-wrap break-words text-text-200"} (print/text view (:part print/budgets))])])
 
+(defn- toggle
+  "A <details>' attrs that tell the render proc it opened or closed (/open), for the conversation's
+  part with element id: its view read from the list it sits in (data-view)."
+  {:malli/schema [:=> [:cat :string] :map]}
+  [id] {(keyword "data-on:toggle") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=" id "&open=' + el.open)")})
+
 (defn problem-about
   "What problem row r is about, as words: its task, run, test and attribute, those it has (the
   one wording seon.render.ai/problem-row and `problem-row` share)."
@@ -594,16 +600,19 @@
 
 (defn problems
   "Main's problems (the declared html render of :seon.problems/report): each class with rows,
-  its count, its rows a line each (`problem-row`) on open, open ones first."
+  its count, and its rows a line each (`problem-row`), open ones first, rendered only when the
+  tab opened the class (its id in :open, the /open toggle's; a report shown with no :open shows
+  every class's rows)."
   {:malli/schema [:=> [:cat :seon.problems/report :seon.render/opts] :any]}
-  [{:keys [classes]} _]
+  [{:keys [classes open]} _]
   (let [cs (for [[c {:keys [n rows]}] (sort-by (comp str key) classes) :when (seq rows)] [c n rows])]
     [:div {:class "flex flex-col gap-1 text-xs"}
      (if (empty? cs)
        [:p "none open"]
-       (for [[c n rows] cs]
-         [:details [:summary {:class "cursor-pointer"} (str (kname c) " " n)]
-          (for [r (sort-by #(if (false? (:open? %)) 1 0) rows)] (render/html (assoc r :class c) {:schema :seon.problems/row}))]))]))
+       (for [[c n rows] cs :let [id (str "pc-" (name c)) shown? (or (nil? open) (contains? open id))]]
+         [:details (cond-> (toggle id) (and open shown?) (assoc :open true))
+          [:summary {:class "cursor-pointer"} (str (kname c) " " n)]
+          (when shown? (for [r (sort-by #(if (false? (:open? %)) 1 0) rows)] (render/html (assoc r :class c) {:schema :seon.problems/row})))]))]))
 
 (defn runs
   "Main's runs (the declared html render of :seon.render/runs): how many by status, and each
@@ -699,12 +708,6 @@
   (if (= :value (:seon.render/kind nd))
     (str "t-" (:seon.render/eid nd) "-" (dom-id (or (get-in nd [:seon.render/from :seon.render/attr]) (:seon.render/schema nd) :value)))
     (comp-id (:seon.render/eid nd) :tile)))
-
-(defn- toggle
-  "A <details>' attrs that tell the render proc it opened or closed (/open), for the conversation's
-  part with element id: its view read from the list it sits in (data-view)."
-  {:malli/schema [:=> [:cat :string] :map]}
-  [id] {(keyword "data-on:toggle") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=" id "&open=' + el.open)")})
 
 (defn- chat-part
   "Entity eid on db as a part of an agent's conversation (element id): a model turn, its header
@@ -833,7 +836,8 @@
                       :chat))
 ]
     {:seon.render/html
-     [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4"}
+     ;; the view every toggle on the page posts for (`toggle`), a tile's as a part's
+     [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4" :data-view view}
       [:nav {:class "flex items-baseline gap-3" :seon/off-screen true}
        [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "text-text-500"} "on jolt"]]
       [:div {:class "grid gap-4 lg:grid-cols-[12rem_minmax(0,1fr)_20rem]"}
