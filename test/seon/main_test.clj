@@ -178,10 +178,21 @@
                      [(clojure.string/starts-with? ?file "src/")]] db)
         read-in (fn [nsn src] (require nsn)
                   (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))
+        ;; a form names git when it holds the literal "git" or ".git", or calls clojure.java.shell/sh
+        ;; with a string whose words include git (a shell line: zsh -c "... git -C ...")
+        names-git? (fn [nsn f]
+                     (some (fn [x] (or (#{"git" ".git"} x)
+                                       (and (seq? x) (symbol? (first x)) (= #'clojure.java.shell/sh (ns-resolve (the-ns nsn) (first x)))
+                                            (some #(and (string? %) (some #{"git"} (clojure.string/split % #"[^A-Za-z0-9_.-]+"))) (tree-seq coll? seq x)))))
+                           (tree-seq coll? seq f)))
         readers (into (sorted-set)
                       (for [[nsn src] forms
                             :let [f (read-in nsn src)
                                   v (when (and (seq? f) (symbol? (second f))) (symbol (str nsn) (name (second f))))]
-                            :when (some #{"git" ".git"} (tree-seq coll? seq f))]
+                            :when (names-git? nsn f)]
                         (or v nsn)))]
+    (testing "a shell line that runs git is seen (checkout-at's old form)"
+      (is (names-git? 'seon.fx '(defn x [d] (sh/sh "zsh" "-c" "rm -rf d && git -C \"$2\" archive HEAD | tar -x" "x" d)))))
+    (testing "a shell line that names no git is not"
+      (is (not (names-git? 'seon.fx '(defn x [d] (sh/sh "zsh" "-c" "tar -x -C \"$1\"" "x" d))))))
     (is (= #{'seon.fx/git! 'seon.fx/git-try 'seon.fx/checked-out?} readers))))

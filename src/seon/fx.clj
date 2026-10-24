@@ -55,11 +55,16 @@
 
 (defn- git-try
   "git in dir with args, for a read whose no is an answer (no commit yet, no such branch or ref, a
-  detached HEAD): its trimmed output when git exits 0, else nil. A read whose failure is an error is
-  git!'s. With git!, the one way src runs git (seon.main-test/git-is-read-through-fx)."
+  detached HEAD: git exits 1): its trimmed output when git exits 0, nil when it exits 1; any other
+  exit (not a repository, git's own failure) throws its stderr, as git! does. With git!, the one way
+  src runs git (seon.main-test/git-is-read-through-fx)."
   {:malli/schema [:=> [:cat :string [:sequential :string]] [:maybe :string]]}
   [dir args]
-  (let [r (apply sh/sh "git" "-C" dir args)] (when (zero? (:exit r)) (str/trim (:out r)))))
+  (let [r (apply sh/sh "git" "-C" dir args)]
+    (case (int (:exit r))
+      0 (str/trim (:out r))
+      1 nil
+      (throw (ex-info (str "git " (str/join " " args) ": " (str/trim (str (:err r) (:out r)))) {:dir dir :exit (:exit r)})))))
 
 (defn- checked-out?
   "Is directory d a git checkout of its own (a submodule checked out: its .git), not only a
@@ -67,11 +72,16 @@
   {:malli/schema [:=> [:cat :string] :boolean]}
   [d] (.exists (java.io.File. ^String d ".git")))
 
+(declare git!)
+
 (defn git-refs
   "The refs directory of the git repository the checkout at co belongs to (its common dir, so a
-  worktree's commits and merges move refs there too), or nil when co is no git checkout."
+  worktree's commits and merges move refs there too), canonical as the watcher reports paths; nil
+  when co is no checkout of its own (checked-out?). git's failure throws its stderr (git!)."
   {:malli/schema [:=> [:cat :string] [:maybe :string]]}
-  [co] (some-> (git-try co ["rev-parse" "--path-format=absolute" "--git-common-dir"]) (str "/refs")))
+  [co]
+  (when (checked-out? co)
+    (str (.getCanonicalPath (java.io.File. ^String (git! {} co ["rev-parse" "--path-format=absolute" "--git-common-dir"] nil))) "/refs")))
 
 (defn read-source
   "The text of every .clj and .edn file under root's dirs (relative paths, e.g.
@@ -86,7 +96,7 @@
   [{{:keys [root dirs binary-tree]} :req}]
   (try
     (let [base (.getCanonicalPath (java.io.File. ^String root))
-          head (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"])]
+          head (when (checked-out? base) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))]
       (cond-> {:value (into (sorted-map)
                         (for [d dirs
                               f (file-seq (java.io.File. (str base "/" d)))
@@ -96,7 +106,7 @@
         head (assoc :commit head
                                     :pins (into {}
                                                 (for [[_ sha p] (re-seq #"(?m)^160000 ([0-9a-f]{40}) \d+\t(\S+)$"
-                                                                        (or (git-try base ["ls-files" "-s" "--" "reference-code"]) ""))]
+                                                                        (git! {} base ["ls-files" "-s" "--" "reference-code"] nil))]
                                                   [p sha])))
         (and binary-tree head) (assoc :inputs (inputs base)
                            :binary (let [f (java.io.File. ^String binary-tree)] (when (.isFile f) (str/trim (slurp f)))))))
@@ -195,11 +205,13 @@
   Answers dir; a failure throws git's or tar's stderr, as git! does."
   {:malli/schema [:=> [:cat :string :string [:sequential :string] :string] :string]}
   [root rev paths dir]
-  (let [r (apply sh/sh "zsh" "-c" "setopt pipefail; rm -rf \"$1\" && mkdir -p \"$1\" && git -C \"$2\" archive \"$3\" -- \"${@:4}\" | tar -x -C \"$1\""
-                 "checkout-at" dir root rev paths)]
-    (when-not (zero? (:exit r))
-      (throw (ex-info (str "checkout-at " rev ": " (str/trim (str (:err r) (:out r)))) {})))
-    dir))
+  (let [tar (.getAbsolutePath (java.io.File. (str dir ".tar")))]
+    (.mkdirs (.getParentFile (java.io.File. ^String tar)))
+    (git! {} root (concat ["archive" "-o" tar rev "--"] paths) nil)
+    (let [r (sh/sh "zsh" "-c" "rm -rf \"$1\" && mkdir -p \"$1\" && tar -x -C \"$1\" -f \"$2\"; e=$?; rm -f \"$2\"; exit $e" "checkout-at" dir tar)]
+      (when-not (zero? (:exit r))
+        (throw (ex-info (str "checkout-at " rev ": " (str/trim (str (:err r) (:out r)))) {})))
+      dir)))
 
 (defn pin
   "What a build or a test reads from the checkout at dir (a submodule), by content: its HEAD
@@ -420,12 +432,13 @@
   [{{:keys [repo branch files tests]} :req}]
   (let [t0 (profile/now-ns)
         ;; the branch's commit: none (no such branch) is an error to the asker, never a run at an empty sha
-        sha (git-try repo ["rev-parse" "--verify" "--quiet" (str branch "^{commit}")])
+        sha (try (git-try repo ["rev-parse" "--verify" "--quiet" (str branch "^{commit}")]) (catch Throwable e e))
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
         clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"]
-        at (when sha (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
+        at (when (string? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
     (cond
+      (instance? Throwable sha) (error :seon.fx/io-error (step/error-msg sha) {:path repo})
       (nil? sha) (error :seon.fx/io-error (str "no commit of branch " branch " in " repo) {:path repo})
       (not (zero? (:exit at))) (error :seon.fx/io-error (str "bin/worktree --at exited " (:exit at) ": " (:err at)) {:path dir})
       :else
