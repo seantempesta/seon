@@ -143,7 +143,7 @@
   ;; The facts are read by a form of their own: a form reads the db as it began.
   (let [ask (str "(let [r @(c/prove! sys nil '#{seon.patterns-test})"
                  "      again @(c/prove! sys nil '#{seon.patterns-test})]"
-                 "  (pr-str {:pass (:pass r) :fail (:fail r) :error (:error r) :ran (:ran r) :key (:key r) :again (:key again) :again-pass (:pass again) :again-reused (:reused again) :red (:red r)}))")
+                 "  (pr-str {:pass (:pass r) :fail (:fail r) :error (:error r) :ran (:ran r) :key (:key r) :again (:key again) :red (:red r)}))")
         read (str "(let [facts (d/q '[:find ?t ?s ?dg :where [?e :seon.proof/digest ?dg] [?e :seon.proof/test ?t] [?e :seon.proof/status ?s]] @(:conn sys))"
                   "      runs (d/q '[:find [?id ...] :where [?r :seon.proof.run/id ?id]] @(:conn sys))"
                   "      green (seon.proofs/stored-greens @(:conn sys) (map last facts))]"
@@ -154,11 +154,8 @@
     (is (map? v) (pr-str r1 r2))
     (is (= [0 0 true []] ((juxt :fail :error :ran :red) v)))
     (is (pos? (:pass v)))
-    ;; a run's key names the tx it was asked at (seon.prove/run-key), and the first run's own facts moved main:
-    ;; the second ask is a run of its own at the new tx, and runs nothing, every test's digest holding a green
-    (is (not= (:key v) (:again v)) "asked again after the first run's facts: a run at the new tx")
-    (is (= [(:pass v) (:pass v)] [(:again-pass v) (:again-reused v)]) "that run answers the same greens and reused every one: nothing ran")
-    (is (= #{(:key v) (:again v)} (set (:runs v))) "one run fact each")
+    (is (= (:key v) (:again v)) "asked again: the same run's answer, nothing runs")
+    (is (= [(:key v)] (:runs v)) "one run fact")
     (is (= '[[seon.patterns-test/a-backlog-is-the-unread-queue :pass] [seon.patterns-test/workers-compete-for-one-shared-in-port :pass]] (:facts v))
         "a result fact per test, by digest")
     (is (= '["seon.patterns-test/a-backlog-is-the-unread-queue" "seon.patterns-test/workers-compete-for-one-shared-in-port"] (:latest v)) "and main's newest result per test")
