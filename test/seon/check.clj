@@ -685,11 +685,14 @@
 
 (defn- main-data-datoms
   "Main's datoms but root's own facts (:seon.root/*: its boot, its quiescence report, its
-  collection record) and every transaction entity's own datoms (:db/txInstant, e = tx): a
-  restarted root writes its facts anew in transactions of its own (boot, quiescent, collected:
-  three :db/txInstant datoms more), so what a restart must give back exactly is the rest."
+  collection record), root's link to the agents it started (:seon.agent/root: a new boot
+  retracts an earlier boot's, seon.task/earlier-agents-tx, one per agent) and every transaction
+  entity's own datoms (:db/txInstant, e = tx): a restarted root writes its facts anew in
+  transactions of its own (boot, quiescent, collected: three :db/txInstant datoms more), so what
+  a restart must give back exactly is the rest."
   [sys]
-  (count (remove #(or (= "seon.root" (namespace (:a %))) (= (:e %) (:tx %))) (d/datoms @(:conn sys) :eavt))))
+  (count (remove #(or (= "seon.root" (namespace (:a %))) (= :seon.agent/root (:a %)) (= (:e %) (:tx %)))
+                 (d/datoms @(:conn sys) :eavt))))
 
 (defn durable-write
   "Phase 1 (a process of its own): boot on main branch nm of the one store (made from its
