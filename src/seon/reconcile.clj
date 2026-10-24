@@ -264,10 +264,18 @@
         (settle idx nc (if all? (set (keys (:tasks idx))) dirty) touched)))))
 
 (defn index
-  "The index of db, listed: observe of every task, run and root entity at once."
-  {:malli/schema [:=> [:cat :seon.host/db] :map]}
-  [db]
-  (observe empty-index db (for [e (task/entity-ids db)] [:db/add e :seon.task/id nil])))
+  "The index of db, listed: observe of every task, run and root entity at once. Given idx,
+  the index of db from, the index of db observed from it over the datoms of the watched
+  attributes that differ (datahike.api/datoms-diff of each attribute's range, which skips the
+  stored subtrees both share): the cost of the watched datoms and what changed, never of the
+  program's (task seon.turn/context-render-observes-what-changed)."
+  {:malli/schema [:function [:=> [:cat :seon.host/db] :map]
+                  [:=> [:cat :seon.reconcile/index :seon.host/db :seon.host/db] :map]]}
+  ([db] (observe empty-index db (for [e (task/entity-ids db)] [:db/add e :seon.task/id nil])))
+  ([idx from db]
+   (observe idx db (for [a (sort (into #{} (filter #(and (keyword? %) (watched-ns (namespace %)))) (concat (keys (:schema from)) (keys (:schema db)))))
+                         dt (apply concat (d/datoms-diff from db :aevt [a]))]
+                     [:db/add (:e dt) a]))))
 
 (defn done-input
   "The done rule's input for run results of task id, observed against main at t basis

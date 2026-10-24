@@ -20,6 +20,7 @@
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
+;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 (defonce state (atom nil))
 

@@ -685,11 +685,14 @@
 
 (defn- main-data-datoms
   "Main's datoms but root's own facts (:seon.root/*: its boot, its quiescence report, its
-  collection record) and every transaction entity's own datoms (:db/txInstant, e = tx): a
-  restarted root writes its facts anew in transactions of its own (boot, quiescent, collected:
-  three :db/txInstant datoms more), so what a restart must give back exactly is the rest."
+  collection record), root's link to the agents it started (:seon.agent/root: a new boot
+  retracts an earlier boot's, seon.task/earlier-agents-tx, one per agent) and every transaction
+  entity's own datoms (:db/txInstant, e = tx): a restarted root writes its facts anew in
+  transactions of its own (boot, quiescent, collected: three :db/txInstant datoms more), so what
+  a restart must give back exactly is the rest."
   [sys]
-  (count (remove #(or (= "seon.root" (namespace (:a %))) (= (:e %) (:tx %))) (d/datoms @(:conn sys) :eavt))))
+  (count (remove #(or (= "seon.root" (namespace (:a %))) (= :seon.agent/root (:a %)) (= (:e %) (:tx %)))
+                 (d/datoms @(:conn sys) :eavt))))
 
 (defn durable-write
   "Phase 1 (a process of its own): boot on main branch nm of the one store (made from its
@@ -731,6 +734,8 @@
     (let [expect (read-string (slurp (str (seon.db/agents-dir (:cfg sys)) "/durable.expect.edn")))
         st (c/state sys {:datoms true})
         md (main-data-datoms sys)
+        ;; this boot has started no agent yet: every earlier boot's link to its agents is retracted
+        linked (count (d/datoms @(:conn sys) :aevt :seon.agent/root))
         [n rb rc] (spawn-ready! sys "born after the restart" {:task "resume b" :branch :dur-b} {:task "resume the clone" :branch :dur-clone})
         r-n (p1 sys n "(app.m0/f1 2) (count (q '[:find ?n :where [?n :note/text]]))")
         r-b (p1 sys rb "(app.m1/f2 1) (q '[:find [?t ...] :where [?n :note/text ?t]]) (app.m0/f1 2)")
@@ -742,9 +747,12 @@
         [n2] (spawn-ready! sys "after merging b")
         r-n2 (p1 sys n2 "(app.m1/f2 1) (q '[:find [?t ...] :where [?n :note/agent :b] [?n :note/text ?t]]) (app.m0/f1 2)")]
       {:report {:store (:store st) :main (:main st) :main-data-datoms {:phase-1 (:main-datoms expect) :recovered md}
+                :agents-linked-at-boot linked
                 :born-after r-n :resumed-b r-b :b-tests (select-keys t-b [:pass :fail :error]) :resumed-clone r-c
                 :merge-b [(select-keys mmb [:ok :applied]) (dissoc mb :ops)] :after-merging-b r-n2}
        :checks {:main-recovered (and (= (:main-datoms expect) md) (:recovered? (:store st)))
+                ;; what main-data-datoms leaves out, asserted: the boot retracted phase 1's links
+                :earlier-agents-are-not-this-roots (zero? linked)
                 ;; phase 1's root was SIGKILLed: it left no stop fact, so this boot found its end :unclean
                 :the-killed-root-ended-unclean (= :unclean (:cause (:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))))
                 :branches-recovered (= #{:dur-a :dur-b :dur-c :dur-clone} (set (get-in st [:store :recovered-branches])))
@@ -1190,9 +1198,10 @@
           :checks checks})))))
 
 (defn- eval-records
-  "The evaluation records on db of agent id: [{:form :origin ...}]."
-  [db id]
-  (vec (d/q '[:find [?r ...] :in $ ?id :where [?a :seon.agent/id ?id] [?e :seon.cluster.eval/agent ?a] [?e :seon.cluster.eval/record ?r]] db id)))
+  "The evaluation records on db of who evaluated, by its identity (seon.repl/record-tx): an
+  agent's [:seon.agent/id id], or root's [:seon.root/id :root]: [{:form :origin ...}]."
+  [db [attr id]]
+  (vec (d/q '[:find [?r ...] :in $ ?attr ?id :where [?a ?attr ?id] [?e :seon.cluster.eval/agent ?a] [?e :seon.cluster.eval/record ?r]] db attr id)))
 
 (defn await-records
   "What (read) answers once (enough? it) holds, read again at each :commit event of agent a
@@ -1240,10 +1249,10 @@
         ;; the agent's record is on its branch at its commit (await-records); answers 2 when
         ;; recorded, else waits on the next commit (the eval failed: its text check says so)
         mine (if (clojure.string/includes? (str (text 4)) "42")
-               (await-records ev a #(filter (fn [r] (= :outside (:origin r))) (eval-records (:db @(c/branch-db sys :mcp1)) a)) #(= 2 (count %)))
+               (await-records ev a #(filter (fn [r] (= :outside (:origin r))) (eval-records (:db @(c/branch-db sys :mcp1)) [:seon.agent/id a])) #(= 2 (count %)))
                [])
         _ (a/untap (:events-mult sys) ev)
-        roots (filter #(= :outside (:origin %)) (eval-records @(:conn sys) :root))
+        roots (filter #(= :outside (:origin %)) (eval-records @(:conn sys) [:seon.root/id :root]))
         bound (seon.config/value :seon.config.machine/relay-mb)]
       {:report {:tools (count (get-in answers [2 "result" "tools"]))
                 :agents-text (text 3) :agent-eval (text 4) :root-eval (text 5)

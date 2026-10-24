@@ -66,6 +66,16 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :qualified-symbol]]}
   [base db] (set (pm/uncontracted (pm/delta-changes base db #{}))))
 
+(defn- index!
+  "The reconciler's index of db, observed from the one this process held for its db at the
+  turn before (seon.reconcile/index over what differs); listed whole only at its first turn."
+  {:malli/schema [:=> [:cat :seon.host/db] :map]}
+  [db]
+  (let [{from :db idx :index} (:index @agent/state)
+        v (if idx (r/index idx from db) (r/index db))]
+    (swap! agent/state assoc :index {:db db :index v})
+    v))
+
 (defn- observe
   "What a turn starts from, measured now: the proofs run by the test service (seon.prove: one run
   per branch and tx whoever asks, in a fork of this agent; a run it could not fork ran no proof:
@@ -92,7 +102,7 @@
                     unfinished (count (remove #(contains? results %) (:selected test-run)))]
                 (cond-> {:this-turn (count (:selected test-run)) :at-judge (:at-judge test-run) :when-asked (count (:deferred test-run))}
                   (pos? unfinished) (assoc :unfinished unfinished))))
-     :reasons (r/done-explain (assoc (r/done-input (r/index db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before
+     :reasons (r/done-explain (assoc (r/done-input (index! db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before
                                                    (if (contract/error? test-run) #{} (set (:deferred test-run))))
                                      :caused (set caused)))}))
 
