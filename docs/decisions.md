@@ -3,6 +3,8 @@
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in notes/archive/DECISIONS-superseded.md.
 
 ## 2026-10-25 rulings
+### Agents stay running, parked, between messages; any commit can be resumed
+Owner, 2026-10-25: "Maybe we should just keep the forks running and just parked. Flow can do this so do this and we don't have to worry about restarting. I still want a resume that can take any transaction commit point and we can get an agent back to the mostly same env even if it means re-evaluating the forms (I think if user approved this is fine)." A live agent's process parks on its input (Flow) when it has nothing to do and wakes on a message; a separate resume takes any commit point of a branch and brings an agent back to nearly the same environment: its conversation from the db, its data results from the store, and, with the user's approval, its forms evaluated again. Stated in: not yet (owed docs/processes.md and docs/flow.md with the build).
 ### Correctness and performance come before lines of code
 Owner, 2026-10-25: "prioritize correctness and perf over lines of code. Lines of code is not my main metric". A change is judged first on whether it is right and on its measured work (ticks, bytes, turns to green); a smaller diff never wins over a correct or faster one. Resistance to growth (2026-10-23) still means reusing and improving the core rather than adding one-offs. Stated in: AGENTS §1 (owed).
 ### Root is main; everything else is the same system with different config
