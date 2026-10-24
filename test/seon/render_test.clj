@@ -363,43 +363,45 @@
   (let [db (walked-db)]
     (testing "an agent: its own attributes, then its units in its schema's order, each a neighbour pulled whole"
       (let [eid (eid-of db [:seon.agent/key "b1/a3"])
-            w (r/walk db eid)
+            w (r/walk [db] eid)
             root (:seon.render/root w)]
         (is (= {:seon.render/kind :entity :seon.render/schema :seon.db/agent-fact :seon.render/eid eid}
                (select-keys root [:seon.render/kind :seon.render/schema :seon.render/eid :seon.render/from])) "the root came from nowhere")
         (is (= {:seon.agent/id :a3 :seon.agent/status :idle :seon.agent/pid 77 :seon.agent/running "(f 2)"}
                (select-keys (:seon.render/value root) [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/running])))
         (is (not (contains? (:seon.render/value root) :seon.agent/root)) "a unit is its own node, not again in the entity")
-        (is (= [:seon.run/_agent :seon.eval/_agent :seon.eval/_agent] (mapv attr-of (:seon.render/nodes w)))
-            "its run and its evaluations; root, of no use to a working agent, is not its unit")
-        (is (every? #(= eid (get-in % [:seon.render/from :seon.render/eid])) (:seon.render/nodes w)) "each says where it came from")
+        (is (= [:seon.eval/_agent :seon.eval/_agent :seon.run/_agent] (mapv attr-of (filter #(= eid (get-in % [:seon.render/from :seon.render/eid])) (:seon.render/nodes w))))
+            "its evaluations and its run, newest first; root, of no use to a working agent, is not its unit")
+        (is (= #{:seon.turn/_run :seon.message/_to :seon.run/task} (set (map attr-of (remove #(= eid (get-in % [:seon.render/from :seon.render/eid])) (:seon.render/nodes w)))))
+            "its run is part of its page (:seon.render/parts): the run's units one hop more, each saying it came from the run")
         (is (= ["demo/f#1"] (values-of w :seon.run/_agent :seon.run/id)))
-        (is (= ["e1" "e2"] (values-of w :seon.eval/_agent :seon.eval/id)))
+        (is (= ["e2" "e1"] (values-of w :seon.eval/_agent :seon.eval/id)))
         (testing "each node is an entity with its own schema; an evaluation, with no identity, the one naming the ref that reached it"
-          (is (= [:seon.run/run-fact :seon.db/eval-fact :seon.db/eval-fact] (mapv :seon.render/schema (:seon.render/nodes w))))
+          (is (= [:seon.db/eval-fact :seon.db/eval-fact :seon.run/run-fact] (mapv :seon.render/schema (filter #(= eid (get-in % [:seon.render/from :seon.render/eid])) (:seon.render/nodes w)))))
           (is (every? #(= :entity (:seon.render/kind %)) (:seon.render/nodes w))))
         (testing "a neighbour holds only the attributes its schema declares relevant (:seon.render/keys)"
-          (let [run (first (:seon.render/nodes w))]
+          (let [run (first (filter #(= :seon.run/run-fact (:seon.render/schema %)) (:seon.render/nodes w)))]
             (is (= "demo/f#1" (get-in run [:seon.render/value :seon.run/id])))
             (is (not (contains? (:seon.render/value run) :seon.run/plan)) "its plan is its task's")
             (is (not (contains? (:seon.render/value run) :seon.run/boot)) "its boot is root's")))))
     (testing "a run: its task, its turns, the messages to it"
-      (let [w (r/walk db (eid-of db [:seon.run/id "demo/f#1"]))]
+      (let [w (r/walk [db] (eid-of db [:seon.run/id "demo/f#1"]))]
         (is (= :seon.run/run-fact (get-in w [:seon.render/root :seon.render/schema])))
-        (is (= [:seon.run/task :seon.turn/_run :seon.message/_to] (mapv attr-of (:seon.render/nodes w))))
+        (is (= #{:seon.run/task :seon.turn/_run :seon.message/_to} (set (map attr-of (:seon.render/nodes w)))))
+        (is (apply >= (map :seon.render/tx (:seon.render/nodes w))) "newest first")
         (is (= ["demo/f"] (values-of w :seon.run/task :seon.task/id)))
         (is (= ["demo/f#1/0"] (values-of w :seon.turn/_run :seon.turn/id)))
         (is (= ["m-1"] (values-of w :seon.message/_to :seon.message/id)))))
     (testing "root: its agents"
-      (is (= [:a3] (values-of (r/walk db (eid-of db [:seon.root/id :root])) :seon.agent/_root :seon.agent/id))))
+      (is (= [:a3] (values-of (r/walk [db] (eid-of db [:seon.root/id :root])) :seon.agent/_root :seon.agent/id))))
     (testing "a task: units that are its own values, plan then proofs, each its attribute's schema"
       (let [eid (eid-of db [:seon.task/id "demo/f"])
-            w (r/walk db eid)]
+            w (r/walk [db] eid)]
         (is (= [[:value :seon.task/plan walked-plan eid] [:value :seon.task/proofs ['demo/f-test] eid]]
                (mapv (juxt :seon.render/kind :seon.render/schema :seon.render/value :seon.render/eid) (:seon.render/nodes w))))
         (is (not (contains? (get-in w [:seon.render/root :seon.render/value]) :seon.task/plan)))))
     (testing "an eid with nothing on db is an error to the asker, not an empty entity"
-      (is (= :seon.render/no-entity (:seon.error/type (r/walk db 99999999)))))
+      (is (= :seon.render/no-entity (:seon.error/type (r/walk [db] 99999999)))))
     (testing "every identity and ref attribute is named by one entity schema (the walk's schema of an entity)"
       (let [attrs #{:seon.agent/key :seon.run/id :seon.task/id :seon.root/id :seon.turn/id :seon.message/id
                     :seon.run/agent :seon.turn/run :seon.message/to :seon.agent/root :seon.eval/agent :seon.run/task}
@@ -409,35 +411,6 @@
         (is (= attrs (set (keys named))) "each is named by an entity schema")
         (is (every? #{1} (vals named)) (pr-str named))))))
 
-(deftest a-walk-pulls-what-its-strings-cite
-  (let [db (walked-db)
-        task (eid-of db [:seon.task/id "demo/f"])
-        w (r/walk db task)
-        refs (:seon.render/refs w)]
-    (testing "the plan's citations, each pulled once at its delimiter's depth (seon.docs/cited, the context's pull), numbered"
-      ;; the test store holds no wiki sections, so the link reaches the checkout's file, and says so
-      (is (= [[1 :var "seon.render/walk" :doc] [2 :namespace "seon.print" :doc] [3 :file "docs/render.md#no-clipping" :doc]]
-             (mapv (juxt :seon.render/n :seon.render/kind :seon.render/address :seon.render/depth) refs)))
-      (is (= 'seon.render/walk (get-in refs [0 :seon.render/value :symbol])))
-      (is (string? (get-in refs [0 :seon.render/value :doc])))
-      (is (= "docs/render.md#no-clipping" (get-in refs [2 :seon.render/value :seon.ref/address])))
-      (is (= [{:seon.render/eid task :seon.render/attr :seon.task/plan :seon.render/line 1}] (get-in refs [0 :seon.render/cited-at])))
-      (is (= [1 2 3] (get-in w [:seon.render/nodes 0 :seon.render/cites])) "the plan's node cites them by number"))
-    (testing "only prose cites: an id names its entity, and a value that is no prose is data"
-      (is (not-any? #(= "demo/f" (:seon.render/address %)) refs))
-      (is (nil? (get-in w [:seon.render/root :seon.render/cites]))))
-    (testing "a citation repeated across the walk is one ref, cited by its number at each place"
-      (let [run (r/walk db (eid-of db [:seon.run/id "demo/f#1"]))
-            by (into {} (map (juxt attr-of :seon.render/cites)) (:seon.render/nodes run))]
-        (is (= 3 (count (:seon.render/refs run))))
-        (is (= {:seon.run/task [1 2 3] :seon.turn/_run [1] :seon.message/_to [2]} by))
-        (is (= [:seon.task/plan :seon.turn/reply] (mapv :seon.render/attr (get-in run [:seon.render/refs 0 :seon.render/cited-at]))))))
-    (testing "refs a context has already seen keep their numbers: the run's turn and message cite 1 and 2 of the task's walk"
-      (let [run (r/walk db (eid-of db [:seon.run/id "demo/f#1"]) refs)]
-        (is (= (mapv :seon.render/value refs) (mapv :seon.render/value (:seon.render/refs run))))
-        (is (= [1] (:seon.render/cites (second (:seon.render/nodes run)))))
-        (is (= 3 (count (get-in run [:seon.render/refs 0 :seon.render/cited-at]))) "the task's place, then the run's task's and its turn's")))))
-
 (defn boom
   "An :ai render that throws: a page part that draws its :ai face fails on it."
   [_ _] (throw (ex-info "a page part drew its :ai face" {})))
@@ -445,11 +418,15 @@
 (deftest a-page-part-renders-only-its-view
   ;; a page part is drawn by its :html render alone: its :ai face is the model's, never made for
   ;; the page (notes/audit-2026-10-24.md correction 1; seon.render/shown drew both every pass)
-  (let [nd {:seon.render/kind :entity :seon.render/eid 7 :seon.render/schema :seon.task/task
-            :seon.render/value (assoc task :seon.render/ai `boom)}]
-    (is (str/includes? (h/html (ui/head nd {:unit "p-head"})) "task · calc/add") "the main pane, by the task's view")
-    (is (str/includes? (h/html (ui/tile nd {:unit "t-7"})) "task · calc/add") "a tile, by the task's view")
-    (is (str/includes? (h/html (ui/row [nd] {:unit "r-7"})) "task · calc/add") "a row, by the task's view")))
+  (let [nd {:seon.render/kind :value :seon.render/eid 7 :seon.render/schema :seon.task/task
+            :seon.render/value (assoc task :seon.render/ai `boom)}
+        db (walked-db)
+        t (eid-of db [:seon.task/id "demo/f"])]
+    (is (str/includes? (h/html (ui/tile nd {:unit "t-7"})) "task · calc/add") "a value's tile, by its view")
+    (testing "an entity's component, read from its db, by its schema's view at each size"
+      (is (str/includes? (h/html (ui/component db t :block "p-head")) "demo/f") "the main pane")
+      (is (str/includes? (h/html (ui/component db t :tile (str "t-" t))) "demo/f") "a tile")
+      (is (str/includes? (h/html (ui/component db t :row (str "r-" t))) "demo/f") "a row"))))
 
 ;; ---- the page (task seon.render/page): every page is the walk of one entity ----
 
@@ -487,42 +464,53 @@
         main (d/db-with main0 (seon.task/agent-tx "b1" :a3 {:status :busy}))]
     [main branch (eid-of main [:seon.agent/key k])]))
 
-(defn- rows-of "Each row unit of layout l: its parts' schemas." [l]
-  (for [u (:seon.render/units l) :when (= :seon.render/page-row (:schema u))] (mapv :seon.render/schema (:input u))))
+(defn- schema-of "Entity e's schema on db." [db e] (r/entity-schema (d/pull db '[*] e) :seon.eval/agent))
 
-(defn- unit-html "Unit u of a layout, rendered as the render proc renders it." [u]
-  (h/html (r/html (:input u) {:schema (:schema u) :unit (:id u)})))
+(defn- rows-of
+  "Each row of layout l (a component on dbs): its entity's schema, and a turn's evals' after it."
+  [dbs l]
+  (for [u (:seon.render/units l) :when (= "#p-rows" (:container u)) :let [[i e] (:comp u) db (nth dbs i)]]
+    (into [(schema-of db e)] (for [c (:seon.turn/calls (d/pull db [:seon.turn/calls] e)) :when (:eval c)] :seon.db/eval-fact))))
+
+(defn- tiles-of "Each tile of layout l: an entity component's schema, or a value's." [dbs l]
+  (for [u (:seon.render/units l) :when (= "#p-tiles" (:container u))]
+    (if-let [[i e] (:comp u)] (schema-of (nth dbs i) e) (get-in u [:input :seon.render/schema]))))
+
+(defn- unit-html "Unit u of a layout on dbs, rendered as the render proc renders it." [dbs u]
+  (if-let [[i e as] (:comp u)]
+    (h/html (ui/component (nth dbs i) e as (:id u)))
+    (h/html (r/html (:input u) {:schema (:schema u) :unit (:id u)}))))
 
 (deftest a-page-is-the-walk-of-its-entity
   (let [[main branch eid] (paged-dbs)
-        w (r/page [main branch] eid)
+        dbs [main branch]
+        w (r/walk dbs eid)
         l (ui/page w {:shown 20 :view "a3"})
         units (:seon.render/units l)]
     (testing "the entity as main holds it: what root observed wins over the branch's older copy"
       (is (= :busy (get-in w [:seon.render/root :seon.render/value :seon.agent/status])))
-      (is (= "p-head" (:id (first units))))
-      (is (every? #(str/includes? (unit-html (first units)) %) [":a3" ":busy" ":task-demo-f"]) "its relevant facts, by the one printer at the page's budget"))
+      (is (= ["p-head" [0 eid :block]] ((juxt :id :comp) (first units))) "a component on main")
+      (is (every? #(str/includes? (unit-html dbs (first units)) %) [":a3" ":busy" ":task-demo-f"]) "its relevant facts, by the one printer at the page's budget"))
     (testing "its units from every db, each once: main's run, the branch's evaluations"
       (is (= 3 (count (filter #(= :seon.db/eval-fact (:seon.render/schema %)) (:seon.render/nodes w)))))
-      (is (= (count (distinct (map :seon.render/eid (:seon.render/nodes w)))) (count (:seon.render/nodes w)))))
+      (is (= (count (distinct (map :seon.render/eid (:seon.render/nodes w)))) (count (:seon.render/nodes w))))
+      (is (every? #(= 1 (:seon.render/db %)) (filter #(= :seon.db/eval-fact (:seon.render/schema %)) (:seon.render/nodes w))) "evaluations from the branch"))
     (testing "one list, newest first: the owner's evaluation, then the turn with its two evaluations in the order its call ran them, then the message"
-      (is (= [[:seon.db/eval-fact] [:seon.turn/turn-fact :seon.db/eval-fact :seon.db/eval-fact] [:seon.message/fact]] (rows-of l)))
-      (let [turn (unit-html (second (filter #(= :seon.render/page-row (:schema %)) units)))]
+      (is (= [[:seon.db/eval-fact] [:seon.turn/turn-fact :seon.db/eval-fact :seon.db/eval-fact] [:seon.message/fact]] (rows-of dbs l)))
+      (let [turn (unit-html dbs (second (filter #(= "#p-rows" (:container %)) units)))]
         (is (< (str/index-of turn "turn 1 of 8") (str/index-of turn "(f 2)") (str/index-of turn "(f 3)")))
         (is (str/includes? turn "f doubles?") "the prose beside the call")
         (is (str/includes? turn "1.5 ms · <span>2.0 KB</span>") "its cost as recorded, each number with its unit")
         (is (str/includes? (h/html (#'ui/cost-line {:ticks 1200 :ms 1.5})) "1,200 ticks · 1.5 ms") "ticks too, when recorded; nothing not recorded")
         (is (str/includes? turn "1,200 tokens"))))
-    (testing "each evaluation is rendered once: in its turn's row, or alone"
-      (let [ids (for [u units :when (= :seon.render/page-row (:schema u)) nd (:input u) :when (= :seon.db/eval-fact (:seon.render/schema nd))] (:seon.render/eid nd))]
-        (is (= 3 (count ids) (count (distinct ids))))))
+    (testing "each evaluation is in one row only: in its turn's, or alone"
+      (is (= 3 (count (filter #{:seon.db/eval-fact} (apply concat (rows-of dbs l)))))))
     (testing "its other units are tiles, each a link that moves the page to its entity"
-      (is (= [:seon.run/run-fact :seon.task/task-fact]
-             (for [u units :when (= :seon.render/page-tile (:schema u))] (get-in u [:input :seon.render/schema]))))
-      (let [run (first (filter #(= :seon.render/page-tile (:schema %)) units))]
-        (is (str/includes? (unit-html run) (str "href=\"/walk/" (get-in run [:input :seon.render/eid]) "\"")))))
+      (is (= #{:seon.run/run-fact :seon.task/task-fact} (set (tiles-of dbs l))))
+      (let [run (first (filter #(= "#p-tiles" (:container %)) units))]
+        (is (str/includes? (unit-html dbs run) (str "href=\"/walk/" (second (:comp run)) "\"")))))
     (testing "an entity no db holds is an error to the asker"
-      (is (= :seon.render/no-entity (:seon.error/type (r/page [main branch] 99999999)))))))
+      (is (= :seon.render/no-entity (:seon.error/type (r/walk dbs 99999999)))))))
 
 (defn- proc-state
   "The render proc's state as it holds a read of main and of a3's branch: root's view (a3 busy;
@@ -536,11 +524,10 @@
         st (proc-state main branch)
         root (#'p/page-value st :root)
         agent (#'p/page-value st :a3)
-        tiles (fn [l] (for [u (:seon.render/units l) :when (= :seon.render/page-tile (:schema u))] (get-in u [:input :seon.render/schema])))]
-    (testing "both are seon.render.ui/page's layout of an entity's page: the same units by the same schemas, but for their input"
-      (is (= (disj (set (map :schema (:seon.render/units root))) :seon.render/root-input)
-             (disj (set (map :schema (:seon.render/units agent))) :seon.render/agent-input)))
-      (is (= [[:seon.db/eval-fact]] (rows-of root)) "root's list: its own evaluations")
+        tiles (fn [l] (tiles-of [main branch] l))]
+    (testing "both are seon.render.ui/page's layout of an entity's page: the same places, but for their input"
+      (is (= (set (map :container (:seon.render/units root))) (set (map :container (:seon.render/units agent)))))
+      (is (= [[:seon.db/eval-fact]] (rows-of [main] root)) "root's list: its own evaluations")
       (is (= "p-head" (:id (first (:seon.render/units root))) (:id (first (:seon.render/units agent))))))
     (testing "root's focus: its agents as tiles, main's open problems a tile by their own schema, its input spawns"
       (is (= [:seon.db/agent-fact :seon.problems/report] (tiles root)))
@@ -550,14 +537,14 @@
         (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil}] [(:schema in) (:input in)]))))
     (testing "a location is an entity: /agent/a3 and /walk/<its eid> are one page (each view reads the branch for itself)"
       (let [by-eid (#'p/page-value (assoc-in st [:branches eid :db] branch) eid)
-            same #(for [u (:seon.render/units %) :when (not= :seon.render/page-more (:schema u))] (:input u))]
+            same #(for [u (:seon.render/units %) :when (not= :seon.render/page-more (:schema u))] (or (:comp u) (:input u)))]
         (is (= (same agent) (same by-eid)))))
     (testing "a location naming no entity is that error, never an empty page; a branch that could not be read is shown as its error"
       (is (= :seon.render/no-entity (:seon.error/type (#'p/page-value st 99999999))))
       (let [err (seon.contract/error :seon.writer/refused 'seon.writer/writer-proc "no branch :task-demo-f" {})
             l (#'p/page-value (-> st (update-in [:branches :a3] dissoc :db) (assoc-in [:branches :a3 :error] err)) :a3)]
         (is (some #(= err (get-in % [:input :seon.render/value])) (:seon.render/units l)))
-        (is (empty? (rows-of (assoc l :seon.render/units (remove #(= :seon.render/page-row (:schema %)) (:seon.render/units l))))))))
+        (is (every? #(zero? (first (:comp %))) (filter #(= "#p-rows" (:container %)) (:seon.render/units l))) "no branch read: none of its rows")))
     (testing "an agent of an earlier boot is not live (root's boot is its entity's on main): its id names no process of this one"
       (let [st2 (assoc st :main-db (d/db-with main [{:seon.root/id :root :seon.root/boot "b2"}]))]
         (is (false? (:live? (:input (second (:seon.render/units (#'p/page-value st2 eid)))))))
@@ -569,7 +556,7 @@
 
 (deftest a-run-is-part-of-its-agents-page
   (let [[main branch eid] (paged-dbs)
-        w (r/page [main branch] eid)
+        w (r/walk [main branch] eid)
         attr (fn [nd] (get-in nd [:seon.render/from :seon.render/attr]))]
     (testing "the agent's schema names its runs as part of its page: each run's units join it"
       (is (= [:seon.run/_agent] (:seon.render/parts (seon.contract/properties :seon.db/agent-fact))))
@@ -577,8 +564,6 @@
              (set (filter #{:seon.run/task :seon.turn/_run :seon.message/_to} (map attr (:seon.render/nodes w)))))))
     (testing "a part's way back to the agent is not shown again"
       (is (= 1 (count (filter #(= eid (:seon.render/eid %)) (cons (:seon.render/root w) (:seon.render/nodes w)))))))
-    (testing "the run's prose cites into the agent page's one numbered list"
-      (is (= ["seon.render/walk" "seon.print" "docs/render.md#no-clipping"] (mapv :seon.render/address (:seon.render/refs w)))))
     (testing "no separate run window: a location names root, an agent of this boot, or an entity"
       (is (= [:root :root :a3 474] (mapv #'seon.web/view-of ["" "root" "a3" "474"]))))))
 
@@ -636,6 +621,61 @@
     (is (not (some #{:a3} (:last-walked (answer st branch)))) "the same branch db: nothing moved, nothing walked")
     (is (some #{:a3} (:last-walked (answer st branch'))) "a new evaluation on it: the page walks")))
 
+(defn- comp-state
+  "proc-state with each agent view's branch read named (its branch, :task-demo-f), as ask-branches
+  records it, so every view of a3 shares its branch's components."
+  [main branch eid]
+  (-> (proc-state main branch)
+      (assoc-in [:branches :a3 :read] [:task-demo-f])
+      (assoc-in [:branches eid] {:db branch :read [:task-demo-f]})))
+
+(deftest an-unchanged-component-never-re-renders
+  ;; task seon.render/a-page-is-its-entitys-view (4a): each entity a page shows is a component,
+  ;; rendered once and again only when a transaction touches what it read
+  (let [[main branch eid] (paged-dbs)
+        st (comp-state main branch eid)
+        [st1 _] (#'p/pass-view st :a3)
+        made #(get-in % [:counts :components] 0)
+        r (d/with main (seon.task/agent-tx "b1" :a3 {:status :idle}))
+        ds (map (fn [d] {:e (:e d) :a (:a d) :v (:v d)}) (:tx-data r))
+        touched (p/comps-touched st1 :main ds)
+        [st2 patch] (#'p/pass-view (#'p/invalidate (assoc st1 :main-db (:db-after r)) touched) :a3)]
+    (is (= #{[:main eid :block]} touched) "the commit on the agent touched its own component alone")
+    (is (= 1 (- (made st2) (made st1))) "one component rendered again")
+    (is (= ["p-head"] (mapv first (:frags patch))) "one fragment sent")
+    (is (empty? (:prepends patch)))
+    (testing "a pass with nothing touched renders nothing"
+      (is (= (made st2) (made (first (#'p/pass-view st2 :a3))))))))
+
+(deftest a-new-evaluation-is-one-append
+  ;; an agent's commit on its branch: what moved (the datoms-diff) touches the list, and the new
+  ;; evaluation renders once, sent as one row above the others
+  (let [[main branch eid] (paged-dbs)
+        o (volatile! {})
+        ;; one tab, on a3's page
+        st (assoc (comp-state main branch eid) :watch #{:a3})
+        [st1 _] (#'p/pass-view st :a3)
+        k (seon.task/agent-key "b1" :a3)
+        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:code "(h)" :text "{:handle result/e4, :value 1}"} nil))
+        st2 (#'p/answered st1 o [:branch :a3] {:db branch'})
+        patch (first (filter #(and (= :patch (:op %)) (= :a3 (:view %))) (:to-web @o)))]
+    (is (= 1 (- (get-in st2 [:counts :components]) (get-in st1 [:counts :components]))) "one component rendered: the new row")
+    (is (empty? (:frags patch)) "no held row changed")
+    (is (= ["#p-rows"] (mapv first (:prepends patch))) "one row, above the others")
+    (is (str/includes? (second (first (:prepends patch))) "(h)"))))
+
+(deftest a-component-on-two-pages-renders-once
+  ;; /agent/a3 and /walk/<its eid> are two pages showing the same rows: each row renders once, for both
+  (let [[main branch eid] (paged-dbs)
+        st (comp-state main branch eid)
+        [st1 _] (#'p/pass-view st :a3)
+        [st2 _] (#'p/pass-view st1 eid)
+        rows #(set (filter (fn [id] (str/starts-with? id "r-")) (keys (get-in %1 [:views %2 :units]))))]
+    (is (seq (rows st2 :a3)))
+    (is (= (rows st2 :a3) (rows st2 eid)) "the same rows on both pages")
+    (is (= (get-in st1 [:counts :components]) (get-in st2 [:counts :components])) "the second page rendered none: every one was cached")
+    (is (= (get-in st2 [:views :a3 :units "p-head" :html]) (get-in st2 [:views eid :units "p-head" :html])) "the same html")))
+
 (deftest a-units-change-rerenders-that-unit
   (let [[main branch eid] (paged-dbs)
         st (proc-state main branch)
@@ -647,8 +687,12 @@
       (let [[st2 p2] (pass st1)]
         (is (nil? p2))
         (is (= (get-in st1 [:counts :rendered]) (get-in st2 [:counts :rendered])))))
-    (testing "the agent changed on main (an event's commit): its head re-renders, nothing else"
-      (let [[_ p] (pass (assoc st1 :main-db (d/db-with main (seon.task/agent-tx "b1" :a3 {:status :idle}))))]
+    (testing "the agent changed on main (a commit, as the writer reports it): its head re-renders, nothing else"
+      (let [r (d/with main (seon.task/agent-tx "b1" :a3 {:status :idle}))
+            ;; the commit's datoms drop the components they touch (the render proc's :main)
+            st' (#'p/invalidate (assoc st1 :main-db (:db-after r))
+                                (p/comps-touched st1 :main (map (fn [d] {:e (:e d) :a (:a d) :v (:v d)}) (:tx-data r))))
+            [_ p] (pass st')]
         (is (= #{"p-head"} (:frags (patch-ids p))))
         (is (empty? (:prepends p)))))
     (testing "a new evaluation on its branch: one new row, prepended above the rows the page holds; the others untouched"
@@ -716,7 +760,10 @@
   (ts/test-branch!
     (fn [_ conn]
       (let [[st [r0 r1] [e0 e1]] (debug-state conn)
-            rows #(filterv (fn [u] (= :seon.render/sent-request (:schema u))) (:seon.render/units (#'p/page-value % [:debug :a1])))
+            ;; each row a component; its data as its render reads it (seon.render.ui/debug-input)
+            rows #(vec (for [u (:seon.render/units (#'p/page-value % [:debug :a1])) :when (= "#d-turns" (:container u))
+                             :let [[_ e [_ open? v]] (:comp u)]]
+                         {:id (:id u) :input (ui/debug-input (get-in % [:branches [:debug :a1] :db]) e open? v)}))
             units (rows st)
             ;; both rows opened, as a tab opening each row's <details> asks (/open)
             opened (rows (assoc-in st [:open [:debug :a1]] #{(str "d-" e0) (str "d-" e1)}))

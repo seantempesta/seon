@@ -24,7 +24,7 @@
   A nested value renders by a call ([render v opts] in hiccup, or render's result)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
-            [clojure.string :as str] [datahike.api :as d] [seon.ref :as ref] [seon.docs :as docs]))
+            [clojure.string :as str] [datahike.api :as d]))
 
 (def faces "Each face's key." {:html :seon.render/html :ai :seon.render/ai})
 
@@ -209,60 +209,6 @@
   {:malli/schema [:=> [:cat :keyword] :keyword]}
   [a] (if (str/starts-with? (name a) "_") (keyword (namespace a) (str/replace-first (name a) "_" "")) a))
 
-(defn prose?
-  "Is attribute a's value prose (its schema's :seon.render/prose, or the schema it names)? Prose
-  is parsed for its citations; any other string is a name or data, and cites nothing."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [a]
-  (let [form (get contract/forms a)]
-    (boolean (or (:seon.render/prose (contract/properties a)) (and (qualified-keyword? form) (prose? form))))))
-
-(def ^:private prose-attrs
-  "The attributes whose values are prose (prose?), derived once from the registry (as
-  entity-schemas): a walk asks a set, not a contracted call per string."
-  (into #{} (filter prose?) (keys contract/forms)))
-
-(defn- texts
-  "Node nd's prose, as [attribute text] pairs: a :value node's own value when its schema is
-  prose, an entity node's prose attributes in name order."
-  {:malli/schema [:=> [:cat :seon.render/node] [:vector [:tuple :keyword :string]]]}
-  [{:seon.render/keys [kind value schema]}]
-  (if (= :value kind)
-    (if (and (string? value) (prose-attrs schema)) [[schema value]] [])
-    (vec (for [[a v] (sort-by (comp str key) value) :when (and (string? v) (prose-attrs a))] [a v]))))
-
-(defn- address
-  "Citation c's address: its name, or its path and anchor."
-  {:malli/schema [:=> [:cat :seon.ref/citation] :string]}
-  [{:seon.ref/keys [name path anchor]}] (if name (str name) (str path (when anchor (str "#" anchor)))))
-
-(defn- cite
-  "State st ({:refs, each numbered :seon.render/n; :index, each ref's position by its address;
-  :next, the number a new ref takes}) with what node nd's prose cites added: a citation already
-  there gains this place; a new one is pulled once (seon.docs/cited, at the depth it is first
-  cited: a later, deeper citation of it is not pulled again) and numbered next; one that reaches
-  nothing pulled (a keyword, a path:N line reference) is left out. Answers [st' nd'], nd' naming
-  the numbers it cites (:seon.render/cites)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.render/cite-state :seon.render/node] [:tuple :seon.render/cite-state :seon.render/node]]}
-  [db st nd]
-  (let [[st nums]
-        (reduce (fn [[{:keys [refs index next] :as st} nums] [a c]]
-                  (let [at (cond-> {:seon.render/eid (:seon.render/eid nd) :seon.render/attr a} (:seon.ref/line c) (assoc :seon.render/line (:seon.ref/line c)))
-                        k (address c)]
-                    (if-let [i (get index k)]
-                      [(update-in st [:refs i :seon.render/cited-at] conj at) (conj nums (get-in refs [i :seon.render/n]))]
-                      (if-let [[kind v] (docs/cited db c)]
-                        [{:refs (conj refs {:seon.render/n next :seon.render/kind kind :seon.render/address k
-                                            :seon.render/depth (:seon.ref/depth c) :seon.render/value v :seon.render/cited-at [at]
-                                            ;; its view's schema, whose render shows it as its prose
-                                            :seon.render/schema (if (#{:var :unresolved} kind) (if (:symbol v) :seon.ref/var-view :seon.ref/view) :seon.ref/view)})
-                          :index (assoc index k (count refs)) :next (inc next)}
-                         (conj nums next)]
-                        [st nums]))))
-                [st []]
-                (for [[a text] (texts nd) c (ref/references db text)] [a c]))]
-    [st (cond-> nd (seq nums) (assoc :seon.render/cites (vec (distinct nums))))]))
-
 (defn- relevant
   "Entity value m of schema, as a walk shows it: only the attributes its schema declares
   relevant (:seon.render/keys) when it declares them, else every one it holds. What is not
@@ -272,97 +218,63 @@
   [schema m]
   (if-let [ks (some-> schema contract/properties :seon.render/keys)] (select-keys m ks) m))
 
+(defn- one
+  "Entity eid on db as a page lists it: its node (its relevant attributes, less its units) and one
+  node per unit its entity schema declares (:seon.render/units, pull's attributes, a leading _ the
+  reverse ref), one hop: a neighbour entity ({:kind :entity :eid}, its relevant attributes as
+  :value, and :tx, the transaction of the datom that links it: the order it was written) or the
+  entity's own value of a non-ref unit ({:kind :value}), each saying the attribute it came by
+  (:from); nil when db holds none of it."
+  {:malli/schema [:=> [:cat :seon.host/db pos-int?] [:maybe [:tuple :seon.render/node [:vector :seon.render/node]]]]}
+  [db eid]
+  (when-let [own (d/pull db '[*] eid)]
+    (let [schema (entity-schema own nil)
+          units (:seon.render/units (contract/properties schema))
+          ref? (fn [a] (or (not= a (forward a)) (= :db.type/ref (get-in (d/schema db) [a :db/valueType]))))
+          ;; each ref unit's linking datoms, with the transaction that wrote each
+          linked (fn [a] (let [f (forward a)]
+                           (if (= a f)
+                             (map (juxt :v :tx) (d/datoms db :eavt eid a))
+                             (d/q {:find '[?e ?tx] :in '[$ ?v] :where [['?e f '?v '?tx]]} db eid))))
+          from (fn [a] {:seon.render/eid eid :seon.render/attr a})]
+      [(cond-> {:seon.render/kind :entity :seon.render/value (relevant schema (apply dissoc own units)) :seon.render/eid eid}
+         schema (assoc :seon.render/schema schema))
+       (into [] (mapcat (fn [a]
+                          (if (ref? a)
+                            (for [[e tx] (linked a) :let [m (d/pull db '[*] e) s (entity-schema m (forward a))]]
+                              (cond-> {:seon.render/kind :entity :seon.render/value (relevant s (dissoc m :db/id)) :seon.render/eid e
+                                       :seon.render/from (from a) :seon.render/tx tx}
+                                s (assoc :seon.render/schema s)))
+                            (when (contains? own a)
+                              [{:seon.render/kind :value :seon.render/value (get own a) :seon.render/schema a :seon.render/eid eid :seon.render/from (from a)}]))))
+             units)])))
+
 (defn walk
-  "Entity eid on db as one map: :seon.render/root, the entity's node (its own attributes less its
-  units); :seon.render/nodes, a node per unit its entity schema declares (:seon.render/units:
-  pull's attributes, a leading _ the reverse ref), in that order, one hop: a neighbour entity with
-  its own attributes (its refs {:db/id}; its components whole, as pull gives them) or the entity's
-  own value, each saying where it came from; :seon.render/refs, what the nodes' prose cites, each
-  pulled once and numbered, every place that cites it named. Given refs already seen (a context's),
-  they keep their numbers and are not pulled again. Two pulls: its own attributes, then its ref
-  units. db is a branch's, or seon.union's for what spans branches (ids are issued store-wide). An
-  eid with no attributes on db answers :seon.render/no-entity."
-  {:malli/schema [:function [:=> [:cat :seon.host/db pos-int?] [:or :seon.render/walk :seon.render/no-entity]]
-                  [:=> [:cat :seon.host/db pos-int? [:vector :seon.render/ref]] [:or :seon.render/walk :seon.render/no-entity]]]}
-  ([db eid] (walk db eid []))
-  ([db eid seen]
-   (if-let [own (d/pull db '[*] eid)]
-     (let [schema (entity-schema own nil)
-           units (:seon.render/units (contract/properties schema))
-           ref? (fn [a] (or (not= a (forward a)) (= :db.type/ref (get-in (d/schema db) [a :db/valueType]))))
-           refs (when (some ref? units) (d/pull db (into [] (comp (filter ref?) (map (fn [a] {a ['*]}))) units) eid))
-           from (fn [a] {:seon.render/eid eid :seon.render/attr a})
-           root (cond-> {:seon.render/kind :entity :seon.render/value (relevant schema (apply dissoc own units)) :seon.render/eid eid}
-                  schema (assoc :seon.render/schema schema))
-           nodes (into [] (mapcat (fn [a]
-                                    (if (ref? a)
-                                      (let [v (get refs a) via (forward a)]
-                                        (map (fn [m] (let [s (entity-schema m via)]
-                                                       (cond-> {:seon.render/kind :entity :seon.render/value (relevant s m) :seon.render/eid (:db/id m) :seon.render/from (from a)}
-                                                         s (assoc :seon.render/schema s))))
-                                             (if (map? v) [v] v)))
-                                      (when (contains? own a)
-                                        [{:seon.render/kind :value :seon.render/value (get own a) :seon.render/schema a
-                                          :seon.render/eid eid :seon.render/from (from a)}]))))
-                       units)
-           st {:refs seen :index (into {} (map-indexed (fn [i r] [(:seon.render/address r) i])) seen)
-               :next (inc (reduce max 0 (map :seon.render/n seen)))}
-           [st root] (cite db st root)
-           [st nodes] (reduce (fn [[st out] nd] (let [[st nd] (cite db st nd)] [st (conj out nd)])) [st []] nodes)]
-       {:seon.render/root root :seon.render/nodes nodes :seon.render/refs (:refs st)})
-     (contract/error :seon.render/no-entity `walk (str "no entity " eid " on this db") {:seon.render/eid eid}))))
-
-(defn- merged
-  "Entity eid walked on each of dbs that holds it (walk), as one walk: the root node from the first
-  db holding the entity, each unit node once, from the first db holding it (by its entity, else its
-  attribute), in unit order; the refs of the last walk, each walk given the refs before it as seen.
-  Main first: what root observed of an entity there (an agent's status, its run's) wins over an
-  older copy on a branch, which adds what only it recorded (its evaluations, its turns). Each entity
-  node says when it was made (:seon.render/t). Every db holding none: :seon.render/no-entity."
-  {:malli/schema [:=> [:cat [:vector :seon.host/db] pos-int? [:vector :seon.render/ref]] [:or :seon.render/walk :seon.render/no-entity]]}
-  [dbs eid seen]
-  (let [;; an entity node's :seon.render/t: the first transaction asserting it on the db it came from
-        ;; (transactions are issued store-wide, so they order entities across branches; an id does
-        ;; not: a content id is a hash). One index read per node, its own datoms.
-        made (fn [db nd] (cond-> nd (= :entity (:seon.render/kind nd))
-                           (assoc :seon.render/t (reduce min (map :tx (d/datoms db :eavt (:seon.render/eid nd)))))))
-        ws (reduce (fn [ws db]
-                     (let [w (walk db eid (or (:seon.render/refs (peek ws)) seen))]
-                       (if (:seon.error/type w) ws (conj ws (update w :seon.render/nodes (fn [nds] (mapv #(made db %) nds)))))))
-                   [] dbs)
-        key-of (fn [nd] (if (= :entity (:seon.render/kind nd)) (:seon.render/eid nd) [(:seon.render/eid nd) (get-in nd [:seon.render/from :seon.render/attr])]))]
-    (if (empty? ws)
-      (contract/error :seon.render/no-entity `merged (str "no entity " eid " on these dbs") {:seon.render/eid eid})
-      {:seon.render/root (:seon.render/root (first ws))
-       :seon.render/nodes (let [all (mapcat :seon.render/nodes ws)
-                                first-of (reduce (fn [m nd] (let [k (key-of nd)] (if (contains? m k) m (assoc m k nd)))) {} all)
-                                attr-of #(get-in % [:seon.render/from :seon.render/attr])
-                                order (into {} (map-indexed (fn [i a] [a i])) (:seon.render/units (contract/properties (:seon.render/schema (:seon.render/root (first ws))))))]
-                            ;; each unit's nodes in its attribute's declared place, entities in the order they were made
-                            (vec (sort-by (fn [nd] [(order (attr-of nd) 0) (:seon.render/t nd 0) (:seon.render/eid nd)]) (vals first-of))))
-       :seon.render/refs (:seon.render/refs (peek ws))})))
-
-(defn page
-  "What the page of entity eid shows, on dbs (main first, then the branch that recorded what main
-  does not hold: an agent's): its walk (merged), and the walk of each unit its schema names as part
-  of its page (:seon.render/parts: an agent's run), their units joined to its own (a part's units
-  that lead back to the entity itself left out) and their prose's citations numbered with its own.
-  One function makes every page: root's, an agent's, any entity's; its layout is its renders'
-  (seon.render.ui/page)."
+  "Entity eid as a page lists it, on dbs (main first, then the branch that records what main does
+  not: an agent's): the default view of any entity (docs/render.md#the-walk). Its node from the
+  first db holding it (what root observed of an agent on main wins over a branch's older copy);
+  the nodes of its units one hop (one), and of each unit its schema names a part
+  (:seon.render/parts: an agent's run) one hop more, each entity once, from the first db holding
+  it, newest first by the transaction that linked it (transactions are issued store-wide, so they
+  order entities across branches; an id does not: a content id is a hash). Each node says the
+  db it came from (:seon.render/db, its index in dbs). No db holding it: :seon.render/no-entity."
   {:malli/schema [:=> [:cat [:vector :seon.host/db] pos-int?] [:or :seon.render/walk :seon.render/no-entity]]}
   [dbs eid]
-  (let [w (merged dbs eid [])]
-    (if (:seon.error/type w)
-      w
-      (let [parts (set (:seon.render/parts (contract/properties (get-in w [:seon.render/root :seon.render/schema]))))]
-        (reduce (fn [w nd]
-                  (let [p (merged dbs (:seon.render/eid nd) (:seon.render/refs w))]
-                    (if (:seon.error/type p)
-                      w
-                      (let [held (set (map :seon.render/eid (:seon.render/nodes w)))]
-                        ;; a part's entity the page holds already (two runs' one task) is shown once
-                        (-> w
-                            (update :seon.render/nodes into (remove #(or (= eid (:seon.render/eid %)) (and (= :entity (:seon.render/kind %)) (held (:seon.render/eid %))))) (:seon.render/nodes p))
-                            (assoc :seon.render/refs (:seon.render/refs p)))))))
-                w
-                (filter #(and (= :entity (:seon.render/kind %)) (parts (get-in % [:seon.render/from :seon.render/attr]))) (:seon.render/nodes w)))))))
+  (let [walks (fn [e] (keep-indexed (fn [i db] (when-let [r (one db e)] (conj r i))) dbs))
+        ws (walks eid)
+        ;; the first db holding entity e: one index read a db
+        held (fn [e] (first (keep-indexed (fn [i db] (when (seq (d/datoms db :eavt e)) i)) dbs)))]
+    (if-let [[root _ i] (first ws)]
+      (let [parts (set (:seon.render/parts (contract/properties (:seon.render/schema root))))
+            near (mapcat second ws)
+            nodes (concat near
+                          (for [nd near :when (and (= :entity (:seon.render/kind nd)) (parts (get-in nd [:seon.render/from :seon.render/attr])))
+                                [_ subs] (walks (:seon.render/eid nd)) sub subs :when (not= eid (:seon.render/eid sub))]
+                            sub))
+            first-db (fn [nd] (if (= :entity (:seon.render/kind nd)) (or (held (:seon.render/eid nd)) i) i))
+            key-of (fn [nd] (if (= :entity (:seon.render/kind nd)) (:seon.render/eid nd) [(:seon.render/eid nd) (get-in nd [:seon.render/from :seon.render/attr])]))]
+        {:seon.render/root (assoc root :seon.render/db i)
+         :seon.render/nodes (->> (vals (reduce (fn [m nd] (let [k (key-of nd)] (if (contains? m k) m (assoc m k (assoc nd :seon.render/db (first-db nd)))))) {} nodes))
+                                 (sort-by (fn [nd] [(- (:seon.render/tx nd 0)) (str (get-in nd [:seon.render/from :seon.render/attr]))]))
+                                 vec)})
+      (contract/error :seon.render/no-entity `walk (str "no entity " eid " on these dbs") {:seon.render/eid eid}))))

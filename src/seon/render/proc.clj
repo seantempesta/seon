@@ -17,7 +17,7 @@
   flight, more events only queue, so a burst becomes one pass (the round trip is the
   coalescing window: no step sleeps). The answer is joined with health, main's tasks and
   runs and the events into the system value (:seon.render/system), whose :ai face is
-  root's context. Each page a tab watches is an entity's (seon.render/page: / root's, /agent/{id}
+  root's context. Each page a tab watches is an entity's (seon.render/walk: / root's, /agent/{id}
   an agent's in root's boot, /walk/{eid} any entity's), walked on main and, for an agent, on its
   branch as last read, and laid out by seon.render.ui/page into units. Then, per unit: inputs
   before render (an unchanged input renders nothing), bytes before send (an unchanged fragment
@@ -141,8 +141,9 @@
 (defn- render-unit
   "A unit's HTML: its input by the render its schema declares, its unit named (its element's id: :unit)."
   {:malli/schema [:=> [:cat :map] :string]}
-  [{:keys [id input schema]}]
-  (h/html (render/html input {:schema schema :unit id})))
+  [{:keys [id input schema html]}]
+  ;; a component's html comes from the proc's cache (comp-entry)
+  (or html (h/html (render/html input {:schema schema :unit id}))))
 
 (defn- step-units
   "Run a layout's units, in the order the layout shows them, against what the view retained: a
@@ -221,44 +222,26 @@
   "View [:debug id]'s page: what agent id's model was sent, each model turn that recorded it
   (:seon.turn/sent) on its branch as this proc last read it, newest first, only the rows its tab
   scrolled to (:shown, as the agent's page: the rest are counted, and load as their end scrolls
-  into view). A row reads back only what its turn added to the request (seon.context/parts-of of
-  the refs the turn before it in its run did not send) and names what it shares with that turn;
-  the whole request is read back when its tab opens it (:open, seon.web's /open). A finished
-  turn is not written again, so a row this view holds, unchanged in whether it is open, keeps its
-  input (a turn in flight is written at its send and at its call's end: its row is held once it
-  has its usage or error). nil until the branch is read."
+  into view). Each row is a component (seon.render.ui/component, as [:debug open? view]): it
+  reads its turn and the one before it, shows what its turn added, and its whole request while
+  its tab has it open (:open, seon.web's /open); a finished turn is never touched again, so its
+  row renders once. nil until the branch is read."
   {:malli/schema [:=> [:cat :map [:tuple [:= :debug] :any]] [:maybe :map]]}
   [st view]
   (when-let [bdb (get-in st [:branches view :db])]
-    (let [held (get-in st [:views view :units])
-          open (get-in st [:open view] #{})
+    (let [open (get-in st [:open view] #{})
           shown (get-in st [:shown view] (history-cap))
           ;; newest first: entity ids are issued in the order turns were written
-          ts (->> (d/q '[:find ?e ?n ?r :where [?e :seon.turn/sent _] [?e :seon.turn/n ?n] [?e :seon.turn/run ?ru] [?ru :seon.run/id ?r]] bdb)
-                  (sort-by first) reverse vec)
+          ts (->> (d/q '[:find [?e ...] :where [?e :seon.turn/sent _]] bdb) sort reverse vec)
           on (take shown ts)
-          sent (fn [e] (:seon.turn/sent (d/pull bdb [:seon.turn/sent] e)))
-          ;; the turn before each shown one in its run, when there is one
-          before (into {} (map (fn [[[e _ r] [p _ pr]]] [e (when (= r pr) p)])) (partition 2 1 [nil] (take (inc shown) ts)))]
+          vp (ui/view-param view)]
       (ui/debug (second view)
-                (vec (for [[e n r] on :let [id (str "d-" e) open? (contains? open id)]]
-                       {:id id
-                        :input (or (let [h (:input (get held id))]
-                                     (when (and (or (:seon.turn/tokens h) (:seon.turn/error h)) (= open? (boolean (:whole h)))) h))
-                                   (let [refs (sent e)
-                                         p (before e)
-                                         had (if p (set (sent p)) #{})
-                                         added (filterv (complement had) refs)]
-                                     (cond-> (merge (d/pull bdb [:seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens :seon.turn/error] e)
-                                                    {:turn n :run r :view (ui/view-param view) :refs (count refs)
-                                                     :added (context/parts-of bdb added)})
-                                       p (assoc :same {:turn (:seon.turn/n (d/pull bdb [:seon.turn/n] p)) :parts (- (count refs) (count added))})
-                                       open? (assoc :whole (context/parts-of bdb refs)))))}))
+                (vec (for [e on :let [id (str "d-" e)]] {:id id :comp [1 e [:debug (contains? open id) vp]]}))
                 (- (count ts) (count on))))))
 
 (defn- page-value
   "View's page: the entity it names walked on main and, for an agent, its branch as this proc last
-  read it (seon.render/page), laid out by seon.render.ui/page with its focus's input at the top
+  read it (seon.render/walk), laid out by seon.render.ui/page with its focus's input at the top
   (root's: spawn and evaluate in every agent, with main's open problems a tile; an agent's: its
   REPL and its messages) and the rows its view has scrolled to; nil when main is not read yet,
   :seon.render/no-location when main names no entity for it (an agent's id of no agent in this
@@ -276,7 +259,7 @@
                           " /walk/<its eid>, linked from its root's page")
                      {:view (ui/kname view)})
      eid
-      (let [w (render/page (into [db] (keep identity) [(get-in st [:branches view :db])]) eid)
+      (let [w (render/walk (into [db] (keep identity) [(get-in st [:branches view :db])]) eid)
             agent (get-in w [:seon.render/root :seon.render/value])
             task (some #(when (= :seon.task/task-fact (:seon.render/schema %)) (:seon.render/value %)) (:seon.render/nodes w))
             input (cond (= :root view) {:schema :seon.render/root-input :value {}}
@@ -351,36 +334,103 @@
   (let [ix (:read-index st {})]
     (into #{} (mapcat (fn [d] (mapcat #(if (= :all %) (keys (:views st)) (get ix %)) (d/datom-keys d)))) datoms)))
 
+(defn- db-key
+  "The db a view's component reads, by its index in the page's dbs: main (0), or the agent's
+  branch as this proc last read it (1, named by its branch, so every view of that agent shares
+  its components)."
+  {:malli/schema [:=> [:cat :map :any nat-int?] :any]}
+  [st view i]
+  (if (zero? i) :main (or (first (get-in st [:branches view :read])) [:view view])))
+
+(defn- comp-entry
+  "Component [i eid as] of view's page (element id) from the proc's one cache of components,
+  keyed by [db eid as], rendered inside d/with-reads when the cache has none (what it read is
+  indexed by db: :comp-index): [st' {:html :keys :rev}], a new :rev each time it renders."
+  {:malli/schema [:=> [:cat :map :any :seon.host/db [:tuple nat-int? pos-int? :any] :string] [:tuple :map :map]]}
+  [st view db [i eid as] id]
+  (let [dk (db-key st view i) ck [dk eid as]]
+    (if-let [e (get-in st [:components ck])]
+      [st e]
+      (let [[html reads] (d/with-reads #(h/html (ui/component db eid as id)))
+            ks (d/reads-index reads)
+            rev (inc (:comp-rev st 0))
+            e {:html html :keys ks :rev rev}]
+        [(-> st (assoc-in [:components ck] e) (assoc :comp-rev rev) (update-in [:counts :components] (fnil inc 0))
+             (update-in [:comp-index dk] (fn [ix] (reduce (fn [ix k] (update ix k (fnil conj #{}) ck)) (or ix {}) ks))))
+         e]))))
+
+(defn comps-touched
+  "The cached components a transaction's datoms on db dk touched (d/datom-keys against what each
+  read: :comp-index; a schema datom touches every one of dk's): one lookup a key a datom."
+  {:malli/schema [:=> [:cat :map :any [:sequential :any]] [:set :any]]}
+  [st dk datoms]
+  (let [ix (get-in st [:comp-index dk] {})]
+    (into #{} (mapcat (fn [d] (mapcat #(if (= :all %) (into #{} cat (vals ix)) (get ix %)) (d/datom-keys d)))) datoms)))
+
+(defn- invalidate
+  "St without cached components cks (they render again when a page next shows them), their reads
+  out of :comp-index, and every view holding one of them dirty."
+  {:malli/schema [:=> [:cat :map [:set :any]] :map]}
+  [st cks]
+  (if (empty? cks)
+    st
+    (let [st (reduce (fn [st [dk :as ck]]
+                       (let [ks (get-in st [:components ck :keys])]
+                         (-> st (update :components dissoc ck)
+                             (update-in [:comp-index dk] (fn [ix] (reduce (fn [ix k] (let [vs (disj (get ix k) ck)] (if (seq vs) (assoc ix k vs) (dissoc ix k)))) ix ks))))))
+                     st cks)
+          holding (for [[v vw] (:views st) [_ u] (:units vw) :when (cks (get-in u [:input :comp]))] v)]
+      (update st :dirty (fnil into #{}) holding))))
+
+(defn- forget
+  "St without the cached components no view holds any more (the views a tab watches changed):
+  the cache holds what pages show, nothing else."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  (let [live (set (for [[_ vw] (:views st) [_ u] (:units vw) :let [c (get-in u [:input :comp])] :when c] c))
+        gone (remove live (keys (:components st)))]
+    (reduce (fn [st [dk :as ck]]
+              (let [ks (get-in st [:components ck :keys])]
+                (-> st (update :components dissoc ck)
+                    (update-in [:comp-index dk] (fn [ix] (reduce (fn [ix k] (let [vs (disj (get ix k) ck)] (if (seq vs) (assoc ix k vs) (dissoc ix k)))) ix ks))))))
+            st gone)))
+
 (defn- pass-view
   "One view rendered: [st' patch-message-or-nil]; a view whose entity main does not hold yet renders
-  nothing. Its walk and its units' renders run inside d/with-reads, and what they read is kept
-  (reindex): one index for the dbs it reads, main's and its agent's branch's (a datom of either
-  is matched against both: a needless walk at worst, never a missed one)."
+  nothing. Its walk runs inside d/with-reads, and what it read is kept (reindex): one index for
+  the dbs it reads, main's and its agent's branch's (a datom of either is matched against both: a
+  needless walk at worst, never a missed one). Each entity part is a component (comp-entry):
+  rendered once into the proc's cache and again only when a transaction touches what it read, its
+  html shared by every page that shows it."
   {:malli/schema [:=> [:cat :map :any] [:tuple :map [:maybe :map]]]}
   [st view-id]
   (let [held (get-in st [:views view-id])
-        [{:keys [out view patch n]} reads]
-        (d/with-reads
-          #(let [out (page-value st view-id)]
-             (if (or (nil? out) (:seon.error/type out))
-               {:out out}
-               (let [units (:seon.render/units out)
-                     [view patch n] (step-units held units)
-                     [view patch] (finish-patch view patch (set (map :id units)))]
-                 {:out out :view (assoc view :skeleton (h/html (:seon.render/html out))) :patch patch :n n}))))
+        [out reads] (d/with-reads #(page-value st view-id))
         st (-> st (update-in [:counts :walked] (fnil inc 0)) (update :last-walked (fnil conj []) view-id) (update :dirty disj view-id))
         read-keys (d/reads-index reads)
-        keep (fn [st v] (-> (reindex st view-id (:reads held) read-keys)
+        hold (fn [st v] (-> (reindex st view-id (:reads held) read-keys)
                             (assoc-in [:views view-id] (assoc v :reads read-keys :extra (extra-of st view-id)))))]
    (cond
     ;; main not read yet: nothing held, nothing indexed; the next pass walks it
     (nil? out) [st nil]
     ;; a location naming no entity: its page is that error, by its render
-    (:seon.error/type out) [(keep st {:skeleton (h/html (render/html out {})) :units {}}) nil]
+    (:seon.error/type out) [(hold st {:skeleton (h/html (render/html out {})) :units {}}) nil]
     :else
-    [(-> (keep st view) (update-in [:counts :rendered] (fnil + 0) (:rendered n)) (update-in [:counts :same] (fnil + 0) (:same n)))
-     (when (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:removes patch)))
-       (assoc patch :op :patch :view view-id))])))
+    (let [dbs (into [(:main-db st)] (keep identity) [(get-in st [:branches view-id :db])])
+          ;; each component's html from the cache (rendered there when missing); its input names
+          ;; it and its revision, so a unit renders again only when its component did
+          [st units] (reduce (fn [[st us] {:keys [id comp] :as u}]
+                               (if comp
+                                 (let [[st e] (comp-entry st view-id (nth dbs (first comp) (first dbs)) comp id)]
+                                   [st (conj us (assoc u :input {:comp [(db-key st view-id (first comp)) (second comp) (peek comp)] :rev (:rev e)} :html (:html e)))])
+                                 [st (conj us u)]))
+                             [st []] (:seon.render/units out))
+          [view patch n] (step-units held units)
+          [view patch] (finish-patch view patch (set (map :id units)))
+          view (assoc view :skeleton (h/html (:seon.render/html out)))]
+      [(-> (hold st view) (update-in [:counts :rendered] (fnil + 0) (:rendered n)) (update-in [:counts :same] (fnil + 0) (:same n)))
+       (when (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:removes patch)))
+         (assoc patch :op :patch :view view-id))]))))
 
 (defn page-html
   "The composed document of view-id from its retained fragments (renders nothing)."
@@ -531,7 +581,8 @@
                       (-> st (update-in z dissoc :db) (assoc-in (conj z :error) r))
                       (-> st (update-in z dissoc :error) (assoc-in (conj z :db) (:db r))))
               (and (not (seon.contract/error? r)) (nil? held)) (update :dirty (fnil conj #{}) view)
-              (seq moved) (update :dirty (fnil into #{}) (touched st moved)))
+              (seq moved) (-> (update :dirty (fnil into #{}) (touched st moved))
+                              (invalidate (comps-touched st (db-key st view 1) moved))))
             o))
     :else st))
 
@@ -566,9 +617,12 @@
          st (case in
               :events (if (nil? m) st (ask-state (reduce on-event st (drain m (:events-ch st) 2048)) o))
               ;; a commit on main: the pages its datoms touched walk in the pass
-              :main (pass (-> (main-info st (:db m))
-                              (update :dirty (fnil into #{}) (touched st (map (fn [[_ e a v]] {:e e :a a :v v}) (:ops m)))))
-                          o)
+              :main (let [ds (map (fn [[_ e a v]] {:e e :a a :v v}) (:ops m))]
+                      (pass (-> (main-info st (:db m))
+                                (update :dirty (fnil into #{}) (touched st ds))
+                                ;; the components the commit's datoms touched render again, and their pages pass
+                                (invalidate (comps-touched st :main ds)))
+                            o))
               :answers (let [[st' kind] (step/answered st (:tag m))
                              r (:r m)
                              err (:seon.error/message r)]
@@ -583,7 +637,8 @@
                                    (ask-state (-> (reduce (fn [st v] (reindex st v (get-in st [:views v :reads]) #{}))
                                                           st (remove w (keys (:views st))))
                                                   (assoc :watch w :tabs (:tabs m)) (update :views drop) (update :branches drop) (update :shown drop) (update :open drop)
-                                                  (update :dirty #(into #{} (filter w) %)))
+                                                  (update :dirty #(into #{} (filter w) %))
+                                                  forget)
                                               o))
                           ;; a UI call root refused before it became a request: answered as root's are
                           :refused (web-answered st o (:tag m) (:r m))

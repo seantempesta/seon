@@ -3,11 +3,12 @@
   the agent UI and context\"; W1's proto.render.ui). Ported from proto/web's
   proto.web.view (session L2's dashboard and L4's polish).
 
-  Every page is one layout, `page`: an entity and its neighbours (seon.render/page) as its
-  skeleton, with a slot where each part goes, and :seon.render/units: each part's id, the exact
-  value it reads (its input) and its input's schema, whose render shows it. The render proc
-  (seon.render.proc) renders a unit only when its input changed, and sends a patch only when its
-  bytes changed. Each part renders by its own schema's declared :html render (`view`): an
+  Every page is one layout, `page`: an entity and its neighbours (seon.render/walk) as its
+  skeleton, with a slot where each part goes, and :seon.render/units: each entity part a
+  component (`component`: read from its db, rendered once into the render proc's cache and again
+  only when a transaction touches what it read), each value part its input and schema. The
+  render proc (seon.render.proc) sends a patch only when a part's bytes changed. Each part
+  renders by its own schema's declared :html render (`view`): an
   agent, a run, an evaluation, a turn, a task, a cost verdict; anything else by the one value
   printer. Layout is Tailwind's classes in the hiccup (resources/public/css/input.css).
 
@@ -15,7 +16,7 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
-            [seon.render :as render] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.proofs :as proofs] [seon.cost :as cost] [seon.task :as task]))
+            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.proofs :as proofs] [seon.cost :as cost] [seon.task :as task]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -400,7 +401,7 @@
                :seon/call 'seon.root/release! :seon/agent id :seon/args {:task held}}
       (str "▶ release " held)])])
 
-;;; --- the page: an entity and its neighbours (seon.render/page), laid out --------------
+;;; --- the page: an entity and its neighbours (seon.render/walk), laid out --------------
 
 (defn- cost-line
   "What an evaluation cost, as recorded when it ran: ticks, ms and bytes allocated, each with its
@@ -491,51 +492,70 @@
   [nd as] (render/html (:seon.render/value nd) {:as as :schema (:seon.render/schema nd)}))
 
 (defn rows
-  "A page's list (node nds that show :as :row), newest first, each row a unit: a turn with the
-  evals its calls name (:eval) under it, in the order it ran them; an evaluation no turn
-  names (the owner's, root's, one of a turn still running) or a message, alone. Each evaluation is
-  in one row only. A row is ordered by the newest transaction that made one of its entities
-  (:seon.render/t)."
-  {:malli/schema [:=> [:cat [:sequential :map]] [:vector [:map [:id :string] [:parts [:vector :map]] [:newest nat-int?]]]]}
+  "A page's list (node nds that show :as :row), in the walk's order (newest first), each row a component: a turn, whose component shows the evals its calls name (:eval)
+  under it; an evaluation no turn names (the owner's, root's, one of a turn still running) or a
+  message, alone. Each evaluation is in one row only. Answers {:id :eid :db} each."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:vector [:map [:id :string] [:eid pos-int?] [:db nat-int?]]]]}
   [nds]
-  (let [evals (into {} (for [nd nds :let [id (get-in nd [:seon.render/value :seon.eval/id])] :when id] [id nd]))
-        turns (filter #(= :seon.turn/turn-fact (:seon.render/schema %)) nds)
-        in-turn (fn [t] (vec (keep evals (keep :eval (get-in t [:seon.render/value :seon.turn/calls])))))
-        taken (set (for [t turns e (in-turn t)] (:seon.render/eid e)))
-        row (fn [parts] {:id (str "r-" (:seon.render/eid (first parts))) :parts parts :newest (reduce max (map #(:seon.render/t % 0) parts))})]
-    (->> (concat (for [t turns] (row (into [t] (in-turn t))))
-                 (for [nd nds :when (and (not= :seon.turn/turn-fact (:seon.render/schema nd)) (not (taken (:seon.render/eid nd))))] (row [nd])))
-         (sort-by (juxt (comp - :newest) :id))
-         vec)))
+  (let [taken (set (for [t nds :when (= :seon.turn/turn-fact (:seon.render/schema t)) c (get-in t [:seon.render/value :seon.turn/calls]) :when (:eval c)] (:eval c)))]
+    (->> nds
+         (remove #(taken (get-in % [:seon.render/value :seon.eval/id])))
+         (mapv (fn [nd] {:id (str "r-" (:seon.render/eid nd)) :eid (:seon.render/eid nd) :db (:seon.render/db nd 0)})))))
 
-(defn row
-  "One row of a page's list, the unit's element (opts :unit): its parts each by its own render
-  (`view`, :as :row), a turn's evaluations under its header."
-  {:malli/schema [:=> [:cat [:vector :map] :seon.render/opts] :any]}
-  [parts opts]
-  (let [[head & more] (map #(view % :row) parts)]
-    [:li {:id (:unit opts) :class "flex flex-col gap-2 rounded-md bg-base-900 p-3"}
-     head (when (seq more) [:ol {:class "flex flex-col gap-2 pl-2"} (for [h more] [:li h])])]))
+(declare sent-request)
+
+(defn debug-input
+  "Turn eid on db as the debug page shows it, as data (sent-request's input): what it added to the
+  request (the refs the turn before it in its run did not send, read back by
+  seon.context/parts-of), what it shares with that turn, its whole request when open?, its usage
+  or error; view, its page's feed param."
+  {:malli/schema [:=> [:cat :seon.host/db pos-int? :boolean :string] :map]}
+  [db eid open? view]
+  (let [t (d/pull db [:seon.turn/n :seon.turn/sent :seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens :seon.turn/error
+                      {:seon.turn/run [:seon.run/id]}] eid)
+        n (:seon.turn/n t) r (get-in t [:seon.turn/run :seon.run/id])
+        refs (:seon.turn/sent t)
+        prev (when (pos? n) (:seon.turn/sent (d/pull db [:seon.turn/sent] [:seon.turn/id (str r "/" (dec n))])))
+        added (filterv (complement (set prev)) refs)]
+    (cond-> (merge (select-keys t [:seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens :seon.turn/error])
+                   {:turn n :run r :view view :refs (count refs) :added (context/parts-of db added)})
+      prev (assoc :same {:turn (dec n) :parts (- (count refs) (count added))})
+      open? (assoc :whole (context/parts-of db refs)))))
+
+(defn component
+  "Entity eid on db as a page part shows it, as as (:row, :tile, :block; [:debug open? view], a
+  turn on the debug page), its element id: what the render proc caches by what it read
+  (d/with-reads) and renders again only when a transaction touches that. Its value by its
+  schema's :html render (`view`; its relevant attributes); a turn's row with the evals its calls
+  name under it; a tile with a link to its own page; the main pane."
+  {:malli/schema [:=> [:cat :seon.host/db pos-int? :any :string] :any]}
+  [db eid as id]
+  (if (vector? as)
+    (let [[_ open? view] as] (sent-request (debug-input db eid open? view) {:unit id}))
+  (let [own (d/pull db '[*] eid)
+        schema (render/entity-schema own nil)
+        units (:seon.render/units (contract/properties schema))
+        nd {:seon.render/kind :entity :seon.render/eid eid :seon.render/schema schema
+            :seon.render/value (let [m (apply dissoc own :db/id units)] (if-let [ks (some-> schema contract/properties :seon.render/keys)] (select-keys m ks) m))}]
+    (case as
+      :row (let [evals (for [c (:seon.turn/calls own) :when (:eval c) :let [e (d/pull db '[*] [:seon.eval/id (:eval c)])] :when e]
+                         {:seon.render/kind :entity :seon.render/eid (:db/id e) :seon.render/schema (render/entity-schema e :seon.eval/agent)
+                          :seon.render/value (dissoc e :db/id)})]
+             [:li {:id id :class "flex flex-col gap-2 rounded-md bg-base-900 p-3"}
+              (view nd :row) (when (seq evals) [:ol {:class "flex flex-col gap-2 pl-2"} (for [e evals] [:li (view e :row)])])])
+      :tile [:div {:id id :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
+             [:a {:href (str "/walk/" eid) :class "text-2xs uppercase tracking-wider"} (str (name (or schema :entity)) " · its page →")]
+             (view nd :tile)]
+      [:section {:id id :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (view nd :block)]))))
 
 (defn tile
-  "One tile of a page's column, the unit's element (opts :unit): node nd by its own render
-  (`view`, :as :tile), a link to its own page when it is an entity."
+  "One tile of a page's column that is a value, not an entity (a task's plan, root's open
+  problems, a branch's read error), the unit's element (opts :unit): by its own render."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [nd opts]
-  (let [h (view nd :tile)
-        what (or (:seon.render/schema nd) (get-in nd [:seon.render/from :seon.render/attr]))]
-    [:div {:id (:unit opts) :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
-     (if (= :entity (:seon.render/kind nd))
-       [:a {:href (str "/walk/" (:seon.render/eid nd)) :class "text-2xs uppercase tracking-wider"} (str (name what) " · its page →")]
-       [:div {:class "text-2xs uppercase tracking-wider text-text-500"} (name what)])
-     h]))
-
-(defn head
-  "A page's main pane, the unit's element (opts :unit): its entity by its own render
-  (`view`, :as :block)."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [nd opts]
-  [:section {:id (:unit opts) :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (view nd :block)])
+  [:div {:id (:unit opts) :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
+   [:div {:class "text-2xs uppercase tracking-wider text-text-500"} (name (or (:seon.render/schema nd) (get-in nd [:seon.render/from :seon.render/attr])))]
+   (view nd :tile)])
 
 (defn more
   "The list's end, the unit's element (opts :unit): how many older rows there are, unrendered; it
@@ -563,16 +583,17 @@
     [:input {:name "forms" :class "flex-1 min-w-0" :autocomplete "off" :spellcheck "false" :placeholder "a form every live agent evaluates"}]]])
 
 (defn page
-  "Page walk w (seon.render/page) laid out: the entity as the main pane, the input at the top, its
+  "Page walk w (seon.render/walk) laid out: the entity as the main pane, the input at the top, its
   list (the units whose schema shows them :as :row) newest first, only the newest opts :shown rows
-  rendered and the rest counted, and its other units as tiles beside it, in their walk's order;
-  responsive by Tailwind (one column, the tiles above the list's end on a narrow screen). Each part
-  is a unit the render proc renders when its input changes. opts {:shown n :view param :input
-  {:schema k :value v}}, the input for the page's focus (root's, an agent's), by its schema's render."
+  and the rest counted, and its other units as tiles beside it; responsive by Tailwind (one
+  column, the tiles above the list's end on a narrow screen). Each entity part is a component the
+  render proc renders once and again only when what it read changes ({:comp [db eid as]}); a value
+  part (a task's plan, root's open problems) renders when it changes. opts {:shown n :view param
+  :input {:schema k :value v}}, the input for the page's focus (root's, an agent's)."
   {:malli/schema [:=> [:cat :seon.render/walk :map] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
   [{:seon.render/keys [root nodes]} {:keys [shown view input]}]
-  (let [listed (filterv #(= :row (shown-as %)) nodes)
-        tiles (remove #(= :row (shown-as %)) nodes)
+  (let [listed (filterv #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))) nodes)
+        tiles (remove #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))) nodes)
         rs (rows listed)
         on (take shown rs)
         older (- (count rs) (count on))
@@ -589,11 +610,13 @@
         [:div {:id "p-foot"} (slot (str "p-more-" (count on)))]]
        [:aside {:id "p-tiles" :class "grid content-start gap-2 sm:grid-cols-2 lg:grid-cols-1"} (for [t tiles] (slot (tile-id t)))]]]
      :seon.render/units
-     (vec (concat [{:id "p-head" :input root :schema :seon.render/page-head}]
+     (vec (concat [{:id "p-head" :comp [(:seon.render/db root 0) (:seon.render/eid root) :block]}]
                   (when input [{:id "p-input" :input (:value input) :schema (:schema input)}])
-                  (for [r on] {:id (:id r) :input (:parts r) :schema :seon.render/page-row :container "#p-rows"})
+                  (for [r on] {:id (:id r) :comp [(:db r) (:eid r) :row] :container "#p-rows"})
                   [{:id (str "p-more-" (count on)) :input {:older older :view view} :schema :seon.render/page-more :container "#p-foot"}]
-                  (for [t tiles] {:id (tile-id t) :input t :schema :seon.render/page-tile :container "#p-tiles"})))}))
+                  (for [t tiles] (if (= :entity (:seon.render/kind t))
+                                   {:id (tile-id t) :comp [(:seon.render/db t 0) (:seon.render/eid t) :tile] :container "#p-tiles"}
+                                   {:id (tile-id t) :input t :schema :seon.render/page-tile :container "#p-tiles"}))))}))
 
 ;;; --- the debug page: what each turn sent, from its records ---------------------------------------
 
@@ -612,7 +635,7 @@
       [:h1 {:class "text-sm text-text-200"} (str "What " (kname id) "'s model was sent, newest first: each turn what it added to the request; its whole request opens on demand")]
       [:ol {:id "d-turns" :class "flex flex-col gap-3"} (for [u turns] (slot (:id u)))]
       [:div {:id "d-foot"} (slot (str "d-more-" (count turns)))]]
-     :seon.render/units (conj (mapv #(assoc % :schema :seon.render/sent-request :container "#d-turns") turns)
+     :seon.render/units (conj (mapv #(assoc % :container "#d-turns") turns)
                               {:id (str "d-more-" (count turns)) :input {:older older :view view} :schema :seon.render/page-more :container "#d-foot"})}))
 
 (defn- source

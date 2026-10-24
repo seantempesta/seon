@@ -136,7 +136,7 @@
       (let [uri (:uri req) m (:request-method req) q (form-params (:query-string req))]
         (cond
           (and (= m :get) (= uri "/")) (html-response (ask! ch {:op :page :view :root}))
-          ;; every page is an entity's (seon.render/page): an agent's by its id in root's boot, any
+          ;; every page is an entity's (seon.render/walk): an agent's by its id in root's boot, any
           ;; entity's by its id
           (and (= m :get) (str/starts-with? uri "/agent/")) (html-response (ask! ch {:op :page :view (view-of (subs uri 7))}))
           (and (= m :get) (re-matches #"/walk/\d+" uri)) (html-response (ask! ch {:op :page :view (view-of (subs uri 6))}))

@@ -25,53 +25,35 @@
                     [:unit {:optional true} [:maybe :string]]]
  ;; an :ai render's result: its text, and whether it cut (each cut names what it left and how to read it)
  :seon.render/text [:map [:text :string] [:truncated? {:optional true} :boolean]]
- ;; ---- the walk (seon.render/walk): an entity, its units one hop away, what their prose cites ----
- ;; a schema whose values are prose ({:seon.render/prose true}: a plan, a message, a reply) is
- ;; parsed for its citations; any other string is a name or data
- ;; what a part is: an entity, a value of the walked entity, or what a citation reaches (a var, a
- ;; namespace, a task, a doc section path#anchor, a file, or nothing: unresolved)
- :seon.render/kind [:enum :entity :value :var :namespace :task :section :file :unresolved]
+ ;; ---- the walk (seon.render/walk): an entity and its units one hop away, the default view of any entity ----
+ ;; a schema whose values are prose ({:seon.render/prose true}: a plan, a message, a reply) renders as markdown
+ ;; what a node is: an entity, or a value of the walked entity
+ :seon.render/kind [:enum :entity :value]
  ;; an entity schema's units (a schema property): the attributes a view of its entity shows, in
  ;; pull's syntax, a leading _ the reverse ref
  :seon.render/units [:vector :keyword]
- ;; an entity schema's units whose entities are part of its page (a schema property): each is walked
- ;; too, and its units join the page's (an agent's run: its task, turns and messages; seon.render/page)
+ ;; an entity schema's units whose entities are part of its page (a schema property): their units
+ ;; are walked one hop more and join the page's (an agent's run: its task, turns and messages)
  :seon.render/parts [:vector :keyword]
- :seon.render/depth :seon.ref/depth
  :seon.render/value :any
  ;; the schema of a node's value: its entity schema, or a value's attribute (absent: no entity schema names it)
  :seon.render/schema :qualified-keyword
  :seon.render/eid pos-int?
- ;; the transaction that made an entity a page shows (seon.render/page): what orders its list
- :seon.render/t pos-int?
  :seon.render/attr :keyword
- :seon.render/line pos-int?
- ;; where a node or a citation came from: the entity and the attribute that reached it (a unit's
- ;; ref, or the prose attribute that cites), and the citation's line in that text
- :seon.render/place [:map [:seon.render/eid :seon.render/eid] [:seon.render/attr :seon.render/attr]
-                     [:seon.render/line {:optional true} :seon.render/line]]
- :seon.render/from :seon.render/place
- ;; every place a citation is cited
- :seon.render/cited-at [:vector :seon.render/place]
- ;; a ref's number, and the refs a node's prose cites by number
- :seon.render/n pos-int?
- :seon.render/cites [:vector :seon.render/n]
- :seon.render/address :string
+ ;; where a node came from: the entity and the attribute that reached it
+ :seon.render/from [:map [:seon.render/eid :seon.render/eid] [:seon.render/attr :seon.render/attr]]
+ ;; the transaction of the datom that linked a neighbour to the entity walked: the order it was written
+ :seon.render/tx pos-int?
+ ;; the db a node was read from: its index in the dbs a page reads (main 0, an agent's branch 1)
+ :seon.render/db nat-int?
  ;; an entity, or a value of the walked entity (a unit that is no entity: its schema its attribute)
  :seon.render/node [:map [:seon.render/kind :seon.render/kind] [:seon.render/value :seon.render/value]
                      [:seon.render/schema {:optional true} :seon.render/schema] [:seon.render/eid :seon.render/eid]
-                     [:seon.render/from {:optional true} :seon.render/from] [:seon.render/cites {:optional true} :seon.render/cites]
-                     [:seon.render/t {:optional true} :seon.render/t]]
- ;; a citation's content, pulled once at the depth it was first cited (seon.docs/cited), and every place citing it
- :seon.render/ref [:map [:seon.render/n :seon.render/n] [:seon.render/kind :seon.render/kind] [:seon.render/address :seon.render/address]
-                    [:seon.render/depth :seon.ref/depth] [:seon.render/value :seon.render/value]
-                    [:seon.render/cited-at :seon.render/cited-at]]
+                     [:seon.render/from {:optional true} :seon.render/from] [:seon.render/tx {:optional true} :seon.render/tx]
+                     [:seon.render/db {:optional true} :seon.render/db]]
  :seon.render/root :seon.render/node
  :seon.render/nodes [:vector :seon.render/node]
- :seon.render/refs [:vector :seon.render/ref]
- ;; the walk's citation pass (seon.render/cite): the refs so far, each one's position by its address, the next number
- :seon.render/cite-state [:map [:refs :seon.render/refs] [:index [:map-of :string nat-int?]] [:next :seon.render/n]]
- :seon.render/walk [:map [:seon.render/root :seon.render/root] [:seon.render/nodes :seon.render/nodes] [:seon.render/refs :seon.render/refs]]
+ :seon.render/walk [:map [:seon.render/root :seon.render/root] [:seon.render/nodes :seon.render/nodes]]
  :seon.render/no-entity [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-entity]] [:seon.render/eid :seon.render/eid]]]
  ;; a page's location that main names no entity for (seon.render.proc/page-value): an agent's id of no agent in root's boot
  :seon.render/no-location [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-location]] [:view :string]]]
@@ -93,10 +75,7 @@
                             [:whole {:optional true} [:vector [:tuple :any [:vector :seon.model/message]]]]
                             [:seon.turn/tokens {:optional true} :int] [:seon.turn/cache-hit-tokens {:optional true} :int]
                             [:seon.turn/cache-miss-tokens {:optional true} :int] [:seon.turn/error {:optional true} :map]]
- :seon.render/page-head [:and {:seon.render/html seon.render.ui/head} :seon.render/node]
- ;; one row of its list: a turn and the evaluations it ran, or one evaluation or message
- :seon.render/page-row [:vector {:seon.render/html seon.render.ui/row :min 1} :seon.render/node]
- ;; one tile of its column: a unit that is not a row
+ ;; one tile of its column that is a value, not an entity (an entity's tile is a component: seon.render.ui/component)
  :seon.render/page-tile [:and {:seon.render/html seon.render.ui/tile} :seon.render/node]
  ;; its list's end: the older rows, counted and unrendered, and the view that asks for them
  :seon.render/page-more [:map {:seon.render/html seon.render.ui/more} [:older nat-int?] [:view :string]]
