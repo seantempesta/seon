@@ -66,17 +66,20 @@ Standard function calling (`seon.model`, OpenAI-compatible; DeepSeek today):
 
 **One render per schema**: `:seon.render/view` (replaces `:seon.render/html` and `:seon.render/ai`; the existing renders in `seon.render.ui` are reused, renamed by what they show (`seon.view/eval`, `task`, `error`), called `[f props value]`). Lookup by the value's schema key (`seon.render/declared`, one map lookup) with an optional registry in opts (the branch's, then main's).
 
-**Who renders (one producer per view):**
-- **Root's render proc renders every browser view** from records with main's renders: live or finished, watched or not, one place. For that, **an agent commits after each eval** (today it commits at idle or turn end), so root sees each eval as it lands; cost measured in step 3.
-- **The agent's screen is its own evals** (section 1): `(seon.screen/show)` runs in its REPL with its branch's registry, so a view override it registers applies at once to what its model sees, and to its page for the user when its branch merges. The browser view is never rendered by an agent, so an agent can't hide a red proof from root or the user.
+**No special treatment: the page is the agent's refs, rendered** (owner, 2026-10-24: "I don't want special treatment anywhere … The goal is to only render the same thing once and then cache it"). An agent's page is its entity's view. Its view renders the entities it refers to (its task, its run, its turns, its root) through their own views; root's view renders root's agents (`:seon.agent/_root`). So the sidebar is not a column anyone builds: it is the agent's ref to root, rendered, and root's view shows its agents' views. Root's own page is the same thing with root as the entity. Nothing about agents, root or the user is special-cased in code.
+**Render each thing once, and share it.**
+- **A view is rendered once per entity value**: the cache key is (the view function, the digest of the entity's current datoms); the value is its hiccup. This is the content-keyed reuse the owner ruled on 2026-10-23 ("reuse of all unique and immutable data … expensive to render"), keyed by content, never by time.
+- **Views are budget-free.** A view renders its entity whole, summary first; size is applied after rendering: by CSS in the browser and by the printer's breadth-first selection for the model. So "the abbreviated agent in a sidebar" and "the agent in root's detail page" are the same cached hiccup, shown at different sizes; nothing renders twice for size.
+- **One producer: root's render proc** renders every view from records with main's views. An agent commits after each eval (today: at idle or turn end), so its entity's datoms change, its view re-renders once, and every page that includes it, every sidebar of every agent, root's page, and the screens of agents that show it, picks up the same new hiccup. Cost of the commit measured in step 3.
+- **The model's screen is a read of the same cache.** `(seon.screen/show)` in the agent's REPL asks root for its page's hiccup (cached views, presentation attributes removed) and answers it as an ordinary value. An agent trying a new view calls it in its REPL like any function; it becomes the page's view when its branch merges. The browser view is never rendered by an agent, so an agent can't hide a red proof from root or the user.
 
-**Components.** Each call `[f props & children]` is a component; its id is the digest of its path in the page plus the call's arguments (so two equal calls in different places have different ids; code identity is not in the id). The id is the element's `id` and the Datastar patch target. Re-render rule, using what already exists (render/proc.clj `step-units`): on a commit to the branch a view reads, its components re-run; a component whose inputs are equal is skipped, and same bytes send nothing. A parent holds its children's calls, not their output. Attribute-level dependency tracking (Datahike's `query-attribute-dependencies`, in our fork) is added only if a measurement on a busy page asks for it.
+**Components and patches.** A view's call `[f props & children]` of another entity's view is a component whose id is that entity's (`e<eid>`), so the same entity is the same component on every page. When an entity's view re-renders, one patch (its new hiccup, by id) is serialized once and sent to every tab of every view that shows it (an index from component id to views). A view of the same entity twice on one page shows the second as a link. Components of plain data (not an entity) are part of their parent. What re-renders on a commit: the entities whose datoms the commit changed (its tx data names them), each once; their parents hold the component, not its output, so they don't re-render. Attribute-level dependency tracking is not needed: entity identity and content digests decide.
 
 ## 4. Budget (the model) and visibility (the browser)
 - **`(seon.screen/show)` answers the page without the chat column** (the conversation is already the chat) as hiccup data: the sidebar summaries, the tiles, the open and pinned evals, references. It is an ordinary value: its response prints it like any other, earlier results as their handles. It answers the page's hiccup without its presentation attributes (`class`, `style`, `data-*`, removed by one small function over hiccup), which the same page keeps when written as HTML.
 - **Written by the one printer, made general** (owner, 2026-10-24: "a general printer which shows all values well"): `seon.print/print-value` prints the screen's hiccup like any value. Two changes to the printer, for every value, not a view special case: (a) sequential members fill breadth before depth as maps already do (today a vector's members fill in order and the first that doesn't fit takes the rest, print/select.clj:557-587), so a long vector, a table or a page shows every member at its least before any grows; (b) a component `[f props & children]` is a value whose least form is its summary plus its call `(f props)`, the form that renders it, so it is shown whole only when its share holds it. Plain data inside keeps the printer's selection. Estimated ~40-60 lines in `seon.print.select`/`emit`; no second elision mechanism.
-- **Priority is layout order** (title, status, red proofs, the latest eval first), and no component takes more than its share.
-- **Sizes are not declared.** CSS for the user (Tailwind container queries, `line-clamp`); the budget for the model.
+- **Priority is layout order** (title, status, red proofs, the latest eval first): the printer's breadth-first selection shows every member at its least first, so a small share shows the summary.
+- **Sizes are not declared and views take no budget.** CSS for the user (Tailwind container queries, `line-clamp`); the printer under the request's budget for the model.
 - **The browser renders only what is visible.** A closed `<details>` body or an offscreen tile is a placeholder with the component's id (same tag). `data-on-intersect__once` or `data-on:toggle` posts for it; the post answers 204 and the rendered component arrives on `/feed` (as `:more` does today, web.clj:142). `<details>` carries `data-preserve-attr="open"` (Datastar RC.7, our build).
 - **References.** Strings shown (prose, thinking, user messages, the task plan) are parsed once at record time by the one reference parser and their references stored with them; the referenced things (a var's card, a task's plan and proofs, a wiki section) are rendered into the screen after the open and pinned items, within the budget.
 
@@ -92,7 +95,7 @@ Standard function calling (`seon.model`, OpenAI-compatible; DeepSeek today):
 │                     │ [ message or (form) …           Send ] │                 │
 └─────────────────────┴────────────────────────────────────────┴─────────────────┘
 ```
-- Sidebar: each live agent's summary tile (its view under a small budget share), windowed. Root's page shows the agents at a larger share. Peers' ids appear in the agent's screen, so it can message them; replies land in its record.
+- Sidebar: the agent's ref to root, rendered: root's view lists its agents' views, which CSS shows small here and root's own page shows large. Peers' ids are in the agent's screen, so it can message them; replies land in its record.
 - Chat: thinking and prose as markdown; each eval a collapsed line; expanded: form + response. The user's messages and forms in the same timeline; the input box takes prose, or a form when it reads as one.
 - Tiles: one per eval whose value has a render, newest first.
 - **Debug view (root)**: the same chat plus, per turn, the request's tokens, cache hits and its screen evals as they were sent (they are recorded evals).
@@ -110,13 +113,13 @@ Standard function calling (`seon.model`, OpenAI-compatible; DeepSeek today):
 | Operation | Work | Today |
 |---|---|---|
 | an eval | print the value within its budget; one branch commit | no commit until turn end |
-| browser update after a commit | a view's components re-run; equal inputs skipped; same bytes not sent | root re-walks the page per event |
+| a commit | each entity it changed re-renders its view once (cache miss on its new digest); one patch per entity, fanned out to every view showing it | root re-walks every watched page per event |
 | model request | conversation kept as serialized messages per eval id: O(new evals); screen: O(visible components + references) under the budget; one root request for view + peers | O(turns) pulls + whole context rebuild |
 | references | parsed once per string at record time | per render (1.66M ticks a string; being fixed) |
 | render lookup | one map lookup | same |
-| sidebar, N agents | one tile per status change; visible rows only | O(N) per commit |
+| sidebar, N agents | one cached view per agent, re-rendered when that agent changes; visible rows only | O(N) per commit |
 | view toggle | one transaction on main; one component | — |
-Per commit a view's components re-run: O(components on the view), each cheap, sends only what changed. If a busy page measures badly, attribute dependencies narrow it.
+Per commit: O(entities the commit changed), each rendered once for everyone.
 
 ## 9. What it replaces and deletes (estimates)
 - New or rewritten: ~430 src lines (chat page ~150, function card ~70, result/handle/message reshape ~90 mostly rewrites, printer: breadth-first members and component leaves ~50, view facts + toggle ~25, user agent + root request for view ~30, render lookup ~15).
