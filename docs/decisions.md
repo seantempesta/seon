@@ -166,7 +166,7 @@ Owner, 2026-10-21: "But fucking name the processes if they really have to be dif
 ### Work is admitted by its measured workload, through flows
 Owner, 2026-10-21: "I don't want slots I want smarter systems where we understand the workload and they are flow based." Stated in: AGENTS §4.
 ### Embeddings join the context: fused, small and measured
-Owner, 2026-10-21: quote not recorded; 2026-10-23: "We can build bindings to some fast C library for running it ourselves right? maybe as a flow so it's just processing requests". 2026-10-24: "keep embeddings in the context; bring a measured version back in 4d" (the agent-view design's task story keeps a small embedding-found list, measured in its step 6). Stated in: docs/vector.md.
+Owner, 2026-10-21: quote not recorded; 2026-10-23: "We can build bindings to some fast C library for running it ourselves right? maybe as a flow so it's just processing requests". 2026-10-24: "keep embeddings in the context; bring a measured version back in 4d", then "If it's not working well for now leave them out but we haven't fully explored embeddings to drop them": a small embedding-found list joins the task story only while measurement shows it helps; the embedding machinery (seon.vector, its search and config) stays for exploration either way. Stated in: docs/vector.md.
 ### Patterns live in the topic sections, linked
 Owner, 2026-10-21: "I want us to learn how we can detect patterns in our code and reuse these solutions". Stated in: docs/README.md#how-the-wiki-is-kept.
 ### If nothing has changed, we do nothing; no clock or timer decides (three exceptions)
