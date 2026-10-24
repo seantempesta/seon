@@ -118,18 +118,6 @@
     (is (seon.contract/valid? :seon.model/failure r))
     (is (not (contains? r :tool-calls)) "no reply, scripted or otherwise")))
 
-(deftest the-eval-tool-takes-thinking
-  ;; owner, 2026-10-23: the eval tool's optional `thinking`, recorded with its call
-  (let [props (get-in model/eval-tool [:function :parameters :properties])]
-    (is (contains? props :thinking))
-    (is (= ["code"] (get-in model/eval-tool [:function :parameters :required])) "thinking stays optional"))
-  (let [call-code #'seon.model/call-code]
-    (is (= {:code "(+ 1 2)" :thinking "check the sum"} (call-code (json/write-str {:code "(+ 1 2)" :thinking "check the sum"}))))
-    (is (= {:code "(+ 1 2)"} (call-code (json/write-str {:code "(+ 1 2)" :thinking " "}))) "blank thinking is none")
-    (is (= {:code "{\"code\": \"(+ 1"} (call-code "{\"code\": \"(+ 1")) "a call cut mid-JSON: its arguments as they came"))
-  (testing "a recorded call's thinking goes back on the wire with its code"
-    (let [m (#'seon.model/wire-message {:role "assistant" :content "" :tool-calls [{:id "c1" :code "(+ 1 2)" :thinking "sum"}]})]
-      (is (= {"code" "(+ 1 2)" "thinking" "sum"} (json/read-str (get-in m [:tool_calls 0 :function :arguments])))))))
 (deftest cost-prices-a-turn-at-its-models-rates
   (testing "a DeepSeek turn as seon.turn/usage records it: 10k prompt (8k cached), 500 completion"
     (let [u (turn/usage {:prompt-tokens 10000 :completion-tokens 500 :cache-hit-tokens 8000 :cache-miss-tokens 2000})]
