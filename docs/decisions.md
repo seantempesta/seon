@@ -2,6 +2,16 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in notes/archive/DECISIONS-superseded.md.
 
+## 2026-10-24 rulings
+### A prove run is keyed by the digest of what it reads
+Owner, 2026-10-24: "okay lets try the digest". The test service's run key (`seon.prove/run-key`) names the digest of the code and tests the run reaches, as each test's result is already keyed (AGENTS §5), not `branch@t`: a write to main that touches none of it never starts a second run. Stated in: not yet (owed docs/merging.md#the-test-service, task seon.proofs/a-prove-runs-key-does-not-move-between-two-asks).
+### Root merges verified fixes as they come in
+Owner, 2026-10-24: "merge fixes as they come in". A fix branch whose report carries its numbers, its self-review rating and a green bin/prove is merged by root without asking (bin/prove and smoke on the merged tree, then bin/update); a branch that adds a namespace, config key, schema attribute, proc or route still needs the owner's gate. Stated in: AGENTS §2, root's working rules (owed).
+### One render per schema, declared where the schema is registered
+Owner, 2026-10-24: "Okay I'm willing to try a single render function -- so it's specified during the register! for the malli schema?" and "If we can nail a compositional design and the function naming the hiccup could be extremely readable and concise to build complex frontends (this is important for me)… if it hasn't changed we aren't re-rendering". A schema names one render function (`:seon.render/fn`, set by `my.schema/register!` or the schema resources), replacing the two faces `:seon.render/html` and `:seon.render/ai`; views compose as hiccup (`[f props & children]` calls f; plain data renders by its schema; the db is passed when the function's contract asks for it); an unchanged value is not rendered again. Views are plain HTML hiccup with Tailwind classes, function symbols and data, with no house set of special tags or symbols (owner, 2026-10-24: "I want less hardcoding and special symbols and more easy to compose things together with function symbols or data and normal tailwind css and html"). Stated in: not yet (owed docs/render.md and its task).
+### The debug view shows exactly what each turn was sent, styled, with where each part came from
+Owner, 2026-10-24: "Yes in terms of content, but I would like it styled and clear to read. Maybe columns and we can show the form and eval result that created it or can explain the rendering?" The content a model call was sent is recorded, so the view reproduces it exactly; it is shown styled, beside the form, eval or render that made each part. Stated in: not yet (owed docs/render.md and THE PLAN step 3).
+
 ## Tonight's rulings (2026-10-23, with the 2026-10-21/22 rulings they rest on)
 ### Learn from earlier work, then write it clean; remove a worktree once it holds nothing unsaved
 Owner, 2026-10-23: "don't forget to clean up the old work trees once they aren't needed and don't throw away good work have agents learn from it if you want a clean implementation. No crappy slow repetitive code." Stated in: AGENTS §9.
