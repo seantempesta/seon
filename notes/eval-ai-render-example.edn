@@ -1,0 +1,52 @@
+{:record
+ #:seon.eval{:id "e7",
+             :by "a2",
+             :record
+             {:code "(clojure.repl/source seon.model/transport-error)",
+              :text
+              "{:handle result/e7,\n :value nil,\n :ms 1.179,\n :ticks 52329,\n :bytes 568864,\n :out\n   \"(defn- transport-error\n  \\\"The connection failed or died (connect refused or timed out, a reset, EOF mid-reply):\n  :seon.model/transport, transient, the request is kept and retried after a pause.\\\"\n  {:malli/schema [:=> [:cat :string :map] :seon.model/failure]}\n  [message data]\n  (contract/error :seon.model/transport 'seon.model/complete (str \\\"transport: \\\" message) data))\n\"}",
+              :response
+              {:handle result/e7,
+               :out
+               "(defn- transport-error\n  \"The connection failed or died (connect refused or timed out, a reset, EOF mid-reply):\n  :seon.model/transport, transient, the request is kept and retried after a pause.\"\n  {:malli/schema [:=> [:cat :string :map] :seon.model/failure]}\n  [message data]\n  (contract/error :seon.model/transport 'seon.model/complete (str \"transport: \" message) data))\n",
+               :ms 1.179,
+               :ticks 52329,
+               :bytes 568864},
+              :prose
+              "I'll start by reading the current docstring and the owner's handling of outcomes.",
+              :call-id "call_00_vXrTVM5afa3nbPszbPIb9343",
+              :call 0,
+              :run
+              "seon.model/a-transport-failure-says-what-happens#1",
+              :fns
+              [{:var my.agent/source-fn, :calls 1, :ms 0.086}
+               {:var seon.docs/source-of, :calls 1, :ms 0.07}
+               {:var seon.db/eid, :calls 1, :ms 0.038}
+               {:var seon.agent/db, :calls 1, :ms 0.002}]}},
+ :ai-render
+ [{:role "assistant",
+   :content
+   "I'll start by reading the current docstring and the owner's handling of outcomes.",
+   :tool-calls
+   [{:id "call_00_vXrTVM5afa3nbPszbPIb9343",
+     :code "(clojure.repl/source seon.model/transport-error)"}],
+   :call 0}
+  {:role "tool",
+   :tool-call-id "call_00_vXrTVM5afa3nbPszbPIb9343",
+   :content
+   "{:handle result/e7,\n :value nil,\n :ms 1.179,\n :ticks 52329,\n :bytes 568864,\n :out\n   \"(defn- transport-error\n  \\\"The connection failed or died (connect refused or timed out, a reset, EOF mid-reply):\n  :seon.model/transport, transient, the request is kept and retried after a pause.\\\"\n  {:malli/schema [:=> [:cat :string :map] :seon.model/failure]}\n  [message data]\n  (contract/error :seon.model/transport 'seon.model/complete (str \\\"transport: \\\" message) data))\n\"}"}],
+ :wire
+ [{:role "assistant",
+   :content
+   "I'll start by reading the current docstring and the owner's handling of outcomes.",
+   :tool_calls
+   [{:id "call_00_vXrTVM5afa3nbPszbPIb9343",
+     :type "function",
+     :function
+     {:name "eval",
+      :arguments
+      "{\"code\":\"(clojure.repl\\/source seon.model\\/transport-error)\"}"}}]}
+  {:role "tool",
+   :content
+   "{:handle result/e7,\n :value nil,\n :ms 1.179,\n :ticks 52329,\n :bytes 568864,\n :out\n   \"(defn- transport-error\n  \\\"The connection failed or died (connect refused or timed out, a reset, EOF mid-reply):\n  :seon.model/transport, transient, the request is kept and retried after a pause.\\\"\n  {:malli/schema [:=> [:cat :string :map] :seon.model/failure]}\n  [message data]\n  (contract/error :seon.model/transport 'seon.model/complete (str \\\"transport: \\\" message) data))\n\"}",
+   :tool_call_id "call_00_vXrTVM5afa3nbPszbPIb9343"}]}
