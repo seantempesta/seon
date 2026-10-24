@@ -2,6 +2,16 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in notes/archive/DECISIONS-superseded.md.
 
+## 2026-10-25 rulings
+### Root is main; everything else is the same system with different config
+Owner, 2026-10-25: "Root is main and is in charge with keeping main stable and working well. Agents can explore different ideas safely in their own forked processes ... and then we merge to main via the same task system. If a merge fails root needs a root specific merge task ... other tasks for root to handle like when agents die or health checks fail. All of these I want to run on main CURRENT ... we need to refactor to make this possible not build a separate system for root. It's one system where we use data and flows to have a runtime, db, and agent running against a task. Who and what they are doing on what branch they are is all just config options." Root's own work (a failed merge, a dead agent, a failing health check) is tasks run by agents on main's current commit; root is not a separate code path. Stated in: not yet (owed AGENTS §4 and docs after the one-system audit).
+### Agents restart from their record; the lifecycle is Flow's
+Owner, 2026-10-25: "it's only 0.08s to start a fresh agent and we can resume the context since it's immutable and generatable from any T id? Hell yes. Wake the agent once it's up ... Can we just have the flow step function and the lifecycle handle the forking and killing?" A message wakes or restarts an agent; how, built on Flow's step-fn and lifecycle, is being researched concretely (sources, then REPL experiments, then an Opus design and build) before it is built. Stated in: not yet.
+### The screen is sent as diffs between turns
+Owner, 2026-10-25: chose "Diffs between turns". `(seon.screen/show {:since t})` answers what changed since the agent's last screen at db t, the unchanged sections named; the first screen of a run is whole; a section about to be cut by the history budget is sent whole again. Stated in: not yet (owed the design note and docs/context.md).
+### Merge the agent-view branch to main once its review is done
+Owner, 2026-10-25: "873 lines isn't that much if you think it's good lets merge to main. ... I want to see the web work too so if merging to main makes that easier lets do it". Stated in: this entry.
+
 ## 2026-10-24 rulings
 ### A failed model call keeps what it sent and its typed error
 Owner, 2026-10-24: "Approve :seon.turn/error." A turn is written with its sent refs as the request goes; when the call ends it gains its reply and usage, or `:seon.turn/error` (the typed error as data, as the run's end has `:seon.end/error`). One turn entity either way. Stated in: not yet (owed docs/context.md with step 3).
