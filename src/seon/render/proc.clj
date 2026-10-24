@@ -270,21 +270,44 @@
 
 ;;; --- the pass ------------------------------------------------------------------------------------
 
+(defn- reindex
+  "St with view-id's reads (keys, d/reads-index) in the proc's one index from a read key to the
+  views that read it (:read-index), its earlier reads (old) taken out."
+  {:malli/schema [:=> [:cat :map :any [:maybe [:set :any]] [:set :any]] :map]}
+  [st view-id old keys]
+  (let [drop (reduce (fn [ix k] (let [vs (disj (get ix k) view-id)] (if (seq vs) (assoc ix k vs) (dissoc ix k)))) (:read-index st {}) old)]
+    (assoc st :read-index (reduce (fn [ix k] (update ix k (fnil conj #{}) view-id)) drop keys))))
+
+(defn touched
+  "The views a transaction's datoms touched: those whose last walk read a key one of the datoms
+  has (d/datom-keys; a schema datom touches every view). One lookup a key a datom, whatever
+  the views read (task seon.render/a-view-renders-once-per-change-of-its-reads)."
+  {:malli/schema [:=> [:cat :map [:sequential :any]] [:set :any]]}
+  [st datoms]
+  (let [ix (:read-index st {})]
+    (into #{} (mapcat (fn [d] (mapcat #(if (= :all %) (keys (:views st)) (get ix %)) (d/datom-keys d)))) datoms)))
+
 (defn- pass-view
-  "One view rendered: [st' patch-message-or-nil]; a view whose entity main does not hold yet renders nothing."
+  "One view rendered: [st' patch-message-or-nil]; a view whose entity main does not hold yet renders
+  nothing. Its walk runs inside d/with-reads, and what it read is kept (reindex): one index for
+  the dbs it reads, main's and its agent's branch's (a datom of either is matched against both:
+  a needless walk at worst, never a missed one)."
   {:malli/schema [:=> [:cat :map :any] [:tuple :map [:maybe :map]]]}
   [st view-id]
-  (let [out (page-value st view-id)]
+  (let [[out reads] (d/with-reads #(page-value st view-id))
+        read-keys (d/reads-index reads)
+        st (reindex st view-id (get-in st [:views view-id :reads]) read-keys)
+        st (if (get-in st [:views view-id]) (assoc-in st [:views view-id :reads] read-keys) st)]
    (cond
     (nil? out) [st nil]
     ;; a location naming no entity: its page is that error, by its render
-    (:seon.error/type out) [(assoc-in st [:views view-id] {:skeleton (h/html (render/html out {})) :units {}}) nil]
+    (:seon.error/type out) [(assoc-in st [:views view-id] {:skeleton (h/html (render/html out {})) :units {} :reads read-keys}) nil]
     :else
     (let [units (:seon.render/units out)
           skeleton (h/html (:seon.render/html out))
           [view patch n] (step-units (get-in st [:views view-id]) units)
           [view patch] (finish-patch view patch (set (map :id units)))
-          view (assoc view :skeleton skeleton)
+          view (assoc view :skeleton skeleton :reads read-keys)
           st (-> st (assoc-in [:views view-id] view)
                  (update-in [:counts :rendered] (fnil + 0) (:rendered n)) (update-in [:counts :same] (fnil + 0) (:same n)))]
       [st (when (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:removes patch)))

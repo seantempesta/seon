@@ -581,6 +581,19 @@
     (testing "no separate run window: a location names root, an agent of this boot, or an entity"
       (is (= [:root :root :a3 474] (mapv #'seon.web/view-of ["" "root" "a3" "474"]))))))
 
+(deftest a-page-keeps-what-it-read
+  ;; task seon.render/a-view-renders-once-per-change-of-its-reads (B): a page's walk runs inside
+  ;; d/with-reads and the proc indexes its reads by key, so a transaction finds the pages it
+  ;; touched by its datoms' keys (seon.render.proc/touched), never by walking them
+  (let [[main branch eid] (paged-dbs)
+        [st _] (#'p/pass-view (proc-state main branch) :a3)
+        e1 (:db/id (d/entity branch [:seon.eval/id "e1"]))
+        touched (fn [db tx-data] (#'p/touched st (:tx-data (d/with db tx-data))))]
+    (is (seq (get-in st [:views :a3 :reads])) "the page holds what it read")
+    (is (= #{:a3} (touched main [{:db/id eid :seon.agent/status :idle}])) "the agent's own datom")
+    (is (= #{:a3} (touched branch [{:db/id e1 :seon.eval/by "user"}])) "a row's entity, on the branch")
+    (is (empty? (touched main [{:seon.task/id "other/t" :seon.task/plan "Elsewhere."}])) "an entity the page did not read")))
+
 (deftest a-units-change-rerenders-that-unit
   (let [[main branch eid] (paged-dbs)
         st (proc-state main branch)
