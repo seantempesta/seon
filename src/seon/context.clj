@@ -368,9 +368,8 @@
   with how many earlier records the budget left out; with none (an outside agent's read), the
   block's turn sections (`screen-message`). Provider-neutral messages: the provider's format
   function makes the wire shape (seon.model/wire-messages). Called by the turn, not declared as
-  the agent fact's :seon.render/ai: the page walk renders every node's :ai face each pass
-  (seon.render/shown), which would build every agent's request per pass until step 3's
-  read-keyed cache."
+  the agent fact's :seon.render/ai until the render cache keyed by reads (design section
+  10, step 2) makes it once per change."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:vector :seon.model/message]]}
   [a {:keys [db basis block help run]}]
   (let [parts (if (and a (= :model (:origin basis)))

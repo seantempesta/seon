@@ -187,7 +187,7 @@
         ;; the screen: its forms evaluated now, each recorded by the screen, so the request (and
         ;; any later reading of it) ends with their responses (seon.context/request)
         _ (swap! agent/state assoc-in [:turn :screen]
-                 {:task (:seon.task/id t) :last last
+                 {:task (:seon.task/id t)
                   :input (context/turn-input (agent/db) {:turn turn :max-turns max-turns :origin :model :observed ob :merge? merge?} last)})
         screen (vec (keep #(:record (repl/eval-string % {:origin :screen})) screen/forms))
         basis (cond-> (assoc (basis! (:seon.task/id t) run turn max-turns :model ob true) :agent (:key @agent/state))

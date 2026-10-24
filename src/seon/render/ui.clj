@@ -7,7 +7,7 @@
   skeleton, with a slot where each part goes, and :seon.render/units: each part's id, the exact
   value it reads (its input) and its input's schema, whose render shows it. The render proc
   (seon.render.proc) renders a unit only when its input changed, and sends a patch only when its
-  bytes changed. Each part renders by its own schema's declared render (seon.render/shown): an
+  bytes changed. Each part renders by its own schema's declared :html render (`view`): an
   agent, a run, an evaluation, a turn, a task, a cost verdict; anything else by the one value
   printer. Layout is Tailwind's classes in the hiccup (resources/public/css/input.css).
 
@@ -480,6 +480,12 @@
   {:malli/schema [:=> [:cat :map] :seon.render/as]}
   [nd] (or (:seon.render/as (contract/properties (:seon.render/schema nd))) :tile))
 
+(defn- view
+  "Node nd's value by its schema's :html render as as (seon.render/html: none declared, the one
+  printer): the one site a page part is drawn at. Its :ai face is the model's, never made here."
+  {:malli/schema [:=> [:cat :map :seon.render/as] :any]}
+  [nd as] (render/html (:seon.render/value nd) {:as as :schema (:seon.render/schema nd)}))
+
 (defn rows
   "A page's list (node nds that show :as :row), newest first, each row a unit: a turn with the
   evals its calls name (:eval) under it, in the order it ran them; an evaluation no turn
@@ -500,19 +506,19 @@
 
 (defn row
   "One row of a page's list, the unit's element (opts :unit): its parts each by its own render
-  (seon.render/shown, :as :row), a turn's evaluations under its header."
+  (`view`, :as :row), a turn's evaluations under its header."
   {:malli/schema [:=> [:cat [:vector :map] :seon.render/opts] :any]}
   [parts opts]
-  (let [[head & more] (map #(:seon.render/hiccup (render/shown % :row {})) parts)]
+  (let [[head & more] (map #(view % :row) parts)]
     [:li {:id (:unit opts) :class "flex flex-col gap-2 rounded-md bg-base-900 p-3"}
      head (when (seq more) [:ol {:class "flex flex-col gap-2 pl-2"} (for [h more] [:li h])])]))
 
 (defn tile
   "One tile of a page's column, the unit's element (opts :unit): node nd by its own render
-  (seon.render/shown, :as :tile), a link to its own page when it is an entity."
+  (`view`, :as :tile), a link to its own page when it is an entity."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [nd opts]
-  (let [h (:seon.render/hiccup (render/shown nd :tile {}))
+  (let [h (view nd :tile)
         what (or (:seon.render/schema nd) (get-in nd [:seon.render/from :seon.render/attr]))]
     [:div {:id (:unit opts) :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
      (if (= :entity (:seon.render/kind nd))
@@ -522,10 +528,10 @@
 
 (defn head
   "A page's main pane, the unit's element (opts :unit): its entity by its own render
-  (seon.render/shown, :as :block)."
+  (`view`, :as :block)."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [nd opts]
-  [:section {:id (:unit opts) :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (:seon.render/hiccup (render/shown nd :block {}))])
+  [:section {:id (:unit opts) :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (view nd :block)])
 
 (defn more
   "The list's end, the unit's element (opts :unit): how many older rows there are, unrendered; it

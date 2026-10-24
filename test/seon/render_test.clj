@@ -437,36 +437,18 @@
         (is (= [1] (:seon.render/cites (second (:seon.render/nodes run)))))
         (is (= 3 (count (get-in run [:seon.render/refs 0 :seon.render/cited-at]))) "the task's place, then the run's task's and its turn's")))))
 
-(deftest a-walk-names-the-render-of-each-part
-  (let [db (walked-db)
-        run (eid-of db [:seon.run/id "demo/f#1"])
-        w (r/rendered (r/walk db run) {})
-        [task-node turn msg] (:seon.render/nodes w)
-        by (juxt :seon.render/as :seon.render/ai-by :seon.render/html-by)]
-    (is (= [:block 'seon.render/print-ai 'seon.render/print-html] (by (:seon.render/root w))) "no render declared: the one printer, named")
-    (is (= [:tile 'seon.render/print-ai 'seon.render/print-html] (by task-node)) "no render declared: the one printer, named")
-    (is (= [:tile 'seon.render/print-ai 'seon.render.ui/turn] (by turn)) "a turn by its schema's declared render")
-    (is (= (r/render-of (:seon.render/value turn) :html :seon.turn/turn-fact) @(requiring-resolve (:seon.render/html-by turn))) "the named render is the one that ran")
-    (is (every? #(= :tile (:seon.render/as %)) (concat [task-node msg] (:seon.render/refs w))))
-    (testing "both faces from the one walk, each saying whether it was cut"
-      (is (str/includes? (:seon.render/ai-text (:seon.render/root w)) "demo/f#1"))
-      (is (false? (:seon.render/truncated? (:seon.render/root w))))
-      (is (str/includes? (h/html (:seon.render/hiccup turn)) "as `seon.render/walk` says") "the turn row shows the turn's reply")
-      (is (str/includes? (:seon.render/ai-text msg) "check g"))
-      (is (str/includes? (:seon.render/ai-text (first (:seon.render/refs w))) "seon.render/walk")))))
+(defn boom
+  "An :ai render that throws: a page part that draws its :ai face fails on it."
+  [_ _] (throw (ex-info "a page part drew its :ai face" {})))
 
-(deftest render-name-names-what-render-of-picks
-  ;; render-name repeats render-of's selection (a shared step would cost the printer three calls a
-  ;; nested value): every outcome agrees
-  (doseq [[v face hint] [[{:k 1} :ai nil] [{:k 1} :html nil]
-                         [{:seon.run/id "x#1"} :ai nil] [{:seon.run/id "x#1"} :html nil]
-                         [{:k 1 :seon.render/html 'seon.render.ui/task-box} :html nil]
-                         [{:k 1 :seon.render/html [:b "mine"]} :html nil]
-                         [{:k 1} :html :seon.turn/turn-fact] [{:k 1} :ai :seon.task/task]]
-          :let [f (r/render-of v face hint) n (r/render-name v face hint)]]
-    (if f
-      (is (= f @(requiring-resolve n)) (pr-str v face hint))
-      (is (contains? #{'seon.render/print-ai 'seon.render/print-html (r/faces face)} n) (pr-str v face hint)))))
+(deftest a-page-part-renders-only-its-view
+  ;; a page part is drawn by its :html render alone: its :ai face is the model's, never made for
+  ;; the page (notes/audit-2026-10-24.md correction 1; seon.render/shown drew both every pass)
+  (let [nd {:seon.render/kind :entity :seon.render/eid 7 :seon.render/schema :seon.task/task
+            :seon.render/value (assoc task :seon.render/ai `boom)}]
+    (is (str/includes? (h/html (ui/head nd {:unit "p-head"})) "task · calc/add") "the main pane, by the task's view")
+    (is (str/includes? (h/html (ui/tile nd {:unit "t-7"})) "task · calc/add") "a tile, by the task's view")
+    (is (str/includes? (h/html (ui/row [nd] {:unit "r-7"})) "task · calc/add") "a row, by the task's view")))
 
 ;; ---- the page (task seon.render/page): every page is the walk of one entity ----
 
@@ -661,26 +643,6 @@
         (is (nil? (get-in st2 [:branches :a3])))
         (is (nil? (get-in st2 [:shown :a3])))
         (is (= st2 (first (#'p/render-proc st2 :from-web {:op :more :view :a3}))) "and its end scrolling into view asks for nothing")))))
-
-(deftest a-walk-is-data-a-model-reads
-  ;; the owner, 2026-10-23: what a model reads is data, improved at its producer. The walk as one
-  ;; value: the entity's relevant attributes, each unit under the attribute that reached it, what
-  ;; its prose cites as data under :seon.render/refs; no prose, no printer artifact
-  (let [w {:seon.render/root {:seon.render/kind :entity :seon.render/eid 1 :seon.render/value {:seon.run/id "demo/f#1" :seon.run/status :running}}
-           :seon.render/nodes [{:seon.render/kind :entity :seon.render/eid 2 :seon.render/value {:seon.task/id "demo/f" :seon.task/plan "Make `demo/f` triple."}
-                                :seon.render/from {:seon.render/eid 1 :seon.render/attr :seon.run/task}}
-                               {:seon.render/kind :entity :seon.render/eid 3 :seon.render/value {:seon.turn/id "demo/f#1/0"}
-                                :seon.render/from {:seon.render/eid 1 :seon.render/attr :seon.turn/_run}}]
-           :seon.render/refs [{:seon.render/n 1 :seon.render/kind :var :seon.render/address "demo/f" :seon.render/depth :summary
-                               :seon.render/cited-at [{:seon.render/eid 2 :seon.render/attr :seon.task/plan}]
-                               :seon.render/value {:symbol 'demo/f :arglists '([x]) :summary "Doubles."}}]}
-        d (r/data w)]
-    (is (= {:seon.run/id "demo/f#1" :seon.run/status :running
-            :seon.run/task {:seon.task/id "demo/f" :seon.task/plan "Make `demo/f` triple."}
-            :seon.turn/_run [{:seon.turn/id "demo/f#1/0"}]
-            :seon.render/refs [{:symbol 'demo/f :arglists '([x]) :summary "Doubles." :seon.render/n 1 :seon.render/address "demo/f"}]}
-           d))
-    (is (not (str/includes? (r/ai d {}) ";;")) "no comment lines: data only")))
 
 (deftest the-html-fallback-folds-only-what-nests
   ;; the owner, 2026-10-23, on the default html: a fold and its "map 12 items, depth 0" header on

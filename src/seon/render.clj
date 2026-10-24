@@ -138,20 +138,6 @@
     (when-let [sym (if (symbol? own) own (when (nil? own) (declared (schema-of v hint) face)))]
       @(requiring-resolve sym))))
 
-(defn render-name
-  "Which render shows v for face, by name, for every outcome render-of's selection has: v's own
-  override, the face's key when v's own key holds a rendered result, its schema's declared render,
-  else the one printer's (print-ai, print-html). A walk's provenance (parts). Not a step of
-  render-of, which the printer asks of every nested value: a shared step measured three more
-  contracted calls a value (2,254 against 1,947 at 100 runs,
-  seon.render-cost-test/the-printer-renders-nested-values-in-one-pass)."
-  {:malli/schema [:=> [:cat :any :seon.render/face [:maybe :qualified-keyword]] [:or :symbol :keyword]]}
-  [v face hint]
-  (let [own (own-key v (faces face))]
-    (cond (symbol? own) own
-          (some? own) (faces face)
-          :else (or (declared (schema-of v hint) face) (if (= :ai face) `print-ai `print-html)))))
-
 (defn render
   "v rendered: (render-fn v opts), the function its override or schema names for opts' :face
   (:html, the default, or :ai), else the printer's (print-html, print-ai); a value's own key
@@ -375,43 +361,3 @@
                             (assoc :seon.render/refs (:seon.render/refs p)))))))
                 w
                 (filter #(and (= :entity (:seon.render/kind %)) (parts (get-in % [:seon.render/from :seon.render/attr]))) (:seon.render/nodes w)))))))
-
-(defn data
-  "Walk w as one value a model reads: the entity's own attributes, each unit under the attribute
-  that reached it (a reverse unit as a vector of its entities, a forward one as its entity or value),
-  and what its prose cites under :seon.render/refs, each its view with its number. Data, printed by
-  the one printer: no prose, nothing but what the walk pulled."
-  {:malli/schema [:=> [:cat :seon.render/walk] :map]}
-  [{:seon.render/keys [root nodes refs]}]
-  (cond-> (reduce (fn [m {:seon.render/keys [from value]}]
-                    (let [a (:seon.render/attr from)]
-                      (if (not= a (forward a)) (update m a (fnil conj []) value) (assoc m a value))))
-                  (:seon.render/value root) nodes)
-    (seq refs) (assoc :seon.render/refs (mapv (fn [{:seon.render/keys [n address value]}]
-                                               (assoc value :seon.render/n n :seon.render/address address))
-                                             refs))))
-
-(defn shown
-  "Node or ref x rendered :as as on both faces by its schema's renders (render: none declared, the
-  one printer, whose nested values show by their own), with which render made each face
-  (render-name) and whether the :ai face was cut. The one site every part of a walk or a page is
-  rendered at."
-  {:malli/schema [:=> [:cat :map :seon.render/as :seon.render/opts] :map]}
-  [x as opts]
-  (let [v (:seon.render/value x) schema (:seon.render/schema x)
-        o (assoc opts :as as :schema schema)
-        {:keys [text truncated?]} (render v (assoc o :face :ai))]
-    (assoc x :seon.render/as as
-           :seon.render/ai-by (render-name v :ai schema) :seon.render/html-by (render-name v :html schema)
-           :seon.render/ai-text text :seon.render/truncated? (boolean truncated?)
-           :seon.render/hiccup (render v (assoc o :face :html)))))
-
-(defn rendered
-  "Walk w with every part rendered on both faces (shown): its root :as :block, each unit and ref
-  :as :tile, each saying which render made it, beside what it is and where it came from."
-  {:malli/schema [:=> [:cat :seon.render/walk :seon.render/opts] :seon.render/walk]}
-  [w opts]
-  (-> w
-      (update :seon.render/root shown :block opts)
-      (update :seon.render/nodes (fn [us] (mapv #(shown % :tile opts) us)))
-      (update :seon.render/refs (fn [rs] (mapv #(shown % :tile opts) rs)))))

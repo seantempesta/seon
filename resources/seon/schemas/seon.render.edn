@@ -3,8 +3,7 @@
 ;; renders in its own properties ({:seon.render/html sym :seon.render/ai sym}); selection is
 ;; the value's own override key, else the declared render (the schema, then its parents),
 ;; else the one value printer (seon.print). The values below are what root's web renders.
-{:seon.render/hiccup [:vector :any]
- :seon.render/face [:enum :ai :html]
+{:seon.render/face [:enum :ai :html]
  ;; how a value is shown: in one line, as the page's main pane, a tile of its column, a row of its
  ;; list (an entity schema's {:seon.render/as :row} puts its entities in the page's list, newest first)
  :seon.render/as [:enum :inline :block :tile :row]
@@ -58,27 +57,15 @@
  :seon.render/n pos-int?
  :seon.render/cites [:vector :seon.render/n]
  :seon.render/address :string
- ;; which render made each face of a part (a render's symbol; a value's own rendered result: the face's key)
- :seon.render/ai-by [:or :symbol :keyword]
- :seon.render/html-by [:or :symbol :keyword]
- :seon.render/truncated? :boolean
- ;; a part's :ai face, the text the model reads (its :html face is :seon.render/hiccup)
- :seon.render/ai-text :string
- ;; a part rendered (seon.render/rendered): how it is shown, its two faces and their makers
- :seon.render/shown [:map [:seon.render/as {:optional true} :seon.render/as] [:seon.render/ai-by {:optional true} :seon.render/ai-by]
-                     [:seon.render/html-by {:optional true} :seon.render/html-by] [:seon.render/ai-text {:optional true} :seon.render/ai-text]
-                     [:seon.render/truncated? {:optional true} :seon.render/truncated?] [:seon.render/hiccup {:optional true} :seon.render/hiccup]]
  ;; an entity, or a value of the walked entity (a unit that is no entity: its schema its attribute)
- :seon.render/node [:and :seon.render/shown
-                    [:map [:seon.render/kind :seon.render/kind] [:seon.render/value :seon.render/value]
+ :seon.render/node [:map [:seon.render/kind :seon.render/kind] [:seon.render/value :seon.render/value]
                      [:seon.render/schema {:optional true} :seon.render/schema] [:seon.render/eid :seon.render/eid]
                      [:seon.render/from {:optional true} :seon.render/from] [:seon.render/cites {:optional true} :seon.render/cites]
-                     [:seon.render/t {:optional true} :seon.render/t]]]
+                     [:seon.render/t {:optional true} :seon.render/t]]
  ;; a citation's content, pulled once at the depth it was first cited (seon.docs/cited), and every place citing it
- :seon.render/ref [:and :seon.render/shown
-                   [:map [:seon.render/n :seon.render/n] [:seon.render/kind :seon.render/kind] [:seon.render/address :seon.render/address]
+ :seon.render/ref [:map [:seon.render/n :seon.render/n] [:seon.render/kind :seon.render/kind] [:seon.render/address :seon.render/address]
                     [:seon.render/depth :seon.ref/depth] [:seon.render/value :seon.render/value]
-                    [:seon.render/cited-at :seon.render/cited-at]]]
+                    [:seon.render/cited-at :seon.render/cited-at]]
  :seon.render/root :seon.render/node
  :seon.render/nodes [:vector :seon.render/node]
  :seon.render/refs [:vector :seon.render/ref]
