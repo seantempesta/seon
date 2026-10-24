@@ -734,6 +734,8 @@
     (let [expect (read-string (slurp (str (seon.db/agents-dir (:cfg sys)) "/durable.expect.edn")))
         st (c/state sys {:datoms true})
         md (main-data-datoms sys)
+        ;; this boot has started no agent yet: every earlier boot's link to its agents is retracted
+        linked (count (d/datoms @(:conn sys) :aevt :seon.agent/root))
         [n rb rc] (spawn-ready! sys "born after the restart" {:task "resume b" :branch :dur-b} {:task "resume the clone" :branch :dur-clone})
         r-n (p1 sys n "(app.m0/f1 2) (count (q '[:find ?n :where [?n :note/text]]))")
         r-b (p1 sys rb "(app.m1/f2 1) (q '[:find [?t ...] :where [?n :note/text ?t]]) (app.m0/f1 2)")
@@ -745,9 +747,12 @@
         [n2] (spawn-ready! sys "after merging b")
         r-n2 (p1 sys n2 "(app.m1/f2 1) (q '[:find [?t ...] :where [?n :note/agent :b] [?n :note/text ?t]]) (app.m0/f1 2)")]
       {:report {:store (:store st) :main (:main st) :main-data-datoms {:phase-1 (:main-datoms expect) :recovered md}
+                :agents-linked-at-boot linked
                 :born-after r-n :resumed-b r-b :b-tests (select-keys t-b [:pass :fail :error]) :resumed-clone r-c
                 :merge-b [(select-keys mmb [:ok :applied]) (dissoc mb :ops)] :after-merging-b r-n2}
        :checks {:main-recovered (and (= (:main-datoms expect) md) (:recovered? (:store st)))
+                ;; what main-data-datoms leaves out, asserted: the boot retracted phase 1's links
+                :earlier-agents-are-not-this-roots (zero? linked)
                 ;; phase 1's root was SIGKILLed: it left no stop fact, so this boot found its end :unclean
                 :the-killed-root-ended-unclean (= :unclean (:cause (:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))))
                 :branches-recovered (= #{:dur-a :dur-b :dur-c :dur-clone} (set (get-in st [:store :recovered-branches])))
