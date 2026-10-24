@@ -26,7 +26,7 @@ An **agent** has a **conversation** of **turns**; each turn holds the agent's **
 2. **Views are renders of records.** A human's page and the model's screen are renders of recorded data: plain HTML hiccup with Tailwind classes, function calls and values.
 3. **State is explicit.** What the user is looking at (expanded and pinned evals) is a recorded fact, so the model sees exactly that, a turn can be remade from its basis, and nothing depends on an open tab.
 4. **Only what is visible is rendered.** In the browser an offscreen or closed component is a placeholder; for the model, everything is written under one budget, cut with the form that reads the rest.
-5. **Reuse first; one mechanism per need.** No provider key, no `show` function, no attribute-level dependency index until a measurement asks for one.
+5. **Reuse first; one mechanism per need.** Everything the model sees is an eval and its response, the screen too. No special message, no provider key, no attribute-level dependency index until a measurement asks for one.
 
 ## 1. What the model is sent
 Standard function calling (`seon.model`, OpenAI-compatible; DeepSeek today):
@@ -36,7 +36,10 @@ Standard function calling (`seon.model`, OpenAI-compatible; DeepSeek today):
 | system | short prompt: you work in a live Clojure REPL; every action is an `eval` | stable |
 | task story | user message: the task, its plan, the proofs to pass | stable per run |
 | conversation | per model eval: assistant `{content: its prose, reasoning: replayed as returned, tool_calls: [eval {code}]}` then tool `{content: the printed response}`; per user message: a user message; per user form: a user message `{:from "user" :code ".." :result {..}}`; tx order, never a message between a call and its result | append-only |
-| screen | the page without its chat column (section 4), rebuilt each request, never kept | changes |
+| screen | the screen evals: forms the system evaluates in the agent's REPL just before each request, sent like a user form `{:by "screen" :code ".." :response {..}}`; each request replaces the previous screen evals, so they never repeat in the conversation | changes |
+
+- **The screen is evals, nothing else** (owner, 2026-10-24: "the dynamic section is just forms that we inject into the evals and we just replace them … the hiccup is a normal eval response. No magic, one system"; and the 2026-10-23 ruling "the turn's live state is REPL forms, run fresh each turn"). The default screen forms are `(seon.screen/show)` (the agent's page without its chat column, as hiccup data) plus the live state forms (`(my.task/status)`, `(my.branch/changes)`). Each is a real eval: recorded (`:seon.eval/by` the screen), a response with a handle, printed by the one printer. The forms are data on the agent's screen fact (`:seon.screen/forms`), so an agent changes what it is shown by changing them: rewriting its own interface is an eval.
+- **Handles in printing.** The printer is given the conversation's handles: a value already in an earlier response prints as its handle (`result/e43`) instead of again. A general printer feature: it serves every response, the screen's included.
 
 - **Response** (`:seon.eval/response`, replacing `:seon.agent/item`): `{:handle result/e43 :value v :out ".." :err ".." :ex {..} :ms .. :ticks .. :bytes ..}`. `:ex` is a thrown exception as `seon.error` data; `:out`/`:err` are the streams; each key only when present. Printed by the printer with `:handle result/e43`, so a cut inside the value reads `(get-in result/e43 [..])`. Sent as a string.
 - **One handle per tool call**, named by the eval record's id (`result/e43`; unique across restarts, unlike today's per-process counter, agent.clj:769). A call's forms run in order like `load-string`: the value is the last form's; it stops at the first exception, which is the `:ex`.
@@ -51,7 +54,7 @@ Standard function calling (`seon.model`, OpenAI-compatible; DeepSeek today):
 - **The user is an agent**: an agent entity with no process (`:seon.agent/id "user"`); its messages and forms are recorded like any agent's (`:seon.eval/by` the user).
 - **One view per (user, agent)**, a fact on main: `:seon.screen/{agent viewer open pinned}` (agent ref, user ref, sets of eval ids). All of a user's tabs on an agent share it. New schema attributes (owner's gate).
 - **▸ and 📌** post `/call` (exists, web.clj:76) to `seon.screen/open!` / `pin!`, which transact the view fact on main: no branch write, no wake of the agent.
-- **How the agent reads it.** The agent builds its request from its own branch db (turn.clj:191) and has no read of main's head. At each model request it asks root (its existing request channel) for `{:screen .. :peers ..}` at main's head; the answer and main's t go into the turn's basis, so the turn can be remade.
+- **How the agent reads it.** `(seon.screen/show)` is evaluated in the agent's process, which reads its own branch db (turn.clj:191) and has no read of main's head; so it asks root (its existing request channel) for `{:screen .. :peers ..}` at main's head. The screen evals are recorded with main's t, so a turn can be remade.
 - **Scroll position is not state.** Browser lazy loading is performance (section 4); for the model, "what the user sees" is the page in layout order under the budget, plus everything open or pinned. No tab open: the last view stands; a new agent's view has its latest eval open.
 
 ## 3. The render system
@@ -65,12 +68,12 @@ Standard function calling (`seon.model`, OpenAI-compatible; DeepSeek today):
 
 **Who renders (one producer per view):**
 - **Root's render proc renders every browser view** from records with main's renders: live or finished, watched or not, one place. For that, **an agent commits after each eval** (today it commits at idle or turn end), so root sees each eval as it lands; cost measured in step 3.
-- **The agent's process renders its own screen** (it builds its model request), with its branch's registry: an override it registers applies at once to what its model sees, and to its page for the user when its branch merges. The browser view is never rendered by an agent, so an agent can't hide a red proof from root or the user.
+- **The agent's screen is its own evals** (section 1): `(seon.screen/show)` runs in its REPL with its branch's registry, so a view override it registers applies at once to what its model sees, and to its page for the user when its branch merges. The browser view is never rendered by an agent, so an agent can't hide a red proof from root or the user.
 
 **Components.** Each call `[f props & children]` is a component; its id is the digest of its path in the page plus the call's arguments (so two equal calls in different places have different ids; code identity is not in the id). The id is the element's `id` and the Datastar patch target. Re-render rule, using what already exists (render/proc.clj `step-units`): on a commit to the branch a view reads, its components re-run; a component whose inputs are equal is skipped, and same bytes send nothing. A parent holds its children's calls, not their output. Attribute-level dependency tracking (Datahike's `query-attribute-dependencies`, in our fork) is added only if a measurement on a busy page asks for it.
 
 ## 4. Budget (the model) and visibility (the browser)
-- **The screen = the page without the chat column** (the conversation is already the chat), written for the model: the sidebar summaries, the tiles, the open and pinned evals, references. Any value that is an earlier eval's result is written as its handle `result/eN`. `class`, `style` and `data-*` attributes are dropped for the model (a printer option).
+- **`(seon.screen/show)` answers the page without the chat column** (the conversation is already the chat) as hiccup data: the sidebar summaries, the tiles, the open and pinned evals, references. It is an ordinary value: its response prints it like any other, earlier results as their handles. It answers the page's hiccup without its presentation attributes (`class`, `style`, `data-*`, removed by one small function over hiccup), which the same page keeps when written as HTML.
 - **Written by the one printer, made general** (owner, 2026-10-24: "a general printer which shows all values well"): `seon.print/print-value` prints the screen's hiccup like any value. Two changes to the printer, for every value, not a view special case: (a) sequential members fill breadth before depth as maps already do (today a vector's members fill in order and the first that doesn't fit takes the rest, print/select.clj:557-587), so a long vector, a table or a page shows every member at its least before any grows; (b) a component `[f props & children]` is a value whose least form is its summary plus its call `(f props)`, the form that renders it, so it is shown whole only when its share holds it. Plain data inside keeps the printer's selection. Estimated ~40-60 lines in `seon.print.select`/`emit`; no second elision mechanism.
 - **Priority is layout order** (title, status, red proofs, the latest eval first), and no component takes more than its share.
 - **Sizes are not declared.** CSS for the user (Tailwind container queries, `line-clamp`); the budget for the model.
@@ -92,14 +95,14 @@ Standard function calling (`seon.model`, OpenAI-compatible; DeepSeek today):
 - Sidebar: each live agent's summary tile (its view under a small budget share), windowed. Root's page shows the agents at a larger share. Peers' ids appear in the agent's screen, so it can message them; replies land in its record.
 - Chat: thinking and prose as markdown; each eval a collapsed line; expanded: form + response. The user's messages and forms in the same timeline; the input box takes prose, or a form when it reads as one.
 - Tiles: one per eval whose value has a render, newest first.
-- **Debug view (root)**: the same chat plus, per turn, the request's tokens, cache hits and its screen as sent (remade from the turn's basis, which includes the screen answer).
+- **Debug view (root)**: the same chat plus, per turn, the request's tokens, cache hits and its screen evals as they were sent (they are recorded evals).
 
 ## 6. The function card
 `(info #'f)` returns data, so the agent can evaluate it: `{:var :args :doc :source :callers :tests {:reaching .. :red ..} :cost ..}`. Source from `:form/*` facts; callers from `my.agent/callers` (exists); tests reaching the var by a reverse walk of the reach graph (new, ~30 lines); their status from `:seon.proof/*` facts; cost: the producing eval's ticks, bytes and its `:fns` (a history of a var's cost would need `:fns` as facts: deferred). Its render is the card.
 
 ## 7. Record changes (the standing store is erased on the owner's go)
 - Eval (`:seon.eval`, was `:seon.cluster.eval`): one per tool call; its prose; the response's keys; `:seon.eval/by` (who evaluated); the provider's call id; the references in its strings. `:lead` goes.
-- Turn: reply, reasoning (opaque), basis (now with the screen answer and main's t), usage. `:calls`/`:evals` text blobs go.
+- Turn: reply, reasoning (opaque), basis, usage. `:calls`/`:evals` text blobs go.
 - User prose: `:seon.message` facts, placed in the conversation in tx order (context_test.clj:539 changes).
 - New: the user agent entity; `:seon.screen/*`.
 
@@ -122,7 +125,7 @@ Per commit a view's components re-run: O(components on the view), each cheap, se
 ## 10. Build order: riskiest first, each measured
 0. **Provider check** (~$0.01): 3 DeepSeek turns with thinking ON: tool_choice auto, reasoning replayed, a trailing screen message replaced each turn; assert 200 and cache hits by turn 3.
 1. **Conversation reshape** (seon.context, seon.turn, seon.repl, seon.model): response, handles by record id, prose on the eval, user messages in the conversation, auto tool choice, no `;;`, no render in wrap-print; the screen is today's current state for now. Measure on 5 real tasks with deepseek-flash against today's context: turns to green, cache hit rate, tokens per turn (~$1). Rethink if hits fall under ~60% after turn 3 or turns to green get worse.
-2. **Screen as the page under budget** (printer component share, handles for earlier results, attributes dropped, root request for view + peers): same 5 tasks, compared.
+2. **The screen evals** (`seon.screen/show` and the live-state forms; the printer's breadth-first members, component leaves and handles for earlier results; a root request for screen + peers): same 5 tasks, compared.
 3. **Commit per eval; the page in root's render proc** (three columns, placeholders, toggle/pin, user agent), checked in the browser by a subagent; commit cost measured.
 4. **Function card; references.**
 5. **Deletions** as each replacement is proven.
