@@ -99,6 +99,8 @@ Its references are derived from the plan's citations by the one parser ([referen
 
 **No regressions get through.** The merge runs `bin/prove`, the process tests the change reaches, and the cost proofs on any pin bump, and leaves its greens at main's digest (a second `bin/prove` on main reuses everything). Once a day, and before any freeze or cutover, the full run (`bin/test --all`, `bin/check 100`) runs on a clean main checkout. A red on main gets an owner and a task within the hour, and nothing touching its area merges until it is green.
 
+**A view is a render of what already exists, checked in a browser** (owner, 2026-10-24: "the debug page should be doing basically zero work … in the past I've asked for the debug page and entirely separate machinery that is somehow slower is built"). A page shows records through their views and the render cache; it never recomputes what the system already computed (a debug page shows what was sent, as recorded, not a rebuilt request), and its cost proof shows it costs what changed. A session whose work changes what an agent is sent or what the owner sees opens the page in a browser (a subagent with the built-in browser) before it reports.
+
 **Measure before and after.** Every perf or cost claim carries numbers from the same input before and after, and every "faster" is checked by an independent run. `notes/perf-<date>.md` stays current; a regression found there is a task the same day.
 
 ### Testing: compute only what is needed
