@@ -9,7 +9,7 @@
             [seon.reconcile :as r]
             [seon.template :as tpl] [seon.problems :as problems] [seon.merge :as pm] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
             [clojure.string :as str] [clojure.set] [seon.config :as cfg]
-            [seon.program :as program] [seon.writer :as writer] [seon.turn :as turn] [clojure.core.async :as a]))
+            [seon.program :as program] [seon.writer :as writer] [seon.turn :as turn] [clojure.core.async :as a] [seon.cost :as cost]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -340,6 +340,42 @@
       (is (= [[:proof-red (t "a")]]
              (mapv (juxt :reason :symbol)
                    (r/done-explain (r/done-input (r/index db) "demo/b-merge" {(t "b") :pass (t "a") :fail} #{} [] nil nil #{}))))))))
+
+(deftest an-index-observed-from-the-last-is-the-index-listed
+  (let [db0 (db-of diamond)
+        steps [["a plan improved" [{:seon.task/id "demo/b" :seon.task/plan "Make b truer."}]]
+               ["a run started and ended" (run "a" 1 :ended :results {(t "a") :pass})]
+               ["a run merged" [{:seon.run/id "demo/a#1" :seon.run/status :merged :seon.run/merged-t 7}]]
+               ["a need added" [{:seon.task/id "demo/c" :seon.task/needs #{"demo/a" "demo/b"}}]]
+               ["a proof added" [{:seon.task/id "demo/a" :seon.task/proofs #{(t "a") 'demo-test/more}}]]
+               ["a new boot" (task/boot-tx "boot-2" 4)]]]
+    (reduce (fn [[db idx] [what tx]]
+              (let [db' (d/db-with db tx) idx' (r/index idx db db')]
+                (testing what (is (= (r/index db') idx')))
+                [db' idx']))
+            [db0 (r/index db0)] steps)))
+
+(defn observed-input
+  "The cost proof's input at n: the index of a main db with n unrelated tasks, that db, and
+  the db after one task's plan improved (one datom differs)."
+  [n]
+  (let [db0 (db-of (mapv #(decl (str "u" %)) (range n)))]
+    [(r/index db0) db0 (d/db-with db0 [{:seon.task/id "demo/u0" :seon.task/plan "Make u0 truer."}])]))
+
+(deftest an-index-is-observed-at-the-cost-of-what-changed
+  (cost/proof {:of 'seon.reconcile/index :input 'seon.reconcile-test/observed-input
+               :n "unrelated tasks on main, beside one whose plan changed"
+               :work (str "a datahike.api/datoms-diff of each of the 74 watched attributes' ranges, one pull of the "
+                          "entity that differs and its task re-derived. The test store keeps no node at an address, so "
+                          "each diff walks the attribute's datoms (linear here; on a stored db it skips the subtrees "
+                          "both share: 1.29M ticks, 10.2 MB on a root's main of 680 tasks and 118k datoms). Listing "
+                          "the index again, as seon.turn/observe did every turn, settles all n tasks: n^1.75, 258M "
+                          "ticks and 922 MB at 1,000 (92.0M ticks, 384 MB on that root's main)")
+               :growth :linear
+               ;; measured 2026-10-24: 8.51M ticks / 67.7 MB at 10, 8.23M / 61.1 MB at 100, 11.3M / 68.7 MB at 1,000
+               :fixed {:ticks 8500000.0 :bytes 65000000.0}
+               :per-n {:ticks 3000.0 :bytes 8000.0}
+               :sizes [10 100 1000]}))
 
 (deftest with-merge-chains-work-through-merges
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])])]
