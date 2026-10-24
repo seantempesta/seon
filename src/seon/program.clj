@@ -1083,8 +1083,8 @@
 (defn program-digest
   "The digest of db's program as a whole: its live forms (:form/id, hasch of a form's namespace
   and text, docs/storage.md#ids: a replaced form is retracted), its schema entries (:schema/form)
-  and its namespaces' tails, each by its entity, a content id of its identity, so the index's
-  order is the same on every branch and nothing is sorted. It moves when a form, schema entry or
+  and its namespaces' tails, each by its entity, a content id of its identity (docs/storage.md#ids),
+  so the index's order is the same on every branch and nothing is sorted. It moves when a form, schema entry or
   ns tail is added, replaced or removed, and not on a write of data. What a main run of the test
   service reads of main's program (seon.root/prove!): per-test digests (reach-digests) need the
   checkout's tests loaded, which is the run's own work. Cost: one read of three attributes'

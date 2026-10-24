@@ -45,6 +45,14 @@
           (is (= [4] (waiters-answered o)))
           (is (empty? (filter :req o))))))))
 
+(deftest the-read-digest-moves-with-what-the-run-reads
+  (let [in {:tree "t1" :env "e1"} dg (prove/read-digest in "p1")]
+    (is (not= dg (prove/read-digest (assoc in :tree "t2") "p1")) "a file of the checkout changed (a test, a doc)")
+    (is (not= dg (prove/read-digest (assoc in :env "e2") "p1")) "the config or a pin changed")
+    (is (not= dg (prove/read-digest in "p2")) "main's program changed")
+    (is (= dg (prove/read-digest (assoc in :data-refs {}) "p1")) "the same reads: the same digest")
+    (is (= "p1" (prove/read-digest nil "p1")) "an agent's run: its branch's program")))
+
 (deftest a-run-is-keyed-by-what-it-reads
   ;; seon.root/prove! and seon.agent/prove! name the digest of what the run reads: a branch's tx
   ;; moves with any write, the run's own facts, its prove agent's end and the eval that asked among them
@@ -134,8 +142,8 @@
 (deftest a-session-and-an-agents-turn-for-one-digest-end-in-one-run
   ;; a real root and agent a1. The agent's turn asks the service (seon.agent/prove!, what
   ;; seon.turn/observe calls) while a session asks for the same branch's head (seon.root/prove!,
-  ;; the server's :prove op / seon_prove): the service runs it once, for both, and once more for a
-  ;; session asking after the eval that asked recorded itself (the tx moved, nothing the run reads did).
+  ;; the server's :prove op / seon_prove): the service runs it once, for both, and a session asking
+  ;; again after the eval that asked recorded itself (the tx moved, nothing the run reads did) gets that run.
   (let [code (str "(let [ap (c/submit! sys :a1 \"(select-keys (seon.agent/prove!) [:key :pass :fail :error])\" {:origin :outside})"
                   "      sp (c/prove! sys :a1)"
                   "      s (select-keys @sp [:key :pass :fail :error])"

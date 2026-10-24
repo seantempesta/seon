@@ -20,8 +20,20 @@
   `:main` is the writer's commit notice (a sliding buffer of one: a notice is replaced by the next,
   a reader catches up from main's head); it keeps the latest main t for a request that names none."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.proofs :as proofs]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.proofs :as proofs] [seon.error :as error]
             [clojure.core.async.flow :as flow] [clojure.string :as str]))
+
+(defn read-digest
+  "The digest of what a run reads, its key's (run-key): the program of the branch it runs (pd,
+  seon.program/program-digest of its head) and, for main, the checkout's inputs (seon.fx/inputs:
+  :tree, every file, and :env; main's prove agent loads its tests from the checkout). An agent's
+  run reads its branch's program, its tests among them, and this root's inputs, fixed for the
+  boot as this proc's state is, so inputs is nil. Not read: an agent's merge base (:turn selects
+  what the branch changed since it), which moves with a merge of main that changes the branch's
+  program, except when the branch already held what main gained; then the answer kept covers
+  more tests than the new selection, not fewer."
+  {:malli/schema [:=> [:cat [:maybe [:map [:tree :string] [:env :string]]] :string] :string]}
+  [inputs pd] (if inputs (error/digest (str (:tree inputs) "\n" (:env inputs) "\n" pd)) pd))
 
 (defn run-key
   "The key of the run of branch whose reads have digest dg (seon.root/prove!), of the tests of
