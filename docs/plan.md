@@ -11,26 +11,21 @@ Pins: see docs/forks.md · `src` resists growth (AGENTS §1; no line target) · 
 
 ## In flight
 
-Updated 2026-10-23 evening by root. Sessions are grouped so related tasks stay in one context (owner: "grouped tasks can stay in one agents context"); each reports ready to the merge session. A new session needs root's go unless the owner starts it (AGENTS §2).
+Updated 2026-10-24 morning by root. The repo is `~/src/seon-next`; every session below still runs in its old folder and works here by absolute path. Sessions are found with list_sessions in the sidebar group seon-jolt, and messaged by id. Each reports ready to the merge session; a new session needs root's go unless the owner starts it (AGENTS §2).
 
-| Session | Working on | Next |
+| Session | Last done | Now / next |
 |---|---|---|
-| **Merge** (main tree) | ``jolt/analysis-lookups`` (Jolt 86f49de8), with the cost proofs a pin bump runs | ``jolt/agent-view`` (chat window), then the freeze |
-| **Vocabulary** | ``jolt/rename-run``: run → run and every AGENTS §7a word, one scripted pass and a `bin/laws` check; ready | merges first in the freeze; the standing store is erased once |
-| **Agent view** | the context frame and the renders (data, not prose; the printer stays general), on ``jolt/a-page-is-an-entity-and-its-neighbors``, which merges in the freeze | the default HTML value render |
-| ↳ evaluations, page | the context as data (the frame, then the walk), the page entity | through agent view |
-| ↳ embed | similar search by embedding (approved, model download included) | reports to root and merge |
-| **Walk** | shrink `src` (THE PLAN step 4), one small branch per deletion; its health branch is with merge | reconcile's duplication |
-| **Wiki** (was eval-cost) | main's 35 dead citations and 167 stale sections | |
-| **Agent loop** | ``jolt/resumed-branch`` (a resumed branch keeps what main gained; `test/` in every root's dirs) | the first-move judge: ten real tasks, one call each, scored from compiler facts |
-| **Store** (covering shrink) | the reach-update regression from Jolt 0d39edc3 (n^1.96) | a check's roots take explicit config, not the checkout's `config/local.edn` |
-| **Reuse** | option B: `bin/test` branches a kept program db per git tree | the memo is paused until the data context is measured (two attacks: `notes/reuse/`) |
+| **Merge** | 33 merges since the cutover, main b80738d74 | idle; merges what reports ready |
+| **Agent loop** | the first-move judge, the standard chat format (decisions: the model's context is the standard format), the live state at the end of each turn | the standard builder into `seon.turn`; then examples, one per stage |
+| **Agent view** (+ page, evaluations, embed, eval-cost) | chat window, page as entity, walk, embeddings, per-eval cost | the context's data inside the standard messages |
+| **Walk** | watcher survives a vanished file; one-off folds | the rest of the one-offs survey (`notes/one-offs-2026-10-23.md`) |
+| **Store** | Datahike add path, test-store races, tick quantum, predicate errors | ``jolt/ticks-are-exact-2`` (the parked Chez cause), its next task |
+| **Reuse** | option B (program db per tree), emitter −49%, image registration opt-in | its next cost task; the memo waits on the data context |
+| **Vocab** | the rename, the cutover, GC sweepers | the decider's open reds (prove-agent run key, mcp relay, durable-read) |
 
-Ended: shrink (its folder was removed at merge), eval-cost (merged).
+Open on main: the decider's reds above; `seon.cost/ticks-are-exact` (a Chez timer quantum, allowed for).
 
-**src size** (owner, 2026-10-23): not a line target; resistance to growth, so agents reuse and improve the core rather than add one-offs. Shrink work goes on only where it removes duplication or improves a core part.
-
-**The freeze**, on root's word: ``jolt/rename-run``, then ``jolt/a-page-is-an-entity-and-its-neighbors``, then the store is erased; then ``jolt/self-contained`` and step R (`~/src/seon-next`). Other sessions keep working, and afterwards re-run the rename's scripts on their branches (`notes/rename-run/` on ``jolt/rename-run``).
+**src size** (owner, 2026-10-23): not a line target; resistance to growth, so agents reuse and improve the core rather than add one-offs.
 
 ## Open owner questions
 
