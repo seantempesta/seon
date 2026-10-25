@@ -582,7 +582,7 @@
   (let [q "[:find (pull ?e [:seon.run/outcome :seon.run/error]) . :where [?e :seon.run/task ?t] [?t :seon.task/id \"demo/m\"] [?e :seon.run/error]]"
         [_ r] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root"
                         :code (str "(do (my.root/run! sys [\"demo/m\"])"
-                                   " (let [a (datahike.api/q '" q " (seon.await/await-db sys #(datahike.api/q '" q " %)))]"
+                                   " (let [a (datahike.api/q '" q " (seon.root/await-db sys #(datahike.api/q '" q " %)))]"
                                    " [(:seon.run/outcome a) (:seon.error/type (:seon.run/error a))"
                                    " (mapv #(get-in % [:error :seon.error/type]) (get-in (my.root/problems sys) [:classes :error :rows]))]))")}]
                       {:sets [":seon.config.ai/provider=:none"]

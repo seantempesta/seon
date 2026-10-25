@@ -144,7 +144,7 @@
            :answer (fn [sys ag req]
                      (let [r @(c/prove! sys ag (set (map symbol (:names req))))]
                        (if (contract/error? r) r (select-keys r [:key :ran :pass :fail :error :red :reused :ms]))))}
-   :done {:doc "Hand the run the agent works back to root: the agent writes the run's end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason. Answers the verdict when main holds it: the run's status (done, merged, or closed with its task held), outcome and reason, and for a held task the done rule's reasons; a root defect that stops the judge, as that defect."
+   :done {:doc "Hand the run the agent works back to root: the agent writes the run's end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason. Answers the verdict when main holds it: the run's status (done, merged, or closed with its task held), outcome and reason, and for a held task the done rule's reasons; a defect of the reconciler that stops the judge, as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge), so a caller's read timeout must allow minutes."
           :args {:agent {:type "string"}} :required ["agent"]
           :answer (fn [sys ag _]
                     (if-let [{:keys [run task env]} (run-of sys ag)]
@@ -159,8 +159,8 @@
                                               ;; judged: the run left :running and :ended (the reconciler accepted,
                                               ;; held or refused it), or a root defect stopped the judge
                                               _ (c/judge! sys {:run run :task task :env env :agent ag})
-                                              db (c/await-db sys #(or (not (#{:running :ended} (status %))) (c/defect % t)))]
-                                          (if-let [p (and (#{:running :ended} (status db)) (c/defect db t))]
+                                              db (c/await-db sys #(or (not (#{:running :ended} (status %))) (c/defect % t "seon.reconcile")))]
+                                          (if-let [p (and (#{:running :ended} (status db)) (c/defect db t "seon.reconcile"))]
                                             {:run run :defect (select-keys p [:seon.error/type :seon.error/message])}
                                             (verdict db run task)))
                               :else (refused (str ag " answered no end for " run))))

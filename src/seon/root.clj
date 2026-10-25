@@ -1016,16 +1016,24 @@
   (let [p (promise) k (keyword "seon.root" (str "await-" (random-uuid)))
         a (:wrapped-atom (:conn sys))]
     (add-watch a k (fn [_ _ _ db] (when (pred db) (deliver p db))))
-    (let [db @(:conn sys)] (when (pred db) (deliver p db)))
-    (let [db @p] (remove-watch a k) db)))
+    ;; the watch goes whatever ends the wait (an interrupt of a caller whose client left, a pred
+    ;; that threw on the current value)
+    (try (let [db @(:conn sys)] (when (pred db) (deliver p db)))
+         @p
+         (finally (remove-watch a k)))))
 
 (defn defect
   "A root proc's defect (a :platform problem) whose record main wrote after t, or nil: a step
-  that threw dropped its outputs, so what it carried never ends. Facts, not clocks."
-  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :map]]}
-  [db t]
-  (some #(when (some (fn [dt] (> (:tx dt) t)) (d/datoms db :eavt (:e %) :seon.error/last-ms)) (into {} (d/entity db (:e %))))
-        (filter #(= :platform (:v %)) (d/datoms db :aevt :seon.error/class))))
+  that threw dropped its outputs, so what it carried never ends. With nsname, only one raised
+  by an operation of that namespace (the reconciler's, for a run waiting on its judge). Facts,
+  not clocks."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :int] [:maybe :map]] [:=> [:cat :seon.host/db :int [:maybe :string]] [:maybe :map]]]}
+  ([db t] (defect db t nil))
+  ([db t nsname]
+   (some #(when (some (fn [dt] (> (:tx dt) t)) (d/datoms db :eavt (:e %) :seon.error/last-ms))
+            (let [x (into {} (d/entity db (:e %)))]
+              (when (or (nil? nsname) (= nsname (some-> (:seon.error/operation x) namespace))) x)))
+         (filter #(= :platform (:v %)) (d/datoms db :aevt :seon.error/class)))))
 
 (defn run-tests!
   "The agent forks itself and runs its deftests in the child; a promise of
