@@ -1,0 +1,45 @@
+{:shard [0 4],
+ :contracts 321,
+ :fn-without-gen [],
+ :generated-and-checked 24,
+ :failed [],
+ :such-that [],
+ :not-generated 110,
+ :checks
+   {:every-fn-schema-generates true, :every-pure-contract-holds true},
+ :checked
+   [seon.cost/work seon.lib/push-window seon.merge/conflict-kind
+    seon.proofs/failures seon.proofs/red-reports seon.proofs/results
+    seon.reconcile/classify seon.reconcile/done-explain
+    seon.reconcile/downstream seon.reconcile/hairy
+    seon.reconcile/merge-keys seon.reconcile/task-state seon.ref/based
+    seon.ref/first-sentence seon.ref/link-candidate seon.ref/sections
+    seon.ref/view seon.step/control-op seon.step/pend
+    seon.task/cited-text seon.task/file-declarations
+    seon.task/message-tx seon.task/run-value seon.template/request],
+ :ms
+   {seon.cost/work 1.83,
+    seon.lib/push-window 75.78,
+    seon.merge/conflict-kind 63.13,
+    seon.proofs/failures 13366.67,
+    seon.proofs/red-reports 319.88,
+    seon.proofs/results 5.73,
+    seon.reconcile/classify 12.41,
+    seon.reconcile/done-explain 2273.95,
+    seon.reconcile/downstream 422.16,
+    seon.reconcile/hairy 1124.68,
+    seon.reconcile/merge-keys 12.86,
+    seon.reconcile/task-state 12.15,
+    seon.ref/based 11.65,
+    seon.ref/first-sentence 14.27,
+    seon.ref/link-candidate 17.97,
+    seon.ref/sections 407.02,
+    seon.ref/view 2660.76,
+    seon.step/control-op 16.42,
+    seon.step/pend 32.79,
+    seon.task/cited-text 1812.95,
+    seon.task/file-declarations 19.08,
+    seon.task/message-tx 51.05,
+    seon.task/run-value 50.98,
+    seon.template/request 2458.28}}
+MG-CHECK OK

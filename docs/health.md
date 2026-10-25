@@ -78,8 +78,8 @@ Root watches its checkout and its repository's refs, so whoever writes (a Claude
 - `seon.watch/start!` reads it on one edge thread, the blocking read AGENTS §5 allows. That thread is an outside caller of root's API, as a server connection is: a proc's step must never wait on the api's answers. Each batch is what the stream holds when a read returns, so no clock decides.
 - `my.root/watch!` (started by ```seon.main/root-serve```, the standing root `bin/root` runs) decides what each batch makes root load (`my.root/watch-kinds`):
   - a path by its loader: a page under docs/, a task file, Seon's source;
-  - a moved ref (a commit or merge on any branch): the source;
-  - a rescan or a moved root, where FSEvents coalesced or dropped events under a subtree: every kind.
+  - the checkout's own branch moving (its ref, ```seon.fx/head-ref```: a commit or merge on it): the source. The repository's refs are every worktree's, so another branch's commit loads nothing (a root-test root loaded the repository's 806 task files when other sessions' work moved them, 2026-10-25: `seon.watch-test/another-worktrees-commit-loads-nothing`);
+  - a rescan or a moved root, where FSEvents coalesced or dropped events under a subtree: the loaders reading under that subtree (a build's under target/: none; the checkout itself: every kind), and of the refs, the source alone.
 - `my.root/watch!` loads each kind once (`load-kinds!`); a batch no loader reads writes nothing, so root's own store writes never feed back. Batches, paths and rescans are counted in root's `:seon.root/watch` fact.
 - What changed while root was down is boot's to load, as it always was: the wiki (`seon.root/wiki-tx`) and the source (`seon.root/import-source!`). Task files load on their change or by `my.root/load-tasks!`, never at boot.
 - A watcher that cannot start or dies is a `:platform` error on main (`seon.root/platform-tx`), shown on the banner; root goes on unwatched, never polling ([failure points](failure-points.md)).

@@ -163,13 +163,13 @@
         by (into {} (map (juxt :test identity)) (:proofs block))]
     (is (= [{:assert (print/code "(= 9 (square 3))") :got (print/code "(= 9 6)")}] (:failures (by 'ctx-calc-test/square-test)))
         "the assertion once, and what it evaluated to")
-    (is (= [{:var 'ctx-calc/square :contract [:=> [:cat :int] :int] :doc "Squares x."}
+    (is (= [{:var 'ctx-calc/square :contract [:=> [:cat :int] :int] :doc {:seon.print/prose "Squares x."}}
             {:var 'ctx-ghost/half :contract [:=> [:cat :int] :int]}]
            (:calls (by 'ctx-calc-test/square-test)))
         "the program functions the red proof calls, at summary level from their facts: one in a namespace never loaded too")
     (is (= {:test 'ctx-calc-test/cube-test :status :undefined} (by 'ctx-calc-test/cube-test))
         "a proof not written yet says so")
-    (is (= :no-assertions (:status (by 'ctx-calc-test/empty-test))) "a proof that ran and asserted nothing says so")
+    (is (= :unknown (:status (by 'ctx-calc-test/empty-test))) "a proof no report named never ran: the judge's :proof-unknown")
     (let [b (context/current-state db (task/task db "ctx/sq") {:results {} :turn 1 :max-turns 4 :test-run-errors ["namespace app-test did not load"]})]
       (is (= {'ctx-calc-test/square-test :not-run 'ctx-calc-test/empty-test :not-run 'ctx-calc-test/cube-test :undefined}
              (into {} (map (juxt :test :status)) (:proofs b)))
@@ -349,7 +349,7 @@
         by (into {} (for [r (seon.ref/references db (:seon.task/plan (task/task db "demo/d")))]
                       [(:seon.ref/name r) (seon.docs/resolve-ref db (:seon.ref/name r) (:seon.ref/depth r))]))]
     (is (= {:symbol 'ctx-depth/sq :arglists '([x]) :summary "Squares x."} (by 'ctx-depth/sq)) "bare: arglists and the first sentence")
-    (is (= {:symbol 'ctx-depth/cube :arglists '([x]) :doc "Cubes x." :contract [:=> [:cat :int] :int]} (by 'ctx-depth/cube))
+    (is (= {:symbol 'ctx-depth/cube :arglists '([x]) :doc {:seon.print/prose "Cubes x."} :contract [:=> [:cat :int] :int]} (by 'ctx-depth/cube))
         "one backtick: arglists, doc and contract")
     (is (= {:symbol 'ctx-depth/tri :source (print/code "(defn tri \"Triples x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 3 x))")} (by 'ctx-depth/tri))
         "three backticks: the source, as code")))
@@ -480,6 +480,7 @@
   (let [db (d/db-with (db-with-program) [{:seon.message/id "m-1" :seon.message/from "owner" :seon.message/to {:seon.run/id "demo/f#1"}
                                           :seon.message/body "use demo/g, not a new helper"}])]
     (is (= [{:id "m-1" :from "owner" :body "use demo/g, not a new helper"}] (context/taken-messages db {:message-ids ["m-1"]})))))
+
 (defn- read-back
   "What turn entity e on db sent, read back from its records (the refs it recorded, each by its own
   render: seon.context/parts-of), as one vector of messages."
@@ -797,7 +798,7 @@
         es (into [te] (for [i (range 5)] (pdb/eid db :seon.section/address (anchors i))))
         db (d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) (repeat 6 10) "m"))
         ;; a function beside the plan by meaning, and a schema key its plan names
-        db (d/db-with db [{:db/id "f" :form/id "demo/g" :form/src "(defn g [])"} {:var/name 'demo/g :var/form "f" :var/doc "Gets it. More."}
+        db (d/db-with db [{:db/id "f" :form/id "demo/g" :form/src "(defn g [])" :form/keywords #{:demo/thing :demo/not-a-schema}} {:var/name 'demo/g :var/form "f" :var/doc "Gets it. More."}
                           {:schema/key :demo/thing :schema/form "[:map]"}])
         f (pdb/eid db :form/id "demo/g")]
     [(d/db-with db (vector/tx-data [f] [1] [(dir 1.0 0.05)] [10] "m")) te dir]))
@@ -814,7 +815,8 @@
         "the sections nearest first, the section the plan cites left out")
     (is (= ['demo/g] (:functions rel)) "the functions nearest it")
     (is (= [:demo/thing] (:schemas rel)) "and the schema keys its plan cites")
-    (is (= ["demo/g: Gets it."] (:functions v)) "a function a line: its name and its doc's first sentence")
+    (is (= [["demo/g: Gets it." [:demo/thing]]] (:functions v))
+        "a function a line: its name, its doc's first sentence and the registry keys it operates on (its :form/keywords)")
     (is (some #{"(my.task/related)"} seon.screen/forms) "a form of the screen: each turn evaluates it, as an eval the agent sees and can rerun")
     (is (= ["docs/vector.md#the-model: Section 0 says one thing." "docs/vector.md#the-pyramid: Section 2 says one thing."
             "docs/vector.md#fused-with-the-call-graph: Section 3 says one thing." "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval: Section 4 says one thing."]
@@ -862,4 +864,20 @@
             "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"]
            (:sections rel))
         "the section naming the cited var fused at its rank with the nearest by meaning; the cited section left out")
-    (is (nil? (context/related-view db {:sections [] :functions [] :schemas []})) "nothing related, nothing shown")))
+    (is (nil? (context/related-view db {:sections [] :functions [] :schemas []})) "nothing related, nothing shown")
+    ;; task seon.context/related-weighs-a-neighbour-by-its-rarity: h calls demo/plumb, which twenty
+    ;; forms name, and demo/rare, which only h names; by plain counts the two tie and the name put
+    ;; plumbing first
+    (let [db (d/db-with db (into [{:db/id "h" :form/id "demo/h" :form/refs #{'demo/plumb 'demo/rare}}
+                                  {:db/id "pv" :var/name 'demo/plumb :var/kind :fn} {:db/id "rv" :var/name 'demo/rare :var/kind :fn}]
+                                 (for [i (range 20)] {:form/id (str "demo/p" i) :form/src "(plumb)" :form/refs #{'demo/plumb}})))]
+      (is (= ['demo/g 'demo/k 'demo/rare 'demo/plumb] (:functions (context/related db te)))
+          "a neighbour few forms name before one every form names"))))
+
+(deftest a-proof-with-no-result-reads-unknown
+  ;; demo-test/f-test is written (its source is recorded) but no test report names it: it never
+  ;; ran, which the judge calls :proof-unknown (seon.reconcile/done-explain); it is not "ran and asserted nothing"
+  (let [db (db-with-program)
+        block (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4})
+        by (into {} (map (juxt :test :status)) (:proofs block))]
+    (is (= :unknown (by 'demo-test/f-test)) (pr-str (:proofs block)))))

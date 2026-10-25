@@ -89,8 +89,10 @@
        :growth :linear
        :per-n (dissoc (armed (priced per-entry) 9 62) :ns)
        ;; the functions a print calls once or twice whatever its size (show, select, allot, the
-       ;; root's node and sizing, tree, emit-both, node-ops, layout and their helpers): 71 calls
-       :fixed (dissoc (armed fixed 71 170) :ns)
+       ;; root's node and sizing, tree, emit-both, node-ops, layout and their helpers): 78 calls
+       ;; (71 until an entry of two leaves was charged its flat width, 2026-10-25: the least form,
+       ;; seon.print.select/minimal, then checks one more member whole, seven calls)
+       :fixed (dissoc (armed fixed 78 170) :ns)
        :sizes [100 1000 10000]})))
 
 (def ^:private shown-budget

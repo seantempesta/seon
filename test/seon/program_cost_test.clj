@@ -281,6 +281,42 @@
      :fixed {:ticks 2000.0 :bytes 12000.0 :calls 7.0}
      :sizes [100 1000 10000]}))
 
+(defn- keyword-form
+  "calls-form with each step's key qualified (assoc m :app.acct/k<i> ...), as a program's facts
+  are written: every step names one attribute; every tenth also names a key and a var as quoted
+  data ('[:app.acct/k<i> app.acct/g], a render or a proc declared by name), which is walked once."
+  {:malli/schema [:=> [:cat pos-int?] :any]}
+  [n]
+  (apply list 'defn 'g '[m]
+         (for [i (range n) :let [k (keyword "app.acct" (str "k" i))]]
+           (if (zero? (mod i 10))
+             (list 'assoc 'm k (list 'quote [k 'app.acct/g]))
+             (list 'assoc 'm k (list 'str (str "s" i) (list :name 'm)))))))
+
+(defn keyword-node-of
+  "unit-account's argument: the analyzed node of keyword-form n in app.acct."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  [n]
+  (let [nsx (app-acct)]
+    [(binding [*ns* nsx] (jolt.analyzer/analyze (jolt.host/ctx-for-ns "app.acct") (keyword-form n)))]))
+
+(deftest a-keyword-a-form-names-costs-one-conj
+  ;; root's gate (approved), :form/keywords: the analyzer records each qualified keyword its
+  ;; constants name with one set conj, no walk; the rest of the step as a-scalar-constant-costs-no-walk
+  (cost/proof
+    {:of 'seon.program/unit-account :input 'seon.program-cost-test/keyword-node-of
+     :n "steps in the body, each naming one qualified keyword (keyword-form)"
+     :work (str "one visit per IR node, as a-scalar-constant-costs-no-walk; each qualified keyword "
+                "constant one conj into the form's :keywords, not walked; a quoted collection walked "
+                "for its vars (quoted-vars, as before) and once more for its keywords")
+     :growth :linear
+     ;; measured 2026-10-25 (n 100 -> 10,000): 755 ticks, 3.13 KB and 9.6 contracted calls a step;
+     ;; 74.9k ticks, 278 KB and 967 calls at 100 (the quoted-collection filter as a contracted
+     ;; predicate was 989: one call an element)
+     :per-n {:ticks 760.0 :bytes 3150.0 :calls 9.6}
+     :fixed {:ticks 2000.0 :bytes 12000.0 :calls 7.0}
+     :sizes [100 1000 10000]}))
+
 (defn account-of
   "account's argument: calls-form n in app.acct as read, its text and its unit's account."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
