@@ -479,7 +479,8 @@
   "Why released work is not done, as root causes: each task held for root with a failure
   (a run refused, its agent dead, its merge refused, or marked failed: its reason),
   each task whose latest run root refused to spawn (its reason: the branch is held, or
-  too many live agents), and each other task not released (cancelled, held) that released
+  too many live agents), each task whose latest run parked its session (its outcome: it waits
+  for a message, which wakes it), and each other task not released (cancelled, held) that released
   work needs, with the released tasks it blocks. Read once at quiescence: one pass over the
   tasks."
   {:malli/schema [:=> [:cat :seon.reconcile/index] [:vector :seon.reconcile/root-cause]]}
@@ -491,11 +492,16 @@
                    ;; runs are numbered in order (actions' spawns), so the latest is the count's
                    latest (let [n (count (get-in idx [:by-task id]))] (when (pos? n) (get-in idx [:runs (task/run-id id n)])))
                    refused (when (= :refused (:seon.run/status latest)) latest)
+                   parked (when (= :parked (:seon.run/status latest)) latest)
+                   stopped (or refused parked)
                    bs (blocks idx id)]
-             :when (cond (= :running ex) refused f true :else (seq bs))]
-         (cond-> {:task id :cause (cond f (:reason f) refused (:seon.run/reason refused) :else (name ex)) :blocks bs}
+             :when (cond (= :running ex) stopped f true :else (seq bs))]
+         (cond-> {:task id :cause (cond f (:reason f) refused (:seon.run/reason refused)
+                                        parked (str "parked: " (some-> (:seon.run/outcome parked) name) ", waiting for a message")
+                                        :else (name ex))
+                  :blocks bs}
            (:run f) (assoc :run (:run f))
-           refused (assoc :run (:seon.run/id refused))))))
+           stopped (assoc :run (:seon.run/id stopped))))))
 
 (defn- cas-tx
   "Move run aid's status from -> to (Datahike's compare-and-swap, by lookup ref: a racing
@@ -700,9 +706,9 @@
                       (sort-by first) last)
         prev-task (some-> prev task-of)]
     (when (and prev-task (not= prev-task id))
-      (let [t (task/task db id)]
+      (let [{:keys [plan proofs]} (:seon.task/accumulated (task/task db id))]
         (str prev-task " is done. Your task now is " id ", in this same session: what you did so far stays above.\n\n"
-             "Its plan: " (:seon.task/plan t) "\n\nIts proofs: " (str/join " " (sort (map str (:seon.task/proofs t))))
+             "Its plan: " plan "\n\nIts proofs: " (str/join " " (sort (map str proofs)))
              "\n\nIts whole story (what it cites, its write set): (my.task/story)")))))
 
 (defn- taken-messages

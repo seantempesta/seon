@@ -615,6 +615,27 @@
                        :decls [{:seon.task/name "m" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= [:error :seon.model/no-provider [:seon.model/no-provider]] (:value r)) (pr-str r))))
 
+(deftest a-requests-implement-continues-its-designs-request
+  ;; live finding A1, on a real request (the pipeline's: the implement's first request sent its own
+  ;; story in second place and no boundary, 512 of 35,126 tokens cached): through my.root/request! and
+  ;; the reconciler, the implement's first turn, on the design's session, sends the design's story
+  ;; where the design's requests did, the design's last request whole as its prefix, then root's
+  ;; boundary message (seon.reconcile/stage-boundary), read off the turns as the branch recorded them
+  (let [code (str "(let [_ (my.root/request! sys {:seon.task/ns 'demo :seon.task/name \"st\" :seon.task/plan \"Make st.\"})"
+                  " _ (seon.root/await-db sys \"the implement parked\" #(= :parked (:seon.run/status (datahike.api/entity % [:seon.run/id \"demo/st-implement#1\"]))))"
+                  " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"demo/st\")}}))"
+                  " sent (fn [run] (mapv second (sort (datahike.api/q '[:find ?n ?s :in $ ?id :where [?r :seon.run/id ?id] [?u :seon.turn/run ?r] [?u :seon.turn/n ?n] [?u :seon.turn/origin :model] [?u :seon.turn/sent ?s]] b run))))"
+                  " boundary (datahike.api/q '[:find ?mid . :where [?r :seon.run/id \"demo/st-implement#1\"] [?m :seon.message/to ?r] [?m :seon.message/from \"root\"] [?m :seon.message/id ?mid]] b)]"
+                  " {:design (sent \"demo/st#1\") :implement (sent \"demo/st-implement#1\") :boundary boundary})")
+        [_ r] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code code}]
+                        {:sets [":seon.config.ai/script=seon.fixtures/stages"]})
+        {:keys [design implement boundary]} (:value r)
+        last-design (peek design) first-implement (first implement)]
+    (is (and (seq design) (seq implement) boundary) (pr-str r))
+    (is (= (second (first design)) (second first-implement)) "the design's story, in the same place")
+    (is (= last-design (subvec first-implement 0 (min (count first-implement) (count last-design)))) "the design's last request is its exact prefix")
+    (is (some #(= [:message boundary] (vec (take 2 %))) (drop (count last-design) first-implement)) "then root's boundary")))
+
 (deftest a-waiting-run-parks-and-a-message-wakes-the-same-process
   ;; design agent-loop section 2 (owner, 2026-10-25: "Always park"): a run that waits parks its
   ;; session, its process kept; the owner's message wakes it, and the next run is the same
@@ -774,3 +795,22 @@
               "the agent's own words refine it: the sections nearest them")
           (is (= 2 (count (:sections v))) "k of them")))
       (finally (reset! agent/state old)))))
+
+(deftest a-parked-agent-draws-its-own-render-and-a-gone-one-answers-at-once
+  ;; root, 2026-10-25: a key of @ctx whose render the branch defines is drawn by its agent while the
+  ;; page is viewed (seon.render.ui/ctx, the render proc's {:op :render} ask): an agent parked between
+  ;; requests answers it with its render's HTML, recording nothing; a request to an agent that is
+  ;; gone is answered at once, so the page shows the key's structure and never waits
+  (let [n "(count (datahike.api/datoms (seon.agent/db) :aevt :seon.eval/id))"
+        [_ _ before drawn after gone]
+        (in-agent ["(my.schema/register! :lab.ctx/steps '[:vector {:seon.render/html lab.ui/steps} :string])"
+                   "(ns lab.ui) (defn steps \"The steps, numbered.\" {:malli/schema [:=> [:cat [:vector :string] :map] :any]} [v _] [:ol (for [s v] [:li s])])"
+                   n
+                   {:op :eval :agent "root"
+                    :code (str "(let [id (first (keys (:agents @(seon.root/call! sys {:op :state}))))]"
+                               " @(seon.root/call! sys {:op :render :id id :schema :lab.ctx/steps :value [\"read the plan\" \"write the test\"]}))")}
+                   n
+                   {:op :eval :agent "root" :code "@(seon.root/call! sys {:op :render :id :gone :schema :lab.ctx/steps :value []})"}])]
+    (is (= {:html "<ol><li>read the plan</li><li>write the test</li></ol>"} (:value drawn)) (pr-str drawn))
+    (is (= (inc (:value before)) (:value after)) "the drawing recorded no eval: only the count before it is new")
+    (is (= :seon.root/no-agent (:seon.error/type (:value gone))) (pr-str gone))))

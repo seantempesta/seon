@@ -15,6 +15,8 @@
                               refine what the screen's (my.task/related) showed
     (prove)                   run what judges this branch: the task's proofs and the tests reaching
                               what it changed since main, each one with a result at its digest reused
+    @ctx                      this agent's record as a map: its task, runs, turns, messages and evals,
+                              kept current as it works; the page shows it as a block
     (help 'ns.name)           a namespace: every definition, privates included, a line each in file order
     (help)                    the help page's sections (docs/agent.md); (help "done") one whole;
                               (help "docs/vector.md#the-model") any section, (help "docs/vector.md") a page
@@ -22,7 +24,7 @@
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
-            [seon.config :as cfg] [seon.proofs :as proofs] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract]
+            [seon.config :as cfg] [seon.proofs :as proofs] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
             [seon.db :as pdb] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
@@ -160,8 +162,10 @@
   "The source of the var sym names, or nil: clojure.repl/source-fn. The text its last definition
   in this process kept (seon.repl), else what this branch records for it, else the form at its
   :file and :line (a library's). A namespace's name answers its ns form as this branch records
-  it (its requires and aliases), which clojure.repl's does not. sym is a symbol or the var
-  (named)."
+  it (its requires and aliases), then each definition, privates included, a line each in file
+  order (seon.docs/definition-lines), which clojure.repl's does not (pipeline 1's F4: a design
+  that asked (source ns) saw the ns form alone, took it for all that was recorded, and spent five
+  turns finding the namespace's private functions). sym is a symbol or the var (named)."
   {:malli/schema [:=> [:cat [:or :symbol :seon.host/var]] [:maybe :string]]}
   [sym]
   (if-let [v (if (var? sym) sym (resolve sym))]
@@ -169,19 +173,22 @@
         (docs/source-of (agent/db) (named v))
         (file-source v))
     (when-not (namespace sym)
-      (d/q '[:find ?src . :in $ ?s :where [?n :ns/name ?s] [?f :form/defines ?n] [?f :form/src ?src]] (agent/db) sym))))
+      ;; the branch's record is the answer: a namespace it does not record has no ns form or privates to list
+      (let [db (agent/db)]
+        (when-let [head (d/q '[:find ?src . :in $ ?s :where [?n :ns/name ?s] [?f :form/defines ?n] [?f :form/src ?src]] db sym)]
+          (str head (some->> (docs/definition-lines (ref/namespace-view db sym :doc)) (str "\n"))))))))
 
 (defn not-found
   "What source prints for sym when it names nothing: Clojure's words; when its namespace part
   names a namespace, that no such var is defined here or recorded on this branch (a name a
   plan gives a function to write is not one yet: step E's paid run 4, whose design and
   implement asked the source of a planned function until they ended :no-progress), how to
-  write it there, and the form that shows that namespace's ns form."
+  write it there, and the form that lists that namespace's definitions."
   {:malli/schema [:=> [:cat :symbol] :string]}
   [sym]
   (if-let [n (some-> (namespace sym) symbol find-ns)]
     (str "Source not found for " sym ": no such var is defined or recorded on this branch. If your plan names it as new, "
-         "write it: (in-ns '" (ns-name n) ") (defn " (name sym) " ...). Its namespace's ns form: (source " (ns-name n) ")")
+         "write it: (in-ns '" (ns-name n) ") (defn " (name sym) " ...). Every definition of its namespace, a line each: (source " (ns-name n) ")")
     (str "Source not found for " sym)))
 
 (defn deferred

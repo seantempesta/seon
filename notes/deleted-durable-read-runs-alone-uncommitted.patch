@@ -1,0 +1,40 @@
+diff --cc resources/seon/tasks/seon.db.edn
+index 84940f8e7,6dddc37d0..000000000
+--- a/resources/seon/tasks/seon.db.edn
++++ b/resources/seon/tasks/seon.db.edn
+diff --cc test/seon/check.clj
+index 80b62884a,498896ce6..000000000
+--- a/test/seon/check.clj
++++ b/test/seon/check.clj
+@@@ -736,14 -731,11 +731,15 @@@
+    [nm]
+    (run-check "DURABLE" {:main (keyword nm)}
+     (fn [sys]
+ -    (let [expect (read-string (slurp (str (seon.db/agents-dir (:cfg sys)) "/durable.expect.edn")))
+ +    (let [expect-file (str (seon.db/agents-dir (:cfg sys)) "/durable.expect.edn")
+ +          _ (when-not (.exists (java.io.File. expect-file))
+ +              (out! "DURABLE FAILED (phase 1 left no " expect-file ": durable-read reopens what durable-write killed; run bin/check durable)")
+ +              (lib/c-exit 1))
+ +          expect (read-string (slurp expect-file))
+          st (c/state sys {:datoms true})
+          md (main-data-datoms sys)
+-         ba (by-attr sys)
++         ;; this boot has started no agent yet: every earlier boot's link to its agents is retracted
++         linked (count (d/datoms @(:conn sys) :aevt :seon.agent/root))
+          [n rb rc] (spawn-ready! sys "born after the restart" {:task "resume b" :branch :dur-b} {:task "resume the clone" :branch :dur-clone})
+          r-n (p1 sys n "(app.m0/f1 2) (count (q '[:find ?n :where [?n :note/text]]))")
+          r-b (p1 sys rb "(app.m1/f2 1) (q '[:find [?t ...] :where [?n :note/text ?t]]) (app.m0/f1 2)")
+diff --git a/resources/seon/tasks/seon.check.edn b/resources/seon/tasks/seon.check.edn
+index bae024e09..abc934f0f 100644
+--- a/resources/seon/tasks/seon.check.edn
++++ b/resources/seon/tasks/seon.check.edn
+@@ -91,8 +91,4 @@
+   :seon.task/proofs #{}}
+  {:seon.task/name "a-worktree-syncs-every-submodule-its-branch-pins"
+   :seon.task/plan "Found 2026-10-23 (shrink session): `bin/worktree --sync NAME` moves only the submodules the worktree already has a checkout of; one main added after the worktree was made (reference-code/llama.cpp) is skipped without a word (its loop's `[[ -e $WT/$sub/.git ]] || continue`), so after merging main the worktree builds and tests without it and nothing says so. Correct: --sync does what setup does for a submodule it lacks (a worktree of the main tree's submodule repo at the branch's pin, and its nested copies), and says so; one it cannot make (the main tree has not checked it out, or lacks the pin) is named and the command exits non-zero, never silent. Proof: a worktree made before a submodule was added gets it from --sync, and one the main tree lacks makes --sync fail with its name."
+-  :seon.task/kind :work}
+- {:seon.task/name "durable-read-runs-alone"
+-  :seon.task/plan "Done: durable-read is the second process of the `durable` step, not a mode of its own: `bin/check durable` (a single mode) now runs both processes as the full run does (durable-write, which SIGKILLs itself and must exit 137, then durable-read), and `bin/check durable-read` alone says why it cannot (\"phase 1 left no durable.expect.edn ... run bin/check durable\") instead of throwing FileNotFoundException. Original report: Reproduction: Found 2026-10-23 by the cutover's decider: red in a built scratch worktree of main 4bc598dc1 as well as in the fresh clone, so it is main's, not the cutover's. `bin/check durable-read` on its own crashes with an unhandled FileNotFoundException from `read-file-string` in `seon.check/durable-read` (a path under target/check-store-agents/): it reads a file another step of `bin/check 100` leaves behind. A check mode is runnable by itself (AGENTS section 3: `bin/check MODE`): make the step make what it reads, or name its dependency as `:needs`. Replaces nothing."
+-  :seon.task/kind :work
+-  :seon.task/proofs #{}}]
++  :seon.task/kind :work}]

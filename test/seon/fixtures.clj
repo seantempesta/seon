@@ -269,6 +269,19 @@
   {:malli/schema [:=> [:cat :seon.model/request] :string]}
   [_] "(my.turn/wait)")
 
+(defn stages
+  "The scripted model of a request's stages on one session (seon.agent-test): the design writes
+  a proof red, registers it and adds to its plan, then ends its turn with prose (done: its proof
+  red and run, its plan changed); the implement and the merge wait (each parks)."
+  {:malli/schema [:=> [:cat :seon.model/request] :string]}
+  [{:keys [task turn]}]
+  (cond (or (str/ends-with? task "-implement") (str/ends-with? task "-merge")) "(my.turn/wait)"
+        (zero? turn) (fenced "Write the proof, red, and say what implement changes."
+                             (str "(in-ns 'app.stages-test)\n(clojure.test/deftest t (clojure.test/is (= 1 2)))\n"
+                                  "(my.task/update! :seon.task/proofs conj 'app.stages-test/t)\n"
+                                  "(my.task/update! :seon.task/plan str \" Implement makes app.stages-test/t pass.\")"))
+        :else "The proof is written and red, and the plan says what implement changes."))
+
 (defn reply
   "The scripted model: the scripted reply for the request's task and turn (the last one
   repeats); a swarm task's reply is generated from its index; a merge or design task

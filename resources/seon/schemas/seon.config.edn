@@ -143,7 +143,7 @@
 
  ;; which layer each key came from (seon.config/sources): the shipped file, a --config file
  ;; (the standing root's config/local.edn among them) or --set; written beside the config on main's root entity, as EDN text
- :seon.config/sources [:map-of {:seon.db/data true} :qualified-keyword :string]
+ :seon.config/sources [:map-of :qualified-keyword :string]
  :seon.config/sources-fact [:map {:seon.db/attributes true} [:seon.config/sources :seon.config/sources]]
 
  ;; one refused key: unknown (not in :seon.config/config), missing (required, absent) or invalid

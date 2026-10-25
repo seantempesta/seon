@@ -14,6 +14,10 @@
  :seon.render/opts [:map
                     ;; shown :as :page: the page's walk, its dbs and its tab's state (seon.render.proc/page-value)
                     [:page {:optional true} :map]
+                    ;; the db the value was read on (an agent's branch, for a value recorded as its basis),
+                    ;; and who draws what that agent's own renders draw (seon.render.ui/ctx)
+                    [:db {:optional true} [:maybe :seon.host/db]]
+                    [:drawer {:optional true} [:maybe [:map [:agent :keyword] [:handle :any]]]]
                     ;; the face (:html, the default, or :ai), when rendering through seon.render/render
                     [:face {:optional true} :seon.render/face]
                     ;; the room it is shown in: one line (a chat stream, a table cell), a full panel
