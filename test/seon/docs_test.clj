@@ -28,9 +28,9 @@
 
 (deftest an-unchanged-page-writes-nothing
   (let [db (load-pages (empty-db) pages)]
-    (is (= "Count messages, with `app.m0/f1`." (:seon.section/text (docs/section db "demo/flow.md#quiet")))
+    (is (= "Count messages, with `app.m0/f1`." (:seon.ref/text (docs/view db "demo/flow.md#quiet" :code)))
         "the first load wrote each section")
-    (is (= "demo/flow.md#flow" (:seon.section/parent (docs/section db "demo/flow.md#idioms"))))
+    (is (some #{"demo/flow.md#idioms"} (map :seon.ref/address (:seon.ref/below (docs/view db "demo/flow.md#flow" :doc)))) "a section is below its parent")
     (is (= [] (docs/load-tx db "demo" pages)) "loading the same pages again writes nothing")))
 
 (deftest a-changed-section-rewrites-only-itself
@@ -42,7 +42,7 @@
     (is (= #{quiet} (into #{} (map #(if (map? %) (:db/id %) (second %))) tx))
         "the load states only the changed section")
     (is (= "Count every message, with `app.m0/f1`."
-           (:seon.section/text (docs/section (d/db-with db tx) "demo/flow.md#quiet"))))))
+           (:seon.ref/text (docs/view (d/db-with db tx) "demo/flow.md#quiet" :code))))))
 
 (deftest a-link-to-no-section-is-a-dead-link-and-the-rest-loads
   (let [broken (assoc pages "demo/async.md" (str/replace async "flow.md#idioms" "flow.md#nowhere"))
@@ -183,7 +183,8 @@
   git, and not the checkout's repository, whose history answers for the real wiki): bin/test and bin/check
   run roots with SEON_WIKI_BASELINE=false, so this is the history path's proof against real git. It holds
   src/app/gb.clj with functions f and g and docs/p.md citing them and app.gb/h, app.gl/z, committed
-  together; then a second commit that changes f, adds h, and adds src/app/gl.clj defining z.
+  together; then a second commit that changes f (its body and its docstring), adds h, and adds
+  src/app/gl.clj defining z.
   Answers {:dir :first :second}."
   []
   (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "user.dir") "/target/tmp/git-fixture-" (random-uuid))) (.mkdirs)))
@@ -195,7 +196,7 @@
     (put "docs/p.md" "# P\n\nIt reads `app.gb/f`.\n\n## Q\n\nIt reads `app.gb/g`, `app.gb/h` and `app.gl/z`.\n")
     (git "add" ".") (git "commit" "-q" "-m" "first")
     (let [first (git "rev-parse" "HEAD")]
-      (put "src/app/gb.clj" "(ns app.gb)\n\n(defn f [] 11)\n\n(clojure.core/defn g [] 2)\n\n(defn h [] 3)\n")
+      (put "src/app/gb.clj" "(ns app.gb)\n\n(defn f \"Eleven.\" [] 11)\n\n(clojure.core/defn g [] 2)\n\n(defn h [] 3)\n")
       (put "src/app/gl.clj" "(ns app.gl)\n\n(defn z [] 4)\n")
       (git "add" ".") (git "commit" "-q" "-m" "second")
       {:dir dir :first first :second (git "rev-parse" "HEAD")})))
@@ -223,9 +224,8 @@
     (is (= 2 (count plan)) "both sections cite code")
     (is (empty? (get-in answer [:value :errors])) "git answered every request")
     (is (= {:commit first} (get-in answer [:value :sections "docs/p.md#p"])) "the section was last changed in the first commit")
-    (testing "f was changed by the second commit, after the section: the recorded id is not today's"
-      (is (not= (form-id 'app.gb/f) (get (read "docs/p.md#p") 'app.gb/f)))
-      (is (some? (get (read "docs/p.md#p") 'app.gb/f))))
+    (testing "f's docstring was changed by the second commit, after the section: recorded changed"
+      (is (= "changed" (get (read "docs/p.md#p") 'app.gb/f))))
     (testing "g is unchanged since: recorded as it is now"
       (is (= (form-id 'app.gb/g) (get (read "docs/p.md#q") 'app.gb/g))))
     (testing "h did not exist at the commit: recorded absent, stale now that it does (a citation ahead of the code)"
