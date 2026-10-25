@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [test-runner :as runner]))
+            [seon.fx :as fx] [seon.docs] [test-runner :as runner]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -698,3 +698,38 @@
         after (agent/mem-mb)]
     (is (>= (- after before) 64.0) (str "96 MB written between two calls shows in the second: " before " -> " after))
     (is (pos? (alength held)) "held until the second reading")))
+
+(defn- grep-db
+  "A test db holding forms [name doc src]: each a var app/<name> defined by its form."
+  [forms]
+  (let [db0 (ts/test-db)]
+    (d/db-with db0 (vec (mapcat (fn [[n doc src]]
+                                  [(cond-> {:db/id (str "v" n) :var/name (symbol "app" n)} doc (assoc :var/doc doc))
+                                   {:db/id (str "f" n) :form/id (str "app/" n " " src) :form/src src :form/defines [(str "v" n)]}])
+                                forms)))))
+
+(defn- grep-on [db s] (seon.docs/grep db s))
+
+(deftest grep-ranks-names-before-bodies
+  ;; dogfood 2026-10-25: grep answered ~30 names, unranked and without their line. A var whose name
+  ;; holds the word comes first, then one whose docstring does, then the rest; each with its line
+  (let [db (grep-db [["g" nil "(defn g []\n  (accumulate 1))"]
+                     ["f" "Sums, as accumulate does." "(defn f\n  \"Sums, as accumulate does.\"\n  [] 2)"]
+                     ["accumulate" nil "(defn accumulate [x]\n  x)"]
+                     ["h" nil "(defn h [] 3)"]])]
+    (is (= ['app/accumulate 'app/f 'app/g] (mapv :var (grep-on db "accumulate"))) "name, then docstring, then body; h left out")
+    (is (= "(accumulate 1))" (:line (last (grep-on db "accumulate")))) "the first line holding it")
+    (is (= [] (grep-on db "nowhere")))))
+
+(defn grep-input
+  "The cost proof's input at n: n forms, every tenth holding the word."
+  [n] [(grep-db (for [i (range n)] [(str "f" i) nil (str "(defn f" i " []\n  " (if (zero? (mod i 10)) "(accumulate 1)" "(inc 1)") ")")])) "accumulate"])
+
+(deftest grep-costs-its-forms
+  (seon.cost/proof {:of 'seon.docs/grep :input 'seon.agent-test/grep-input
+                    :n "forms the branch holds, a tenth of them matching"
+                    :work "one scan of :form/src, then per match its definitions and a split of its source"
+                    :growth :linear
+                    :per-n {:bytes 20000 :calls 0}
+                    :fixed {:bytes 400000 :calls 2}
+                    :sizes [100 1000]}))

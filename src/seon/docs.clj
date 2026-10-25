@@ -370,6 +370,20 @@
   (vec (sort (disj (set (d/q '[:find [?v ...] :in $ ?s :where [?f :form/refs ?s] [?f :form/defines ?e] [?e :var/name ?v]] db sym))
                    sym))))
 
+(defn grep
+  "The program vars whose recorded definition on db (:form/src) holds the string s, best first: a
+  var whose name holds it, then one whose docstring does, then the rest, each sorted by name, as
+  {:var :line}, the first line of its source holding s; the one search my.agent/grep asks. Cost: one
+  scan of :form/src, then per matching form its definitions and a split of its text."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:vector [:map [:var :qualified-symbol] [:line :string]]]]}
+  [db s]
+  (let [hits (for [{:keys [e v]} (d/datoms db :aevt :form/src) :when (str/index-of v s)
+                   dv (d/datoms db :eavt e :form/defines)
+                   :let [x (d/entity db (:v dv)) n (:var/name x)] :when n]
+               {:var n :line (some #(when (str/index-of % s) (str/trim %)) (str/split-lines v))
+                :rank (cond (str/index-of (name n) s) 0 (some-> (:var/doc x) (str/index-of s)) 1 :else 2)})]
+    (mapv #(dissoc % :rank) (sort-by (juxt :rank (comp str :var)) (distinct hits)))))
+
 (defn resolve-ref
   "Var sym as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth):
   :summary its arglists and its doc's first sentence, :doc its arglists, doc and contract,
