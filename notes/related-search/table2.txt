@@ -1,0 +1,30 @@
+per kind: method R@5 R@10 tok@5 tok@10 (n)
+fns
+  embedding        0.366 0.477   430   873 (29)
+  graph            0.385 0.428   236   358 (29)
+  graph+embedding  0.496 0.575   366   671 (29)
+sections
+  embedding        0.647 0.773   385   714 (29)
+  graph            0.406 0.522   212   323 (29)
+  graph+embedding  0.706 0.762   367   685 (29)
+attr
+  embedding        0.056 0.222    27    54 (3)
+  graph            0.333 0.333     5    11 (3)
+  graph+embedding  0.056 0.556    24    49 (3)
+config
+  embedding        0.661 0.798    46    95 (6)
+  graph            0.500 0.500    10    10 (6)
+  graph+embedding  0.786 0.839    45    95 (6)
+record
+  embedding        0.164 0.321    28    59 (5)
+  graph            0.285 0.354    17    29 (5)
+  graph+embedding  0.308 0.477    27    56 (5)
+tasks
+  embedding        0.284 0.319   482   877 (16)
+  graph            0.080 0.105   304   448 (16)
+  graph+embedding  0.228 0.357   489   942 (16)
+
+neighbours of the shown top 5 (keys reached from the shown 5 functions), mean
+  config: fused5 0.357  fused5+next5 0.518  fused5+fn-neighbours 0.393  neighbours 1.0 costing 8 tok (n=2)
+  attr: fused5 0.083  fused5+next5 0.333  fused5+fn-neighbours 0.183  neighbours 9.5 costing 45 tok (n=2)
+  fns: fused5 0.496  fused5+next5 0.575  fused5+key-neighbours5 0.503  neighbours5 cost 404 tok (n=29)

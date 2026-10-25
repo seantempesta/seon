@@ -144,6 +144,79 @@ Too few rounds to say anything yet. Three findings:
 2. **A run hung.** In on-2, the unrun-proof run hung past its 30-turn cap (36 evals, the agent `:busy`, its stderr empty) for over an hour, and the round never ended. The agents' directory is kept in the session scratchpad. The cause is not found; filed for root.
 3. **The rest of the A/B waits for the new defaults.** Measuring the old screen form would measure what no longer merges. Off-2, on-3 and off-3 run after this branch's new defaults (below), about $0.10 more.
 
+## Widened: every schema kind, data and function edges, others' work, renders (root, after the owner)
+
+The same harness ran over 32 merged tasks, with the schema keys split by kind and a config-key column added to the truth. Code: `notes/related-search/search2.clj`; data: `truth2.edn`, `results2.edn`, `table2.txt`.
+
+**The kinds searched.** Every registry entry carries a vector now, from `:schema/form`, embedded on main by this branch:
+- 243 Datahike attributes;
+- 131 config keys;
+- 278 other entries (records, tasks, values).
+
+### Recall at 5, with its tokens
+
+| kind (tasks with truth) | embedding | graph | graph+embedding | tokens@5, fused |
+|---|---|---|---|---|
+| functions (29) | 0.366 | 0.385 | **0.496** | 366 |
+| sections (29) | 0.647 | 0.406 | **0.706** | 367 |
+| Datahike attributes (3) | 0.056 | **0.333** | 0.056 (0.556 at 10) | 24 |
+| config keys (6) | 0.661 | 0.500 | **0.786** | 45 |
+| other registry entries (5) | 0.164 | 0.285 | **0.308** | 27 |
+| tasks (16) | **0.284** | 0.080 | 0.228 | 489 |
+
+The schema columns are small, 3 to 6 tasks each. They say which way the methods lean, not by how much.
+
+### Data and function edges
+
+**What the db records today:**
+- `:form/refs` holds only vars. The analyzer sees keywords in its `:const` case but records none.
+- `:var/contract` is an EDN string. `seon.program/schema-dependents` decodes every contract on each call to find the keys it names.
+
+So neither "the functions a schema or attribute is used by" nor "the schemas a function touches" is a stored edge. The measurement approximates the edge from each function's text: the qualified keywords it names, contract included. 931 of 1,656 functions name at least one registry key, and 592 keys are named by some function.
+
+**The proposal for root's gate.** The smallest fact that would store this edge is `:form/keywords`, `[:set {:seon.db/index true} :qualified-keyword]`:
+- the analyzer records the qualified keywords it already walks past in a form's code and contract;
+- a function's schemas become one EAVT seek;
+- a key's functions become one AVET seek, the same shape as callers on `:form/refs`;
+- `schema-dependents` could then read it rather than decode every contract.
+
+### Which neighbours earn their tokens
+
+Each comparison is against the next five of the same fused list:
+
+| shown | added | recall before → after | added tokens | next five instead |
+|---|---|---|---|---|
+| top 5 functions | the record keys they name | 0.308 → **0.526** | 74 | 0.477 |
+| top 5 functions | the Datahike attributes they name | 0.056 → **0.456** | 47 | 0.556 (3 tasks) |
+| top 5 functions | the config keys they name | 0.786 → 0.798 | 25 | 0.839 |
+| top 5 keys | the functions that name them | 0.496 → 0.503 | 404 | **0.575** for ~305 |
+
+**A function's schema keys earn their tokens:** a few keys, about 5 tokens each, beside each function. **A key's functions do not:** they cost a function's line each and add almost nothing that the fused function list does not already hold.
+
+### Other agents' work
+
+**The truth.** Pairs of merged tasks that changed the same var or section: 28 of 32 tasks have partners, 3.9 each on average.
+
+**How well the others' texts find them.** For a task's plan, the others are ranked by their text's vector:
+
+| the others' text | recall@3 | recall@5 |
+|---|---|---|
+| plan | 0.277 | 0.402 |
+| producer text: plan, merge subject, changed names | 0.300 | 0.430 |
+| chance | 0.13 | 0.16 |
+
+So embedding finds about 2.5× chance, and producer text adds 2–3 points. Each branch's plan is already embedded on its branch (this branch), so the plan column is what a live agent can rank today. Producer text would mean embedding each branch's turn prose and changed names at its turns' end. That is a small gain for a new kind of text, so I don't recommend it yet.
+
+### Renders and hiccup
+
+**Renders as definitions** cost nothing new:
+- the 178 `seon.render.*` functions are already embedded forms;
+- the 28 registry entries declaring `:seon.render/ai` or `:seon.render/html` name their render, and `:form/keywords` would make that schema ↔ render edge one seek.
+
+There is no render-specific truth column. Renders are in the functions column.
+
+**Embedding rendered hiccup output.** Estimated, not measured. Each agent turn renders about five new records (four screen evals and the model's), and its page parts change with them. At the 400–2,000 tokens a record prints (the screen's related eval alone printed 1.3–1.9k characters), that is about 2–10k tokens embedded per agent turn. Each turn's records are new, so nothing is reused, and the vectors would grow with every turn of every run. That is more than everything above combined, re-made every turn. As root expected, renders as definitions and others' plans give the sharing for a fraction of the cost. I recommend against embedding hiccup output.
+
 ## What the screen shows now, and what stays a query
 
 - **On the screen,** in `(my.task/related)`, made again only when the plan's vector changes, k 5 each (`:seon.config.render/related`):
