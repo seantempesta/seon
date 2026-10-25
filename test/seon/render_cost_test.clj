@@ -166,8 +166,9 @@
      ;; shown-as twice a node (the list, then the tiles), each armed (~353 B), and the node's row id
      ;; (seon.render.ui/comp-id, one more call: 306 / 3,006 at 100 / 1,000)
      :per-n {:calls 3 :bytes 1300}
-     ;; page, rows, and a slot per shown row and the list's end; what the first page's units hold
-     :fixed {:calls 6 :bytes 30000}
+     ;; page, rows, top-bar (the bar every page shares), and a slot per shown row and the list's
+     ;; end; what the first page's units hold
+     :fixed {:calls 7 :bytes 30000}
      :sizes [100 1000 4000]}))
 
 (defn walked-of
@@ -297,8 +298,9 @@
      ;; 403 once each row's id is seon.render.ui/comp-id and each view's components are indexed (hold-comps);
      ;; 404 since a row's records are printed as sent, in order (seon.context/record-parts, 2026-10-25);
      ;; 429 and 1.51 MB: the whole request read once, and sized (where its tokens went), in place of
-     ;; the read of the added parts alone (2026-10-25)
-     :fixed {:calls 429 :bytes 1210000}
+     ;; the read of the added parts alone (2026-10-25); 458 with the page's shared bar and header
+     ;; (seon.render.ui/top-bar: their elements and attributes, serialized once a pass, 2026-10-25)
+     :fixed {:calls 458 :bytes 1210000}
      ;; the full run measures 4,000 too (:seon.config.proofs/cost-max-n)
      :sizes [100 1000 4000]}))
 
