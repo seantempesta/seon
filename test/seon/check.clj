@@ -87,7 +87,8 @@
   [sys f]
   (let [ev (c/events sys)
         r (f)]
-    (when (contract/error? r) (a/untap (:events-mult sys) ev) (throw (ex-info (str "refused: " (:seon.error/message r)) r)))
+    (when-let [e (first (filter contract/error? (if (sequential? r) r [r])))]
+      (a/untap (:events-mult sys) ev) (throw (ex-info (str "refused: " (:seon.error/message e)) e)))
     (await-agents ev (cond (keyword? r) [r] (map? r) [(:id r)] :else r) #{:ready})
     (a/untap (:events-mult sys) ev)
     r))
@@ -744,7 +745,7 @@
         _ (await-event ev #(and (= :commit (:type %)) (= (:id cl) (:agent %))))
         _ @(c/transact-main! sys [] {:flush? true})
         st (c/state sys {:datoms true})
-        expect {:main-datoms (main-data-datoms sys) :main-t (get-in st [:main :t])}]
+        expect {:main-datoms (main-data-datoms sys) :main-t (get-in st [:main :t]) :user (seon.task/agent-key (:boot sys) :user)}]
       (spit (str path ".expect.edn") (sedn/encode expect))
       {:report {:store (:store st) :a ra :merge (dissoc m :ops) :b rb :clone [(:id cl) rc] :expect expect :store-bytes (dir-bytes (:store-path sys))}
        :checks {:merged (:merged? m)} :then :kill}))))
@@ -780,6 +781,8 @@
                 ;; what main-data-datoms leaves out, asserted: the boot retracted phase 1's links
                 :earlier-agents-are-not-this-roots (= [(seon.task/agent-key (:boot sys) :user)] linked)
                 ;; phase 1's root was SIGKILLed: it left no stop fact, so this boot found its end :unclean
+                ;; main-data-datoms leaves each boot's user out: phase 1's is still main's
+                :phase-1s-user-recovered (= :user (:seon.agent/id (d/pull @(:conn sys) [:seon.agent/id] [:seon.agent/key (:user expect)])))
                 :the-killed-root-ended-unclean (= :unclean (:cause (:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))))
                 :branches-recovered (= #{:dur-a :dur-b :dur-c :dur-clone} (set (get-in st [:store :recovered-branches])))
                 :main-runs-the-merged-f1 (= 20 (first r-n))
@@ -1452,8 +1455,10 @@
         flushed (writer-flushed sys)
         fs (fork-server-caught-up sys)
         ;; the render proc's own asks answered: one in flight (main read for a commit the
-        ;; tab's page reads, its state) steps it once more and sends a settled mark when
-        ;; answered (seon.render.proc: settled once nothing is pending), so the wait is that mark
+        ;; tab's page reads, its state) steps it once more, and the step that answers the last
+        ;; starts busy, so it sends a settled mark (seon.render.proc), the mark this waits for. A
+        ;; mark sent before the reset and still in the socket when it is read ends the wait early;
+        ;; the window then counts the late answer's step (red, never a hang)
         _ (swap! feed assoc :settled false)
         rs (:state (ping sys :render))
         render-pending (:pending rs)
