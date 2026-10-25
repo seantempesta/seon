@@ -40,7 +40,7 @@
 (defn related-of
   "seon.context/related-at's arguments at n wiki sections, each with a vector, and the plan's
   answer made once: the next turn's call, its plan unchanged."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int :map]]}
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int :int :map]]}
   [n]
   (let [unit (fn [seed] (let [v (mapv (fn [i] (Math/sin (* (inc seed) (inc i) 0.37))) (range 768)) m (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % m) v)))
         db (ts/test-db)
@@ -50,12 +50,12 @@
         te (pdb/eid db :seon.task/id "demo/r")
         es (into [te] (for [i (range n)] (pdb/eid db :seon.section/address (str "docs/p.md#s" i))))
         db (d/db-with db (vector/tx-data es (repeat (count es) 1) (mapv unit (range (count es))) (repeat (count es) 10) "m"))]
-    [db te (seon.context/related-at db te nil)]))
+    [db te 1 (seon.context/related-at db te 1 nil)]))
 
 (deftest related-sections-cost-nothing-when-the-plan-is-unchanged
   (cost/proof {:of 'seon.context/related-at :input 'seon.context-cost-test/related-of
                :n "wiki sections with vectors"
-               :work "one seek of the plan's vector's datom, its key compared with the held one's: nothing ranked, nothing read of the sections"
+               :work "the count read through the resolver (one pull) and the key compared with the held one's: nothing ranked, nothing read of the sections"
                :growth :constant
                :fixed {:calls 4 :bytes 20000}
                :sizes [10 100 1000]}))

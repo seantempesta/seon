@@ -185,3 +185,24 @@
     (is (empty? asked) "nothing written is due and the plan's vector is current: no request")
     (let [[n _ asked] (on-branch main (d/db-with main [{:form/id "z/1" :form/src "(defn z [])"}]) answered #(agent/embed-written! 0 "m"))]
       (is (= [0 []] [n asked]) "0 texts a request asks nothing, as on bin/test's roots"))))
+
+(deftest more-due-than-one-request-takes-waits-for-the-next
+  (let [main (d/db-with (ts/test-db) [{:seon.task/id "t/x" :seon.task/plan "a plan"}])
+        e (plan-of main)
+        main (d/db-with main (vector/tx-data [e] [(:tx (first (d/datoms main :eavt e :seon.task/plan)))] (vectors 1 1 1 768) [4] "m"))
+        branch (d/db-with main [{:form/id "y/1" :form/src "(defn a [])"} {:form/id "y/2" :form/src "(defn b [])"} {:form/id "y/3" :form/src "(defn c [])"}])
+        old @agent/state asked (atom [])]
+    (reset! agent/state {:n 0 :mode :test :db branch :base main :task "t/x"})
+    (try
+      (binding [agent/*fx-stub* (fn [_ {:keys [texts]}] (swap! asked conj texts)
+                                  (if (some #(clojure.string/includes? % "(defn b") texts)
+                                    (contract/error :seon.vector/encode-failed 'seon.vector/embed "llama.cpp's encode answered -2" {:code -2})
+                                    (answered texts)))]
+        (is (= 1 (agent/embed-written! 1 "m")) "one of three, as one request takes")
+        (is (= main (:embedded-from @agent/state (:base @agent/state))) "the rest still due: the next call reads from the same db")
+        (is (= :seon.vector/encode-failed (:seon.error/type (agent/embed-written! 1 "m"))) "a text the model cannot encode fails its request")
+        (is (= 1 (agent/embed-written! 1 "m")) "and is kept out of the next, so the text after it is embedded")
+        (is (= 0 (agent/embed-written! 1 "m")) "nothing else due: nothing asked")
+        (is (= [["title: none | text: (defn a [])"] ["title: none | text: (defn b [])"] ["title: none | text: (defn c [])"]] @asked))
+        (is (some? (:vectors-t @agent/state)) "the branch's last vector write is marked (seon.context/related-at's mark)"))
+      (finally (reset! agent/state old)))))

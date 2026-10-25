@@ -759,13 +759,19 @@
 
 (deftest related-sections-follow-a-rewritten-plan
   (let [[db te dir] (sections-near "Make the page say one thing.")
-        held (context/related-at db te nil)
+        held (context/related-at db te 1 nil)
         _ (is (= "docs/vector.md#the-model" (first (:value held))))
-        ;; the plan rewritten on the branch and embedded there, its vector now beside s4's
+        ;; the plan rewritten on the branch and embedded there (the branch's vector write is the
+        ;; mark), its vector now beside the last section's
         db (d/db-with db [[:db/add te :seon.task/plan "Make the last section say it."]])
         t (:tx (first (d/datoms db :eavt te :seon.task/plan)))
         db (d/db-with db (vector/tx-data [te] [t] [(dir 1.0 0.5)] [10] "m"))
-        again (context/related-at db te held)]
-    (is (not= (:key held) (:key again)) "a new vector of the plan is a new key")
+        again (context/related-at db te 2 held)]
+    (is (not= (:key held) (:key again)) "a vector write is a new key")
     (is (= "docs/vector.md#sections-nearest-the-plan-on-the-screen" (first (:value again))) "and the sections follow it: the one nearest the new plan first")
-    (is (identical? again (context/related-at db te again)) "an unchanged plan reuses what was made")))
+    (is (identical? again (context/related-at db te 2 again)) "nothing written since: what was made is reused")
+    (let [s (d/db-with db [{:seon.section/address "docs/vector.md#the-pyramid-b" :seon.section/heading "B" :seon.section/lead "New. More."}])
+          se (pdb/eid s :seon.section/address "docs/vector.md#the-pyramid-b")
+          s (d/db-with s (vector/tx-data [se] [1] [(dir 1.0 0.5)] [10] "m"))]
+      (is (some #{"docs/vector.md#the-pyramid-b"} (:value (context/related-at s te 3 again)))
+          "a section embedded on the branch with the plan unchanged is in the next answer: its write is the mark"))))

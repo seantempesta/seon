@@ -48,7 +48,7 @@ A contract gap is a function the branch's own changes define without a contract:
 ## Where an agent's run falls short today
 
 Working a design task through the server (Claude subagents as Seon agents, 2026-10-25) found where the run gives an agent less than the done rule asks of it. Each gap is a task.
-- A design made from a request cannot add its proofs. The request carries none, ```my.task/update!``` takes only the plan and instructions, so every deftest the design writes is a `:stray-red`, and the refusal shows no form that fixes it: `my.task/a-design-adds-its-proofs`.
+- A design made from a request cannot add its proofs. The request carries none, ```my.task/update!``` takes only the plan and instructions, so every deftest the design writes is a `:stray-red`, and the reason shows no form that fixes it: `my.task/a-design-adds-its-proofs`.
 - `(my.task/status)` answers `:seon.turn/not-observed` until a model turn has observed the task, so an outside agent never reads it: `my.task/status-answers-before-any-turn`.
 - `(my.agent/prove)` answers a process test as `:deferred` with no reason, so an agent cannot tell why its own new proof did not run: `my.agent/a-deferred-test-names-the-process-it-reaches`.
 - `(my.agent/grep "word")` answers names unranked and without their line, at about 350 ms and 240 MB a call, the main tool for a plan that cites nothing: `my.agent/grep-ranks-definitions-first`.

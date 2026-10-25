@@ -19,7 +19,8 @@
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
-;; :embedded-from (the db embed-written! last read the branch's writes up to) :related (seon.turn's related sections, keyed by the plan's vector)
+;; :embedded-from (the db embed-written! last read the branch's writes up to) :vectors-t (the transaction of its last vector write)
+;; :unembeddable (the entities whose text llama.cpp could not encode, as vectors-proc keeps them) :related (seon.turn's related sections, seon.context/related-at)
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
 ;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
@@ -230,31 +231,37 @@
 ;; ---- the branch's own vectors (docs/vector.md#what-is-embedded) ----------------------------
 
 (defn embed-written!
-  "The texts this branch wrote since the last call (since its fork, at the first) and its
-  task's plan, those whose vector is due for model (seon.vector/due over seon.vector/written),
-  embedded by root's :embed effect in one request (the first n of them; 0 asks nothing) and
-  their vectors written on the branch: what seon.vector/near reads here follows the agent's own
-  writes, and the model stays in root. n is :seon.config.vector/texts and model the one it names
-  unless given. Nothing due asks nothing. A failed embedding is the effect's recorded error, and
-  the texts stay due: the next call reads from the same db, as it does while more are due than
-  one request takes. Answers the texts embedded, or the error."
+  "The texts this branch wrote since the last call (since its fork, at the first: after
+  my.branch/merge-main!, main's texts merged in too, which carry no vector) and its task's plan,
+  those whose vector is due for model (seon.vector/due over seon.vector/written), embedded by
+  root's :embed effect in one request (the first n of them; 0 asks nothing) and their vectors
+  written on the branch: what seon.vector/near reads here follows the agent's own writes, and
+  the model stays in root. n is :seon.config.vector/texts and model the one it names unless
+  given. Nothing due asks nothing. A failed embedding is the effect's recorded error and the
+  texts stay due, read again from the same db next call, as while more are due than one request
+  takes; texts llama.cpp could not encode are kept out of later requests (:unembeddable, as
+  seon.vector/vectors-proc keeps them), so they never hold back the rest. Answers the texts
+  embedded, or the error."
   {:malli/schema [:function [:=> [:cat] [:or nat-int? :map]] [:=> [:cat nat-int? :string] [:or nat-int? :map]]]}
   ([] (let [n (cfg/value :seon.config.vector/texts)]
         (if (pos? n) (embed-written! n (vector/model-id (cfg/value :seon.config.vector/model))) 0)))
   ([n model]
    (let [head (db)
          plan (some->> (:task @state) (pdb/eid head :seon.task/id) (#(d/datoms head :eavt % :seon.task/plan)))
-         due (vector/due head model (distinct (into (vector/written (get @state :embedded-from (:base @state)) head) plan)))
+         due (remove (comp (get @state :unembeddable #{}) first)
+                     (vector/due head model (distinct (into (vector/written (get @state :embedded-from (:base @state)) head) plan))))
          ask (take n due)]
      (if (empty? ask)
        (do (when (empty? due) (swap! state assoc :embedded-from head)) 0)
        (let [r (fx! :embed {:texts (mapv second ask)} {})]
-         (if (contract/error? r)
-           r
-           (let [{:keys [model vectors tokens]} (:value r)]
-             (transact! (vector/tx-data (map first ask) (map peek ask) vectors tokens model))
-             (when (= (count ask) (count due)) (swap! state assoc :embedded-from (db)))
-             (count ask))))))))
+         (cond
+           (= :seon.vector/encode-failed (:seon.error/type r)) (do (swap! state update :unembeddable (fnil into #{}) (map first ask)) r)
+           (contract/error? r) r
+           :else (let [{:keys [model vectors tokens]} (:value r)
+                       w (transact! (vector/tx-data (map first ask) (map peek ask) vectors tokens model))]
+                   (swap! state assoc :vectors-t (:t w))
+                   (when (= (count ask) (count due)) (swap! state assoc :embedded-from (db)))
+                   (count ask))))))))
 
 ;; ---- merging main into this branch (seon.merge; session M1) -------------------------------
 

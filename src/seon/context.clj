@@ -160,17 +160,24 @@
                             (vector/near db te all {:of :form/id :shortlist all :fine-dims all}))
              :more "(my.agent/similar 'ns/f) or (my.agent/similar \"text\"): more by meaning"})))
 
+(defn- related-count
+  "How many related sections task entity te's screen shows: :seon.config.render/related through
+  the one resolver (its task, its model, the config), as `similar` reads its count."
+  {:malli/schema [:=> [:cat :seon.host/db :int] nat-int?]}
+  [db te]
+  (let [t (d/pull db [:seon.task/model] te)]
+    (cfg/value :seon.config.render/related {:task t :model (:seon.task/model t)})))
+
 (defn related
   "The wiki sections nearest task entity te's plan by meaning (its vector, seon.vector/near over
-  the sections) that the plan does not cite, the first :seon.config.render/related of them
-  (through the one resolver, as `similar` reads its count): their addresses, best first. nil when
-  the count is 0 (none shown) or the plan has no vector yet."
+  the sections) that the plan does not cite, the first :seon.config.render/related of them:
+  their addresses, best first. nil when the count is 0 (none shown) or the plan has no vector
+  yet."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe [:vector :string]]]}
   [db te]
-  (let [t (d/pull db [:seon.task/model :seon.task/id] te)
-        k (cfg/value :seon.config.render/related {:task t :model (:seon.task/model t)})]
+  (let [k (related-count db te)]
     (when (and (pos? k) (vector/vector-of db te))
-      (let [{:keys [plan]} (:seon.task/accumulated (task/task db (:seon.task/id t)))
+      (let [{:keys [plan]} (:seon.task/accumulated (task/task db (:seon.task/id (d/pull db [:seon.task/id] te))))
             cited (into #{} (comp (filter #(= :view (docs/citation-kind db %))) (keep #(:seon.ref/address (docs/cited-view db %))))
                         (ref/references db plan))]
         (into [] (comp (map #(:seon.section/address (d/entity db (first %)))) (remove cited) (take k))
@@ -178,20 +185,22 @@
 
 (defn related-at
   "`related` for task entity te on db, as {:key :value}: held (an earlier answer) reused when its
-  :key, the plan's vector (te and the transaction of its facts), is the same, so an unchanged
-  plan computes nothing; made again when the plan was embedded anew."
-  {:malli/schema [:=> [:cat :seon.host/db :int [:maybe :map]] [:map [:key :any] [:value [:maybe [:vector :string]]]]]}
-  [db te held]
-  (let [k [te (:tx (first (d/datoms db :eavt te :seon.vector/f16)))]]
+  :key is the same: te, the count shown and mark, a value that changes whenever the vectors
+  `related` reads do (an agent's: the transaction of its branch's last vector write, nil before
+  one; every text it reads, the plan, the plans along :needs and the sections, is embedded by
+  that write when it changes). So an unchanged plan computes nothing."
+  {:malli/schema [:=> [:cat :seon.host/db :int :any [:maybe :map]] [:map [:key :any] [:value [:maybe [:vector :string]]]]]}
+  [db te mark held]
+  (let [k [te (related-count db te) mark]]
     (if (= k (:key held)) held {:key k :value (related db te)})))
 
 (defn related-view
   "Sections at addresses, each at summary depth (seon.docs/view: its address and its lead's
-  first sentence, else its heading), and the form that reads one whole: the screen's :related."
+  first sentence, or its heading when it has no lead), and the form that reads one whole: the
+  screen's :related."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :string]] [:map [:nearest [:vector :string]] [:read :string]]]}
   [db addresses]
-  {:nearest (vec (for [a addresses :let [v (docs/view db a :summary)] :when v]
-                   (str a ": " (or (:seon.ref/summary v) (:seon.ref/heading v)))))
+  {:nearest (mapv #(let [v (docs/view db % :summary)] (str % ": " (or (:seon.ref/summary v) (:seon.ref/heading v)))) addresses)
    :read "(seon.docs/view (seon.agent/db) address :code): one whole"})
 
 (defn run-state

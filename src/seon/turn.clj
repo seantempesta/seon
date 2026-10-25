@@ -74,11 +74,13 @@
 
 (defn- related!
   "The sections nearest task id's plan on db (seon.context/related-at, held in this process
-  between turns): an unchanged plan computes nothing."
+  between turns, marked by the branch's last vector write): an unchanged plan computes nothing."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe [:vector :string]]]}
   [db id]
   (when-let [te (pdb/eid db :seon.task/id id)]
-    (:value (:related (swap! agent/state update :related #(context/related-at db te %))))))
+    (let [r (context/related-at db te (:vectors-t @agent/state) (:related @agent/state))]
+      (swap! agent/state assoc :related r)
+      (:value r))))
 
 (defn- observe
   "What a turn starts from, measured now: the proofs run by the test service (seon.prove: one run
