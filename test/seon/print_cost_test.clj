@@ -89,8 +89,10 @@
        :growth :linear
        :per-n (dissoc (armed (priced per-entry) 9 62) :ns)
        ;; the functions a print calls once or twice whatever its size (show, select, allot, the
-       ;; root's node and sizing, tree, emit-both, node-ops, layout and their helpers): 71 calls
-       :fixed (dissoc (armed fixed 71 170) :ns)
+       ;; root's node and sizing, tree, emit-both, node-ops, layout and their helpers): 72 calls
+       ;; (71 until estimate became chars-tokens over a text's length, its rule shared with
+       ;; seon.context/messages-tokens: one call more)
+       :fixed (dissoc (armed fixed 72 170) :ns)
        :sizes [100 1000 10000]})))
 
 (def ^:private shown-budget
