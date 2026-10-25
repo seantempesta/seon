@@ -53,7 +53,6 @@
   [:seon.config.agent/form-ticks :seon.config.agent/form-ticks]
   [:seon.config.agent/form-top-fns :seon.config.agent/form-top-fns]
   [:seon.config.agent/test-ticks :seon.config.agent/test-ticks]
-  [:seon.config.agent/turn-test-ticks :seon.config.agent/turn-test-ticks]
   ;; merges
   [:seon.config.merge/max-running :seon.config.merge/max-running]
   [:seon.config.merge/max-conflicts :seon.config.merge/max-conflicts]

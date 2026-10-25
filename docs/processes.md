@@ -20,7 +20,7 @@ The child runs `seon.repl/run!`: ```seon.agent/init!``` makes the process the ag
 
 The REPL speaks nREPL's message model: a handler with middleware composed over it (```seon.repl/middleware```: the one printer, the one error map, per-form cost, the compiler's account recorded on the branch, the branch's schema registry, contract instrumentation). The agent writes its own branch (`seon.agent/transact!`); root reads its commits through the writer ([storage](storage.md)). What an agent changes becomes program through that recording and through staging the live runtime (```seon.stage/stage!```: a var unmapped or a method removed, which only the runtime knows), so nothing it evaluated is evaluated again ([source](source.md#an-agent-changes-code-at-its-repl)).
 
-Its tests run in a fork of itself (`seon.agent/run-tests-forked`), bounded by `:seon.config.agent/test-ticks` of work (`:seon.config.agent/turn-test-ticks` for a turn's observation), never time; a process test runs there only when its namespace is named or it is one of the proofs; a fork refused because a thread is active answers `:seon.test/fork-refused` ([turn](turn.md#who-runs-which-tests)).
+Its tests run in a fork of itself (`seon.agent/run-tests-forked`), each test bounded by `:seon.config.agent/test-ticks` of work of its own (one bound in a turn, the judge and bin/test: `seon.proofs/run-tests!`), never time; when every selected test is green at its digest nothing is forked; a process test runs there only when its namespace is named or it is one of the proofs; a fork refused because a thread is active answers `:seon.test/fork-refused` ([turn](turn.md#who-runs-which-tests)).
 
 ## The socket and the agent proc
 

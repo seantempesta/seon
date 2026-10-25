@@ -242,6 +242,28 @@
     (is (= [{proof :pass reached :pass} 0 2] (edn/read-string (:printed judged))) "root's :tests (the judge's) runs nothing: both reused from it, the same results")
     (is (= {:results {proof :pass reached :pass} :ran 0 :reused 2} (edn/read-string (:printed second-run))) "and so does the agent's next run")))
 
+(deftest one-bound-one-verdict-and-the-judge-reruns-no-green
+  ;; task seon.proofs/one-prove-path: a test's tick budget is its own, so two tests that each
+  ;; need t ticks are green under a budget of 1.5 t wherever they run (a per-run budget made
+  ;; the second red in one run and green alone); the turn's greens are stored at their digests,
+  ;; so the judge after it (the plan's tests, the same here) runs nothing and forks no child
+  (let [dir (str (System/getProperty "user.dir") "/target/tmp/one-bound-" (random-uuid))
+        [_ budget turn judge]
+        (in-agent ["(do (ns bound-test (:require [clojure.test :refer [deftest is]]))
+                        (defn work {:malli/schema [:=> [:cat] :int]} [] (reduce + (range 300000)))
+                        (deftest a (is (pos? (work))))
+                        (deftest b (is (pos? (work)))))"
+                   "(def budget (long (* 3/2 (:ticks (get (seon.proofs/run-tests! '[bound-test/a] {} (fn [_]) nil) 'bound-test/a)))))"
+                   "(let [r (seon.agent/run-tests-forked budget #{} :turn)] [(seon.proofs/results r) (:ran r) (some? (:pid r))])"
+                   "(let [r (seon.agent/run-tests-forked budget #{} :judge)] [(seon.proofs/results r) (:ran r) (:reused r) (some? (:pid r))])"]
+                  {:dirs ["src" "test"] :proofs #{} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})]
+    (sh/sh "rm" "-rf" dir)
+    (is (pos-int? (edn/read-string (:printed budget))) (:printed budget))
+    (is (= ['{bound-test/a :pass bound-test/b :pass} 2 true] (edn/read-string (:printed turn)))
+        "the turn runs both, each within its own budget: green")
+    (is (= ['{bound-test/a :pass bound-test/b :pass} 0 2 false] (edn/read-string (:printed judge)))
+        "the judge after it: the same verdict, both reused, nothing run and no child forked")))
+
 (deftest an-agents-greens-and-a-checkouts-are-one-store
   ;; owner, 2026-10-23: a test that is the same is not run again once green, "especially when
   ;; freshly branched": an agent's greens and a checkout's (bin/test's) are one store, keyed by
