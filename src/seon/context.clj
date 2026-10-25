@@ -446,11 +446,12 @@
   sent the same page name the same ref); [:task eid t], the task as of its
   run's first turn; [:eval id]; [:line id], an eval sent collapsed; [:message id]; [:history n],
   the n records the budget left out.
-  :sent is nil for a read with no screen evals (an outside agent's): its last message is the
+  :split, where its tokens go: the system prompt, the story, the conversation (the history note
+  with it), the screen, by the printer's sizer. :sent is nil for a read with no screen evals (an outside agent's): its last message is the
   block's turn sections, no record; every model turn has screen evals.
   Called by the turn, not declared as the agent fact's :seon.render/ai until the render cache
   makes it once per change (design section 10, step 4)."
-  {:malli/schema [:=> [:cat [:maybe :map] :map] [:map [:messages [:vector :seon.model/message]] [:sent [:maybe [:vector :any]]] [:printed :map]]]}
+  {:malli/schema [:=> [:cat [:maybe :map] :map] [:map [:messages [:vector :seon.model/message]] [:sent [:maybe [:vector :any]]] [:printed :map] [:split :seon.turn/sent-split]]]}
   [a {:keys [db basis block help run help-ref run-ref printed]}]
   (let [rs (if (and a (= :model (:origin basis))) (records db (:db/id a) (:run basis) (:tx printed)) [])
         ;; each record printed once (opts :printed, the run's earlier requests'), then which the
@@ -468,13 +469,18 @@
         screen-sent (mapv #(as-sent (get screen-parts %) whole-ids) (:screen basis))
         screen (when (seq screen-sent) (into [] (mapcat second) screen-sent))
         note (when (and screen (pos? dropped)) {:role "user" :content (pr-str {:history {:left-out dropped}})})]
-    {:messages (-> [{:role "system" :content help} {:role "user" :content (or run (run-message block))}]
-                   (into (mapcat second) sent)
-                   (into (if screen (cond-> screen note (conj note)) [{:role "user" :content (screen-message block dropped)}])))
+    (let [head [{:role "system" :content help} {:role "user" :content (or run (run-message block))}]
+          conv (into [] (mapcat second) sent)
+          tail (if screen (cond-> screen note (conj note)) [{:role "user" :content (screen-message block dropped)}])
+          tok (fn [ms] (select/estimate (apply str (mapcat (fn [m] (cons (:content m) (map :code (:tool-calls m)))) ms))))]
+    {:messages (-> head (into conv) (into tail))
+     ;; where its tokens go, by the printer's sizer: what the debug page shows of it (recorded with :sent)
+     :split {:system (tok [(first head)]) :story (tok [(second head)]) :conversation (tok (cond-> conv note (conj note)))
+             :screen (tok (if screen screen tail))}
      :printed cache
      :sent (when (and screen help-ref run-ref)
              (-> [help-ref run-ref] (into (map first) sent) (into (map first) screen-sent)
-                 (cond-> note (conj [:history dropped]))))}))
+                 (cond-> note (conj [:history dropped]))))})))
 
 (defn messages
   "A request's messages without a record (a test's, a read before any eval): the system prompt, the
@@ -525,19 +531,6 @@
                    :history [{:role "user" :content (pr-str {:history {:left-out x}})}])])
           refs)))
 
-(defn sent-split
-  "Where a turn's request went, by part, in tokens (the printer's sizer over each part's content
-  and calls' code): the system prompt, the task story, the conversation (the run's records, whole
-  or collapsed, and the history note) and the screen (the screen evals, screen: their ids, the
-  turn basis's :screen), from what parts-of reads back of its refs. {:system :story :conversation
-  :screen}, a part with no tokens 0."
-  {:malli/schema [:=> [:cat [:vector [:tuple :any [:vector :seon.model/message]]] [:set :string]]
-                  [:map [:system nat-int?] [:story nat-int?] [:conversation nat-int?] [:screen nat-int?]]]}
-  [parts screen]
-  (let [part (fn [[kind x]] (case kind :section :system :task :story (:eval :line) (if (screen x) :screen :conversation) :conversation))
-        tok (fn [ms] (select/estimate (apply str (mapcat (fn [m] (cons (:content m) (map :code (:tool-calls m)))) ms))))]
-    (reduce (fn [m [ref ms]] (update m (part ref) + (tok ms))) {:system 0 :story 0 :conversation 0 :screen 0} parts)))
-
 (defn- story
   "The task story: task entity e's run sections as of t on db (run-state, printed by
   run-message), what every turn of a run sends after the system prompt, as its first turn read them."
@@ -566,9 +559,9 @@
   from its own basis). The one maker of a context: the model's request is this, and so is
   every later reading of it. opts :printed, what the run's earlier requests printed (the cache
   `printed-run` answers, with the task story's text by its ref): only what is new is printed.
-  {:block :messages :sent :printed}."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.turn/basis] [:map [:block :map] [:messages [:vector :seon.model/message]] [:sent [:maybe [:vector :any]]] [:printed :map]]]
-                  [:=> [:cat :seon.host/db :seon.turn/basis :map] [:map [:block :map] [:messages [:vector :seon.model/message]] [:sent [:maybe [:vector :any]]] [:printed :map]]]]}
+  {:block :messages :sent :split :printed}, :split where the request's tokens go (request's)."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.turn/basis] [:map [:block :map] [:messages [:vector :seon.model/message]] [:sent [:maybe [:vector :any]]] [:split :seon.turn/sent-split] [:printed :map]]]
+                  [:=> [:cat :seon.host/db :seon.turn/basis :map] [:map [:block :map] [:messages [:vector :seon.model/message]] [:sent [:maybe [:vector :any]]] [:split :seon.turn/sent-split] [:printed :map]]]]}
   ([db basis] (render db basis {}))
   ([db {:keys [task run turn origin screen agent] :as basis} {:keys [printed]}]
   (let [prev (if (= :model origin) (model-turns db run turn) [])
@@ -584,5 +577,5 @@
         r (request a {:db db :basis basis :block block :help (system-text db) :run story-text :printed printed
                       :help-ref [:section (docs/page-top db system-page) (docs/page-t db system-page)]
                       :run-ref run-ref})]
-    {:block block :messages (:messages r) :sent (:sent r)
+    {:block block :messages (:messages r) :sent (:sent r) :split (:split r)
      :printed (cond-> (:printed r) story-text (assoc :story {run-ref story-text}))})))

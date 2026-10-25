@@ -54,7 +54,11 @@
     (is (apply = (map :seon.task/branch [design implement merge])) "one branch")
     (is (not (contains? d :seon.task/proofs)) "no proof given: design writes its own")
     (is (< (count (:seon.task/plan d)) 300) (str "a short description: " (:seon.task/name d)))
-    (is (seq (task/create-tx (ts/test-db) (tpl/request d))) "each a valid task set"))
+    (is (seq (task/create-tx (ts/test-db) (tpl/request d))) "each a valid task set")))
+
+(deftest each-steps-instructions-are-its-task-briefly-prose-first
+  ;; root, 2026-10-25: each step's instructions short, prose first (its goal, when it is done, by
+  ;; what means: the standard format's stage stories), with no ;; anywhere
   (doseq [[k v] tpl/instructions]
     (is (str/starts-with? v "Your task: ") (str k ": its goal first"))
     (is (not (str/includes? v ";;")) (str k ": no ;; reaches the model"))

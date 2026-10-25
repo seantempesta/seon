@@ -682,19 +682,18 @@
   or error; view, its page's feed param."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? :boolean :string] :map]}
   [db eid open? view]
-  (let [t (d/pull db [:seon.turn/n :seon.turn/sent :seon.turn/basis :seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens :seon.turn/error
+  (let [t (d/pull db [:seon.turn/n :seon.turn/sent :seon.turn/sent-split :seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens :seon.turn/error
                       {:seon.turn/run [:seon.run/id]}] eid)
         n (:seon.turn/n t) r (get-in t [:seon.turn/run :seon.run/id])
         refs (:seon.turn/sent t)
         prev (when (pos? n) (:seon.turn/sent (d/pull db [:seon.turn/sent] [:seon.turn/id (str r "/" (dec n))])))
-        added (filterv (complement (set prev)) refs)
-        ;; its whole request read back once: where its tokens went, and the request itself when open
-        whole (context/parts-of db refs)]
+        added (filterv (complement (set prev)) refs)]
     (cond-> (merge (select-keys t [:seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens :seon.turn/error])
-                   {:turn n :run r :view view :refs (count refs) :added (context/parts-of db added)
-                    :split (context/sent-split whole (set (get-in t [:seon.turn/basis :screen])))})
+                   {:turn n :run r :view view :refs (count refs) :added (context/parts-of db added)})
+      ;; where its tokens went, as its request recorded it (never sized again here)
+      (:seon.turn/sent-split t) (assoc :split (:seon.turn/sent-split t))
       prev (assoc :same {:turn (dec n) :parts (- (count refs) (count added))})
-      open? (assoc :whole whole))))
+      open? (assoc :whole (context/parts-of db refs)))))
 
 (defn- tile-id
   "The element id of tile nd: an entity's, its component's (comp-id); a value's, its entity and
@@ -1072,7 +1071,7 @@
   request (:added, each part beside the record that made it), a line naming what it sends as the
   turn before it in its run did (:same), and its whole request in a <details> that is rendered
   only while open (:whole: opening it posts /open, and the unit comes back with it), and where its
-  tokens went (:split, seon.context/sent-split: system, story, conversation, screen). input {:turn
+  tokens went (:split, the turn's :seon.turn/sent-split: system, story, conversation, screen). input {:turn
   :run :view :refs :added [[ref messages]] :same {:turn :parts} :whole :split} and the turn's usage
   (:seon.turn/tokens, cache-hit and cache-miss tokens) or its call's error (:seon.turn/error)."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}

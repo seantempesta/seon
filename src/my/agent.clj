@@ -160,7 +160,7 @@
     `(let [s# (named ~x)] (println (or (source-fn s#) (not-found s#))))))
 
 (defn help
-  "The help page every agent reads first (seon.context/help-page), as this branch holds it
+  "The help page (seon.context/help-page), read on demand beside the system prompt, as this branch holds it
   (seon.docs/page): its sections, each its address, heading and lead's first sentence; with
   an anchor, that section's own text."
   {:malli/schema [:function [:=> [:cat] [:vector :map]] [:=> [:cat :string] [:maybe :string]]]}

@@ -6,7 +6,7 @@ You have one tool, eval. Each call takes prose first, then code. In the prose, s
 
 What you define becomes part of the program on your branch, and reaches main when your task merges.
 
-Your turn ends with your screen: forms the system evaluates for you just before each request and replaces in the next. `(seon.screen/show)` is your page as the user sees it. `(my.task/status)` is your turn of how many, and each proof, red or green, its first failing assertion and the form that runs it. `(my.branch/changes)` is what your branch changes against main.
+Each request ends with your screen: forms the system evaluates for you just before it, replaced in the next. `(seon.screen/show)` is your page as the user sees it. `(my.task/status)` is your turn of how many, and each proof, red or green, its first failing assertion and the form that runs it. `(my.branch/changes)` is what your branch changes against main.
 
 A value cut to fit says what it left and gives the form that reads the rest: evaluate that form to see it.
 

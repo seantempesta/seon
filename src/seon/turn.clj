@@ -199,7 +199,7 @@
         basis (cond-> (assoc (basis! (:seon.task/id t) run turn max-turns :model ob true) :agent (:key @agent/state))
                 (seq screen) (assoc :screen screen))
         ;; what the run's earlier requests printed, reused by each record's id (seon.context/printed-run)
-        {:keys [block messages sent printed]} (context/render (agent/db) basis {:printed (get-in @agent/state [:printed run])})
+        {:keys [block messages sent split printed]} (context/render (agent/db) basis {:printed (get-in @agent/state [:printed run])})
         _ (swap! agent/state assoc :printed {run printed})
         context-ms (long (profile/ms-since t0))
         id (str run "/" turn)
@@ -207,7 +207,7 @@
         ;; page shows the call in flight and a call that fails keeps what it sent
         _ (agent/transact! [{:db/id "run" :seon.run/id run}
                             (cond-> {:seon.turn/id id :seon.turn/run "run" :seon.turn/n turn :seon.turn/origin :model :seon.turn/basis basis}
-                              sent (assoc :seon.turn/sent sent))])
+                              sent (assoc :seon.turn/sent sent :seon.turn/sent-split split))])
         _ (agent/commit!)
         t1 (profile/now-ns)
         r (agent/fx! :model (cond-> {:messages messages :task (:seon.task/id t) :turn turn}
