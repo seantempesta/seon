@@ -715,19 +715,22 @@
                                       ['demo-test/make "(defn make [] {})" []]]))
         db (d/db-with db [{:var/name 'demo/helper :var/kind :fn :var/doc "Helps. More."}
                           {:var/name 'demo-test/f-test :var/kind :test} {:var/name 'demo-test/g-test :var/kind :test} {:var/name 'demo-test/make :var/kind :fn :var/doc "Makes one."}])
-        story (fn [pulls] (let [db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name (str "p" (hash pulls)) :seon.task/plan "Make `demo/f` double."
+        story (fn [pulls] (let [db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name (str "p" (hash pulls)) :seon.task/plan "Make `demo/f` double, as `demo/caller` asks."
                                                                          :seon.task/proofs #{'demo-test/f-test} :seon.task/config {:seon.config.render/pulls pulls}}]))]
                             (context/run-state db (task/task db (str "demo/p" (hash pulls))))))
         off (story {})
-        on (story {:test-ns true :call-sites true :example-test true})
-        f (first (:write-set on))]
+        on (story {:test-ns true :call-sites true :example-test true :callees true})
+        f (first (filter #(= 'demo/f (:symbol %)) (:write-set on)))
+        caller (first (filter #(= 'demo/caller (:symbol %)) (:write-set on)))]
     (is (not-any? #(contains? off %) [:proof-namespaces :functions]) "off by default: nothing more")
     (is (every? symbol? (:callers (first (:write-set off)))) "callers by name alone")
     (is (= 'demo-test (:ns (first (:proof-namespaces on)))) "the proof's namespace")
     (is (some #(clojure.string/starts-with? % "demo-test/make: Makes one.") (:helpers (first (:proof-namespaces on)))) "with its helpers, a line each")
     (is (= '(demo/f 2) (:call (first (filter #(= 'demo/caller (:var %)) (:callers f))))) "each caller with its call")
     (is (= 'demo-test/g-test (get-in f [:example-test :symbol])) "a test that calls it, not the proof the story shows")
-    (is (clojure.string/includes? (get-in f [:example-test :source] "") "(demo/f 1)") "whole")))
+    (is (clojure.string/includes? (get-in f [:example-test :source] "") "(demo/f 1)") "whole")
+    (is (some #(clojure.string/starts-with? % "demo/f") (:callees caller)) "each write-set var's program callees, a line each")
+    (is (not-any? #(contains? % :callees) (:write-set off)))))
 
 (deftest the-story-names-the-functions-nearest-its-plan
   ;; the owner's ruling (2026-10-24, DECISIONS "Embeddings join the context"): the task story's

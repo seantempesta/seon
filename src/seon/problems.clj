@@ -221,9 +221,9 @@
     (into {} (keep (fn [{:keys [e v]}] (some->> (forms e) ids (vector v)))) (d/datoms db :aevt :var/name))))
 
 (defn- value-at
-  "The value of attribute a of entity e as of transaction t, from history db hist ((d/history db), not a
-  db value the :seon.host/db schema admits; its datoms of
-  [e a], a retraction before the assertion of one transaction), or nil when it had none."
+  "The value of attribute a of entity e as of transaction t, or nil when it had none: its datoms of
+  [e a] in history db hist (d/history db, which the :seon.host/db schema does not admit), in
+  transaction order, a retraction before the assertion of one transaction."
   {:malli/schema [:=> [:cat :any :int :keyword :int] :any]}
   [hist e a t]
   (reduce (fn [v {:keys [added] dv :v}] (if added dv (when (not= v dv) v))) nil
@@ -242,7 +242,7 @@
   the section's :seon.section/read (seon.docs/load-tx) or its :seon.section/reviewed
   (my.docs/reviewed!), read from history, against now. A body that changed while both stayed is
   not a change of what the section describes. A var that did not exist then (seon.docs/load-tx
-  recorded \"absent\", from git) is stale: code now; one whose docstring, contract or arglists changed
+  recorded \"absent\", from git) is stale: code now; one whose docstring or contract changed
   after the section's last commit (\"changed\", from git) is stale; one imported after the section was
   read is not. A var that is gone is a dead citation, not this. Open until the section is edited or
   reviewed; attention, never a reason to refuse done. Cost: the read datoms and the vars' and forms'
@@ -257,11 +257,11 @@
   ([db ans only]
    (let [address (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.section/address))
          reads (if only
-                 (keep (fn [{:keys [e v] :as dt}]
+                 (keep (fn [{:keys [e v tx]}]
                          (let [vs (if ((:sections only) e) v (select-keys v (filter (:names only) (keys v))))]
-                           (when (seq vs) (assoc dt :v vs))))
+                           (when (seq vs) {:e e :v vs :tx tx})))
                        (d/datoms db :aevt :seon.section/read))
-                 (d/datoms db :aevt :seon.section/read))
+                 (map (fn [{:keys [e v tx]}] {:e e :v v :tx tx}) (d/datoms db :aevt :seon.section/read)))
          reviewed (into {} (map (juxt :e :tx)) (d/datoms db :aevt :seon.section/reviewed))
          ;; a contract or docstring changes only with its form's text, so only a recorded name whose
          ;; form moved has its history read
@@ -287,7 +287,7 @@
               (derived-row ans s (symbol (namespace n))
                            (cond
                              absent? (str a " cites " n ", which did not exist when the section was last written: it is code now, read it")
-                             before? (str a " describes " n ", whose docstring, contract or arglists changed after the section's last commit (git): read it")
+                             before? (str a " describes " n ", whose docstring or contract changed after the section's last commit (git): read it")
                              :else (str a " describes " n ", whose " (str/join " and " (map #(case % :var/contract "contract" :var/doc "docstring") changed))
                                   " changed since: read it, then edit the section or review it"))
                            (assoc fields :kind :stale-section) fields))

@@ -252,7 +252,7 @@
   the three dbs, read once."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:map [:tx [:vector :any]] [:conflicts :seon.run/task-conflicts]]]}
   [base branch main]
-  (let [many (get-in main [:rschema :db.cardinality/many] #{})
+  (let [many (fn [a] (= :db.cardinality/many (get-in (d/schema main) [a :db/cardinality])))
         ;; each member's value: a set member's values as a set, a single member's value
         vs (fn [db] (reduce (fn [m [k v]] (if (many (second k)) (update m k (fnil conj #{}) v) (assoc m k v))) {}
                             (for [a (sort pm/carried-platform-attrs) dt (d/datoms db :aevt a)] [[(:e dt) a] (:v dt)])))
@@ -273,15 +273,21 @@
 (defn member-tx
   "The facts that make member of task t (as seon.task/task reads it) (apply f its value args), as
   my.task/update! writes them: a set member (:seon.task/proofs) its values added and retracted, a
-  single member its new value."
-  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs] :seon.host/fn [:sequential :any]] [:vector :any]]}
+  single member its new value. A value its member's schema does not admit (proofs that are no
+  set of qualified symbols, a plan that is no string) is the update's contract error, writing nothing."
+  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs] :seon.host/fn [:sequential :any]]
+                  [:or [:vector :any] :seon.task/invalid-member]]}
   [t member f args]
-  (let [id [:seon.task/id (:seon.task/id t)]]
-    (if (= :seon.task/proofs member)
-      (let [old (set (get t member)) new (set (apply f old args))]
-        (into (mapv #(vector :db/retract id member %) (sort-by str (remove new old)))
-              (map #(vector :db/add id member %)) (sort-by str (remove old new))))
-      [[:db/add id member (apply f (get t member) args)]])))
+  (let [id [:seon.task/id (:seon.task/id t)]
+        old (if (= :seon.task/proofs member) (set (get t member)) (get t member))
+        new (apply f old args)]
+    (cond
+      (not (contract/valid? member new))
+      (contract/error :seon.task/invalid-member 'my.task/update! (str member " would be " (pr-str new) ", which its schema does not admit") {:member member})
+      (= :seon.task/proofs member)
+      (into (mapv #(vector :db/retract id member %) (sort-by str (remove new old)))
+            (map #(vector :db/add id member %)) (sort-by str (remove old new)))
+      :else [[:db/add id member new]])))
 
 (defn onto-tx
   "The facts that put task id as main holds it, and every task it needs (transitively) that

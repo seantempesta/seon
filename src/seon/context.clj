@@ -142,7 +142,8 @@
   first :seon.config.render/similar of them, each one line: its name and its doc's first
   sentence ({:nearest :more}, :more the forms that search further). nil when the count is 0
   (off, the default; a task turns it on in its :seon.task/config); a plan with no vector yet says
-  so ({:not-embedded}), never an empty list."
+  so ({:not-embedded}), never an empty list. With k, the first k, whatever the setting (the
+  story's :seeded pull, :seon.config.render/pulls, which the resolver read)."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:maybe :int] [:set :qualified-symbol]]
                              [:maybe [:or [:map [:nearest [:vector :string]] [:more :string]] [:map [:not-embedded :string]]]]]
                   [:=> [:cat :seon.host/db [:maybe :int] [:set :qualified-symbol] nat-int?]
@@ -169,16 +170,21 @@
 ;; ---- the story's pulls (:seon.config.render/pulls): related data a run read by eval, measured ----
 
 (defn- call-site
-  "The first call of var sym in caller's recorded form, as read (seon.reader/read-text in its
-  namespace, its aliases resolved by the namespace as this process holds it), or nil."
+  "The first call of var sym in caller's recorded form (the compiler's :form/refs say it names
+  sym), as read (seon.reader/read-text in its namespace), a head resolved as its namespace resolves
+  it in this process (aliases and refers: ns-resolve), else by its written namespace; nil when the
+  form names sym only as a value."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol :qualified-symbol] :any]}
   [db caller sym]
   (when-let [f (:var/form (d/entity db [:var/name caller]))]
-    (let [nsym (:ns/name (:form/ns f))
-          aliases (some-> (find-ns nsym) ns-aliases)
-          names-sym? (fn [s] (and (symbol? s) (= (name s) (name sym))
-                                  (= (namespace sym) (if-let [q (namespace s)] (str (or (some-> (get aliases (symbol q)) ns-name) q)) (str nsym)))))]
-      (some #(when (and (seq? %) (names-sym? (first %))) %) (tree-seq coll? seq (reader/read-text (:form/src f) nsym))))))
+    (when (contains? (set (:form/refs f)) sym)
+      (let [nsym (:ns/name (:form/ns f))
+            n (find-ns nsym)
+            names-sym? (fn [s] (and (symbol? s) (= (name s) (name sym))
+                                    (if-let [v (and n (ns-resolve n s))]
+                                      (= sym (symbol v))
+                                      (= (namespace sym) (or (namespace s) (str nsym))))))]
+        (some #(when (and (seq? %) (names-sym? (first %))) %) (tree-seq coll? seq (reader/read-text (:form/src f) nsym)))))))
 
 (defn- one-line
   "Var s as a line: its name and its docstring's first sentence."
@@ -232,8 +238,9 @@
         seed (when (and (= :design (:seon.task/kind t)) (empty? refs) (pos? (:seeded pulls 0))) (:seeded pulls))
         near (if seed (similar db te named seed) (similar db te named))
         program-var? #(some-> (d/entity db [:var/name %]) :var/form)
-        ;; a test calling s that is not a proof of the task (those the story shows already)
-        tests-of (fn [s] (filterv #(and (not (contains? (set proofs) %)) (= :test (:var/kind (d/entity db [:var/name %])))) (docs/callers db s)))]
+        proof? (set proofs)
+        ;; the first test calling s that is not a proof of the task (those the story shows already)
+        example (fn [s] (first (filter #(and (not (proof? %)) (= :test (:var/kind (d/entity db [:var/name %])))) (docs/callers db s))))]
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])
                           :seon.task/plan plan)
              ;; a proof is shown with the proofs, not again in the write set; the names that
@@ -243,13 +250,13 @@
                                                         (cond-> v
                                                           (not (:unresolved v))
                                                           (assoc :callers (if (:call-sites pulls)
-                                                                            (mapv (fn [c] (cond-> {:var c} (call-site db c s) (assoc :call (call-site db c s)))) (docs/callers db s))
+                                                                            (mapv (fn [c] (let [call (call-site db c s)] (cond-> {:var c} call (assoc :call call)))) (docs/callers db s))
                                                                             (docs/callers db s)))
                                                           (and (not (:unresolved v)) (:callees pulls))
                                                           (assoc :callees (into [] (comp (filter program-var?) (remove #{s}) (map (fn [c] (one-line db c))))
                                                                                 (sort (:form/refs (:var/form (d/entity db [:var/name s]))))))
-                                                          (and (not (:unresolved v)) (:example-test pulls) (first (tests-of s)))
-                                                          (assoc :example-test (docs/resolve-ref db (first (tests-of s)) :code))))))
+                                                          (and (not (:unresolved v)) (:example-test pulls))
+                                                          (as-> v' (if-let [e (example s)] (assoc v' :example-test (docs/resolve-ref db e :code)) v'))))))
                                        refs)
                               {gone true there false} (group-by (comp boolean :unresolved) rs)]
                           (cond-> (vec there)

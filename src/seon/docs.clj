@@ -306,7 +306,7 @@
   value {:sections :files :errors}): {address {:read {name form-id} :unread reason}}. A section's :read
   is each cited var's form id in its file as of the commit that last changed the section (found by
   seon.source/defining-ids, the id seon.program/account would record) when what the section describes
-  of it (seon.source/defining-meanings: its docstring, contract and arglists as written) is what its form
+  of it (seon.source/defining-meanings: its docstring and contract as written) is what its form
   says today, \"changed\" when that changed since, or \"absent\" for a var the
   file at that commit does not mention at all, or a file that did not exist: a citation that was ahead
   of the code, stale once the code exists. A section with an uncommitted line is read as of today
@@ -346,7 +346,7 @@
                               (if bad
                                 [address {:read today :unread bad}]
                                 ;; a var whose form changed since: \"changed\" when what the section
-                                ;; describes of it (its docstring, contract or arglists) changed, else as today
+                                ;; describes of it (its docstring or contract) changed, else as today
                                 [address {:read (into {} (for [[n res] per :let [then (get (:ids res) n "absent")]]
                                                            [n (cond (or (= "absent" then) (= then (today n))) then
                                                                     (= (get (:meanings res) n) (meaning-now n)) (today n)

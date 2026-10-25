@@ -21,11 +21,14 @@
   "clojure.core/update on a content member of this agent's task (:seon.task/plan,
   :seon.task/instructions, or :seon.task/proofs, the set of its proofs: a design registers each
   red proof it writes with `(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)`), written
-  on its branch (seon.task/member-tx) and carried to main at the run's end. Answers the task after the update."
-  {:malli/schema [:=> [:cat [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs] :seon.host/fn [:* :any]] [:maybe :seon.task/task]]}
+  on its branch (seon.task/member-tx) and carried to main at the run's end. Answers the task after the update,
+  or :seon.task/invalid-member, writing nothing, for a value the member's schema does not admit."
+  {:malli/schema [:=> [:cat [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs] :seon.host/fn [:* :any]] [:or [:maybe :seon.task/task] :seon.task/invalid-member]]}
   [member f & args]
-  (agent/transact! (task/member-tx (current) member f (vec args)))
-  (current))
+  (let [tx (task/member-tx (current) member f (vec args))]
+    (if (contract/error? tx)
+      tx
+      (do (agent/transact! tx) (current)))))
 
 (defn fail!
   "Mark this agent's task failed: reason, and a counterexample (a form or value showing

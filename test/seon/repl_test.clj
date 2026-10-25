@@ -19,6 +19,9 @@
     (is (= [:x] (:value @(resolve (:handle r)))) "and its handle reads it")
     (is (str/includes? (:text r) "\"ab\"") "the model reads every value")
     (is (= 1 (count (re-seq #"\[:x\]" (:text r)))) "the last is printed once")
+    (is (str/includes? (:line (repl/record-details nil "(+ 1 2) (str \"a\" \"b\") [:x]" r {} nil)) "\"ab\"") "a collapsed row shows every value, not the last alone")
+    (let [rec (repl/record-details nil "1 (atom 1)" {:handle 'result/e9 :values [1 (atom 1)] :value (atom 1)} {} nil)]
+      (is (and (:printed rec) (not (contains? (:response rec) :values))) "a value that is no plain data: the response as it printed, not the values"))
     (let [e (ev "(+ 1 2) (throw (ex-info \"no\" {})) 4")]
       (is (= [3] (:values e)) "the values before the error stay")
       (is (contains? e :ex)))

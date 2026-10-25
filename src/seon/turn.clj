@@ -297,16 +297,19 @@
         n (get-in (swap! agent/state update-in [:turn :reads] (fnil inc 0)) [:turn :reads])
         t0 (profile/now-ns)
         ob (assoc (observed obs) :merge? true)
-        screen (screen! task {:turn n :max-turns 1 :origin :outside :observed ob :merge? true})
+        ;; the run's turn (take?) evaluates the screen and keeps what it printed, as a model turn does;
+        ;; an observer's read records nothing on the branch beyond the read and leaves the print cache
+        screen (when take? (screen! task {:turn n :max-turns 1 :origin :outside :observed ob :merge? true}))
         basis (cond-> (basis! task run n 1 :outside ob take?) (seq screen) (assoc :screen screen))
-        {:keys [messages printed]} (context/render (agent/db) basis {:printed (get-in @agent/state [:printed run])})
-        _ (swap! agent/state assoc :printed {run printed})
+        {:keys [messages printed sent]} (context/render (agent/db) basis {:printed (get-in @agent/state [:printed run])})
+        _ (when take? (swap! agent/state assoc-in [:printed run] printed))
         text (str/join "\n\n" (map :content messages))]
     ;; the read is a turn of this run, as a model turn is: what it was built from and what it cost
     (agent/transact! [{:db/id "run" :seon.run/id run}
-                      {:seon.turn/id (str run "/read-" n) :seon.turn/run "run" :seon.turn/n n
-                       :seon.turn/origin :outside :seon.turn/basis basis
-                       :seon.turn/split (cond-> {:context-ms (long (profile/ms-since t0))} tests-ms (assoc :tests-ms tests-ms))}])
+                      (cond-> {:seon.turn/id (str run "/read-" n) :seon.turn/run "run" :seon.turn/n n
+                               :seon.turn/origin :outside :seon.turn/basis basis
+                               :seon.turn/split (cond-> {:context-ms (long (profile/ms-since t0))} tests-ms (assoc :tests-ms tests-ms))}
+                        sent (assoc :seon.turn/sent sent))])
     text))
 
 (defn hand-back!
