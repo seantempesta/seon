@@ -436,7 +436,10 @@
   [e opts]
   (let [rec (or (:seon.eval/record e) e)
         r (merge (:response rec) (select-keys rec [:code :prose :fns]) (dissoc e :seon.eval/record))
-        r (cond-> r (and (:seon.eval/record e) (nil? (:text r))) (assoc :text (print/record-text rec nil)))
+        ;; a recorded value printed at the part's budget under its handle, its cut the printer's
+        ;; (whole rows, the form that reads the rest), not its reply's text cut again as prose
+        printed (when (and (:seon.eval/record e) (nil? (:text r)) (not (:printed rec))) (print/record-text rec nil (part)))
+        r (cond-> r (and (:seon.eval/record e) (nil? (:text r))) (assoc :text (or printed (print/record-text rec nil))))
         by (or (:seon.eval/by e) (:by r))
         err? (some? (:ex r))]
     (if (= :inline (:as opts))
@@ -447,7 +450,7 @@
        (when (:code r) [:pre {:class "text-text-100"} [:code (prose (:code r) (form-budget))]])
        (if (map? (:ex r))
          (render/html (:ex r) {})
-         [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (prose (or (:text r) "") (part))])
+         [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (if printed (:text r) (prose (or (:text r) "") (part)))])
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
         [:span (get asked-by by "its own turn")]
