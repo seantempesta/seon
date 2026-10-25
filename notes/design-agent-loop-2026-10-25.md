@@ -75,9 +75,9 @@ What this shows:
 - Hazard: static objects are never freed, so the fork server keeps every main db value it held at a static. Its growth per static is unmeasured (build part 1). The bound is the existing standby fork server (`promote`, fork_server.clj:221): when the fork server's footprint passes its share, the standby takes over and the old one exits. That may need a config key (owner's gate, section 6).
 - Found in passing, filed rather than fixed: Chez reports `collect-trip-bytes` 172,842,656 in an agent, while `:seon.config.agent/trip-bytes` is 4,194,304 (agent.clj:743 sets it; Jolt's policy rescales it, it seems). A follow-up for a `jolt/` branch.
 
-**Eviction, by measured workload.** When an admission (a spawn) would put the sum of the agents' reported `mem-mb` past their share of `memory-mb`, the reconciler stops the parked process woken least recently (by wake order, a counter, not a time). That is Flow's stop transition, which exists (agent_proc.clj:274: `{:op :stop}`, await death, SIGKILL past the bound). The session loses nothing: its next message resumes it from its branch head (about 0.4 s instead of 7-35 ms).
+**Eviction: an owner question, not to be built without a ruling.** The owner chose "Always park" over "park within a memory budget", so the design parks every agent until its task finishes. With the static fork server, about 24 worked agents fit in `memory-mb`; past that, the choice is the owner's. The option, if the owner wants it: when an admission (a spawn) would put the sum of the agents' reported `mem-mb` past their share of `memory-mb`, the reconciler stops the parked process woken least recently (by wake order, a counter, not a time). That is Flow's stop transition, which exists (agent_proc.clj:274: `{:op :stop}`, await death, SIGKILL past the bound). The session loses nothing: its next message resumes it from its branch head (about 0.4 s instead of 7-35 ms).
 
-**The lifecycle is Flow's.** A proc is present exactly while the session has a process. The api's `flow/update!` adds it at spawn and removes it at the end, as today. Stop is the kill, as today; eviction is a stop. The fork itself stays a request to the fork server's proc: Flow's init arity returns state and has no outputs, and the fork server is the only single-threaded process that can fork (lib.clj:149), so forking inside init would mean a step blocking on another proc (AGENTS §5). Nothing about the lifecycle needs Flow changes.
+**The lifecycle is Flow's.** A proc is present exactly while the session has a process. The api's `flow/update!` adds it at spawn and removes it at the end, as today. Stop is the kill, as today (and eviction, if ruled, would be a stop). The fork itself stays a request to the fork server's proc: Flow's init arity returns state and has no outputs, and the fork server is the only single-threaded process that can fork (lib.clj:149), so forking inside init would mean a step blocking on another proc (AGENTS §5). Nothing about the lifecycle needs Flow changes.
 
 **Deleted:** the `:diffed` kill for every end (kept only for an accepted end); `hold-tx` for `:waiting`, `:cap` and `:no-progress` ("waiting is a failure" goes, so quiescence stops naming waiting tasks as root causes); `my.root/run!`'s release as the only way back (a message is the release, section 3).
 
@@ -178,21 +178,23 @@ What this shows:
 3. `:seon.run/status` gains `:parked`; new `:seon.run/taken` (int).
 4. `:seon.eval/calls` (refs to vars); eval and turn ids are session-scoped (`<key>/e<n>`, `<key>/<n>`).
 5. `:seon.resume/*`: one fact per resume.
-6. Possibly one config key: the fork server's static garbage bound (when the standby takes over), with unit and provenance, only if build part 1 measures growth that needs it.
+6. Eviction (owner's question 6): no schema, but a reconciler action; built only if ruled.
+7. Possibly one config key: the fork server's static garbage bound (when the standby takes over), with unit and provenance, only if build part 1 measures growth that needs it.
 New functions the help page teaches: `send`, `my.root/resume!`. Gone: `message!`, `send-message`, `release!`.
 
 **Owner's questions** (each needs a ruling before its part is built; my recommendation first):
 1. Agent key = the task's session (one per task) rather than the branch: *recommended*, since a rewind moves the task to a new branch and its agent continues there.
 2. A refused green end parks and holds (as DECISIONS asks) rather than sending the refusal to the agent as a message that wakes it (an automatic retry). *Recommended: hold*, with the reason in the user's timeline; the user's reply is the release.
 3. Only the user's or root's message releases a held task; another agent's waits. *Recommended.*
-4. `send` shadows `clojure.core/send` in agent namespaces. *Recommended: `send`*, as the owner named it, with the shadowing stated on the help page; the alternative is `tell`.
+4. The send function's name. `send` (the owner's word) shadows `clojure.core/send` (Clojure's agents) in every agent namespace, and an agent at a plain REPL would expect core's. *Recommended: `my.agent/message!`*: no shadowing, and the `!` says it is an effect. The api op stays `:send`; the help page teaches the one function either way.
 5. Async effect outcomes become messages from the effect's owner (one inbox feeder). *Recommended.*
+6. Past what `memory-mb` holds (about 24 worked agents with the static fork server), stop the parked agent woken least recently, which resumes from its branch head on its next message (about 0.4 s instead of 7-35 ms), or keep every agent parked as ruled and let admission refuse new spawns. *Recommended: keep "Always park"* until the measured count of parked agents nears the bound.
 
 ## 7. Build order (phase 2, after `jolt/agent-conversation` merges and root's go)
 Each part is red then green, measured, reported before the next; a page change is checked in a browser.
 1. **Fork server static before fork; collect on park.** Smallest, measured, unblocks capacity. Proof: worked-agent footprint; fork server growth per static measured.
 2. **Session-scoped records and ids** (part 1): the conversation across runs.
-3. **Park and wake** (part 2): park outcomes, `:parked`/`taken`, the reconciler's ready rule and `:wake`, eviction.
+3. **Park and wake** (part 2): park outcomes, `:parked`/`taken`, the reconciler's ready rule and `:wake` (eviction only if the owner rules for it).
 4. **One send** (part 3), the help page, the page's box and MCP rewired; the seven mechanisms' deletions.
 5. **Resume** (part 4), with `:seon.eval/calls` measured first.
 6. **Screen diffs** (part 5).
