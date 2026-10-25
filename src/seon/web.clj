@@ -27,7 +27,7 @@
 ;;; --- the files it serves ------------------------------------------------------------
 
 (def public-dir
-  "Where datastar.js is read (:seon.config.web/public-dir)."
+  "Where the page's scripts, datastar.js and highlight.js, are read (:seon.config.web/public-dir)."
   (config/value :seon.config.web/public-dir))
 
 (def stylesheet
@@ -133,7 +133,8 @@
   "The routes, as an edge in front of the proc's :http in-port."
   {:malli/schema [:=> [:cat :seon.host/chan] :seon.host/fn]}
   [ch]
-  (let [js (delay (slurp (str public-dir "/datastar.js")))]
+  ;; the page's scripts, each read once: Datastar, and highlight.js (its Clojure grammar) for code
+  (let [js (into {} (for [f ["/datastar.js" "/highlight.js"]] [f (delay (slurp (str public-dir f)))]))]
     (fn [req]
       (let [uri (:uri req) m (:request-method req) q (form-params (:query-string req))]
         (cond
@@ -151,7 +152,7 @@
           (let [out (a/chan 64)]
             (a/>!! ch {:op :open :view (view-of (get q "view")) :ch out})
             {:status 200 :headers {"Content-Type" "text/event-stream" "Cache-Control" "no-cache"} :body out})
-          (and (= m :get) (= uri "/datastar.js")) {:status 200 :headers {"Content-Type" "text/javascript" "Cache-Control" "max-age=3600"} :body @js}
+          (and (= m :get) (js uri)) {:status 200 :headers {"Content-Type" "text/javascript" "Cache-Control" "max-age=3600"} :body @(js uri)}
           (and (= m :get) (= uri "/app.css"))
           (if (.exists (java.io.File. ^String stylesheet))
             {:status 200 :headers {"Content-Type" "text/css" "Cache-Control" "no-cache"} :body (slurp stylesheet)}

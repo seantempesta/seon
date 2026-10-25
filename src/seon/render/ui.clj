@@ -333,6 +333,8 @@
     [:title title]
     [:link {:rel "icon" :href "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%23f0b429'/%3E%3C/svg%3E"}]
     [:link {:rel "stylesheet" :href "/app.css"}]
+    ;; highlight.js first, so a code block's data-init finds it (seon.print.emit/marked-hiccup)
+    [:script {:src "/highlight.js"}]
     [:script {:type "module" :src "/datastar.js"}]]
    [:body
     body
@@ -427,6 +429,15 @@
   "Who evaluated, by its :seon.eval/by (any other: the agent's own, its model's turn)."
   {"user" "the owner, from this page" "outside" "an outside agent, through root's server" "context" "the context, read for a turn"})
 
+(defn- shown-value
+  "What an eval's recorded response shows as its value: the response less its handle and what
+  the row shows beside it (cost, the costliest functions, its error), each form's value when it
+  has them (its last is :value)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [response]
+  (cond-> (dissoc response :handle :ms :ticks :bytes :fns :ex :text :record :recorded)
+    (contains? response :values) (dissoc :value)))
+
 (defn evaluation
   "One eval (the declared html render of :seon.db/eval-fact, its record, and of a response), as
   it ran: the prose beside it, its code, its response printed under its handle as it is shown
@@ -437,22 +448,28 @@
   [e opts]
   (let [rec (or (:seon.eval/record e) e)
         r (merge (:response rec) (select-keys rec [:code :prose :fns]) (dissoc e :seon.eval/record))
-        ;; a recorded value printed as its reply reads (the reply's budget, one budget for an eval's
-        ;; value wherever it is shown) under its handle, its cut the printer's, not cut again; text
-        ;; with no value behind it (a host value's :printed, a live reply's :text) is prose
-        printed (when (and (:seon.eval/record e) (nil? (:text r)) (not (:printed rec))) (print/record-text rec nil))
-        r (cond-> r (and (:seon.eval/record e) (nil? (:text r))) (assoc :text (or printed (:printed rec))))
+        ;; a value recorded as data: inline, printed as its reply reads under its handle; in a row,
+        ;; rendered as structure (the printer's hiccup). Text with no value behind it (a host
+        ;; value's :printed, a live reply's :text) is prose
+        data? (and (:seon.eval/record e) (nil? (:text r)) (not (:printed rec)))
+        r (cond-> r (and (:seon.eval/record e) (nil? (:text r)))
+            (assoc :text (if data? (when (= :inline (:as opts)) (print/record-text rec nil)) (:printed rec))))
         by (or (:seon.eval/by e) (:by r))
         err? (some? (:ex r))]
     (if (= :inline (:as opts))
       [:span {:class "font-mono"} [:code (prose (or (:code r) "") (cell) {:one-line? true})] (if err? " ✕ " " ⇒ ")
        [:code (prose (or (:text r) "") (cell) {:one-line? true})]]
-      [:div {:class (str "flex flex-col gap-1 border-l-2 pl-3 py-1 " (if err? "border-error" "border-base-700"))}
+      [:div (cond-> {:class (str "flex flex-col gap-1 border-l-2 pl-3 py-1 " (if err? "border-error" "border-base-700"))}
+              ;; a handle printed anywhere on the page links here (seon.print.emit's symbol hiccup)
+              (symbol? (:handle r)) (assoc :id (str "eval-" (name (:handle r)))))
        (when-not (str/blank? (:prose r)) [:p {:class "whitespace-pre-wrap text-text-300 italic"} (prose (:prose r) (form-budget))])
        (when (:code r) [:pre {:class "text-text-100"} [:code (prose (:code r) (form-budget))]])
        (if (map? (:ex r))
          (render/html (:ex r) (cond-> {} (:handle r) (assoc :handle (list :ex (:handle r)))))
-         [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (if printed (:text r) (prose (or (:text r) "") (part)))])
+         (if data?
+           ;; a value stored as data renders as structure, the printer's hiccup under its handle
+           [:div {:class "flex gap-2 text-text-200"} [:span {:class "text-text-500"} "⇒"] (render/html (shown-value (:response rec)) {:handle (:handle r)})]
+           [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (prose (or (:text r) "") (part))]))
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
         [:span (get asked-by by "its own turn")]

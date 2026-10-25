@@ -1147,3 +1147,26 @@
     (is (str/includes? html "1 root causes when it went quiet at t 9"))
     (is (str/includes? html "demo/f: red proof · blocks 1") "each cause one line")
     (is (not (str/includes? html "#:seon")) "nothing printed raw")))
+
+(deftest an-eval-row-renders-its-value-as-structure
+  ;; owner, 2026-10-25 (the value view): a value recorded as data is drawn from its data, a map as
+  ;; rows and code as code, not as its printed text; the row's id is its handle's, which links reach
+  (let [src "(deftest t\n  ;; why\n  (is (= 2 (f 1))))"
+        rec {:code "(my.task/status)" :response {:handle 'result/e157 :ms 2.5 :value {:turn "29 of 30" :proofs [{:test 'demo-test/t :status :fail :source (seon.print/code src)}
+                                                                                                           {:test 'demo-test/u :status :pass :source (seon.print/code "(deftest u)")}]}}}
+        html (h/html (ui/evaluation {:seon.eval/record rec :seon.eval/by "outside"} {}))
+        held (h/html (ui/evaluation {:seon.eval/record {:code "(Object.)" :printed "#object[java.lang.Object]" :response {:handle 'result/e2}}} {}))]
+    (is (str/includes? html "id=\"eval-e157\"") "the row is its handle's anchor")
+    (is (str/includes? html "seon-print-grid") "the value, a map, as rows")
+    (is (str/includes? html "<table class=\"seon-print-table\"") "its proofs, maps sharing keys, as a table")
+    (is (str/includes? html ";; why") "the source verbatim, its comment as written")
+    (is (not (str/includes? html "\\\"")) "no escaped string literal")
+    (is (not (str/includes? html ":ms")) "the cost is on its own line, not in the value")
+    (is (str/includes? held "#object[java.lang.Object]") "a value not held as data shows as it was printed")))
+
+(deftest a-page-an-agent-built-renders-nested
+  ;; owner, 2026-10-25: an agent's hiccup renders as HTML. It is the value's own :seon.render/html
+  ;; key (a render already made), wherever the value sits
+  (let [page [:section [:h2 "agents"] [:ol [:li "a1 busy"]]]
+        html (h/html (r/html {:screen {:seon.render/html page} :n 1} {}))]
+    (is (str/includes? html "<section><h2>agents</h2><ol><li>a1 busy</li></ol></section>") html)))

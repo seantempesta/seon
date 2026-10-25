@@ -107,5 +107,21 @@
 .seon-print-number, .seon-print-boolean, .seon-print-nil { color: var(--color-eval); }
 .seon-print-symbol, .seon-print-tag { color: var(--color-text-100); }
 .seon-print-elision, .seon-print-whole-text, .seon-print-prune { color: var(--color-warning); }
-.seon-print-table { max-width: 100%; overflow-x: auto; }
+/* a map as key and value rows; a vector of same-keyed maps as a table (seon.print.emit/close-frame) */
+.seon-print-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 0.75rem; row-gap: 0.125rem; }
+.seon-print-entry { display: contents; }
+.seon-print-key { text-align: right; opacity: .75; }
+.seon-print-val { min-width: 0; }
+.seon-print-node > .seon-print-grid { margin-left: 1rem; }
+.seon-print-table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.seon-print-table th, .seon-print-table td { border: 1px solid var(--color-base-800); padding: 0.125rem 0.5rem; text-align: left; vertical-align: top; }
+.seon-print-table th { font-weight: normal; }
+.seon-print-prose { white-space: pre-wrap; font-family: var(--font-sans, ui-sans-serif, system-ui); color: var(--color-text-200); margin: 0; }
+/* highlight.js's Clojure tokens in the page's palette */
+.hljs-comment { color: var(--color-text-500); font-style: italic; }
+.hljs-string { color: var(--color-success); }
+.hljs-number, .hljs-literal { color: var(--color-eval); }
+.hljs-symbol, .hljs-keyword { color: var(--color-info); }
+.hljs-name, .hljs-title { color: var(--color-text-100); }
+pre.seon-print-code { margin: 0; padding: 0.25rem 0.5rem; border-left: 2px solid var(--color-base-700); overflow-x: auto; }
 .seon-data-panel { display: inline; }

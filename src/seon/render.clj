@@ -79,21 +79,24 @@
           (if (contains? contract/forms t) t :seon.error/base)
           (some by-identity (keys v))))))
 
-(declare render-of render)
+(declare render-of render own-key)
 
 (defn- nested
   "The printer's :render: a nested value whose schema declares a render, as that render's one
-  line ({:text, its :ai render inline; :html, a call of its :html render inline}), else nil.
+  line ({:text, its :ai render inline; :html, a call of its :html render inline}); one whose
+  own :seon.render/html key holds hiccup (a page an agent built) as that hiccup; else nil.
   Each face's render is looked up by render-of (seon.render/schema-of: one metadata read or
   one map lookup per key, never a validation)."
   {:malli/schema [:=> [:cat :any] [:maybe [:map [:text :string] [:html :any]]]]}
   [v]
-  (let [h (render-of v :html nil) a (render-of v :ai nil)]
-    (when (or h a)
+  (let [h (render-of v :html nil) a (render-of v :ai nil)
+        own (own-key v :seon.render/html)
+        own (when-not (symbol? own) own)]
+    (when (or h a own)
       ;; one line, as the printer's row needs it: a render that ignores :inline is cut to one by the printer
       (let [text (print/line (:text (render v {:face :ai :as :inline :budget (config/value :seon.config.render/line-budget)}))
                              (config/value :seon.config.render/line-budget))]
-        {:text text :html (if h [h v {:as :inline}] text)}))))
+        {:text text :html (cond h [h v {:as :inline}] own own :else text)}))))
 
 (defn- printer-opts
   "The printer's options for a render's opts: its budget (else :seon.config.render/value-budget),

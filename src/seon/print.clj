@@ -53,7 +53,9 @@
   written, every later line indented to where it stands), never as a string literal; cut, it is
   cut by the one string cutter and its cut reads the rest, `(subs (:seon.print/code (get-in
   result/e3 [...])) 1200)`. Plain data, {:seon.print/code s}: a record stores it and reads it
-  back as it is. The producer says it is code; the printer never guesses from a string's text."
+  back as it is. The producer says it is code; the printer never guesses from a string's text.
+  Prose (a docstring, a plan, a section's lead) is marked the same way, {:seon.print/prose s}:
+  printed as code is, and on the page a paragraph."
   {:malli/schema [:=> [:cat :string] [:map [:seon.print/code :string]]]}
   [s] {:seon.print/code s})
 

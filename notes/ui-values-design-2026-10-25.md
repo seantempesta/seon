@@ -1,4 +1,6 @@
-# A value on the page as structure, from the record's data (design for the owner's approval)
+# A value on the page as structure, from the record's data (approved by the owner, 2026-10-25; in progress)
+
+**State (2026-10-25):** approved with highlight.js vendored, agent hiccup unrestricted, built after the printer merges. Built on jolt/ui-values-design over jolt/printer-everywhere: the row renders the value, map grids, tables, code and prose, handle links, and agent hiccup as the value's own `:seon.render/html` key (the existing override, so no third mark and no allowlist). The section is [render](../docs/render.md#a-value-on-the-page-is-its-structure). Left to do: highlight.js's file in `resources/public/` (a download, waiting on the owner's go); step 3 (a cut opens its path through `/open`); producers wrapping prose and the screen's page.
 
 The owner, 2026-10-25: "What is the status of the UI? We can do more complex representations of values there." The model reads printed text, and that stays. The page (`/agent/{id}`, `/agent/{id}/debug`) can show the stored value itself, so this is a design for rendering an eval's value from its record's data, with no second printer. Nothing is built yet.
 
