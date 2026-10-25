@@ -387,8 +387,9 @@
                 :line (str/trim (subs v (inc (or (str/last-index-of v "\n" (max 0 (dec i))) -1))
                                       (or (str/index-of v "\n" i) (count v))))
                 :rank (cond (str/index-of (name n) s) 0 (some-> (:var/doc x) (str/index-of s)) 1 :else 2)})]
-    (->> hits (sort-by (juxt :rank (comp str :var))) (reduce (fn [acc h] (if (some #(= (:var h) (:var %)) acc) acc (conj acc h))) [])
-         (mapv #(dissoc % :rank)))))
+    (->> hits (sort-by (juxt :rank (comp str :var)))
+         (reduce (fn [[seen out :as acc] h] (if (seen (:var h)) acc [(conj seen (:var h)) (conj out (dissoc h :rank))])) [#{} []])
+         second)))
 
 (defn resolve-ref
   "Var sym as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth):
