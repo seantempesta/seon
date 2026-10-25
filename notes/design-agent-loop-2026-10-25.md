@@ -379,3 +379,23 @@ In Seon:
 - **Not measured:** a paid model turn (scripted turns only); agent to root through a `jolt.async.remote` end (agents still use their socket frames; joining root's graph by remote channels is the next step); the loop on Linux (`wake-on-signals!` is macOS only).
 
 
+
+## 9. Part 3, as it will be built (from reading the code, 2026-10-25)
+Today a run's end walks the reconciler's chain `:started` (work!) → `:worked` → `:tested` (`{:op :judge}`: the agent runs its proofs) → `:diffed` (the writer's branch read; then `{:op :kill}` and `judge-tx`, which writes the run `:ended` with the end the agent wrote on its branch). Then `actions` judges it: accepted, or `failed` → `:hold`. `idx-ready?` keeps a task out of `:ready` while a run of it is live or awaiting judgment (`:ended`, `:dead`); once judged, a task still `:running` with no live run is ready again.
+
+Part 3 changes five places, and adds no attribute but `:seon.run/taken`:
+1. **`:worked`, a park outcome** (`:waiting`, `:cap`, `:no-progress`, `:error`, read from work!'s answer `{:outcome ..}`): skip `:tested` (no proof run to judge) and go to `:diffed` with no results. `:diffed` does not kill the process for a park outcome, and `judge-tx` still writes the end and carries the task content the branch changed (the plan an agent rewrote while waiting is not lost).
+2. **`judge-tx` records `:seon.run/taken`**: the count of `:seon.message/to` facts on the branch db it already read, the messages the session's turns took.
+3. **`actions`, a judged run with a park outcome** gives `{:op :park :run aid}` (cas `:ended` → `:closed`), never `failed`/`:hold`. That deletes the hold of a waiting run.
+4. **`idx-ready?`**: a task whose newest run is `:closed` with a park outcome is ready only when the messages to its session's runs on main number more than that run's `:seon.run/taken`. The index keeps the count per task from the `:seon.message/to` datoms of each main transaction (one more watched attribute: O(message datoms) per tx).
+5. **The start of a ready task whose newest run parked in this boot is a `:wake`, not a `:spawn`:** `run-start-tx` on the parked run's agent and process, then the `:started` step (work!) with no fork. A wake whose process has died since (root answers `:seon.root/no-agent`) is that run's death, and the next ready start is a spawn, which loads the session (part 2's key).
+
+`max-running` already counts live runs (`:live`), not processes, so parked processes do not take a slot. Root's `:seon.config.root/max-agents` still bounds live processes, parked ones included: past it a spawn is refused (eviction stays off, section 2).
+
+Proofs, all at the reconciler's index (pure, n ≤ 100):
+- a waiting run's judgment is a park, not a hold;
+- a parked task is not ready until a message comes, and is ready after one;
+- the start of a parked task with a live process is a wake;
+- the lost-wake count (`taken`) closes the race, by the model in `notes/agent-loop/delivery-model.clj`.
+
+Then one process test: a scripted run that waits, a message, the same pid's next run.

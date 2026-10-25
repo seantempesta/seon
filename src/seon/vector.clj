@@ -125,7 +125,7 @@
   {:form/src (fn [src] (str document-prompt src))
    :seon.section/text (fn [text] (str document-prompt text))
    ;; a schema's form, so the screen's related schema keys are found by meaning too
-   ;; (notes/related-search-2026-10-25.md)
+   ;; (docs/vector.md#what-the-work-is-likely-to-need-as-an-eval)
    :schema/form (fn [form] (str document-prompt form))
    :seon.task/plan (fn [plan] (str query-prompt plan))})
 

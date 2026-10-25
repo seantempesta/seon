@@ -315,6 +315,27 @@
         (is (= text (do (clojure.java.shell/sh "env" "-u" "SEON_WEB_PORT" (str root "/bin/ports") f) (slurp f))) "a second run writes the same file"))
       (finally (clojure.java.io/delete-file f true)))))
 
+(deftest bin-ports-writes-at-once-from-many-callers
+  ;; bin/build, bin/test and bin/check each run `bin/ports --write` first, so several run at
+  ;; once on one layer. Before, every run wrote the one name FILE.new: one run renamed or removed
+  ;; it while another's mv still named it ("mv: ...local.edn.new: No such file or directory", the
+  ;; last line of a-failed-seed-says-failed in the full run of 2026-10-25). Each writes its own now
+  (let [root (config/checkout)
+        f (str root "/target/ports-test-" (random-uuid) ".edn")
+        text (str "{:seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 7920]\n"
+                  " :seon.config.web/port #long #or [#env SEON_WEB_PORT 7921]}\n")]
+    (try
+      (spit f text)
+      (clojure.java.shell/sh (str root "/bin/ports") "--write" f)
+      (let [written (slurp f)
+            runs (mapv deref (doall (for [_ (range 16)] (future (clojure.java.shell/sh (str root "/bin/ports") "--write" f)))))]
+        (is (= [] (remove #(and (= 0 (:exit %)) (= "" (:err %))) runs)) "every run writes the layer, none fails on another's file")
+        (is (= written (slurp f)) "the layer is the one the first run wrote")
+        (is (= [] (filter #(str/starts-with? (.getName %) (str (.getName (clojure.java.io/file f)) ".new"))
+                          (.listFiles (clojure.java.io/file root "target"))))
+            "no run leaves its file"))
+      (finally (clojure.java.io/delete-file f true)))))
+
 
 (deftest thinking-on-refuses-reasoning-left-out
   ;; owner ruling 2026-10-24 (docs/decisions.md, "A config key does what it says"): with
