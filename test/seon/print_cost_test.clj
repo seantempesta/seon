@@ -135,7 +135,7 @@
   ;; (73 of 7 keys, then one cut), and no row past the cut is read (seon.print.select/fill-rows).
   ;; Measured 2026-10-25, unarmed: 13.2 MB and 3.39M ticks at 100, 1,000 and 10,000 rows; main's
   ;; breadth path on the same input cost 16.0 MB and 4.28M ticks at 100 rows, growing with them,
-  ;; for 493 cuts and no row shown. The fixed part is the selection's whole attempt at each level
+  ;; for 493 cuts and no row shown. The fixed part is the selection trying each level whole
   ;; (the root map, its :rows entry, the vector, each row: about four walks of what shows).
   (let [armed? (contract/armed? #'seon.print/print-value)]
     (require 'seon.print.emit 'seon.print.select 'seon.print :reload)
