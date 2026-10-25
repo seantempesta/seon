@@ -343,3 +343,26 @@
     (is (some? (:form c)) "and the form that reads the rest")
     (is (= (subs (name v) (- 300 (:n c))) (when (:form c) (read-rest (:form c) h v)))
         "the form reads exactly the N characters of the name that were left")))
+
+(deftest a-long-name-cuts-the-same-anywhere
+  ;; the cut reads `(subs (str <path>) k)`: a namespaced keyword's or symbol's printed text, and a
+  ;; long keyword as a map's key (its path reads it back from the map)
+  (let [h 'result/h1
+        n (apply str (repeat 300 "n"))]
+    (doseq [v [(keyword "a.ns" n) (symbol "a.ns" n) {(keyword n) 1} [:x (symbol n)]]]
+      (let [{:keys [text]} (seon/print-value v {:budget 60 :handle h})
+            cs (cuts-of text)]
+        (is (seq cs) text)
+        (is (every? #(and (:form %) (reads-exactly? text h v %)) cs) text)))))
+
+(deftest an-entry-of-leaves-is-charged-what-it-prints
+  ;; an entry of two leaves that fits its line from its indentation is charged its flat width (no
+  ;; break between key and value); the printer throws when its text passes its charge, so this
+  ;; prints entries of every length around the line's width where an entry starts deepest: first
+  ;; in a map, in a namespaced map, nested, and last before several closers
+  (doseq [w (range 50 90)
+          :let [s (apply str (repeat w "x"))]
+          v [{:a s} {:a s :b s} {:k {:k2 {:a s :b 1}}} {:ns/a s :ns/b s} [[[{:a s :b s}]]] {:x/a {:x/b {:x/c s}}}]
+          b [10 40 400]]
+    (let [r (seon/print-value v {:handle 'result/h1 :budget b})]
+      (is (or (:text r) (= :seon.render.value/insufficient-floor-budget-error (:seon.error/type r))) (pr-str [w b r])))))
