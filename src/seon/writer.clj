@@ -85,23 +85,23 @@
         uncontracted (pm/uncontracted (:ours r))]
     (cond
       (seq (:theirs r))
-      (contract/error :seon.merge/behind 'seon.writer/merge-branch
+      (contract/error :seon.merge/behind 'seon.writer/merge-refused
                       (str "main changed " (count (:theirs r)) " key(s) since the branch's merge base: merge main into the branch first")
                       {:tx (:max-tx main) :behind (count (:theirs r))
                        :seon.error/fix "A merge task merges main into the branch (my.branch/merge-main!), resolves any conflict, and its proofs run on the combined program."})
       (seq unmerged)
-      (contract/error :seon.merge/unmerged 'seon.writer/merge-branch
+      (contract/error :seon.merge/unmerged 'seon.writer/merge-refused
                       (str "the branch has " (count unmerged) " unmerged entr(ies)")
                       {:tx (:max-tx main) :unmerged (mapv :key unmerged)})
       (seq (pm/mutations main (:ours r)))
       (let [ms (pm/mutations main (:ours r))]
-        (contract/error :seon.merge/mutation 'seon.writer/merge-branch
+        (contract/error :seon.merge/mutation 'seon.writer/merge-refused
                         (str "the branch's program " (str/join "; " (for [m ms] (str (sedn/encode (:defines m))
                                                                                     (if (:call m) (str " calls " (:call m)) (str " defines " (:inline-def m) " inside a function body"))))))
                         {:tx (:max-tx main) :mutations ms
                          :seon.error/fix "Every definition happens once, where it is defined: vary behaviour through arguments or the environment, and define at the top level, not inside a function."}))
       (seq uncontracted)
-      (contract/error :seon.merge/uncontracted 'seon.writer/merge-branch
+      (contract/error :seon.merge/uncontracted 'seon.writer/merge-refused
                       (str "the branch carries " (count uncontracted) " function(s) without a contract")
                       {:tx (:max-tx main) :uncontracted uncontracted
                        :seon.error/fix "Declare each function's contract ({:malli/schema [:=> [:cat ...] ...]}) and merge again."}))))
@@ -144,15 +144,6 @@
          {:tx t :datoms (count ops)
           ;; :files, the source files (namespaces' and schema resources') its changes touch: what a write-back rewrites
           :results (mapv #(or (:refused %) {:merged? true :tx t :keys (count (:ours (:r %))) :files (source/changed-files (:db-after rep) (:ours (:r %)))}) (:members judged))}]))))
-
-(defn- merge-branch
-  "Merge the branch into main (git: only a branch that contains main's head; session M1): a
-  octopus merge of one. Answers [st result]."
-  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/branch :seon.merge/data-attrs] [:tuple :seon.writer/state :map]]}
-  [st o branch data-attrs]
-  (let [[st r] (octopus-merge st o [branch] data-attrs)
-        r1 (first (:results r))]
-    [st (cond-> r1 (and (:merged? r1) (:datoms r)) (assoc :datoms (:datoms r)))]))
 
 (defn- answer
   "The answer r for dest, as data on :to-api."
@@ -224,9 +215,6 @@
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
                         (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st)}))
       :octopus-merge (let [[st r] (octopus-merge st o (vec (:branches m)) (:data-attrs m #{}))] (reply st r))
-      :merge (if (exists? (:branch m))
-               (let [[st r] (merge-branch st o (:branch m) (:data-attrs m #{}))] (reply st r))
-               (reply st (refused (str "no branch " (:branch m)) {})))
       ;; one derivation (seon.merge/three-way) for the dashboard, the done rule and merges
       :branch-diff (reply st (if (exists? (:branch m))
                                (let [[head r base] (branch-merge st (:branch m) (:data-attrs m #{}))]
