@@ -272,7 +272,7 @@
      :n "steps in the body (calls-form)"
      :work (str "one visit per IR node (two invokes, their vars, a local, a keyword invoke, constants): each "
                 "var's ref conj'd; a scalar constant names no var, so it is not walked, and a quoted "
-                "collection is (quoted-vars walked every constant: tree-seq, a set, its contract, 3.5 KB each)")
+                "collection is (quoted-names walks every constant: tree-seq, a set, its contract, 3.5 KB each when measured)")
      :growth :linear
      ;; measured 2026-10-23 (n 100 -> 10,000): 5.92 KB, 745 ticks and 9.6 contracted calls a step (vsym,
      ;; invoked, datum: 354 B each armed, seon.cost/units :fn/armed-call); 10.9 KB, 1,157 ticks and 12.4
@@ -308,7 +308,7 @@
      :n "steps in the body, each naming one qualified keyword (keyword-form)"
      :work (str "one visit per IR node, as a-scalar-constant-costs-no-walk; each qualified keyword "
                 "constant one conj into the form's :keywords, not walked; a quoted collection walked "
-                "for its vars (quoted-vars, as before) and once more for its keywords")
+                "for its names (quoted-names) and once more for its keywords")
      :growth :linear
      ;; measured 2026-10-25 (n 100 -> 10,000): 755 ticks, 3.13 KB and 9.6 contracted calls a step;
      ;; 74.9k ticks, 278 KB and 967 calls at 100 (the quoted-collection filter as a contracted
