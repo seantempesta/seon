@@ -428,6 +428,25 @@
     (is (= :green (:seon.run/outcome run)) (pr-str run))
     (is (#{:done :merged} state) (str "the task finishes, never held for root: " state))))
 
+(deftest the-judge-is-a-run-of-the-test-service
+  ;; task seon.reconcile/the-judge-asks-the-test-service: the judge at a run's end asks the test
+  ;; service (seon.prove), so its run is recorded on main, a fact per test digest and one for the
+  ;; run, keyed by the branch at its program's digest in mode :judge (no !turn)
+  (let [[_ _ _ _ seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+                                  "(ns demo-test (:require [clojure.test :refer [deftest is]]))"
+                                  "(deftest t (is (= 2 (inc 1))))"
+                                  {:op :done :agent "a1"}
+                                  {:op :eval :agent "root"
+                                   :code (str "(let [t (:max-tx @(:conn sys))] (seon.await/await-quiet sys (inc t))"
+                                              " (let [db @(:conn sys)]"
+                                              "  [(d/q '[:find [?id ...] :where [?r :seon.proof.run/id ?id]] db)"
+                                              "   (d/q '[:find [?s ...] :where [?e :seon.proof/test demo-test/t] [?e :seon.proof/status ?s] [?e :seon.proof/digest]] db)"
+                                              "   (:seon.run/outcome (first (vals (seon.task/runs db))))]))")}])
+        [runs statuses outcome] (:value seen)]
+    (is (some #(re-find #"@[0-9a-f]+$" %) runs) (str "a judge run on main, keyed branch@digest: " (pr-str seen)))
+    (is (= [:pass] statuses) "its result is a fact at the test's digest")
+    (is (= :green outcome))))
+
 (deftest an-agent-finds-no-repository
   ;; owner, 2026-10-22: no git in agents, and no source-file editing as the way to develop
   ;; Seon; an agent works in a scratch dir with no repository above it
