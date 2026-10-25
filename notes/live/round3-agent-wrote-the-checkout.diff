@@ -1,0 +1,29 @@
+diff --git a/test/seon/context_test.clj b/test/seon/context_test.clj
+index 5abcbcdae..c36f557c1 100644
+--- a/test/seon/context_test.clj
++++ b/test/seon/context_test.clj
+@@ -868,3 +868,24 @@
+            (:sections rel))
+         "the section naming the cited var fused at its rank with the nearest by meaning; the cited section left out")
+     (is (nil? (context/related-view db {:sections [] :functions [] :schemas []})) "nothing related, nothing shown")))
++
++(deftest a-proof-that-never-ran-says-so
++  ;; a proof with no result and no run error never ran: it says :not-run, not that it ran and
++  ;; asserted nothing (the word seon.proofs/results gives a test that ran with no assertion)
++  (let [db (db-with-program)
++        b (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4})
++        by (into {} (map (juxt :test identity)) (:proofs b))]
++    (is (= :not-run (:status (by 'demo-test/f-test)))
++        "a proof with no result says it has not run")
++    (is (not= :no-assertions (:status (by 'demo-test/f-test)))
++        "a proof that never ran does not say it asserted nothing")))
++
++(deftest a-proof-that-ran-and-asserted-nothing-says-none
++  ;; a test that ran with no assertion is :none (seon.proofs/results), and the turn says so
++  (let [db (db-with-program)
++        rep (agent/test-report {:type :pass} "#'demo-test/f-test")
++        results (proofs/results {:reports [rep]})
++        b (context/current-state db (task-f db) {:results results :turn 1 :max-turns 4})
++        by (into {} (map (juxt :test identity)) (:proofs b))]
++    (is (= {'demo-test/f-test :none} results) "a test with no assertion is :none")
++    (is (= :none (:status (by 'demo-test/f-test))) "the turn says the proof asserted nothing")))
