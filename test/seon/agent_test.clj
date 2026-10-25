@@ -719,7 +719,12 @@
                      ["h" nil "(defn h [] 3)"]])]
     (is (= ['app/accumulate 'app/f 'app/g] (mapv :var (grep-on db "accumulate"))) "name, then docstring, then body; h left out")
     (is (= "(accumulate 1))" (:line (last (grep-on db "accumulate")))) "the first line holding it")
-    (is (= [] (grep-on db "nowhere")))))
+    (is (= [] (grep-on db "nowhere")))
+    (is (= "(defn g []" (:line (first (grep-on db "[]\n  (accumulate")))) "a match across a line break: the line it begins in")
+    (is (= [{:var 'app/f :line "\"Sums, as accumulate does.\""}] (grep-on db "Sums")) "a docstring's match: its line")
+    (let [two (d/db-with db [{:db/id "a" :var/name 'app/a} {:db/id "b" :var/name 'app/b}
+                             {:form/id "app/ab" :form/src "(do (defn a [] :zed) (defn b [] :zed))" :form/defines ["a" "b"]}])]
+      (is (= ['app/a 'app/b] (mapv :var (grep-on two ":zed"))) "a form defining two vars: each, once"))))
 
 (defn grep-input
   "The cost proof's input at n: n forms, every tenth holding the word."

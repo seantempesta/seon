@@ -373,16 +373,22 @@
 (defn grep
   "The program vars whose recorded definition on db (:form/src) holds the string s, best first: a
   var whose name holds it, then one whose docstring does, then the rest, each sorted by name, as
-  {:var :line}, the first line of its source holding s; the one search my.agent/grep asks. Cost: one
-  scan of :form/src, then per matching form its definitions and a split of its text."
+  {:var :line}, :line the source's line where s first begins; a var once, at its best rank (two live
+  forms may define one: a method, an extension); the one search my.agent/grep asks. Cost: one scan of
+  :form/src, then per matching form its definitions and a line cut at the match."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:vector [:map [:var :qualified-symbol] [:line :string]]]]}
   [db s]
-  (let [hits (for [{:keys [e v]} (d/datoms db :aevt :form/src) :when (str/index-of v s)
+  (let [hits (for [{:keys [e v]} (d/datoms db :aevt :form/src)
+                   :let [i (str/index-of v s)] :when i
                    dv (d/datoms db :eavt e :form/defines)
                    :let [x (d/entity db (:v dv)) n (:var/name x)] :when n]
-               {:var n :line (some #(when (str/index-of % s) (str/trim %)) (str/split-lines v))
+               {:var n
+                ;; the whole line the match begins in (s may itself hold a line break)
+                :line (str/trim (subs v (inc (or (str/last-index-of v "\n" (max 0 (dec i))) -1))
+                                      (or (str/index-of v "\n" i) (count v))))
                 :rank (cond (str/index-of (name n) s) 0 (some-> (:var/doc x) (str/index-of s)) 1 :else 2)})]
-    (mapv #(dissoc % :rank) (sort-by (juxt :rank (comp str :var)) (distinct hits)))))
+    (->> hits (sort-by (juxt :rank (comp str :var))) (reduce (fn [acc h] (if (some #(= (:var h) (:var %)) acc) acc (conj acc h))) [])
+         (mapv #(dissoc % :rank)))))
 
 (defn resolve-ref
   "Var sym as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth):
