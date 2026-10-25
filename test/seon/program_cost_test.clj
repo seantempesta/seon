@@ -272,7 +272,7 @@
      :n "steps in the body (calls-form)"
      :work (str "one visit per IR node (two invokes, their vars, a local, a keyword invoke, constants): each "
                 "var's ref conj'd; a scalar constant names no var, so it is not walked, and a quoted "
-                "collection is (quoted-vars, since quoted-names, walked every constant: tree-seq, a set, its contract, 3.5 KB each)")
+                "collection is (quoted-names walks every constant: tree-seq, a set, its contract, 3.5 KB each when measured)")
      :growth :linear
      ;; measured 2026-10-23 (n 100 -> 10,000): 5.92 KB, 745 ticks and 9.6 contracted calls a step (vsym,
      ;; invoked, datum: 354 B each armed, seon.cost/units :fn/armed-call); 10.9 KB, 1,157 ticks and 12.4

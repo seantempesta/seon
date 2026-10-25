@@ -364,13 +364,14 @@
 
 (defn callers
   "The program vars whose recorded definition names x on db, sorted, x itself left out: a var by
-  its :form/refs, a qualified keyword (an attribute, config key or schema entry) by its
+  its :form/refs (calls it) or its :form/quoted (names it as data: a render, a proc, a form sent
+  to an agent), a qualified keyword (an attribute, config key or schema entry) by its
   :form/keywords, the data it operates on. The one query my.agent/callers and the task story ask."
   {:malli/schema [:=> [:cat :seon.host/db [:or :qualified-symbol :qualified-keyword]] [:vector :qualified-symbol]]}
   [db x]
-  (let [a (if (keyword? x) :form/keywords :form/refs)]
-    (vec (sort (disj (set (d/q '[:find [?v ...] :in $ ?a ?s :where [?f ?a ?s] [?f :form/defines ?e] [?e :var/name ?v]] db a x))
-                     x)))))
+  (vec (sort (disj (into #{} (mapcat #(d/q '[:find [?v ...] :in $ ?a ?s :where [?f ?a ?s] [?f :form/defines ?e] [?e :var/name ?v]] db % x))
+                         (if (keyword? x) [:form/keywords] [:form/refs :form/quoted]))
+                   x))))
 
 (defn resolve-ref
   "Var sym as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth):

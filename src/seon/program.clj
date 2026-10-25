@@ -351,7 +351,7 @@
                (or ns-form? (seq defs) (seq declares) (seq methods) (seq impls) (:env? a)))
       (cond-> {:id (form-id nsym src k) :src src :ns nsym :ns-form? (boolean ns-form?)
                :defs defs :declares declares :methods (or methods []) :impls (or impls [])
-               :refs (into (:refs a) (macro-uses nsx form)) :requires (:requires a) :banned (:banned a) :inline-defs (:inline-defs a)
+               :refs (into (:refs a) (macro-uses nsx form)) :quoted (:quoted a) :requires (:requires a) :banned (:banned a) :inline-defs (:inline-defs a)
                ;; its code's keywords and its contracts': the data it operates on, read once here
                :keywords (into (:keywords a) (comp (keep :contract) (mapcat (comp names sedn/decode))) defs)
                :timeouts (:timeouts a) :catches (:catches a)}
@@ -378,7 +378,7 @@
 
 (def ^:private form-sets
   "A form's card-many facts, as stored and as its row (form-row) and its account name them."
-  [[:form/refs :refs] [:form/keywords :keywords] [:form/requires :requires] [:form/banned :banned] [:form/inline-defs :inline-defs]
+  [[:form/refs :refs] [:form/quoted :quoted] [:form/keywords :keywords] [:form/requires :requires] [:form/banned :banned] [:form/inline-defs :inline-defs]
    [:form/timeouts :timeouts] [:form/catches :catches]])
 
 (defn- form-of

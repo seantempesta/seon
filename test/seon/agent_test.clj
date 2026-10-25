@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [test-runner :as runner] [seon.context-test]))
+            [seon.fx :as fx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -712,10 +712,10 @@
         old @agent/state]
     (reset! agent/state {:n 0 :mode :test :db db :task "demo/r"})
     (try
-      (is (= "docs/vector.md#the-model: Section 0 says one thing." (first (:sections ((requiring-resolve 'my.task/related)))))
+      (is (= "docs/vector.md#the-model: Section 0 says one thing." (first (:sections (my.task/related))))
           "the screen form: the sections nearest the plan, the cited one left out")
       (binding [agent/*fx-stub* (fn [_ _] {:value {:model "m" :vectors [(dir 1.0 0.5)] :tokens [3]}})]
-        (let [v ((requiring-resolve 'my.agent/related) "the last one" 2)]
+        (let [v (my.agent/related "the last one" 2)]
           (is (= "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval: Section 4 says one thing." (first (:sections v)))
               "the agent's own words refine it: the sections nearest them")
           (is (= 2 (count (:sections v))) "k of them")))
