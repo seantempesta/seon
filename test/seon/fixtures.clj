@@ -241,6 +241,12 @@
   {:malli/schema [:=> [:cat :seon.model/request] :string]}
   [_] "(+ 1 1)")
 
+(defn repeat-then-move
+  "The scripted model in a loop (seon.agent-test): each call twice, then a new one (turn 0 and 1
+  evaluate (+ 1 0), 2 and 3 (+ 1 1), ...): a repeat after progress is a first repeat again."
+  {:malli/schema [:=> [:cat :seon.model/request] :string]}
+  [{:keys [turn]}] (str "(+ 1 " (quot turn 2) ")"))
+
 (defn two-calls
   "The scripted model that proves a turn's rhythm (seon.agent-test): its first call evaluates
   (+ 20 21); each later call adds one to the value the last call's response showed, so its
@@ -256,12 +262,6 @@
   one form, and the prose beside it (the scripted provider's reply text)."
   {:malli/schema [:=> [:cat :seon.model/request] [:map [:code :string] [:thinking :string]]]}
   [_] {:code "(+ 1 2)" :thinking "check the sum before the proof"})
-
-(defn wait-call
-  "The scripted model of a session that waits (seon.agent-test): every turn waits for a message
-  (my.turn/wait), so each run parks and the next message wakes it (design agent-loop section 2)."
-  {:malli/schema [:=> [:cat :seon.model/request] :string]}
-  [_] "(my.turn/wait)")
 
 (defn reply
   "The scripted model: the scripted reply for the request's task and turn (the last one

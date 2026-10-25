@@ -62,7 +62,12 @@
   (doseq [[k v] tpl/instructions]
     (is (str/starts-with? v "Your task: ") (str k ": its goal first"))
     (is (not (str/includes? v ";;")) (str k ": no ;; reaches the model"))
-    (is (< (count v) 1200) (str k ": short (" (count v) " chars)"))))
+    (is (< (count v) 1200) (str k ": short (" (count v) " chars)")))
+  ;; live agents round 3 (2026-10-25, notes/live-2026-10-25.md A2): a design agent that was told
+  ;; to write deftests but not how found the checkout on disk, appended its deftest to the test file
+  ;; and load-file'd it; a deftest is evaluated in its namespace, recorded on the branch
+  (is (str/includes? (:design tpl/instructions) "(in-ns 'ns.x-test)") "design says where a proof is evaluated")
+  (is (str/includes? (:design tpl/instructions) "you write no file")))
 
 
 (deftest a-requests-stages-are-one-sessions-agent

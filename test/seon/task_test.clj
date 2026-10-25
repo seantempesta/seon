@@ -159,6 +159,17 @@
     (is (= #{"b2/user" "b2/a1"} (agents db3)) "and its own as they start")
     (is (some? (d/entity db3 [:seon.agent/key "b1/a1"])) "the earlier agent is kept, not deleted")))
 
+(deftest a-task-is-its-members-not-its-plans-vector
+  ;; live agents, 2026-10-25 (notes/live-2026-10-25.md D1): the plan's embedding is written on the
+  ;; task's entity (seon.vector), and (my.task/current) and my.task/update! printed its bytes as
+  ;; #object[[B ...] under :also; a task's value is its own members, the vector is the index's
+  (let [db (d/db-with (ts/test-db) (task/create-tx (ts/test-db) [(decl "Make t true.")]))
+        db (d/db-with db [{:seon.task/id "demo/t" :seon.vector/model "m" :seon.vector/tokens 3 :seon.vector/text-t 1
+                           :seon.vector/f16 (byte-array 4) :seon.vector/coarse (byte-array 2)}])
+        t (task/task db "demo/t")]
+    (is (= "Make t true." (:seon.task/plan t)) "its members are read")
+    (is (empty? (filter #(= "seon.vector" (namespace %)) (keys t))) "and nothing of the vector")))
+
 (deftest a-design-adds-a-proof-with-update
   ;; owner, 2026-10-25 (Dogfood rulings): my.task/update! takes :seon.task/proofs, so a design
   ;; registers the red proofs it writes; its write is seon.task/member-tx, a set member's adds and
