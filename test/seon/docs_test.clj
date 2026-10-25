@@ -260,8 +260,10 @@
                 :files {[(apply str (repeat 40 "a")) "src/app/m0.clj"] old}
                 :errors {[(apply str (repeat 40 "b")) "src/app/m0.clj"] "git show: exploded"}}
         r (seon.docs/baseline-reads db plan answer)]
-    (testing "a var defined by a form of a head defining-ids knows: its id at that commit"
-      (is (string? (get-in r ["docs/p.md#a" :read 'app.m0/f0])))
+    (testing "a var defined by a form of a head defining-ids knows is found at that commit, never absent"
+      ;; this db holds no app.m0/f0 today, so what the section described of it (its meaning at the
+      ;; commit) is not today's: :changed (the string sentinel "changed" passed a string? check here)
+      (is (= :changed (get-in r ["docs/p.md#a" :read 'app.m0/f0])))
       (is (nil? (:unread (r "docs/p.md#a")))))
     (testing "a var the old file mentions but no known head defines is unread, never absent"
       (is (re-find #"no form this reading knows" (:unread (r "docs/p.md#b")))))
