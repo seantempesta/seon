@@ -4,7 +4,7 @@
   proof is not shown again, a merge task's plan stays its own."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.context :as context] [seon.print :as print]
-            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs]
+            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs] [seon.screen]
             [seon.print.select :as select] [clojure.string :as str] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model]))
 
 (defn- db-with-program []
@@ -782,3 +782,84 @@
     (is (= c (seon.edn/decode (seon.edn/encode c))) "its EDN reads back")
     (is (= rec back) "the record reads back equal")
     (is (every? #(str/includes? (print/record-text back) %) (str/split-lines src)) "and prints verbatim")))
+
+(defn- sections-near
+  "db with a task demo/r whose plan is plan, and five wiki sections each at a vector a step further
+  from the plan's than the one before (docs/vector.md#the-model nearest), each with a lead."
+  [plan]
+  (let [anchors (mapv #(str "docs/vector.md#" %) ["the-model" "what-is-embedded" "the-pyramid" "fused-with-the-call-graph" "what-the-work-is-likely-to-need-as-an-eval"])
+        dir (fn [& xs] (let [v (vec (concat xs (repeat (- 768 (count xs)) 0.0))) n (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % n) v)))
+        db (ts/test-db)
+        db (d/db-with db (vec (for [i (range 5)] {:seon.section/address (anchors i) :seon.section/heading (str "S" i)
+                                                  :seon.section/lead (str "Section " i " says one thing. And more.")})))
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan plan}]))
+        te (pdb/eid db :seon.task/id "demo/r")
+        es (into [te] (for [i (range 5)] (pdb/eid db :seon.section/address (anchors i))))
+        db (d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) (repeat 6 10) "m"))
+        ;; a function beside the plan by meaning, and a schema key its plan names
+        db (d/db-with db [{:db/id "f" :form/id "demo/g" :form/src "(defn g [])"} {:var/name 'demo/g :var/form "f" :var/doc "Gets it. More."}
+                          {:schema/key :demo/thing :schema/form "[:map]"}])
+        f (pdb/eid db :form/id "demo/g")]
+    [(d/db-with db (vector/tx-data [f] [1] [(dir 1.0 0.05)] [10] "m")) te dir]))
+
+(deftest the-screen-shows-the-sections-nearest-the-plan
+  ;; the owner (2026-10-25): embed the docs and pull in related concepts, as explicit evals refined
+  ;; over the session: (my.task/related) is a screen form, the sections nearest the plan's vector
+  ;; that it does not cite, the first :seon.config.render/related (5), each a line with the forms
+  ;; that dig further (its wrappers' own test: seon.agent-test/related-is-an-eval-of-the-plan-and-of-any-text)
+  (let [[db te] (sections-near "Make the page say one thing (docs/vector.md#what-is-embedded) of `:demo/thing`.")
+        rel (context/related db te)
+        v (context/related-view db rel)]
+    (is (= ["docs/vector.md#the-model" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph" "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"] (:sections rel))
+        "the sections nearest first, the section the plan cites left out")
+    (is (= ['demo/g] (:functions rel)) "the functions nearest it")
+    (is (= [:demo/thing] (:schemas rel)) "and the schema keys its plan cites")
+    (is (= ["demo/g: Gets it."] (:functions v)) "a function a line: its name and its doc's first sentence")
+    (is (some #{"(my.task/related)"} seon.screen/forms) "a form of the screen: each turn evaluates it, as an eval the agent sees and can rerun")
+    (is (= ["docs/vector.md#the-model: Section 0 says one thing." "docs/vector.md#the-pyramid: Section 2 says one thing."
+            "docs/vector.md#fused-with-the-call-graph: Section 3 says one thing." "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval: Section 4 says one thing."]
+           (:sections v))
+        "each at summary depth: its address and its lead's first sentence")
+    (is (str/includes? (:read v) "(:seon.ref/text (my.agent/help ") "with the form that reads one whole, its text's key named")
+    (is (str/includes? (:more v) "my.agent/related") "and the form that searches further")
+    (is (nil? (context/related (ts/test-db) (pdb/eid db :seon.task/id "demo/r"))) "a plan with no vector shows none")))
+
+(deftest related-sections-follow-a-rewritten-plan
+  (let [[db te dir] (sections-near "Make the page say one thing.")
+        held (context/related-at db te 1 nil)
+        _ (is (= "docs/vector.md#the-model" (first (:sections (:value held)))))
+        ;; the plan rewritten on the branch and embedded there (the branch's vector write is the
+        ;; mark), its vector now beside the last section's
+        db (d/db-with db [[:db/add te :seon.task/plan "Make the last section say it."]])
+        t (:tx (first (d/datoms db :eavt te :seon.task/plan)))
+        db (d/db-with db (vector/tx-data [te] [t] [(dir 1.0 0.5)] [10] "m"))
+        again (context/related-at db te 2 held)]
+    (is (not= (:key held) (:key again)) "a vector write is a new key")
+    (is (= "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval" (first (:sections (:value again)))) "and the sections follow it: the one nearest the new plan first")
+    (is (identical? again (context/related-at db te 2 again)) "nothing written since: what was made is reused")
+    (let [s (d/db-with db [{:seon.section/address "docs/vector.md#the-pyramid-b" :seon.section/heading "B" :seon.section/lead "New. More."}])
+          se (pdb/eid s :seon.section/address "docs/vector.md#the-pyramid-b")
+          s (d/db-with s (vector/tx-data [se] [1] [(dir 1.0 0.5)] [10] "m"))]
+      (is (some #{"docs/vector.md#the-pyramid-b"} (:sections (:value (context/related-at s te 3 again))))
+          "a section embedded on the branch with the plan unchanged is in the next answer: its write is the mark"))))
+
+(deftest related-fuses-the-plans-references-with-meaning
+  ;; seon.context/related's graph half: the plan cites `demo/h`, so its caller demo/k (no vector:
+  ;; meaning alone never finds it) and the section naming it (no vector either) are fused with the
+  ;; nearest by meaning (seon.vector/rrf: a tie broken by name); what the plan cites is left out
+  (let [[db te] (sections-near "Make the page say one thing (docs/vector.md#what-is-embedded), in `demo/h`.")
+        db (d/db-with db [{:db/id "h" :form/id "demo/h" :form/src "(defn h [])"} {:var/name 'demo/h :var/form "h" :var/kind :fn}
+                          {:db/id "k" :form/id "demo/k" :form/src "(defn k [] (h))" :form/refs #{'demo/h} :form/defines #{"kv"}} {:db/id "kv" :var/name 'demo/k :var/form "k" :var/kind :fn}
+                          {:db/id "t" :form/id "demo/k-test" :form/src "(deftest k-test (h))" :form/refs #{'demo/h} :form/defines #{"tv"}} {:db/id "tv" :var/name 'demo/k-test :var/form "t" :var/kind :test}
+                          ;; a test namespace's helper calling it: a fixture, no program function
+                          {:db/id "x" :form/id "demo-test/fixture" :form/src "(defn fixture [] (h))" :form/refs #{'demo/h} :form/defines #{"xv"}}
+                          {:db/id "xv" :var/name 'demo-test/fixture :var/form "x" :var/kind :fn}
+                          {:seon.section/address "docs/vector.md#the-pyramid-c" :seon.section/heading "C" :seon.section/lead "Names h. More."
+                           :seon.section/names #{'demo/h}}])
+        rel (context/related db te)]
+    (is (= ['demo/g 'demo/k] (:functions rel)) "the caller of the cited var beside the nearest by meaning; the cited var, the test and a test namespace's helper left out")
+    (is (= ["docs/vector.md#the-model" "docs/vector.md#the-pyramid-c" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph"
+            "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"]
+           (:sections rel))
+        "the section naming the cited var fused at its rank with the nearest by meaning; the cited section left out")
+    (is (nil? (context/related-view db {:sections [] :functions [] :schemas []})) "nothing related, nothing shown")))
