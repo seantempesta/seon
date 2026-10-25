@@ -457,13 +457,15 @@
   asks, the key the digest of what the run reads (seon.prove/read-digest of this branch's
   program, as seon.root/prove! takes it of the same head): a session's request and this ask are one run; when it is
   this agent's to run, root's :tests request arrives while it waits and is taken here. Other
-  messages wait for the loop. :dead when root is gone (the process then ends)."
-  {:malli/schema [:=> [:cat] :map]}
-  []
+  messages wait for the loop. :dead when root is gone (the process then ends). mode :turn (a
+  turn's observation, the default) or :judge (root's judge at the run's end: its :judge request)."
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:enum :turn :judge]] :map]]}
+  ([] (prove! :turn))
+  ([mode]
   (commit!)
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
-    (when (= :dead (send! {:op :prove :k k :t (:max-tx (db)) :digest (seon.prove/read-digest nil (program/program-digest (db))) :mode :turn})) (lib/c-exit 0))
-    (await-reply! k)))
+    (when (= :dead (send! {:op :prove :k k :t (:max-tx (db)) :digest (seon.prove/read-digest nil (program/program-digest (db))) :mode mode})) (lib/c-exit 0))
+    (await-reply! k))))
 
 (defn screen
   "This agent's screen: its page as root's render proc holds it (seon.render.proc/screen-of), without
@@ -674,6 +676,9 @@
   (case (:op m)
     ;; the proofs of the task root names (:task), as this branch holds them
     ;; root hears the test child's pid once it is forked (its agent proc's :tests-started event)
+    ;; root's judge at a run's end: the test service proves this branch (prove! :judge), so the
+    ;; run is recorded on main and joins any other asker's of its key; answered as :tests is
+    :judge [{:op :tests :id (:id m) :result (prove! :judge) :mem-mb (mem-mb)}]
     :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
                                                               (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
                                                               (or (:mode m) :judge)

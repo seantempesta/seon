@@ -679,7 +679,7 @@
       :worked (if (contract/error? r)
                 (dead st r)
                 (one (request (cond-> st (:ex r) (assoc-in [:flights aid :worked-error] (:ex r)))
-                              aid :tested {:op :tests :id agent})))
+                              aid :tested {:op :judge :id agent})))
       :tested (if (contract/error? r)
                 (dead st r)
                 (one (request (-> st (assoc-in [:flights aid :results] (proofs/results r))
@@ -821,7 +821,7 @@
      ;; an outside agent handed its run back: judged as a turn loop's end is
      :judge (let [{:keys [run task env agent]} m
                   st (assoc-in st [:flights run] {:act {:op :spawn :run run :task task :env env} :agent agent})
-                  [st o] (request st run :tested {:op :tests :id agent})]
+                  [st o] (request st run :tested {:op :judge :id agent})]
               [st {:to-api [o]}])
      :answers (let [[st [aid step]] (step/answered st (:tag m))
                     [st outs] (if aid (advance st aid step (:r m)) [st []])
