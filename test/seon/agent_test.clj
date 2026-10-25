@@ -263,11 +263,11 @@
                    "(let [r (seon.agent/run-tests-forked budget #{'bound-test/a 'bound-test/b} :judge)] [(seon.proofs/results r) (:ran r) (:reused r) (some? (:pid r))])"]
                   {:dirs ["src" "test"] :proofs #{} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})]
     (sh/sh "rm" "-rf" dir)
-    (is (pos-int? (edn/read-string (:printed budget))) (:printed budget))
-    (is (= ['{bound-test/a :pass bound-test/b :pass} 2 true] (edn/read-string (:printed turn)))
-        "the turn runs both, each within its own budget: green")
-    (is (= ['{bound-test/a :pass bound-test/b :pass} 0 2 false] (edn/read-string (:printed judge)))
-        "the judge after it: the same verdict, both reused, nothing run and no child forked")))
+    (is (pos-int? (:value budget)) (pr-str budget))
+    (is (= ['{bound-test/a :pass bound-test/b :pass} 2 true] (:value turn))
+        (str "the turn runs both, each within its own budget: green " (pr-str turn)))
+    (is (= ['{bound-test/a :pass bound-test/b :pass} 0 2 false] (:value judge))
+        (str "the judge after it: the same verdict, both reused, nothing run and no child forked " (pr-str judge)))))
 
 (deftest an-agents-greens-and-a-checkouts-are-one-store
   ;; owner, 2026-10-23: a test that is the same is not run again once green, "especially when
