@@ -1012,7 +1012,7 @@
 
 (defn run-tests!
   "The agent forks itself and runs its deftests in the child; a promise of
-  {:pass :fail :error :reports [...]} (the run is bounded by its work: :seon.config.agent/test-ticks)."
+  {:pass :fail :error :reports [...]} (each test is bounded by its work: :seon.config.agent/test-ticks)."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id pos-int?] :seon.host/promise]]}
   ([sys agent-id] (request! sys 'run-tests! agent-id nil))
   ([sys agent-id ticks] (request! sys 'run-tests! agent-id {:ticks ticks})))

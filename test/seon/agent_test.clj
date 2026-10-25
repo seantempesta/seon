@@ -246,16 +246,18 @@
   ;; task seon.proofs/one-prove-path: a test's tick budget is its own, so two tests that each
   ;; need t ticks are green under a budget of 1.5 t wherever they run (a per-run budget made
   ;; the second red in one run and green alone); the turn's greens are stored at their digests,
-  ;; so the judge after it (the plan's tests, the same here) runs nothing and forks no child
+  ;; so the judge after it (the plan's tests, the same here: both are the run's proofs) runs
+  ;; nothing and forks no child
   (let [dir (str (System/getProperty "user.dir") "/target/tmp/one-bound-" (random-uuid))
         [_ budget turn judge]
-        (in-agent ["(do (ns bound-test (:require [clojure.test :refer [deftest is]]))
-                        (defn work {:malli/schema [:=> [:cat] :int]} [] (reduce + (range 300000)))
-                        (deftest a (is (pos? (work))))
-                        (deftest b (is (pos? (work)))))"
-                   "(def budget (long (* 3/2 (:ticks (get (seon.proofs/run-tests! '[bound-test/a] {} (fn [_]) nil) 'bound-test/a)))))"
-                   "(let [r (seon.agent/run-tests-forked budget #{} :turn)] [(seon.proofs/results r) (:ran r) (some? (:pid r))])"
-                   "(let [r (seon.agent/run-tests-forked budget #{} :judge)] [(seon.proofs/results r) (:ran r) (:reused r) (some? (:pid r))])"]
+        ;; top-level forms, each recorded, so each test has a digest its green is stored at
+        (in-agent ["(ns bound-test (:require [clojure.test :refer [deftest is]]))
+                   (defn work {:malli/schema [:=> [:cat] :int]} [] (reduce + (range 300000)))
+                   (deftest a (is (pos? (work))))
+                   (deftest b (is (pos? (work))))"
+                   "(do (def budget (long (* 3/2 (:ticks (get (seon.proofs/run-tests! '[bound-test/a] {} (fn [_]) nil) 'bound-test/a))))) budget)"
+                   "(let [r (seon.agent/run-tests-forked budget #{'bound-test/a 'bound-test/b} :turn)] [(seon.proofs/results r) (:ran r) (some? (:pid r))])"
+                   "(let [r (seon.agent/run-tests-forked budget #{'bound-test/a 'bound-test/b} :judge)] [(seon.proofs/results r) (:ran r) (:reused r) (some? (:pid r))])"]
                   {:dirs ["src" "test"] :proofs #{} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})]
     (sh/sh "rm" "-rf" dir)
     (is (pos-int? (edn/read-string (:printed budget))) (:printed budget))
@@ -551,7 +553,7 @@
   ;; Jolt jolt/nested-tick-budget: a tick budget covers all the work inside it, nested
   ;; bounded runs' included. Step E's run 7 (2026-10-22): the agent's proof fork, whose
   ;; tests each run bounded evals (seon.intr/run), spun 2.5 h past its 2e11-tick budget.
-  ;; Here a proof that loops over bounded evals for ever ends at the run's budget, named
+  ;; Here a proof that loops over bounded evals for ever ends at its own budget, named
   (let [[_ r] (in-agent ["(do (ns spin-test (:require [clojure.test :refer [deftest is]]))
                               (deftest spin (loop [] (seon.intr/run 100000 #(reduce + (range 1000))) (recur))))"
                          "(let [r (seon.agent/run-tests-forked 100000000 #{'spin-test/spin} :turn)] [(:seon.error/type (first (filter :seon.error/type (:reports r)))) (some :var (:reports r))])"])

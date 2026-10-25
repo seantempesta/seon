@@ -188,15 +188,19 @@
   ;; and each result says the ticks it did
   (record (ts/test-db) 'user "(ns app.pv-budget-test (:require [clojure.test :refer [deftest is]]))"
           'app.pv-budget-test "(deftest spins (loop [] (recur)))"
+          'app.pv-budget-test "(deftest swallows (try (loop [] (recur)) (catch Throwable _ nil)) (is true))"
           'app.pv-budget-test "(deftest after (is (= 3 (+ 1 2))))")
   (let [notes (atom [])
-        ran (proofs/run-tests! '[app.pv-budget-test/spins app.pv-budget-test/after] {} #(swap! notes conj %) 1000000)
+        ran (proofs/run-tests! '[app.pv-budget-test/spins app.pv-budget-test/swallows app.pv-budget-test/after] {} #(swap! notes conj %) 1000000)
+        unbounded (proofs/run-tests! '[app.pv-budget-test/after] {} (fn [_]) nil)
         spent (some #(when (= :seon.test/ticks-spent (get-in % [:seon.test/report :seon.error/type])) %) @notes)]
     (is (= {:pass 0 :fail 0 :error 1} (select-keys (ran 'app.pv-budget-test/spins) [:pass :fail :error])) "the endless test is red")
     (is (= 'app.pv-budget-test/spins (:test spent)) "named, as the typed error")
     (is (= 1000000 (get-in spent [:seon.test/report :budget])))
     (is (<= 1000000 (:ticks (ran 'app.pv-budget-test/spins))) "it did its budget's work")
+    (is (= 1 (:error (ran 'app.pv-budget-test/swallows))) "the test's own catch cannot swallow its budget's end")
     (is (proofs/green? (ran 'app.pv-budget-test/after)) "the next test ran, under a budget of its own")
+    (is (pos-int? (:ticks (unbounded 'app.pv-budget-test/after))) "an unbounded run (bin/test with 0) counts ticks too")
     (is (pos-int? (:ticks (ran 'app.pv-budget-test/after))) "each result carries the ticks it did")))
 
 (deftest shards-are-dealt-by-measured-work

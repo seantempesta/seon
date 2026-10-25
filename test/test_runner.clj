@@ -213,7 +213,7 @@
                                                (:seon.test/report x) nil
                                                (not (proofs/green? x)) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))
                                    (flush))
-                                 (let [b (config/value :seon.config.agent/test-ticks)] (when (pos? b) b)))
+                                 (config/value :seon.config.agent/test-ticks))
           ;; the tree the tests read is the plan's from before the run to after it: an edit
           ;; during the run (a test reading files reads it) is not what the digests name
           same? (= tree before (fx/tree-id (System/getProperty "user.dir")))

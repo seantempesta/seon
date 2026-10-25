@@ -214,21 +214,27 @@
 (defn- test-vars
   "clojure.test's test-vars for vars of namespace n (Jolt's: its :once fixtures around them, each
   var in its :each fixtures), each test with a budget of its own: ticks engine ticks of work (nil:
-  unbounded). A test past it reports one :error of the typed :seon.test/ticks-spent naming it,
-  and ends (its :end-test-var), so the next test runs."
+  unbounded), inside its :each fixtures, so their teardown runs whatever the test did. A test past
+  it reports one :error of the typed :seon.test/ticks-spent naming it, and ends (its
+  :end-test-var), so the next test runs. The namespace's fixtures are bounded too: the whole
+  namespace within ticks per test and one more, so a fixture that never ends stops the namespace,
+  its unreported tests :error (run-tests!)."
   {:malli/schema [:=> [:cat :symbol [:sequential :any] [:maybe pos-int?]] :nil]}
   [n vars ticks]
-  (let [each (t/join-fixtures (get @t/each-fixtures n []))]
-    ((t/join-fixtures (get @t/once-fixtures n []))
-     (fn []
-       (doseq [v vars :when (:test (meta v))]
-         (try (jolt.host/run-interruptible (jolt.host/make-interrupt) #(each (fn [] (t/test-var v))) ticks)
-              (catch Throwable e
-                (if-let [spent (:jolt/ticks-spent (ex-data e))]
-                  (do (t/do-report {:type :error :var v :seon.error/type :seon.test/ticks-spent :ticks spent :budget ticks
-                                    :message (str "the test spent its budget of " ticks " engine ticks (work done, not time): a test that never ends, or more work than one test may do")})
-                      (t/do-report {:type :end-test-var :var v}))
-                  (throw e)))))))
+  (let [each (t/join-fixtures (get @t/each-fixtures n []))
+        one (fn [v]
+              (try (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-var v) ticks)
+                   (catch Throwable e
+                     (if-let [spent (:jolt/ticks-spent (ex-data e))]
+                       (do (t/do-report {:type :error :var v :seon.error/type :seon.test/ticks-spent :ticks spent :budget ticks
+                                         :message (str "the test spent its budget of " ticks " engine ticks (work done, not time): a test that never ends, or more work than one test may do")})
+                           (t/do-report {:type :end-test-var :var v}))
+                       (throw e)))))
+        body #((t/join-fixtures (get @t/once-fixtures n []))
+               (fn [] (doseq [v vars :when (:test (meta v))] (each (fn [] (one v))))))]
+    (if ticks
+      (jolt.host/run-interruptible (jolt.host/make-interrupt) body (* ticks (inc (count vars))))
+      (body))
     nil))
 
 (defn run-tests!
@@ -240,20 +246,21 @@
   :ns n} for a red namespace's clojure.test output. It only runs: its caller stores the greens
   (store-greens!). Answers {test result}; a test that never reported, because its namespace's
   run threw (a fixture), is an :error result and an :error report carrying that throw's
-  message and data. Each test, its :each fixtures included, runs within ticks engine ticks of
-  work of its own (Jolt's run-interruptible; nil: unbounded), so a test's verdict is a function of
-  the test alone, never of what ran before it in the run: one bound wherever it runs (bin/test,
-  an agent's turn, the judge). A test past it is an :error report of the typed
-  :seon.test/ticks-spent naming it, and the run goes on to the next. Each result carries the
-  :ticks it did. The per-namespace counts are volatiles local to its run: clojure.test reports
-  through a callback, one thread, no proc."
+  message and data. Each test runs within ticks engine ticks of work of its own (Jolt's
+  run-interruptible; nil or 0: unbounded), so a test's verdict is a function of the test alone,
+  never of what ran before it in the run: one bound wherever it runs (bin/test, an agent's turn,
+  the judge). A test past it is an :error report of the typed :seon.test/ticks-spent naming it,
+  and the run goes on to the next (test-vars, which bounds a namespace's fixtures too: a throw
+  that ends a namespace, its budget's included, makes its unreported tests :error). Each result
+  carries the :ticks it did. The per-namespace counts are volatiles local to its run: clojure.test
+  reports through a callback, one thread, no proc."
   {:malli/schema [:function [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn]
                              [:map-of :qualified-symbol :map]]
-                  [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn [:maybe pos-int?]]
+                  [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn [:maybe nat-int?]]
                    [:map-of :qualified-symbol :map]]]}
   ([tests digests note!] (run-tests! tests digests note! nil))
   ([tests digests note! ticks]
-  (let [tset (set tests)]
+  (let [tset (set tests) ticks (when (and ticks (pos? ticks)) ticks)]
     (into {} (for [[n ts] (group-by (comp symbol namespace) tests)
                    :let [counts (volatile! {}) ran (volatile! {}) out (java.io.StringWriter.) t0 (volatile! nil) k0 (volatile! nil)
                          done! (fn [v] (let [r (assoc (merge {:pass 0 :fail 0 :error 0} (@counts v)) :test v :digest (digests v)
@@ -275,7 +282,7 @@
                                                          nil))
                                                      (binding [t/*test-out* out] (report m)))]
                                   (try (test-vars n (keep #(ns-resolve n (symbol (name %))) ts) ticks) nil
-                                       (catch Throwable e (if (:jolt/ticks-spent (ex-data e)) (throw e) e))))
+                                       (catch Throwable e e)))
                          unreported (for [tst ts :when (not (@ran tst))]
                                       (let [msg (if thrown (str n "'s run threw before this test reported: " (ex-message thrown))
                                                     (str n "'s run ended before this test reported"))]

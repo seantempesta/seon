@@ -474,7 +474,7 @@
                       (:seon.test/report x) (swap! reports conj (test-report (:seon.test/report x) (str "#'" (:test x))))
                       :else nil))
         _ (binding [mr/*registry* (program/schema-registry (program/schema-changes (db)))]
-            (proofs/run-tests! tests (zipmap tests (repeat nil)) note! (when (pos? ticks) ticks)))
+            (proofs/run-tests! tests (zipmap tests (repeat nil)) note! ticks))
         reports @reports
         counts (frequencies (map :type reports))]
     {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
