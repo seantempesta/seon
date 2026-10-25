@@ -131,7 +131,12 @@
 
 (def ^:private comma (text-op :seon.print/separator ","))
 
-(defn- marked-hiccup
+(def highlight
+  "A <code>'s attributes for Clojure code, which the page highlights (highlight.js, served at
+  /highlight.js; seon.render.ui/shell's observer highlights each as it arrives or a patch resets it)."
+  {:class "language-clojure"})
+
+(defn marked-hiccup
   "Marked text as HTML: prose (seon.print/prose) a paragraph, its line breaks kept; code
   (seon.print/code) verbatim in <pre><code>, highlighted as Clojure when the page inserts it."
   {:malli/schema [:=> [:cat [:maybe :keyword] :string] :seon.print/hiccup]}
@@ -139,7 +144,7 @@
   (if (= :seon.print/prose mark)
     [:p {:class (css-class :seon.print/prose)} text]
     [:pre {:class (css-class :seon.print/code)}
-     [:code {:class "language-clojure" :data-init "window.hljs && hljs.highlightElement(el)"} text]]))
+     [:code highlight text]]))
 
 (defn- elided-hiccup
   "A cut as HTML: a string cut's shown characters, then its marker and continuation form; a cut

@@ -727,12 +727,13 @@
     ;; the fixture writes the turn after its evals (seon.turn writes it as its request goes, before them)
     (is (< (at "check g") (at "f doubles?") (at "turn 1 of 8") (at "(g)")) "in the order written: the message, an eval's prose, the turn, the owner's eval")
     (is (< (at "id=\"c-rows\"") (at "id=\"p-input\"")) "the input under the conversation")
-    (is (str/includes? html "<details data-on:toggle=") "an eval is a line that opens")
-    (is (not (str/includes? html "<pre class=\"text-text-100\"><code>(f 2)")) "closed: its form is not rendered, only its line")
+    (is (some #(and (str/includes? % "class=\"seon-eval\"") (str/includes? % "data-on:toggle=")) (re-seq #"<details[^>]*>" html)) "an eval is a block that opens")
+    (is (re-find #"<details [^>]*id=\"eval-e1\"" html) "the row is its handle's anchor, open or not")
+    (is (not (str/includes? html "<pre class=\"seon-print-code\"><code class=\"language-clojure\">(f 2)")) "closed: its form is not rendered, only its line")
     (testing "opened, it is rendered whole"
       (let [e1 (:db/id (d/entity branch [:seon.eval/id "e1"]))
             [st2 _] (#'p/pass-view (assoc-in st1 [:open :a3] #{(str "c-" e1)}) :a3)]
-        (is (str/includes? (p/page-html st2 :a3) "<pre class=\"text-text-100\"><code>(f 2)"))))))
+        (is (str/includes? (p/page-html st2 :a3) "<pre class=\"seon-print-code\"><code class=\"language-clojure\">(f 2)") "its code, highlighted")))))
 
 (deftest the-sidebar-is-roots-agents
   ;; the sidebar is the agent's ref to root, rendered: root's agents, each its own component,
@@ -1176,7 +1177,6 @@
                                                                                                            {:test 'demo-test/u :status :pass :source (seon.print/code "(deftest u)")}]}}}
         html (h/html (ui/evaluation {:seon.eval/record rec :seon.eval/by "outside"} {}))
         held (h/html (ui/evaluation {:seon.eval/record {:code "(Object.)" :printed "#object[java.lang.Object]" :response {:handle 'result/e2}}} {}))]
-    (is (str/includes? html "id=\"eval-e157\"") "the row is its handle's anchor")
     (is (str/includes? html "seon-print-grid") "the value, a map, as rows")
     (is (str/includes? html "<table class=\"seon-print-table\"") "its proofs, maps sharing keys, as a table")
     (is (str/includes? html ";; why") "the source verbatim, its comment as written")

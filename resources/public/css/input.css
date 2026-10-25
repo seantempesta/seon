@@ -30,6 +30,8 @@
 @theme {
   --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Monaco, 'Cascadia Mono', monospace;
   --font-sans: var(--font-mono);
+  /* prose (what a model or a person wrote) reads in the system's text face; code and data stay mono */
+  --font-prose: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   /* the dense label size: Tailwind v4 has no 2xs */
   --text-2xs: 0.625rem;
   --text-2xs--line-height: 0.9rem;
@@ -62,7 +64,7 @@
 
 @layer base {
   html, body { background: var(--color-base-950); color: var(--color-text-200); }
-  body { font: 12px/1.45 var(--font-mono); min-height: 100vh; }
+  body { font: 12.5px/1.5 var(--font-mono); min-height: 100vh; -webkit-font-smoothing: antialiased; }
   a { color: var(--color-info); }
   a:hover { text-decoration: underline; }
   pre, code { font-family: var(--font-mono); }
@@ -117,12 +119,23 @@
 .seon-print-table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
 .seon-print-table th, .seon-print-table td { border: 1px solid var(--color-base-800); padding: 0.125rem 0.5rem; text-align: left; vertical-align: top; }
 .seon-print-table th { font-weight: normal; }
-.seon-print-prose { white-space: pre-wrap; font-family: var(--font-sans, ui-sans-serif, system-ui); color: var(--color-text-200); margin: 0; }
+.seon-print-prose { white-space: pre-wrap; font-family: var(--font-prose); color: var(--color-text-200); margin: 0; }
 /* highlight.js's Clojure tokens in the page's palette */
 .hljs-comment { color: var(--color-text-500); font-style: italic; }
 .hljs-string { color: var(--color-success); }
 .hljs-number, .hljs-literal { color: var(--color-eval); }
 .hljs-symbol, .hljs-keyword { color: var(--color-info); }
 .hljs-name, .hljs-title { color: var(--color-text-100); }
-pre.seon-print-code { margin: 0; padding: 0.25rem 0.5rem; border-left: 2px solid var(--color-base-700); overflow-x: auto; }
+pre.seon-print-code { margin: 0; padding: 0.4rem 0.6rem; border-radius: 6px; background: var(--color-base-850); overflow-x: auto; }
 .seon-data-panel { display: inline; }
+/* the conversation (seon.render.ui/chat-part): prose as prose, each eval a block that opens to
+   its code and its value */
+.seon-prose { white-space: pre-wrap; font-family: var(--font-prose); font-size: 0.875rem; line-height: 1.6; color: var(--color-text-100); margin: 0; }
+.seon-eval { border: 1px solid var(--color-base-800); border-radius: 8px; background: var(--color-base-900); min-width: 0; }
+.seon-eval > summary { list-style: none; padding: 0.4rem 0.7rem; border-radius: 8px; }
+.seon-eval > summary::-webkit-details-marker { display: none; }
+.seon-eval > summary:hover { background: var(--color-base-850); }
+.seon-eval[open] > summary { border-bottom: 1px solid var(--color-base-800); border-radius: 8px 8px 0 0; }
+.seon-eval > :not(summary) { margin: 0.6rem 0.7rem; }
+.seon-eval > div { border-left: 0; padding-left: 0; }
+.seon-eval-error { border-color: color-mix(in srgb, var(--color-error) 45%, var(--color-base-800)); }
