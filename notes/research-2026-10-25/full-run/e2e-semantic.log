@@ -1,0 +1,17 @@
+:program {:ok true, :datoms 26}
+:program {:ok true, :datoms 59}
+:create {:ok true, :datoms 4}
+:after {:ok true}
+:quiescent {:t 536873943, :root-causes []}
+:task semantic/a {:execution :running, :done true, :blocked-by #{}, :runs [[semantic/a#1 :done :green 1 957]]}
+:task semantic/a-merge {:execution :running, :done true, :blocked-by #{}, :runs [[semantic/a-merge#1 :merged :green 0 0]]}
+:task semantic/b {:execution :running, :done true, :blocked-by #{}, :runs [[semantic/b#1 :done :green 1 998]]}
+:task semantic/b-merge {:execution :running, :done true, :blocked-by #{}, :runs [[semantic/b-merge#1 :merged :green 1 1523]]}
+:agents-reused [] :merges {:merge-runs {:merged 2}, :behind-reruns 0, :conflicts-measured 0, :held-tasks 0, :model-calls-in-merges 0} :fresh-agent {:handle result/e1,
+ :value [9 6],
+ :ms 0.879,
+ :ticks 19194,
+ :bytes 275840}
+:checks {}
+:numbers {:wall-ms 3541, :runs 4, :merged 2, :turns-per-merged-task 1.5, :model-calls 0, :tokens 3478, :root-real-mb 773.8, :writer {:tx-count 107, :flushes 14, :batch-p50-ms 7.54, :tx-per-commit 0.95, :commits 113, :tx-per-s 42.0}, :root-errors []}
+E2E FAILED

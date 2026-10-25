@@ -1,0 +1,18 @@
+{:agents 8,
+ :left [],
+ :stop
+   {:stopped true,
+    :cause :stop!,
+    :drained {:drained true, :fork-server 12641},
+    :graph true,
+    :agents-left 0,
+    :ms 57.64},
+ :main {:ok 300, :refused-after-close 0, :stored 300},
+ :evals {:done 8, :other {":done" 8}},
+ :checks
+   {:every-request-answered true,
+    :graph-stopped true,
+    :main-answers-account true,
+    :main-ok-all-stored true,
+    :nothing-left-running true}}
+DRAIN OK

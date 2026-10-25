@@ -1,0 +1,52 @@
+{:shard [1 4],
+ :contracts 321,
+ :fn-without-gen [],
+ :generated-and-checked 29,
+ :failed [],
+ :such-that [],
+ :not-generated 105,
+ :checks
+   {:every-fn-schema-generates true, :every-pure-contract-holds true},
+ :checked
+   [seon.cost/exponent seon.lib/p50 seon.lib/r2 seon.merge/conflict-tx
+    seon.merge/uncontracted seon.profile/top seon.proofs/green?
+    seon.proofs/red? seon.proofs/test-symbol seon.reconcile/blocked-by
+    seon.reconcile/dead-tx seon.reconcile/done-info
+    seon.reconcile/evidence seon.reconcile/hold-tx
+    seon.reconcile/merge-limits seon.reconcile/put-run
+    seon.reconcile/root-causes seon.reconcile/topo seon.ref/candidate
+    seon.ref/namespace-name? seon.ref/punct? seon.ref/shown
+    seon.step/answered seon.task/accumulate seon.task/boot-tx
+    seon.task/file-refused seon.task/needs-problem seon.task/task-id
+    seon.template/merge-decl],
+ :ms
+   {seon.cost/exponent 71.29,
+    seon.lib/p50 20.94,
+    seon.lib/r2 1.62,
+    seon.merge/conflict-tx 46.98,
+    seon.merge/uncontracted 2471.12,
+    seon.profile/top 373.21,
+    seon.proofs/green? 0.95,
+    seon.proofs/red? 0.91,
+    seon.proofs/test-symbol 8.29,
+    seon.reconcile/blocked-by 13.14,
+    seon.reconcile/dead-tx 6521.03,
+    seon.reconcile/done-info 12.2,
+    seon.reconcile/evidence 2194.19,
+    seon.reconcile/hold-tx 2052.08,
+    seon.reconcile/merge-limits 2282.9,
+    seon.reconcile/put-run 1183.2,
+    seon.reconcile/root-causes 0.81,
+    seon.reconcile/topo 339.16,
+    seon.ref/candidate 20.91,
+    seon.ref/namespace-name? 13.37,
+    seon.ref/punct? 0.8,
+    seon.ref/shown 1344.15,
+    seon.step/answered 17.69,
+    seon.task/accumulate 19.45,
+    seon.task/boot-tx 12.03,
+    seon.task/file-refused 17.02,
+    seon.task/needs-problem 17727.4,
+    seon.task/task-id 16.66,
+    seon.template/merge-decl 1940.81}}
+MG-CHECK OK

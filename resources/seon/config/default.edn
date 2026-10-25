@@ -474,7 +474,12 @@
    ;; birth (the key is root's alone).
    :seon.config.ai/api-key-variable #or [#env SEON_AI_API_KEY_ENV "DEEPSEEK_API_KEY"]
    ;; the request field the completion budget is sent in (v1)
-   :seon.ai.model/output-token-wire-key "max_tokens"}}
+   :seon.ai.model/output-token-wire-key "max_tokens"
+   ;; Unit: tokens. The block DeepSeek's prompt cache counts a hit in. Provenance: measured
+   ;; 2026-10-25 on 100 recorded turns of 6 runs (.worktrees/live-agents): every
+   ;; prompt_cache_hit_tokens a multiple of 128. At the bound: a turn's hit more than one block
+   ;; short of the prefix it shares with the turn before is a :seon.turn/cache-miss.
+   :seon.config.ai/cache-block-tokens 128}}
  ;; Prices: USD per million tokens, off-peak; peak (01:00-04:00 and 06:00-10:00 UTC, weekdays,
  ;; not Chinese public holidays) is twice. Read 2026-10-21 from
  ;; api-docs.deepseek.com/quick_start/pricing. Concurrency ceilings: the provider's, per account
@@ -507,6 +512,10 @@
  ;; Unit: tokens per second the provider admits, cluster-wide: the :model owner's token bucket
  ;; (session R3; AIMD on a 429). 0: no bucket.
  :seon.config.ai/rate 0
+ ;; Unit: tokens. The block a provider's prompt cache stores a prefix in, stated by each provider
+ ;; that caches (DeepSeek's: 128). 0 here: a provider that states none has no prompt cache known,
+ ;; and no turn is checked against one.
+ :seon.config.ai/cache-block-tokens 0
  ;; Unit: characters per token, the one estimate the printer and the context size with.
  ;; Provenance: v1's :seon.config.ai/chars-per-token-prior, 17 DeepSeek prompt samples
  ;; (2026-08-08/10) fit 3.21-3.23.

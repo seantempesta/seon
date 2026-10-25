@@ -47,11 +47,6 @@ A task's proofs are content its agent may improve, like its plan: a design made 
 
 A contract gap is a function the branch's own changes define without a contract: `seon.merge/uncontracted` over the three-way merge's `:ours`, one answer for the writer's merge gate and for root's judge (which reads it from the writer's `:branch-diff`), so the done rule never refuses what the merge would take, or the reverse. The agent's own done check (`seon.turn`) asks the same function of its branch's changes since its merge base.
 
-## Where an agent's run falls short today
-
-Working a design task through the server (Claude subagents as Seon agents, 2026-10-25) found where the run gives an agent less than the done rule asks of it. Each gap is a task.
-- `(my.agent/grep "word")` answers names unranked and without their line, at about 350 ms and 240 MB a call, the main tool for a plan that cites nothing: `my.agent/grep-ranks-definitions-first`.
-
 ## Where a task's state lives
 
 A task's state is derived from its runs on main (```seon.reconcile/task-state```: `:cancelled`, `:merged`, `:done`, `:running`, `:blocked`, `:failed`, `:held`, `:open`), never stated. Work a worktree session merges has no run, so its task file entry reads the same before and after the merge; how that work is recorded is open (task `seon.task/merged-work-leaves-the-task-files`). A run's own lifecycle (its outcomes, judging, root causes) is [root's](root.md#runs-and-judging); its turns are [turn](turn.md)'s.

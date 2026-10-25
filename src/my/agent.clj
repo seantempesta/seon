@@ -116,13 +116,10 @@
      (assoc test-run :results (proofs/results test-run)))))
 
 (defn grep
-  "The program vars whose recorded definition's text (:form/src on this branch) holds the
-  string s, sorted: a text search over the program as the branch holds it."
-  {:malli/schema [:=> [:cat :string] [:vector :qualified-symbol]]}
-  [s]
-  (vec (sort (d/q '[:find [?n ...] :in $ ?s :where [?f :form/src ?src] [(clojure.string/includes? ?src ?s)]
-                    [?f :form/defines ?v] [?v :var/name ?n]]
-                  (agent/db) s))))
+  "The program vars whose recorded definition on this branch holds the string s, best first, each
+  {:var :line} (seon.docs/grep): a var whose name holds it, then one whose docstring does, then the rest."
+  {:malli/schema [:=> [:cat :string] [:vector [:map [:var :qualified-symbol] [:line :string]]]]}
+  [s] (docs/grep (agent/db) s))
 
 (defn- file-source
   "The text of the form at var v's :file and :line on the classpath (Clojure's clojure.repl/source-fn

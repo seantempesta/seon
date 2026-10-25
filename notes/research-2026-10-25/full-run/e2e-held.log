@@ -1,0 +1,33 @@
+:program {:ok true, :datoms 25}
+:program {:ok true, :datoms 59}
+:create {:ok true, :datoms 4}
+:quiescent {:t 536873863, :root-causes [{:task calc/add, :cause run calc/add#1 ended no-progress (turn 1 repeated turn 0's calls from the same state: ;; add is subtraction, surely.
+;; ```clojure
+(in-ns 'app.calc)
+(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] (- a b))
+;; ```
+): proof-red app.proofs/add-test, :blocks [calc/add-merge calc/twice calc/twice-merge], :run calc/add#1}]}
+:release {:ok true}
+:task calc/add {:execution :held, :done false, :blocked-by #{}, :runs [[calc/add#1 :closed :no-progress 2 2040]], :failure run calc/add#1 ended no-progress (turn 1 repeated turn 0's calls from the same state: ;; add is subtraction, surely.
+;; ```clojure
+(in-ns 'app.calc)
+(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] (- a b))
+;; ```
+): proof-red app.proofs/add-test}
+:task calc/add-merge {:execution :running, :done false, :blocked-by #{calc/add}, :runs []}
+:task calc/twice {:execution :running, :done false, :blocked-by #{calc/add-merge}, :runs []}
+:task calc/twice-merge {:execution :running, :done false, :blocked-by #{calc/twice}, :runs []}
+:agents-reused [] :merges {:merge-runs {}, :behind-reruns 0, :conflicts-measured 0, :held-tasks 1, :model-calls-in-merges 0} :fresh-agent nil
+:checks {:first-hold true, :release-on-the-same-branch true, :root-causes [{:task calc/add, :cause run calc/add#1 ended no-progress (turn 1 repeated turn 0's calls from the same state: ;; add is subtraction, surely.
+;; ```clojure
+(in-ns 'app.calc)
+(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] (- a b))
+;; ```
+): proof-red app.proofs/add-test, :blocks [calc/add-merge calc/twice calc/twice-merge], :run calc/add#1}], :root-causes-after-release [{:task calc/add, :cause run calc/add#2 ended no-progress (turn 1 repeated turn 0's calls from the same state: ;; add is subtraction, surely.
+;; ```clojure
+(in-ns 'app.calc)
+(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] (- a b))
+;; ```
+): proof-red app.proofs/add-test, :blocks [calc/add-merge calc/twice calc/twice-merge], :run calc/add#2}], :quiet-after-last-end-ms 75, :problems-failed 1}
+:numbers {:wall-ms 3229, :runs 2, :merged 0, :turns-per-merged-task nil, :model-calls 0, :tokens 4132, :root-real-mb 772.9, :writer {:tx-count 64, :flushes 16, :batch-p50-ms 6.38, :tx-per-commit 0.75, :commits 85, :tx-per-s 42.0}, :root-errors []}
+E2E OK
