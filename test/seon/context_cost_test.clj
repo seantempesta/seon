@@ -37,6 +37,34 @@
                :fixed {:calls 16 :bytes 340000}
                :sizes [10 100 1000]}))
 
+(defn session-of
+  "The input at n: a main db holding a session of n evals by agent b/a1 across two runs (as a
+  woken or loaded session's first request reads it cold), each record production-shaped (item),
+  and the agent's entity id."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int]]}
+  [n]
+  (let [db (d/db-with (ts/test-db)
+                      (vec (for [i (range n) :let [[_ v] (item i)]]
+                             (assoc v :seon.eval/agent {:seon.agent/key "b/a1"}
+                                    :seon.eval/record (assoc (:seon.eval/record v) :run (if (< i (quot n 2)) "demo/f#1" "demo/f#2"))))))]
+    [db (:db/id (d/entity db [:seon.agent/key "b/a1"]))]))
+
+(deftest a-sessions-records-cost-one-read-per-record
+  ;; design agent-loop section 1: the conversation is the session's, so the first request after
+  ;; a wake or a load reads every record of it, cold; a later request reads only what is new
+  ;; (:printed, a-turn-prints-its-new-records-flat-in-the-history)
+  (cost/proof {:of 'seon.context/records :input 'seon.context-cost-test/session-of
+               :n "eval records of the session"
+               :work (str "per record: its datom found by the agent's AVET range (one seek), one pull of three attributes "
+                          "(its record a data value), and one place in the sort by tx; the messages' query adds nothing "
+                          "when none came")
+               :growth :linear
+               ;; measured 2026-10-25: 798 KB at 10, 5.46 MB at 100, 52.8 MB at 1,000 (about 52 KB a
+               ;; record: its pull and its record's data value), one contracted call (records itself)
+               :per-n {:bytes 52500}
+               :fixed {:bytes 300000 :calls 1}
+               :sizes [10 100 1000]}))
+
 (defn related-of
   "seon.context/related-at's arguments at n wiki sections, each with a vector, and the plan's
   answer made once: the next turn's call, its plan unchanged."
@@ -87,3 +115,22 @@
                :per-n {:bytes 1480.0 :calls 0.0}
                :fixed {:bytes 7440000.0 :calls 445.0}
                :sizes [500 1000 2000]}))
+
+(defn kept-of
+  "seon.context/kept's arguments: n parts of a conversation, each a reply's call (every third
+  continuing the one before), whole 1,000 tokens and collapsed 20, at the 32k history budget, so the
+  cuts jump as the history passes it."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple [:vector :map] :int]]}
+  [n] [(vec (for [i (range n)] {:cost [1000 20] :call (if (zero? (mod i 3)) 0 1)})) 32000])
+
+(deftest the-history-cut-is-one-walk-of-the-parts
+  ;; task seon.context/history-steps-hold-below-one-step: the cuts only advance, each part passed once
+  (cost/proof
+    {:of 'seon.context/kept :input 'seon.context-cost-test/kept-of
+     :n "parts of the conversation"
+     :work "each part's two costs summed once (prefix sums), then one walk holding two cuts that only advance: linear in the parts"
+     :growth :linear
+     ;; measured 2026-10-25 (n 100 -> 10,000): 231 ticks and 1.57 KB a part, one contracted call
+     :per-n {:ticks 240.0 :bytes 1600.0 :calls 0.0}
+     :fixed {:ticks 2000.0 :bytes 5000.0 :calls 1.0}
+     :sizes [100 1000 10000]}))

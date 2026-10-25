@@ -45,6 +45,7 @@
   ;; agents
   [:seon.config.agent/max-running :seon.config.agent/max-running]
   [:seon.config.agent/max-turns :seon.config.agent/max-turns]
+  [:seon.config.agent/repeats-told :seon.config.agent/repeats-told]
   [:seon.config.agent/cwd :seon.config.agent/cwd]
   [:seon.config.agent/inbox-size :seon.config.agent/inbox-size]
   [:seon.config.agent/trip-bytes :seon.config.agent/trip-bytes]
@@ -61,6 +62,7 @@
   [:seon.config.source/root {:optional true} :seon.config.source/root]
   [:seon.config.source/gate-checkout {:optional true} :seon.config.source/gate-checkout]
   [:seon.config.source/dirs :seon.config.source/dirs]
+  [:seon.config.source/program-dirs :seon.config.source/program-dirs]
   [:seon.config.source/process-vars :seon.config.source/process-vars]
   [:seon.config.source/binary-vars :seon.config.source/binary-vars]
   [:seon.config.source/branch :seon.config.source/branch]
@@ -107,7 +109,6 @@
   [:seon.config.render/form-budget :seon.config.render/form-budget]
   [:seon.config.render/context-budget :seon.config.render/context-budget]
   [:seon.config.render/history-budget :seon.config.render/history-budget]
-  [:seon.config.render/history-step :seon.config.render/history-step]
   [:seon.config.render/similar :seon.config.render/similar]
   [:seon.config.render/related :seon.config.render/related]
   [:seon.config.render/related-rarity :seon.config.render/related-rarity]

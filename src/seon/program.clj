@@ -134,31 +134,32 @@
           (= :throw (:op d)) acc
           :else (conj acc {:class "*" :answers (answers d)}))))
 
-(defn- quoted-vars
-  "The qualified symbols in a quoted datum (walked: a collection's too) whose namespace
-  exists: a syntax-quoted or quoted name resolved later (`requiring-resolve`, a macro's
-  template, a proc or render named in data). A symbol of no namespace is data. By namespace,
-  not by var: whether the var exists yet depends on what this process analyzed before (an
-  import of the same files twice gave 43 of 387 tests the same reach digest, so no result was
-  reused across runs or checkouts), while every imported
-  file's namespace exists before any form is analyzed."
+(defn- quoted-names
+  "The qualified symbols in a quoted datum (walked: a collection's too), by name: a name as
+  data (a proc or render named in data, a form sent to an agent, `requiring-resolve`'s
+  argument), which no call of this form reaches, except in a macro's template, whose quoted
+  names are the expansion's code (unit-account). A symbol of no namespace is data. By name,
+  never by whether its namespace or var exists yet: that depends on what this process
+  analyzed before, so a refresh, which loads only the changed files, dropped what a whole
+  import kept (240 against 250 tests left out on one tree)."
   {:malli/schema [:=> [:cat :any] [:set :qualified-symbol]]}
-  [x] (into #{} (filter #(and (qualified-symbol? %) (find-ns (symbol (namespace %))))) (tree-seq coll? seq x)))
+  [x] (into #{} (filter qualified-symbol?) (tree-seq coll? seq x)))
 
 (defn unit-account
   "What the compiler says one analyzed top-level node does, from its IR by resolved var
   identity: the vars it defines at its top (:defs, each def-info) and inside a function body
   (:inline-defs), its multimethod methods ({:multi sym-as-written :dispatch value}) and
   protocol extensions ({:protocol sym :type name}), the multimethods it sets up, the vars and
-  host statics (Class/member) it references (:refs, with the vars its quoted data names:
-  quoted-vars), the qualified keywords its constants name (:keywords: the attributes, config keys
+  host statics (Class/member) it references (:refs; in a macro, also the names its template
+  quotes, which its expansion calls), the qualified names its quoted data holds (:quoted:
+  quoted-names, data, not references), the qualified keywords its constants name (:keywords: the attributes, config keys
   and schema entries its code reads or writes), the banned vars it references, the
   calls it bounds by a clock (:timeouts: deref with a timeout), its catch clauses
   (:catches, each {:class :answers}), the namespaces it requires, and whether it changes its
   namespace's environment (:env?)."
   {:malli/schema [:=> [:cat :map] :map]}
   [node]
-  (let [acc (volatile! {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :keywords #{} :banned #{} :requires #{} :env? false
+  (let [acc (volatile! {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :quoted #{} :keywords #{} :banned #{} :requires #{} :env? false
                         :timeouts #{} :catches #{}})]
     ((fn walk [n in-fn?]
        (case (:op n)
@@ -176,9 +177,9 @@
          ;; keyword: most constants (unqualified keywords, strings, numbers) cost no walk
          (:quote :const) (let [x (datum n)]
                            (cond (qualified-keyword? x) (vswap! acc update :keywords conj x)
-                                 (qualified-symbol? x) (vswap! acc update :refs into (quoted-vars x))
-                                 ;; a quoted collection: its vars (one quoted-vars) and its keywords
-                                 (coll? x) (vswap! acc #(-> % (update :refs into (quoted-vars x))
+                                 (qualified-symbol? x) (vswap! acc update :quoted conj x)
+                                 ;; a quoted collection: its names (one quoted-names) and its keywords
+                                 (coll? x) (vswap! acc #(-> % (update :quoted into (quoted-names x))
                                                             (update :keywords into (filter qualified-keyword?) (tree-seq coll? seq x))))))
          :try (vswap! acc update :catches into (map sedn/encode) (catches n))
          :invoke (when (and (= 'clojure.core/deref (invoked n)) (= 3 (count (:args n))))
@@ -209,14 +210,16 @@
              (vswap! acc update :keywords #(into kws (remove meta-keys) %)))
            (ir/reduce-ir-children (fn [_ c] (walk c in-fn?)) nil n))))
      node false)
-    @acc))
+    ;; a macro's template is its expansion's code: the names it quotes are what every form
+    ;; calling it calls (macro-uses reaches the macro; this, what it expands to)
+    (let [a @acc] (if (some :macro? (:defs a)) (update a :refs into (:quoted a)) a))))
 
 (defn- merge-accounts
   "The accounts of a form's units as one."
   {:malli/schema [:=> [:cat [:sequential :map]] :map]}
   [as]
   (reduce (fn [a b] (merge-with (fn [x y] (if (boolean? x) (or x y) (into x y))) a b))
-          {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :keywords #{} :banned #{} :requires #{} :env? false
+          {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :quoted #{} :keywords #{} :banned #{} :requires #{} :env? false
            :timeouts #{} :catches #{}}
           as))
 
@@ -291,7 +294,8 @@
   there to a macro var. The IR is the expansion, which names no macro, and a
   top-level call expanding to a do leaves its units' forms no trace of it (Clojure's
   compilation-unit rule), so the form itself is read. A macro's own template names the
-  macros it expands to as quoted vars (quoted-vars), which closes the chain."
+  macros it expands to as quoted names (unit-account takes them as its references), which
+  closes the chain."
   {:malli/schema [:=> [:cat :seon.host/namespace :any] [:set :qualified-symbol]]}
   [nsx form]
   (into #{} (keep (fn [x] (when (and (seq? x) (symbol? (first x)))
@@ -347,7 +351,7 @@
                (or ns-form? (seq defs) (seq declares) (seq methods) (seq impls) (:env? a)))
       (cond-> {:id (form-id nsym src k) :src src :ns nsym :ns-form? (boolean ns-form?)
                :defs defs :declares declares :methods (or methods []) :impls (or impls [])
-               :refs (into (:refs a) (macro-uses nsx form)) :requires (:requires a) :banned (:banned a) :inline-defs (:inline-defs a)
+               :refs (into (:refs a) (macro-uses nsx form)) :quoted (:quoted a) :requires (:requires a) :banned (:banned a) :inline-defs (:inline-defs a)
                ;; its code's keywords and its contracts': the data it operates on, read once here
                :keywords (into (:keywords a) (comp (keep :contract) (mapcat (comp names sedn/decode))) defs)
                :timeouts (:timeouts a) :catches (:catches a)}
@@ -374,7 +378,7 @@
 
 (def ^:private form-sets
   "A form's card-many facts, as stored and as its row (form-row) and its account name them."
-  [[:form/refs :refs] [:form/keywords :keywords] [:form/requires :requires] [:form/banned :banned] [:form/inline-defs :inline-defs]
+  [[:form/refs :refs] [:form/quoted :quoted] [:form/keywords :keywords] [:form/requires :requires] [:form/banned :banned] [:form/inline-defs :inline-defs]
    [:form/timeouts :timeouts] [:form/catches :catches]])
 
 (defn- form-of
@@ -466,9 +470,8 @@
                   {:var n :was (select-keys was changed) :now (select-keys now changed)
                    :cited-by (vec (sort-by :section (for [dt (d/datoms db :avet :seon.section/references (:db/id e))
                                                           :let [a (:seon.section/address (d/entity db (:e dt)))]]
-                                                      ;; the form's head named, not quoted: the reach walk follows a quoted name,
-                                                      ;; and every test reaching this would reach the help page's file reads
-                                                      {:section a :read (list (symbol "my.agent" "help") a)})))})]
+                                                      ;; the form that reads it, as data (no reference: unit-account)
+                                                      {:section a :read (list 'my.agent/help a)})))})]
     (not-empty (vec changes))))
 
 (defn- def-keys
@@ -516,6 +519,18 @@
   [db acct] (account-tx db acct (inc (:max-tx db))))
 
 ;; ---- the live program ----------------------------------------------------------------
+
+(defn program-nss
+  "The namespaces of db that are the program's own: their file under one of
+  :seon.config.source/program-dirs. A test's, a fixture's or a test helper's (under test/, whatever
+  its name), and one with no file (an app an agent made at its REPL, until it is written back), are
+  not (seon.context/related shows the last as the agent's new work). One read of the namespaces'
+  files, so a caller asks it once and tests membership."
+  {:malli/schema [:=> [:cat :seon.host/db] [:set :symbol]]}
+  [db]
+  (let [dirs (mapv #(str % "/") (cfg/value :seon.config.source/program-dirs))]
+    (into #{} (keep (fn [{:keys [e v]}] (when (some #(str/starts-with? v %) dirs) (:ns/name (d/entity db e)))))
+          (d/datoms db :aevt :ns/file))))
 
 (defn live?
   "Is form entity e part of the program: it defines nothing (a text form: a declare, a
@@ -970,24 +985,14 @@
   [f] (boolean (and (some tree-readers (:refs f))
                     (not (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f)))))))
 
-(def ^:private names-only
-  "The vars whose forms only name other vars, as quoted data: reaching one is neither using nor
-  reaching what it names, so their references give the reach walk no edges. seon.config/schema-forms
-  is every schema baked into one literal, whose :seon.render/* properties name every render: an
-  edge from it put every render, and through seon.docs/cited the tree, under every contracted
-  call (680 of 706 tests took the tree digest); a check reaches the schemas it
-  checks through its contract's own schema rows, and the baked schemas are :env."
-  '#{seon.program/tree-readers seon.program/env-readers seon.config/schema-forms})
-
 (defn- uses?
   "Does form f use one of vars (:seon.config.source/process-vars or -binary-vars)? A form uses
-  a var it references and does not define (a var's own form names itself), and not when it
-  only names vars as data (names-only: tree-readers lists the binary-sh that the reach walk's
-  own tests never run)."
+  a var it references and does not define (a var's own form names itself); a name in its
+  quoted data is no reference (unit-account)."
   {:malli/schema [:=> [:cat [:set :qualified-symbol] :map] :boolean]}
   [vars f]
   (let [own (set (keep (fn [[k s]] (when (= :var k) s)) (:defines f)))]
-    (boolean (and (not-any? names-only own) (some #(and (vars %) (not (own %))) (:refs f))))))
+    (boolean (some #(and (vars %) (not (own %))) (:refs f)))))
 
 (defn- schema-texts
   "{schema key -> its form's text} of db, from two index scans."
@@ -1032,10 +1037,7 @@
         test-ids (set (keep var-form tests))
         edges (fn [f] (if (schema-row? f)
                         (vec (:schema f))
-                        ;; a names-only form names vars as data: no edges from its references,
-                        ;; its contract's, methods' and data's kept
-                        (vec (concat (when-not (some (fn [[k s]] (and (= :var k) (names-only s))) (:defines f))
-                                       (remove test-ids (keep var-form (:refs f))))
+                        (vec (concat (remove test-ids (keep var-form (:refs f)))
                                      (for [s (defined f :var)
                                            id (concat (get methods s) (get impls s) (get contract s) (keep var-form (get data-refs s)))]
                                        id)))))

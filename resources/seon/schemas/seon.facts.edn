@@ -24,6 +24,10 @@
  ;; the vars it references, resolved by the compiler (clojure.core's left out): callers are
  ;; one AVET seek
  :form/refs [:set {:seon.db/index true} :qualified-symbol]
+ ;; the qualified names its quoted data holds (seon.program/quoted-names): names, not references,
+ ;; so the reach never follows them; a caller listing reads them (seon.docs/callers: who names a
+ ;; render, a proc, a form sent to an agent)
+ :form/quoted [:set {:seon.db/index true} :qualified-symbol]
  ;; the qualified keywords its code and its contracts name, recorded by the analyzer from the read
  ;; it already does (seon.program/unit-account): the attributes, config keys and schema entries it
  ;; operates on; a key's forms are one AVET seek (seon.program/schema-dependents, my.agent/callers)
@@ -80,7 +84,7 @@
  :seon.db/form-fact [:map {:seon.db/attributes true}
                       [:form/id :form/id] [:form/src :form/src] [:form/ns :form/ns] [:form/order :form/order]
                       [:form/lead {:optional true} :form/lead] [:form/defines {:optional true} :form/defines]
-                      [:form/declares {:optional true} :form/declares] [:form/refs {:optional true} :form/refs] [:form/keywords {:optional true} :form/keywords]
+                      [:form/declares {:optional true} :form/declares] [:form/refs {:optional true} :form/refs] [:form/quoted {:optional true} :form/quoted] [:form/keywords {:optional true} :form/keywords]
                       [:form/requires {:optional true} :form/requires] [:form/banned {:optional true} :form/banned]
                       [:form/inline-defs {:optional true} :form/inline-defs] [:form/source {:optional true} :form/source]
                       [:form/timeouts {:optional true} :form/timeouts] [:form/catches {:optional true} :form/catches]]
@@ -211,7 +215,7 @@
  :seon.run/task [:and {:seon.db/index true} :seon.db/ref]
  ;; finished: its task is done (seon.reconcile/finished); judged: ended or dead, the done rule's to judge;
  ;; failed: its agent died or was lost, a death (seon.problems/report)
- :seon.run/status [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ended :dead} :seon.status/failed #{:dead :lost}} [:enum :running :ended :killed :dead :lost :done :merged :behind :closed :refused]]
+ :seon.run/status [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ended :dead} :seon.status/failed #{:dead :lost}} [:enum :running :ended :killed :dead :lost :done :merged :behind :parked :closed :refused]]
  :seon.run/boot :string
  ;; the agent that works it (seon.task/agent-key)
  :seon.run/agent :seon.db/ref
@@ -224,6 +228,11 @@
  :seon.run/outcome [:enum :green :red :waiting :cap :failed :merge-failed :error :no-end :no-progress]
  :seon.run/reason [:string {:seon.render/prose true}]
  :seon.run/turns :int
+ ;; the turns in a row whose calls repeated the last turn's from the same observed state
+ ;; (seon.turn/work!); a turn that made progress sets it to 0; none written means none repeated
+ :seon.run/repeats :int
+ ;; the messages to its session's runs its branch had taken when the run was judged (seon.reconcile/judge-tx): main holding more wakes a parked one
+ :seon.run/taken :int
  :seon.run/model-calls :int
  :seon.run/tokens :int
  :seon.run/merged-t :int
@@ -266,7 +275,7 @@
                              [:seon.run/branch {:optional true} :seon.run/branch] [:seon.run/model {:optional true} :seon.run/model]
                              [:seon.run/max-turns {:optional true} :seon.run/max-turns]
                              [:seon.run/outcome {:optional true} :seon.run/outcome] [:seon.run/reason {:optional true} :seon.run/reason]
-                             [:seon.run/turns {:optional true} :seon.run/turns] [:seon.run/model-calls {:optional true} :seon.run/model-calls]
+                             [:seon.run/turns {:optional true} :seon.run/turns] [:seon.run/taken {:optional true} :seon.run/taken] [:seon.run/model-calls {:optional true} :seon.run/model-calls] [:seon.run/repeats {:optional true} :seon.run/repeats]
                              [:seon.run/tokens {:optional true} :seon.run/tokens] [:seon.run/merged-t {:optional true} :seon.run/merged-t]
                              [:seon.run/basis-t {:optional true} :seon.run/basis-t]
                              [:seon.run/plan {:optional true} :seon.run/plan]
@@ -326,6 +335,8 @@
                    [:batches nat-int?] [:paths nat-int?] [:rescans nat-int?]
                    [:last-rescan {:optional true} [:map [:path :string] [:kind [:enum :rescan :root]]]]
                    [:last-opened {:optional true} [:vector :string]]
+                   ;; the last batch that loaded: each kind with the first record that made it
+                   [:last-load {:optional true} [:map-of [:enum :docs :tasks :source] [:tuple [:enum :path :rescan :root] :string]]]
                    [:error {:optional true} :string]]
  :seon.root/stopped :seon.root/end
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean

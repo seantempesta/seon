@@ -345,12 +345,13 @@
                                                 per))]
                               (if bad
                                 [address {:read today :unread bad}]
-                                ;; a var whose form changed since: \"changed\" when what the section
-                                ;; describes of it (its docstring or contract) changed, else as today
-                                [address {:read (into {} (for [[n res] per :let [then (get (:ids res) n "absent")]]
-                                                           [n (cond (or (= "absent" then) (= then (today n))) then
+                                ;; a var the old file has no form for is :absent; one whose form changed
+                                ;; since is :changed when what the section describes of it (its docstring
+                                ;; or contract) changed, else today's form id
+                                [address {:read (into {} (for [[n res] per :let [then (get (:ids res) n :absent)]]
+                                                           [n (cond (or (= :absent then) (= then (today n))) then
                                                                     (= (get (:meanings res) n) (meaning-now n)) (today n)
-                                                                    :else "changed")]))}]))))))
+                                                                    :else :changed)]))}]))))))
           plan)))
 
 ;; ---- a citation as its depth shows it (docs/references.md#the-delimiter-picks-the-depth): ----
@@ -364,13 +365,14 @@
 
 (defn callers
   "The program vars whose recorded definition names x on db, sorted, x itself left out: a var by
-  its :form/refs, a qualified keyword (an attribute, config key or schema entry) by its
+  its :form/refs (calls it) or its :form/quoted (names it as data: a render, a proc, a form sent
+  to an agent), a qualified keyword (an attribute, config key or schema entry) by its
   :form/keywords, the data it operates on. The one query my.agent/callers and the task story ask."
   {:malli/schema [:=> [:cat :seon.host/db [:or :qualified-symbol :qualified-keyword]] [:vector :qualified-symbol]]}
   [db x]
-  (let [a (if (keyword? x) :form/keywords :form/refs)]
-    (vec (sort (disj (set (d/q '[:find [?v ...] :in $ ?a ?s :where [?f ?a ?s] [?f :form/defines ?e] [?e :var/name ?v]] db a x))
-                     x)))))
+  (vec (sort (disj (into #{} (mapcat #(d/q '[:find [?v ...] :in $ ?a ?s :where [?f ?a ?s] [?f :form/defines ?e] [?e :var/name ?v]] db % x))
+                         (if (keyword? x) [:form/keywords] [:form/refs :form/quoted]))
+                   x))))
 
 (defn grep
   "The program vars whose recorded definition on db (:form/src) holds the string s, best first: a

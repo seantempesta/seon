@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.screen :as screen] [clojure.edn]))
+            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.screen :as screen] [seon.program :as program] [clojure.edn]))
 
 (def help-page
   "The help page, docs/agent.md: what my.agent/help answers, each section on demand. Main holds
@@ -81,6 +81,8 @@
                                           ;; a red test the agent wrote is a proof it has not registered, or one to delete
                                           (= :stray-red reason)
                                           (assoc :do (list 'my.task/update! :seon.task/proofs 'conj (list 'quote symbol))))
+               ;; a design made from a request carries none: it registers each it writes
+               :no-proofs {:reason reason :do '(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)}
                :no-design {:reason reason :unchanged :seon.task/plan
                            :do '(my.task/update! :seon.task/plan str "\n\n" "<what the implement step must do>")}
                ;; no result: never written, or never run; what writes and runs it
@@ -105,17 +107,20 @@
      :text (subs text start end)}))
 
 (defn last-reply
-  "What happened to the agent's last reply: cut at the token limit, and each delimiter the
+  "What happened to the agent's last reply: cut at the token limit, each delimiter the
   reader repaired (what it dropped or inserted, and where: the line and column in source,
-  the reply as the reader gave it to the REPL, and that line), or nil."
-  {:malli/schema [:=> [:cat [:maybe :boolean] [:maybe :string] [:vector :map]] [:maybe :map]]}
-  [truncated? source repairs]
+  the reply as the reader gave it to the REPL, and that line), and calls that repeated the
+  turn before's from the same state (repeated, the run's :seon.run/repeats so far), or nil."
+  {:malli/schema [:=> [:cat [:maybe :boolean] [:maybe :string] [:vector :map] [:maybe :int]] [:maybe :map]]}
+  [truncated? source repairs repeated]
   (let [rs (for [{:keys [at dropped inserted]} repairs :when (not= ";; " inserted)]
              (cond-> {:near (near (or source "") at)}
                (seq dropped) (assoc :dropped dropped)
                (seq inserted) (assoc :inserted inserted)))]
     (cond-> nil
       truncated? (assoc :cut "at the model's token limit: what followed the cut was lost. Answer with less: one change at a time.")
+      repeated (assoc :repeated (str "your calls were the same as the turn before's, from the same state, so their answers are the same as above. "
+                                     "Ask something else, or change something; the same calls again end the run."))
       (seq rs) (assoc :repaired (vec rs)))))
 
 
@@ -151,7 +156,11 @@
   (let [;; through the one resolver: a task's own setting (its flattened :seon.task/config), else its model's, else the config's
         t (when te (d/pull db [:seon.config.render/similar :seon.task/model] te))
         k (cfg/value :seon.config.render/similar {:task t :model (:seon.task/model t)})
-        function? #(= :fn (:var/kind (d/entity db [:var/name %])))
+        ;; a program function, as related's: no test helper or fixture of test/
+        program (program/program-nss db)
+        function? #(let [n (symbol (namespace %))]
+                     (and (= :fn (:var/kind (d/entity db [:var/name %])))
+                          (or (contains? program n) (nil? (:ns/file (d/entity db [:ns/name n]))))))
         ;; every vector, every dim, every rank: the exact ranking (near's shortlist and fine level
         ;; over all of them; it sorts them all anyway), walked until k functions are found, as the
         ;; nearest forms are often tests
@@ -204,9 +213,12 @@
                        cites)
             schema? #(some? (pdb/eid db :schema/key %))
             ;; a program function: no test, no macro (every contracted form names seon.contract/defn),
-            ;; nothing of a test namespace (its fixtures); the graph and the meaning halves alike
-            function? #(and (not (#{:test :macro} (:var/kind (d/entity db [:var/name %]))))
-                            (not (str/ends-with? (namespace %) "-test")))
+            ;; nothing outside the program's dirs (test/'s fixtures and helpers); both halves alike
+            ;; a namespace with no file yet (one the agent made at its REPL) is its new work: shown
+            program (program/program-nss db)
+            function? #(let [n (symbol (namespace %))]
+                         (and (not (#{:test :macro} (:var/kind (d/entity db [:var/name %]))))
+                              (or (contains? program n) (nil? (:ns/file (d/entity db [:ns/name n]))))))
             ;; a neighbour weighs 1/(1 + the forms naming it, counted to a cap): what every form names
             ;; (seon.contract/checked, on?, seon.db/eid) weighs nothing (docs/vector.md#fused-with-the-call-graph)
             cap (cfg/value :seon.config.render/related-rarity)
@@ -312,7 +324,7 @@
   wiki sections its changes made stale; the tests run; what happened to the last reply; turns
   left. The messages delivered are the conversation's (`conversation`), not the block's."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge tests attention]}]
+  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs repeated will-merge tests attention]}]
   (let [{:keys [proofs]} (:seon.task/accumulated t)]
     (cond-> {;; a passing proof is its status; a red or unrun one shows its source, its failures
              ;; and the program functions it calls; one not defined yet says so
@@ -330,7 +342,7 @@
       max-turns (assoc :turn (str (inc turn) " of " max-turns))
       (seq (refused (vec reasons) (vec reds))) (assoc :refused (refused (vec reasons) (vec reds)))
       (seq test-run-errors) (assoc :test-run {:failed (vec test-run-errors)})
-      (last-reply truncated? source (vec repairs)) (assoc :your-last-reply (last-reply truncated? source (vec repairs)))
+      (last-reply truncated? source (vec repairs) repeated) (assoc :your-last-reply (last-reply truncated? source (vec repairs) repeated))
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
       ;; the sections of the wiki this branch's code changes made stale (seon.problems/caused-split): to read and
       ;; probably fix; never a reason to refuse done
@@ -498,30 +510,37 @@
   [{:keys [ref whole fold plain]} whole-ids]
   (if (every? #(contains? whole-ids (name %)) (vals fold)) [ref whole] [[:eval (second ref)] plain]))
 
-(defn- step-up
-  "Index i raised to a multiple of step, at most to: the history's boundaries move in large steps."
-  {:malli/schema [:=> [:cat :int pos-int? :int] :int]}
-  [i step to] (min to (* step (quot (+ i (dec step)) step))))
-
 (defn- kept
   "Which of the parts (each {:cost [whole collapsed] :call}, oldest first) the history budget sends:
-  the newest whole, the newest before them whole while they fit, the older still collapsed (the
-  result its handle and one line) while those fit, the rest left out; each boundary raised to a
-  multiple of step (:seon.config.render/history-step), so it moves in large steps and the
-  messages before it stay the same bytes for many turns; never starting inside a reply (a part
-  continuing the call before it). Answers [picks dropped]: :whole or :line for each part from the
-  first sent, and how many older ones were left out."
-  {:malli/schema [:=> [:cat [:vector :map] :int pos-int?] [:tuple [:vector [:enum :whole :line]] nat-int?]]}
-  [parts budget step]
+  the parts walked oldest first, holding two cuts, where the collapsed parts (a result's handle and
+  one line) begin, every part before left out, and where the whole ones begin. When what is sent
+  passes the budget, the oldest whole parts collapse until the whole ones fit in half of it, then,
+  if all is still over half, the oldest collapsed are left out until it fits: the cuts only advance,
+  in jumps that leave room for many turns, so between jumps each request is the one before and
+  what was added (the provider's prefix cache; a cut recomputed each turn moved back and forth, and
+  a resumed run hit 23% of 1.1M tokens). A cut never starts inside a reply (a part continuing
+  the call before it), and the newest part is whole. A function of the parts alone: a cold read
+  sends what a warm one does. Answers [picks dropped]: :whole or :line for each part from the first
+  sent, and how many older ones were left out."
+  {:malli/schema [:=> [:cat [:vector :map] :int] [:tuple [:vector [:enum :whole :line]] nat-int?]]}
+  [parts budget]
   (let [n (count parts)
-        whole (mapv (comp first :cost) parts) small (mapv (comp second :cost) parts)
-        ;; the first index from which the parts fit whole (the newest always), and before it, the
-        ;; first from which the rest fit collapsed
-        from (fn [cs spent end] (loop [i (dec end) s spent] (if (and (>= i 0) (<= (+ s (nth cs i)) budget)) (recur (dec i) (+ s (nth cs i))) (inc i))))
-        b (if (zero? n) 0 (step-up (min (dec n) (from whole 0 n)) step (dec n)))
-        a (step-up (from small (reduce + 0 (subvec whole b)) b) step b)
-        a (or (first (drop-while #(pos? (:call (nth parts %))) (range a n))) n)]
-    [(into (vec (repeat (max 0 (- b a)) :line)) (repeat (- n (max a b)) :whole)) a]))
+        sums (fn [k] (vec (reductions + 0 (map #(nth (:cost %) k) parts))))
+        whole (sums 0) small (sums 1)
+        span (fn [sv a b] (- (nth sv b) (nth sv a)))
+        ;; a cut moved to i, then on past any part that continues a reply, at most to j
+        start (fn [i j] (or (first (drop-while #(pos? (:call (nth parts %))) (range i (inc j)))) j))
+        half (quot budget 2)
+        [l w] (reduce (fn [[l w] j]
+                        (let [sent #(+ (span small %1 %2) (span whole %2 (inc j)))]
+                          (if (<= (sent l w) budget)
+                            [l w]
+                            (let [w (start (or (first (filter #(<= (span whole % (inc j)) half) (range w (inc j)))) j) j)
+                                  l (if (<= (sent l w) half) l
+                                        (start (or (first (filter #(<= (sent % w) half) (range l (inc w)))) w) w))]
+                              [l w]))))
+                      [0 0] (range n))]
+    [(into (vec (repeat (- w l) :line)) (repeat (- n w) :whole)) l]))
 
 (defn records
   "What agent a's conversation is made of on db, in tx order: its evals, the screen's among them
@@ -576,7 +595,7 @@
   opts :printed the run's earlier requests' prints, answered again as :printed):
   the newest whole, older ones whole and then collapsed within the history budget, `kept`), then
   the screen: the screen evals b names, the newest records, each its diff from the previous one of
-  its form (`printed-run`), then how many earlier records the budget left out; with none
+  its form (`printed-run`); how many earlier records the budget left out goes just after the story; with none
   (an outside agent's read), the block's turn sections (`screen-message`). Answers {:messages
   :sent}: provider-neutral messages (the provider's format function makes the wire shape,
   seon.model/wire-messages) and the records they render, in order (:seon.turn/sent, `sent`):
@@ -600,20 +619,23 @@
         ;; history budget sends, whole or collapsed
         cache (printed-run (mapv (fn [[tx v k]] [(ref-of v) v k tx]) rs) (when model? printed))
         parts (mapv #(get-in cache [:parts %]) (:ids cache))
-        [picks dropped] (kept parts (cfg/value :seon.config.render/history-budget) (cfg/value :seon.config.render/history-step))
+        [picks dropped] (kept parts (cfg/value :seon.config.render/history-budget))
         whole-ids (into #{} (keep (fn [[{:keys [ref]} pick]] (when (= :whole pick) (second ref)))) (map vector (drop dropped parts) picks))
         sent (mapv (fn [{:keys [ref collapsed] :as p} pick] (if (= :line pick) [[:line (second ref)] collapsed] (as-sent p whole-ids)))
                    (drop dropped parts) picks)
         ;; the screen evals are the newest records, each its diff from the one before it (printed-run)
         screen? (seq (:screen basis))
         note (when (and screen? (pos? dropped)) {:role "user" :content (pr-str {:history {:left-out dropped}})})]
+    ;; how many records the budget left out, just after the story: it changes only when the cut
+    ;; jumps, so every message after it is the one before and what was added (sent last, it moved
+    ;; one message along each request and no request was the next one's prefix)
     {:messages (-> [{:role "system" :content help} {:role "user" :content (or run (run-message block))}]
+                   (cond-> note (conj note))
                    (into (mapcat second) sent)
-                   (into (if screen? (cond-> [] note (conj note)) [{:role "user" :content (screen-message block dropped)}])))
+                   (cond-> (not screen?) (conj {:role "user" :content (screen-message block dropped)})))
      :printed cache
      :sent (when (and screen? help-ref run-ref)
-             (-> [help-ref run-ref] (into (map first) sent)
-                 (cond-> note (conj [:history dropped]))))}))
+             (-> [help-ref run-ref] (cond-> note (conj [:history dropped])) (into (map first) sent)))}))
 
 (defn messages
   "A request's messages without a record (a test's, a read before any eval): the system prompt, the
@@ -644,6 +666,12 @@
        (sort-by second) (mapv (fn [[e _ tx]] (assoc (turn-record db e) :tx tx)))))
 
 (declare render story)
+
+(defn- session-first-run
+  "Agent entity a's first run (the one whose :seon.run/agent was written first), or nil."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :seon.run/id]]}
+  [db a]
+  (some->> (d/q '[:find ?tx ?id :in $ ?a :where [?r :seon.run/agent ?a ?tx] [?r :seon.run/id ?id]] db a) (sort-by first) first second))
 
 (defn parts-of
   "Refs (as :seon.turn/sent names records) each beside its messages, each record by its own
@@ -692,7 +720,9 @@
 
 (defn- story
   "The task story: task entity e's run sections as of t on db (run-state, printed by
-  run-message), what every turn of a run sends after the system prompt, as its first turn read them."
+  run-message), what every turn of a session sends after the system prompt, as its first turn
+  read them; a later stage's arrives as root's message at its boundary
+  (seon.reconcile/stage-boundary)."
   {:malli/schema [:=> [:cat :seon.host/db :int :int] :string]}
   [db e t]
   (let [h (d/as-of db t)]
@@ -706,7 +736,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :map [:maybe :map]] :map]}
   [db {:keys [turn max-turns origin observed merge?]} lst]
   (let [{:keys [text repairs]} (when lst (reader/forgive (str/join "\n" (map :code (:seon.turn/calls lst)))))]
-    (cond-> (assoc observed :truncated? (:seon.turn/truncated lst) :source text :repairs (vec repairs)
+    (cond-> (assoc observed :truncated? (:seon.turn/truncated lst) :source text :repairs (vec repairs) :repeated (:seon.turn/repeated lst)
                    :unmerged (when merge? (pm/unmerged db)))
       (= :model origin) (assoc :turn turn :max-turns max-turns))))
 
@@ -727,12 +757,16 @@
         t (task/task db task)
         block (if screen (run-state db t) (current-state db t (turn-input db basis (peek prev))))
         a (when agent (d/pull db [:db/id :seon.agent/key] [:seon.agent/key agent]))
-        ;; the task story is its run's first turn's: the task as of that turn's t
-        story-t (if (seq prev) (:max-tx (d/commit-as-db db (:commit (:seon.turn/basis (first prev))))) (:max-tx db))
-        task-e (pdb/eid db :seon.task/id task)
+        ;; the task story is its session's first turn's: the task of the agent's first run as of that
+        ;; turn's t, so a later stage's request keeps the earlier stages' as its exact prefix (its
+        ;; own story came as a message at the boundary: seon.reconcile/stage-boundary)
+        first-run (when a (session-first-run db (:db/id a)))
+        prev0 (if (and first-run (not= first-run run)) (model-turns db first-run Integer/MAX_VALUE) prev)
+        story-t (if (seq prev0) (:max-tx (d/commit-as-db db (:commit (:seon.turn/basis (first prev0))))) (:max-tx db))
+        task-e (if (identical? prev0 prev) (pdb/eid db :seon.task/id task) (:db/id (:seon.run/task (d/entity db [:seon.run/id first-run]))))
         run-ref [:task task-e story-t]
-        ;; the story is the same each turn of a run: printed once, by its ref
-        story-text (when (seq prev) (or (get-in printed [:story run-ref]) (story db task-e story-t)))
+        ;; the story is the same each turn of a session: printed once, by its ref
+        story-text (when (seq prev0) (or (get-in printed [:story run-ref]) (story db task-e story-t)))
         r (request a {:db db :basis basis :block block :help (system-text db) :run story-text :printed printed
                       :help-ref [:section (docs/page-top db system-page) (docs/page-t db system-page)]
                       :run-ref run-ref})]

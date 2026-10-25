@@ -196,6 +196,14 @@
  ;; sits above the measured p90. Tokens are the paid resource; task
  ;; seon.model/budgets-are-data-and-spend-is-measured makes them the budget.
  :seon.config.agent/max-turns 40
+ ;; Unit: repeats in a row (a turn that made progress starts the count again). How many times a
+ ;; run is told that a turn's calls repeat the last turn's, from the same observed state (the answers
+ ;; unchanged), before the next repeat ends it :no-progress.
+ ;; 0 ends it at the first (the rule before). Provenance: live agents round 1 (2026-10-25,
+ ;; notes/live-2026-10-25.md L6): 3 of 6 paid runs ended at their first repeat, each right after
+ ;; an answer that gave nothing new; root's provisional ruling (owner to confirm): told once,
+ ;; ended at the second. The count is the run's :seon.run/repeats.
+ :seon.config.agent/repeats-told 1
  ;; Unit: path, every agent process's working directory, shared, made at the fork server's boot.
  ;; No repository above it: an agent changes code through its REPL, never git (owner, 2026-10-22:
  ;; "no git in agents"); it reads and writes any file by its absolute path. At the bound: n/a.
@@ -294,6 +302,15 @@
  ;; own dirs. It costs each boot the test forms' evaluation (+5 s a restart, measured
  ;; 2026-10-22; task seon.source/test-namespaces-built-into-the-binary).
  :seon.config.source/dirs ["src" "test" "resources/seon/schemas"]
+ ;; Unit: paths under the root, of those above. The program proper: a namespace whose file is under
+ ;; one is the program's, one under test/ (a test's, a fixture's, a helper's like seon.check or
+ ;; seon.fixtures, whose names do not end in -test) is not (seon.program/program-nss). Read where
+ ;; the program is told from its tests: the failure-point law's sites (a namespace with no file,
+ ;; an agent's REPL app, is no failure point), and related's and similar's functions (there one
+ ;; with no file is the agent's new work, and shown). Provenance: root, 2026-10-25 (the live round
+ ;; 5's big-map request, whose related functions were test/ helpers). At the bound: an empty
+ ;; vector makes nothing the program's (no law site, no related function but the agent's own).
+ :seon.config.source/program-dirs ["src"]
  ;; Unit: qualified var names. A test whose reach (seon.program/reach-index, the compiler's
  ;; facts) references one of these reaches a process of its own: a shell, a fork, a root booted
  ;; for it, the binary. Such tests never run automatically, only when named (owner, 2026-10-23;
@@ -553,12 +570,6 @@
  ;; turn (owner: "wtf"); 32000 keeps the last several whole turns (a turn is a reply of ~1-3k
  ;; plus its evaluations up to the evals budget), so a turn sends ~20-55k with the block.
  :seon.config.render/history-budget 32000
- ;; Unit: records. The history's two boundaries (where the whole records begin, and where the
- ;; collapsed ones do: seon.context/kept) are raised to a multiple of this, so they move in large
- ;; steps and every message before them is the same bytes for many turns (the provider's cache:
- ;; a boundary that moved each turn would change the prefix each turn). Provenance: root's
- ;; ruling 2026-10-25 (P3 collapses in large steps); 16 records is several turns of a few calls each.
- :seon.config.render/history-step 16
  ;; Unit: functions. The program functions nearest the task's plan by meaning (seon.vector/near,
  ;; exact) that its write set and proofs do not name, each a line in its task story (:similar);
  ;; 0 shows none. Provenance: the owner's ruling (2026-10-24, DECISIONS "Embeddings join the

@@ -5,7 +5,7 @@
   is keyed like a test by what its functions reach, and the run is shards whose greens are
   stored."
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d]
-            [seon.test-store :as ts] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
+            [seon.test-store :as ts] [seon.db :as pdb] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
             [seon.program-test :refer [record]] [seon.source :as source] [seon.fx :as fx] [seon.config] [seon.profile :as profile] [test-runner :as runner]))
 
 (defn- prog []
@@ -259,6 +259,26 @@
 (defn- calls-of
   "{var calls} of the contracted functions thunk called."
   [thunk] (profile/begin!) (thunk) (into {} (map (juxt :var :calls)) (profile/touched)))
+
+(deftest a-failed-import-leaves-no-branch
+  ;; task seon.proofs/a-failed-import-leaves-no-branch: an import that threw left its tree's branch
+  ;; behind, and every later plan of that tree read the partial program: 0 tests, and TEST OK
+  ;; (a merge's conflict markers, 2026-10-25). Now the branch exists only once the import committed
+  (let [good "(ns app.fi-calc)\n(defn add [a b] (+ a b))\n"
+        d (checkout! {"deps.edn" "{}"
+                      "src/app/fi_calc.clj" "(ns app.fi-calc)\n<<<<<<< HEAD\n(defn add [a b] (+ a b))\n=======\n(defn add [a b] (+ b a))\n>>>>>>> main\n"
+                      "test/app/fi_calc_test.clj" "(ns app.fi-calc-test (:require [clojure.test :refer [deftest is]] [app.fi-calc :as c]))\n(deftest adds (is (= 3 (c/add 1 2))))\n"
+                      "test/app/fi_empty_test.clj" "(ns app.fi-empty-test)\n"})
+        store (str (scratch-dir) "/store")
+        branches #(let [{:keys [conn]} (pdb/open! :lmdb store 0 :db)] (try (set (d/branches conn)) (finally (d/release conn))))
+        thrown (try (runner/plan-of d "tests" false nil store) nil (catch Throwable t t))]
+    (is (some? thrown) "a file that does not read: the plan throws")
+    (is (= #{:db} (branches)) "and leaves no branch named for its tree")
+    (spit (str d "/src/app/fi_calc.clj") good)
+    (clojure.java.shell/sh "git" "-C" d "add" ".")
+    (let [p (runner/plan-of d "tests" false nil store)]
+      (is (contains? (:digests p) 'app.fi-calc-test/adds) "the tree read: its test is planned")
+      (is (= '[app.fi-empty-test] (:no-test p)) "a test namespace the program db holds no test of is named, never left as an empty OK"))))
 
 (deftest a-plan-reads-the-kept-program-db-of-its-tree
   ;; task seon.proofs/a-plan-keeps-a-program-db-per-tree: the program db is a function of the

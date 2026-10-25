@@ -23,8 +23,10 @@
  :seon.section/dead-links [:set :string]
  ;; the form id of each var the section cites, as it stood when the section's text was last written
  ;; (seon.docs/load-tx keeps it while the text is unchanged): a var whose form id now differs leaves the
- ;; section stale (seon.problems, class :stale-section)
- :seon.section/read [:map-of :qualified-symbol :string]
+ ;; section stale (seon.problems, class :stale-section). From git's baseline (seon.docs/baseline-reads)
+ ;; a var may instead be :absent (no form defined it at the section's commit) or :changed (its form's
+ ;; docstring or contract changed since), each stale
+ :seon.section/read [:map-of :qualified-symbol [:or :string [:enum :absent :changed]]]
  ;; why the baseline of :read could not be taken from git (seon.docs/baseline-reads): the section's :read is as of
  ;; the load, shown as attention (seon.problems, :stale-section) until the section is edited
  :seon.section/baseline-unread :string
