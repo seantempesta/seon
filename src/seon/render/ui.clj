@@ -261,9 +261,10 @@
 (defn error-box
   "An error map (:seon.error/base, every variant): its message first, then its type and where
   it was raised, the fix when it carries one, and every other key it carries by the printer
-  (`error-shown`: the AI face's lines and this one's are the same)."
+  (`error-shown`: the AI face's lines and this one's are the same), its cut read through opts
+  :handle (a form that answers e) when it has one."
   {:malli/schema [:=> [:cat :seon.error/base :seon.render/opts] :any]}
-  [e _]
+  [e {:keys [handle]}]
   (let [own (apply dissoc e (error-hidden e))
         budget (config/value :seon.config.render/part-budget)]
          [:div {:class "err"}
@@ -272,7 +273,7 @@
       (when (:seon.error/fix e) [:p {:class "fix"} "fix: " (prose (:seon.error/fix e) budget)])
       (for [{:keys [in expected value]} (:seon.error/problems e)]
         [:p {:class "muted"} "at " [:code (print/text in budget)] " expected " [:code (print/text expected budget)] ", got " [:code value]])
-      (when (seq own) [:code {:class "muted"} " " (print/text own budget)])]))
+      (when (seq own) [:code {:class "muted"} " " (let [p (print/print-value own {:handle handle :budget budget})] (or (:text p) (:seon.error/message p)))])]))
 
 ;;; --- events ---------------------------------------------------------------------
 
@@ -449,7 +450,7 @@
        (when-not (str/blank? (:prose r)) [:p {:class "whitespace-pre-wrap text-text-300 italic"} (prose (:prose r) (form-budget))])
        (when (:code r) [:pre {:class "text-text-100"} [:code (prose (:code r) (form-budget))]])
        (if (map? (:ex r))
-         (render/html (:ex r) {})
+         (render/html (:ex r) (cond-> {} (:handle r) (assoc :handle (list :ex (:handle r)))))
          [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (if printed (:text r) (prose (or (:text r) "") (part)))])
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
