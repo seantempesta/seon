@@ -1,6 +1,6 @@
 (ns seon.vector
   "Semantic search, native to the store and its query language (docs/vector.md). Each form's,
-  wiki section's and task plan's text is embedded once by EmbeddingGemma-2 in process (root's
+  wiki section's, schema entry's and task plan's text is embedded once by EmbeddingGemma-2 in process (root's
   :embed effect over llama.cpp, native/embed.c), and the vector kept on that entity as facts
   (resources/seon/schemas/seon.vector.edn); a form is content-addressed, so an unchanged text is
   never embedded again. `near` is a Datalog function, similarity one more relation:
@@ -105,8 +105,8 @@
 (defn rrf
   "Rankings fused by reciprocal rank (Cormack et al. 2009): each item scores the sum of 1/(k + rank)
   over the rankings it is in, k :seon.config.vector/rrf-k; best first, the name breaking a tie.
-  Measured fusing the call graph with embeddings (docs/vector.md#fused-with-the-call-graph); kept
-  for that exploration, nothing in the context calls it now."
+  Measured fusing the call graph with embeddings (docs/vector.md#fused-with-the-call-graph); the
+  screen's related lists fuse their reference graph with meaning by it (seon.context/related)."
   {:malli/schema [:=> [:cat [:sequential [:sequential :any]]] [:vector :any]]}
   [rankings]
   (let [k (cfg/value :seon.config.vector/rrf-k)
@@ -124,21 +124,42 @@
   "Each embedded kind: the attribute holding its text, and the text the model reads."
   {:form/src (fn [src] (str document-prompt src))
    :seon.section/text (fn [text] (str document-prompt text))
+   ;; a schema's form, so the screen's related schema keys are found by meaning too
+   ;; (docs/vector.md#what-the-work-is-likely-to-need-as-an-eval)
+   :schema/form (fn [form] (str document-prompt form))
    :seon.task/plan (fn [plan] (str query-prompt plan))})
 
+(defn- due-among
+  "Of the text datoms ds, those whose vector is due for model, made (an entity's
+  :seon.vector/text-t) and of (its :seon.vector/model) read as functions of the entity:
+  [[e text t] ...] in entity order."
+  {:malli/schema [:=> [:cat [:sequential :any] :seon.host/fn :seon.host/fn :string] [:vector [:tuple :int :string :int]]]}
+  [ds made of model]
+  (vec (sort (for [{:keys [e a v tx]} ds
+                   :when (or (not= model (of e)) (not= tx (made e)))]
+               [e ((texts a) v) tx]))))
+
 (defn due
-  "The texts on db whose vector is due for model: each form's source, wiki section's text and
-  task's plan with no vector, a vector made from an earlier text (its :seon.vector/text-t is not
+  "The texts on db whose vector is due for model: each form's source, wiki section's text, schema
+  entry's form and task's plan with no vector, a vector made from an earlier text (its :seon.vector/text-t is not
   the text's transaction), or another model's. [[e text t] ...] in entity order, t the text's
-  transaction."
-  {:malli/schema [:=> [:cat :seon.host/db :string] [:vector [:tuple :int :string :int]]]}
-  [db model]
-  (let [made (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.vector/text-t))
-        of (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.vector/model))]
-    (vec (sort (for [[a text-of] texts
-                     {:keys [e v tx]} (d/datoms db :aevt a)
-                     :when (or (not= model (of e)) (not= tx (made e)))]
-                 [e (text-of v) tx])))))
+  transaction. With ds, only those of the text datoms ds (`written`), each one's vector read by
+  one seek: the cost of ds, not of the store."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:vector [:tuple :int :string :int]]]
+                  [:=> [:cat :seon.host/db :string [:sequential :any]] [:vector [:tuple :int :string :int]]]]}
+  ([db model]
+   (let [made (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.vector/text-t))
+         of (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.vector/model))]
+     (due-among (for [a (keys texts) d (d/datoms db :aevt a)] d) #(made %) #(of %) model)))
+  ([db model ds]
+   (due-among (filter (comp texts :a) ds) #(stored db % :seon.vector/text-t) #(stored db % :seon.vector/model) model)))
+
+(defn written
+  "The text datoms db holds that db from does not (datahike.api/datoms-diff, which skips the
+  subtrees they share): the forms, sections and plans a branch wrote since from. Cost: the
+  datoms that differ."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :any]]}
+  [from db] (filterv (comp texts :a) (second (d/datoms-diff from db :eavt []))))
 
 (defn tx-data
   "The facts of embedded texts: entity es[i]'s vector vs[i] of the text at transaction ts[i], that

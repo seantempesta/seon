@@ -562,6 +562,17 @@
  ;; that listed them named the same functions as a run listing none (my.agent/prove,
  ;; seon.model/provider-error, seon.docs/view, seon.print/print-value): no measured gain.
  :seon.config.render/similar 0
+ ;; Unit: lines of each kind. The wiki sections, program functions and schema keys nearest the
+ ;; task's plan (seon.context/related: its references and seon.vector/near on its vector, fused by
+ ;; seon.vector/rrf) that the plan does not cite, each a line at summary depth in the screen form
+ ;; (my.task/related), made again when the plan's vector changes; 0 shows none. Not
+ ;; :seon.config.render/similar: that counts program functions in the task story, the run's fixed
+ ;; part (for the prompt cache), and is off by step 6's measurement; these follow the plan as it is
+ ;; rewritten. Provenance: the owner, 2026-10-25 ("embeddings on our docs ... pulling in related
+ ;; concepts that we can refine over the session"); 5 each found 0.51 of what 31 merged tasks
+ ;; changed in functions, 0.71 in sections and 0.56 in schema keys, at about 370 + 370 + 33 tokens a
+ ;; turn (notes/related-search-2026-10-25.md).
+ :seon.config.render/related 5
  ;; Semantic search's pyramid (seon.vector/near, docs/vector.md#the-pyramid), measured against an
  ;; exact 768-dim search, recall@10 (EmbeddingGemma-2):
  ;; - bin/check vectors, Seon's whole text (2,681: 1,783 forms with the schemas, 321 sections, the
