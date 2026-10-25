@@ -281,6 +281,17 @@
     (doseq [n (keep #(seon.source/file-ns (val %)) files)] (require n))
     (let [db (ts/test-db)] (d/db-with db (seon.source/import-tx db files)))))
 
+(deftest a-render-reaches-no-process
+  ;; root, 2026-10-25: after jolt/agent-conversation merged, bin/prove planned 29 keys of 686 tests:
+  ;; every test reaches every schema's declared render (contract/checked, the registry, the schema
+  ;; forms), and seon.render.ui/did named my.agent/prove as a quoted symbol, which the reach walk
+  ;; follows (seon.program/reach-graph), so every test reached seon.lib/fork! through it, counted
+  ;; as reaching a process and was left out of bin/prove. A render runs no process
+  (let [idx (seon.program/reach-index (src-program) {:env "e" :tree "t"}
+                                      {"agent" '[seon.render.ui/agent] "root" '[seon.render.ui/root] "page" '[seon.render.ui/page]})]
+    (is (= {"agent" false "root" false "page" false} (update-vals idx :process?))
+        "no render reaches a process var (:seon.config.source/process-vars)")))
+
 (defn- sites
   "The vars of src whose forms reference one of marks (the compiler's :form/refs), in
   namespaces ns? holds."
