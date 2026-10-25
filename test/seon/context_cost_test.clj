@@ -69,19 +69,19 @@
 (deftest related-ranks-each-kind-by-one-search
   (cost/proof {:of 'seon.context/related :input 'seon.context-cost-test/related-of-changed
                :n "wiki sections with vectors"
-               :work (str "the plan's citations parsed once, and one seon.vector/near a kind (every coarse row read "
-                          "once, its shortlist reranked), the graph's seeks for what the plan cites (none here), "
-                          "and one rrf of each kind's two rankings: linear in the vectors")
+               :work (str "the plan's citations parsed once, and one seon.vector/near a kind (each reads every coarse "
+                          "row, its shortlist of 400 reranked: one seek a row), the graph's seeks for what the plan "
+                          "cites (none here), and one rrf of each kind's two rankings: linear in the vectors")
                :growth :linear
-               ;; measured at n=100 (prove, 2026-10-25): 145 calls, 3.39 MB. The calls are ~100
-               ;; seon.vector/stored, one EAVT seek per row the fine level reranks (every row below
-               ;; the 400-row :seon.config.vector/shortlist), and ~45 fixed: three near (each its
-               ;; vector-of, unpack and pack-dims), the citation parse and the resolver's read. One
-               ;; seek a reranked row is the work (the shortlist's rows are scattered: a batch read
-               ;; would scan every f16 row), so past the shortlist the calls are constant, ~445, as
-               ;; seon.vector-cost-test/a-search-reads-each-row-once measures past it. Each near reads
-               ;; every coarse row before :of filters them (two of the three here keep none): per-n
-               ;; bytes three times near's own 700. Estimates to be set from the run at these sizes.
-               :per-n {:bytes 2100.0 :calls 0.0}
-               :fixed {:bytes 6500000.0 :calls 460.0}
+               ;; measured 2026-10-25: 145 calls, 3.39 MB at n=100 (below the shortlist); 445 calls
+               ;; at 500 and at 1,000, 8.18 MB and 8.92 MB (~1.48 KB a row). The calls are one
+               ;; seon.vector/stored seek per row the fine level reranks (the 400 of
+               ;; :seon.config.vector/shortlist, each row once: the shortlist's rows are scattered, a
+               ;; batch read would scan every f16 row) and ~45 fixed: three near (each its vector-of,
+               ;; unpack and pack-dims), the citation parse and the resolver's read; constant past
+               ;; the shortlist, as seon.vector-cost-test/a-search-reads-each-row-once measures past
+               ;; it. Each near reads every coarse row before :of filters them, so the per-row bytes
+               ;; are ~2.1x near's own 700 B (seon.vector/one-scan-ranks-every-kind).
+               :per-n {:bytes 1480.0 :calls 0.0}
+               :fixed {:bytes 7440000.0 :calls 445.0}
                :sizes [500 1000 2000]}))
