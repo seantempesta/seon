@@ -98,6 +98,20 @@
   (let [[tree ix] (if-let [e (and k (pdb/eid db :seon.agent/key k))] (node db e :seon.db/agent-fact [] {}) [{} {}])]
     {:tree (merge tree (environment db branch)) :ix ix}))
 
+;; ---- provenance: a query on the tx-meta (docs/ctx.md#provenance) --------------------------
+
+(defn made-by
+  "Who made attribute a of entity e as db holds it: the tx-meta of the transaction of its newest
+  datom, the branch it was written on (:seon.tx/branch), the eval whose code made it
+  (:seon.tx/eval, when an eval did) and the branch a catch-up merged it from (:seon.tx/merged),
+  with that transaction (:t); nil when e has no a. One seek of e's a and one of the transaction."
+  {:malli/schema [:=> [:cat :seon.host/db pos-int? :qualified-keyword]
+                  [:maybe [:map [:t :int] [:seon.tx/branch {:optional true} :seon.tx/branch]
+                           [:seon.tx/eval {:optional true} :seon.tx/eval] [:seon.tx/merged {:optional true} :seon.tx/merged]]]]}
+  [db e a]
+  (when-let [tx (some->> (seq (d/datoms db :eavt e a)) (map :tx) (reduce max))]
+    (assoc (dissoc (d/pull db [:seon.tx/branch :seon.tx/eval :seon.tx/merged] tx) :db/id) :t tx)))
+
 ;; ---- datoms -> patch ---------------------------------------------------------------------
 
 (defn- under?

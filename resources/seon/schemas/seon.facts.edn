@@ -363,8 +363,16 @@
  ;; the branch the transaction was written on: it travels with a merged datom, so the union
  ;; of every branch's history names who wrote what (seon.union)
  :seon.tx/branch [:and {:seon.db/index true} :keyword]
+ ;; the eval whose code made it (its :seon.eval/id on the branch, "e5"): an agent's write during
+ ;; an eval, its record's included (seon.agent/transact!); none outside an eval
+ :seon.tx/eval [:string {:min 1}]
+ ;; the branch a catch-up merged (seon.agent/merge-main!): what it applied is that branch's, not
+ ;; the agent's, though :seon.tx/branch names the branch it was written on
+ :seon.tx/merged :seon.db/branch
  :seon.tx/meta [:map {:seon.db/attributes true} [:seon.tx/runtime {:optional true} :seon.tx/runtime]
-                [:seon.tx/branch {:optional true} :seon.tx/branch]]
+                [:seon.tx/branch {:optional true} :seon.tx/branch]
+                [:seon.tx/eval {:optional true} :seon.tx/eval]
+                [:seon.tx/merged {:optional true} :seon.tx/merged]]
  ;; a message between root and an agent, as a fact on the sender's branch: root's on main, an
  ;; agent's reply on its own; the union of every branch's history joins a conversation in one
  ;; query (seon.union). from and to name a run (its :seon.run/id, "demo/f#1"),

@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent]))
+            [seon.fx :as fx] [seon.repl :as repl] [test-runner :as runner] [seon.context-test] [my.task] [my.agent]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -556,7 +556,9 @@
          (let [r (agent/merge-main! #{})]
            (is (some #{[:var 'app.m0/f1]} (:applied r)) "main's change merges in")
            (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity (agent/db) (:t r))))
-               "in a merge commit that names its runtime (task seon.db/each-commit-names-its-runtime)"))
+               "in a merge commit that names its runtime (task seon.db/each-commit-names-its-runtime)")
+           (is (= [ab (:branch cfg)] ((juxt :seon.tx/branch :seon.tx/merged) (d/entity (agent/db) (:t r))))
+               "made on the agent's branch, of what it merged from main: a caught-up fact reads as main's (task seon.ctx/a-change-names-its-eval)"))
          (is (empty? (program/changed-vars (:base @agent/state) (agent/db)))
              "and is main's, not the agent's: its base is the merge base")
          (is (= {} (program/divergence (:base @agent/state) (agent/db)))
@@ -577,7 +579,26 @@
          (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :db @store-conn})
          (let [{:keys [t]} (agent/transact! [{:note/text "the agent's"}])]
            (agent/commit!)
-           (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @store-conn t)))))
+           (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @store-conn t))))
+           (is (nil? (:seon.tx/eval (d/entity @store-conn t))) "written outside any eval: it names none"))
+         ;; task seon.ctx/a-change-names-its-eval: a write an eval's code makes names that eval
+         (let [r (repl/eval-string "(seon.agent/transact! [{:note/text \"an eval's\"}])" {"ns" "user" :origin :outside})
+               t (:t (:value r))]
+           (agent/commit!)
+           (is (= [ab (name (:handle r))] ((juxt :seon.tx/branch :seon.tx/eval) (d/entity @store-conn t))) (str "the eval that wrote it: " (:ex r)))
+           (is (nil? (:eval @agent/state)) "and once the eval ends, a write names no eval"))
+         (let [r (repl/eval-string "(throw (ex-info \"boom\" {}))" {"ns" "user" :origin :outside})]
+           (is (:ex r) "an eval that throws")
+           (is (nil? (:eval @agent/state)) "leaves no eval named"))
+         (let [r (repl/eval-string "(do (seon.repl/eval-string \"1\" {\"ns\" \"user\" :origin :screen}) (:eval @seon.agent/state))" {"ns" "user" :origin :outside})]
+           (is (= (name (:handle r)) (:value r)) "an eval inside one names its own, then the outer one's again"))
+         ;; recorded as an agent records: the eval's own record names it too
+         (swap! agent/state assoc :mode :agent :key "test/a1" :id :a1)
+         (let [r (repl/eval-string "(+ 1 2)" {"ns" "user" :origin :outside})]
+           (agent/commit!)
+           (is (= (name (:handle r)) (:record r)) "recorded")
+           (is (= (name (:handle r)) (:seon.tx/eval (d/entity @store-conn (:tx (first (d/datoms @store-conn :avet :seon.eval/id (:record r)))))))
+               "its record's transaction names it"))
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 

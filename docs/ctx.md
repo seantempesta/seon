@@ -49,6 +49,14 @@ The record's environment is read-only; everything else is writable, and history 
 
 **The screen is the agent's to change.** `(swap! ctx assoc :seon.agent/screen ["(seon.screen/show)" "(:lab.ctx/steps @ctx)"])` sets the forms its next screen evaluates (``seon.turn``'s screen reads the record; absent, ``seon.screen/forms``).
 
+## Provenance: who made each fact
+
+Who made a fact is a query on the tx-meta of its transaction, Datomic's reified transactions. Every transaction Seon makes names its branch (`:seon.tx/branch`, ``seon.db/tx-meta``). An agent's write during an eval also names that eval (`:seon.tx/eval`, its `:seon.eval/id`, "e5"): ``seon.repl/eval-string`` holds the running eval's id on the agent's state while its forms run, and ``seon.agent/transact!`` writes it, so a `swap!`, any `transact!` its code makes, and the eval's own record all name it. A catch-up (``seon.agent/merge-main!``) also names the branch it merged (`:seon.tx/merged`), so a fact main made reads as main's after the agent caught up, though the agent's branch wrote the merge.
+
+``seon.ctx/made-by`` answers it for one attribute of one entity: the tx-meta of its newest datom's transaction, by two seeks (`(seon.ctx/made-by (my.db/db) (:db/id @ctx) :lab.ctx/steps)`). The page's ctx block shows it beside each attribute, as of the eval's t: the eval that wrote it, else "from :main" for a fact the agent was forked holding, and "merged from :main" for one a catch-up brought (`seon.ctx-test/a-change-names-its-eval`; the tx-meta itself, `seon.agent-test/an-agents-transactions-name-their-runtime` and `after-merge-main-the-agent-judges-against-the-new-base`).
+
+Not covered: root's own writes (``seon.root``'s transactions on main) name no eval; a unit's members show no provenance on the block (each eval is its own record); a removed member is not shown as removed.
+
 ## Not yet
 
-Provenance (which eval and branch made each fact), the diff from main and its merge mark are the plan's next steps.
+The diff from main and its merge mark are the plan's next step.

@@ -4,7 +4,7 @@
   each key by its own schema's render. Run: bin/test seon.ctx-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [seon.cost :as cost]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema]))
 
 (def ^:private k "The test agent's key." "test-boot/a1")
 
@@ -147,6 +147,28 @@
     (is (= [":evals" ":seon.render/proofs"] (sort (keys rows))) "a row per key, its environment above them")
     (is (= (render/html proofs {:schema :seon.render/proofs}) (rows ":seon.render/proofs")) "a key whose schema declares a render draws by it")
     (is (= (render/html {"e1" {:seon.eval/id "e1"}} {:schema nil}) (rows ":evals")) "a key with none draws as the printer's structure")))
+
+(deftest a-change-names-its-eval
+  ;; task seon.ctx/a-change-names-its-eval: who made each fact is a query on the tx-meta of its
+  ;; transaction (seon.ctx/made-by): the eval whose code wrote it on the agent's branch, main for
+  ;; one the agent was forked holding, main again for one a catch-up merged; the page's block
+  ;; says so beside each key
+  (let [w (fn [db branch more tx] (:db-after (d/with db tx (pdb/tx-meta branch more))))
+        db (-> (ts/test-db)
+               (w :main {} [{:seon.agent/key k :seon.agent/id :a1}])
+               (w :main/a1 {:seon.tx/eval "e5"} [{:db/id [:seon.agent/key k] :seon.agent/screen ["(seon.screen/show)"]}])
+               (w :main/a1 {:seon.tx/merged :main} [{:db/id [:seon.agent/key k] :seon.agent/answered-t 3}]))
+        e (:db/id (d/entity db [:seon.agent/key k]))
+        by (fn [a] (dissoc (ctx/made-by db e a) :t))]
+    (is (= {:seon.tx/branch :main/a1 :seon.tx/eval "e5"} (by :seon.agent/screen)) "written by an eval: that eval, on the agent's branch")
+    (is (= {:seon.tx/branch :main} (by :seon.agent/id)) "forked holding it: main's, by no eval")
+    (is (= {:seon.tx/branch :main/a1 :seon.tx/merged :main} (by :seon.agent/answered-t)) "caught up: merged from main")
+    (is (nil? (ctx/made-by db e :seon.eval/by)) "an attribute it does not have: nobody made it")
+    (let [h (render/html (with-meta (:tree (ctx/build db k :main/a1)) {:seon.render/schema :seon.ctx/ctx}) {:db db})
+          rows (into {} (for [x (tree-seq coll? seq h) :when (and (vector? x) (= :tr (first x)))] [(last (nth x 2)) (last (nth x 4))]))]
+      (is (= {":seon.agent/screen" "e5" ":seon.agent/id" "from :main" ":seon.agent/answered-t" "merged from :main"}
+             (select-keys rows [":seon.agent/screen" ":seon.agent/id" ":seon.agent/answered-t"]))
+          "the page names who made each key"))))
 
 (declare steps)
 
@@ -298,4 +320,21 @@
                 "at 100 and at 1,000 evals")
      :growth :constant
      :fixed {:calls 5}
+     :sizes [100 1000 3000]}))
+
+(defn one-attribute
+  "The input of size n: a session of n evals and one attribute of its agent: [db e a], seon.ctx/made-by's."
+  {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
+  [n]
+  (let [db (seeded n)] [db (:db/id (d/entity db [:seon.agent/key k])) :seon.agent/id]))
+
+(deftest who-made-a-fact-costs-two-seeks-not-the-record
+  ;; the page asks it of each key of the block: its work is the attribute's datoms and its
+  ;; transaction, whatever the session holds
+  (cost/proof
+    {:of 'seon.ctx/made-by :input 'seon.ctx-test/one-attribute
+     :n "evals in the session's record"
+     :work "one seek of the entity's attribute (its one datom) and one pull of that datom's transaction: made-by's own call"
+     :growth :constant
+     :fixed {:calls 1}
      :sizes [100 1000 3000]}))

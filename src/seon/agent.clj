@@ -25,6 +25,7 @@
 ;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 ;; :tx (the last transaction transact! applied, {:db-after :tx-data}: seon.ctx patches @ctx from it)
+;; :eval (the id of the eval running, "e5", while seon.repl/eval-string runs it: what transact! names in its tx-meta)
 (defonce state (atom nil))
 
 
@@ -157,7 +158,7 @@
     (let [r (d/with (db) tx-data)]
       (swap! state assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]))
       {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
-    (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state))})]
+    (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:eval @state) (assoc :seon.tx/eval (:eval @state))))})]
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
       ;; :tx, the transaction that moved :db: what seon.ctx patches @ctx from
       (swap! state assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]) :dirty? true)
@@ -285,7 +286,7 @@
       {:ok true :applied [] :conflicts [] :t (:max-tx head)}
       (let [rep (d/merge-db conn #{main-b} (into (pm/merge-tx head (:base @state) main (:apply r) data-attrs)
                                               (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
-                             (pdb/tx-meta (:branch @state)))
+                             (pdb/tx-meta (:branch @state) {:seon.tx/merged main-b}))
             ops (pdb/report->tx rep)
             errs (program/load-changes! (:db-after rep) ops)]
         ;; the merge base is now main's head: what main changed is not this branch's change
