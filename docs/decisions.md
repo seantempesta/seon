@@ -3,6 +3,8 @@
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in notes/archive/DECISIONS-superseded.md.
 
 ## 2026-10-25 rulings
+### A request's stages are separate steps in one session
+Owner, 2026-10-25: "I want the investigation and implementation and merging steps to be separate steps so we can instruct the agent through some reliability steps but their previous context will be available so I do want the context to transfer (just have it be the same session right?)". Design, implement and merge stay separate tasks with their own instructions and checks, worked in one session: the next stage continues the same conversation on the same branch. Also: "Errors can be customized again ... Maybe that is a good easy task to investigate?" A candidate first request for the pipeline. Stated in: not yet (owed the agent-loop design).
 ### Every agent parks; resume replays pure forms and asks for effects
 Owner, 2026-10-25: chose "Always park" (measured: a parked agent is 1 thread, 0% CPU, wakes in 7-35 ms; 47-300 MB each) and "Auto-replay pure, ask for effects". An agent parks until its task finishes. On resume, effect-free forms are evaluated again automatically and effectful ones (sends, writes, spawns) are listed for the user's approval; every eval records the functions it called so effects are known, not guessed; each task's agent namespace is stable, so forms never name an agent id. Stated in: not yet.
 ### A session continues across turns and resumes; its context is generated from the db at a commit
