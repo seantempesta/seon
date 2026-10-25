@@ -101,6 +101,24 @@
                     :else m)))
           (or seen {}) [:value :out]))
 
+(defn read-rest
+  "What a cut's continuation form (seon.print.emit/continuation: get-in, nth, seq, key, val, a
+  mark's keyword, subs and drop over its handle) reads from root, the value its handle names, so
+  the page shows a cut's rest as the model would read it, from the record (a marked text's rest
+  keeps its mark). A form of any other operator reads nil."
+  {:malli/schema [:=> [:cat :any :any :any] :any]}
+  [form handle root]
+  (cond (= form handle) root
+        (not (seq? form)) form
+        :else (let [[op & args] form
+                    [x y] (map #(read-rest % handle root) args)]
+                (case op
+                  get-in (get-in x y) nth (nth x y nil) seq (seq x) key (key x) val (val x)
+                  ;; a marked text's rest keeps its mark: code reads on as code
+                  subs (let [k (first (first args))] (if (and (seq? (first args)) (#{:seon.print/code :seon.print/prose} k)) {k (subs x y)} (subs x y)))
+                  drop (vec (drop x y))
+                  (when (keyword? op) (get x op))))))
+
 (defn record-text
   "An eval's record (:seon.eval/record) as its response reads, printed now (`response-text`, with
   seen): its stored value printed; a value that is not plain data was printed as it was recorded

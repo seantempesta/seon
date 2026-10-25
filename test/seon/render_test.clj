@@ -771,9 +771,13 @@
   ;; input, or presentation; at main's t
   (let [[main branch eid] (paged-dbs)
         [st1 _] (#'p/pass-view (comp-state main branch eid) :a3)
-        {:keys [t page]} (p/screen-of st1 :a3)
-        text (pr-str page)]
+        {:keys [t page] :as screen} (p/screen-of st1 :a3)
+        ;; the page is its own :seon.render/html render, so the agent's page draws it (the value view)
+        page (:seon.render/html page)
+        ;; the screen as the model reads it: the page's data printed once by the one printer
+        text (seon.print/text page seon.print/default-budget)]
     (is (= (:max-tx main) t))
+    (is (= #{:seon.render/html} (set (keys (:page screen)))) "the page, its own render")
     (is (vector? page) "hiccup, as the page is")
     (is (some #{[:h1 "a3"]} (tree-seq coll? seq page)) "the agent's head")
     (is (some #(and (vector? %) (= :li (first %)) (some #{"a3"} %)) (tree-seq coll? seq page)) "root's agents, the sidebar")
@@ -1174,13 +1178,17 @@
 
 (deftest a-cut-opens-its-path-in-the-row
   ;; the value view's step 3: a cut on the page is a toggle naming its path; the row, given that
-  ;; path opened (/open), renders it at the whole budget from the record, under the form the cut names
-  (let [body (str/join "\n" (repeat 50 "  (is (= 2 (f 1)))"))
-        proof (fn [n] {:test (symbol "demo-test" n) :source (seon.print/code (str "(deftest " n "\n" body ")"))})
-        rec {:code "(my.task/status)" :response {:handle 'result/e5 :value {:proofs (mapv proof ["t" "u" "v"])}}}
+  ;; path opened (/open), renders it at the whole budget from the record, under the form the cut
+  ;; names, so it shows what the cut left
+  (let [body (fn [n] (str/join "\n" (repeat 50 (str "  (is (= " n " (f " n ")))"))))
+        proof (fn [n] {:test (symbol "demo-test" (str "t" n)) :source (seon.print/code (str "(deftest t" n "\n" (body n) ")"))})
+        rec {:code "(my.task/status)" :response {:handle 'result/e5 :value {:proofs (mapv proof (range 1 5))}}}
+        shown (fn [html] (count (filter #(str/includes? html (body %)) (range 1 5))))
         closed (h/html (ui/evaluation {:seon.eval/record rec} {}))
-        path (second (re-find #"class=\"seon-print-cut\" data-seon-path=\"(\[:value :proofs \d :source\])\"" closed))
-        opened (h/html (ui/evaluation {:seon.eval/record rec} {:opened #{path}}))]
-    (is path "three sources over the value's budget: a source cut, its cut a toggle naming its path in the value printed")
-    (is (not (str/includes? closed body)) "closed, that source is cut")
-    (is (str/includes? opened body) "opened, its path renders whole at the value's budget")))
+        path (some-> (re-find #"class=\"seon-print-cut\"[^>]*? data-seon-form=\"([^\"]*)\"" closed) second (str/replace "&amp;" "&"))
+        opened (when path (h/html (ui/evaluation {:seon.eval/record rec} {:opened #{path}})))]
+    (is path (str "four sources over the value's budget: a cut, a toggle naming the form that reads its rest: "
+                  (shown closed) " shown; " (pr-str (re-seq #"seon-print-(?:cut|elision)[^<]{0,160}" closed))))
+    (is (< (shown closed) 4) "closed, a source is left out")
+    (is (> (shown opened) (shown closed)) "opened, what its form reads renders: what the cut left shows")))
+

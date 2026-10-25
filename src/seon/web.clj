@@ -105,15 +105,15 @@
                  :when (seq k)]
              [(java.net.URLDecoder/decode k "UTF-8") (java.net.URLDecoder/decode (or v "") "UTF-8")])))
 
-(defn- open-path
-  "The path a toggled unit names after its row's id (\"row/[:value :proofs 0]\", a cut the page
-  opened, seon.print.emit/elided-hiccup): its vector; nil for a unit with none (a row itself);
-  ::unread when the text after the slash is not an EDN vector (the edge: the browser's text)."
-  {:malli/schema [:=> [:cat :string] [:or :nil [:vector :any] [:= ::unread]]]}
+(defn- open-form
+  "The form a toggled unit names after its row's id (\"row/(drop 1 (get-in result/e5 [:value]))\",
+  a cut the page opened, seon.print.emit/elided-hiccup): that form; nil for a unit with none (a
+  row itself); ::unread when the text after the slash does not read as EDN (the edge: the
+  browser's text)."
+  {:malli/schema [:=> [:cat :string] :any]}
   [unit]
   (when-let [p (second (str/split unit #"/" 2))]
-    (let [v (try (sedn/decode p) (catch Exception _ ::unread))]
-      (if (vector? v) v ::unread))))
+    (try (sedn/decode p) (catch Exception _ ::unread))))
 
 (defn- ask!
   "m asked of the web proc on its :http in-port (seon.step/ask-edge), and its one answer waited
@@ -156,10 +156,10 @@
           ;; a page's list end scrolled into view: its next rows
           (and (= m :post) (= uri "/more")) (do (a/>!! ch {:op :more :view (view-of (get q "view"))}) {:status 204 :headers {}})
           ;; a row's <details> toggled (the debug page): its unit renders its whole content while open
-          ;; a cut opened (unit "row/path"): its path must read as a vector, or the render proc never sees it
+          ;; a cut opened (unit "row/form"): its form must read as EDN, or the render proc never sees it
           (and (= m :post) (= uri "/open"))
-          (if (= ::unread (open-path (get q "unit" "")))
-            {:status 400 :headers {"Content-Type" "text/plain"} :body (str "a cut's path is an EDN vector: " (get q "unit"))}
+          (if (= ::unread (open-form (get q "unit" "")))
+            {:status 400 :headers {"Content-Type" "text/plain"} :body (str "a cut's form reads as EDN: " (get q "unit"))}
             (do (a/>!! ch {:op :toggle :view (view-of (get q "view")) :unit (get q "unit") :open (= "true" (get q "open"))})
                 {:status 204 :headers {}}))
           (and (= m :get) (= uri "/feed"))

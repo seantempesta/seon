@@ -471,10 +471,10 @@
            (let [v (shown-value (:response rec))]
              [:div {:class "flex flex-col gap-1 text-text-200"}
               [:div {:class "flex gap-2"} [:span {:class "text-text-500"} "⇒"] (render/html v {:handle (:handle r)})]
-              ;; each path a cut opened, rendered whole from the record (the form its cut names reads the same)
-              (for [p (:opened opts) :let [path (edn/read-string p)] :when (vector? path)]
-                [:div {:class "flex gap-2"} [:code {:class "text-text-500"} p]
-                 (render/html (get-in v path) {:handle (list 'get-in (:handle r) path)})])])
+              ;; each cut opened: what its form reads, from the record, under that form (seon.web/open-form read it)
+              (for [f (:opened opts) :let [form (edn/read-string f)]]
+                [:div {:class "flex gap-2"} [:code {:class "text-text-500"} f]
+                 (render/html (print/read-rest form (:handle r) v) {:handle form})])])
            [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (prose (or (:text r) "") (part))]))
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
@@ -861,7 +861,7 @@
         tiles (remove #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))) nodes)
         on (vec (reverse (take shown listed)))
         older (- (count listed) (count on))
-        ;; an eval's row: open or not, and the paths of its value its cuts opened ("id/path", /open)
+        ;; an eval's row: open or not, and the forms of its cuts opened on the page ("id/form", /open)
         as (fn [nd] (if (#{:seon.db/eval-fact :seon.turn/turn-fact} (:seon.render/schema nd))
                       (let [id (comp-id (:seon.render/eid nd) :chat)]
                         [:chat (contains? (or open #{}) id)

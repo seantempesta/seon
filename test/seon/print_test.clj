@@ -376,8 +376,8 @@
         rows (rest (elements table :tr))]
     (is table)
     (is (some #(str/includes? (pr-str %) "seon-print-elision") rows) "the collection's cut is a row of its own")
-    (is (some #(= "seon-print-grid" (:class (second %))) (tree-seq coll? seq table)) "a nested map is its cell, a grid")
-    (is (str/includes? (pr-str (second rows)) "demo-test/t0") "a row's cells under their keys")))
+    (is (seq (elements table :div "seon-print-grid")) "a nested map is its cell, a grid")
+    (is (some #(str/includes? (pr-str %) "demo-test/t") rows) "a row's cells under their keys")))
 
 (deftest a-lifted-map-keeps-its-namespace
   ;; self-review: a map of one namespace's keys prints #:ns{...}; the grid drops the braces, so its
@@ -385,3 +385,11 @@
   (let [{:keys [text html]} (seon/print-value {:seon.run/id "r" :seon.run/status :done} {:outputs #{:text :hiccup}})]
     (is (str/starts-with? text "#:seon.run{") text)
     (is (= ["#:seon.run"] (map last (elements html :div "seon-print-caption"))))))
+
+(deftest a-cuts-form-reads-its-rest
+  ;; seon.print/read-rest reads what a cut's continuation reads, from the value its handle names
+  (let [v {:value {:proofs [{:t 1} {:t 2} {:t 3}] :src (seon/code "abcdef") :s "hello"}}]
+    (is (= [{:t 2} {:t 3}] (seon/read-rest '(drop 1 (get-in result/e5 [:value :proofs])) 'result/e5 v)))
+    (is (= {:seon.print/code "def"} (seon/read-rest '(subs (:seon.print/code (get-in result/e5 [:value :src])) 3) 'result/e5 v)) "code reads on as code")
+    (is (= "lo" (seon/read-rest '(subs (get-in result/e5 [:value :s]) 3) 'result/e5 v)))
+    (is (= 2 (seon/read-rest '(val (nth (seq (get-in result/e5 [:value :proofs 1])) 0)) 'result/e5 v)))))

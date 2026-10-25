@@ -121,11 +121,9 @@
     (is (= "<ul><li class=\"inline\">1<b>inner 0</b></li></ul>" (seon.web.html/html [:ul [row 1 {:as :inline}]])))
     (is (= "<a href=\"/\">x</a>" (seon.web.html/html [:a {:href "/"} "x"])) "a keyword head is an element")))
 
-(deftest an-unread-cut-path-never-reaches-the-render-proc
-  ;; seon.web/open-path, the edge: the browser's text after a row's id reads as a vector or is refused
-  (let [open-path @#'seon.web/open-path]
-    (is (nil? (open-path "c12-chat")) "a row's own toggle names no path")
-    (is (= [:value :proofs 0] (open-path "c12-chat/[:value :proofs 0]")))
-    (is (= [:value :seon.print/code] (open-path "c12-chat/[:value :seon.print/code]")) "a path's keyword may hold a slash")
-    (is (= :seon.web/unread (open-path "c12-chat/[:value")) "unreadable text")
-    (is (= :seon.web/unread (open-path "c12-chat/:value")) "not a vector")))
+(deftest an-unread-cut-form-never-reaches-the-render-proc
+  ;; seon.web/open-form, the edge: the browser's text after a row's id reads as EDN or is refused
+  (let [open-form @#'seon.web/open-form]
+    (is (nil? (open-form "c12-chat")) "a row's own toggle names no form")
+    (is (= '(drop 1 (get-in result/e5 [:value :proofs])) (open-form "c12-chat/(drop 1 (get-in result/e5 [:value :proofs]))")) "a form's symbols hold a slash")
+    (is (= :seon.web/unread (open-form "c12-chat/(drop 1")) "unreadable text")))
