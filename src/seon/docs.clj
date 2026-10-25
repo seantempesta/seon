@@ -191,9 +191,11 @@
   lead is the stored lead, the sections below are those whose parent it is (in the order the
   wiki was written), and at :code its own text whole. Whatever the depth, its edges from the
   stored facts, each at summary depth: :references, what its text cites, and :cited-by, the
-  sections that cite it. nil when main holds no such section."
-  {:malli/schema [:=> [:cat :seon.host/db :string :seon.ref/depth] [:maybe :seon.ref/view]]}
-  [db address depth]
+  sections that cite it (unless edges? is false, as for a text made whole, page-text). nil when main holds no such section."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :string :seon.ref/depth] [:maybe :seon.ref/view]]
+                  [:=> [:cat :seon.host/db :string :seon.ref/depth :boolean] [:maybe :seon.ref/view]]]}
+  ([db address depth] (view db address depth true))
+  ([db address depth edges?]
   (when-let [e (pdb/eid db :seon.section/address address)]
     (let [{:seon.section/keys [heading lead text references]} (d/pull db [:seon.section/heading :seon.section/lead :seon.section/text
                                                                            {:seon.section/references [:db/id]}] e)
@@ -207,8 +209,8 @@
                            lead (assoc :seon.ref/lead lead)
                            (and text (= :code depth)) (assoc :seon.ref/text text))
                          depth)
-        (seq references) (assoc :seon.ref/references (edges references))
-        (seq cited-by) (assoc :seon.ref/cited-by (edges cited-by))))))
+        (and edges? (seq references)) (assoc :seon.ref/references (edges references))
+        (and edges? (seq cited-by)) (assoc :seon.ref/cited-by (edges cited-by)))))))
 
 (defn page-top
   "The entity of the page at path's own section (the one with no parent), or nil."
@@ -233,12 +235,14 @@
   shows the sections below): each its view at depth (:code by default) and its :level (1 for the
   page's own); nil when db holds no section of it."
   {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:maybe [:vector :seon.ref/view]]]
-                  [:=> [:cat :seon.host/db :string :seon.ref/depth] [:maybe [:vector :seon.ref/view]]]]}
+                  [:=> [:cat :seon.host/db :string :seon.ref/depth] [:maybe [:vector :seon.ref/view]]]
+                  [:=> [:cat :seon.host/db :string :seon.ref/depth :boolean] [:maybe [:vector :seon.ref/view]]]]}
   ([db path] (page db path :code))
-  ([db path depth]
+  ([db path depth] (page db path depth true))
+  ([db path depth edges?]
    (when-let [top (page-top db path)]
      (letfn [(walk [e level]
-               (into [(assoc (view db (:seon.section/address (d/pull db [:seon.section/address] e)) depth) :level level)]
+               (into [(assoc (view db (:seon.section/address (d/pull db [:seon.section/address] e)) depth edges?) :level level)]
                      (mapcat #(walk % (inc level))) (children db e)))]
        (walk top 1)))))
 
@@ -247,7 +251,7 @@
   level, then its own text; nil when db holds none of it."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]]}
   [db path]
-  (some->> (page db path)
+  (some->> (page db path :code false)
            (map (fn [{:seon.ref/keys [heading text] :keys [level]}] (cond-> (str (apply str (repeat level "#")) " " heading) text (str "\n\n" text))))
            (str/join "\n\n")))
 

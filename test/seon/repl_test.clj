@@ -153,7 +153,7 @@
     (is (str/includes? (printed toc) "docs/agent.md#done") "no argument: the help page's sections at summary")
     (is (str/includes? (printed anchor) "The judge counts exactly") "an anchor of the help page")
     (is (str/includes? (printed other) "docs/vector.md#the-model") "any address of the wiki")
-    (is (not (str/includes? (printed miss) "nil")) "a miss is not nil")
+    (is (= #{:no-section :help-page :pages :read-one} (set (keys (:value miss)))) "a miss is the declared map, not nil")
     (is (str/includes? (printed miss) "docs/agent.md#done") "a miss lists the help page's sections")
     (is (str/includes? (printed miss) "docs/vector.md") "every page's path")
     (is (str/includes? (printed miss) "my.agent/help") "and the form that reads one")))

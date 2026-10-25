@@ -167,16 +167,16 @@
   sentence, with the sections it cites and those citing it. With an address (``docs/vector.md#the-model``) or
   an anchor of the help page (\"done\"), that section whole; with a page's path (\"docs/vector.md\"), that page
   at summary. A miss answers the help page's sections, every page's path and the form that reads
-  one, never nil."
-  {:malli/schema [:function [:=> [:cat] [:vector :map]] [:=> [:cat :string] [:or :seon.ref/view [:vector :map] :map]]]}
-  ([] (docs/page (agent/db) context/help-page :summary))
+  one, never nil. (Before this an anchor answered its text alone; it answers the view, :seon.ref/text among its keys.)"
+  {:malli/schema [:function [:=> [:cat] [:vector :seon.ref/view]] [:=> [:cat :string] [:or :seon.ref/view [:vector :seon.ref/view] [:map [:no-section :string] [:help-page [:vector :seon.ref/view]] [:pages [:vector :string]] [:read-one :string]]]]]}
+  ([] (vec (docs/page (agent/db) context/help-page :summary)))
   ([address]
    (let [db (agent/db)
          a (if (str/includes? address "#") address (str context/help-page "#" address))]
      (or (docs/view db a :code)
          (docs/page db address :summary)
          {:no-section address
-          :help-page (docs/page db context/help-page :summary)
+          :help-page (vec (docs/page db context/help-page :summary))
           :pages (docs/page-paths db)
           :read-one "(my.agent/help \"docs/<page>.md\") lists a page's sections; (my.agent/help \"docs/<page>.md#<section>\") reads one"}))))
 
