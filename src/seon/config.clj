@@ -42,7 +42,7 @@
     (if d
       d
       (let [msg "neither SEON_CHECKOUT nor JOLT_PWD is set: the checkout the config file and its paths are read from (bin/env exports SEON_CHECKOUT)"]
-        (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation 'seon.config/checkout
+        (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation (symbol #'seon.config/checkout)
                              :seon.error/message msg}))))))
 
 (defn profile
@@ -107,7 +107,7 @@
                   {:key (or (first in) (first path))
                    :problem (case type :malli.core/extra-key :unknown-key :malli.core/missing-key :missing-key :invalid)
                    :value (sedn/encode value)}))]
-    {:seon.error/type :seon.config/refused :seon.error/operation 'seon.config/resolved
+    {:seon.error/type :seon.config/refused :seon.error/operation (symbol #'seon.config/invalid)
      :seon.error/message (str "the config does not satisfy :seon.config/config: "
                               (str/join ", " (for [{:keys [key problem]} ps] (str key " " (name problem)))))
      :seon.config/problems ps}))
@@ -169,7 +169,7 @@
         (if (empty? ps)
           m
           (let [msg (str "the config does not satisfy :seon.config.ai/reasoning-pair: " (str/join ", " (map (comp pr-str :key) ps)))]
-            (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation 'seon.config/resolved
+            (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation (symbol #'seon.config/resolved)
                                  :seon.error/message msg :seon.config/problems ps}))))))))
 
 ;; ---- the layers: the shipped file, the checkout's own file, the command line ------------------

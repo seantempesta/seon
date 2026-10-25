@@ -110,7 +110,7 @@
              (cond
                (:jolt/ticks-spent d)
                (throw (ex-info "the form spent its tick budget"
-                               (contract/error :seon.repl/ticks-spent 'seon.repl/eval-code
+                               (contract/error :seon.repl/ticks-spent #'seon.intr/run
                                                (str "the form ran " (:jolt/ticks-spent d) " engine ticks (procedure calls and loop"
                                                     " back-edges), its budget of " ticks ", and was stopped: a loop that never ends,"
                                                     " or more work than one form should do")

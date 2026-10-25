@@ -19,7 +19,7 @@
 (defn- refused
   "The server refusing a request, as root's API does: the one error map."
   {:malli/schema [:=> [:cat :string] :seon.root/refused]}
-  [why] (contract/error :seon.root/refused 'seon.server/answer why))
+  [why] (contract/error :seon.root/refused #'seon.server/refused why))
 
 (defn task-summaries
   "Every task on main db: {id {:execution :done :blocked-by :runs [[id status outcome
@@ -250,7 +250,7 @@
            (sedn/encode (answer sys (edn/read-string line))))
          (catch Throwable e
            (let [cause (step/error-msg e)
-                 d (contract/error :seon.server/defect 'seon.server/answer
+                 d (contract/error :seon.server/defect #'seon.server/respond
                                    (if (and mcp? (nil? @msg)) (str "a line opening {\" is MCP's JSON-RPC, and an EDN request a keyword-keyed map; this one is not JSON: " cause) cause)
                                    (cond-> {:line line} (ex-data e) (assoc :data (sedn/encode (ex-data e)))))]
              (if mcp?

@@ -80,7 +80,7 @@
   [fd]
   (when-not (and (not (neg? (c-fcntl fd F-SETOWN (lib/c-getpid))))
                  (not (neg? (c-fcntl fd F-SETFL (bit-or O-ASYNC (c-fcntl fd F-GETFL 0))))))
-    (contract/error :seon.sock/unwatched 'seon.sock/signal-at-input!
+    (contract/error :seon.sock/unwatched #'seon.sock/signal-at-input!
                     (str "fd " fd " cannot raise SIGIO (fcntl errno " (ffi/errno) "): this process ends only when it next reads its socket")
                     {:errno (ffi/errno)})))
 

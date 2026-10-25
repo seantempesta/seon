@@ -69,7 +69,7 @@
   "The writer refusing a request, as the one error map (:seon.writer/refused); members
   describe the refused answer."
   {:malli/schema [:=> [:cat :string :map] :seon.writer/refused]}
-  [why members] (contract/error :seon.writer/refused 'seon.writer/writer-proc why members))
+  [why members] (contract/error :seon.writer/refused #'seon.writer/refused why members))
 
 (defn- merge-refused
   "Why branch head (its three-way r against main) cannot merge into main now (session M1), or
@@ -85,23 +85,23 @@
         uncontracted (pm/uncontracted (:ours r))]
     (cond
       (seq (:theirs r))
-      (contract/error :seon.merge/behind 'seon.writer/merge-refused
+      (contract/error :seon.merge/behind #'seon.writer/merge-refused
                       (str "main changed " (count (:theirs r)) " key(s) since the branch's merge base: merge main into the branch first")
                       {:tx (:max-tx main) :behind (count (:theirs r))
                        :seon.error/fix "A merge task merges main into the branch (my.branch/merge-main!), resolves any conflict, and its proofs run on the combined program."})
       (seq unmerged)
-      (contract/error :seon.merge/unmerged 'seon.writer/merge-refused
+      (contract/error :seon.merge/unmerged #'seon.writer/merge-refused
                       (str "the branch has " (count unmerged) " unmerged entr(ies)")
                       {:tx (:max-tx main) :unmerged (mapv :key unmerged)})
       (seq (pm/mutations main (:ours r)))
       (let [ms (pm/mutations main (:ours r))]
-        (contract/error :seon.merge/mutation 'seon.writer/merge-refused
+        (contract/error :seon.merge/mutation #'seon.writer/merge-refused
                         (str "the branch's program " (str/join "; " (for [m ms] (str (sedn/encode (:defines m))
                                                                                     (if (:call m) (str " calls " (:call m)) (str " defines " (:inline-def m) " inside a function body"))))))
                         {:tx (:max-tx main) :mutations ms
                          :seon.error/fix "Every definition happens once, where it is defined: vary behaviour through arguments or the environment, and define at the top level, not inside a function."}))
       (seq uncontracted)
-      (contract/error :seon.merge/uncontracted 'seon.writer/merge-refused
+      (contract/error :seon.merge/uncontracted #'seon.writer/merge-refused
                       (str "the branch carries " (count uncontracted) " function(s) without a contract")
                       {:tx (:max-tx main) :uncontracted uncontracted
                        :seon.error/fix "Declare each function's contract ({:malli/schema [:=> [:cat ...] ...]}) and merge again."}))))
@@ -122,7 +122,7 @@
                                why-not (if have? (merge-refused main head r) (refused (str "no branch " b) {}))
                                why-not (or why-not
                                            (when (some taken (keys (:ours r)))
-                                             (contract/error :seon.merge/behind 'seon.writer/octopus-merge
+                                             (contract/error :seon.merge/behind #'seon.writer/octopus-merge
                                                              "another member of the octopus merge changes the same definitions: merge main into the branch first"
                                                              {:tx (:max-tx main) :behind (count (filter taken (keys (:ours r))))})))]
                            (-> acc (update :members conj {:branch b :r r :head head :base base :refused why-not})

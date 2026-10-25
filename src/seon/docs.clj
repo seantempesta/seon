@@ -496,7 +496,8 @@
       (and (= :namespace kind) (symbol? nm))
       (let [nv (ref/namespace-view db nm :doc)]
         (print/code (str "(ns " nm (when-let [d (:seon.ref/lead nv)] (str "\n  " (emit/string-literal d))) ")"
-                         (when-let [b (seq (:seon.ref/below nv))] (str "\n" (names-lines (map :seon.ref/heading b)))))))
+                         ;; each definition a line: its name and its doc's first sentence
+                         (when-let [b (seq (:seon.ref/below nv))] (str "\n" (str/join "\n" (map #(str ";; " (:seon.ref/heading %)) b)))))))
       ;; a task, a section, a file, or what reaches nothing: its address and lead as prose (comment
       ;; lines), then the form that reads it whole; never its view's map
       hit

@@ -61,7 +61,8 @@ The program as your branch records it answers where things are, so read before y
 - A function: `(clojure.repl/doc seon.task/accumulate)` and `(clojure.repl/source seon.task/accumulate)`; who calls it: `(my.agent/callers 'seon.task/accumulate)`; what it calls: `(my.agent/callees 'seon.task/accumulate)`.
 - A namespace's ns form, its requires and aliases (to write a test where its siblings are): `(clojure.repl/source seon.task)`.
 - A schema: its form, `(my.schema/forms :seon.task/task)`; the file that registers it, `(my.db/q '[:find ?f . :where [?e :schema/key :seon.task/task] [?e :schema/file ?f]])`; every key, `(keys (my.schema/forms))`.
-- A namespace's publics: `(clojure.repl/dir my.task)`; every program namespace: `(my.db/q '[:find [?n ...] :where [_ :ns/name ?n]])`.
+- A namespace, every definition, privates too, in file order, a line each (its name and its doc's first sentence): `(my.agent/help 'seon.print.select)`; read the few you need whole with `source`. Its publics alone: `(clojure.repl/dir my.task)`; every program namespace: `(my.db/q '[:find [?n ...] :where [_ :ns/name ?n]])`.
+- Where an error is raised: its `:seon.error/operation` names the function that built it; the text that builds one, `(my.agent/grep "insufficient-floor-budget")` (its `:seon.error/type`'s name).
 - Your task: `(my.task/current)`; one task by id: `(seon.task/task (my.db/db) (:seon.task/id (my.task/current)))`.
 - An effect (a file, a model, git) goes through its owner: ``(my.fx/call :kind req)``.
 

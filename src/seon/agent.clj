@@ -200,7 +200,7 @@
   [kind req]
   (if *fx-stub*
     (*fx-stub* kind req)
-    (contract/error :seon.fx/in-test 'seon.fx/call "an effect inside a test does not leave the test's process: bind seon.agent/*fx-stub*"
+    (contract/error :seon.fx/in-test #'seon.agent/fx-test "an effect inside a test does not leave the test's process: bind seon.agent/*fx-stub*"
                     {:seon.fx/kind kind})))
 
 (defn fx-send!
@@ -625,7 +625,7 @@
               (let [[r w] (sock/socketpair)]
                 (lib/fork!
                 {:refused (fn [n] (lib/c-close r) (lib/c-close w)
-                            (contract/error :seon.test/fork-refused 'seon.agent/run-tests-forked
+                            (contract/error :seon.test/fork-refused #'seon.agent/run-tests-forked
                                             (str "cannot fork the tests: " n " Chez threads active (a running future?)") {:active-threads n}))
                  :child (fn []
                           (lib/c-close r)
@@ -781,7 +781,7 @@
         (do (sock/close! fd) (send! {:op :clone-failed :k k :error (:error r)}))
         (lib/fork!
           {:fd fd :double? true
-           :refused (fn [n] (send! {:op :clone-failed :k k :error (contract/error :seon.agent/failed 'seon.agent/clone! (str "cannot fork: " n " Chez threads active (a running future?)") {:agent (:agent m)})}))
+           :refused (fn [n] (send! {:op :clone-failed :k k :error (contract/error :seon.agent/failed #'seon.agent/clone! (str "cannot fork: " n " Chez threads active (a running future?)") {:agent (:agent m)})}))
            :parent (fn [_] (send! {:op :cloned :k k :clone (:agent m)}))
            :child (fn []
                     (let [parent (:id @state)]

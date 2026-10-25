@@ -308,4 +308,4 @@
                                  (map (fn [nd] [[(- (:seon.render/tx nd 0)) (get-in nd [:seon.render/from :seon.render/attr])] nd]))
                                  (sort-by first)
                                  (mapv second))})
-      (contract/error :seon.render/no-entity `walk (str "no entity " eid " on these dbs") {:seon.render/eid eid})))))
+      (contract/error :seon.render/no-entity #'seon.render/walk (str "no entity " eid " on these dbs") {:seon.render/eid eid})))))
