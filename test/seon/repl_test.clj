@@ -27,6 +27,23 @@
       (is (contains? e :ex)))
     (is (not (contains? (ev "(+ 1 2)") :values)) "one form answers its value alone")))
 
+(deftest a-value-that-is-no-data-among-the-values-reaches-root-printed
+  ;; (in-ns 'x) answers a Namespace: among a call's :values it is printed for the model, and the
+  ;; agent's reply to root carries the text, never the live values (which no wire encodes)
+  (let [[ns-call next-call] (at/in-agent ["(in-ns 'user) 1" "(+ 1 1)"])]
+    (is (str/includes? (str (:text ns-call)) "#namespace") "each form's value, printed")
+    (is (= 2 (:value next-call)) "and the agent lives to answer the next")))
+
+(deftest a-redefinition-that-changes-a-docstring-says-so
+  ;; owner, 2026-10-25 (DECISIONS: a change to a schema is an explicit fact the eval shows): the
+  ;; eval that changes an existing var's docstring or contract answers what it was and is now
+  (let [[_ again same] (at/in-agent ["(ns app.redef) (seon.contract/defn f \"One.\" {:malli/schema [:=> [:cat] :int]} [] 1)"
+                                      "(seon.contract/defn f \"Two.\" {:malli/schema [:=> [:cat] :int]} [] 1)"
+                                      "(seon.contract/defn f \"Two.\" {:malli/schema [:=> [:cat] :int]} [] 2)"])]
+    (is (str/includes? (str (:text again)) ":redefined") "a docstring changed: said")
+    (is (str/includes? (str (:text again)) "\"One.\"") "with what it was")
+    (is (not (str/includes? (str (:text same)) ":redefined")) "a body alone: nothing said")))
+
 (deftest an-agent-repl-answers-what-a-clojure-repl-answers
   ;; owner, 2026-10-21: "Whatever intuitions agents have we need to make sure we are matching a
   ;; real clojure repl as much as possible AND improving on it". Each row is what a Clojure

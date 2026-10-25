@@ -417,6 +417,42 @@
           (for [a attrs :let [old (get x a)] :when (and (some? old) (not (contains? now a)))]
             [:db/retract e a (if ((set (vals pointer)) a) (:db/id old) old)]))))
 
+(def meaning
+  "What a definition says of itself that text describing it relies on, so what a wiki section
+  citing it goes stale on (seon.problems/stale-sections) and an eval that changes it shows
+  (meaning-changes): its contract and its docstring, the facts def-tx asserts and retracts (owner,
+  2026-10-25, DECISIONS Dogfood rulings; the contract carries the arity)."
+  [:var/contract :var/doc])
+
+(defn meaning-changes
+  "What tx-data (an eval's definitions, def-tx's, before they are transacted on db) changes of
+  each existing var's `meaning`: [{:var :was :now :cited-by}], :was and :now its changed
+  attributes' values (a removed one absent from :now), :cited-by the wiki sections citing the var
+  (their :seon.section/references), each with the form that reads it. A new var changes nothing a
+  section relied on; nil when nothing changed. Cost: the tx-data walked once, then per var it
+  names one entity read and one index seek of its citations."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.db/tx-data] [:maybe [:vector :seon.program/meaning-change]]]}
+  [db tx-data]
+  (let [asserted (for [m tx-data :when (and (map? m) (symbol? (:var/name m)) (some #(contains? m %) meaning))] [(:var/name m) (select-keys m meaning)])
+        retracted (for [x tx-data :when (and (vector? x) (= :db/retract (first x)) (some #{(nth x 2 nil)} meaning))
+                        :let [n (:var/name (d/entity db (second x)))] :when n]
+                    [n (nth x 2)])
+        names (distinct (concat (map first asserted) (map first retracted)))
+        changes (for [n names
+                      :let [e (d/entity db [:var/name n])] :when e
+                      :let [was (into {} (keep (fn [a] (some->> (get e a) (vector a)))) meaning)
+                            now (reduce (fn [m a] (dissoc m a)) (reduce merge was (for [[k v] asserted :when (= k n)] v))
+                                        (for [[k a] retracted :when (= k n)] a))
+                            changed (filter #(not= (get was %) (get now %)) meaning)]
+                      :when (seq changed)]
+                  {:var n :was (select-keys was changed) :now (select-keys now changed)
+                   :cited-by (vec (sort-by :section (for [dt (d/datoms db :avet :seon.section/references (:db/id e))
+                                                          :let [a (:seon.section/address (d/entity db (:e dt)))]]
+                                                      ;; the form's head named, not quoted: the reach walk follows a quoted name,
+                                                      ;; and every test reaching this would reach the help page's file reads
+                                                      {:section a :read (list (symbol "my.agent" "help") a)})))})]
+    (not-empty (vec changes))))
+
 (defn- def-keys
   "The definition keys account acct makes: its vars, methods, extensions and, for an ns
   form, its namespace."

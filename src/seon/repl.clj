@@ -226,9 +226,14 @@
                               (program/account (assoc l :src (:repl/src m) :lead (:lead m) :form (:repl/form m) :ran? (contains? m :repl/value))))]
                    (when l (vreset! last nil))
                    (if acct
-                     (do (when contract/record? (agent/transact! (program/record-tx (agent/db) acct)))
-                         (assoc m :recorded (vec (concat (map :var (:defs acct)) (when (:ns-form? acct) [(:ns acct)])))
-                                :repl/defined (mapv :var (:defs acct))))
+                     (let [tx (when contract/record? (program/record-tx (agent/db) acct))
+                           ;; what this form's own transaction changes of an existing var's contract or
+                           ;; docstring, read before it is applied (a form that defines nothing reads nothing)
+                           redefined (when tx (program/meaning-changes (agent/db) tx))]
+                       (when tx (agent/transact! tx))
+                       (cond-> (assoc m :recorded (vec (concat (map :var (:defs acct)) (when (:ns-form? acct) [(:ns acct)])))
+                                      :repl/defined (mapv :var (:defs acct)))
+                         redefined (assoc :redefined redefined)))
                      (cond-> m l (assoc :repl/defined (program/set-vars l))))))))))))
 
 (defn- branch-registry
@@ -322,8 +327,10 @@
   form's value in order (:values, as nREPL answers a value per form, when more than one form
   answered: the values before an error stay), the last form's value (:value, as *1 holds it),
   what its forms wrote to *out* and *err*, the error that stopped it (:ex, the one error map),
-  and its cost summed over its forms (ms, ticks, bytes allocated); each key only when present
-  (owner, 2026-10-25, DECISIONS Dogfood rulings)."
+  what its forms changed of an existing var's contract or docstring (:redefined, wrap-record's,
+  seon.program/meaning-changes), and its cost summed over its forms (ms, ticks, bytes allocated);
+  each key only when present (owner, 2026-10-25, DECISIONS Dogfood rulings; a change to a schema
+  is an explicit fact the eval shows)."
   {:malli/schema [:=> [:cat [:sequential :seon.wire/msg] :qualified-symbol] :seon.eval/response]}
   [answers handle]
   (let [fs (filterv :tag answers)
@@ -334,6 +341,7 @@
     (cond-> {:handle handle}
       (contains? lst :repl/value) (assoc :value (:repl/value lst))
       (and (> (count fs) 1) (seq vs)) (assoc :values vs)
+      (some :redefined fs) (assoc :redefined (into [] (mapcat :redefined) fs))
       (joined :out) (assoc :out (joined :out))
       (joined :err-out) (assoc :err (joined :err-out))
       (= :err (:tag lst)) (assoc :ex (or (:err lst) {:seon.error/message (str (:err-text lst))}))
@@ -459,7 +467,7 @@
        ;; waits on, never a sleep: one arriving from here on stops it
        (intr/clear-pending!)
        (agent/send! {:op :started :id (:id m)})
-       [st {:sock [{:op :reply :id (:id m) :response (dissoc (eval-string (:forms m) (select-keys m [:ticks :origin])) :value)
+       [st {:sock [{:op :reply :id (:id m) :response (dissoc (eval-string (:forms m) (select-keys m [:ticks :origin])) :value :values)
                     :t (:max-tx (agent/db))}]}])
      [st (when-let [ms (agent/handle! m)] {:sock ms})])))
 

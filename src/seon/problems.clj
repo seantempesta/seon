@@ -229,16 +229,10 @@
   (reduce (fn [v {:keys [added] dv :v}] (if added dv (when (not= v dv) v))) nil
           (sort-by (juxt :tx :added) (filter #(<= (:tx %) t) (d/datoms hist :eavt e a)))))
 
-(def ^:private meaning
-  "What a section citing a var describes of it, so what makes the section stale when it changes:
-  its contract and its docstring (owner, 2026-10-25, DECISIONS Dogfood rulings), the facts
-  seon.program/def-tx asserts and retracts when a definition changes them."
-  [:var/contract :var/doc])
-
 (defn stale-sections
   "Each section whose text cites a var whose contract or docstring changed since the section was
   last written or reviewed, as a :stale-section row naming what changed (:changed), what it was as
-  of then (:was) and what it is (:now): the var's facts (`meaning`) as of the transaction that wrote
+  of then (:was) and what it is (:now): the var's facts (seon.program/meaning) as of the transaction that wrote
   the section's :seon.section/read (seon.docs/load-tx) or its :seon.section/reviewed
   (my.docs/reviewed!), read from history, against now. A body that changed while both stayed is
   not a change of what the section describes. A var that did not exist then (seon.docs/load-tx
@@ -276,9 +270,9 @@
                   :let [absent? (= "absent" then)
                         before? (= "changed" then)
                         existed? (some #(and (:added %) (<= (:tx %) t)) (d/datoms hist :eavt ve :var/name))
-                        was (when existed? (into {} (keep (fn [a] (some->> (value-at hist ve a t) (vector a)))) meaning))
-                        now (into {} (keep (fn [a] (some->> (get (d/entity db ve) a) (vector a)))) meaning)
-                        changed (when existed? (filterv #(not= (was %) (now %)) meaning))]
+                        was (when existed? (into {} (keep (fn [a] (some->> (value-at hist ve a t) (vector a)))) program/meaning))
+                        now (into {} (keep (fn [a] (some->> (get (d/entity db ve) a) (vector a)))) program/meaning)
+                        changed (when existed? (filterv #(not= (was %) (now %)) program/meaning))]
                   :when (or absent? before? (seq changed))
                   :let [a (address e) s (str "stale-section " a " " n)
                         fields (cond-> {:section a :name n}
