@@ -562,6 +562,15 @@
  ;; that listed them named the same functions as a run listing none (my.agent/prove,
  ;; seon.model/provider-error, seon.docs/view, seon.print/print-value): no measured gain.
  :seon.config.render/similar 0
+ ;; Unit: sections. The wiki sections nearest the task's plan by meaning (seon.context/related:
+ ;; seon.vector/near over the sections, the plan's own vector on the branch) that the plan does not
+ ;; cite, each a line on the screen at summary depth (my.task/status's :related), made again when
+ ;; the plan's vector changes; 0 shows none. Not :seon.config.render/similar: that counts program
+ ;; functions in the task story, the run's fixed part (for the prompt cache), and is off by step 6's
+ ;; measurement; these are sections, and follow the plan as it is rewritten. Provenance: the owner,
+ ;; 2026-10-25 ("embeddings on our docs ... pulling in related concepts that we can refine over the
+ ;; session"); 5 lines cost about 150 tokens a turn (measured on the fit requests, docs/vector.md).
+ :seon.config.render/related 5
  ;; Semantic search's pyramid (seon.vector/near, docs/vector.md#the-pyramid), measured against an
  ;; exact 768-dim search, recall@10 (EmbeddingGemma-2):
  ;; - bin/check vectors, Seon's whole text (2,681: 1,783 forms with the schemas, 321 sections, the

@@ -160,6 +160,40 @@
                             (vector/near db te all {:of :form/id :shortlist all :fine-dims all}))
              :more "(my.agent/similar 'ns/f) or (my.agent/similar \"text\"): more by meaning"})))
 
+(defn related
+  "The wiki sections nearest task entity te's plan by meaning (its vector, seon.vector/near over
+  the sections) that the plan does not cite, the first :seon.config.render/related of them
+  (through the one resolver, as `similar` reads its count): their addresses, best first. nil when
+  the count is 0 (none shown) or the plan has no vector yet."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe [:vector :string]]]}
+  [db te]
+  (let [t (d/pull db [:seon.task/model :seon.task/id] te)
+        k (cfg/value :seon.config.render/related {:task t :model (:seon.task/model t)})]
+    (when (and (pos? k) (vector/vector-of db te))
+      (let [{:keys [plan]} (:seon.task/accumulated (task/task db (:seon.task/id t)))
+            cited (into #{} (comp (filter #(= :view (docs/citation-kind db %))) (keep #(:seon.ref/address (docs/cited-view db %))))
+                        (ref/references db plan))]
+        (into [] (comp (map #(:seon.section/address (d/entity db (first %)))) (remove cited) (take k))
+              (vector/near db te (+ k (count cited)) {:of :seon.section/address}))))))
+
+(defn related-at
+  "`related` for task entity te on db, as {:key :value}: held (an earlier answer) reused when its
+  :key, the plan's vector (te and the transaction of its facts), is the same, so an unchanged
+  plan computes nothing; made again when the plan was embedded anew."
+  {:malli/schema [:=> [:cat :seon.host/db :int [:maybe :map]] [:map [:key :any] [:value [:maybe [:vector :string]]]]]}
+  [db te held]
+  (let [k [te (:tx (first (d/datoms db :eavt te :seon.vector/f16)))]]
+    (if (= k (:key held)) held {:key k :value (related db te)})))
+
+(defn related-view
+  "Sections at addresses, each at summary depth (seon.docs/view: its address and its lead's
+  first sentence, else its heading), and the form that reads one whole: the screen's :related."
+  {:malli/schema [:=> [:cat :seon.host/db [:vector :string]] [:map [:nearest [:vector :string]] [:read :string]]]}
+  [db addresses]
+  {:nearest (vec (for [a addresses :let [v (docs/view db a :summary)] :when v]
+                   (str a ": " (or (:seon.ref/summary v) (:seon.ref/heading v)))))
+   :read "(seon.docs/view (seon.agent/db) address :code): one whole"})
+
 (defn run-state
   "The task story: task t's run sections as data, the same each turn of a run: the task (its
   plan as it accumulated along :needs, prerequisites first); its write set, each var the plan
@@ -204,7 +238,7 @@
   wiki sections its changes made stale; the tests run; what happened to the last reply; turns
   left. The messages delivered are the conversation's (`conversation`), not the block's."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge tests attention]}]
+  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge tests attention related]}]
   (let [{:keys [proofs]} (:seon.task/accumulated t)]
     (cond-> {;; a passing proof is its status; a red or unrun one shows its source, its failures
              ;; and the program functions it calls; one not defined yet says so
@@ -225,6 +259,9 @@
       ;; the sections of the wiki this branch's code changes made stale (seon.problems/caused-split): to read and
       ;; probably fix; never a reason to refuse done
       (seq attention) (assoc :attention attention)
+      ;; the sections nearest the plan as it is now (seon.turn's observe: made again when the plan's
+      ;; vector changes), on the screen, so the story stays fixed for the prompt cache
+      (seq related) (assoc :related (related-view db related))
       ;; owner D4: every change the branch's merge carries to main, every turn measured and
       ;; empty ({}) says so; absent only when not measured (a basis before D4)
       (some? will-merge) (assoc :will-merge will-merge)

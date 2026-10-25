@@ -726,3 +726,46 @@
     (is (string? (:more sim)) "and the form that searches further")
     (is (= sim (:similar (context/run-state db (task/task db "demo/c")))) "in the story")
     (is (nil? (context/similar db nil #{})) "off by default (:seon.config.render/similar 0): nothing listed")))
+
+(defn- sections-near
+  "db with a task demo/r whose plan is plan, and five wiki sections each at a vector a step further
+  from the plan's than the one before (docs/vector.md#the-model nearest), each with a lead."
+  [plan]
+  (let [anchors (mapv #(str "docs/vector.md#" %) ["the-model" "what-is-embedded" "the-pyramid" "fused-with-the-call-graph" "sections-nearest-the-plan-on-the-screen"])
+        dir (fn [& xs] (let [v (vec (concat xs (repeat (- 768 (count xs)) 0.0))) n (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % n) v)))
+        db (ts/test-db)
+        db (d/db-with db (vec (for [i (range 5)] {:seon.section/address (anchors i) :seon.section/heading (str "S" i)
+                                                  :seon.section/lead (str "Section " i " says one thing. And more.")})))
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan plan}]))
+        te (pdb/eid db :seon.task/id "demo/r")
+        es (into [te] (for [i (range 5)] (pdb/eid db :seon.section/address (anchors i))))]
+    [(d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) (repeat 6 10) "m")) te dir]))
+
+(deftest the-screen-shows-the-sections-nearest-the-plan
+  ;; the owner (2026-10-25): embed the docs and pull in related concepts; the screen's :related, the
+  ;; sections nearest the plan's vector that it does not cite, the first :seon.config.render/related (5)
+  (let [[db te] (sections-near "Make the page say one thing (docs/vector.md#what-is-embedded).")
+        rel (context/related db te)]
+    (is (= ["docs/vector.md#the-model" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph" "docs/vector.md#sections-nearest-the-plan-on-the-screen"] rel)
+        "nearest first, the section the plan cites left out")
+    (let [st (context/turn-state db (task/task db "demo/r") {:results {} :related rel})]
+      (is (= ["docs/vector.md#the-model: Section 0 says one thing." "docs/vector.md#the-pyramid: Section 2 says one thing."
+              "docs/vector.md#fused-with-the-call-graph: Section 3 says one thing." "docs/vector.md#sections-nearest-the-plan-on-the-screen: Section 4 says one thing."]
+             (get-in st [:related :nearest]))
+          "on the screen, each at summary depth: its address and its lead's first sentence")
+      (is (str/includes? (get-in st [:related :read]) "seon.docs/view") "with the form that reads one whole"))
+    (is (not (contains? (context/turn-state db (task/task db "demo/r") {:results {}}) :related)) "nothing observed, nothing shown")
+    (is (nil? (context/related (ts/test-db) (pdb/eid db :seon.task/id "demo/r"))) "a plan with no vector shows none")))
+
+(deftest related-sections-follow-a-rewritten-plan
+  (let [[db te dir] (sections-near "Make the page say one thing.")
+        held (context/related-at db te nil)
+        _ (is (= "docs/vector.md#the-model" (first (:value held))))
+        ;; the plan rewritten on the branch and embedded there, its vector now beside s4's
+        db (d/db-with db [[:db/add te :seon.task/plan "Make the last section say it."]])
+        t (:tx (first (d/datoms db :eavt te :seon.task/plan)))
+        db (d/db-with db (vector/tx-data [te] [t] [(dir 1.0 0.5)] [10] "m"))
+        again (context/related-at db te held)]
+    (is (not= (:key held) (:key again)) "a new vector of the plan is a new key")
+    (is (= "docs/vector.md#sections-nearest-the-plan-on-the-screen" (first (:value again))) "and the sections follow it: the one nearest the new plan first")
+    (is (identical? again (context/related-at db te again)) "an unchanged plan reuses what was made")))

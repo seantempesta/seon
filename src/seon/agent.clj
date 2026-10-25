@@ -13,12 +13,13 @@
   breaks its forks; docs/failure-points.md, "Physics". Agent code calls the functions of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
+  (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.prove] [seon.fx :as fx] [seon.source :as source] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
             [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
+;; :embedded-from (the db embed-written! last read the branch's writes up to) :related (seon.turn's related sections, keyed by the plan's vector)
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
 ;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
@@ -225,6 +226,35 @@
           r (dissoc (await-op! :fx-reply k) :op :k)]
       (fx-record! k r)
       r)))
+
+;; ---- the branch's own vectors (docs/vector.md#what-is-embedded) ----------------------------
+
+(defn embed-written!
+  "The texts this branch wrote since the last call (since its fork, at the first) and its
+  task's plan, those whose vector is due for model (seon.vector/due over seon.vector/written),
+  embedded by root's :embed effect in one request (the first n of them; 0 asks nothing) and
+  their vectors written on the branch: what seon.vector/near reads here follows the agent's own
+  writes, and the model stays in root. n is :seon.config.vector/texts and model the one it names
+  unless given. Nothing due asks nothing. A failed embedding is the effect's recorded error, and
+  the texts stay due: the next call reads from the same db, as it does while more are due than
+  one request takes. Answers the texts embedded, or the error."
+  {:malli/schema [:function [:=> [:cat] [:or nat-int? :map]] [:=> [:cat nat-int? :string] [:or nat-int? :map]]]}
+  ([] (let [n (cfg/value :seon.config.vector/texts)]
+        (if (pos? n) (embed-written! n (vector/model-id (cfg/value :seon.config.vector/model))) 0)))
+  ([n model]
+   (let [head (db)
+         plan (some->> (:task @state) (pdb/eid head :seon.task/id) (#(d/datoms head :eavt % :seon.task/plan)))
+         due (vector/due head model (distinct (into (vector/written (get @state :embedded-from (:base @state)) head) plan)))
+         ask (take n due)]
+     (if (empty? ask)
+       (do (when (empty? due) (swap! state assoc :embedded-from head)) 0)
+       (let [r (fx! :embed {:texts (mapv second ask)} {})]
+         (if (contract/error? r)
+           r
+           (let [{:keys [model vectors tokens]} (:value r)]
+             (transact! (vector/tx-data (map first ask) (map peek ask) vectors tokens model))
+             (when (= (count ask) (count due)) (swap! state assoc :embedded-from (db)))
+             (count ask))))))))
 
 ;; ---- merging main into this branch (seon.merge; session M1) -------------------------------
 

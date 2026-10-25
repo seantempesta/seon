@@ -109,6 +109,7 @@
   [:seon.config.render/history-budget :seon.config.render/history-budget]
   [:seon.config.render/history-step :seon.config.render/history-step]
   [:seon.config.render/similar :seon.config.render/similar]
+  [:seon.config.render/related :seon.config.render/related]
   [:seon.config.vector/coarse-dims :seon.config.vector/coarse-dims]
   [:seon.config.vector/shortlist :seon.config.vector/shortlist]
   [:seon.config.vector/fine-dims :seon.config.vector/fine-dims]
