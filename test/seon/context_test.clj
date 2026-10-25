@@ -63,9 +63,27 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p"}]))
         t (task/task db "demo/f")]
     (is (re-find #"at the model's token limit" (:cut (:your-last-reply (context/current-state db t {:turn 1 :max-turns 4 :truncated? true})))))
-    (is (nil? (:your-last-reply (context/current-state db t {:turn 1 :max-turns 4}))))
-    ;; live agents round 1 (2026-10-25): a repeat is told, not only ended (seon.turn/work!)
-    (is (re-find #"same as the turn before's" (:repeated (:your-last-reply (context/current-state db t {:turn 2 :max-turns 4 :repeated 1})))))))
+    (is (nil? (:your-last-reply (context/current-state db t {:turn 1 :max-turns 4}))))))
+
+(deftest code-run-again-with-the-same-answer-says-so-on-it
+  ;; the live runs of 2026-10-25/26: an answer to code sent again printed as the form that reads
+  ;; the earlier one, `:out (:out result/e89)`, and the agent sent it again four times; the earlier
+  ;; one was sent whole each time. Sent again with the same answer, it prints whole beside that
+  ;; one's handle; a different answer is new, so it is not marked
+  (let [outs {"e1" "---- budget 16\n[:kw …]\n" "e2" "---- budget 16\n[:kw …]\n" "e3" "other\n"}
+        db (d/db-with (db-with-program) (for [[id out] outs]
+                                          {:seon.eval/id id :seon.eval/by "a1"
+                                           :seon.eval/record {:code "(probe)" :call-id (str "c" id) :call 0
+                                                              :response {:handle (symbol "result" id) :value nil :out out :ms 1}}}))
+        ev (fn [id] [[:eval id] (d/pull db [:seon.eval/id :seon.eval/by :seon.eval/record] [:seon.eval/id id]) :seon.db/eval-fact 1])
+        c (#'context/printed-run (mapv ev ["e1" "e2" "e3"]) nil)
+        text (fn [id] (:content (peek (get-in c [:parts id :whole]))))]
+    (is (= [:eval "e2" {:same-as 'result/e1}] (get-in c [:parts "e2" :ref])) "its ref names the earlier one")
+    (is (str/includes? (text "e2") ":same-as result/e1") (text "e2"))
+    (is (str/includes? (text "e2") "---- budget 16") "and its answer prints whole, never as (:out result/e1)")
+    (is (= [:eval "e3"] (get-in c [:parts "e3" :ref])) "a different answer to the same code is not marked")
+    (is (= (get-in c [:parts "e2" :whole]) (second (first (context/parts-of db [[:eval "e2" {:same-as 'result/e1}]]))))
+        "read back from its ref")))
 
 (defn- task-f [db] (task/task (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p"
                                                                   :seon.task/proofs #{'demo-test/f-test}}]))
@@ -439,7 +457,7 @@
             :seon.error/member :malli.core/invalid-output
             :seon.error/message "seon.e2e/agents-reused invalid-output: its value does not satisfy its contract"
             :seon.error/fix "Fix seon.e2e/agents-reused (the producer), or its contract."
-            :seon.error/problems [{:path [0] :in [0] :expected :keyword :value nil}]}
+            :seon.error/problems [{:path [0] :in [0] :expected :keyword :value {:seon.print/code "nil"}}]}
         text (print/response-text {:handle 'result/e1 :ex em})]
     (is (str/includes? text ":expected :keyword") text)
     (is (str/includes? text "Fix seon.e2e/agents-reused") text)

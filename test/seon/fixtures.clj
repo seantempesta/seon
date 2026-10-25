@@ -241,12 +241,6 @@
   {:malli/schema [:=> [:cat :seon.model/request] :string]}
   [_] "(+ 1 1)")
 
-(defn repeat-then-move
-  "The scripted model in a loop (seon.agent-test): each call twice, then a new one (turn 0 and 1
-  evaluate (+ 1 0), 2 and 3 (+ 1 1), ...): a repeat after progress is a first repeat again."
-  {:malli/schema [:=> [:cat :seon.model/request] :string]}
-  [{:keys [turn]}] (str "(+ 1 " (quot turn 2) ")"))
-
 (defn two-calls
   "The scripted model that proves a turn's rhythm (seon.agent-test): its first call evaluates
   (+ 20 21); each later call adds one to the value the last call's response showed, so its

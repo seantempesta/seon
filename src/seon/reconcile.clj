@@ -106,10 +106,10 @@
 
 (def park-outcomes
   "A run's ends that park its session instead of ending it (design agent-loop section 1): a
-  reply with no eval (waiting), its turn budget spent, no progress. Its run is written
+  reply with no eval (waiting), its turn budget spent. Its run is written
   :parked, its process stays, and the next message to the session wakes it with a fresh
   budget. An error is not one: it holds the task with its cause, as any failed run does."
-  #{:waiting :cap :no-progress})
+  #{:waiting :cap})
 
 (defn- branch-messages
   "How many messages main holds to the runs on branch br: what a parked session on br is woken

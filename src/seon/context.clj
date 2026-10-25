@@ -109,18 +109,15 @@
 (defn last-reply
   "What happened to the agent's last reply: cut at the token limit, each delimiter the
   reader repaired (what it dropped or inserted, and where: the line and column in source,
-  the reply as the reader gave it to the REPL, and that line), and calls that repeated the
-  turn before's from the same state (repeated, the run's :seon.run/repeats so far), or nil."
-  {:malli/schema [:=> [:cat [:maybe :boolean] [:maybe :string] [:vector :map] [:maybe :int]] [:maybe :map]]}
-  [truncated? source repairs repeated]
+  the reply as the reader gave it to the REPL, and that line), or nil."
+  {:malli/schema [:=> [:cat [:maybe :boolean] [:maybe :string] [:vector :map]] [:maybe :map]]}
+  [truncated? source repairs]
   (let [rs (for [{:keys [at dropped inserted]} repairs :when (not= ";; " inserted)]
              (cond-> {:near (near (or source "") at)}
                (seq dropped) (assoc :dropped dropped)
                (seq inserted) (assoc :inserted inserted)))]
     (cond-> nil
       truncated? (assoc :cut "at the model's token limit: what followed the cut was lost. Answer with less: one change at a time.")
-      repeated (assoc :repeated (str "your calls were the same as the turn before's, from the same state, so their answers are the same as above. "
-                                     "Ask something else, or change something; the same calls again end the run."))
       (seq rs) (assoc :repaired (vec rs)))))
 
 
@@ -324,7 +321,7 @@
   wiki sections its changes made stale; the tests run; what happened to the last reply; turns
   left. The messages delivered are the conversation's (`conversation`), not the block's."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs repeated will-merge tests attention]}]
+  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge tests attention]}]
   (let [{:keys [proofs]} (:seon.task/accumulated t)]
     (cond-> {;; a passing proof is its status; a red or unrun one shows its source, its failures
              ;; and the program functions it calls; one not defined yet says so
@@ -342,7 +339,7 @@
       max-turns (assoc :turn (str (inc turn) " of " max-turns))
       (seq (refused (vec reasons) (vec reds))) (assoc :refused (refused (vec reasons) (vec reds)))
       (seq test-run-errors) (assoc :test-run {:failed (vec test-run-errors)})
-      (last-reply truncated? source (vec repairs) repeated) (assoc :your-last-reply (last-reply truncated? source (vec repairs) repeated))
+      (last-reply truncated? source (vec repairs)) (assoc :your-last-reply (last-reply truncated? source (vec repairs)))
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
       ;; the sections of the wiki this branch's code changes made stale (seon.problems/caused-split): to read and
       ;; probably fix; never a reason to refuse done
@@ -378,7 +375,9 @@
   assistant message, the reply's prose and reasoning as returned with the eval call (:call, the
   call's place in its reply: the provider's format folds a reply's calls into one message),
   then its tool message, the response printed now (seon.print/record-text, opts :fold: its value or
-  output an earlier record showed, as the form that reads it there, `folded`), or with opts
+  output an earlier record showed, as the form that reads it there, `folded`; opts :same-as: the
+  handle of an earlier eval of the same code that answered the same, shown beside the answer
+  whole), or with opts
   :collapsed its handle and its value in one line (:line, which a record with a value or an
   error holds); anyone else's (the user's, the screen's) is one user message
   {:by :code :response}, the response spliced as printed."
@@ -391,6 +390,7 @@
                ;; a screen eval's cost is root's (its forms run each turn), shown on the page, not the model's
                (print/record-text (cond-> record
                                     (seq (:fold opts)) (update :response folded (:fold opts))
+                                    (:same-as opts) (assoc-in [:response :same-as] (:same-as opts))
                                     (= "screen" by) (update :response dissoc :ms :ticks :bytes))))]
     (if call-id
       ;; as the model sent it: the reply's text, and the call's own prose argument when it gave one
@@ -458,10 +458,15 @@
   output an earlier record showed, as the form that reads it there: its ref [:eval id fold]) and
   collapsed (its handle and one line), each with its cost; a screen eval after another of its form
   as seon.screen/diff of the two (its ref [:eval id {:since handle}], whole while that one is not
-  sent whole, `as-sent`: the owner's ruling, the screen sent as diffs). A record's text is a function of it and
+  sent whole, `as-sent`: the owner's ruling, the screen sent as diffs), and an eval of code an earlier
+  eval of the run ran, with the same answer, whole beside that one's handle (its ref [:eval id
+  {:same-as handle}]: the agent asked again and is told so on the answer it reads, where a fold
+  showed it only the earlier one's form; whole whatever the history sends of that one, since it
+  shows its own answer). A record's text is a function of it and
   the records before it, which never change, so a request prints only its new records and every
   older message is the same bytes (the provider's cache). An item already printed is skipped.
-  Answers the cache: {:ids :parts {id part} :seen :canon :tx}, each part {:ref :whole :collapsed
+  Answers the cache: {:ids :parts {id part} :seen :canon :codes :tx} (:codes, each code's last
+  eval: its handle and its answer's hash), each part {:ref :whole :collapsed
   :cost [whole collapsed] :call}, a folded one also :fold and :plain (it unfolded), :tx the newest
   record's."
   {:malli/schema [:=> [:cat [:sequential :any] [:maybe :map]] :map]}
@@ -479,7 +484,12 @@
                       screen? (and tx (= "screen" (:seon.eval/by v)) (contains? r :value))
                       base (when screen? (get-in c [:screens (:code rec)]))
                       c (cond-> c screen? (assoc-in [:screens (:code rec)] {:handle (:handle r) :value (:value r)}))
-                      plain (when base (ai-messages v k))]
+                      plain (when base (ai-messages v k))
+                      ;; the agent's eval of code an eval of the run ran before, answered the same: that one's handle
+                      answer (hash (assoc (dissoc r :handle :ms :ticks :bytes) :printed (:printed rec)))
+                      same (when-not (= "screen" (:seon.eval/by v))
+                             (when-let [[h a] (get-in c [:codes (:code rec)])] (when (= a answer) h)))
+                      c (cond-> c (not (or same (= "screen" (:seon.eval/by v)))) (assoc-in [:codes (:code rec)] [(:handle r) answer]))]
                   (if-let [d (when base
                                (let [d (ai-messages (as-diff v base) k)]
                                  ;; a diff longer than the value (a small one unchanged) is not sent
@@ -487,6 +497,8 @@
                     ;; a screen eval: its diff from the previous one of its form, whole while that one is not sent whole
                     (assoc-in c [:parts id] (assoc (part [:eval id {:since (:handle base)}] d (ai-messages v k {:collapsed true}))
                                                    :fold {:since (:handle base)} :plain plain))
+                  (if same
+                    (assoc-in c [:parts id] (part [:eval id {:same-as same}] (ai-messages v k {:same-as same}) (ai-messages v k {:collapsed true})))
                 (let [has? (and (contains? r :value) (coll? (:value r)))
                       ;; an equal earlier value stands for this one (seen is by identity)
                       x (when has? (get canon [(type (:value r)) (:value r)] (:value r)))
@@ -498,8 +510,8 @@
                                               ;; and as it reads unfolded: sent so while what it folds to is not shown whole
                                               (seq fold) (assoc :fold fold :plain (ai-messages v k))))
                       (assoc :seen (if (:printed rec) seen (print/seen seen r))
-                             :canon (cond-> canon has? (assoc [(type x) x] x))))))))))
-          (or cache {:ids [] :parts {} :seen nil :canon {} :screens {}}) items))
+                             :canon (cond-> canon has? (assoc [(type x) x] x)))))))))))
+          (or cache {:ids [] :parts {} :seen nil :canon {} :screens {} :codes {}}) items))
 
 (defn- as-sent
   "Part p (printed-run's) as a request sends it, whole-ids the evals it sends whole: folded (its
@@ -690,7 +702,7 @@
                    ;; a screen eval sent as its diff names the one it was taken from (:since)
                    :eval (if-let [h (:since t)]
                            (ai-messages (as-diff (ev x) {:handle h :value (get-in (ev (name h)) [:seon.eval/record :response :value])}) :seon.db/eval-fact)
-                           (ai-messages (ev x) :seon.db/eval-fact {:fold (if (map? t) t {})}))
+                           (ai-messages (ev x) :seon.db/eval-fact (cond (:same-as t) t (map? t) {:fold t} :else {})))
                    :line (ai-messages (ev x) :seon.db/eval-fact {:collapsed true})
                    :message (ai-messages (d/pull db [:seon.message/id :seon.message/from :seon.message/body] [:seon.message/id x]) :seon.message/fact)
                    :history [{:role "user" :content (pr-str {:history {:left-out x}})}])])
@@ -736,7 +748,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :map [:maybe :map]] :map]}
   [db {:keys [turn max-turns origin observed merge?]} lst]
   (let [{:keys [text repairs]} (when lst (reader/forgive (str/join "\n" (map :code (:seon.turn/calls lst)))))]
-    (cond-> (assoc observed :truncated? (:seon.turn/truncated lst) :source text :repairs (vec repairs) :repeated (:seon.turn/repeated lst)
+    (cond-> (assoc observed :truncated? (:seon.turn/truncated lst) :source text :repairs (vec repairs)
                    :unmerged (when merge? (pm/unmerged db)))
       (= :model origin) (assoc :turn turn :max-turns max-turns))))
 
