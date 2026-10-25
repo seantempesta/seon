@@ -105,16 +105,20 @@
                                     (let [c# (:conn (seon.db/open! :lmdb ~path 0 :db))]
                                       (dotimes [i# 50] (datahike.api/branch! c# :db (keyword (str ~tag "-" i#))))
                                       (System/exit 0)))))
-        cmd (str "'" jolt "' -A:test -e " (pr-str (code "x")) " > /dev/null 2>&1 & "
-                 "'" jolt "' -A:test -e " (pr-str (code "y")) " > /dev/null 2>&1 & wait")
+        ;; each process's exit status and stderr, so a process that ended before its branches says why
+        cmd (str "'" jolt "' -A:test -e " (pr-str (code "x")) " > /dev/null 2> '" path "-x.err' & x=$!; "
+                 "'" jolt "' -A:test -e " (pr-str (code "y")) " > /dev/null 2> '" path "-y.err' & y=$!; "
+                 "wait $x; ex=$?; wait $y; ey=$?; echo \"$ex $ey\"")
         r (clojure.java.shell/sh "nice" "-n" "10" "zsh" "-c" cmd)
+        ends (zipmap ["x" "y"] (map parse-long (str/split (str/trim (:out r)) #" ")))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         made (for [t ["x" "y"] i (range 50)] (keyword (str t "-" i)))]
     (try
-      (is (zero? (:exit r)))
+      (doseq [t ["x" "y"]]
+        (is (= 0 (ends t)) (str "process " t " ended " (ends t) ": " (slurp (str path "-" t ".err")))))
       (is (= 100 (count (filter #(pdb/branch? conn %) made))) "every branch's head was written")
       (is (= (set made) (disj (d/branches conn) :db)) "and every branch is listed")
-      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path (str path "-x.err") (str path "-y.err"))))))
 
 (deftest opening-a-kept-store-installs-the-attributes-it-lacks
   ;; a store on disk of this test's own, the last resort: what is proved is what a root's
