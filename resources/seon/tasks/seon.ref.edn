@@ -4,7 +4,7 @@
   :seon.task/proofs #{seon.ref-test/a-namespace-is-read-as-a-namespace
                       seon.context-test/a-cited-file-is-read-on-demand}}
  {:seon.task/name "a-summary-says-there-is-more"
-  :seon.task/plan "A cited section at :summary depth shows its lead sentence (`seon.ref/shown`, ref.clj, the :summary branch of its `case`) and says nothing of the rest. Correct (AGENTS §9: every cut says what it left and how to read the rest): when the section's lead holds more than that first sentence, the summary view also carries `:seon.ref/left` (the characters of the lead after the summary sentence, trimmed) and `:seon.ref/read-at` (the section's address, the citation that reads it at :doc); a one-sentence lead, or no lead, adds neither key. Write set: `seon.ref/shown` and the `:seon.ref/view` schema in resources/seon/schemas (two optional keys); `seon.ref-test/a-section-summary-is-its-heading-and-leads-first-sentence` compares a whole summary map and is updated for the two keys. Red now: `bin/test seon.ref-test` fails `a-summary-names-the-citation-that-reads-the-rest` on `:seon.ref/read-at` and `:seon.ref/left` being nil. Replaces nothing; about 6 lines."
+  :seon.task/plan "A cited section at :summary depth shows its lead sentence (`seon.ref/shown`) and says nothing of the rest. Correct: the summary view says how much it left and the citation that reads it at :doc depth (AGENTS §9: every cut says what it left and how to read the rest). Replaces nothing; the summary view gains one line."
   :seon.task/kind :work
   :seon.task/proofs #{seon.ref-test/a-summary-names-the-citation-that-reads-the-rest}}
  {:seon.task/name "the-parser-reads-with-options-built-once"

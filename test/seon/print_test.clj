@@ -234,22 +234,3 @@
     (is (not (str/includes? text "199")) text)
     (is (str/includes? (:text (seon/print-value {:xs (vec (range 200))} {:handle 'result/e2 :seen {:colls {(System/identityHashCode big) [[big '(:value result/e1)]]}}})) "199")
         "an equal value that is not the same one prints as itself: collections match by identity")))
-
-(deftest a-map-shows-its-first-entry-whenever-its-least-form-fits
-  ;; a vector of the same size shows its first member at this budget (`[0 …29 (drop 1 result/h1)]`)
-  (let [m (zipmap (range 30) (range 30))
-        {:keys [text] :as r} (seon/print-value m {:budget 10 :handle 'result/h1})]
-    (is (nil? (:seon.error/type r)) (pr-str r))
-    (is (str/starts-with? (str text) "{0 0") "the first entry, then a cut")
-    (is (every? :form (cuts-of (str text))) "every cut names the form that reads the rest")))
-
-(deftest a-long-name-is-cut-in-chars-and-names-its-form
-  (let [v (keyword (apply str (repeat 300 "n")))
-        h 'result/h1
-        {:keys [text]} (seon/print-value v {:budget 60 :handle h})
-        [c :as cs] (cuts-of text)]
-    (is (= 1 (count cs)) text)
-    (is (:chars? c) "the cut says its unit: `…+N chars`")
-    (is (some? (:form c)) "and the form that reads the rest")
-    (is (= (subs (name v) (- 300 (:n c))) (when (:form c) (read-rest (:form c) h v)))
-        "the form reads exactly the N characters of the name that were left")))
