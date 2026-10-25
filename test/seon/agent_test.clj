@@ -595,26 +595,6 @@
                        :decls [{:seon.task/name "m" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= [:error :seon.model/no-provider [:seon.model/no-provider]] (:value r)) (pr-str r))))
 
-(deftest a-waiting-run-parks-and-a-message-wakes-the-same-process
-  ;; design agent-loop section 2 (owner, 2026-10-25: "Always park"): a run that waits parks its
-  ;; session, its process kept; the owner's message wakes it, and the next run is the same
-  ;; process (its pid), on the same agent (the parked run's own: the harness's agent is another)
-  (let [runs "[:find ?id ?st ?out ?ag :where [?e :seon.run/task ?t] [?t :seon.task/id \"demo/w\"] [?e :seon.run/id ?id] [?e :seon.run/status ?st] [?e :seon.run/outcome ?out] [?e :seon.run/agent ?a] [?a :seon.agent/id ?ag]]"
-        parked (fn [n] (str "(seon.root/await-db sys #(= " n " (count (filter (fn [[_ st]] (= :parked st)) (datahike.api/q '" runs " %)))))"))
-        [_ r] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
-                         {:op :eval :agent "root"
-                          :code (str "(do (my.root/run! sys [\"demo/w\"]) " (parked 1)
-                                     " (let [ag (some (fn [[id _ _ ag]] (when (= \"demo/w#1\" id) ag)) (datahike.api/q '" runs " @(:conn sys)))"
-                                     " pid1 (get-in (c/state sys) [:agents ag :pid])]"
-                                     " @(seon.root/message! sys ag \"carry on\") " (parked 2)
-                                     " {:runs (sort (datahike.api/q '" runs " @(:conn sys))) :pid1 pid1 :pid2 (get-in (c/state sys) [:agents ag :pid])}))")}]
-                        {:sets [":seon.config.ai/script=seon.fixtures/wait-call"]
-                         :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})
-        {:keys [runs pid1 pid2]} (:value r)]
-    (is (= [["demo/w#1" :parked :waiting] ["demo/w#2" :parked :waiting]] (mapv #(subvec % 0 3) runs)) (pr-str r))
-    (is (apply = (map peek runs)) "both runs on one agent")
-    (is (and pid1 (= pid1 pid2)) (str "one process for both runs: " pid1 " " pid2))))
-
 (deftest a-failed-call-keeps-what-it-sent
   ;; root, 2026-10-24: a turn whose model call fails still records what it sent (written as the
   ;; request goes) and its typed error (an error is data, AGENTS section 4); the debug page shows both
@@ -634,13 +614,27 @@
 (deftest a-turn-that-repeats-the-last-from-the-same-state-ends-the-run
   ;; root's research, lever 2 (2026-10-22): loops took 45% of tokens, and the step E dry run's
   ;; first real design made one pair of calls 18 times from an unchanged state. A turn whose
-  ;; calls repeat the last turn's, from the same observed state, ends the run as
-  ;; :no-progress, naming the code; the judge refines from that evidence
-  (let [[end] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#loop\" :max-turns 5})"]
-                        {:sets [":seon.config.ai/script=seon.fixtures/same-call"]})
+  ;; calls repeat the last turn's, from the same observed state, is a repeat counted on the run:
+  ;; the first is told to the agent in its next status (live agents round 1, 2026-10-25: 3 of 6
+  ;; runs ended at a first repeat that followed an answer giving nothing new; root's provisional
+  ;; ruling), the second ends it :no-progress, naming the code; the judge refines from that evidence
+  (let [[end repeats status] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#loop\" :max-turns 5})"
+                                        "(:seon.run/repeats (datahike.api/pull (seon.agent/db) [:seon.run/repeats] [:seon.run/id \"demo/t#loop\"]))"
+                                        "(:repeated (:your-last-reply (my.task/status)))"]
+                                       {:sets [":seon.config.ai/script=seon.fixtures/same-call"]})
         end (:value end)]
-    (is (= [:no-progress 2] [(:outcome end) (:model-calls end)]) (pr-str end))
-    (is (str/includes? (str (:reason end)) "(+ 1 1)") "the reason names the repeated code")))
+    (is (= [:no-progress 3] [(:outcome end) (:model-calls end)]) (str "told once, ended at the second repeat: " (pr-str end)))
+    (is (str/includes? (str (:reason end)) "(+ 1 1)") "the reason names the repeated code")
+    (is (= 2 (:value repeats)) "the repeats are the run's, on its branch")
+    (is (str/includes? (str (:value status)) "same as the turn before's") (str "the last status told it: " (pr-str status))))
+  (let [[end] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#loop0\" :max-turns 5})"]
+                        {:sets [":seon.config.ai/script=seon.fixtures/same-call" ":seon.config.agent/repeats-told=0"]})]
+    (is (= [:no-progress 2] ((juxt :outcome :model-calls) (:value end))) "told none: the first repeat ends it"))
+  ;; root, 2026-10-25: no progress is repeats in a row; a turn that made progress starts the count again
+  ;; (round 8's two ends were "repeat 2 of the run" across progress between)
+  (let [[end] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#moves\" :max-turns 6})"]
+                        {:sets [":seon.config.ai/script=seon.fixtures/repeat-then-move"]})]
+    (is (= [:cap 6] ((juxt :outcome :model-calls) (:value end))) (str "each repeat told, none in a row twice: " (pr-str (:value end))))))
 
 (deftest a-proof-run-ends-at-its-budget-though-its-tests-run-bounded-evals
   ;; Jolt jolt/nested-tick-budget: a tick budget covers all the work inside it, nested

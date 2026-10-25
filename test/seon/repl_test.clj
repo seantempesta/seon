@@ -95,6 +95,10 @@
               ["(my.task/current)" :text ":id \"demo/t\""]
               ["(:seon.task/id (with-meta (my.task/current) nil))" :text "\"demo/t\""]
               ["(pr-str (keys (with-meta (my.task/current) nil)))" :text ":seon.task/plan"]
+              ;; update! answers the member it changed, as swap! answers the new value, never the
+              ;; whole task (live agents, 2026-10-25: its instructions and story were most of each answer)
+              ["(my.task/update! :seon.task/plan str \" Then more.\")" :text "Then more.\""]
+              ["(string? (my.task/update! :seon.task/plan str \"\"))" :text "true"]
               ["{:seon.task/id \"x/y\" :n 1}" :text ":n 1"]
               ["(seon.contract/error :seon.root/refused 'a/b \"m\")" :text "#:seon.error{:type :seon.root/refused"]]
         items (at/in-agent (mapv first rows))]

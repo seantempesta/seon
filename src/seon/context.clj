@@ -81,6 +81,8 @@
                                           ;; a red test the agent wrote is a proof it has not registered, or one to delete
                                           (= :stray-red reason)
                                           (assoc :do (list 'my.task/update! :seon.task/proofs 'conj (list 'quote symbol))))
+               ;; a design made from a request carries none: it registers each it writes
+               :no-proofs {:reason reason :do '(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)}
                :no-design {:reason reason :unchanged :seon.task/plan
                            :do '(my.task/update! :seon.task/plan str "\n\n" "<what the implement step must do>")}
                ;; no result: never written, or never run; what writes and runs it
@@ -105,17 +107,20 @@
      :text (subs text start end)}))
 
 (defn last-reply
-  "What happened to the agent's last reply: cut at the token limit, and each delimiter the
+  "What happened to the agent's last reply: cut at the token limit, each delimiter the
   reader repaired (what it dropped or inserted, and where: the line and column in source,
-  the reply as the reader gave it to the REPL, and that line), or nil."
-  {:malli/schema [:=> [:cat [:maybe :boolean] [:maybe :string] [:vector :map]] [:maybe :map]]}
-  [truncated? source repairs]
+  the reply as the reader gave it to the REPL, and that line), and calls that repeated the
+  turn before's from the same state (repeated, the run's :seon.run/repeats so far), or nil."
+  {:malli/schema [:=> [:cat [:maybe :boolean] [:maybe :string] [:vector :map] [:maybe :int]] [:maybe :map]]}
+  [truncated? source repairs repeated]
   (let [rs (for [{:keys [at dropped inserted]} repairs :when (not= ";; " inserted)]
              (cond-> {:near (near (or source "") at)}
                (seq dropped) (assoc :dropped dropped)
                (seq inserted) (assoc :inserted inserted)))]
     (cond-> nil
       truncated? (assoc :cut "at the model's token limit: what followed the cut was lost. Answer with less: one change at a time.")
+      repeated (assoc :repeated (str "your calls were the same as the turn before's, from the same state, so their answers are the same as above. "
+                                     "Ask something else, or change something; the same calls again end the run."))
       (seq rs) (assoc :repaired (vec rs)))))
 
 
@@ -319,7 +324,7 @@
   wiki sections its changes made stale; the tests run; what happened to the last reply; turns
   left. The messages delivered are the conversation's (`conversation`), not the block's."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge tests attention]}]
+  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs repeated will-merge tests attention]}]
   (let [{:keys [proofs]} (:seon.task/accumulated t)]
     (cond-> {;; a passing proof is its status; a red or unrun one shows its source, its failures
              ;; and the program functions it calls; one not defined yet says so
@@ -337,7 +342,7 @@
       max-turns (assoc :turn (str (inc turn) " of " max-turns))
       (seq (refused (vec reasons) (vec reds))) (assoc :refused (refused (vec reasons) (vec reds)))
       (seq test-run-errors) (assoc :test-run {:failed (vec test-run-errors)})
-      (last-reply truncated? source (vec repairs)) (assoc :your-last-reply (last-reply truncated? source (vec repairs)))
+      (last-reply truncated? source (vec repairs) repeated) (assoc :your-last-reply (last-reply truncated? source (vec repairs) repeated))
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
       ;; the sections of the wiki this branch's code changes made stale (seon.problems/caused-split): to read and
       ;; probably fix; never a reason to refuse done
@@ -652,12 +657,6 @@
 
 (declare render story)
 
-(defn- session-first-run
-  "Agent entity a's first run (the one whose :seon.run/agent was written first), or nil."
-  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :seon.run/id]]}
-  [db a]
-  (some->> (d/q '[:find ?tx ?id :in $ ?a :where [?r :seon.run/agent ?a ?tx] [?r :seon.run/id ?id]] db a) (sort-by first) first second))
-
 (defn parts-of
   "Refs (as :seon.turn/sent names records) each beside its messages, each record by its own
   render: the system prompt's section as of its t (system-text), the task's run sections as of its t
@@ -705,9 +704,7 @@
 
 (defn- story
   "The task story: task entity e's run sections as of t on db (run-state, printed by
-  run-message), what every turn of a session sends after the system prompt, as its first turn
-  read them; a later stage's arrives as root's message at its boundary
-  (seon.reconcile/stage-boundary)."
+  run-message), what every turn of a run sends after the system prompt, as its first turn read them."
   {:malli/schema [:=> [:cat :seon.host/db :int :int] :string]}
   [db e t]
   (let [h (d/as-of db t)]
@@ -721,7 +718,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :map [:maybe :map]] :map]}
   [db {:keys [turn max-turns origin observed merge?]} lst]
   (let [{:keys [text repairs]} (when lst (reader/forgive (str/join "\n" (map :code (:seon.turn/calls lst)))))]
-    (cond-> (assoc observed :truncated? (:seon.turn/truncated lst) :source text :repairs (vec repairs)
+    (cond-> (assoc observed :truncated? (:seon.turn/truncated lst) :source text :repairs (vec repairs) :repeated (:seon.turn/repeated lst)
                    :unmerged (when merge? (pm/unmerged db)))
       (= :model origin) (assoc :turn turn :max-turns max-turns))))
 
@@ -742,16 +739,12 @@
         t (task/task db task)
         block (if screen (run-state db t) (current-state db t (turn-input db basis (peek prev))))
         a (when agent (d/pull db [:db/id :seon.agent/key] [:seon.agent/key agent]))
-        ;; the task story is its session's first turn's: the task of the agent's first run as of that
-        ;; turn's t, so a later stage's request keeps the earlier stages' as its exact prefix (its
-        ;; own story came as a message at the boundary: seon.reconcile/stage-boundary)
-        first-run (when a (session-first-run db (:db/id a)))
-        prev0 (if (and first-run (not= first-run run)) (model-turns db first-run Integer/MAX_VALUE) prev)
-        story-t (if (seq prev0) (:max-tx (d/commit-as-db db (:commit (:seon.turn/basis (first prev0))))) (:max-tx db))
-        task-e (if (identical? prev0 prev) (pdb/eid db :seon.task/id task) (:db/id (:seon.run/task (d/entity db [:seon.run/id first-run]))))
+        ;; the task story is its run's first turn's: the task as of that turn's t
+        story-t (if (seq prev) (:max-tx (d/commit-as-db db (:commit (:seon.turn/basis (first prev))))) (:max-tx db))
+        task-e (pdb/eid db :seon.task/id task)
         run-ref [:task task-e story-t]
-        ;; the story is the same each turn of a session: printed once, by its ref
-        story-text (when (seq prev0) (or (get-in printed [:story run-ref]) (story db task-e story-t)))
+        ;; the story is the same each turn of a run: printed once, by its ref
+        story-text (when (seq prev) (or (get-in printed [:story run-ref]) (story db task-e story-t)))
         r (request a {:db db :basis basis :block block :help (system-text db) :run story-text :printed printed
                       :help-ref [:section (docs/page-top db system-page) (docs/page-t db system-page)]
                       :run-ref run-ref})]
