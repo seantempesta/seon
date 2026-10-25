@@ -125,15 +125,26 @@
       (is (= "dred" (:seon.proof/digest (d/pull db1 [:seon.proof/digest] [:seon.proof/digest "dred"]))))
       (is (= ['a.b-test/t] (mapv :test (reds db1))))
       (is (re-find #"a.b-test/t is fail at main t 7, asked by a3" (:message (first (reds db1))))))
-    (testing "a red digest is no green: the test runs again"
-      (is (= {} (proofs/stored-greens db1 ["dred"]))))
+    (testing "a red at its digest is reused with the failures its run recorded: it is not run again"
+      (is (= {"dred" {:digest "dred" :pass 0 :fail 1 :error 0 :failures [{:type :fail :message "boom" :expected "1" :actual "2"}]}}
+             (proofs/stored-results db1 ["dred"])))
+      (let [p (proofs/plan nil '{a.b-test/t "dred"} (proofs/stored-results db1 ["dred"]) #{})]
+        (is (= '[a.b-test/t] (:selected p)) "a red still judges a tree with no base")
+        (is (= [] (:run p)) "and runs nothing")
+        (is (= 1 (:fail (get (:reused p) 'a.b-test/t))))))
     (let [green (assoc red :pass 1 :fail 0 :digests {'a.b-test/t "dgreen"} :reports [{:type :pass :var "#'a.b-test/t"}])
           db2 (d/db-with db1 (prove/result-tx (assoc run :key "main@8" :t 8) green))]
       (testing "a later green at a new digest closes the red: nothing written, the row is gone, the red fact is kept"
         (is (= [] (reds db2)))
         (is (some? (d/pull db2 [:seon.proof/digest] [:seon.proof/digest "dred"]))))
       (testing "a digest that holds a green is never run again: the lookup finds it in the store"
-        (is (= ["dgreen"] (keys (proofs/stored-greens db2 ["dgreen" "dred" "dnone"])))))
+        (is (= {"dgreen" 1 "dred" 0} (update-vals (proofs/stored-results db2 ["dgreen" "dred" "dnone"]) :pass))))
+      (testing "a test whose child died has no result at its digest, only main's newest: a death is no verdict to reuse"
+        (let [dead {:pass 0 :fail 0 :error 1 :digests {'a.b-test/t "ddead"}
+                    :reports [{:type :error :var "#'a.b-test/t" :exit 9 :message "test process died: 9 while #'a.b-test/t ran"}]}
+              db3 (d/db-with db2 (prove/result-tx (assoc run :key "main@9" :t 9) dead))]
+          (is (= {} (proofs/stored-results db3 ["ddead"])))
+          (is (= ['a.b-test/t] (mapv :test (reds db3))) "main's red is still shown")))
       (testing "the run is a fact too"
         (is (= 1 (:seon.proof.run/fail (d/pull db2 [:seon.proof.run/fail] [:seon.proof.run/id "main@7"]))))))))
 
@@ -168,7 +179,7 @@
                  "  (pr-str {:pass (:pass r) :fail (:fail r) :error (:error r) :ran (:ran r) :key (:key r) :again (:key again) :red (:red r)}))")
         read (str "(let [facts (d/q '[:find ?t ?s ?dg :where [?e :seon.proof/digest ?dg] [?e :seon.proof/test ?t] [?e :seon.proof/status ?s]] @(:conn sys))"
                   "      runs (d/q '[:find [?id ...] :where [?r :seon.proof.run/id ?id]] @(:conn sys))"
-                  "      green (seon.proofs/stored-greens @(:conn sys) (map last facts))]"
+                  "      green (filter seon.proofs/green? (vals (seon.proofs/stored-results @(:conn sys) (map last facts))))]"
                   "  (pr-str {:facts (vec (sort (map (juxt first second) facts))) :runs (vec runs) :green (count green)"
                   "           :latest (vec (sort (map first (d/q '[:find ?l :where [?e :seon.proof/latest ?l]] @(:conn sys)))))}))")
         [r1 r2] (at/in-agent [{:op :eval :agent "root" :code ask} {:op :eval :agent "root" :code read}])

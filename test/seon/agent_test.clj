@@ -269,6 +269,24 @@
     (is (= ['{bound-test/a :pass bound-test/b :pass} 0 2 false] (:value judge))
         (str "the judge after it: the same verdict, both reused, nothing run and no child forked " (pr-str judge)))))
 
+(deftest a-red-at-its-digest-is-reused-with-its-failures
+  ;; task seon.proofs/a-red-at-its-digest-is-reused: the test service recorded r red at its
+  ;; digest; r is green if it runs, so a run would say :pass. The judge reuses the red, with the
+  ;; failure its run recorded, and forks nothing
+  (let [[_ dg _ judge]
+        (in-agent ["(ns reds-test (:require [clojure.test :refer [deftest is]]))
+                   (deftest r (is true))"
+                   "(get (:digests (seon.agent/test-plan (seon.agent/db) nil #{'reds-test/r})) 'reds-test/r)"
+                   "(seon.agent/transact! [{:seon.proof/digest (get (:digests (seon.agent/test-plan (seon.agent/db) nil #{'reds-test/r})) 'reds-test/r)
+                                           :seon.proof/test 'reds-test/r :seon.proof/status :fail :seon.proof/run \"main@1\" :seon.proof/branch \"main\" :seon.proof/t 1
+                                           :seon.proof/failures [{:type :fail :message \"the recorded failure\" :expected \"1\" :actual \"2\"}]}])"
+                   "(let [r (seon.agent/run-tests-forked 100000000 #{'reds-test/r} :judge)]
+                      [(seon.proofs/results r) (:ran r) (:reused r) (some? (:pid r)) (:fail r) (mapv (juxt :message :reused) (:reports r))])"]
+                  {:dirs ["src" "test"] :proofs #{}})]
+    (is (string? (:value dg)) (pr-str dg))
+    (is (= ['{reds-test/r :fail} 0 1 false 1 [["the recorded failure" true]]] (:value judge))
+        (str "red as recorded, with its failure, nothing run and no child forked " (pr-str judge)))))
+
 (deftest an-agents-greens-and-a-checkouts-are-one-store
   ;; owner, 2026-10-23: a test that is the same is not run again once green, "especially when
   ;; freshly branched": an agent's greens and a checkout's (bin/test's) are one store, keyed by
