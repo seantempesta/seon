@@ -436,7 +436,8 @@
     nil))
 
 (defn- names-lines
-  "Names as comment lines of at most :seon.config.render/width characters: `;; a b c`."
+  "Words (a namespace's public names, a docstring's words) as comment lines of at most
+  :seon.config.render/width characters: `;; a b c`."
   {:malli/schema [:=> [:cat [:sequential :string]] :string]}
   [names]
   (let [width (cfg/value :seon.config.render/width)]
@@ -452,7 +453,10 @@
   2026-10-25): a var as its definition's head (seon.reader/definition-head: name, docstring as
   written, attribute map, arglist; its body marked `…)` with the form that reads it whole), a
   namespace as its ns form's head, its docstring as written, then its public names; each as code
-  (seon.print/code), printed verbatim. Anything else as `cited` reaches it; nil when nothing."
+  (seon.print/code), printed verbatim; a var whose source db does not record, as a `declare` with
+  its arglists and doc as comments; a task, a section, a file or a citation that reaches nothing as
+  its address and lead in comment lines, then the form that reads it whole (never its view's map:
+  root, 2026-10-25). nil when it reaches nothing pulled."
   {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :any]}
   [db c]
   (let [[kind v :as hit] (cited db c)
@@ -463,9 +467,25 @@
             head (some-> src (reader/definition-head (symbol (namespace nm))))]
         (cond head (print/code (str head "  ; the body: (source " nm ")"))
               src (print/code src)
-              :else v))
+              ;; no source recorded: what the var's facts say, as Clojure (its arglists and doc as comments)
+              :else (print/code (str "(declare " (name nm) ")  ; no source recorded: (doc " nm ")"
+                                     (when-let [as (seq (:arglists v))] (str "\n;; " (str/join " " (map str as))))
+                                     (when-let [d (:doc v)] (str "\n" (names-lines (str/split d #"\s+"))))))))
       (and (= :namespace kind) (symbol? nm))
       (let [nv (ref/namespace-view db nm :doc)]
         (print/code (str "(ns " nm (when-let [d (:seon.ref/lead nv)] (str "\n  " (emit/string-literal d))) ")"
                          (when-let [b (seq (:seon.ref/below nv))] (str "\n" (names-lines (map :seon.ref/heading b)))))))
-      :else (second hit))))
+      ;; a task, a section, a file, or what reaches nothing: its address and lead as prose (comment
+      ;; lines), then the form that reads it whole; never its view's map
+      hit
+      (let [a (or (:seon.ref/address v) (some-> nm str) (:seon.ref/path c))
+            say (if (= :unresolved kind)
+                  (str (or (:problem v) "reaches nothing"))
+                  (or (some-> (:seon.ref/lead v) ref/lead-sentence) (:seon.ref/summary v)
+                      (some->> (:seon.ref/lines v) (str "a file of ") (#(str % " lines"))) (:seon.ref/heading v)))
+            read (case kind
+                   :task (str "(:seon.task/plan (seon.task/task (seon.agent/db) " (emit/string-literal a) "))")
+                   :section (str "(my.agent/help " (emit/string-literal a) ")")
+                   :file (str "(slurp " (emit/string-literal (str (cfg/checkout) "/" (:seon.ref/path c))) ")")
+                   nil)]
+        (print/code (str (names-lines (str/split (str a ": " say) #"\s+")) (when read (str "\n" read))))))))

@@ -6,7 +6,7 @@
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.render.proc :as p]
-            [seon.web.html :as h] [seon.config] [seon.docs] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
+            [seon.web.html :as h] [clojure.walk] [seon.print.select] [seon.config] [seon.docs] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
             [seon.fx] [seon.source] [seon.program] [seon.web] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems]))
 
 (def ^:private task
@@ -772,8 +772,10 @@
   (let [[main branch eid] (paged-dbs)
         [st1 _] (#'p/pass-view (comp-state main branch eid) :a3)
         {:keys [t page] :as screen} (p/screen-of st1 :a3)
-        ;; the page is its own :seon.render/html render, so the agent's page draws it (the value view)
-        page (:seon.render/html page)
+        ;; the page is its own :seon.render/html render, so the agent's page draws it (the value view);
+        ;; code and prose marks (seon.print.select/code?) are the printer's plain data, printed as
+        ;; themselves: read as their text, never as an attribute map or a raw value
+        page (clojure.walk/postwalk #(if-let [k (seon.print.select/code? %)] (k %) %) (:seon.render/html page))
         ;; the screen as the model reads it: the page's data printed once by the one printer
         text (seon.print/text page seon.print/default-budget)]
     (is (= (:max-tx main) t))
@@ -1094,7 +1096,21 @@
     (testing "a run whose records cite nothing has no cited tile"
       (let [branch' (d/db-with branch [{:seon.eval/id "e1" :seon.eval/record {:code "(f 2)" :response {:value "x"} :run "demo/f#1"}}])
             [st2 _] (#'p/pass-view (comp-state main branch' eid) :a3)]
-        (is (not (str/includes? (pr-str (:page (p/screen-of st2 :a3))) "[:h2 \"cited\"]")))))))
+        (is (not (str/includes? (pr-str (:page (p/screen-of st2 :a3))) "[:h2 \"cited\"]")))))
+    (testing "a cited task and a wiki section: the lead as prose and the form that reads it whole, never a view map (root, 2026-10-25)"
+      (let [k (:seon.agent/key (d/pull main [:seon.agent/key] eid))
+            b (d/db-with branch (seon.task/create-tx branch [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g fast. Then measure it." :seon.task/kind :work}]))
+            b (d/db-with b [{:seon.section/address "docs/render.md#one-printer" :seon.section/heading "One printer"
+                             :seon.section/lead "One printer prints every value. Its passes follow."}])
+            b (d/db-with b (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3"
+                                                {:code "(g)" :prose "see" :run "demo/f#1" :response {:handle 'result/e4 :value 1}
+                                                 :cites (seon.ref/references b "`demo/g` and `docs/render.md#one-printer`")} nil))
+            [st3 _] (#'p/pass-view (comp-state main b eid) :a3)
+            page (:page (p/screen-of st3 :a3))
+            codes (set (keep #(when (seon.print.select/code? %) (:seon.print/code %)) (tree-seq coll? seq page)))]
+        (is (contains? codes ";; demo/g: Make g fast.\n(:seon.task/plan (seon.task/task (seon.agent/db) \"demo/g\"))") (pr-str codes))
+        (is (contains? codes ";; docs/render.md#one-printer: One printer prints every value.\n(my.agent/help \"docs/render.md#one-printer\")") (pr-str codes))
+        (is (not-any? #(and (map? %) (not (seon.print.select/code? %))) (tree-seq coll? seq page)) "no view map in the page")))))
 
 (deftest a-turns-screen-folds-into-it-and-an-eval-collapses-to-its-value
   ;; root, 2026-10-24: the screen's evals are the system's, folded into their turn's header (they

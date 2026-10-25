@@ -35,11 +35,11 @@
                                            :turn 0 :max-turns 4})
         by (into {} (map (juxt :test identity)) (:proofs block))]
     (is (= {:test 'demo-test/f-test :status :pass} (by 'demo-test/f-test)) "a passing proof is its status")
-    (is (string? (:source (by 'demo-test/g-test))) "a red proof shows its source")
+    (is (select/code? (:source (by 'demo-test/g-test))) "a red proof shows its source, as code")
     (is (= [{:assert (print/code "(= 1 (g))") :got (print/code "(= 1 0)")}] (:failures (by 'demo-test/g-test)))
         "a failure is the assertion and what it evaluated to")
     (is (= ['demo/f] (mapv :symbol (:write-set block))) "a proof named in the plan is not shown again in the write set")
-    (is (string? (:source (first (:write-set block)))) "a var of the write set shows its source")
+    (is (select/code? (:source (first (:write-set block)))) "a var of the write set shows its source, as code")
     (is (= {'demo-test/f-test '(my.agent/prove #{demo-test/f-test}) 'demo-test/g-test '(my.agent/prove #{demo-test/g-test})} (:to-prove block))
         "each proof and the form that runs it")))
 
@@ -366,7 +366,7 @@
                                                :seon.task/proofs #{'demo-test/f-test}}]))
         r (seon.docs/resolve-ref db 'ctx-big/big :code)
         story (#'context/run-message (context/run-state db (task/task db "demo/b")))]
-    (is (= {:symbol 'ctx-big/big :source src} r) "the source whole, never swapped for its doc by size")
+    (is (= {:symbol 'ctx-big/big :source (print/code src)} r) "the source whole as code, never swapped for its doc by size")
     (is (< (:context seon.print/budgets) (select/estimate src)) "a source over the context's budget")
     (is (< (select/estimate story) (select/estimate src)) "the story is cut where it is printed")
     (is (str/includes? story "(my.task/story)") (str "its cut reads the rest through the story's form: " (subs story 0 (min 400 (count story)))))))
@@ -683,7 +683,7 @@
                                                  :seon.task/proofs #{'demo-test/f-test} :seon.task/config {:seon.config.render/similar 5}}]))]
       (is (contains? (:similar (context/run-state db (task/task db "demo/n"))) :not-embedded)
           "a task that turns it on, its plan with no vector yet: says so"))
-    (is (= [{:symbol 'demo/f :source "(defn f \"Doubles.\" [x] (* 2 x))" :callers '[demo/area demo/vol]}] (:write-set story))
+    (is (= [{:symbol 'demo/f :source (print/code "(defn f \"Doubles.\" [x] (* 2 x))") :callers '[demo/area demo/vol]}] (:write-set story))
         "each cited var with its source and its callers")
     (is (= '(my.agent/prove #{demo-test/f-test}) (get (:to-prove story) 'demo-test/f-test)) "a written proof: the form that runs it")
     (is (= "not written yet; it should assert what the plan says: demo-test/h-test asserts (f 2) is 6."
