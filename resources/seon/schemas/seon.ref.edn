@@ -82,6 +82,9 @@
                  [:seon.ref/address :seon.ref/address]
                  [:seon.ref/heading :string]
                  [:seon.ref/summary {:optional true} :string]
+                 ;; a summary that left part of its lead: how many characters, and the address that reads it at :doc
+                 [:seon.ref/left {:optional true} pos-int?]
+                 [:seon.ref/read-at {:optional true} :seon.ref/address]
                  [:seon.ref/lead {:optional true} :string]
                  [:seon.ref/opening {:optional true} :string]
                  [:seon.ref/below {:optional true} [:vector [:map [:seon.ref/address :seon.ref/address] [:seon.ref/heading :string]]]]
