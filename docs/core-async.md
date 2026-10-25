@@ -5,6 +5,9 @@ core.async on Jolt is one waiter protocol over Chez mutexes, condition variables
 The source is the pinned Jolt's: `reference-code/jolt/host/chez/java/async.ss`, `reference-code/jolt/host/chez/java/fibers-async.ss`, `reference-code/jolt/host/chez/java/host-static-methods.ss`, `reference-code/jolt/host/chez/fibers.ss` and `reference-code/jolt/stdlib/clojure/core/async.clj`. Each claim names the function or comment that carries it. [flow](flow.md) builds on this page.
 
 ## The model
+
+How Jolt's core.async works underneath: channels, the one waiter protocol, parking against blocking, and fibers on carriers.
+
 - **A channel is a Chez mutex and condition variable with a FIFO** (`reference-code/jolt/host/chez/java/async.ss`, its header). Its ops are legal anywhere, inside or outside `go`. This is a superset of the JVM: there is no go thread pool and **no cap on pending ops**.
 - **There is one waiter protocol, with three ways to wake.** A pending op is an `alt-handler` (`reference-code/jolt/host/chez/java/async.ss`). A thread waiter is woken by a condition variable; a fiber waiter by putting the fiber on its carrier's run queue (`alt-deliver!`); a `put!`/`take!` callback waiter by running its callback on a fiber (`async-callback-waiter`). A fiber's `<!` registers on the same `alt-takers` list as `alts!` (`reference-code/jolt/host/chez/java/fibers-async.ss`, its header).
 - **`<!` `>!` `<!!` `>!!` dispatch on the caller** (`reference-code/jolt/host/chez/java/fibers-async.ss`). On a fiber they **park**; on an OS thread they **block** on the condition variable. `<!`/`>!` and `<!!`/`>!!` differ only in whether `Thread.interrupt` reaches them: the `!!` forms are interruptible.
@@ -16,6 +19,8 @@ The source is the pinned Jolt's: `reference-code/jolt/host/chez/java/async.ss`, 
   - **What parks:** channel ops, `deref` of a promise or future, `jolt.socket` IO, subprocess pipe IO, and **`Thread/sleep`**, whose deadline goes on the timer (`reference-code/jolt/host/chez/java/host-static-methods.ss`, the `Thread/sleep` comment). **What pins a carrier:** a raw fd read, or an FFI call that blocks. The comments above `thread-call` and `io-thread` in `reference-code/jolt/stdlib/clojure/core/async.clj` still name `Thread/sleep` as pinning; that is a Jolt docstring defect.
 
 ## Channels and buffers
+
+What a put does on each kind of channel and buffer when it is full, and whether it loses data.
 
 | form | what a put does when full | loses data? |
 |---|---|---|
@@ -32,6 +37,8 @@ Closing and nil:
 
 ## Ops
 
+What each core.async operation does on a fiber and on an OS thread, and what it costs.
+
 | op | on a fiber | on an OS thread | cost / note |
 |---|---|---|---|
 | `>!` `<!` `>!!` `<!!` | park | block (condition variable) | inside `go`, a park the CPS pass can see costs no continuation capture (`reference-code/jolt/stdlib/clojure/core/async.clj`) |
@@ -41,6 +48,9 @@ Closing and nil:
 | `timeout ms` | a channel the **one timer thread** closes at ms | same | `jolt-async-timeout`. All deadlines share one thread and a min-heap: O(log k) to arm, O(1) to cancel. 100 pending timeouts → +1 thread, once per process. |
 
 ## go, thread, io-thread
+
+Which backend each of go, thread and io-thread spawns on, and what each costs.
+
 - **`go` / `go-loop`** spawn on the backend ``*go-backend*`` names at spawn time. The default is **`:fiber`** (`reference-code/jolt/host/chez/java/async.ss`, the ``*go-backend*`` comment). A fiber go costs 2.2 µs and 6 KB to spawn; a `:thread` go costs 8 µs and 87 KB. 100 go blocks parked on a channel add no OS thread.
 - **`thread`** is always an OS thread.
 - **`io-thread`**, or `(thread-call f :io)`, is always a fiber. `:mixed` and `:compute` are OS threads (`thread-call`).
@@ -56,6 +66,9 @@ The library forms in `reference-code/jolt/stdlib/clojure/core/async.clj` are bui
 - **`mix`, `merge`, `split`, `reduce`, `into`, `onto-chan!`, `to-chan!`** are go-loops over the primitives.
 
 ## Idioms for Seon
+
+How Seon meets each need (a dependency, a backlog, a retry, a request and its answer, a failure, quiet) with channels.
+
 - **Dependency:** park on a channel, with `<!` on a fiber. Never a sleep, a poll or a timeout standing in for the thing you wait for.
 - **Backlog and admission:** a fixed `(chan n)` is the queue. A full one parks the producer, and that is the back-pressure. Sliding and dropping buffers are only for values where the newest subsumes the rest (a tick, the latest commit, a view). **Never use them for data that must arrive.**
 - **Delayed retry:** `(go (<! (timeout ms)) (>! retry-ch m))`. That is one heap entry on the one timer thread plus a parked fiber, about 3.5 KB. No cron proc and no thread.

@@ -6,6 +6,8 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 
 ## Processes (core.async.flow's words)
 
+The words for processes, in core.async Flow's terms, and the namespace that owns each.
+
 | word | meaning | owner |
 |---|---|---|
 | **proc** | a Flow process: one step-fn Var with four arities (describe, init, transition, transform) | `seon.step` |
@@ -33,6 +35,8 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 
 ## The REPL (nREPL's words)
 
+The words for the agent's REPL, in nREPL's terms, and the namespace that owns each.
+
 | word | meaning | owner |
 |---|---|---|
 | **request**, **response**, **session**, `eval`, `done`, `interrupt` | nREPL's message model on the agent's socket | `seon.repl` |
@@ -45,6 +49,8 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 
 ## Contracts (Malli's words)
 
+The words for contracts, in Malli's terms, and the namespace that owns each.
+
 | word | meaning | owner |
 |---|---|---|
 | **contract** | a function's ``:malli/schema``, checked from its definition on (inputs, arity, output) | `seon.contract/defn` |
@@ -54,6 +60,8 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **instrument mode** (was guarantees) | `:seon.config.contract/instrument` (`SEON_INSTRUMENT`): `:on`, `:contracts` (no recording), `:off` | `seon.contract/on?`, `record?` |
 
 ## Data (Datahike's and git's words)
+
+The words for data and branches, in Datahike's and git's terms, and the namespace that owns each.
 
 | word | meaning | owner |
 |---|---|---|
@@ -67,6 +75,8 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **prove** | run what a change reaches and reuse every test and check step green at its reach digest: `bin/prove` in a checkout, ``(my.agent/prove)`` in an agent (the process tests it reaches run only when root asks, or when they are a proof; [merging](merging.md#a-merge-runs-what-the-change-reaches)) | `seon.proofs/plan`, `my.agent/prove` |
 
 ## Tasks (TASK-CHAIN's words)
+
+The words for tasks and their prerequisites, and the namespace that owns each.
 
 | word | meaning | owner |
 |---|---|---|
@@ -94,6 +104,8 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **section** | one heading of a wiki page as an entity on main: address `path#anchor`, heading, lead, own text, parent, and references (what its own text cites); its backlinks are who cites it | `seon.docs/load-tx` |
 
 ## Agent-facing functions (`my.*`)
+
+The functions an agent has in its own namespaces, by namespace.
 
 | ns | functions |
 |---|---|

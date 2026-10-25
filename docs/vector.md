@@ -49,3 +49,9 @@ Measured on 283 pairs from main's history (each non-merge commit's message as th
 | fused, k 10 (k 60: 0.448) | 0.451 | 0.407 | 0.514 |
 
 Fused beat the call graph alone, and embeddings alone (`my.agent/similar`) did as well as fused. Two biases run the other way from each other: the embeddings read each form as it is today, after the change its commit describes (flattering them), and a commit pair has no proofs, the call graph's richest source (understating it). v1 measured 0.274 / 0.386 / 0.441 on its own corpus. Weighting the two rankings is the lever if a task-shaped corpus shows embeddings alone ahead.
+
+## Where it falls short today
+
+Sections and plans are embedded on main, but two pieces of "related concepts, refined over the run" are missing.
+- A branch has main's vectors as of its fork, so a plan the agent rewrites, a function it defines and a section text it changes have none until they merge. Anything ranked by the plan's vector cannot follow the agent's refinement, and `my.agent/similar` on its own new function answers `[]`: `seon.vector/a-text-written-on-a-branch-is-embedded-there`.
+- The story shows only the sections the plan cites, and `:similar` ranks only functions (and is off), so a one-line request starts with no section at all. The screen should show the sections nearest the plan's current vector at summary depth, made again as the plan changes: `seon.context/the-screen-shows-the-sections-nearest-the-plan`.
