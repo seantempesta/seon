@@ -78,7 +78,11 @@
   tree-id): the same tree reads its branch; a tree never seen is branched from the kept tree of
   the fewest changed program files (one in root's repository) and brought current by
   seon.source/refresh-tx; a store keeping no tree imports the whole program (seon.source/
-  import-tx). Every text is read from the tree's git objects (tree-files). One writer at a time
+  import-tx). A tree's branch exists only once its import committed: its facts are made before
+  the branch (a file that does not read throws first), and a transaction refused takes the
+  branch it made with it, so no later plan reads a partial program as the tree's (task
+  seon.proofs/a-failed-import-leaves-no-branch: one selected 0 tests and said OK). Every text is
+  read from the tree's git objects (tree-files). One writer at a time
   per store (two runs never share a checkout, AGENTS section 3). A store past
   :seon.config.proofs/program-store-max-bytes on disk (an LMDB file never shrinks) is removed
   before it is opened, and starts again from this tree. The branch's connection stays open for
@@ -96,11 +100,17 @@
                                  [k (changed-paths root t tree)])
                                (sort-by (comp count second))
                                first)
+            parent (d/connect (assoc cfg :branch (or from :db)))
+            tx (if from
+                 (source/refresh-tx @parent (tree-files root tree paths))
+                 (source/import-tx @parent (tree-files root tree nil)))
+            _ (d/release parent)
             _ (d/branch! conn (or from :db) b)
-            c (d/connect (assoc cfg :branch b))]
-        (d/transact c {:tx-data (if from
-                                  (source/refresh-tx @c (tree-files root tree paths))
-                                  (source/import-tx @c (tree-files root tree nil)))})))
+            c (d/connect (assoc cfg :branch b))
+            committed (volatile! false)]
+        (try (d/transact c {:tx-data tx})
+             (vreset! committed true)
+             (finally (when-not @committed (d/release c) (d/delete-branch! conn b))))))
     (d/release conn)
     @(d/connect (assoc cfg :branch b))))
 
@@ -108,7 +118,9 @@
   "{test digest} of the named test namespaces (or every one) on the checkout at root, the
   ones among them that reach a process of their own (:process, seon.program/graph-index), its
   program db (program-db, kept in store), inputs and reach graph (seon.program/reach-graph:
-  walked once, the check steps' index is read from it too)."
+  walked once, the check steps' index is read from it too), and :empty, the namespaces of nss
+  of which the program db holds no test (a namespace with no deftest, or a program db missing
+  it: never an empty selection that says OK)."
   [root names store]
   (let [nss (set (if (seq names) (map symbol names) (test-namespaces root)))
         db (program-db root store)
@@ -116,6 +128,7 @@
         g (program/reach-graph db (:data-refs in))
         idx (into {} (filter #(nss (symbol (namespace (key %))))) (program/graph-index g in nil))]
     {:graph g :inputs in
+     :empty (vec (sort (remove (set (map (comp symbol namespace key) idx)) nss)))
      :digests (update-vals idx :digest)
      :process (set (keep (fn [[t v]] (when (:process? v) t)) idx))
      :binary (set (keep (fn [[t v]] (when (:binary? v) t)) idx))}))
@@ -235,7 +248,7 @@
   {:run-tests :run-steps :reused :cand :left (the process keys left out) :digests :steps
   :missing :inputs}."
   [root what all? names store]
-  (let [{:keys [graph inputs digests process binary]} (tests-of root names store)
+  (let [{:keys [graph inputs digests process binary empty]} (tests-of root names store)
         dir (config/value :seon.config.source/test-results-dir)
         tests? (not= what "checks") checks? (not= what "tests")
         ;; the steps' functions read from the tests' graph: their digests and which boot a root or a process
@@ -249,7 +262,7 @@
         cand (if named? all-cand (automatic all-cand process))
         {:keys [run reused]} (proofs/plan nil cand (if all? {} (proofs/greens dir (vec (vals cand)))) #{})
         {run-steps true run-tests false} (group-by string? run)]
-    {:run-tests (vec run-tests) :run-steps (vec run-steps) :reused reused :cand cand :process process :binary binary
+    {:run-tests (vec run-tests) :run-steps (vec run-steps) :reused reused :cand cand :process process :binary binary :empty empty
      :left (when-not named? (vec (sort-by str (filter all-cand process))))
      :digests digests :steps steps :missing missing :inputs inputs}))
 
@@ -266,8 +279,15 @@
   (let [t0 (profile/now-ns)
         dir (config/value :seon.config.source/test-results-dir)
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left digests steps missing inputs binary]} (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store)))
-        n (write-shards! out run-tests digests (:tree inputs))
+        {:keys [run-tests run-steps reused cand left digests steps missing inputs binary empty]} (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store)))
+        ;; a test namespace of the tree that its program db holds no test of: nothing it holds can
+        ;; be selected, so a run would say OK of tests it never saw
+        empty (when tests? (seq empty))
+        _ (when empty
+            (println (str "TEST FAILED (the plan): the program db holds no test of " (str/join " " empty)
+                          ": a namespace with no deftest, or a program db that misses it (rerun with the store "
+                          (config/value :seon.config.proofs/program-store) "-* moved aside to import the tree)")))
+        n (write-shards! out (if empty [] run-tests) digests (:tree inputs))
         ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
         ;; mode): bin/test builds target/seon only when this is not empty, bin/check seeds only for the steps
         step-bin (filterv proofs/step-needs-binary? run-steps)
@@ -289,7 +309,7 @@
       (when (seq run-steps) (println "prove: check steps to run:" (str/join " " run-steps)))
       (when (seq missing)
         (println "prove: check steps naming a function the program does not define (seon.proofs/check-steps):" (str/join " " missing))))
-    (if (seq missing)
+    (if (or (seq missing) empty)
       1
       (do (when (and (empty? run-tests) (empty? run-steps))
             (println (str "prove: nothing to run: " (count reused) " reused green at their digest")))
