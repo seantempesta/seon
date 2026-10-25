@@ -109,7 +109,6 @@
   [:seon.config.render/form-budget :seon.config.render/form-budget]
   [:seon.config.render/context-budget :seon.config.render/context-budget]
   [:seon.config.render/history-budget :seon.config.render/history-budget]
-  [:seon.config.render/history-step :seon.config.render/history-step]
   [:seon.config.render/similar :seon.config.render/similar]
   [:seon.config.render/related :seon.config.render/related]
   [:seon.config.render/related-rarity :seon.config.render/related-rarity]

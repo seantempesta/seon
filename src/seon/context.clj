@@ -510,30 +510,37 @@
   [{:keys [ref whole fold plain]} whole-ids]
   (if (every? #(contains? whole-ids (name %)) (vals fold)) [ref whole] [[:eval (second ref)] plain]))
 
-(defn- step-up
-  "Index i raised to a multiple of step, at most to: the history's boundaries move in large steps."
-  {:malli/schema [:=> [:cat :int pos-int? :int] :int]}
-  [i step to] (min to (* step (quot (+ i (dec step)) step))))
-
 (defn- kept
   "Which of the parts (each {:cost [whole collapsed] :call}, oldest first) the history budget sends:
-  the newest whole, the newest before them whole while they fit, the older still collapsed (the
-  result its handle and one line) while those fit, the rest left out; each boundary raised to a
-  multiple of step (:seon.config.render/history-step), so it moves in large steps and the
-  messages before it stay the same bytes for many turns; never starting inside a reply (a part
-  continuing the call before it). Answers [picks dropped]: :whole or :line for each part from the
-  first sent, and how many older ones were left out."
-  {:malli/schema [:=> [:cat [:vector :map] :int pos-int?] [:tuple [:vector [:enum :whole :line]] nat-int?]]}
-  [parts budget step]
+  the parts walked oldest first, holding two cuts, where the collapsed parts (a result's handle and
+  one line) begin, every part before left out, and where the whole ones begin. When what is sent
+  passes the budget, the oldest whole parts collapse until the whole ones fit in half of it, then,
+  if all is still over half, the oldest collapsed are left out until it fits: the cuts only advance,
+  in jumps that leave room for many turns, so between jumps each request is the one before and
+  what was added (the provider's prefix cache; a cut recomputed each turn moved back and forth, and
+  a resumed run hit 23% of 1.1M tokens). A cut never starts inside a reply (a part continuing
+  the call before it), and the newest part is whole. A function of the parts alone: a cold read
+  sends what a warm one does. Answers [picks dropped]: :whole or :line for each part from the first
+  sent, and how many older ones were left out."
+  {:malli/schema [:=> [:cat [:vector :map] :int] [:tuple [:vector [:enum :whole :line]] nat-int?]]}
+  [parts budget]
   (let [n (count parts)
-        whole (mapv (comp first :cost) parts) small (mapv (comp second :cost) parts)
-        ;; the first index from which the parts fit whole (the newest always), and before it, the
-        ;; first from which the rest fit collapsed
-        from (fn [cs spent end] (loop [i (dec end) s spent] (if (and (>= i 0) (<= (+ s (nth cs i)) budget)) (recur (dec i) (+ s (nth cs i))) (inc i))))
-        b (if (zero? n) 0 (step-up (min (dec n) (from whole 0 n)) step (dec n)))
-        a (step-up (from small (reduce + 0 (subvec whole b)) b) step b)
-        a (or (first (drop-while #(pos? (:call (nth parts %))) (range a n))) n)]
-    [(into (vec (repeat (max 0 (- b a)) :line)) (repeat (- n (max a b)) :whole)) a]))
+        sums (fn [k] (vec (reductions + 0 (map #(nth (:cost %) k) parts))))
+        whole (sums 0) small (sums 1)
+        span (fn [sv a b] (- (nth sv b) (nth sv a)))
+        ;; a cut moved to i, then on past any part that continues a reply, at most to j
+        start (fn [i j] (or (first (drop-while #(pos? (:call (nth parts %))) (range i (inc j)))) j))
+        half (quot budget 2)
+        [l w] (reduce (fn [[l w] j]
+                        (let [sent #(+ (span small %1 %2) (span whole %2 (inc j)))]
+                          (if (<= (sent l w) budget)
+                            [l w]
+                            (let [w (start (or (first (filter #(<= (span whole % (inc j)) half) (range w (inc j)))) j) j)
+                                  l (if (<= (sent l w) half) l
+                                        (start (or (first (filter #(<= (sent % w) half) (range l (inc w)))) w) w))]
+                              [l w]))))
+                      [0 0] (range n))]
+    [(into (vec (repeat (- w l) :line)) (repeat (- n w) :whole)) l]))
 
 (defn records
   "What agent a's conversation is made of on db, in tx order: its evals, the screen's among them
@@ -588,7 +595,7 @@
   opts :printed the run's earlier requests' prints, answered again as :printed):
   the newest whole, older ones whole and then collapsed within the history budget, `kept`), then
   the screen: the screen evals b names, the newest records, each its diff from the previous one of
-  its form (`printed-run`), then how many earlier records the budget left out; with none
+  its form (`printed-run`); how many earlier records the budget left out goes just after the story; with none
   (an outside agent's read), the block's turn sections (`screen-message`). Answers {:messages
   :sent}: provider-neutral messages (the provider's format function makes the wire shape,
   seon.model/wire-messages) and the records they render, in order (:seon.turn/sent, `sent`):
@@ -612,20 +619,23 @@
         ;; history budget sends, whole or collapsed
         cache (printed-run (mapv (fn [[tx v k]] [(ref-of v) v k tx]) rs) (when model? printed))
         parts (mapv #(get-in cache [:parts %]) (:ids cache))
-        [picks dropped] (kept parts (cfg/value :seon.config.render/history-budget) (cfg/value :seon.config.render/history-step))
+        [picks dropped] (kept parts (cfg/value :seon.config.render/history-budget))
         whole-ids (into #{} (keep (fn [[{:keys [ref]} pick]] (when (= :whole pick) (second ref)))) (map vector (drop dropped parts) picks))
         sent (mapv (fn [{:keys [ref collapsed] :as p} pick] (if (= :line pick) [[:line (second ref)] collapsed] (as-sent p whole-ids)))
                    (drop dropped parts) picks)
         ;; the screen evals are the newest records, each its diff from the one before it (printed-run)
         screen? (seq (:screen basis))
         note (when (and screen? (pos? dropped)) {:role "user" :content (pr-str {:history {:left-out dropped}})})]
+    ;; how many records the budget left out, just after the story: it changes only when the cut
+    ;; jumps, so every message after it is the one before and what was added (sent last, it moved
+    ;; one message along each request and no request was the next one's prefix)
     {:messages (-> [{:role "system" :content help} {:role "user" :content (or run (run-message block))}]
+                   (cond-> note (conj note))
                    (into (mapcat second) sent)
-                   (into (if screen? (cond-> [] note (conj note)) [{:role "user" :content (screen-message block dropped)}])))
+                   (cond-> (not screen?) (conj {:role "user" :content (screen-message block dropped)})))
      :printed cache
      :sent (when (and screen? help-ref run-ref)
-             (-> [help-ref run-ref] (into (map first) sent)
-                 (cond-> note (conj [:history dropped]))))}))
+             (-> [help-ref run-ref] (cond-> note (conj [:history dropped])) (into (map first) sent)))}))
 
 (defn messages
   "A request's messages without a record (a test's, a read before any eval): the system prompt, the
