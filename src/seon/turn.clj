@@ -197,7 +197,7 @@
   messages both requests hold equal; its tokens are the provider's own prompt count (usage),
   apportioned by the one sizer's share of them (seon.context/messages-tokens) and rounded down to
   the provider's block (:seon.config.ai/cache-block-tokens, 0: no check). Measured on 94 recorded
-  turn pairs (2026-10-25): a hit is 0.87-1.12 of the shared prefix so sized, and none is short."
+  turn pairs: a hit is 0.87-1.12 of the shared prefix so sized, and none is short."
   {:malli/schema [:=> [:cat [:maybe [:sequential :map]] [:sequential :map] :map nat-int?] [:maybe :map]]}
   [prev messages {:keys [prompt-tokens cache-hit-tokens]} block]
   (when (and (seq prev) (pos? block) prompt-tokens cache-hit-tokens)
