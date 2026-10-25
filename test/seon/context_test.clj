@@ -731,30 +731,38 @@
   "db with a task demo/r whose plan is plan, and five wiki sections each at a vector a step further
   from the plan's than the one before (docs/vector.md#the-model nearest), each with a lead."
   [plan]
-  (let [anchors (mapv #(str "docs/vector.md#" %) ["the-model" "what-is-embedded" "the-pyramid" "fused-with-the-call-graph" "sections-nearest-the-plan-on-the-screen"])
+  (let [anchors (mapv #(str "docs/vector.md#" %) ["the-model" "what-is-embedded" "the-pyramid" "fused-with-the-call-graph" "what-the-work-is-likely-to-need-as-an-eval"])
         dir (fn [& xs] (let [v (vec (concat xs (repeat (- 768 (count xs)) 0.0))) n (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % n) v)))
         db (ts/test-db)
         db (d/db-with db (vec (for [i (range 5)] {:seon.section/address (anchors i) :seon.section/heading (str "S" i)
                                                   :seon.section/lead (str "Section " i " says one thing. And more.")})))
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan plan}]))
         te (pdb/eid db :seon.task/id "demo/r")
-        es (into [te] (for [i (range 5)] (pdb/eid db :seon.section/address (anchors i))))]
-    [(d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) (repeat 6 10) "m")) te dir]))
+        es (into [te] (for [i (range 5)] (pdb/eid db :seon.section/address (anchors i))))
+        db (d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) (repeat 6 10) "m"))
+        ;; a function beside the plan by meaning, and a schema key its plan names
+        db (d/db-with db [{:db/id "f" :form/id "demo/g" :form/src "(defn g [])"} {:var/name 'demo/g :var/form "f" :var/doc "Gets it. More."}
+                          {:schema/key :demo/thing :schema/form "[:map]"}])
+        f (pdb/eid db :form/id "demo/g")]
+    [(d/db-with db (vector/tx-data [f] [1] [(dir 1.0 0.05)] [10] "m")) te dir]))
 
 (deftest the-screen-shows-the-sections-nearest-the-plan
   ;; the owner (2026-10-25): embed the docs and pull in related concepts, as explicit evals refined
   ;; over the session: (my.task/related) is a screen form, the sections nearest the plan's vector
   ;; that it does not cite, the first :seon.config.render/related (5), each a line with the forms
   ;; that dig further (its wrappers' own test: seon.agent-test/related-is-an-eval-of-the-plan-and-of-any-text)
-  (let [[db te] (sections-near "Make the page say one thing (docs/vector.md#what-is-embedded).")
+  (let [[db te] (sections-near "Make the page say one thing (docs/vector.md#what-is-embedded) of :demo/thing.")
         rel (context/related db te)
         v (context/related-view db rel)]
-    (is (= ["docs/vector.md#the-model" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph" "docs/vector.md#sections-nearest-the-plan-on-the-screen"] rel)
-        "nearest first, the section the plan cites left out")
+    (is (= ["docs/vector.md#the-model" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph" "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"] (:sections rel))
+        "the sections nearest first, the section the plan cites left out")
+    (is (= ['demo/g] (:functions rel)) "the functions nearest it")
+    (is (= [:demo/thing] (:schemas rel)) "and the schema keys its plan names")
+    (is (= ["demo/g: Gets it."] (:functions v)) "a function a line: its name and its doc's first sentence")
     (is (some #{"(my.task/related)"} seon.screen/forms) "a form of the screen: each turn evaluates it, as an eval the agent sees and can rerun")
     (is (= ["docs/vector.md#the-model: Section 0 says one thing." "docs/vector.md#the-pyramid: Section 2 says one thing."
-            "docs/vector.md#fused-with-the-call-graph: Section 3 says one thing." "docs/vector.md#sections-nearest-the-plan-on-the-screen: Section 4 says one thing."]
-           (:nearest v))
+            "docs/vector.md#fused-with-the-call-graph: Section 3 says one thing." "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval: Section 4 says one thing."]
+           (:sections v))
         "each at summary depth: its address and its lead's first sentence")
     (is (str/includes? (:read v) "(:seon.ref/text (my.agent/help ") "with the form that reads one whole, its text's key named")
     (is (str/includes? (:more v) "my.agent/related") "and the form that searches further")
@@ -763,7 +771,7 @@
 (deftest related-sections-follow-a-rewritten-plan
   (let [[db te dir] (sections-near "Make the page say one thing.")
         held (context/related-at db te 1 nil)
-        _ (is (= "docs/vector.md#the-model" (first (:value held))))
+        _ (is (= "docs/vector.md#the-model" (first (:sections (:value held)))))
         ;; the plan rewritten on the branch and embedded there (the branch's vector write is the
         ;; mark), its vector now beside the last section's
         db (d/db-with db [[:db/add te :seon.task/plan "Make the last section say it."]])
@@ -771,10 +779,10 @@
         db (d/db-with db (vector/tx-data [te] [t] [(dir 1.0 0.5)] [10] "m"))
         again (context/related-at db te 2 held)]
     (is (not= (:key held) (:key again)) "a vector write is a new key")
-    (is (= "docs/vector.md#sections-nearest-the-plan-on-the-screen" (first (:value again))) "and the sections follow it: the one nearest the new plan first")
+    (is (= "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval" (first (:sections (:value again)))) "and the sections follow it: the one nearest the new plan first")
     (is (identical? again (context/related-at db te 2 again)) "nothing written since: what was made is reused")
     (let [s (d/db-with db [{:seon.section/address "docs/vector.md#the-pyramid-b" :seon.section/heading "B" :seon.section/lead "New. More."}])
           se (pdb/eid s :seon.section/address "docs/vector.md#the-pyramid-b")
           s (d/db-with s (vector/tx-data [se] [1] [(dir 1.0 0.5)] [10] "m"))]
-      (is (some #{"docs/vector.md#the-pyramid-b"} (:value (context/related-at s te 3 again)))
+      (is (some #{"docs/vector.md#the-pyramid-b"} (:sections (:value (context/related-at s te 3 again))))
           "a section embedded on the branch with the plan unchanged is in the next answer: its write is the mark"))))

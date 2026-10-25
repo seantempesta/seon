@@ -97,8 +97,8 @@
    (let [db (agent/db) q (query-of db x)]
      (cond (contract/error? q) q
            (nil? q) {:not-embedded (str x " has no vector yet")}
-           :else (context/related-view db (mapv #(:seon.section/address (d/entity db (first %)))
-                                                (vector/near db q k {:of :seon.section/address})))))))
+           :else (context/related-view db {:sections (mapv #(:seon.section/address (d/entity db (first %)))
+                                                           (vector/near db q k {:of :seon.section/address}))})))))
 
 (defn prove
   "Run what root's judge will run on this branch (seon.agent/run-tests-forked :judge, in a fork

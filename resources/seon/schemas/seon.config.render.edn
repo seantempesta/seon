@@ -14,7 +14,7 @@
  :seon.config.render/history-budget [:int {:min 0 :seon.config/unit "tokens" :description "Earlier records the model reads: the newest whole, older ones collapsed, the oldest left out."}]
  :seon.config.render/history-step [:int {:min 1 :seon.config/unit "records" :description "The history's boundaries move in multiples of this many records."}]
  :seon.config.render/similar [:int {:min 0 :seon.config/unit "functions" :description "The program functions nearest the task's plan by meaning shown in its task story (:similar); 0 shows none."}]
- :seon.config.render/related [:int {:min 0 :seon.config/unit "sections" :description "The wiki sections nearest the task's plan by meaning, not cited by it, shown on its screen at summary depth (:related); 0 shows none."}]
+ :seon.config.render/related [:int {:min 0 :seon.config/unit "lines of each kind" :description "The wiki sections, program functions and schema keys nearest the task's plan, by its references and by meaning, not cited by it, shown by its screen form (my.task/related) at summary depth; 0 shows none."}]
  :seon.config.render/big-alloc [:int {:min 1 :seon.config/unit "bytes" :description "An evaluation that allocated more is flagged on the page."}]
  :seon.config.render/value-budget [:int {:min 1 :seon.config/unit "tokens" :description "A rendered value whose env names no budget."}]
  :seon.config.render/root-context-budget [:int {:min 1 :seon.config/unit "tokens" :description "Root's context, the system's AI face; later sections past it are named."}]

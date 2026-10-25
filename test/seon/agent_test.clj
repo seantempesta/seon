@@ -695,11 +695,11 @@
         old @agent/state]
     (reset! agent/state {:n 0 :mode :test :db db :task "demo/r"})
     (try
-      (is (= "docs/vector.md#the-model: Section 0 says one thing." (first (:nearest ((requiring-resolve 'my.task/related)))))
+      (is (= "docs/vector.md#the-model: Section 0 says one thing." (first (:sections ((requiring-resolve 'my.task/related)))))
           "the screen form: the sections nearest the plan, the cited one left out")
       (binding [agent/*fx-stub* (fn [_ _] {:value {:model "m" :vectors [(dir 1.0 0.5)] :tokens [3]}})]
         (let [v ((requiring-resolve 'my.agent/related) "the last one" 2)]
-          (is (= "docs/vector.md#sections-nearest-the-plan-on-the-screen: Section 4 says one thing." (first (:nearest v)))
+          (is (= "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval: Section 4 says one thing." (first (:sections v)))
               "the agent's own words refine it: the sections nearest them")
-          (is (= 2 (count (:nearest v))) "k of them")))
+          (is (= 2 (count (:sections v))) "k of them")))
       (finally (reset! agent/state old)))))

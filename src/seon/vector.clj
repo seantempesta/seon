@@ -1,6 +1,6 @@
 (ns seon.vector
   "Semantic search, native to the store and its query language (docs/vector.md). Each form's,
-  wiki section's and task plan's text is embedded once by EmbeddingGemma-2 in process (root's
+  wiki section's, schema entry's and task plan's text is embedded once by EmbeddingGemma-2 in process (root's
   :embed effect over llama.cpp, native/embed.c), and the vector kept on that entity as facts
   (resources/seon/schemas/seon.vector.edn); a form is content-addressed, so an unchanged text is
   never embedded again. `near` is a Datalog function, similarity one more relation:
@@ -124,6 +124,9 @@
   "Each embedded kind: the attribute holding its text, and the text the model reads."
   {:form/src (fn [src] (str document-prompt src))
    :seon.section/text (fn [text] (str document-prompt text))
+   ;; a schema's form, so the screen's related schema keys are found by meaning too
+   ;; (notes/related-search-2026-10-25.md)
+   :schema/form (fn [form] (str document-prompt form))
    :seon.task/plan (fn [plan] (str query-prompt plan))})
 
 (defn- due-among
@@ -137,8 +140,8 @@
                [e ((texts a) v) tx]))))
 
 (defn due
-  "The texts on db whose vector is due for model: each form's source, wiki section's text and
-  task's plan with no vector, a vector made from an earlier text (its :seon.vector/text-t is not
+  "The texts on db whose vector is due for model: each form's source, wiki section's text, schema
+  entry's form and task's plan with no vector, a vector made from an earlier text (its :seon.vector/text-t is not
   the text's transaction), or another model's. [[e text t] ...] in entity order, t the text's
   transaction. With ds, only those of the text datoms ds (`written`), each one's vector read by
   one seek: the cost of ds, not of the store."

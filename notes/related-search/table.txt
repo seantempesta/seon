@@ -1,0 +1,69 @@
+31 tasks; 18 with the plan the worker got
+
+### all
+
+fns (n=28)  method: R@5 R@10 tok@5 tok@10
+  embedding              0.379 0.459   434   862
+  graph                  0.399 0.443   244   369
+  grep                   0.315 0.418   393   760
+  graph+embedding        0.514 0.559   374   672
+  seeds-then-embedding   0.419 0.525   346   783
+  all-three              0.516 0.604   432   795
+
+sections (n=28)  method: R@5 R@10 tok@5 tok@10
+  embedding              0.670 0.783   392   754
+  graph                  0.402 0.541   222   332
+  grep                   0.618 0.705   360   766
+  graph+embedding        0.713 0.753   369   713
+  seeds-then-embedding   0.729 0.793   368   756
+  all-three              0.745 0.890   362   703
+
+schemas (n=10)  method: R@5 R@10 tok@5 tok@10
+  embedding              0.365 0.422    34    68
+  graph                  0.343 0.560    23    38
+  grep                   0.368 0.436    40    81
+  graph+embedding        0.556 0.583    32    66
+  seeds-then-embedding   0.526 0.571    33    66
+  all-three              0.465 0.613    35    75
+
+tasks (n=16)  method: R@5 R@10 tok@5 tok@10
+  embedding              0.284 0.319   483   875
+  graph                  0.080 0.105   305   449
+  grep                   0.041 0.124   552  1002
+  graph+embedding        0.228 0.361   490   940
+  seeds-then-embedding   0.228 0.298   494   907
+  all-three              0.122 0.450   488   946
+
+### plan as given (parent)
+
+fns (n=15)  method: R@5 R@10 tok@5 tok@10
+  embedding              0.320 0.355   434   820
+  graph                  0.237 0.258   216   364
+  grep                   0.292 0.366   384   715
+  graph+embedding        0.356 0.392   340   649
+  seeds-then-embedding   0.250 0.382   314   731
+  all-three              0.376 0.445   425   757
+
+sections (n=16)  method: R@5 R@10 tok@5 tok@10
+  embedding              0.584 0.719   380   766
+  graph                  0.219 0.378   223   308
+  grep                   0.502 0.596   349   774
+  graph+embedding        0.551 0.595   369   726
+  seeds-then-embedding   0.582 0.656   362   761
+  all-three              0.598 0.825   365   701
+
+schemas (n=6)  method: R@5 R@10 tok@5 tok@10
+  embedding              0.233 0.286    34    66
+  graph                  0.238 0.267    18    33
+  grep                   0.238 0.310    39    80
+  graph+embedding        0.426 0.472    32    66
+  seeds-then-embedding   0.419 0.494    33    64
+  all-three              0.276 0.522    34    74
+
+tasks (n=5)  method: R@5 R@10 tok@5 tok@10
+  embedding              0.218 0.263   573   973
+  graph                  0.032 0.045   444   668
+  grep                   0.032 0.032   592  1021
+  graph+embedding        0.236 0.263   606  1090
+  seeds-then-embedding   0.236 0.263   583  1023
+  all-three              0.050 0.250   664  1053
