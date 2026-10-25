@@ -676,10 +676,14 @@
           (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
                              :seon.eval/record {:code code :response {:handle (symbol "result" id) :value value} :run "demo/f#1"}}])
           (when (= "screen" by)
-            (let [db @conn]
-              (swap! out conj (:messages (context/render db {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn i :max-turns 9
-                                                             :origin (or origin :model) :observed {:results {} :test-run-errors [] :reds [] :reasons []}
-                                                             :screen [id] :agent "b/a1"}))))))))
+            (let [db @conn
+                  {:keys [messages sent]} (context/render db {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn i :max-turns 9
+                                                              :origin (or origin :model) :observed {:results {} :test-run-errors [] :reds [] :reasons []}
+                                                              :screen (if (= :outside origin) (vec (keep (fn [[id by]] (when (= "screen" by) id)) (take (inc i) evs))) [id])
+                                                              :agent "b/a1"})]
+              ;; what it recorded it sent reads back as the same bytes, a diff's {:since} among them
+              (is (= messages (into [] (mapcat second) (context/parts-of db sent))) (str "request " i " reads back the same"))
+              (swap! out conj messages))))))
     @out))
 
 (deftest an-unchanged-screen-sends-only-its-names
@@ -694,9 +698,11 @@
     (is (every? #(str/includes? (:content (peek r2)) %) [":since result/e3" "{:changed {[:proofs demo-test/f-test] :pass}," ":unchanged [[:task] [:changes]]}"])
         "a changed one: since the last, what changed by path, and the rest named")
     (is (not (str/includes? (:content (peek r2)) "(defn f [x] x)")) "an unchanged section is not sent again")
+    ;; the outside read names both screen evals of the form: neither is a diff
     (let [out (peek (screen-requests [["e1" "screen" "(my.task/status)" page] ["e3" "screen" "(my.task/status)" page]] :outside))]
-      (is (and (str/includes? (:content (peek out)) "(defn f [x] x)") (not (str/includes? (:content (peek out)) ":since")))
-          "an outside agent's read: its screen whole, its reader holding no earlier one"))))
+      (is (= 2 (count (filter #(or (str/includes? (str (:content %)) "(defn f [x] x)") (str/includes? (str (:content %)) "(:value result/e1)")) out)))
+          "an outside agent's read: each screen eval whole (an equal one as the form reading the first, in the same read)")
+      (is (not-any? #(str/includes? (str (:content %)) ":since") out) "its reader holding no earlier one"))))
 
 (deftest a-screen-whose-base-is-cut-is-sent-whole
   (let [page {:proofs {'demo-test/f-test :fail} :changes (str "(defn f [x] x)" (apply str (repeat 400 " ")) "(defn g [] 1)")}

@@ -24,8 +24,9 @@
 (defn diff
   "What changed from before to after, by path (get-in's): {:changed {path value} :unchanged [path
   ...] :removed [path ...]}, the empty ones left out. A map is compared key by key, a vector of
-  the same count item by item one level down (a page's tiles; a tile is whole), anything else
-  whole; each unchanged path is the highest one, so an equal value is {:unchanged [[]]}. Each
+  the same count item by item (a page's tiles; a vector inside one is whole), anything else
+  whole; each unchanged path is the highest one, so an equal value is {:unchanged [[]]}. Paths
+  follow each map's own order, the same on every read of one stored value (a record's). Each
   screen eval is sent as its diff from the previous one of the same form (the owner's ruling,
   docs/render.md#the-screen-is-sent-as-diffs)."
   {:malli/schema [:=> [:cat :any :any] [:map [:changed {:optional true} [:map-of [:vector :any] :any]]
@@ -44,17 +45,14 @@
     (into {} (remove (comp empty? val)) (walk {:changed {} :unchanged [] :removed []} [] before after false))))
 
 (defn- last-screen
-  "The value this agent's screen form code answered at the newest screen eval of transaction t or
-  before it, on its branch, or ::none."
-  {:malli/schema [:=> [:cat :string :int] :any]}
-  [code t]
-  (let [db (agent/db)
-        rows (d/q '[:find ?tx ?r :in $ ?k ?t :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a ?tx] [(<= ?tx ?t)]
-                    [?e :seon.eval/by "screen"] [?e :seon.eval/record ?r]]
-                  db (:key @agent/state) t)]
-    (if-let [[_ r] (last (sort-by first (filter #(= code (:code (second %))) rows)))]
-      (get-in r [:response :value] ::none)
-      ::none)))
+  "The value agent key k's screen form code answered at its newest screen eval of transaction t or
+  before it, on db, or ::none."
+  {:malli/schema [:=> [:cat :seon.host/db :string :string :int] :any]}
+  [db k code t]
+  (let [[_ r] (last (sort-by first (d/q '[:find ?tx ?r :in $ ?k ?code ?t :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a ?tx] [(<= ?tx ?t)]
+                                          [?e :seon.eval/by "screen"] [?e :seon.eval/record ?r] [(get ?r :code) ?c] [(= ?c ?code)]]
+                                        db k code t)))]
+    (if r (get-in r [:response :value] ::none) ::none)))
 
 (defn show
   "The agent's screen: its page as root's render proc holds it, without its conversation (the model
@@ -65,7 +63,7 @@
   {:malli/schema [:function [:=> [:cat] :any] [:=> [:cat [:map [:since :int]]] :any]]}
   ([] (agent/screen))
   ([{:keys [since]}]
-   (let [now (agent/screen) before (last-screen "(seon.screen/show)" since)]
+   (let [now (agent/screen) before (last-screen (agent/db) (:key @agent/state) "(seon.screen/show)" since)]
      (if (= ::none before) now (diff before now)))))
 
 (defn input

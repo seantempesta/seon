@@ -463,16 +463,18 @@
                 (= :message kind) (let [ms (ai-messages v k)] (assoc-in c [:parts id] (part [:message id] ms ms)))
                 :else
                 (let [rec (:seon.eval/record v) r (:response rec)
-                      base (when (and (= "screen" (:seon.eval/by v)) (contains? r :value)) (get-in c [:screens (:code rec)]))
-                      c (cond-> c (and (= "screen" (:seon.eval/by v)) (contains? r :value))
-                          (assoc-in [:screens (:code rec)] {:handle (:handle r) :value (:value r)}))]
+                      ;; a screen eval of the conversation (a record: it has a tx; an outside read's are not)
+                      screen? (and tx (= "screen" (:seon.eval/by v)) (contains? r :value))
+                      base (when screen? (get-in c [:screens (:code rec)]))
+                      c (cond-> c screen? (assoc-in [:screens (:code rec)] {:handle (:handle r) :value (:value r)}))
+                      plain (when base (ai-messages v k))]
                   (if-let [d (when base
                                (let [d (ai-messages (as-diff v base) k)]
                                  ;; a diff longer than the value (a small one unchanged) is not sent
-                                 (when (< (cost d) (cost (ai-messages v k))) d)))]
+                                 (when (< (cost d) (cost plain)) d)))]
                     ;; a screen eval: its diff from the previous one of its form, whole while that one is not sent whole
                     (assoc-in c [:parts id] (assoc (part [:eval id {:since (:handle base)}] d (ai-messages v k {:collapsed true}))
-                                                   :fold {:since (:handle base)} :plain (ai-messages v k)))
+                                                   :fold {:since (:handle base)} :plain plain))
                 (let [has? (and (contains? r :value) (coll? (:value r)))
                       ;; an equal earlier value stands for this one (seen is by identity)
                       x (when has? (get canon [(type (:value r)) (:value r)] (:value r)))
