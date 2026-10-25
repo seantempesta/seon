@@ -1,0 +1,20 @@
+{:window-ms 2000,
+ :procs 19,
+ :bytes-at-idle 16,
+ :agent :a1,
+ :steps-at-idle {:render [5 6]},
+ :flushed
+   {:commits 2, :flushes 1, :durable? true, :before 2, :covered true},
+ :fork-server
+   {:t 536873811, :main-t 536873811, :mismatch 0, :caught-up true},
+ :checks
+   {:commit-reached-tab true,
+    :flush-covered-main true,
+    :fork-server-caught-up true,
+    :no-byte-at-idle false,
+    :no-proc-blocked true,
+    :no-step-at-idle false,
+    :spawn-reached-tab true,
+    :tab-opened true,
+    :tab-settled true}}
+IDLE FAILED

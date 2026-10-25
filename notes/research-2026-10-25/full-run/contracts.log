@@ -1,0 +1,81 @@
+{:namespaces 65,
+ :contracted 1284,
+ :checked-at-definition 1151,
+ :uncontracted [],
+ :direct-linked-caller :refused,
+ :instrument :on,
+ :armed-at-boot
+   [seon.config/argv seon.config/checkout seon.config/facts
+    seon.config/from-db seon.config/invalid seon.config/invalid-pairs
+    seon.config/keys-declared seon.config/layered
+    seon.config/load-layers seon.config/overrides seon.config/parse-set
+    seon.config/path seon.config/profile seon.config/provider
+    seon.config/read-layer seon.config/refuse! seon.config/resolve
+    seon.config/resolve-in seon.config/resolved seon.config/secret
+    seon.config/value seon.config/with-provider
+    seon.config/without-overrides seon.contract/checked
+    seon.contract/contracted-def seon.contract/enum-values
+    seon.contract/invalid seon.contract/pred seon.contract/problems
+    seon.contract/properties seon.contract/registry-of
+    seon.contract/schema seon.contract/wrap seon.edn/decode
+    seon.edn/encode seon.print/line seon.print/line-prose
+    seon.print/print-value seon.print/prose seon.print/record-text
+    seon.print/response-text seon.print/seen seon.print/source-offset
+    seon.print/text seon.print.emit/close-frame
+    seon.print.emit/continuation seon.print.emit/css-class
+    seon.print.emit/cut-words seon.print.emit/elided-hiccup
+    seon.print.emit/elided-text seon.print.emit/emit-both
+    seon.print.emit/emit-collection seon.print.emit/emit-node
+    seon.print.emit/flat-width seon.print.emit/flat?
+    seon.print.emit/form-text seon.print.emit/group-ends
+    seon.print.emit/indentation seon.print.emit/layout
+    seon.print.emit/leaf-op seon.print.emit/literal
+    seon.print.emit/node-ops seon.print.emit/ops-hiccup
+    seon.print.emit/ops-text seon.print.emit/path-form
+    seon.print.emit/same-key-namespace seon.print.emit/string-literal
+    seon.print.emit/summary seon.print.emit/text-op
+    seon.print.emit/unqualified-key-node seon.print.select/allot
+    seon.print.select/big-number seon.print.select/bound?
+    seon.print.select/break-at seon.print.select/child
+    seon.print.select/classify seon.print.select/collapsed
+    seon.print.select/cut-node seon.print.select/cut-reserve
+    seon.print.select/cut-text seon.print.select/elides?
+    seon.print.select/elisions seon.print.select/entry
+    seon.print.select/escaped-width seon.print.select/estimate
+    seon.print.select/estimate-chars seon.print.select/fill-end
+    seon.print.select/fill-members seon.print.select/fill-string
+    seon.print.select/first-at-least seon.print.select/flat-width
+    seon.print.select/grow-values seon.print.select/held-order
+    seon.print.select/insufficient-budget
+    seon.print.select/integer-digits seon.print.select/keyword-lookup?
+    seon.print.select/leaf seon.print.select/leaf-width
+    seon.print.select/line-breaks seon.print.select/lines-after
+    seon.print.select/list-row seon.print.select/make-node
+    seon.print.select/member-indent seon.print.select/member-rank
+    seon.print.select/minimal seon.print.select/more?
+    seon.print.select/node-continuation seon.print.select/node-of
+    seon.print.select/placed seon.print.select/scalar
+    seon.print.select/seen-form seon.print.select/select
+    seon.print.select/separator seon.print.select/seq-cells
+    seon.print.select/show seon.print.select/shown-to
+    seon.print.select/shows? seon.print.select/sized
+    seon.print.select/sorts? seon.print.select/throwable-value
+    seon.print.select/tree seon.print.select/tree-node
+    seon.print.select/whole seon.profile/alloc-bytes seon.profile/begin!
+    seon.profile/calls seon.profile/counted seon.profile/cpu-ns
+    seon.profile/measure! seon.profile/ms-since seon.profile/now-ns
+    seon.profile/top seon.profile/touched],
+ :wrong-arity
+   {:refused 1280,
+    :not-refused [],
+    :other [],
+    :no-bad-arity
+      [seon.main/-main seon.main/out! seon.proofs/seed
+       seon.test-store/binary-sh]},
+ :boot {:invalid [], :armed 133, :unchanged 9, :ms 14.343375},
+ :checks
+   {:direct-linked-caller-refused true,
+    :every-fn-contracted true,
+    :every-wrong-arity-refused true,
+    :late-ones-armed true}}
+CONTRACTS OK

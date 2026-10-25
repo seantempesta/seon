@@ -107,6 +107,28 @@
     (is (= '#{app.pt-ban/inner} (:inline-defs acct)) "a def inside a function body"))
   (is (empty? (:banned (eval-account 'app.pt-ban "(defn fine [m] (assoc m :intern 1))"))) "a keyword named like it is nothing"))
 
+(deftest the-keywords-a-form-names-are-recorded
+  ;; root's gate (approved): :form/keywords, the data a function operates on, recorded by the
+  ;; analyzer from the read it already does: its code's qualified keywords and its contract's
+  (let [src "(defn kw-user {:malli/schema [:=> [:cat [:map [:app.kw/thing :int]]] :app.kw/count]} [m] (assoc m :app.kw/count (:app.kw/thing m) :plain 1 :listed '[:app.kw/listed]))"
+        acct (eval-account 'app.pt-kw src)
+        db (record (empty-db) 'app.pt-kw src)]
+    (is (= #{:app.kw/thing :app.kw/count :app.kw/listed} (:keywords acct))
+        "its code's (a constant, a keyword called, quoted data) and its contract's qualified keywords, the unqualified left out")
+    (is (= #{:app.kw/thing :app.kw/count :app.kw/listed} (set (d/q '[:find [?k ...] :where [?v :var/name app.pt-kw/kw-user] [?v :var/form ?f] [?f :form/keywords ?k]] db)))
+        "as facts of its form")
+    (is (= ['app.pt-kw/kw-user] (seon.docs/callers db :app.kw/thing)) "a key's functions, one AVET seek")
+    ;; two keys, the first an attribute: as a vector Datahike read them as a lookup ref
+    ;; (datahike.query-test's (= :query/nested-call (:error r)) failed the program db)
+    (is (= #{:ns/name :app.kw/err} (set (d/q '[:find [?k ...] :where [?v :var/name app.pt-kw/two] [?v :var/form ?f] [?f :form/keywords ?k]]
+                                             (record (empty-db) 'app.pt-kw "(defn two [r] [(:ns/name r) :app.kw/err])"))))
+        "an attribute and a key, each a fact")
+    (is (= #{:app.kw/init} (:keywords (eval-account 'app.pt-kw "(def kw-init :app.kw/init)"))) "a def's init is its data")
+    (is (= #{:app.kw/tested} (:keywords (eval-account 'app.pt-kw "(clojure.test/deftest kw-t (clojure.test/is (= :app.kw/tested (:app.kw/tested {}))))")))
+        "a deftest's body (its var's :test) names its data; the metadata's own keys do not")
+    (is (= [src] (mapv :src (program/schema-dependents db #{:app.kw/count}))) "the form that re-arms when a key it names changes")
+    (is (empty? (:keywords (eval-account 'app.pt-kw "(defn plain [m] (:x m))"))) "no qualified keyword, nothing recorded")))
+
 (deftest catches-and-clocks-are-recorded
   ;; for the guard detectors (session PATTERNS): a hiding guard is a catch answering a constant;
   ;; time deciding is a sleep, a deref with a timeout, or core.async's timeout

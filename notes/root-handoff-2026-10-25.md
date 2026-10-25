@@ -42,3 +42,8 @@ What root did on 2026-10-24/25, what is unfinished, the owner's newest ideas, an
 - ctx-atom: notes/design-ctx-atom-2026-10-25.md on ``jolt/ctx-lab`` (revision 3 + §11); the session waits on the owner.
 - Dogfood rulings recorded (update! takes proofs; each form's value under one handle; stale on meaning changes; pilot budget up to $5).
 - Owner, at the end of 2026-10-25's root context: message delivery is to be compared (main-first vs merged from the sender's branch; prefer independent processes only if not worse in stability, performance, complexity); the related-section config key and the docs-levels bound raise are approved; root continues in the same session after a compaction.
+
+## For the owner's morning (2026-10-26)
+- Ruling to confirm: no-progress. Root provisionally approved (live-agents): the first exact repeat of a turn's calls is told to the agent, the second ends the run :no-progress (the open owner question "does a byte-identical repeated reply end the run, or is it only recorded?").
+- Old branches: the printer session's triage table (notes/branch-triage-2026-10-25.md) marks which are carried forward or superseded; deleting them is the owner's call.
+- Archive finished sessions (full-run-reds, and others as they finish)?

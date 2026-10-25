@@ -1,0 +1,32 @@
+{:tools 7,
+ :client-ms 458.8,
+ :exit 0,
+ :relay-peak-mb 6.45,
+ :relay-mb-bound 32,
+ :root-down-exit 0,
+ :agents-text
+   "{:tasks {},
+ :agents {:a1 {:branch :check-mcp/mcp1, :status :idle, :task \"mcp\"}}}",
+ :agent-eval
+   "{:handle result/e1, :value 42, :ms 1.755, :ticks 21661, :bytes 282496}",
+ :root-eval
+   "{:handle result/e1, :value 1, :ms 3.132, :ticks 87929, :bytes 724736}",
+ :agent-records
+   [{:by "outside", :code "(def outside-x 41) (inc outside-x)"}],
+ :root-records
+   [{:by "outside", :code "(count (:agents (c/state sys)))"}],
+ :root-down
+   ["root's server on 127.0.0.1:58737 is not listening (Connection refused): bin/root start"
+    "root's server on 127.0.0.1:58737 is not listening (Connection refused): bin/root start"
+    "root's server on 127.0.0.1:58737 is not listening (Connection refused): bin/root start"
+    "root's server on 127.0.0.1:58737 is not listening (Connection refused): bin/root start"
+    "root's server on 127.0.0.1:58737 is not listening (Connection refused): bin/root start"],
+ :checks
+   {:agent-eval true,
+    :both-recorded-outside true,
+    :notification-unanswered true,
+    :relay-within-bound true,
+    :root-down-answers-every-request true,
+    :root-eval true,
+    :tools-are-the-ops true}}
+MCP OK

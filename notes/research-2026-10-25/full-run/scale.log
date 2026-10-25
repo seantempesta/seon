@@ -1,0 +1,75 @@
+ready in 787.57 ms: {:idle 100}
+{:agents 100,
+ :all-ok 100,
+ :spawn->all-ready-ms 787.57,
+ :end-to-end-ms 2061.37,
+ :server-fork-ms-p50 2.84,
+ :agent-real-mb-sum 9839.8,
+ :system-free-drop-mb-per-agent 39.51,
+ :system-free-returned-mb-per-agent 44.49,
+ :control-real-mb 777.2,
+ :merged 10,
+ :main-notes 10,
+ :all-ended true,
+ :gc-sweepers 0,
+ :start-ms
+   {:n 100,
+    :min 74.72,
+    :p50 232.31,
+    :p95 306.17,
+    :p99 310.69,
+    :max 310.69},
+ :eval+transact-ms
+   {:n 100,
+    :min 27.67,
+    :p50 75.84,
+    :p95 103.28,
+    :p99 131.92,
+    :max 131.92},
+ :tests-ms
+   {:n 100,
+    :min 14.52,
+    :p50 137.46,
+    :p95 353.78,
+    :p99 395.19,
+    :max 395.19},
+ :agent-real-mb
+   {:n 100, :min 95.4, :p50 98.5, :p95 100.9, :p99 113.9, :max 113.9},
+ :fork-server
+   {:mem-mb 161.3,
+    :os-threads 1,
+    :active-threads 1,
+    :mismatch 0,
+    :datoms 12959},
+ :writer
+   {:tx-count 494,
+    :flushes 3,
+    :batch-p50-ms 19.77,
+    :tx-per-commit 2.99,
+    :commits 165,
+    :tx-per-s 232.0},
+ :gc {:count 734, :real-ms 564, :cpu-ms 592},
+ :memory-at-max-running {:agents 4, :need-mb 1096.44, :budget-mb 4096},
+ :root-threads
+   {:os 43,
+    :declared
+      {:gc-sweepers 0,
+       :roster
+         {"main" 1,
+          "jolt-shutdown" 1,
+          "jolt-timer" 1,
+          "jolt-io-poller" 1,
+          "jolt-carrier" 18,
+          "async-mixed" 20,
+          "seon-fs-events" 1}},
+    :diff
+      {:all-ready {},
+       :after-work {},
+       :after-kill {},
+       :boot {"jolt-io-poller" [1 0]}}},
+ :checks
+   {:every-eval-and-test-passed true,
+    :fits-the-machine true,
+    :root-threads-as-declared true,
+    :ten-merges-went-in true}}
+SCALE OK

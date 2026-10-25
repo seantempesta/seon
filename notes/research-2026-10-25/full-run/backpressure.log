@@ -1,0 +1,26 @@
+{:flood
+   {:arrived 20000,
+    :ordered true,
+    :reply ":flooded",
+    :taken-before-the-pause 0,
+    :taken-while-paused 0,
+    :status-while-paused :busy,
+    :blocked [],
+    :drain-ms 734.64},
+ :writer
+   {:agents 8,
+    :writer-buf 1024,
+    :answered-while-paused 0,
+    :root-real-mb {:before 770.2, :writer-saturated 770.4},
+    :resume->all-done-ms 77.74,
+    :ok 8,
+    :agents-ok 8,
+    :not-ok {}},
+ :checks
+   {:agents-write-past-a-paused-writer true,
+    :flood-all-arrive-in-order true,
+    :its-proc-answered true,
+    :ring-pushes-back true,
+    :writer-paused-holds-all true,
+    :writer-resumed-completes-all true}}
+BACKPRESSURE OK

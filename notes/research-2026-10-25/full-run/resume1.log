@@ -1,0 +1,4 @@
+:program {:ok true, :datoms 73}
+:program {:ok true, :datoms 175}
+:create {:ok true, :datoms 12}
+:running-at-kill #{calc/neg#1}

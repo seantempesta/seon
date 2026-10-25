@@ -1,0 +1,13 @@
+{:keys 115,
+ :agent-reply
+   "{:handle result/e1,
+ :ms 13.392,
+ :ticks 1227755,
+ :bytes 6894000,
+ :value [115 -1892937106 -1892937106]}",
+ :checks
+   {:every-declared-key-the-config-holds true,
+    :main-holds-the-config-in-force true,
+    :the-agent-reads-it-from-its-branch true,
+    :the-agent-was-forked-holding-it true}}
+CONFIG OK

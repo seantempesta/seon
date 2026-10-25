@@ -1,0 +1,19 @@
+{:second ["1" "\"(defn f3 [x] (* 3 x))\""],
+ :first
+   {:record "e1",
+    :recorded [app.m0/f3],
+    :text
+      "{:handle result/e1,
+ :ms 2.793,
+ :ticks 76790,
+ :bytes 997456,
+ :ex
+   {:seon.error/type :seon.agent/eval-error,
+    :seon.error/operation seon.repl/eval-code,
+    :seon.error/message \"Divide by zero\",
+    :class \"class java.lang.ArithmeticException\"}}"},
+ :checks
+   {:its-defn-recorded true,
+    :its-evals-recorded false,
+    :one-response-its-error true}}
+RECORD FAILED
