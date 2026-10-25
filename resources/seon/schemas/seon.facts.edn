@@ -265,7 +265,7 @@
                              [:seon.run/branch {:optional true} :seon.run/branch] [:seon.run/model {:optional true} :seon.run/model]
                              [:seon.run/max-turns {:optional true} :seon.run/max-turns]
                              [:seon.run/outcome {:optional true} :seon.run/outcome] [:seon.run/reason {:optional true} :seon.run/reason]
-                             [:seon.run/turns {:optional true} :seon.run/turns] [:seon.run/model-calls {:optional true} :seon.run/model-calls]
+                             [:seon.run/turns {:optional true} :seon.run/turns] [:seon.run/model-calls {:optional true} :seon.run/model-calls] [:seon.run/repeats {:optional true} :seon.run/repeats]
                              [:seon.run/tokens {:optional true} :seon.run/tokens] [:seon.run/merged-t {:optional true} :seon.run/merged-t]
                              [:seon.run/basis-t {:optional true} :seon.run/basis-t]
                              [:seon.run/plan {:optional true} :seon.run/plan]
