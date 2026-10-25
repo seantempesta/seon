@@ -11,16 +11,28 @@
             [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [clojure.edn]))
 
 (def help-page
-  "The help page, docs/agent.md: what every agent reads first (its system message, the same
-  bytes for every agent and turn, so a provider caches it), and what my.agent/help answers.
-  Main holds it as the wiki's sections from root's boot on (seon.root/start!)."
+  "The help page, docs/agent.md: what my.agent/help answers, each section on demand. Main holds
+  it as the wiki's sections from root's boot on (seon.root/start!)."
   "docs/agent.md")
 
 (defn help-text
-  "The help page as db holds it (seon.docs/page-text): a turn's, at the commit it read. A db
-  without it (no root booted on it) is refused by this contract, never answered empty."
+  "The help page as db holds it (seon.docs/page-text). A db without it (no root booted on it) is
+  refused by this contract, never answered empty."
   {:malli/schema [:=> [:cat :seon.host/db] :string]}
   [db] (docs/page-text db help-page))
+
+(def system-page
+  "The system prompt, docs/prompt.md: what every agent reads first (its system message, the same
+  bytes for every agent and turn, so a provider caches it): the standard format's short prompt
+  (owner, 2026-10-23: the model's context is the standard format; the help page is read on
+  demand, my.agent/help). Main holds it as the wiki's sections, as the help page."
+  "docs/prompt.md")
+
+(defn system-text
+  "The system prompt as db holds it (seon.docs/page-text): a turn's, at the commit it read. A db
+  without it is refused by this contract, never answered empty."
+  {:malli/schema [:=> [:cat :seon.host/db] :string]}
+  [db] (docs/page-text db system-page))
 
 (defn- failure
   "A failing assertion as the agent reads it (the test AI render): the assertion as written
@@ -420,7 +432,7 @@
 (defn request
   "The agent's request, a render of its record: agent a (its entity map, :db/id) for the turn
   basis b on db (opts :db :basis :block :help :run, and :help-ref :run-ref, the records those
-  two texts render): the system prompt (the help page), the task story (opts :run, the run
+  two texts render): the system prompt (system-text), the task story (opts :run, the run
   sections as its first turn was sent them, else block's), the conversation (each record of the
   run, `records`, by its own :seon.render/ai render, in tx order, each printed once (printed-run,
   opts :printed the run's earlier requests' prints, answered again as :printed):
@@ -430,7 +442,7 @@
   (an outside agent's read), the block's turn sections (`screen-message`). Answers {:messages
   :sent}: provider-neutral messages (the provider's format function makes the wire shape,
   seon.model/wire-messages) and the records they render, in order (:seon.turn/sent, `sent`):
-  [:section eid t], the help page's own section as of t, the page's last change (so turns that
+  [:section eid t], the system prompt's own section as of t, the page's last change (so turns that
   sent the same page name the same ref); [:task eid t], the task as of its
   run's first turn; [:eval id]; [:line id], an eval sent collapsed; [:message id]; [:history n],
   the n records the budget left out.
@@ -465,13 +477,13 @@
                  (cond-> note (conj [:history dropped]))))}))
 
 (defn messages
-  "A request's messages without a record (a test's, a read before any eval): the help page, the
+  "A request's messages without a record (a test's, a read before any eval): the system prompt, the
   run sections of block and its turn sections, as `request` closes a read with no screen evals."
   {:malli/schema [:=> [:cat :string :map] [:vector :seon.model/message]]}
   [help block] (:messages (request nil {:block block :help help :basis {}})))
 
 (defn reader-text
-  "What a turn's reader got beyond the help page and the scrollback: its run sections and
+  "What a turn's reader got beyond the system prompt and the scrollback: its run sections and
   its turn sections, as one text (the server's context, the page's panel)."
   {:malli/schema [:=> [:cat [:vector :seon.model/message]] :string]}
   [msgs] (str (:content (second msgs)) "\n\n" (:content (peek msgs))))
@@ -496,7 +508,7 @@
 
 (defn parts-of
   "Refs (as :seon.turn/sent names records) each beside its messages, each record by its own
-  render: the help page's section as of its t (help-text), the task's run sections as of its t
+  render: the system prompt's section as of its t (system-text), the task's run sections as of its t
   (story), an eval by its :seon.render/ai render with the fold its ref names (what it showed of an
   earlier record, as the form that reads it there) or collapsed ([:line id]), a message by its
   render, the history note by its count: what the request sent, the same bytes. No request is built again: the same records, rendered."
@@ -505,7 +517,7 @@
   (let [ev #(d/pull db [:seon.eval/id :seon.eval/by :seon.eval/record] [:seon.eval/id %])]
     (mapv (fn [[kind x t :as ref]]
             [ref (case kind
-                   :section [{:role "system" :content (help-text (d/as-of db t))}]
+                   :section [{:role "system" :content (system-text (d/as-of db t))}]
                    :task [{:role "user" :content (story db x t)}]
                    :eval (ai-messages (ev x) :seon.db/eval-fact {:fold (if (map? t) t {})})
                    :line (ai-messages (ev x) :seon.db/eval-fact {:collapsed true})
@@ -513,9 +525,22 @@
                    :history [{:role "user" :content (pr-str {:history {:left-out x}})}])])
           refs)))
 
+(defn sent-split
+  "Where a turn's request went, by part, in tokens (the printer's sizer over each part's content
+  and calls' code): the system prompt, the task story, the conversation (the run's records, whole
+  or collapsed, and the history note) and the screen (the screen evals, screen: their ids, the
+  turn basis's :screen), from what parts-of reads back of its refs. {:system :story :conversation
+  :screen}, a part with no tokens 0."
+  {:malli/schema [:=> [:cat [:vector [:tuple :any [:vector :seon.model/message]]] [:set :string]]
+                  [:map [:system nat-int?] [:story nat-int?] [:conversation nat-int?] [:screen nat-int?]]]}
+  [parts screen]
+  (let [part (fn [[kind x]] (case kind :section :system :task :story (:eval :line) (if (screen x) :screen :conversation) :conversation))
+        tok (fn [ms] (select/estimate (apply str (mapcat (fn [m] (cons (:content m) (map :code (:tool-calls m)))) ms))))]
+    (reduce (fn [m [ref ms]] (update m (part ref) + (tok ms))) {:system 0 :story 0 :conversation 0 :screen 0} parts)))
+
 (defn- story
   "The task story: task entity e's run sections as of t on db (run-state, printed by
-  run-message), what every turn of a run sends after the help page, as its first turn read them."
+  run-message), what every turn of a run sends after the system prompt, as its first turn read them."
   {:malli/schema [:=> [:cat :seon.host/db :int :int] :string]}
   [db e t]
   (let [h (d/as-of db t)]
@@ -556,8 +581,8 @@
         run-ref [:task task-e story-t]
         ;; the story is the same each turn of a run: printed once, by its ref
         story-text (when (seq prev) (or (get-in printed [:story run-ref]) (story db task-e story-t)))
-        r (request a {:db db :basis basis :block block :help (help-text db) :run story-text :printed printed
-                      :help-ref [:section (docs/page-top db help-page) (docs/page-t db help-page)]
+        r (request a {:db db :basis basis :block block :help (system-text db) :run story-text :printed printed
+                      :help-ref [:section (docs/page-top db system-page) (docs/page-t db system-page)]
                       :run-ref run-ref})]
     {:block block :messages (:messages r) :sent (:sent r)
      :printed (cond-> (:printed r) story-text (assoc :story {run-ref story-text}))})))

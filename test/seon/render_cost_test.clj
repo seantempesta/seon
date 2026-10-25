@@ -293,8 +293,10 @@
      ;; rendered (before rows were components: 130 calls and 3.90 / 34.3 MB, ~34 KB a held turn)
      :per-n {:bytes 3600}
      ;; 403 once each row's id is seon.render.ui/comp-id and each view's components are indexed (hold-comps);
-     ;; 404 since a row's records are printed as sent, in order (seon.context/record-parts, 2026-10-25)
-     :fixed {:calls 404 :bytes 900000}
+     ;; 404 since a row's records are printed as sent, in order (seon.context/record-parts, 2026-10-25);
+     ;; 430 and 1.51 MB since a row reads its whole request once to say where its tokens went
+     ;; (seon.context/sent-split: system, story, conversation, screen; 2026-10-25)
+     :fixed {:calls 430 :bytes 1150000}
      ;; the full run measures 4,000 too (:seon.config.proofs/cost-max-n)
      :sizes [100 1000 4000]}))
 

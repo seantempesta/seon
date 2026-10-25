@@ -682,16 +682,19 @@
   or error; view, its page's feed param."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? :boolean :string] :map]}
   [db eid open? view]
-  (let [t (d/pull db [:seon.turn/n :seon.turn/sent :seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens :seon.turn/error
+  (let [t (d/pull db [:seon.turn/n :seon.turn/sent :seon.turn/basis :seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens :seon.turn/error
                       {:seon.turn/run [:seon.run/id]}] eid)
         n (:seon.turn/n t) r (get-in t [:seon.turn/run :seon.run/id])
         refs (:seon.turn/sent t)
         prev (when (pos? n) (:seon.turn/sent (d/pull db [:seon.turn/sent] [:seon.turn/id (str r "/" (dec n))])))
-        added (filterv (complement (set prev)) refs)]
+        added (filterv (complement (set prev)) refs)
+        ;; its whole request read back once: where its tokens went, and the request itself when open
+        whole (context/parts-of db refs)]
     (cond-> (merge (select-keys t [:seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens :seon.turn/error])
-                   {:turn n :run r :view view :refs (count refs) :added (context/parts-of db added)})
+                   {:turn n :run r :view view :refs (count refs) :added (context/parts-of db added)
+                    :split (context/sent-split whole (set (get-in t [:seon.turn/basis :screen])))})
       prev (assoc :same {:turn (dec n) :parts (- (count refs) (count added))})
-      open? (assoc :whole (context/parts-of db refs)))))
+      open? (assoc :whole whole))))
 
 (defn- tile-id
   "The element id of tile nd: an entity's, its component's (comp-id); a value's, its entity and
@@ -1068,11 +1071,12 @@
   its turn, tokens and the share its provider served from cache, then what this turn added to the
   request (:added, each part beside the record that made it), a line naming what it sends as the
   turn before it in its run did (:same), and its whole request in a <details> that is rendered
-  only while open (:whole: opening it posts /open, and the unit comes back with it). input {:turn
-  :run :view :refs :added [[ref messages]] :same {:turn :parts} :whole} and the turn's usage
+  only while open (:whole: opening it posts /open, and the unit comes back with it), and where its
+  tokens went (:split, seon.context/sent-split: system, story, conversation, screen). input {:turn
+  :run :view :refs :added [[ref messages]] :same {:turn :parts} :whole :split} and the turn's usage
   (:seon.turn/tokens, cache-hit and cache-miss tokens) or its call's error (:seon.turn/error)."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [{:keys [turn run view refs added same whole] :seon.turn/keys [tokens cache-hit-tokens cache-miss-tokens error]} opts]
+  [{:keys [turn run view refs added same whole split] :seon.turn/keys [tokens cache-hit-tokens cache-miss-tokens error]} opts]
   (let [prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
         unit (:unit opts)]
     [:li {:id unit :class "flex flex-col gap-2 rounded-md bg-base-900 p-3 text-xs"}
@@ -1082,6 +1086,11 @@
       (when (and prompt (pos? prompt)) [:span {:class "tabular-nums text-text-400"} (str (group3 cache-hit-tokens) " of " (group3 prompt) " prompt tokens cached (" (long (* 100 (/ cache-hit-tokens prompt))) "%)")])
       [:span {:class "text-text-500"} (str refs " records sent")]
       (when-not (or tokens error) [:span {:class "text-text-500"} "the call is in flight"])]
+     ;; where its tokens went, as the printer sizes what it sent
+     (when split
+       [:p {:class "tabular-nums text-text-400"}
+        (str/join " · " (for [[k w] [[:system "system"] [:story "story"] [:conversation "conversation"] [:screen "screen"]]]
+                          (str w " " (group3 (get split k 0)))))])
      ;; a call that failed: its typed error, by its render
      (when error [:div {:class "rounded border border-error p-2"} (render/html error {})])
      [:div {:class "text-2xs uppercase text-text-500"} (if same "what this turn added" "what this turn sent")]

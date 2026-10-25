@@ -397,6 +397,8 @@
  ;; sent with (its value or output an earlier record showed: the handle there), an eval sent collapsed
  ;; ([:line id]); the history note's count
  ;; a model turn whose call failed: the typed error as data (the run's end holds it too, :seon.end/error)
+ ;; (my.task/status) asked before any turn of this process observed its task: why, and what runs its proofs
+ :seon.turn/not-observed [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-observed]]]]
  :seon.turn/error [:map {:seon.db/data true}]
  :seon.turn/sent [:vector {:seon.db/data true} [:or [:tuple [:enum :section :task] :int :int] [:tuple [:enum :eval :line :message] :string] [:tuple [:= :eval] :string [:map-of :keyword :symbol]] [:tuple [:= :history] :int]]]
  :seon.turn/calls [:vector {:seon.db/data true} [:map [:id :string] [:code :string]

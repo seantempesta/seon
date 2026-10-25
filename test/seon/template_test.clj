@@ -6,7 +6,7 @@
   Run: bin/test seon.template-test"
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]]
             [datahike.api :as d]
-            [seon.db :as pdb] [seon.task :as task] [seon.reconcile :as r] [seon.template :as tpl]))
+            [seon.db :as pdb] [seon.task :as task] [seon.reconcile :as r] [seon.template :as tpl] [seon.fixtures :as fx] [clojure.string :as str]))
 
 (def req {:seon.task/ns 'demo :seon.task/name "workouts" :seon.task/plan "store my workouts"
           :seon.task/proofs #{'demo-test/workouts-test}})
@@ -44,3 +44,19 @@
         "the request's proofs reach implement along :needs")
     (is (= :seon.task/refused (:seon.error/type (tpl/request-tx after (assoc req :seon.task/needs #{"demo/nothing"}))))
         "an error answers as it is, and nothing is written")))
+
+(deftest the-fit-tasks-are-requests-a-user-would-write
+  ;; root, 2026-10-25 (the clean path): the five fit tasks restated as a user's problem
+  ;; descriptions, each a request: design, implement and merge on one branch, no proof given
+  ;; (design writes its own, red), short, and each step's instructions prose first, with no ;;
+  (doseq [d fx/fit-requests :let [[design implement merge] (tpl/request d)]]
+    (is (= [:design :implement :merge] (mapv :seon.task/kind [design implement merge])) (:seon.task/name d))
+    (is (apply = (map :seon.task/branch [design implement merge])) "one branch")
+    (is (not (contains? d :seon.task/proofs)) "no proof given: design writes its own")
+    (is (< (count (:seon.task/plan d)) 300) (str "a short description: " (:seon.task/name d)))
+    (is (seq (task/create-tx (ts/test-db) (tpl/request d))) "each a valid task set"))
+  (doseq [[k v] tpl/instructions]
+    (is (str/starts-with? v "Your task: ") (str k ": its goal first"))
+    (is (not (str/includes? v ";;")) (str k ": no ;; reaches the model"))
+    (is (< (count v) 1200) (str k ": short (" (count v) " chars)"))))
+

@@ -729,8 +729,8 @@
 
 (defn wiki-tx
   "The wiki (the checkout's docs/) onto main db, written in the boot fact's own commit so main
-  holds it before any agent forks: the help page every agent reads first is one of its pages
-  (seon.context/help-text). An unchanged wiki writes nothing. A link to no section is kept on
+  holds it before any agent forks: the system prompt every agent reads first is one of its pages
+  (seon.context/system-text), and the help page another (seon.context/help-text). An unchanged wiki writes nothing. A link to no section is kept on
   its section and shows as a dead citation (seon.problems/health), never refuses the load.
   baseline: what the sections with no record were last written against (wiki-baseline)."
   {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:vector :any]]
