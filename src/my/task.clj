@@ -18,13 +18,14 @@
   [] (some->> (current) (context/run-state (agent/db))))
 
 (defn update!
-  "clojure.core/update on a content member of this agent's task (:seon.task/plan or
-  :seon.task/instructions), written on its branch. Answers the task after the update."
-  {:malli/schema [:=> [:cat [:enum :seon.task/plan :seon.task/instructions] :seon.host/fn [:* :any]] [:maybe :seon.task/task]]}
+  "clojure.core/update on a content member of this agent's task (:seon.task/plan,
+  :seon.task/instructions, or :seon.task/proofs, the set of its proofs: a design registers each
+  red proof it writes with `(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)`), written
+  on its branch (seon.task/member-tx) and carried to main at the run's end. Answers the task after the update."
+  {:malli/schema [:=> [:cat [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs] :seon.host/fn [:* :any]] [:maybe :seon.task/task]]}
   [member f & args]
-  (let [t (current)]
-    (agent/transact! [{:seon.task/id (:seon.task/id t) member (apply f (get t member) args)}])
-    (current)))
+  (agent/transact! (task/member-tx (current) member f (vec args)))
+  (current))
 
 (defn fail!
   "Mark this agent's task failed: reason, and a counterexample (a form or value showing

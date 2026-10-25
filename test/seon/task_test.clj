@@ -158,3 +158,20 @@
     (is (= #{"b2/user"} (agents db2)) "the new boot holds none of the earlier boot's: only its user, an agent with no process")
     (is (= #{"b2/user" "b2/a1"} (agents db3)) "and its own as they start")
     (is (some? (d/entity db3 [:seon.agent/key "b1/a1"])) "the earlier agent is kept, not deleted")))
+
+(deftest a-design-adds-a-proof-with-update
+  ;; owner, 2026-10-25 (Dogfood rulings): my.task/update! takes :seon.task/proofs, so a design
+  ;; registers the red proofs it writes; its write is seon.task/member-tx, a set member's adds and
+  ;; retracts, a single member's new value
+  (let [t {:seon.task/id "demo/t" :seon.task/plan "p" :seon.task/proofs #{'demo-test/a-test}}]
+    (is (= [[:db/add [:seon.task/id "demo/t"] :seon.task/proofs 'demo-test/b-test]]
+           (task/member-tx t :seon.task/proofs conj ['demo-test/b-test])))
+    (is (= [[:db/retract [:seon.task/id "demo/t"] :seon.task/proofs 'demo-test/a-test]]
+           (task/member-tx t :seon.task/proofs disj ['demo-test/a-test])))
+    (is (= [[:db/add [:seon.task/id "demo/t"] :seon.task/proofs 'demo-test/b-test]]
+           (task/member-tx (dissoc t :seon.task/proofs) :seon.task/proofs conj ['demo-test/b-test])) "a task with no proofs yet")
+    (is (= [[:db/add [:seon.task/id "demo/t"] :seon.task/plan "p, better"]]
+           (task/member-tx t :seon.task/plan str [", better"])))
+    (let [db (d/db-with (ts/test-db) (task/create-tx (ts/test-db) [(decl "Make t true.")]))
+          after (d/db-with db (task/member-tx (task/task db "demo/t") :seon.task/proofs conj ['demo-test/t-test]))]
+      (is (= #{'demo-test/t-test} (set (:seon.task/proofs (task/task after "demo/t")))) "written, the task holds it"))))

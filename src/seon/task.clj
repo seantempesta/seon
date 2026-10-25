@@ -247,19 +247,41 @@
   the branch changed and main did not overwrites
   main's, so the next agents start from it; one main also changed since base, to another
   value, is a conflict for root (never resolved here). Tasks main does not hold are left.
-  Answers {:tx :conflicts [{:task :attr :base :ours :theirs}]}. Cost: the carried datoms of
+  A set member (the proofs) is compared and written as a set. Answers {:tx :conflicts [{:task
+  :attr :base :ours :theirs}]}. Cost: the carried datoms of
   the three dbs, read once."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:map [:tx [:vector :any]] [:conflicts :seon.run/task-conflicts]]]}
   [base branch main]
-  (let [vs (fn [db] (into {} (for [a (sort pm/carried-platform-attrs) dt (d/datoms db :aevt a)] [[(:e dt) a] (:v dt)])))
-        b (vs base) o (vs branch) m (vs main)]
+  (let [many (get-in main [:rschema :db.cardinality/many] #{})
+        ;; each member's value: a set member's values as a set, a single member's value
+        vs (fn [db] (reduce (fn [m [k v]] (if (many (second k)) (update m k (fnil conj #{}) v) (assoc m k v))) {}
+                            (for [a (sort pm/carried-platform-attrs) dt (d/datoms db :aevt a)] [[(:e dt) a] (:v dt)])))
+        b (vs base) o (vs branch) m (vs main)
+        ;; the facts that make member a of task id hold ov where main holds mv
+        write (fn [id a ov mv] (if (many a)
+                                 (concat (for [v (sort-by str (remove (set ov) mv))] [:db/retract [:seon.task/id id] a v])
+                                         (for [v (sort-by str (remove (set mv) ov))] [:db/add [:seon.task/id id] a v]))
+                                 [(if (some? ov) [:db/add [:seon.task/id id] a ov] [:db/retract [:seon.task/id id] a mv])]))]
     (reduce (fn [acc [e a :as k]]
               (let [id (:seon.task/id (d/entity branch e)) bv (b k) ov (o k) mv (m k)]
                 (cond (or (nil? id) (nil? (pdb/eid main :seon.task/id id)) (= mv ov)) acc
-                      (= mv bv) (update acc :tx conj (if (some? ov) [:db/add [:seon.task/id id] a ov] [:db/retract [:seon.task/id id] a mv]))
+                      (= mv bv) (update acc :tx into (write id a ov mv))
                       :else (update acc :conflicts conj {:task id :attr a :base bv :ours ov :theirs mv}))))
             {:tx [] :conflicts []}
             (sort (for [k (into (set (keys b)) (keys o)) :when (not= (b k) (o k))] k)))))
+
+(defn member-tx
+  "The facts that make member of task t (as seon.task/task reads it) (apply f its value args), as
+  my.task/update! writes them: a set member (:seon.task/proofs) its values added and retracted, a
+  single member its new value."
+  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs] :seon.host/fn [:sequential :any]] [:vector :any]]}
+  [t member f args]
+  (let [id [:seon.task/id (:seon.task/id t)]]
+    (if (= :seon.task/proofs member)
+      (let [old (set (get t member)) new (set (apply f old args))]
+        (into (mapv #(vector :db/retract id member %) (sort-by str (remove new old)))
+              (map #(vector :db/add id member %)) (sort-by str (remove old new))))
+      [[:db/add id member (apply f (get t member) args)]])))
 
 (defn onto-tx
   "The facts that put task id as main holds it, and every task it needs (transitively) that
