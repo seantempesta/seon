@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [test-runner :as runner]))
+            [seon.fx :as fx] [test-runner :as runner] [seon.context-test]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -569,11 +569,11 @@
                                    "   :screen (seon.print/record-text (:seon.eval/record (datahike.api/pull db '[:seon.eval/record] [:seon.eval/id (second (nth (:seon.turn/sent t) 2))])))})")]
                              {:sets [":seon.config.ai/provider=:none"]})]
     (is (= :error (:outcome (:value end))) (pr-str end))
-    (is (= [:section :task :eval :eval :eval] (:sent (:value turn))) "the help page, the task story, the screen's three evals (show, status, changes)")
+    (is (= [:section :task :eval :eval :eval :eval] (:sent (:value turn))) "the help page, the task story, the screen's four evals (show, status, changes, related)")
     (is (str/includes? (str (:screen (:value turn))) ":page") (str "the screen is root's page of it: " (:screen (:value turn))))
     (is (str/includes? (str (:screen (:value turn))) "[:h1 \"a1\"]") (str "its head in words, read whole at the screen's budget: " (:screen (:value turn))))
     (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")
-    (is (= 5 (:read (:value turn))) "read back from its records")))
+    (is (= 6 (:read (:value turn))) "read back from its records")))
 
 (deftest a-turn-that-repeats-the-last-from-the-same-state-ends-the-run
   ;; root's research, lever 2 (2026-10-22): loops took 45% of tokens, and the step E dry run's
@@ -668,3 +668,19 @@
         after (agent/mem-mb)]
     (is (>= (- after before) 64.0) (str "96 MB written between two calls shows in the second: " before " -> " after))
     (is (pos? (alength held)) "held until the second reading")))
+
+(deftest related-is-an-eval-of-the-plan-and-of-any-text
+  ;; my.task/related (the screen form) and my.agent/related (the agent's own words), in a test-mode
+  ;; agent over seon.context-test's five sections; a process test because my.agent reaches a fork
+  (let [[db _ dir] (#'seon.context-test/sections-near "Make the page say one thing (docs/vector.md#what-is-embedded).")
+        old @agent/state]
+    (reset! agent/state {:n 0 :mode :test :db db :task "demo/r"})
+    (try
+      (is (= "docs/vector.md#the-model: Section 0 says one thing." (first (:nearest ((requiring-resolve 'my.task/related)))))
+          "the screen form: the sections nearest the plan, the cited one left out")
+      (binding [agent/*fx-stub* (fn [_ _] {:value {:model "m" :vectors [(dir 1.0 0.5)] :tokens [3]}})]
+        (let [v ((requiring-resolve 'my.agent/related) "the last one" 2)]
+          (is (= "docs/vector.md#sections-nearest-the-plan-on-the-screen: Section 4 says one thing." (first (:nearest v)))
+              "the agent's own words refine it: the sections nearest them")
+          (is (= 2 (count (:nearest v))) "k of them")))
+      (finally (reset! agent/state old)))))

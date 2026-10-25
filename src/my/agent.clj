@@ -10,8 +10,8 @@
     (grep "text")             the program vars whose recorded definition's text holds it
     (similar 'ns/f)           what is nearest ns/f's definition by meaning: vars, wiki sections, tasks
     (similar "text")          what is nearest the text by meaning (seon.vector/near)
-    (related)                 the wiki sections nearest this task's plan, a line each, and how to read one
-    (related "text" k)        the k sections nearest the text: refine what the screen showed
+    (related "text" k)        the k wiki sections nearest the text, a line each, and how to read one:
+                              refine what the screen's (my.task/related) showed
     (prove)                   run what judges this branch: the task's proofs and the tests reaching
                               what it changed since main, each one with a result at its digest reused
     (help)                    the help page's sections (docs/agent.md); (help "done") one whole
@@ -19,7 +19,7 @@
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
-            [seon.config :as cfg] [seon.proofs :as proofs] [seon.task :as task] [seon.vector :as vector] [seon.db :as pdb] [seon.contract :as contract]
+            [seon.config :as cfg] [seon.proofs :as proofs] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract]
             [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
@@ -83,28 +83,14 @@
            :else (mapv (fn [[e s]] [(name-of e) s]) (vector/near db q k))))))
 
 (defn related
-  "The wiki sections nearest by meaning, each a line at summary depth (its address and its
-  lead's first sentence), with the forms that dig further (seon.context/related-view). With no
-  argument, those nearest this task's plan as the branch holds it now (what the branch wrote is
-  embedded first, seon.agent/embed-written!, as each turn's observe does), the ones it cites left out,
-  :seon.config.render/related of them, made again only when the branch's vectors change
-  (seon.context/related-at). With x, those nearest a text (embedded as a search's query) or a
-  var's definition, k of them. One of the screen's forms (seon.screen/forms): each turn shows it
-  as an eval, which the agent reruns with its own words to refine it. A plan or var with no
-  vector yet says so; a failed embedding answers its error."
-  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:or :qualified-symbol :string]] :map]
+  "The wiki sections nearest x by meaning, a text (embedded as a search's query by root's :embed
+  effect) or a var's definition, k of them (:seon.config.render/related unless given), each a
+  line at summary depth with the forms that read one whole and search further
+  (seon.context/related-view): how an agent refines, in its own words, what its screen's
+  (my.task/related) showed. A var with no vector yet says so; a failed embedding answers its
+  error."
+  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :string]] :map]
                   [:=> [:cat [:or :qualified-symbol :string] nat-int?] :map]]}
-  ([] (let [;; what the branch wrote since the last embedding first, so the plan's vector is the plan's now
-            e (agent/embed-written!)
-            db (agent/db)
-            te (some->> (:task @agent/state) (pdb/eid db :seon.task/id))
-            r (when te (context/related-at db te (:vectors-t @agent/state) (:related @agent/state)))]
-        (when r (swap! agent/state assoc :related r))
-        (cond
-          (contract/error? e) e
-          (:value r) (context/related-view db (:value r))
-          :else
-          {:not-embedded "no plan with a vector yet: (my.agent/related \"your words\") searches the wiki by any text"})))
   ([x] (related x (cfg/value :seon.config.render/related)))
   ([x k]
    (let [db (agent/db) q (query-of db x)]

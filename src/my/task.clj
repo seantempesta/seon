@@ -3,7 +3,7 @@
   Writes go to the agent's own branch; root sees them when the branch merges, and a
   failure at the run's end (root's judge reads the branch)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.turn :as turn] [seon.screen :as screen] [seon.context :as context] [seon.contract :as contract]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.turn :as turn] [seon.screen :as screen] [seon.context :as context] [seon.contract :as contract] [seon.db :as pdb]))
 
 (defn current
   "The task this agent works, as data (:seon.task/task)."
@@ -50,3 +50,22 @@
   (if-let [{:keys [input]} (screen/input)]
     (dissoc (context/turn-state (agent/db) (current) input) :will-merge)
     (contract/error :seon.turn/not-observed 'my.task/status "no turn has observed this agent's task yet: (my.agent/prove) runs its proofs" {})))
+
+(defn related
+  "The wiki sections nearest this task's plan by meaning, as the branch holds it now (its vector
+  is embedded on the branch by each turn's observe, seon.agent/embed-written!, just before the
+  screen runs), the ones it cites left out, :seon.config.render/related of them, each a line at
+  summary depth with the forms that read one whole and search further
+  (seon.context/related-view). A form of the screen (seon.screen/forms), made again only when the
+  branch's vectors change (seon.context/related-at); it asks no effect, so it reads the vectors
+  the branch holds. (my.agent/related \"words\" k) refines it by any text. A plan with no vector
+  yet says so."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (let [db (agent/db)
+        te (some->> (turn/current-task) (pdb/eid db :seon.task/id))
+        r (when te (context/related-at db te (:vectors-t @agent/state) (:related @agent/state)))]
+    (when r (swap! agent/state assoc :related r))
+    (if (:value r)
+      (context/related-view db (:value r))
+      {:not-embedded "no plan with a vector yet: (my.agent/related \"your words\") searches the wiki by any text"})))

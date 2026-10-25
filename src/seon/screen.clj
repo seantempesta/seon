@@ -13,12 +13,12 @@
   shows it (`show`: its peers, status, plan and this run), then its task's live state run fresh
   (my.task/status: the turn of how many, each proof's status, first failing assertion and how to
   run it), then what its branch changes against main (my.branch/changes), then the wiki sections
-  nearest its plan as it is now (my.agent/related: a line each, and the forms that read one and
+  nearest its plan as it is now (my.task/related: a line each, and the forms that read one and
   search further) (owner, 2026-10-23: the turn's live state is REPL forms, run fresh each turn;
   2026-10-25: embedding references as explicit evals, refined as the session goes). An agent
   changes what it is shown by redefining this var: rewriting its own interface is an eval, so
   (my.agent/related \"its words\") in place of the last form follows its own query."
-  ["(seon.screen/show)" "(my.task/status)" "(my.branch/changes)" "(my.agent/related)"])
+  ["(seon.screen/show)" "(my.task/status)" "(my.branch/changes)" "(my.task/related)"])
 
 (defn show
   "The agent's screen: its page as root's render proc holds it, without its conversation (the model
