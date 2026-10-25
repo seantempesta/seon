@@ -694,7 +694,7 @@
   [db aid]
   (let [task-of #(:seon.task/id (:seon.run/task (d/entity db [:seon.run/id %])))
         id (task-of aid)
-        [_ prev] (->> (d/q '[:find ?tx ?id :in $ ?me :where [?x :seon.run/id ?me] [?x :seon.run/agent ?g] [?r :seon.run/agent ?g ?tx] [?r :seon.run/id ?id] [(not= ?id ?me)]] db aid)
+        [_ prev] (->> (d/q '[:find ?tx ?id :in $ ?me :where [?x :seon.run/id ?me] [?x :seon.run/agent ?g ?mt] [?r :seon.run/agent ?g ?tx] [(< ?tx ?mt)] [?r :seon.run/id ?id]] db aid)
                       (sort-by first) last)
         prev-task (some-> prev task-of)]
     (when (and prev-task (not= prev-task id))
