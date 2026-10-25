@@ -23,18 +23,24 @@
 
 (defn task-summaries
   "Every task on main db: {id {:execution :done :blocked-by :runs [[id status outcome
-  turns tokens]] :failure}}: the server's and the e2e harness's one summary."
+  turns tokens]] :failure}}: the server's and the e2e harness's one summary. A key says something
+  or is left out: :done only when done, :blocked-by and :runs only when there are some (676 held
+  tasks spelled `:done false, :blocked-by #{}, :runs []` each, 2026-10-25)."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
   (let [idx (r/index db)]
     (into (sorted-map)
-          (for [[id t] (:tasks idx)]
-            [id (cond-> {:execution (:seon.task/execution t) :done (r/done? idx id) :blocked-by (r/blocked-by idx id)
-                         :runs (mapv (juxt :seon.run/id :seon.run/status :seon.run/outcome :seon.run/turns :seon.run/tokens)
-                                         (sort-by :seon.run/id (map (:runs idx) (get-in idx [:by-task id]))))}
+          (for [[id t] (:tasks idx)
+                :let [blocked (r/blocked-by idx id)
+                      runs (mapv (juxt :seon.run/id :seon.run/status :seon.run/outcome :seon.run/turns :seon.run/tokens)
+                                 (sort-by :seon.run/id (map (:runs idx) (get-in idx [:by-task id]))))]]
+            [id (cond-> {:execution (:seon.task/execution t)}
+                  (r/done? idx id) (assoc :done true)
+                  (seq blocked) (assoc :blocked-by blocked)
+                  (seq runs) (assoc :runs runs)
                   (:seon.task/failure t) (assoc :failure (:reason (:seon.task/failure t))))]))))
 
-(defn- agents-answer
+(defn agents-answer
   "Live agents (id, branch, status, task) and every task (task-summaries)."
   {:malli/schema [:=> [:cat :seon.root/sys] :map]}
   [sys]
@@ -112,7 +118,9 @@
   nil) and the request. MCP lists each as the tool seon_<op> (mcp-reply)."
   (array-map
    :agents {:doc "Live agents (id, branch, status, task) and every task (execution, done, blocked-by, its runs as [id status outcome turns tokens], problem)."
-            :args {} :answer (fn [sys _ _] (agents-answer sys))}
+            :args {} :answer (fn [sys _ _] (agents-answer sys))
+            ;; the form that answers it again at root's REPL (seon_eval root): its reply's cuts read through it
+            :again '(seon.server/agents-answer sys)}
    :eval {:doc "Evaluate Clojure in a running agent's process (recorded on its branch, origin :outside) or as \"root\" in root's process (root.repl: `sys` is root; my.root/run!, my.root/cancel! ...), each through the one REPL path. Answers its response (:seon.eval/response): {:handle :value :out :err :ex}, printed under its handle."
           :args {:agent {:type "string" :description "an agent id (a3) or root"} :code {:type "string" :description "Clojure forms"}}
           :required ["agent" "code"]
@@ -161,10 +169,14 @@
                                               ;; judged: the run left :running and :ended (the reconciler accepted,
                                               ;; held or refused it), or a root defect stopped the judge
                                               _ (c/judge! sys {:run run :task task :env env :agent ag})
-                                              db (c/await-db sys #(or (not (#{:running :ended} (status %))) (c/defect % t "seon.reconcile")))]
-                                          (if-let [p (and (#{:running :ended} (status db)) (c/defect db t "seon.reconcile"))]
-                                            {:run run :defect (select-keys p [:seon.error/type :seon.error/message])}
-                                            (verdict db run task)))
+                                              db (c/await-db sys (str "the judge of " run)
+                                                            #(or (not (#{:running :ended} (status %))) (c/defect % t "seon.reconcile")))]
+                                          ;; a judge that has not moved by root's quiet never will: that, or root
+                                          ;; stopped, is the answer
+                                          (cond (contract/error? db) (assoc db :run run)
+                                                :else (if-let [p (and (#{:running :ended} (status db)) (c/defect db t "seon.reconcile"))]
+                                                        {:run run :defect (select-keys p [:seon.error/type :seon.error/message])}
+                                                        (verdict db run task))))
                               :else (refused (str ag " answered no end for " run))))
                       (refused (str ag " works no task"))))}))
 
@@ -212,11 +224,13 @@
                          (rpc-error id -32602 (str "no tool " n ": the tools are " (str/join ", " (map #(str "seon_" (name %)) (keys ops)))))
                          (let [a (answer sys (into {:op op} (for [[k v] (get params "arguments")] [(keyword k) v])))]
                            ;; what the model reads: the block itself, an eval's response as printed
-                           ;; under its handle, an error by its render, anything else whole by the
-                           ;; printer (the whole answer to an outside caller: nothing could re-ask it)
+                           ;; under its handle, an error by its render, an op's answer that root's
+                           ;; REPL answers again (:again) under the reply budget with that form as its
+                           ;; handle, anything else whole by the printer (nothing could re-ask it)
                            (result {"content" [{"type" "text" "text" (cond (and (= :context op) (:context a)) (:context a)
                                                                            (:response a) (:text (:response a))
                                                                            (contract/error? a) (render/ai a {})
+                                                                           (:again (ops op)) (let [p (print/print-value a {:handle (:again (ops op))})] (or (:text p) (:seon.error/message p)))
                                                                            :else (print/text (vary-meta a assoc :seon.print/full true)))}]}))))
         (rpc-error id -32601 (str "no method " method ": this server answers initialize, ping, tools/list and tools/call"))))))
 

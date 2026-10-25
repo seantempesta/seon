@@ -102,7 +102,6 @@
   [:seon.config.render.agent/max-number-digits :seon.config.render.agent/max-number-digits]
   [:seon.config.render.agent/sort-bound :seon.config.render.agent/sort-bound]
   [:seon.config.render/width :seon.config.render/width]
-  [:seon.config.render/nest-depth :seon.config.render/nest-depth]
   [:seon.config.render/part-budget :seon.config.render/part-budget]
   [:seon.config.render/form-budget :seon.config.render/form-budget]
   [:seon.config.render/context-budget :seon.config.render/context-budget]

@@ -952,9 +952,13 @@
                     (not (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f)))))))
 
 (def ^:private names-only
-  "The vars whose forms only name other vars, as quoted data (the reach walk follows a quoted
-  name): reaching one is not using what it names."
-  '#{seon.program/tree-readers seon.program/env-readers})
+  "The vars whose forms only name other vars, as quoted data: reaching one is neither using nor
+  reaching what it names, so their references give the reach walk no edges. seon.config/schema-forms
+  is every schema baked into one literal, whose :seon.render/* properties name every render: an
+  edge from it put every render, and through seon.docs/cited the tree, under every contracted
+  call (680 of 706 tests took the tree digest, 2026-10-25); a check reaches the schemas it
+  checks through its contract's own schema rows, and the baked schemas are :env."
+  '#{seon.program/tree-readers seon.program/env-readers seon.config/schema-forms})
 
 (defn- uses?
   "Does form f use one of vars (:seon.config.source/process-vars or -binary-vars)? A form uses
@@ -1009,7 +1013,10 @@
         test-ids (set (keep var-form tests))
         edges (fn [f] (if (schema-row? f)
                         (vec (:schema f))
-                        (vec (concat (remove test-ids (keep var-form (:refs f)))
+                        ;; a names-only form names vars as data: no edges from its references,
+                        ;; its contract's, methods' and data's kept
+                        (vec (concat (when-not (some (fn [[k s]] (and (= :var k) (names-only s))) (:defines f))
+                                       (remove test-ids (keep var-form (:refs f))))
                                      (for [s (defined f :var)
                                            id (concat (get methods s) (get impls s) (get contract s) (keep var-form (get data-refs s)))]
                                        id)))))

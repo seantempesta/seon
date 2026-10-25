@@ -397,7 +397,9 @@
  ;; (my.task/status) asked before any turn of this process observed its task: why, and what runs its proofs
  :seon.turn/not-observed [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-observed]]]]
  ;; my.task/update! of a member to a value its schema does not admit (seon.task/member-tx): nothing written
- :seon.task/invalid-member [:and :seon.error/base [:map [:seon.error/type [:= :seon.task/invalid-member]] [:member :keyword]]]
+ :seon.task/invalid-member [:and :seon.error/base [:map [:seon.error/type [:= :seon.task/invalid-member]] [:member :keyword]
+                                                        ;; what the update would have made it, printed by the error's render (the one printer)
+                                                        [:value :any]]]
  ;; a model turn whose call failed: the typed error as data (the run's end holds it too, :seon.end/error)
  :seon.turn/error [:map {:seon.db/data true}]
  ;; what a model turn's request sent, the records it rendered in order (seon.context/request, parts-of):

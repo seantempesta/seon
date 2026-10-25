@@ -35,11 +35,11 @@
                                            :turn 0 :max-turns 4})
         by (into {} (map (juxt :test identity)) (:proofs block))]
     (is (= {:test 'demo-test/f-test :status :pass} (by 'demo-test/f-test)) "a passing proof is its status")
-    (is (string? (:source (by 'demo-test/g-test))) "a red proof shows its source")
-    (is (= [{:assert "(= 1 (g))" :got "(= 1 0)"}] (:failures (by 'demo-test/g-test)))
+    (is (select/code? (:source (by 'demo-test/g-test))) "a red proof shows its source, as code")
+    (is (= [{:assert (print/code "(= 1 (g))") :got (print/code "(= 1 0)")}] (:failures (by 'demo-test/g-test)))
         "a failure is the assertion and what it evaluated to")
     (is (= ['demo/f] (mapv :symbol (:write-set block))) "a proof named in the plan is not shown again in the write set")
-    (is (string? (:source (first (:write-set block)))) "a var of the write set shows its source")
+    (is (select/code? (:source (first (:write-set block)))) "a var of the write set shows its source, as code")
     (is (= {'demo-test/f-test '(my.agent/prove #{demo-test/f-test}) 'demo-test/g-test '(my.agent/prove #{demo-test/g-test})} (:to-prove block))
         "each proof and the form that runs it")))
 
@@ -81,7 +81,7 @@
                                            :reasons reasons :turn 1 :max-turns 4
                                            :test-run-errors ["namespace app-test did not load: Unable to resolve symbol: g"]})]
     (testing "every reason but the task's own red proof (shown with the proofs), each with what explains it"
-      (is (= [{:reason :regression :test 'demo-test/g-test :failures [{:assert "(= 1 (g))" :got "(= 1 0)"}]}
+      (is (= [{:reason :regression :test 'demo-test/g-test :failures [{:assert (print/code "(= 1 (g))") :got (print/code "(= 1 0)")}]}
               {:reason :stray-red :test 'user/scratch-test :do '(my.task/update! :seon.task/proofs conj (quote user/scratch-test))}
               {:reason :contract-gap :vars ['demo/helper]}]
              (:refused block))))
@@ -161,7 +161,7 @@
                                      {:results {'ctx-calc-test/square-test :fail} :turn 1 :max-turns 4
                                       :reds (proofs/red-reports {:reports [rep]} #{'ctx-calc-test/square-test})})
         by (into {} (map (juxt :test identity)) (:proofs block))]
-    (is (= [{:assert "(= 9 (square 3))" :got "(= 9 6)"}] (:failures (by 'ctx-calc-test/square-test)))
+    (is (= [{:assert (print/code "(= 9 (square 3))") :got (print/code "(= 9 6)")}] (:failures (by 'ctx-calc-test/square-test)))
         "the assertion once, and what it evaluated to")
     (is (= [{:var 'ctx-calc/square :contract [:=> [:cat :int] :int] :doc "Squares x."}
             {:var 'ctx-ghost/half :contract [:=> [:cat :int] :int]}]
@@ -326,7 +326,7 @@
         ms (context/messages "H" block)
         times (fn [s] (count (filter #(str/includes? (str (:content %)) s) ms)))]
     (is (= 1 (times "Make ```demo/g``` exact.")) "the plan once")
-    (is (= 1 (times "(defn g \\\"Halves.\\\"")) "a cited source once")
+    (is (= 1 (times "(defn g \"Halves.\"")) "a cited source once, as code: its quotes as written")
     (is (= 1 (times ":test demo-test/f-test")) "the proofs once, in the turn sections")
     (is (not (str/includes? (:content (peek ms)) ":write-set")) "the turn sections hold no run section")))
 
@@ -351,8 +351,8 @@
     (is (= {:symbol 'ctx-depth/sq :arglists '([x]) :summary "Squares x."} (by 'ctx-depth/sq)) "bare: arglists and the first sentence")
     (is (= {:symbol 'ctx-depth/cube :arglists '([x]) :doc "Cubes x." :contract [:=> [:cat :int] :int]} (by 'ctx-depth/cube))
         "one backtick: arglists, doc and contract")
-    (is (= {:symbol 'ctx-depth/tri :source "(defn tri \"Triples x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 3 x))"} (by 'ctx-depth/tri))
-        "three backticks: the source")))
+    (is (= {:symbol 'ctx-depth/tri :source (print/code "(defn tri \"Triples x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 3 x))")} (by 'ctx-depth/tri))
+        "three backticks: the source, as code")))
 
 (deftest a-long-source-is-cut-by-the-printer-where-it-is-shown
   ;; the clipping audit (2026-10-25, P4): a cited source is whole in the story; the one printer
@@ -366,7 +366,7 @@
                                                :seon.task/proofs #{'demo-test/f-test}}]))
         r (seon.docs/resolve-ref db 'ctx-big/big :code)
         story (#'context/run-message (context/run-state db (task/task db "demo/b")))]
-    (is (= {:symbol 'ctx-big/big :source src} r) "the source whole, never swapped for its doc by size")
+    (is (= {:symbol 'ctx-big/big :source (print/code src)} r) "the source whole as code, never swapped for its doc by size")
     (is (< (:context seon.print/budgets) (select/estimate src)) "a source over the context's budget")
     (is (< (select/estimate story) (select/estimate src)) "the story is cut where it is printed")
     (is (str/includes? story "(my.task/story)") (str "its cut reads the rest through the story's form: " (subs story 0 (min 400 (count story)))))))
@@ -683,7 +683,7 @@
                                                  :seon.task/proofs #{'demo-test/f-test} :seon.task/config {:seon.config.render/similar 5}}]))]
       (is (contains? (:similar (context/run-state db (task/task db "demo/n"))) :not-embedded)
           "a task that turns it on, its plan with no vector yet: says so"))
-    (is (= [{:symbol 'demo/f :source "(defn f \"Doubles.\" [x] (* 2 x))" :callers '[demo/area demo/vol]}] (:write-set story))
+    (is (= [{:symbol 'demo/f :source (print/code "(defn f \"Doubles.\" [x] (* 2 x))") :callers '[demo/area demo/vol]}] (:write-set story))
         "each cited var with its source and its callers")
     (is (= '(my.agent/prove #{demo-test/f-test}) (get (:to-prove story) 'demo-test/f-test)) "a written proof: the form that runs it")
     (is (= "not written yet; it should assert what the plan says: demo-test/h-test asserts (f 2) is 6."
@@ -754,6 +754,35 @@
     (is (= sim (:similar (context/run-state db (task/task db "demo/c")))) "in the story")
     (is (nil? (context/similar db nil #{})) "off by default (:seon.config.render/similar 0): nothing listed")))
 
+(deftest a-red-proofs-source-reads-as-its-file
+  ;; owner, 2026-10-25: a test's source in my.task/status read as one escaped string literal
+  ;; (every quote \", every line break \n); it is code (seon.print/code) and prints as its file
+  ;; holds it, comments and quotes as written
+  (let [src "(deftest f-test
+  ;; f doubles: the plan's \"exact\" case
+  (is (= 4 (f 2))
+      \"two doubled\"))"
+        db (d/db-with (db-with-program) (program-facts [['demo-test/f-test src []]]))
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f exact."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+        state (context/turn-state db (task/task db "demo/f") {:results {'demo-test/f-test :fail} :reds [] :turn 0 :max-turns 4})
+        text (:text (print/print-value {:handle 'result/e1 :value state} {:handle 'result/e1}))]
+    (is (every? #(str/includes? text %) (str/split-lines src)) text)
+    (is (not (str/includes? text "\\\"two doubled")) "no quote escaped")))
+
+(deftest code-is-plain-data-that-round-trips
+  ;; root, 2026-10-25: code is plain data ({:seon.print/code text}), one representation live and
+  ;; stored: a record holding it stores as :db.type/data and reads back equal, printing verbatim
+  (let [src "(deftest f-test\n  ;; a comment, a \"quoted\" word\n  (is (= 4 (f 2))))"
+        c (print/code src)
+        rec {:code "(my.task/status)" :response {:handle 'result/e4 :value {:source c}}}
+        db (d/db-with (ts/test-db) [{:seon.eval/id "e4" :seon.eval/agent {:seon.agent/id :a1} :seon.eval/record rec}])
+        back (:seon.eval/record (d/pull db [:seon.eval/record] [:seon.eval/id "e4"]))]
+    (is (pdb/plain? c) "plain data")
+    (is (= c (seon.edn/decode (seon.edn/encode c))) "its EDN reads back")
+    (is (= rec back) "the record reads back equal")
+    (is (every? #(str/includes? (print/record-text back) %) (str/split-lines src)) "and prints verbatim")))
+
 (defn- sections-near
   "db with a task demo/r whose plan is plan, and five wiki sections each at a vector a step further
   from the plan's than the one before (docs/vector.md#the-model nearest), each with a lead."
@@ -778,13 +807,13 @@
   ;; over the session: (my.task/related) is a screen form, the sections nearest the plan's vector
   ;; that it does not cite, the first :seon.config.render/related (5), each a line with the forms
   ;; that dig further (its wrappers' own test: seon.agent-test/related-is-an-eval-of-the-plan-and-of-any-text)
-  (let [[db te] (sections-near "Make the page say one thing (docs/vector.md#what-is-embedded) of :demo/thing.")
+  (let [[db te] (sections-near "Make the page say one thing (docs/vector.md#what-is-embedded) of `:demo/thing`.")
         rel (context/related db te)
         v (context/related-view db rel)]
     (is (= ["docs/vector.md#the-model" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph" "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"] (:sections rel))
         "the sections nearest first, the section the plan cites left out")
     (is (= ['demo/g] (:functions rel)) "the functions nearest it")
-    (is (= [:demo/thing] (:schemas rel)) "and the schema keys its plan names")
+    (is (= [:demo/thing] (:schemas rel)) "and the schema keys its plan cites")
     (is (= [["demo/g: Gets it." [:demo/thing]]] (:functions v))
         "a function a line: its name, its doc's first sentence and the registry keys it operates on (its :form/keywords)")
     (is (some #{"(my.task/related)"} seon.screen/forms) "a form of the screen: each turn evaluates it, as an eval the agent sees and can rerun")
@@ -821,12 +850,15 @@
   ;; nearest by meaning (seon.vector/rrf: a tie broken by name); what the plan cites is left out
   (let [[db te] (sections-near "Make the page say one thing (docs/vector.md#what-is-embedded), in `demo/h`.")
         db (d/db-with db [{:db/id "h" :form/id "demo/h" :form/src "(defn h [])"} {:var/name 'demo/h :var/form "h" :var/kind :fn}
-                          {:db/id "k" :form/id "demo/k" :form/src "(defn k [] (h))" :form/refs #{'demo/h}} {:var/name 'demo/k :var/form "k" :var/kind :fn}
-                          {:db/id "t" :form/id "demo/k-test" :form/src "(deftest k-test (h))" :form/refs #{'demo/h}} {:var/name 'demo/k-test :var/form "t" :var/kind :test}
+                          {:db/id "k" :form/id "demo/k" :form/src "(defn k [] (h))" :form/refs #{'demo/h} :form/defines #{"kv"}} {:db/id "kv" :var/name 'demo/k :var/form "k" :var/kind :fn}
+                          {:db/id "t" :form/id "demo/k-test" :form/src "(deftest k-test (h))" :form/refs #{'demo/h} :form/defines #{"tv"}} {:db/id "tv" :var/name 'demo/k-test :var/form "t" :var/kind :test}
+                          ;; a test namespace's helper calling it: a fixture, no program function
+                          {:db/id "x" :form/id "demo-test/fixture" :form/src "(defn fixture [] (h))" :form/refs #{'demo/h} :form/defines #{"xv"}}
+                          {:db/id "xv" :var/name 'demo-test/fixture :var/form "x" :var/kind :fn}
                           {:seon.section/address "docs/vector.md#the-pyramid-c" :seon.section/heading "C" :seon.section/lead "Names h. More."
                            :seon.section/names #{'demo/h}}])
         rel (context/related db te)]
-    (is (= ['demo/g 'demo/k] (:functions rel)) "the caller of the cited var beside the nearest by meaning; the cited var and the test left out")
+    (is (= ['demo/g 'demo/k] (:functions rel)) "the caller of the cited var beside the nearest by meaning; the cited var, the test and a test namespace's helper left out")
     (is (= ["docs/vector.md#the-model" "docs/vector.md#the-pyramid-c" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph"
             "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"]
            (:sections rel))

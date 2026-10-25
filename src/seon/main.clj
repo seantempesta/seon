@@ -58,8 +58,12 @@
         sys (c/start! {})]
     ;; the first cause stops root, once; a signal's hook waits for that stop, then Jolt exits
     (let [cause (promise) stopped (promise)
+          ;; stopped is delivered however the stop ends, so a signal's hook waiting on it ends with
+          ;; it (a stop that throws goes on to its caller, its cause first)
           end! (fn [why] (deliver cause why)
-                 (when (= why @cause) (out! "ROOT STOPPED " (shown (select-keys (c/stop! sys why) [:cause :ms :stop-fact-refused]))) (deliver stopped true))
+                 (when (= why @cause)
+                   (try (out! "ROOT STOPPED " (shown (select-keys (c/stop! sys why) [:cause :ms :stop-fact-refused])))
+                        (finally (deliver stopped true))))
                  @stopped)]
       (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (end! :signal))))
       ;; the key's three values, read here only: -1 the kernel assigns a port (0 to bind), >0 that

@@ -261,9 +261,10 @@
 (defn error-box
   "An error map (:seon.error/base, every variant): its message first, then its type and where
   it was raised, the fix when it carries one, and every other key it carries by the printer
-  (`error-shown`: the AI face's lines and this one's are the same)."
+  (`error-shown`: the AI face's lines and this one's are the same), its cut read through opts
+  :handle (a form that answers e) when it has one."
   {:malli/schema [:=> [:cat :seon.error/base :seon.render/opts] :any]}
-  [e _]
+  [e {:keys [handle]}]
   (let [own (apply dissoc e (error-hidden e))
         budget (config/value :seon.config.render/part-budget)]
          [:div {:class "err"}
@@ -272,7 +273,7 @@
       (when (:seon.error/fix e) [:p {:class "fix"} "fix: " (prose (:seon.error/fix e) budget)])
       (for [{:keys [in expected value]} (:seon.error/problems e)]
         [:p {:class "muted"} "at " [:code (print/text in budget)] " expected " [:code (print/text expected budget)] ", got " [:code value]])
-      (when (seq own) [:code {:class "muted"} " " (print/text own budget)])]))
+      (when (seq own) [:code {:class "muted"} " " (let [p (print/print-value own {:handle handle :budget budget})] (or (:text p) (:seon.error/message p)))])]))
 
 ;;; --- events ---------------------------------------------------------------------
 
@@ -436,7 +437,11 @@
   [e opts]
   (let [rec (or (:seon.eval/record e) e)
         r (merge (:response rec) (select-keys rec [:code :prose :fns]) (dissoc e :seon.eval/record))
-        r (cond-> r (and (:seon.eval/record e) (nil? (:text r))) (assoc :text (print/record-text rec nil)))
+        ;; a recorded value printed as its reply reads (the reply's budget, one budget for an eval's
+        ;; value wherever it is shown) under its handle, its cut the printer's, not cut again; text
+        ;; with no value behind it (a host value's :printed, a live reply's :text) is prose
+        printed (when (and (:seon.eval/record e) (nil? (:text r)) (not (:printed rec))) (print/record-text rec nil))
+        r (cond-> r (and (:seon.eval/record e) (nil? (:text r))) (assoc :text (or printed (:printed rec))))
         by (or (:seon.eval/by e) (:by r))
         err? (some? (:ex r))]
     (if (= :inline (:as opts))
@@ -446,8 +451,8 @@
        (when-not (str/blank? (:prose r)) [:p {:class "whitespace-pre-wrap text-text-300 italic"} (prose (:prose r) (form-budget))])
        (when (:code r) [:pre {:class "text-text-100"} [:code (prose (:code r) (form-budget))]])
        (if (map? (:ex r))
-         (render/html (:ex r) {})
-         [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (prose (or (:text r) "") (part))])
+         (render/html (:ex r) (cond-> {} (:handle r) (assoc :handle (list :ex (:handle r)))))
+         [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (if printed (:text r) (prose (or (:text r) "") (part)))])
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
         [:span (get asked-by by "its own turn")]
@@ -560,12 +565,13 @@
 
 (defn cited
   "What the run's prose cites (the declared html render of :seon.render/cited): each cited thing
-  as its citation reached it (a var's card, a task's plan and proofs, a wiki section), by the
-  one printer at a part's budget; every one of them, the screen's printer cutting the whole."
+  as seon.docs/cited-code gives it (a var's definition head and a namespace's head as code, a
+  task or a wiki section as its view), as data in the hiccup, the serializer and the screen's
+  printer printing it once (no text printed before them)."
   {:malli/schema [:=> [:cat :seon.render/cited :seon.render/opts] :any]}
   [cs _]
   [:div {:class "flex flex-col gap-1 text-xs"}
-   (for [view cs] [:pre {:class "whitespace-pre-wrap break-words text-text-200"} (print/text view (:part print/budgets))])])
+   (for [view cs] [:pre {:class "whitespace-pre-wrap break-words text-text-200"} view])])
 
 (defn- toggle
   "A <details>' attrs that tell the render proc it opened or closed (/open), for the conversation's
@@ -891,7 +897,7 @@
           this-run (when (seq evals) (did evals))
           ;; what the run's prose cites, as each eval's record holds it (parsed once, as it was
           ;; recorded: seon.repl/record-details), newest first, each once, read on its branch
-          cites (when branch (into [] (comp (mapcat (comp :cites :seon.eval/record)) (distinct) (keep #(second (docs/cited branch %))))
+          cites (when branch (into [] (comp (mapcat (comp :cites :seon.eval/record)) (distinct) (keep #(docs/cited-code branch %)))
                                    evals))
           ;; what its branch changes against main now (seon.program/divergence of main's head, not the
           ;; branch's fork point: what main gained since is shown too, as the branch not having it)

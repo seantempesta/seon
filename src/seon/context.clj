@@ -40,8 +40,10 @@
   message only when it says something."
   {:malli/schema [:=> [:cat :map] :map]}
   [r]
-  (cond-> {:assert (:expected r) :got (or (:got r) (:actual r))}
-    (:message r) (assoc :message (:message r))))
+  (let [code #(cond-> % (string? %) print/code)]
+    ;; an assertion as written is code (seon.print/code), printed as in the test file
+    (cond-> {:assert (code (:expected r)) :got (code (or (:got r) (:actual r)))}
+      (:message r) (assoc :message (:message r)))))
 
 (defn callees
   "The program functions proof p calls directly (one level: its recorded form's :form/refs,
@@ -201,10 +203,12 @@
                                  (keep #(:seon.ref/address (docs/cited-view db %))))
                        cites)
             schema? #(some? (pdb/eid db :schema/key %))
-            ;; a program function, not a test (callees leaves tests out too)
-            function? #(not= :test (:var/kind (d/entity db [:var/name %])))
+            ;; a program function: no test, no macro (every contracted form names seon.contract/defn),
+            ;; nothing of a test namespace (its fixtures); the graph and the meaning halves alike
+            function? #(and (not (#{:test :macro} (:var/kind (d/entity db [:var/name %]))))
+                            (not (str/ends-with? (namespace %) "-test")))
             near (fn [of f] (into [] (comp (keep (comp f first)) (distinct)) (vector/near db te (* 4 k) {:of of})))
-            graph {:functions (by-frequency (concat (filter function? (mapcat #(docs/callers db %) fns)) (mapcat #(map :var (callees db %)) fns)
+            graph {:functions (by-frequency (concat (mapcat #(docs/callers db %) fns) (mapcat #(map :var (callees db %)) fns)
                                                     (for [a secs n (:seon.section/names (d/entity db [:seon.section/address a]))] n)))
                    :sections (by-frequency (concat (for [n fns e (d/q '[:find [?e ...] :in $ ?n :where [?e :seon.section/names ?n]] db n)]
                                                      (:seon.section/address (d/entity db e)))
@@ -217,7 +221,8 @@
                      :schemas (near :schema/key #(:schema/key (d/entity db %)))}
             cited {:functions fns :sections secs :schemas #{}}]
         (into {} (for [kind [:sections :functions :schemas]]
-                   [kind (into [] (comp (remove (cited kind)) (remove nil?) (take k)) (vector/rrf [(graph kind) (meaning kind)]))]))))))
+                   [kind (into [] (comp (remove (cited kind)) (remove nil?) (filter (if (= kind :functions) function? any?)) (take k))
+                               (vector/rrf [(graph kind) (meaning kind)]))]))))))
 
 (defn related-at
   "`related` for task entity te on db, as {:key :value}: held (an earlier answer) reused when its
@@ -308,10 +313,11 @@
                                 :let [src (docs/source-of db p)
                                       ;; no result: not written yet, the run failed as a whole, or it never ran (unknown,
                                       ;; the judge's word: seon.reconcile/done-explain)
-                                      st (get results p (cond (nil? src) :undefined (seq test-run-errors) :not-run :else :unknown))
+                                      st (get results p (cond (nil? src) :undefined (seq test-run-errors) :not-run :else :no-assertions))
                                       fs (filter #(= p (:test %)) reds)]]
                             (cond-> {:test p :status st}
-                              (and src (not= :pass st)) (assoc :source src)
+                              ;; its source is code, printed as in its file (seon.print/code)
+                              (and src (not= :pass st)) (assoc :source (print/code src))
                               (seq fs) (assoc :failures (mapv failure fs))
                               (and src (not= :pass st) (seq (callees db p))) (assoc :calls (callees db p)))))}
       max-turns (assoc :turn (str (inc turn) " of " max-turns))
@@ -363,7 +369,10 @@
         ;; collapsed (opts :collapsed, an older one the history keeps small): its handle and its value in one line
         text (if (:collapsed opts)
                (str (get-in record [:response :handle]) " ⇒ " (:line record))
-               (print/record-text (cond-> record (seq (:fold opts)) (update :response folded (:fold opts)))))]
+               ;; a screen eval's cost is root's (its forms run each turn), shown on the page, not the model's
+               (print/record-text (cond-> record
+                                    (seq (:fold opts)) (update :response folded (:fold opts))
+                                    (= "screen" by) (update :response dissoc :ms :ticks :bytes))))]
     (if call-id
       ;; as the model sent it: the reply's text, and the call's own prose argument when it gave one
       ;; (a record with neither, from before the prose argument, replays its prose as the text)
