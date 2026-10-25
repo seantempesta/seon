@@ -171,6 +171,22 @@
       (is (str/includes? (printed "(my.agent/help)") "docs/agent.md#done") "help lists the page's sections, from the branch's db")
       (is (str/includes? (printed "(my.agent/help \"done\")") "The judge counts exactly") "and one section's text"))))
 
+(deftest a-name-that-is-no-var-says-so
+  ;; the live rounds (notes/live-2026-10-25.md): (my.agent/callers 'seon.proof/status) answered [],
+  ;; read as "no callers", and the run asked again until it ended :no-progress. A symbol that names
+  ;; no var says so, with the form for the registry key of that name when there is one
+  (let [[_ nothing key-name real callees] (at/in-agent [{:op :context :agent "a1"}
+                                                         "(my.agent/callers 'seon.task/no-such-thing)"
+                                                         "(my.agent/callers 'seon.task/plan)"
+                                                         "(my.agent/callers 'seon.task/accumulate)"
+                                                         "(my.agent/callees 'seon.task/no-such-thing)"])]
+    (is (= :my.agent/no-var (:seon.error/type (:value nothing))) (pr-str nothing))
+    (is (= 'seon.task/no-such-thing (:name (:value nothing))) "it names what was asked")
+    (is (nil? (:ask (:value nothing))) "and no key of that name: nothing to ask instead")
+    (is (= "(my.agent/callers :seon.task/plan)" (:ask (:value key-name))) "a registry key of that name: the form that asks for it")
+    (is (vector? (:value real)) "a var still answers its callers")
+    (is (= :my.agent/no-var (:seon.error/type (:value callees))) "callees says the same")))
+
 (deftest help-answers-a-section
   ;; the help page is read from the wiki's sections main holds (root's boot loads them), at
   ;; the commit a turn read, through seon.docs's one reader
