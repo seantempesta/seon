@@ -40,8 +40,10 @@
   message only when it says something."
   {:malli/schema [:=> [:cat :map] :map]}
   [r]
-  (cond-> {:assert (:expected r) :got (or (:got r) (:actual r))}
-    (:message r) (assoc :message (:message r))))
+  (let [code #(cond-> % (string? %) print/code)]
+    ;; an assertion as written is code (seon.print/code), printed as in the test file
+    (cond-> {:assert (code (:expected r)) :got (code (or (:got r) (:actual r)))}
+      (:message r) (assoc :message (:message r)))))
 
 (defn callees
   "The program functions proof p calls directly (one level: its recorded form's :form/refs,
@@ -307,7 +309,8 @@
                                       st (get results p (cond (nil? src) :undefined (seq test-run-errors) :not-run :else :no-assertions))
                                       fs (filter #(= p (:test %)) reds)]]
                             (cond-> {:test p :status st}
-                              (and src (not= :pass st)) (assoc :source src)
+                              ;; its source is code, printed as in its file (seon.print/code)
+                              (and src (not= :pass st)) (assoc :source (print/code src))
                               (seq fs) (assoc :failures (mapv failure fs))
                               (and src (not= :pass st) (seq (callees db p))) (assoc :calls (callees db p)))))}
       max-turns (assoc :turn (str (inc turn) " of " max-turns))
@@ -359,7 +362,10 @@
         ;; collapsed (opts :collapsed, an older one the history keeps small): its handle and its value in one line
         text (if (:collapsed opts)
                (str (get-in record [:response :handle]) " ⇒ " (:line record))
-               (print/record-text (cond-> record (seq (:fold opts)) (update :response folded (:fold opts)))))]
+               ;; a screen eval's cost is root's (its forms run each turn), shown on the page, not the model's
+               (print/record-text (cond-> record
+                                    (seq (:fold opts)) (update :response folded (:fold opts))
+                                    (= "screen" by) (update :response dissoc :ms :ticks :bytes))))]
     (if call-id
       ;; as the model sent it: the reply's text, and the call's own prose argument when it gave one
       ;; (a record with neither, from before the prose argument, replays its prose as the text)

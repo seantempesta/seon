@@ -50,4 +50,8 @@
  {:seon.task/name "done-answers-the-verdict"
   :seon.task/plan "Dogfood (gap 4): `seon_done` answers `{:judging ...}` and ends the agent, so an outside agent never sees whether its run was done or what the done rule refused. The judge's reasons are recorded on the run. The change: the op answers when the judge has, with its outcome and reasons (as the screen's :refused shows them), the request's one answer (a reply with credit, never a wait on a clock)."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.server-test/done-answers-the-judges-reasons}}]
+  :seon.task/proofs #{seon.server-test/done-answers-the-judges-reasons}}
+ {:seon.task/name "seon-agents-answers-what-is-live"
+  :seon.task/plan "Found by the printer audit (notes/printer-audit-2026-10-25.md; owner, 2026-10-25: not generating crap). ```seon.server/agents-answer``` answers every one of main's 676 tasks (30,897 tokens printed whole once its empty keys are left out; 41,434 before), almost all :held with no runs, so the reply budget shows 95 held tasks alphabetically and an outside agent never sees what is running (docs/parity.md: too much context). Correct: the live agents, the tasks running or with runs, newest first, then the rest counted by execution with the form that lists them ((seon.server/task-summaries db) filtered), as root's context groups what repeats. Proof: on a root with one running task among many held ones, the seon_agents text names the running task before any held one and counts the held."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.server-test/seon-agents-answers-what-is-live}}]
