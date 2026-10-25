@@ -345,12 +345,13 @@
                                                 per))]
                               (if bad
                                 [address {:read today :unread bad}]
-                                ;; a var whose form changed since: \"changed\" when what the section
-                                ;; describes of it (its docstring or contract) changed, else as today
-                                [address {:read (into {} (for [[n res] per :let [then (get (:ids res) n "absent")]]
-                                                           [n (cond (or (= "absent" then) (= then (today n))) then
+                                ;; a var the old file has no form for is :absent; one whose form changed
+                                ;; since is :changed when what the section describes of it (its docstring
+                                ;; or contract) changed, else today's form id
+                                [address {:read (into {} (for [[n res] per :let [then (get (:ids res) n :absent)]]
+                                                           [n (cond (or (= :absent then) (= then (today n))) then
                                                                     (= (get (:meanings res) n) (meaning-now n)) (today n)
-                                                                    :else "changed")]))}]))))))
+                                                                    :else :changed)]))}]))))))
           plan)))
 
 ;; ---- a citation as its depth shows it (docs/references.md#the-delimiter-picks-the-depth): ----
