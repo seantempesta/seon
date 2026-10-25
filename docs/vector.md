@@ -50,6 +50,8 @@ Measured on 283 pairs from main's history (each non-merge commit's message as th
 
 Fused beat the call graph alone, and embeddings alone (`my.agent/similar`) did as well as fused. Two biases run the other way from each other: the embeddings read each form as it is today, after the change its commit describes (flattering them), and a commit pair has no proofs, the call graph's richest source (understating it). v1 measured 0.274 / 0.386 / 0.441 on its own corpus. Weighting the two rankings is the lever if a task-shaped corpus shows embeddings alone ahead.
 
+The screen's call graph (```seon.context/related```) weighs each neighbour 1/(1 + the forms naming it), counted to `:seon.config.render/related-rarity` (16): plain counts ranked first what every contracted form names (`seon.contract/checked`, `on?`, `seon.db/eid`), 26 of the 155 fused lines over 31 merged tasks; weighed so, none, at the same recall (R@5 0.343 by counts, 0.346 so, 0.353 by log IDF, which needs every form counted; `notes/related-search/search3c.clj`).
+
 ## What the work is likely to need, as an eval
 
 `(my.task/related)` is a form of the screen (`seon.screen/forms`), evaluated before each model request like `(my.task/status)` and recorded as an eval. It shows what the plan's work is likely to need beyond what the plan cites (```seon.context/related```):
