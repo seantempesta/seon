@@ -98,7 +98,13 @@ if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then
   quiet() { local what=$1 o; shift; o=$("$@") || { print -r -- "$o"; echo "$VERDICT FAILED ($what)"; exit 1 } }
   [[ $1 == seed ]] || quiet seed run seed 2000
   quiet drop run drop $M
-  if [[ $1 == idle ]]; then SEON_WEB_PORT=$IDLE_WEB_PORT SEON_MAIN=$M run "$@"; else SEON_MAIN=$M run "$@"; fi; st=$?
+  if [[ $1 == idle ]]; then SEON_WEB_PORT=$IDLE_WEB_PORT SEON_MAIN=$M run "$@"; st=$?
+  elif [[ $1 == durable ]]; then
+    # two processes, as the full run's u-durable: the writer SIGKILLs itself (137), the reader reopens its store
+    SEON_MAIN=check-durable-write run durable-write $M; st=$?
+    (( st == 137 )) || { echo "DURABLE FAILED (durable-write exit $st, expected 137)"; exit 1 }
+    SEON_MAIN=check-durable-read run durable-read $M; st=$?
+  else SEON_MAIN=$M run "$@"; st=$?; fi
   (( st == 0 )) && quiet drop run drop $M
   exit $st
 fi

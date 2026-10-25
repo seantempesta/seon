@@ -230,6 +230,15 @@
   shuffle."
   [n] (vec (sort-by #(mod (* (inc %) 2654435761) 4294967291) (range n))))
 
+(defn- notes-db
+  "n notes, each with :note/text and :note/agent, on a branch of the seeded test store, and their
+  entity ids in index order: the one input of both pull units (seon.test-store/test-branch!: the
+  two index levels real dbs have)."
+  [n]
+  (ts/test-branch! (fn [_ conn]
+                     (d/transact conn (vec (for [i (range n)] {:note/text (str "n" i) :note/agent :u})))
+                     [(d/db conn) (mapv :e (d/datoms (d/db conn) :aevt :note/text))])))
+
 (def unit-benches
   "How each unit operation is measured: (f n) does n units on (setup n). The table below
   is these, divided by n; the-unit-table-is-current measures them again."
@@ -276,20 +285,17 @@
    :pr-str/char {:what "pr-str, per character printed (a vector of integers)" :setup #(vector (vec (range (quot % 6))))
                  :f (fn [v] (pr-str v)) :per-char true}
    ;; a pull from a branch of the in-memory test store (session D2: every read of facts is pulls)
-   :db/pull {:what "d/pull of one attribute of an entity, by entity id (per pull)"
-             :setup (fn [n] (ts/test-branch! (fn [_ conn]
-                              (d/transact conn (vec (for [i (range n)] {:note/text (str "n" i) :note/agent :u})))
-                              [(d/db conn) (mapv :e (d/datoms (d/db conn) :aevt :note/text))])))
+   :db/pull {:what "d/pull of one attribute of an entity, by entity id (per pull)" :setup notes-db
              :f (fn [db es] (reduce (fn [a e] (d/pull db [:note/text] e) a) 0 es))}
-   :db/pull-attr {:what "each attribute of a d/pull beyond its first (per attribute)"
-                  :setup (fn [n] (ts/test-branch! (fn [_ conn]
-                                   (d/transact conn [{:note/text "x" :note/agent :u}])
-                                   [(d/db conn) (first (map :e (d/datoms (d/db conn) :aevt :note/text))) n])))
-                  :f (fn [db e n] (dotimes [_ n] (d/pull db [:note/text :note/agent] e)))
+   ;; the same db and entities, one attribute more: the difference is the attribute alone
+   :db/pull-attr {:what "each attribute of a d/pull beyond its first (per attribute)" :setup notes-db
+                  :f (fn [db es] (reduce (fn [a e] (d/pull db [:note/text :note/agent] e) a) 0 es))
                   :minus :db/pull}})
 
 (defn measure-unit
-  "Unit k measured at n units: {:ticks :ns :bytes} per unit."
+  "Unit k measured at n units: {:ticks :ns :bytes} per unit. A unit stated as the difference from
+  another (:minus) measures both on the one input, the second right after the first, so the db,
+  its entities and every index under them are the same for both and only the difference remains."
   {:malli/schema [:=> [:cat :keyword pos-int?] [:map [:ticks :double] [:ns :double] [:bytes :double]]]}
   [k n]
   (let [{:keys [setup f per per-char minus]} (unit-benches k)
@@ -297,9 +303,8 @@
         units (cond per-char (double (count (if (string? (first args)) (first args) (pr-str (first args)))))
                     per (cost/work per n) :else (double n))
         m (cost/measure f args)
-        ;; a unit measured as the difference from another (an attribute beyond a pull's first)
-        b (when minus (measure-unit minus n))]
-    {:ticks (- (/ (:ticks m) units) (:ticks b 0.0)) :ns (- (/ (:ns m) units) (:ns b 0.0)) :bytes (- (/ (:bytes m) units) (:bytes b 0.0))}))
+        b (when minus (cost/measure (:f (unit-benches minus)) args))]
+    {:ticks (/ (- (:ticks m) (:ticks b 0.0)) units) :ns (/ (- (:ns m) (:ns b 0.0)) units) :bytes (/ (- (:bytes m) (:bytes b 0.0)) units)}))
 
 (deftest the-unit-table-is-current
   ;; every row of the table measured again at 10k units (the table's own n: a unit's bytes at 1k

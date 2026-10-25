@@ -707,7 +707,7 @@
 (defn- dir-bytes [path] (reduce + (map #(.length %) (filter #(.isFile %) (file-seq (java.io.File. path))))))
 
 (defn- main-data-datoms
-  "Main's datoms but root's own facts (:seon.root/*: its boot, its quiescence report, its
+  "Main's datoms (a seq) but root's own facts (:seon.root/*: its boot, its quiescence report, its
   collection record), each boot's user (an agent of the boot with no process, seon.task/boot-tx:
   a new boot writes its own), root's link to the agents it started (:seon.agent/root: a new boot
   retracts an earlier boot's, seon.task/earlier-agents-tx, one per agent) and every transaction
@@ -716,8 +716,13 @@
   a restart must give back exactly is the rest."
   [sys]
   (let [db @(:conn sys) users (set (d/q '[:find [?e ...] :where [?e :seon.agent/id :user]] db))]
-    (count (remove #(or (= "seon.root" (namespace (:a %))) (= :seon.agent/root (:a %)) (= (:e %) (:tx %)) (users (:e %)))
-                   (d/datoms db :eavt)))))
+    (remove #(or (= "seon.root" (namespace (:a %))) (= :seon.agent/root (:a %)) (= (:e %) (:tx %)) (users (:e %)))
+            (d/datoms db :eavt))))
+
+(defn- by-attr
+  "The datoms main-data-datoms counts, per attribute: {attr n}, so a recovery that differs names
+  the attributes it differs in."
+  [datoms] (frequencies (map :a datoms)))
 
 (defn durable-write
   "Phase 1 (a process of its own): boot on main branch nm of the one store (made from its
@@ -745,7 +750,8 @@
         _ (await-event ev #(and (= :commit (:type %)) (= (:id cl) (:agent %))))
         _ @(c/transact-main! sys [] {:flush? true})
         st (c/state sys {:datoms true})
-        expect {:main-datoms (main-data-datoms sys) :main-t (get-in st [:main :t]) :user (seon.task/agent-key (:boot sys) :user)}]
+        md (main-data-datoms sys)
+        expect {:main-datoms (count md) :by-attr (by-attr md) :main-t (get-in st [:main :t]) :user (seon.task/agent-key (:boot sys) :user)}]
       (spit (str path ".expect.edn") (sedn/encode expect))
       {:report {:store (:store st) :a ra :merge (dissoc m :ops) :b rb :clone [(:id cl) rc] :expect expect :store-bytes (dir-bytes (:store-path sys))}
        :checks {:merged (:merged? m)} :then :kill}))))
@@ -756,9 +762,19 @@
   [nm]
   (run-check "DURABLE" {:main (keyword nm)}
    (fn [sys]
-    (let [expect (read-string (slurp (str (seon.db/agents-dir (:cfg sys)) "/durable.expect.edn")))
+    (let [expect-file (str (seon.db/agents-dir (:cfg sys)) "/durable.expect.edn")
+          ;; phase 2 reads what phase 1 wrote before it killed itself: run alone, it says so
+          _ (when-not (.exists (java.io.File. expect-file))
+              (out! "DURABLE FAILED (phase 1 left no " expect-file ": durable-read reopens what durable-write killed; run bin/check durable)")
+              (lib/c-exit 1))
+          expect (read-string (slurp expect-file))
+          ;; read once: phase 2 takes what phase 1 left (its report carries it), so a later run
+          ;; alone finds none rather than an earlier run's
+          _ (.delete (java.io.File. expect-file))
         st (c/state sys {:datoms true})
-        md (main-data-datoms sys)
+        data (main-data-datoms sys)
+        md (count data)
+        ba (by-attr data)
         ;; this boot has started no agent yet: every earlier boot's link to its agents is
         ;; retracted, and the one agent linked is this boot's user (seon.task/boot-tx)
         linked (vec (for [dt (d/datoms @(:conn sys) :aevt :seon.agent/root)] (:seon.agent/key (d/pull @(:conn sys) [:seon.agent/key] (:e dt)))))
@@ -774,6 +790,9 @@
         [n2] (spawn-ready! sys "after merging b")
         r-n2 (ts/value-of @(c/submit! sys n2 "[(app.m1/f2 1) (q '[:find [?t ...] :where [?n :note/agent :b] [?n :note/text ?t]]) (app.m0/f1 2)]"))]
       {:report {:store (:store st) :main (:main st) :main-data-datoms {:phase-1 (:main-datoms expect) :recovered md}
+                :attrs-that-differ (into {} (for [a (set (concat (keys (:by-attr expect)) (keys ba)))
+                                                  :let [x (get (:by-attr expect) a 0) y (get ba a 0)] :when (not= x y)]
+                                              [a [x y]]))
                 :agents-linked-at-boot linked
                 :born-after r-n :resumed-b r-b :b-tests (select-keys t-b [:pass :fail :error]) :resumed-clone r-c
                 :merge-b [(select-keys mmb [:ok :applied]) (dissoc mb :ops)] :after-merging-b r-n2}
