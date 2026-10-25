@@ -144,8 +144,9 @@
 (defn- elided-hiccup
   "A cut as HTML: a string cut's shown characters, then its marker and continuation form; a cut
   with no continuation names why in its title. A cut with a continuation opens: its marker is a
-  closed <details> whose toggle posts /open for its row (the page's li) and that form, and the row
-  renders what the form reads (seon.print/read-rest, seon.render.ui/evaluation's :opened)."
+  button whose click posts /open for its row (the page's li) and that form, and the row renders
+  what the form reads (seon.print/read-rest, seon.render.ui/evaluation's :opened), which closes it.
+  A button, not a <details>: the re-rendered row would close a details and its toggle post the close."
   {:malli/schema [:=> [:cat :seon.print/node :string] :seon.print/hiccup]}
   [node text]
   (let [prefix (or (:seon.print/prefix node) "")
@@ -156,10 +157,10 @@
         marker [:span (cond-> {:class (css-class :seon.print/elision)} reason (assoc :title reason)) label]
         form (:seon.print/continuation node)
         marker (if form
-                 [:details {:class (css-class :seon.print/cut) :data-seon-form (form-text form)
-                            (keyword "data-on:toggle") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=' + "
-                                                            "encodeURIComponent(el.closest('li[id]').id + '/' + el.dataset.seonForm) + '&open=' + el.open)")}
-                  [:summary marker]]
+                 [:button {:type "button" :class (css-class :seon.print/cut) :data-seon-form (form-text form)
+                           (keyword "data-on:click") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=' + "
+                                                          "encodeURIComponent(el.closest('li[id]').id + '/' + el.dataset.seonForm) + '&open=true')")}
+                  marker]
                  marker)]
     (cond (and shown (:seon.print/code? node)) [:div (marked-hiccup (:seon.print/code? node) shown) marker]
           shown [:span [:span {:class (css-class :seon.print/string)} shown] marker]

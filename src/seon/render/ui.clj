@@ -473,7 +473,11 @@
               [:div {:class "flex gap-2"} [:span {:class "text-text-500"} "⇒"] (render/html v {:handle (:handle r)})]
               ;; each cut opened: what its form reads, from the record, under that form (seon.web/open-form read it)
               (for [f (:opened opts) :let [form (edn/read-string f)]]
-                [:div {:class "flex gap-2"} [:code {:class "text-text-500"} f]
+                [:div {:class "flex gap-2"}
+                 ;; the form read, as the button that closes it
+                 [:button {:type "button" :class "text-text-500 font-mono text-left" :data-seon-form f :title "close"
+                           (keyword "data-on:click") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=' + "
+                                                          "encodeURIComponent(el.closest('li[id]').id + '/' + el.dataset.seonForm) + '&open=false')")} f]
                  (render/html (print/read-rest form (:handle r) v) {:handle form})])])
            [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (prose (or (:text r) "") (part))]))
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
