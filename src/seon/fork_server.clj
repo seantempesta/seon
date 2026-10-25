@@ -47,6 +47,19 @@
     (lib/fork! {:fd fd :refused refused :parent parent
                 :child #(do (sock/close! (:fd conn)) (sock/close-pending-fds! conn) (child fd))})))
 
+(defn moves-program?
+  "Whether a commit's resolved ops change the program (an attribute of seon.program/attr-namespaces):
+  what moves the reach graph a fork hands its agent."
+  {:malli/schema [:=> [:cat [:sequential :any]] :boolean]}
+  [ops] (boolean (some (fn [[_ _ a]] (and (keyword? a) (program/attr-namespaces (namespace a)))) ops)))
+
+(defn graph-at-fork
+  "Server state st with main's reach graph (built when the server starts) brought to :db, only
+  when a commit since moved the program (:graph-moved, moves-program?): a spawn's own commit (its
+  run) moves none, and reach-update reads every live form (15-21 ms a fork, measured)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st] (cond-> st (:graph-moved st) (-> (update :graph program/reach-update (:db st)) (dissoc :graph-moved))))
+
 (defn server-step
   "The fork server's step-fn. In :cmd ({:op :tx|:fork|:stats|:static|:exit}: :exit is a child
   that exited, by its pid); out :ev (events for root). The fork is this process's own
@@ -83,17 +96,14 @@
                  db' (d/commit-as-db (:store st) (:commit m))
                  st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc)
                       ;; the program moved: the reach graph is brought to it at the next fork
-                      (some (fn [[_ _ a]] (and (keyword? a) (program/attr-namespaces (namespace a)))) (:tx-data m)) (assoc :graph-moved true))
+                      (moves-program? (:tx-data m)) (assoc :graph-moved true))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled
                  errs (seq (program/load-changes! db' (:tx-data m)))]
              [st {:ev (cond-> [] errs (conj {:ev :load-errors :t (:t m) :errors (vec errs)})
                         true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (profile/ms-since t0)
                                     :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}]))
      :fork (let [t0 (profile/now-ns)
-                 ;; main's reach graph (built when this server starts) brought to :db at a fork only
-                 ;; when a commit since moved the program (:graph-moved): a spawn's own commit (its
-                 ;; run) moves none, and reach-update reads every live form (15-21 ms a fork measured)
-                 st (cond-> st (:graph-moved st) (-> (update :graph program/reach-update (:db st)) (dissoc :graph-moved)))
+                 st (graph-at-fork st)
                  ;; the heap made static first, so the agent's collections never trace (and un-share)
                  ;; what it inherits (design agent-loop section 2: 163 MB of this heap sat in
                  ;; generations 3-4 at fork; static, an agent's work left 106 MB where it left 333).

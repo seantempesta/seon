@@ -80,6 +80,7 @@ Clock reads whose value is recorded or shown and never compared to decide anythi
 - `seon.render.proc/pass`: a render pass's duration and the events' age, shown on the dashboard.
 - `seon.render.proc/system-value`: carries the pass's wall time (`:now-ms`) to the dashboard, which shows ages from it; nothing here decides by it.
 - `seon.agent/handle!`, `seon.root/ext-op`, `seon.reconcile/advance`, `seon.reconcile/reconciler-proc`: stamps and durations.
+- `seon.agent/init!`, `seon.agent/hello!`: a spawn's phases (`seon.agent/spawn-phases`: the fork server's marks, then the child's, each with the bytes it allocated), sent with the agent's hello and shown on root's `:ready` event; nothing decides by them.
 - `seon.root/deliver-message`: a delivered message's send stamp (`:ns`), which the agent's receipt (`:received`) answers with its own, so the delivery's time is measured.
 
 The thread CPU clock (`seon.profile/cpu-ns`, what a cost proof's `seon.cost/measure` times through `seon.profile/measure!`) orders nothing and carries no mark; [cost](cost.md) says what it measures.
