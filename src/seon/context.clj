@@ -143,13 +143,16 @@
   sentence ({:nearest :more}, :more the forms that search further). nil when the count is 0
   (off, the default; a task turns it on in its :seon.task/config); a plan with no vector yet says
   so ({:not-embedded}), never an empty list."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe :int] [:set :qualified-symbol]]
-                  [:maybe [:or [:map [:nearest [:vector :string]] [:more :string]] [:map [:not-embedded :string]]]]]}
-  [db te named]
-  (let [;; through the one resolver: a task's own setting (its flattened :seon.task/config), else its model's, else the config's
-        t (when te (d/pull db [:seon.config.render/similar :seon.task/model] te))
-        k (cfg/value :seon.config.render/similar {:task t :model (:seon.task/model t)})
-        function? #(= :fn (:var/kind (d/entity db [:var/name %])))
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:maybe :int] [:set :qualified-symbol]]
+                             [:maybe [:or [:map [:nearest [:vector :string]] [:more :string]] [:map [:not-embedded :string]]]]]
+                  [:=> [:cat :seon.host/db [:maybe :int] [:set :qualified-symbol] nat-int?]
+                   [:maybe [:or [:map [:nearest [:vector :string]] [:more :string]] [:map [:not-embedded :string]]]]]]}
+  ([db te named]
+   ;; through the one resolver: a task's own setting (its flattened :seon.task/config), else its model's, else the config's
+   (let [t (when te (d/pull db [:seon.config.render/similar :seon.task/model] te))]
+     (similar db te named (cfg/value :seon.config.render/similar {:task t :model (:seon.task/model t)}))))
+  ([db te named k]
+  (let [function? #(= :fn (:var/kind (d/entity db [:var/name %])))
         ;; every vector, every dim, every rank: the exact ranking (near's shortlist and fine level
         ;; over all of them; it sorts them all anyway), walked until k functions are found, as the
         ;; nearest forms are often tests
@@ -161,7 +164,44 @@
                                      (remove named) (filter function?) (distinct) (take k)
                                      (map (fn [s] (str s (some->> (:var/doc (d/entity db [:var/name s])) ref/lead-sentence (str ": "))))))
                             (vector/near db te all {:of :form/id :shortlist all :fine-dims all}))
-             :more "(my.agent/similar 'ns/f) or (my.agent/similar \"text\"): more by meaning"})))
+             :more "(my.agent/similar 'ns/f) or (my.agent/similar \"text\"): more by meaning"}))))
+
+;; ---- the story's pulls (:seon.config.render/pulls): related data a run read by eval, measured ----
+
+(defn- call-site
+  "The first call of var sym in caller's recorded form, as read (seon.reader/read-text in its
+  namespace, its aliases resolved by the namespace as this process holds it), or nil."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol :qualified-symbol] :any]}
+  [db caller sym]
+  (when-let [f (:var/form (d/entity db [:var/name caller]))]
+    (let [nsym (:ns/name (:form/ns f))
+          aliases (some-> (find-ns nsym) ns-aliases)
+          names-sym? (fn [s] (and (symbol? s) (= (name s) (name sym))
+                                  (= (namespace sym) (if-let [q (namespace s)] (str (or (some-> (get aliases (symbol q)) ns-name) q)) (str nsym)))))]
+      (some #(when (and (seq? %) (names-sym? (first %))) %) (tree-seq coll? seq (reader/read-text (:form/src f) nsym))))))
+
+(defn- one-line
+  "Var s as a line: its name and its docstring's first sentence."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] :string]}
+  [db s] (str s (some->> (:var/doc (d/entity db [:var/name s])) ref/lead-sentence (str ": "))))
+
+(defn- proof-namespace
+  "Proof namespace n as a story shows it beside the proofs: its ns form (its requires and
+  aliases, where a new test is written) and its helpers, each a line."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] :map]}
+  [db n]
+  (let [helpers (sort (d/q '[:find [?v ...] :in $ ?n :where [?ns :ns/name ?n] [?e :var/ns ?ns] [?e :var/name ?v] (not [?e :var/kind :test])] db n))]
+    (cond-> {:ns n}
+      (some-> (d/entity db [:ns/name n]) :ns/form :form/src) (assoc :form (:form/src (:ns/form (d/entity db [:ns/name n]))))
+      (seq helpers) (assoc :helpers (mapv #(one-line db %) helpers)))))
+
+(defn- prompt-functions
+  "The my.* functions the system prompt names, each a line: what an agent read their source
+  for, 15 times in the runs measured on 2026-10-25."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :string]]}
+  [db]
+  (into [] (comp (map :seon.ref/name) (filter qualified-symbol?) (filter #(str/starts-with? (namespace %) "my.")) (distinct) (map #(one-line db %)))
+        (ref/references db (system-text db))))
 
 (defn run-state
   "The task story: task t's run sections as data, the same each turn of a run: the task (its
@@ -170,22 +210,43 @@
   once; each proof to the form that runs it at the REPL, or, when it is not written, that it
   is not and what it should assert in the plan's words (whether it fails, and why, is the
   screen's: it changes each turn); the wiki sections it cites; the functions nearest its plan
-  by meaning that it does not name (`similar`)."
+  by meaning that it does not name (`similar`). The pulls :seon.config.render/pulls turns on (the
+  related data step 6's runs read by eval, to compare on and off): each proof namespace's ns form
+  and helpers (:test-ns), the my.* functions the system prompt names (:functions), a design plan
+  citing no var seeded with the functions nearest it (:seeded, how many), each caller's call (:call-sites),
+  each write-set var's callees a line each (:callees), and one test calling it (:example-test)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] :map]}
   [db t]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
+        te (some->> (:seon.task/id t) (pdb/eid db :seon.task/id))
+        ;; through the one resolver: the task's own setting (its flattened :seon.task/config), its model's, the config's
+        pulls (cfg/value :seon.config.render/pulls {:task (when te (d/pull db [:seon.config.render/pulls] te)) :model (:seon.task/model t)})
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
         refs (filterv #(= :var (docs/citation-kind db %)) cites)
         sections (into [] (comp (filter #(= :view (docs/citation-kind db %))) (map #(docs/cited-view db %)))
                        cites)
-        near (similar db (some->> (:seon.task/id t) (pdb/eid db :seon.task/id)) (into (set proofs) (map :seon.ref/name) refs))]
+        named (into (set proofs) (map :seon.ref/name) refs)
+        seed (when (and (= :design (:seon.task/kind t)) (empty? refs) (pos? (:seeded pulls 0))) (:seeded pulls))
+        near (if seed (similar db te named seed) (similar db te named))
+        program-var? #(some-> (d/entity db [:var/name %]) :var/form)
+        ;; a test calling s that is not a proof of the task (those the story shows already)
+        tests-of (fn [s] (filterv #(and (not (contains? (set proofs) %)) (= :test (:var/kind (d/entity db [:var/name %])))) (docs/callers db s)))]
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])
                           :seon.task/plan plan)
              ;; a proof is shown with the proofs, not again in the write set; the names that
              ;; resolve to nothing are one entry, their problem said once
              :write-set (let [rs (into [] (comp (remove (comp (set proofs) :seon.ref/name))
-                                                (map #(let [v (docs/resolve-ref db (:seon.ref/name %) :code)]
-                                                        (cond-> v (not (:unresolved v)) (assoc :callers (docs/callers db (:seon.ref/name %)))))))
+                                                (map #(let [s (:seon.ref/name %) v (docs/resolve-ref db s :code)]
+                                                        (cond-> v
+                                                          (not (:unresolved v))
+                                                          (assoc :callers (if (:call-sites pulls)
+                                                                            (mapv (fn [c] (cond-> {:var c} (call-site db c s) (assoc :call (call-site db c s)))) (docs/callers db s))
+                                                                            (docs/callers db s)))
+                                                          (and (not (:unresolved v)) (:callees pulls))
+                                                          (assoc :callees (into [] (comp (filter program-var?) (remove #{s}) (map (fn [c] (one-line db c))))
+                                                                                (sort (:form/refs (:var/form (d/entity db [:var/name s]))))))
+                                                          (and (not (:unresolved v)) (:example-test pulls) (first (tests-of s)))
+                                                          (assoc :example-test (docs/resolve-ref db (first (tests-of s)) :code))))))
                                        refs)
                               {gone true there false} (group-by (comp boolean :unresolved) rs)]
                           (cond-> (vec there)
@@ -197,7 +258,9 @@
                                     (list 'my.agent/prove #{p})
                                     (str "not written yet; it should assert what the plan says: " (not-written p plan)))]))}
       (seq sections) (assoc :sections sections)
-      near (assoc :similar near))))
+      near (assoc :similar near)
+      (and (:test-ns pulls) (seq proofs)) (assoc :proof-namespaces (mapv #(proof-namespace db %) (sort (distinct (map (comp symbol namespace) proofs)))))
+      (:functions pulls) (assoc :functions (prompt-functions db)))))
 
 (defn turn-state
   "The turn sections of task t's current state as data, measured again each turn from
@@ -412,7 +475,7 @@
 (def run-keys
   "The block's run sections: what the task is and what it cites, the same each turn of an
   run (made from its first turn's basis), so they are sent once, in the cached prefix."
-  [:task :write-set :to-prove :sections :similar])
+  [:task :write-set :to-prove :proof-namespaces :functions :sections :similar])
 
 (defn- run-message
   "The run sections of block, printed by the one printer under the context's budget, its cuts

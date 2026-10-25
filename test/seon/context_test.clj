@@ -704,6 +704,31 @@
         "a value of nil after printing is nil, not nothing (step 6: such evals' collapsed rows showed nothing)")
     (is (not (contains? (repl/record-details db "(f 1)" {:text "2"} {:prose "No names here."} nil) :cites)) "prose citing nothing records none")))
 
+(deftest the-story-pulls-what-its-config-names
+  ;; root's brief, 2026-10-25: the related data agents read by eval that the story could have shown,
+  ;; each pull behind :seon.config.render/pulls so the pilot compares on and off
+  (let [db (d/db-with (db-with-program)
+                      (program-facts [['demo/helper "(defn helper [] 1)" []]
+                                      ['demo/caller "(defn caller [] (demo/f 2))" ['demo/f]]
+                                      ['demo-test/f-test "(deftest f-test (is (= 4 (demo/f 2))))" ['demo/f]]
+                                      ['demo-test/g-test "(deftest g-test (is (= 2 (demo/f 1))))" ['demo/f]]
+                                      ['demo-test/make "(defn make [] {})" []]]))
+        db (d/db-with db [{:var/name 'demo/helper :var/kind :fn :var/doc "Helps. More."}
+                          {:var/name 'demo-test/f-test :var/kind :test} {:var/name 'demo-test/g-test :var/kind :test} {:var/name 'demo-test/make :var/kind :fn :var/doc "Makes one."}])
+        story (fn [pulls] (let [db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name (str "p" (hash pulls)) :seon.task/plan "Make `demo/f` double."
+                                                                         :seon.task/proofs #{'demo-test/f-test} :seon.task/config {:seon.config.render/pulls pulls}}]))]
+                            (context/run-state db (task/task db (str "demo/p" (hash pulls))))))
+        off (story {})
+        on (story {:test-ns true :call-sites true :example-test true})
+        f (first (:write-set on))]
+    (is (not-any? #(contains? off %) [:proof-namespaces :functions]) "off by default: nothing more")
+    (is (every? symbol? (:callers (first (:write-set off)))) "callers by name alone")
+    (is (= 'demo-test (:ns (first (:proof-namespaces on)))) "the proof's namespace")
+    (is (some #(clojure.string/starts-with? % "demo-test/make: Makes one.") (:helpers (first (:proof-namespaces on)))) "with its helpers, a line each")
+    (is (= '(demo/f 2) (:call (first (filter #(= 'demo/caller (:var %)) (:callers f))))) "each caller with its call")
+    (is (= 'demo-test/g-test (get-in f [:example-test :symbol])) "a test that calls it, not the proof the story shows")
+    (is (clojure.string/includes? (get-in f [:example-test :source] "") "(demo/f 1)") "whole")))
+
 (deftest the-story-names-the-functions-nearest-its-plan
   ;; the owner's ruling (2026-10-24, DECISIONS "Embeddings join the context"): the task story's
   ;; :similar, the program functions nearest the plan by meaning (exact), those it names and
