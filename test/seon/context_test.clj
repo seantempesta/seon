@@ -258,15 +258,22 @@
     (let [part (fn [whole small call] {:cost [whole small] :call call})
           ;; tokens whole and collapsed, oldest first; the third continues the second's reply
           parts [(part 400 5 0) (part 10 2 0) (part 10 2 1) (part 10 2 0)]]
-      (is (= [[:whole :whole :whole] 0] (#'context/kept (subvec parts 1) 30 1)) "all whole when they fit")
-      (is (= [[:line :whole :whole :whole] 0] (#'context/kept parts 35 1)) "an older one too large whole is collapsed, not dropped")
-      (is (= [[:whole] 3] (#'context/kept parts 0 1)) "the newest stays at budget 0")
-      (is (= [[:whole] 1] (#'context/kept (subvec parts 2) 10 1)) "a cut never starts inside a reply")
-      (testing "the boundaries move in steps: more is collapsed or left out at once, so the prefix holds for many turns"
-        (let [many (vec (repeat 20 (part 10 2 0)))]
-          (is (= [(into (vec (repeat 4 :line)) (repeat 12 :whole)) 4] (#'context/kept many 130 4))
-              "13 fit whole: whole from 8 (raised to a step of 4); 5 more fit collapsed: from 4 (raised); the 4 before left out")
-          (is (= (#'context/kept many 130 4) (#'context/kept many 128 4)) "a slightly smaller budget moves nothing"))))))
+      (is (= [[:whole :whole :whole] 0] (#'context/kept (subvec parts 1) 30)) "all whole when they fit")
+      (is (= [[:line :whole :whole :whole] 0] (#'context/kept parts 35)) "an older one too large whole is collapsed, not dropped")
+      (is (= [[:whole] 3] (#'context/kept parts 0)) "the newest stays at budget 0")
+      (is (= [[:whole] 1] (#'context/kept (subvec parts 2) 10)) "a cut never starts inside a reply")
+      (testing "the cuts only advance, in jumps to half the budget, so the prefix holds between them"
+        (let [many (vec (repeat 40 (part 10 2 0)))
+              ;; what each length of the history sends, as [first-sent picks]
+              at (fn [k] (let [[picks dropped] (#'context/kept (subvec many 0 k) 130)] [dropped picks]))
+              moved (vec (for [k (range 2 41) :let [[d0 p0] (at (dec k)) [d1 p1] (at k)]
+                               ;; the earlier request's parts, as this one sends them
+                               :when (not (and (= d0 d1) (= p0 (subvec p1 0 (count p0)))))] k))]
+          (is (= [(into (vec (repeat 2 :line)) (repeat 6 :whole)) 6] (#'context/kept (subvec many 0 14) 130))
+              "past the budget at 14 whole: the oldest collapse until the whole fit in half (6 of 10), then the oldest collapsed are left out until all fits in half")
+          (is (= [14 21 28 35] moved) "the cuts move at four lengths of 39, every 7th; every other request is the one before and what was added")
+          (is (every? (fn [k] (let [[_ p] (at k)] (<= (+ (* 2 (count (filter #{:line} p))) (* 10 (count (filter #{:whole} p)))) 130))) (range 1 41))
+              "and what is sent stays within the budget"))))))
 
 ;; ---- context v2: a stable prefix, each var at its citation's depth, the helpers -----------
 
@@ -549,6 +556,48 @@
             a (:db/id (d/entity db [:seon.agent/key "b/a1"]))
             ids (mapv (fn [[_ v]] (or (:seon.eval/id v) (:seon.message/id v))) (context/records db a))]
         (is (= ["e1" "m1" "e2"] ids) "the first run's eval and message, then the second's, and no other agent's")))))
+
+(deftest a-sessions-next-stage-keeps-the-last-request-as-its-prefix
+  ;; live finding A1 (2026-10-25): an implement continuing its design's session was sent its own
+  ;; story at the top, before the design's conversation (1% of 33k tokens cached), with nothing
+  ;; marking the switch. The story at the top is the session's first stage's; the next stage's
+  ;; comes as root's message at the boundary (seon.reconcile/stage-boundary), taken before the
+  ;; new stage's first screen (seon.turn/take!), and the conversation is append-only (the screen
+  ;; evals are records), so the second stage's request is the first's whole, then the boundary,
+  ;; then the new stage's screen
+  (ts/test-branch!
+    (fn [_ conn]
+      (wiki! conn)
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "d" :seon.task/plan "Design d." :seon.task/proofs #{'demo-test/d-test}}
+                                              {:seon.task/ns 'demo :seon.task/name "i" :seon.task/plan "Implement d." :seon.task/proofs #{'demo-test/i-test}}]))
+      (let [ev! (fn [id by run]
+                  (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
+                                     :seon.eval/record {:code (str "(" id ")") :response {:handle (symbol "result" id) :value 1} :line id :run run
+                                                        :call-id (str "c-" id) :call 0 :prose "Step."}}]))
+            run! (fn [run task] (d/transact conn [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key "b/a1"}}]))
+            basis (fn [task run screen] {:commit (d/commit-id @conn) :task task :run run :turn 0 :max-turns 9 :origin :model
+                                         :observed {:results {} :test-run-errors [] :reds [] :reasons []} :screen [screen] :agent "b/a1"})
+            turn! (fn [run b sent] (d/transact conn [{:seon.turn/id (str run "/0") :seon.turn/run {:seon.run/id run} :seon.turn/n 0 :seon.turn/origin :model
+                                                      :seon.turn/basis b :seon.turn/sent sent :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1}]))
+            _ (run! "demo/d#1" "demo/d")
+            _ (ev! "e0" "a1" "demo/d#1")
+            _ (ev! "s0" "screen" "demo/d#1")
+            b0 (basis "demo/d" "demo/d#1" "s0")
+            first-stage (context/render @conn b0)
+            _ (turn! "demo/d#1" b0 (:sent first-stage))
+            boundary "demo/d is done. Your task now is demo/i, in this same session: what you did so far stays above.\n\nIts plan: Implement d."
+            _ (run! "demo/i#1" "demo/i")
+            _ (d/transact conn (task/message-tx "m1" "root" "demo/i#1" boundary))
+            _ (ev! "s1" "screen" "demo/i#1")
+            second-stage (context/render @conn (basis "demo/i" "demo/i#1" "s1"))
+            ms0 (:messages first-stage) ms1 (:messages second-stage)
+            refs (mapv #(vec (take 2 %)) (:sent second-stage))
+            at (fn [ref] (.indexOf refs ref))]
+        (is (= ms0 (subvec ms1 0 (min (count ms1) (count ms0)))) "the first stage's request is the second's exact prefix")
+        (is (= (:sent first-stage) (subvec (:sent second-stage) 0 (count (:sent first-stage)))) "and records it sent so")
+        (is (< (dec (count (:sent first-stage))) (at [:message "m1"]) (at [:eval "s1"])) "then the boundary, root's message, before the new stage's first screen")
+        (is (some #(str/includes? (str (:content %)) "Your task now is demo/i") (drop (count ms0) ms1)) "the boundary says the new task")
+        (is (str/includes? (:content (second ms1)) "Design d.") "the story at the top stays the session's first stage's")))))
 
 (deftest a-run-printed-once-sends-what-a-cold-read-sends
   ;; the branch review (2026-10-25, F6, F7): a request threaded through what the run's earlier
