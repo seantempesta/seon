@@ -668,6 +668,14 @@
                    :history [{:role "user" :content (pr-str {:history {:left-out x}})}])])
           refs)))
 
+(defn messages-tokens
+  "Messages ms in tokens, by the printer's sizer over their contents and their calls' code, sized
+  together (the sizer's estimate is not additive across pieces): how sent-split and a turn's
+  cache check (seon.turn/cache-miss) apportion a request. It reads each part's length and copies
+  no text, so it costs its parts, not their characters."
+  {:malli/schema [:=> [:cat [:sequential :map]] nat-int?]}
+  [ms] (select/chars-tokens (transduce (comp (mapcat (fn [m] (cons (:content m) (map :code (:tool-calls m))))) (map #(count (str %)))) + 0 ms)))
+
 (defn sent-split
   "Where a turn's request went, in tokens (the printer's sizer over each part's content and its
   calls' code), from its parts as parts-of reads them back from the refs the turn recorded: the
@@ -677,11 +685,10 @@
   {:malli/schema [:=> [:cat [:vector [:tuple :any [:vector :seon.model/message]]] [:set :string]]
                   [:map [:system nat-int?] [:story nat-int?] [:conversation nat-int?] [:screen nat-int?]]]}
   [parts screen]
-  (let [part (fn [[kind x]] (case kind :section :system :task :story (:eval :line) (if (screen x) :screen :conversation) :conversation))
-        tok (fn [ms] (select/estimate (apply str (mapcat (fn [m] (cons (:content m) (map :code (:tool-calls m)))) ms))))]
+  (let [part (fn [[kind x]] (case kind :section :system :task :story (:eval :line) (if (screen x) :screen :conversation) :conversation))]
     ;; each part's messages sized together (the sizer's estimate is not additive across pieces)
     (merge {:system 0 :story 0 :conversation 0 :screen 0}
-           (update-vals (group-by (comp part first) parts) #(tok (into [] (mapcat second) %))))))
+           (update-vals (group-by (comp part first) parts) #(messages-tokens (into [] (mapcat second) %))))))
 
 (defn- story
   "The task story: task entity e's run sections as of t on db (run-state, printed by

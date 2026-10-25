@@ -109,6 +109,42 @@
       (is (str/includes? out "EXIT 0") "and it stops when its stdin closes")
       (finally (sh/sh "rm" "-rf" path (str path "-in") (str path ".log") (str path "-agents"))))))
 
+(deftest an-agent-resumes-a-branch-cut-before-an-attribute
+  ;; root, 2026-10-25 (ctx-atom's finding): a branch made before :form/keywords existed killed its
+  ;; agent at resume (seon.program/load-diff! -> schema-dependents read an attribute its schema
+  ;; lacks). A store of this test's own, as a-root-resumes-a-store-an-earlier-build-wrote: main and
+  ;; a kept branch cut from it before the attribute; today's root opens main (which gains it) and
+  ;; spawns an agent onto the kept branch, which gains it on resume and answers an eval
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        path (str checkout "/target/root-test-cut-before-" (random-uuid))
+        cfg (pdb/store-cfg :lmdb path)
+        _ (d/create-database cfg)
+        c (d/connect cfg)
+        _ (d/transact c {:tx-data (vec (remove #(= :form/keywords (:db/ident %)) pdb/schema))})
+        _ (doseq [tx (pdb/seed-tx 110)] (d/transact c {:tx-data tx}))
+        _ (d/branch! c :db :old-run)
+        _ (d/branch! c :old-run (pdb/on-main :old-run :kept))
+        ;; the branch's own schema entry: resumed, its contract's dependents are re-armed
+        ;; (schema-dependents), the read that died
+        kc (d/connect (assoc cfg :branch (pdb/on-main :old-run :kept)))
+        _ (d/transact kc {:tx-data [{:schema/key :demo.kept/thing :schema/form (seon.edn/encode [:map [:demo.kept/x :int]])}]})
+        _ (d/release kc)
+        _ (pdb/sync! cfg)
+        _ (d/release c)
+        out (root-answers path "old-run"
+                          [{:op :eval :agent "root"
+                            :code (str "(let [ev (seon.root/events sys) ag (seon.root/spawn! sys {:branch :kept})]"
+                                       " (loop [] (let [e (clojure.core.async/<!! ev)]"
+                                       " (cond (not= ag (:agent e)) (recur)"
+                                       " (= :ready (:type e)) (:text @(seon.root/submit! sys ag \"(contains? (datahike.api/schema (seon.agent/db)) :form/keywords)\"))"
+                                       " (#{:dead :ended :killed} (:type e)) (:type e)"
+                                       " :else (recur)))))")}])
+        answer (fn [l] (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))]
+    (try
+      (is (str/includes? (str (answer (first (str/split-lines out)))) ":value true")
+          (str "the agent on the branch cut before :form/keywords is ready, its branch holding the attribute: " (subs out 0 (min 2000 (count out)))))
+      (finally (sh/sh "rm" "-rf" path (str path "-in") (str path ".log") (str path "-agents"))))))
+
 (deftest a-second-boot-resumes-the-same-main
   ;; task seon.root/one-main-resumed: a root started with no main named works on the
   ;; config's main ("main"), and a second root on the same store resumes it: the task the
