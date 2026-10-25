@@ -554,8 +554,10 @@
   ;; live finding A1 (2026-10-25): an implement continuing its design's session was sent its own
   ;; story at the top, before the design's conversation (1% of 33k tokens cached), with nothing
   ;; marking the switch. The story at the top is the session's first stage's; the next stage's
-  ;; comes as root's message at the boundary (seon.reconcile/stage-boundary), so the second
-  ;; stage's request is the first's, less its screen, then the boundary and what follows
+  ;; comes as root's message at the boundary (seon.reconcile/stage-boundary), taken before the
+  ;; new stage's first screen (seon.turn/take!), and the conversation is append-only (the screen
+  ;; evals are records), so the second stage's request is the first's whole, then the boundary,
+  ;; then the new stage's screen
   (ts/test-branch!
     (fn [_ conn]
       (wiki! conn)
@@ -571,8 +573,8 @@
             turn! (fn [run b sent] (d/transact conn [{:seon.turn/id (str run "/0") :seon.turn/run {:seon.run/id run} :seon.turn/n 0 :seon.turn/origin :model
                                                       :seon.turn/basis b :seon.turn/sent sent :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1}]))
             _ (run! "demo/d#1" "demo/d")
-            _ (ev! "s0" "screen" "demo/d#1")
             _ (ev! "e0" "a1" "demo/d#1")
+            _ (ev! "s0" "screen" "demo/d#1")
             b0 (basis "demo/d" "demo/d#1" "s0")
             first-stage (context/render @conn b0)
             _ (turn! "demo/d#1" b0 (:sent first-stage))
@@ -582,11 +584,12 @@
             _ (ev! "s1" "screen" "demo/i#1")
             second-stage (context/render @conn (basis "demo/i" "demo/i#1" "s1"))
             ms0 (:messages first-stage) ms1 (:messages second-stage)
-            screen0 (count (mapcat second (filter #(= "s0" (second (first %))) (context/parts-of @conn (:sent first-stage)))))
-            prefix (subvec ms0 0 (- (count ms0) screen0))]
-        (is (pos? screen0) "the first stage's request ended on its screen")
-        (is (= prefix (subvec ms1 0 (count prefix))) "the first stage's request, less its screen, is the second's exact prefix")
-        (is (str/includes? (:content (nth ms1 (count prefix))) "Your task now is demo/i") "then the boundary, root's message")
+            refs (mapv #(vec (take 2 %)) (:sent second-stage))
+            at (fn [ref] (.indexOf refs ref))]
+        (is (= ms0 (subvec ms1 0 (min (count ms1) (count ms0)))) "the first stage's request is the second's exact prefix")
+        (is (= (:sent first-stage) (subvec (:sent second-stage) 0 (count (:sent first-stage)))) "and records it sent so")
+        (is (< (dec (count (:sent first-stage))) (at [:message "m1"]) (at [:eval "s1"])) "then the boundary, root's message, before the new stage's first screen")
+        (is (some #(str/includes? (str (:content %)) "Your task now is demo/i") (drop (count ms0) ms1)) "the boundary says the new task")
         (is (str/includes? (:content (second ms1)) "Design d.") "the story at the top stays the session's first stage's")))))
 
 (deftest a-run-printed-once-sends-what-a-cold-read-sends

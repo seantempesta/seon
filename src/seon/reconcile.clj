@@ -691,7 +691,7 @@
   another task before (its newest earlier run, by the transaction that started it), the new
   task's plan and proofs, said once at the boundary (its whole story is (my.task/story): the
   story's render reaches the related search, a process, which no reconciler test may), so the conversation above stays as it was
-  sent (design agent-loop section 1a; live finding A1, 2026-10-25: the new stage's story put at
+  sent (design agent-loop section 1a; the live agents' finding A1: the new stage's story put at
   the top cached 1% of 33k tokens, and the agent took the design for its task)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:maybe :string]]}
   [db aid]
