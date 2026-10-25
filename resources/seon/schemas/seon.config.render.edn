@@ -13,9 +13,6 @@
  :seon.config.render/context-budget [:int {:min 1 :seon.config/unit "tokens" :description "The whole context block the model reads."}]
  :seon.config.render/history-budget [:int {:min 0 :seon.config/unit "tokens" :description "Earlier records the model reads: the newest whole, older ones collapsed, the oldest left out."}]
  :seon.config.render/history-step [:int {:min 1 :seon.config/unit "records" :description "The history's boundaries move in multiples of this many records."}]
- :seon.config.render/pulls [:map {:closed true :seon.db/data true :seon.config/unit "pulls" :description "The related data the task story pulls in beside the plan's citations (seon.context/run-state), each off unless named: :test-ns each proof namespace's ns form and helpers, :functions the my.* functions the system prompt names, :seeded how many functions nearest a design plan that cites no var, :call-sites each caller's call, :callees each write-set var's callees a line each, :example-test one test calling it."}
-                             [:test-ns {:optional true} :boolean] [:functions {:optional true} :boolean] [:seeded {:optional true} nat-int?]
-                             [:call-sites {:optional true} :boolean] [:callees {:optional true} :boolean] [:example-test {:optional true} :boolean]]
  :seon.config.render/similar [:int {:min 0 :seon.config/unit "functions" :description "The program functions nearest the task's plan by meaning shown in its task story (:similar); 0 shows none."}]
  :seon.config.render/big-alloc [:int {:min 1 :seon.config/unit "bytes" :description "An evaluation that allocated more is flagged on the page."}]
  :seon.config.render/value-budget [:int {:min 1 :seon.config/unit "tokens" :description "A rendered value whose env names no budget."}]

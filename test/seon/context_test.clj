@@ -704,34 +704,6 @@
         "a value of nil after printing is nil, not nothing (step 6: such evals' collapsed rows showed nothing)")
     (is (not (contains? (repl/record-details db "(f 1)" {:text "2"} {:prose "No names here."} nil) :cites)) "prose citing nothing records none")))
 
-(deftest the-story-pulls-what-its-config-names
-  ;; root's brief, 2026-10-25: the related data agents read by eval that the story could have shown,
-  ;; each pull behind :seon.config.render/pulls so the pilot compares on and off
-  (let [db (d/db-with (db-with-program)
-                      (program-facts [['demo/helper "(defn helper [] 1)" []]
-                                      ['demo/caller "(defn caller [] (demo/f 2))" ['demo/f]]
-                                      ['demo-test/f-test "(deftest f-test (is (= 4 (demo/f 2))))" ['demo/f]]
-                                      ['demo-test/g-test "(deftest g-test (is (= 2 (demo/f 1))))" ['demo/f]]
-                                      ['demo-test/make "(defn make [] {})" []]]))
-        db (d/db-with db [{:var/name 'demo/helper :var/kind :fn :var/doc "Helps. More."}
-                          {:var/name 'demo-test/f-test :var/kind :test} {:var/name 'demo-test/g-test :var/kind :test} {:var/name 'demo-test/make :var/kind :fn :var/doc "Makes one."}])
-        story (fn [pulls] (let [db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name (str "p" (hash pulls)) :seon.task/plan "Make `demo/f` double, as `demo/caller` asks."
-                                                                         :seon.task/proofs #{'demo-test/f-test} :seon.task/config {:seon.config.render/pulls pulls}}]))]
-                            (context/run-state db (task/task db (str "demo/p" (hash pulls))))))
-        off (story {})
-        on (story {:test-ns true :call-sites true :example-test true :callees true})
-        f (first (filter #(= 'demo/f (:symbol %)) (:write-set on)))
-        caller (first (filter #(= 'demo/caller (:symbol %)) (:write-set on)))]
-    (is (not-any? #(contains? off %) [:proof-namespaces :functions]) "off by default: nothing more")
-    (is (every? symbol? (:callers (first (:write-set off)))) "callers by name alone")
-    (is (= 'demo-test (:ns (first (:proof-namespaces on)))) "the proof's namespace")
-    (is (some #(clojure.string/starts-with? % "demo-test/make: Makes one.") (:helpers (first (:proof-namespaces on)))) "with its helpers, a line each")
-    (is (= '(demo/f 2) (:call (first (filter #(= 'demo/caller (:var %)) (:callers f))))) "each caller with its call")
-    (is (= 'demo-test/g-test (get-in f [:example-test :symbol])) "a test that calls it, not the proof the story shows")
-    (is (clojure.string/includes? (get-in f [:example-test :source] "") "(demo/f 1)") "whole")
-    (is (some #(clojure.string/starts-with? % "demo/f") (:callees caller)) "each write-set var's program callees, a line each")
-    (is (not-any? #(contains? % :callees) (:write-set off)))))
-
 (deftest the-story-names-the-functions-nearest-its-plan
   ;; the owner's ruling (2026-10-24, DECISIONS "Embeddings join the context"): the task story's
   ;; :similar, the program functions nearest the plan by meaning (exact), those it names and
@@ -757,12 +729,4 @@
         "nearest first, the named one and the test left out, the first five, each its name and first sentence")
     (is (string? (:more sim)) "and the form that searches further")
     (is (= sim (:similar (context/run-state db (task/task db "demo/c")))) "in the story")
-    (is (nil? (context/similar db nil #{})) "off by default (:seon.config.render/similar 0): nothing listed")
-    (testing "a design plan citing no var is seeded with the functions nearest it (:seon.config.render/pulls :seeded), though :similar is off"
-      (let [db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "d" :seon.task/kind :design :seon.task/plan "The circle's area."
-                                                   :seon.task/proofs #{} :seon.task/config {:seon.config.render/pulls {:seeded 3}}}]))
-            de (pdb/eid db :seon.task/id "demo/d")
-            db (d/db-with db (vector/tx-data [de] [1] [(dir 1.0)] [10] "m"))
-            story (context/run-state db (task/task db "demo/d"))]
-        (is (= ["demo/f: f does it." "demo/area: area does it." "demo/pi: pi does it."] (:nearest (:similar story)))
-            "the three nearest functions")))))
+    (is (nil? (context/similar db nil #{})) "off by default (:seon.config.render/similar 0): nothing listed")))

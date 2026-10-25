@@ -562,16 +562,6 @@
  ;; that listed them named the same functions as a run listing none (my.agent/prove,
  ;; seon.model/provider-error, seon.docs/view, seon.print/print-value): no measured gain.
  :seon.config.render/similar 0
- ;; Unit: pulls, each named one on. The related data the task story pulls in beside what the plan
- ;; cites (seon.context/run-state), from what agents read by eval that the story could have shown
- ;; (measured 2026-10-25 on the 8 runs whose eval forms survive, 143 reads: 12% already shown, about
- ;; a third pullable): :test-ns (the proof's test namespace, read in 7 of 8 runs; about 220 tokens),
- ;; :functions (the my.* functions the system prompt names; 15 source reads of my.task/status),
- ;; :seeded n (a design plan citing no var gets the n functions nearest it; dogfood: about ten evals of
- ;; hand exploration each), :call-sites, :callees and :example-test (about 1 read a run each).
- ;; Provenance: root's brief of 2026-10-25, "behind a config key, so the pilot can compare". Off ({})
- ;; until the pilot measures turns to green with them on against off.
- :seon.config.render/pulls {}
  ;; Semantic search's pyramid (seon.vector/near, docs/vector.md#the-pyramid), measured against an
  ;; exact 768-dim search, recall@10 (EmbeddingGemma-2):
  ;; - bin/check vectors, Seon's whole text (2,681: 1,783 forms with the schemas, 321 sections, the
