@@ -1044,8 +1044,17 @@
 
 (defn- schema-row? {:malli/schema [:=> [:cat :map] :boolean]} [f] (contains? f :schema))
 
+(defn- reach-row
+  "Form entity e as the reach walk reads it (reach-step): form-row's :id, :ns, :src, :defines
+  and :refs, and none of the other facts, which no edge, digest or flag reads."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
+  [db e]
+  (let [f (d/entity db e)]
+    {:id (:form/id f) :src (:form/src f) :ns (:ns/name (:form/ns f))
+     :defines (into #{} (keep definition-key) (:form/defines f)) :refs (set (:form/refs f))}))
+
 (defn- reach-step
-  "Graph g after the forms removed (ids) and the rows added (form-row's, live on db): each
+  "Graph g after the forms removed (ids) and the rows added (reach-row's, live on db): each
   form's neighbours recomputed only where its edges can have changed (an added form; a form
   referring to, or defining the methods, extensions or contract of, a var a changed form
   defines), and the components of the changed forms and of every form reaching them re-folded
@@ -1141,7 +1150,7 @@
                  :reads #{} :proc #{} :bin #{} :plain {} :own {} :comp-of {} :cd {} :flags {} :next 0
                  :data-refs data-refs :schemas schemas :live live}
                 db []
-                (into (mapv #(form-row db %) (vals live))
+                (into (mapv #(reach-row db %) (vals live))
                       (for [[k text] schemas]
                         {:id (sid k) :ns k :src text :refs #{} :defines #{}
                          :schema (keep #(when (contains? schemas %) (sid %)) (names (sedn/decode text)))})))))
@@ -1156,7 +1165,7 @@
   (if (not= (:schemas g) (schema-texts db))
     (reach-graph db (:data-refs g))
     (let [live (live-ids db) was (:live g)]
-      (assoc (reach-step g db (vec (remove live (keys was))) (vec (for [[id e] live :when (not (was id))] (form-row db e))))
+      (assoc (reach-step g db (vec (remove live (keys was))) (vec (for [[id e] live :when (not (was id))] (reach-row db e))))
              :live live))))
 
 (defn graph-index
