@@ -154,6 +154,21 @@
 
 ;; ---- reading ----------------------------------------------------------------------------
 
+(defn section
+  "Section address on db, its parent as an address and its references as addresses or var
+  names, or nil."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :map]]}
+  [db address]
+  (when (pdb/eid db :seon.section/address address)
+    (let [s (d/pull db [:seon.section/address :seon.section/heading :seon.section/lead :seon.section/text
+                        {:seon.section/parent [:seon.section/address]}
+                        {:seon.section/references [:seon.section/address :var/name]}]
+                    [:seon.section/address address])]
+      (cond-> s
+        (:seon.section/parent s) (update :seon.section/parent :seon.section/address)
+        (:seon.section/references s) (update :seon.section/references
+                                             #(into #{} (map (fn [r] (or (:seon.section/address r) (:var/name r)))) %))))))
+
 (defn- children
   "The sections whose parent is section entity e on db, in the order the wiki was written."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:vector :int]]}
@@ -305,9 +320,7 @@
   "The baseline of the sections of plan (baseline-plan) from the history answer (seon.fx/wiki-history's
   value {:sections :files :errors}): {address {:read {name form-id} :unread reason}}. A section's :read
   is each cited var's form id in its file as of the commit that last changed the section (found by
-  seon.source/defining-ids, the id seon.program/account would record) when what the section describes
-  of it (seon.source/defining-meanings: its docstring and contract as written) is what its form
-  says today, \"changed\" when that changed since, or \"absent\" for a var the
+  seon.source/defining-ids, the id seon.program/account would record), or \"absent\" for a var the
   file at that commit does not mention at all, or a file that did not exist: a citation that was ahead
   of the code, stale once the code exists. A section with an uncommitted line is read as of today
   (:read, nothing unread): its text is newer than git's. A section git could not answer for, whose
@@ -323,13 +336,10 @@
                      (let [text (get files [sha file])
                            r (cond (get errors [sha file]) {:error (str file " at " (subs sha 0 8) " could not be read from git: " (get errors [sha file]))}
                                    (nil? text) {:ids {}}
-                                   :else (try {:ids (source/defining-ids nsym text) :meanings (source/defining-meanings nsym text) :text text}
+                                   :else (try {:ids (source/defining-ids nsym text) :text text}
                                               (catch Throwable e {:error (str file " at " (subs sha 0 8) " does not read: " (step/error-msg e))})))]
                        (vswap! cache assoc [sha file] r)
                        r)))
-        ;; what a var's form today says of it, read as the old file is (the same reader, both sides as written)
-        meaning-now (fn [n] (when-let [f (some->> (pdb/eid db :var/name n) (d/entity db) :var/form)]
-                              (get (source/defining-meanings (:ns/name (:form/ns f)) (:form/src f)) n)))
         mentioned? (fn [text n] (boolean (re-find (re-pattern (str "[\\s(\\[{'#]" (java.util.regex.Pattern/quote (name n)) "[\\s)\\]}]")) text)))]
     (into {}
           (keep (fn [{:keys [address] :as r}]
@@ -345,12 +355,7 @@
                                                 per))]
                               (if bad
                                 [address {:read today :unread bad}]
-                                ;; a var whose form changed since: \"changed\" when what the section
-                                ;; describes of it (its docstring or contract) changed, else as today
-                                [address {:read (into {} (for [[n res] per :let [then (get (:ids res) n "absent")]]
-                                                           [n (cond (or (= "absent" then) (= then (today n))) then
-                                                                    (= (get (:meanings res) n) (meaning-now n)) (today n)
-                                                                    :else "changed")]))}]))))))
+                                [address {:read (into {} (for [[n res] per] [n (get (:ids res) n "absent")]))}]))))))
           plan)))
 
 ;; ---- a citation as its depth shows it (docs/references.md#the-delimiter-picks-the-depth): ----

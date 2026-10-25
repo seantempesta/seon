@@ -393,13 +393,12 @@
   one with a var but no program facts (loaded, never recorded) has no digest: it always runs.
   With no base (a tree with nothing to diff against: root's on-change runs), the proofs and
   every test with no green at its digest, of which those with no result run (seon.proofs/plan's own rule). Answers the plan with
-  :digests {test digest}, :dir (the results directory when shared), :graph (the reach graph it
-  walked) and :process, the tests that reach a process of their own (seon.program/reach-index, the
-  same walk as the digests): never run automatically, only when named (DECISIONS, Process tests
-  are not automatic)."
+  :digests {test digest}, :dir (the results directory when shared) and :process, the tests that reach a
+  process of their own (seon.program/reach-index, the same walk as the digests): never run
+  automatically, only when named (DECISIONS, Process tests are not automatic)."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] [:set :qualified-symbol]]
                   [:map [:selected [:vector :qualified-symbol]] [:run [:vector :qualified-symbol]] [:reused [:map-of :qualified-symbol :map]]
-                   [:digests [:map-of :qualified-symbol :string]] [:dir [:maybe :string]] [:graph :map] [:process [:set :qualified-symbol]]]]}
+                   [:digests [:map-of :qualified-symbol :string]] [:dir [:maybe :string]] [:process [:set :qualified-symbol]]]]}
   [db base proofs]
   (let [root (d/entity db [:seon.root/id :root])
         source (:seon.root/source root)
@@ -416,7 +415,7 @@
     (-> (proofs/plan (some-> b :index (update-vals :digest)) cd (merge (if dir (proofs/greens dir (vec (vals cd))) {}) (proofs/stored-results db (vec (vals cd)))) proofs)
         (update :selected into unrecorded)
         (update :run into unrecorded)
-        (assoc :digests cd :dir dir :graph g
+        (assoc :digests cd :dir dir
                :process (program/process-tests idx)))))
 
 (declare handle!)
@@ -555,9 +554,7 @@
   namespaces) restricts either to the tests of those namespaces. A process test (the plan's
   :process: it reaches a shell, a fork, a root or the binary) never runs here unless its namespace
   is named (DECISIONS, Process tests are not automatic; root's gate, my.root/gate!, asks).
-  The answer names those left out (:deferred), why each was (:why, {test {:uses :through}}: the
-  process var it reaches and the calls to it, seon.program/process-path), and how many the judge
-  runs (:at-judge)."
+  The answer names those left out (:deferred) and how many the judge runs (:at-judge)."
   {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge]] [:or :seon.test/result :seon.test/fork-refused]]
                   [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]
                   [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused]]]}
@@ -627,9 +624,7 @@
         (as-> r (merge-with + r (select-keys (frequencies (map :type reused-reports)) [:pass :fail :error])))
         (assoc :digests (select-keys digests (concat (keep (comp proofs/test-symbol :var) (:reports res)) (filter reused selected))))
         (assoc :reused (count (filter reused selected)) :ran (count (distinct (keep :var (:reports res))))
-               :selected selected :deferred deferred :at-judge (count judge))
-        ;; why each was left out: the process it reaches and the calls to it (seon.program/process-path)
-        (cond-> (seq deferred) (assoc :why (into {} (for [t deferred] [t (program/process-path (:graph plan) t)])))))))))
+               :selected selected :deferred deferred :at-judge (count judge)))))))
 
 ;; ---- the loop ----------------------------------------------------------------------
 

@@ -35,4 +35,4 @@ Every run's agent first merges main into its branch with no model call (a kept b
 
 ## An outside agent
 
-A Claude session works a task through the same path: `seon_attach` and `seon_done` on the server. ```seon.turn/context-block``` gives it the request a model would be sent, observed now, its screen's forms evaluated as a model turn's are (`seon.turn/screen!`), and records the read as a turn of the run with origin `:outside`.
+A Claude session works a task through the same path: `seon_attach` and `seon_done` on the server. ```seon.turn/context-block``` gives it the block a model would read, observed now, and records the read as a turn of the run with origin `:outside`.

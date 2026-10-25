@@ -32,10 +32,10 @@
 
 (def carried-platform-attrs
   "The platform attributes (seon.*) a branch carries: the task content an agent may improve
-  (my.task/update!: its plan, its instructions, and the proofs a design registers), carried onto main at its run's end (seon.task/carry-tx). Every other seon.* attribute is a platform record (root's boot and
+  (my.task/update!), carried onto main at its run's end (seon.task/carry-tx). Every other seon.* attribute is a platform record (root's boot and
   quiescence, recorded errors, runs, observations) written where it happened and never
   carried, so main writing one never puts a branch behind."
-  #{:seon.task/plan :seon.task/instructions :seon.task/proofs})
+  #{:seon.task/plan :seon.task/instructions})
 
 (defn- platform-record? {:malli/schema [:=> [:cat :keyword] :boolean]} [k]
   (let [n (namespace k)]

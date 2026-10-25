@@ -27,7 +27,7 @@ An agent holds the task and run root forked it for from its first form: `my.task
 
 When a run ends, every task whose content its branch changed since the branch's base is written onto main, and one that main also changed, differently, is a conflict for root: a task edited on two live branches should not happen, and when it does, root resolves it.
 
-`seon.task/carry-tx` compares the merge base, the branch and main over the carried task attributes (`seon.merge/carried-platform-attrs`: the plan, instructions and proofs `my.task/update!` edits). Tasks main does not hold are left. A member the branch changed and main did not overwrites main's; one equal on both sides writes nothing; one main changed too, to another value, is never resolved: it goes on the run as `:seon.run/task-conflicts` and `seon.problems/report` shows it in its `:task-conflict` class. Root's judge (`seon.reconcile/judge-tx`) calls it with the base the writer's branch read answers, so it is the one carry: a design step's plan reaches main before implement starts, on the same branch. Merging merges the program only (`:data-attrs #{}`), so main's task edits never put a merge behind. Not this: carrying only the run's own plan, or merging task data at merge, where every judged plan on main would make each merge `:seon.merge/behind`.
+`seon.task/carry-tx` compares the merge base, the branch and main over the carried task attributes (`seon.merge/carried-platform-attrs`: the plan and instructions `my.task/update!` edits). Tasks main does not hold are left. A member the branch changed and main did not overwrites main's; one equal on both sides writes nothing; one main changed too, to another value, is never resolved: it goes on the run as `:seon.run/task-conflicts` and `seon.problems/report` shows it in its `:task-conflict` class. Root's judge (`seon.reconcile/judge-tx`) calls it with the base the writer's branch read answers, so it is the one carry: a design step's plan reaches main before implement starts, on the same branch. Merging merges the program only (`:data-attrs #{}`), so main's task edits never put a merge behind. Not this: carrying only the run's own plan, or merging task data at merge, where every judged plan on main would make each merge `:seon.merge/behind`.
 
 ## A refused run is held for root
 
@@ -43,13 +43,14 @@ Root, or the owner through root, decides: release it with `my.root/run!`, edit t
 
 `seon.reconcile/done-explain` says why a run's measured facts do not make its task done; empty means done. A proof with no result never ran: it refuses as `:proof-unknown`, not `:proof-red` (v1's reading), so the reason names what was not measured. A proof left out of a run (a process test that was not run) is neither red nor unknown; an open problem the branch's work made true (`seon.problems/caused`) refuses it too, and a `:design` task may leave its proofs red but not unknown, until its plan differs from the one its run began with.
 
-A task's proofs are content its agent may improve, like its plan: a design made from a request carries none, so it registers each red proof it writes with ``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)`` (`seon.task/member-tx`), and a red test it has not registered is a `:stray-red` whose reason shows that form. The judge carries the proofs onto main with the plan (`seon.task/carry-tx`, a set compared as a set), so the done rule sees them red at design and green at implement (owner, 2026-10-25, DECISIONS Dogfood rulings).
-
 A contract gap is a function the branch's own changes define without a contract: `seon.merge/uncontracted` over the three-way merge's `:ours`, one answer for the writer's merge gate and for root's judge (which reads it from the writer's `:branch-diff`), so the done rule never refuses what the merge would take, or the reverse. The agent's own done check (`seon.turn`) asks the same function of its branch's changes since its merge base.
 
 ## Where an agent's run falls short today
 
 Working a design task through the server (Claude subagents as Seon agents, 2026-10-25) found where the run gives an agent less than the done rule asks of it. Each gap is a task.
+- A design made from a request cannot add its proofs. The request carries none, ```my.task/update!``` takes only the plan and instructions, so every deftest the design writes is a `:stray-red`, and that reason shows no form that fixes it: `my.task/a-design-adds-its-proofs`.
+- `(my.task/status)` answers `:seon.turn/not-observed` until a model turn has observed the task, so an outside agent never reads it: `my.task/status-answers-before-any-turn`.
+- `(my.agent/prove)` answers a process test as `:deferred` with no reason, so an agent cannot tell why its own new proof did not run: `my.agent/a-deferred-test-names-the-process-it-reaches`.
 - `(my.agent/grep "word")` answers names unranked and without their line, at about 350 ms and 240 MB a call, the main tool for a plan that cites nothing: `my.agent/grep-ranks-definitions-first`.
 
 ## Where a task's state lives

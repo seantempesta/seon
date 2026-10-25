@@ -724,13 +724,6 @@
                     :form/order (:form/order f) :form/defines [ve]}
                    [:db/add ve :var/form -1]])))
 
-(defn- change-meaning
-  "db with var v's docstring (or, with :contract, its contract) changed, as redefining it with
-  another docstring records it (seon.program/def-tx asserts the new value)."
-  [db v & [attr]]
-  (let [ve (pdb/eid db :var/name v)]
-    (d/db-with (change-var db v) [[:db/add ve (or attr :var/doc) (str "changed " (random-uuid))]])))
-
 (deftest a-section-is-stale-when-the-code-it-cites-changed-after-its-text
   (let [db0 (ts/test-db)
         [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
@@ -743,18 +736,11 @@
     (testing "an unchanged wiki writes nothing, the record kept"
       (is (= [] (seon.docs/load-tx db1 "demo" {"demo/p.md" page}))))
     (is (zero? (:n (stale db1))))
-    (testing "a body changed, its contract and docstring not: not stale (owner, 2026-10-25, DECISIONS Dogfood rulings)"
-      (is (zero? (:n (stale (change-var db1 v))))))
-    (testing "a contract changed: stale"
-      (let [r (first (:rows (stale (change-meaning db1 v :var/contract))))]
-        (is (= ["demo/p.md#p" v [:var/contract]] ((juxt :section :name :changed) r)))))
-    (let [db2 (change-meaning db1 v)]
-      (testing "a docstring changed under the text: stale, naming the section, the var, what changed, was and is"
+    (let [db2 (change-var db1 v)]
+      (testing "the code moved under the text: stale, naming the section, the var and both form ids"
         (is (= 1 (:n (stale db2))))
         (let [r (first (:rows (stale db2)))]
-          (is (= ["demo/p.md#p" v [:var/doc]] ((juxt :section :name :changed) r)))
-          (is (= (:var/doc (d/entity db1 (pdb/eid db1 :var/name v))) (get-in r [:was :var/doc])))
-          (is (= (:var/doc (d/entity db2 (pdb/eid db2 :var/name v))) (get-in r [:now :var/doc])))))
+          (is (= ["demo/p.md#p" v (form-id-of db1 v) (form-id-of db2 v)] ((juxt :section :name :then :now) r)))))
       (testing "reloading the same text does not forgive it: the record is kept while the text is unchanged"
         (is (= 1 (:n (stale (d/db-with db2 (seon.docs/load-tx db2 "demo" {"demo/p.md" page})))))))
       (testing "editing the section re-reads the code: closed"
@@ -766,7 +752,7 @@
           (is (= (:seon.section/text (d/pull db2 [:seon.section/text] [:seon.section/address "demo/p.md#p"]))
                  (:seon.section/text (d/pull db3 [:seon.section/text] [:seon.section/address "demo/p.md#p"])))))))
     (testing "it is attention, never a reason to refuse done: a branch that changes the code sees it, and the done rule does not"
-      (let [head (change-meaning db1 v) {:keys [caused attention]} (problems/caused-split db1 head)]
+      (let [head (change-var db1 v) {:keys [caused attention]} (problems/caused-split db1 head)]
         (is (= [] caused))
         (is (= 1 (count attention)))
         (is (re-find #"demo/p.md#p describes" (first attention)))
@@ -829,19 +815,19 @@
       (is (some? (pdb/eid db :seon.section/address a)) (str c " points at " a ", which is no section of the wiki")))))
 
 (defn stale-input
-  "The cost proof's input at n: n sections each citing a var, every var's docstring then changed (each section stale)."
+  "The cost proof's input at n: n sections each citing a var, every var's form then changed (each section stale)."
   [n] (let [db0 (ts/test-db)
             vs (vec (take n (map :v (d/datoms db0 :aevt :var/name))))
             page (apply str "# Cited\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\nIt reads `" (nth vs (mod i (count vs))) "`.\n")))
             db (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/c.md" page}))]
-        [(reduce change-meaning db (distinct vs)) {}]))
+        [(reduce change-var db (distinct vs)) {}]))
 
 (deftest stale-sections-follow-the-recorded-names
   (cost/proof {:of 'seon.problems/stale-sections :input 'seon.problems-test/stale-input
-               :n "sections each citing a var whose docstring then changed"
-               :work "the read, review, vars' and forms' datoms in one scan each, then per recorded name whose form moved a seek of its var, its name's history and each meaning attribute's history (value-at), and a row"
+               :n "sections each citing a var whose form then changed"
+               :work "the vars' and forms' datoms in one scan each, then per recorded name a map lookup and a row"
                :growth :linear
-               :per-n {:ns 90000 :bytes 120000 :calls 4}
+               :per-n {:ns 90000 :bytes 120000 :calls 1}
                :fixed {:ns 2500000 :bytes 4000000 :calls 3}
                :sizes [10 100 300]}))
 
@@ -881,7 +867,7 @@
   (let [db0 (ts/test-db)
         [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
         base (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" (str "# P\n\nIt reads `" v "`.\n")}))
-        head (change-meaning base v)
+        head (change-var base v)
         {:keys [caused attention]} (problems/caused-split base head)]
     (is (seq attention) "the branch made a section stale")
     (is (vector? attention))

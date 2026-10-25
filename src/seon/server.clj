@@ -107,7 +107,7 @@
    ;; the block's text as the model reads it: printed to the agent's output, not as a
    ;; value (a value comes back as a string literal, escaped, under the reply's budget);
    ;; recorded with origin :context, a context read, which renders refer to, not repeat
-   :context {:doc "The request of the task an agent works as a model is sent it now: system prompt, story, conversation and screen, its screen forms evaluated. Name the agent, or a task (ns/name): the agent working it, else one attached to it now (attach), so one request reads a task's context."
+   :context {:doc "The current-state block of the task an agent works: what the model would read now. Name the agent, or a task (ns/name): the agent working it, else one attached to it now (attach), so one request reads a task's context."
              :args {:agent {:type "string"} :task {:type "string" :description "ns/name, instead of an agent"}}
              :answer (fn [sys ag req]
                        (let [ag (or ag (when-let [t (:task req)]

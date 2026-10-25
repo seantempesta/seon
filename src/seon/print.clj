@@ -61,12 +61,11 @@
   agent): printed by the one printer under its handle, so a cut names the form that reads its
   rest, `(get-in result/e43 [:value ..])`, and a value an earlier response showed (seen: {:strings
   :colls}, `seen`) prints as the form that reads it again, `(:value result/e12)`. Made when r is
-  sent or shown, never stored (seon.repl/record-details keeps the value). A response with each
-  form's value (:values) prints them, its last once: :value is that last."
+  sent or shown, never stored (seon.repl/record-details keeps the value)."
   {:malli/schema [:function [:=> [:cat :map] :string] [:=> [:cat :map [:maybe :map]] :string]]}
   ([r] (response-text r nil))
   ([r seen]
-   (let [p (print-value (cond-> r (contains? r :values) (dissoc :value)) (cond-> {:handle (:handle r)} (seq seen) (assoc :seen seen)))]
+   (let [p (print-value r (cond-> {:handle (:handle r)} (seq seen) (assoc :seen seen)))]
      (or (:text p) (:seon.error/message p)))))
 
 (defn seen

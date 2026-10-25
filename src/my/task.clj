@@ -18,17 +18,13 @@
   [] (some->> (current) (context/run-state (agent/db))))
 
 (defn update!
-  "clojure.core/update on a content member of this agent's task (:seon.task/plan,
-  :seon.task/instructions, or :seon.task/proofs, the set of its proofs: a design registers each
-  red proof it writes with `(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)`), written
-  on its branch (seon.task/member-tx) and carried to main at the run's end. Answers the task after the update,
-  or :seon.task/invalid-member, writing nothing, for a value the member's schema does not admit."
-  {:malli/schema [:=> [:cat [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs] :seon.host/fn [:* :any]] [:or [:maybe :seon.task/task] :seon.task/invalid-member]]}
+  "clojure.core/update on a content member of this agent's task (:seon.task/plan or
+  :seon.task/instructions), written on its branch. Answers the task after the update."
+  {:malli/schema [:=> [:cat [:enum :seon.task/plan :seon.task/instructions] :seon.host/fn [:* :any]] [:maybe :seon.task/task]]}
   [member f & args]
-  (let [tx (task/member-tx (current) member f (vec args))]
-    (if (contract/error? tx)
-      tx
-      (do (agent/transact! tx) (current)))))
+  (let [t (current)]
+    (agent/transact! [{:seon.task/id (:seon.task/id t) member (apply f (get t member) args)}])
+    (current)))
 
 (defn fail!
   "Mark this agent's task failed: reason, and a counterexample (a form or value showing
@@ -47,10 +43,10 @@
   failures, source and calls), what else the done rule refuses, a failed test run, the turn of
   how many, what happened to its last reply, its unmerged entries, the stale wiki sections, the
   tests run (seon.context/turn-state), as this turn's observe measured them; what the branch's
-  merge carries is my.branch/changes. Before any turn (a model's, or an outside agent's context
-  read) has observed the task in this process: :seon.turn/not-observed, and (my.agent/prove) runs its proofs."
+  merge carries is my.branch/changes. Before any turn has observed the task in this process:
+  :seon.turn/not-observed, and (my.agent/prove) runs its proofs."
   {:malli/schema [:=> [:cat] :any]}
   []
   (if-let [{:keys [input]} (screen/input)]
     (dissoc (context/turn-state (agent/db) (current) input) :will-merge)
-    (contract/error :seon.turn/not-observed 'my.task/status "no turn has observed this agent's task yet: a model turn or a context read (the server's :context, seon_context) measures it; (my.agent/prove) runs its proofs" {})))
+    (contract/error :seon.turn/not-observed 'my.task/status "no turn has observed this agent's task yet: (my.agent/prove) runs its proofs" {})))
