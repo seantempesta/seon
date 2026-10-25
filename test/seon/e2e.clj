@@ -12,7 +12,7 @@
   the run's numbers and its verdict."
   (:require [seon.await :as await] [seon.root :as c] [my.root :as root] [seon.task :as task] [seon.context :as context] [seon.reconcile :as r]
             [seon.fixtures :as fx] [datahike.api :as d] [seon.lib :as lib] [clojure.string :as str] [seon.config] [clojure.java.shell :as sh]
-            [clojure.core.async :as a] [seon.server :as server] [seon.contract :as contract]))
+            [clojure.core.async :as a] [seon.server :as server] [seon.contract :as contract] [seon.test-store :as ts]))
 
 (defn- now [] (System/currentTimeMillis))
 (defn- db [sys] @(:conn sys))
@@ -65,13 +65,16 @@
      :root-errors (vec (take 3 (:root-errors (c/state sys))))}))
 
 (defn- fresh
-  "What a fresh agent forked from main prints for each of forms, sent once its :ready event
-  comes."
+  "What a fresh agent forked from main shows for forms, sent once its :ready event comes: one
+  request, whose response is its last form's value, as [printed] (seon.test-store/value-of
+  printed as Clojure prints it), the response itself when it shows no value that reads back
+  (an error, a var, nil), or the request's error."
   [sys forms]
   (let [ev (c/events sys) ag (c/spawn! sys {})]
     (loop [] (let [e (a/<!! ev)] (when-not (and (= :ready (:type e)) (= ag (:agent e))) (recur))))
     (a/untap (:events-mult sys) ev)
-    (let [r @(c/submit! sys ag forms)] (c/kill! sys ag) (if (contract/error? r) r (:text r)))))
+    (let [r @(c/submit! sys ag forms)] (c/kill! sys ag)
+      (if-some [v (when-not (or (contract/error? r) (:ex r)) (ts/value-of r))] [(pr-str v)] r))))
 
 (defn- quiet! "await/await-quiet from main's t now." [sys] (await/await-quiet sys (:max-tx (db sys))))
 
@@ -218,7 +221,7 @@
   its first turn), the rest merges. square's branch records what its model read each turn
   and where the time went: its second turn read its first answer's failure as the
   assertion and what it got (square was (twice x), and twice is still its stub on square's
-  branch: 0); each turn's text is made again from its basis (seon.context/render)."
+  branch: 0); each turn's text is every message it sent, read back from its refs (seon.context/parts-of)."
   [path]
   {:boot (cond-> {:max-running 2} path (assoc :path path)) :specs fx/calc :tns 'calc
    :during (fn [sys ev]
@@ -227,13 +230,13 @@
                  (when-not (some #(and (ready (:seon.run/agent %)) (= "calc/neg" (:seon.run/task %))) (vals (task/runs (db sys))))
                    (recur ready))))
              (println :cancel-neg (select-keys (root/cancel! sys ["calc/neg"]) [:ok])))
-   :check "(app.calc/sum-sq 3 4)\n(count (my.db/q '[:find ?e :where [?e :seon.turn/id]]))" :expect ["25" "0"]
+   :check "[(app.calc/sum-sq 3 4) (count (my.db/q '[:find ?e :where [?e :seon.turn/id]]))]" :expect ["[25 0]"]
    :ok (fn [{:keys [sys q d]}]
          (let [idx (r/index d)
                done? (every? #(r/done? idx %) ["calc/add-merge" "calc/twice-merge" "calc/square-merge" "calc/sum-sq-merge"])
                blocked (r/blocked-by idx "calc/abs")
                sq-db (:db @(c/branch-db sys (task/default-branch "calc/square")))
-               sq-turns (sort-by first (map (fn [[n e s]] [n (context/reader-text (into [] (mapcat second) (context/parts-of sq-db (:seon.turn/sent (d/pull sq-db [:seon.turn/sent] e))))) s])
+               sq-turns (sort-by first (map (fn [[n e s]] [n (str/join "\n\n" (keep :content (into [] (mapcat second) (context/parts-of sq-db (:seon.turn/sent (d/pull sq-db [:seon.turn/sent] e)))))) s])
                                             (d/q '[:find ?n ?e ?s :where [?e :seon.turn/n ?n] [?e :seon.turn/origin :model]
                                                    [?e :seon.turn/basis _] [?e :seon.turn/split ?s]] sq-db)))
                read-failure? (and (= 2 (count sq-turns))
