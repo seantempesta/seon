@@ -225,7 +225,7 @@
   ;; transaction on the branch, checked by the schemas; the record after it is the db's
   (let [db (seeded 20)
         db (:db-after (d/with db (:tx (my.schema/registration db :lab.ctx/steps '[:vector :string] false))))
-        same? (fn [db] (= (:tree (ctx/build db k :b)) (dissoc @ctx/ctx)))
+        same? (fn [db] (= (:tree (ctx/build db k :b)) @ctx/ctx))
         ;; f's value (or the ex-data of the error that refused it) and whether @ctx is the db's then
         step (fn [db f] (as-agent! db #(let [r (try (f) (catch clojure.lang.ExceptionInfo e (ex-data e)))] [r (same? (:db @seon.agent/state))])))]
     (testing "a datum the agent adds, an attribute of its own entity"
@@ -244,14 +244,33 @@
         (is (= "lab/ctx#1" (:seon.run/id (:seon.message/to (d/entity db' [:seon.message/id "m-new"])))))
         (is same)
         (is (= "a note to myself" (get-in @ctx/ctx [:runs "lab/ctx#1" :messages "m-new" :seon.message/body])) "the swap!'s map gave way to the db's")))
-    (testing "refused, nothing written: a key with no schema, a value its schema refuses, the environment"
+    (testing "a cardinality-many attribute of a forward unit, member by member"
+      (let [[[_ same] db'] (step db #(swap! ctx/ctx update-in [:runs "lab/ctx#1" :task :seon.task/proofs] conj 'app.x-test/t9))]
+        (is (= #{'app.x-test/t0 'app.x-test/t9} (:seon.task/proofs (d/entity db' [:seon.task/id "lab/ctx"]))))
+        (is same)))
+    (testing "a new member with its own unit: a run and its turn, each naming its parent"
+      (let [[[r same] db'] (step db #(swap! ctx/ctx assoc-in [:runs "lab/ctx#9"]
+                                            {:seon.run/id "lab/ctx#9" :seon.run/status :running
+                                             :turns {"lab/ctx#9/0" {:seon.turn/n 0 :seon.turn/reply "begin"}}}))]
+        (is (nil? (:seon.error/type r)) (pr-str r))
+        (is (= "lab/ctx#9" (:seon.run/id (:seon.turn/run (d/entity db' [:seon.turn/id "lab/ctx#9/0"])))))
+        (is (= k (:seon.agent/key (:seon.run/agent (d/entity db' [:seon.run/id "lab/ctx#9"])))))
+        (is same)))
+    (testing "refused, nothing written, the record as it was: a key with no schema, a value its schema
+      refuses, the environment, a reset! to what is no record"
       (doseq [[f t] [[#(swap! ctx/ctx assoc :notes "x") :seon.ctx/invalid]
                      [#(swap! ctx/ctx assoc :lab.ctx/steps [1 2]) :seon.ctx/invalid]
                      [#(swap! ctx/ctx assoc :t 1) :seon.ctx/basis]
-                     [#(swap! ctx/ctx update :runs dissoc "nope" ) nil]]]
-        (let [[[r] db'] (step db f)]
+                     [#(reset! ctx/ctx nil) :seon.ctx/basis]]]
+        (let [[[r same] db'] (step db f)]
           (is (= t (:seon.error/type r)) (pr-str r))
+          (is same "the record is the db's")
           (is (= (:max-tx db) (:max-tx db')) "the branch is unchanged"))))
+    (testing "a swap! that changes nothing writes nothing, and the record stays the db's"
+      (let [[[r same] db'] (step db #(swap! ctx/ctx update :runs dissoc "nope"))]
+        (is (map? r))
+        (is same)
+        (is (= (:max-tx db) (:max-tx db')))))
     (testing "a swap!'s function that writes the db is refused once, never retried (the livelock)"
       (let [calls (atom 0)
             [[r] _] (step db #(swap! ctx/ctx (fn [c] (swap! calls inc) (seon.agent/transact! [{:seon.agent/key k :lab.ctx/steps ["x"]}]) (assoc c :lab.ctx/steps ["y"]))))]

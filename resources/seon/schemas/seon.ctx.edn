@@ -11,6 +11,7 @@
  :seon.ctx/not-held [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/not-held]]
                                             [:paths [:vector [:vector :any]]] [:held [:vector :any]]]]
  ;; the swap!'s map is not of the record's basis: its :t, :branch or :commit differs (the db moved while
- ;; the swap!'s function ran, or the function wrote one of them, which are the environment's)
+ ;; the swap!'s function ran, or the function wrote one of them, which are the environment's), it is
+ ;; no map (a reset! of the atom), or there is no record yet (:held empty)
  :seon.ctx/basis [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/basis]]
-                                         [:held [:map [:t :int]]] [:swapped :map]]]}
+                                         [:held :map] [:swapped :map]]]}
