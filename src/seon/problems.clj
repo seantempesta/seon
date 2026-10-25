@@ -166,6 +166,8 @@
                   [:=> [:cat :seon.host/db :map [:maybe [:set :int]]] [:vector :seon.problems/row]]]}
   ([db ans] (unnamed-sites db ans nil))
   ([db ans only]
+  ;; the law is the program's own source's: its namespaces, read once, when a site asks
+  (let [program (delay (program/program-nss db))]
   (vec (for [{:keys [law fact page except]} laws
              :let [page-eids (into #{} (keep (fn [{:keys [e v]}] (when (str/starts-with? v (str page "#")) e))) (d/datoms db :aevt :seon.section/address))
                    named (into #{} (keep (fn [{:keys [e v]}] (when (page-eids e) v))) (d/datoms db :aevt :seon.section/names))
@@ -178,15 +180,14 @@
                    ;; a catch is attributed to its form: the vars it defines, else the multimethod or
                    ;; protocol it extends, else the form's id: no site drops
                    sites (or (seq (map :var/name (:form/defines f))) (some-> (@owners fe) vector) [(:form/id f)])
-                   file (some-> f :form/ns :ns/file)
                    nsym (:ns/name (:form/ns f))]
              v sites
              ;; the law is Seon's own source's (bin/laws scans src): an agent's app, and a test's
              ;; `is` (which expands to a catch), are not failure points of the system
-             :when (and (not (except (str nsym))) (not (named v)) (some-> file (str/starts-with? "src/")))
+             :when (and (not (except (str nsym))) (not (named v)) (contains? @program nsym))
              :let [s (str "unnamed-site " (name law) " " v)]]
          (derived-row ans s nsym (str v " has a " (name law) " site that " page " does not name")
-                      {:kind :unnamed-site :law law :site v :page page} {:law law :site v :page page})))))
+                      {:kind :unnamed-site :law law :site v :page page} {:law law :site v :page page}))))))
 
 (def pins
   "Where the wiki states each customized library's pin: the page, and the line that states one
@@ -267,8 +268,8 @@
                   [n then] v
                   :when (and (now-form n) (not= then (now-form n)))
                   :let [ve (pdb/eid db :var/name n)]
-                  :let [absent? (= "absent" then)
-                        before? (= "changed" then)
+                  :let [absent? (= :absent then)
+                        before? (= :changed then)
                         existed? (some #(and (:added %) (<= (:tx %) t)) (d/datoms hist :eavt ve :var/name))
                         was (when existed? (into {} (keep (fn [a] (some->> (value-at hist ve a t) (vector a)))) program/meaning))
                         now (into {} (keep (fn [a] (some->> (get (d/entity db ve) a) (vector a)))) program/meaning)

@@ -225,13 +225,13 @@
     (is (empty? (get-in answer [:value :errors])) "git answered every request")
     (is (= {:commit first} (get-in answer [:value :sections "docs/p.md#p"])) "the section was last changed in the first commit")
     (testing "f's docstring was changed by the second commit, after the section: recorded changed"
-      (is (= "changed" (get (read "docs/p.md#p") 'app.gb/f))))
+      (is (= :changed (get (read "docs/p.md#p") 'app.gb/f))))
     (testing "g is unchanged since: recorded as it is now"
       (is (= (form-id 'app.gb/g) (get (read "docs/p.md#q") 'app.gb/g))))
     (testing "h did not exist at the commit: recorded absent, stale now that it does (a citation ahead of the code)"
-      (is (= "absent" (get (read "docs/p.md#q") 'app.gb/h))))
+      (is (= :absent (get (read "docs/p.md#q") 'app.gb/h))))
     (testing "z lives in a file that did not exist at the commit (git ls-tree says so): absent, not an error"
-      (is (= "absent" (get (read "docs/p.md#q") 'app.gl/z))))
+      (is (= :absent (get (read "docs/p.md#q") 'app.gl/z))))
     (testing "so the sections stale today are exactly those, one name each"
       (is (= #{["docs/p.md#p" 'app.gb/f] ["docs/p.md#q" 'app.gb/h] ["docs/p.md#q" 'app.gl/z]} (set (map (juxt :section :name) stale)))))
     (testing "an unchanged reload keeps the baseline: nothing is rewritten, nothing forgiven"
@@ -260,8 +260,10 @@
                 :files {[(apply str (repeat 40 "a")) "src/app/m0.clj"] old}
                 :errors {[(apply str (repeat 40 "b")) "src/app/m0.clj"] "git show: exploded"}}
         r (seon.docs/baseline-reads db plan answer)]
-    (testing "a var defined by a form of a head defining-ids knows: its id at that commit"
-      (is (string? (get-in r ["docs/p.md#a" :read 'app.m0/f0])))
+    (testing "a var defined by a form of a head defining-ids knows is found at that commit, never absent"
+      ;; this db holds no app.m0/f0 today, so what the section described of it (its meaning at the
+      ;; commit) is not today's: :changed (the string sentinel "changed" passed a string? check here)
+      (is (= :changed (get-in r ["docs/p.md#a" :read 'app.m0/f0])))
       (is (nil? (:unread (r "docs/p.md#a")))))
     (testing "a var the old file mentions but no known head defines is unread, never absent"
       (is (re-find #"no form this reading knows" (:unread (r "docs/p.md#b")))))
@@ -341,3 +343,30 @@
                [p (inc i) w])]
     (is (contains? (set (map first patterns)) "attempt") "the table is read, the run row included")
     (is (empty? hits) "no text uses an old word outside text-kept: each is [file line word]")))
+
+(defn grep-db
+  "A test db holding forms [name doc src]: each a var app/<name> defined by its form."
+  [forms]
+  (let [db0 (ts/test-db)]
+    (d/db-with db0 (vec (mapcat (fn [[n doc src]]
+                                  [(cond-> {:db/id (str "v" n) :var/name (symbol "app" n)} doc (assoc :var/doc doc))
+                                   {:db/id (str "f" n) :form/id (str "app/" n " " src) :form/src src :form/defines [(str "v" n)]}])
+                                forms)))))
+
+(defn- grep-on [db s] (seon.docs/grep db s))
+
+(deftest grep-ranks-names-before-bodies
+  ;; dogfood 2026-10-25: grep answered ~30 names, unranked and without their line. A var whose name
+  ;; holds the word comes first, then one whose docstring does, then the rest; each with its line
+  (let [db (grep-db [["g" nil "(defn g []\n  (accumulate 1))"]
+                     ["f" "Sums, as accumulate does." "(defn f\n  \"Sums, as accumulate does.\"\n  [] 2)"]
+                     ["accumulate" nil "(defn accumulate [x]\n  x)"]
+                     ["h" nil "(defn h [] 3)"]])]
+    (is (= ['app/accumulate 'app/f 'app/g] (mapv :var (grep-on db "accumulate"))) "name, then docstring, then body; h left out")
+    (is (= "(accumulate 1))" (:line (last (grep-on db "accumulate")))) "the first line holding it")
+    (is (= [] (grep-on db "nowhere")))
+    (is (= "(defn g []" (:line (first (grep-on db "[]\n  (accumulate")))) "a match across a line break: the line it begins in")
+    (is (= [{:var 'app/f :line "\"Sums, as accumulate does.\""}] (grep-on db "Sums")) "a docstring's match: its line")
+    (let [two (d/db-with db [{:db/id "a" :var/name 'app/a} {:db/id "b" :var/name 'app/b}
+                             {:form/id "app/ab" :form/src "(do (defn a [] :zed) (defn b [] :zed))" :form/defines ["a" "b"]}])]
+      (is (= ['app/a 'app/b] (mapv :var (grep-on two ":zed"))) "a form defining two vars: each, once"))))

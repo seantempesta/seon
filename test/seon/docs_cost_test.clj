@@ -3,7 +3,7 @@
   section, and writes nothing."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
-            [datahike.api :as d] [seon.db :as pdb] [seon.docs :as docs] [seon.cost :as cost]))
+            [datahike.api :as d] [seon.db :as pdb] [seon.docs :as docs] [seon.cost :as cost] [seon.docs-test]))
 
 (defn wiki
   "The input of size n: a main db already holding a wiki of n sections (pages of ten, each
@@ -54,3 +54,17 @@
      ;; measured 2026-10-25 at 10 sections: 33 contracted calls, 1.05 MB (the section's, its nine children's and its nine edges' pulls)
      :fixed {:calls 33 :bytes 1050000}
      :sizes [10 100 1000]}))
+
+(defn grep-input
+  "The cost proof's input at n: n forms, every tenth holding the word."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :string]]}
+  [n] [(seon.docs-test/grep-db (for [i (range n)] [(str "f" i) nil (str "(defn f" i " []\n  " (if (zero? (mod i 10)) "(accumulate 1)" "(inc 1)") ")")])) "accumulate"])
+
+(deftest grep-costs-its-forms
+  (cost/proof {:of 'seon.docs/grep :input 'seon.docs-cost-test/grep-input
+                    :n "forms the branch holds, a tenth of them matching"
+                    :work "one scan of :form/src, then per match its definitions and a split of its source"
+                    :growth :linear
+                    :per-n {:bytes 20000 :calls 0}
+                    :fixed {:bytes 400000 :calls 2}
+                    :sizes [10 100 1000]}))
