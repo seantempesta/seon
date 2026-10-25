@@ -1,0 +1,64 @@
+{:inbox "80",
+ :unknown ":seon.fx/unknown-kind",
+ :file-text "text 19",
+ :checks
+   {:test-fork-refuses-unless-stubbed true, :unknown-kind-is-typed true},
+ :echo-once
+   "{:value {:x 1}, :seon.fx/kind :echo, :seon.fx/queue-us 42, :seon.fx/us 21}",
+ :load
+   "12:59  up 23 days,  3:48, 2 users, load averages: 8.58 7.03 7.08",
+ :plain-us {:n 3, :min 0.04, :p50 0.06, :p95 0.06, :p99 0.06, :max 0.06},
+ :echo-us
+   {:n 3,
+    :min 491.52,
+    :p50 505.68,
+    :p95 607.69,
+    :p99 607.69,
+    :max 607.69},
+ :floor-us
+   {:n 3,
+    :min 226.4,
+    :p50 290.27,
+    :p95 312.01,
+    :p99 312.01,
+    :max 312.01},
+ :transact-us
+   {:n 3,
+    :min 318.18,
+    :p50 497.96,
+    :p95 535.83,
+    :p99 535.83,
+    :max 535.83},
+ :spit-us
+   {:n 3,
+    :min 475.64,
+    :p50 861.27,
+    :p95 1005.51,
+    :p99 1005.51,
+    :max 1005.51},
+ :file-us
+   {:n 3,
+    :min 1525.06,
+    :p50 1627.44,
+    :p95 1805.15,
+    :p99 1805.15,
+    :max 1805.15},
+ :send-us
+   {:n 3, :min 10.26, :p50 52.62, :p95 77.87, :p99 77.87, :max 77.87},
+ :test-fork {:pass 2, :fail 0, :error 0},
+ :recorded {:file 80, :echo 161, :nope 81},
+ :echo-queue-us
+   {:n 99, :min 8.0, :p50 483.0, :p95 2909.0, :p99 4151.0, :max 4151.0},
+ :echo-perform-us
+   {:n 13, :min 0.0, :p50 6.0, :p95 39.0, :p99 39.0, :max 39.0},
+ :owner-ping
+   {:status :running,
+    :count 322,
+    :state
+      {:kind :echo,
+       :workers 1,
+       :busy 0,
+       :done 161,
+       :queued 0,
+       :spent {}}}}
+FX OK

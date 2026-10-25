@@ -71,7 +71,8 @@
                :n "wiki sections with vectors"
                :work (str "the plan's citations parsed once, and one seon.vector/near a kind (each reads every coarse "
                           "row, its shortlist of 400 reranked: one seek a row), the graph's seeks for what the plan "
-                          "cites (none here), and one rrf of each kind's two rankings: linear in the vectors")
+                          "cites (none here; each neighbour also one bounded count of the forms naming it, at most "
+                          ":seon.config.render/related-rarity datoms), and one rrf of each kind's two rankings: linear in the vectors")
                :growth :linear
                ;; measured 2026-10-25: 145 calls, 3.39 MB at n=100 (below the shortlist); 445 calls
                ;; at 500 and at 1,000, 8.18 MB and 8.92 MB (~1.48 KB a row). The calls are one

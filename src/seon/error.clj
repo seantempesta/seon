@@ -129,15 +129,17 @@
 ;; ---- an agent's side: its eval errors, folded until its next commit --------------------
 
 (defn note
-  "Errors folded in an agent (cause -> sent entry) after one more eval error e in form at
-  ms: what the agent sends root with its next commit (then starts empty)."
-  {:malli/schema [:=> [:cat [:maybe :map] :map [:maybe :string] :int] :map]}
-  [m e form ms]
+  "Errors folded in an agent (cause -> sent entry) after one more error e of class (an eval's
+  :eval; a model call's outcome, a short cache hit, :effect) in form at ms: what the agent sends
+  root with its next commit (then starts empty)."
+  {:malli/schema [:=> [:cat [:maybe :map] :map :seon.error/class [:maybe :string] :int] :map]}
+  [m e class form ms]
   (update m (cause e) (fn [s] (if s (-> s (update :n inc) (assoc :last-ms ms))
-                                  {:error e :form form :n 1 :first-ms ms :last-ms ms}))))
+                                  {:error e :class class :form form :n 1 :first-ms ms :last-ms ms}))))
 
 (defn sent->occurrence
-  "An agent's sent entry s (its eval errors since its last commit) as root's occurrence."
+  "An agent's sent entry s (its errors since its last commit, each of the class it was noted as) as
+  root's occurrence."
   {:malli/schema [:=> [:cat :seon.error/sent :keyword [:maybe :string]] :seon.error/occurrence]}
   [s agent task]
-  (occurrence (:error s) :eval {:agent agent :task task :form (:form s) :n (:n s) :first-ms (:first-ms s)} (:last-ms s)))
+  (occurrence (:error s) (:class s) {:agent agent :task task :form (:form s) :n (:n s) :first-ms (:first-ms s)} (:last-ms s)))

@@ -155,7 +155,7 @@
          (fn [m] (if-let [e (:repl/ex m)]
                    (let [em (cond-> (agent/error-map e) (:repl/phase m) (assoc :phase :read))
                          em (if (= :seon.agent/eval-error (:seon.error/type em)) (merge em (located e m)) em)]
-                     (swap! agent/state update :errors err/note em (:form m) (System/currentTimeMillis))
+                     (swap! agent/state update :errors err/note em :eval (:form m) (System/currentTimeMillis))
                      (assoc m :err em))
                    m))))))
 
