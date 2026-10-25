@@ -26,12 +26,37 @@ A **run** is five things at once: the process's lifetime (spawn to SIGKILL), the
 
 | Outcome | Today | New |
 |---|---|---|
-| `:green` (the done rule refuses nothing) | judge; accept, or hold as a failure; kill | judge as today (the agent's tests, the branch diff, `judge-tx`). Accepted: the task is done, and its agent's process ends (the only kill). Refused: the task is held (DECISIONS: no automatic retries) and the agent **parks**; the reason goes to the user's timeline |
+| `:green` (the done rule refuses nothing) | judge; accept, or hold as a failure; kill | judge as today (the agent's tests, the branch diff, `judge-tx`). Accepted: the stage is done; the next stage's message wakes the agent (section 1a); after the last stage its process ends (the only kill). Refused: the task is held (DECISIONS: no automatic retries) and the agent **parks**; the reason goes to the user's timeline |
 | `:waiting` (a prose-only reply, `my.turn/wait`) | judged, held as a failure, killed | **park**: no judge, no hold, no kill; the task stays `:running` |
 | `:cap`, `:no-progress`, `:error` (a provider error) | held as a failure, killed | **park**, its reason on the run; the next message wakes it with a fresh budget |
 | `:failed` (`my.task/fail!`), `:merge-failed` | held, killed | the failure carried and the task held, as today (`judge-tx`); the agent **parks** |
 | the process died | run `:dead`, held, killed | run `:dead`; the session has no process; the next message resumes it at its head (section 4) |
 | root restarted mid-run | `:lost`, re-run blank | `:lost`; the session resumes at its head and its next run's first record says what was interrupted (root's `last-op`) |
+
+### 1a. A request's stages are runs of one session (owner's ruling, 2026-10-25)
+DECISIONS: "A request's stages are separate steps in one session". Design, implement and merge stay three tasks, each with its own instructions and its own judge checks, and they are worked as runs of **one session**: the next stage continues the same conversation, on the same branch, in the same process when it is parked.
+- **What exists:** `seon.template/request` already writes the three linked tasks in one transaction: `<name>` (`:design`), `<name>-implement` needing it, and `<name>-merge` needing that, all on the design task's branch. `seon.task/accumulate` already carries the proofs along `:needs`, and `judge-tx` already judges by `:kind` (`:design` is checked for a plan and red proofs, reconcile.clj:47-49). None of this changes.
+- **How a stage joins the session:** the session's agent is keyed by the **head of its task's same-branch `:needs` chain**: the task on the branch that needs no other task there. For a request that is the design task. For a plain work task and its merge it is the work task. For a task alone it is the task itself. The chain is already walked in `merge-keys` (reconcile.clj:308), so the key is derived and adds no attribute. Owner question 1 below becomes "one agent per request session".
+- **The session's current stage** is the first task of the chain that is not done and whose `:needs` are done. A run records it as `:seon.run/task` (an existing attribute), so every run belongs to exactly one stage.
+- **How a stage's instructions arrive:** a stage is accepted when its green end is judged and accepted. The reconciler's judge transaction then also writes one message, a fact on main from `"root"` to the session's agent, carrying the next stage's `:seon.task/instructions` and its plan as rendered by its `:seon.render/ai`. That message is the stage's start. The ready rule of section 2 (messages > `taken`) wakes the parked process with no new path: one starter, one wake. The model reads the stage change where it happened: the earlier stages' records stay in the cached prefix, and the screen's task section (section 5) shows the new stage as a diff.
+- **The process ends only when the session has no stage left:** when the last stage is accepted, or the request is cancelled. The first row of the outcome table reads "accepted: the stage is done; the next stage's message wakes the agent; after the last stage the process ends".
+- **How the judge checks each stage:** the run's task is the stage, so `judge-tx` takes the run's `:seon.run/task` kind as today:
+  - **design:** a plan and red proofs;
+  - **implement:** the accumulated proofs are green, and the branch diff is caused by this session;
+  - **merge:** merged, with main's checks green.
+
+  A stage that is refused holds that stage's task alone (DECISIONS: no automatic retries). The agent parks, and the reason goes to the user's timeline. The user's reply releases the stage and wakes the same session in the same stage. Earlier stages stay done.
+- **Hazards:**
+  - **A stage message written twice:** it can't be. It is part of the one judge transaction for that run, and a run is judged once.
+  - **Two stages running:** they can't, because the next stage's `:needs` hold it until the current one is done, and section 2 starts no run while a run of the session is `:running`.
+  - **A merge run in root's gate checkout:** the merge stage's git effects already go through `:fx :git` on the session's branch (reconcile.clj:745). What the agent does in the merge stage, resolving conflicts and running proofs, happens in its own process as in the other stages.
+  - **The judge's proofs for implement:** they are design's red proofs, read through `accumulate` as today.
+- **Work done:** at a stage change, one more message fact in the judge's transaction, and a wake (7 to 35 ms measured) instead of a fork plus a blank conversation. The turns implement no longer spends re-reading what design learned are estimated, not measured: that is the pilot's first number.
+- **Proofs:**
+  - a scripted request runs design → implement → merge in one process: one agent key, turn ids continuing, implement's first request carrying design's records as its prefix;
+  - each stage's run carries its own stage as its task, and is judged by that stage's kind;
+  - a refused implement stage holds only implement, and a reply from the user wakes the same session.
+- **The pilot** (owner, 2026-10-25): **"customizable errors"** is the first request run through the pipeline once parts 2-4 of section 7 are built: v1 let errors be customized, and next does not yet. It is small, so it exercises all three stages and their judges on real work. It is a paid run, so it needs root's go. Its numbers: turns to green per stage, and implement's turns against an estimate for a blank-context implement.
 
 ## 2. Parking and waking on Flow
 
@@ -189,7 +214,7 @@ What this shows:
 New functions the help page teaches: `send`, `my.root/resume!`. Gone: `message!`, `send-message`, `release!`.
 
 **Owner's questions** (each needs a ruling before its part is built; my recommendation first):
-1. Agent key = the task's session (one per task) rather than the branch: *recommended*, since a rewind moves the task to a new branch and its agent continues there.
+1. Agent key = the request's session (the head of the same-branch `:needs` chain, section 1a), rather than the branch: *recommended*, since a rewind moves the session to a new branch and its agent continues there.
 2. A refused green end parks and holds (as DECISIONS asks) rather than sending the refusal to the agent as a message that wakes it (an automatic retry). *Recommended: hold*, with the reason in the user's timeline; the user's reply is the release.
 3. Only the user's or root's message releases a held task; another agent's waits. *Recommended.*
 4. The send function's name. `send` (the owner's word) shadows `clojure.core/send` (Clojure's agents) in every agent namespace, and an agent at a plain REPL would expect core's. *Recommended: `my.agent/message!`*: no shadowing, and the `!` says it is an effect. The api op stays `:send`; the help page teaches the one function either way.
@@ -200,8 +225,9 @@ New functions the help page teaches: `send`, `my.root/resume!`. Gone: `message!`
 Each part is red then green, measured, reported before the next; a page change is checked in a browser.
 1. **Fork server static before fork; collect on park.** Smallest, measured, unblocks capacity. Proof: worked-agent footprint; fork server growth per static measured.
 2. **Session-scoped records and ids** (part 1): the conversation across runs.
-3. **Park and wake** (part 2): park outcomes, `:parked`/`taken`, the reconciler's ready rule and `:wake` (eviction only if the owner rules for it).
+3. **Park and wake** (part 2): park outcomes, `:parked`/`taken`, the reconciler's ready rule and `:wake` (eviction only if the owner rules for it); the session key from the `:needs` chain and the stage message in the judge's transaction (section 1a).
 4. **One send** (part 3), the help page, the page's box and MCP rewired; the seven mechanisms' deletions.
 5. **Resume** (part 4), with `:seon.eval/calls` measured first.
 6. **Screen diffs** (part 5).
-No paid model runs: the scripted provider (`seon.lab/reply`, `jolt/flow-lab`) drives every proof; a paid measurement of turns to green comes after part 4, with root's go.
+After part 4: **the pilot, "customizable errors"** (section 1a), a paid run with root's go.
+No other paid model runs: the scripted provider (`seon.lab/reply`, `jolt/flow-lab`) drives every proof; a paid measurement of turns to green comes after part 4, with root's go.
