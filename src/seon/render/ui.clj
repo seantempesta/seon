@@ -1092,13 +1092,15 @@
 
 (defn- source
   "What made part ref of a sent request, as a line: the help page or the task as of a t, an eval,
-  a message, the history the budget left out."
+  an eval sent collapsed to its line, a message, the history the budget left out: every ref kind
+  seon.context/request names (:seon.turn/sent)."
   {:malli/schema [:=> [:cat :any] :string]}
   [[kind x t]]
   (case kind
     :section (str "the help page (its section, entity " x ") as of t " t)
     :task (str "the task story: task entity " x "'s run sections as of t " t)
     :eval (str "eval " x)
+    :line (str "eval " x ", sent as its one line")
     :message (str "message " x)
     :history (str x " earlier records the history budget left out")))
 
