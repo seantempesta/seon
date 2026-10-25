@@ -141,7 +141,7 @@ Each run's context was checked first through the server (the pilot's screen and 
 
 Too few rounds to say anything yet. Three findings:
 1. **The dig-deeper form cost turns.** In the pilot, the unrun-proof run followed `:read` to a related section (`docs/agent.md#what-you-read`). It then spent about 8 evals reading it with `(:text …)`; the key is `:seon.ref/text`. The form is now `(:seon.ref/text (my.agent/help address))`, with the key named.
-2. **A run hung.** In on-2, the unrun-proof run hung past its 30-turn cap (36 evals, the agent `:busy`, its stderr empty) for over an hour, and the round never ended. The agents' directory is kept in the session scratchpad. The cause is not found; filed for root.
+2. **A run hung.** In on-2, the unrun-proof run hung past its 30-turn cap (36 evals, the agent `:busy`, its stderr empty) for over an hour, and the round never ended. The agents' directory is kept in the session scratchpad. The cause is not found; filed as task `seon.turn/a-run-past-its-cap-ends`.
 3. **The rest of the A/B waits for the new defaults.** Measuring the old screen form would measure what no longer merges. Off-2, on-3 and off-3 run after this branch's new defaults (below), about $0.10 more.
 
 ## Widened: every schema kind, data and function edges, others' work, renders (root, after the owner)
@@ -215,7 +215,7 @@ So embedding finds about 2.5× chance, and producer text adds 2–3 points. Each
 
 There is no render-specific truth column. Renders are in the functions column.
 
-**Embedding rendered hiccup output.** Estimated, not measured. Each agent turn renders about five new records (four screen evals and the model's), and its page parts change with them. At the 400–2,000 tokens a record prints (the screen's related eval alone printed 1.3–1.9k characters), that is about 2–10k tokens embedded per agent turn. Each turn's records are new, so nothing is reused, and the vectors would grow with every turn of every run. That is more than everything above combined, re-made every turn. As root expected, renders as definitions and others' plans give the sharing for a fraction of the cost. I recommend against embedding hiccup output.
+**Embedding rendered hiccup output.** Estimated, not measured. Each agent turn renders about five new records (four screen evals and the model's), and its page parts change with them. At the 400–2,000 tokens a record prints (the screen's related eval alone printed 1.3–1.9k characters), that is about 2–10k tokens embedded per agent turn. Each turn's records are new, so nothing is reused, and the vectors would grow with every turn of every run. That is more than everything above combined, re-made every turn. As root expected, renders as definitions and others' plans give the sharing for a fraction of the cost. I recommend against embedding hiccup output. **Decided** (root, 2026-10-25): hiccup output is not embedded.
 
 ## What the screen shows now, and what stays a query
 
