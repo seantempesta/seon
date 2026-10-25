@@ -521,6 +521,29 @@
         e-of (fn [id] (d/q '[:find ?e . :in $ ?id :where [?e :seon.turn/id ?id]] db id))]
     [db [r0 r1] [(e-of "demo/f#1/0") (e-of "demo/f#1/1")]]))
 
+(deftest a-sessions-next-run-reads-its-earlier-runs
+  ;; design agent-loop section 1 (owner, 2026-10-25: "a resume where the agent wakes and responds
+  ;; to a message it should have the same previous context"): the conversation is the session's,
+  ;; not the run's. An agent's second run reads the evals of its first and the messages its first
+  ;; took, in tx order; another agent's records stay out
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+      (let [ev! (fn [id agent run code] (d/transact conn [{:seon.eval/id id :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key agent}
+                                                           :seon.eval/record {:code code :response {:handle (symbol "result" id) :value 1} :run run}}]))
+            run! (fn [run agent] (d/transact conn [{:seon.run/id run :seon.run/task [:seon.task/id "demo/f"] :seon.run/agent {:seon.agent/key agent}}]))
+            _ (run! "demo/f#1" "b/a1")
+            _ (ev! "e1" "b/a1" "demo/f#1" "(f 1)")
+            _ (d/transact conn (task/message-tx "m1" "user" "demo/f#1" "use g"))
+            _ (run! "demo/f#2" "b/a1")
+            _ (ev! "e2" "b/a1" "demo/f#2" "(f 2)")
+            _ (ev! "x1" "b/a9" "other#1" "(other)")
+            db @conn
+            a (:db/id (d/entity db [:seon.agent/key "b/a1"]))
+            ids (mapv (fn [[_ v]] (or (:seon.eval/id v) (:seon.message/id v))) (context/records db a))]
+        (is (= ["e1" "m1" "e2"] ids) "the first run's eval and message, then the second's, and no other agent's")))))
+
 (deftest a-run-printed-once-sends-what-a-cold-read-sends
   ;; the branch review (2026-10-25, F6, F7): a request threaded through what the run's earlier
   ;; requests printed (:printed) equals one made with none, turn by turn; what each turn recorded

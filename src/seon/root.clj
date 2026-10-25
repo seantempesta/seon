@@ -120,7 +120,7 @@
                   id)]
     (if (and (seq changed) (not (:writer-closed st)))
       (do
-        (step/out! o :to-writer {:op :tx :branch :db :tx-data (into [] (mapcat #(task/agent-tx (:boot st) % (observed (get now %)))) changed)
+        (step/out! o :to-writer {:op :tx :branch :db :tx-data (into [] (mapcat #(task/agent-tx (:boot st) % (observed (get now %)) (:key (get now %)))) changed)
                                  :dest {:agent-facts (vec changed)}})
         st)
       st)))
@@ -256,7 +256,7 @@
   end is a jolt.async.remote end (session RC1): its :in is the agent proc's :from, so the
   agent's port is an ordinary channel. Answers [st id agent-end-fd]."
   {:malli/schema [:=> [:cat :seon.root/api-state :map] [:tuple :seon.root/api-state :seon.agent/id :seon.lib/fd]]}
-  [st {:keys [branch task run cloned-from]}]
+  [st {:keys [branch task run cloned-from key]}]
   (let [n (inc (:next-id st))
         id (keyword (str "a" n))
         ;; named under root's main, so roots sharing a store never share a branch (seon.db/on-main)
@@ -274,6 +274,8 @@
          (assoc-in [:view :agents id] (cond-> {:branch branch :status :spawning :task task :pid nil
                                                :forked-ms nil :mem-mb nil :evals [] :tests nil}
                                         run (assoc :run run)
+                                        ;; the session's agent this process continues (seon.task/session-key)
+                                        key (assoc :key key)
                                         cloned-from (assoc :cloned-from cloned-from))))
      id a]))
 
@@ -337,7 +339,8 @@
                  (>= (count (:agents st)) (cfg/value :seon.config.root/max-agents)) (reply! st o p (refused 'seon.root/spawn! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)}))
                  :else (let [[st aid fd] (start-agent st opts)
                              branch (get-in st [:agents aid :branch])]
-                         (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :run (:run opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}})
+                         (step/out! o :to-writer (cond-> {:op :spawn :agent aid :branch branch :task (:task opts) :run (:run opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}}
+                                          (:key opts) (assoc :key (:key opts))))
                          ;; answered at its hello (set-agent's :ready), or the end it meets first
                          (assoc-in st [::spawning aid] p))))
       :clone (let [parent (:parent m)]
