@@ -1109,6 +1109,26 @@
   ([db inputs] (reach-index db inputs nil))
   ([db inputs roots] (graph-index (reach-graph db (:data-refs inputs)) inputs roots)))
 
+(defn process-path
+  "Why test t of graph g (reach-graph's) is a process test: the shortest chain of calls from its
+  form to a form that uses a process var (:seon.config.source/process-vars), as the vars each
+  form on it defines, and the process vars that last form uses: {:uses [var ...] :through [var
+  ...]}, or nil when t reaches none. Cost: a breadth-first walk of what t reaches, stopping at the
+  first form that uses one."
+  {:malli/schema [:=> [:cat :map :qualified-symbol] [:maybe [:map [:uses [:vector :qualified-symbol]] [:through [:vector :qualified-symbol]]]]]}
+  [{:keys [rows defs adj proc]} t]
+  (when-let [start (peek (get defs t))]
+    (let [pvars (cfg/value :seon.config.source/process-vars)
+          vars-of (fn [id] (sort-by str (keep (fn [[k s]] (when (= :var k) s)) (:defines (rows id)))))]
+      (loop [frontier [start] from {start nil}]
+        (when (seq frontier)
+          (if-let [hit (first (filter proc frontier))]
+            {:uses (vec (sort-by str (filter pvars (:refs (rows hit)))))
+             :through (vec (mapcat vars-of (reverse (take-while some? (iterate from hit)))))}
+            (let [step (for [id frontier w (adj id) :when (not (contains? from w))] [w id])
+                  from' (reduce (fn [m [w id]] (if (contains? m w) m (assoc m w id))) from step)]
+              (recur (vec (distinct (map first step))) from'))))))))
+
 (defn process-tests
   "The keys of index (reach-index's answer) that reach a process of their own (a shell, a
   fork, a root booted for it, the binary): never run automatically, only when named (DECISIONS,
