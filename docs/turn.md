@@ -8,7 +8,7 @@ Root's reconciler forks an agent for a released task and evaluates ```seon.turn/
 - the done rule refuses nothing (`:green`; all green at the start ends it with no model call);
 - a function asked to stop: `my.turn/wait` (`:waiting`) or `my.task/fail!` (`:failed`, the task held for root: [tasks](tasks.md#a-refused-run-is-held-for-root));
 - the turns run out (`:cap`, with the done rule's reasons as its reason);
-- a turn repeats the last turn's calls from the same observed state, after the run's first `:seon.config.agent/repeats-told` repeats were told to the agent in its next status (`:your-last-reply :repeated`), each counted on the run as `:seon.run/repeats` (`:no-progress`, naming the calls);
+- a turn repeats the last turn's calls from the same observed state, after the run's first `:seon.config.agent/repeats-told` repeats were told to the agent in its next status (`:your-last-reply :repeated`), each counted in a row on the run as `:seon.run/repeats` (a turn that made progress starts it again) (`:no-progress`, naming the calls);
 - a merge task's merge of main is too hairy (`:merge-failed`, [below](#a-merge-tasks-loop));
 - the model call fails (`:error`: [model](model.md#failures)).
 
