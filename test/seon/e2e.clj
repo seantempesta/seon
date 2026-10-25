@@ -30,8 +30,15 @@
     (mapv #(task/task-id tns (:seon.task/name %)) ds)))
 
 (defn agents-reused
-  "Agent ids that more than one run used (must be empty: every run is a new agent)."
-  [d] (vec (for [[ag n] (frequencies (map :seon.run/agent (vals (task/runs d)))) :when (> n 1)] ag)))
+  "Agent ids whose runs worked more than one branch (must be empty): a session's runs (a
+  task and the tasks on its branch it needs, a work task and its merge: seon.task/session-key)
+  continue its one agent, and no agent serves two sessions; a run naming no branch is a session
+  of its own. The branch stands for the session (a session is one branch): two sessions on one
+  branch with no :needs between them sharing an agent pass unseen. session-key cannot judge it,
+  since it answers the agent this check asks about."
+  [d] (vec (for [[ag rs] (group-by :seon.run/agent (vals (task/runs d)))
+                 :when (and ag (< 1 (count (distinct (map #(or (get-in % [:seon.run/env :branch]) (:seon.run/id %)) rs)))))]
+             ag)))
 
 (defn- merge-counts [d]
   (let [ts (task/tasks d)
@@ -83,7 +90,7 @@
   main (its own store), read before root stops; printed as LABEL OK or LABEL FAILED."
   ([sys ok] (verdict! sys ok "E2E"))
   ([sys ok label]
-   (let [p (await/defect (db sys) 0) ok (and ok (nil? p))]
+   (let [p (c/defect (db sys) 0) ok (and ok (nil? p))]
      (c/stop! sys)
      (when p (println :defect p))
      (println label (if ok "OK" "FAILED")) ok)))
@@ -180,8 +187,8 @@
   quiescence; a row without :specs only boots and waits (a restart's second phase). Then a
   fresh agent runs :check on what main runs, which must print :expect, and (:ok run) judges
   the rest from {:sys :q (the quiescence report) :d (main)}, answering {:ok bool & what it
-  measured}, printed as :checks. No agent may serve two runs of one boot (a row without
-  :specs spans two boots, whose agent ids both start at a1). Answers the verdict, printed
+  measured}, printed as :checks. No agent may serve two sessions of one boot (agents-reused;
+  a row without :specs spans two boots, whose agent ids both start at a1). Answers the verdict, printed
   under the row's :label (E2E when it names none)."
   [{:keys [boot specs during check expect ok label] :as row}]
   (let [t0 (now)
@@ -211,7 +218,7 @@
       {:boot boot :ok (fn [{:keys [sys d]}] (assoc (all-done d) :recovered (get-in (c/state sys) [:store :recovered-branches])))}
       {:boot boot :specs fx/calc :tns 'calc
        :during (fn [sys _]
-                 (await/await-db sys #(let [idx (r/index %)] (and (r/done? idx "calc/add-merge") (seq (:live idx)))))
+                 (c/await-db sys #(let [idx (r/index %)] (and (r/done? idx "calc/add-merge") (seq (:live idx)))))
                  (println :running-at-kill (:live (r/index (db sys))))
                  (flush)
                  (lib/c-kill (lib/c-getpid) 9))})))

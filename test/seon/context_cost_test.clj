@@ -59,3 +59,20 @@
                :growth :constant
                :fixed {:calls 4 :bytes 20000}
                :sizes [10 100 1000]}))
+
+(defn related-of-changed
+  "seon.context/related's arguments at n wiki sections with vectors: the plan's answer made anew,
+  as when its vector changed."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int]]}
+  [n] (let [[db te] (related-of n)] [db te]))
+
+(deftest related-ranks-each-kind-by-one-search
+  (cost/proof {:of 'seon.context/related :input 'seon.context-cost-test/related-of-changed
+               :n "wiki sections with vectors"
+               :work (str "the plan's citations parsed once, and one seon.vector/near a kind (every coarse row read "
+                          "once, its shortlist reranked), the graph's seeks for what the plan cites (none here), "
+                          "and one rrf of each kind's two rankings: linear in the vectors")
+               :growth :linear
+               :per-n {:bytes 700.0 :calls 0.0}
+               :fixed {:bytes 6000000.0 :calls 60.0}
+               :sizes [100 1000 3000]}))

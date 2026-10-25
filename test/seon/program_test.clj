@@ -110,11 +110,12 @@
 (deftest the-keywords-a-form-names-are-recorded
   ;; root's gate (approved): :form/keywords, the data a function operates on, recorded by the
   ;; analyzer from the read it already does: its code's qualified keywords and its contract's
-  (let [src "(defn kw-user {:malli/schema [:=> [:cat [:map [:app.kw/thing :int]]] :app.kw/count]} [m] (assoc m :app.kw/count (:app.kw/thing m) :plain 1))"
+  (let [src "(defn kw-user {:malli/schema [:=> [:cat [:map [:app.kw/thing :int]]] :app.kw/count]} [m] (assoc m :app.kw/count (:app.kw/thing m) :plain 1 :listed '[:app.kw/listed]))"
         acct (eval-account 'app.pt-kw src)
         db (record (empty-db) 'app.pt-kw src)]
-    (is (= #{:app.kw/thing :app.kw/count} (:keywords acct)) "its code's and its contract's qualified keywords, the unqualified left out")
-    (is (= #{:app.kw/thing :app.kw/count} (set (d/q '[:find [?k ...] :where [?v :var/name app.pt-kw/kw-user] [?v :var/form ?f] [?f :form/keywords ?k]] db)))
+    (is (= #{:app.kw/thing :app.kw/count :app.kw/listed} (:keywords acct))
+        "its code's (a constant, a keyword called, quoted data) and its contract's qualified keywords, the unqualified left out")
+    (is (= #{:app.kw/thing :app.kw/count :app.kw/listed} (set (d/q '[:find [?k ...] :where [?v :var/name app.pt-kw/kw-user] [?v :var/form ?f] [?f :form/keywords ?k]] db)))
         "as facts of its form")
     (is (= ['app.pt-kw/kw-user] (seon.docs/callers db :app.kw/thing)) "a key's functions, one AVET seek")
     (is (= [src] (mapv :src (program/schema-dependents db #{:app.kw/count}))) "the form that re-arms when a key it names changes")

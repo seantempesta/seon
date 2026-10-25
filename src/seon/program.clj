@@ -134,6 +134,11 @@
           (= :throw (:op d)) acc
           :else (conj acc {:class "*" :answers (answers d)}))))
 
+(defn- quoted-var?
+  "Does datum x name a var as quoted data: a qualified symbol whose namespace exists (quoted-vars)."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [x] (boolean (and (qualified-symbol? x) (find-ns (symbol (namespace x))))))
+
 (defn- quoted-vars
   "The qualified symbols in a quoted datum (walked: a collection's too) whose namespace
   exists: a syntax-quoted or quoted name resolved later (`requiring-resolve`, a macro's
@@ -143,7 +148,7 @@
   reused across runs or checkouts), while every imported
   file's namespace exists before any form is analyzed."
   {:malli/schema [:=> [:cat :any] [:set :qualified-symbol]]}
-  [x] (into #{} (filter #(and (qualified-symbol? %) (find-ns (symbol (namespace %))))) (tree-seq coll? seq x)))
+  [x] (into #{} (filter quoted-var?) (tree-seq coll? seq x)))
 
 (defn unit-account
   "What the compiler says one analyzed top-level node does, from its IR by resolved var
@@ -176,9 +181,11 @@
          ;; keyword: most constants (unqualified keywords, strings, numbers) cost no walk
          (:quote :const) (let [x (datum n)]
                            (cond (qualified-keyword? x) (vswap! acc update :keywords conj x)
-                                 (or (coll? x) (qualified-symbol? x))
-                                 (vswap! acc #(-> % (update :refs into (quoted-vars x))
-                                                  (update :keywords into (filter qualified-keyword?) (tree-seq coll? seq x))))))
+                                 (qualified-symbol? x) (when (quoted-var? x) (vswap! acc update :refs conj x))
+                                 ;; a quoted collection walked once for both
+                                 (coll? x) (let [xs (tree-seq coll? seq x)]
+                                             (vswap! acc #(-> % (update :refs into (filter quoted-var?) xs)
+                                                              (update :keywords into (filter qualified-keyword?) xs))))))
          :try (vswap! acc update :catches into (map sedn/encode) (catches n))
          :invoke (when (and (= 'clojure.core/deref (invoked n)) (= 3 (count (:args n))))
                    (vswap! acc update :timeouts conj 'clojure.core/deref))
@@ -430,8 +437,8 @@
 (def meaning
   "What a definition says of itself that text describing it relies on, so what a wiki section
   citing it goes stale on (seon.problems/stale-sections) and an eval that changes it shows
-  (meaning-changes): its contract and its docstring, the facts def-tx asserts and retracts (owner,
-  2026-10-25, DECISIONS Dogfood rulings; the contract carries the arity)."
+  (meaning-changes): its contract and its docstring, the facts def-tx asserts and retracts
+  (DECISIONS Dogfood rulings; the contract carries the arity)."
   [:var/contract :var/doc])
 
 (defn meaning-changes
@@ -740,12 +747,12 @@
     (let [naming (reduce (fn [m [k f]] (reduce #(update %1 %2 (fnil conj []) k) m (names f)))
                          {} (merge contract/forms (schema-changes db)))
           reached (into keys (closure keys naming))]
-      (vec (distinct (for [k reached
-                           dt (d/datoms db :avet :form/keywords k)
-                           :let [fe (:e dt)]
-                           :when (and (live? db fe)
-                                      (some #(:var/contract (d/entity db %)) (map :db/id (:form/defines (d/entity db fe)))))]
-                       (form-row db fe)))))))
+      (mapv #(form-row db %)
+            (distinct (for [k reached
+                            dt (d/datoms db :avet :form/keywords k)
+                            :let [fe (:e dt)]
+                            :when (and (live? db fe) (some :var/contract (:form/defines (d/entity db fe))))]
+                        fe))))))
 
 (defn ensure-ns!
   "The namespace, created with clojure.core and clojure.test's assertions referred when it
