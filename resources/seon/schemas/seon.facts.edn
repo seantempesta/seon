@@ -217,6 +217,8 @@
  :seon.run/outcome [:enum :green :red :waiting :cap :failed :merge-failed :error :no-end :no-progress]
  :seon.run/reason [:string {:seon.render/prose true}]
  :seon.run/turns :int
+ ;; the messages to its session's runs its branch held when the run parked (seon.reconcile/judge-tx): main holding more wakes it
+ :seon.run/taken :int
  :seon.run/model-calls :int
  :seon.run/tokens :int
  :seon.run/merged-t :int
@@ -259,7 +261,7 @@
                              [:seon.run/branch {:optional true} :seon.run/branch] [:seon.run/model {:optional true} :seon.run/model]
                              [:seon.run/max-turns {:optional true} :seon.run/max-turns]
                              [:seon.run/outcome {:optional true} :seon.run/outcome] [:seon.run/reason {:optional true} :seon.run/reason]
-                             [:seon.run/turns {:optional true} :seon.run/turns] [:seon.run/model-calls {:optional true} :seon.run/model-calls]
+                             [:seon.run/turns {:optional true} :seon.run/turns] [:seon.run/taken {:optional true} :seon.run/taken] [:seon.run/model-calls {:optional true} :seon.run/model-calls]
                              [:seon.run/tokens {:optional true} :seon.run/tokens] [:seon.run/merged-t {:optional true} :seon.run/merged-t]
                              [:seon.run/basis-t {:optional true} :seon.run/basis-t]
                              [:seon.run/plan {:optional true} :seon.run/plan]

@@ -92,13 +92,15 @@
  ;; full reconcile on generated dbs)
  :seon.reconcile/index [:map {:gen/elements [{:root nil :tasks {} :keys {} :needed-by {} :acc {} :depth {} :claims {}
                                               :runs {} :by-task {} :done {} :ready #{} :ready-key {}
-                                              :live #{} :reap #{} :kill {} :judge #{} :merging #{}}]}
+                                              :live #{} :reap #{} :kill {} :judge #{} :merging #{} :msgs {}}]}
                         [:root [:maybe :map]] [:tasks [:map-of :seon.task/id :map]] [:keys :map] [:needed-by :map]
                         [:acc :map] [:depth [:map-of :seon.task/id :int]] [:claims :map]
                         [:runs [:map-of :seon.run/id :map]] [:by-task :map] [:done :map]
                         [:ready [:set [:tuple :int :seon.task/id]]] [:ready-key :map]
                         [:live [:set :seon.run/id]] [:reap [:set :seon.run/id]] [:kill [:map-of :seon.run/id :keyword]]
-                        [:judge [:set :seon.run/id]] [:merging [:set :seon.run/id]]]
+                        [:judge [:set :seon.run/id]] [:merging [:set :seon.run/id]]
+                        ;; messages main holds to each branch's runs (seon.reconcile/branch-messages): a parked session's wake
+                        [:msgs {:optional true} [:map-of :keyword :int]]]
  :seon.reconcile/step [:enum :ignored :done :dead-read :spawned :started :worked :tested :read :diffed :merged :octopus-merged :write-back :main-read :committed :commit-recorded :built :gate-read :gated]
  ;; a task and a run as Datahike pulls them (the readers' inputs)
  :seon.task/pulled [:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
@@ -137,9 +139,14 @@
                          ;; a failed run: its task held for root, the problem as data (seon.reconcile/hold-tx)
                          [:hold [:map {:closed true} [:op [:= :hold]] [:run :seon.run/id] [:task :seon.task/id]
                                  [:problem :string]]]
+                         ;; a judged run closed: its task no longer running, or the run parked its session
+                         ;; (a park outcome: its process kept, the next message wakes it, design agent-loop section 2)
                          [:close [:map {:closed true} [:op [:= :close]] [:run :seon.run/id]]]
                          [:spawn [:map {:closed true} [:op [:= :spawn]] [:task :seon.task/id] [:env :seon.task/env]
-                                  [:run :seon.run/id]]]]
+                                  [:run :seon.run/id]]]
+                         ;; a parked session's next run on its live process (agent): no fork
+                         [:wake [:map {:closed true} [:op [:= :wake]] [:task :seon.task/id] [:env :seon.task/env]
+                                 [:run :seon.run/id] [:agent :keyword]]]]
  :seon.reconcile/actions [:vector :seon.reconcile/action]
  ;; ---- the model ----
  ;; a conversation message: an assistant's may carry its eval calls, a tool message answers one by its id

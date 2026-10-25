@@ -4,7 +4,8 @@
   of it and the records before it, which never change, so it is printed once and reused by its
   id). Run: bin/test seon.context-cost-test"
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.context]))
+  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.context]
+            [datahike.api :as d] [seon.test-store :as ts]))
 
 (defn- item
   "Eval record i of a run as the conversation reads it ([ref v k tx]): a model's call whose value
@@ -34,4 +35,32 @@
                :growth :constant
                ;; measured 2026-10-25: 16 calls and 329 KB at 10 held records (the new record's two prints)
                :fixed {:calls 16 :bytes 340000}
+               :sizes [10 100 1000]}))
+
+(defn session-of
+  "The input at n: a main db holding a session of n evals by agent b/a1 across two runs (as a
+  woken or loaded session's first request reads it cold), each record production-shaped (item),
+  and the agent's entity id."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int]]}
+  [n]
+  (let [db (d/db-with (ts/test-db)
+                      (vec (for [i (range n) :let [[_ v] (item i)]]
+                             (assoc v :seon.eval/agent {:seon.agent/key "b/a1"}
+                                    :seon.eval/record (assoc (:seon.eval/record v) :run (if (< i (quot n 2)) "demo/f#1" "demo/f#2"))))))]
+    [db (:db/id (d/entity db [:seon.agent/key "b/a1"]))]))
+
+(deftest a-sessions-records-cost-one-read-per-record
+  ;; design agent-loop section 1: the conversation is the session's, so the first request after
+  ;; a wake or a load reads every record of it, cold; a later request reads only what is new
+  ;; (:printed, a-turn-prints-its-new-records-flat-in-the-history)
+  (cost/proof {:of 'seon.context/records :input 'seon.context-cost-test/session-of
+               :n "eval records of the session"
+               :work (str "per record: its datom found by the agent's AVET range (one seek), one pull of three attributes "
+                          "(its record a data value), and one place in the sort by tx; the messages' query adds nothing "
+                          "when none came")
+               :growth :linear
+               ;; measured 2026-10-25: 798 KB at 10, 5.46 MB at 100, 52.8 MB at 1,000 (about 52 KB a
+               ;; record: its pull and its record's data value), one contracted call (records itself)
+               :per-n {:bytes 52500}
+               :fixed {:bytes 300000 :calls 1}
                :sizes [10 100 1000]}))
