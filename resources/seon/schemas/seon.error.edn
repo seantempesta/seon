@@ -10,9 +10,10 @@
  :seon.error/problem [:map {:description "One refused part of a value: malli's path and the value shown as text."}
                       [:path vector?] [:in vector?] [:expected :any] [:value :string]]
  :seon.error/problems [:vector :seon.error/problem]
- ;; what the error is about, when it names one: a var (symbol) or a section address (string). Once
- ;; its subject changes after the error last happened, the error is closed (seon.problems), by a read
- :seon.error/subject [:or {:seon.db/data true} :string :symbol]
+ ;; what the error is about, when it names one: a var (symbol), a section address (string) or an
+ ;; attribute (keyword: a proc's own fact, e.g. root's :seon.root/watch). Once its subject changes
+ ;; after the error last happened, the error is closed (seon.problems), by a read
+ :seon.error/subject [:or {:seon.db/data true} :string :symbol :qualified-keyword]
  :seon.error/base [:map {:seon.render/ai seon.render.ai/error :seon.render/html seon.render.ui/error-box :description "Every error: its variant (a registered schema key), the operation that raised it, a short message."}
                    [:seon.error/type :seon.error/type]
                    [:seon.error/operation :seon.error/operation]
