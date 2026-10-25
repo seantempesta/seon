@@ -569,7 +569,8 @@
  ;; functions in the task story, the run's fixed part (for the prompt cache), and is off by step 6's
  ;; measurement; these are sections, and follow the plan as it is rewritten. Provenance: the owner,
  ;; 2026-10-25 ("embeddings on our docs ... pulling in related concepts that we can refine over the
- ;; session"); 5 lines cost about 150 tokens a turn (measured on the fit requests, docs/vector.md).
+ ;; session"); 5 lines cost 250-470 tokens a turn on the five fit requests (chars/4, estimated:
+ ;; a lead's first sentence runs long), the screen's largest part for a one-line request.
  :seon.config.render/related 5
  ;; Semantic search's pyramid (seon.vector/near, docs/vector.md#the-pyramid), measured against an
  ;; exact 768-dim search, recall@10 (EmbeddingGemma-2):
