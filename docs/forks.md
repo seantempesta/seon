@@ -218,8 +218,9 @@ Pinned in `deps.edn` (not a submodule).
 
 - Fork repo: ``https://github.com/seantempesta/http-client``. Upstream: ``jolt-lang/http-client``.
 - Base: `5a9706e0`, upstream main ("Send a default User-Agent").
-- Ours, on ``jolt/fiber-aware-read`` `d9901f9a`:
+- Ours, on ``jolt/fiber-aware-read`` `4e846e47`:
   - `d9901f9a` a read from a fiber parks the fiber, not its carrier: `jolt.http.net/await-readable!` waits through `jolt.io-poller/wait-ready` on a fiber (the socket's read timeout as its deadline), poll(2) slices on a thread as before. On a main-carrier process (an agent, its test fork) the poll held the one thread, so a server fiber in the same process never answered and the read waited for good (S1, live agents 2026-10-25: one judge's test fork stalled every agent). Proof: the fork's `jolt -M:fibertest` (red: the watchdog after 10 s; green in 0.2 s), its `-M:test` and `-M:timeouttest` green. Generic (an upstream candidate).
+  - `4e846e47` on a fiber, recv does not block (MSG_DONTWAIT) and EAGAIN waits again: the poller may wake a waiter with nothing to read (its last wait's registration), and a blocking recv then held the carrier. Proof: `-M:fibertest` reads twice (red 3 of 3 without). Generic.
 
 ## Unmodified submodules
 
