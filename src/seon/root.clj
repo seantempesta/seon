@@ -19,7 +19,7 @@
   drains and flushes last, the fork server is reaped, then flow/stop.
 
   Agents transact facts on their own branch; root reacts: the writer applies them, and
-  only root's merge! advances main."
+  only a merge task's octopus merge (the reconciler's, seon.writer) advances main."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
@@ -187,18 +187,17 @@
 
 (defn- failed
   "What went wrong in agent id's view change m (a its entry before), as the one error map,
-  or nil: a spawn or fork refused (:error, its error map); a red test run or a refused merge of an agent
+  or nil: a spawn or fork refused (:error, its error map); a red test run of an agent
   with no task (a task's run records its own at its end, seon.problems/report)."
   {:malli/schema [:=> [:cat :seon.agent/id :map :map] [:maybe :seon.error/base]]}
   [id a m]
-  (let [{:keys [fail error reports]} (:tests m) r (:merged m)]
+  (let [{:keys [fail error reports]} (:tests m)]
     (cond
       (:error m) (:error m)
       (:task a) nil
       (pos? (+ (or fail 0) (or error 0)))
       (contract/error :seon.agent/failed 'seon.agent/run-tests
-                      (str "tests red" (some->> (first (remove #(= :pass (:type %)) reports)) :var (str ": "))) {:agent id})
-      (contract/error? r) r)))
+                      (str "tests red" (some->> (first (remove #(= :pass (:type %)) reports)) :var (str ": "))) {:agent id}))))
 
 (defn- set-agent
   "Merge m into agent id's view entry, recording what went wrong in it (`failed`). A stopped
@@ -352,17 +351,17 @@
                    (to-agent st o parent
                              {:op :req :rid rid :kind :clone :new aid :branch branch :pass-fd fd
                               :msg {:op :clone :agent aid :branch branch}}))))
-      (:eval :tests :merge-tests :stats :merge-main)
+      (:eval :tests :stats :merge-main)
       (if (nil? (get-in st [:agents id]))
         (reply! st o p (absent (get-in st [:view :agents id]) id))
         (let [[st rid] (pend st p op id)
               msg (case op
                     :eval (cond-> {:op :eval :forms (:forms m)} (:ticks m) (assoc :ticks (:ticks m)) (:origin m) (assoc :origin (:origin m)))
-                    (:tests :merge-tests) (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)) (:names m) (assoc :names (:names m)) (:mode m) (assoc :mode (:mode m))
+                    :tests (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)) (:names m) (assoc :names (:names m)) (:mode m) (assoc :mode (:mode m))
                                             (get-in st [:view :agents id :task]) (assoc :task (get-in st [:view :agents id :task])))
                     :stats {:op :stats}
                     :merge-main {:op :merge-main :data-attrs (:data-attrs m)})]
-          (to-agent st o id {:op :req :rid rid :kind op :msg msg :merge-branch (:merge-branch m) :data-attrs (:data-attrs m)})))
+          (to-agent st o id {:op :req :rid rid :kind op :msg msg})))
       ;; a message to a live agent (the owner's, from the page or the server): root's one
       ;; delivery, as an agent's send is; it lands in the agent's inbox, which its next turn reads
       ;; the owner's message is a fact on main (root's branch: :seon.message/*, seon.task/message-tx),
@@ -381,7 +380,7 @@
                (reply! st o p (refused 'seon.root/collect "a collection waits until no agent is live" {:agents (vec (sort (keys (:agents st))))}))
                (let [[st rid] (pend st p (get-in m [:req :op]) nil)
                    req (:req m)
-                   dest (case (:op req) :merge-main {:merge-main (:agent req) :rid rid} :merge {:merged (:agent req) :rid rid} {:rid rid})]
+                   dest (case (:op req) :merge-main {:merge-main (:agent req) :rid rid} {:rid rid})]
                (step/out! o :to-writer (assoc (dissoc req :agent) :dest dest))
                (update st :writes (fnil conj #{}) rid)))
       ;; the test service (seon.prove): the request goes to its proc, the caller (a session, or an
@@ -389,6 +388,9 @@
       :prove (let [[st rid] (pend st p :prove (:agent m))]
                (step/out! o [:prove :req] (assoc (select-keys m [:branch :t :digest :agent :proofs :names :mode]) :rid rid))
                st)
+      ;; an agent's screen (seon.screen/show): its page's request to the render proc, which answers
+      ;; the caller's route itself once the page is whole (the cached page, without its conversation)
+      :screen (do (step/out! o [:render :from-web] (cond-> {:op :page :view (:agent m) :screen p} (:t m) (assoc :t (:t m)))) st)
       :kill (cond-> (if (get-in st [:agents id])
                       ;; :ended when root stops it because its run ended (the reconciler says so)
                       (-> st (set-agent o id {:status (if (:ended m) :ended :killed)}) (to-agent o id {:op :kill}))
@@ -418,9 +420,6 @@
     (:dest m)
     (let [{:keys [dest r]} m]
       (cond
-        (:merged dest) (let [r (cond-> r (:tests dest) (assoc :tests (:tests dest)))]
-                         (step/out! o :events (step/event {:type :merged :agent (:merged dest) :result r}))
-                         (-> st (set-agent o (:merged dest) {:merged r}) (deliver-rid o (:rid dest) r)))
         (:merge-main dest) (let [aid (:merge-main dest)]
                              (step/out! o :events (step/event {:type :merged-main :agent aid :result (dissoc r :sync)}))
                              (cond-> st
@@ -652,9 +651,9 @@
       (d/pull db '[:task/name {:task/refs [:var/name]}] [:task/name :seon.warm/tidy])
       (d/db-with db [{:note/text "warm" :note/agent :warm}])
       (d/with db [{:note/text "warm" :note/agent :warm}])
-      (sock/frame {:op :reply :items [{:id 1 :printed "x" :ms 0.1}]})
+      (sock/frame {:op :reply :response {:handle 'result/e1 :text "x" :ms 0.1}})
       ;; the one value printer, its text and hiccup paths and a cut
-      (print/print-value {:a [1 2 3] :b "x" :c (vec (range 300))} {:handle 'result/h0 :budget 200 :outputs #{:text :hiccup}}))
+      (print/print-value {:a [1 2 3] :b "x" :c (vec (range 300))} {:handle 'result/e0 :budget 200 :outputs #{:text :hiccup}}))
     (let [nsx (create-ns 'seon.warm)]
       (binding [*ns* nsx]
         (refer-clojure)
@@ -730,8 +729,8 @@
 
 (defn wiki-tx
   "The wiki (the checkout's docs/) onto main db, written in the boot fact's own commit so main
-  holds it before any agent forks: the help page every agent reads first is one of its pages
-  (seon.context/help-text). An unchanged wiki writes nothing. A link to no section is kept on
+  holds it before any agent forks: the system prompt every agent reads first is one of its pages
+  (seon.context/system-text), and the help page another (seon.context/help-text). An unchanged wiki writes nothing. A link to no section is kept on
   its section and shows as a dead citation (seon.problems/health), never refuses the load.
   baseline: what the sections with no record were last written against (wiki-baseline)."
   {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:vector :any]]
@@ -831,7 +830,7 @@
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
-                         :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1)
+                         :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1)
                          :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
                          :web-port (cfg/value :seon.config.web/port)
                          :vectors-main-buf (a/sliding-buffer 1) :embed-batch (cfg/value :seon.config.vector/batch)
@@ -920,16 +919,17 @@
   [sys] @(call! sys {:op :errors}))
 
 (defn events
-  "A fresh tap of every event {:type :spawned|:ready|:reply|:tx|:merged|:tests|:killed|:ended|:dead ...}."
+  "A fresh tap of every event {:type :spawned|:ready|:reply|:tx|:merged-main|:tests|:killed|:ended|:dead ...}."
   {:malli/schema [:=> [:cat :seon.root/sys] :seon.host/chan]}
   [sys]
   (let [c (a/chan (a/sliding-buffer 1024))] (a/tap (:events-mult sys) c) c))
 
 (defn request
-  "The op (named as its fn below: spawn! clone! submit! run-tests! kill! merge!
+  "The op (named as its fn below: spawn! clone! submit! run-tests! kill!
   merge-main! message! release!) on agent id with args, as the api request it is: one table for these fns
-  and the dashboard's calls (seon.web). a: the agent's entry in root's view, which merge!
-  and merge-main! read; an op the agent cannot take answers its error."
+  and the dashboard's calls (seon.web). a: the agent's entry in root's view, which
+  merge-main! reads; an op the agent cannot take answers its error. A branch reaches main
+  only through a merge task (seon.reconcile's octopus merge)."
   {:malli/schema [:=> [:cat :symbol [:maybe :seon.agent/id] [:maybe :map] [:maybe :map]] :map]}
   [op id args a]
   (let [live? (boolean (and a (not (gone-statuses (:status a)))))
@@ -946,10 +946,6 @@
       merge-main! (if live?
                     {:op :merge-main :id id :data-attrs data-attrs}
                     (absent a id))
-      merge! (cond (not (:branch a)) (refused 'seon.root/merge! (str "no agent " id) {:agent id})
-                   (false? (:gate? args)) {:op :write :req {:op :merge :branch (:branch a) :agent id :data-attrs data-attrs}}
-                   live? {:op :merge-tests :id id :merge-branch (:branch a) :data-attrs data-attrs}
-                   :else (refused 'seon.root/merge! "agent not running, so its tests cannot run; merge with {:gate? false}" {:agent id}))
       (refused 'seon.root/request (str op " is not one of root's requests") {}))))
 
 (defn- agent-entry {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] [:maybe :map]]}
@@ -960,7 +956,7 @@
   error."
   {:malli/schema [:=> [:cat :seon.root/sys :symbol [:maybe :seon.agent/id] [:maybe :map]] :seon.host/promise]}
   [sys op id args]
-  (let [r (request op id args (when (#{'merge! 'merge-main!} op) (agent-entry sys id)))]
+  (let [r (request op id args (when (= 'merge-main! op) (agent-entry sys id)))]
     (if (contract/error? r) (doto (promise) (deliver r)) (call! sys r))))
 
 (defn spawn!
@@ -1012,7 +1008,7 @@
 
 (defn run-tests!
   "The agent forks itself and runs its deftests in the child; a promise of
-  {:pass :fail :error :reports [...]} (the run is bounded by its work: :seon.config.agent/test-ticks)."
+  {:pass :fail :error :reports [...]} (each test is bounded by its work: :seon.config.agent/test-ticks)."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id pos-int?] :seon.host/promise]]}
   ([sys agent-id] (request! sys 'run-tests! agent-id nil))
   ([sys agent-id ticks] (request! sys 'run-tests! agent-id {:ticks ticks})))
@@ -1062,17 +1058,6 @@
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :seon.host/promise] [:=> [:cat :seon.root/sys :string] :seon.host/promise]]}
   ([sys] (apply! sys (cfg/value :seon.config.root/system-path)))
   ([sys p] (call! sys {:op :apply :decl (system/read-decl p) :bindings (:bindings sys)})))
-
-(defn merge!
-  "Root merges the agent's branch into main (seon.merge, session M1); a promise of {:merged?
-  :tx ...}, or :seon.merge/behind when main changed since the branch's merge base (merge
-  main first), :seon.merge/unmerged, :seon.merge/uncontracted. Unless opts has :gate?
-  false, the agent's tests run first in a fork of it (red: :seon.merge/red). opts {:data-attrs}: the data that
-  merges beside the program (default :all: every attribute that is neither program nor
-  observation)."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :map] :seon.host/promise]]}
-  ([sys agent-id] (merge! sys agent-id {}))
-  ([sys agent-id opts] (request! sys 'merge! agent-id opts)))
 
 (defn merge-main!
   "git merge main, on the agent's branch (seon.merge): main's changes since the merge base

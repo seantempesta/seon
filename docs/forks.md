@@ -71,7 +71,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 ## chez
 
-`reference-code/chez` pinned at `80e4b9f`, the tip of ``jolt/signal-wakes-wait``.
+`reference-code/chez` pinned at `fa6a4c73`, the tip of ``jolt/collect-uncounted`` (a collection, its handler and the runtime's stacks are not charged to the measured thread: `002b57ad`, `c946398d`, `89b4082a`, `fa6a4c73`), on `80e4b9f`, the tip of ``jolt/signal-wakes-wait``.
 
 - Fork repo: ``https://github.com/seantempesta/ChezScheme``. Upstream: ``cisco/ChezScheme``.
 - Base: `e95a7ef`, Chez Scheme v10.4.1.
@@ -89,7 +89,7 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 ## datahike
 
-`reference-code/datahike` pinned at `698a2fa`, the tip of ``jolt/a-predicate-that-throws-is-an-error`` (`6b668f0`, `25cc875`, `698a2fa`), on `d89be47` (the tip of ``jolt/datom-cost``: `6db7188` and ``jolt/nested-call-refused`` (`ae35add`, `dda24c0`), each on ``jolt/release-drains`` `bae7c3e` (``jolt/in-scalar`` `1880fcc` merged into it; both on ``jolt/global-ids`` `b4596cf`, ``jolt/gc-cache-epoch`` `700c473` merged in)).
+`reference-code/datahike` pinned at `6dc9ce64`, the tip of ``jolt/with-reads`` (`6689077e` records the index ranges a read scanned: `with-reads`, `reads-index`, `datom-keys`, `reads-touched?`; `6dc9ce64` the collector is an atom), on `698a2fa`, the tip of ``jolt/a-predicate-that-throws-is-an-error`` (`6b668f0`, `25cc875`, `698a2fa`), on `d89be47` (the tip of ``jolt/datom-cost``: `6db7188` and ``jolt/nested-call-refused`` (`ae35add`, `dda24c0`), each on ``jolt/release-drains`` `bae7c3e` (``jolt/in-scalar`` `1880fcc` merged into it; both on ``jolt/global-ids`` `b4596cf`, ``jolt/gc-cache-epoch`` `700c473` merged in)).
 
 - Fork repo: ``https://github.com/seantempesta/datahike``. Upstream: ``replikativ/datahike``.
 - Base: `ad9fc97` "baseline", a history-less snapshot of Seon's fork ``seantempesta/datahike`` `ccba220b` (unknown: that commit is not in the repo, so the snapshot cannot be checked against it).

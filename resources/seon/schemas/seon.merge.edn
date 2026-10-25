@@ -40,7 +40,4 @@
  :seon.merge/behind [:and :seon.error/base [:map [:seon.error/type [:enum :seon.merge/behind]]
                                              [:behind pos-int?]]]
  :seon.merge/unmerged [:and :seon.error/base [:map [:seon.error/type [:enum :seon.merge/unmerged]]
-                                               [:unmerged [:vector :any]]]]
- ;; a gated merge whose proofs ran red in the agent's fork (seon.root/merge!): not merged
- :seon.merge/red [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/red]]
-                                         [:tests :map] [:reports [:vector :any]]]]}
+                                               [:unmerged [:vector :any]]]]}

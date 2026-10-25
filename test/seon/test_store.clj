@@ -181,6 +181,13 @@
   {:malli/schema [:=> [:cat [:map [:runs :string]]] [:map [:drained :boolean]]]}
   [root] {:drained (boolean (re-find #"\(drained\)" (:out (root-sh root "kill" []))))})
 
+(defn value-of
+  "The value a response r showed (an eval's, :seon.eval/response), read back from its :text (the
+  response printed under its handle; tagged literals kept), or nil when that text does not read
+  back as EDN (a var, a cut)."
+  {:malli/schema [:=> [:cat [:maybe :map]] :any]}
+  [r] (try (:value (clojure.edn/read-string {:default tagged-literal} (str (:text r)))) (catch Exception _ nil)))
+
 (defn ask
   "One request m to a started root's server (bin/ask: its line on a socket, one reply line read,
   ending on the reply or when the root closes the connection or dies): the reply as data

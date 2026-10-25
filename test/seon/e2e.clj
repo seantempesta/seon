@@ -71,7 +71,7 @@
   (let [ev (c/events sys) ag (c/spawn! sys {})]
     (loop [] (let [e (a/<!! ev)] (when-not (and (= :ready (:type e)) (= ag (:agent e))) (recur))))
     (a/untap (:events-mult sys) ev)
-    (let [r @(c/submit! sys ag forms)] (c/kill! sys ag) (if (contract/error? r) r (mapv :printed r)))))
+    (let [r @(c/submit! sys ag forms)] (c/kill! sys ag) (if (contract/error? r) r (:text r)))))
 
 (defn- quiet! "await/await-quiet from main's t now." [sys] (await/await-quiet sys (:max-tx (db sys))))
 
@@ -233,7 +233,7 @@
                done? (every? #(r/done? idx %) ["calc/add-merge" "calc/twice-merge" "calc/square-merge" "calc/sum-sq-merge"])
                blocked (r/blocked-by idx "calc/abs")
                sq-db (:db @(c/branch-db sys (task/default-branch "calc/square")))
-               sq-turns (sort-by first (map (fn [[n e s]] [n (context/turn-text sq-db e) s])
+               sq-turns (sort-by first (map (fn [[n e s]] [n (context/reader-text (into [] (mapcat second) (context/parts-of sq-db (:seon.turn/sent (d/pull sq-db [:seon.turn/sent] e))))) s])
                                             (d/q '[:find ?n ?e ?s :where [?e :seon.turn/n ?n] [?e :seon.turn/origin :model]
                                                    [?e :seon.turn/basis _] [?e :seon.turn/split ?s]] sq-db)))
                read-failure? (and (= 2 (count sq-turns))

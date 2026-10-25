@@ -1,7 +1,7 @@
 (ns my.agent
   "An agent's own functions (from proto/flow f2-final proto.agent's agent API). Referred into
   every agent namespace.
-    ($ handle)                the live value of an earlier result (also result/h3)
+    ($ handle)                an earlier eval's response, its live value under :value (also result/e3)
     (whoami)                  {:id :branch :pid}
     (messages)                the messages delivered and not yet taken, taken
     (send-message tos body)   body to the agents tos (ids), delivered by root
@@ -11,7 +11,7 @@
     (similar 'ns/f)           what is nearest ns/f's definition by meaning: vars, wiki sections, tasks
     (similar "text")          what is nearest the text by meaning (seon.vector/near)
     (prove)                   run what judges this branch: the task's proofs and the tests reaching
-                              what it changed since main, each green one at its digest reused
+                              what it changed since main, each one with a result at its digest reused
     (help)                    the help page's sections (docs/agent.md); (help "done") one whole
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"
@@ -20,7 +20,7 @@
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract]
             [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
-(defn $ "The live value of an earlier result, by handle (:h3)." {:malli/schema [:=> [:cat :keyword] :any]}
+(defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
 (defn whoami "This agent: {:id :branch :pid}." {:malli/schema [:=> [:cat] [:map [:id :seon.agent/id] [:branch :seon.db/branch] [:pid :seon.lib/pid]]]}
   [] {:id (:id @agent/state) :branch (:branch @agent/state) :pid (lib/c-getpid)})
@@ -29,23 +29,28 @@
 (defn send-message "Send body to the agents tos (ids); root delivers it by id. nil." {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
   [tos body] (agent/send-message tos body))
 
+(defn named
+  "The symbol x names a definition by: x as it is, or a var's ns-qualified name (what a REPL hands
+  a function of a name when its caller passes #'f or a value of (resolve 'f))."
+  {:malli/schema [:=> [:cat [:or :symbol :seon.host/var]] :symbol]}
+  [x] (if (var? x) (symbol (str (ns-name (:ns (meta x)))) (str (:name (meta x)))) x))
+
 (defn callers
   "The program vars whose recorded definition names var sym (its :form/refs on this branch),
-  sorted; sym itself left out."
-  {:malli/schema [:=> [:cat :qualified-symbol] [:vector :qualified-symbol]]}
-  [sym]
-  (vec (sort (disj (set (d/q '[:find [?v ...] :in $ ?s :where [?f :form/refs ?s] [?f :form/defines ?e] [?e :var/name ?v]]
-                             (agent/db) sym))
-                   sym))))
+  sorted; sym itself left out. sym is a qualified symbol or the var (named)."
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:vector :qualified-symbol]]}
+  [sym] (docs/callers (agent/db) (named sym)))
 
 (defn callees
   "The vars var sym's recorded definition names on this branch (its :form/refs: program,
-  library and clojure.core alike), sorted; sym itself left out."
-  {:malli/schema [:=> [:cat :qualified-symbol] [:vector :qualified-symbol]]}
+  library and clojure.core alike), sorted; sym itself left out. sym is a qualified symbol or
+  the var (named)."
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:vector :qualified-symbol]]}
   [sym]
-  (vec (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]]
-                             (agent/db) sym))
-                   sym))))
+  (let [sym (named sym)]
+    (vec (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]]
+                               (agent/db) sym))
+                     sym)))))
 
 (defn similar
   "What on this branch is nearest x by meaning (seon.vector/near): x a var, by its definition's
@@ -70,7 +75,8 @@
 (defn prove
   "Run what root's judge will run on this branch (seon.agent/run-tests-forked :judge, in a fork
   of this agent): the task's proofs (or the given ones) and every in-process test reaching what
-  the branch changed since the main it forked from, each test green at its reach digest reused,
+  the branch changed since the main it forked from, each test with a result at its reach digest
+  reused (a red as recorded),
   not run; the process tests it reaches run only when root asks (:deferred). Answers that test run ({:pass :fail :error :reports :ran :reused :ms ...}) with :results
   {test :pass|:fail|:error}."
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :qualified-symbol]] :map]]}
@@ -103,12 +109,13 @@
   "The source of the var sym names, or nil: clojure.repl/source-fn. The text its last definition
   in this process kept (seon.repl), else what this branch records for it, else the form at its
   :file and :line (a library's). A namespace's name answers its ns form as this branch records
-  it (its requires and aliases), which clojure.repl's does not."
-  {:malli/schema [:=> [:cat :symbol] [:maybe :string]]}
+  it (its requires and aliases), which clojure.repl's does not. sym is a symbol or the var
+  (named)."
+  {:malli/schema [:=> [:cat [:or :symbol :seon.host/var]] [:maybe :string]]}
   [sym]
-  (if-let [v (resolve sym)]
+  (if-let [v (if (var? sym) sym (resolve sym))]
     (or (:source (meta v))
-        (docs/source-of (agent/db) (symbol (str (ns-name (:ns (meta v)))) (str (:name (meta v)))))
+        (docs/source-of (agent/db) (named v))
         (file-source v))
     (when-not (namespace sym)
       (d/q '[:find ?src . :in $ ?s :where [?n :ns/name ?s] [?f :form/defines ?n] [?f :form/src ?src]] (agent/db) sym))))
@@ -146,11 +153,15 @@
            (println "Caused by:" type message)))))
 
 (defmacro source
-  "Print the recorded source of the definition named by sym (as clojure.repl/source does)."
-  [sym] `(println (or (source-fn '~sym) (not-found '~sym))))
+  "Print the recorded source of the definition named by sym (as clojure.repl/source does). A
+  name is taken as written; any other form (a quoted symbol, #'f, a local of a doseq) is
+  evaluated to the symbol or var it holds, as the call reads naturally."
+  [sym]
+  (let [x (if (and (symbol? sym) (not (contains? &env sym))) (list 'quote sym) sym)]
+    `(let [s# (named ~x)] (println (or (source-fn s#) (not-found s#))))))
 
 (defn help
-  "The help page every agent reads first (seon.context/help-page), as this branch holds it
+  "The help page (seon.context/help-page), read on demand beside the system prompt, as this branch holds it
   (seon.docs/page): its sections, each its address, heading and lead's first sentence; with
   an anchor, that section's own text."
   {:malli/schema [:function [:=> [:cat] [:vector :map]] [:=> [:cat :string] [:maybe :string]]]}

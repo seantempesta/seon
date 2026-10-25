@@ -1,6 +1,6 @@
 # Vectors
 
-Semantic search is native to the store and its query language: each form's, wiki section's and task plan's text is embedded once by a small local model in root, its vector is kept on that entity as facts, and `seon.vector/near` is a Datalog function, so similarity is one more relation a query joins. The context fuses it with the call graph to name the helpers a task needs (`seon.context/found`), and an agent asks it at its REPL (`my.agent/similar`). The ruling is DECISIONS "Embeddings join the context: fused, small and measured"; the work was task `seon.context/similar-finds-helpers-by-embedding`.
+Semantic search is native to the store and its query language: each form's, wiki section's and task plan's text is embedded once by a small local model in root, its vector is kept on that entity as facts, and `seon.vector/near` is a Datalog function, so similarity is one more relation a query joins. An agent asks it at its REPL (`my.agent/similar`). The ruling is DECISIONS "Embeddings join the context: fused, small and measured"; the work was task `seon.context/similar-finds-helpers-by-embedding`.
 
 ```clojure
 [(seon.vector/near $ ?q 10 {:of :form/id}) [[?e ?score]]]   ; ?q an entity with a vector, or a vector
@@ -38,14 +38,14 @@ The C levels take 0.08 ms at 1,393 vectors and 0.31 ms at 100k (v1's f32 brute f
 
 ## Fused with the call graph
 
-`seon.context/found` ranks the helpers a task's plan does not name two ways and fuses them by reciprocal rank (`:seon.config.vector/rrf-k`): the call graph's (the cited vars' and proofs' one-hop callees, tf-idf) and the program forms nearest the task's plan vector (`:seon.config.render/found-near` of them). A task with no vector yet ranks by the call graph alone. Proof: `seon.context-test/similar-finds-a-helper-the-call-graph-misses`.
+The task story shows `:similar` (```seon.context/similar```): the first `:seon.config.render/similar` program functions nearest the plan's vector, by an exact search (`near` with every vector its shortlist, at every dim), that the plan and proofs do not name, a line each. On Seon's own program (3,843 vectors) it costs about 9.7M ticks and 52 MB (40 ms) and 397 of a story's 1,749 tokens; ```seon.vector-cost-test/the-story-ranks-every-form-once``` holds it. Step 6 measures how often agents read one; 0 turns it off. Fusing the call graph's helpers (the cited vars' and proofs' one-hop callees, tf-idf) with the forms nearest a task's plan by reciprocal rank (```seon.vector/rrf```, k `:seon.config.vector/rrf-k`) was measured below; embeddings alone did as well, so the story uses them alone, and the fusion stays for further exploration.
 
 Measured on 283 pairs from main's history (each non-merge commit's message as the plan; the functions its diff touched, still in the program, less those the message names, as what it needed), recall@10:
 
 | ranking | all (283) | message names functions (166) | names none (117) |
 |---|---|---|---|
-| call graph (`found` before) | 0.042 | 0.071 | 0 |
+| call graph | 0.042 | 0.071 | 0 |
 | embeddings | 0.495 | 0.482 | 0.514 |
 | fused, k 10 (k 60: 0.448) | 0.451 | 0.407 | 0.514 |
 
-Fused beats the call graph alone, so it is kept. Two biases run the other way from each other: the embeddings read each form as it is today, after the change its commit describes (flattering them), and a commit pair has no proofs, the call graph's richest source (understating it). v1 measured 0.274 / 0.386 / 0.441 on its own corpus. Weighting the two rankings is the lever if a task-shaped corpus shows embeddings alone ahead.
+Fused beat the call graph alone, and embeddings alone (`my.agent/similar`) did as well as fused. Two biases run the other way from each other: the embeddings read each form as it is today, after the change its commit describes (flattering them), and a commit pair has no proofs, the call graph's richest source (understating it). v1 measured 0.274 / 0.386 / 0.441 on its own corpus. Weighting the two rankings is the lever if a task-shaped corpus shows embeddings alone ahead.

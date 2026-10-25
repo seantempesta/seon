@@ -104,13 +104,13 @@
     (let [r (invalid 'app/f "x")
           e (agent/error-map (ex-info (:seon.error/message r) r))]
       (is (= r e))))
-  (testing "the reply item carries the map, and the stored eval record holds it as data"
+  (testing "the response carries the map as :ex, and the stored eval record holds it as data"
     (let [em (agent/error-map (ArithmeticException. "Divide by zero"))
-          it (first (repl/fold [{"status" ["eval-error"] :tag :err :err em :printed (:seon.error/message em) :id 0 :form "(/ 1 0)"}]))
-          rec (some :seon.cluster.eval/record (repl/record-tx {:seon.agent/key "b/a1" :seon.agent/id :a1} "r1" [it] nil))]
-      (is (= em (:err it)))
-      (is (= "Divide by zero" (:printed it)))
-      (is (= em (:error rec)) "grouped by type and producer without parsing text")))
+          r (repl/response [{"status" ["eval-error"] :tag :err :err em :id 0 :form "(/ 1 0)"}] 'result/e1)
+          rec (some :seon.eval/record (repl/record-tx {:seon.agent/key "b/a1" :seon.agent/id :a1} "e1" "a1"
+                                                      {:code "(/ 1 0)" :response r} nil))]
+      (is (= em (:ex r)))
+      (is (= em (get-in rec [:response :ex])) "grouped by type and producer without parsing text")))
   (testing "the agent folds its errors until its commit; root folds them as :eval occurrences"
     (let [em (agent/error-map (ArithmeticException. "Divide by zero"))
           m (-> nil (err/note em "(/ 1 0)" 10) (err/note em "(/ 2 0)" 12))
@@ -194,7 +194,7 @@
 
 (deftest root-records-what-went-wrong-in-an-agent
   ;; the one producer of what is wrong (seon.render.ai/problems reads only what is recorded):
-  ;; root records a red run or a refused merge of an agent with no task, and a refused spawn
+  ;; root records a red run of an agent with no task, and a refused spawn
   (let [view {:agents {:a1 {:status :idle} :a2 {:status :idle :task "t/x"}}}
         red {:pass 1 :fail 1 :error 0 :reports [{:type :pass :var "#'app.t/ok"} {:type :fail :var "#'app.t/red"}]}
         written (fn [[_ o]] (mapv (juxt :seon.error/class :seon.error/type :seon.error/message :seon.error/last-agent) (first (writes o))))]
@@ -203,10 +203,6 @@
              (written (step (api view) :back {:op :status :agent :a1 :set {:tests red}})))))
     (testing "a task's agent: its run records its reds at its end, not root"
       (is (= [] (written (step (api view) :back {:op :status :agent :a2 :set {:tests red}})))))
-    (testing "a merge the writer refused is recorded as the writer's refused answer"
-      (let [r (contract/error :seon.merge/behind 'seon.writer/merge-branch "main changed 2 key(s)" {:tx 1 :behind 2})]
-        (is (= [[:agent :seon.merge/behind "main changed 2 key(s)" :a1]]
-               (written (step (api view) :from-writer {:dest {:merged :a1 :rid 5} :r r}))))))
     (testing "a refused spawn, of any agent"
       (is (= [[:agent :seon.agent/failed "fork server went down before the fork" :a2]]
              (written (step (api view) :back {:op :status :agent :a2
@@ -288,7 +284,7 @@
       (is (= [] (:answered-by e)))
       (is (some? s)))
     (testing "a merge: its conflicts, unmerged keys and the writer's refused answer, as evidence"
-      (let [behind (contract/error :seon.merge/behind 'seon.writer/merge-branch "main changed 2 key(s)" {:behind 2})
+      (let [behind (contract/error :seon.merge/behind 'seon.writer/merge-refused "main changed 2 key(s)" {:behind 2})
             db2 (:db-after (d/with db [{:seon.task/id "t/m" :seon.task/ns 't :seon.task/name "m" :seon.task/plan "p" :seon.task/execution :running
                                          :seon.task/branch :b :seon.task/kind :merge}
                                         {:seon.run/id "t/m#1" :seon.run/task [:seon.task/id "t/m"] :seon.run/boot "b" :seon.run/agent {:seon.agent/key "b/a2" :seon.agent/id :a2}
@@ -297,7 +293,7 @@
                                          :seon.run/conflicts [{:seon.merge/key [:var 'app/f] :seon.merge/kind :both-modified}]
                                          :seon.run/error behind}]))
             [m] (get-in (problems/report db2) [:classes :merge :rows])]
-        (is (= ["t/m#1" :behind 1 ["[:var app/g]"] 'seon.writer/merge-branch]
+        (is (= ["t/m#1" :behind 1 ["[:var app/g]"] 'seon.writer/merge-refused]
                [(:run m) (:status m) (:conflicts m) (:unmerged m) (:producer m)]))
         (is (= [{:key [:var 'app/f] :kind :both-modified}] (get-in m [:evidence :conflicts])))
         (is (= :seon.merge/behind (get-in m [:error :seon.error/type])))))
@@ -347,8 +343,9 @@
 (def ^:private req {:messages [{:role "user" :content "hi"}] :task "t/a" :turn 0})
 
 (deftest the-request-sets-thinking-only-when-the-provider-does
-  (is (= {:model "deepseek-flash" :messages (:messages req) :tools [model/eval-tool] :max_tokens 2048 :temperature 0 :stream true :stream_options {:include_usage true}}
-         (model/request-body deepseek req)) "thinking absent: the provider's default; max-tokens the provider's; streamed with its usage")
+  ;; tool_choice auto: the model may reply in prose alone, which ends the turn (design, owner 2026-10-24)
+  (is (= {:model "deepseek-flash" :messages (:messages req) :tools [model/eval-tool] :tool_choice "auto" :max_tokens 2048 :temperature 0 :stream true :stream_options {:include_usage true}}
+         (model/request-body deepseek req)) "thinking absent: the provider's default; max-tokens the provider's; the model chooses whether to call; streamed with its usage")
   (is (= {:type "disabled"} (:thinking (model/request-body (assoc deepseek :thinking :disabled) req))))
   (is (= ["high" 512] ((juxt :reasoning_effort :max_tokens) (model/request-body (assoc deepseek :reasoning-effort :high :max-tokens 512) req))))
   (is (contract/valid? :seon.model/provider (assoc deepseek :thinking :enabled :reasoning-effort :low))))
@@ -547,7 +544,7 @@
         (is (false? (:open? (row after))))
         (is (= 1 (:count (row after))) "the record is kept"))
       (testing "the context marks it closed"
-        (is (re-find #"\(closed\)" (render/ai (problems/report after) {})))))
+        (is (str/includes? (render/ai (problems/report after) {}) ":closed true"))))
     (testing "the citing section's link is changed to an existing target: closed, nothing written (the target never appears)"
       (let [dbc (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/a.md" "# A\n\nIt links to [b](b.md#nowhere).\n" "demo/c.md" "# C\n\nThe other.\n"}))
             err (d/db-with dbc [{:seon.error/signature "cccccccccccccccc" :seon.error/class :platform :seon.error/count 1

@@ -203,6 +203,16 @@
                             :else [])))
         batch))
 
+(defn watch-died-tx
+  "The write of watcher error e at ms on main db, with held root's current :seon.root/watch fact: a :platform error
+  (seon.root/platform-tx) whose subject is the watch fact, and that fact with its :error, in one
+  transaction. Only a live watcher writes the fact after it (a new boot's start, a batch), so
+  that write closes the error (seon.problems/closed?) and nothing is written to close it."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.root/watch :map :int] [:vector :map]]}
+  [db held e ms]
+  (conj (root/platform-tx db (assoc e :seon.error/subject :seon.root/watch) ms)
+        {:seon.root/id :root :seon.root/watch (assoc held :error (:seon.error/message e))}))
+
 (defn watch!
   "Root watches its checkout and its repository's refs (seon.watch, FSEvents: every writer,
   a Claude session, an agent, the owner's editor, git). What changed while root was down is
@@ -220,8 +230,7 @@
         fact (fn [f] (root/transact-main! sys [{:seon.root/id :root :seon.root/watch f}]))
         fresh {:roots roots :boot (:boot sys) :batches 0 :paths 0 :rescans 0}
         held #(or (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) fresh)
-        died (fn [e] @(root/transact-main! sys (conj (root/platform-tx @(:conn sys) e (System/currentTimeMillis))
-                                                    {:seon.root/id :root :seon.root/watch (assoc (held) :error (:seon.error/message e))})))
+        died (fn [e] @(root/transact-main! sys (watch-died-tx @(:conn sys) (held) e (System/currentTimeMillis))))
         w (watch/start! roots
                         (fn [batch]
                           (let [ks (watch-kinds co refs batch)
@@ -316,14 +325,14 @@
         version (select-keys src [:root :commit])
         ;; the score of calls against task t's subject, made in an agent of its own (a reply's
         ;; ns forms run there, so no task's reading leaks into the next), ended once it answers;
-        ;; the agent answers the score as seon.edn text, which its item prints as a string
+        ;; the agent answers the score as seon.edn text, which its response prints as a string
         score (fn [db t calls]
                 (let [ag (root/spawn! sys {})
-                      item (try (first @(root/submit! sys ag (pr-str (list 'seon.edn/encode (list 'seon.judge/first-move (list 'quote (judge/subject db t)) calls)))))
-                                (finally (root/kill! sys ag)))]
-                  (if (= :ret (:tag item))
-                    (assoc (sedn/decode (edn/read-string (:printed item))) :scorer (judge/scorer db))
-                    (contract/error :seon.judge/unscored 'my.root/first-moves! "the scoring agent answered no score" {:item item}))))
+                      r (try @(root/submit! sys ag (pr-str (list 'seon.edn/encode (list 'seon.judge/first-move (list 'quote (judge/subject db t)) calls))))
+                             (finally (root/kill! sys ag)))]
+                  (if (and (map? r) (not (:ex r)) (:text r))
+                    (assoc (sedn/decode (:value (edn/read-string {:default tagged-literal} (:text r)))) :scorer (judge/scorer db))
+                    (contract/error :seon.judge/unscored 'my.root/first-moves! "the scoring agent answered no score" {:response r}))))
         row (fn [f reused?] (merge {:task (:seon.judge/task f) :reused? (boolean reused?)} (when (= :rescored reused?) {:rescored? true})
                                    (select-keys (:seon.judge/score f) [:acted :right-var :right-test :waste :uncompiled :green :usd])))]
     (loop [[id & more] ids rows [] spent 0.0]

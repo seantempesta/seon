@@ -52,10 +52,12 @@
 (defn chunk-of
   "A render patch as one SSE chunk, serialized once for every tab of its view."
   {:malli/schema [:=> [:cat :seon.render/patch] :string]}
-  [{:keys [frags appends prepends removes]}]
+  [{:keys [frags appends prepends afters removes]}]
   (str (apply str (for [[_ html] frags] (patch-event html)))
        (apply str (for [[sel html] appends] (patch-event html sel "append")))
        (apply str (for [[sel html] prepends] (patch-event html sel "prepend")))
+       ;; after their siblings, once those are placed (in layout order)
+       (apply str (for [[sel html] afters] (patch-event html sel "after")))
        (apply str (for [id removes] (patch-event "" (str "#" id) "remove")))))
 
 ;;; --- UI calls ------------------------------------------------------------------------------
@@ -118,10 +120,12 @@
 
 (defn- view-of
   "The view a path names, each a location the render proc resolves to an entity on main: :root, an
-  agent's id in root's boot (a keyword), or an entity's id (a number)."
+  agent's id in root's boot (a keyword), or an entity's id (a number); `<view>/debug` is
+  [:debug view], what that agent's model was sent (design section 5, two pages, two audiences)."
   {:malli/schema [:=> [:cat [:maybe :string]] :any]}
   [s]
-  (cond (or (str/blank? s) (= "root" s)) :root
+  (cond (some->> s (re-matches #".+/debug")) [:debug (view-of (subs s 0 (- (count s) 6)))]
+        (or (str/blank? s) (= "root" s)) :root
         (re-matches #"\d+" s) (parse-long s)
         :else (keyword s)))
 
@@ -134,12 +138,15 @@
       (let [uri (:uri req) m (:request-method req) q (form-params (:query-string req))]
         (cond
           (and (= m :get) (= uri "/")) (html-response (ask! ch {:op :page :view :root}))
-          ;; every page is an entity's (seon.render/page): an agent's by its id in root's boot, any
+          ;; every page is an entity's (seon.render/walk): an agent's by its id in root's boot, any
           ;; entity's by its id
           (and (= m :get) (str/starts-with? uri "/agent/")) (html-response (ask! ch {:op :page :view (view-of (subs uri 7))}))
           (and (= m :get) (re-matches #"/walk/\d+" uri)) (html-response (ask! ch {:op :page :view (view-of (subs uri 6))}))
           ;; a page's list end scrolled into view: its next rows
           (and (= m :post) (= uri "/more")) (do (a/>!! ch {:op :more :view (view-of (get q "view"))}) {:status 204 :headers {}})
+          ;; a row's <details> toggled (the debug page): its unit renders its whole content while open
+          (and (= m :post) (= uri "/open")) (do (a/>!! ch {:op :toggle :view (view-of (get q "view")) :unit (get q "unit") :open (= "true" (get q "open"))})
+                                                {:status 204 :headers {}})
           (and (= m :get) (= uri "/feed"))
           (let [out (a/chan 64)]
             (a/>!! ch {:op :open :view (view-of (get q "view")) :ch out})
@@ -209,7 +216,9 @@
   [view body]
   (when body
     (str "<!doctype html>"
-         (h/html (ui/shell (if (= :root view) "Seon on Jolt · root" (str "Seon on Jolt · " (ui/kname view)))
+         (h/html (ui/shell (cond (= :root view) "Seon on Jolt · root"
+                                 (vector? view) (str "Seon on Jolt · " (ui/kname (second view)) " · what its model was sent")
+                                 :else (str "Seon on Jolt · " (ui/kname view)))
                            (str "/feed?view=" (ui/view-param view))
                            (h/raw body))))))
 
@@ -239,6 +248,7 @@
                (step/out! o :to-render {:op ({:context :context :render-stats :stats} (:op m)) :k k})
                st)
     :more (do (step/out! o :to-render {:op :more :view (:view m)}) st)
+    :toggle (do (step/out! o :to-render (select-keys m [:op :view :unit :open])) st)
     :stats (do (deliver (:p m) (stats st)) st)
     :call (let [c (:call m)
                 reqs (requests c (:index st {}))]

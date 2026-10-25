@@ -41,7 +41,8 @@ References and their depths: [references](references.md).
 - [source](source.md): agents change Seon's own functions at the REPL on their branches; a merge merges them on main, writes the files back and runs them next.
 - [references](references.md): what a text cites, read by one parser (`seon.ref`), becomes its references, pulled into a context at the depth its delimiter asks.
 - [render](render.md): every view, the model's context included, is the one value printer or a render declared on the value's schema; nothing clips.
-- [agent](agent.md): the help page, what every agent reads first and `my.agent/help` answers.
+- [prompt](prompt.md): the system prompt, what every agent reads first (the standard format's short prompt).
+- [agent](agent.md): the help page, which `my.agent/help` answers section by section.
 - [turn](turn.md): the turn loop an agent works its task in: observe, act, end, and who runs which tests.
 - [model](model.md): the provider a profile names (none by default), the one tool, thinking off by default, usage as recorded.
 - [cost](cost.md): what a cost proof measures (the calling thread's CPU time and allocation) and why.

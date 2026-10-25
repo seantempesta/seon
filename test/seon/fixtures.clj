@@ -200,10 +200,40 @@
   {"-merge" (fenced "Take main's version of each conflict." "(doseq [e (my.branch/unmerged)] (my.branch/resolve! (second (:key e)) :theirs))")
    "-design" (fenced "Main's code is the base now." "(my.task/update! :seon.task/plan str \" Design: build on main's definitions as they are.\")\n(my.turn/wait)")})
 
+(def measure-replies
+  "A scripted run whose evals answer values as a real run's do (a source, a vector of rows, a
+  long vector, the task's status, one value again), for measuring what a turn sends (tokens per
+  turn) before and after a change to how records print, on task seon.ref/a-summary-says-there-is-more."
+  {"seon.ref/a-summary-says-there-is-more"
+   [(fenced "Read the function the plan names." "(clojure.repl/source seon.ref/shown)")
+    (fenced "A table of rows." "(vec (for [i (range 120)] {:i i :name (str \"item-\" i) :tags #{:a :b}}))")
+    (fenced "A long value." "(vec (range 400))")
+    (fenced "The task's state." "(my.task/status)")
+    (fenced "The rows again." "(vec (for [i (range 120)] {:i i :name (str \"item-\" i) :tags #{:a :b}}))")
+    (fenced "A small value." "(+ 1 2)")
+    (fenced "Done reading." "(my.turn/wait)")]})
+
+(def fit-requests
+  "The five tasks fit to measure (jolt/fit-tasks, 2026-10-24), as a user would ask for them: a
+  short problem description each, no proof, no write set (design writes its own proofs, red, and
+  names what to change), each a request for seon.template/request (design -> implement -> merge on
+  one branch: my.root/request! writes it). Kept here, not run: the clean path's measurement waits
+  for the owner's go (root, 2026-10-25)."
+  [{:seon.task/ns 'seon.ref :seon.task/name "a-summary-says-what-it-left"
+    :seon.task/plan "When a wiki section is cited at summary depth, the agent sees only the first sentence of its lead and nothing says there is more. It should say how much of the lead it left out and how to read the rest."}
+   {:seon.task/ns 'seon.model :seon.task/name "the-transport-failure-docstring-is-true"
+    :seon.task/plan "The docstring of seon.model/transport-error says a failed request is kept and retried after a pause, but a transport failure goes straight back to the agent. Make the docstring say what really happens."}
+   {:seon.task/ns 'seon.context :seon.task/name "a-proof-that-never-ran-says-so"
+    :seon.task/plan "When one of my proofs has no test result yet, my status says it ran and asserted nothing. It should say it has not run."}
+   {:seon.task/ns 'seon.print :seon.task/name "a-long-name-cut-says-its-chars"
+    :seon.task/plan "When the printer cuts a long keyword it just shows …+N; it should say how many chars it left and how to read the rest."}
+   {:seon.task/ns 'seon.print :seon.task/name "a-map-shows-its-first-entry"
+    :seon.task/plan "Printing a big map with a small budget fails, saying it needs 33 characters, while a vector of the same size shows its first item and a cut. A map should show its first entry and a cut too."}])
+
 (def ^:private all-replies
   "Scripted replies by task name (calc) and by task id (a scenario's tasks live in a task
-  namespace named after it, e.g. conflict/b-merge)."
-  (into calc-replies (for [[k {:keys [replies]}] scenarios [nm r] replies] [(str (name k) "/" nm) r])))
+  namespace named after it, e.g. conflict/b-merge; a measurement's, measure-replies)."
+  (-> calc-replies (into measure-replies) (into (for [[k {:keys [replies]}] scenarios [nm r] replies] [(str (name k) "/" nm) r]))))
 
 (defn same-call
   "The scripted model in a loop (seon.agent-test): every reply makes the same call,
@@ -213,19 +243,19 @@
 
 (defn two-calls
   "The scripted model that proves a turn's rhythm (seon.agent-test): its first call evaluates
-  (+ 20 21); each later call adds one to the answer the last call's result printed, so its
+  (+ 20 21); each later call adds one to the value the last call's response showed, so its
   code holds what it saw before it was made."
   {:malli/schema [:=> [:cat :seon.model/request] :string]}
   [{:keys [messages]}]
   (if-let [seen (some #(when (= "tool" (:role %)) (edn/read-string (:content %))) (rseq messages))]
-    (str "(+ 1 " (or (:printed seen) (:value seen)) ")")
+    (str "(+ 1 " (:value seen) ")")
     "(+ 20 21)"))
 
 (defn thinking-call
-  "The scripted model that proves a call's thought is recorded with it (seon.agent-test): one
-  form with its ;; lead, and the eval tool's thinking."
+  "The scripted model that proves a reply's prose is recorded with its call (seon.agent-test):
+  one form, and the prose beside it (the scripted provider's reply text)."
   {:malli/schema [:=> [:cat :seon.model/request] [:map [:code :string] [:thinking :string]]]}
-  [_] {:code ";; the sum first\n(+ 1 2)" :thinking "check the sum before the proof"})
+  [_] {:code "(+ 1 2)" :thinking "check the sum before the proof"})
 
 (defn reply
   "The scripted model: the scripted reply for the request's task and turn (the last one

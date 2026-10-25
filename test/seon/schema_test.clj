@@ -28,15 +28,15 @@
     (d/db-with db (source/import-tx db (schema-files)))))
 
 (defn- evals
-  "The printed value of each form of code, evaluated through the agent's REPL handler in this
-  process on a branch holding db (a test-mode agent: its writes apply to its db only), and
-  the branch's db after."
+  "The printed value of each line of code, each its own request through the agent's REPL in
+  this process on a branch holding db (a test-mode agent: its writes apply to its db only; a
+  request stops at its first error, so each line is one), and the branch's db after."
   [db code]
-  (let [answers (volatile! [])
-        old @agent/state]
+  (let [old @agent/state]
     (reset! agent/state {:n 0 :ns (the-ns 'user) :mode :test :db db})
-    (try ((repl/handler) {"op" "eval" "code" code :reply #(vswap! answers conj %)})
-         [(mapv :printed (repl/fold @answers)) (:db @agent/state)]
+    (try [(mapv #(let [r (repl/eval-string % {})] (if (:ex r) (pr-str (:ex r)) (pr-str (:value r))))
+                (clojure.string/split-lines code))
+          (:db @agent/state)]
          (finally (reset! agent/state old)))))
 
 (def ^:private paused-status

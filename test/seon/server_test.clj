@@ -5,16 +5,17 @@
 
 (deftest a-root-eval-replies-like-an-agent-eval
   ;; task seon.server/root-evals-through-the-one-repl: an eval as root goes through the
-  ;; agents' REPL path, so its reply items are an agent's: the one printer, a result
-  ;; handle, the error's message, *1 kept between requests
+  ;; agents' REPL path, so its response is an agent's: the one printer, a result handle, the
+  ;; error map, *1 kept between requests
   (let [[a-ret a-err r-ret r-err r-star]
         (at/in-agent ["{:a 1}" "(/ 1 0)"
                       {:op :eval :agent "root" :code "{:a 1}"} {:op :eval :agent "root" :code "(/ 1 0)"}
                       {:op :eval :agent "root" :code "(count (:agents (c/state sys)))"}])]
-    (is (= (dissoc a-ret :handle :recorded) (dissoc r-ret :handle)) "a value replies alike")
-    (is (keyword? (:handle r-ret)) "root's value has its result handle, as an agent's does")
-    (is (= (select-keys a-err [:tag :form :printed]) (select-keys r-err [:tag :form :printed])) "an error replies alike")
-    (is (= "1" (:printed r-star)) "`sys` is this root: one agent")))
+    (is (= {:a 1} (:value a-ret) (:value r-ret)) "a value replies alike")
+    (is (qualified-symbol? (:handle r-ret)) "root's value has its result handle, as an agent's does")
+    (is (= (select-keys (:ex a-err) [:seon.error/type :seon.error/message]) (select-keys (:ex r-err) [:seon.error/type :seon.error/message]))
+        "an error replies alike")
+    (is (= 1 (:value r-star)) "`sys` is this root: one agent")))
 
 (deftest a-server-refused-answer-is-the-one-error-map
   ;; task seon.render/one-owner-per-view-path (B2): the server refuses as root does, with the
@@ -32,7 +33,7 @@
   (let [[defect ok] (at/in-agent [{:op :attach :task 5} {:op :eval :agent "root" :code "(+ 1 2)"}])]
     (is (= :seon.server/defect (:seon.error/type defect)))
     (is (= (pr-str {:op :attach :task 5}) (:line defect)))
-    (is (= "3" (:printed ok)) "the server goes on")))
+    (is (= 3 (:value ok)) "the server goes on")))
 
 (deftest the-server-speaks-mcp
   ;; task seon.server/the-server-answers-mcp-itself: root's server answers MCP's JSON-RPC
@@ -77,7 +78,7 @@
                                     {:decls [{:seon.task/name "u" :seon.task/plan "Work too." :seon.task/kind :work
                                               :seon.task/proofs #{'demo-test/u} :seon.task/branch :task-demo-t}]})]
     (clojure.test/is (clojure.string/includes? (pr-str refused) "is held by live agent") "the attach is refused: demo/t's agent holds the branch")
-    (clojure.test/is (= "[:held nil 0]" (:printed seen)) "and wrote nothing: demo/u is still held, with no env and no run")))
+    (clojure.test/is (= [:held nil 0] (:value seen)) "and wrote nothing: demo/u is still held, with no env and no run")))
 
 (deftest a-message-reaches-the-agent
   ;; task seon.render/a-debug-view-of-any-agent (parity row 73): the owner's message, sent as
@@ -88,8 +89,8 @@
                                         "(my.agent/messages)"
                                         {:op :message :agent "a9" :body "hello?"}])]
     (is (true? (:ok sent)) "answered when its fact is on main")
-    (is (re-find #":from :owner" (:printed taken)) (:printed taken))
-    (is (re-find #":body \"use demo/g\"" (:printed taken)))
-    (is (re-find #":to \"demo/t#1\"" (:printed taken)) "to the run the agent works")
-    (is (re-find #":id \"m-" (:printed taken)) "the fact's id, which the agent writes on its branch")
+    (is (re-find #":from :owner" (:text taken)) (:text taken))
+    (is (re-find #":body \"use demo/g\"" (:text taken)))
+    (is (re-find #":to \"demo/t#1\"" (:text taken)) "to the run the agent works")
+    (is (re-find #":id \"m-" (:text taken)) "the fact's id, which the agent writes on its branch")
     (is (contract/error? none) "no live agent a9: refused, as root refuses")))

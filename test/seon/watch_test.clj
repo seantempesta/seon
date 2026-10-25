@@ -61,6 +61,27 @@
     (let [db (d/db-with (ts/test-db) (root/platform-tx (ts/test-db) bad 1000))]
       (is (= [(:seon.error/type bad)] (mapv :type (get-in (problems/report db) [:classes :platform :rows])))))))
 
+(deftest a-dead-watchers-error-closes-when-a-new-watcher-writes-its-fact
+  ;; found on the standing root 2026-10-25: a past boot's :seon.watch/died stayed open while this
+  ;; boot's watcher ran (task seon.problems/a-platform-error-closes-when-its-cause-is-gone)
+  (let [db0 (ts/test-db)
+        e (contract/error :seon.watch/died 'seon.watch/start! "its batch handler threw: docs/references.md (No such file or directory): root no longer watches the checkout"
+                          {:bin "/c/target/watch" :roots ["/c"] :exit 143 :stderr ""})
+        fresh {:roots ["/c"] :boot "b2" :batches 0 :paths 0 :rescans 0}
+        died #(d/db-with % (mr/watch-died-tx % (assoc fresh :boot "b1") e 1000))
+        open? #(not (false? (:open? (first (get-in (problems/report %) [:classes :platform :rows])))))
+        dead (died db0)]
+    (is (= [:seon.watch/died] (mapv :type (get-in (problems/report dead) [:classes :platform :rows]))))
+    (is (open? dead) "the death's own write of the watch fact is no later fact: open")
+    (is (open? (d/db-with dead [{:seon.root/id :root :seon.root/boot "b2"}])) "a later write of root's other facts says nothing of the watcher")
+    (let [alive (d/db-with dead [{:seon.root/id :root :seon.root/watch fresh}])]
+      (is (not (open? alive)) "a new boot's watcher writes its fact: closed, nothing written to close it")
+      (is (open? (died alive)) "it dies again: open again"))
+    (testing "a death stored before its producer named a subject gains it when it happens again"
+      (let [old (d/db-with db0 (root/platform-tx db0 e 900))]
+        (is (open? (d/db-with old [{:seon.root/id :root :seon.root/watch fresh}])) "no subject: nothing can close it")
+        (is (not (open? (-> (died old) (d/db-with [{:seon.root/id :root :seon.root/watch fresh}])))))))))
+
 (deftest a-file-gone-when-its-batch-reads-it-is-a-change
   ;; task seon.watch/a-vanished-file-is-a-fact: a git merge or bin/update removes a file for a moment
   ;; while a batch reads it (the standing root's watcher died: "its batch handler threw:

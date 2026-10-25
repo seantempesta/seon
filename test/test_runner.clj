@@ -206,12 +206,14 @@
         t0 (profile/now-ns)]
     (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
     (let [before (fx/tree-id (System/getProperty "user.dir"))
+          ;; each test under the one bound an agent's run has (seon.proofs/run-tests!): one verdict wherever it runs
           ran (proofs/run-tests! tests digests
                                  (fn [x] (cond (:seon.test/started x) (println "started" (:seon.test/started x))
                                                (:seon.test/output x) (print (:seon.test/output x))
                                                (:seon.test/report x) nil
                                                (not (proofs/green? x)) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))
-                                   (flush)))
+                                   (flush))
+                                 (config/value :seon.config.agent/test-ticks))
           ;; the tree the tests read is the plan's from before the run to after it: an edit
           ;; during the run (a test reading files reads it) is not what the digests name
           same? (= tree before (fx/tree-id (System/getProperty "user.dir")))

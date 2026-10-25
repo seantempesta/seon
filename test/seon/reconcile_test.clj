@@ -186,7 +186,7 @@
          (let [w (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 4) :events (a/chan 4)})
                ask (fn [req] (:r (first (:to-api (second (#'writer/writer-proc w :in (assoc req :dest {:rid 1})))))))
                diff (ask {:op :branch-diff :branch ab})
-               gate (ask {:op :merge :branch ab})
+               gate (first (:results (ask {:op :octopus-merge :branches [ab]})))
                judged (first (filter #(and (map? %) (:seon.run/outcome %))
                                      (#'r/judge-tx {:db @conn :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:run "demo/a#1" :task "demo/a"}} {}
                                                    diff)))]

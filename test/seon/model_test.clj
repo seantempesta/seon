@@ -5,7 +5,7 @@
   The model edge as data: a provider's reply body read into the completion (task
   seon.model/budgets-are-data-and-spend-is-measured). Run: bin/test seon.model-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [clojure.data.json :as json]
-            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.turn :as turn] [seon.contract]))
+            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.turn :as turn] [seon.contract] [clojure.string :as str]))
 
 (defn- chunk-line [m] (str "data: " (json/write-str m) "\n\n"))
 
@@ -118,18 +118,6 @@
     (is (seon.contract/valid? :seon.model/failure r))
     (is (not (contains? r :tool-calls)) "no reply, scripted or otherwise")))
 
-(deftest the-eval-tool-takes-thinking
-  ;; owner, 2026-10-23: the eval tool's optional `thinking`, recorded with its call
-  (let [props (get-in model/eval-tool [:function :parameters :properties])]
-    (is (contains? props :thinking))
-    (is (= ["code"] (get-in model/eval-tool [:function :parameters :required])) "thinking stays optional"))
-  (let [call-code #'seon.model/call-code]
-    (is (= {:code "(+ 1 2)" :thinking "check the sum"} (call-code (json/write-str {:code "(+ 1 2)" :thinking "check the sum"}))))
-    (is (= {:code "(+ 1 2)"} (call-code (json/write-str {:code "(+ 1 2)" :thinking " "}))) "blank thinking is none")
-    (is (= {:code "{\"code\": \"(+ 1"} (call-code "{\"code\": \"(+ 1")) "a call cut mid-JSON: its arguments as they came"))
-  (testing "a recorded call's thinking goes back on the wire with its code"
-    (let [m (#'seon.model/wire-message {:role "assistant" :content "" :tool-calls [{:id "c1" :code "(+ 1 2)" :thinking "sum"}]})]
-      (is (= {"code" "(+ 1 2)" "thinking" "sum"} (json/read-str (get-in m [:tool_calls 0 :function :arguments])))))))
 (deftest cost-prices-a-turn-at-its-models-rates
   (testing "a DeepSeek turn as seon.turn/usage records it: 10k prompt (8k cached), 500 completion"
     (let [u (turn/usage {:prompt-tokens 10000 :completion-tokens 500 :cache-hit-tokens 8000 :cache-miss-tokens 2000})]
@@ -159,3 +147,21 @@
     (is (= "Square multiplies." (:reasoning c)))
     (is (= "Square multiplies." (:reasoning_content (second (:messages b)))) "the earlier reply's reasoning goes back with it")
     (is (not-any? :reasoning_content [(first (:messages b)) (nth (:messages b) 2)]) "and only on the assistant's message")))
+
+(deftest a-request-lets-the-model-reply-in-prose
+  ;; notes/design-agent-view-2026-10-24.md §1 (step 0 measured it live: four DeepSeek turns,
+  ;; thinking on, all 200, cache hits 87-96% from turn 2): tool_choice auto (DeepSeek refuses
+  ;; `required` with thinking on), so a reply may be prose alone; the eval tool takes code
+  ;; only; the reasoning goes back as it was returned; no ;; reaches the model
+  (let [b (model/request-body {:kind :openai-compat :base-url "" :model "m" :api-key-env "" :max-tokens 10 :thinking :enabled}
+                              {:messages [{:role "assistant" :content "I read f." :reasoning "r" :tool-calls [{:id "c1" :code "(f)"}]}
+                                          {:role "tool" :tool-call-id "c1" :content "{:handle result/e1, :value 1}"}]
+                               :task "t/x" :turn 1})]
+    (is (= "auto" (:tool_choice b)))
+    (is (= [:prose :code] (keys (get-in b [:tools 0 :function :parameters :properties]))) "prose first, then code: the model states its intent before the code")
+    (is (not (str/includes? (pr-str (:tools b)) ";;")) "no ;; in the tool")
+    (is (= {:role "assistant" :content "I read f." :reasoning_content "r"
+            :tool_calls [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"code\":\"(f)\"}"}}]}
+           (first (:messages b))) "prose, reasoning and the call, as returned")
+    (is (= "c1" (:tool_call_id (second (:messages b)))) "the response answers its call by the provider's id")))
+

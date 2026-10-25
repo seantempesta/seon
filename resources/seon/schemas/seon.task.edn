@@ -16,7 +16,9 @@
                    :running :blocked :open :failed :held :done :merged :cancelled]
  :seon.task/config [:map {:closed true} [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
                     [:seon.config.merge/max-conflicts {:optional true} nat-int?]
-                    [:seon.config.merge/max-merge-turns {:optional true} nat-int?]]
+                    [:seon.config.merge/max-merge-turns {:optional true} nat-int?]
+                    ;; the functions near its plan its story lists (seon.context/similar: off by default, on to measure it)
+                    [:seon.config.render/similar {:optional true} :seon.config.render/similar]]
  :seon.task/need-ids [:set :seon.task/id]
  :seon.task/declaration [:map {:closed true}
                          [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
@@ -141,10 +143,12 @@
  :seon.reconcile/actions [:vector :seon.reconcile/action]
  ;; ---- the model ----
  ;; a conversation message: an assistant's may carry its eval calls, a tool message answers one by its id
- :seon.model/tool-call [:map [:id :string] [:code :string] [:thinking {:optional true} :string]]
+ :seon.model/tool-call [:map [:id :string] [:code :string] [:prose {:optional true} :string]]
  :seon.model/message [:map [:role [:enum "system" "user" "assistant" "tool"]] [:content :string]
                       [:tool-calls {:optional true} [:vector :seon.model/tool-call]] [:tool-call-id {:optional true} :string]
-                      [:reasoning {:optional true} :string]]
+                      [:reasoning {:optional true} :string]
+                      ;; an assistant message's call's place in its reply: the provider's format folds a reply's calls into one message
+                      [:call {:optional true} :int]]
  :seon.model/provider [:multi {:dispatch :kind}
                        [:none [:map [:kind [:= :none]]]]
                        [:scripted [:map [:kind [:= :scripted]] [:script :qualified-symbol]]]
@@ -153,7 +157,9 @@
                                         [:max-tokens pos-int?]
                                         ;; DeepSeek's thinking mode and effort; absent: the provider's default
                                         [:thinking {:optional true} [:enum :enabled :disabled]]
-                                        [:reasoning-effort {:optional true} [:enum :low :medium :high]]]]]
+                                        [:reasoning-effort {:optional true} [:enum :low :medium :high]]
+                                        ;; earlier reasoning sent back (:seon.config.ai/replay-reasoning)
+                                        [:replay-reasoning {:optional true} :boolean]]]]
  :seon.model/request [:map [:messages [:vector :seon.model/message]] [:task :seon.task/id] [:turn :int]]
  :seon.model/completion [:map [:text :string] [:prompt-tokens {:optional true} :int] [:completion-tokens {:optional true} :int] [:ms number?]
                          ;; the counts are the scripted model's own estimate (seon.print.select/estimate), not a provider's measure

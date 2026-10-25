@@ -6,7 +6,7 @@
   host reference, never by text)."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.io :as io] [clojure.string :as str] [clojure.edn :as edn] [clojure.java.shell]
-            [aero.core :as aero] [datahike.api :as d]
+            [aero.core :as aero] [datahike.api :as d] [seon.model]
             [jolt.scheme :as scm] [jolt.analyzer :as an] [jolt.ir :as ir]
             [seon.config :as config] [seon.contract :as contract] [seon.db :as pdb] [seon.task :as task]))
 
@@ -126,8 +126,15 @@
   (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider config/config)))
   (let [p (config/provider (assoc config/config :seon.config.ai/provider :openai-compat :seon.config.ai/thinking :disabled))]
     (is (= {:kind :openai-compat :base-url "https://api.deepseek.com" :model "deepseek-flash" :api-key-env "DEEPSEEK_API_KEY"
-            :max-tokens (config/value :seon.config.ai/max-tokens) :thinking :disabled}
+            :max-tokens (config/value :seon.config.ai/max-tokens) :replay-reasoning (config/value :seon.config.ai/replay-reasoning) :thinking :disabled}
            p))
+    ;; whether earlier reasoning goes back is the config key, obeyed as written (owner, 2026-10-24)
+    (let [off (config/provider (assoc config/config :seon.config.ai/provider :openai-compat :seon.config.ai/thinking :disabled
+                                      :seon.config.ai/replay-reasoning false))
+          said {:messages [{:role "assistant" :content "" :reasoning "why" :tool-calls [{:id "c1" :code "(+ 1 2)"}]}] :task "t/a" :turn 1}]
+      (is (false? (:replay-reasoning off)))
+      (is (= "why" (get-in (seon.model/request-body p said) [:messages 0 :reasoning_content])) "on: the reasoning goes back as returned")
+      (is (not (contains? (get-in (seon.model/request-body off said) [:messages 0]) :reasoning_content)) "off: the request leaves it out"))
     ;; the facts say what a run handed another provider really used
     (is (= p (config/provider (config/with-provider config/config p))))
     (is (= "https://example.test" (:base-url (config/provider (config/with-provider config/config (assoc p :base-url "https://example.test"))))))))
@@ -308,3 +315,16 @@
         (is (= text (do (clojure.java.shell/sh "env" "-u" "SEON_WEB_PORT" (str root "/bin/ports") f) (slurp f))) "a second run writes the same file"))
       (finally (clojure.java.io/delete-file f true)))))
 
+
+(deftest thinking-on-refuses-reasoning-left-out
+  ;; owner ruling 2026-10-24 (docs/decisions.md, "A config key does what it says"): with
+  ;; thinking :enabled and tools, DeepSeek answers 400 when earlier reasoning_content is left
+  ;; out (measured live, notes/step0/no-replay.edn), so that config is refused at load, naming
+  ;; each model and explained by m/explain; thinking off may leave it out
+  (let [r (refused #(config/resolved (assoc config/config :seon.config.ai/thinking :enabled :seon.config.ai/replay-reasoning false)))]
+    (is (= :seon.config/refused (:seon.error/type r)) (pr-str r))
+    (is (= (set (for [id (keys (:seon.config.ai/models config/config))] [:seon.config.ai/models id])) (set (map :key (:seon.config/problems r)))))
+    (is (str/includes? (:value (first (:seon.config/problems r))) "replay-reasoning") "explained"))
+  (is (false? (:seon.config.ai/replay-reasoning (config/resolved (assoc config/config :seon.config.ai/thinking :disabled :seon.config.ai/replay-reasoning false))))
+      "thinking off: nothing to send, left out is valid")
+  (is (true? (:seon.config.ai/replay-reasoning (config/resolved (assoc config/config :seon.config.ai/thinking :enabled)))) "the default replays"))

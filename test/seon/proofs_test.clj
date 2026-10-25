@@ -160,7 +160,7 @@
     (is (proofs/green? (ran 'app.pv-red-test/fixture-test)) "its namespace's fixtures ran around it")
     (is (= (count tests) (count (filter :seon.test/started @notes))) "each test named as it starts")
     (is (every? #(.isFile (java.io.File. (proofs/result-path dir (dg %)))) (remove #{'app.pv-red-test/red-test} tests)) "each green stored at its digest")
-    (is (= #{"d-fx" "d-add" "d-twice" "d-neg"} (set (keys (proofs/greens dir (vec (vals dg)))))) "only greens are stored and reused: a red runs again")))
+    (is (= #{"d-fx" "d-add" "d-twice" "d-neg"} (set (keys (proofs/greens dir (vec (vals dg)))))) "the files hold greens only: a red is reused from the test service's facts (seon.proofs/stored-results)")))
 
 (deftest a-failed-write-or-a-throwing-fixture-is-recorded-red
   ;; review 2026-10-22: a write's declared error was dropped (read as stored), and a fixture's
@@ -181,6 +181,27 @@
     (is (some #(and (= 'app.pv-fx-test/never-runs (:test %)) (= :error (:type (:seon.test/report %)))) @notes) "the unreported test is reported, as an error")
     (is (re-find #"the fixture's store is gone" (:message t)) "the throw's own message, not a guess")
     (is (= "{:store :gone}" (:data t)) "and its data")))
+
+(deftest each-test-has-its-own-budget
+  ;; task seon.proofs/one-prove-path: the bound is per test, so a test that never ends is red,
+  ;; named, as the typed :seon.test/ticks-spent, and the run goes on: the next test is green,
+  ;; and each result says the ticks it did
+  (record (ts/test-db) 'user "(ns app.pv-budget-test (:require [clojure.test :refer [deftest is]]))"
+          'app.pv-budget-test "(deftest spins (loop [] (recur)))"
+          'app.pv-budget-test "(deftest swallows (try (loop [] (recur)) (catch Throwable _ nil)) (is true))"
+          'app.pv-budget-test "(deftest after (is (= 3 (+ 1 2))))")
+  (let [notes (atom [])
+        ran (proofs/run-tests! '[app.pv-budget-test/spins app.pv-budget-test/swallows app.pv-budget-test/after] {} #(swap! notes conj %) 1000000)
+        unbounded (proofs/run-tests! '[app.pv-budget-test/after] {} (fn [_]) nil)
+        spent (some #(when (= :seon.test/ticks-spent (get-in % [:seon.test/report :seon.error/type])) %) @notes)]
+    (is (= {:pass 0 :fail 0 :error 1} (select-keys (ran 'app.pv-budget-test/spins) [:pass :fail :error])) "the endless test is red")
+    (is (= 'app.pv-budget-test/spins (:test spent)) "named, as the typed error")
+    (is (= 1000000 (get-in spent [:seon.test/report :budget])))
+    (is (<= 1000000 (:ticks (ran 'app.pv-budget-test/spins))) "it did its budget's work")
+    (is (= 1 (:error (ran 'app.pv-budget-test/swallows))) "the test's own catch cannot swallow its budget's end")
+    (is (proofs/green? (ran 'app.pv-budget-test/after)) "the next test ran, under a budget of its own")
+    (is (pos-int? (:ticks (unbounded 'app.pv-budget-test/after))) "an unbounded run (bin/test with 0) counts ticks too")
+    (is (pos-int? (:ticks (ran 'app.pv-budget-test/after))) "each result carries the ticks it did")))
 
 (deftest shards-are-dealt-by-measured-work
   ;; pure-tests 2026-10-23: dealt by count, the full run's shards ended 437, 397, 110 and 68 s

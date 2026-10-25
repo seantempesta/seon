@@ -81,7 +81,7 @@ The merge carries an entry per key, `[:schema k]` -> `{:form text :file path}`, 
 
 A schema resource is written entry by entry with rewrite-clj (v1's `schema-file-text`, ported unchanged but for the separator of an appended entry, which follows the file's last two entries): the imported text, with each entry whose form differs from what that text holds replaced in its old layout (a part that reads as before keeps its text), each key no longer held removed with its line, and each new key appended. Every other byte is as it was: adding `:refused` to `:seon.run/status` changes only those 9 bytes of `resources/seon/schemas/seon.facts.edn` (`seon.source-test/a-changed-schema-entry-rewrites-only-itself`).
 
-```seon.source/file-text``` builds a namespace's file and ```seon.source/schema-resource-text``` a schema resource's (through ```seon.source/schema-file-text```); ```seon.source/files``` builds every changed file, from ```seon.source/changed-files``` of what ```seon.writer/merge-branch``` merged; ```seon.fx/write-file``` writes one.
+```seon.source/file-text``` builds a namespace's file and ```seon.source/schema-resource-text``` a schema resource's (through ```seon.source/schema-file-text```); ```seon.source/files``` builds every changed file, from ```seon.source/changed-files``` of what ```seon.writer/octopus-merge``` merged; ```seon.fx/write-file``` writes one.
 
 ## Commit: the merges branch
 

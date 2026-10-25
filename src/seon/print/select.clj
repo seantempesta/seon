@@ -153,6 +153,19 @@
   [x fits? text tag digits]
   (scalar :seon.print/number x (if fits? text (str "#" tag "[≈" digits " digits]"))))
 
+(defn- seen-form
+  "The form that reads x again when an earlier response showed it (the context's :seen), else
+  nil: a string by its text, a map, set or vector by identity (the same value object), so no
+  lookup hashes a collection's contents (a member may be lazy and endless); the printed value
+  itself is never its own handle."
+  {:malli/schema [:=> [:cat :any :any :map] :any]}
+  [x c context]
+  (when-let [{:keys [strings colls]} (:seen context)]
+    (when-not (identical? x (:root context))
+      (cond (identical? c String) (get strings x)
+            (or (map-classes c) (set-classes c) (vector-classes c))
+            (some (fn [[v form]] (when (identical? v x) form)) (get colls (System/identityHashCode x)))))))
+
 (defn- classify
   "One row of the permitted-operation table: exact classes for scalars, maps and sets; seqs and
   other sequentials by interface, stepped to the context's `:max-children`; anything else is its
@@ -162,8 +175,12 @@
   [x context]
   (let [c (class x) limit (:max-children context)
         ;; a nested map whose schema declares a render shows as that render, one line, in its place
-        rendered (when (and (:render context) (map-classes c) (not (identical? x (:root context)))) ((:render context) x))]
+        rendered (when (and (:render context) (map-classes c) (not (identical? x (:root context)))) ((:render context) x))
+        ;; a value an earlier response showed is the form that reads it again (seen-form); a
+        ;; print given no earlier responses looks nothing up
+        again (when (:seen context) (seen-form x c context))]
     (cond
+      again (scalar :seon.print/rendered x (pr-str again))
       rendered (assoc (scalar :seon.print/rendered x (:text rendered)) :seon.print/html (:html rendered))
       (nil? x) (scalar :seon.print/nil nil "nil")
       (identical? c Boolean) (scalar :seon.print/boolean x (str x))
@@ -554,38 +571,6 @@
   (let [[held & more] (seq (:pending node))]
     (sized context (assoc node :kids [(minimal context (child context node held 0))] :pending more))))
 
-(defn- fill-members
-  "Sequence or set `node` within `budget`: whole members in order while each fits beside the one
-  cut that follows them; the first that does not fit is allotted what is left when that shows part of it.
-  A first member that shows no part is shown at its least when that fits, so a node shows its first
-  member whenever its least form fits (select's floor)."
-  {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc number?] :seon.print/alloc]}
-  [context node budget]
-  (let [sep (separator context node)]
-    (loop [kids [] spent (+ (:ub (collapsed context node)) (cut-reserve node)) members (:pending node)]
-      (let [[held & more :as remaining] (seq members)
-            cap (- budget spent sep)
-            member (when remaining (child context node held (count kids)))
-            cut #(sized context (assoc node :kids kids :pending members))
-            shown (when member
-                    (or (whole context member cap)
-                        ;; the last member needs no cut after it
-                        (when-not more
-                          (whole context member (- budget (:ub (sized context (assoc node :kids kids :pending nil))) sep)))))
-            part (when (and member (not shown))
-                   (let [allotted (allot context member cap)]
-                     (when (and (<= (:ub allotted) cap) (shows? allotted)) allotted)))
-            least (when (and member (not shown) (not part) (empty? kids))
-                    (let [floor (first-at-least context node)]
-                      (when (<= (:ub floor) budget) floor)))]
-        (cond
-          part (sized context (assoc node :kids (conj kids part) :pending more))
-          least least
-          (nil? shown) (cut)
-          more (recur (conj kids shown) (+ spent sep (:ub shown)) more)
-          :else (let [complete (sized context (assoc node :kids (conj kids shown) :pending nil))]
-                  (if (<= (:ub complete) budget) complete (cut))))))))
-
 (defn- elisions
   "How many nodes of the allotted tree under `node` show less than they hold, walked once."
   {:malli/schema [:=> [:cat :seon.print/alloc] nat-int?]}
@@ -600,33 +585,45 @@
   (pos? (elisions node)))
 
 (defn- grow-values
-  "Map `entries`, each value at its least, grown into `extra` characters: each cut value whole when
-  its growth fits, else filled to what is left, strings before collections, smallest first."
-  {:malli/schema [:=> [:cat :seon.print/context [:vector :seon.print/alloc] number?] [:vector :seon.print/alloc]]}
-  [context entries extra]
-  (let [value-of #(second (:kids (nth entries %)))
-        order (sort-by (juxt :string-rank :width :i)
-                       (for [i (range (count entries))
-                             :let [v (value-of i)]
-                             :when (elides? v)
-                             :let [w (whole context v (+ (:ub v) extra))]]
-                         {:i i :grown w :string-rank (if (#{:string :name} (:kind v)) 0 1)
-                          :width (if w (:ub w) Long/MAX_VALUE)}))
-        with-value (fn [entries i v] (update entries i #(sized context (assoc-in % [:kids 1] v))))]
+  "`entries` at their least grown into `extra` characters: each cut one whole when its growth
+  fits, else filled to its room. A map's (map? true: its entries' values) strings before
+  collections, smallest first. A sequence's members in their order, breadth before depth: the
+  extra is split in equal shares, one for each member that does not fit whole in it and one more
+  for layout order, and each member's room keeps back a share for every later such member, so
+  each shows its first part and the first grows most. One allot a member, at every depth."
+  {:malli/schema [:=> [:cat :seon.print/context [:vector :seon.print/alloc] number? :boolean] [:vector :seon.print/alloc]]}
+  [context entries extra map?]
+  (let [value-of (if map? #(second (:kids (nth entries %))) #(nth entries %))
+        grown (for [i (range (count entries))
+                    :let [v (value-of i)]
+                    :when (elides? v)
+                    :let [w (whole context v (+ (:ub v) extra))]]
+                {:i i :grown w :string-rank (if (#{:string :name} (:kind v)) 0 1)
+                 :width (if w (:ub w) Long/MAX_VALUE)})
+        order (vec (if map? (sort-by (juxt :string-rank :width :i) grown) grown))
+        ;; the members that will show less than they hold: no whole form fits the extra
+        cut? (fn [g] (nil? (:grown g)))
+        share (if map? 0 (quot extra (inc (count (filter cut? order)))))
+        with-value (if map?
+                     (fn [entries i v] (update entries i #(sized context (assoc-in % [:kids 1] v))))
+                     (fn [entries i v] (assoc entries i v)))]
     (loop [entries entries extra extra [{:keys [i grown]} & more] order]
       (if (nil? i)
         entries
-        (let [least (value-of i)]
-          (if (and grown (<= (- (:ub grown) (:ub least)) extra))
+        (let [least (value-of i)
+              room (max 0 (- extra (* share (count (filter cut? more)))))]
+          (if (and grown (<= (- (:ub grown) (:ub least)) room))
             (recur (with-value entries i grown) (- extra (- (:ub grown) (:ub least))) more)
-            (let [allotted (allot context least (+ (:ub least) extra))]
-              (if (< (:ub least) (:ub allotted) (+ (:ub least) extra 1))
+            (let [allotted (allot context least (+ (:ub least) room))]
+              (if (< (:ub least) (:ub allotted) (+ (:ub least) room 1))
                 (recur (with-value entries i allotted) (- extra (- (:ub allotted) (:ub least))) more)
                 (recur entries extra more)))))))))
 
-(defn- fill-map
-  "Map `node` within `budget`, structure first: every key with its value at its least while they
-  fit, then one cut; the budget left grows the values."
+(defn- fill-members
+  "Collection `node` within `budget`, breadth before depth: every member at its least while they
+  fit (a map's key with its value at its least), then one cut; the budget left grows the members
+  (grow-values), so a long sequence, a table or a page shows every member at its least before
+  any one deepens."
   {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc number?] :seon.print/alloc]}
   [context node budget]
   (let [sep (separator context node)
@@ -638,22 +635,18 @@
               (recur (conj entries entry) (+ spent sep (:ub entry)) more)
               [entries members])))
         skeleton (sized context (assoc node :kids entries :pending members))]
-    (sized context (assoc skeleton :kids (grow-values context entries (- budget (:ub skeleton)))))))
+    (sized context (assoc skeleton :kids (grow-values context entries (- budget (:ub skeleton)) (= :map (:kind node)))))))
 
 (defn- allot
-  "`node` within `budget` characters: whole when it fits, else filled to the budget; a collection
-  at the depth bound collapsed."
+  "`node` within `budget` characters: whole when it fits, else filled to the budget (a collection
+  breadth before depth, fill-members); a collection at the depth bound collapsed."
   {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc number?] :seon.print/alloc]}
   [context node budget]
-  (if (and (= :coll (:kind node)) (not (bound? context node)))
-    (fill-members context node budget)
-    (or (whole context node budget)
-        (case (:kind node)
-          (:string :name) (fill-string context node budget)
-          (:map :coll) (cond (bound? context node) (collapsed context node)
-                             (= :map (:kind node)) (fill-map context node budget)
-                             :else (fill-members context node budget))
-          (sized context node)))))
+  (or (whole context node budget)
+      (case (:kind node)
+        (:string :name) (fill-string context node budget)
+        (:map :coll) (if (bound? context node) (collapsed context node) (fill-members context node budget))
+        (sized context node))))
 
 (defn- select
   "`value` allotted under the context's budget, or the insufficient-budget error when its least
@@ -733,10 +726,11 @@
   "`value` selected under `opts` and emitted: `{:text :tokens :truncated? :elisions}` plus
   `:html` (hiccup) when `outputs` holds `:hiccup`, or the insufficient-budget error.
   opts: `:handle` (what cuts read through: a `result/…` symbol, or a form that reads the value), `:budget` tokens, `:max-depth`, `:width`,
-  `:outputs`. A value whose metadata holds `:seon.print/full true` prints whole, and
+  `:outputs`, `:seen` (values earlier responses showed, each the form that reads it again: such a
+  nested value prints as its form). A value whose metadata holds `:seon.print/full true` prints whole, and
   `:seon.print/budget n` raises its own budget."
   {:malli/schema [:=> [:cat :any :seon.print/opts] :seon.print/result]}
-  [value {:keys [handle budget max-depth width outputs render]}]
+  [value {:keys [handle budget max-depth width outputs render seen]}]
   (let [requery (if (or (and (qualified-symbol? handle) (= "result" (namespace handle))) (seq? handle))
                   {:seon.print/requery-id handle}
                   {:seon.print/requery-refused "the value has no result handle"})
@@ -748,7 +742,8 @@
         context (cond-> (merge limits
                                {:breaks? (pos? width) :requery requery :requery-id (:seon.print/requery-id requery)
                                 :width width :budget chars :max-children (inc (quot chars 2)) :max-depth max-depth}
-                               (when render {:render render :root value}))
+                               (when render {:render render :root value})
+                               (when seen {:seen seen :root value}))
                   full? (assoc :budget Long/MAX_VALUE :max-children Long/MAX_VALUE :max-depth Long/MAX_VALUE
                                :max-name Long/MAX_VALUE))
         {root :root :as state} (select value context)]

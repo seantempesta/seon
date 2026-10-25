@@ -1,0 +1,1 @@
+[{:task "seon.ref/a-summary-says-there-is-more", :run "seon.ref/a-summary-says-there-is-more#1", :status :closed, :outcome :waiting, :turns 7, :per-turn [[0 4510 nil nil nil 0] [1 4929 nil nil nil 0] [2 6627 nil nil nil 0] [3 7144 nil nil nil 0] [4 7460 nil nil nil 0] [5 7468 nil nil nil 0] [6 7463 nil nil nil 0]], :usd 0, :tokens 45601, :hit 0, :miss 0}]
