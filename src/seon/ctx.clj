@@ -115,13 +115,19 @@
   {:malli/schema [:=> [:cat [:maybe :qualified-keyword] :keyword] [:maybe :map]]}
   [s a] (some #(when (= a (:attr %)) %) (get units s)))
 
+(defn- without
+  "Tree t without key a (an attribute, a unit, a member's id) of the map at path p (the record's
+  own entity at [])."
+  {:malli/schema [:=> [:cat :map [:vector :any] :any] :map]}
+  [t p a] (if (seq p) (update-in t p dissoc a) (dissoc t a)))
+
 (defn- leave
   "c without the member (or forward unit) at path p; a unit it empties goes with it."
   {:malli/schema [:=> [:cat :map [:vector :any]] :map]}
   [{:keys [tree ix]} p]
-  (let [unit (pop p) t (update-in tree unit dissoc (peek p))
+  (let [unit (pop p) t (without tree unit (peek p))
         ;; a unit emptied is no key, as a build holds it
-        t (if (and (seq unit) (empty? (get-in t unit))) (update-in t (pop unit) dissoc (peek unit)) t)]
+        t (if (and (seq unit) (empty? (get-in t unit))) (without t (pop unit) (peek unit)) t)]
     {:tree t :ix (unindex ix (get-in tree p) p)}))
 
 (defn- join
@@ -149,9 +155,9 @@
         (assoc c :tree
                (cond (contains? many a) (if added
                                           (assoc-in (:tree c) path (conj (or cur #{}) v))
-                                          (let [r (disj (or cur #{}) v)] (if (seq r) (assoc-in (:tree c) path r) (update-in (:tree c) p dissoc a))))
+                                          (let [r (disj (or cur #{}) v)] (if (seq r) (assoc-in (:tree c) path r) (without (:tree c) p a))))
                      added (assoc-in (:tree c) path v)
-                     (= v cur) (update-in (:tree c) p dissoc a)
+                     (= v cur) (without (:tree c) p a)
                      :else (:tree c)))))))
 
 (defn patch
