@@ -113,7 +113,7 @@
       (is (= em (get-in rec [:response :ex])) "grouped by type and producer without parsing text")))
   (testing "the agent folds its errors until its commit; root folds them as :eval occurrences"
     (let [em (agent/error-map (ArithmeticException. "Divide by zero"))
-          m (-> nil (err/note em "(/ 1 0)" 10) (err/note em "(/ 2 0)" 12))
+          m (-> nil (err/note em :eval "(/ 1 0)" 10) (err/note em :eval "(/ 2 0)" 12))
           [s] (vals m)
           o (err/sent->occurrence s :a4 "t/x")]
       (is (= [2 10 12 "(/ 1 0)"] [(:n s) (:first-ms s) (:last-ms s) (:form s)]))
