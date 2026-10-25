@@ -76,7 +76,11 @@
     (is (open? (d/db-with dead [{:seon.root/id :root :seon.root/boot "b2"}])) "a later write of root's other facts says nothing of the watcher")
     (let [alive (d/db-with dead [{:seon.root/id :root :seon.root/watch fresh}])]
       (is (not (open? alive)) "a new boot's watcher writes its fact: closed, nothing written to close it")
-      (is (open? (died alive)) "it dies again: open again"))))
+      (is (open? (died alive)) "it dies again: open again"))
+    (testing "a death stored before its producer named a subject gains it when it happens again"
+      (let [old (d/db-with db0 (root/platform-tx db0 e 900))]
+        (is (open? (d/db-with old [{:seon.root/id :root :seon.root/watch fresh}])) "no subject: nothing can close it")
+        (is (not (open? (-> (died old) (d/db-with [{:seon.root/id :root :seon.root/watch fresh}])))))))))
 
 (deftest a-file-gone-when-its-batch-reads-it-is-a-change
   ;; task seon.watch/a-vanished-file-is-a-fact: a git merge or bin/update removes a file for a moment

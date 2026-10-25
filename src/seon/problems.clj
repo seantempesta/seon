@@ -69,9 +69,8 @@
 (defn- closed?
   "Is the recorded error r (entity e) closed: a subject of it has a fact written after the error's
   last one. The subjects: :seon.error/subject (a var's name, a section's address, or an attribute,
-  whose facts are its datoms on any entity), and, for a
-  :seon.docs/refused error from a store older than the type's removal, the link's target address
-  and the citing section's (its example's). Such an error is closed too when the citing section
+  whose facts are its datoms on any entity), and, for a :seon.docs/refused error from a store
+  older than the type's removal, the link's target address and the citing section's (its example's). Such an error is closed too when the citing section
   exists and no longer links to the target (not a dead link of it, not among its references).
   Nothing is written to close it, and a subject that does not exist has changed nothing."
   {:malli/schema [:=> [:cat :seon.host/db :map :int] :boolean]}
@@ -82,7 +81,7 @@
         facts (fn [s] (if (keyword? s)
                         (d/datoms db :aevt s)
                         (some->> (pdb/eid db (if (symbol? s) :var/name :seon.section/address) s) (d/datoms db :eavt))))
-        subjects (keep identity [(:seon.error/subject r) target from])
+        subjects (remove nil? [(:seon.error/subject r) target from])
         last-tx (reduce max (map :tx (d/datoms db :eavt e)))
         citing (some->> from (pdb/eid db :seon.section/address) (d/pull db [:seon.section/dead-links {:seon.section/references [:seon.section/address]}]))]
     (boolean (or (some (fn [s] (some #(> (:tx %) last-tx) (facts s))) subjects)

@@ -118,8 +118,10 @@
                             :seon.error/first-ms (or (:seon.error/first-ms stored) first-ms)}
                      last-agent (assoc :seon.error/last-agent last-agent)
                      last-task (assoc :seon.error/last-task last-task)
+                     ;; on every write, so a signature stored before its producer named a subject gains it
+                     (:seon.error/subject example) (assoc :seon.error/subject (:seon.error/subject example))
                      first?
-                     (merge (select-keys example [:seon.error/type :seon.error/operation :seon.error/message :seon.error/subject])
+                     (merge (select-keys example [:seon.error/type :seon.error/operation :seon.error/message])
                             {:seon.error/example example}
                             (when form {:seon.error/form form})))])]
     [(into f (map first) flushed) (mapv second flushed)]))

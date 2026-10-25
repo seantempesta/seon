@@ -204,7 +204,7 @@
         batch))
 
 (defn watch-died-tx
-  "The write of watcher error e at ms on main db, whose watch fact is held: a :platform error
+  "The write of watcher error e at ms on main db, with held root's current :seon.root/watch fact: a :platform error
   (seon.root/platform-tx) whose subject is the watch fact, and that fact with its :error, in one
   transaction. Only a live watcher writes the fact after it (a new boot's start, a batch), so
   that write closes the error (seon.problems/closed?) and nothing is written to close it."
