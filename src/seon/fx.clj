@@ -53,26 +53,47 @@
 
 (declare inputs)
 
+(defn- git-run
+  "git in dir with args, under the environment variables env adds ({name value}), fed in when given:
+  its sh result. The one place src runs git (seon.main-test/git-is-read-through-fx); git! and
+  git-try are its two readings."
+  {:malli/schema [:=> [:cat [:map-of :string :string] :string [:sequential :string] [:maybe :string]] :map]}
+  [env dir args in]
+  (let [cmd (concat (when (seq env) (cons "env" (for [[k v] (sort env)] (str k "=" v)))) ["git" "-C" dir] args)]
+    (if in (apply sh/sh (concat cmd [:in in])) (apply sh/sh cmd))))
+
+(defn- git-failed
+  "git's failure of args in result r, as the exception git! and git-try throw: git's words."
+  {:malli/schema [:=> [:cat [:sequential :string] :map] :any]}
+  [args r]
+  (ex-info (str "git " (str/join " " args) ": " (str/trim (str (:err r) (:out r)))) {:exit (:exit r)}))
+
+(defn- git!
+  "git in dir with args (git-run), its trimmed output; a failure throws git's words (git-commit
+  answers it as :seon.fx/io-error)."
+  {:malli/schema [:=> [:cat [:map-of :string :string] :string [:sequential :string] [:maybe :string]] :string]}
+  [env dir args in]
+  (let [r (git-run env dir args in)]
+    (when-not (zero? (:exit r)) (throw (git-failed args r)))
+    (str/trim (:out r))))
+
 (defn- git-try
-  "git in dir with args, for a read whose no is an answer (no commit yet, no such branch or ref, a
-  detached HEAD: git exits 1): its trimmed output when git exits 0, nil when it exits 1; any other
-  exit (not a repository, git's own failure) throws its stderr, as git! does. With git!, the one way
-  src runs git (seon.main-test/git-is-read-through-fx)."
+  "git in dir with args (git-run), for a read whose no is an answer (no commit yet, no such branch
+  or ref, a detached HEAD: git exits 1): its trimmed output when git exits 0, nil when it exits 1;
+  any other exit (not a repository, git's own failure) throws git's words, as git! does."
   {:malli/schema [:=> [:cat :string [:sequential :string]] [:maybe :string]]}
   [dir args]
-  (let [r (apply sh/sh "git" "-C" dir args)]
+  (let [r (git-run {} dir args nil)]
     (case (int (:exit r))
       0 (str/trim (:out r))
       1 nil
-      (throw (ex-info (str "git " (str/join " " args) ": " (str/trim (str (:err r) (:out r)))) {:dir dir :exit (:exit r)})))))
+      (throw (git-failed args r)))))
 
 (defn- checked-out?
   "Is directory d a git checkout of its own (a submodule checked out: its .git), not only a
   directory inside its parent's work tree (where git rev-parse answers for the parent)?"
   {:malli/schema [:=> [:cat :string] :boolean]}
   [d] (.exists (java.io.File. ^String d ".git")))
-
-(declare git!)
 
 (defn git-refs
   "The refs directory of the git repository the checkout at co belongs to (its common dir, so a
@@ -111,17 +132,6 @@
         (and binary-tree head) (assoc :inputs (inputs base)
                            :binary (let [f (java.io.File. ^String binary-tree)] (when (.isFile f) (str/trim (slurp f)))))))
     (catch Throwable e (error :seon.fx/io-error (step/error-msg e) {:path root}))))
-
-(defn- git!
-  "git in dir with args, under the environment variables env adds ({name value}), its
-  trimmed output; a failure throws its stderr (git-commit answers it as :seon.fx/io-error)."
-  {:malli/schema [:=> [:cat [:map-of :string :string] :string [:sequential :string] [:maybe :string]] :string]}
-  [env dir args in]
-  (let [cmd (concat (when (seq env) (cons "env" (for [[k v] (sort env)] (str k "=" v)))) ["git" "-C" dir] args)
-        r (if in (apply sh/sh (concat cmd [:in in])) (apply sh/sh cmd))]
-    (when-not (zero? (:exit r))
-      (throw (ex-info (str "git " (first args) ": " (str/trim (str (:err r) (:out r)))) {})))
-    (str/trim (:out r))))
 
 (defn- env-input?
   "Is the file at relative path p an input of every test: everything git tracks or would
@@ -205,13 +215,14 @@
   Answers dir; a failure throws git's or tar's stderr, as git! does."
   {:malli/schema [:=> [:cat :string :string [:sequential :string] :string] :string]}
   [root rev paths dir]
-  (let [tar (.getAbsolutePath (java.io.File. (str dir ".tar")))]
-    (.mkdirs (.getParentFile (java.io.File. ^String tar)))
-    (git! {} root (concat ["archive" "-o" tar rev "--"] paths) nil)
-    (let [r (sh/sh "zsh" "-c" "rm -rf \"$1\" && mkdir -p \"$1\" && tar -x -C \"$1\" -f \"$2\"; e=$?; rm -f \"$2\"; exit $e" "checkout-at" dir tar)]
-      (when-not (zero? (:exit r))
-        (throw (ex-info (str "checkout-at " rev ": " (str/trim (str (:err r) (:out r)))) {})))
-      dir)))
+  (let [tar (java.io.File/createTempFile "seon-checkout-at" ".tar")]
+    (try
+      (git! {} root (concat ["archive" "-o" (.getPath tar) rev "--"] paths) nil)
+      (let [r (sh/sh "zsh" "-c" "rm -rf \"$1\" && mkdir -p \"$1\" && tar -x -C \"$1\" -f \"$2\"" "checkout-at" dir (.getPath tar))]
+        (when-not (zero? (:exit r))
+          (throw (ex-info (str "checkout-at " rev ": " (str/trim (str (:err r) (:out r)))) {})))
+        dir)
+      (finally (.delete tar)))))
 
 (defn pin
   "What a build or a test reads from the checkout at dir (a submodule), by content: its HEAD
@@ -431,15 +442,16 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [repo branch files tests]} :req}]
   (let [t0 (profile/now-ns)
-        ;; the branch's commit: none (no such branch) is an error to the asker, never a run at an empty sha
-        sha (try (git-try repo ["rev-parse" "--verify" "--quiet" (str branch "^{commit}")]) (catch Throwable e e))
+        ;; the branch's commit, or the error the asker gets: no such branch is never a run at an empty sha
+        sha (try (or (git-try repo ["rev-parse" "--verify" "--quiet" (str branch "^{commit}")])
+                     (error :seon.fx/io-error (str "no commit of branch " branch " in " repo) {:path repo}))
+                 (catch Throwable e (error :seon.fx/io-error (step/error-msg e) {:path repo})))
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
         clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"]
-        at (when (string? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
+        at (when-not (contract/error? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
     (cond
-      (instance? Throwable sha) (error :seon.fx/io-error (step/error-msg sha) {:path repo})
-      (nil? sha) (error :seon.fx/io-error (str "no commit of branch " branch " in " repo) {:path repo})
+      (contract/error? sha) sha
       (not (zero? (:exit at))) (error :seon.fx/io-error (str "bin/worktree --at exited " (:exit at) ": " (:err at)) {:path dir})
       :else
       (try
