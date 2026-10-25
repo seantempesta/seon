@@ -14,6 +14,10 @@
  :seon.render/opts [:map
                     ;; shown :as :page: the page's walk, its dbs and its tab's state (seon.render.proc/page-value)
                     [:page {:optional true} :map]
+                    ;; the db the value was read on (an agent's branch, for a value recorded as its basis),
+                    ;; and who draws what that agent's own renders draw (seon.render.ui/ctx)
+                    [:db {:optional true} [:maybe :seon.host/db]]
+                    [:drawer {:optional true} [:maybe [:map [:agent :keyword] [:handle :any]]]]
                     ;; the face (:html, the default, or :ai), when rendering through seon.render/render
                     [:face {:optional true} :seon.render/face]
                     ;; the room it is shown in: one line (a chat stream, a table cell), a full panel
@@ -73,6 +77,10 @@
  :seon.render/this-run [:map {:seon.render/html seon.render.ui/this-run} [:read [:map-of :symbol pos-int?]] [:defined [:vector :symbol]]
                         [:evaluated [:vector :symbol]] [:tests [:vector [:map [:form :string] [:handle :string]]]]]
  :seon.render/changes [:map {:seon.render/html seon.render.ui/changes} [:against :string] [:changes :map]]
+ ;; the agent's record as one map, @ctx (seon.ctx): its environment, its own attributes and its
+ ;; units by their short keys; the page draws it as a block (seon.render.ui/ctx), the model reads it
+ ;; through the one printer (no :ai render)
+ :seon.ctx/ctx [:map {:seon.render/html seon.render.ui/ctx} [:t :int] [:branch :seon.db/branch] [:commit {:optional true} :uuid]]
  ;; root's page's tile of main's problems (seon.render.proc/page-value): the report, by its own view,
  ;; with the ids of the classes its tab opened (:open, the /open toggle's): only those render their rows
  :seon.render/problems [:and :seon.problems/report [:map [:open [:set :string]]]]

@@ -8,7 +8,7 @@
   `malli->datahike-schema-in`, and the EDN slot codec). Kept: the type table, cardinality,
   uniqueness, index, refs, components and no-history from the attribute schema's own
   `:seon.db/*` properties, entity maps that declare their members (`:seon.db/attributes`),
-  and one explicit plain-data slot (`{:seon.db/data true}`). Cut: Seon's vector cells and Datalog lowering, the
+  and plain data for every value with no one Datahike type. Cut: Seon's vector cells and Datalog lowering, the
   projection (a registry generation), render-pair properties, secondary indexes, tuples, and
   the automatic EDN codec for unions (see notes/archive/option3-D1-schema-datahike.md).
 
@@ -25,8 +25,10 @@
   - `:seon.db/ref` is a reference (entity id, tempid, lookup ref or nested map); `[:set X]`
     is cardinality many.
   - A map with `{:seon.db/attributes true}` declares its members as attributes.
-  - `{:seon.db/data true}` on any schema stores its value as plain data (`:db.type/data`, our
-    Datahike's: the store's serializer writes it as data, no text between; docs/storage.md)."
+  - A vector, sequential, tuple, map, map-of, `:any`, or an `:or` whose arms differ in type
+    stores its value whole as plain data (`:db.type/data`, our Datahike's: the store's
+    serializer writes it as data, no text between, and a vector keeps its order and
+    duplicates; docs/storage.md#plain-values)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- error error?]] [malli.core :as m] [malli.registry :as mr]))
 
@@ -56,6 +58,10 @@
 ;; Here it descends only the one path that decides the storage: an attribute's schema is a
 ;; few nodes deep, and a data slot's value schema is never walked.
 
+(def ^:private data-types
+  "The Malli types stored whole as plain data (`:db.type/data`)."
+  #{:vector :sequential :tuple :map :map-of :any})
+
 (defn- refused
   {:malli/schema [:=> [:cat :qualified-keyword :any] :map]}
   [reason form] {:invalid [reason form]})
@@ -67,8 +73,6 @@
   [node active]
   (let [t (m/type node) props (m/properties node)]
     (cond
-      (:seon.db/data props) {:type :db.type/data :card :one :props props}
-
       (m/-ref-schema? node)
       (let [r (m/-ref node)]
         (cond
@@ -85,10 +89,17 @@
       (= :set t)
       (let [child (storage (first (m/children node)) active)]
         (cond (:invalid child) child
-              (= :many (:card child)) (refused ::nested-collection (m/form node))
+              (or (= :many (:card child)) (= :db.type/data (:type child))) (refused ::nested-collection (m/form node))
               :else (assoc child :card :many :props props)))
 
-      (#{:vector :sequential} t) (refused ::ordered-collection (m/form node))
+      ;; a value with no one Datahike type is stored whole as plain data: an ordered collection
+      ;; (order and duplicates kept), a map, a tuple, anything; and a union whose arms differ
+      (data-types t) {:type :db.type/data :card :one :props props}
+      (= :or t)
+      (let [arms (map #(storage % active) (m/children node))]
+        (cond (some :invalid arms) (first (filter :invalid arms))
+              (and (= :one (:card (first arms))) (apply = (map (juxt :type :card) arms))) (assoc (first arms) :props props)
+              :else {:type :db.type/data :card :one :props props}))
       (= :maybe t) (refused ::nilable (m/form node))
 
       (= := t)
@@ -109,12 +120,11 @@
 (def ^:private reasons
   {::absent "The attribute has no registered schema."
    ::cyclic "A stored attribute's schema refers to itself."
-   ::nested-collection "A stored collection holds scalars or refs, not another collection."
-   ::ordered-collection "A stored collection is a [:set T]; Datahike cardinality-many is unordered. Register [:set T], or mark an ordered value {:seon.db/data true}."
+   ::nested-collection "A stored [:set T] holds scalars or refs, one datom a member; a set of collections or maps is one value: register it as a [:vector T]."
    ::nilable "Stored attributes cannot use :maybe. Omit an absent key or mark its entity-map entry {:optional true}."
    ::literal "Only scalar Malli literals are storable."
    ::enum "Only keyword enums are storable."
-   ::value-type-unavailable "This Malli form has no Datahike value type. Register a scalar, or mark the value {:seon.db/data true}."})
+   ::value-type-unavailable "This Malli form has no Datahike value type. Register a scalar, a collection or a map."})
 
 (defn- storable?
   {:malli/schema [:=> [:cat :seon.host/registry :qualified-keyword] :boolean]}
