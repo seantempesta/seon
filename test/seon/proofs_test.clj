@@ -278,7 +278,7 @@
     (clojure.java.shell/sh "git" "-C" d "add" ".")
     (let [p (runner/plan-of d "tests" false nil store)]
       (is (contains? (:digests p) 'app.fi-calc-test/adds) "the tree read: its test is planned")
-      (is (= '[app.fi-empty-test] (:empty p)) "a test namespace the program db holds no test of is named, never left as an empty OK"))))
+      (is (= '[app.fi-empty-test] (:no-test p)) "a test namespace the program db holds no test of is named, never left as an empty OK"))))
 
 (deftest a-plan-reads-the-kept-program-db-of-its-tree
   ;; task seon.proofs/a-plan-keeps-a-program-db-per-tree: the program db is a function of the
