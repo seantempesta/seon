@@ -109,9 +109,12 @@
 
 (defn- merge-in!
   "Agent id's branch into main as a merge task's is: the writer's octopus merge of one
-  member (what seon.reconcile's :octopus-merge asks), answered as that member's result."
+  member (what seon.reconcile's :octopus-merge asks), answered as that member's result. The
+  agent commits its branch first (seon.agent/commit!; it commits when idle, which a request
+  straight to the writer does not wait for), as a run's end is committed before its merge."
   [sys id]
-  (let [r @(c/call! sys {:op :write :req {:op :octopus-merge :branches [(get-in (c/state sys) [:agents id :branch])] :data-attrs :all}})]
+  (let [_ @(c/submit! sys id "(seon.agent/commit!)")
+        r @(c/call! sys {:op :write :req {:op :octopus-merge :branches [(get-in (c/state sys) [:agents id :branch])] :data-attrs :all}})]
     (if (contract/error? r) r (first (:results r)))))
 
 (defn- main-q [sys query & inputs] (apply d/q query @(:conn sys) inputs))
