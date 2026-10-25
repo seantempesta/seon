@@ -66,10 +66,10 @@ DECISIONS: "A request's stages are separate steps in one session". Design, imple
 ```
 task :running, not done, its :needs done, no run of it :running, and one of:
   - it has had no run;
-  - a message to its agent exists on some branch (the sender's environment, or main for the user's and a root's) and not yet on its own branch;
+  - (messages to its agent on main) > (:seon.run/taken of its last run);
   - its last run is :lost.
 ```
-Both sides are facts, so the rule closes the lost wake without timing: a message written before the park and delivered to a process that had already decided to park is still not on the recipient's branch, so the reconciler wakes the session again at once. Delivery is a merge of the message's own datoms into the recipient's branch, and the content id makes a second delivery a no-op (section 3). The reconciler's index holds, per agent, the ids of messages to it seen in the writer's commits on any branch, minus those committed on its own branch: O(message datoms) per commit, since every branch's commit goes through root's one writer. No count is recorded, so the old `:seon.run/taken` is dropped.
+`:seon.run/taken` is how many message facts the session had taken when the run parked, which the agent reports with its end (the count of `:seon.message/to` it on its branch). It is the one new attribute: the reconciler's index holds main, where the messages are, and the taken copies are on the branch, which it reads only at a run's end, so recording the count then keeps the ready rule a comparison on main (section 3a measures the alternative). Both sides are counts of immutable facts, so the comparison closes the lost wake without timing: a message written before the park record and delivered to a process that had already decided to park is in the count and not in `taken`, so the reconciler wakes the session again at once (model-checked: 0 lost in 2,000 schedules, section 3a). The reconciler's index keeps the per-agent message count from each transaction's message datoms: O(datoms in the tx).
 
 The action for a ready session:
 - process live (parked) on the task's branch: `:wake`, which is today's `:started` step: `{:op :eval :forms (seon.turn/work! ...)}`, with no fork;
@@ -120,8 +120,8 @@ What this shows:
 - an effect's owner, for an async effect's outcome.
 
 It does exactly two things, in order:
-1. **Make the fact in the sender's environment** (owner, 2026-10-25, through the ctx-atom design §11: "agents have their own envs. So messages can get merged but are delivered into the other env"): `:seon.message/{id from to body}` on the sender's branch (main for the user and a root, since main is their environment). `to` is a ref to the recipient's agent entity, an existing attribute that refs a run today. `:seon.message/id` is a content id, so the message is one entity on every branch it reaches. The write is answered when committed in memory (group commit, AGENTS §5).
-2. **Deliver by merging that one fact into the recipient's environment:** `merge-tx` onto the recipient's branch, from the sender's head, for that message's keys only (ctx-atom design §10's mechanism, so this adds no second path). If the recipient has a live process, parked or busy, root's frame tells it, and it merges the message into its own branch at once (agents own their branch); its turn reads the message there. If it has no process, the message waits on the sender's branch, and the reconciler's rule (section 2) loads the session, which merges what is pending at load. Only the message crosses: nothing else of the sender's environment does.
+1. **Transact the fact on main:** `:seon.message/{id from to body}`. `to` is a ref to the recipient's agent entity, an existing attribute that refs a run today. `from` stays the sender's address, a string. The write is answered when committed in memory (group commit, AGENTS §5; measured 4.96 ms median, section 3a).
+2. **Deliver:** if the recipient has a live process, parked or busy, the existing `deliver-message` puts the message on its proc's input, then in its inbox. If not, nothing more happens: the fact is in the reconciler's count, which loads the session (section 2).
 
 **Addresses:**
 - a task's id names its session's agent;
@@ -148,7 +148,7 @@ The one error is an address nothing resolves. A message to a finished task's age
 | 3. `deliver-message`'s fact and no-fact entries | one entry, always a fact |
 | 4. the inbox's three feeders (sends, owner, effect replies) | one feeder: message facts. An async effect's outcome (`fx-send!`, `:fx-reply`, agent.clj:204, 678) is a message from its kind's owner. The synchronous `fx!` answer is unchanged |
 | 5. `basis!`'s two classes (`:message-ids` and `:messages`) and `taken-messages`' second branch | one class: ids |
-| 6. the fact written twice (on main by root, on the branch by the turn) | goes: written once, in the sender's environment, and merged into the recipient's |
+| 6. the fact written twice (on main by root, on the branch by the turn) | stays: one content id, one entity once merged. The branch's copy is the "taken" record the count needs, and the recipient's own environment holds it |
 | 7. `my.turn/wait`, hold, and `release!` as the only wake | `wait` stays (it parks with no message); hold for waiting goes; `release!` goes (a message releases) |
 | also | `seon.root/message!`, `seon.agent/send-message` and `my.agent/send-message` all become `my.agent/message!`; the web page's `>` special case (web.clj:89) goes |
 
@@ -170,6 +170,25 @@ The one error is an address nothing resolves. A message to a finished task's age
   does not show something you or the owner need, improve it (seon.render.ui): it is your interface too.
 ```
 The last item carries out the ruling "instruct agents to think about and use the UI". The same sentence goes into the system page (`seon.context/system-page`) so that every agent reads it.
+
+### 3a. Where a message lives: on main first, then delivered (measured and decided, 2026-10-25)
+The owner asked for a comparison (2026-10-25: "I would prefer real flow semantics where processes are independent, but not at the cost of stability and performance and complexity. We either have a better design or we do the simple one that works"). The two designs:
+- **A, main-first (this note):** the fact is written on main, then delivered to the recipient's process. A turn takes it onto the recipient's branch.
+- **B, sender-branch (the ctx-atom design's §11):** the fact is written on the sender's branch and delivered by merging that one entity into the recipient's branch.
+
+Measured at n ≤ 100 on this worktree's root (`notes/agent-loop/delivery-model.clj`, `notes/agent-loop/delivery-write-cost.clj`; no model calls):
+
+| | A main-first | B sender-branch |
+|---|---|---|
+| lost-wake safety (2,000 random schedules of up to 100 events: sends, turns, parks, deaths) | 0 lost | 0 lost |
+| the same check with A's park recording main's count instead of the branch's (the check can fail) | 190 lost | |
+| one delivery's writes, median (p90) | **4.96 ms** (5.75): one transaction on main, 3 datoms | **16.79 ms** (19.53): a transaction on the sender's branch, a read of that branch's head, a pull, a transaction on the recipient's branch. This is a lower bound: `merge-tx` itself does more |
+| what the reconciler reads to know a message is pending | main's commits, which it already reads; it grows with messages only | **every branch's every commit**: 10 ordinary evals made 10 commits of 7.3 datoms each, none of them a message. The work grows with agents times their write rate, and needs a new feed from the writer to the reconciler |
+| after root restarts | main's index, as today | a scan of every branch for message facts |
+| the user's timeline; root's page | one query on main | the user's own messages on main, but every agent-to-agent message only by reading each branch |
+| mechanisms | the fact on main, the existing delivery, the taken copy on the branch, `:seon.run/taken` | a branch write, a merge per delivery in the recipient, a branch-commit feed, a pending index, a boot scan |
+
+**Decision: A, main-first.** Both rules are safe. B is 3.4 times the write cost per delivery, makes the reconciler read all agents' writes instead of main's, and adds three mechanisms. That is the cost in performance and complexity the owner ruled out. Section 3 keeps main-first, with `:seon.run/taken` as its one new attribute (section 2's ready rule). Each agent still gets its own environment: a message reaches the recipient's branch (the taken copy, mechanism 6), and the recipient reads it there. Main holds the record, as it holds the user's timeline. The real flow semantics the owner prefers come from the main carrier (section 8a), not from where the fact lives: once agents' procs join root's graph by remote channels, a delivery is a channel put from the sender's proc to the recipient's, with the fact written first by the one writer.
 
 ## 4. Loading a session at a point: starting and resuming are one mechanism (owner, 2026-10-25)
 
@@ -240,7 +259,7 @@ Measured on the lab prototype: planning the replay took 2-12 ms, and replay took
 **Schema and config changes, each re-justified** (owner, 2026-10-25: "What are these attributes doing?"; the standing store is erased, never migrated: DECISIONS):
 1. **Kept, changed meaning:** `:seon.agent/key` is generated at a session's first load and stable from then on, no longer per boot. It is what messages address and what names the agent's namespace.
 2. **Kept, retargeted:** `:seon.message/to` refs the recipient's agent instead of a run, because a run no longer addresses anything. `:from` stays a string; `:reply-to` stays declared and unwritten.
-3. **No new attribute.** The old `:seon.run/taken` is dropped: whether a message is pending is derived from facts (on some branch, not yet on the recipient's).
+3. **New, the only one:** `:seon.run/taken` (int), the count that closes the lost wake on main (section 2; the alternative without it is measured in section 3a).
 4. **Moved into the record, no attribute:** the full set of called functions, in the eval record's existing `:fns` key (section 4, step 5).
 5. **Dropped:** `:seon.agent/continues` (no fork; a rewind keeps the agent, and the branch's parent commit is Datahike's own record), `:seon.agent/ns` (named from the key), `:parked` (a parked run is an ended run, outcome `:waiting`, `:cap` and the rest; whether a process is live is root's view), `:seon.eval/calls` (item 4), and `:seon.resume/*` (the load's own eval record, `:by "load"`, holds the plan).
 6. **Config keys:** `:seon.config.agent/replay` (`:pure` or `:all`, default `:pure`) and `:seon.config.agent/evict?` (default false), each with its unit, provenance and what happens at the bound. Possibly the fork server's static garbage bound, only if build part 1 measures growth that needs it.
@@ -335,17 +354,28 @@ What this shows, with the research subagent's source reading (Chez `c/gc.c`, `c/
 - The agent's procs join root's graph through remote ends, so Flow's own pause, resume and ping reach them as channel messages. A paused proc's input fills, and its senders park.
 - This deletes `run-loop`'s own lifecycle protocol, `agent-proc`'s bridge logic and the hand-written frames. The one writer still records each message on main before delivery (section 3).
 
-**Not yet measured:**
-- agent to root latency through a remote end, against today's 7-35 ms wake;
-- the loop with timers (change 3);
-- a full agent turn (evals, model calls through `my.fx`) inside `run-until`.
+**Built (2026-10-25):** Jolt `jolt/main-carrier` (seantempesta/jolt 4af22ebc, 0cf54944) has `jolt.host/main-carrier-run!`.
+- The program itself is a fiber, and the loop beneath it is the one scheduler, at a fixed base. A first version ran the loop from inside the main thread's waits instead. It failed: a fiber first run inside a wait captured that wait's stack and locks, and later returned into them (`mutex-release: thread does not own mutex`, a `dounderflow` into the old wait). So every wait is now a fiber's park.
+- Timers run in the loop, the poller's rounds run on this thread with the next deadline as their timeout, and a wait nothing can end raises.
+- The loop can wake on signals (`jolt.io-poller/wake-on-signals!`, kqueue's `EVFILT_SIGNAL`), so an agent whose only wake is root's interrupt waits for it.
+- Where the Chez allows it (patch 0008), the sweeper pool is fixed at none: on stock Chez, 1-2 runs in 10 of the test faulted; with the pool fixed, 20 of 20 passed.
+
+In Seon:
+- an agent's whole body runs under it (`seon.repl/run!`);
+- `seon.sock/recv!` parks on the socket's readiness;
+- `seon.intr` interrupts each eval's own thread.
+
+**Measured in Seon** (this worktree's root, an agent forked by the fork server; the same tree built with and without the main carrier, n = 100, twice):
+
+| | without | with the main carrier |
+|---|---|---|
+| an eval's round trip, root to agent to root, median (p90) | 5.87 / 5.95 ms (7.59 / 6.93) | **5.22 / 5.20 ms** (7.03 / 6.38) |
+| `(<!! (timeout 50))` | 57.9 ms | **52.1 ms** |
+| `alts!!` on a 20 ms timeout | 27.3 ms | **22.1 ms** |
+| 1,000 sequential 1 ms timeouts in a go loop | 1,497 ms | **1,262 ms** |
+| the agent's OS threads after those timers | **20** (the carriers and the timer they started: a process that can no longer fork safely) | **1** |
+
+- **A full agent turn inside the loop:** `bin/test seon.agent-test` is 35 of 35 green with every agent under the main carrier. That covers evals, test children forked from the agent, the judge, outside runs, resumed branches, `merge-main!`, a killed test run, and root's interrupt of a blocked take. The interrupt test went red first and was fixed by the signal wake and the eval's own thread.
+- **Not measured:** a paid model turn (scripted turns only); agent to root through a `jolt.async.remote` end (agents still use their socket frames; joining root's graph by remote channels is the next step); the loop on Linux (`wake-on-signals!` is macOS only).
 
 
-### 3a. Where a message lives: the sender's environment, delivered by merge (decided 2026-10-25)
-Two designs were on the table: this note's earlier one, "transact on main, then deliver to the process", and the ctx-atom design's §11, "made in the sender's environment, delivered by merging that one fact into the recipient's". Section 3 now takes §11, as the one mechanism, for four reasons:
-- **The owner asked for it:** agents have their own environments, and messages are delivered into the other environment. Main-first made main, root's environment, the store of every agent-to-agent message.
-- **One write, not two.** Main-first wrote each message on main and again on the recipient's branch when a turn took it (mechanism 6). Here it is written once and merged once, with the content id making a repeat delivery a no-op.
-- **No new attribute.** Whether a message is pending is a fact (on a branch, not yet on the recipient's), so `:seon.run/taken`, the one attribute revision 2 still added, is gone.
-- **It reuses a mechanism instead of adding one:** `merge-tx` over one entity's keys, the ctx-atom design's §10.
-
-The cost moves to root's index, which now reads message datoms from every branch's commits instead of main's alone. Every commit already passes through root's one writer, so that is O(message datoms) per commit; it is to be measured with a cost proof in build part 4. The user's and a root's messages are made on main, because main is their environment.
