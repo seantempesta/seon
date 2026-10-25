@@ -768,7 +768,7 @@
         es (into [te] (for [i (range 5)] (pdb/eid db :seon.section/address (anchors i))))
         db (d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) (repeat 6 10) "m"))
         ;; a function beside the plan by meaning, and a schema key its plan names
-        db (d/db-with db [{:db/id "f" :form/id "demo/g" :form/src "(defn g [])"} {:var/name 'demo/g :var/form "f" :var/doc "Gets it. More."}
+        db (d/db-with db [{:db/id "f" :form/id "demo/g" :form/src "(defn g [])" :form/keywords #{:demo/thing :demo/not-a-schema}} {:var/name 'demo/g :var/form "f" :var/doc "Gets it. More."}
                           {:schema/key :demo/thing :schema/form "[:map]"}])
         f (pdb/eid db :form/id "demo/g")]
     [(d/db-with db (vector/tx-data [f] [1] [(dir 1.0 0.05)] [10] "m")) te dir]))
@@ -785,7 +785,8 @@
         "the sections nearest first, the section the plan cites left out")
     (is (= ['demo/g] (:functions rel)) "the functions nearest it")
     (is (= [:demo/thing] (:schemas rel)) "and the schema keys its plan names")
-    (is (= ["demo/g: Gets it."] (:functions v)) "a function a line: its name and its doc's first sentence")
+    (is (= ["demo/g: Gets it. [:demo/thing]"] (:functions v))
+        "a function a line: its name, its doc's first sentence and the registry keys it operates on (its :form/keywords)")
     (is (some #{"(my.task/related)"} seon.screen/forms) "a form of the screen: each turn evaluates it, as an eval the agent sees and can rerun")
     (is (= ["docs/vector.md#the-model: Section 0 says one thing." "docs/vector.md#the-pyramid: Section 2 says one thing."
             "docs/vector.md#fused-with-the-call-graph: Section 3 says one thing." "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval: Section 4 says one thing."]

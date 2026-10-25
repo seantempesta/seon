@@ -363,12 +363,14 @@
   [db sym] (some->> (pdb/eid db :var/name sym) (d/entity db) :var/form :form/src))
 
 (defn callers
-  "The program vars whose recorded definition names var sym on db (its :form/refs), sorted; sym
-  itself left out: the one query my.agent/callers and the task story ask."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :qualified-symbol]]}
-  [db sym]
-  (vec (sort (disj (set (d/q '[:find [?v ...] :in $ ?s :where [?f :form/refs ?s] [?f :form/defines ?e] [?e :var/name ?v]] db sym))
-                   sym))))
+  "The program vars whose recorded definition names x on db, sorted, x itself left out: a var by
+  its :form/refs, a qualified keyword (an attribute, config key or schema entry) by its
+  :form/keywords, the data it operates on. The one query my.agent/callers and the task story ask."
+  {:malli/schema [:=> [:cat :seon.host/db [:or :qualified-symbol :qualified-keyword]] [:vector :qualified-symbol]]}
+  [db x]
+  (let [a (if (keyword? x) :form/keywords :form/refs)]
+    (vec (sort (disj (set (d/q '[:find [?v ...] :in $ ?a ?s :where [?f ?a ?s] [?f :form/defines ?e] [?e :var/name ?v]] db a x))
+                     x)))))
 
 (defn resolve-ref
   "Var sym as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth):

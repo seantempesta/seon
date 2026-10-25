@@ -107,6 +107,19 @@
     (is (= '#{app.pt-ban/inner} (:inline-defs acct)) "a def inside a function body"))
   (is (empty? (:banned (eval-account 'app.pt-ban "(defn fine [m] (assoc m :intern 1))"))) "a keyword named like it is nothing"))
 
+(deftest the-keywords-a-form-names-are-recorded
+  ;; root's gate (approved): :form/keywords, the data a function operates on, recorded by the
+  ;; analyzer from the read it already does: its code's qualified keywords and its contract's
+  (let [src "(defn kw-user {:malli/schema [:=> [:cat [:map [:app.kw/thing :int]]] :app.kw/count]} [m] (assoc m :app.kw/count (:app.kw/thing m) :plain 1))"
+        acct (eval-account 'app.pt-kw src)
+        db (record (empty-db) 'app.pt-kw src)]
+    (is (= #{:app.kw/thing :app.kw/count} (:keywords acct)) "its code's and its contract's qualified keywords, the unqualified left out")
+    (is (= #{:app.kw/thing :app.kw/count} (set (d/q '[:find [?k ...] :where [?v :var/name app.pt-kw/kw-user] [?v :var/form ?f] [?f :form/keywords ?k]] db)))
+        "as facts of its form")
+    (is (= ['app.pt-kw/kw-user] (seon.docs/callers db :app.kw/thing)) "a key's functions, one AVET seek")
+    (is (= [src] (mapv :src (program/schema-dependents db #{:app.kw/count}))) "the form that re-arms when a key it names changes")
+    (is (empty? (:keywords (eval-account 'app.pt-kw "(defn plain [m] (:x m))"))) "no qualified keyword, nothing recorded")))
+
 (deftest catches-and-clocks-are-recorded
   ;; for the guard detectors (session PATTERNS): a hiding guard is a catch answering a constant;
   ;; time deciding is a sleep, a deref with a timeout, or core.async's timeout
