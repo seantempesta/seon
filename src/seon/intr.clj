@@ -22,7 +22,7 @@
   Conditions (T1's): the process descends from Chez's main thread on every fork
   (else the signal is lost); every wait loop retries EINTR."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn- defchecked]] [jolt.scheme :as scm] [seon.lib :as lib]))
+  (:require [seon.contract :as contract :refer [defn defn- defchecked]] [jolt.scheme :as scm] [seon.lib :as lib] [jolt.io-poller :as poller]))
 
 ;; The live bounded evals of this process, innermost first. The signal handlers run
 ;; on this (the only) thread at a Chez safe point and must find them; this is the
@@ -50,10 +50,12 @@
   (let [es @stack]
     (if (seq es)
       (let [newly (boolean (some true? (mapv #(set-token! % :interrupted) es)))]
-        ;; a form blocked in a wait (a channel take) reaches no tick: the thread's own
+        ;; a form blocked in a wait (a channel take) reaches no tick: its thread's own
         ;; interrupt flag, read by the wait when the signal wakes it, ends it as
-        ;; Thread.interrupt ends a blocked <!! (cleared when the eval ends, in run)
-        (.interrupt (Thread/currentThread))
+        ;; Thread.interrupt ends a blocked <!! (cleared when the eval ends, in run). The
+        ;; eval's thread, not this handler's: on a main carrier the eval is a fiber, a thread
+        ;; of its own, and the handler runs beneath it in the loop
+        (run! #(.interrupt ^Thread (:thread %)) es)
         newly)
       (do (reset! pending true) false))))
 
@@ -63,7 +65,8 @@
 
 ;; Outside any run-interruptible the engine timer has Chez's default handler, which
 ;; raises; a kick that arrives just outside one (a token set between push and entry)
-;; must do nothing there. An agent runs no fibers, so no scheduler handler is replaced.
+;; must do nothing there. An agent's fibers run on its main carrier, whose drain installs the
+;; scheduler's own handler while it runs them.
 (defchecked ^:private quiet-timer* [:=> [:cat] :any] (scm/eval-string "(lambda () (timer-interrupt-handler (lambda () (void))))"))
 
 (defn install!
@@ -73,6 +76,8 @@
   []
   (quiet-timer*)
   (install-kick* lib/SIGUSR1 on-usr1)
+  ;; on a main carrier the loop beneath may be waiting with nothing else to wake it: the signal does
+  (when (jolt.host/main-carrier?) (poller/wake-on-signals! [lib/SIGUSR1]))
   true)
 
 (defn exit-at-eof!
@@ -84,6 +89,7 @@
   {:malli/schema [:=> [:cat :seon.host/fn] :boolean]}
   [gone?]
   (install-kick* lib/SIGIO (fn [] (when (gone?) (lib/c-exit 0)) false))
+  (when (jolt.host/main-carrier?) (poller/wake-on-signals! [lib/SIGIO]))
   true)
 
 (defn run
@@ -96,7 +102,7 @@
   (when (or @pending (some #(deref (:cause %)) @stack))
     (throw (ex-info "interrupted by root" {:interrupted true})))
   (let [tok (jolt.host/make-interrupt)
-        e {:token tok :cause (volatile! nil)}]
+        e {:token tok :cause (volatile! nil) :thread (Thread/currentThread)}]
     (swap! stack conj e)
     (try (if ticks (jolt.host/run-interruptible tok thunk ticks) (jolt.host/run-interruptible tok thunk))
          (catch Throwable ex

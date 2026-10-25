@@ -36,7 +36,7 @@
         by (into {} (map (juxt :test identity)) (:proofs block))]
     (is (= {:test 'demo-test/f-test :status :pass} (by 'demo-test/f-test)) "a passing proof is its status")
     (is (string? (:source (by 'demo-test/g-test))) "a red proof shows its source")
-    (is (= [{:assert "(= 1 (g))" :got "(= 1 0)"}] (:failures (by 'demo-test/g-test)))
+    (is (= [{:assert (print/code "(= 1 (g))") :got (print/code "(= 1 0)")}] (:failures (by 'demo-test/g-test)))
         "a failure is the assertion and what it evaluated to")
     (is (= ['demo/f] (mapv :symbol (:write-set block))) "a proof named in the plan is not shown again in the write set")
     (is (string? (:source (first (:write-set block)))) "a var of the write set shows its source")
@@ -81,7 +81,7 @@
                                            :reasons reasons :turn 1 :max-turns 4
                                            :test-run-errors ["namespace app-test did not load: Unable to resolve symbol: g"]})]
     (testing "every reason but the task's own red proof (shown with the proofs), each with what explains it"
-      (is (= [{:reason :regression :test 'demo-test/g-test :failures [{:assert "(= 1 (g))" :got "(= 1 0)"}]}
+      (is (= [{:reason :regression :test 'demo-test/g-test :failures [{:assert (print/code "(= 1 (g))") :got (print/code "(= 1 0)")}]}
               {:reason :stray-red :test 'user/scratch-test :do '(my.task/update! :seon.task/proofs conj (quote user/scratch-test))}
               {:reason :contract-gap :vars ['demo/helper]}]
              (:refused block))))
@@ -161,7 +161,7 @@
                                      {:results {'ctx-calc-test/square-test :fail} :turn 1 :max-turns 4
                                       :reds (proofs/red-reports {:reports [rep]} #{'ctx-calc-test/square-test})})
         by (into {} (map (juxt :test identity)) (:proofs block))]
-    (is (= [{:assert "(= 9 (square 3))" :got "(= 9 6)"}] (:failures (by 'ctx-calc-test/square-test)))
+    (is (= [{:assert (print/code "(= 9 (square 3))") :got (print/code "(= 9 6)")}] (:failures (by 'ctx-calc-test/square-test)))
         "the assertion once, and what it evaluated to")
     (is (= [{:var 'ctx-calc/square :contract [:=> [:cat :int] :int] :doc "Squares x."}
             {:var 'ctx-ghost/half :contract [:=> [:cat :int] :int]}]
@@ -326,7 +326,7 @@
         ms (context/messages "H" block)
         times (fn [s] (count (filter #(str/includes? (str (:content %)) s) ms)))]
     (is (= 1 (times "Make ```demo/g``` exact.")) "the plan once")
-    (is (= 1 (times "(defn g \\\"Halves.\\\"")) "a cited source once")
+    (is (= 1 (times "(defn g \"Halves.\"")) "a cited source once, as code: its quotes as written")
     (is (= 1 (times ":test demo-test/f-test")) "the proofs once, in the turn sections")
     (is (not (str/includes? (:content (peek ms)) ":write-set")) "the turn sections hold no run section")))
 
@@ -351,8 +351,8 @@
     (is (= {:symbol 'ctx-depth/sq :arglists '([x]) :summary "Squares x."} (by 'ctx-depth/sq)) "bare: arglists and the first sentence")
     (is (= {:symbol 'ctx-depth/cube :arglists '([x]) :doc "Cubes x." :contract [:=> [:cat :int] :int]} (by 'ctx-depth/cube))
         "one backtick: arglists, doc and contract")
-    (is (= {:symbol 'ctx-depth/tri :source "(defn tri \"Triples x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 3 x))"} (by 'ctx-depth/tri))
-        "three backticks: the source")))
+    (is (= {:symbol 'ctx-depth/tri :source (print/code "(defn tri \"Triples x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 3 x))")} (by 'ctx-depth/tri))
+        "three backticks: the source, as code")))
 
 (deftest a-long-source-is-cut-by-the-printer-where-it-is-shown
   ;; the clipping audit (2026-10-25, P4): a cited source is whole in the story; the one printer
@@ -520,6 +520,29 @@
         db @conn
         e-of (fn [id] (d/q '[:find ?e . :in $ ?id :where [?e :seon.turn/id ?id]] db id))]
     [db [r0 r1] [(e-of "demo/f#1/0") (e-of "demo/f#1/1")]]))
+
+(deftest a-sessions-next-run-reads-its-earlier-runs
+  ;; design agent-loop section 1 (owner, 2026-10-25: "a resume where the agent wakes and responds
+  ;; to a message it should have the same previous context"): the conversation is the session's,
+  ;; not the run's. An agent's second run reads the evals of its first and the messages its first
+  ;; took, in tx order; another agent's records stay out
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+      (let [ev! (fn [id agent run code] (d/transact conn [{:seon.eval/id id :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key agent}
+                                                           :seon.eval/record {:code code :response {:handle (symbol "result" id) :value 1} :run run}}]))
+            run! (fn [run agent] (d/transact conn [{:seon.run/id run :seon.run/task [:seon.task/id "demo/f"] :seon.run/agent {:seon.agent/key agent}}]))
+            _ (run! "demo/f#1" "b/a1")
+            _ (ev! "e1" "b/a1" "demo/f#1" "(f 1)")
+            _ (d/transact conn (task/message-tx "m1" "user" "demo/f#1" "use g"))
+            _ (run! "demo/f#2" "b/a1")
+            _ (ev! "e2" "b/a1" "demo/f#2" "(f 2)")
+            _ (ev! "x1" "b/a9" "other#1" "(other)")
+            db @conn
+            a (:db/id (d/entity db [:seon.agent/key "b/a1"]))
+            ids (mapv (fn [[_ v]] (or (:seon.eval/id v) (:seon.message/id v))) (context/records db a))]
+        (is (= ["e1" "m1" "e2"] ids) "the first run's eval and message, then the second's, and no other agent's")))))
 
 (deftest a-run-printed-once-sends-what-a-cold-read-sends
   ;; the branch review (2026-10-25, F6, F7): a request threaded through what the run's earlier
@@ -730,3 +753,32 @@
     (is (string? (:more sim)) "and the form that searches further")
     (is (= sim (:similar (context/run-state db (task/task db "demo/c")))) "in the story")
     (is (nil? (context/similar db nil #{})) "off by default (:seon.config.render/similar 0): nothing listed")))
+
+(deftest a-red-proofs-source-reads-as-its-file
+  ;; owner, 2026-10-25: a test's source in my.task/status read as one escaped string literal
+  ;; (every quote \", every line break \n); it is code (seon.print/code) and prints as its file
+  ;; holds it, comments and quotes as written
+  (let [src "(deftest f-test
+  ;; f doubles: the plan's \"exact\" case
+  (is (= 4 (f 2))
+      \"two doubled\"))"
+        db (d/db-with (db-with-program) (program-facts [['demo-test/f-test src []]]))
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f exact."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+        state (context/turn-state db (task/task db "demo/f") {:results {'demo-test/f-test :fail} :reds [] :turn 0 :max-turns 4})
+        text (:text (print/print-value {:handle 'result/e1 :value state} {:handle 'result/e1}))]
+    (is (every? #(str/includes? text %) (str/split-lines src)) text)
+    (is (not (str/includes? text "\\\"two doubled")) "no quote escaped")))
+
+(deftest code-is-plain-data-that-round-trips
+  ;; root, 2026-10-25: code is plain data ({:seon.print/code text}), one representation live and
+  ;; stored: a record holding it stores as :db.type/data and reads back equal, printing verbatim
+  (let [src "(deftest f-test\n  ;; a comment, a \"quoted\" word\n  (is (= 4 (f 2))))"
+        c (print/code src)
+        rec {:code "(my.task/status)" :response {:handle 'result/e4 :value {:source c}}}
+        db (d/db-with (ts/test-db) [{:seon.eval/id "e4" :seon.eval/agent {:seon.agent/id :a1} :seon.eval/record rec}])
+        back (:seon.eval/record (d/pull db [:seon.eval/record] [:seon.eval/id "e4"]))]
+    (is (pdb/plain? c) "plain data")
+    (is (= c (seon.edn/decode (seon.edn/encode c))) "its EDN reads back")
+    (is (= rec back) "the record reads back equal")
+    (is (every? #(str/includes? (print/record-text back) %) (str/split-lines src)) "and prints verbatim")))

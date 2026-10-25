@@ -13,7 +13,7 @@
   printf '{:op :agents}\\n' | nc -w 5 127.0.0.1 PORT
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.reconcile :as r]
+  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.reconcile :as r] [datahike.api :as d]
             [seon.lib :as lib] [seon.edn :as sedn] [seon.repl :as repl] [seon.print :as print] [seon.render :as render] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str]))
 
 (defn- refused
@@ -23,18 +23,24 @@
 
 (defn task-summaries
   "Every task on main db: {id {:execution :done :blocked-by :runs [[id status outcome
-  turns tokens]] :failure}}: the server's and the e2e harness's one summary."
+  turns tokens]] :failure}}: the server's and the e2e harness's one summary. A key says something
+  or is left out: :done only when done, :blocked-by and :runs only when there are some (676 held
+  tasks spelled `:done false, :blocked-by #{}, :runs []` each, 2026-10-25)."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
   (let [idx (r/index db)]
     (into (sorted-map)
-          (for [[id t] (:tasks idx)]
-            [id (cond-> {:execution (:seon.task/execution t) :done (r/done? idx id) :blocked-by (r/blocked-by idx id)
-                         :runs (mapv (juxt :seon.run/id :seon.run/status :seon.run/outcome :seon.run/turns :seon.run/tokens)
-                                         (sort-by :seon.run/id (map (:runs idx) (get-in idx [:by-task id]))))}
+          (for [[id t] (:tasks idx)
+                :let [blocked (r/blocked-by idx id)
+                      runs (mapv (juxt :seon.run/id :seon.run/status :seon.run/outcome :seon.run/turns :seon.run/tokens)
+                                 (sort-by :seon.run/id (map (:runs idx) (get-in idx [:by-task id]))))]]
+            [id (cond-> {:execution (:seon.task/execution t)}
+                  (r/done? idx id) (assoc :done true)
+                  (seq blocked) (assoc :blocked-by blocked)
+                  (seq runs) (assoc :runs runs)
                   (:seon.task/failure t) (assoc :failure (:reason (:seon.task/failure t))))]))))
 
-(defn- agents-answer
+(defn agents-answer
   "Live agents (id, branch, status, task) and every task (task-summaries)."
   {:malli/schema [:=> [:cat :seon.root/sys] :map]}
   [sys]
@@ -76,10 +82,12 @@
       (refused (str "no task " id))
       (let [env (assoc (r/desired-env t) :model "outside")
             aid (task/run-id id (inc (count (filter #(= id (:seon.run/task %)) (vals (task/runs db))))))
-            ag (c/spawn! sys {:branch (:branch env) :task id :run aid})]
+            ;; the session's agent continues (design agent-loop section 1)
+            k (task/session-key db id)
+            ag (c/spawn! sys (cond-> {:branch (:branch env) :task id :run aid} k (assoc :key k)))]
         @(c/transact-main! sys (vec (concat (task/env-tx id {:model "outside"}) (task/execution-tx [id] :running)
                                             (task/run-start-tx aid id (:boot sys) ag env (System/currentTimeMillis)
-                                                                   (:plan (:seon.task/accumulated t))))))
+                                                                   (:plan (:seon.task/accumulated t)) k))))
         {:agent ag :task id :run aid}))))
 
 (defn- run-of
@@ -89,6 +97,19 @@
   (some (fn [a] (when (= ag (:seon.run/agent a)) {:run (:seon.run/id a) :task (:seon.run/task a) :env (:seon.run/env a)}))
         (task/running @(:conn sys))))
 
+(defn verdict
+  "Run run of task as main db holds its judgement: its status (:done or :merged: the done rule
+  had no reason; :closed with its task held: it had some), outcome and reason, and, for a held
+  task, the failure the judge wrote (its reason names the done rule's reasons) and the evidence."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.run/id :seon.task/id] :map]}
+  [db run task]
+  (let [r (d/pull db [:seon.run/status :seon.run/outcome :seon.run/reason] [:seon.run/id run])
+        t (d/pull db [:seon.task/execution :seon.task/failure :seon.task/evidence] [:seon.task/id task])]
+    (cond-> {:run run :status (:seon.run/status r)}
+      (:seon.run/outcome r) (assoc :outcome (:seon.run/outcome r))
+      (:seon.run/reason r) (assoc :reason (:seon.run/reason r))
+      (= :held (:seon.task/execution t)) (assoc :held (select-keys t [:seon.task/failure :seon.task/evidence])))))
+
 (def ops
   "The server's ops, the one table, keyed by a request's :op (an EDN request is a
   keyword-keyed map, {:op :agents}; a line opening `{\"` is MCP's, respond): each op's
@@ -97,7 +118,9 @@
   nil) and the request. MCP lists each as the tool seon_<op> (mcp-reply)."
   (array-map
    :agents {:doc "Live agents (id, branch, status, task) and every task (execution, done, blocked-by, its runs as [id status outcome turns tokens], problem)."
-            :args {} :answer (fn [sys _ _] (agents-answer sys))}
+            :args {} :answer (fn [sys _ _] (agents-answer sys))
+            ;; the form that answers it again at root's REPL (seon_eval root): its reply's cuts read through it
+            :again '(seon.server/agents-answer sys)}
    :eval {:doc "Evaluate Clojure in a running agent's process (recorded on its branch, origin :outside) or as \"root\" in root's process (root.repl: `sys` is root; my.root/run!, my.root/cancel! ...), each through the one REPL path. Answers its response (:seon.eval/response): {:handle :value :out :err :ex}, printed under its handle."
           :args {:agent {:type "string" :description "an agent id (a3) or root"} :code {:type "string" :description "Clojure forms"}}
           :required ["agent" "code"]
@@ -131,7 +154,7 @@
            :answer (fn [sys ag req]
                      (let [r @(c/prove! sys ag (set (map symbol (:names req))))]
                        (if (contract/error? r) r (select-keys r [:key :ran :pass :fail :error :red :reused :ms]))))}
-   :done {:doc "Hand the run the agent works back to root: the agent writes the run's end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason."
+   :done {:doc "Hand the run the agent works back to root: the agent writes the run's end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason. Answers the verdict when main holds it: the run's status (done, merged, or closed with its task held), outcome and reason, and for a held task the done rule's reasons; a defect of the reconciler that stops the judge, as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge), so a caller's read timeout must allow minutes."
           :args {:agent {:type "string"}} :required ["agent"]
           :answer (fn [sys ag _]
                     (if-let [{:keys [run task env]} (run-of sys ag)]
@@ -141,8 +164,15 @@
                         ;; and the run stays the agent's to hand back again
                         (cond (contract/error? r) r
                               (:ex r) (:ex r)
-                              (:text r) (do (c/judge! sys {:run run :task task :env env :agent ag})
-                                            {:judging run})
+                              (:text r) (let [t (:max-tx @(:conn sys))
+                                              status #(:seon.run/status (d/pull % [:seon.run/status] [:seon.run/id run]))
+                                              ;; judged: the run left :running and :ended (the reconciler accepted,
+                                              ;; held or refused it), or a root defect stopped the judge
+                                              _ (c/judge! sys {:run run :task task :env env :agent ag})
+                                              db (c/await-db sys #(or (not (#{:running :ended} (status %))) (c/defect % t "seon.reconcile")))]
+                                          (if-let [p (and (#{:running :ended} (status db)) (c/defect db t "seon.reconcile"))]
+                                            {:run run :defect (select-keys p [:seon.error/type :seon.error/message])}
+                                            (verdict db run task)))
                               :else (refused (str ag " answered no end for " run))))
                       (refused (str ag " works no task"))))}))
 
@@ -190,11 +220,13 @@
                          (rpc-error id -32602 (str "no tool " n ": the tools are " (str/join ", " (map #(str "seon_" (name %)) (keys ops)))))
                          (let [a (answer sys (into {:op op} (for [[k v] (get params "arguments")] [(keyword k) v])))]
                            ;; what the model reads: the block itself, an eval's response as printed
-                           ;; under its handle, an error by its render, anything else whole by the
-                           ;; printer (the whole answer to an outside caller: nothing could re-ask it)
+                           ;; under its handle, an error by its render, an op's answer that root's
+                           ;; REPL answers again (:again) under the reply budget with that form as its
+                           ;; handle, anything else whole by the printer (nothing could re-ask it)
                            (result {"content" [{"type" "text" "text" (cond (and (= :context op) (:context a)) (:context a)
                                                                            (:response a) (:text (:response a))
                                                                            (contract/error? a) (render/ai a {})
+                                                                           (:again (ops op)) (let [p (print/print-value a {:handle (:again (ops op))})] (or (:text p) (:seon.error/message p)))
                                                                            :else (print/text (vary-meta a assoc :seon.print/full true)))}]}))))
         (rpc-error id -32601 (str "no method " method ": this server answers initialize, ping, tools/list and tools/call"))))))
 

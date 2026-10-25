@@ -24,7 +24,7 @@
 (def system-page
   "The system prompt, docs/prompt.md: what every agent reads first (its system message, the same
   bytes for every agent and turn, so a provider caches it): the standard format's short prompt
-  (owner, 2026-10-23: the model's context is the standard format; the help page is read on
+  (the owner's ruling: the model's context is the standard format; the help page is read on
   demand, my.agent/help). Main holds it as the wiki's sections, as the help page."
   "docs/prompt.md")
 
@@ -40,8 +40,10 @@
   message only when it says something."
   {:malli/schema [:=> [:cat :map] :map]}
   [r]
-  (cond-> {:assert (:expected r) :got (or (:got r) (:actual r))}
-    (:message r) (assoc :message (:message r))))
+  (let [code #(cond-> % (string? %) print/code)]
+    ;; an assertion as written is code (seon.print/code), printed as in the test file
+    (cond-> {:assert (code (:expected r)) :got (code (or (:got r) (:actual r)))}
+      (:message r) (assoc :message (:message r)))))
 
 (defn callees
   "The program functions proof p calls directly (one level: its recorded form's :form/refs,
@@ -217,7 +219,8 @@
                                       st (get results p (cond (nil? src) :undefined (seq test-run-errors) :not-run :else :no-assertions))
                                       fs (filter #(= p (:test %)) reds)]]
                             (cond-> {:test p :status st}
-                              (and src (not= :pass st)) (assoc :source src)
+                              ;; its source is code, printed as in its file (seon.print/code)
+                              (and src (not= :pass st)) (assoc :source (print/code src))
                               (seq fs) (assoc :failures (mapv failure fs))
                               (and src (not= :pass st) (seq (callees db p))) (assoc :calls (callees db p)))))}
       max-turns (assoc :turn (str (inc turn) " of " max-turns))
@@ -269,7 +272,10 @@
         ;; collapsed (opts :collapsed, an older one the history keeps small): its handle and its value in one line
         text (if (:collapsed opts)
                (str (get-in record [:response :handle]) " ⇒ " (:line record))
-               (print/record-text (cond-> record (seq (:fold opts)) (update :response folded (:fold opts)))))]
+               ;; a screen eval's cost is root's (its forms run each turn), shown on the page, not the model's
+               (print/record-text (cond-> record
+                                    (seq (:fold opts)) (update :response folded (:fold opts))
+                                    (= "screen" by) (update :response dissoc :ms :ticks :bytes))))]
     (if call-id
       ;; as the model sent it: the reply's text, and the call's own prose argument when it gave one
       ;; (a record with neither, from before the prose argument, replays its prose as the text)
@@ -392,19 +398,21 @@
     [(into (vec (repeat (max 0 (- b a)) :line)) (repeat (- n (max a b)) :whole)) a]))
 
 (defn records
-  "What run's conversation is made of on db, in tx order: agent a's evals of the run (not the
-  screen's or a context read's: those end only the request that ran them) and the messages the
-  run took (written on its branch by the turn that took each), each [tx value schema-key]; with
-  since, only those of transaction since and later (what a request has not printed yet)."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :int :seon.run/id] [:vector [:tuple :int :map :qualified-keyword]]]
-                  [:=> [:cat :seon.host/db :int :seon.run/id [:maybe :int]] [:vector [:tuple :int :map :qualified-keyword]]]]}
-  ([db a run] (records db a run nil))
-  ([db a run since]
+  "What agent a's conversation is made of on db, in tx order: its evals (not the screen's or a
+  context read's: those end only the request that ran them) and the messages its runs took
+  (written on its branch by the turn that took each), each [tx value schema-key]; with since,
+  only those of transaction since and later (what a request has not printed yet). The
+  session's, not one run's: a run that wakes or loads the session reads every run before it
+  (design agent-loop section 1)."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :int] [:vector [:tuple :int :map :qualified-keyword]]]
+                  [:=> [:cat :seon.host/db :int [:maybe :int]] [:vector [:tuple :int :map :qualified-keyword]]]]}
+  ([db a] (records db a nil))
+  ([db a since]
   (->> (concat (for [[e tx] (d/q '[:find ?e ?tx :in $ ?a ?since :where [?e :seon.eval/agent ?a ?tx] [(>= ?tx ?since)]] db a (or since 0))
                      :let [v (d/pull db [:seon.eval/id :seon.eval/by :seon.eval/record] e)]
-                     :when (and (= run (:run (:seon.eval/record v))) (not (#{"screen" "context"} (:seon.eval/by v))))]
+                     :when (not (#{"screen" "context"} (:seon.eval/by v)))]
                  [tx v :seon.db/eval-fact])
-               (for [[e tx] (d/q '[:find ?m ?tx :in $ ?r ?since :where [?ru :seon.run/id ?r] [?m :seon.message/to ?ru ?tx] [(>= ?tx ?since)]] db run (or since 0))]
+               (for [[e tx] (d/q '[:find ?m ?tx :in $ ?a ?since :where [?ru :seon.run/agent ?a] [?m :seon.message/to ?ru ?tx] [(>= ?tx ?since)]] db a (or since 0))]
                  [tx (d/pull db [:seon.message/id :seon.message/from :seon.message/body] e) :seon.message/fact]))
        (sort-by (fn [[tx v]] [tx (:seon.eval/id v (:seon.message/id v))]))
        vec)))
@@ -455,7 +463,7 @@
   makes it once per change (design section 10, step 4)."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:map [:messages [:vector :seon.model/message]] [:sent [:maybe [:vector :any]]] [:printed :map]]]}
   [a {:keys [db basis block help run help-ref run-ref printed]}]
-  (let [rs (if (and a (= :model (:origin basis))) (records db (:db/id a) (:run basis) (:tx printed)) [])
+  (let [rs (if (and a (= :model (:origin basis))) (records db (:db/id a) (:tx printed)) [])
         ;; each record printed once (opts :printed, the run's earlier requests'), then which the
         ;; history budget sends, whole or collapsed
         cache (printed-run (mapv (fn [[tx v k]] [(ref-of v) v k tx]) rs) printed)

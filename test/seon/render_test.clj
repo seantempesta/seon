@@ -254,6 +254,7 @@
       (is (= 90 (:problems-on-main-at-t data)))
       (is (= [:failed :merge] (keys (:classes data))) "a class with rows; an empty one left out")
       (is (= true (get-in data [:classes :merge :rows 0 :closed])))
+      (is (not (contains? (get-in data [:classes :merge :rows 0]) :class)) "a row under its class does not say it again")
       (is (str/includes? text "not total"))
       (is (str/includes? text ":as-data (with-meta result/h1 nil)")))))
 

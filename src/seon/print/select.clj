@@ -56,6 +56,13 @@
         (and (identical? c clojure.lang.PersistentTreeMap)
              (or (zero? (count value)) (identical? (class (key (first value))) clojure.lang.Keyword))))))
 
+(defn code?
+  "Is x code (seon.print/code): a map of the one key :seon.print/code to its text, plain data
+  that stores and reads back as it is."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [x]
+  (boolean (and (map? x) (== 1 (count x)) (keyword-lookup? x) (string? (:seon.print/code x)))))
+
 (defn- escaped-width
   "Characters the string literal spends on chars [from, to) of `s`; a newline stays a line break."
   {:malli/schema [:=> [:cat :string :int :int] :int]}
@@ -193,6 +200,9 @@
                                            :else (str x))))
       (identical? c Character) (scalar :seon.print/char x (if-let [n (char-name-string x)] (str "\\" n) (str "\\" x)))
       (identical? c String) {:kind :string :value x :total (.length ^String x)}
+      ;; code (seon.print/code): its text verbatim, cut by the one string cutter
+      ;; the count first: only a one-entry map asks code? (a contracted call)
+      (and (map-classes c) (== 1 (count x)) (code? x)) (let [s (:seon.print/code x)] {:kind :string :value s :total (.length ^String s) :code? true})
       ;; a name's node carries its text, which a cut of it replaces
       (or (identical? c clojure.lang.Keyword) (identical? c clojure.lang.Symbol))
       (let [face (if (keyword? x) :seon.print/keyword :seon.print/symbol)
@@ -252,6 +262,7 @@
   (when (and (:requery-id node) (not= :name (:kind node)))
     (emit/continuation
      {:seon.print/requery-id (:requery-id node)
+      :seon.print/code? (boolean (:code? node))
       :seon.print/elision-unit (cond (= :string (:kind node)) :characters (:pending? node) :pending :else :children)
       :seon.render.data/path (:path node)
       :seon.render.data/next-offset (cond (:sorted? node) 0
@@ -301,7 +312,8 @@
   [node]
   (let [form (node-continuation node)]
     (case (:kind node)
-      :string (emit/cut-words (- (:total node) (:shown node)) (lines-after (:breaks node) (:total node) (:shown node)) form)
+      ;; code's cut stands a space after its shown text (emit/elided-text)
+      :string (str (when (:code? node) " ") (emit/cut-words (- (:total node) (:shown node)) (lines-after (:breaks node) (:total node) (:shown node)) form))
       :name (str "…+" (- (:total node) (:shown node)))
       (cond-> (if (:pending? node) "…?" (str "…" (- (:total node) (:n node)))) form (str " " (emit/form-text form))))))
 
@@ -317,7 +329,8 @@
   [node]
   (case (:kind node)
     :leaf (:flat node)
-    :string (+ 2 (:shown-width node) (if (more? node) (count (cut-text node)) 0))
+    ;; a string literal's quotes; code has none
+    :string (+ (if (:code? node) 0 2) (:shown-width node) (if (more? node) (count (cut-text node)) 0))
     :name (+ (:shown-width node) (if (more? node) (count (cut-text node)) 0))
     (:map :coll) (let [lines (+ (:n node) (if (more? node) 1 0))]
                    (+ (count (str (:prefix node) (:open node) (:close node))) (:sum node)
@@ -335,7 +348,8 @@
         to (loop [i (long (:shown node)) width 0]
              (if (< i limit)
                (let [c (.charAt text i)
-                     width (+ width (if-let [e (when-not (= \newline c) (char-escape-string c))] (count e) 1))]
+                     width (+ width (cond (:code? node) (if (= \newline c) (inc (:indent node)) 1)
+                                          :else (if-let [e (when-not (= \newline c) (char-escape-string c))] (count e) 1)))]
                  (if (<= width room) (recur (inc i) width) i))
                i))
         at (break-at text to)]
@@ -383,7 +397,8 @@
     :scalar (leaf (:node c))
     ;; a name longer than :max-name
     :name (assoc (placed context depth path indent) :kind :name :node (:node c) :text (:text c) :value (:text c) :total (count (:text c)))
-    :string (assoc (placed context depth path indent) :kind :string :value (:value c) :total (:total c) :breaks (line-breaks (:value c)))
+    :string (cond-> (assoc (placed context depth path indent) :kind :string :value (:value c) :total (:total c) :breaks (line-breaks (:value c)))
+              (:code? c) (assoc :code? true))
     (merge (placed context depth path indent)
            (select-keys c [:kind :face :open :close :total :pending? :prefix :ordered? :indexed? :sorted? :lookup?])
            {:pending (:members c)})))
@@ -398,11 +413,29 @@
 (defn- member-indent {:malli/schema [:=> [:cat :seon.print/alloc] :int]} [node]
   (+ (:indent node) (if (= :seon.print/set (:face node)) 2 1)))
 
+(defn- breaks-before
+  "How many of a text's line breaks (`line-breaks`) sit before offset at: a binary search."
+  {:malli/schema [:=> [:cat [:vector nat-int?] nat-int?] nat-int?]}
+  [breaks at]
+  (loop [lo 0 hi (count breaks)]
+    (if (< lo hi)
+      (let [mid (quot (+ lo hi) 2)] (if (< (nth breaks mid) at) (recur (inc mid) hi) (recur lo mid)))
+      lo)))
+
+(defn- code-width
+  "Characters code `node`'s first `to` characters spend: each itself, and each line break its
+  indentation more (every later line starts at the node's place)."
+  {:malli/schema [:=> [:cat :seon.print/alloc :int] :int]}
+  [node to]
+  (+ to (* (:indent node) (breaks-before (:breaks node) to))))
+
 (defn- shown-to
   "String or name `node` showing its first `to` characters."
   {:malli/schema [:=> [:cat :seon.print/alloc :int] :seon.print/alloc]}
   [node to]
-  (assoc node :shown to :shown-width (if (= :name (:kind node)) to (escaped-width (:value node) 0 to))))
+  (assoc node :shown to :shown-width (cond (= :name (:kind node)) to
+                                           (:code? node) (code-width node to)
+                                           :else (escaped-width (:value node) 0 to))))
 
 (defn- entry
   "A map's entry of key and value nodes `kids`, its lines indented `indent`; sized when both kids
@@ -619,11 +652,36 @@
                 (recur (with-value entries i allotted) (- extra (- (:ub allotted) (:ub least))) more)
                 (recur entries extra more)))))))))
 
+(defn- row-class
+  "The kind that makes `held`, a member of `node`, a row: :map, :vector or :set (an array map and
+  a hash map are one kind), or in a sequence :string; else nil. A map's member is a row by its value when its key is no keyword
+  (an id's row; a keyword names an attribute, a part of one record, which shows breadth first).
+  A row at its least is a cut that shows nothing, a line and a form that say no more than the
+  collection's own cut."
+  {:malli/schema [:=> [:cat :seon.print/alloc :any] :any]}
+  [node held]
+  (let [map? (= :map (:kind node))
+        m (if (and (:indexed? node) (:sorted? node)) (nth held 1) held)
+        c (class (if map? (val m) m))]
+    (when-not (and map? (keyword? (key m)))
+      (cond (map-classes c) :map (vector-classes c) :vector (set-classes c) :set (and (not map?) (identical? c String)) :string))))
+
+(defn- alike?
+  "Are `node`'s members rows of one kind (`row-class`), as far as `:max-children` members reach
+  (the most a budget shows)."
+  {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc] :boolean]}
+  [context node]
+  (let [c (row-class node (first (:pending node)))]
+    (loop [members (next (:pending node)) k 1]
+      (cond (or (nil? c) (nil? members) (>= k (:max-children context))) (some? c)
+            (= c (row-class node (first members))) (recur (next members) (inc k))
+            :else false))))
+
 (defn- fill-members
   "Collection `node` within `budget`, breadth before depth: every member at its least while they
   fit (a map's key with its value at its least), then one cut; the budget left grows the members
-  (grow-values), so a long sequence, a table or a page shows every member at its least before
-  any one deepens."
+  (grow-values), so a long sequence or a page shows every member at its least before any one
+  deepens. Rows (`alike?`) show whole in their order instead (`fill-rows`)."
   {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc number?] :seon.print/alloc]}
   [context node budget]
   (let [sep (separator context node)
@@ -637,6 +695,42 @@
         skeleton (sized context (assoc node :kids entries :pending members))]
     (sized context (assoc skeleton :kids (grow-values context entries (- budget (:ub skeleton)) (= :map (:kind node)))))))
 
+(defn- fill-rows
+  "Collection `node` within `budget`, its first member a row (`row-class`): each member whole in
+  its order while it fits, then one cut for the rest. When not even the first fits whole, it is
+  filled to the room if the members are rows of its kind (`alike?`) and its first part shows;
+  otherwise, and at a member of another kind, the members share the room breadth before depth
+  (`fill-members`). It reads no member past the cut."
+  {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc number?] :seon.print/alloc]}
+  [context node budget]
+  (let [sep (separator context node)
+        c0 (row-class node (first (:pending node)))
+        ;; the cut as it prints, its form's path included, at its widest (both counts at the total's digits)
+        reserve (+ sep (count (cut-text (assoc node :n 0))) (count (str (:total node 0))))]
+    (loop [kids [] spent (+ (:ub (collapsed context node)) reserve) members (:pending node)]
+      (if-let [[held & more] (seq members)]
+        (let [cost (if (seq kids) sep 0)
+              c (child context node held (count kids))
+              room (- budget spent cost)
+              w (when (= c0 (row-class node held)) (whole context c room))]
+          (cond
+            w (recur (conj kids w) (+ spent cost (:ub w)) more)
+            ;; a row that does not fit ends the rows; a member of another kind makes the collection
+            ;; mixed, whose members share the room (a vector of a string, rows and a keyword)
+            (and (seq kids) (= c0 (row-class node held))) (sized context (assoc node :kids kids :pending members))
+            (or (seq kids) (not (alike? context node))) (fill-members context node budget)
+            :else
+            (let [part (when (pos? room)
+                         (if (= :entry (:kind c))
+                           ;; a map's member: its key at its least, its value filled to what is left
+                           (let [least (minimal context c) v (nth (:kids least) 1)]
+                             (sized context (assoc-in least [:kids 1] (allot context v (- room (- (:ub least) (:ub v)))))))
+                           (allot context c room)))]
+              (if (and part (shows? (if (= :entry (:kind part)) (nth (:kids part) 1) part)) (<= (:ub part) room))
+                (sized context (assoc node :kids [part] :pending more))
+                (fill-members context node budget)))))
+        (sized context (assoc node :kids kids :pending nil))))))
+
 (defn- allot
   "`node` within `budget` characters: whole when it fits, else filled to the budget (a collection
   breadth before depth, fill-members); a collection at the depth bound collapsed."
@@ -645,7 +739,9 @@
   (or (whole context node budget)
       (case (:kind node)
         (:string :name) (fill-string context node budget)
-        (:map :coll) (if (bound? context node) (collapsed context node) (fill-members context node budget))
+        (:map :coll) (cond (bound? context node) (collapsed context node)
+                           (row-class node (first (:pending node))) (fill-rows context node budget)
+                           :else (fill-members context node budget))
         (sized context node))))
 
 (defn- select
@@ -677,6 +773,7 @@
       (not (:pending? node)) (assoc :seon.print/omitted (max 1 (- (:total node) (if text? (:shown node) (:n node)))))
       text? (assoc :seon.print/prefix (subs (if (= :name (:kind node)) (:text node) (:value node)) 0 (:shown node)))
       (= :string (:kind node)) (assoc :seon.print/lines (lines-after (:breaks node) (:total node) (:shown node)))
+      (:code? node) (assoc :seon.print/code? true :seon.print/indent (:indent node))
       form (assoc :seon.print/continuation form)
       (nil? form) (assoc :seon.print/requery-refused (get-in context [:requery :seon.print/requery-refused] "the source has no stable requery identity")))))
 
@@ -702,7 +799,9 @@
       (case (:kind node)
         :entry kids
         :name (assoc (:node node) :seon.print/text (if cut (str (:seon.print/prefix cut) "…+" (:seon.print/omitted cut)) (:text node)))
-        :string (or cut {:seon.print/face :seon.print/string :seon.print/value (:value node)})
+        :string (or cut (if (:code? node)
+                          {:seon.print/face :seon.print/code :seon.print/value (:value node) :seon.print/indent (:indent node)}
+                          {:seon.print/face :seon.print/string :seon.print/value (:value node)}))
         (:map :coll)
         (let [children (cond-> kids cut (conj cut))
               collection (cond-> {:seon.print/face (if (= :seon.print/throwable (:face node)) :seon.print/map (:face node))}

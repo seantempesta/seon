@@ -183,10 +183,13 @@
 
 (defn value-of
   "The value a response r showed (an eval's, :seon.eval/response), read back from its :text (the
-  response printed under its handle; tagged literals kept), or nil when that text does not read
-  back as EDN (a var, a cut)."
+  response printed under its handle, as Clojure prints it: a var among its :values reads as
+  (var x); tagged literals kept; nothing evaluated): its :value, or the last of its :values
+  (each form's value, the last shown once), or nil when that text does not read back (a cut)."
   {:malli/schema [:=> [:cat [:maybe :map]] :any]}
-  [r] (try (:value (clojure.edn/read-string {:default tagged-literal} (str (:text r)))) (catch Exception _ nil)))
+  [r] (try (let [m (binding [*read-eval* false *default-data-reader-fn* tagged-literal] (read-string (str (:text r))))]
+             (if (contains? m :value) (:value m) (peek (:values m))))
+           (catch Exception _ nil)))
 
 (defn ask
   "One request m to a started root's server (bin/ask: its line on a socket, one reply line read,

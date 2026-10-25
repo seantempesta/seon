@@ -120,7 +120,7 @@
                   id)]
     (if (and (seq changed) (not (:writer-closed st)))
       (do
-        (step/out! o :to-writer {:op :tx :branch :db :tx-data (into [] (mapcat #(task/agent-tx (:boot st) % (observed (get now %)))) changed)
+        (step/out! o :to-writer {:op :tx :branch :db :tx-data (into [] (mapcat #(task/agent-tx (:boot st) % (observed (get now %)) (:key (get now %)))) changed)
                                  :dest {:agent-facts (vec changed)}})
         st)
       st)))
@@ -256,7 +256,7 @@
   end is a jolt.async.remote end (session RC1): its :in is the agent proc's :from, so the
   agent's port is an ordinary channel. Answers [st id agent-end-fd]."
   {:malli/schema [:=> [:cat :seon.root/api-state :map] [:tuple :seon.root/api-state :seon.agent/id :seon.lib/fd]]}
-  [st {:keys [branch task run cloned-from]}]
+  [st {:keys [branch task run cloned-from key]}]
   (let [n (inc (:next-id st))
         id (keyword (str "a" n))
         ;; named under root's main, so roots sharing a store never share a branch (seon.db/on-main)
@@ -274,6 +274,8 @@
          (assoc-in [:view :agents id] (cond-> {:branch branch :status :spawning :task task :pid nil
                                                :forked-ms nil :mem-mb nil :evals [] :tests nil}
                                         run (assoc :run run)
+                                        ;; the session's agent this process continues (seon.task/session-key)
+                                        key (assoc :key key)
                                         cloned-from (assoc :cloned-from cloned-from))))
      id a]))
 
@@ -337,7 +339,8 @@
                  (>= (count (:agents st)) (cfg/value :seon.config.root/max-agents)) (reply! st o p (refused 'seon.root/spawn! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)}))
                  :else (let [[st aid fd] (start-agent st opts)
                              branch (get-in st [:agents aid :branch])]
-                         (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :run (:run opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}})
+                         (step/out! o :to-writer (cond-> {:op :spawn :agent aid :branch branch :task (:task opts) :run (:run opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}}
+                                          (:key opts) (assoc :key (:key opts))))
                          ;; answered at its hello (set-agent's :ready), or the end it meets first
                          (assoc-in st [::spawning aid] p))))
       :clone (let [parent (:parent m)]
@@ -1006,6 +1009,34 @@
   :agent}. nil."
   {:malli/schema [:=> [:cat :seon.root/sys :map] :nil]}
   [sys run] (a/>!! (:judge sys) run) nil)
+
+(defn await-db
+  "Main's first db value (now or after a later commit) for which (pred db) holds: a watch on
+  main's connection runs pred once per commit. No deadline, no polling: what an outside caller
+  waiting on a fact parks on (the server's :done, a test)."
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] ifn?] :seon.host/db]}
+  [sys pred]
+  (let [p (promise) k (keyword "seon.root" (str "await-" (random-uuid)))
+        a (:wrapped-atom (:conn sys))]
+    (add-watch a k (fn [_ _ _ db] (when (pred db) (deliver p db))))
+    ;; the watch goes whatever ends the wait (an interrupt of a caller whose client left, a pred
+    ;; that threw on the current value)
+    (try (let [db @(:conn sys)] (when (pred db) (deliver p db)))
+         @p
+         (finally (remove-watch a k)))))
+
+(defn defect
+  "A root proc's defect (a :platform problem) whose record main wrote after t, or nil: a step
+  that threw dropped its outputs, so what it carried never ends. With nsname, only one raised
+  by an operation of that namespace (the reconciler's, for a run waiting on its judge). Facts,
+  not clocks."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :int] [:maybe :map]] [:=> [:cat :seon.host/db :int [:maybe :string]] [:maybe :map]]]}
+  ([db t] (defect db t nil))
+  ([db t nsname]
+   (some #(when (some (fn [dt] (> (:tx dt) t)) (d/datoms db :eavt (:e %) :seon.error/last-ms))
+            (let [x (into {} (d/entity db (:e %)))]
+              (when (or (nil? nsname) (= nsname (some-> (:seon.error/operation x) namespace))) x)))
+         (filter #(= :platform (:v %)) (d/datoms db :aevt :seon.error/class)))))
 
 (defn run-tests!
   "The agent forks itself and runs its deftests in the child; a promise of

@@ -326,6 +326,17 @@
   (let [[id] (in-agent ["(:seon.task/id (my.task/current))"])]
     (is (= "demo/t" (:value id)) (pr-str id))))
 
+(deftest an-agent-inherits-a-static-heap
+  ;; design agent-loop section 2: an agent forked after main moved inherits the fork server's
+  ;; heap in Chez's static generation, so its collections never copy (un-share) it. Measured
+  ;; 2026-10-25: 163 MB of the fork server's heap sat in generations 3 and 4 at fork, and one
+  ;; full collect in a fresh agent raised its footprint by 98 MB; made static, 106 MB after a
+  ;; work that left today's agent at 333 MB. The bytes in Chez's collected generations are
+  ;; work done (what the fork server held live), not load.
+  (let [[r] (in-agent ["(vec (for [g (range 1 5)] (jolt.scheme/eval-string (str \"(bytes-allocated \" g \")\"))))"])
+        mb (/ (reduce + (:value r)) 1048576.0)]
+    (is (< mb 16) (str "the agent inherited " mb " MB outside the static generation: " (pr-str r)))))
+
 (deftest an-agent-with-no-task-resumes-a-kept-branch
   ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
   ;; store already holds (a kept branch; e2e's fresh agent on a store an earlier run left)
@@ -406,7 +417,7 @@
                                   :code (str "(let [t (:max-tx @(:conn sys))] (seon.await/await-quiet sys (inc t))"
                                              " (select-keys (first (vals (seon.task/runs @(:conn sys)))) [:seon.run/outcome :seon.run/reason]))")}])
         run (:value seen)]
-    (is (contains? done :judging) (pr-str done))
+    (is (= :red (:outcome done)) (str "the answer is the verdict: " (pr-str done)))
     (is (= :red (:seon.run/outcome run)) (pr-str run))
     (is (str/includes? (str (:seon.run/reason run)) "proof-unknown demo-test/t") "the end names why it is red")
     (is (not (str/includes? (str (:seon.run/reason run)) "no end")) "never read as an end nobody wrote")))
@@ -424,7 +435,7 @@
                                                  "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) \"demo/t\")])")}])
         [run state] (:value seen)]
     (is (str/includes? (:text t) ":value #'demo-test/t") (pr-str t))
-    (is (contains? done :judging) (pr-str done))
+    (is (and (= :green (:outcome done)) (#{:done :merged} (:status done))) (str "the answer is the verdict: " (pr-str done)))
     (is (= :green (:seon.run/outcome run)) (pr-str run))
     (is (#{:done :merged} state) (str "the task finishes, never held for root: " state))))
 
@@ -571,7 +582,7 @@
   (let [q "[:find (pull ?e [:seon.run/outcome :seon.run/error]) . :where [?e :seon.run/task ?t] [?t :seon.task/id \"demo/m\"] [?e :seon.run/error]]"
         [_ r] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root"
                         :code (str "(do (my.root/run! sys [\"demo/m\"])"
-                                   " (let [a (datahike.api/q '" q " (seon.await/await-db sys #(datahike.api/q '" q " %)))]"
+                                   " (let [a (datahike.api/q '" q " (seon.root/await-db sys #(datahike.api/q '" q " %)))]"
                                    " [(:seon.run/outcome a) (:seon.error/type (:seon.run/error a))"
                                    " (mapv #(get-in % [:error :seon.error/type]) (get-in (my.root/problems sys) [:classes :error :rows]))]))")}]
                       {:sets [":seon.config.ai/provider=:none"]

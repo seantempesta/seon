@@ -111,3 +111,13 @@
     (is (not (contract/error? (:value status))) (pr-str (:value status)))
     (is (contains? (:value status) :proofs) "status answers as the turn measured it")
     (is (seq (:value sent)) "and the read records what it sent, as a model turn does (the debug page shows it)")))
+
+(deftest done-answers-the-judges-reasons
+  ;; dogfood 2026-10-25: seon_done answered {:judging ...} and ended the agent, so an outside agent
+  ;; never saw its verdict. It answers when main holds the judgement: here the one proof was never
+  ;; written, so the done rule refuses, the task is held, and the answer says why
+  (let [[done] (at/in-agent [{:op :done :agent "a1"}])]
+    (is (= :closed (:status done)) (pr-str done))
+    (is (= :red (:outcome done)))
+    (is (clojure.string/includes? (str (get-in done [:held :seon.task/failure :reason])) "proof-unknown demo-test/t")
+        "the done rule's reasons, as the judge wrote them on the held task")))

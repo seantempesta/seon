@@ -201,6 +201,8 @@
   [sig f] (install-signal-handler* sig f))
 
 (def ^:private linux? (.startsWith (str (System/getProperty "os.name")) "Linux"))
+(defn macos? "Is this macOS (kqueue, Mach)?" {:malli/schema [:=> [:cat] :boolean]}
+  [] (.startsWith (str (System/getProperty "os.name")) "Mac"))
 (def SIGUSR1 "Root's interrupt: 30 on macOS, 10 on Linux." (if linux? 10 30))
 (def SIGIO "Input on a socket that asked for it (O_ASYNC): 23 on macOS, 29 on Linux." (if linux? 29 23))
 
