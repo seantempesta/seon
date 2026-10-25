@@ -206,10 +206,9 @@
                 "(Tarjan's) and each one's Merkle digest once, sinks first; then per key its starting "
                 "components' digests: linear in the forms, never forms x keys (a walk per key was "
                 "quadratic here); a form is read as reach-row's five facts, none of the rest. Measured: "
-                "79 MB at 100, 242 MB at 1,000 (form-row's every fact set: 111 MB and 336 MB, 1.26x the "
-                "estimate at 10,000); the fixed part is the test store's example program")
+                "79 MB at 100, 242 MB at 1,000, 982 MB at 5,000; the fixed part is the test store's example program")
      :growth :linear
-     ;; ticks measured (seon.cost's once): 15.6M at 100, 47.2M at 1,000 (form-row's: 24.9M, 75.2M)
+     ;; ticks measured (seon.cost's once): 15.6M at 100, 47.2M at 1,000, 192.2M at 5,000
      :per-n {:ticks 36000 :bytes 185000}
      :fixed {:ticks 12500000 :bytes 62000000}
      :sizes [100 1000 10000]}))
