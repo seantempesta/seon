@@ -4,7 +4,7 @@
   each key by its own schema's render. Run: bin/test seon.ctx-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [seon.cost :as cost]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [seon.contract] [my.schema]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema]))
 
 (def ^:private k "The test agent's key." "test-boot/a1")
 
@@ -186,7 +186,7 @@
         (let [[h w] (block {want (:response answer)})]
           (is (re-find #"<ol><li>read the plan</li>" h) "the page shows the agent's drawing")
           (is (empty? w) "and asks nothing more"))
-        (let [[h w] (block {want {:error (seon.contract/error :seon.root/no-agent 'seon.root/api-proc "no live agent :a1" {:agent :a1})}})]
+        (let [[h w] (block {want {:error (#'seon.root/gone :a1 "no live agent :a1")}})]
           (is (re-find #"drawn by seon.ctx-test/steps in a1, which answered:" h) "an agent that did not draw it: its structure, and its answer")
           (is (re-find #"no live agent :a1" h))
           (is (empty? w))))
