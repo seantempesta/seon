@@ -177,18 +177,31 @@
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [loaded] (filterv contract/error? (vals loaded)))
 
+(defn- loader-dirs
+  "Where each of main's loaders reads under checkout co: {kind [dir]}, absolute."
+  {:malli/schema [:=> [:cat :string] [:map-of [:enum :docs :tasks :source] [:vector :string]]]}
+  [co]
+  {:docs [(str co "/docs")] :tasks [(config/value :seon.config.root/tasks-dir)]
+   :source (mapv #(str co "/" %) (config/value :seon.config.source/dirs))})
+
 (defn watch-kinds
-  "What a watcher's batch makes root load: a changed path under checkout co by its loader, a
-  ref moved under refs (a commit or merge: the source), and every kind for a rescan or a
-  moved root (FSEvents coalesced or dropped what happened under it)."
-  {:malli/schema [:=> [:cat :string [:maybe :string] [:vector [:tuple :keyword :string]]] [:set [:enum :docs :tasks :source]]]}
-  [co refs batch]
-  (into #{} (mapcat (fn [[kind path]]
-                      (cond (#{:rescan :root} kind) kinds
-                            (and refs (str/starts-with? path (str refs "/"))) [:source]
-                            (str/starts-with? path (str co "/")) (keep identity [(loader (str/replace-first path (str co "/") ""))])
-                            :else [])))
-        batch))
+  "What a watcher's batch makes root load: a changed path under checkout co by its loader; the
+  checkout's own branch moving (own, its ref under refs: a commit or merge on it) the source, and
+  no other ref (another worktree's commit is not this root's); a rescan or a moved root (FSEvents
+  coalesced or dropped what happened under it) the loaders reading under that path (a rescan of
+  target/ none, of the checkout every kind), and of refs the source alone."
+  {:malli/schema [:=> [:cat :string [:maybe :string] [:maybe :string] [:vector [:tuple :keyword :string]]] [:set [:enum :docs :tasks :source]]]}
+  [co refs own batch]
+  (let [dirs (loader-dirs co)
+        overlap? (fn [p d] (or (= p d) (str/starts-with? d (str p "/")) (str/starts-with? p (str d "/"))))]
+    (into #{} (mapcat (fn [[kind path]]
+                        (let [under-refs? (and refs (or (= path refs) (str/starts-with? path (str refs "/"))))]
+                          (cond (and (#{:rescan :root} kind) under-refs?) [:source]
+                                (#{:rescan :root} kind) (for [[k ds] dirs :when (some #(overlap? path %) ds)] k)
+                                under-refs? (when (= path own) [:source])
+                                (str/starts-with? path (str co "/")) (keep identity [(loader (str/replace-first path (str co "/") ""))])
+                                :else []))))
+          batch)))
 
 (defn watch-died-tx
   "The write of watcher error e at ms on main db, with held root's current :seon.root/watch fact: a :platform error
@@ -202,7 +215,8 @@
 
 (defn watch!
   "Root watches its checkout and its repository's refs (seon.watch, FSEvents: every writer,
-  a Claude session, an agent, the owner's editor, git). What changed while root was down is
+  a Claude session, an agent, the owner's editor, git), and loads on its own branch's ref only
+  (watch-kinds: the repository is shared by every worktree, whose commits are not this root's). What changed while root was down is
   boot's to load, as it always was: the wiki (seon.root/wiki-tx) and the source
   (seon.root/import-source!); task files are loaded on their change, or by load-tasks!, never
   at boot. Then each batch loads what it makes root load (watch-kinds),
@@ -213,6 +227,7 @@
   [sys]
   (let [co (config/checkout)
         refs (fx/git-refs co)
+        own (fx/head-ref co)
         roots (vec (remove nil? [co refs]))
         fact (fn [f] (root/transact-main! sys [{:seon.root/id :root :seon.root/watch f}]))
         fresh {:roots roots :boot (:boot sys) :batches 0 :paths 0 :rescans 0}
@@ -220,7 +235,7 @@
         died (fn [e] @(root/transact-main! sys (watch-died-tx @(:conn sys) (held) e (System/currentTimeMillis))))
         w (watch/start! roots
                         (fn [batch]
-                          (let [ks (watch-kinds co refs batch)
+                          (let [ks (watch-kinds co refs own batch)
                                 rescan (last (filter (comp #{:rescan :root} first) batch))]
                             ;; a batch no loader reads (root's own store under runs/, target/) writes
                             ;; nothing, so root's writes never feed its watcher
