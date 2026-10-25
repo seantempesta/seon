@@ -107,6 +107,16 @@
     (remove-watch r k)
     true))
 
+(defn- merge-in!
+  "Agent id's branch into main as a merge task's is: the writer's octopus merge of one
+  member (what seon.reconcile's :octopus-merge asks), answered as that member's result. The
+  agent commits its branch first (seon.agent/commit!; it commits when idle, which a request
+  straight to the writer does not wait for), as a run's end is committed before its merge."
+  [sys id]
+  (let [_ @(c/submit! sys id "(seon.agent/commit!)")
+        r @(c/call! sys {:op :write :req {:op :octopus-merge :branches [(get-in (c/state sys) [:agents id :branch])] :data-attrs :all}})]
+    (if (contract/error? r) r (first (:results r)))))
+
 (defn- main-q [sys query & inputs] (apply d/q query @(:conn sys) inputs))
 
 (defn- short-items "A response as a report shows it: its text, its error, its ms." [r]
@@ -154,10 +164,10 @@
         ;; the test's write vanished with the test's process
         _ (out! (ids 2) " after tests, its branch still says: " (printed (deref (c/submit! sys (ids 2) "(doc-of 'app.m0/f1)"))))
         _ (out! (ids 2) " branch diff before its merge: " @(c/branch-diff sys (ids 2)) "; stats now: " @(c/call! sys {:op :stats :id (ids 2)}))
-        m1 @(c/merge! sys (ids 0))
-        ;; git: a branch merges main first (main took a1's work), then root merges it
+        m1 (merge-in! sys (ids 0))
+        ;; git: a branch merges main first (main took a1's work), then it merges into main
         mm3 @(c/merge-main! sys (ids 2))
-        m3 @(c/merge! sys (ids 2))
+        m3 (merge-in! sys (ids 2))
         _ (out! "merge main into " (ids 2) " first: " (select-keys mm3 [:ok :applied :conflicts]))
         _ (out! "merge " (ids 0) ": " m1 "\nmerge " (ids 2) ": " m3)
         _ (out! "main notes: " (main-q sys '[:find ?a ?t :where [?n :note/agent ?a] [?n :note/text ?t]]))
@@ -165,14 +175,14 @@
                 "; note about: " (main-q sys '[:find ?v . :where [?n :note/about ?e] [?e :var/name ?v]]))
         ;; a second merge of the same branch: the note a3 created is the same entity on main
         _ @(c/submit! sys (ids 2) "(transact! [[:db/add (q '[:find ?n . :where [?n :note/agent :a3]]) :note/text \"f1 adds one (edited)\"]])")
-        m3b @(c/merge! sys (ids 2))
+        m3b (merge-in! sys (ids 2))
         _ (out! "merge " (ids 2) " again: " m3b " -> main a3 notes: "
                 (main-q sys '[:find [?t ...] :where [?n :note/agent :a3] [?n :note/text ?t]]))
         ;; a conflict: a2 changes f1's doc on its branch too, after main already took a3's change
         _ @(c/submit! sys (ids 1) "(transact! [{:var/name 'app.m0/f1 :var/doc \"a2's doc\"}])")
         mm2 @(c/merge-main! sys (ids 1))
         _ (out! "merge main into " (ids 1) " (both changed f1's doc): " (select-keys mm2 [:ok :applied :conflicts]))
-        m2 @(c/merge! sys (ids 1))
+        m2 (merge-in! sys (ids 1))
         _ (out! "merge " (ids 1) " with its conflict unmerged: " (dissoc m2 :tx))
         ;; clone: a3 forks itself, live values and all, onto a branch of its branch
         _ @(c/submit! sys (ids 2) "(def memo (atom {:seen 1}))")
@@ -198,9 +208,9 @@
         _ (out! a4 " spawned after the kill: " (short-items @(c/submit! sys a4 "(count (q '[:find ?n :where [?n :note/text]]))")))
         st (c/state sys)]
       {:report {:state (-> st (update :agents (fn [ags] (into (sorted-map) (for [[k v] ags] [k (-> v (dissoc :evals) (update :tests #(some-> % (dissoc :reports))))])))))}
-       ;; each agent's tests ran and passed; a1 and a3 merged (their tests judging); a2 is refused (its conflict, or the merged doc-test it now fails)
+       ;; each agent's tests ran and passed; a1 and a3 merged; a2 is refused (its conflict unmerged)
        :checks {:every-agent's-tests-pass (every? (fn [id] (let [t (tests id)] (and (not (contract/error? t)) (pos? (:pass t)) (zero? (+ (:fail t) (:error t)))))) ids)
-                :a1-merged-gated-by-its-tests (and (:merged? m1) (pos? (get-in m1 [:tests :pass] 0)))
+                :a1-merged (:merged? m1)
                 :a3-merged-twice (and (:merged? m3) (:merged? m3b))
                 :a2-refused (not (:merged? m2))}}))))
 
@@ -626,7 +636,7 @@
         st (c/state sys)
         mem1 (lib/sysmem)
         agent-mb (keep #(get-in st [:agents % :mem-mb]) ids)
-        merged (mapv (fn [id] @(c/merge-main! sys id) @(c/merge! sys id)) (take 10 ids)) ; as a merge task does: main first
+        merged (mapv (fn [id] @(c/merge-main! sys id) (merge-in! sys id)) (take 10 ids)) ; as a merge task does: main first
         notes (count (main-q sys '[:find ?n :where [?n :note/text]]))
         fs @(c/call! sys {:op :fs :req {:op :stats}})
         ;; kill! marks :killed at once; the :killed event says root has retired the process
@@ -707,7 +717,7 @@
 (defn durable-write
   "Phase 1 (a process of its own): boot on main branch nm of the one store (made from its
   seed), then
-  a merges a new f1 (gated), b commits unmerged facts and a recorded defn on its branch,
+  a merges a new f1, b commits unmerged facts and a recorded defn on its branch,
   c's clone commits on a branch of a branch. Root then exits WITHOUT stop! (SIGKILL of
   itself): nothing but the store survives."
   [nm]
@@ -716,7 +726,7 @@
     (let [path (str (seon.db/agents-dir (:cfg sys)) "/durable")
         [a b k] (spawn-ready! sys {:task "make f1 multiply" :branch :dur-a} {:task "unmerged work" :branch :dur-b} {:task "parent" :branch :dur-c})
         ra (p1 sys a "(in-ns 'app.m0) (defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (* x 10)) (deftest f1-test (is (= 20 (f1 2)))) (f1 2)")
-        m @(c/merge! sys a)
+        m (merge-in! sys a)
         rb (p1 sys b "(in-ns 'app.m1) (defn f2 {:malli/schema [:=> [:cat :int] :string]} [x] (str \"b:\" x)) (deftest f2-test (is (= \"b:1\" (f2 1))))
                              (in-ns 'agent.a2) (transact! [{:note/text \"b's unmerged note\" :note/agent :b}]) (app.m1/f2 1)")
         cl (ready! sys #(deref (c/clone! sys k {:branch :dur-clone})))
@@ -753,7 +763,7 @@
         t-b @(c/run-tests! sys rb)
         r-c (p1 sys rc "(sort (q '[:find [?t ...] :where [?n :note/text ?t]]))")
         mmb @(c/merge-main! sys rb)
-        mb @(c/merge! sys rb)
+        mb (merge-in! sys rb)
         [n2] (spawn-ready! sys "after merging b")
         r-n2 (p1 sys n2 "(app.m1/f2 1) (q '[:find [?t ...] :where [?n :note/agent :b] [?n :note/text ?t]]) (app.m0/f1 2)")]
       {:report {:store (:store st) :main (:main st) :main-data-datoms {:phase-1 (:main-datoms expect) :recovered md}

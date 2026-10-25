@@ -79,9 +79,8 @@
      ;; health is what flows: each declared proc with the defects root recorded of it (a
      ;; step that threw); no ping, no beat
      :health (proc-health-of st (:root-errors v []))
-     ;; merges into main: root's merge! of a branch (its events) and the reconciler's
-     ;; merged runs (main's facts)
-     :main (assoc (:main st {}) :merges (+ (:merges st 0) (count (filter #(= :merged (:seon.run/status %)) (vals (:runs st))))))
+     ;; merges into main: the reconciler's merged runs (main's facts)
+     :main (assoc (:main st {}) :merges (count (filter #(= :merged (:seon.run/status %)) (vals (:runs st)))))
      :recorded (:recorded st)
      :tasks (:tasks st {}) :runs (:runs st {}) :task-rows (:task-rows st {}) :agent-run (:agent-run st {})
      ;; a stop that arrived before main recorded how the run ended says so once main does
@@ -621,12 +620,11 @@
   [x ch n] (loop [acc [x]] (if-let [y (and (< (count acc) n) (a/poll! ch))] (recur (conj acc y)) acc)))
 
 (defn- on-event
-  "An event: kept for the stream (merges counted), and the view asked for; an agent's commit
+  "An event: kept for the stream, and the view asked for; an agent's commit
   recorded by its id (ask-branches reads its branch again)."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [st ev]
   (cond-> (update st :new-events conj ev)
-    (and (= :merged (:type ev)) (get-in ev [:result :merged?])) (update :merges (fnil inc 0))
     ;; an agent's commit moves its branch: a page of it reads the branch again (its turns and evaluations are written there)
     (and (= :commit (:type ev)) (:agent ev)) (assoc-in [:commits (:agent ev)] (:t ev))))
 
@@ -744,7 +742,7 @@
    (let [events (a/chan (a/sliding-buffer 4096))]
      (a/tap (:events-mult args) events)
      {:events-ch events :mult (:events-mult args) :system-p (:system args) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{}
-      :new-events [] :events [] :views {} :branches {} :merges 0
+      :new-events [] :events [] :views {} :branches {}
       ::flow/in-ports {:events events}}))
   ([st tr]
    (when (= tr ::flow/stop)

@@ -194,7 +194,7 @@
 
 (deftest root-records-what-went-wrong-in-an-agent
   ;; the one producer of what is wrong (seon.render.ai/problems reads only what is recorded):
-  ;; root records a red run or a refused merge of an agent with no task, and a refused spawn
+  ;; root records a red run of an agent with no task, and a refused spawn
   (let [view {:agents {:a1 {:status :idle} :a2 {:status :idle :task "t/x"}}}
         red {:pass 1 :fail 1 :error 0 :reports [{:type :pass :var "#'app.t/ok"} {:type :fail :var "#'app.t/red"}]}
         written (fn [[_ o]] (mapv (juxt :seon.error/class :seon.error/type :seon.error/message :seon.error/last-agent) (first (writes o))))]
@@ -203,10 +203,6 @@
              (written (step (api view) :back {:op :status :agent :a1 :set {:tests red}})))))
     (testing "a task's agent: its run records its reds at its end, not root"
       (is (= [] (written (step (api view) :back {:op :status :agent :a2 :set {:tests red}})))))
-    (testing "a merge the writer refused is recorded as the writer's refused answer"
-      (let [r (contract/error :seon.merge/behind 'seon.writer/merge-branch "main changed 2 key(s)" {:tx 1 :behind 2})]
-        (is (= [[:agent :seon.merge/behind "main changed 2 key(s)" :a1]]
-               (written (step (api view) :from-writer {:dest {:merged :a1 :rid 5} :r r}))))))
     (testing "a refused spawn, of any agent"
       (is (= [[:agent :seon.agent/failed "fork server went down before the fork" :a2]]
              (written (step (api view) :back {:op :status :agent :a2
@@ -288,7 +284,7 @@
       (is (= [] (:answered-by e)))
       (is (some? s)))
     (testing "a merge: its conflicts, unmerged keys and the writer's refused answer, as evidence"
-      (let [behind (contract/error :seon.merge/behind 'seon.writer/merge-branch "main changed 2 key(s)" {:behind 2})
+      (let [behind (contract/error :seon.merge/behind 'seon.writer/merge-refused "main changed 2 key(s)" {:behind 2})
             db2 (:db-after (d/with db [{:seon.task/id "t/m" :seon.task/ns 't :seon.task/name "m" :seon.task/plan "p" :seon.task/execution :running
                                          :seon.task/branch :b :seon.task/kind :merge}
                                         {:seon.run/id "t/m#1" :seon.run/task [:seon.task/id "t/m"] :seon.run/boot "b" :seon.run/agent {:seon.agent/key "b/a2" :seon.agent/id :a2}
@@ -297,7 +293,7 @@
                                          :seon.run/conflicts [{:seon.merge/key [:var 'app/f] :seon.merge/kind :both-modified}]
                                          :seon.run/error behind}]))
             [m] (get-in (problems/report db2) [:classes :merge :rows])]
-        (is (= ["t/m#1" :behind 1 ["[:var app/g]"] 'seon.writer/merge-branch]
+        (is (= ["t/m#1" :behind 1 ["[:var app/g]"] 'seon.writer/merge-refused]
                [(:run m) (:status m) (:conflicts m) (:unmerged m) (:producer m)]))
         (is (= [{:key [:var 'app/f] :kind :both-modified}] (get-in m [:evidence :conflicts])))
         (is (= :seon.merge/behind (get-in m [:error :seon.error/type])))))

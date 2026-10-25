@@ -162,7 +162,7 @@
 
 (def ^:private behind
   ;; as seon.writer/merge-reason makes it
-  (seon.contract/error :seon.merge/behind 'seon.writer/merge-branch
+  (seon.contract/error :seon.merge/behind 'seon.writer/merge-refused
                        "main changed 3 key(s) since the branch's merge base: merge main into the branch first"
                        {:tx 812 :behind 3
                         :seon.error/fix "A merge task merges main into the branch (my.branch/merge-main!), resolves any conflict, and its proofs run on the combined program."}))
@@ -185,7 +185,7 @@
     (let [html (h/html (r/html behind {}))]
       (is (str/includes? html "main changed 3 key(s)"))
       (is (str/includes? html "fix: A merge task merges main"))
-      (is (str/includes? html "seon.merge/behind in seon.writer/merge-branch")))))
+      (is (str/includes? html "seon.merge/behind in seon.writer/merge-refused")))))
 
 (def ^:private failed-task
   (assoc task :seon.task/execution :held :seon.task/needs #{"calc/sub"}

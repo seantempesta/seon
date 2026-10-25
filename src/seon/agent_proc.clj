@@ -83,7 +83,7 @@
            (let [st (cond-> (to-proc! st (assoc msg (if (= kind :clone) :k :id) rid))
                       ;; a clone's socket follows in its own frame once the agent asks
                       (= kind :clone) (assoc :holding rid)
-                      true (update :inflight assoc rid (cond-> (select-keys m [:kind :branch :new :merge-branch :data-attrs :pass-fd])
+                      true (update :inflight assoc rid (cond-> (select-keys m [:kind :branch :new :pass-fd])
                                                          ;; an eval's text, for its :started event
                                                          (string? (:forms msg)) (assoc :form (:forms msg))))
                       ;; what root last asked of it, for a stall or a death (seon.agent/last-op)
@@ -184,21 +184,10 @@
                (step/out! o :to-api (status st {:evals-add [(:response m)] :t (:t m) :status (busy st) :running nil}))
                (step/out! o :events (step/event {:type :reply :agent id :response (:response m)}))
                st)
-      :tests (let [{:keys [kind merge-branch data-attrs]} (get-in st [:inflight (:id m)])
-                   result (:result m)
+      :tests (let [result (:result m)
                    ;; a run the agent could not fork is its refused answer, answered as it is
                    ran? (not (contract/error? result))
-                   green? (and ran? (zero? (:fail result)) (zero? (:error result)))
-                   summary (select-keys result [:pass :fail :error :test])
-                   st (cond
-                        ;; a gated merge's green run goes on to the writer; its answer is the merge's
-                        (and (= kind :merge-tests) green?)
-                        (do (step/out! o :to-writer {:op :merge :branch merge-branch :data-attrs (or data-attrs :all) :dest {:merged id :rid (:id m) :tests summary}})
-                            (update st :inflight dissoc (:id m)))
-                        (and (= kind :merge-tests) ran?)
-                        (answer-rid st o (:id m) (contract/error :seon.merge/red 'seon.root/merge! (str "tests red: " (:fail result) " fail, " (:error result) " error")
-                                                                 {:tests summary :reports (vec (remove #(= :pass (:type %)) (:reports result)))}))
-                        :else (answer-rid st o (:id m) result))]
+                   st (answer-rid st o (:id m) result)]
                (step/out! o :to-api (status st (cond-> {:mem-mb (:mem-mb m) :status (busy st)} ran? (assoc :tests result) (not ran?) (assoc :error result))))
                (when ran? (step/out! o :events (step/event {:type :tests :agent id :ms (:ms result) :pass (:pass result) :fail (:fail result) :error (:error result)})))
                st)

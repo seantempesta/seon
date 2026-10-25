@@ -64,7 +64,7 @@
 
 (deftest a-writers-merge-names-its-runtime
   ;; task seon.db/each-commit-names-its-runtime: a branch merged into main through the writer
-  ;; (:merge, d/merge-db) is a transaction like any other: it names the runtime that made it
+  ;; (:octopus-merge, d/merge-db) is a transaction like any other: it names the runtime that made it
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
         b (pdb/on-main (:branch cfg) :a1)
@@ -76,8 +76,8 @@
                           [:db/add v :var/form "f2'"]])
         _ (d/release bc)
         t0 (:max-tx @conn)
-        [_ outs] (step #'writer/writer-proc st :in {:op :merge :branch b :dest {:rid 1}})]
-    (is (:merged? (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))) "the branch merges")
+        [_ outs] (step #'writer/writer-proc st :in {:op :octopus-merge :branches [b] :dest {:rid 1}})]
+    (is (:merged? (first (:results (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))))) "the branch merges")
     (is (< t0 (:max-tx @conn)))
     (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @conn (:max-tx @conn)))) "and its merge names the runtime")))))
 
@@ -342,7 +342,7 @@
   (let [st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                              :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
         bare? (fn [r] (and (map? r) (seon.contract/error? r) (empty? (filter fake-members (keys r)))))]
-    (doseq [op [:eval :tests :merge-tests :merge-main :stats]]
+    (doseq [op [:eval :tests :merge-main :stats]]
       (let [p (promise)]
         (step #'root/api-proc st :ext {:op op :id :nope :forms "1" :p p})
         (is (bare? @p) (str op " to no live agent: " (pr-str @p)))))

@@ -63,7 +63,7 @@ Each fact the page and root's context both show has one producer they share:
 
   A new status is one enum entry. Not this: a status set typed out at each site that asks.
 - **How an agent is:** `seon.render.ui/shown-status` and `seon.render.ui/ended-as`; its newest events are the stream's own words (`seon.render.ui/event-detail`); a cost verdict's lines are `seon.cost/verdict-lines`. The writer, the fork server and main are `seon.render.ui/load-tiles`, data root's context prints one line each.
-- **Runs, merges and evaluations:** a test run's words are `seon.render.ui/run-words` and its redness `seon.proofs/red?`; a merge's result is `seon.render.ui/merge-words`; an evaluation is one render, ```seon.render.ui/evaluation```, for its entity, its record and a reply item.
+- **Runs, merges and evaluations:** a test run's words are `seon.render.ui/run-words` and its redness `seon.proofs/red?`; a merge is its run's end (`:seon.run/status` `:merged`, shown on its task's row); an evaluation is one render, ```seon.render.ui/evaluation```, for its entity, its record and a reply item.
 - **Errors:** an error or failure shown reads `:seon.error/message` of the one error map ([errors](errors.md#errors)), never a second `{:error "text"}` shape.
 - **Numbers:** root's view numbers (p50s, transactions per commit) are `seon.root/view-numbers`, read by `seon.root/state` and the render proc alike.
 - One-line text in a row or the context is `seon.print/line`. A root function called from the page is recorded on main by the render proc when root answers it (origin `:ui`), with that answer ([dashboard](dashboard.md)).

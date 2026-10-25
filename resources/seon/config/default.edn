@@ -226,18 +226,16 @@
  ;; Provenance: worktree session F2's literal 10, made a key (research row top-fns, 2026-10-22). At the
  ;; bound the rest are left out of the item; the record says nothing of them.
  :seon.config.agent/form-top-fns 10
- ;; Unit: engine ticks one proof run (every test of the branch, in its fork) may run. Larger
- ;; than a form's: cost proofs measure large sizes. At the bound the run stops with
- ;; :seon.test/ticks-spent naming the test that was running. 0: none.
+ ;; Unit: engine ticks ONE test (its :each fixtures included) may run, wherever it runs: an
+ ;; agent's turn, the judge, bin/test (seon.proofs/run-tests!). One bound, per test, so a test's
+ ;; verdict is a function of the test alone and the same in every place, and a green reused by
+ ;; its digest means the same thing everywhere (task seon.proofs/one-prove-path; it replaced a
+ ;; per-run bound and a turn's own smaller per-run bound, under which
+ ;; a proof could be red in its turn and green at the judge). Larger than a form's: cost proofs
+ ;; measure large sizes. Provenance: the per-run judge bound it was (no single in-process test
+ ;; needed more); each result records its :ticks. At the bound that test is an :error of
+ ;; :seon.test/ticks-spent naming it, and the run goes on. 0: none.
  :seon.config.agent/test-ticks 200000000000
- ;; Unit: engine ticks a turn's own test run may do: the task's proofs and the tests the
- ;; branch changed or added (root's ruling (a), 2026-10-22; the reached in-process set is the
- ;; judge's, at the run's end, under test-ticks). Provenance: step E's run 7, where a change
- ;; to seon.problems/report put 294 reached tests in every turn's run and one ran for 2.5 h;
- ;; the same budget as one form's (~5-25 s of work). At the bound the run stops with
- ;; :seon.test/ticks-spent; the tests it did not finish are unknown, never red, and the turn
- ;; says how many and how to run them (my.agent/prove). 0: none.
- :seon.config.agent/turn-test-ticks 20000000000
 
  ;; ==== merges =================================================================================
 

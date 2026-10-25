@@ -16,13 +16,10 @@
            (w/requests {:var 'seon.root/submit! :agent :a1 :forms "(+ 1 2)"} index))))
   (testing "all=>: one eval per live agent, the ended ones left out"
     (is (= [:a1 :a3] (mapv second (w/requests {:var 'seon.root/submit! :agent :all :forms "1"} index)))))
-  (testing "merge!: gated by the agent's tests, on its branch; no deadline (the child's exit ends a run)"
-    (is (= {:op :merge-tests :id :a1 :merge-branch :agent-1 :data-attrs :all}
-           (ffirst (w/requests {:var 'seon.root/merge! :agent :a1} index)))))
-  (testing "merge! of an ended agent: root refuses it (seon.root/request, the API fn's own table): its refused answer, for the asker"
-    (let [[[r id] & more] (w/requests {:var 'seon.root/merge! :agent :a2} index)]
+  (testing "merge!: no such request; a branch reaches main only through a merge task (the reconciler's octopus merge), so root refuses it (seon.root/request, the API fn's own table): its refused answer, for the asker"
+    (let [[[r id] & more] (w/requests {:var 'seon.root/merge! :agent :a1} index)]
       (is (= :seon.root/refused (:seon.error/type r)))
-      (is (= :a2 id))
+      (is (= :a1 id))
       (is (nil? more))))
   (testing "interrupt!: an effect this proc performs, no request"
     (is (= [] (w/requests {:var 'seon.root/interrupt! :agent :a1} index))))
@@ -93,10 +90,10 @@
       (is (str/includes? (seon.print/record-text rec) ":killed :a1") "what root answered"))))
 
 (deftest a-refused-ui-call-reaches-the-stream-and-main
-  ;; root refuses merge! of an ended agent before any request: the refused answer goes to the render
-  ;; proc as the call's answer (shown, and recorded on main with its error), not dropped
+  ;; root refuses a call of one of its fns that is none of its requests, before any request: the refused
+  ;; answer goes to the render proc as the call's answer (shown, and recorded on main as an :err item), not dropped
   (let [st (#'w/web-proc {:port 0})
-        [_ out] (#'w/web-proc (assoc st :index index) :http {:op :call :call {:var 'seon.root/merge! :agent :a2}})
+        [_ out] (#'w/web-proc (assoc st :index index) :http {:op :call :call {:var 'seon.root/nope! :agent :a2}})
         [m] (:to-render out)]
     (is (empty? (:to-api out)) "no request: root refused it")
     (is (= :refused (:op m)))
@@ -105,8 +102,8 @@
           [_ o] (#'p/render-proc rp :from-web m)
           w (first (filter #(= :write (get-in % [:req :op])) (:to-api o)))
           rec (some :seon.eval/record (get-in w [:req :req :tx-data]))]
-      (is (= "(seon.root/merge! :a2)" (:code rec)))
-      (is (str/includes? (seon.print/record-text rec) "agent not running") "what root refused, and why"))))
+      (is (= "(seon.root/nope! :a2)" (:code rec)))
+      (is (str/includes? (seon.print/record-text rec) "not one of root's requests") "what root refused, and why"))))
 
 (deftest a-listener-that-cannot-bind-is-the-one-error-map
   ;; task seon.render/one-owner-per-view-path (B2): a port taken is data, the one error map

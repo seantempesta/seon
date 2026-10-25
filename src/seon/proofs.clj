@@ -211,6 +211,32 @@
   []
   (let [v (test-symbol (str (first t/*testing-vars*)))] (seed v (get *digests* v))))
 
+(defn- test-vars
+  "clojure.test's test-vars for vars of namespace n (Jolt's: its :once fixtures around them, each
+  var in its :each fixtures), each test with a budget of its own: ticks engine ticks of work (nil:
+  unbounded), inside its :each fixtures, so their teardown runs whatever the test did. A test past
+  it reports one :error of the typed :seon.test/ticks-spent naming it, and ends (its
+  :end-test-var), so the next test runs. The namespace's fixtures are bounded too: the whole
+  namespace within ticks per test and one more, so a fixture that never ends stops the namespace,
+  its unreported tests :error (run-tests!)."
+  {:malli/schema [:=> [:cat :symbol [:sequential :any] [:maybe pos-int?]] :nil]}
+  [n vars ticks]
+  (let [each (t/join-fixtures (get @t/each-fixtures n []))
+        one (fn [v]
+              (try (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-var v) ticks)
+                   (catch Throwable e
+                     (if-let [spent (:jolt/ticks-spent (ex-data e))]
+                       (do (t/do-report {:type :error :var v :seon.error/type :seon.test/ticks-spent :ticks spent :budget ticks
+                                         :message (str "the test spent its budget of " ticks " engine ticks (work done, not time): a test that never ends, or more work than one test may do")})
+                           (t/do-report {:type :end-test-var :var v}))
+                       (throw e)))))
+        body #((t/join-fixtures (get @t/once-fixtures n []))
+               (fn [] (doseq [v vars :when (:test (meta v))] (each (fn [] (one v))))))]
+    (if ticks
+      (jolt.host/run-interruptible (jolt.host/make-interrupt) body (* ticks (inc (count vars))))
+      (body))
+    nil))
+
 (defn run-tests!
   "The one clojure.test runner (bin/test's shards, an agent's test fork): run tests (var
   symbols, their namespaces loaded) here, each namespace's by clojure.test/test-vars so its
@@ -220,17 +246,25 @@
   :ns n} for a red namespace's clojure.test output. It only runs: its caller stores the greens
   (store-greens!). Answers {test result}; a test that never reported, because its namespace's
   run threw (a fixture), is an :error result and an :error report carrying that throw's
-  message and data. A run's work budget (Jolt's ticks, :jolt/ticks-spent) ends the whole run:
-  that throw is the caller's. The per-namespace counts are volatiles local to its run:
-  clojure.test reports through a callback, one thread, no proc."
-  {:malli/schema [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn]
-                  [:map-of :qualified-symbol :map]]}
-  [tests digests note!]
-  (let [tset (set tests)]
+  message and data. Each test runs within ticks engine ticks of work of its own (Jolt's
+  run-interruptible; nil or 0: unbounded), so a test's verdict is a function of the test alone,
+  never of what ran before it in the run: one bound wherever it runs (bin/test, an agent's turn,
+  the judge). A test past it is an :error report of the typed :seon.test/ticks-spent naming it,
+  and the run goes on to the next (test-vars, which bounds a namespace's fixtures too: a throw
+  that ends a namespace, its budget's included, makes its unreported tests :error). Each result
+  carries the :ticks it did. The per-namespace counts are volatiles local to its run: clojure.test
+  reports through a callback, one thread, no proc."
+  {:malli/schema [:function [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn]
+                             [:map-of :qualified-symbol :map]]
+                  [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn [:maybe nat-int?]]
+                   [:map-of :qualified-symbol :map]]]}
+  ([tests digests note!] (run-tests! tests digests note! nil))
+  ([tests digests note! ticks]
+  (let [tset (set tests) ticks (when (and ticks (pos? ticks)) ticks)]
     (into {} (for [[n ts] (group-by (comp symbol namespace) tests)
-                   :let [counts (volatile! {}) ran (volatile! {}) out (java.io.StringWriter.) t0 (volatile! nil)
+                   :let [counts (volatile! {}) ran (volatile! {}) out (java.io.StringWriter.) t0 (volatile! nil) k0 (volatile! nil)
                          done! (fn [v] (let [r (assoc (merge {:pass 0 :fail 0 :error 0} (@counts v)) :test v :digest (digests v)
-                                                      :ms (quot (- (profile/now-ns) @t0) 1000000))]
+                                                      :ms (quot (- (profile/now-ns) @t0) 1000000) :ticks (- (jolt.host/ticks) @k0))]
                                          (vswap! ran assoc v r)
                                          (note! r)))
                          thrown (binding [t/*test-out* out
@@ -241,14 +275,14 @@
                                                      (let [v (some-> (or (:var m) (first t/*testing-vars*)) str test-symbol)
                                                            v (when (tset v) v)]
                                                        (case (when v (:type m))
-                                                         :begin-test-var (do (vreset! t0 (profile/now-ns)) (note! {:seon.test/started v}))
+                                                         :begin-test-var (do (vreset! t0 (profile/now-ns)) (vreset! k0 (jolt.host/ticks)) (note! {:seon.test/started v}))
                                                          :end-test-var (done! v)
                                                          (:pass :fail :error) (do (vswap! counts update-in [v (:type m)] (fnil inc 0))
                                                                                   (note! {:seon.test/report m :test v}))
                                                          nil))
                                                      (binding [t/*test-out* out] (report m)))]
-                                  (try (t/test-vars (keep #(ns-resolve n (symbol (name %))) ts)) nil
-                                       (catch Throwable e (if (:jolt/ticks-spent (ex-data e)) (throw e) e))))
+                                  (try (test-vars n (keep #(ns-resolve n (symbol (name %))) ts) ticks) nil
+                                       (catch Throwable e e)))
                          unreported (for [tst ts :when (not (@ran tst))]
                                       (let [msg (if thrown (str n "'s run threw before this test reported: " (ex-message thrown))
                                                     (str n "'s run ended before this test reported"))]
@@ -258,4 +292,4 @@
                          result (into @ran unreported)
                          _ (when (or thrown (some #(not (green? (result %))) ts)) (note! {:seon.test/output (str out) :ns n}))]
                    tst ts]
-               [tst (result tst)]))))
+               [tst (result tst)])))))
