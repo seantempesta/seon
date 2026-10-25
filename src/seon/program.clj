@@ -141,7 +141,7 @@
   names are the expansion's code (unit-account). A symbol of no namespace is data. By name,
   never by whether its namespace or var exists yet: that depends on what this process
   analyzed before, so a refresh, which loads only the changed files, dropped what a whole
-  import kept (240 against 250 tests left out on one tree, 2026-10-25)."
+  import kept (240 against 250 tests left out on one tree)."
   {:malli/schema [:=> [:cat :any] [:set :qualified-symbol]]}
   [x] (into #{} (filter qualified-symbol?) (tree-seq coll? seq x)))
 
