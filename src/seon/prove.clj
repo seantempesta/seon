@@ -47,12 +47,16 @@
 (defn result-tx
   "The facts a finished run leaves on main: one :seon.proof/ result per test that ran or was
   reused (a green the results directory held becomes a fact too) at its digest, greens and reds, and the run's fact.
+  A test whose child died while it ran (a report with its :exit, seon.agent/test-run-answer) has
+  no verdict at its digest, only main's newest result: a death is unknown, and a result at a
+  digest is reused (seon.proofs/stored-results), so it would never run again.
   run: the run request {:key :branch :t :agent}; answer: the agent's tests answer ({:reports
   :digests :pass :fail :error :ms}); ms: the run's wall time. The change names who asked."
   {:malli/schema [:=> [:cat :map :map] [:vector :map]]}
   [run answer]
   (let [statuses (proofs/results {:reports (:reports answer)})
         fails (proofs/failures {:reports (:reports answer)})
+        died (set (keep #(when (:exit %) (proofs/test-symbol (:var %))) (:reports answer)))
         change (cond-> (select-keys run [:branch :t]) (:agent run) (assoc :agent (:agent run)))]
     (into [(cond-> {:seon.proof.run/id (:key run) :seon.proof.run/branch (name (:branch run)) :seon.proof.run/t (:t run)
             :seon.proof.run/pass (:pass answer 0) :seon.proof.run/fail (:fail answer 0) :seon.proof.run/error (:error answer 0)
@@ -63,7 +67,7 @@
                       (let [fact (cond-> {:seon.proof/status s :seon.proof/run (:key run) :seon.proof/branch (name (:branch run))
                                           :seon.proof/t (:t run) :seon.proof/change change}
                                    (fails t) (assoc :seon.proof/failures (fails t)))]
-                        (cond-> [(assoc fact :seon.proof/digest dg :seon.proof/test t)]
+                        (cond-> (if (died t) [] [(assoc fact :seon.proof/digest dg :seon.proof/test t)])
                           ;; main's newest result of the test, read by :test-red
                           (= :main (:branch run)) (conj (assoc fact :seon.proof/latest (str t)))))))
                   statuses))))

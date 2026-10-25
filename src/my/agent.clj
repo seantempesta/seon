@@ -11,7 +11,7 @@
     (similar 'ns/f)           what is nearest ns/f's definition by meaning: vars, wiki sections, tasks
     (similar "text")          what is nearest the text by meaning (seon.vector/near)
     (prove)                   run what judges this branch: the task's proofs and the tests reaching
-                              what it changed since main, each green one at its digest reused
+                              what it changed since main, each one with a result at its digest reused
     (help)                    the help page's sections (docs/agent.md); (help "done") one whole
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"
@@ -75,7 +75,8 @@
 (defn prove
   "Run what root's judge will run on this branch (seon.agent/run-tests-forked :judge, in a fork
   of this agent): the task's proofs (or the given ones) and every in-process test reaching what
-  the branch changed since the main it forked from, each test green at its reach digest reused,
+  the branch changed since the main it forked from, each test with a result at its reach digest
+  reused (a red as recorded),
   not run; the process tests it reaches run only when root asks (:deferred). Answers that test run ({:pass :fail :error :reports :ran :reused :ms ...}) with :results
   {test :pass|:fail|:error}."
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :qualified-symbol]] :map]]}

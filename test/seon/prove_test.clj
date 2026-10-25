@@ -139,6 +139,12 @@
         (is (some? (d/pull db2 [:seon.proof/digest] [:seon.proof/digest "dred"]))))
       (testing "a digest that holds a green is never run again: the lookup finds it in the store"
         (is (= {"dgreen" 1 "dred" 0} (update-vals (proofs/stored-results db2 ["dgreen" "dred" "dnone"]) :pass))))
+      (testing "a test whose child died has no result at its digest, only main's newest: a death is no verdict to reuse"
+        (let [dead {:pass 0 :fail 0 :error 1 :digests {'a.b-test/t "ddead"}
+                    :reports [{:type :error :var "#'a.b-test/t" :exit 9 :message "test process died: 9 while #'a.b-test/t ran"}]}
+              db3 (d/db-with db2 (prove/result-tx (assoc run :key "main@9" :t 9) dead))]
+          (is (= {} (proofs/stored-results db3 ["ddead"])))
+          (is (= ['a.b-test/t] (mapv :test (reds db3))) "main's red is still shown")))
       (testing "the run is a fact too"
         (is (= 1 (:seon.proof.run/fail (d/pull db2 [:seon.proof.run/fail] [:seon.proof.run/id "main@7"]))))))))
 

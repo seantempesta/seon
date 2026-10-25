@@ -387,12 +387,12 @@
   root with no such fact this boot shares nothing and reuses nothing (the
   inputs then are blank, which keys nothing stored: it only selects). A test is selected when
   it is a proof or reaches what the branch changed since base (a var, method, fixture, ns form,
-  macro or schema entry), and runs when no green is stored at its digest
+  macro or schema entry), and runs when no result is stored at its digest (a red is reused as recorded)
   (seon.reconcile/done-explain reads the selected). Scratch namespaces' tests (user,
   ^:scratch) never merge, so they never judge; a proof with no test var here does not run, and
   one with a var but no program facts (loaded, never recorded) has no digest: it always runs.
   With no base (a tree with nothing to diff against: root's on-change runs), the proofs and
-  every test with no green at its digest (seon.proofs/plan's own rule). Answers the plan with
+  every test with no green at its digest, of which those with no result run (seon.proofs/plan's own rule). Answers the plan with
   :digests {test digest}, :dir (the results directory when shared) and :process, the tests that reach a
   process of their own (seon.program/reach-index, the same walk as the digests): never run
   automatically, only when named (DECISIONS, Process tests are not automatic)."
@@ -538,7 +538,8 @@
   pipe to its end: no clock; the child ends by finishing or by dying (then the last test it
   started is named). Each selected test with a result at its digest is reused, marked :reused: a
   green as one :pass report, a red as the failures its run recorded (the test service's facts,
-  seon.proofs/stored-results); when every one is, nothing is forked (no :pid). One bound in every mode
+  seon.proofs/stored-results: each assertion's type, message, expected and actual); when every
+  one is, nothing is forked (no :pid). The counts are its reports' types, as a run's are. One bound in every mode
   (:seon.config.agent/test-ticks, per test), so a test's verdict is the same in a turn, the
   judge and bin/test, and the judge after a turn reruns no green the turn left.
   Each test that ran green is stored at its digest in test-plan's :dir through root's :file
@@ -570,7 +571,9 @@
         run (filterv #(not (reused %)) selected)
         ;; a red reused reports the failures its run recorded, so it judges as it did
         reused-reports (vec (for [t selected :let [r (reused t)] :when r
-                                  f (or (seq (:failures r)) [{:type (if (proofs/green? r) :pass (if (pos? (:error r)) :error :fail))}])]
+                                  f (or (seq (:failures r))
+                                        [(cond-> {:type (if (proofs/green? r) :pass (if (pos? (:error r)) :error :fail))}
+                                           (not (proofs/green? r)) (assoc :message "red at this digest, with no failure kept"))])]
                               (assoc f :var (str "#'" t) :reused true)))
         t0 (profile/now-ns)
         ;; every selected test green at its digest (a turn's run of the same tree, a session's):
@@ -616,9 +619,7 @@
       (-> res
         (cond-> (seq unstored) (assoc :unstored unstored))
         (update :reports into reused-reports)
-        (update :pass + (count (filter #(proofs/green? (reused %)) selected)))
-        (update :fail + (count (filter #(pos? (:fail (reused %) 0)) selected)))
-        (update :error + (count (filter #(pos? (:error (reused %) 0)) selected)))
+        (as-> r (merge-with + r (select-keys (frequencies (map :type reused-reports)) [:pass :fail :error])))
         (assoc :digests (select-keys digests (concat (keep (comp proofs/test-symbol :var) (:reports res)) (filter reused selected))))
         (assoc :reused (count (filter reused selected)) :ran (count (distinct (keep :var (:reports res))))
                :selected selected :deferred deferred :at-judge (count judge)))))))
