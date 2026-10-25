@@ -202,10 +202,12 @@
                        cites)
             schema? #(some? (pdb/eid db :schema/key %))
             src (str/join "\n" (keep #(docs/source-of db %) fns))
-            ;; a program function, not a test (callees leaves tests out too)
-            function? #(not= :test (:var/kind (d/entity db [:var/name %])))
+            ;; a program function: no test, no macro (every contracted form names seon.contract/defn),
+            ;; nothing of a test namespace (its fixtures); the graph and the meaning halves alike
+            function? #(and (not (#{:test :macro} (:var/kind (d/entity db [:var/name %]))))
+                            (not (str/ends-with? (namespace %) "-test")))
             near (fn [of f] (into [] (comp (keep (comp f first)) (distinct)) (vector/near db te (* 4 k) {:of of})))
-            graph {:functions (by-frequency (concat (filter function? (mapcat #(docs/callers db %) fns)) (mapcat #(map :var (callees db %)) fns)
+            graph {:functions (by-frequency (concat (mapcat #(docs/callers db %) fns) (mapcat #(map :var (callees db %)) fns)
                                                     (for [a secs n (:seon.section/names (d/entity db [:seon.section/address a]))] n)))
                    :sections (by-frequency (concat (for [n fns e (d/q '[:find [?e ...] :in $ ?n :where [?e :seon.section/names ?n]] db n)]
                                                      (:seon.section/address (d/entity db e)))
@@ -218,7 +220,8 @@
                      :schemas (near :schema/key #(:schema/key (d/entity db %)))}
             cited {:functions fns :sections secs :schemas #{}}]
         (into {} (for [kind [:sections :functions :schemas]]
-                   [kind (into [] (comp (remove (cited kind)) (remove nil?) (take k)) (vector/rrf [(graph kind) (meaning kind)]))]))))))
+                   [kind (into [] (comp (remove (cited kind)) (remove nil?) (filter (if (= kind :functions) function? any?)) (take k))
+                               (vector/rrf [(graph kind) (meaning kind)]))]))))))
 
 (defn related-at
   "`related` for task entity te on db, as {:key :value}: held (an earlier answer) reused when its

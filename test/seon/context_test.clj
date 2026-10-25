@@ -822,10 +822,13 @@
         db (d/db-with db [{:db/id "h" :form/id "demo/h" :form/src "(defn h [])"} {:var/name 'demo/h :var/form "h" :var/kind :fn}
                           {:db/id "k" :form/id "demo/k" :form/src "(defn k [] (h))" :form/refs #{'demo/h} :form/defines #{"kv"}} {:db/id "kv" :var/name 'demo/k :var/form "k" :var/kind :fn}
                           {:db/id "t" :form/id "demo/k-test" :form/src "(deftest k-test (h))" :form/refs #{'demo/h} :form/defines #{"tv"}} {:db/id "tv" :var/name 'demo/k-test :var/form "t" :var/kind :test}
+                          ;; a test namespace's helper calling it: a fixture, no program function
+                          {:db/id "x" :form/id "demo-test/fixture" :form/src "(defn fixture [] (h))" :form/refs #{'demo/h} :form/defines #{"xv"}}
+                          {:db/id "xv" :var/name 'demo-test/fixture :var/form "x" :var/kind :fn}
                           {:seon.section/address "docs/vector.md#the-pyramid-c" :seon.section/heading "C" :seon.section/lead "Names h. More."
                            :seon.section/names #{'demo/h}}])
         rel (context/related db te)]
-    (is (= ['demo/g 'demo/k] (:functions rel)) "the caller of the cited var beside the nearest by meaning; the cited var and the test left out")
+    (is (= ['demo/g 'demo/k] (:functions rel)) "the caller of the cited var beside the nearest by meaning; the cited var, the test and a test namespace's helper left out")
     (is (= ["docs/vector.md#the-model" "docs/vector.md#the-pyramid-c" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph"
             "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"]
            (:sections rel))
