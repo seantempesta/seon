@@ -41,6 +41,13 @@
       (testing what
         (is (= (whole-plan db to) (program/diff-plan db to)) "from the program to this")
         (is (= (whole-plan to db) (program/diff-plan to db)) "and back")))
+    (let [db1 (d/db-with db [{:schema/key :app.pc/s :schema/form ":int"}])]
+      (doseq [[what to] {"a schema entry changed in place" (d/db-with db1 [{:schema/key :app.pc/s :schema/form ":string"}])
+                         "a schema entry made the binary's" (d/db-with db1 [{:schema/key :app.pc/s :schema/source true}])}]
+        (testing what
+          (is (= (whole-plan db1 to) (program/diff-plan db1 to)) "from the entry to this")
+          (is (= (whole-plan to db1) (program/diff-plan to db1)) "and back")))
+      (is (= #{:app.pc/s} (:schemas (program/diff-plan db1 (d/db-with db1 [{:schema/key :app.pc/s :schema/form ":string"}])))) "a changed entry's key"))
     (testing "the cases differ as they should"
       (is (= {:remove [] :load [] :schemas #{}} (program/diff-plan db db)))
       (is (= 1 (count (:load (program/diff-plan db (get cases "a form redefined"))))))

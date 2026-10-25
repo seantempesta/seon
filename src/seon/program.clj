@@ -881,8 +881,10 @@
     {:loaded (count forms) :errors (load! db forms (set (keys (schema-changes db))))}))
 
 (defn- live-in?
-  "Is form entity e live on db (live-ids' rule, for one form): it has an id, and defines
-  nothing or one of its definitions points back to it. O(its definitions)."
+  "Is form entity e live on db, for one form: it has an id, and defines nothing or one of its
+  own definitions points back to it (live?'s rule; live-ids takes any pointer to it, the same
+  wherever a definition points only to the form that defines it, as account-tx and record-tx
+  write: the pointers hold no reverse index to read otherwise). O(its definitions)."
   {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
   [db e]
   (boolean (and (seq (d/datoms db :eavt e :form/id))
