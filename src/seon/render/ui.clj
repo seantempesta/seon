@@ -647,6 +647,24 @@
      [:p {:class "text-text-500"} (str "against " against)]
      (for [[k xs] by-kind] [:p [:span {:class "text-text-400"} (str (name k) ": ")] (str/join " " xs)])]))
 
+(defn ctx
+  "The agent's record, @ctx (the declared html render of :seon.ctx/ctx), as one block: its
+  environment on a line, then a row per key, each value by the render its key's schema declares
+  (render/html with :schema the key: an attribute an agent registered with a :seon.render/html
+  draws by it), else the one printer's structure."
+  {:malli/schema [:=> [:cat :seon.ctx/ctx :seon.render/opts] :any]}
+  [{:keys [t branch commit] :as c} opts]
+  (let [ks (sort-by str (keys (dissoc c :t :branch :commit :db/id)))]
+    (if (= :inline (:as opts))
+      [:span {:class "font-mono"} (str "ctx " branch " t " t ", " (count ks) " keys")]
+      [:div {:class "flex flex-col gap-1 border border-base-700 rounded p-2 text-xs"}
+       [:div {:class "text-text-500"} (str "ctx · " branch " · t " t " · commit " commit)]
+       [:table [:tbody (for [k ks :let [v (get c k)]]
+                         [:tr {:class "align-top"}
+                          [:td {:class "pr-3 font-mono text-text-400 whitespace-nowrap"} (str k)]
+                          [:td (render/html v (cond-> {:schema (when (qualified-keyword? k) k)}
+                                               (:handle opts) (assoc :handle (list k (:handle opts)))))]])]]])))
+
 (defn- shown-as
   "How node nd's schema says it is shown on a page (:seon.render/as on its entity schema), else as a tile."
   {:malli/schema [:=> [:cat :map] :seon.render/as]}
