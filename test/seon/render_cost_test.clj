@@ -299,8 +299,10 @@
      ;; 404 since a row's records are printed as sent, in order (seon.context/record-parts, 2026-10-25);
      ;; 429 and 1.51 MB: the whole request read once, and sized (where its tokens went), in place of
      ;; the read of the added parts alone (2026-10-25); 458 with the page's shared bar and header
-     ;; (seon.render.ui/top-bar: their elements and attributes, serialized once a pass, 2026-10-25)
-     :fixed {:calls 458 :bytes 1210000}
+     ;; (seon.render.ui/top-bar: their elements and attributes, serialized once a pass, 2026-10-25);
+     ;; 459 since sent-split sizes the parts together (seon.context/messages-tokens, one call a pass:
+     ;; the sizer is not additive across pieces; measured per function, 2026-10-25)
+     :fixed {:calls 459 :bytes 1210000}
      ;; the full run measures 4,000 too (:seon.config.proofs/cost-max-n)
      :sizes [100 1000 4000]}))
 
