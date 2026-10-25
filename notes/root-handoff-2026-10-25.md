@@ -23,6 +23,8 @@ What root did on 2026-10-24/25, what is unfinished, the owner's newest ideas, an
 5. **Dogfood:** test with Claude subagents through the `seon` MCP server as if they were Seon agents, to find what is confusing or undescribed; feed the gaps into the help, the prompt and the references.
 6. **Related data pulled in explicitly:** context shrank 45% with turns to green at parity, so the screen likely lacks references; find ways to pull related data explicitly (cited references of on-screen strings, callers, the write set) and measure.
 
+7. **Customizable errors** as an easy first request through design → implement → merge (owner: "I want the system to evolve in smart ways"). The stages are separate steps in one session (decisions 2026-10-25).
+
 ## Lessons (also in AGENTS §3 and docs/decisions.md)
 - A green `bin/prove` counts only with its plan line compared to main's (662 tests were silently left out after a merge).
 - A view renders what exists; it never recomputes it (the debug page that rebuilt requests was rejected twice).
