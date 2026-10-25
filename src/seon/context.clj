@@ -661,7 +661,7 @@
     (merge {:system 0 :story 0 :conversation 0 :screen 0}
            (update-vals (group-by (comp part first) parts) #(tok (into [] (mapcat second) %))))))
 
-(defn story
+(defn- story
   "The task story: task entity e's run sections as of t on db (run-state, printed by
   run-message), what every turn of a session sends after the system prompt, as its first turn
   read them; a later stage's arrives as root's message at its boundary

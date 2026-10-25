@@ -570,8 +570,7 @@
             b0 (basis "demo/d" "demo/d#1" "s0")
             first-stage (context/render @conn b0)
             _ (turn! "demo/d#1" b0 (:sent first-stage))
-            boundary (str "demo/d is done. Your task now is demo/i, in this same session: what you did so far stays above. Its story:\n\n"
-                          (context/story @conn (:db/id (d/entity @conn [:seon.task/id "demo/i"])) (:max-tx @conn)))
+            boundary "demo/d is done. Your task now is demo/i, in this same session: what you did so far stays above.\n\nIts plan: Implement d."
             _ (run! "demo/i#1" "demo/i")
             _ (d/transact conn (task/message-tx "m1" "root" "demo/i#1" boundary))
             _ (ev! "s1" "screen" "demo/i#1")

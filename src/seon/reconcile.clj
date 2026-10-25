@@ -9,7 +9,7 @@
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.proofs :as proofs] [seon.merge :as pm] [seon.program :as program] [seon.source :as source]
             [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
-            [seon.config :as cfg] [seon.context :as context]))
+            [seon.config :as cfg]))
 
 
 (defn merge-limits
@@ -687,7 +687,8 @@
 (defn- stage-boundary
   "The message that opens run aid's stage of its session, or nil: when the session's agent ran
   another task before (its newest earlier run, by the transaction that started it), the new
-  task and its story, said once at the boundary, so the conversation above stays as it was
+  task's plan and proofs, said once at the boundary (its whole story is (my.task/story): the
+  story's render reaches the related search, a process, which no reconciler test may), so the conversation above stays as it was
   sent (design agent-loop section 1a; live finding A1, 2026-10-25: the new stage's story put at
   the top cached 1% of 33k tokens, and the agent took the design for its task)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:maybe :string]]}
@@ -698,8 +699,10 @@
                       (sort-by first) last)
         prev-task (some-> prev task-of)]
     (when (and prev-task (not= prev-task id))
-      (str prev-task " is done. Your task now is " id ", in this same session: what you did so far stays above. Its story:\n\n"
-           (context/story db (:db/id (d/entity db [:seon.task/id id])) (:max-tx db))))))
+      (let [t (task/task db id)]
+        (str prev-task " is done. Your task now is " id ", in this same session: what you did so far stays above.\n\n"
+             "Its plan: " (:seon.task/plan t) "\n\nIts proofs: " (str/join " " (sort (map str (:seon.task/proofs t))))
+             "\n\nIts whole story (what it cites, its write set): (my.task/story)")))))
 
 (defn- taken-messages
   "How many messages to the runs on run aid's branch (as main names them) branch db holds:
