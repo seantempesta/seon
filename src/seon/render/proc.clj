@@ -498,7 +498,7 @@
       (let [held (get-in st [:views view-id])
             d (clojure.main/ex-triage (assoc (Throwable->map ex) :clojure.error/phase :execution))
             named (java.net.URLDecoder/decode (ui/view-param view-id) "UTF-8")
-            e (contract/error :seon.render/view-defect `pass-view (str "the page " named " threw rendering: " (step/error-msg ex))
+            e (contract/error :seon.render/view-defect #'pass-view (str "the page " named " threw rendering: " (step/error-msg ex))
                               (cond-> {:view named :class (.getName (class ex))}
                                 (:clojure.error/symbol d) (assoc :seon.error/in (:clojure.error/symbol d))))
             hc (render/html e {})]
