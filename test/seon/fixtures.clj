@@ -81,9 +81,9 @@
 (def scenarios
   "Merge scenarios, by name (seon.e2e runs each as a row): :specs (the program and its
   tasks, in app.m), :after (merge task -> the merge task it must follow, so the order is
-  fixed), the scripted model's replies by task name and turn, and :check, the forms a
-  fresh agent runs on what main runs, with :expect, what they must print (one string per
-  form); :model holds the :check and :expect of a real model's run where they differ: what
+  fixed), the scripted model's replies by task name and turn, and :check, the one form a
+  fresh agent runs on what main runs, with :expect, what its value prints as ([printed],
+  seon.e2e/fresh); :model holds the :check and :expect of a real model's run where they differ: what
   the task's plan and proofs ask of any correct solution, where :check also asserts the
   scripted model's own extras.
   - :conflict: a and b both rewrite f (same behaviour, different text); b merges after a,

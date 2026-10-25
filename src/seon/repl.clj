@@ -329,7 +329,7 @@
   what its forms wrote to *out* and *err*, the error that stopped it (:ex, the one error map),
   what its forms changed of an existing var's contract or docstring (:redefined, wrap-record's,
   seon.program/meaning-changes), and its cost summed over its forms (ms, ticks, bytes allocated);
-  each key only when present (owner, 2026-10-25, DECISIONS Dogfood rulings; a change to a schema
+  each key only when present (DECISIONS Dogfood rulings; a change to a schema
   is an explicit fact the eval shows)."
   {:malli/schema [:=> [:cat [:sequential :seon.wire/msg] :qualified-symbol] :seon.eval/response]}
   [answers handle]

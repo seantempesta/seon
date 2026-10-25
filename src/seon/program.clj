@@ -420,8 +420,8 @@
 (def meaning
   "What a definition says of itself that text describing it relies on, so what a wiki section
   citing it goes stale on (seon.problems/stale-sections) and an eval that changes it shows
-  (meaning-changes): its contract and its docstring, the facts def-tx asserts and retracts (owner,
-  2026-10-25, DECISIONS Dogfood rulings; the contract carries the arity)."
+  (meaning-changes): its contract and its docstring, the facts def-tx asserts and retracts
+  (DECISIONS Dogfood rulings; the contract carries the arity)."
   [:var/contract :var/doc])
 
 (defn meaning-changes
@@ -1124,7 +1124,7 @@
   ns tail is added, replaced or removed, and not on a write of data. What a main run of the test
   service reads of main's program (seon.root/prove!): per-test digests (reach-digests) need the
   checkout's tests loaded, which is the run's own work. Cost: one read of three attributes'
-  datoms (measured 2026-10-24 on the standing root's main, 2699 forms, 660 schema entries, 129
+  datoms (measured on the standing root's main, 2699 forms, 660 schema entries, 129
   namespaces: 0.79M ticks, 5.0 MB, of which the index read is 0.52M ticks, 3.9 MB)."
   {:malli/schema [:=> [:cat :seon.host/db] :string]}
   [db]

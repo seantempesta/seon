@@ -24,7 +24,7 @@
 (def system-page
   "The system prompt, docs/prompt.md: what every agent reads first (its system message, the same
   bytes for every agent and turn, so a provider caches it): the standard format's short prompt
-  (owner, 2026-10-23: the model's context is the standard format; the help page is read on
+  (the owner's ruling: the model's context is the standard format; the help page is read on
   demand, my.agent/help). Main holds it as the wiki's sections, as the help page."
   "docs/prompt.md")
 
