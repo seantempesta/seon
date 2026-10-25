@@ -221,6 +221,8 @@
  :seon.run/outcome [:enum :green :red :waiting :cap :failed :merge-failed :error :no-end :no-progress]
  :seon.run/reason [:string {:seon.render/prose true}]
  :seon.run/turns :int
+ ;; the turns whose calls repeated the last turn's from the same observed state (seon.turn/work!)
+ :seon.run/repeats :int
  :seon.run/model-calls :int
  :seon.run/tokens :int
  :seon.run/merged-t :int

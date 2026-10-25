@@ -63,7 +63,9 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p"}]))
         t (task/task db "demo/f")]
     (is (re-find #"at the model's token limit" (:cut (:your-last-reply (context/current-state db t {:turn 1 :max-turns 4 :truncated? true})))))
-    (is (nil? (:your-last-reply (context/current-state db t {:turn 1 :max-turns 4}))))))
+    (is (nil? (:your-last-reply (context/current-state db t {:turn 1 :max-turns 4}))))
+    ;; live agents round 1 (2026-10-25): a repeat is told, not only ended (seon.turn/work!)
+    (is (re-find #"same as the turn before's" (:repeated (:your-last-reply (context/current-state db t {:turn 2 :max-turns 4 :repeated 1})))))))
 
 (defn- task-f [db] (task/task (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p"
                                                                   :seon.task/proofs #{'demo-test/f-test}}]))

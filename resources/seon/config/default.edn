@@ -196,6 +196,13 @@
  ;; sits above the measured p90. Tokens are the paid resource; task
  ;; seon.model/budgets-are-data-and-spend-is-measured makes them the budget.
  :seon.config.agent/max-turns 40
+ ;; Unit: repeats. How many times a run is told that a turn's calls repeat the last turn's, from
+ ;; the same observed state (the answers unchanged), before the next repeat ends it :no-progress.
+ ;; 0 ends it at the first (the rule before). Provenance: live agents round 1 (2026-10-25,
+ ;; notes/live-2026-10-25.md L6): 3 of 6 paid runs ended at their first repeat, each right after
+ ;; an answer that gave nothing new; root's provisional ruling (owner to confirm): told once,
+ ;; ended at the second. The count is the run's :seon.run/repeats.
+ :seon.config.agent/repeats-told 1
  ;; Unit: path, every agent process's working directory, shared, made at the fork server's boot.
  ;; No repository above it: an agent changes code through its REPL, never git (owner, 2026-10-22:
  ;; "no git in agents"); it reads and writes any file by its absolute path. At the bound: n/a.

@@ -107,17 +107,20 @@
      :text (subs text start end)}))
 
 (defn last-reply
-  "What happened to the agent's last reply: cut at the token limit, and each delimiter the
+  "What happened to the agent's last reply: cut at the token limit, each delimiter the
   reader repaired (what it dropped or inserted, and where: the line and column in source,
-  the reply as the reader gave it to the REPL, and that line), or nil."
-  {:malli/schema [:=> [:cat [:maybe :boolean] [:maybe :string] [:vector :map]] [:maybe :map]]}
-  [truncated? source repairs]
+  the reply as the reader gave it to the REPL, and that line), and calls that repeated the
+  turn before's from the same state (repeated, the run's :seon.run/repeats so far), or nil."
+  {:malli/schema [:=> [:cat [:maybe :boolean] [:maybe :string] [:vector :map] [:maybe :int]] [:maybe :map]]}
+  [truncated? source repairs repeated]
   (let [rs (for [{:keys [at dropped inserted]} repairs :when (not= ";; " inserted)]
              (cond-> {:near (near (or source "") at)}
                (seq dropped) (assoc :dropped dropped)
                (seq inserted) (assoc :inserted inserted)))]
     (cond-> nil
       truncated? (assoc :cut "at the model's token limit: what followed the cut was lost. Answer with less: one change at a time.")
+      repeated (assoc :repeated (str "your calls were the same as the turn before's, from the same state, so their answers are the same as above. "
+                                     "Ask something else, or change something; the same calls again end the run."))
       (seq rs) (assoc :repaired (vec rs)))))
 
 
@@ -314,7 +317,7 @@
   wiki sections its changes made stale; the tests run; what happened to the last reply; turns
   left. The messages delivered are the conversation's (`conversation`), not the block's."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge tests attention]}]
+  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs repeated will-merge tests attention]}]
   (let [{:keys [proofs]} (:seon.task/accumulated t)]
     (cond-> {;; a passing proof is its status; a red or unrun one shows its source, its failures
              ;; and the program functions it calls; one not defined yet says so
@@ -332,7 +335,7 @@
       max-turns (assoc :turn (str (inc turn) " of " max-turns))
       (seq (refused (vec reasons) (vec reds))) (assoc :refused (refused (vec reasons) (vec reds)))
       (seq test-run-errors) (assoc :test-run {:failed (vec test-run-errors)})
-      (last-reply truncated? source (vec repairs)) (assoc :your-last-reply (last-reply truncated? source (vec repairs)))
+      (last-reply truncated? source (vec repairs) repeated) (assoc :your-last-reply (last-reply truncated? source (vec repairs) repeated))
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
       ;; the sections of the wiki this branch's code changes made stale (seon.problems/caused-split): to read and
       ;; probably fix; never a reason to refuse done
@@ -673,7 +676,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :map [:maybe :map]] :map]}
   [db {:keys [turn max-turns origin observed merge?]} lst]
   (let [{:keys [text repairs]} (when lst (reader/forgive (str/join "\n" (map :code (:seon.turn/calls lst)))))]
-    (cond-> (assoc observed :truncated? (:seon.turn/truncated lst) :source text :repairs (vec repairs)
+    (cond-> (assoc observed :truncated? (:seon.turn/truncated lst) :source text :repairs (vec repairs) :repeated (:seon.turn/repeated lst)
                    :unmerged (when merge? (pm/unmerged db)))
       (= :model origin) (assoc :turn turn :max-turns max-turns))))
 
