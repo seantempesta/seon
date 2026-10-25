@@ -84,6 +84,10 @@
  :seon.render/no-entity [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-entity]] [:seon.render/eid :seon.render/eid]]]
  ;; a page's location that main names no entity for (seon.render.proc/page-value): an agent's id of no agent in root's boot
  :seon.render/no-location [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-location]] [:view :string]]]
+ ;; a view whose render threw (seon.render.proc/view-pass, a failure point: renders are code, and agents
+ ;; write them): its page is this error, recorded as a platform problem; :seon.error/in the function it threw in
+ :seon.render/view-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/view-defect]] [:view :string]
+                                                    [:seon.error/in {:optional true} :symbol] [:class {:optional true} :string]]]
  ;; ---- what root's context reads: the whole system as one value ----
  ;; the api's view (agents, writer, fork server, store, boot, root errors) joined with every
  ;; proc's health, main's tasks and runs, the series and the events. Its AI face is root's

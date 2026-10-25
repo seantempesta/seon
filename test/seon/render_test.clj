@@ -1218,3 +1218,31 @@
   (doseq [ref [[:section 397 536870918] [:task 978 536871223] [:eval "e3"] [:eval "e4" {:since 'result/e3}] [:line "e5"] [:message "m1"] [:history 12]]]
     (is (string? (#'ui/source ref)) (pr-str ref)))
   (is (= "eval e5, sent as its one line" (#'ui/source [:line "e5"]))))
+
+(deftest a-view-that-throws-answers-its-page-with-the-error
+  ;; root, 2026-10-26: a render that threw stopped every pass of the render proc, and every page
+  ;; waited forever. A view renders on its own: one whose render throws answers its own page with
+  ;; the error and is recorded as a problem, and a second page renders through the same pass
+  (let [k (seon.task/agent-key "b1" :a1)
+        ;; a turn that sent a part no render names (a ref kind the debug page's source has no line for)
+        db (reduce d/db-with (ts/test-db)
+                   [[{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 4}]
+                    (seon.task/agent-tx "b1" :a1 {:status :busy})
+                    (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} "e1" "a1" {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3} :run "t/x#1"} nil)
+                    [{:db/id "run" :seon.run/id "t/x#1"}]
+                    [{:seon.turn/id "t/x#1/0" :seon.turn/run [:seon.run/id "t/x#1"] :seon.turn/n 0 :seon.turn/origin :model
+                      :seon.turn/sent [[:no-such-part "x"]] :seon.turn/tokens 100 :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 0 :seon.turn/ms 1}]])
+        debug [:debug :a1]
+        o (volatile! {})
+        st {:rid 1 :pending {} :watch #{debug :a1} :waiting {1 debug 2 :a1} :kf-wanted #{} :new-events [] :events [] :views {}
+            :main-db db :recorded (seon.problems/health db) :view {:agents {:a1 {:status :busy}}}
+            :branches {debug {:db db :read [:task-x]} :a1 {:db db :read [:task-x]}}}
+        st' (#'p/pass st o)
+        pages (into {} (for [m (:to-web @o) :when (= :page (:op m))] [(:k m) (:html m)]))]
+    (is (= #{1 2} (set (keys pages))) "both pages are answered: neither waits on the other's render")
+    (is (str/includes? (str (pages 1)) "seon.render/view-defect") (str "the debug page is its error: " (subs (str (pages 1)) 0 (min 400 (count (str (pages 1)))))))
+    (is (str/includes? (str (pages 1)) ":no-such-part") "it says what threw")
+    (is (str/includes? (str (pages 2)) "(+ 1 2)") "the agent's own page renders through the same pass")
+    (is (some #(and (= :error (:op %)) (= :seon.render/view-defect (get-in % [:data :seon.error/type]))) (:to-api @o))
+        "recorded as the problem it is: the api's proc error")
+    (is (empty? (:waiting st')) "nothing left waiting")))
