@@ -45,14 +45,6 @@
 (def ^:private set-classes #{clojure.lang.PersistentHashSet clojure.lang.PersistentTreeSet})
 
 
-(deftype Code [^String text]
-  ;; source text its producer gave as code (seon.print/code): printed verbatim at its place; a
-  ;; value, equal to the code of the same text
-  Object
-  (toString [_] text)
-  (equals [_ o] (and (instance? Code o) (= text (str o))))
-  (hashCode [_] (hash text)))
-
 (defn keyword-lookup?
   "May `value` be asked for a keyword key without running foreign code: an exact array or hash
   map, or a sorted map whose keys are keywords (Jolt cannot tell a sorted map's comparator)."
@@ -63,6 +55,13 @@
         (identical? c clojure.lang.PersistentHashMap)
         (and (identical? c clojure.lang.PersistentTreeMap)
              (or (zero? (count value)) (identical? (class (key (first value))) clojure.lang.Keyword))))))
+
+(defn code?
+  "Is x code (seon.print/code): a map of the one key :seon.print/code to its text, plain data
+  that stores and reads back as it is."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [x]
+  (boolean (and (map? x) (== 1 (count x)) (keyword-lookup? x) (string? (:seon.print/code x)))))
 
 (defn- escaped-width
   "Characters the string literal spends on chars [from, to) of `s`; a newline stays a line break."
@@ -202,7 +201,8 @@
       (identical? c Character) (scalar :seon.print/char x (if-let [n (char-name-string x)] (str "\\" n) (str "\\" x)))
       (identical? c String) {:kind :string :value x :total (.length ^String x)}
       ;; code (seon.print/code): its text verbatim, cut by the one string cutter
-      (instance? Code x) (let [s (str x)] {:kind :string :value s :total (.length ^String s) :code? true})
+      ;; the count first: only a one-entry map asks code? (a contracted call)
+      (and (map-classes c) (== 1 (count x)) (code? x)) (let [s (:seon.print/code x)] {:kind :string :value s :total (.length ^String s) :code? true})
       ;; a name's node carries its text, which a cut of it replaces
       (or (identical? c clojure.lang.Keyword) (identical? c clojure.lang.Symbol))
       (let [face (if (keyword? x) :seon.print/keyword :seon.print/symbol)

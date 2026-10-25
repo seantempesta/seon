@@ -51,10 +51,11 @@
   "Source text s (a form's :form/src, a test's source, an assertion as written) as code: the
   printer prints it verbatim at its place, as in its file (comments, line breaks and quotes as
   written, every later line indented to where it stands), never as a string literal; cut, it is
-  cut by the one string cutter and its cut reads the rest, `(subs (str (get-in result/e3
-  [...])) 1200)`. The producer says it is code; the printer never guesses from a string's text."
-  {:malli/schema [:=> [:cat :string] :any]}
-  [s] (select/->Code s))
+  cut by the one string cutter and its cut reads the rest, `(subs (:seon.print/code (get-in
+  result/e3 [...])) 1200)`. Plain data, {:seon.print/code s}: a record stores it and reads it
+  back as it is. The producer says it is code; the printer never guesses from a string's text."
+  {:malli/schema [:=> [:cat :string] [:map [:seon.print/code :string]]]}
+  [s] {:seon.print/code s})
 
 (defn text
   "`v` as text under budget tokens: the printed text, or the error's message when even

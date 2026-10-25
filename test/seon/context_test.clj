@@ -746,3 +746,16 @@
         text (:text (print/print-value {:handle 'result/e1 :value state} {:handle 'result/e1}))]
     (is (every? #(str/includes? text %) (str/split-lines src)) text)
     (is (not (str/includes? text "\\\"two doubled")) "no quote escaped")))
+
+(deftest code-is-plain-data-that-round-trips
+  ;; root, 2026-10-25: code is plain data ({:seon.print/code text}), one representation live and
+  ;; stored: a record holding it stores as :db.type/data and reads back equal, printing verbatim
+  (let [src "(deftest f-test\n  ;; a comment, a \"quoted\" word\n  (is (= 4 (f 2))))"
+        c (print/code src)
+        rec {:code "(my.task/status)" :response {:handle 'result/e4 :value {:source c}}}
+        db (d/db-with (ts/test-db) [{:seon.eval/id "e4" :seon.eval/agent {:seon.agent/id :a1} :seon.eval/record rec}])
+        back (:seon.eval/record (d/pull db [:seon.eval/record] [:seon.eval/id "e4"]))]
+    (is (pdb/plain? c) "plain data")
+    (is (= c (seon.edn/decode (seon.edn/encode c))) "its EDN reads back")
+    (is (= rec back) "the record reads back equal")
+    (is (every? #(str/includes? (print/record-text back) %) (str/split-lines src)) "and prints verbatim")))

@@ -78,6 +78,67 @@ bin/prove leaves out the tests that reach a process of their own (`test-runner/p
 - Left out ≤ 240 would need a correct edge removed. Filed instead: `seon.program/a-trees-program-is-the-same-however-its-store-reached-it`.
 - The 10 tests ran green by name: `bin/test seon.reconcile-test seon.procs-test seon.problems-test`, with six more namespaces (TEST OK, 111 run, 161 reused).
 
+## Code prints as code (owner, 2026-10-25)
+
+Owner, 2026-10-25: "If we reference a function we should return the quote escaped forms so agents see more clojure code as is normally seen in files or the repl". Source text was a string, so the printer printed it as a string literal: every `"` escaped, a map of a proof read as data around one long escaped string. Now it is code, marked at its producer (```seon.print/code```: plain data, `{:seon.print/code text}`, which a record stores as `:db.type/data` and reads back equal; root, 2026-10-25, ruled one representation live and stored, after a deftype would have needed a Datahike serializer change), and the printer prints it verbatim at its place: comments and quotes as written, every later line indented to where it stands, cut by the one string cutter with `(subs (:seon.print/code (get-in result/e3 [:source])) n)`. The printer never guesses code from a string's text.
+- **Producers marked:** a red proof's `:source` (`seon.context/turn-state`); an assertion as written and what it got (`seon.context/failure`); a cited var's `:source` at `:code` depth (`seon.docs/resolve-ref`); the screen's cited vars and namespaces (`seon.docs/cited-code`).
+- **Before**, `(my.task/status)` on the related-sections root (port 8261): `:source "(clojure.test/deftest a-proof-with-no-result-reads-unknown` then the body, with every quote written `\"`: `(task/create-tx db [{:seon.task/ns 'demo :seon.task/name \"f\"`.
+- **After** (`seon.context-test/a-red-proofs-source-reads-as-its-file`): `:source (deftest f-test` then the body as the file holds it, `;; f doubles: the plan's "exact" case`, `"two doubled"))`.
+- **Cost:** `seon.print-cost-test/printing-code-costs-what-it-shows`. At 1,000 lines, code costs 576 KB and 350k ticks in all; a string's escaping prices the same characters at 13.5 MB. Per line, the line breaks are found three times, once each time the selection makes a map's child. Any long string in a map pays that; making `:breaks` lazy per node would make it once.
+- **Stored:** `seon.context-test/code-is-plain-data-that-round-trips` (a record holding code reads back equal and prints verbatim).
+- **Docstrings** already print as Clojure prints them in a defn: a string literal whose line breaks stay line breaks.
+
+## The screen's cited section (owner: "This is not good output")
+
+The producer was `seon.render.ui/cited`: `[:pre (print/text view part-budget)]`, an EDN string printed before the screen's printer printed it again, escaped, under a 256-token budget (40 `{…2}` lines on main). It now holds `seon.docs/cited-code`'s values as data in the hiccup, printed once.
+
+**Before** (a cited namespace):
+```
+[:pre
+ "#:seon.ref{:address \"seon.context\",
+ :heading \"seon.context\",
+ :problem-kind :no-lead,
+ :depth :doc,
+ :below
+   [#:seon.ref{:address \"seon.context/ai-messages\", :heading \"ai-messages\"}
+    #:seon.ref{:address \"seon.context/as-sent\", :heading \"as-sent\"}
+    #:seon.ref{:address \"seon.context/callees\", :heading \"callees\"}
+    {…2}
+    {…2}   ;; 40 of them
+```
+**After:**
+```
+(ns seon.context)
+;; ai-messages as-sent callees cost current-state eval-messages failure
+;; fold-of folded help-page help-text kept last-reply message-messages
+;; ... turn-state
+```
+**Before** (a cited var, `:doc` depth): `{:symbol seon.context/turn-state, :doc "The turn sections of task t's current state as data, …" (one escaped string), :arglists ([db t {:keys [results reds … …9]}]), :contract [...]}`.
+**After:**
+```
+(defn turn-state
+  "The turn sections of task t's current state as data, measured again each turn from
+  observed: ...
+  left. The messages delivered are the conversation's (`conversation`), not the block's."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
+  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge tests attention]}]
+  …)  ; the body: (source seon.context/turn-state)
+```
+(`seon.reader/definition-head`: one edamame read with end locations; multi-arity `([a] …)` per arity; a `def` has no head and shows its source.) Internal keys (`:problem-kind`, `:depth`, `:heading`, `:address`) do not reach the model. A namespace's missing lead is no longer said at all; the wiki's `:leadless-section` problem says it once.
+
+## A screen eval's :ms :ticks :bytes
+
+The model does not need them: the screen's forms are root's, run each turn, and their cost is root's to act on, not the agent's. The page needs them, and reads them from the record (`seon.render.ui/cost-line`). `seon.context/eval-messages` leaves them out of a screen eval's message. An agent's own evals keep theirs, since an agent can read its own code's cost.
+
+## Tests that take the tree digest
+
+The chain: `seon.contract/registry` → `seon.config/schema-forms` (every schema baked into one literal, its `:seon.render/*` properties naming every render) → `seon.render.ui/agent` → `seon.docs/cited` → `seon.ref/file-view` (a tree reader). So every contracted call reached every render, and through them the tree. `schema-forms` is now in ```seon.program/names-only```, and a names-only form gives the reach walk no edges (`tree-readers` and `env-readers` were names-only for `uses?` only). A check still reaches the schemas it checks, through its contract's own schema rows; the baked schemas are `:env`. Measured on fresh program stores (an incrementally refreshed store can hold stale facts: task `seon.program/a-trees-program-is-the-same-however-its-store-reached-it`):
+
+| tree | tests | take the tree digest | process tests (left out) |
+|---|---|---|---|
+| main 761c1502e | 708 | 682 | 210 |
+| this branch (main merged) | 715 | 255 | 198 |
+
 ## Second printers and clipping
 
 `seon.render-test/one-printer-and-no-cut-before-it` holds `pr-str` and the like, `subs`, `take`, `take-last` and `drop-last` in display namespaces to the list in [render](../docs/render.md#one-printer). Grepping what it says it does not cover (`subvec`, `nthrest`, `split-at`, `partition-all`, `.substring`, `str` of a value, `format "%s"`, `clip`, `ellipsis`, `line-clamp`, `text-overflow`) found no second printer in src. `seon.context/kept`'s `subvec` chooses which history parts are sent, and it counts the ones it leaves out. The one second cut found was the page's eval body (above), and it is fixed.

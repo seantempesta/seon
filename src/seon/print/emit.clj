@@ -64,7 +64,7 @@
   {:malli/schema [:=> [:cat :map] :any]}
   [{:seon.print/keys [requery-id elision-unit code?] path :seon.render.data/path next-offset :seon.render.data/next-offset}]
   (when (or (symbol? requery-id) (seq? requery-id))
-    (let [target (cond->> (path-form requery-id (vec path)) code? (list 'str))
+    (let [target (cond->> (path-form requery-id (vec path)) code? (list :seon.print/code))
           offset (or next-offset 0)]
       (cond (zero? offset) target
             (= :characters elision-unit) (list 'subs target offset)
@@ -139,9 +139,9 @@
         label (if shown (cut-words (:seon.print/omitted node) (:seon.print/lines node) (:seon.print/continuation node)) text)
         reason (when-not (:seon.print/continuation node) (:seon.print/requery-refused node))
         marker [:span (cond-> {:class (css-class :seon.print/elision)} reason (assoc :title reason)) label]]
-    (if shown
-      [:span [:span {:class (css-class :seon.print/string)} shown] marker]
-      marker)))
+    (cond (and shown (:seon.print/code? node)) [:span [:code {:class (css-class :seon.print/code)} shown] " " marker]
+          shown [:span [:span {:class (css-class :seon.print/string)} shown] marker]
+          :else marker)))
 
 (defn- leaf-op
   "The text op of one leaf node."

@@ -939,7 +939,7 @@
 
 (def ^:private names-only
   "The vars whose forms only name other vars, as quoted data: reaching one is neither using nor
-  reaching what it names, so their forms give the reach walk no edges. seon.config/schema-forms
+  reaching what it names, so their references give the reach walk no edges. seon.config/schema-forms
   is every schema baked into one literal, whose :seon.render/* properties name every render: an
   edge from it put every render, and through seon.docs/cited the tree, under every contracted
   call (680 of 706 tests took the tree digest, 2026-10-25); a check reaches the schemas it
@@ -997,12 +997,12 @@
         ;; a test's form is reached only as the root it is: another form naming a test (its
         ;; name quoted as data, a proof list) never runs it, clojure.test does
         test-ids (set (keep var-form tests))
-        edges (fn [f] (cond
-                        (schema-row? f) (vec (:schema f))
-                        ;; it names vars as data: no edges (names-only)
-                        (some (fn [[k s]] (and (= :var k) (names-only s))) (:defines f)) []
-                        :else
-                        (vec (concat (remove test-ids (keep var-form (:refs f)))
+        edges (fn [f] (if (schema-row? f)
+                        (vec (:schema f))
+                        ;; a names-only form names vars as data: no edges from its references,
+                        ;; its contract's, methods' and data's kept
+                        (vec (concat (when-not (some (fn [[k s]] (and (= :var k) (names-only s))) (:defines f))
+                                       (remove test-ids (keep var-form (:refs f))))
                                      (for [s (defined f :var)
                                            id (concat (get methods s) (get impls s) (get contract s) (keep var-form (get data-refs s)))]
                                        id)))))

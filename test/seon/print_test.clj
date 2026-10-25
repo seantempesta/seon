@@ -319,3 +319,4 @@
             rest (read-rest (:form cut) h {:source (seon/code (str/join "\n" (repeat 40 a-deftest)))})]
         (is (:chars? cut) text)
         (is (= (:n cut) (count rest)) "the form reads the characters it says it left")))))
+

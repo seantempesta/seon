@@ -95,4 +95,6 @@
          (reader/definition-head "(defn f\n  \"Doubles, \\\"exactly\\\".\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  ;; twice\n  (* 2 x))" 'user)))
   (is (= "(defn g\n  \"Adds.\"\n  ([a] …)\n  ([a b] …))"
          (reader/definition-head "(defn g\n  \"Adds.\"\n  ([a] (g a 1))\n  ([a b] (+ a b)))" 'user)))
-  (is (nil? (reader/definition-head "(def x 1)" 'user)) "a def has no arglist: no head"))
+  (is (nil? (reader/definition-head "(def x 1)" 'user)) "a def has no arglist: no head")
+  (is (nil? (reader/definition-head "(def x [1 2 3])" 'user)) "a def holding a vector is no function: no head")
+  (is (nil? (reader/definition-head "(defmulti m \"Dispatch.\" [:kind])" 'user)) "nor is a defmulti"))

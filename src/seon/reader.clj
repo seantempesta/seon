@@ -55,7 +55,7 @@
 
 (defn read-all
   "Every form of text, written in namespace nsym, in order."
-  {:malli/schema [:function [:=> [:cat :string :symbol] [:vector :any]] [:=> [:cat :string :symbol :map] [:vector :any]]]}
+  {:malli/schema [:function [:=> [:cat :string :symbol] [:vector :any]] [:=> [:cat :string :symbol [:maybe :map]] [:vector :any]]]}
   ([text nsym] (read-all text nsym nil))
   ([text nsym more] (e/parse-string-all text (merge (opts nsym) more))))
 
@@ -65,7 +65,7 @@
   answer, not a failure; nothing is evaluated (no #=), so whatever the read throws means
   that. edamame 1.4.32 on Jolt throws a bare IllegalArgumentException for a meta prefix at
   the end (\"a^\"), not its :edamame/error (docs/failure-points.md)."
-  {:malli/schema [:function [:=> [:cat :string :symbol] [:maybe [:vector :any]]] [:=> [:cat :string :symbol :map] [:maybe [:vector :any]]]]}
+  {:malli/schema [:function [:=> [:cat :string :symbol] [:maybe [:vector :any]]] [:=> [:cat :string :symbol [:maybe :map]] [:maybe [:vector :any]]]]}
   ([text nsym] (read-text text nsym nil))
   ([text nsym more]
    (try (read-all text nsym more)
@@ -74,8 +74,8 @@
 (defn definition-head
   "Definition text src (a defn's, written in namespace nsym) up to its body, as written: its
   name, docstring, attribute map and arglist, or per arity its arglist, each arity's body and
-  the definition's end marked `…)`; nil when src is no list or holds no arglist (a def). One
-  read, by edamame's end locations."
+  the definition's end marked `…)`; nil when src is not a defn, defn-, defmacro or fn (a def, a
+  defmulti: no arglist). One read, by edamame's end locations."
   {:malli/schema [:=> [:cat :string :symbol] [:maybe :string]]}
   [src nsym]
   (let [f (first (read-text src nsym {:end-location true}))
@@ -83,8 +83,9 @@
         at (fn [row col] (+ (nth starts (dec row)) (dec col)))
         end (fn [x] (let [{:keys [end-row end-col]} (meta x)] (when end-row (at end-row end-col))))
         start (fn [x] (let [{:keys [row col]} (meta x)] (when row (at row col))))
-        params (when (seq? f) (some #(when (vector? %) %) (drop 2 f)))
-        arities (when (seq? f) (filter #(and (seq? %) (vector? (first %))) (drop 2 f)))]
+        fn? (and (seq? f) ('#{defn defn- defmacro fn} (first f)))
+        params (when fn? (some #(when (vector? %) %) (drop 2 f)))
+        arities (when fn? (filter #(and (seq? %) (vector? (first %))) (drop 2 f)))]
     (cond
       (and params (end params)) (str (subs src 0 (end params)) "\n  …)")
       (and (seq arities) (start (first arities)))
