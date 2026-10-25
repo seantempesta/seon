@@ -836,7 +836,7 @@
         db (d/db-with db [(on "demo/i#1" "i")])
         body (#'r/stage-boundary db "demo/i#1")]
     (is (str/starts-with? body "demo/d is done. Your task now is demo/i") body)
-    (is (str/includes? body "Make i true.") "with the new task's plan, as it accumulated")
+    (is (str/includes? body "Its plan: Make i true.") "with the new task's plan, as it accumulated")
     (is (str/includes? body "demo-test/i-test") "and its proofs")
     (is (nil? (#'r/stage-boundary db "demo/d#1")) "a session's first run opens with none")
     (is (nil? (#'r/stage-boundary (d/db-with db [(on "demo/i#2" "i")]) "demo/i#2")) "nor does a wake of the same task")))
