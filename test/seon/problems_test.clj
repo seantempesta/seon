@@ -770,6 +770,30 @@
     (is (= [] (orphans (d/db-with db0 (seon.docs/load-tx db0 "docs" (dissoc pages "docs/README.md")))))
         "no map in the db: unknown, not every page an orphan")))
 
+(deftest a-section-with-no-lead-is-a-problem
+  (let [db0 (ts/test-db)
+        page "# A\n\nThe page A.\n\n## Listed\n\n- one\n- two\n\n## Said\n\nA sentence that says what it is.\n"
+        db (d/db-with db0 (seon.docs/load-tx db0 "docs" {"docs/a.md" page}))
+        rows #(mapv :section (get-in (problems/health %) [:classes :leadless-section :rows]))]
+    (is (= ["docs/a.md#listed"] (rows db)) "a section whose first block is a list has no lead")
+    (let [fixed (d/db-with db (seon.docs/load-tx db "docs" {"docs/a.md" (str/replace page "- one" "It holds two items.\n\n- one")}))]
+      (is (= [] (rows fixed)) "a paragraph before the list closes it, with nothing else written"))
+    (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :leadless-section))))
+
+(defn leadless-input
+  "The cost proof's input at n: n sections, none with a lead."
+  [n] (let [db0 (ts/test-db)]
+        [(d/db-with db0 (seon.docs/load-tx db0 "docs" {"docs/p.md" (apply str "# P\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\n- item\n")))})) {}]))
+
+(deftest leadless-sections-follow-the-sections
+  (cost/proof {:of 'seon.problems/leadless-sections :input 'seon.problems-test/leadless-input
+               :n "sections, none with a lead"
+               :work "the sections' addresses and the lead datoms once, sorted by address, then a row per section"
+               :growth :linear
+               :per-n {:ns 30000 :bytes 30000 :calls 0}
+               :fixed {:ns 500000 :bytes 500000 :calls 3}
+               :sizes [10 100 1000]}))
+
 (deftest an-issue-with-no-page-is-a-problem
   (let [db0 (ts/test-db)
         err {:seon.error/signature "eeeeeeeeeeeeeeee" :seon.error/class :platform :seon.error/count 1 :seon.error/agents 0

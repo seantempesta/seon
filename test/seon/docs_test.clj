@@ -108,6 +108,14 @@
     (is (not-any? :seon.ref/text summary))
     (is (nil? (docs/page db "demo/none.md" :summary)))))
 
+(deftest every-section-of-the-wiki-has-a-lead
+  ;; docs/README.md: every section leads with one sentence that stands alone; the list is read from the
+  ;; real wiki as main holds it (notes/dogfood/docs-audit.md found 54 of 364 without)
+  (let [db0 (empty-db)
+        db (d/db-with db0 (docs/load-dir-tx db0 (config/checkout) "docs"))]
+    (is (< 300 (count (d/datoms db :aevt :seon.section/address))) "the real wiki is read")
+    (is (= [] (mapv :section (get-in (problems/health db) [:classes :leadless-section :rows]))) "no section lacks a lead")))
+
 (deftest one-address-shows-one-text-through-ref-and-docs
   ;; research row 15: a section's text at code depth is its own text, the lines after its
   ;; heading up to the next heading of any level, whichever reader shows it: the expected

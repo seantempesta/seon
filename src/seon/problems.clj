@@ -280,6 +280,21 @@
                 :producer nil :owner-ns 'seon.docs :proofs []
                 :evidence {:kind :orphan-page :page p} :answered-by (get-in ans [:signature s] []) :at-ms nil}))))))
 
+(defn leadless-sections
+  "Each section of the wiki whose first block is not a paragraph, so it has no lead, as a :leadless-section
+  row: its summary is its heading alone and its embedding has no sentence saying what it is about
+  (docs/README.md asks each section for a leading sentence that stands alone). Open until the section
+  is given one. Cost: the section addresses and the lead datoms, once."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (let [led (into #{} (map :e) (d/datoms db :aevt :seon.section/lead))]
+    (vec (for [{:keys [e v]} (sort-by :v (d/datoms db :aevt :seon.section/address)) :when (not (led e))
+               :let [s (str "leadless-section " v)]]
+           {:signature s :section v :open? true
+            :message (str v " has no lead: its first block is not a paragraph that says what the section is about")
+            :producer nil :owner-ns 'seon.docs :proofs []
+            :evidence {:kind :leadless-section :section v} :answered-by (get-in ans [:signature s] []) :at-ms nil}))))
+
 (defn problem-unlinked
   "Each class of classes ({class {:rows ...}}) with an open row whose wiki section (:seon.problems/docs)
   is no stored section, or that declares none, as a :problem-unlinked row: an issue that points
@@ -563,7 +578,7 @@
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the
   program's facts make true now (`dead-citations`, `unnamed-sites`, `stale-pins`, `stale-sections`,
-  `orphan-pages`, `uncited-tasks`, and `problem-unlinked` over all of them). What the page, an agent's context and
+  `orphan-pages`, `leadless-sections`, `uncited-tasks`, and `problem-unlinked` over all of them). What the page, an agent's context and
   the done and merge gates read: computed when read, never stored, never polled."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]
                   [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}
@@ -572,6 +587,7 @@
    (let [ans (answers db)
          derived {:dead-citation (dead-citations db ans) :unnamed-site (unnamed-sites db ans) :stale-pin (stale-pins db ans)
                   :stale-section (stale-sections db ans) :orphan-page (orphan-pages db ans)
+                  :leadless-section (leadless-sections db ans)
                   :uncited-task (uncited-tasks db ans)}
          classes (merge (:classes (report db fold)) (update-vals derived (fn [rows] {:n (count rows) :rows rows})))
          ;; its own class last: a missing section of the unlinked class is one more row

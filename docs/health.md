@@ -1,6 +1,6 @@
 # Health
 
-Health is the set of open problems: a value computed when something reads it (`seon.problems/health`). It is never stored, never precomputed and never polled. Root's page, an agent's context and the done rule each read it on the db they hold. It is the recorded classes (`seon.problems/report`) beside the derived ones (`:dead-citation`, `:unnamed-site`, `:stale-pin`, `:stale-section`, `:orphan-page`, `:uncited-task`, `:problem-unlinked`), one value by class (`:seon.problems/report`).
+Health is the set of open problems: a value computed when something reads it (`seon.problems/health`). It is never stored, never precomputed and never polled. Root's page, an agent's context and the done rule each read it on the db they hold. It is the recorded classes (`seon.problems/report`) beside the derived ones (`:dead-citation`, `:unnamed-site`, `:stale-pin`, `:stale-section`, `:orphan-page`, `:leadless-section`, `:uncited-task`, `:problem-unlinked`), one value by class (`:seon.problems/report`).
 
 ## Two kinds of problem
 
@@ -47,6 +47,10 @@ While root has recorded no import there is nothing to compare, and the class has
 ## An orphan page
 
 A page of the wiki that no other page links to, the map (docs/README.md) included as a linker, is an `:orphan-page` (`seon.problems/orphan-pages`): a section of another page has a reference to one of its sections, or it is orphaned. The map is the root and is not judged, and a db whose wiki has no map has no orphans (unknown). Adding a link anywhere closes it, with nothing written.
+
+## A section with no lead
+
+A section whose first block is a list, a table or code, not a paragraph, has no lead and is a `:leadless-section` (`seon.problems/leadless-sections`): its summary is its heading alone and its embedding has no sentence saying what it is about. [The wiki's rule](README.md) is a leading sentence that stands alone for every section, and a heading that only groups subsections says what they share. Writing the sentence closes it, with nothing else written.
 
 ## A task that cites nothing
 
