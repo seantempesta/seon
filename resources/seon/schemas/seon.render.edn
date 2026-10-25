@@ -77,6 +77,10 @@
  :seon.render/this-run [:map {:seon.render/html seon.render.ui/this-run} [:read [:map-of :symbol pos-int?]] [:defined [:vector :symbol]]
                         [:evaluated [:vector :symbol]] [:tests [:vector [:map [:form :string] [:handle :string]]]]]
  :seon.render/changes [:map {:seon.render/html seon.render.ui/changes} [:against :string] [:changes :map]]
+ ;; the agent's record as one map, @ctx (seon.ctx): its environment, its own attributes and its
+ ;; units by their short keys; the page draws it as a block (seon.render.ui/ctx), the model reads it
+ ;; through the one printer (no :ai render)
+ :seon.ctx/ctx [:map {:seon.render/html seon.render.ui/ctx} [:t :int] [:branch :seon.db/branch] [:commit {:optional true} :uuid]]
  ;; root's page's tile of main's problems (seon.render.proc/page-value): the report, by its own view,
  ;; with the ids of the classes its tab opened (:open, the /open toggle's): only those render their rows
  :seon.render/problems [:and :seon.problems/report [:map [:open [:set :string]]]]
