@@ -77,8 +77,12 @@
               ;; asked for seon.problems-test/ns 18 turns running, to write its deftest)
               ["(my.schema/forms :seon.run/status)" :text ":enum"]
               ["(clojure.repl/source seon.reconcile)" :text "(ns seon.reconcile"]
+              ;; then every definition, privates included, a line each (pipeline 1's F4: a design took
+              ;; the ns form alone for all that was recorded and spent five turns finding the privates)
+              ["(let [s (clojure.repl/source-fn 'seon.reconcile)] (mapv #(clojure.string/includes? s %) [\";; branch-messages\" \";; hairy\"]))" :text "[true true]"]
               ["(clojure.repl/source seon.reconcile/ns)" :text "(source seon.reconcile)"]
               ["(clojure.repl/source seon.reconcile/not-yet)" :text "no such var is defined"]
+              ["(clojure.repl/source seon.reconcile/not-yet-either)" :text "Every definition of its namespace, a line each: (source seon.reconcile)"]
               ;; what an agent naturally types answers as it reads (step 6, 2026-10-25: a run read its
               ;; helpers by a doseq over quoted names, then by #'f, and got invalid-input each time)
               ["(clojure.repl/source 'seon.reconcile/merge-limits)" :text "(defn merge-limits"]

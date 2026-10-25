@@ -213,7 +213,7 @@
   "Why value v cannot be attribute a, or nil when it can: a's schema's explanation, or that a has none."
   {:malli/schema [:=> [:cat :any :any] :any]}
   [a v]
-  (cond (not (registered? a)) (str a " has no schema: register it (my.schema/register!), a qualified keyword")
+  (cond (not (registered? a)) "no schema: register it (my.schema/register!), a qualified keyword"
         (contract/valid? a v) nil
         :else (me/humanize (m/explain (contract/schema a) v))))
 
@@ -261,7 +261,7 @@
                (reduce-kv (fn [acc k m]
                             (let [o (get om k)]
                               (cond
-                                (nil? o) (let [t (str "ctx" (pr-str (conj path k)))]
+                                (nil? o) (let [t (str "ctx" (count (:tx acc)))] ; unique: each new member writes its identity first
                                            ;; its identity is its key in the unit, written here: no path the
                                            ;; swap!'s map says anything at
                                            (-> (edits db schema {} (assoc m id k) t (conj path k) acc)
@@ -273,7 +273,7 @@
                           acc (or om {})))
              (and (map? om) (map? nm) (= (:db/id om) (:db/id nm))) (edits db (render/entity-schema nm nil) om nm (:db/id om) path acc)
              (nil? nm) (-> acc (update :tx conj [:db/retract e attr (:db/id om)]) (update :paths conj path))
-             :else (update acc :invalid conj {:path path :why (str key " is " attr "'s entity: set it by " attr ", a ref")}))))
+             :else (update acc :invalid conj {:path path :why "a ref's entity: set it by the ref" :ref attr}))))
        acc us))))
 
 (defn- strip "x without its :db/ids, at every depth." {:malli/schema [:=> [:cat :any] :any]}
@@ -301,9 +301,9 @@
       (cond
         ;; nothing to write: the record stays the db's (the swap!'s map gives way to it as it ends)
         (empty? tx) (if (seq invalid)
-                      (throw (ex-info (str "ctx: refused, nothing written: " (pr-str invalid)) (contract/error :seon.ctx/invalid #'write! "refused by the schemas, nothing written: each path and why" {:invalid invalid})))
+                      (throw (ex-info "ctx: refused by the schemas, nothing written" (contract/error :seon.ctx/invalid #'write! "refused by the schemas, nothing written: each path and why" {:invalid invalid})))
                       (do (vreset! pending c) true))
-        (seq invalid) (throw (ex-info (str "ctx: refused, nothing written: " (pr-str invalid)) (contract/error :seon.ctx/invalid #'write! "refused by the schemas, nothing written: each path and why" {:invalid invalid})))
+        (seq invalid) (throw (ex-info "ctx: refused by the schemas, nothing written" (contract/error :seon.ctx/invalid #'write! "refused by the schemas, nothing written: each path and why" {:invalid invalid})))
         :else
         (let [rep (d/with db tx)
               held' (:tree (patch c (:db-after rep) (:tx-data rep) branch))
@@ -313,7 +313,7 @@
                                      :else (= (strip w) (strip h))))
               unheld (vec (remove #(holds? (get-in nv %) (get-in held' %)) paths))]
           (when (seq unheld)
-            (throw (ex-info (str "ctx: the db would not hold what the swap! says at " (pr-str unheld) ", nothing written")
+            (throw (ex-info "ctx: the db would not hold what the swap! says, nothing written"
                             (contract/error :seon.ctx/not-held #'write! "the db would not hold what the swap! says at these paths (it would hold :held), nothing written" {:paths unheld :held (mapv #(get-in held' %) unheld)}))))
           (binding [*writing* true] (agent/transact! tx))
           true)))))

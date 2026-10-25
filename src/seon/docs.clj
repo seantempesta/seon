@@ -473,6 +473,14 @@
                                                   (conj lines [n]))))
                                 [] names)))))
 
+(defn definition-lines
+  "Namespace view nv's definitions as comment lines, one each in file order: its name and its doc's
+  first sentence (seon.ref/namespace-view's headings), or nil when it lists none. What a namespace's
+  citation and `(source ns)` show below its head."
+  {:malli/schema [:=> [:cat [:maybe :seon.ref/view]] [:maybe :string]]}
+  [nv]
+  (when-let [b (seq (:seon.ref/below nv))] (str/join "\n" (map #(str ";; " (:seon.ref/heading %)) b))))
+
 (defn cited-code
   "What the screen shows of citation c on db, as Clojure is written in a file (DECISIONS,
   code is shown as code): a var as its definition's head (seon.reader/definition-head: name, docstring as
@@ -498,8 +506,7 @@
       (and (= :namespace kind) (symbol? nm))
       (let [nv (ref/namespace-view db nm :doc)]
         (print/code (str "(ns " nm (when-let [d (:seon.ref/lead nv)] (str "\n  " (emit/string-literal d))) ")"
-                         ;; each definition a line: its name and its doc's first sentence
-                         (when-let [b (seq (:seon.ref/below nv))] (str "\n" (str/join "\n" (map #(str ";; " (:seon.ref/heading %)) b)))))))
+                         (some->> (definition-lines nv) (str "\n")))))
       ;; a task, a section, a file, or what reaches nothing: its address and lead as prose (comment
       ;; lines), then the form that reads it whole; never its view's map
       hit

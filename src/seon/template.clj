@@ -34,14 +34,14 @@
   "What each step's agent does, by task kind (its own work: instructions never flow): its goal,
   when it is done and by what means, short, the standard format's stage stories (seon.judge's). How every agent works at the REPL is the system prompt every agent reads first
   (seon.context/system-page), and the help page it reads on demand (seon.context/help-page)."
-  {:design (str "Your task: turn the plan below, however rough (it may be one line from a user), into a plan the implement "
+  {:design (str "Your task: turn the plan below, however rough, into a plan the implement "
                 "step can follow without exploring. You are done when the plan names each function to change, cited with three "
                 "backticks, and the proofs that will show the change are written, registered "
-                "and red for the reason the plan gives. You do it at the REPL: read what the plan touches "
-                "(``(clojure.repl/source ns/f)``, ``(my.agent/callers 'ns/f)``, the schemas on the data's path) and try the idea. "
-                "Write each proof by evaluating its deftest in its test namespace (``(in-ns 'ns.x-test)``, then the deftest): what you "
-                "evaluate is your branch's program, so you write no file. Register it (``(my.task/update! :seon.task/proofs conj "
-                "'ns.x-test/a-proof)``) and run it red. Leave each new function's defn with its contract and a stub body, each new "
+                "and red for the reason the plan gives. You do it at the REPL, proof first: reproduce what the plan says is wrong "
+                "as a deftest, evaluated in its test namespace (``(in-ns 'ns.x-test)``, then the deftest: what you evaluate is your "
+                "branch's program, so you write no file), register it (``(my.task/update! :seon.task/proofs conj "
+                "'ns.x-test/a-proof)``) and run it red. Then read what the change touches (``(clojure.repl/source ns/f)``; "
+                "``(clojure.repl/source ns)`` lists its every definition; ``(my.agent/callers 'ns/f)``). Leave each new function's defn with its contract and a stub body, each new "
                 "schema registered, a cost proof (``seon.cost/proof``) for a function whose input grows, and the plan rewritten "
                 "with ``(my.task/update! :seon.task/plan str \"\\n\\nWhat the implement step changes: \" \"<each function and what it does then>\")``. "
                 "Do not write the bodies: they are the implement step's. Then end your turn with prose.")
