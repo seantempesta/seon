@@ -14,7 +14,7 @@ The ops are one table, ```seon.server/ops```, keyed by a request's `:op`; each e
 
 - `:agents`: live agents and every task's summary (`seon.server/task-summaries`: execution, done, blocked-by, its runs, its failure).
 - `:eval`: Clojure evaluated in a running agent's process (recorded on its branch, origin `:outside`) or as `"root"` in root's process, with `sys` bound to root (`seon.server/*sys*`). Both go through the one REPL path, `seon.repl/eval-string` ([processes](processes.md#the-agent-process)).
-- `:context`: the current-state block of the task an agent works, as the model would read it now (`seon.turn/context-block`; it names an agent or a task, attaching one if none works it), recorded with origin `:context`, a row of the agent's page like any evaluation ([render](render.md#the-page)).
+- `:context`: the request of the task an agent works as a model is sent it now, system prompt, story, conversation and screen (its forms evaluated, so `(my.task/status)` answers as this read measured) as one text (`seon.turn/context-block`; it names an agent or a task, attaching one if none works it), recorded with origin `:context`, a row of the agent's page like any evaluation ([render](render.md#the-page)).
 - `:message`: the owner's words to a running agent (`seon.root/message!`, the page's message bar sends the same request): root delivers them, and the agent's next turn reads them in its block ([render](render.md)).
 - `:attach`: root starts an agent on the task's branch with model `"outside"`, so no turn loop runs in it, and answers its id once the agent is ready (its hello), or the end it met first, which is the run's death ([root](root.md#holders-and-refused-spawns)).
 - `:prove`: the tests a branch's change reaches, run once per branch and tx however many ask, through the one test service (`seon.prove`, [merging](merging.md#the-test-service)); it names an agent's branch, else main.
@@ -34,6 +34,5 @@ Working a task this way is the turn loop's path with the model outside: [turn](t
 
 ## Where it falls short today
 
-An outside agent (a Claude session through the server) does not see what a model sees, so dogfooding through the server measures a different context.
-- `:context` answers ```seon.turn/context-block```, the story and the turn sections, not the parts a model's request is made of: `seon.server/the-outside-context-is-what-a-model-is-sent`.
+An outside agent (a Claude session through the server) reads what a model is sent, but does not yet hear how its run ended.
 - `:done` answers `{:judging ...}` and ends the agent, so it never sees the verdict: `seon.server/done-answers-the-verdict`.

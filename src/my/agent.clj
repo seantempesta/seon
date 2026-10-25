@@ -20,7 +20,7 @@
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
-            [seon.config :as cfg] [seon.proofs :as proofs] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract]
+            [seon.config :as cfg] [seon.proofs :as proofs] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract]
             [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
@@ -164,11 +164,12 @@
 (defn deferred
   "The process tests this branch's change reaches, a proof among them: an agent's turn and
   root's judge never run them, root's gate runs them when root asks (my.root/gate!; DECISIONS,
-  Process tests are not automatic). seon.agent/test-plan's :process among what it selects: names."
-  {:malli/schema [:=> [:cat] [:vector :qualified-symbol]]}
+  Process tests are not automatic). seon.agent/test-plan's :process among what it selects, each
+  with why: the process var it uses and the calls from the test to it (seon.program/process-path)."
+  {:malli/schema [:=> [:cat] [:vector [:map [:test :qualified-symbol] [:uses [:vector :qualified-symbol]] [:through [:vector :qualified-symbol]]]]]}
   [] (let [proofs (or (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})
            plan (agent/test-plan (agent/db) (:base @agent/state) proofs)]
-       (vec (filter (:process plan) (:selected plan)))))
+       (vec (for [t (filter (:process plan) (:selected plan))] (assoc (program/process-path (:graph plan) t) :test t)))))
 
 (defn pst
   "Print the exception e (*e by default) as clojure.repl/pst does: its message, then each cause's

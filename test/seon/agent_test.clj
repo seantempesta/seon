@@ -326,6 +326,17 @@
   (let [[id] (in-agent ["(:seon.task/id (my.task/current))"])]
     (is (= "demo/t" (:value id)) (pr-str id))))
 
+(deftest an-agent-inherits-a-static-heap
+  ;; design agent-loop section 2: an agent forked after main moved inherits the fork server's
+  ;; heap in Chez's static generation, so its collections never copy (un-share) it. Measured
+  ;; 2026-10-25: 163 MB of the fork server's heap sat in generations 3 and 4 at fork, and one
+  ;; full collect in a fresh agent raised its footprint by 98 MB; made static, 106 MB after a
+  ;; work that left today's agent at 333 MB. The bytes in Chez's collected generations are
+  ;; work done (what the fork server held live), not load.
+  (let [[r] (in-agent ["(vec (for [g (range 1 5)] (jolt.scheme/eval-string (str \"(bytes-allocated \" g \")\"))))"])
+        mb (/ (reduce + (:value r)) 1048576.0)]
+    (is (< mb 16) (str "the agent inherited " mb " MB outside the static generation: " (pr-str r)))))
+
 (deftest an-agent-with-no-task-resumes-a-kept-branch
   ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
   ;; store already holds (a kept branch; e2e's fresh agent on a store an earlier run left)
