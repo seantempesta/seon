@@ -448,14 +448,13 @@
                                 [] names)))))
 
 (defn cited-code
-  "What the screen shows of citation c on db, as Clojure is written in a file (owner,
-  2026-10-25): a var as its definition's head (seon.reader/definition-head: name, docstring as
+  "What the screen shows of citation c on db, as Clojure is written in a file (DECISIONS,
+  code is shown as code): a var as its definition's head (seon.reader/definition-head: name, docstring as
   written, attribute map, arglist; its body marked `…)` with the form that reads it whole), a
   namespace as its ns form's head, its docstring as written, then its public names; each as code
   (seon.print/code), printed verbatim; a var whose source db does not record, as a `declare` with
   its arglists and doc as comments; a task, a section, a file or a citation that reaches nothing as
-  its address and lead in comment lines, then the form that reads it whole (never its view's map:
-  root, 2026-10-25). nil when it reaches nothing pulled."
+  its address and lead in comment lines, then the form that reads it whole (never its view's map). nil when it reaches nothing pulled."
   {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :any]}
   [db c]
   (let [[kind v :as hit] (cited db c)

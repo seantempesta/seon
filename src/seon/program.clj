@@ -942,7 +942,7 @@
   reaching what it names, so their references give the reach walk no edges. seon.config/schema-forms
   is every schema baked into one literal, whose :seon.render/* properties name every render: an
   edge from it put every render, and through seon.docs/cited the tree, under every contracted
-  call (680 of 706 tests took the tree digest, 2026-10-25); a check reaches the schemas it
+  call (680 of 706 tests took the tree digest); a check reaches the schemas it
   checks through its contract's own schema rows, and the baked schemas are :env."
   '#{seon.program/tree-readers seon.program/env-readers seon.config/schema-forms})
 
