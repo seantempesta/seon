@@ -9,7 +9,7 @@
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.proofs :as proofs] [seon.merge :as pm] [seon.program :as program] [seon.source :as source]
             [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
-            [seon.config :as cfg]))
+            [seon.config :as cfg] [seon.context :as context]))
 
 
 (defn merge-limits
@@ -671,6 +671,36 @@
       :gate (one (request st run :gate-read
                           {:op :write :req {:op :branch-db :branch (get-in (task/run (:db st) run) [:seon.run/env :branch])}})))))
 
+(defn- work
+  "[st [output]]: the agent's turn loop for run aid of act, asked of agent: seon.turn/work!,
+  named as text (a form sent to another process is no call in this one, and a quoted name is a
+  reach edge, as seon.render.ui/did names my.agent/prove, which made every test reaching the
+  reconciler reach seon.lib/fork! whenever seon.turn happened to be analyzed first)."
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.run/id :map :keyword] [:tuple :seon.reconcile/state [:vector :map]]]}
+  [st aid act agent]
+  (let [[st o] (request st aid :worked
+                        {:op :eval :id agent
+                         :forms (sedn/encode (list (symbol "seon.turn" "work!") (list 'quote (cond-> {:task (:task act) :run aid :max-turns (get-in act [:env :max-turns])}
+                                                                                (get-in act [:env :model]) (assoc :model (get-in act [:env :model]))))))})]
+    [st [o]]))
+
+(defn- stage-boundary
+  "The message that opens run aid's stage of its session, or nil: when the session's agent ran
+  another task before (its newest earlier run, by the transaction that started it), the new
+  task and its story, said once at the boundary, so the conversation above stays as it was
+  sent (design agent-loop section 1a; live finding A1, 2026-10-25: the new stage's story put at
+  the top cached 1% of 33k tokens, and the agent took the design for its task)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:maybe :string]]}
+  [db aid]
+  (let [task-of #(:seon.task/id (:seon.run/task (d/entity db [:seon.run/id %])))
+        id (task-of aid)
+        [_ prev] (->> (d/q '[:find ?tx ?id :in $ ?me :where [?x :seon.run/id ?me] [?x :seon.run/agent ?g] [?r :seon.run/agent ?g ?tx] [?r :seon.run/id ?id] [(not= ?id ?me)]] db aid)
+                      (sort-by first) last)
+        prev-task (some-> prev task-of)]
+    (when (and prev-task (not= prev-task id))
+      (str prev-task " is done. Your task now is " id ", in this same session: what you did so far stays above. Its story:\n\n"
+           (context/story db (:db/id (d/entity db [:seon.task/id id])) (:max-tx db))))))
+
 (defn- taken-messages
   "How many messages to the runs on run aid's branch (as main names them) branch db holds:
   those its session's turns took (each written on the branch by the turn that took it). The
@@ -789,14 +819,12 @@
                  (= "outside" (get-in act [:env :model]))
                  (done st)
                  :else
-                 ;; the agent's turn loop, named as text: a form sent to another process is no call in
-                 ;; this one, and a quoted name is a reach edge (as seon.render.ui/did names my.agent/prove),
-                 ;; which made every test reaching the reconciler reach seon.lib/fork! whenever seon.turn
-                 ;; happened to be analyzed first
-                 (one (request st aid :worked
-                               {:op :eval :id agent
-                                :forms (sedn/encode (list (symbol "seon.turn" "work!") (list 'quote (cond-> {:task (:task act) :run aid :max-turns (get-in act [:env :max-turns])}
-                                                                                       (get-in act [:env :model]) (assoc :model (get-in act [:env :model]))))))})))
+                 ;; a session's next stage: the boundary is a message in the session, root's, taken by
+                 ;; its first turn like any other (the conversation above it unchanged, its prefix cached)
+                 (if-let [body (stage-boundary (:db st) aid)]
+                   (one (request st aid :briefed {:op :message :id agent :from :root :body body}))
+                   (work st aid act agent)))
+      :briefed (if (contract/error? r) (dead st r) (work st aid act agent))
       ;; the turn loop answered: died (no live agent), or judge it from measured facts
       ;; work! that threw was answered by the agent's REPL (the process lives): its error
       ;; names the run's end when the loop wrote none

@@ -821,6 +821,18 @@
                 [db0 (r/index db0)] [(msg "m1") (msg "m2")])
         (is (= 2 (get-in (r/index (d/db-with db0 (concat (msg "m1") (msg "m2")))) [:msgs (task/default-branch "demo/a")])))))))
 
+(deftest a-sessions-next-stage-opens-with-roots-message
+  ;; live finding A1 (2026-10-25): a session's next stage (another task, the same agent) opens
+  ;; with root's message naming the new task and its story; a wake of the same task opens with none
+  (let [on (fn [run task] {:seon.run/id run :seon.run/task [:seon.task/id (str "demo/" task)] :seon.run/agent {:seon.agent/key "b/a1"}})
+        db (db-of [(decl "d") (decl "i" :needs ["d"])] :extra [(on "demo/d#1" "d")])
+        db (d/db-with db [(on "demo/i#1" "i")])
+        body (#'r/stage-boundary db "demo/i#1")]
+    (is (str/starts-with? body "demo/d is done. Your task now is demo/i") body)
+    (is (str/includes? body "Make i true.") "with the new task's story")
+    (is (nil? (#'r/stage-boundary db "demo/d#1")) "a session's first run opens with none")
+    (is (nil? (#'r/stage-boundary (d/db-with db [(on "demo/i#2" "i")]) "demo/i#2")) "nor does a wake of the same task")))
+
 (deftest a-proof-a-branch-registers-reaches-main-at-the-runs-end
   ;; owner, 2026-10-25 (Dogfood rulings): a design registers the red proofs it writes
   ;; (my.task/update! :seon.task/proofs conj 't); the judge carries them onto main like the plan,
