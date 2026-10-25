@@ -32,14 +32,19 @@
   [] (:task @agent/state))
 
 (defn- begin!
-  "This process works task as run: the turn state, begun once per run with the
-  task's accumulated plan as the branch held it (a design step answers for improving it).
+  "This process works task as run: the run recorded as its session's on its branch, and the
+  turn state, begun once per run with the task's accumulated plan as the branch held it (a
+  design step answers for improving it).
   The turn loop and an outside agent's context read begin it the same way."
   {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :map]}
   [task run]
   (if (= run (get-in @agent/state [:turn :run]))
     (:turn @agent/state)
     (let [db (agent/db)]
+      ;; the run is this session's on its own branch too (root writes it on main): the
+      ;; conversation finds the messages its runs took, and the story its first stage's, by it
+      ;; (seon.context/records, session-first-run read the branch)
+      (agent/transact! [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @agent/state)}}])
       (:turn (swap! agent/state assoc :turn {:run run
                                              :plan-before (:plan (:seon.task/accumulated (task/task db task)))})))))
 
