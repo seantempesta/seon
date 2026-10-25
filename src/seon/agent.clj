@@ -138,7 +138,7 @@
   {:malli/schema [:=> [:cat] :any]}
   []
   (when-let [c (dw/commit-pending! (:store-conn @state))]
-    (swap! state #(-> % (assoc :db (:db c)) (dissoc :dirty?)))
+    (swap! state #(-> % (assoc :db (:db c)) (dissoc :dirty? :tx)))
     ;; the eval errors folded since the last commit ride it (seon.error/note): root counts
     ;; them across agents
     (let [errs (:errors @state)]

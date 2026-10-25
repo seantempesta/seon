@@ -19,7 +19,7 @@ Things are named by themselves: an eval by its id, a run by its id, an attribute
 
 `@ctx`'s value carries `{:seon.render/schema :seon.ctx/ctx}` as metadata. ``:seon.ctx/ctx`` declares a page render, ``seon.render.ui/ctx``, and none for the model, so the model reads `@ctx` as it reads any value, through the one printer, cut where it is large with the form that reads the rest. The page draws the same eval as a block: a row per key, each value by the render its key's own schema declares (``seon.render/render`` with the key as its schema), else the printer's structure.
 
-The block is drawn in the agent, where its renders are defined, when the eval is recorded (``seon.repl/record-details``), and kept as its HTML (``seon.web.html/raw``): root's page shows it as drawn and calls nothing of the agent's. The record keeps the text the model read and the block, not a copy of the map. The renders a branch registered are the ones it draws by: the REPL binds its branch's schema changes (``seon.contract/*changes*``) beside malli's registry while it evaluates and records.
+The block is drawn in the agent, where its renders are defined, when the eval is recorded (``seon.repl/record-details``), and kept as its HTML (``seon.web.html/raw``): root's page shows it as drawn and calls nothing of the agent's. The record keeps the text the model read and the block, not a copy of the map. The renders a branch registered are the ones it draws by: the REPL binds malli's registry to its branch's population while it evaluates and records, and ``seon.contract/properties`` reads a bound registry first.
 
 ## Adding a datum and its render
 

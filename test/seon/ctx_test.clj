@@ -51,13 +51,15 @@
 (defn- change
   "The i-th change of a session, chosen by r from what one does: an eval, a new run with turns, a
   turn or message on a run, a run's status, the task's plan and proofs, an eval gone, the agent's
-  own attribute."
+  own attribute, a turn moved to another run, a run gone, a run's messages all gone (a unit
+  emptied)."
   {:malli/schema [:=> [:cat :seon.host/db nat-int? :any] [:vector :any]]}
   [db i ^java.util.Random r]
   (let [runs (vec (d/q '[:find [?id ...] :where [_ :seon.run/id ?id]] db))
         evals (vec (sort (d/q '[:find [?id ...] :where [_ :seon.eval/id ?id]] db)))
-        run (nth runs (.nextInt r (count runs)))]
-    (case (.nextInt r 9)
+        run (nth runs (.nextInt r (count runs)))
+        turns (vec (sort (d/q '[:find [?id ...] :where [_ :seon.turn/id ?id]] db)))]
+    (case (.nextInt r 12)
       0 (eval-tx (+ 10000 i))
       1 (run-tx (str "lab/ctx#" (+ 2 i)) 2)
       2 [{:seon.turn/id (str run "/x" i) :seon.turn/run [:seon.run/id run] :seon.turn/n i}]
@@ -66,11 +68,16 @@
       5 [[:db/add [:seon.task/id "lab/ctx"] :seon.task/plan (str "plan " i)]]
       6 [[(if (.nextBoolean r) :db/add :db/retract) [:seon.task/id "lab/ctx"] :seon.task/proofs (symbol "app.x-test" (str "t" (.nextInt r 3)))]]
       7 (if (seq evals) [[:db/retractEntity [:seon.eval/id (nth evals (.nextInt r (count evals)))]]] (eval-tx (+ 20000 i)))
-      8 [[:db/add [:seon.agent/key k] :seon.agent/status (nth [:idle :busy] (.nextInt r 2))]])))
+      8 [[:db/add [:seon.agent/key k] :seon.agent/status (nth [:idle :busy] (.nextInt r 2))]]
+      9 (if (seq turns) [[:db/add [:seon.turn/id (nth turns (.nextInt r (count turns)))] :seon.turn/run [:seon.run/id run]]] (eval-tx (+ 30000 i)))
+      10 (if (< 1 (count runs)) [[:db/retractEntity [:seon.run/id run]]] (eval-tx (+ 40000 i)))
+      11 (or (not-empty (vec (for [m (d/q '[:find [?m ...] :in $ ?r :where [?re :seon.run/id ?r] [?m :seon.message/to ?re]] db run)] [:db/retractEntity m])))
+             (eval-tx (+ 50000 i))))))
 
 (deftest ctx-is-the-record-after-every-transaction
-  ;; the patch holds what a build holds, after each of 150 changes of a session's kinds (a seeded
-  ;; random choice, so a failure repeats): the map is never a second record of its own
+  ;; the patch holds what a build holds, its map and its index, after each of 150 changes of a
+  ;; session's kinds (a seeded random choice, so a failure repeats): the map is never a second
+  ;; record of its own
   (let [r (java.util.Random. 25)]
     (testing "the record holds the session: its evals keyed by id, its runs with their task, turns and messages"
       (let [t (:tree (ctx/build (seeded 60) k :b))]
@@ -84,7 +91,22 @@
       (if (= i 150)
         (is (empty? bad) (str "the change after which the patch and a build differ: " (first bad)))
         (let [tx (change db i r) rep (d/with db tx) db' (:db-after rep) c' (ctx/patch c db' (:tx-data rep) :b)]
-          (recur db' c' (inc i) (cond-> bad (not= (:tree c') (:tree (ctx/build db' k :b))) (conj [i tx]))))))))
+          (recur db' c' (inc i) (cond-> bad (not= c' (ctx/build db' k :b)) (conj [i tx]))))))))
+
+(deftest the-agents-state-keeps-ctx
+  ;; the atom follows the agent's db: built when the state first holds it, patched from the
+  ;; transaction transact! records, and from what two values differ by when no transaction moved it
+  (let [db (seeded 10) rep (d/with db (eval-tx 11))]
+    (try
+      (reset! seon.agent/state {:db db :key k :branch :b})
+      (is (= (:tree (ctx/build db k :b)) @ctx/ctx) "built when the state first holds the db")
+      (is (= {:seon.render/schema :seon.ctx/ctx} (meta @ctx/ctx)) "marked for its block")
+      (swap! seon.agent/state assoc :db (:db-after rep) :tx (select-keys rep [:db-after :tx-data]))
+      (is (contains? (:evals @ctx/ctx) "e11") "a transaction's eval joins")
+      (is (= (:tree (ctx/build (:db-after rep) k :b)) @ctx/ctx))
+      (swap! seon.agent/state assoc :db db)
+      (is (= (:tree (ctx/build db k :b)) @ctx/ctx) "a move with no transaction is patched by the difference")
+      (finally (reset! seon.agent/state nil)))))
 
 (defn new-eval
   "The input of size n: the record of a session of n evals, built, and one more eval's
@@ -118,11 +140,12 @@
         c (with-meta {:t 7 :branch :main/a1 :commit (random-uuid) :seon.render/proofs proofs :evals {"e1" {:seon.eval/id "e1"}}}
             {:seon.render/schema :seon.ctx/ctx})
         h (render/html c {})
-        has? (fn [x] (some #(= x %) (tree-seq coll? seq h)))]
+        rows (into {} (for [x (tree-seq coll? seq h) :when (and (vector? x) (= :tr (first x)))]
+                        [(last (nth x 2)) (last (nth x 3))]))]
     (is (= 'seon.render.ui/ctx (render/declared (render/schema-of c nil) :html)) "@ctx's value names its block")
-    (is (has? (render/html proofs {:schema :seon.render/proofs})) "a key whose schema declares a render draws by it")
-    (is (has? (render/html {"e1" {:seon.eval/id "e1"}} {:schema nil})) "a key with none draws as the printer's structure")
-    (is (has? ":seon.render/proofs") "each row names its key")))
+    (is (= [":evals" ":seon.render/proofs"] (sort (keys rows))) "a row per key, its environment above them")
+    (is (= (render/html proofs {:schema :seon.render/proofs}) (rows ":seon.render/proofs")) "a key whose schema declares a render draws by it")
+    (is (= (render/html {"e1" {:seon.eval/id "e1"}} {:schema nil}) (rows ":evals")) "a key with none draws as the printer's structure")))
 
 (declare steps)
 

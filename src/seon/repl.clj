@@ -254,11 +254,11 @@
     {}))
 
 (defn- with-branch-schemas
-  "f called with malli's dynamic registry bound to this branch's population (branch-registry)
-  and seon.contract/*changes* to its schema changes, read now: what a form compiles against
-  and the renders its values' schemas name."
+  "f called with malli's dynamic registry bound to this branch's population (branch-registry),
+  read now: what a form compiles against, and the renders its values' schemas name
+  (seon.contract/properties reads it)."
   {:malli/schema [:=> [:cat :seon.host/fn] :any]}
-  [f] (let [r (branch-registry)] (binding [mr/*registry* r contract/*changes* (:key (:schema-registry @agent/state))] (f))))
+  [f] (binding [mr/*registry* (branch-registry)] (f)))
 
 (defn wrap-registry
   "Each form evaluates with its branch's schemas bound (with-branch-schemas), read before the
@@ -398,11 +398,10 @@
                           (with-branch-schemas #(render/declared (:seon.render/schema (meta v)) :html)))
                  (with-branch-schemas #(h/raw (h/html (render/html v {:as :block :handle (:handle resp)}))))))
         data? (and (nil? html) (or (not (contains? resp :value)) (pdb/plain? (:value resp))) (every? pdb/plain? (:values resp)))]
-    (cond-> (cond
-              data? {:code code :response resp}
-              html {:code code :response (dissoc resp :value :values) :printed (print/response-text resp) :type (str (type (:value resp)))
-                    :seon.render/html html}
-              :else {:code code :response (dissoc resp :value :values) :printed (print/response-text resp) :type (str (type (:value resp)))})
+    (cond-> (if data?
+              {:code code :response resp}
+              (cond-> {:code code :response (dissoc resp :value :values) :printed (print/response-text resp) :type (str (type (:value resp)))}
+                html (assoc :seon.render/html html)))
       (or (contains? r :value) (:ex r))
       (assoc :line (print/line (cond (:ex r) (or (get-in r [:ex :seon.error/message]) (:ex r)) (contains? r :values) (:values r) (nil? (:value r)) "nil" :else (:value r)) (cfg/value :seon.config.render/line-budget) nil))
       (:prose req) (assoc :prose (:prose req))

@@ -116,9 +116,13 @@
   [s a] (some #(when (= a (:attr %)) %) (get units s)))
 
 (defn- leave
-  "c without the member at path p."
+  "c without the member (or forward unit) at path p; a unit it empties goes with it."
   {:malli/schema [:=> [:cat :map [:vector :any]] :map]}
-  [{:keys [tree ix]} p] {:tree (update-in tree (pop p) dissoc (peek p)) :ix (unindex ix (get-in tree p) p)})
+  [{:keys [tree ix]} p]
+  (let [unit (pop p) t (update-in tree unit dissoc (peek p))
+        ;; a unit emptied is no key, as a build holds it
+        t (if (and (seq unit) (empty? (get-in t unit))) (update-in t (pop unit) dissoc (peek unit)) t)]
+    {:tree t :ix (unindex ix (get-in tree p) p)}))
 
 (defn- join
   "c with entity e of schema s added at path p, whole as db holds it."
@@ -153,30 +157,42 @@
 (defn patch
   "ctx's value c with datoms (a transaction's :tx-data, or a datoms-diff marked :added) applied on
   db, the db after them: each datom of an entity c holds sets or removes its attribute
-  (retractions first: a change is a retraction and an assertion), and an entity c lacks that a
-  datom links to one it holds by a reverse unit's attribute joins it, read whole. Work: a map
-  lookup and an assoc-in per datom, and the read of each entity that joins."
+  (retractions first: a change is a retraction and an assertion), and a datom whose ref links an
+  entity to one c holds, by a reverse unit's attribute, joins it to that unit, read whole, or takes
+  it out. Entities are taken in any order: one that joins is read from db, so a child read before
+  its parent is read again, whole, when the parent joins. Work: a map lookup and an assoc-in per
+  datom, and the read of each entity that joins. An identity never changes (an upsert key)."
   {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :map]] :seon.host/db [:sequential :any] :any] [:map [:tree :map] [:ix :map]]]}
   [c db datoms branch]
   (-> (reduce
        (fn [c [e ds]]
-         (if (seq (get (:ix c) e))
-           ;; at each path it sits at, as each datom finds it (a member gone leaves its paths)
-           (reduce (fn [c dt] (reduce (fn [c [p s]] (if (contains? (get (:ix c) e) [p s]) (step c db p s dt) c)) c (get (:ix c) e)))
-                   c (concat (remove :added ds) (filter :added ds)))
-           (or (some (fn [{:keys [a v added]}]
-                       (when added
-                         (when-let [at (seq (get (:ix c) v))]
-                           (when-let [{:keys [key schema id]} (some #(when (and (:rev? %) (= a (:attr %))) %) (get units (second (first at))))]
-                             (let [k (key-of db e id)] (reduce (fn [c [pp _]] (join c db e schema (conj pp key k))) c at))))))
-                     ds)
-               c)))
+         (let [own (fn [at] (fn [c dt] (reduce (fn [c [p s]] (if (contains? (get (:ix c) e) [p s]) (step c db p s dt) c)) c at)))
+               ;; a datom whose ref names a held entity by one of its reverse units' attribute links e
+               ;; into that unit (added) or out of it (retracted), at each path the held one sits at
+               link (fn [c {:keys [a v added]}]
+                      (let [at (get (:ix c) v)]
+                        (if-let [{:keys [key schema id]} (when (seq at) (some #(when (and (:rev? %) (= a (:attr %))) %) (get units (second (first at)))))]
+                          (let [k (key-of db e id)]
+                            (reduce (fn [c [pp _]] (let [q (conj pp key k)]
+                                                     (cond (and added (not (contains? (get (:ix c) e) [q schema]))) (join c db e schema q)
+                                                           (and (not added) (contains? (get (:ix c) e) [q schema])) (leave c q)
+                                                           :else c)))
+                                    c at))
+                          c)))
+               gone (remove :added ds) put (filter :added ds)]
+           ;; retractions first (a change is a retraction and an assertion); where e joins it is read
+           ;; whole from db, so its assertions set it only at the paths it held before
+           (let [c (reduce link (reduce (own (get (:ix c) e)) c gone) gone)
+                 held (get (:ix c) e)]
+             (reduce (own held) (reduce link c put) put))))
        c (group-by :e datoms))
       (update :tree merge (environment db branch))))
 
 ;; ---- the atom ----------------------------------------------------------------------------
 
-(defonce ^{:doc "The agent's record as a map: (deref ctx). Read-only for now: a swap! changes the map, never the branch."} ctx (atom nil))
+(defonce ^{:doc "The agent's record as a map: (deref ctx). Read-only for now: a swap! changes the map, never the branch, and the next transaction's patch, made from the record, replaces it."} ctx (atom nil))
+;; the value and its index, beside the atom: the agent is one thread, and its state's watch runs
+;; on it, so each patch follows the one before
 (defonce ^:private held (volatile! nil))
 
 (defn- install!
