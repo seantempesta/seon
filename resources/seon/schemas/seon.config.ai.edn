@@ -19,6 +19,7 @@
  :seon.config.ai/reasoning-effort [:enum {:seon.config/unit "effort" :description "DeepSeek's reasoning effort; absent: the provider's default."} :low :medium :high]
  :seon.config.ai/max-in-flight [:int {:min 1 :seon.config/unit "calls" :description "Model calls in flight at once, cluster-wide: our admission cap (the :model owner's workers)."}]
  :seon.config.ai/judge-pass-usd [:double {:min 0.0 :seon.config/unit "USD" :description "What one first-move pass (my.root/first-moves!) may spend on model calls; at the bound it stops and records the tasks it left."}]
+ :seon.config.ai/cache-block-tokens [:int {:min 0 :seon.config/unit "tokens" :description "The block the provider's prompt cache stores a prefix in: a turn whose cache hit falls more than one block short of the prefix it shares with the turn before is a :seon.turn/cache-miss. 0: no prompt cache known, no check."}]
  :seon.config.ai/rate [:int {:min 0 :seon.config/unit "tokens/s" :description "Tokens per second the provider admits (the :model owner's bucket). 0: no bucket."}]
  ;; ---- the model manifest (v1's seon.ai.model rows; config/default.edn :seon.config.ai/providers,
  ;; :seon.config.ai/models): by id in the file, an entity each on main
@@ -28,7 +29,8 @@
                                    [:seon.config.ai/base-url :seon.config.ai/base-url]
                                    [:seon.config.ai/api-key-variable :seon.config.ai/api-key-variable]
                                    [:seon.ai.model/output-token-wire-key :seon.ai.model/output-token-wire-key]
-                                   [:seon.config.ai/max-in-flight {:optional true} :seon.config.ai/max-in-flight]]
+                                   [:seon.config.ai/max-in-flight {:optional true} :seon.config.ai/max-in-flight]
+                                   [:seon.config.ai/cache-block-tokens {:optional true} :seon.config.ai/cache-block-tokens]]
  :seon.ai.model/model-settings [:map {:closed true}
                                 [:seon.ai.model/provider :seon.ai.model/provider]
                                 [:seon.ai.model/version :seon.ai.model/version]
