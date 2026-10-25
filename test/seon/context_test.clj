@@ -563,16 +563,17 @@
             basis (fn [n screen] {:commit (d/commit-id @conn) :task "demo/g" :run "demo/g#1" :turn n :max-turns 9
                                   :origin :model :observed {:results {} :test-run-errors [] :reds [] :reasons []} :screen screen :agent "b/a1"})
             turns (loop [n 0 printed nil out []]
-                    (if (= n 4)
+                    (if (= n 5)
                       out
+                      ;; as a turn goes: its screen evals, its request, then its call's eval
                       (do (ev! (str "s" n) "screen" :status)
-                          (ev! (str "e" n) "a1" (if (odd? n) rows (vec (range (* 10 (inc n))))) {:call-id (str "c" n) :call 0 :prose (str "Step " n ".")})
                           (let [b (basis n [(str "s" n)])
                                 warm (context/render @conn b {:printed printed})
                                 cold (context/render @conn b)]
                             (d/transact conn [{:seon.turn/id (str "demo/g#1/" n) :seon.turn/run {:seon.run/id "demo/g#1"} :seon.turn/n n
                                                :seon.turn/origin :model :seon.turn/basis b :seon.turn/sent (:sent warm)
                                                :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1}])
+                            (ev! (str "e" n) "a1" (if (odd? n) rows (vec (range (* 10 (inc n))))) {:call-id (str "c" n) :call 0 :prose (str "Step " n ".")})
                             (recur (inc n) (:printed warm) (conj out [n warm cold]))))))
             db @conn]
         (doseq [[n warm cold] turns]
@@ -607,7 +608,7 @@
             sent #(:seon.turn/sent (d/pull db [:seon.turn/sent] %))]
         (is (= [:section :task :eval] (mapv first (sent e0))) "turn 0: the system prompt, the task story, the screen eval")
         (is (every? pos-int? (map second (take 2 (sent e0)))) "the system prompt's own section and the task, by entity")
-        (is (= [:section :task :eval :eval] (mapv first (sent e1))) "turn 1: then its call's eval, then the screen eval")
+        (is (= [:section :task :eval :eval :eval] (mapv first (sent e1))) "turn 1: turn 0's screen eval, its call's eval, then the screen eval")
         (is (= (second (sent e0)) (second (sent e1))) "the task story is the run's first turn's: the same task as of the same t")
         (is (= r0 (read-back db e0)) "turn 0's messages, read from its records")
         (is (= r1 (read-back db e1)) "turn 1's, though the plan changed after both")
@@ -652,15 +653,68 @@
             _ (ev! "e3" "screen" "(my.task/status)" :green)
             [_ r1] (request 1 ["e3"])]
         (is (= ["system" "user" "user"] (mapv :role r0)) "turn 0: the task, then the screen")
-        (is (= ["system" "user" "assistant" "tool" "user"] (mapv :role r1)) (pr-str (mapv :role r1)))
-        (is (= {:role "assistant" :content "I call f." :reasoning "why" :tool-calls [{:id "call-0" :code "(f 1)"}] :call 0} (nth r1 2))
+        (is (= ["system" "user" "user" "assistant" "tool" "user"] (mapv :role r1)) (pr-str (mapv :role r1)))
+        (is (= {:role "assistant" :content "I call f." :reasoning "why" :tool-calls [{:id "call-0" :code "(f 1)"}] :call 0} (nth r1 3))
             "prose as content, the reasoning as returned, the call")
-        (is (= "{:handle result/e2, :value 1}" (:content (nth r1 3))) "the call's response, its recorded value printed as it is sent")
-        (is (= (pop r0) (subvec r1 0 2)) "the prefix carries over")
+        (is (= "{:handle result/e2, :value 1}" (:content (nth r1 4))) "the call's response, its recorded value printed as it is sent")
+        (is (= r0 (subvec r1 0 3)) "the whole earlier request is the prefix: its screen stays, appended (the screen as diffs)")
         (is (= "{:by \"screen\" :code \"(my.task/status)\" :response {:handle result/e3, :value :green}}" (:content (peek r1)))
-            "the screen eval, last")
-        (is (not-any? #(str/includes? (str (:content %)) ":value :red") r1) "the earlier screen is gone")
+            "the screen eval, last: whole, as its diff would be no shorter")
         (is (not-any? #(str/includes? (str (:content %)) ";;") (rest r1)) "no ;; reaches the model")))))
+
+;; task seon.screen/the-screen-is-sent-as-diffs: each screen eval is its diff from the previous one
+;; of its form, whole while that one is not sent whole
+(defn- screen-requests
+  "The requests of a run whose evals are evs ([id by code value] in order), each request after the
+  screen eval it names, read as origin's (a model's turn by default)."
+  [evs & [origin]]
+  (let [out (atom [])]
+    (ts/test-branch!
+      (fn [_ conn]
+        (wiki! conn)
+        (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f."}]))
+        (doseq [[i [id by code value]] (map-indexed vector evs)]
+          (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
+                             :seon.eval/record {:code code :response {:handle (symbol "result" id) :value value} :run "demo/f#1"}}])
+          (when (= "screen" by)
+            (let [db @conn
+                  {:keys [messages sent]} (context/render db {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn i :max-turns 9
+                                                              :origin (or origin :model) :observed {:results {} :test-run-errors [] :reds [] :reasons []}
+                                                              :screen (if (= :outside origin) (vec (keep (fn [[id by]] (when (= "screen" by) id)) (take (inc i) evs))) [id])
+                                                              :agent "b/a1"})]
+              ;; what it recorded it sent reads back as the same bytes, a diff's {:since} among them
+              (is (= messages (into [] (mapcat second) (context/parts-of db sent))) (str "request " i " reads back the same"))
+              (swap! out conj messages))))))
+    @out))
+
+(deftest an-unchanged-screen-sends-only-its-names
+  (let [page {:task "Make f." :proofs {'demo-test/f-test :fail} :changes (str "(defn f [x] x)" (apply str (repeat 400 " ")) "(defn g [] 1)")}
+        [r0 r1 r2] (screen-requests [["e1" "screen" "(my.task/status)" page] ["e2" "a1" "(f 1)" 1]
+                                     ["e3" "screen" "(my.task/status)" page]
+                                     ["e4" "screen" "(my.task/status)" (assoc page :proofs {'demo-test/f-test :pass})]])]
+    (is (str/includes? (:content (peek r0)) "(defn f [x] x)") "the first screen is whole")
+    (is (= r1 (subvec r2 0 (count r1))) "each request is the last one and what was added since")
+    (is (= "{:by \"screen\" :code \"(my.task/status)\" :response {:handle result/e3, :since result/e1, :value {:unchanged [[]]}}}" (:content (peek r1)))
+        "an unchanged screen: only that nothing changed, and since which")
+    (is (every? #(str/includes? (:content (peek r2)) %) [":since result/e3" "{:changed {[:proofs demo-test/f-test] :pass}," ":unchanged [[:task] [:changes]]}"])
+        "a changed one: since the last, what changed by path, and the rest named")
+    (is (not (str/includes? (:content (peek r2)) "(defn f [x] x)")) "an unchanged section is not sent again")
+    ;; the outside read names both screen evals of the form: neither is a diff
+    (let [out (peek (screen-requests [["e1" "screen" "(my.task/status)" page] ["e3" "screen" "(my.task/status)" page]] :outside))]
+      (is (= 2 (count (filter #(or (str/includes? (str (:content %)) "(defn f [x] x)") (str/includes? (str (:content %)) "(:value result/e1)")) out)))
+          "an outside agent's read: each screen eval whole (an equal one as the form reading the first, in the same read)")
+      (is (not-any? #(str/includes? (str (:content %)) ":since") out) "its reader holding no earlier one"))))
+
+(deftest a-screen-whose-base-is-cut-is-sent-whole
+  (let [page {:proofs {'demo-test/f-test :fail} :changes (str "(defn f [x] x)" (apply str (repeat 400 " ")) "(defn g [] 1)")}
+        ;; forty records of ~2k tokens each, past :seon.config.render/history-budget (32k) whole
+        bigs (for [i (range 40)] [(str "b" i) "a1" "(f 1)" (apply str i (repeat 8000 "x"))])
+        rs (screen-requests (concat [["e1" "screen" "(my.task/status)" page]] bigs [["e3" "screen" "(my.task/status)" page]]))]
+    (is (str/includes? (:content (peek (peek rs))) "(defn f [x] x)")
+        "its base collapsed by the history budget: the screen whole again")
+    (is (not (str/includes? (:content (peek (peek rs))) ":since")) "and no diff")
+    (let [r (peek (screen-requests [["e1" "screen" "(my.task/status)" page] ["e2" "a1" "(f 1)" 1] ["e3" "screen" "(my.task/status)" page]]))]
+      (is (str/includes? (:content (peek r)) "{:unchanged [[]]}") "the same screen with its base sent whole: the diff"))))
 
 (deftest an-assertion-message-of-any-value-is-kept-as-text
   ;; clojure.test's is takes any message (a doseq's keyword, say); a run whose test reported one
