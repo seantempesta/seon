@@ -145,17 +145,17 @@
      :test-run-errors (if (contract/error? test-run) [(:seon.error/message test-run)] (proofs/test-run-errors test-run))
      :will-merge will-merge :tests tests :attention attention}))
 
-(defn- basis!
-  "What a turn's context is built from, recorded instead of its text (a model call stores its
-  basis, not its prompt): the commit it reads (the run-ahead writes committed now, as the
-  model call's wait would), the task, run and turn, the observations no db holds, the
-  messages delivered since the last turn (taken: the turn is their reader; a message that is
-  a fact is written on this branch first, the same fact root wrote on main, and the basis
-  names it by id, so its text is read again from the commit). A read that is not the run's turn (take?
-  false: an observer's read of an agent its model drives) shows the inbox and leaves it, each
-  message as it was sent."
-  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id :int :int :seon.turn/origin :map :boolean] :seon.turn/basis]}
-  [task run turn max-turns origin observed take?]
+(defn- take!
+  "The messages delivered since the last turn, taken before the turn's screen is evaluated, so
+  each sits in the conversation before the screen that shows what came after it (a session's
+  next stage opens with root's message, seon.reconcile/stage-boundary, before that stage's first
+  screen). The turn is their reader: a message that is a fact is written on this branch first,
+  the same fact root wrote on main, and named by id, so its text is read again from the commit.
+  A read that is not the run's turn (take? false: an observer's read of an agent its model
+  drives) shows the inbox and leaves it, each message as it was sent. Answers the observations
+  they add: {:message-ids [..]} and {:messages [{:from :body} ..]}, each only when there are some."
+  {:malli/schema [:=> [:cat :boolean] :map]}
+  [take?]
   (let [msgs (agent/inbox)
         {facts true others false} (if take? (group-by (comp some? :id) msgs) {false msgs})
         _ (when (seq facts)
@@ -163,12 +163,22 @@
         _ (agent/commit!)
         ;; taken once their facts are committed: a refused write leaves them in the inbox
         _ (when take? (agent/taken! (count msgs)))]
-    (cond-> {:commit (d/commit-id (agent/db)) :task task :run run :turn turn :max-turns max-turns
-             :origin origin :observed (cond-> (dissoc observed :merge?)
-                                        (seq facts) (assoc :message-ids (mapv :id facts))
-                                        ;; a send no fact holds (another agent's, until its sender writes one)
-                                        (seq others) (assoc :messages (mapv (fn [{:keys [from body]}] {:from (name from) :body body}) others)))}
-      (:merge? observed) (assoc :merge? true))))
+    (cond-> {}
+      (seq facts) (assoc :message-ids (mapv :id facts))
+      ;; a send no fact holds (another agent's, until its sender writes one)
+      (seq others) (assoc :messages (mapv (fn [{:keys [from body]}] {:from (name from) :body body}) others)))))
+
+(defn- basis!
+  "What a turn's context is built from, recorded instead of its text (a model call stores its
+  basis, not its prompt): the commit it reads (the run-ahead writes committed now, as the
+  model call's wait would), the task, run and turn, the observations no db holds, with the
+  messages the turn took (taken, take!)."
+  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id :int :int :seon.turn/origin :map :map] :seon.turn/basis]}
+  [task run turn max-turns origin observed taken]
+  (agent/commit!)
+  (cond-> {:commit (d/commit-id (agent/db)) :task task :run run :turn turn :max-turns max-turns
+           :origin origin :observed (merge (dissoc observed :merge?) taken)}
+    (:merge? observed) (assoc :merge? true)))
 
 (defn- evaluated!
   "Code through the one REPL path (seon.repl/eval-string, req) and its record committed to the
@@ -224,8 +234,9 @@
         proofs (:proofs (:seon.task/accumulated t))
         t0 (profile/now-ns)
         ob (cond-> (observed obs) merge? (assoc :merge? true))
+        taken (take! true)
         screen (screen! (:seon.task/id t) {:turn turn :max-turns max-turns :origin :model :observed ob :merge? merge?})
-        basis (cond-> (assoc (basis! (:seon.task/id t) run turn max-turns :model ob true) :agent (:key @agent/state))
+        basis (cond-> (assoc (basis! (:seon.task/id t) run turn max-turns :model ob taken) :agent (:key @agent/state))
                 (seq screen) (assoc :screen screen))
         ;; what the run's earlier requests printed, reused by each record's id (seon.context/printed-run)
         {:keys [block messages sent printed]} (context/render (agent/db) basis {:printed (get-in @agent/state [:printed run])})
@@ -330,8 +341,9 @@
         ob (assoc (observed obs) :merge? true)
         ;; the run's turn (take?) evaluates the screen and keeps what it printed, as a model turn does;
         ;; an observer's read records nothing on the branch beyond the read and leaves the print cache
+        taken (take! take?)
         screen (when take? (screen! task {:turn n :max-turns 1 :origin :outside :observed ob :merge? true}))
-        basis (cond-> (basis! task run n 1 :outside ob take?) (seq screen) (assoc :screen screen))
+        basis (cond-> (basis! task run n 1 :outside ob taken) (seq screen) (assoc :screen screen))
         {:keys [messages printed sent]} (context/render (agent/db) basis {:printed (get-in @agent/state [:printed run])})
         _ (when take? (swap! agent/state assoc-in [:printed run] printed))
         text (str/join "\n\n" (map :content messages))]
@@ -367,7 +379,7 @@
   "Work task `task` as run `run` (the model `model` when set, else root's), at most
   max-turns model calls. A turn whose calls repeat the last turn's, made from the same
   observed state (the done rule's reasons and proof results), is a repeat, counted in a row on the
-  run (:seon.run/repeats, on its branch; a turn that made progress sets it to 0, root:
+  run (:seon.run/repeats, on its branch; a turn that made progress sets it to 0, root's provisional ruling:
   no progress means repeats in a row): the first :seon.config.agent/repeats-told are told to the
   agent in its next status (:your-last-reply :repeated), and the one after ends the run
   :no-progress, naming the code (root's research, lever 2: loops took 45% of tokens; the step E

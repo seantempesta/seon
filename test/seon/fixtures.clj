@@ -263,6 +263,12 @@
   {:malli/schema [:=> [:cat :seon.model/request] [:map [:code :string] [:thinking :string]]]}
   [_] {:code "(+ 1 2)" :thinking "check the sum before the proof"})
 
+(defn wait-call
+  "The scripted model of a session that waits (seon.agent-test): every turn waits for a message
+  (my.turn/wait), so each run parks and the next message wakes it (design agent-loop section 2)."
+  {:malli/schema [:=> [:cat :seon.model/request] :string]}
+  [_] "(my.turn/wait)")
+
 (defn reply
   "The scripted model: the scripted reply for the request's task and turn (the last one
   repeats); a swarm task's reply is generated from its index; a merge or design task
