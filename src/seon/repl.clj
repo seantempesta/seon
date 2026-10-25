@@ -490,9 +490,16 @@
   returns."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :int] :any]}
   [fd m db0 t-req-ns]
-  (agent/init! fd m db0 serve!)
-  (agent/hello! t-req-ns (cond-> {:interrupt-ok (:interrupt-ok @agent/state)}
-                            (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))
-                            (:misaligned @agent/state) (assoc :misaligned (:misaligned @agent/state))
-                            (:unwatched @agent/state) (assoc :unwatched (:unwatched @agent/state))))
-  (serve!))
+  ;; the agent's whole body is one fiber on its one thread (jolt.host/main-carrier-run!): its
+  ;; waits park, its go blocks, flows and remote channels run beneath it, and it starts no
+  ;; thread, so it still forks its test children safely (design agent-loop section 8a). macOS
+  ;; only: the loop wakes on root's signals through kqueue (jolt.io-poller/wake-on-signals!),
+  ;; which Linux lacks, so there the agent runs on its thread as before
+  ((if (lib/macos?) jolt.host/main-carrier-run! #(%))
+    (fn []
+      (agent/init! fd m db0 serve!)
+      (agent/hello! t-req-ns (cond-> {:interrupt-ok (:interrupt-ok @agent/state)}
+                                (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))
+                                (:misaligned @agent/state) (assoc :misaligned (:misaligned @agent/state))
+                                (:unwatched @agent/state) (assoc :unwatched (:unwatched @agent/state))))
+      (serve!))))
