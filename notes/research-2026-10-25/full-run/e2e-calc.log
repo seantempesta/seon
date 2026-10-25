@@ -1,0 +1,46 @@
+:program {:ok true, :datoms 73}
+:program {:ok true, :datoms 175}
+:create {:ok true, :datoms 12}
+:cancel-neg {:ok true}
+:quiescent {:t 536874054, :root-causes [{:task calc/neg, :cause cancelled, :blocks [calc/abs calc/abs-merge calc/neg-merge]}]}
+:task calc/abs {:execution :running, :done false, :blocked-by #{calc/neg-merge}, :runs []}
+:task calc/abs-merge {:execution :running, :done false, :blocked-by #{calc/abs}, :runs []}
+:task calc/add {:execution :running, :done true, :blocked-by #{}, :runs [[calc/add#1 :done :green 1 979]]}
+:task calc/add-merge {:execution :running, :done true, :blocked-by #{}, :runs [[calc/add-merge#1 :merged :green 0 0]]}
+:task calc/neg {:execution :cancelled, :done false, :blocked-by #{}, :runs [[calc/neg#1 :killed nil nil nil]]}
+:task calc/neg-merge {:execution :running, :done false, :blocked-by #{calc/neg}, :runs []}
+:task calc/square {:execution :running, :done true, :blocked-by #{}, :runs [[calc/square#1 :done :green 2 2421]]}
+:task calc/square-merge {:execution :running, :done true, :blocked-by #{}, :runs [[calc/square-merge#1 :merged :green 0 0]]}
+:task calc/sum-sq {:execution :running, :done true, :blocked-by #{}, :runs [[calc/sum-sq#1 :done :green 1 1417]]}
+:task calc/sum-sq-merge {:execution :running, :done true, :blocked-by #{}, :runs [[calc/sum-sq-merge#1 :merged :green 0 0]]}
+:task calc/twice {:execution :running, :done true, :blocked-by #{}, :runs [[calc/twice#1 :done :green 1 1123]]}
+:task calc/twice-merge {:execution :running, :done true, :blocked-by #{}, :runs [[calc/twice-merge#1 :merged :green 0 0]]}
+:agents-reused [] :merges {:merge-runs {:merged 4}, :behind-reruns 0, :conflicts-measured 0, :held-tasks 0, :model-calls-in-merges 0} :fresh-agent {:handle result/e1, :value 0, :ms 2.515, :ticks 194858, :bytes 1112784}
+:checks {:done-all? true, :abs-blocked-by #{calc/neg-merge}, :square-turns 2, :square-read-its-failure? false, :square-splits [{:context-ms 180, :model-ms 0, :eval-ms 22, :record-ms 0, :tests-ms 33} {:context-ms 558, :model-ms 0, :eval-ms 17, :record-ms 0, :tests-ms 60}], :square-second-context Your task and what it cites, the same for this whole run:
+{:task
+   #:seon.task{:id "calc/square",
+    :kind :work,
+    :plan
+      "Make `app.calc/add` pass its proof `app.proofs/add-test`.
+
+Make `app.calc/square` pass its proof `app.proofs/square-test`. It may use `app.calc/add`."},
+ :write-set
+   [{:symbol app.calc/add,
+     :callers [app.proofs/add-test],
+     :source
+       "(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] (+ a b))"}
+    {:symbol app.calc/square,
+     :callers [app.proofs/square-test],
+     :source
+       "(defn square {:malli/schema [:=> [:cat :int] :int]} [x] 0)"}],
+ :to-prove
+   #:app.proofs{add-test (my.agent/prove #{app.proofs/add-test}),
+    square-test (my.agent/prove #{app.proofs/square-test})}}
+
+{:by "screen" :code "(my.branch/changes)" :response {:handle result/e8,
+ :ms 0.689,
+ :ticks 93934,
+ :bytes 679808,
+ :value {:changed [app.calc/square]}}}}
+:numbers {:wall-ms 5171, :runs 9, :merged 4, :turns-per-merged-task 1.25, :model-calls 0, :tokens 5940, :root-real-mb 774.9, :writer {:tx-count 193, :flushes 37, :batch-p50-ms 6.39, :tx-per-commit 0.94, :commits 206, :tx-per-s 45.0}, :root-errors []}
+E2E FAILED

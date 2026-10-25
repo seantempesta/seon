@@ -71,7 +71,8 @@
                :n "wiki sections with vectors"
                :work (str "the plan's citations parsed once, and one seon.vector/near a kind (each reads every coarse "
                           "row, its shortlist of 400 reranked: one seek a row), the graph's seeks for what the plan "
-                          "cites (none here), and one rrf of each kind's two rankings: linear in the vectors")
+                          "cites (none here; each neighbour also one bounded count of the forms naming it, at most "
+                          ":seon.config.render/related-rarity datoms), and one rrf of each kind's two rankings: linear in the vectors")
                :growth :linear
                ;; measured 2026-10-25: 145 calls, 3.39 MB at n=100 (below the shortlist); 445 calls
                ;; at 500 and at 1,000, 8.18 MB and 8.92 MB (~1.48 KB a row). The calls are one
@@ -80,8 +81,9 @@
                ;; batch read would scan every f16 row) and ~45 fixed: three near (each its vector-of,
                ;; unpack and pack-dims), the citation parse and the resolver's read; constant past
                ;; the shortlist, as seon.vector-cost-test/a-search-reads-each-row-once measures past
-               ;; it. Each near reads every coarse row before :of filters them, so the per-row bytes
-               ;; are ~2.1x near's own 700 B (seon.vector/one-scan-ranks-every-kind).
+               ;; it. A row is its coarse datom read (~590 B) and its kind's membership set, the :of
+               ;; attribute's datoms (~790 B for sections); the second and third coarse scans add
+               ;; ~40 B (measured, seon.vector/one-scan-ranks-every-kind).
                :per-n {:bytes 1480.0 :calls 0.0}
                :fixed {:bytes 7440000.0 :calls 445.0}
                :sizes [500 1000 2000]}))

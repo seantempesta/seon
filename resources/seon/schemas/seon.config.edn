@@ -93,6 +93,7 @@
   [:seon.config.ai/providers :seon.config.ai/providers]
   [:seon.config.ai/models :seon.config.ai/models]
   [:seon.config.ai/rate :seon.config.ai/rate]
+  [:seon.config.ai/cache-block-tokens :seon.config.ai/cache-block-tokens]
   [:seon.config.ai/chars-per-token-prior :seon.config.ai/chars-per-token-prior]
   ;; the printer
   [:seon.config.render.agent/token-budget :seon.config.render.agent/token-budget]
@@ -109,6 +110,7 @@
   [:seon.config.render/history-step :seon.config.render/history-step]
   [:seon.config.render/similar :seon.config.render/similar]
   [:seon.config.render/related :seon.config.render/related]
+  [:seon.config.render/related-rarity :seon.config.render/related-rarity]
   [:seon.config.vector/coarse-dims :seon.config.vector/coarse-dims]
   [:seon.config.vector/shortlist :seon.config.vector/shortlist]
   [:seon.config.vector/fine-dims :seon.config.vector/fine-dims]

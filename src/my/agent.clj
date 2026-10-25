@@ -6,6 +6,7 @@
     (messages)                the messages delivered and not yet taken, taken
     (send-message tos body)   body to the agents tos (ids), delivered by root
     (callers 'ns/f)           the program vars whose recorded definition names ns/f
+    (callers :ns/key)         the functions whose code or contract names the key (an attribute, config, schema)
     (callees 'ns/f)           the vars ns/f's recorded definition names
     (grep "text")             the program vars whose recorded definition's text holds it
     (similar 'ns/f)           what is nearest ns/f's definition by meaning: vars, wiki sections, tasks
@@ -39,10 +40,11 @@
   [x] (if (var? x) (symbol (str (ns-name (:ns (meta x)))) (str (:name (meta x)))) x))
 
 (defn callers
-  "The program vars whose recorded definition names var sym (its :form/refs on this branch),
-  sorted; sym itself left out. sym is a qualified symbol or the var (named)."
-  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:vector :qualified-symbol]]}
-  [sym] (docs/callers (agent/db) (named sym)))
+  "The program vars whose recorded definition names x on this branch, sorted, x itself left out
+  (seon.docs/callers): a var's callers (x a qualified symbol, or the var: named), or the functions
+  operating on a qualified keyword, an attribute, config key or schema entry (its :form/keywords)."
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var :qualified-keyword]] [:vector :qualified-symbol]]}
+  [x] (docs/callers (agent/db) (if (keyword? x) x (named x))))
 
 (defn callees
   "The vars var sym's recorded definition names on this branch (its :form/refs: program,

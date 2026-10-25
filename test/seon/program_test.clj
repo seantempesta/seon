@@ -107,6 +107,52 @@
     (is (= '#{app.pt-ban/inner} (:inline-defs acct)) "a def inside a function body"))
   (is (empty? (:banned (eval-account 'app.pt-ban "(defn fine [m] (assoc m :intern 1))"))) "a keyword named like it is nothing"))
 
+(deftest the-keywords-a-form-names-are-recorded
+  ;; root's gate (approved): :form/keywords, the data a function operates on, recorded by the
+  ;; analyzer from the read it already does: its code's qualified keywords and its contract's
+  (let [src "(defn kw-user {:malli/schema [:=> [:cat [:map [:app.kw/thing :int]]] :app.kw/count]} [m] (assoc m :app.kw/count (:app.kw/thing m) :plain 1 :listed '[:app.kw/listed]))"
+        acct (eval-account 'app.pt-kw src)
+        db (record (empty-db) 'app.pt-kw src)]
+    (is (= #{:app.kw/thing :app.kw/count :app.kw/listed} (:keywords acct))
+        "its code's (a constant, a keyword called, quoted data) and its contract's qualified keywords, the unqualified left out")
+    (is (= #{:app.kw/thing :app.kw/count :app.kw/listed} (set (d/q '[:find [?k ...] :where [?v :var/name app.pt-kw/kw-user] [?v :var/form ?f] [?f :form/keywords ?k]] db)))
+        "as facts of its form")
+    (is (= ['app.pt-kw/kw-user] (seon.docs/callers db :app.kw/thing)) "a key's functions, one AVET seek")
+    ;; two keys, the first an attribute: as a vector Datahike read them as a lookup ref
+    ;; (datahike.query-test's (= :query/nested-call (:error r)) failed the program db)
+    (is (= #{:ns/name :app.kw/err} (set (d/q '[:find [?k ...] :where [?v :var/name app.pt-kw/two] [?v :var/form ?f] [?f :form/keywords ?k]]
+                                             (record (empty-db) 'app.pt-kw "(defn two [r] [(:ns/name r) :app.kw/err])"))))
+        "an attribute and a key, each a fact")
+    (is (= #{:app.kw/init} (:keywords (eval-account 'app.pt-kw "(def kw-init :app.kw/init)"))) "a def's init is its data")
+    (is (= #{:app.kw/tested} (:keywords (eval-account 'app.pt-kw "(clojure.test/deftest kw-t (clojure.test/is (= :app.kw/tested (:app.kw/tested {}))))")))
+        "a deftest's body (its var's :test) names its data; the metadata's own keys do not")
+    (is (= [src] (mapv :src (program/schema-dependents db #{:app.kw/count}))) "the form that re-arms when a key it names changes")
+    (is (empty? (:keywords (eval-account 'app.pt-kw "(defn plain [m] (:x m))"))) "no qualified keyword, nothing recorded")))
+
+(deftest a-branch-cut-before-form-keywords-gains-them-on-resume
+  ;; root, 2026-10-25 (ctx-atom's finding): a branch cut before :form/keywords killed its agent at
+  ;; resume, schema-dependents reading an attribute its schema lacks. A branch keeps the schema it
+  ;; was cut with; resumed, it gains this program's attributes (seon.db/install-missing!, as a kept
+  ;; store does when a root opens it) and its forms the facts they were recorded without (gained-tx)
+  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}
+        _ (d/create-database cfg)
+        conn (d/connect cfg)
+        ;; the schema as it was before :form/keywords, and a contracted form recorded then
+        _ (d/transact conn (vec (remove #(= :form/keywords (:db/ident %)) pdb/schema)))
+        _ (d/transact conn [{:db/id "n" :ns/name 'app.old} {:db/id "f" :form/id "app.old/f" :form/src "(defn f [m] (:app.old/thing m))" :form/ns "n" :form/order 0 :form/defines #{"v"}}
+                            {:db/id "v" :var/name 'app.old/f :var/form "f" :var/kind :fn :var/contract (seon.edn/encode [:=> [:cat [:map [:app.old/thing :int]]] :int])}])]
+    (is (thrown? Exception (program/schema-dependents @conn #{:app.old/thing})) "cut before the attribute: the read refuses it, as the agent died")
+    (is (= [] (program/gained-tx @conn)) "the attribute not yet installed: nothing to derive")
+    (let [added (pdb/install-missing! conn)
+          _ (d/transact conn (program/gained-tx @conn))]
+      (is (contains? added :form/keywords) "resumed: the attribute is installed on the branch")
+      (is (= #{:app.old/thing} (set (d/q '[:find [?k ...] :where [?f :form/id "app.old/f"] [?f :form/keywords ?k]] @conn)))
+          "and the form gains the keys its contract names")
+      (is (= ["app.old/f"] (mapv :id (program/schema-dependents @conn #{:app.old/thing})))
+          "so a change to that key re-arms the form, as it did before :form/keywords")
+      (is (= #{} (pdb/install-missing! conn)) "a second resume installs nothing")
+      (is (= [] (program/gained-tx @conn)) "and derives nothing: a form holds keywords now"))))
+
 (deftest catches-and-clocks-are-recorded
   ;; for the guard detectors (session PATTERNS): a hiding guard is a catch answering a constant;
   ;; time deciding is a sleep, a deref with a timeout, or core.async's timeout

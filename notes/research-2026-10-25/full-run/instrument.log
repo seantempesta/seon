@@ -1,0 +1,26 @@
+{:uncontracted ["1" "2"],
+ :checks {:armed-and-refused true, :uncontracted-grows true},
+ :refused
+   {:ms 3.179,
+    :text
+      "{:handle result/e1,
+ :ms 3.179,
+ :ticks 95829,
+ :bytes 1275360,
+ :ex
+   #:seon.error{:type :seon.instrument/contract-error,
+    :operation agent.a1/sq,
+    :member :malli.core/invalid-input,
+    :message
+      \"agent.a1/sq invalid-input: its arguments do not satisfy its contract\",
+    :fix \"Call agent.a1/sq with arguments its contract declares.\",
+    :problems [{:path [0], :in [0], :expected :int, :value \"\\\"x\\\"\"}]}}",
+    :ex
+      #:seon.error{:type :seon.instrument/contract-error,
+       :operation agent.a1/sq,
+       :member :malli.core/invalid-input,
+       :message
+         "agent.a1/sq invalid-input: its arguments do not satisfy its contract",
+       :fix "Call agent.a1/sq with arguments its contract declares.",
+       :problems [{:path [0], :in [0], :expected :int, :value "\"x\""}]}}}
+INSTRUMENT OK

@@ -1,0 +1,195 @@
+booted: {:t 536873810, :datoms 9269}
+spawned [:a1 :a2 :a3], ready
+:a1 {:text "{:handle result/e1,\n :value 144,\n :ms 9.382,\n :ticks 658935,\n :bytes 8053040}", :ms 9.382}
+:a2 {:text "{:handle result/e1,\n :value 362,\n :ms 19.079,\n :ticks 1526288,\n :bytes 15740368}", :ms 19.079}
+:a3 {:text "{:handle result/e1,\n :value \"f1 adds 1 to x\",\n :ms 17.121,\n :ticks 1297433,\n :bytes 14887760}", :ms 17.121}
+:a1 tests {:pass 1, :fail 0, :error 0, :ms 6.640125}[]
+:a2 tests {:pass 2, :fail 0, :error 0, :ms 10.997958}[]
+:a3 tests {:pass 2, :fail 0, :error 0, :ms 8.85125}[]
+:a3 after tests, its branch still says: "f1 adds 1 to x"
+:a3 branch diff before its merge: {:ok true, :db #datahike/DB {:store-id [#uuid "09b115f0-e80a-5f6b-a61a-6f53e4a91d41" :check-smoke/agent-3 :sync] :commit-id #uuid "6add9ae4-d9f4-5d1e-9604-d1b5bb307e7d" :max-tx 536873850 :max-eid 6986}, :base #datahike/DB {:store-id [#uuid "09b115f0-e80a-5f6b-a61a-6f53e4a91d41" :check-smoke :sync] :commit-id #uuid "6add9ae4-2296-553f-902e-cf4316c7cf67" :max-tx 536873817 :max-eid 6979}, :base-t 536873817, :ours [[:form "app.docs/233240db-b905-5d31-93fb-315dc5bef0e9"] [:form "app.docs/366f3a42-a1b1-5c2f-b8e2-73a8319d546e"] [:form "app.docs/3cffb22b-2e23-5beb-8d4a-1c1327949306"] [:ns app.docs] [:var app.docs/doc-of] [:var app.docs/doc-test] [:var app.m0/f1]], :theirs 0, :conflicts 0, :unmerged [], :uncontracted [], :caused [], :vars #{app.docs/doc-of app.docs/doc-test app.m0/f1}}; stats now: {:mem-mb 102.5, :t 536873850, :pid 12541, :results 2, :evals 6, :heap-mb 652.14}
+merge main into :a3 first: {:ok true, :applied [[:datum 6980 :note/agent] [:datum 6980 :note/text] [:form "app.sq/2db24367-5140-55c6-97bb-1eae0a4a4ccf"] [:form "app.sq/2f60a392-942f-54b7-a18b-638bdac16edc"] [:form "app.sq/353adad4-8cd8-52ca-94d9-be37e620843d"] [:ns app.sq] [:var app.sq/sq-test] [:var app.sq/sq]], :conflicts []}
+merge :a1: {:merged? true, :tx 536873861, :keys 8, :files []}
+merge :a3: {:merged? true, :tx 536873870, :keys 10, :files []}
+main notes: #{[:a1 "sq is defined"] [:a3 "f1 adds one"]}
+main f1 doc: f1 adds 1 to x; note about: app.m0/f1
+merge :a3 again: {:merged? true, :tx 536873882, :keys 1, :files []} -> main a3 notes: ["f1 adds one (edited)"]
+merge main into :a2 (both changed f1's doc): {:ok true, :applied [[:datum 6980 :note/agent] [:datum 6980 :note/text] [:datum 6982 :note/about] [:datum 6982 :note/agent] [:datum 6982 :note/text] [:form "app.docs/233240db-b905-5d31-93fb-315dc5bef0e9"] [:form "app.docs/366f3a42-a1b1-5c2f-b8e2-73a8319d546e"] [:form "app.docs/3cffb22b-2e23-5beb-8d4a-1c1327949306"] [:form "app.sq/2db24367-5140-55c6-97bb-1eae0a4a4ccf"] [:form "app.sq/2f60a392-942f-54b7-a18b-638bdac16edc"] [:form "app.sq/353adad4-8cd8-52ca-94d9-be37e620843d"] [:ns app.docs] [:ns app.sq] [:var app.docs/doc-of] [:var app.docs/doc-test] [:var app.sq/sq-test] [:var app.sq/sq]], :conflicts [{:key [:var app.m0/f1], :kind :both-modified, :base {:form "app.m0/f1", :src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1))", :kind :fn, :contract "[:=> [:cat :int] :int]", :doc "f1 of module 0"}, :ours {:form "app.m0/f1", :src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1))", :kind :fn, :contract "[:=> [:cat :int] :int]", :doc "a2's doc"}, :theirs {:form "app.m0/f1", :src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1))", :kind :fn, :contract "[:=> [:cat :int] :int]", :doc "f1 adds 1 to x"}}]}
+merge :a2 with its conflict unmerged: {:unmerged [[:var app.m0/f1]], :seon.error/type :seon.merge/unmerged, :seon.error/operation seon.writer/merge-refused, :seon.error/message "the branch has 1 unmerged entr(ies)"}
+clone :a3 -> {:ok true, :id :a4} in 50.6 ms; the clone says: {:text "{:handle result/e7,\n :value \"f1 adds 1 to x\",\n :ms 2.21,\n :ticks 98788,\n :bytes 588720}", :ms 2.21}; the parent still has {:seen 1}
+merge main into :a1: {:ok true, :applied [[:datum 6982 :note/about] [:datum 6982 :note/agent] [:datum 6982 :note/text] [:form "app.docs/233240db-b905-5d31-93fb-315dc5bef0e9"] [:form "app.docs/366f3a42-a1b1-5c2f-b8e2-73a8319d546e"] [:form "app.docs/3cffb22b-2e23-5beb-8d4a-1c1327949306"] [:ns app.docs] [:var app.docs/doc-of] [:var app.docs/doc-test] [:var app.m0/f1]], :conflicts [], :t 536873923, :datoms 60} -> it sees ("f1 adds one (edited)" "sq is defined")
+:a1 running: {:form "(loop [] (recur))", :since-ms 1792908005419}
+killed :a1 mid-eval; its pending reply: {:agent :a1, :seon.error/type :seon.root/ended, :seon.error/operation seon.root/api-proc, :seon.error/message "agent a1 ended"}
+:a3 still answers: {:text "{:handle result/e8, :value 42, :ms 0.095, :ticks 3551, :bytes 21440}", :ms 0.095}
+:a5 spawned after the kill: {:text "{:handle result/e1, :value 2, :ms 1.83, :ticks 93249, :bytes 564864}", :ms 1.83}
+{:state
+   {:main {:t 536873940},
+    :agents
+      {:a1
+         {:branch :check-smoke/agent-1,
+          :status :killed,
+          :task "square numbers",
+          :pid 12537,
+          :forked-ms 122.08,
+          :mem-mb 121.4,
+          :t 536873926,
+          :running nil,
+          :ended-ms 1792908005430,
+          :exit {:signal 9},
+          :tests
+            {:pass 1,
+             :fail 0,
+             :error 0,
+             :test 1,
+             :ms 6.640125,
+             :pid 12549,
+             :exit {:exit 0},
+             :digests {app.sq/sq-test "858435443e7edb1c"},
+             :reused 0,
+             :ran 1,
+             :selected [app.sq/sq-test],
+             :deferred [],
+             :at-judge 1}},
+       :a2
+         {:branch :check-smoke/agent-2,
+          :status :idle,
+          :task "count the program's vars",
+          :pid 12539,
+          :forked-ms 48.07,
+          :mem-mb 111.6,
+          :t 536873896,
+          :running nil,
+          :tests
+            {:pass 2,
+             :fail 0,
+             :error 0,
+             :test 1,
+             :ms 10.997958,
+             :pid 12550,
+             :exit {:exit 0},
+             :digests {app.count/n-vars-test "a73e2b8e22980604"},
+             :reused 0,
+             :ran 1,
+             :selected [app.count/n-vars-test],
+             :deferred [],
+             :at-judge 1}},
+       :a3
+         {:branch :check-smoke/agent-3,
+          :status :idle,
+          :pid 12541,
+          :forked-ms 36.07,
+          :mem-mb 109.3,
+          :t 536873930,
+          :running nil,
+          :task "write a note about app.m0/f1",
+          :tests
+            {:pass 2,
+             :fail 0,
+             :error 0,
+             :test 1,
+             :ms 8.85125,
+             :pid 12552,
+             :exit {:exit 0},
+             :digests {app.docs/doc-test "3abcbd973418ee2e"},
+             :reused 0,
+             :ran 1,
+             :selected [app.docs/doc-test],
+             :deferred [],
+             :at-judge 1}},
+       :a4
+         {:branch :check-smoke/agent-4,
+          :status :idle,
+          :task "a3's clone",
+          :pid 12561,
+          :forked-ms 38.55,
+          :mem-mb 59.9,
+          :tests nil,
+          :cloned-from :a3,
+          :t 536873912,
+          :running nil},
+       :a5
+         {:branch :check-smoke/agent-5,
+          :status :idle,
+          :task "after the kill",
+          :pid 12574,
+          :forked-ms 58.52,
+          :mem-mb 55.3,
+          :tests nil,
+          :t 536873941,
+          :running nil}},
+    :writer
+      {:tx-count 95,
+       :flushes 5,
+       :batch-p50-ms 10.04,
+       :tx-per-commit 1.16,
+       :commits 82,
+       :tx-per-s 88.0},
+    :stats
+      {:batches 61,
+       :commits 82,
+       :batched-tx 95,
+       :main-seen-us
+         [2238.167 757.167 414.667 815.791 509.667 495.125 700.25
+          531.084 835.083 931.708 637.833 1056.417 984.5 915.042
+          2247.708 1628.666 2247.375 1979.417 819.583 1040.542 474.792
+          2148.458 1353.5 9294.541 551.709 1184.042 908.416 53247.75
+          507.542 675.958 59128.291 58700.625 58113.209 57656.75
+          8785.625 726.25 1408.834 1043.416 1145.75 59535.875 59256.916
+          11857.292 6787.709 815.292 1345.583 1396.875 38166.5 37787.041
+          28949.667 28736.083 1124.042 6556.334 6614.625 1257.416
+          1459.125 1107.458 895.417 698.333 8152.084 680.167 687.958
+          33511.875 33332.0 6115.25 1063.375 2124.042 2178.75 2025.459
+          1861.791 1038.083 8347.708 2288.458 436.875 493.209 881.333
+          1233.5 1042.333 861.75 691.208 11839.833 6217.75 1474.042
+          793.0 767.834 588.542 833.625 651.917 6524.292 1067.333
+          876.708 13070.0 12490.959 12006.083 11680.917 949.167 547.834
+          944.833 1191.875],
+       :lag-ms
+         [15.230666 3.033416 105.055834 5.033958 1.949584 6.907917
+          2.573458 2.035792 7.246042 4.241 2.481959 2.475709 3.127875
+          2.1475 10.27025 6.539417 3.19825 2.869166 3.912667 10.725291
+          3.147542 2.423834 54.633208 3.516916 2.26575 61.109791 39.102
+          24.606916 5.505459 1.93525 60.380542 24.935084 9.313167
+          4.568041 2.193208 38.597292 30.319 3.187875 7.283291 2.168083
+          2.186791 8.887083 2.983958 1.26725 31.749833 6.816541 3.386459
+          3.120333 9.372625 4.352792 1.369458 1.3065 1.726167 2.080792
+          11.970833 7.078125 2.90525 1.635208 2.0395 1.658292 7.603583
+          2.959417 14.087791 14.526 10.322416 2.396583 2.059792],
+       :fork-ms [94.266041 4.370083 4.272458 7.190875]},
+    :fork-server
+      {:agents-forked 4,
+       :pid 12529,
+       :status :up,
+       :restarts 0,
+       :mismatch 0,
+       :lag-ms 3.52,
+       :fork-ms-p50 7.19},
+    :store
+      {:backend :lmdb,
+       :main :check-smoke,
+       :recovered? false,
+       :recovered-branches [],
+       :open-ms 139.81,
+       :preload-ms 62.9,
+       :batches 61,
+       :commits 82,
+       :tx-per-commit 1.16,
+       :used-bytes 171458560,
+       :map-bytes 68719476736,
+       :path
+         "/Users/sean/src/seon-next/.worktrees/full-run-2026-10-25/target/check/20261025T125845/stores/smoke",
+       :agents-dir
+         "/Users/sean/src/seon-next/.worktrees/full-run-2026-10-25/target/check/20261025T125845/stores/smoke-agents/check-smoke"},
+    :boot
+      {:gc-sweepers 0,
+       :load-ms 202.71,
+       :instrument :on,
+       :program {:loaded 360, :errors [], :ms 309.48},
+       :contracts {:armed 133, :unchanged 9, :invalid [], :ms 10.353041}},
+    :web {:listening false, :port 0, :error nil}},
+ :checks
+   {:a1-merged true,
+    :a2-refused true,
+    :a3-merged-twice true,
+    :every-agent's-tests-pass true}}
+SMOKE OK

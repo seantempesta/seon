@@ -120,3 +120,10 @@
   (let [row (fn [v opts] [:li {:class (name (:as opts :block))} (str v) (when (pos? v) [(fn [w _] [:b (str "inner " w)]) (dec v) {}])])]
     (is (= "<ul><li class=\"inline\">1<b>inner 0</b></li></ul>" (seon.web.html/html [:ul [row 1 {:as :inline}]])))
     (is (= "<a href=\"/\">x</a>" (seon.web.html/html [:a {:href "/"} "x"])) "a keyword head is an element")))
+
+(deftest an-unread-cut-form-never-reaches-the-render-proc
+  ;; seon.web/open-form, the edge: the browser's text after a row's id reads as EDN or is refused
+  (let [open-form @#'seon.web/open-form]
+    (is (nil? (open-form "c12-chat")) "a row's own toggle names no form")
+    (is (= '(drop 1 (get-in result/e5 [:value :proofs])) (open-form "c12-chat/(drop 1 (get-in result/e5 [:value :proofs]))")) "a form's symbols hold a slash")
+    (is (= :seon.web/unread (open-form "c12-chat/(drop 1")) "unreadable text")))

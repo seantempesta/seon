@@ -53,7 +53,9 @@
   written, every later line indented to where it stands), never as a string literal; cut, it is
   cut by the one string cutter and its cut reads the rest, `(subs (:seon.print/code (get-in
   result/e3 [...])) 1200)`. Plain data, {:seon.print/code s}: a record stores it and reads it
-  back as it is. The producer says it is code; the printer never guesses from a string's text."
+  back as it is. The producer says it is code; the printer never guesses from a string's text.
+  Prose (a docstring, a plan, a section's lead) is marked the same way, {:seon.print/prose s}:
+  printed as code is, and on the page a paragraph."
   {:malli/schema [:=> [:cat :string] [:map [:seon.print/code :string]]]}
   [s] {:seon.print/code s})
 
@@ -98,6 +100,24 @@
                     (update-in m [:colls (System/identityHashCode v)] (fnil conj []) [v form])
                     :else m)))
           (or seen {}) [:value :out]))
+
+(defn read-rest
+  "What a cut's continuation form (seon.print.emit/continuation: get-in, nth, seq, key, val, a
+  mark's keyword, subs and drop over its handle) reads from root, the value its handle names, so
+  the page shows a cut's rest as the model would read it, from the record (a marked text's rest
+  keeps its mark). A form of any other operator reads nil."
+  {:malli/schema [:=> [:cat :any :any :any] :any]}
+  [form handle root]
+  (cond (= form handle) root
+        (not (seq? form)) form
+        :else (let [[op & args] form
+                    [x y] (map #(read-rest % handle root) args)]
+                (case op
+                  get-in (get-in x y) nth (nth x y nil) seq (seq x) key (key x) val (val x)
+                  ;; a marked text's rest keeps its mark: code reads on as code
+                  subs (let [k (first (first args))] (if (and (seq? (first args)) (#{:seon.print/code :seon.print/prose} k)) {k (subs x y)} (subs x y)))
+                  drop (vec (drop x y))
+                  (when (keyword? op) (get x op))))))
 
 (defn record-text
   "An eval's record (:seon.eval/record) as its response reads, printed now (`response-text`, with

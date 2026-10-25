@@ -1,0 +1,53 @@
+{:shard [2 4],
+ :contracts 321,
+ :fn-without-gen [],
+ :generated-and-checked 30,
+ :failed [],
+ :such-that [],
+ :not-generated 93,
+ :checks
+   {:every-fn-schema-generates true, :every-pure-contract-holds true},
+ :checked
+   [seon.lib/percentile seon.lib/summ seon.merge/conflict-value
+    seon.merge/platform-record? seon.merge/same? seon.proofs/result-file
+    seon.reconcile/blocks seon.reconcile/derive-needs
+    seon.reconcile/done-input seon.reconcile/explain-text
+    seon.reconcile/idx-done? seon.reconcile/put-task
+    seon.reconcile/refresh-done seon.reconcile/settle seon.ref/cited
+    seon.ref/lead-sentence seon.ref/names seon.ref/slug
+    seon.ref/trim-word seon.step/ask seon.step/event seon.task/agent-key
+    seon.task/cycle-in seon.task/end-members seon.task/env-tx
+    seon.task/invalid seon.task/run-id seon.task/task-value
+    seon.template/merge-name seon.template/with-merge],
+ :ms
+   {seon.lib/percentile 21.6,
+    seon.lib/summ 38.09,
+    seon.merge/conflict-value 64.73,
+    seon.merge/platform-record? 5.9,
+    seon.merge/same? 57.09,
+    seon.proofs/result-file 25.57,
+    seon.reconcile/blocks 12.87,
+    seon.reconcile/derive-needs 11.79,
+    seon.reconcile/done-input 1447.62,
+    seon.reconcile/explain-text 362.83,
+    seon.reconcile/idx-done? 10.77,
+    seon.reconcile/put-task 1197.64,
+    seon.reconcile/refresh-done 12.11,
+    seon.reconcile/settle 1307.29,
+    seon.ref/cited 622.79,
+    seon.ref/lead-sentence 10.93,
+    seon.ref/names 13.26,
+    seon.ref/slug 11.36,
+    seon.ref/trim-word 11.68,
+    seon.step/ask 28.0,
+    seon.step/event 0.72,
+    seon.task/agent-key 15.85,
+    seon.task/cycle-in 20339.65,
+    seon.task/end-members 2605.94,
+    seon.task/env-tx 27.6,
+    seon.task/invalid 17.22,
+    seon.task/run-id 12.92,
+    seon.task/task-value 49.37,
+    seon.template/merge-name 13.74,
+    seon.template/with-merge 3380.6}}
+MG-CHECK OK
