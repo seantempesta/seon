@@ -127,7 +127,7 @@
  ;; the fold in the observer's state: cause -> its running entry
  :seon.error/fold [:map-of [:vector :any] :seon.error/entry]
  ;; what an agent sends root with its commit: its occurrences since the last commit, folded
- :seon.error/sent [:map [:error :map] [:form [:maybe :string]] [:n pos-int?] [:first-ms :int] [:last-ms :int]]
+ :seon.error/sent [:map [:error :map] [:class :seon.error/class] [:form [:maybe :string]] [:n pos-int?] [:first-ms :int] [:last-ms :int]]
 
  ;; ---- problem members of a run's end (main; the judge writes them) and of the agent's end (branch) ----
  ;; the error that ended the run: the agent's death, the turn loop's error, a refused merge

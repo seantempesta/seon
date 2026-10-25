@@ -202,14 +202,16 @@
   [prev messages {:keys [prompt-tokens cache-hit-tokens]} block]
   (when (and (seq prev) (pos? block) prompt-tokens cache-hit-tokens)
     (let [ms (vec messages)
-          shared (count (take-while true? (map = prev ms)))
-          expected (long (* prompt-tokens (/ (double (context/messages-tokens (subvec ms 0 shared)))
-                                             (max 1 (context/messages-tokens ms)))))
-          floor (* block (quot expected block))]
-      (when (< cache-hit-tokens (- floor block))
+          shared (count (take-while true? (map = prev ms)))]
+      ;; nothing shared (the first message differs): no prefix the cache could serve
+      (when (pos? shared)
+        (let [expected (long (* prompt-tokens (/ (double (context/messages-tokens (subvec ms 0 shared)))
+                                                 (context/messages-tokens ms))))
+              floor (* block (quot expected block))]
+          (when (< cache-hit-tokens (- floor block))
         (contract/error :seon.turn/cache-miss 'seon.turn/act!
                         (str "the prompt cache hit " cache-hit-tokens " tokens of the " expected " this request shares with the one before")
-                        {:hit cache-hit-tokens :expected expected :block block :shared shared :messages (count ms)})))))
+                            {:hit cache-hit-tokens :expected expected :block block :shared shared :messages (count ms)})))))))
 
 (defn- act!
   "One model turn: the context of what was observed to the model, the reply's eval calls
@@ -242,17 +244,18 @@
                      {})
         model-ms (long (profile/ms-since t1))
         c (:value r)
-        ;; the request before this one in its run, and this one kept for the next: what the cache
-        ;; check compares (cache-miss); a miss is an error this agent folds (seon.error/note)
-        prev (get-in @agent/state [:requests run])
-        _ (swap! agent/state assoc :requests {run messages})]
+        ;; the request before this one in its run: what the cache check compares (cache-miss)
+        prev (get-in @agent/state [:requests run])]
     (if (contract/error? r)
       ;; the call failed: its typed error on the turn (an error is data), and to the run's end
       (do (agent/transact! [{:seon.turn/id id :seon.turn/error r :seon.turn/ms model-ms
                              :seon.turn/split {:context-ms context-ms :model-ms model-ms}}])
           r)
-      (let [_ (when-let [miss (cache-miss prev messages c (cfg/value :seon.config.ai/cache-block-tokens {:task t :model model-name}))]
-                (swap! agent/state update :errors err/note miss id (System/currentTimeMillis)))
+      (let [;; a request answered is the next one's baseline (a failed call stored no prefix); a short
+            ;; hit is the model call's outcome, an error this agent folds as :effect (seon.error/note)
+            _ (swap! agent/state assoc :requests {run messages})
+            _ (when-let [miss (cache-miss prev messages c (cfg/value :seon.config.ai/cache-block-tokens {:task t :model model-name}))]
+                (swap! agent/state update :errors err/note miss :effect id (System/currentTimeMillis)))
             t2 (profile/now-ns)
             ;; an interrupt left from before this turn's evals is not theirs
             _ (intr/clear-pending!)
