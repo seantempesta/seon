@@ -212,6 +212,15 @@ The branches each fork keeps: our working line, one fix per topic, and the gener
 - Ours: `355f390` clojure.spec.alpha 0.5.238 verbatim; `3427652` hasch.platform 0.4.100 verbatim, plus `res` in spec.alpha (a resolved deftype is not an emittable literal); `4ecb7a8` hasch's digest names upper-cased (`SHA-512`, `MD5`). Jolt (workarounds).
 - **Recommendation: don't fold it into `jolt` as is.** Each change is a workaround for a generic gap elsewhere: (1) jolt-lang/crypto's `MessageDigest/getInstance` is case-sensitive where the JVM's is not, so the fix belongs in crypto, and hasch.platform's copy then goes; (2) `resolve` of a deftype yields a value Jolt cannot emit as a literal, a Jolt compiler gap. Once both are fixed, what remains is spec.alpha verbatim, which Jolt could ship in its stdlib or we could take as a pinned dependency.
 
+## http-client
+
+Pinned in `deps.edn` (not a submodule).
+
+- Fork repo: ``https://github.com/seantempesta/http-client``. Upstream: ``jolt-lang/http-client``.
+- Base: `5a9706e0`, upstream main ("Send a default User-Agent").
+- Ours, on ``jolt/fiber-aware-read`` `d9901f9a`:
+  - `d9901f9a` a read from a fiber parks the fiber, not its carrier: `jolt.http.net/await-readable!` waits through `jolt.io-poller/wait-ready` on a fiber (the socket's read timeout as its deadline), poll(2) slices on a thread as before. On a main-carrier process (an agent, its test fork) the poll held the one thread, so a server fiber in the same process never answered and the read waited for good (S1, live agents 2026-10-25: one judge's test fork stalled every agent). Proof: the fork's `jolt -M:fibertest` (red: the watchdog after 10 s; green in 0.2 s), its `-M:test` and `-M:timeouttest` green. Generic (an upstream candidate).
+
 ## Unmodified submodules
 
 The submodules we use as upstream has them, each with its pin and how it is built.
@@ -226,4 +235,4 @@ The fork's only change printed a stack trace in the supervisor's error fn; `deps
 
 ## Unmodified, pinned in `deps.edn`
 
-ring-chez-adapter `fa0674e3`, multipart `ca51dd47`, time `a28ab100`, http-client `5a9706e0`, data.json 2.5.1, edamame 1.4.32, rewrite-clj 1.2.51, tools.reader 1.5.2, aero 1.1.6, fipp 0.6.29, core.cache 1.0.225.
+ring-chez-adapter `fa0674e3`, multipart `ca51dd47`, time `a28ab100`, data.json 2.5.1, edamame 1.4.32, rewrite-clj 1.2.51, tools.reader 1.5.2, aero 1.1.6, fipp 0.6.29, core.cache 1.0.225.
