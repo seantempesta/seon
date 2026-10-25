@@ -267,8 +267,8 @@
                   [n then] v
                   :when (and (now-form n) (not= then (now-form n)))
                   :let [ve (pdb/eid db :var/name n)]
-                  :let [absent? (= "absent" then)
-                        before? (= "changed" then)
+                  :let [absent? (= :absent then)
+                        before? (= :changed then)
                         existed? (some #(and (:added %) (<= (:tx %) t)) (d/datoms hist :eavt ve :var/name))
                         was (when existed? (into {} (keep (fn [a] (some->> (value-at hist ve a t) (vector a)))) program/meaning))
                         now (into {} (keep (fn [a] (some->> (get (d/entity db ve) a) (vector a)))) program/meaning)

@@ -225,13 +225,13 @@
     (is (empty? (get-in answer [:value :errors])) "git answered every request")
     (is (= {:commit first} (get-in answer [:value :sections "docs/p.md#p"])) "the section was last changed in the first commit")
     (testing "f's docstring was changed by the second commit, after the section: recorded changed"
-      (is (= "changed" (get (read "docs/p.md#p") 'app.gb/f))))
+      (is (= :changed (get (read "docs/p.md#p") 'app.gb/f))))
     (testing "g is unchanged since: recorded as it is now"
       (is (= (form-id 'app.gb/g) (get (read "docs/p.md#q") 'app.gb/g))))
     (testing "h did not exist at the commit: recorded absent, stale now that it does (a citation ahead of the code)"
-      (is (= "absent" (get (read "docs/p.md#q") 'app.gb/h))))
+      (is (= :absent (get (read "docs/p.md#q") 'app.gb/h))))
     (testing "z lives in a file that did not exist at the commit (git ls-tree says so): absent, not an error"
-      (is (= "absent" (get (read "docs/p.md#q") 'app.gl/z))))
+      (is (= :absent (get (read "docs/p.md#q") 'app.gl/z))))
     (testing "so the sections stale today are exactly those, one name each"
       (is (= #{["docs/p.md#p" 'app.gb/f] ["docs/p.md#q" 'app.gb/h] ["docs/p.md#q" 'app.gl/z]} (set (map (juxt :section :name) stale)))))
     (testing "an unchanged reload keeps the baseline: nothing is rewritten, nothing forgiven"
