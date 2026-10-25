@@ -5,7 +5,7 @@
   The model edge as data: a provider's reply body read into the completion (task
   seon.model/budgets-are-data-and-spend-is-measured). Run: bin/test seon.model-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [clojure.data.json :as json]
-            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.turn :as turn] [seon.contract] [clojure.string :as str]))
+            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.turn :as turn] [seon.contract] [clojure.string :as str] [seon.context] [seon.error]))
 
 (defn- chunk-line [m] (str "data: " (json/write-str m) "\n\n"))
 
@@ -165,3 +165,35 @@
            (first (:messages b))) "prose, reasoning and the call, as returned")
     (is (= "c1" (:tool_call_id (second (:messages b)))) "the response answers its call by the provider's id")))
 
+
+(deftest a-turn-whose-cache-misses-its-prefix-is-a-problem
+  ;; the shape of the recorded requests (2026-10-25, 94 turn pairs of 6 runs on DeepSeek): the
+  ;; system prompt, the task story, the turn's evals, then the screen, evaluated fresh each turn;
+  ;; the provider counts its cache hit in blocks of 128
+  (let [line (fn [tag n] (apply str (repeat n (str tag " is a line of a request's text. "))))
+        msg (fn [role tag n] {:role role :content (line tag n)})
+        system (msg "system" "system" 40) story (msg "user" "story" 60)
+        e1 (msg "assistant" "eval one" 30) e2 (msg "tool" "eval two" 30)
+        t1 [system story e1 e2 (msg "user" "screen a" 50)]
+        t2 [system story e1 e2 (msg "assistant" "eval three" 30) (msg "user" "screen b" 50)]
+        prompt 3000
+        shared-tokens (long (* prompt (/ (double (seon.context/messages-tokens [system story e1 e2])) (seon.context/messages-tokens t2))))
+        floor (* 128 (quot shared-tokens 128))]
+    (is (nil? (turn/cache-miss t1 t2 {:prompt-tokens prompt :cache-hit-tokens floor} 128))
+        "a hit of the shared prefix, in the provider's blocks, is no miss")
+    (is (nil? (turn/cache-miss t1 t2 {:prompt-tokens prompt :cache-hit-tokens (- floor 128)} 128))
+        "one block short is the sizer's error, not a miss")
+    (is (nil? (turn/cache-miss [system story (msg "user" "screen 0" 120)] t1
+                               {:prompt-tokens prompt :cache-hit-tokens (* 128 (quot (long (* prompt (/ (double (seon.context/messages-tokens [system story])) (seon.context/messages-tokens t1)))) 128))} 128))
+        "turn 1 shares only the system prompt and the story (turn 0's request after them is all screen): no miss")
+    (let [miss (turn/cache-miss t1 t2 {:prompt-tokens prompt :cache-hit-tokens 128} 128)]
+      (is (= :seon.turn/cache-miss (:seon.error/type miss)) (pr-str miss))
+      (is (= {:hit 128 :expected shared-tokens :block 128 :shared 4 :messages 6} (select-keys miss [:hit :expected :block :shared :messages])))
+      (testing "misses of other sizes are one cause: the agent's fold counts them under one signature"
+        (let [other (turn/cache-miss t1 t2 {:prompt-tokens prompt :cache-hit-tokens 256} 128)
+              fold (-> nil (seon.error/note miss "demo/f#1/2" 1) (seon.error/note other "demo/f#1/3" 2))]
+          (is (= 1 (count fold)))
+          (is (= 2 (:n (first (vals fold))))))))
+    (is (nil? (turn/cache-miss nil t1 {:prompt-tokens prompt :cache-hit-tokens 0} 128)) "a run's first request has nothing before it")
+    (is (nil? (turn/cache-miss t1 t2 {:prompt-tokens prompt :cache-hit-tokens 0} 0)) "a provider with no known cache (block 0) is not checked")
+    (is (nil? (turn/cache-miss t1 t2 {:prompt-tokens prompt} 128)) "a reply with no cache count is not checked")))

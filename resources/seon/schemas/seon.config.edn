@@ -93,6 +93,7 @@
   [:seon.config.ai/providers :seon.config.ai/providers]
   [:seon.config.ai/models :seon.config.ai/models]
   [:seon.config.ai/rate :seon.config.ai/rate]
+  [:seon.config.ai/cache-block-tokens :seon.config.ai/cache-block-tokens]
   [:seon.config.ai/chars-per-token-prior :seon.config.ai/chars-per-token-prior]
   ;; the printer
   [:seon.config.render.agent/token-budget :seon.config.render.agent/token-budget]

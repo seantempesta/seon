@@ -72,6 +72,7 @@
  :seon.model/rate-limited [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/rate-limited]] [:status {:optional true} :int]
                                                   [:body {:optional true} :string] [:retry-after-ms {:optional true} :int]]]
  ;; the connection failed or died (connect, reset, EOF mid-reply): transient, kept and retried after a pause
+ :seon.turn/cache-miss [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/cache-miss]] [:hit nat-int?] [:expected nat-int?] [:block pos-int?] [:shared nat-int?] [:messages nat-int?]]]
  :seon.model/transport [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/transport]] [:url {:optional true} :string]]]
  ;; the reply's content is empty while its reasoning is not: thinking spent the token budget
  :seon.model/reasoning-ate-reply [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/reasoning-ate-reply]]

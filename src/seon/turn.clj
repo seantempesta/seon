@@ -20,7 +20,7 @@
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context] [seon.program :as program] [seon.merge :as pm] [seon.problems :as problems]
             [seon.stage :as stage] [seon.screen :as screen] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
-            [datahike.api :as d]))
+            [seon.error :as err] [datahike.api :as d]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: the run it
 ;; works, and a stop a function requested.
@@ -191,6 +191,26 @@
          {:task task :input (context/turn-input (agent/db) in (get-in @agent/state [:turn :last]))})
   (vec (keep #(:record (evaluated! % {:origin :screen})) screen/forms)))
 
+(defn cache-miss
+  "A :seon.turn/cache-miss when a request's prompt cache hit falls more than one block short of
+  the prefix it shares with the request before it in its run, else nil. The prefix is the leading
+  messages both requests hold equal; its tokens are the provider's own prompt count (usage),
+  apportioned by the one sizer's share of them (seon.context/messages-tokens) and rounded down to
+  the provider's block (:seon.config.ai/cache-block-tokens, 0: no check). Measured on 94 recorded
+  turn pairs (2026-10-25): a hit is 0.87-1.12 of the shared prefix so sized, and none is short."
+  {:malli/schema [:=> [:cat [:maybe [:sequential :map]] [:sequential :map] :map nat-int?] [:maybe :map]]}
+  [prev messages {:keys [prompt-tokens cache-hit-tokens]} block]
+  (when (and (seq prev) (pos? block) prompt-tokens cache-hit-tokens)
+    (let [ms (vec messages)
+          shared (count (take-while true? (map = prev ms)))
+          expected (long (* prompt-tokens (/ (double (context/messages-tokens (subvec ms 0 shared)))
+                                             (max 1 (context/messages-tokens ms)))))
+          floor (* block (quot expected block))]
+      (when (< cache-hit-tokens (- floor block))
+        (contract/error :seon.turn/cache-miss 'seon.turn/act!
+                        (str "the prompt cache hit " cache-hit-tokens " tokens of the " expected " this request shares with the one before")
+                        {:hit cache-hit-tokens :expected expected :block block :shared shared :messages (count ms)})))))
+
 (defn- act!
   "One model turn: the context of what was observed to the model, the reply's eval calls
   through the one REPL path, each answered as its own result, the turn's facts on the branch. Answers the loop state after it, or the
@@ -221,13 +241,19 @@
                               model-name (assoc :model model-name))
                      {})
         model-ms (long (profile/ms-since t1))
-        c (:value r)]
+        c (:value r)
+        ;; the request before this one in its run, and this one kept for the next: what the cache
+        ;; check compares (cache-miss); a miss is an error this agent folds (seon.error/note)
+        prev (get-in @agent/state [:requests run])
+        _ (swap! agent/state assoc :requests {run messages})]
     (if (contract/error? r)
       ;; the call failed: its typed error on the turn (an error is data), and to the run's end
       (do (agent/transact! [{:seon.turn/id id :seon.turn/error r :seon.turn/ms model-ms
                              :seon.turn/split {:context-ms context-ms :model-ms model-ms}}])
           r)
-      (let [t2 (profile/now-ns)
+      (let [_ (when-let [miss (cache-miss prev messages c (cfg/value :seon.config.ai/cache-block-tokens {:task t :model model-name}))]
+                (swap! agent/state update :errors err/note miss id (System/currentTimeMillis)))
+            t2 (profile/now-ns)
             ;; an interrupt left from before this turn's evals is not theirs
             _ (intr/clear-pending!)
             ;; each eval call through the one REPL path, in order; its response is the call's
