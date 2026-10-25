@@ -32,9 +32,10 @@
 (defn agents-reused
   "Agent ids whose runs worked more than one branch (must be empty): a session's runs (a
   task and the tasks on its branch it needs, a work task and its merge: seon.task/session-key)
-  continue its one agent, and no agent serves two sessions."
+  continue its one agent, and no agent serves two sessions; a run naming no branch is a session
+  of its own."
   [d] (vec (for [[ag rs] (group-by :seon.run/agent (vals (task/runs d)))
-                 :when (and ag (< 1 (count (distinct (map #(get-in % [:seon.run/env :branch]) rs)))))]
+                 :when (and ag (< 1 (count (distinct (map #(or (get-in % [:seon.run/env :branch]) (:seon.run/id %)) rs)))))]
              ag)))
 
 (defn- merge-counts [d]
