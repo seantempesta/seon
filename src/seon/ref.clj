@@ -512,8 +512,8 @@
 (defn namespace-view
   "Namespace nsym as depth shows it, by the one rule `shown`: its address is its name, its lead
   its docstring and the sections below it its definitions, privates included, in file order, each
-  headed by its name and its doc's first sentence (those of the db, else the loaded namespace's
-  public vars): what a namespace is to someone working in it, one line a definition (the a-map
+  headed by its name and its doc's first sentence (those of the db; a namespace only this process
+  has loaded lists its public names alone): what a namespace is to someone working in it, one line a definition (the a-map
   design read 42 of seon.print.select's one (source f) a turn, its bug in privates ns-publics
   never named). nil when neither db nor process holds it."
   {:malli/schema [:=> [:cat :seon.host/db :symbol :seon.ref/depth] [:maybe :seon.ref/view]]}
