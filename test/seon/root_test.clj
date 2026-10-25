@@ -177,21 +177,21 @@
   ;; the second boot above read 810 tasks (2026-10-25): its root started seconds after a merge
   ;; rewrote the checkout's task files, FSEvents delivered those writes to its new watcher, and
   ;; a task file's event loads every file of the task dir. A test root's task dir is its own
-  ;; (seon.test-store/start-root!): a write to the checkout's loads nothing; one to its own loads it
+  ;; (seon.test-store/start-root!), so its loads read its own files and never the checkout's.
+  ;; Asserted through the root's own reads, with no watcher event and no write to the checkout
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         path (str checkout "/target/runs/root-test-own-tasks-" (random-uuid))
         runs (str path "-main-runs")
+        _ (.mkdirs (java.io.File. (str runs "/tasks")))
+        _ (spit (str runs "/tasks/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work}]))
         root (ts/start-root! {:store path :main "main" :runs runs})
-        ask (fn [code] (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code code}))))
-        theirs (str checkout "/resources/seon/tasks/seon.watch.edn")]
+        ask (fn [code] (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code code}))))]
     (try
-      (is (= 0 (ask "(count (seon.task/tasks @(:conn sys)))")) "a fresh root holds no task: no file of the checkout's")
-      ;; the checkout's task file written as a merge writes it (its own text), then one of the root's
-      (spit theirs (slurp theirs))
-      (.mkdirs (java.io.File. (str runs "/tasks")))
-      (spit (str runs "/tasks/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work}]))
-      (is (= 2 (ask "(do (seon.root/await-db sys #(pos? (:batches (:seon.root/watch (d/pull % [:seon.root/watch] [:seon.root/id :root])) 0))) (count (seon.task/tasks @(:conn sys))))"))
-          "its first load is its own task file: root's task and demo/t, none of the checkout's (810 before)")
+      (is (= (str runs "/tasks") (ask "(seon.config/value :seon.config.root/tasks-dir)")) "its task dir is under its runs, not the checkout's")
+      (is (= 0 (ask "(count (seon.task/tasks @(:conn sys)))")) "a fresh root holds no task")
+      ;; a load of its task dir (what a task file's event runs) reads its own file: demo/t, and the
+      ;; root task the first load writes (with main's start-root!, the checkout's 810)
+      (is (= 2 (ask "(do (my.root/load-tasks! sys) (count (seon.task/tasks @(:conn sys))))")) "its own task file and root's task, none of the checkout's")
       (finally (ts/stop-root! root) (clojure.java.shell/sh "rm" "-rf" path runs (str path "-agents"))))))
 
 (deftest a-dead-link-in-the-wiki-is-a-problem-and-the-boot-goes-on

@@ -207,11 +207,6 @@
                 (reduce (fn [m k] (if (contains? m k) m (assoc m k r))) m ks)))
             {} batch)))
 
-(defn watch-kinds
-  "The kinds a watcher's batch makes root load (watch-loads' keys)."
-  {:malli/schema [:=> [:cat :string [:maybe :string] [:maybe :string] [:vector [:tuple :keyword :string]]] [:set [:enum :docs :tasks :source]]]}
-  [co refs own batch] (set (keys (watch-loads co refs own batch))))
-
 (defn watch-died-tx
   "The write of watcher error e at ms on main db, with held root's current :seon.root/watch fact: a :platform error
   (seon.root/platform-tx) whose subject is the watch fact, and that fact with its :error, in one
@@ -225,10 +220,10 @@
 (defn watch!
   "Root watches its checkout and its repository's refs (seon.watch, FSEvents: every writer,
   a Claude session, an agent, the owner's editor, git), and loads on its own branch's ref only
-  (watch-kinds: the repository is shared by every worktree, whose commits are not this root's). What changed while root was down is
+  (watch-loads: the repository is shared by every worktree, whose commits are not this root's). What changed while root was down is
   boot's to load, as it always was: the wiki (seon.root/wiki-tx) and the source
   (seon.root/import-source!); task files are loaded on their change, or by load-tasks!, never
-  at boot. Then each batch loads what it makes root load (watch-kinds),
+  at boot. Then each batch loads what it makes root load (watch-loads),
   and a batch that loads, its paths and any rescan are counted in root's :seon.root/watch fact. A
   watcher that cannot start or dies is a :platform error on main (seon.root/platform-tx), and
   root goes on unwatched: nothing falls back to a poll. Answers the watcher, or the error."
