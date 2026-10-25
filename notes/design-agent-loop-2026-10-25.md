@@ -312,7 +312,7 @@ What this shows, with the research subagent's source reading (Chez `c/gc.c`, `c/
 | a go block, its value taken on the main thread | 42, as put | agent: **1** (`ps -M`) |
 | 20,000 values to a forked child and back over a `jolt.async.remote` end (`:pump :fiber`), the child echoing `(inc v)` | all back, sum exact; 52 ms, **382,000 per second** each way, pipelined; 16 poller rounds | agent 1, child 1 |
 | 100,000 values over that channel, with **50 forks made in the middle of the traffic** (each child runs a go block and a full collect) | **50 of 50 forks went through, 50 of 50 children exited 0**, sum exact | 1 |
-| ...the same forks beside a threaded busy flow, for comparison (section 8) | 199 of 200 refused; 50 of 50 forced through deadlocked | 9+ |
+| ...the same forks beside a threaded busy flow, for comparison (section 8) | 199 of 200 refused; 50 of 50 forced through deadlocked | not counted (carrier threads) |
 | a three-proc Flow graph (`create-flow`, `:io` procs), 20,000 messages injected | all through, sum exact; 148 ms, **135,000 per second** | 1 |
 | back-pressure: the peer process is busy in a 1 s eval (its fibers don't run) while 100,000 values are sent | the sender put **1,707** (its buffer, the kernel's socket buffers and the peer's) and then parked; once the peer ran, all 100,000 arrived, sum exact | 1 each |
 
