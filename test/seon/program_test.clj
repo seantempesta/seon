@@ -195,6 +195,32 @@
     (let [db (record (empty-db) 'app.pt-d "(declare b)" 'app.pt-d "(defn a [] (b))" 'app.pt-d "(defn b [] 1)")]
       (is (= ["(declare b)" "(defn a [] (b))" "(defn b [] 1)"] (map :src (program/load-order (in-ns-forms db 'app.pt-d))))))))
 
+;; task seon.source/a-tests-reach-is-the-same-however-the-program-was-analyzed (root's ruling,
+;; 2026-10-25): a quoted name is data, recorded by name, never a reference: whether its namespace
+;; existed depended on what the process had analyzed, so a refresh (only the changed files) dropped
+;; what a whole import kept (240 against 250 tests left out on one tree)
+(deftest a-quoted-name-is-data-whatever-the-process-analyzed
+  (let [srcs {"src/app/pt_qa.clj" "(ns app.pt-qa)\n(defn f [] (list 'app.pt-qb/g 1))\n(defmacro m [x] `(app.pt-qb/g ~x))\n"
+              "src/app/pt_qb.clj" "(ns app.pt-qb)\n(defn g [x] x)\n"}
+        refs (fn [db v] (set (:form/refs (:var/form (d/entity db [:var/name v])))))
+        whole (let [db (empty-db)] (d/db-with db (source/import-tx db srcs)))
+        ;; app.pt-qa alone, in a process that no longer holds app.pt-qb (a refresh's: only the
+        ;; changed file is read)
+        alone (try (remove-ns 'app.pt-qb)
+                   (let [db (empty-db)] (d/db-with db (source/import-tx db (select-keys srcs ["src/app/pt_qa.clj"]))))
+                   (finally (remove-ns 'app.pt-qa)))]
+    (is (not (contains? (refs whole 'app.pt-qa/f) 'app.pt-qb/g)) "a name in quoted data is no reference of the form")
+    (is (contains? (refs whole 'app.pt-qa/m) 'app.pt-qb/g) "a macro's template is its expansion's code: its names are")
+    (is (= (refs whole 'app.pt-qa/f) (refs alone 'app.pt-qa/f)) "the same facts whether the named namespace was analyzed or not")
+    (is (= (refs whole 'app.pt-qa/m) (refs alone 'app.pt-qa/m)) "for a macro's template too")))
+
+(deftest load-order-reads-no-quoted-name
+  ;; task seon.program/load-dependencies-leave-quoted-names-out: a form recorded at a REPL that
+  ;; quotes a later var (an error's data naming it) is not ordered after it
+  (let [db (record (empty-db) 'app.pt-lq "(defn a [] (ex-info \"no\" {:see 'app.pt-lq/b}))" 'app.pt-lq "(defn b [] (a))")]
+    (is (= ["(defn a [] (ex-info \"no\" {:see 'app.pt-lq/b}))" "(defn b [] (a))"]
+           (map :src (program/load-order (in-ns-forms db 'app.pt-lq)))))))
+
 (def ^:private calc-srcs
   ['user "(ns app.pt-calc)"
    'app.pt-calc "(defn add [a b] (+ a b))"
@@ -397,12 +423,17 @@
 (defn- refs-of [db sym]
   (set (d/q '[:find [?r ...] :in $ ?s :where [?v :var/name ?s] [?v :var/form ?f] [?f :form/refs ?r]] db sym)))
 
-(deftest a-quoted-or-syntax-quoted-var-is-a-ref
+(deftest a-quoted-name-is-no-reference-but-in-a-macros-template
+  ;; root's ruling, 2026-10-25: the reach follows calls; a quoted name is data, but what a
+  ;; macro's template quotes is its expansion's code
   (let [db (record (empty-db) 'user "(ns app.pt-q)" 'app.pt-q "(defn g [] 1)"
                    'app.pt-q "(defn f [] [`g 'app.pt-q/g {:render 'app.pt-q/g}])"
-                   'app.pt-q "(defn k [] ['no.such/var 'g '(a b)])")]
-    (is (contains? (refs-of db 'app.pt-q/f) 'app.pt-q/g) "a syntax-quoted and a quoted qualified symbol naming a var, in a map too")
-    (is (not-any? #{'no.such/var 'g 'a 'b} (refs-of db 'app.pt-q/k)) "a symbol naming no var, or unqualified, is data")))
+                   'app.pt-q "(defn c [] (g))"
+                   'app.pt-q "(defmacro t [] `(g))")]
+    (is (not (contains? (refs-of db 'app.pt-q/f) 'app.pt-q/g)) "a syntax-quoted and a quoted name, in a map too: data, no reference")
+    (is (contains? (refs-of db 'app.pt-q/c) 'app.pt-q/g) "a call is")
+    (is (contains? (refs-of db 'app.pt-q/t) 'app.pt-q/g) "and a name a macro's template quotes, which its expansion calls")
+    (is (= '[app.pt-q/c app.pt-q/f app.pt-q/t] (seon.docs/callers db 'app.pt-q/g)) "who calls or names g: f names it as data")))
 
 (deftest a-macro-use-is-a-ref
   (let [db (record (empty-db) 'user "(ns app.pt-qm)" 'app.pt-qm "(defmacro m [x] x)"
@@ -413,19 +444,6 @@
     (is (contains? (refs-of db 'app.pt-qm/u) 'app.pt-qm/m) "the macro a form expanded")
     (is (contains? (refs-of db 'app.pt-qm/w) 'app.pt-qm/mdo) "a top-level macro call that expands to a do: each unit's form names it")
     (is (contains? (refs-of db 'app.pt-qm/m2) 'app.pt-qm/m) "a macro whose template names another: the expansion chain is closed")))
-
-(deftest a-test-reaching-a-quoted-function-changes-digest-with-it
-  (let [db (record (empty-db) 'user "(ns app.pt-qr)" 'app.pt-qr "(defn g [] 1)"
-                   'user "(ns app.pt-qr-test (:require [clojure.test :refer [deftest is]]))"
-                   'app.pt-qr-test "(deftest q-test (is (= 1 ((requiring-resolve 'app.pt-qr/g)))))"
-                   'app.pt-qr-test "(deftest other-test (is (= 1 1)))")
-        ts '#{app.pt-qr-test/q-test app.pt-qr-test/other-test}
-        before (select-keys (program/reach-digests db {:env "e" :tree "t"}) ts)
-        db' (record db 'app.pt-qr "(defn g [] 2)")
-        after (select-keys (program/reach-digests db' {:env "e" :tree "t"}) ts)]
-    (is (not= (before 'app.pt-qr-test/q-test) (after 'app.pt-qr-test/q-test)) "g changed: the test resolving it by name moved")
-    (is (= (before 'app.pt-qr-test/other-test) (after 'app.pt-qr-test/other-test)) "the test not reaching g kept its digest")
-    (is (= '#{app.pt-qr-test/q-test} (selected db db')) "and every run's selection finds it")))
 
 (deftest a-changed-macro-moves-the-digest-of-each-test-that-expands-it
   (let [db (record (empty-db) 'user "(ns app.pt-mac)" 'app.pt-mac "(defmacro m [x] `(inc ~x))"
@@ -503,7 +521,7 @@
 ;; ---- digests are the tree's, never the process's (root 2026-10-22: every bin/test --reach run reused nothing)
 
 (deftest the-same-tree-gives-the-same-digests-in-any-checkout-and-any-run
-  ;; a quoted name counted as a ref only when its var existed yet (seon.program/quoted-vars), so
+  ;; a quoted name counted as a ref only when its var existed yet (then by namespace, now by name: seon.program/quoted-names), so
   ;; the digests followed what the process had analyzed before: 43 of 387 equal on a second
   ;; import of the same tree. The same commit, imported twice and from a copy at another path,
   ;; gives the same digest for every test: a second run reruns nothing, two worktrees share

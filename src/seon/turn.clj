@@ -367,7 +367,7 @@
   "Work task `task` as run `run` (the model `model` when set, else root's), at most
   max-turns model calls. A turn whose calls repeat the last turn's, made from the same
   observed state (the done rule's reasons and proof results), is a repeat, counted in a row on the
-  run (:seon.run/repeats, on its branch; a turn that made progress sets it to 0, root 2026-10-25:
+  run (:seon.run/repeats, on its branch; a turn that made progress sets it to 0, root:
   no progress means repeats in a row): the first :seon.config.agent/repeats-told are told to the
   agent in its next status (:your-last-reply :repeated), and the one after ends the run
   :no-progress, naming the code (root's research, lever 2: loops took 45% of tokens; the step E

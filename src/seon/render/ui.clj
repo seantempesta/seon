@@ -588,11 +588,10 @@
     {:read (into (sorted-map-by #(compare (str %1) (str %2))) (frequencies (mapcat #(when (:explore? %) (:targets %)) reads)))
      :defined (vec (distinct (mapcat :recorded recs)))
      :evaluated (vec (distinct (remove lib? (keep :var (mapcat :fns recs)))))
-     ;; a form that ran its tests names my.agent/prove: compared by its name as text, since the reach
-     ;; walk follows a quoted symbol (seon.program/reach-graph) and this render runs no tests (a
-     ;; quoted one made every test reach seon.lib/fork! through every schema's render: render-test/
+     ;; a form that ran its tests names my.agent/prove (a quoted name, data: no reference,
+     ;; seon.program/unit-account, so this render reaches no process: render-test/
      ;; a-render-reaches-no-process)
-     :tests (vec (for [[r rd] (map vector mine reads) :when (some #(= "my.agent/prove" (str %)) (:targets rd))]
+     :tests (vec (for [[r rd] (map vector mine reads) :when (some #{'my.agent/prove} (:targets rd))]
                    {:form (:code (:seon.eval/record r)) :handle (:seon.eval/id r)}))}))
 
 (defn this-run
