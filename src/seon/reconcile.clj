@@ -700,9 +700,9 @@
                       (sort-by first) last)
         prev-task (some-> prev task-of)]
     (when (and prev-task (not= prev-task id))
-      (let [t (task/task db id)]
+      (let [{:keys [plan proofs]} (:seon.task/accumulated (task/task db id))]
         (str prev-task " is done. Your task now is " id ", in this same session: what you did so far stays above.\n\n"
-             "Its plan: " (:seon.task/plan t) "\n\nIts proofs: " (str/join " " (sort (map str (:seon.task/proofs t))))
+             "Its plan: " plan "\n\nIts proofs: " (str/join " " (sort (map str proofs)))
              "\n\nIts whole story (what it cites, its write set): (my.task/story)")))))
 
 (defn- taken-messages

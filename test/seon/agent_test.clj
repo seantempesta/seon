@@ -595,6 +595,27 @@
                        :decls [{:seon.task/name "m" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= [:error :seon.model/no-provider [:seon.model/no-provider]] (:value r)) (pr-str r))))
 
+(deftest a-requests-implement-continues-its-designs-request
+  ;; live finding A1, on a real request (the pipeline's: the implement's first request sent its own
+  ;; story in second place and no boundary, 512 of 35,126 tokens cached): through my.root/request! and
+  ;; the reconciler, the implement's first turn, on the design's session, sends the design's story
+  ;; where the design's requests did, the design's last request whole as its prefix, then root's
+  ;; boundary message (seon.reconcile/stage-boundary), read off the turns as the branch recorded them
+  (let [code (str "(let [_ (my.root/request! sys {:seon.task/ns 'demo :seon.task/name \"st\" :seon.task/plan \"Make st.\"})"
+                  " _ (seon.root/await-db sys \"the implement parked\" #(= :parked (:seon.run/status (datahike.api/entity % [:seon.run/id \"demo/st-implement#1\"]))))"
+                  " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"demo/st\")}}))"
+                  " sent (fn [run] (mapv second (sort (datahike.api/q '[:find ?n ?s :in $ ?id :where [?r :seon.run/id ?id] [?u :seon.turn/run ?r] [?u :seon.turn/n ?n] [?u :seon.turn/origin :model] [?u :seon.turn/sent ?s]] b run))))"
+                  " boundary (datahike.api/q '[:find ?mid . :where [?r :seon.run/id \"demo/st-implement#1\"] [?m :seon.message/to ?r] [?m :seon.message/from \"root\"] [?m :seon.message/id ?mid]] b)]"
+                  " {:design (sent \"demo/st#1\") :implement (sent \"demo/st-implement#1\") :boundary boundary})")
+        [_ r] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code code}]
+                        {:sets [":seon.config.ai/script=seon.fixtures/stages"]})
+        {:keys [design implement boundary]} (:value r)
+        last-design (peek design) first-implement (first implement)]
+    (is (and (seq design) (seq implement) boundary) (pr-str r))
+    (is (= (second (first design)) (second first-implement)) "the design's story, in the same place")
+    (is (= last-design (subvec first-implement 0 (min (count first-implement) (count last-design)))) "the design's last request is its exact prefix")
+    (is (some #(= [:message boundary] (vec (take 2 %))) (drop (count last-design) first-implement)) "then root's boundary")))
+
 (deftest a-waiting-run-parks-and-a-message-wakes-the-same-process
   ;; design agent-loop section 2 (owner, 2026-10-25: "Always park"): a run that waits parks its
   ;; session, its process kept; the owner's message wakes it, and the next run is the same
