@@ -202,14 +202,17 @@
                        cites)
             schema? #(some? (pdb/eid db :schema/key %))
             src (str/join "\n" (keep #(docs/source-of db %) fns))
+            ;; a program function, not a test (callees leaves tests out too)
+            function? #(not= :test (:var/kind (d/entity db [:var/name %])))
             near (fn [of f] (into [] (comp (keep (comp f first)) (distinct)) (vector/near db te (* 4 k) {:of of})))
-            graph {:functions (by-frequency (concat (mapcat #(docs/callers db %) fns) (mapcat #(callees db %) fns)
+            graph {:functions (by-frequency (concat (filter function? (mapcat #(docs/callers db %) fns)) (mapcat #(map :var (callees db %)) fns)
                                                     (for [a secs n (:seon.section/names (d/entity db [:seon.section/address a]))] n)))
                    :sections (by-frequency (concat (for [n fns e (d/q '[:find [?e ...] :in $ ?n :where [?e :seon.section/names ?n]] db n)]
                                                      (:seon.section/address (d/entity db e)))
                                                    (for [a secs r (:seon.section/references (d/entity db [:seon.section/address a]))] (:seon.section/address r))
                                                    (for [a secs r (:seon.section/_references (d/entity db [:seon.section/address a]))] (:seon.section/address r))))
-                   :schemas (by-frequency (filter schema? (map keyword (map #(subs % 1) (re-seq #":[\w.\-]+/[\w.\-?!*]*[\w?!*]" (str plan "\n" src))))))}
+                   :schemas (by-frequency (filter schema? (concat (filter keyword? (keep :seon.ref/name cites))
+                                                                     (map #(keyword (subs % 1)) (re-seq #":[\w.\-]+/[\w.\-?!*]*[\w?!*]" src)))))}
             meaning {:functions (near :form/id #(some-> (d/entity db %) :var/_form first :var/name))
                      :sections (near :seon.section/address #(:seon.section/address (d/entity db %)))
                      :schemas (near :schema/key #(:schema/key (d/entity db %)))}
@@ -233,17 +236,18 @@
   first sentence (seon.docs/view; its heading when it has no lead), a function its name and its
   doc's first sentence, a schema key itself; with the forms that read one whole (naming the
   text's key: a step-6 run's model read the view with (:text ...) eight times over) and search
-  further: what my.task/related and my.agent/related answer."
+  further: what my.task/related and my.agent/related answer. nil when there is nothing."
   {:malli/schema [:=> [:cat :seon.host/db [:map [:sections {:optional true} [:vector :string]] [:functions {:optional true} [:vector :qualified-symbol]]
                                            [:schemas {:optional true} [:vector :qualified-keyword]]]]
-                  :map]}
+                  [:maybe :map]]}
   [db {:keys [sections functions schemas]}]
-  (cond-> {}
+  (when (or (seq sections) (seq functions) (seq schemas))
+   (cond-> {}
     (seq sections) (assoc :sections (mapv #(let [v (docs/view db % :summary)] (str % ": " (or (:seon.ref/summary v) (:seon.ref/heading v)))) sections))
     (seq functions) (assoc :functions (mapv #(str % (some->> (:var/doc (d/entity db [:var/name %])) ref/lead-sentence (str ": "))) functions))
     (seq schemas) (assoc :schemas schemas)
     true (assoc :read "(:seon.ref/text (my.agent/help \"docs/page.md#anchor\")): one section's text whole; (source ns/f) a function; (my.schema/forms :ns/key) a schema's form"
-                :more "(my.agent/related \"your words\" 10): sections by any text; (my.agent/similar \"your words\"): functions and tasks too; (my.agent/callers 'ns/f)")))
+                :more "(my.agent/related \"your words\" 10): sections by any text; (my.agent/similar \"your words\"): functions and tasks too; (my.agent/callers 'ns/f)"))))
 
 (defn run-state
   "The task story: task t's run sections as data, the same each turn of a run: the task (its

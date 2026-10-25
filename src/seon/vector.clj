@@ -105,8 +105,8 @@
 (defn rrf
   "Rankings fused by reciprocal rank (Cormack et al. 2009): each item scores the sum of 1/(k + rank)
   over the rankings it is in, k :seon.config.vector/rrf-k; best first, the name breaking a tie.
-  Measured fusing the call graph with embeddings (docs/vector.md#fused-with-the-call-graph); kept
-  for that exploration, nothing in the context calls it now."
+  Measured fusing the call graph with embeddings (docs/vector.md#fused-with-the-call-graph); the
+  screen's related lists fuse their reference graph with meaning by it (seon.context/related)."
   {:malli/schema [:=> [:cat [:sequential [:sequential :any]]] [:vector :any]]}
   [rankings]
   (let [k (cfg/value :seon.config.vector/rrf-k)

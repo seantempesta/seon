@@ -813,3 +813,21 @@
           s (d/db-with s (vector/tx-data [se] [1] [(dir 1.0 0.5)] [10] "m"))]
       (is (some #{"docs/vector.md#the-pyramid-b"} (:sections (:value (context/related-at s te 3 again))))
           "a section embedded on the branch with the plan unchanged is in the next answer: its write is the mark"))))
+
+(deftest related-fuses-the-plans-references-with-meaning
+  ;; seon.context/related's graph half: the plan cites `demo/h`, so its caller demo/k (no vector:
+  ;; meaning alone never finds it) and the section naming it (no vector either) are fused with the
+  ;; nearest by meaning (seon.vector/rrf: a tie broken by name); what the plan cites is left out
+  (let [[db te] (sections-near "Make the page say one thing (docs/vector.md#what-is-embedded), in `demo/h`.")
+        db (d/db-with db [{:db/id "h" :form/id "demo/h" :form/src "(defn h [])"} {:var/name 'demo/h :var/form "h" :var/kind :fn}
+                          {:db/id "k" :form/id "demo/k" :form/src "(defn k [] (h))" :form/refs #{'demo/h}} {:var/name 'demo/k :var/form "k" :var/kind :fn}
+                          {:db/id "t" :form/id "demo/k-test" :form/src "(deftest k-test (h))" :form/refs #{'demo/h}} {:var/name 'demo/k-test :var/form "t" :var/kind :test}
+                          {:seon.section/address "docs/vector.md#the-pyramid-c" :seon.section/heading "C" :seon.section/lead "Names h. More."
+                           :seon.section/names #{'demo/h}}])
+        rel (context/related db te)]
+    (is (= ['demo/g 'demo/k] (:functions rel)) "the caller of the cited var beside the nearest by meaning; the cited var and the test left out")
+    (is (= ["docs/vector.md#the-model" "docs/vector.md#the-pyramid-c" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph"
+            "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"]
+           (:sections rel))
+        "the section naming the cited var fused at its rank with the nearest by meaning; the cited section left out")
+    (is (nil? (context/related-view db {:sections [] :functions [] :schemas []})) "nothing related, nothing shown")))

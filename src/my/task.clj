@@ -69,10 +69,14 @@
   []
   (let [db (agent/db)
         te (some->> (turn/current-task) (pdb/eid db :seon.task/id))
-        r (when te (context/related-at db te (:vectors-t @agent/state) (:related @agent/state)))]
+        held (:related @agent/state)
+        r (when te (context/related-at db te (:vectors-t @agent/state) held))
+        ;; rendered once per answer: an unchanged plan reads nothing again
+        r (cond-> r (and r (not (contains? r :view))) (assoc :view (some->> (:value r) (context/related-view db))))]
     (when r (swap! agent/state assoc :related r))
     (cond
-      (:value r) (context/related-view db (:value r))
+      (:view r) (:view r)
+      (:value r) {:nothing "nothing nearer the plan than what it cites"}
       ;; its key's count (seon.context/related-at): 0 shows none
       (some-> r :key second zero?) {:off ":seon.config.render/related is 0"}
       :else {:not-embedded "no plan with a vector yet: (my.agent/related \"your words\") searches the wiki by any text"})))
