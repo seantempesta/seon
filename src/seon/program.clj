@@ -420,8 +420,8 @@
 (def meaning
   "What a definition says of itself that text describing it relies on, so what a wiki section
   citing it goes stale on (seon.problems/stale-sections) and an eval that changes it shows
-  (meaning-changes): its contract and its docstring, the facts def-tx asserts and retracts (owner,
-  2026-10-25, DECISIONS Dogfood rulings; the contract carries the arity)."
+  (meaning-changes): its contract and its docstring, the facts def-tx asserts and retracts
+  (DECISIONS Dogfood rulings; the contract carries the arity)."
   [:var/contract :var/doc])
 
 (defn meaning-changes
