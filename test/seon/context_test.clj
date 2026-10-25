@@ -258,15 +258,22 @@
     (let [part (fn [whole small call] {:cost [whole small] :call call})
           ;; tokens whole and collapsed, oldest first; the third continues the second's reply
           parts [(part 400 5 0) (part 10 2 0) (part 10 2 1) (part 10 2 0)]]
-      (is (= [[:whole :whole :whole] 0] (#'context/kept (subvec parts 1) 30 1)) "all whole when they fit")
-      (is (= [[:line :whole :whole :whole] 0] (#'context/kept parts 35 1)) "an older one too large whole is collapsed, not dropped")
-      (is (= [[:whole] 3] (#'context/kept parts 0 1)) "the newest stays at budget 0")
-      (is (= [[:whole] 1] (#'context/kept (subvec parts 2) 10 1)) "a cut never starts inside a reply")
-      (testing "the boundaries move in steps: more is collapsed or left out at once, so the prefix holds for many turns"
-        (let [many (vec (repeat 20 (part 10 2 0)))]
-          (is (= [(into (vec (repeat 4 :line)) (repeat 12 :whole)) 4] (#'context/kept many 130 4))
-              "13 fit whole: whole from 8 (raised to a step of 4); 5 more fit collapsed: from 4 (raised); the 4 before left out")
-          (is (= (#'context/kept many 130 4) (#'context/kept many 128 4)) "a slightly smaller budget moves nothing"))))))
+      (is (= [[:whole :whole :whole] 0] (#'context/kept (subvec parts 1) 30)) "all whole when they fit")
+      (is (= [[:line :whole :whole :whole] 0] (#'context/kept parts 35)) "an older one too large whole is collapsed, not dropped")
+      (is (= [[:whole] 3] (#'context/kept parts 0)) "the newest stays at budget 0")
+      (is (= [[:whole] 1] (#'context/kept (subvec parts 2) 10)) "a cut never starts inside a reply")
+      (testing "the cuts only advance, in jumps to half the budget, so the prefix holds between them"
+        (let [many (vec (repeat 40 (part 10 2 0)))
+              ;; what each length of the history sends, as [first-sent picks]
+              at (fn [k] (let [[picks dropped] (#'context/kept (subvec many 0 k) 130)] [dropped picks]))
+              moved (vec (for [k (range 2 41) :let [[d0 p0] (at (dec k)) [d1 p1] (at k)]
+                               ;; the earlier request's parts, as this one sends them
+                               :when (not (and (= d0 d1) (= p0 (subvec p1 0 (count p0)))))] k))]
+          (is (= [(into (vec (repeat 2 :line)) (repeat 6 :whole)) 6] (#'context/kept (subvec many 0 14) 130))
+              "past the budget at 14 whole: the oldest collapse until the whole fit in half (6 of 10), then the oldest collapsed are left out until all fits in half")
+          (is (= [14 21 28 35] moved) "the cuts move at four lengths of 39, every 7th; every other request is the one before and what was added")
+          (is (every? (fn [k] (let [[_ p] (at k)] (<= (+ (* 2 (count (filter #{:line} p))) (* 10 (count (filter #{:whole} p)))) 130))) (range 1 41))
+              "and what is sent stays within the budget"))))))
 
 ;; ---- context v2: a stable prefix, each var at its citation's depth, the helpers -----------
 
