@@ -15,6 +15,12 @@
   "seon.await, which a root (importing src only) loads by this path."
   (.getCanonicalPath (java.io.File. "test/seon/await.clj")))
 
+(def ^:private before-done
+  "Main's t just before a :done, kept in root's REPL as t-before-done: :done answers once the judge
+  has, and the reconciler may be quiet by then, so a test waiting for quiescence after :done waits
+  for a report written after this t, never after :done's answer (that wait could never end)."
+  {:op :eval :agent "root" :code "(def t-before-done (:max-tx @(:conn sys)))"})
+
 (def value-of "seon.test-store/value-of, as this namespace's callers name it." ts/value-of)
 
 (defn in-agent
@@ -396,10 +402,10 @@
   ;; owner, 2026-10-22: a failure is task data and root reacts to it. The agent marks its
   ;; task failed on its branch, hands the run back (seon_done), and root, at the
   ;; run's end, holds the task as :failed and reports it among the problems
-  (let [[_ f _ seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} "(:reason (my.task/fail! \"the premise is refuted\" '(= 1 2)))"
-                              {:op :done :agent "a1"}
+  (let [[_ f _ _ seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} "(:reason (my.task/fail! \"the premise is refuted\" '(= 1 2)))"
+                              before-done {:op :done :agent "a1"}
                               {:op :eval :agent "root"
-                               :code (str "(let [t (:max-tx @(:conn sys))] (seon.await/await-quiet sys (inc t))"
+                               :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
                                           " [(seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) \"demo/t\")"
                                           " (select-keys (first (get-in (my.root/problems sys) [:classes :failed :rows])) [:task :reason :counterexample :open?])])")}])]
     (is (= "the premise is refuted" (:value f)) (pr-str f))
@@ -411,10 +417,10 @@
   ;; judged a run that had no end, so its run read "ended no-end (the agent wrote no end)"
   ;; whatever its proofs said. The agent writes the end first, as a turn loop does: here its
   ;; one proof is not written, so the end is :red and names why
-  (let [[_ done seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
-                                 {:op :done :agent "a1"}
+  (let [[_ _ done seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+                                 before-done {:op :done :agent "a1"}
                                  {:op :eval :agent "root"
-                                  :code (str "(let [t (:max-tx @(:conn sys))] (seon.await/await-quiet sys (inc t))"
+                                  :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
                                              " (select-keys (first (vals (seon.task/runs @(:conn sys)))) [:seon.run/outcome :seon.run/reason]))")}])
         run (:value seen)]
     (is (= :red (:outcome done)) (str "the answer is the verdict: " (pr-str done)))
@@ -425,12 +431,12 @@
 (deftest an-outside-run-with-a-green-proof-finishes
   ;; root (2026-10-23): an outside agent that writes its proof green and hands the run back is
   ;; judged by the end it wrote, and its task finishes, not held
-  (let [[_ _ t done seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+  (let [[_ _ t _ done seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
                                      "(ns demo-test (:require [clojure.test :refer [deftest is]]))"
                                      "(deftest t (is (= 2 (inc 1))))"
-                                     {:op :done :agent "a1"}
+                                     before-done {:op :done :agent "a1"}
                                      {:op :eval :agent "root"
-                                      :code (str "(let [t (:max-tx @(:conn sys))] (seon.await/await-quiet sys (inc t))"
+                                      :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
                                                  " [(select-keys (first (vals (seon.task/runs @(:conn sys)))) [:seon.run/outcome :seon.run/status])"
                                                  "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) \"demo/t\")])")}])
         [run state] (:value seen)]
@@ -443,12 +449,12 @@
   ;; task seon.reconcile/the-judge-asks-the-test-service: the judge at a run's end asks the test
   ;; service (seon.prove), so its run is recorded on main, a fact per test digest and one for the
   ;; run, keyed by the branch at its program's digest in mode :judge (no !turn)
-  (let [[_ _ _ _ seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+  (let [[_ _ _ _ _ seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
                                   "(ns demo-test (:require [clojure.test :refer [deftest is]]))"
                                   "(deftest t (is (= 2 (inc 1))))"
-                                  {:op :done :agent "a1"}
+                                  before-done {:op :done :agent "a1"}
                                   {:op :eval :agent "root"
-                                   :code (str "(let [t (:max-tx @(:conn sys))] (seon.await/await-quiet sys (inc t))"
+                                   :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
                                               " (let [db @(:conn sys)]"
                                               "  [(d/q '[:find [?id ...] :where [?r :seon.proof.run/id ?id]] db)"
                                               "   (d/q '[:find [?s ...] :where [?e :seon.proof/test demo-test/t] [?e :seon.proof/status ?s] [?e :seon.proof/digest]] db)"
