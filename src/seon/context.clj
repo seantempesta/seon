@@ -588,10 +588,15 @@
   makes it once per change (design section 10, step 4)."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:map [:messages [:vector :seon.model/message]] [:sent [:maybe [:vector :any]]] [:printed :map]]]}
   [a {:keys [db basis block help run help-ref run-ref printed]}]
-  (let [rs (if (and a (= :model (:origin basis))) (records db (:db/id a) (:tx printed)) [])
+  (let [model? (and a (= :model (:origin basis)))
+        ;; a model's turn: the session's records; another's read (an outside agent's): only its screen
+        ;; evals, whole (its reader holds no earlier screen to diff from)
+        rs (cond model? (records db (:db/id a) (:tx printed))
+                 (seq (:screen basis)) (for [id (:screen basis)] [nil (d/pull db [:seon.eval/id :seon.eval/by :seon.eval/record] [:seon.eval/id id]) :seon.db/eval-fact])
+                 :else [])
         ;; each record printed once (opts :printed, the run's earlier requests'), then which the
         ;; history budget sends, whole or collapsed
-        cache (printed-run (mapv (fn [[tx v k]] [(ref-of v) v k tx]) rs) printed)
+        cache (printed-run (mapv (fn [[tx v k]] [(ref-of v) v k tx]) rs) (when model? printed))
         parts (mapv #(get-in cache [:parts %]) (:ids cache))
         [picks dropped] (kept parts (cfg/value :seon.config.render/history-budget) (cfg/value :seon.config.render/history-step))
         whole-ids (into #{} (keep (fn [[{:keys [ref]} pick]] (when (= :whole pick) (second ref)))) (map vector (drop dropped parts) picks))

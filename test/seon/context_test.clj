@@ -665,8 +665,8 @@
 ;; of its form, whole while that one is not sent whole
 (defn- screen-requests
   "The requests of a run whose evals are evs ([id by code value] in order), each request after the
-  screen eval it names."
-  [evs]
+  screen eval it names, read as origin's (a model's turn by default)."
+  [evs & [origin]]
   (let [out (atom [])]
     (ts/test-branch!
       (fn [_ conn]
@@ -678,7 +678,7 @@
           (when (= "screen" by)
             (let [db @conn]
               (swap! out conj (:messages (context/render db {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn i :max-turns 9
-                                                             :origin :model :observed {:results {} :test-run-errors [] :reds [] :reasons []}
+                                                             :origin (or origin :model) :observed {:results {} :test-run-errors [] :reds [] :reasons []}
                                                              :screen [id] :agent "b/a1"}))))))))
     @out))
 
@@ -693,7 +693,10 @@
         "an unchanged screen: only that nothing changed, and since which")
     (is (every? #(str/includes? (:content (peek r2)) %) [":since result/e3" "{:changed {[:proofs demo-test/f-test] :pass}," ":unchanged [[:task] [:changes]]}"])
         "a changed one: since the last, what changed by path, and the rest named")
-    (is (not (str/includes? (:content (peek r2)) "(defn f [x] x)")) "an unchanged section is not sent again")))
+    (is (not (str/includes? (:content (peek r2)) "(defn f [x] x)")) "an unchanged section is not sent again")
+    (let [out (peek (screen-requests [["e1" "screen" "(my.task/status)" page] ["e3" "screen" "(my.task/status)" page]] :outside))]
+      (is (and (str/includes? (:content (peek out)) "(defn f [x] x)") (not (str/includes? (:content (peek out)) ":since")))
+          "an outside agent's read: its screen whole, its reader holding no earlier one"))))
 
 (deftest a-screen-whose-base-is-cut-is-sent-whole
   (let [page {:proofs {'demo-test/f-test :fail} :changes (str "(defn f [x] x)" (apply str (repeat 400 " ")) "(defn g [] 1)")}
