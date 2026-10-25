@@ -39,13 +39,19 @@
   {:malli/schema [:=> [:cat [:or :symbol :seon.host/var]] :symbol]}
   [x] (if (var? x) (symbol (str (ns-name (:ns (meta x)))) (str (:name (meta x)))) x))
 
+(defn- asked
+  "The name sym is asked by: the var it resolves to in the agent's namespace (an alias, 'str/join,
+  read as clojure.string/join, the name its callers' facts record), else sym as written."
+  {:malli/schema [:=> [:cat :qualified-symbol] :qualified-symbol]}
+  [sym] (let [v (ns-resolve *ns* sym)] (if (var? v) (named v) sym)))
+
 (defn- no-var
   "The error for sym when it names no var on db nor in this process (a library's var is one), else
   nil: an asked name that is nothing is said, never answered as no callers; with the form for the
   registry key of that name when db has one (an attribute, a config key or a schema entry)."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :my.agent/no-var]]}
   [db sym]
-  (when-not (or (pdb/eid db :var/name sym) (some-> (find-ns (symbol (namespace sym))) (ns-resolve (symbol (name sym)))))
+  (when-not (or (pdb/eid db :var/name sym) (var? (ns-resolve *ns* sym)))
     (let [k (keyword (namespace sym) (name sym))
           key? (or (contains? (d/schema db) k) (pdb/eid db :schema/key k))]
       (contract/error :my.agent/no-var (symbol #'no-var)
@@ -56,10 +62,11 @@
   "The program vars whose recorded definition names x on this branch, sorted, x itself left out
   (seon.docs/callers): a var's callers (x a qualified symbol, or the var: named), or the functions
   operating on a qualified keyword, an attribute, config key or schema entry (its :form/keywords).
-  A symbol that names no var answers so (:my.agent/no-var), never []."
+  A symbol through an alias reads as the var it resolves to; one that names no var answers so
+  (:my.agent/no-var), never []. A keyword nothing names answers [] (no use is the true answer)."
   {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var :qualified-keyword]] [:or [:vector :qualified-symbol] :my.agent/no-var]]}
   [x]
-  (let [db (agent/db) x (if (keyword? x) x (named x))]
+  (let [db (agent/db) x (cond (keyword? x) x (var? x) (named x) :else (asked x))]
     (or (when (symbol? x) (no-var db x)) (docs/callers db x))))
 
 (defn callees
@@ -68,7 +75,7 @@
   the var (named). A symbol that names no var answers so (:my.agent/no-var), never []."
   {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or [:vector :qualified-symbol] :my.agent/no-var]]}
   [sym]
-  (let [db (agent/db) sym (named sym)]
+  (let [db (agent/db) sym (if (var? sym) (named sym) (asked sym))]
     (or (no-var db sym)
         (vec (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db sym))
                          sym))))))

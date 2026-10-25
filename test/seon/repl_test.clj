@@ -175,17 +175,24 @@
   ;; the live rounds (notes/live-2026-10-25.md): (my.agent/callers 'seon.proof/status) answered [],
   ;; read as "no callers", and the run asked again until it ended :no-progress. A symbol that names
   ;; no var says so, with the form for the registry key of that name when there is one
-  (let [[_ nothing key-name real callees] (at/in-agent [{:op :context :agent "a1"}
+  (let [[_ nothing key-name real callees library _ fresh aliased] (at/in-agent [{:op :context :agent "a1"}
                                                          "(my.agent/callers 'seon.task/no-such-thing)"
                                                          "(my.agent/callers 'seon.task/plan)"
                                                          "(my.agent/callers 'seon.task/accumulate)"
-                                                         "(my.agent/callees 'seon.task/no-such-thing)"])]
+                                                         "(my.agent/callees 'seon.task/no-such-thing)"
+                                                         "(my.agent/callers 'clojure.core/map)"
+                                                         "(defn zz-fresh [] 1)"
+                                                         "(my.agent/callers (symbol (str *ns*) \"zz-fresh\"))"
+                                                         "(do (require '[clojure.string :as s-alias]) (my.agent/callers 's-alias/join))"])]
     (is (= :my.agent/no-var (:seon.error/type (:value nothing))) (pr-str nothing))
     (is (= 'seon.task/no-such-thing (:name (:value nothing))) "it names what was asked")
     (is (nil? (:ask (:value nothing))) "and no key of that name: nothing to ask instead")
     (is (= "(my.agent/callers :seon.task/plan)" (:ask (:value key-name))) "a registry key of that name: the form that asks for it")
     (is (vector? (:value real)) "a var still answers its callers")
-    (is (= :my.agent/no-var (:seon.error/type (:value callees))) "callees says the same")))
+    (is (= :my.agent/no-var (:seon.error/type (:value callees))) "callees says the same")
+    (is (vector? (:value library)) "a library's var is a var")
+    (is (vector? (:value fresh)) (str "a var just defined at the REPL is a var: " (pr-str fresh)))
+    (is (seq (:value aliased)) (str "an alias reads as the var it resolves to, whose callers are recorded by its full name: " (pr-str aliased)))))
 
 (deftest help-answers-a-section
   ;; the help page is read from the wiki's sections main holds (root's boot loads them), at
