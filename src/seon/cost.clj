@@ -392,6 +392,10 @@
    ;; load 8, at 10k, three runs: measured on a branch of the seeded test
    ;; store (seon.test-store/test-branch!: ~2,000 datoms beside the setup's) instead of an empty store,
    ;; a pull 21 us and 24.6 KB, each further attribute 11.3-15.1 us and 11.6 KB: pull-attr's one
-   ;; entity sat in a one-level index before, the seed makes it the two levels real dbs have
+   ;; entity sat in a one-level index before, the seed makes it the two levels real dbs have.
+   ;; 2026-10-25 (from jolt/unitflake): both pulls on one db and one set of entities, the subtrahend
+   ;; measured on the same input right after (seon.cost-test/measure-unit), so the row is the extra
+   ;; attribute alone: 10,377 B and 2,847 ticks at 1k and 10k in two processes, the same each run
+   ;; (the two-db difference read 9,946 B and 2,577 ticks)
    :db/pull {:ticks 5475.52 :ns 15483.7 :bytes 23833.98 :what "d/pull of one attribute of an entity, by entity id (per pull)"}
-   :db/pull-attr {:ticks 2685.38 :ns 7287.7 :bytes 10402.52 :what "each attribute of a d/pull beyond its first (per attribute)"}})
+   :db/pull-attr {:ticks 2847.0 :ns 7287.7 :bytes 10377.0 :what "each attribute of a d/pull beyond its first (per attribute)"}})
