@@ -129,7 +129,7 @@
                    ;; a clone: its pid arrives here (the fork server never saw it)
                    (when (:kill? st) (lib/c-kill (:pid m) 9))
                    (step/out! o :events (step/event {:type :spawned :agent id :pid (:pid m) :cloned-from (:cloned-from m)})))
-                 (step/out! o :to-api (status st (cond-> {:forked-ms (lib/r2 (:start-ms m)) :mem-mb (:mem-mb m) :t (:t m) :ready true}
+                 (step/out! o :to-api (status st (cond-> {:forked-ms (lib/r2 (:start-ms m)) :mem-mb (:mem-mb m) :t (:t m) :ready true :phases (:phases m)}
                                               (:cloned-from m) (assoc :pid (:pid m))
                                               (seq (:load-errors m)) (assoc :load-errors (:load-errors m)))))
                  ;; root's interrupt cannot reach it (its SIGUSR1 handler never ran: a process not
@@ -149,7 +149,7 @@
                    (step/out! o :to-api {:op :problem :class :agent :agent id
                                          :error (contract/error :seon.agent/fork-misaligned 'seon.agent/init!
                                                                 (str "its branch or image is not at the commit it was branched at: " (sedn/encode x)) x)}))
-                 (step/out! o :events (step/event {:type :ready :agent id :start-ms (:start-ms m)}))
+                 (step/out! o :events (step/event {:type :ready :agent id :start-ms (:start-ms m) :phases (:phases m)}))
                  (cond-> st (:cloned-from m) (assoc :pid (:pid m))))
       ;; its eval's record could not be written on its branch (its entity ids are spent):
       ;; the typed error is recorded on main as its problem

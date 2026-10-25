@@ -372,6 +372,12 @@
 
 (def pointer "Each definition kind's form pointer." {:var :var/form :method :method/form :impl :impl/form :ns :ns/form})
 
+(def attr-namespaces
+  "The namespaces of the attributes that hold the program (its forms, their definitions, the
+  schema and the db's own schema): what a merge carries as program, and what a commit must
+  touch to move the reach graph (seon.fork-server's :fork)."
+  #{"form" "var" "ns" "method" "impl" "schema" "schema.file" "db" "db.install" "db.type" "db.cardinality" "db.unique"})
+
 (def ^:private form-sets
   "A form's card-many facts, as stored and as its row (form-row) and its account name them."
   [[:form/refs :refs] [:form/keywords :keywords] [:form/requires :requires] [:form/banned :banned] [:form/inline-defs :inline-defs]

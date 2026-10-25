@@ -57,7 +57,11 @@
        :ping-map-fn (fn [st] {:t (:max-tx (:db st)) :mismatch (:mismatch st)})})
   ;; :graph, main's reach graph (seon.program/reach-graph) for :db as of the last fork, handed
   ;; to every agent forked (seon.agent/base-graph); a standby inherits it
-  ([{:keys [db cfg store conn graph kq]}] (cond-> {:db db :cfg cfg :store store :mismatch 0 :conn conn :kq kq :status-buf (ffi/alloc 4) :children #{}} graph (assoc :graph graph)))
+  ;; the reach graph is built here when the server starts (a standby inherits its server's), so no
+  ;; spawn waits for it (the first fork built it: 0.8-3.8 s measured)
+  ([{:keys [db cfg store conn graph kq]}]
+   {:db db :cfg cfg :store store :mismatch 0 :conn conn :kq kq :status-buf (ffi/alloc 4) :children #{}
+    :graph (or graph (program/reach-graph db (fx/declared-refs (cfg/value :seon.config.root/system-path))))})
   ;; stop (root closed its end, or died): every child (agents, the standby) killed and reaped
   ;; before this process exits, so root's waitpid of this server is the end of every one of
   ;; them. An agent that had closed its socket but not yet exited was handed to launchd when
@@ -77,18 +81,19 @@
                  ;; persistent indexes), never its datoms replayed here: replaying a 42,942-datom
                  ;; import took 3.5 s, and the first fork waited behind it
                  db' (d/commit-as-db (:store st) (:commit m))
-                 st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc))
+                 st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc)
+                      ;; the program moved: the reach graph is brought to it at the next fork
+                      (some (fn [[_ _ a]] (and (keyword? a) (program/attr-namespaces (namespace a)))) (:tx-data m)) (assoc :graph-moved true))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled
                  errs (seq (program/load-changes! db' (:tx-data m)))]
              [st {:ev (cond-> [] errs (conj {:ev :load-errors :t (:t m) :errors (vec errs)})
                         true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (profile/ms-since t0)
                                     :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}]))
      :fork (let [t0 (profile/now-ns)
-                 ;; main's reach graph brought to :db when a fork needs it, not at each commit: the
-                 ;; first fork builds it, a later one updates it by the commits since (reach-update)
-                 st (assoc st :graph (if-let [g (:graph st)]
-                                       (program/reach-update g (:db st))
-                                       (program/reach-graph (:db st) (fx/declared-refs (cfg/value :seon.config.root/system-path)))))
+                 ;; main's reach graph (built when this server starts) brought to :db at a fork only
+                 ;; when a commit since moved the program (:graph-moved): a spawn's own commit (its
+                 ;; run) moves none, and reach-update reads every live form (15-21 ms a fork measured)
+                 st (cond-> st (:graph-moved st) (-> (update :graph program/reach-update (:db st)) (dissoc :graph-moved)))
                  ;; the heap made static first, so the agent's collections never trace (and un-share)
                  ;; what it inherits (design agent-loop section 2: 163 MB of this heap sat in
                  ;; generations 3-4 at fork; static, an agent's work left 106 MB where it left 333).
@@ -96,8 +101,10 @@
                  ;; anyway, and a static of an unmoved heap costs what is new (6 ms measured)
                  t1 (profile/now-ns)
                  _ (lib/static!)
-                 static-ms (profile/ms-since t1)]
-             (fork-carrying! st #(repl/run! % (assoc m :graph (:graph st)) (:db st) (:ns m))
+                 static-ms (profile/ms-since t1)
+                 ;; the spawn's phases here, on the one clock (seon.agent/spawn-phases)
+                 marks [[:fork-server-in t0 nil] [:reach-graph t1 nil] [:static (profile/now-ns) nil]]]
+             (fork-carrying! st #(repl/run! % (assoc m :graph (:graph st) :marks marks) (:db st) (:ns m))
                              (fn [n] [st {:ev [{:ev :fork-failed :agent (:agent m) :active-threads n}]}])
                              (fn [pid] (let [[st evs] (adopt st pid)]
                                          [st {:ev (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
