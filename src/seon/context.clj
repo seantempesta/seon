@@ -81,6 +81,8 @@
                                           ;; a red test the agent wrote is a proof it has not registered, or one to delete
                                           (= :stray-red reason)
                                           (assoc :do (list 'my.task/update! :seon.task/proofs 'conj (list 'quote symbol))))
+               ;; a design made from a request carries none: it registers each it writes
+               :no-proofs {:reason reason :do '(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)}
                :no-design {:reason reason :unchanged :seon.task/plan
                            :do '(my.task/update! :seon.task/plan str "\n\n" "<what the implement step must do>")}
                ;; no result: never written, or never run; what writes and runs it

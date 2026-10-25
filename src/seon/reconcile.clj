@@ -40,7 +40,9 @@
   branch's work made true (seon.problems/caused: a citation of a var it deleted). A :design task readies
   the interface and plan for its implement step, so its own proofs may stay red but not
   unknown (each written and run), and it is refused :no-design until its plan differs from
-  the one its run began with (or that one is unknown). A deferred proof (a process test, run
+  the one its run began with (or that one is unknown), and :no-proofs, as every task is, until
+  it registers one (a design that only rewrote its plan was green at its first plan edit, its
+  proofs named in prose and never written: live agents, 2026-10-25). A deferred proof (a process test, run
   only when root asks: DECISIONS, Process tests are not automatic) is neither red nor unknown
   here; while unrun it is the merge's open :unrun problem."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
@@ -48,7 +50,7 @@
   (let [red? (fn [t] (#{:fail :error} (get results t)))
         design? (= :design kind)]
     (vec (concat
-           (when (and (empty? proofs) (not design?)) [{:reason :no-proofs}])
+           (when (empty? proofs) [{:reason :no-proofs}])
            (when (and design? (or (nil? plan-before) (= plan plan-before))) [{:reason :no-design}])
            ;; a proof with no result never ran: unknown, not red (v1's reading); a design
            ;; leaves its proofs red, never unknown (the implement step needs them written)
