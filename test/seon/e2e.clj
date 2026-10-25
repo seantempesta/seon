@@ -3,8 +3,8 @@
   is a row of data that one runner works (run-scenario): its specs, its boot, what a fresh
   agent must print on main afterwards and what else it asserts. The rows: the six-task graph
   with a cancel, a root restart in two phases, the merge scenarios (seon.fixtures/scenarios),
-  a swarm over shared definitions, a real model's run, and a task that always fails held for
-  root, then released by root; a new run is one row. bin/check runs them as modes of target/seon:
+  a swarm over shared definitions, a real model's run, and a task that always fails parked
+  at its cap, then woken by the owner's message; a new run is one row. bin/check runs them as modes of target/seon:
     calc | resume DIR | resume2 DIR | scenario conflict|semantic|hairy|newns|sibling [model] | swarm N M (verdict SWARM) | model add|calc | held
     | loop DIR (the self-improvement loop's first turn, on a clone of this repository under DIR)
   Each run ends on what the system observes (the reconciler's quiescence report, an event,
@@ -303,45 +303,41 @@
      :ok (fn [{:keys [d]}] (all-done d))}))
 
 (defn- held
-  "A task that always fails is held for root, and root's release runs it again on its branch,
-  from the evidence: add (always wrong) is refused once and held (its failure, its
-  evidence, the run closed); nothing else starts, no task is created, and the reconciler
-  reports quiescence naming add as the root cause of twice and the merges; the problems read
-  lists it. Root releases add (my.root/run!): one new run, on add's branch, whose agent
-  took the task from main with add#1's evidence (seon.task/onto-tx), refused and held again.
-  Each wait ends on the reconciler's quiescence report, with no deadline."
+  "A task that always fails parks its session at its cap, and the owner's message wakes the
+  same process (design agent-loop section 2: always park): add (always wrong) runs out of turns,
+  its run parked with outcome :cap, its process kept; nothing else starts, no task is created,
+  and the reconciler reports quiescence naming add as the root cause of twice and the merges
+  (parked, waiting for a message). Root messages add's agent: one new run, a wake on the same
+  agent and branch, which parks again at its cap and is named again. Each wait ends on the
+  reconciler's quiescence report, with no deadline."
   []
   {:boot {:max-running 2 :provider {:kind :scripted :script 'seon.e2e/always-wrong}} :specs (vec (take 2 fx/calc)) :tns 'calc :max-turns 2
    :ok (fn [{:keys [sys q d]}]
          (let [blocks ["calc/add-merge" "calc/twice" "calc/twice-merge"]
+               cause "parked: cap, waiting for a message"
                [row & more] (:root-causes q)
                ts (task/tasks d)
-               add (get ts "calc/add")
-               first? (and (nil? more) (= "calc/add" (:task row)) (= "calc/add#1" (:run row)) (= blocks (:blocks row))
-                           (= :held (:seon.task/execution add)) (= "calc/add#1" (:run (:seon.task/failure add)))
-                           (= "calc/add#1" (:from (:seon.task/evidence add)))
+               a1 (task/run d "calc/add#1")
+               agent (:seon.run/agent a1)
+               first? (and (nil? more) (= {:task "calc/add" :cause cause :run "calc/add#1" :blocks blocks} row)
+                           (= [:parked :cap] [(:seon.run/status a1) (:seon.run/outcome a1)])
+                           (= :running (:seon.task/execution (get ts "calc/add")))
                            (= #{"calc/add" "calc/add-merge" "calc/twice" "calc/twice-merge"} (set (keys ts)))
-                           (= [[:closed]] (mapv (comp vector :seon.run/status) (vals (task/runs d)))))
-               problems (get-in (root/problems sys) [:classes :failed :rows])
-               ;; root decides: run it again
-               _ (println :release (select-keys (root/run! sys ["calc/add"]) [:ok]))
+                           (= 1 (count (task/runs d))))
+               ;; the owner answers the parked session: its next run wakes the same agent
+               _ (println :message (select-keys @(c/message! sys agent "try again") [:ok]))
                q2 (quiet! sys)
                d2 (db sys)
                a2 (task/run d2 "calc/add#2")
-               branch (task/default-branch "calc/add")
-               on-branch (task/task (:db @(c/branch-db sys branch)) "calc/add")
-               second? (and (= branch (get-in a2 [:seon.run/env :branch]))
-                            ;; the agent took its task from main: add#1's evidence
-                            (= "calc/add#1" (:from (:seon.task/evidence on-branch)))
-                            (= "calc/add#2" (:run (:seon.task/failure (task/task d2 "calc/add"))))
-                            (= :held (:seon.task/execution (task/task d2 "calc/add")))
+               second? (and (= [:parked :cap] [(:seon.run/status a2) (:seon.run/outcome a2)])
+                            (= agent (:seon.run/agent a2))
+                            (= (task/default-branch "calc/add") (get-in a2 [:seon.run/env :branch]))
                             (= 2 (count (task/runs d2))) (= 4 (count (task/tasks d2)))
-                            (= ["calc/add"] (mapv :task (:root-causes q2))))]
-           {:ok (and first? second? (= 1 (count (filter :open? problems))))
-            :first-hold first? :release-on-the-same-branch second?
-            :root-causes (:root-causes q) :root-causes-after-release (:root-causes q2)
-            :quiet-after-last-end-ms (- (now) (apply max 0 (keep :seon.run/end-ms (vals (task/runs d2)))))
-            :problems-failed (count problems)}))})
+                            (= [{:task "calc/add" :cause cause :run "calc/add#2" :blocks blocks}] (:root-causes q2)))]
+           {:ok (and first? second?)
+            :first-park first? :a-message-wakes-the-same-agent second?
+            :root-causes (:root-causes q) :root-causes-after-message (:root-causes q2)
+            :runs (mapv #(select-keys % [:seon.run/id :seon.run/status :seon.run/outcome]) (vals (task/runs d2)))}))})
 
 (defn run
   "One e2e mode; answers whether it passed. No mode, or an unknown one: its usage, then

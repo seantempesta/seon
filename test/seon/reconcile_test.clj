@@ -792,7 +792,10 @@
       (is (= :hold (:op (first (actions-for (db-of [(decl "a")] :extra (run "a" 1 :ended :results red :outcome :red))))))))
     (testing "parked, nothing new: nothing starts"
       (is (= [] (actions-for (db-of [(decl "a")] :extra (parked :waiting 0)))))
-      (is (= [] (actions-for (db-of [(decl "a")] :extra (into (parked :cap 1) (msg "m1"))))) "one message, already taken"))
+      (is (= [] (actions-for (db-of [(decl "a")] :extra (into (parked :cap 1) (msg "m1"))))) "one message, already taken")
+      (is (= [{:task "demo/a" :cause "parked: cap, waiting for a message" :run "demo/a#1" :blocks ["demo/b"]}]
+             (r/root-causes (r/index (db-of [(decl "a") (decl "b" :needs ["a"])] :extra (parked :cap 0)))))
+          "quiet names it, with what it blocks"))
     (testing "a message it has not taken: a wake on its process"
       (is (= [wake] (actions-for (db-of [(decl "a")] :extra (into (parked :waiting 0) (msg "m1"))))))
       (is (= [wake] (actions-for (db-of [(decl "a")] :extra (into (parked :no-progress 1) (concat (msg "m1") (msg "m2"))))))))
