@@ -337,7 +337,7 @@
     :seon.turn/reply (slice @prose k 1500)
     :seon.turn/calls [{:id "call-0" :code "(f 2)" :eval (str "e" k)}]}
    ;; the call's eval, whose record holds its response as the next turn reads it
-   {:seon.eval/id (str "e" k) :seon.eval/by "a1" :seon.eval/record {:code "(f 2)" :text (slice @code k 2000)}}])
+   {:seon.eval/id (str "e" k) :seon.eval/by "a1" :seon.eval/record {:code "(f 2)" :response {:handle (symbol "result" (str "e" k)) :value (slice @code k 2000)}}}])
 
 (defn- write-turns!
   "Bytes the store at path gains when branch b gets n turns through the agent's run-ahead

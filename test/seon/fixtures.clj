@@ -200,10 +200,23 @@
   {"-merge" (fenced "Take main's version of each conflict." "(doseq [e (my.branch/unmerged)] (my.branch/resolve! (second (:key e)) :theirs))")
    "-design" (fenced "Main's code is the base now." "(my.task/update! :seon.task/plan str \" Design: build on main's definitions as they are.\")\n(my.turn/wait)")})
 
+(def measure-replies
+  "A scripted run whose evals answer values as a real run's do (a source, a vector of rows, a
+  long vector, the task's status, one value again), for measuring what a turn sends (tokens per
+  turn) before and after a change to how records print, on task seon.ref/a-summary-says-there-is-more."
+  {"seon.ref/a-summary-says-there-is-more"
+   [(fenced "Read the function the plan names." "(clojure.repl/source seon.ref/shown)")
+    (fenced "A table of rows." "(vec (for [i (range 120)] {:i i :name (str \"item-\" i) :tags #{:a :b}}))")
+    (fenced "A long value." "(vec (range 400))")
+    (fenced "The task's state." "(my.task/status)")
+    (fenced "The rows again." "(vec (for [i (range 120)] {:i i :name (str \"item-\" i) :tags #{:a :b}}))")
+    (fenced "A small value." "(+ 1 2)")
+    (fenced "Done reading." "(my.turn/wait)")]})
+
 (def ^:private all-replies
   "Scripted replies by task name (calc) and by task id (a scenario's tasks live in a task
-  namespace named after it, e.g. conflict/b-merge)."
-  (into calc-replies (for [[k {:keys [replies]}] scenarios [nm r] replies] [(str (name k) "/" nm) r])))
+  namespace named after it, e.g. conflict/b-merge; a measurement's, measure-replies)."
+  (-> calc-replies (into measure-replies) (into (for [[k {:keys [replies]}] scenarios [nm r] replies] [(str (name k) "/" nm) r]))))
 
 (defn same-call
   "The scripted model in a loop (seon.agent-test): every reply makes the same call,

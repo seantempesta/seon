@@ -89,7 +89,7 @@
   [n]
   [{} (d/db-with (ts/test-db) (into [{:db/id "a" :seon.agent/id :a1}]
                                     (for [i (range (* 20 n))] {:seon.eval/id (str "a1-1-1/" i) :seon.eval/agent "a"
-                                                        :seon.eval/record {:code "(+ 1 2)" :text "3"}})))])
+                                                        :seon.eval/record {:code "(+ 1 2)" :response {:value 3}}})))])
 
 (deftest main-info-reads-what-the-page-shows
   ;; global-ids' profile (2026-10-23): main-info took 174 ms a call on the owner's main, 695 ms
@@ -123,7 +123,7 @@
                    [[{:seon.root/id :root :seon.root/boot "b1"}]
                     (seon.task/agent-tx "b1" :a1 {:status :idle})
                     (into [] (mapcat #(seon.repl/record-tx {:seon.agent/key "b1/a1" :seon.agent/id :a1} (str "e" %) "a1"
-                                                           {:code "(+ 1 2)" :text "{:handle result/e1, :value 3}"} nil))
+                                                           {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3}} nil))
                           (range n))])]
     [[db] (:db/id (d/entity db [:seon.agent/key "b1/a1"]))]))
 
@@ -245,7 +245,7 @@
         db (reduce d/db-with (ts/test-db)
                    [[{:seon.root/id :root :seon.root/boot "b1"}]
                     (seon.task/agent-tx "b1" :a1 {:status :busy})
-                    (into [] (mapcat #(seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} % "a1" {:code "(+ 1 2)" :text "{:handle result/e1, :value 3}" :run "t/x#1" :call-id (str "c-" %) :call 0} nil)) ["e1" "e2"])
+                    (into [] (mapcat #(seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} % "a1" {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3} :run "t/x#1" :call-id (str "c-" %) :call 0} nil)) ["e1" "e2"])
                     [{:db/id "run" :seon.run/id "t/x#1"}]
                     (mapv turn (range n))])
         view [:debug :a1]
@@ -270,8 +270,9 @@
      ;; measured 2026-10-24: 357 / 357 calls and 1.20 / 4.37 MB at 100 / 1,000 held turns, one component
      ;; rendered (before rows were components: 130 calls and 3.90 / 34.3 MB, ~34 KB a held turn)
      :per-n {:bytes 3600}
-     ;; 403 once each row's id is seon.render.ui/comp-id and each view's components are indexed (hold-comps)
-     :fixed {:calls 403 :bytes 900000}
+     ;; 403 once each row's id is seon.render.ui/comp-id and each view's components are indexed (hold-comps);
+     ;; 404 since a row's records are printed as sent, in order (seon.context/record-parts, 2026-10-25)
+     :fixed {:calls 404 :bytes 900000}
      ;; the full run measures 4,000 too (:seon.config.proofs/cost-max-n)
      :sizes [100 1000 4000]}))
 
@@ -282,7 +283,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
   (let [k (seon.task/agent-key "b1" :a1)
-        ev (fn [id by more] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id by (merge {:code "(+ 1 2)" :text "{:handle result/e1, :value 3}" :run "t/x#1"} more) nil))
+        ev (fn [id by more] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id by (merge {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3} :run "t/x#1"} more) nil))
         db (reduce d/db-with (ts/test-db)
                    [[{:seon.root/id :root :seon.root/boot "b1"}]
                     (seon.task/agent-tx "b1" :a1 {:status :busy})

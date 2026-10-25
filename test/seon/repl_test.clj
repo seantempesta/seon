@@ -263,7 +263,7 @@
     (is (str/includes? (render/ai em {}) ":jolt.error/line 4") (render/ai em {}))
     (let [r (render/ai (assoc em :seon.error/at {:line 3 :column 6}) {})]
       (is (not (str/includes? r ":jolt.error/line")) r)
-      (is (some #{"at line 3:6"} (str/split-lines r))))))
+      (is (str/includes? r ":at {:line 3, :column 6}") r))))
 
 (def evals-run
   "How many times the ticks proof's form ran."

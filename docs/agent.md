@@ -21,7 +21,7 @@ Your context comes in two parts: the run's, sent once and unchanged while you wo
 
 The run's part:
 - `:task`: its id, kind and instructions, and its plan as it accumulated along its needs, prerequisites first.
-- `:write-set`: each var the plan cites, the code you are likely to change: its source and `:callers`, the program vars whose definitions name it. A source past the cap shows `:left-out` and `:read`, the form that reads it.
+- `:write-set`: each var the plan cites, the code you are likely to change: its source and `:callers`, the program vars whose definitions name it. A long source is cut where it is printed, like any value: the cut says what it left and the form that reads the rest, through `(my.task/story)`, which answers this whole story as data.
 - `:to-prove`: each of your proofs and the form that runs it at your REPL, or, for one not written yet, that it is not and what the plan says it should assert.
 - `:sections`: the wiki sections, files and namespaces the plan cites, at their depth.
 - `:similar`: a few program functions nearest the plan in meaning that it does not name, a line each (name and first sentence); often a helper the task needs.
@@ -38,7 +38,7 @@ The turn's part, last, made again before each request:
 - `:attention`: the wiki sections your code changes made stale, to read and probably fix; never a reason to refuse done.
 - `:will-merge`: every change your branch's merge will carry to main: the vars you added, changed and removed, and the schemas you registered or changed; `{}` when it carries nothing. Anything listed that the task does not need, put back.
 - `:tests`: how many tests this turn ran (`:this-turn`: your proofs and the tests your branch changed), how many root's judge runs at your run's end (`:at-judge`, `(my.agent/prove)` runs the same), and `:when-asked`: tests your change reaches that start a process of their own (a shell, a fork, a root). Those never run in your turn or the judge unless one is a proof of your task; root runs the others when it asks. `(my.agent/deferred)` lists them.
-- `:history`: how many earlier turns the history budget left out of the conversation.
+- `:history`: how many earlier records the history budget left out of the conversation. Older records come collapsed before that: a result as its handle and its value in one line (`result/e12 ⇒ [0 1 2 …]`); evaluate the handle to read it whole.
 
 ## The REPL
 

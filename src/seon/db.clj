@@ -20,6 +20,19 @@
   one that refuses to open (:seon.db/types-differ) or is migrated."
   (subs (clojure.string/replace (str (hasch/uuid schema)) "-" "") 0 8))
 
+(defn plain?
+  "Whether v is plain data as the store keeps it (docs/storage.md#plain-data): nil, a boolean, a
+  string, an integer or double, a keyword, symbol, uuid or instant, or a map, vector, set or list
+  of them (not sorted, not a record). A seq that is not a list (lazy, a range) is not: telling
+  would realize it."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [v]
+  (cond (or (nil? v) (boolean? v) (string? v) (int? v) (double? v) (keyword? v) (symbol? v) (uuid? v) (inst? v)) true
+        (or (record? v) (sorted? v)) false
+        (map? v) (every? (fn [[k x]] (and (plain? k) (plain? x))) v)
+        (or (vector? v) (set? v) (list? v)) (every? plain? v)
+        :else false))
+
 (defn eid
   "The entity id of the entity whose unique attribute a has value v on db, or nil: one seek
   in a's AVET index, never a query (a Datalog query here cost ~95 us and 100 KB at 100

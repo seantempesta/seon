@@ -27,7 +27,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
-            [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
+            [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile]
             [seon.config :as config] [seon.step :as step] [seon.context :as context]))
 
@@ -572,7 +572,7 @@
           sys (system-value st t0 now-ms)
           ;; root's context: the system's AI face, also a unit of root's layout
           ctx (render/ai sys {:schema :seon.render/system})
-          sys (assoc sys :context {:text ctx :tokens (select/estimate ctx)} :problem-areas (ai/problem-areas sys))
+          sys (assoc sys :context {:text ctx :tokens (select/estimate ctx)})
           st (assoc st :context ctx)
           views (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st) (map :view (vals (:screens st)))))
           st (assoc st :last-walked [])
@@ -665,7 +665,7 @@
         ;; stream's row cuts it to a cell, seon.render.ui/event-detail)
         detail (if err (render/ai r {}) (:text (render/printed r nil)))]
     (when form
-      (let [rec (cond-> {:code form :text (or detail "")} err (assoc :response {:ex r}))]
+      (let [rec (repl/record-details (:main-db st) form (if err {:ex r} {:value r}) {} nil)]
         (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx {:seon.root/id :root} (str "root-ui-" (profile/now-ns)) "user" rec nil)}}
                               :route [:render :answers] :tag [:web-record]})))
     (ask-state (on-event st {:type :ui :call (str v) :agent agent :at-ms (System/currentTimeMillis) :error err :detail detail}) o)))

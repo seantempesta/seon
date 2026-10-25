@@ -233,26 +233,32 @@
   ;; scrollback. Each eval renders its own part (its :seon.render/ai): the assistant message with
   ;; the call, then the response as a tool message; the provider's format folds a reply's calls
   ;; into one assistant message (notes/design-agent-view-2026-10-24.md §3, the request is a render)
-  (let [ev (fn [id call prose text] {:seon.eval/id id :seon.eval/by "a1" :seon.eval/record (cond-> {:code (str "(" id ")") :text text :call-id (str "c-" id) :call call} prose (assoc :prose prose))})
+  (let [ev (fn [id call prose value] {:seon.eval/id id :seon.eval/by "a1" :seon.eval/record (cond-> {:code (str "(" id ")") :response {:handle (symbol "result" id) :value value} :call-id (str "c-" id) :call call} prose (assoc :prose prose))})
         ms (into [] (mapcat #(context/eval-messages % {})) [(ev "e1" 0 "R0" "E1") (ev "e2" 0 nil "E2") (ev "e3" 1 nil "E3")])]
     (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each eval its call and its response")
     (is (= {:role "assistant" :content "R0" :tool-calls [{:id "c-e1" :code "(e1)"}] :call 0} (first ms)))
-    (is (= {:role "tool" :tool-call-id "c-e1" :content "E1"} (second ms)))
+    (is (= {:role "tool" :tool-call-id "c-e1" :content "{:handle result/e1, :value \"E1\"}"} (second ms)))
     (let [wire (seon.model/wire-messages true ms)]
       (is (= ["assistant" "tool" "assistant" "tool" "tool"] (mapv :role wire)) "a reply's two calls are one assistant message")
       (is (= ["c-e2" "c-e3"] (mapv :id (:tool_calls (nth wire 2)))))
       (is (= ["c-e2" "c-e3"] (mapv :tool_call_id (subvec wire 3 5))) "each call answered, in order")))
   (testing "a user's form is one user message carrying its response"
     (is (= [{:role "user" :content "{:by \"user\" :code \"(+ 1 2)\" :response {:handle result/e4, :value 3}}"}]
-           (context/eval-messages {:seon.eval/by "user" :seon.eval/record {:code "(+ 1 2)" :text "{:handle result/e4, :value 3}"}} {}))))
-  (testing "the history budget keeps whole records, the newest always, never starting inside a reply"
-    (let [part (fn [c call] [{:role "assistant" :content (str c " " (apply str (repeat 30 "x"))) :call call}])
-          parts [(part (apply str (repeat 400 "a")) 0) (part "R1" 0) (part "R2" 1) (part "R3" 0)]
-          names (fn [ps] (mapv #(subs (:content (first %)) 0 2) ps))
-          one (select/estimate (:content (first (part "R1" 0))))]
-      (is (= [["R1" "R2" "R3"] 1] [(names (first (#'context/kept parts (* 3 one)))) (second (#'context/kept parts (* 3 one)))]))
-      (is (= ["R3"] (names (first (#'context/kept parts 0)))) "the newest stays at budget 0")
-      (is (= ["R3"] (names (first (#'context/kept (subvec parts 2) (* 2 one))))) "a cut never starts inside a reply"))))
+           (context/eval-messages {:seon.eval/by "user" :seon.eval/record {:code "(+ 1 2)" :response {:handle 'result/e4 :value 3}}} {}))))
+  (testing "the history budget sends the newest whole, then older ones whole, then collapsed, never starting inside a reply"
+    (let [part (fn [whole small call] {:cost [whole small] :call call})
+          ;; tokens whole and collapsed, oldest first; the third continues the second's reply
+          parts [(part 400 5 0) (part 10 2 0) (part 10 2 1) (part 10 2 0)]]
+      (is (= [[:whole :whole :whole] 0] (#'context/kept (subvec parts 1) 30 1)) "all whole when they fit")
+      (is (= [[:line :whole :whole :whole] 0] (#'context/kept parts 35 1)) "an older one too large whole is collapsed, not dropped")
+      (is (= [[:whole] 3] (#'context/kept parts 0 1)) "the newest stays at budget 0")
+      (is (= [[:whole] 1] (#'context/kept (subvec parts 2) 10 1)) "a cut never starts inside a reply")
+      (testing "the boundaries move in steps: more is collapsed or left out at once, so the prefix holds for many turns"
+        (let [many (vec (repeat 20 (part 10 2 0)))]
+          (is (= [(into (vec (repeat 4 :line)) (repeat 12 :whole)) 4] (#'context/kept many 130 4))
+              "13 fit whole: whole from 8 (raised to a step of 4); 5 more fit collapsed: from 4 (raised); the 4 before left out")
+          (is (= (#'context/kept many 130 4) (#'context/kept many 128 4)) "a slightly smaller budget moves nothing"))))))
+
 ;; ---- context v2: a stable prefix, each var at its citation's depth, the helpers -----------
 
 (defn- program-facts
@@ -344,18 +350,22 @@
     (is (= {:symbol 'ctx-depth/tri :source "(defn tri \"Triples x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 3 x))"} (by 'ctx-depth/tri))
         "three backticks: the source")))
 
-(deftest a-source-over-the-cap-says-what-it-left-and-how-to-read-it
+(deftest a-long-source-is-cut-by-the-printer-where-it-is-shown
+  ;; the clipping audit (2026-10-25, P4): a cited source is whole in the story; the one printer
+  ;; cuts it at the context's budget, and the cut reads its rest through (my.task/story)
   (binding [*ns* *ns*]
     (eval '(ns ctx-big))
     (eval '(defn big "Does much." {:malli/schema [:=> [:cat] :int]} [] 1)))
-  (let [src (str "(defn big \"Does much.\" [] " (str/join " " (repeat 4000 "(inc 1)")) ")")
+  (let [src (str "(defn big \"Does much.\" [] " (str/join " " (repeat 8000 "(inc 1)")) ")")
         db (d/db-with (db-with-program) (program-facts [['ctx-big/big src []]]))
-        r (seon.docs/resolve-ref db 'ctx-big/big :code)]
-    (is (< seon.docs/reference-tokens (select/estimate src)) "the source is over the cap")
-    (is (= "Does much." (:doc r)) "the doc instead")
-    (is (nil? (:source r)) "no source cut short")
-    (is (= '(clojure.repl/source ctx-big/big) (:read r)) "the form that reads the rest")
-    (is (str/includes? (:left-out r) (str (select/estimate src) " tokens")) "and how much it left out")))
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "b" :seon.task/plan "Read ```ctx-big/big```."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+        r (seon.docs/resolve-ref db 'ctx-big/big :code)
+        story (#'context/run-message (context/run-state db (task/task db "demo/b")))]
+    (is (= {:symbol 'ctx-big/big :source src} r) "the source whole, never swapped for its doc by size")
+    (is (< (:context seon.print/budgets) (select/estimate src)) "a source over the context's budget")
+    (is (< (select/estimate story) (select/estimate src)) "the story is cut where it is printed")
+    (is (str/includes? story "(my.task/story)") (str "its cut reads the rest through the story's form: " (subs story 0 (min 400 (count story)))))))
 
 ;; a made unit vector, dim i weighted as a Matryoshka model's are (seon.vector-test/vectors)
 (defn- made-vector [seed]
@@ -406,7 +416,7 @@
             :seon.error/message "seon.e2e/agents-reused invalid-output: its value does not satisfy its contract"
             :seon.error/fix "Fix seon.e2e/agents-reused (the producer), or its contract."
             :seon.error/problems [{:path [0] :in [0] :expected :keyword :value nil}]}
-        text (repl/printed {:handle 'result/e1 :ex em})]
+        text (print/response-text {:handle 'result/e1 :ex em})]
     (is (str/includes? text ":expected :keyword") text)
     (is (str/includes? text "Fix seon.e2e/agents-reused") text)
     (is (= 1 (count (re-seq #"its value does not satisfy" text))) "the message once")))
@@ -415,7 +425,7 @@
   ;; DeepSeek's thinking mode with tools needs each earlier reply's reasoning_content sent back
   ;; (a 400 otherwise, measured: notes/step0/no-replay.edn): the reply's first eval carries it,
   ;; exactly as returned, and the provider's format sends it unless replay-reasoning is false
-  (let [ms (context/eval-messages {:seon.eval/by "a1" :seon.eval/record {:code "(f 3)" :text "9" :call-id "c1" :call 0 :prose "f triples." :reasoning "Square it first."}} {})
+  (let [ms (context/eval-messages {:seon.eval/by "a1" :seon.eval/record {:code "(f 3)" :response {:value 9} :call-id "c1" :call 0 :prose "f triples." :reasoning "Square it first."}} {})
         assistant (first ms)]
     (is (= "Square it first." (:reasoning assistant)))
     (is (not-any? :reasoning (rest ms)))
@@ -476,8 +486,8 @@
   (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f."
                                            :seon.task/proofs #{'demo-test/f-test}}]))
   (let [observed {:results {'demo-test/f-test :fail} :test-run-errors [] :reds [] :reasons []}
-        ev! (fn [id by code text & [more]] (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
-                                                              :seon.eval/record (merge {:code code :text text :run "demo/f#1"} more)}]))
+        ev! (fn [id by code value & [more]] (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
+                                                               :seon.eval/record (merge {:code code :response {:handle (symbol "result" id) :value value} :run "demo/f#1"} more)}]))
         turn! (fn [n screen more]
                 (let [db @conn
                       b {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4
@@ -489,11 +499,11 @@
                                            more)])
                   messages))
         plan! (fn [p] (d/transact conn [{:seon.task/id "demo/f" :seon.task/plan p}]))
-        _ (ev! "e1" "screen" "(my.task/status)" "{:handle result/e1, :value :red}")
+        _ (ev! "e1" "screen" "(my.task/status)" :red)
         r0 (turn! 0 ["e1"] {})
-        _ (ev! "e2" "a1" "(f 1)" "{:handle result/e2, :value 1}" {:call-id "call-0" :call 0 :prose "I call f." :reasoning "why"})
+        _ (ev! "e2" "a1" "(f 1)" 1 {:call-id "call-0" :call 0 :prose "I call f." :reasoning "why"})
         _ (plan! "Make f triple.")
-        _ (ev! "e3" "screen" "(my.task/status)" "{:handle result/e3, :value :green}")
+        _ (ev! "e3" "screen" "(my.task/status)" :green)
         r1 (turn! 1 ["e3"] {})
         _ (plan! "Later.")
         ;; and the help page changes: a turn's system prompt is its section as of the turn's t
@@ -543,25 +553,25 @@
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
       (let [observed {:results {'demo-test/f-test :fail} :test-run-errors [] :reds [] :reasons []}
-            ev! (fn [id by code text & [more]] (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
-                                                                  :seon.eval/record (merge {:code code :text text :run "demo/f#1"} more)}]))
+            ev! (fn [id by code value & [more]] (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
+                                                                   :seon.eval/record (merge {:code code :response {:handle (symbol "result" id) :value value} :run "demo/f#1"} more)}]))
             request (fn [n screen] (let [db @conn
                                          b {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4
                                             :origin :model :observed observed :screen screen :agent "b/a1"}]
                                      [b (:messages (context/render db b))]))
-            _ (ev! "e1" "screen" "(my.task/status)" "{:handle result/e1, :value :red}")
+            _ (ev! "e1" "screen" "(my.task/status)" :red)
             [b0 r0] (request 0 ["e1"])
-            _ (ev! "e2" "a1" "(f 1)" "{:handle result/e2, :value 1}" {:call-id "call-0" :call 0 :prose "I call f." :reasoning "why"})
+            _ (ev! "e2" "a1" "(f 1)" 1 {:call-id "call-0" :call 0 :prose "I call f." :reasoning "why"})
             _ (d/transact conn [{:seon.turn/id "demo/f#1/0" :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/n 0 :seon.turn/origin :model
                                  :seon.turn/basis b0 :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1
                                  :seon.turn/reply "I call f." :seon.turn/reasoning "why" :seon.turn/calls [{:id "call-0" :code "(f 1)" :eval "e2"}]}])
-            _ (ev! "e3" "screen" "(my.task/status)" "{:handle result/e3, :value :green}")
+            _ (ev! "e3" "screen" "(my.task/status)" :green)
             [_ r1] (request 1 ["e3"])]
         (is (= ["system" "user" "user"] (mapv :role r0)) "turn 0: the task, then the screen")
         (is (= ["system" "user" "assistant" "tool" "user"] (mapv :role r1)) (pr-str (mapv :role r1)))
         (is (= {:role "assistant" :content "I call f." :reasoning "why" :tool-calls [{:id "call-0" :code "(f 1)"}] :call 0} (nth r1 2))
             "prose as content, the reasoning as returned, the call")
-        (is (= "{:handle result/e2, :value 1}" (:content (nth r1 3))) "the call's response, as recorded")
+        (is (= "{:handle result/e2, :value 1}" (:content (nth r1 3))) "the call's response, its recorded value printed as it is sent")
         (is (= (pop r0) (subvec r1 0 2)) "the prefix carries over")
         (is (= "{:by \"screen\" :code \"(my.task/status)\" :response {:handle result/e3, :value :green}}" (:content (peek r1)))
             "the screen eval, last")
@@ -596,6 +606,30 @@
     (is (= "not written yet; it should assert what the plan says: demo-test/h-test asserts (f 2) is 6."
            (get (:to-prove story) 'demo-test/h-test))
         "an unwritten proof: what the plan says it should assert")))
+
+(deftest a-record-keeps-its-value
+  ;; the owner's rule (clipping audit 2026-10-25, P1/P8): data is cut only by the one printer,
+  ;; when it is printed into a reader's view; the full result is stored. A record keeps its
+  ;; response's value as data, and is the same whatever was evaluated before it
+  (let [db (db-with-program)
+        r {:handle 'result/e5 :value (vec (for [i (range 300)] {:i i :name (str "row-" i)})) :ms 1.0}
+        rec (repl/record-details db "(rows)" r {} nil)
+        stored (d/db-with db [{:seon.eval/id "e5" :seon.eval/by "a1" :seon.eval/record rec}])]
+    (is (= (:value r) (get-in rec [:response :value])) "the whole value, not a printout of it")
+    (is (not (contains? rec :text)) "no text made for a reader")
+    (is (= rec (:seon.eval/record (d/pull stored [:seon.eval/record] [:seon.eval/id "e5"]))) "it round-trips through the store")
+    (is (str/includes? (print/record-text rec) "row-0") "printed when it is shown")
+    (testing "the same whatever came before it: a value an earlier eval showed is the reader's to fold"
+      (let [seen (print/seen nil (assoc r :handle 'result/e1))]
+        (is (= rec (repl/record-details db "(rows)" r {} nil)))
+        (is (str/includes? (print/record-text rec seen) "(:value result/e1)") "folded as it is sent, not as it is stored")))
+    (testing "a value that is not plain data keeps the response as it printed then, and its type"
+      (doseq [v [(atom 1) (map inc (range 3)) #'clojure.core/inc]]
+        (let [rec (repl/record-details db "(x)" {:handle 'result/e6 :value v} {} nil)]
+          (is (not (contains? (:response rec) :value)) (str (type v)))
+          (is (= (str (type v)) (:type rec)))
+          (is (string? (:printed rec)))
+          (is (= (:printed rec) (print/record-text rec)) "and reads so"))))))
 
 (deftest prose-references-are-parsed-once
   ;; task seon.render/a-page-is-its-entitys-view (4e): an eval's prose is parsed once, as it is

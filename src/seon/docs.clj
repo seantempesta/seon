@@ -9,7 +9,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.contract :refer [defn defn-]] [seon.ref :as ref] [seon.source :as source] [seon.task :as task] [seon.db :as pdb]
             [datahike.api :as d] [clojure.string :as str] [clojure.java.io :as io]
-            [seon.print.select :as select] [seon.config :as cfg] [seon.lib :as lib]))
+            [seon.config :as cfg] [seon.lib :as lib]))
 
 ;; ---- one page, parsed into sections ----------------------------------------------------
 
@@ -344,16 +344,12 @@
   (vec (sort (disj (set (d/q '[:find [?v ...] :in $ ?s :where [?f :form/refs ?s] [?f :form/defines ?e] [?e :var/name ?v]] db sym))
                    sym))))
 
-(def reference-tokens
-  "Tokens a cited var's source may take in the context: the config's."
-  (cfg/value :seon.config.render/reference-tokens))
-
 (defn resolve-ref
   "Var sym as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth):
   :summary its arglists and its doc's first sentence, :doc its arglists, doc and contract,
-  :code its source (from the db). A source over reference-tokens shows the doc instead, with
-  what it left out and the form that reads it; at :doc a var with no doc shows its source. A
-  name that resolves to nothing says so."
+  :code its source (from the db), whole: the printer cuts it where it is shown, with the form
+  that reads its rest; at :doc a var with no doc shows its source. A name that resolves to
+  nothing says so."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol :seon.ref/depth] :map]}
   [db sym depth]
   (let [m (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))) meta)
@@ -361,15 +357,12 @@
         doc (cond-> {:symbol sym}
               (:arglists m) (assoc :arglists (:arglists m))
               (:doc m) (assoc :doc (:doc m))
-              (:malli/schema m) (assoc :contract (:malli/schema m)))
-        n (some-> src select/estimate)]
+              (:malli/schema m) (assoc :contract (:malli/schema m)))]
     (cond
       (and (nil? m) (nil? src)) {:symbol sym :unresolved true :problem (:unresolved ref/problem-messages)}
       (= :summary depth) (cond-> (select-keys doc [:symbol :arglists]) (:doc m) (assoc :summary (ref/lead-sentence (:doc m))))
       (or (nil? src) (and (= :doc depth) (:doc m))) doc
-      (<= n reference-tokens) {:symbol sym :source src}
-      :else (assoc doc :left-out (str "its source, about " n " tokens, over the context's " reference-tokens)
-                       :read (list 'clojure.repl/source sym)))))
+      :else {:symbol sym :source src})))
 
 (defn- reached
   "What citation c asks to see, at its depth, and what that is: a wiki section from main's

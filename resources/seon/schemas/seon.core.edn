@@ -65,8 +65,8 @@
                      :spawning :busy :idle :ended :killed :dead]
  :seon.agent/tx-result [:map [:t :int] [:datoms nat-int?]]
  ;; an eval's response (nREPL's keys): its handle (result/e<n>, bound to it in the agent), the last
- ;; form's value (in the agent only; every reader reads :text, the response printed under its
- ;; handle), what its forms wrote, the error that stopped it (the one error map), its summed cost;
+ ;; form's value (kept in its record when it is plain data; :text, the response printed under its
+ ;; handle for its caller), what its forms wrote, the error that stopped it (the one error map), its summed cost;
  ;; each key only when present. Beside them as answered: its record's id and the vars it recorded
  :seon.eval/response [:map {:seon.render/html seon.render.ui/evaluation}
                       [:handle :qualified-symbol] [:value {:optional true} :any] [:out {:optional true} :string]

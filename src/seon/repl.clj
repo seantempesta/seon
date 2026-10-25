@@ -30,12 +30,9 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.ref :as ref] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
             [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
-            [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d]))
+            [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
 (defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
-
-(defn- form-text {:malli/schema [:=> [:cat :any] :string]}
-  [form] (print/text form (:form print/budgets)))
 
 (defn- form-src
   "The exact text of form in code, from its reader position (:line, :column; 1-based) to end,
@@ -97,8 +94,10 @@
                                        (catch Throwable e [:err e ns (outer-frames)]))
                 end (+ (@starts (dec (.getLineNumber r))) (dec (.getColumnNumber r)))
                 lead (reader/lead code prev end)
-                common (cond-> {:id n :out (not-empty (str out)) :err-out (not-empty (str err)) :form (form-text form) :repl/form form
-                                :repl/src (form-src code @starts form end)}
+                src (form-src code @starts form end)
+                ;; the form as the wire carries it, whole: its own text, else its EDN (a symbol, a number)
+                common (cond-> {:id n :out (not-empty (str out)) :err-out (not-empty (str err)) :form (or src (sedn/encode form)) :repl/form form
+                                :repl/src src}
                          lead (assoc :lead lead))]
             (swap! agent/state assoc :repl-vars (if (= tag :ret) {:v1 v :v2 v1 :v3 v2 :e e1} {:v1 v1 :v2 v2 :v3 v3 :e v}))
             (when (= tag :ret) (keep-source! v (:repl/src common)))
@@ -338,37 +337,6 @@
       (sum :ticks) (assoc :ticks (sum :ticks))
       (sum :alloc-bytes) (assoc :bytes (sum :alloc-bytes)))))
 
-(defn printed
-  "Response r as every reader reads it (the model's tool message, the page, an outside agent):
-  printed by the one printer under its handle, so a cut names the form that reads its rest,
-  `(get-in result/e43 [:value ..])`, and a value an earlier response showed (seen: {value
-  form}) prints as the form that reads it again, `(:value result/e12)`."
-  {:malli/schema [:function [:=> [:cat :seon.eval/response] :string] [:=> [:cat :seon.eval/response [:maybe :map]] :string]]}
-  ([r] (printed r nil))
-  ([r seen]
-   (let [p (print/print-value r (cond-> {:handle (:handle r)} (seq seen) (assoc :seen seen)))]
-     (or (:text p) (:seon.error/message p)))))
-
-(defn- seen
-  "seen with response r's value and output, each that prints longer than the form that reads it
-  again ((:value result/e12)): what later responses print as that form. A string by its text,
-  a collection by identity (seon.print.select/seen-form), so nothing hashes a value's contents."
-  {:malli/schema [:=> [:cat [:maybe :map] :seon.eval/response] :map]}
-  [seen r]
-  (reduce (fn [m k]
-            (let [v (get r k)
-                  form (list k (:handle r))
-                  n (count (pr-str form))]
-              (cond (not (contains? r k)) m
-                    (string? v) (cond-> m (and (> (count v) n) (not (get-in m [:strings v]))) (assoc-in [:strings v] form))
-                    (and (or (map? v) (set? v) (vector? v)) (seq v)
-                         ;; cut, or not even its first part fits: longer than the form
-                         (let [p (print/print-value v {:budget (max 1 (select/estimate (pr-str form)))})]
-                           (or (:truncated? p) (nil? (:text p)))))
-                    (update-in m [:colls (System/identityHashCode v)] (fnil conj []) [v form])
-                    :else m)))
-          (or seen {}) [:value :out]))
-
 (defn- by
   "Who evaluated, as the record names it (:seon.eval/by): the user (the page), an outside
   session (root's server), a context read, the screen (the forms run before each model
@@ -380,9 +348,7 @@
 (defn record-tx
   "The recording transaction of one eval: its entity, on the agent's, who evaluated it
   (:seon.eval/by), its details in one EDN attribute (the lean record: nothing queries them
-  apart): the code, the prose beside it and the provider's call id when a model's, the text
-  every reader read (`printed`), the response without its live value, its costliest functions
-  and what it recorded; and the agent's answered t. Who is the one upsert, by its identity: an
+  apart): `record-details`; and the agent's answered t. Who is the one upsert, by its identity: an
   agent's key ({:seon.agent/key k}, seon.task/agent-key) or root's ({:seon.root/id :root})."
   {:malli/schema [:=> [:cat :map :string :string :map [:maybe :int]] :seon.db/tx-data]}
   [who id by details t-basis]
@@ -390,17 +356,24 @@
    (cond-> (assoc who :db/id "agent") t-basis (assoc :seon.agent/answered-t t-basis))])
 
 (defn record-details
-  "What an eval's record holds (:seon.eval/record): its code, the text every reader read, the
-  response without its live value, the prose beside it and what that prose cites (its
+  "What an eval's record holds (:seon.eval/record): its code, its response whole, its value
+  included when it is plain data (seon.db/plain?: stored as data, once under its content key when
+  large), else the response as it printed then (:printed) and the value's type (:type), since only
+  data is stored; never a text made for a reader (each prints it as it shows it: seon.print/
+  record-text), so a record is the same whatever came before it. Then the prose beside it and what that prose cites (its
   references on db, parsed here once by the one reference parser, seon.ref/references, so no
   render parses it again; read on db, the branch as the eval began, so a name the eval itself
-  defines is not yet one), its value in one line, or its error's message (:line, the one printer
+  defines is not yet one; none without a db: root's page before main is read), its value in one line, or its error's message (:line, the one printer
   under the line budget: what a collapsed eval shows), the provider's call id, its reasoning, its run, its costliest
   functions and what it recorded."
-  {:malli/schema [:=> [:cat :seon.host/db :string :map :map [:maybe :string]] :seon.eval/record]}
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :string :map :map [:maybe :string]] :seon.eval/record]}
   [db code r req run]
-  (let [cites (some->> (:prose req) (ref/references db))]
-    (cond-> {:code code :text (:text r) :response (dissoc r :value :text :recorded :fns)}
+  (let [cites (when db (some->> (:prose req) (ref/references db)))
+        resp (dissoc r :text :recorded :fns :record)
+        data? (or (not (contains? resp :value)) (pdb/plain? (:value resp)))]
+    (cond-> (if data?
+              {:code code :response resp}
+              {:code code :response (dissoc resp :value) :printed (print/response-text resp) :type (str (type (:value resp)))})
       (or (contains? r :value) (:ex r))
       (assoc :line (print/line (cond (:ex r) (or (get-in r [:ex :seon.error/message]) (:ex r)) (nil? (:value r)) "nil" :else (:value r)) (cfg/value :seon.config.render/line-budget) nil))
       (:prose req) (assoc :prose (:prose req))
@@ -431,7 +404,7 @@
 
 (defn eval-string
   "Evaluate code through the one REPL path (the handler and its middleware) and answer its one
-  response (`response`) with the text every reader reads (:text, `printed`) and what its forms
+  response (`response`) with the text its caller reads (:text, seon.print/response-text) and what its forms
   recorded, its handle result/e<n> bound to it (the live value inside), and recorded (an
   agent's, on its branch). From inside an agent, the turn loop's calls; req adds to the request
   (root's: seon.server's namespace, origin, budget and eval fn; root's requests to an agent:
@@ -444,7 +417,7 @@
   ([code req]
    (let [answers (volatile! [])
          handle (symbol "result" (str "e" (eval-n!)))]
-     (let [answered (fn [] (let [r (response @answers handle)] [r (printed r (:seen @agent/state))]))
+     (let [answered (fn [] (let [r (response @answers handle)] [r (print/response-text r (:seen @agent/state))]))
            ;; printing is inside the boundary: a value that throws as it is realized is the error
            [r text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
                          (answered)
@@ -455,7 +428,7 @@
            recorded (into [] (mapcat :recorded) @answers)]
        (swap! agent/state assoc-in [:results (keyword (name handle))] r)
        ;; the screen's responses are replaced each request: no later response reads them
-       (when-not (= :screen (:origin req)) (swap! agent/state update :seen seen r))
+       (when-not (= :screen (:origin req)) (swap! agent/state update :seen print/seen r))
        ;; the handle a printed cut reads through, as the REPL's *1 is read
        (intern (create-ns 'result) (symbol (name handle)) r)
        (record! (cond-> (assoc r :text text) (seq recorded) (assoc :recorded recorded) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))

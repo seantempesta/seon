@@ -90,7 +90,7 @@
           rec (:seon.eval/record e)]
       (is (= "(seon.root/kill! :a1)" (:code rec)))
       (is (= "user" (:seon.eval/by e)))
-      (is (str/includes? (str (:text rec)) ":killed :a1") "what root answered"))))
+      (is (str/includes? (seon.print/record-text rec) ":killed :a1") "what root answered"))))
 
 (deftest a-refused-ui-call-reaches-the-stream-and-main
   ;; root refuses merge! of an ended agent before any request: the refused answer goes to the render
@@ -106,7 +106,7 @@
           w (first (filter #(= :write (get-in % [:req :op])) (:to-api o)))
           rec (some :seon.eval/record (get-in w [:req :req :tx-data]))]
       (is (= "(seon.root/merge! :a2)" (:code rec)))
-      (is (str/includes? (str (:text rec)) "agent not running") "what root refused, and why"))))
+      (is (str/includes? (seon.print/record-text rec) "agent not running") "what root refused, and why"))))
 
 (deftest a-listener-that-cannot-bind-is-the-one-error-map
   ;; task seon.render/one-owner-per-view-path (B2): a port taken is data, the one error map

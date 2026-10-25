@@ -440,14 +440,15 @@
 
 (defn evaluation
   "One eval (the declared html render of :seon.db/eval-fact, its record, and of a response), as
-  it ran: the prose beside it, its code, its response as every reader read it (its :text,
-  printed under its handle; an error's by its error map's render), and its cost and who
-  evaluated it as recorded; :as :inline, its code and response in one line. Rendered from the
-  record, which never changes."
+  it ran: the prose beside it, its code, its response printed under its handle as it is shown
+  (seon.print/record-text of its record; a live response's own :text; an error's by its error
+  map's render), and its cost and who evaluated it as recorded; :as :inline, its code and
+  response in one line. Rendered from the record, which never changes."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [e opts]
   (let [rec (or (:seon.eval/record e) e)
-        r (merge (:response rec) (select-keys rec [:code :text :prose :fns]) (dissoc e :seon.eval/record))
+        r (merge (:response rec) (select-keys rec [:code :prose :fns]) (dissoc e :seon.eval/record))
+        r (cond-> r (and (:seon.eval/record e) (nil? (:text r))) (assoc :text (print/record-text rec nil)))
         by (or (:seon.eval/by e) (:by r))
         err? (some? (:ex r))]
     (if (= :inline (:as opts))
@@ -735,7 +736,7 @@
                           (if (:db/id e) (evaluation e {}) [:p {:class "text-error"} (str "screen eval " sid " is not on this branch")])))])])
       :seon.db/eval-fact
       (let [rec (:seon.eval/record own)
-            r (merge (:response rec) (select-keys rec [:code :text :prose]))
+            r (merge (:response rec) (select-keys rec [:code :prose]))
             line #(first (str/split-lines (or % "")))]
         [:li {:id id :class "flex flex-col gap-1 py-1"}
          (when-not (str/blank? (:prose r)) [:p {:class "whitespace-pre-wrap text-text-200"} (prose (:prose r) (part))])

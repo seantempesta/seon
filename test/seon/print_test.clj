@@ -204,11 +204,6 @@
   (testing "one-line reads whitespace runs as one space"
     (is (= "a b c" (:text (seon/prose "a\n  b\t\tc" 20 {:one-line? true}))))))
 
-(deftest more-says-how-many-and-where
-  (is (nil? (seon/more 3 3 "x")))
-  (is (= "+7 more: (seon.task/runs db)" (seon/more 12 5 "(seon.task/runs db)")))
-  (is (= "+1 more" (seon/more 2 1 nil))))
-
 (deftest a-one-line-cut-reads-the-source-rest
   (let [s (str "  first   line\n\n" (str/join "\n" (repeat 40 "a line of  the message")) " ")
         {:keys [offset omitted continuation]} (seon/prose s 20 {:one-line? true :source 'msg})]

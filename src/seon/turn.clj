@@ -149,8 +149,7 @@
   model call's wait would), the task, run and turn, the observations no db holds, the
   messages delivered since the last turn (taken: the turn is their reader; a message that is
   a fact is written on this branch first, the same fact root wrote on main, and the basis
-  names it by id, so its text is read again from the commit), and the last evaluations'
-  responses while no earlier turn shows them. A read that is not the run's turn (take?
+  names it by id, so its text is read again from the commit). A read that is not the run's turn (take?
   false: an observer's read of an agent its model drives) shows the inbox and leaves it, each
   message as it was sent."
   {:malli/schema [:=> [:cat :seon.task/id :seon.run/id :int :int :seon.turn/origin :map :boolean] :seon.turn/basis]}
@@ -161,16 +160,13 @@
             (agent/transact! (into [] (mapcat (fn [{:keys [id from to body]}] (task/message-tx id (name from) to body))) facts)))
         _ (agent/commit!)
         ;; taken once their facts are committed: a refused write leaves them in the inbox
-        _ (when take? (agent/taken! (count msgs)))
-        rs (when (or (= :outside origin) (zero? turn)) (last-evals))
-        ev (when (seq rs) (context/evaluations-text rs))]
+        _ (when take? (agent/taken! (count msgs)))]
     (cond-> {:commit (d/commit-id (agent/db)) :task task :run run :turn turn :max-turns max-turns
              :origin origin :observed (cond-> (dissoc observed :merge?)
                                         (seq facts) (assoc :message-ids (mapv :id facts))
                                         ;; a send no fact holds (another agent's, until its sender writes one)
                                         (seq others) (assoc :messages (mapv (fn [{:keys [from body]}] {:from (name from) :body body}) others)))}
-      (:merge? observed) (assoc :merge? true)
-      ev (assoc :last-evals ev))))
+      (:merge? observed) (assoc :merge? true))))
 
 (defn- evaluated!
   "Code through the one REPL path (seon.repl/eval-string, req) and its record committed to the
@@ -202,7 +198,9 @@
         screen (vec (keep #(:record (evaluated! % {:origin :screen})) screen/forms))
         basis (cond-> (assoc (basis! (:seon.task/id t) run turn max-turns :model ob true) :agent (:key @agent/state))
                 (seq screen) (assoc :screen screen))
-        {:keys [block messages sent]} (context/render (agent/db) basis)
+        ;; what the run's earlier requests printed, reused by each record's id (seon.context/printed-run)
+        {:keys [block messages sent printed]} (context/render (agent/db) basis {:printed (get-in @agent/state [:printed run])})
+        _ (swap! agent/state assoc :printed {run printed})
         context-ms (long (profile/ms-since t0))
         id (str run "/" turn)
         ;; the turn as its request goes: what it was made from and what it sent, committed, so a
