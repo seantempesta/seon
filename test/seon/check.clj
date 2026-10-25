@@ -8,7 +8,7 @@
   A mode is its body: run-check boots root, runs it, prints its report and checks, stops
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
-  reference (await-ref, seon.await/await-db), never a poll or a deadline."
+  reference (await-ref, seon.root/await-db), never a poll or a deadline."
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.await] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.vector] [seon.main :refer [out! shown]] [seon.fx] [seon.source] [seon.docs] [seon.test-store :as ts]))
 
 
@@ -97,7 +97,7 @@
   (ready! sys #(mapv (fn [t] (c/spawn! sys (if (map? t) t {:task t}))) tasks)))
 
 (defn- await-ref
-  "true once (pred @r) holds: a watch on reference r runs pred at each change (seon.await/await-db's
+  "true once (pred @r) holds: a watch on reference r runs pred at each change (seon.root/await-db's
   mechanism, on any reference). No deadline, no polling."
   [r pred]
   (let [p (promise) k (gensym "await-")]
@@ -368,7 +368,7 @@
   for the stall), then read my.root/problems: an eval error and a contract's error, an
   effect's io error, a platform defect in the api, a stall, an agent's death with its exit
   status and stderr, a red proof's assertions and a cost proof's verdict. It reads them
-  once main holds each (seon.await/await-db over seon.problems/report)."
+  once main holds each (seon.root/await-db over seon.problems/report)."
   []
   (run-check "PROBLEMS" {:datoms 300 :max-running 2 :stall-ms 1000}
    (fn [sys]
@@ -385,7 +385,7 @@
                  (remove #(= :merge (:seon.task/kind %)) (seon.fixtures/decls problem-specs 'problems nil)))
         _ (my.root/create! sys ds)
         _ (my.root/run! sys ["problems/p1" "problems/p2"])
-        _ (seon.await/await-db sys #(let [p (seon.problems/report %)]
+        _ (seon.root/await-db sys #(let [p (seon.problems/report %)]
                                     (and (some (fn [r] (= 'app.proofs/p1-test (:test r))) (get-in p [:classes :red :rows]))
                                          (pos? (get-in p [:classes :cost :n])) (pos? (get-in p [:classes :platform :n]))
                                          (some (fn [r] (= :seon.agent/died (:type r))) (get-in p [:classes :agent :rows])))))
@@ -607,10 +607,10 @@
 (defn scale [n]
   (run-check "SCALE" {:datoms 2000}
    (fn [sys]
-    (let [;; with embedding on, main's texts embedded first (seon.await/await-db: nothing due), so
+    (let [;; with embedding on, main's texts embedded first (seon.root/await-db: nothing due), so
           ;; the threads counted are the open model's steady ones, not its load's or an encode's
           _ (when (pos? (seon.config/value :seon.config.vector/texts))
-              (seon.await/await-db sys #(empty? (seon.vector/due % (seon.vector/model-id (seon.config/value :seon.config.vector/model))))))
+              (seon.root/await-db sys #(empty? (seon.vector/due % (seon.vector/model-id (seon.config/value :seon.config.vector/model))))))
           mem0 (lib/sysmem)
         th-boot (thread-diff (declared-threads sys) (threads))
         t0 (profile/now-ns)
@@ -1339,7 +1339,7 @@
 (defn vectors
   "Semantic search on Seon's own text (docs/vector.md): a root booted on this checkout's source,
   task files and wiki embeds every form, section and plan through its :vectors proc and :embed
-  effect (the model in process), awaited on main (seon.await/await-db: nothing due), no clock;
+  effect (the model in process), awaited on main (seon.root/await-db: nothing due), no clock;
   then 200 of those vectors, each a query, have their top 10 by the pyramid's default levels
   compared with an exact search of every vector (seon.vector/near with a shortlist of all).
   Red below a recall of 0.99, or when the model is missing."
@@ -1354,7 +1354,7 @@
          (let [t0 (System/currentTimeMillis)
                _ (my.root/load-tasks! sys)
                _ (my.root/load-docs! sys)
-               db (seon.await/await-db sys #(empty? (seon.vector/due % model)))
+               db (seon.root/await-db sys #(empty? (seon.vector/due % model)))
                embed-ms (- (System/currentTimeMillis) t0)
                es (sort (map :e (d/datoms db :aevt :seon.vector/f16)))
                qs (take-nth (max 1 (quot (count es) 200)) es)
