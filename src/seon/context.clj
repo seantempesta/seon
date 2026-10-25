@@ -196,12 +196,13 @@
 
 (defn related-view
   "Sections at addresses, each at summary depth (seon.docs/view: its address and its lead's
-  first sentence, or its heading when it has no lead), and the form that reads one whole: the
-  screen's :related."
+  first sentence, or its heading when it has no lead), the form that reads one whole and the
+  form that searches further: what my.agent/related answers."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :string]] [:map [:nearest [:vector :string]] [:read :string]]]}
   [db addresses]
   {:nearest (mapv #(let [v (docs/view db % :summary)] (str % ": " (or (:seon.ref/summary v) (:seon.ref/heading v)))) addresses)
-   :read "(seon.docs/view (seon.agent/db) address :code): one whole"})
+   :read "(seon.docs/view (seon.agent/db) \"docs/page.md#anchor\" :code): one whole; :doc, its lead and the sections below"
+   :more "(my.agent/related \"your words\" 10): the sections nearest any text; (my.agent/similar \"your words\"): functions and tasks too"})
 
 (defn run-state
   "The task story: task t's run sections as data, the same each turn of a run: the task (its
@@ -247,7 +248,7 @@
   wiki sections its changes made stale; the tests run; what happened to the last reply; turns
   left. The messages delivered are the conversation's (`conversation`), not the block's."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge tests attention related]}]
+  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge tests attention]}]
   (let [{:keys [proofs]} (:seon.task/accumulated t)]
     (cond-> {;; a passing proof is its status; a red or unrun one shows its source, its failures
              ;; and the program functions it calls; one not defined yet says so
@@ -268,9 +269,6 @@
       ;; the sections of the wiki this branch's code changes made stale (seon.problems/caused-split): to read and
       ;; probably fix; never a reason to refuse done
       (seq attention) (assoc :attention attention)
-      ;; the sections nearest the plan as it is now (seon.turn's observe: made again when the plan's
-      ;; vector changes), on the screen, so the story stays fixed for the prompt cache
-      (seq related) (assoc :related (related-view db related))
       ;; owner D4: every change the branch's merge carries to main, every turn measured and
       ;; empty ({}) says so; absent only when not measured (a basis before D4)
       (some? will-merge) (assoc :will-merge will-merge)

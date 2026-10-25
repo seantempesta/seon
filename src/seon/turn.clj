@@ -20,7 +20,7 @@
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context] [seon.program :as program] [seon.merge :as pm] [seon.problems :as problems]
             [seon.stage :as stage] [seon.screen :as screen] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
-            [seon.db :as pdb] [datahike.api :as d]))
+            [datahike.api :as d]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: the run it
 ;; works, and a stop a function requested.
@@ -72,16 +72,6 @@
     (swap! agent/state assoc :index {:db db :index v})
     v))
 
-(defn- related!
-  "The sections nearest task id's plan on db (seon.context/related-at, held in this process
-  between turns, marked by the branch's last vector write): an unchanged plan computes nothing."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe [:vector :string]]]}
-  [db id]
-  (when-let [te (pdb/eid db :seon.task/id id)]
-    (let [r (context/related-at db te (:vectors-t @agent/state) (:related @agent/state))]
-      (swap! agent/state assoc :related r)
-      (:value r))))
-
 (defn- observe
   "What a turn starts from, measured now: the proofs run by the test service (seon.prove: one run
   per branch and tx whoever asks, in a fork of this agent; a run it could not fork ran no proof:
@@ -103,7 +93,6 @@
         unmerged (branch/unmerged)
         {:keys [caused attention]} (problems/caused-split (:base @agent/state) db)]
     {:test-run test-run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :attention attention :task (task/task db id)
-     :related (related! db id)
      :will-merge (program/divergence (:base @agent/state) db)
      ;; root's ruling (a): what this turn ran, what the judge will run, what the merge runs
      :tests (when-not (contract/error? test-run)
@@ -148,13 +137,13 @@
   done rule, the failing assertions of each test it names, the test run's own errors, and what the
   branch's merge will carry to main."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{:keys [test-run reasons task results will-merge tests attention related]}]
+  [{:keys [test-run reasons task results will-merge tests attention]}]
   (let [proofs (:proofs (:seon.task/accumulated task))
         named (into (set proofs) (keep :symbol) reasons)]
     {:results results :reasons reasons
      :reds (if (contract/error? test-run) [] (proofs/red-reports test-run named))
      :test-run-errors (if (contract/error? test-run) [(:seon.error/message test-run)] (proofs/test-run-errors test-run))
-     :will-merge will-merge :tests tests :attention attention :related related}))
+     :will-merge will-merge :tests tests :attention attention}))
 
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its

@@ -4,7 +4,7 @@
   proof is not shown again, a merge task's plan stays its own."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.context :as context] [seon.print :as print]
-            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs]
+            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs] [my.agent] [seon.screen]
             [seon.print.select :as select] [clojure.string :as str] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model]))
 
 (defn- db-with-program []
@@ -742,19 +742,28 @@
     [(d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) (repeat 6 10) "m")) te dir]))
 
 (deftest the-screen-shows-the-sections-nearest-the-plan
-  ;; the owner (2026-10-25): embed the docs and pull in related concepts; the screen's :related, the
-  ;; sections nearest the plan's vector that it does not cite, the first :seon.config.render/related (5)
-  (let [[db te] (sections-near "Make the page say one thing (docs/vector.md#what-is-embedded).")
-        rel (context/related db te)]
+  ;; the owner (2026-10-25): embed the docs and pull in related concepts, as explicit evals refined
+  ;; over the session: (my.agent/related) is a screen form, the sections nearest the plan's vector
+  ;; that it does not cite, the first :seon.config.render/related (5), and the agent reruns it with its words
+  (let [[db te dir] (sections-near "Make the page say one thing (docs/vector.md#what-is-embedded).")
+        rel (context/related db te)
+        lines ["docs/vector.md#the-model: Section 0 says one thing." "docs/vector.md#the-pyramid: Section 2 says one thing."
+               "docs/vector.md#fused-with-the-call-graph: Section 3 says one thing." "docs/vector.md#sections-nearest-the-plan-on-the-screen: Section 4 says one thing."]]
     (is (= ["docs/vector.md#the-model" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph" "docs/vector.md#sections-nearest-the-plan-on-the-screen"] rel)
         "nearest first, the section the plan cites left out")
-    (let [st (context/turn-state db (task/task db "demo/r") {:results {} :related rel})]
-      (is (= ["docs/vector.md#the-model: Section 0 says one thing." "docs/vector.md#the-pyramid: Section 2 says one thing."
-              "docs/vector.md#fused-with-the-call-graph: Section 3 says one thing." "docs/vector.md#sections-nearest-the-plan-on-the-screen: Section 4 says one thing."]
-             (get-in st [:related :nearest]))
-          "on the screen, each at summary depth: its address and its lead's first sentence")
-      (is (str/includes? (get-in st [:related :read]) "seon.docs/view") "with the form that reads one whole"))
-    (is (not (contains? (context/turn-state db (task/task db "demo/r") {:results {}}) :related)) "nothing observed, nothing shown")
+    (is (some #{"(my.agent/related)"} seon.screen/forms) "a form of the screen: each turn evaluates it, as an eval the agent sees and can rerun")
+    (let [old @agent/state]
+      (reset! agent/state {:n 0 :mode :test :db db :task "demo/r"})
+      (try
+        (let [v (my.agent/related)]
+          (is (= lines (:nearest v)) "each at summary depth: its address and its lead's first sentence")
+          (is (str/includes? (:read v) "seon.docs/view") "with the form that reads one whole")
+          (is (str/includes? (:more v) "my.agent/related") "and the form that searches further"))
+        (binding [agent/*fx-stub* (fn [_ _] {:value {:model "m" :vectors [(dir 1.0 0.5)] :tokens [3]}})]
+          (is (= "docs/vector.md#sections-nearest-the-plan-on-the-screen: Section 4 says one thing." (first (:nearest (my.agent/related "the last one" 2))))
+              "the agent's own words refine it: the sections nearest them, k of them, cited ones too")
+          (is (= 2 (count (:nearest (my.agent/related "the last one" 2))))))
+        (finally (reset! agent/state old))))
     (is (nil? (context/related (ts/test-db) (pdb/eid db :seon.task/id "demo/r"))) "a plan with no vector shows none")))
 
 (deftest related-sections-follow-a-rewritten-plan

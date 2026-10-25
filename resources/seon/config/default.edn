@@ -564,7 +564,7 @@
  :seon.config.render/similar 0
  ;; Unit: sections. The wiki sections nearest the task's plan by meaning (seon.context/related:
  ;; seon.vector/near over the sections, the plan's own vector on the branch) that the plan does not
- ;; cite, each a line on the screen at summary depth (my.task/status's :related), made again when
+ ;; cite, each a line at summary depth in the screen form (my.agent/related), made again when
  ;; the plan's vector changes; 0 shows none. Not :seon.config.render/similar: that counts program
  ;; functions in the task story, the run's fixed part (for the prompt cache), and is off by step 6's
  ;; measurement; these are sections, and follow the plan as it is rewritten. Provenance: the owner,

@@ -10,6 +10,8 @@
     (grep "text")             the program vars whose recorded definition's text holds it
     (similar 'ns/f)           what is nearest ns/f's definition by meaning: vars, wiki sections, tasks
     (similar "text")          what is nearest the text by meaning (seon.vector/near)
+    (related)                 the wiki sections nearest this task's plan, a line each, and how to read one
+    (related "text" k)        the k sections nearest the text: refine what the screen showed
     (prove)                   run what judges this branch: the task's proofs and the tests reaching
                               what it changed since main, each one with a result at its digest reused
     (help)                    the help page's sections (docs/agent.md); (help "done") one whole
@@ -17,7 +19,7 @@
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
-            [seon.config :as cfg] [seon.proofs :as proofs] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract]
+            [seon.config :as cfg] [seon.proofs :as proofs] [seon.task :as task] [seon.vector :as vector] [seon.db :as pdb] [seon.contract :as contract]
             [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
@@ -52,6 +54,17 @@
                                (agent/db) sym))
                      sym)))))
 
+(defn- query-of
+  "x's vector on db: a var's definition's (its entity, whose vector near reads), or text embedded
+  as a search's query by root's :embed effect (a failed embedding its error); nil for a var with
+  no vector yet."
+  {:malli/schema [:=> [:cat :seon.host/db [:or :qualified-symbol :string]] :any]}
+  [db x]
+  (if (symbol? x)
+    (some-> (d/entity db [:var/name x]) :var/form :db/id)
+    (let [r (agent/fx! :embed {:texts [(str vector/query-prompt x)]} {})]
+      (if (contract/error? r) r (first (:vectors (:value r)))))))
+
 (defn similar
   "What on this branch is nearest x by meaning (seon.vector/near): x a var, by its definition's
   vector, or text, embedded as a search's query by root's :embed effect. [[name score] ...] best
@@ -62,15 +75,43 @@
   ([x] (similar x 10))
   ([x k]
    (let [db (agent/db)
-         q (if (symbol? x)
-             (some-> (d/entity db [:var/name x]) :var/form :db/id)
-             (let [r (agent/fx! :embed {:texts [(str vector/query-prompt x)]} {})]
-               (if (contract/error? r) r (first (:vectors (:value r))))))
+         q (query-of db x)
          name-of (fn [e] (let [x (d/entity db e)]
                            (or (some-> (:var/_form x) first :var/name) (:seon.section/address x) (:seon.task/id x) e)))]
      (cond (contract/error? q) q
            (nil? q) []
            :else (mapv (fn [[e s]] [(name-of e) s]) (vector/near db q k))))))
+
+(defn related
+  "The wiki sections nearest by meaning, each a line at summary depth (its address and its
+  lead's first sentence), with the forms that dig further (seon.context/related-view). With no
+  argument, those nearest this task's plan as the branch holds it now (what the branch wrote is
+  embedded first, seon.agent/embed-written!, as each turn's observe does), the ones it cites left out,
+  :seon.config.render/related of them, made again only when the branch's vectors change
+  (seon.context/related-at). With x, those nearest a text (embedded as a search's query) or a
+  var's definition, k of them. One of the screen's forms (seon.screen/forms): each turn shows it
+  as an eval, which the agent reruns with its own words to refine it. A plan or var with no
+  vector yet says so; a failed embedding answers its error."
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:or :qualified-symbol :string]] :map]
+                  [:=> [:cat [:or :qualified-symbol :string] nat-int?] :map]]}
+  ([] (let [;; what the branch wrote since the last embedding first, so the plan's vector is the plan's now
+            e (agent/embed-written!)
+            db (agent/db)
+            te (some->> (:task @agent/state) (pdb/eid db :seon.task/id))
+            r (when te (context/related-at db te (:vectors-t @agent/state) (:related @agent/state)))]
+        (when r (swap! agent/state assoc :related r))
+        (cond
+          (contract/error? e) e
+          (:value r) (context/related-view db (:value r))
+          :else
+          {:not-embedded "no plan with a vector yet: (my.agent/related \"your words\") searches the wiki by any text"})))
+  ([x] (related x (cfg/value :seon.config.render/related)))
+  ([x k]
+   (let [db (agent/db) q (query-of db x)]
+     (cond (contract/error? q) q
+           (nil? q) {:not-embedded (str x " has no vector yet")}
+           :else (context/related-view db (mapv #(:seon.section/address (d/entity db (first %)))
+                                                (vector/near db q k {:of :seon.section/address})))))))
 
 (defn prove
   "Run what root's judge will run on this branch (seon.agent/run-tests-forked :judge, in a fork
