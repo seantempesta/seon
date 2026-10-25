@@ -42,7 +42,7 @@
   unknown (each written and run), and it is refused :no-design until its plan differs from
   the one its run began with (or that one is unknown), and :no-proofs, as every task is, until
   it registers one (a design that only rewrote its plan was green at its first plan edit, its
-  proofs named in prose and never written: live agents, 2026-10-25). A deferred proof (a process test, run
+  proofs named in prose and never written: the live agents' rounds). A deferred proof (a process test, run
   only when root asks: DECISIONS, Process tests are not automatic) is neither red nor unknown
   here; while unrun it is the merge's open :unrun problem."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
