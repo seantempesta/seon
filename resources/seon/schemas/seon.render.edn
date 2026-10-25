@@ -26,7 +26,9 @@
                     ;; the producer's declared schema of the value, when known
                     [:schema {:optional true} [:maybe :qualified-keyword]]
                     ;; the unit the render proc renders it as: its element's id
-                    [:unit {:optional true} [:maybe :string]]]
+                    [:unit {:optional true} [:maybe :string]]
+                    ;; an eval row's value paths its cuts opened on the page, each as EDN text (seon.web/open-path read it)
+                    [:opened {:optional true} [:set :string]]]
  ;; an :ai render's result: its text, and whether it cut (each cut names what it left and how to read it)
  :seon.render/text [:map [:text :string] [:truncated? {:optional true} :boolean]]
  ;; ---- the walk (seon.render/walk): an entity and its units one hop away, the default view of any entity ----

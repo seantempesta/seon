@@ -468,7 +468,13 @@
          (render/html (:ex r) (cond-> {} (:handle r) (assoc :handle (list :ex (:handle r)))))
          (if data?
            ;; a value stored as data renders as structure, the printer's hiccup under its handle
-           [:div {:class "flex gap-2 text-text-200"} [:span {:class "text-text-500"} "⇒"] (render/html (shown-value (:response rec)) {:handle (:handle r)})]
+           (let [v (shown-value (:response rec))]
+             [:div {:class "flex flex-col gap-1 text-text-200"}
+              [:div {:class "flex gap-2"} [:span {:class "text-text-500"} "⇒"] (render/html v {:handle (:handle r)})]
+              ;; each path a cut opened, rendered whole from the record (the form its cut names reads the same)
+              (for [p (:opened opts) :let [path (edn/read-string p)] :when (vector? path)]
+                [:div {:class "flex gap-2"} [:code {:class "text-text-500"} p]
+                 (render/html (get-in v path) {:handle (list 'get-in (:handle r) path)})])])
            [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (prose (or (:text r) "") (part))]))
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
@@ -739,7 +745,7 @@
   while open, and its html is the same on every page) to its form and response;
   a message, who sent it and its body."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? [:maybe [:sequential :any]] :string] :any]}
-  [db eid [open?] id]
+  [db eid [open? opened] id]
   (let [own (d/pull db '[*] eid)
         schema (render/entity-schema own :seon.eval/agent)]
     (case schema
@@ -769,7 +775,7 @@
            [:span {:class (if (:ex r) "text-error" "text-text-500")} (if (:ex r) "✕" "⇒")]
            [:code {:class "text-text-400"} (:line rec)]
            (when (:ms r) [:span {:class "tabular-nums text-text-500"} (ms-str (:ms r))])]
-          (when open? (evaluation own {}))]])
+          (when open? (evaluation own {:opened opened}))]])
       [:li {:id id :class "py-1"} (render/html (dissoc own :db/id) {:schema schema})])))
 
 (defn component
@@ -855,8 +861,11 @@
         tiles (remove #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))) nodes)
         on (vec (reverse (take shown listed)))
         older (- (count listed) (count on))
+        ;; an eval's row: open or not, and the paths of its value its cuts opened ("id/path", /open)
         as (fn [nd] (if (#{:seon.db/eval-fact :seon.turn/turn-fact} (:seon.render/schema nd))
-                      (let [id (comp-id (:seon.render/eid nd) :chat)] [:chat (contains? (or open #{}) id)])
+                      (let [id (comp-id (:seon.render/eid nd) :chat)]
+                        [:chat (contains? (or open #{}) id)
+                         (into (sorted-set) (keep #(let [[u p] (str/split % #"/" 2)] (when (and p (= u id)) p))) open)])
                       :chat))
 ]
     {:seon.render/html

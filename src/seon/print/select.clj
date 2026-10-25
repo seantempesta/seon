@@ -777,7 +777,8 @@
       text? (assoc :seon.print/prefix (subs (if (= :name (:kind node)) (:text node) (:value node)) 0 (:shown node)))
       (= :string (:kind node)) (assoc :seon.print/lines (lines-after (:breaks node) (:total node) (:shown node)))
       (:code? node) (assoc :seon.print/code? (:code? node) :seon.print/indent (:indent node))
-      form (assoc :seon.print/continuation form)
+      ;; where it stands in the value printed, so the page can open it there (seon.print.emit/elided-hiccup)
+      form (assoc :seon.print/continuation form :seon.print/path (:path node))
       (nil? form) (assoc :seon.print/requery-refused (get-in context [:requery :seon.print/requery-refused] "the source has no stable requery identity")))))
 
 (defn- tree-node

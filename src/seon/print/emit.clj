@@ -143,7 +143,9 @@
 
 (defn- elided-hiccup
   "A cut as HTML: a string cut's shown characters, then its marker and continuation form; a cut
-  with no continuation names why in its title."
+  with no continuation names why in its title. A cut with a continuation opens: its marker is a
+  closed <details> whose toggle posts /open for its row (the page's li) and its path in the value
+  printed, and the row renders that path whole (seon.render.ui/evaluation's :opened)."
   {:malli/schema [:=> [:cat :seon.print/node :string] :seon.print/hiccup]}
   [node text]
   (let [prefix (or (:seon.print/prefix node) "")
@@ -151,7 +153,14 @@
         ;; a string's label is its cut's words (the text after its prefix's literal)
         label (if shown (cut-words (:seon.print/omitted node) (:seon.print/lines node) (:seon.print/continuation node)) text)
         reason (when-not (:seon.print/continuation node) (:seon.print/requery-refused node))
-        marker [:span (cond-> {:class (css-class :seon.print/elision)} reason (assoc :title reason)) label]]
+        marker [:span (cond-> {:class (css-class :seon.print/elision)} reason (assoc :title reason)) label]
+        path (:seon.print/path node)
+        marker (if (and path (:seon.print/continuation node))
+                 [:details {:class "seon-print-cut" :data-seon-path (literal path)
+                            (keyword "data-on:toggle") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=' + "
+                                                            "encodeURIComponent(el.closest('li[id]').id + '/' + el.dataset.seonPath) + '&open=' + el.open)")}
+                  [:summary marker]]
+                 marker)]
     (cond (and shown (:seon.print/code? node)) [:div (marked-hiccup (:seon.print/code? node) shown) marker]
           shown [:span [:span {:class (css-class :seon.print/string)} shown] marker]
           :else marker)))
