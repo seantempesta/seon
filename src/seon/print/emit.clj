@@ -9,7 +9,7 @@
   reaches: the node kinds it builds, its cuts and their continuation forms. Keys keep
   Seon's names (`:seon.print/*`, `:seon.render.data/*`); a cut is read as its text.
   Dropped mechanisms are listed in notes BAGGAGE (proto/BAGGAGE.md)."
-  (:require [clojure.string :as str] [seon.config :as config]))
+  (:require [clojure.string :as str]))
 
 (def default-options
   "Seon's shipped print options (the `:seon.print/default` properties of `:seon.print/options`
@@ -103,9 +103,6 @@
 (def ^:private structural-kinds
   #{:seon.print/vector :seon.print/list :seon.print/set :seon.print/map :seon.print/throwable})
 
-(def ^:private nest-depth
-  "Open collections past which indentation stops growing (:seon.config.render/nest-depth), read once."
-  (config/value :seon.config.render/nest-depth))
 
 ;; The ops every collection shares, made once.
 (def ^:private line {:op :line :inline " " :terminate ""})
@@ -211,7 +208,7 @@
                :seon.print/vector "[" :seon.print/list (if quoted? "'" "(") :seon.print/set "#{"
                :seon.print/map (str (when lifted (str "#:" lifted)) "{"))
         close (case (:seon.print/face node) :seon.print/vector "]" :seon.print/list (if quoted? "" ")") "}")
-        nest (fn [offset] (nests (if (< depth nest-depth) offset 0)))
+        nest nests
         d (inc depth)
         fill? (and (not map-like?) (every? (comp scalar-kinds :seon.print/face) shown))
         ;; a member's path, `path` then its index (and 0 for a key, 1 for a value)

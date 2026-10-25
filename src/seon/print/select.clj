@@ -620,15 +620,17 @@
                 (recur entries extra more)))))))))
 
 (defn- row-class
-  "The class that makes `held`, a member of `node`, a row (a map's member, by its value): a map's,
-  vector's or set's, or in a sequence a string's; else nil. A row at its least is a cut that shows
-  nothing, a line and a form that say no more than the collection's own cut."
+  "The class that makes `held`, a member of `node`, a row: a map's, vector's or set's, or in a
+  sequence a string's; else nil. A map's member is a row by its value when its key is no keyword
+  (an id's row; a keyword names an attribute, a part of one record, which shows breadth first).
+  A row at its least is a cut that shows nothing, a line and a form that say no more than the
+  collection's own cut."
   {:malli/schema [:=> [:cat :seon.print/alloc :any] :any]}
   [node held]
   (let [map? (= :map (:kind node))
         m (if (and (:indexed? node) (:sorted? node)) (nth held 1) held)
         c (class (if map? (val m) m))]
-    (when (or (map-classes c) (vector-classes c) (set-classes c) (and (not map?) (identical? c String))) c)))
+    (when (and (not (and map? (keyword? (key m)))) (or (map-classes c) (vector-classes c) (set-classes c) (and (not map?) (identical? c String)))) c)))
 
 (defn- alike?
   "Are `node`'s members rows of one class (`row-class`), as far as `:max-children` members reach."

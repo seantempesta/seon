@@ -525,10 +525,6 @@
  :seon.config.render.agent/sort-bound 64
  ;; Unit: characters per printed line (session P1's printer, matching v1's corpus output).
  :seon.config.render/width 72
- ;; Unit: levels. Nesting levels the printer indents; a deeper level prints at the last
- ;; indent. Provenance: the value seon.print.emit held as a literal (shrink). At the bound:
- ;; deeper structure is laid out flush with its parent, never cut.
- :seon.config.render/nest-depth 6
  ;; Unit: tokens for a value shown inside another: a refused argument, a test's expected and
  ;; actual, ex-data (session P1).
  :seon.config.render/part-budget 256
