@@ -7,7 +7,7 @@ Seon on Jolt's docs, one concept per page, addressed `topic#section`; find the p
 The wiki stays healthy by eight rules, each a page's or section's to keep, the last three read by a class of problem ([health](health.md#a-stale-section)):
 - **Patterns live in the topic sections, linked, never in a catch-all file**. A pattern's home is the section where its problem lives: the idiom, its "Not this", its one implementation cited at code depth. Every section with the same problem links to that home with an ordinary link; its backlinks are its instances, so pulling one shows the others, and one fix can unify them.
 - **One home per concept.** A var or mechanism is explained in one section, the one that cites it at code depth (` ```name``` `); others cite it at summary or doc depth and link there instead of re-explaining it.
-- **Every section leads with one sentence that stands alone.** At summary depth an agent sees a section's heading and that sentence (as in v1), and decides by it whether to read on; then the body; then links to related sections.
+- **Every section leads with one sentence that stands alone.** At summary depth an agent sees a section's heading and that sentence (as in v1), and decides by it whether to read on; then the body; then links to related sections. A section with none is a `:leadless-section` ([health](health.md#a-section-with-no-lead)).
 - **Everything is linked.** Every section is reachable from the map, every page links its neighbours, and nothing is orphaned or duplicated.
 - **Sections state the current truth by topic.** A change rewrites the section it concerns; nothing is a dated log.
 - **A section that describes code is read again when that code changes.** The loader records the form of each var a section cites when its text is written; a changed form leaves the section a `:stale-section` until it is edited or reviewed (`my.docs/reviewed!`, which is also an empty git commit with a `Reviewed: docs/x.md#heading` trailer, so the review survives a rebuilt store).
@@ -18,9 +18,13 @@ References and their depths: [references](references.md).
 
 ## What next replaces
 
+The page that says where each capability of v1 Seon stands here.
+
 - [parity](parity.md): each capability of v1 Seon (`~/src/seon`), and where it stands here: present, partial, missing, or left behind on purpose ([BAGGAGE](../BAGGAGE.md)).
 
 ## The running system
+
+The pages on the processes that run: root, each agent's fork and the server that answers them.
 
 - [root](root.md): the control process: the root graph's procs, boot, runs and judging, holders and refused spawns, root causes at quiescence.
 - [processes](processes.md): the fork server and each agent's process: single-threaded, forked from main's db value, one socket to root.
@@ -38,6 +42,8 @@ References and their depths: [references](references.md).
 
 ## The program and its loop
 
+The pages on how agents change Seon's own program and how a text's references and renders show it.
+
 - [source](source.md): agents change Seon's own functions at the REPL on their branches; a merge merges them on main, writes the files back and runs them next.
 - [references](references.md): what a text cites, read by one parser (`seon.ref`), becomes its references, pulled into a context at the depth its delimiter asks.
 - [render](render.md): every view, the model's context included, is the one value printer or a render declared on the value's schema; nothing clips.
@@ -49,6 +55,8 @@ References and their depths: [references](references.md).
 
 ## How work moves
 
+The pages on how work is tasks, how it is checked and how it merges.
+
 - [tasks](tasks.md): all work is tasks linked by `:needs`; a request becomes design → implement → merge on one branch, in one transaction, before any agent forks.
 - [checks](checks.md): the end-to-end proofs `bin/check` runs, and the task rows `seon.e2e` works.
 - [merging](merging.md): how a branch merges into main: what it runs, how batches are proven, how conflicts are resolved.
@@ -58,6 +66,8 @@ References and their depths: [references](references.md).
 - Who does what, delegation and briefs: [AGENTS.md §2](../AGENTS.md).
 
 ## Words and provenance
+
+The pages on the words this repo uses and the libraries it customizes.
 
 - [vocabulary](vocabulary.md): the words this repo uses, the library's first, and the namespace that owns each.
 - [forks](forks.md): our customized libraries (Jolt, Chez, Datahike, persistent-sorted-set, konserve, crypto, Malli), their pins and branch scheme.

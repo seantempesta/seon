@@ -11,6 +11,8 @@ function. The same site check judges the other laws: [clocks](clocks.md) and [re
 
 ## Edges that catch (each names its one variant)
 
+The failure points whose edge function catches, each with the one variant it declares and who handles it as data.
+
 | failure point | edge (`ns/fn`) | declared variant | handled by, as data |
 |---|---|---|---|
 | A model's reply does not read or compile (an unresolved name, unbalanced code) where the first-move judge analyzes it | `seon.judge/form-facts` | `:seon.judge/uncompiled` | `seon.judge/score` counts it (`:uncompiled`); the reply is scored on what did compile |
@@ -41,6 +43,8 @@ function. The same site check judges the other laws: [clocks](clocks.md) and [re
 
 ## Entrant boundaries (a defect becomes a recorded error map)
 
+The boundaries where a defect in a request becomes a recorded error map instead of ending its process.
+
 | boundary | (`ns/fn`) | what it records |
 |---|---|---|
 | the agent's REPL: reading and evaluating an agent's form | `seon.repl/eval-code` | a form's read error or evaluation error as an `:err` reply item (the one error map itself, under `:err`; the evaluation of a form past its tick budget is the typed interrupt); the next form's reading goes on after an error, the request ends after an interrupt |
@@ -53,6 +57,8 @@ function. The same site check judges the other laws: [clocks](clocks.md) and [re
 | every root proc | Flow's error channel, piped into the api's `:back` | `:root-errors` in the api's view, with the error map; written once per signature on main, repeats counted in the api's fold (`seon.error/flush-tx`: a signature's first record carries its type, operation, message, class and first example; `my.root/problems` reads main and the fold); a repeat of a written signature writes nothing, or the error's own record would be the next commit it fails on |
 
 ## Failure points met without a catch (the edge answers data)
+
+The failure points met without a catch, where the edge answers with data.
 
 | failure point | edge | answer |
 |---|---|---|

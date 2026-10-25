@@ -134,13 +134,29 @@
   (let [db0 (ts/test-db)
         db (d/db-with db0 (docs/load-tx db0 "docs" (docs/pages (cfg/checkout) "docs")))
         toc (docs/page db context/help-page)]
-    (is (= ["docs/agent.md#the-agent" 1] ((juxt :address :level) (first toc))) "the page's sections, the first its title")
-    (is (every? :lead toc) "each section leads with a sentence that stands alone")
-    (is (some #(= "docs/agent.md#done" (:address %)) toc))
+    (is (= ["docs/agent.md#the-agent" 1] ((juxt :seon.ref/address :seon.ref/level) (first toc))) "the page's sections, the first its title")
+    (is (every? :seon.ref/lead toc) "each section leads with a sentence that stands alone")
+    (is (some #(= "docs/agent.md#done" (:seon.ref/address %)) toc))
     (is (str/includes? (:seon.ref/text (docs/view db "docs/agent.md#done" :code)) "The judge counts exactly") "one section, whole")
     (is (nil? (docs/view db "docs/agent.md#nowhere" :code)) "no such section")
     (is (str/starts-with? (context/help-text db) "# The agent\n\nYou are a Seon agent") "the page, made from its sections")
     (is (nil? (docs/page db0 context/help-page)) "a db without the wiki holds no help page")))
+
+(deftest help-reads-any-address-and-lists-on-a-miss
+  ;; dogfood 2026-10-25: (my.agent/help "references") answered nil, three evals lost. Help is the
+  ;; wiki's one view: the help page at :summary, any section at :code, and on a miss the page's
+  ;; sections and the form that lists every page's, never nil
+  (let [[toc anchor other miss] (rest (at/in-agent [{:op :context :agent "a1"}
+                                                       "(my.agent/help)" "(my.agent/help \"done\")" "(my.agent/help \"docs/vector.md#the-model\")"
+                                                       "(my.agent/help \"references\")"]))
+        printed #(str (:text %))]
+    (is (str/includes? (printed toc) "docs/agent.md#done") "no argument: the help page's sections at summary")
+    (is (str/includes? (printed anchor) "The judge counts exactly") "an anchor of the help page")
+    (is (str/includes? (printed other) "docs/vector.md#the-model") "any address of the wiki")
+    (is (= #{:no-section :help-page :pages :read-one} (set (keys (:value miss)))) "a miss is the declared map, not nil")
+    (is (str/includes? (printed miss) "docs/agent.md#done") "a miss lists the help page's sections")
+    (is (str/includes? (printed miss) "docs/vector.md") "every page's path")
+    (is (str/includes? (printed miss) "my.agent/help") "and the form that reads one")))
 
 (defn- outcome [ticks thunk]
   (try {:value (intr/run ticks thunk)} (catch Throwable e {:error e})))

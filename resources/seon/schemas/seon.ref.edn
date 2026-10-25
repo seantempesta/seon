@@ -76,6 +76,8 @@
                      [:symbol :qualified-symbol] [:arglists {:optional true} :any] [:summary {:optional true} :string]
                      [:doc {:optional true} :string] [:contract {:optional true} :any] [:source {:optional true} :string]
                      [:left-out {:optional true} :string] [:read {:optional true} :any]]
+ ;; what an edge of a stored section names, at summary depth: a section or a var
+ :seon.ref/edge [:map [:seon.ref/address :string] [:seon.ref/heading :string] [:seon.ref/summary {:optional true} :string]]
  :seon.ref/view [:map
                  [:seon.ref/address :seon.ref/address]
                  [:seon.ref/heading :string]
@@ -88,4 +90,10 @@
                  [:seon.ref/text {:optional true} :string]
                  [:seon.ref/lines {:optional true} nat-int?]
                  [:seon.ref/pin {:optional true} :string]
-                 [:seon.ref/problem-kind {:optional true} :seon.ref/problem-kind]]}
+                 [:seon.ref/problem-kind {:optional true} :seon.ref/problem-kind]
+                 ;; a stored section's edges, each at summary depth: what its text cites (sections and vars)
+                 ;; and the sections that cite it (seon.docs/view)
+                 [:seon.ref/references {:optional true} [:vector :seon.ref/edge]]
+                 [:seon.ref/cited-by {:optional true} [:vector :seon.ref/edge]]
+                 ;; a section of a page read by seon.docs/page: its depth in the page, 1 for the page's own
+                 [:seon.ref/level {:optional true} pos-int?]]}

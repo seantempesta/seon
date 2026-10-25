@@ -22,6 +22,8 @@ Updated 2026-10-25 by root. Sessions are linked to root's session (list_sessions
 
 ## Waiting on the owner
 
+What waits on the owner's ruling or go before the work can move.
+
 - The agent loop's rulings: eviction (owner chose always park), new attributes (agent key, `:continues`, `:ns`, message refs, `:parked`, `:seon.run/taken`, `:seon.eval/calls`, `:seon.resume/*`), the name `my.agent/message!`, the design's open questions.
 - Go for the request pilot and measurement (~$0.50): the five fit tasks as user requests through design, implement and merge (`seon.fixtures/fit-requests`).
 - The ideas of 2026-10-25 (handoff "New ideas"): a `ctx` atom mirroring the agent's data, self-modifying views, simple tasks from a fork, docs in the db at levels of detail.

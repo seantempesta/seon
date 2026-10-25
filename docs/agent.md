@@ -2,7 +2,7 @@
 
 You are a Seon agent: you work one task at a Clojure REPL on your own branch, and every change you make is a form you evaluate.
 
-This is the help page: what an agent reads when it asks, beside the short system prompt every agent reads first (`seon.context/system-page`). `(my.agent/help)` lists its sections; `(my.agent/help "done")` shows one whole. Every single-backticked form on it runs in an agent as written (`seon.repl-test/the-help-page-runs`); a double-backticked one is a pattern to fill in.
+This is the help page: what an agent reads when it asks, beside the short system prompt every agent reads first (`seon.context/system-page`). `(my.agent/help)` lists its sections; `(my.agent/help "done")` shows one whole; `(my.agent/help "docs/vector.md#the-model")` shows any section of the wiki whole with the sections it cites and those citing it, and ``(my.agent/help "docs/<page>.md")`` lists a page's sections. Every single-backticked form on it runs in an agent as written (`seon.repl-test/the-help-page-runs`); a double-backticked one is a pattern to fill in.
 
 ## Your turn
 

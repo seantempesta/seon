@@ -6,6 +6,8 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 
 ## Operating the system
 
+Each v1 way of starting, stopping and watching the system, and where it stands here.
+
 | v1 | next | Status |
 |---|---|---|
 | ``bin/seon start``, ``start --head``, ``status``, ``stop`` | `bin/root start`, `next` (the newest built generation), `status`, `stop`; every end is a fact on main (`:seon.root/stopped` with its cause, `:seon.root/previous-end` at the next boot, `:unclean` after a SIGKILL or a crash: `seon.root/stop!`) | present |
@@ -15,6 +17,8 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 | ``bin/worker`` claims and proven commits | worktrees (`bin/worktree`) and root's merges | dropped |
 
 ## The MCP server
+
+Each v1 MCP tool and where it stands here.
 
 | v1 | next | Status |
 |---|---|---|
@@ -26,6 +30,8 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 The server's ops, the MCP tools and root's evaluation path are [server](server.md#ops). `seon_agents` returns every task, the cancelled ones included: too much context for an outside agent.
 
 ## The agent's REPL (`my.*`)
+
+Each v1 function of the agent's REPL and where it stands here.
 
 | v1 | next | Status |
 |---|---|---|
@@ -45,6 +51,8 @@ The server's ops, the MCP tools and root's evaluation path are [server](server.m
 
 ## Tasks, merges, tests
 
+Each v1 capability for tasks, merges and tests, and where it stands here.
+
 | v1 | next | Status |
 |---|---|---|
 | tasks as data, `:needs`, one reconciler, green at start ends with no model call | `seon.task`, `seon.reconcile` | present |
@@ -62,6 +70,8 @@ The server's ops, the MCP tools and root's evaluation path are [server](server.m
 
 ## Context, printing, the page
 
+Each v1 capability for building and printing the model's context, and where it stands here.
+
 | v1 | next | Status |
 |---|---|---|
 | generated task context; one reference rule (`seon.ref`); forgiving reader | `seon.context`, `seon.ref`, `seon.reader/forgive` | present |
@@ -77,6 +87,8 @@ The server's ops, the MCP tools and root's evaluation path are [server](server.m
 
 ## Storage, config, errors
 
+Each v1 capability for storage, config and errors, and where it stands here.
+
 | v1 | next | Status |
 |---|---|---|
 | one store, many Datahike branches | `seon.db` (LMDB), `seon.writer` | present |
@@ -88,6 +100,8 @@ The server's ops, the MCP tools and root's evaluation path are [server](server.m
 | named catch sites | [failure points](failure-points.md), `bin/laws` | new |
 
 ## Onboarding and docs
+
+Each v1 way of onboarding agents and keeping docs, and where it stands here.
 
 | v1 | next | Status |
 |---|---|---|
