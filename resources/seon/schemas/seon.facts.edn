@@ -212,7 +212,7 @@
  :seon.run/task [:and {:seon.db/index true} :seon.db/ref]
  ;; finished: its task is done (seon.reconcile/finished); judged: ended or dead, the done rule's to judge;
  ;; failed: its agent died or was lost, a death (seon.problems/report)
- :seon.run/status [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ended :dead} :seon.status/failed #{:dead :lost}} [:enum :running :ended :killed :dead :lost :done :merged :behind :closed :refused]]
+ :seon.run/status [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ended :dead} :seon.status/failed #{:dead :lost}} [:enum :running :ended :killed :dead :lost :done :merged :behind :parked :closed :refused]]
  :seon.run/boot :string
  ;; the agent that works it (seon.task/agent-key)
  :seon.run/agent :seon.db/ref
@@ -225,6 +225,8 @@
  :seon.run/outcome [:enum :green :red :waiting :cap :failed :merge-failed :error :no-end :no-progress]
  :seon.run/reason [:string {:seon.render/prose true}]
  :seon.run/turns :int
+ ;; the messages to its session's runs its branch had taken when the run was judged (seon.reconcile/judge-tx): main holding more wakes a parked one
+ :seon.run/taken :int
  :seon.run/model-calls :int
  :seon.run/tokens :int
  :seon.run/merged-t :int
@@ -267,7 +269,7 @@
                              [:seon.run/branch {:optional true} :seon.run/branch] [:seon.run/model {:optional true} :seon.run/model]
                              [:seon.run/max-turns {:optional true} :seon.run/max-turns]
                              [:seon.run/outcome {:optional true} :seon.run/outcome] [:seon.run/reason {:optional true} :seon.run/reason]
-                             [:seon.run/turns {:optional true} :seon.run/turns] [:seon.run/model-calls {:optional true} :seon.run/model-calls]
+                             [:seon.run/turns {:optional true} :seon.run/turns] [:seon.run/taken {:optional true} :seon.run/taken] [:seon.run/model-calls {:optional true} :seon.run/model-calls]
                              [:seon.run/tokens {:optional true} :seon.run/tokens] [:seon.run/merged-t {:optional true} :seon.run/merged-t]
                              [:seon.run/basis-t {:optional true} :seon.run/basis-t]
                              [:seon.run/plan {:optional true} :seon.run/plan]

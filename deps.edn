@@ -24,8 +24,9 @@
                              :git/sha "ca51dd47aff27dac3cc09557682e82ec63720310"}
         jolt-lang/time {:git/url "https://github.com/jolt-lang/time.git"
                         :git/sha "a28ab100111050356957eb42b7ec89a4065de754"}
-        jolt-lang/http-client {:git/url "https://github.com/jolt-lang/http-client.git"
-                               :git/sha "5a9706e093d09d480c1d8ad70d8b64dfa505398d"}
+        ;; our fork: a read from a fiber parks the fiber, not its carrier (jolt/fiber-aware-read)
+        jolt-lang/http-client {:git/url "https://github.com/seantempesta/http-client.git"
+                               :git/sha "e866277d81f89f7278f47da1e48048610ce6feed"}
         ;; konserve and datahike require it (the same pin datahike declares); core.async is
         ;; excluded because Jolt ships its own
         org.replikativ/superv.async {:git/url "https://github.com/seantempesta/superv.async"
