@@ -21,6 +21,8 @@ way in [failure points](failure-points.md).
 
 ## Time decides (the owner's exceptions)
 
+The sites where time decides because the owner allowed it, the provider's delayed retry among them.
+
 - `seon.fx/wake-later`: the delayed insert, with its helpers `seon.fx/refill`, `seon.fx/admit`, `seon.fx/dispatch` and `seon.fx/owner-proc`. The provider's rate is a token bucket (halved by a rate-limit outcome, raised by a twentieth toward the configured rate by every other, and a request is admitted only while a worker is free and the bucket holds its estimate); a request the bucket cannot cover yet is put back on the owner's `:tick` port once it refills, by one core.async `timeout`.
 
 ## Time decides (a check's measurement, and a check's ping)
@@ -30,6 +32,8 @@ way in [failure points](failure-points.md).
 - `seon.check/ping`, `seon.check/system-check`: Flow's ping takes a bound (`:seon.config.check/ping-ms`); a proc that has not taken its control message by then is mid-step that long, and the check records it `:blocked` (an expected proc missing from a graph ping is reported under `:no-answer`), never reads it as nil.
 
 ## Time decides (a test's subject)
+
+Tests whose subject is itself a timeout or a measurement window, so the clock read there is what they test.
 
 - `seon.lib-test/in-child`: what it tests is a timeout in a forked child (core.async's `timeout` fires there; the child's wait has a bound so a child whose runtime threads are gone ends).
 - `seon.profile-test/allocating-thread`: the window over which it measures another thread's allocation, and a call that sleeps to show ticks count work, not waiting.
@@ -50,6 +54,8 @@ A bound passed under another name, which the marks do not see; each is owed its 
 
 ## Time decides nothing here: clock reads named as data
 
+Names that look like clock reads but are quoted as data, so no time decides at these sites.
+
 - `seon.program-test/var-row` (the form after it records a guarded function's source, `Thread/sleep` and a timed `deref` as text) and `seon.render-test/long-text` (the test after it names the removed `SAMPLE-MS` to show it is gone): clock reads quoted as data.
 - `seon.check/hidden-inputs`, `seon.check/named-test-inputs`: the lists the `test-inputs` check step reads test forms against (a clock read, a sleep, a timeout among the names they hold); they name those vars as data and read no clock.
 
@@ -60,6 +66,8 @@ A measured time chooses which work goes first, never whether a result is green (
 - bin/check's queue: a full run's steps start longest first by the wall seconds of the last full run (its `STEP.time` files); a step not measured yet starts first.
 
 ## Time measured (recorded, never compared to decide)
+
+Clock reads whose value is recorded or shown and never compared to decide anything.
 
 - `seon.profile/now-ns`, `seon.profile/ms-since`: the one clock read ([machine](machine.md#the-clock)); their callers are judged here one by one.
 - `seon.step/event`, `seon.agent-proc/agent-in`, `seon.root/end-agent`, `seon.root/record-death`, `seon.root/set-agent`, `seon.root/previous-end`, `seon.reconcile/judge-tx`, `seon.reconcile/start`, `seon.reconcile/dead-tx`, `seon.server/attach!`, `seon.writer/main-commit`, `seon.writer/stored!`, `seon.writer/writer-proc` (the `:since` on its dirty notice), `seon.repl/wrap-caught`, `seon.web/render-in`: a wall-clock stamp on an event, a run, a death, a root's end, a problem, an error, a commit or a dashboard chunk.

@@ -59,13 +59,15 @@
   (seon.context/related-view). A form of the screen (seon.screen/forms), made again only when the
   branch's vectors change (seon.context/related-at); it asks no effect, so it reads the vectors
   the branch holds. (my.agent/related \"words\" k) refines it by any text. A plan with no vector
-  yet says so."
+  yet says so, and a count of 0 that it is off."
   {:malli/schema [:=> [:cat] :map]}
   []
   (let [db (agent/db)
         te (some->> (turn/current-task) (pdb/eid db :seon.task/id))
         r (when te (context/related-at db te (:vectors-t @agent/state) (:related @agent/state)))]
     (when r (swap! agent/state assoc :related r))
-    (if (:value r)
-      (context/related-view db (:value r))
-      {:not-embedded "no plan with a vector yet: (my.agent/related \"your words\") searches the wiki by any text"})))
+    (cond
+      (:value r) (context/related-view db (:value r))
+      ;; its key's count (seon.context/related-at): 0 shows none
+      (some-> r :key second zero?) {:off ":seon.config.render/related is 0"}
+      :else {:not-embedded "no plan with a vector yet: (my.agent/related \"your words\") searches the wiki by any text"})))

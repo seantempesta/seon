@@ -16,6 +16,8 @@ is judged from the compiler's facts at merge (the vars of `seon.program/banned` 
 
 ## Sanctioned
 
+The sites that resolve a name held in data to a var by design, each with its reason.
+
 - `seon.contract/arm!`: arming a contract is Malli's instrument model, the Var's root replaced once by its checked wrapper at definition.
 - `seon.system/step-fn`: `resources/seon/system.edn` names each proc's step-fn Var; the declaration is the set of these resolves.
 - `seon.render/render-of`: a schema's declared render is a symbol in data, resolved when the value is shown.
@@ -27,5 +29,7 @@ is judged from the compiler's facts at merge (the vars of `seon.program/banned` 
 - `seon.repl/eval-string`: each response's handle (``result/eN``, named by its eval), the agent REPL's own `*1`, defined by the REPL as it answers.
 
 ## Owed its owner's fix
+
+The sites that fill a gap in another namespace, each owed a fix in that namespace's owner.
 
 - `seon.agent/make-ns!`: interns `source`, `source-fn` and `pst` into Jolt's `clojure.repl`, a namespace it does not own ([AGENTS.md §5](../AGENTS.md): a gap in another namespace is fixed in its owner). Task `seon.context/the-standard-repl-tools` (Jolt's `clojure.repl` carries them) deletes the intern.

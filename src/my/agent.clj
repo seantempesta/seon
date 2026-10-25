@@ -14,7 +14,8 @@
                               refine what the screen's (my.task/related) showed
     (prove)                   run what judges this branch: the task's proofs and the tests reaching
                               what it changed since main, each one with a result at its digest reused
-    (help)                    the help page's sections (docs/agent.md); (help "done") one whole
+    (help)                    the help page's sections (docs/agent.md); (help "done") one whole;
+                              (help "docs/vector.md#the-model") any section, (help "docs/vector.md") a page
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
@@ -188,10 +189,21 @@
     `(let [s# (named ~x)] (println (or (source-fn s#) (not-found s#))))))
 
 (defn help
-  "The help page (seon.context/help-page), read on demand beside the system prompt, as this branch holds it
-  (seon.docs/page): its sections, each its address, heading and lead's first sentence; with
-  an anchor, that section's own text."
-  {:malli/schema [:function [:=> [:cat] [:vector :map]] [:=> [:cat :string] [:maybe :string]]]}
-  ([] (mapv (fn [{:keys [address heading lead]}] (cond-> {:address address :heading heading} lead (assoc :lead (ref/lead-sentence lead))))
-            (docs/page (agent/db) context/help-page)))
-  ([anchor] (:seon.ref/text (docs/view (agent/db) (str context/help-page "#" anchor) :code))))
+  "The wiki through the one view (seon.docs/view), as this branch holds it. No argument: the help
+  page (seon.context/help-page) at summary, each section its address, heading and lead's first
+  sentence, with the sections it cites and those citing it. With an address (``docs/vector.md#the-model``) or
+  an anchor of the help page (\"done\"), that section whole; with a page's path (\"docs/vector.md\"), that page
+  at summary. A miss answers the help page's sections, every page's path and the form that reads
+  one, never nil. (Before this an anchor answered its text alone; it answers the view, :seon.ref/text among its keys.)"
+  {:malli/schema [:function [:=> [:cat] [:vector :seon.ref/view]] [:=> [:cat :string] [:or :seon.ref/view [:vector :seon.ref/view] [:map [:no-section :string] [:help-page [:vector :seon.ref/view]] [:pages [:vector :string]] [:read-one :string]]]]]}
+  ([] (vec (docs/page (agent/db) context/help-page :summary)))
+  ([address]
+   (let [db (agent/db)
+         a (if (str/includes? address "#") address (str context/help-page "#" address))]
+     (or (docs/view db a :code)
+         (docs/page db address :summary)
+         {:no-section address
+          :help-page (vec (docs/page db context/help-page :summary))
+          :pages (docs/page-paths db)
+          :read-one "(my.agent/help \"docs/<page>.md\") lists a page's sections; (my.agent/help \"docs/<page>.md#<section>\") reads one"}))))
+

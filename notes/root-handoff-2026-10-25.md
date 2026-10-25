@@ -33,3 +33,12 @@ What root did on 2026-10-24/25, what is unfinished, the owner's newest ideas, an
 - Check tasks before measuring with them: their proof exists and is red on main for the right reason.
 - Correctness and performance before lines of code.
 - Use `bin/worktree`, never `git submodule` in a worktree (root broke this once on 2026-10-25).
+
+## State at root's context limit (2026-10-25, ~11:30)
+- Merged since this note began: platform errors close (0595c749d), reds reused by digest (52b374f02), the judge asks the test service (330f01988; its verification run was in progress: build, prove plan line, agent/prove/reconcile/test-store tests, smoke; re-run it if its log is empty).
+- Ready to merge, not merged: ``jolt/dogfood`` (docs, tasks, notes; src 0) and ``jolt/a-section-reads-at-each-level`` (docs at levels, help never nil, 54 leads; src +120/-68; needs dogfood first). Compare each plan line with main's.
+- Gate pending: ``related-sections`` (session related-sections) brings a new config key (related-section count).
+- Agent loop: design revision 2 approved (one loader; only `:seon.run/taken` new; `my.agent/message!`; no restrictions; roots are tasks); owner chose Flow on the agent's main thread (jolt/main-carrier, prototype 382k values/s, forks safe); build of parts 1-4 is go. Open: reconcile the message path with the ctx-atom note §11 (messages delivered by merging a fact from the sender's branch).
+- ctx-atom: notes/design-ctx-atom-2026-10-25.md on ``jolt/ctx-lab`` (revision 3 + §11); the session waits on the owner.
+- Dogfood rulings recorded (update! takes proofs; each form's value under one handle; stale on meaning changes; pilot budget up to $5).
+- Owner, at the end of 2026-10-25's root context: message delivery is to be compared (main-first vs merged from the sender's branch; prefer independent processes only if not worse in stability, performance, complexity); the related-section config key and the docs-levels bound raise are approved; root continues in the same session after a compaction.

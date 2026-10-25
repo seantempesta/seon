@@ -78,6 +78,44 @@
         (is (= ["demo/quiet.md#counting"] (backlinks db "demo/flow.md#flow")))
         (is (= ["demo/async.md#waiting"] (backlinks db "demo/flow.md#idioms")) "the dropped link is retracted")))))
 
+(deftest a-view-at-summary-lists-references-and-cited-by
+  ;; the edges are the stored ones (backlinks-are-a-sections-instances), each at summary depth:
+  ;; a section by its address and lead's first sentence, a var by its name
+  (let [quiet "# Quiet\n\nQuiet is the absence of messages.\n\n## Counting\n\nCount as the [idiom](flow.md#idioms) does, by `app.m0/f0`.\n"
+        db (load-pages (empty-db) (assoc pages "demo/quiet.md" quiet))
+        idioms (docs/view db "demo/flow.md#idioms" :summary)
+        counting (docs/view db "demo/quiet.md#counting" :summary)]
+    (is (= ["demo/async.md#waiting" "demo/quiet.md#counting"] (mapv :seon.ref/address (:seon.ref/cited-by idioms)))
+        "who cites it, from the stored edges")
+    (is (= "Count as the [idiom](flow.md#idioms) does, by `app.m0/f0`."
+           (:seon.ref/summary (second (:seon.ref/cited-by idioms)))) "each at summary depth")
+    (is (= ["app.m0/f0" "demo/flow.md#idioms"] (mapv :seon.ref/address (:seon.ref/references counting)))
+        "what it cites, a section and a var")
+    (is (= "Park on a channel, as ```app.m0/f0``` does."
+           (:seon.ref/summary (second (:seon.ref/references counting)))))
+    (is (not (contains? (docs/view db "demo/flow.md#quiet" :summary) :seon.ref/cited-by)) "an edge-less section lists none")
+    (is (= (:seon.ref/references counting) (:seon.ref/references (docs/view db "demo/quiet.md#counting" :code))) "at every depth")))
+
+(deftest a-page-reads-at-a-depth
+  (let [db (load-pages (empty-db) pages)
+        summary (docs/page db "demo/flow.md" :summary)
+        code (docs/page db "demo/flow.md" :code)]
+    (is (= ["demo/flow.md#flow" "demo/flow.md#idioms" "demo/flow.md#quiet"] (mapv :seon.ref/address summary)))
+    (is (= [1 2 2] (mapv :seon.ref/level summary)))
+    (is (= (mapv #(docs/view db (:seon.ref/address %) :summary) summary) (mapv #(dissoc % :seon.ref/level) summary))
+        "each section is its view at that depth")
+    (is (= "Park on a channel, as ```app.m0/f0``` does." (:seon.ref/text (second code))))
+    (is (not-any? :seon.ref/text summary))
+    (is (nil? (docs/page db "demo/none.md" :summary)))))
+
+(deftest every-section-of-the-wiki-has-a-lead
+  ;; docs/README.md: every section leads with one sentence that stands alone; the list is read from the
+  ;; real wiki as main holds it (notes/dogfood/docs-audit.md found 54 of 364 without)
+  (let [db0 (empty-db)
+        db (d/db-with db0 (docs/load-dir-tx db0 (config/checkout) "docs"))]
+    (is (< 300 (count (d/datoms db :aevt :seon.section/address))) "the real wiki is read")
+    (is (= [] (mapv :section (get-in (problems/health db) [:classes :leadless-section :rows]))) "no section lacks a lead")))
+
 (deftest one-address-shows-one-text-through-ref-and-docs
   ;; research row 15: a section's text at code depth is its own text, the lines after its
   ;; heading up to the next heading of any level, whichever reader shows it: the expected

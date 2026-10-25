@@ -196,12 +196,13 @@
 
 (defn related-view
   "Sections at addresses, each at summary depth (seon.docs/view: its address and its lead's
-  first sentence, or its heading when it has no lead), the form that reads one whole and the
-  form that searches further: what my.agent/related answers."
+  first sentence, or its heading when it has no lead), the form that reads one whole (naming the
+  text's key: a step-6 run's model read the view with (:text ...) eight times over) and the form
+  that searches further: what my.task/related and my.agent/related answer."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :string]] [:map [:nearest [:vector :string]] [:read :string]]]}
   [db addresses]
   {:nearest (mapv #(let [v (docs/view db % :summary)] (str % ": " (or (:seon.ref/summary v) (:seon.ref/heading v)))) addresses)
-   :read "(seon.docs/view (seon.agent/db) \"docs/page.md#anchor\" :code): one whole; :doc, its lead and the sections below"
+   :read "(:seon.ref/text (my.agent/help \"docs/page.md#anchor\")): one section's text whole; (my.agent/help \"docs/page.md\"), its page at summary"
    :more "(my.agent/related \"your words\" 10): the sections nearest any text; (my.agent/similar \"your words\"): functions and tasks too"})
 
 (defn run-state

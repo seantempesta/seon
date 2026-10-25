@@ -756,7 +756,7 @@
             "docs/vector.md#fused-with-the-call-graph: Section 3 says one thing." "docs/vector.md#sections-nearest-the-plan-on-the-screen: Section 4 says one thing."]
            (:nearest v))
         "each at summary depth: its address and its lead's first sentence")
-    (is (str/includes? (:read v) "seon.docs/view") "with the form that reads one whole")
+    (is (str/includes? (:read v) "(:seon.ref/text (my.agent/help ") "with the form that reads one whole, its text's key named")
     (is (str/includes? (:more v) "my.agent/related") "and the form that searches further")
     (is (nil? (context/related (ts/test-db) (pdb/eid db :seon.task/id "demo/r"))) "a plan with no vector shows none")))
 

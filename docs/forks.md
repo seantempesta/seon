@@ -4,6 +4,8 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 
 ## Branch scheme
 
+The branches each fork keeps: our working line, one fix per topic, and the generic fix cut for upstream.
+
 - ``jolt/main`` in each fork is our working line; it may stay Jolt-specific.
 - ``jolt/<topic>`` holds one fix, cut from ``jolt/main`` (or from the topic it needs) and merged into ``jolt/main`` once measured. A pin may sit on a topic branch that has not yet been merged into ``jolt/main``; its section says so.
 - ``upstream/<topic>`` is a generic fix cut cleanly from upstream's own main, the only candidate for an upstream pull request, opened only when 100% sure.
@@ -211,6 +213,8 @@ Every library we customize is a git submodule under `reference-code/`, pinned at
 - **Recommendation: don't fold it into `jolt` as is.** Each change is a workaround for a generic gap elsewhere: (1) jolt-lang/crypto's `MessageDigest/getInstance` is case-sensitive where the JVM's is not, so the fix belongs in crypto, and hasch.platform's copy then goes; (2) `resolve` of a deftype yields a value Jolt cannot emit as a literal, a Jolt compiler gap. Once both are fixed, what remains is spec.alpha verbatim, which Jolt could ship in its stdlib or we could take as a pinned dependency.
 
 ## Unmodified submodules
+
+The submodules we use as upstream has them, each with its pin and how it is built.
 
 - `reference-code/lmdb` at `253ba52`, upstream ``LMDB/lmdb`` branch `mdb.master3`; built from source by `bin/build`.
 - `reference-code/zstd` at `f8745da` (v1.5.7), upstream ``facebook/zstd``; built by `bin/build zstd` ([storage](storage.md#compression)).
