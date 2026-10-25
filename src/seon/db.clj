@@ -147,16 +147,17 @@
   {:malli/schema [:=> [:cat :seon.host/conn] :seon.db/branch]}
   [conn] (main-branch (:config @conn)))
 
-(defn- install-missing!
+(defn install-missing!
   "Transact the attributes of `schema` the db under conn lacks, or holds without their
-  declared :db/contentId, and answer how many: first
+  declared :db/contentId, and answer the idents it added: first
   :seon.tx/runtime alone when it is missing (the one transaction that cannot name its
   runtime, since it installs the attribute), then the rest in one transaction carrying
   tx-meta (an attribute it holds as another value type is refused, :seon.db/types-differ:
   a value type is fixed once installed): a kept store seeded before an attribute existed gains it when a root
-  opens it (Datahike accepts new attribute definitions at any time). Nothing missing
-  writes nothing."
-  {:malli/schema [:=> [:cat :seon.host/conn] :int]}
+  opens it, and a branch cut before one existed when its agent resumes it (seon.agent's
+  resume: a branch keeps the schema it was cut with; Datahike accepts new attribute
+  definitions at any time). Nothing missing writes nothing."
+  {:malli/schema [:=> [:cat :seon.host/conn] [:set :keyword]]}
   [conn]
   (let [have (d/schema @conn)
         differ (into {} (for [{k :db/ident t :db/valueType} schema
@@ -177,7 +178,7 @@
     (let [[tx-attrs others] ((juxt filter remove) #(#{:seon.tx/runtime :seon.tx/branch} (:db/ident %)) missing)]
       (when (seq tx-attrs) (d/transact conn {:tx-data (vec tx-attrs)}))
       (when (seq others) (d/transact conn {:tx-data (vec others) :tx-meta (tx-meta (conn-main conn))})))
-    (count missing)))
+    (into #{} (map :db/ident) missing)))
 
 (defn seed!
   "Seed the empty store under conn: the schema (install-missing!), then (seed-tx n)."
@@ -312,7 +313,7 @@
           cfg (cond-> cfg (not= :db main) (assoc :branch main))]
       ;; durable before root runs: the seed, the new branch or the added attributes (an
       ;; fsync, ~5-10 ms); a recovered main with its schema whole wrote nothing
-      (when-not (and exists? existed? (zero? added)) (sync! cfg))
+      (when-not (and exists? existed? (empty? added)) (sync! cfg))
       {:cfg cfg :conn conn :recovered? (and exists? existed?) :seeded? (not exists?)})))
 
 (defn collect!

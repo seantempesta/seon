@@ -517,6 +517,18 @@
 
 ;; ---- the live program ----------------------------------------------------------------
 
+(defn program-nss
+  "The namespaces of db that are the program's own: their file under one of
+  :seon.config.source/program-dirs. A test's, a fixture's or a test helper's (under test/, whatever
+  its name), and one with no file (an app an agent made at its REPL, until it is written back), are
+  not (seon.context/related shows the last as the agent's new work). One read of the namespaces'
+  files, so a caller asks it once and tests membership."
+  {:malli/schema [:=> [:cat :seon.host/db] [:set :symbol]]}
+  [db]
+  (let [dirs (mapv #(str % "/") (cfg/value :seon.config.source/program-dirs))]
+    (into #{} (keep (fn [{:keys [e v]}] (when (some #(str/starts-with? v %) dirs) (:ns/name (d/entity db e)))))
+          (d/datoms db :aevt :ns/file))))
+
 (defn live?
   "Is form entity e part of the program: it defines nothing (a text form: a declare, a
   require, a comment kept from its file), or some definition it made still points to it."
@@ -735,6 +747,24 @@
                                      e' (requiring db (symbol (namespace s)))
                                      :when (live? db e')]
                                  e'))))))
+
+(defn gained-tx
+  "tx-data for the program facts db's forms were recorded without, an attribute being new to db (a
+  branch cut before it, resumed: seon.agent's resume, after seon.db/install-missing!). :form/keywords,
+  when db's schema holds it and no form does (one seek; so a resume that died after installing the
+  attribute derives them the next time): for each live form defining a contracted var, the keys its
+  contracts name, from :var/contract as schema-dependents read it before; the keys its code alone
+  names need the form analyzed again, and stay unrecorded until it is."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.db/op]]}
+  [db]
+  (if-not (and (contains? (d/schema db) :form/keywords) (nil? (first (d/datoms db :aevt :form/keywords))))
+    []
+    (vec (for [dt (d/datoms db :aevt :form/defines)
+               :let [fe (:e dt) f (d/entity db fe)]
+               :when (live? db fe)
+               v (:form/defines f) :let [c (:var/contract v)] :when c
+               k (names (sedn/decode c))]
+           [:db/add fe :form/keywords k]))))
 
 (defn schema-dependents
   "The live forms of db defining a contracted var whose form names one of keys (its contract

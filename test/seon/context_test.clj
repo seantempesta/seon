@@ -545,6 +545,45 @@
             ids (mapv (fn [[_ v]] (or (:seon.eval/id v) (:seon.message/id v))) (context/records db a))]
         (is (= ["e1" "m1" "e2"] ids) "the first run's eval and message, then the second's, and no other agent's")))))
 
+(deftest a-sessions-next-stage-keeps-the-last-request-as-its-prefix
+  ;; live finding A1 (2026-10-25): an implement continuing its design's session was sent its own
+  ;; story at the top, before the design's conversation (1% of 33k tokens cached), with nothing
+  ;; marking the switch. The story at the top is the session's first stage's; the next stage's
+  ;; comes as root's message at the boundary (seon.reconcile/stage-boundary), so the second
+  ;; stage's request is the first's, less its screen, then the boundary and what follows
+  (ts/test-branch!
+    (fn [_ conn]
+      (wiki! conn)
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "d" :seon.task/plan "Design d." :seon.task/proofs #{'demo-test/d-test}}
+                                              {:seon.task/ns 'demo :seon.task/name "i" :seon.task/plan "Implement d." :seon.task/proofs #{'demo-test/i-test}}]))
+      (let [ev! (fn [id by run]
+                  (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
+                                     :seon.eval/record {:code (str "(" id ")") :response {:handle (symbol "result" id) :value 1} :line id :run run
+                                                        :call-id (str "c-" id) :call 0 :prose "Step."}}]))
+            run! (fn [run task] (d/transact conn [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key "b/a1"}}]))
+            basis (fn [task run screen] {:commit (d/commit-id @conn) :task task :run run :turn 0 :max-turns 9 :origin :model
+                                         :observed {:results {} :test-run-errors [] :reds [] :reasons []} :screen [screen] :agent "b/a1"})
+            turn! (fn [run b sent] (d/transact conn [{:seon.turn/id (str run "/0") :seon.turn/run {:seon.run/id run} :seon.turn/n 0 :seon.turn/origin :model
+                                                      :seon.turn/basis b :seon.turn/sent sent :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1}]))
+            _ (run! "demo/d#1" "demo/d")
+            _ (ev! "s0" "screen" "demo/d#1")
+            _ (ev! "e0" "a1" "demo/d#1")
+            b0 (basis "demo/d" "demo/d#1" "s0")
+            first-stage (context/render @conn b0)
+            _ (turn! "demo/d#1" b0 (:sent first-stage))
+            boundary "demo/d is done. Your task now is demo/i, in this same session: what you did so far stays above.\n\nIts plan: Implement d."
+            _ (run! "demo/i#1" "demo/i")
+            _ (d/transact conn (task/message-tx "m1" "root" "demo/i#1" boundary))
+            _ (ev! "s1" "screen" "demo/i#1")
+            second-stage (context/render @conn (basis "demo/i" "demo/i#1" "s1"))
+            ms0 (:messages first-stage) ms1 (:messages second-stage)
+            screen0 (count (mapcat second (filter #(= "s0" (second (first %))) (context/parts-of @conn (:sent first-stage)))))
+            prefix (subvec ms0 0 (- (count ms0) screen0))]
+        (is (pos? screen0) "the first stage's request ended on its screen")
+        (is (= prefix (subvec ms1 0 (count prefix))) "the first stage's request, less its screen, is the second's exact prefix")
+        (is (str/includes? (:content (nth ms1 (count prefix))) "Your task now is demo/i") "then the boundary, root's message")
+        (is (str/includes? (:content (second ms1)) "Design d.") "the story at the top stays the session's first stage's")))))
+
 (deftest a-run-printed-once-sends-what-a-cold-read-sends
   ;; the branch review (2026-10-25, F6, F7): a request threaded through what the run's earlier
   ;; requests printed (:printed) equals one made with none, turn by turn; what each turn recorded
@@ -563,16 +602,17 @@
             basis (fn [n screen] {:commit (d/commit-id @conn) :task "demo/g" :run "demo/g#1" :turn n :max-turns 9
                                   :origin :model :observed {:results {} :test-run-errors [] :reds [] :reasons []} :screen screen :agent "b/a1"})
             turns (loop [n 0 printed nil out []]
-                    (if (= n 4)
+                    (if (= n 5)
                       out
+                      ;; as a turn goes: its screen evals, its request, then its call's eval
                       (do (ev! (str "s" n) "screen" :status)
-                          (ev! (str "e" n) "a1" (if (odd? n) rows (vec (range (* 10 (inc n))))) {:call-id (str "c" n) :call 0 :prose (str "Step " n ".")})
                           (let [b (basis n [(str "s" n)])
                                 warm (context/render @conn b {:printed printed})
                                 cold (context/render @conn b)]
                             (d/transact conn [{:seon.turn/id (str "demo/g#1/" n) :seon.turn/run {:seon.run/id "demo/g#1"} :seon.turn/n n
                                                :seon.turn/origin :model :seon.turn/basis b :seon.turn/sent (:sent warm)
                                                :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1}])
+                            (ev! (str "e" n) "a1" (if (odd? n) rows (vec (range (* 10 (inc n))))) {:call-id (str "c" n) :call 0 :prose (str "Step " n ".")})
                             (recur (inc n) (:printed warm) (conj out [n warm cold]))))))
             db @conn]
         (doseq [[n warm cold] turns]
@@ -607,7 +647,7 @@
             sent #(:seon.turn/sent (d/pull db [:seon.turn/sent] %))]
         (is (= [:section :task :eval] (mapv first (sent e0))) "turn 0: the system prompt, the task story, the screen eval")
         (is (every? pos-int? (map second (take 2 (sent e0)))) "the system prompt's own section and the task, by entity")
-        (is (= [:section :task :eval :eval] (mapv first (sent e1))) "turn 1: then its call's eval, then the screen eval")
+        (is (= [:section :task :eval :eval :eval] (mapv first (sent e1))) "turn 1: turn 0's screen eval, its call's eval, then the screen eval")
         (is (= (second (sent e0)) (second (sent e1))) "the task story is the run's first turn's: the same task as of the same t")
         (is (= r0 (read-back db e0)) "turn 0's messages, read from its records")
         (is (= r1 (read-back db e1)) "turn 1's, though the plan changed after both")
@@ -652,15 +692,68 @@
             _ (ev! "e3" "screen" "(my.task/status)" :green)
             [_ r1] (request 1 ["e3"])]
         (is (= ["system" "user" "user"] (mapv :role r0)) "turn 0: the task, then the screen")
-        (is (= ["system" "user" "assistant" "tool" "user"] (mapv :role r1)) (pr-str (mapv :role r1)))
-        (is (= {:role "assistant" :content "I call f." :reasoning "why" :tool-calls [{:id "call-0" :code "(f 1)"}] :call 0} (nth r1 2))
+        (is (= ["system" "user" "user" "assistant" "tool" "user"] (mapv :role r1)) (pr-str (mapv :role r1)))
+        (is (= {:role "assistant" :content "I call f." :reasoning "why" :tool-calls [{:id "call-0" :code "(f 1)"}] :call 0} (nth r1 3))
             "prose as content, the reasoning as returned, the call")
-        (is (= "{:handle result/e2, :value 1}" (:content (nth r1 3))) "the call's response, its recorded value printed as it is sent")
-        (is (= (pop r0) (subvec r1 0 2)) "the prefix carries over")
+        (is (= "{:handle result/e2, :value 1}" (:content (nth r1 4))) "the call's response, its recorded value printed as it is sent")
+        (is (= r0 (subvec r1 0 3)) "the whole earlier request is the prefix: its screen stays, appended (the screen as diffs)")
         (is (= "{:by \"screen\" :code \"(my.task/status)\" :response {:handle result/e3, :value :green}}" (:content (peek r1)))
-            "the screen eval, last")
-        (is (not-any? #(str/includes? (str (:content %)) ":value :red") r1) "the earlier screen is gone")
+            "the screen eval, last: whole, as its diff would be no shorter")
         (is (not-any? #(str/includes? (str (:content %)) ";;") (rest r1)) "no ;; reaches the model")))))
+
+;; task seon.screen/the-screen-is-sent-as-diffs: each screen eval is its diff from the previous one
+;; of its form, whole while that one is not sent whole
+(defn- screen-requests
+  "The requests of a run whose evals are evs ([id by code value] in order), each request after the
+  screen eval it names, read as origin's (a model's turn by default)."
+  [evs & [origin]]
+  (let [out (atom [])]
+    (ts/test-branch!
+      (fn [_ conn]
+        (wiki! conn)
+        (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f."}]))
+        (doseq [[i [id by code value]] (map-indexed vector evs)]
+          (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
+                             :seon.eval/record {:code code :response {:handle (symbol "result" id) :value value} :run "demo/f#1"}}])
+          (when (= "screen" by)
+            (let [db @conn
+                  {:keys [messages sent]} (context/render db {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn i :max-turns 9
+                                                              :origin (or origin :model) :observed {:results {} :test-run-errors [] :reds [] :reasons []}
+                                                              :screen (if (= :outside origin) (vec (keep (fn [[id by]] (when (= "screen" by) id)) (take (inc i) evs))) [id])
+                                                              :agent "b/a1"})]
+              ;; what it recorded it sent reads back as the same bytes, a diff's {:since} among them
+              (is (= messages (into [] (mapcat second) (context/parts-of db sent))) (str "request " i " reads back the same"))
+              (swap! out conj messages))))))
+    @out))
+
+(deftest an-unchanged-screen-sends-only-its-names
+  (let [page {:task "Make f." :proofs {'demo-test/f-test :fail} :changes (str "(defn f [x] x)" (apply str (repeat 400 " ")) "(defn g [] 1)")}
+        [r0 r1 r2] (screen-requests [["e1" "screen" "(my.task/status)" page] ["e2" "a1" "(f 1)" 1]
+                                     ["e3" "screen" "(my.task/status)" page]
+                                     ["e4" "screen" "(my.task/status)" (assoc page :proofs {'demo-test/f-test :pass})]])]
+    (is (str/includes? (:content (peek r0)) "(defn f [x] x)") "the first screen is whole")
+    (is (= r1 (subvec r2 0 (count r1))) "each request is the last one and what was added since")
+    (is (= "{:by \"screen\" :code \"(my.task/status)\" :response {:handle result/e3, :since result/e1, :value {:unchanged [[]]}}}" (:content (peek r1)))
+        "an unchanged screen: only that nothing changed, and since which")
+    (is (every? #(str/includes? (:content (peek r2)) %) [":since result/e3" "{:changed {[:proofs demo-test/f-test] :pass}," ":unchanged [[:task] [:changes]]}"])
+        "a changed one: since the last, what changed by path, and the rest named")
+    (is (not (str/includes? (:content (peek r2)) "(defn f [x] x)")) "an unchanged section is not sent again")
+    ;; the outside read names both screen evals of the form: neither is a diff
+    (let [out (peek (screen-requests [["e1" "screen" "(my.task/status)" page] ["e3" "screen" "(my.task/status)" page]] :outside))]
+      (is (= 2 (count (filter #(or (str/includes? (str (:content %)) "(defn f [x] x)") (str/includes? (str (:content %)) "(:value result/e1)")) out)))
+          "an outside agent's read: each screen eval whole (an equal one as the form reading the first, in the same read)")
+      (is (not-any? #(str/includes? (str (:content %)) ":since") out) "its reader holding no earlier one"))))
+
+(deftest a-screen-whose-base-is-cut-is-sent-whole
+  (let [page {:proofs {'demo-test/f-test :fail} :changes (str "(defn f [x] x)" (apply str (repeat 400 " ")) "(defn g [] 1)")}
+        ;; forty records of ~2k tokens each, past :seon.config.render/history-budget (32k) whole
+        bigs (for [i (range 40)] [(str "b" i) "a1" "(f 1)" (apply str i (repeat 8000 "x"))])
+        rs (screen-requests (concat [["e1" "screen" "(my.task/status)" page]] bigs [["e3" "screen" "(my.task/status)" page]]))]
+    (is (str/includes? (:content (peek (peek rs))) "(defn f [x] x)")
+        "its base collapsed by the history budget: the screen whole again")
+    (is (not (str/includes? (:content (peek (peek rs))) ":since")) "and no diff")
+    (let [r (peek (screen-requests [["e1" "screen" "(my.task/status)" page] ["e2" "a1" "(f 1)" 1] ["e3" "screen" "(my.task/status)" page]]))]
+      (is (str/includes? (:content (peek r)) "{:unchanged [[]]}") "the same screen with its base sent whole: the diff"))))
 
 (deftest an-assertion-message-of-any-value-is-kept-as-text
   ;; clojure.test's is takes any message (a doseq's keyword, say); a run whose test reported one
@@ -734,23 +827,27 @@
   ;; what is no function left out, the first :seon.config.render/similar (5, the task's own setting), each a line: its
   ;; name and its doc's first sentence; a plan with no vector says so
   (let [fns '[demo/area demo/pi demo/noise demo/e1 demo/e2 demo/e3]
-        db (d/db-with (db-with-program) (program-facts (vec (for [s (conj fns 'demo-test/near-test)] [s (str "(defn " (name s) " [])") []]))))
+        db (d/db-with (db-with-program) (program-facts (vec (for [s (conj fns 'demo-test/near-test 'demo.fixtures/near-helper)] [s (str "(defn " (name s) " [])") []]))))
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "c" :seon.task/plan "Make `demo/f` use the circle's area."
                                                :seon.task/proofs #{'demo-test/f-test} :seon.task/config {:seon.config.render/similar 5}}]))
         db (d/db-with db (vec (concat (for [s (conj fns 'demo/f)] {:var/name s :var/kind :fn :var/doc (str (name s) " does it. More.")})
-                                      [{:var/name 'demo-test/near-test :var/kind :test}])))
+                                      [{:var/name 'demo-test/near-test :var/kind :test}
+                                       ;; a test/ helper of any name (seon.fixtures, seon.check): a function, not the program's
+                                       {:var/name 'demo.fixtures/near-helper :var/kind :fn :var/doc "near-helper does it."}
+                                       {:ns/name 'demo :ns/file "src/demo.clj"} {:ns/name 'demo-test :ns/file "test/demo_test.clj"}
+                                       {:ns/name 'demo.fixtures :ns/file "test/demo/fixtures.clj"}])))
         dir (fn [& xs] (let [v (vec (concat xs (repeat (- 768 (count xs)) 0.0))) n (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % n) v)))
         form (fn [s] (:db/id (:var/form (d/entity db [:var/name s]))))
         te (pdb/eid db :seon.task/id "demo/c")
-        ;; nearest first: the named f, a test, then the six functions in order
-        order (into '[demo/f demo-test/near-test] fns)
+        ;; nearest first: the named f, a test, a test/ helper, then the six functions in order
+        order (into '[demo/f demo-test/near-test demo.fixtures/near-helper] fns)
         es (into [te] (map form) order)
         vs (into [(dir 1.0)] (map-indexed (fn [i _] (dir 1.0 (* 0.05 (inc i)))) order))
         db (d/db-with db (vector/tx-data es (repeat (count es) 1) vs (repeat (count es) 10) "m"))
         sim (context/similar db te #{'demo/f 'demo-test/f-test})]
     (is (= ["demo/area: area does it." "demo/pi: pi does it." "demo/noise: noise does it." "demo/e1: e1 does it." "demo/e2: e2 does it."]
            (:nearest sim))
-        "nearest first, the named one and the test left out, the first five, each its name and first sentence")
+        "nearest first, the named one, the test and the test/ helper left out, the first five, each its name and first sentence")
     (is (string? (:more sim)) "and the form that searches further")
     (is (= sim (:similar (context/run-state db (task/task db "demo/c")))) "in the story")
     (is (nil? (context/similar db nil #{})) "off by default (:seon.config.render/similar 0): nothing listed")))
@@ -798,6 +895,8 @@
         es (into [te] (for [i (range 5)] (pdb/eid db :seon.section/address (anchors i))))
         db (d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) (repeat 6 10) "m"))
         ;; a function beside the plan by meaning, and a schema key its plan names
+        ;; demo is the program's (src/), demo-test and its helpers are test/'s (seon.program/program-nss)
+        db (d/db-with db [{:ns/name 'demo :ns/file "src/demo.clj"} {:ns/name 'demo-test :ns/file "test/demo_test.clj"}])
         db (d/db-with db [{:db/id "f" :form/id "demo/g" :form/src "(defn g [])" :form/keywords #{:demo/thing :demo/not-a-schema}} {:var/name 'demo/g :var/form "f" :var/doc "Gets it. More."}
                           {:schema/key :demo/thing :schema/form "[:map]"}])
         f (pdb/eid db :form/id "demo/g")]
@@ -856,10 +955,14 @@
                           ;; a test namespace's helper calling it: a fixture, no program function
                           {:db/id "x" :form/id "demo-test/fixture" :form/src "(defn fixture [] (h))" :form/refs #{'demo/h} :form/defines #{"xv"}}
                           {:db/id "xv" :var/name 'demo-test/fixture :var/form "x" :var/kind :fn}
+                          ;; a helper of test/ whose name does not end in -test (seon.fixtures, seon.check): not the program's
+                          {:ns/name 'demo.fixtures :ns/file "test/demo/fixtures.clj"}
+                          {:db/id "y" :form/id "demo.fixtures/helper" :form/src "(defn helper [] (h))" :form/refs #{'demo/h} :form/defines #{"yv"}}
+                          {:db/id "yv" :var/name 'demo.fixtures/helper :var/form "y" :var/kind :fn}
                           {:seon.section/address "docs/vector.md#the-pyramid-c" :seon.section/heading "C" :seon.section/lead "Names h. More."
                            :seon.section/names #{'demo/h}}])
         rel (context/related db te)]
-    (is (= ['demo/g 'demo/k] (:functions rel)) "the caller of the cited var beside the nearest by meaning; the cited var, the test and a test namespace's helper left out")
+    (is (= ['demo/g 'demo/k] (:functions rel)) "the caller of the cited var beside the nearest by meaning; the cited var, the test, a test namespace's helper and a test/ helper of any name left out")
     (is (= ["docs/vector.md#the-model" "docs/vector.md#the-pyramid-c" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph"
             "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"]
            (:sections rel))
@@ -872,7 +975,11 @@
                                   {:db/id "pv" :var/name 'demo/plumb :var/kind :fn} {:db/id "rv" :var/name 'demo/rare :var/kind :fn}]
                                  (for [i (range 20)] {:form/id (str "demo/p" i) :form/src "(plumb)" :form/refs #{'demo/plumb}})))]
       (is (= ['demo/g 'demo/k 'demo/rare 'demo/plumb] (:functions (context/related db te)))
-          "a neighbour few forms name before one every form names"))))
+          "a neighbour few forms name before one every form names")
+      ;; a namespace with no file yet: what the agent wrote at its REPL, its new work, shown
+      (let [db (d/db-with db [{:ns/name 'agent.app} {:db/id "z" :form/id "agent.app/z" :form/src "(defn z [] (h))" :form/refs #{'demo/h} :form/defines #{"zv"}}
+                              {:db/id "zv" :var/name 'agent.app/z :var/form "z" :var/kind :fn}])]
+        (is (= 'agent.app/z (first (:functions (context/related db te)))) "a caller in a namespace with no file is shown")))))
 
 (deftest a-proof-with-no-result-reads-unknown
   ;; demo-test/f-test is written (its source is recorded) but no test report names it: it never

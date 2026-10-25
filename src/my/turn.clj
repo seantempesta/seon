@@ -9,6 +9,7 @@
   [] (turn/last-evals))
 
 (defn wait
-  "Stop working and wait for root: the run ends :waiting and root holds the task."
+  "Stop working and wait: the run ends :waiting and parks; the next message to the session wakes
+  it, with its conversation and a fresh turn budget."
   {:malli/schema [:=> [:cat] :map]}
   [] (turn/request-stop! :waiting nil))
