@@ -333,6 +333,8 @@
     [:title title]
     [:link {:rel "icon" :href "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%23f0b429'/%3E%3C/svg%3E"}]
     [:link {:rel "stylesheet" :href "/app.css"}]
+    ;; highlight.js first, so a code block's data-init finds it (seon.print.emit/marked-hiccup)
+    [:script {:src "/highlight.js"}]
     [:script {:type "module" :src "/datastar.js"}]]
    [:body
     body
@@ -427,6 +429,15 @@
   "Who evaluated, by its :seon.eval/by (any other: the agent's own, its model's turn)."
   {"user" "the owner, from this page" "outside" "an outside agent, through root's server" "context" "the context, read for a turn"})
 
+(defn- shown-value
+  "What an eval's recorded response shows as its value: the response less its handle and what
+  the row shows beside it (cost, the costliest functions, its error), each form's value when it
+  has them (its last is :value)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [response]
+  (cond-> (dissoc response :handle :ms :ticks :bytes :fns :ex :text :record :recorded)
+    (contains? response :values) (dissoc :value)))
+
 (defn evaluation
   "One eval (the declared html render of :seon.db/eval-fact, its record, and of a response), as
   it ran: the prose beside it, its code, its response printed under its handle as it is shown
@@ -437,25 +448,41 @@
   [e opts]
   (let [rec (or (:seon.eval/record e) e)
         r (merge (:response rec) (select-keys rec [:code :prose :fns]) (dissoc e :seon.eval/record))
-        ;; a recorded value printed as its reply reads (the reply's budget, one budget for an eval's
-        ;; value wherever it is shown) under its handle, its cut the printer's, not cut again; text
-        ;; with no value behind it (a host value's :printed, a live reply's :text) is prose
-        printed (when (and (:seon.eval/record e) (nil? (:text r)) (not (:printed rec))) (print/record-text rec nil))
-        r (cond-> r (and (:seon.eval/record e) (nil? (:text r))) (assoc :text (or printed (:printed rec))))
+        ;; a value recorded as data: inline, printed as its reply reads under its handle; in a row,
+        ;; rendered as structure (the printer's hiccup). Text with no value behind it (a host
+        ;; value's :printed, a live reply's :text) is prose
+        data? (and (:seon.eval/record e) (nil? (:text r)) (not (:printed rec)))
+        r (cond-> r (and (:seon.eval/record e) (nil? (:text r)))
+            (assoc :text (if data? (when (= :inline (:as opts)) (print/record-text rec nil)) (:printed rec))))
         by (or (:seon.eval/by e) (:by r))
         err? (some? (:ex r))]
     (if (= :inline (:as opts))
       [:span {:class "font-mono"} [:code (prose (or (:code r) "") (cell) {:one-line? true})] (if err? " ✕ " " ⇒ ")
        [:code (prose (or (:text r) "") (cell) {:one-line? true})]]
-      [:div {:class (str "flex flex-col gap-1 border-l-2 pl-3 py-1 " (if err? "border-error" "border-base-700"))}
+      [:div (cond-> {:class (str "flex flex-col gap-1 border-l-2 pl-3 py-1 " (if err? "border-error" "border-base-700"))}
+              ;; a handle printed anywhere on the page links here (seon.print.emit's symbol hiccup)
+              (symbol? (:handle r)) (assoc :id (str "eval-" (name (:handle r)))))
        (when-not (str/blank? (:prose r)) [:p {:class "whitespace-pre-wrap text-text-300 italic"} (prose (:prose r) (form-budget))])
        (when (:code r) [:pre {:class "text-text-100"} [:code (prose (:code r) (form-budget))]])
        (if (map? (:ex r))
          (render/html (:ex r) (cond-> {} (:handle r) (assoc :handle (list :ex (:handle r)))))
-         (if-let [block (:seon.render/html rec)]
-           ;; a value recorded with its block (@ctx): the block its agent drew, as it drew it
-           [:div {:class "flex gap-2 text-text-200"} [:span {:class "text-text-500"} "⇒"] block]
-           [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (if printed (:text r) (prose (or (:text r) "") (part)))]))
+         (if data?
+           ;; a value stored as data renders as structure, the printer's hiccup under its handle
+           (let [v (shown-value (:response rec))]
+             [:div {:class "flex flex-col gap-1 text-text-200"}
+              [:div {:class "flex gap-2"} [:span {:class "text-text-500"} "⇒"] (render/html v {:handle (:handle r)})]
+              ;; each cut opened: what its form reads, from the record, under that form (seon.web/open-form read it)
+              (for [f (:opened opts) :let [form (edn/read-string f)]]
+                [:div {:class "flex gap-2"}
+                 ;; the form read, as the button that closes it
+                 [:button {:type "button" :class "text-text-500 font-mono text-left" :data-seon-form f :title "close"
+                           (keyword "data-on:click") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=' + "
+                                                          "encodeURIComponent(el.closest('li[id]').id + '/' + el.dataset.seonForm) + '&open=false')")} f]
+                 (render/html (print/read-rest form (:handle r) v) {:handle form})])])
+           (if-let [block (:seon.render/html rec)]
+             ;; a value recorded with its block (@ctx): the block its agent drew, as it drew it
+             [:div {:class "flex gap-2 text-text-200"} [:span {:class "text-text-500"} "⇒"] block]
+             [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (prose (or (:text r) "") (part))])))
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
         [:span (get asked-by by "its own turn")]
@@ -743,7 +770,7 @@
   while open, and its html is the same on every page) to its form and response;
   a message, who sent it and its body."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? [:maybe [:sequential :any]] :string] :any]}
-  [db eid [open?] id]
+  [db eid [open? opened] id]
   (let [own (d/pull db '[*] eid)
         schema (render/entity-schema own :seon.eval/agent)]
     (case schema
@@ -773,7 +800,7 @@
            [:span {:class (if (:ex r) "text-error" "text-text-500")} (if (:ex r) "✕" "⇒")]
            [:code {:class "text-text-400"} (:line rec)]
            (when (:ms r) [:span {:class "tabular-nums text-text-500"} (ms-str (:ms r))])]
-          (when open? (evaluation own {}))]])
+          (when open? (evaluation own {:opened opened}))]])
       [:li {:id id :class "py-1"} (render/html (dissoc own :db/id) {:schema schema})])))
 
 (defn component
@@ -859,8 +886,11 @@
         tiles (remove #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))) nodes)
         on (vec (reverse (take shown listed)))
         older (- (count listed) (count on))
+        ;; an eval's row: open or not, and the forms of its cuts opened on the page ("id/form", /open)
         as (fn [nd] (if (#{:seon.db/eval-fact :seon.turn/turn-fact} (:seon.render/schema nd))
-                      (let [id (comp-id (:seon.render/eid nd) :chat)] [:chat (contains? (or open #{}) id)])
+                      (let [id (comp-id (:seon.render/eid nd) :chat)]
+                        [:chat (contains? (or open #{}) id)
+                         (into (sorted-set) (keep #(let [[u p] (str/split % #"/" 2)] (when (and p (= u id)) p))) open)])
                       :chat))
 ]
     {:seon.render/html
