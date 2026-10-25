@@ -14,11 +14,17 @@
 
 (def ^:private chars-per-token (config/value :seon.config.ai/chars-per-token-prior))
 
+(defn chars-tokens
+  "Estimated tokens of n characters: the one sizer's rule (`estimate` is it over a text's length)."
+  {:malli/schema [:=> [:cat nat-int?] :int]}
+  [n]
+  (long (Math/floor (/ n chars-per-token))))
+
 (defn estimate
   "Estimated tokens of `text`."
   {:malli/schema [:=> [:cat :string] :int]}
   [text]
-  (long (Math/floor (/ (count text) chars-per-token))))
+  (chars-tokens (count text)))
 
 (defn estimate-chars
   "Characters a token budget holds."

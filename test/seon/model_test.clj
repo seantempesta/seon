@@ -5,7 +5,7 @@
   The model edge as data: a provider's reply body read into the completion (task
   seon.model/budgets-are-data-and-spend-is-measured). Run: bin/test seon.model-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [clojure.data.json :as json]
-            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.fx :as fx] [seon.turn :as turn] [seon.contract] [clojure.string :as str]))
+            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.fx :as fx] [seon.turn :as turn] [seon.contract] [clojure.string :as str] [seon.context] [seon.error] [seon.cost]))
 
 (defn- chunk-line [m] (str "data: " (json/write-str m) "\n\n"))
 
@@ -165,6 +165,60 @@
            (first (:messages b))) "prose, reasoning and the call, as returned")
     (is (= "c1" (:tool_call_id (second (:messages b)))) "the response answers its call by the provider's id")))
 
+
+(deftest a-turn-whose-cache-misses-its-prefix-is-a-problem
+  ;; the shape of the recorded requests (2026-10-25, 94 turn pairs of 6 runs on DeepSeek): the
+  ;; system prompt, the task story, the turn's evals, then the screen, evaluated fresh each turn;
+  ;; the provider counts its cache hit in blocks of 128. Each message is 1,000 tokens to the
+  ;; sizer (640 words), so every number below is stated, not recomputed
+  (let [m (fn [w] {:role "user" :content (subs (str w " " (apply str (repeat 640 "word "))) 0 3200)})
+        [system story e1 e2 e3] (map m ["system" "story" "e1" "e2" "e3"])
+        t1 [system story e1 e2 (m "screen-a")]
+        t2 [system story e1 e2 e3 (m "screen-b")]
+        miss? (fn [prev cur prompt hit] (turn/cache-miss prev cur {:prompt-tokens prompt :cache-hit-tokens hit} 128))]
+    (is (= 1000 (seon.context/messages-tokens [system])) "the fixture's unit: a message is 1,000 tokens")
+    (testing "t2 shares four of its six messages: 4,000 of 6,000 tokens, 3,968 in whole blocks"
+      (is (nil? (miss? t1 t2 6000 3968)) "a hit of the shared prefix is no miss")
+      (is (nil? (miss? t1 t2 6000 3840)) "one block short is the sizer's error, not a miss")
+      (let [e (miss? t1 t2 6000 3839)]
+        (is (= :seon.turn/cache-miss (:seon.error/type e)) "more than a block short is a miss")
+        (is (= {:hit 3839 :expected 4000 :block 128 :shared 4 :messages 6} (select-keys e [:hit :expected :block :shared :messages])))))
+    (testing "the tokens are the provider's count, apportioned: at 9,000 the prefix is 6,000"
+      (is (nil? (miss? t1 t2 9000 5760)))
+      (is (= 6000 (:expected (miss? t1 t2 9000 5759)))))
+    (testing "the prefix ends at the first message that differs"
+      (is (= {:shared 2 :expected 2000} (select-keys (miss? [system story (m "e1'") e2] t2 6000 0) [:shared :expected])))
+      (is (nil? (miss? [(m "another system")] t2 6000 0)) "nothing shared: no prefix to serve"))
+    (testing "turn 1 shares the system prompt and the story only (turn 0's request after them is all screen)"
+      (is (nil? (miss? [system story (m "screen-0")] t1 5000 1920))))
+    (testing "misses of other sizes are one cause: the agent folds them under one signature, as :effect"
+      (let [fold (-> nil (seon.error/note (miss? t1 t2 6000 128) :effect "demo/f#1/2" 1)
+                     (seon.error/note (miss? t1 t2 6000 256) :effect "demo/f#1/3" 2))
+            [entry] (vals fold)]
+        (is (= [1 2 :effect] [(count fold) (:n entry) (:class entry)]))))
+    (is (nil? (miss? nil t1 6000 0)) "a run's first request has nothing before it")
+    (is (nil? (turn/cache-miss t1 t2 {:prompt-tokens 6000 :cache-hit-tokens 0} 0)) "a provider with no known cache (block 0) is not checked")
+    (is (nil? (turn/cache-miss t1 t2 {:prompt-tokens 6000} 128)) "a reply with no cache count is not checked")))
+
+(defn requests
+  "The input of size n characters: a request of five messages and the next of six, sharing four
+  (n/5 characters each, the shape of a-turn-whose-cache-misses-its-prefix-is-a-problem), with a
+  usage and DeepSeek's block."
+  [n]
+  (let [m (fn [w] {:role "user" :content (subs (str w " " (apply str (repeat (quot n 25) "word "))) 0 (quot n 5))})]
+    [(mapv m ["a" "b" "c" "d" "s1"]) (mapv m ["a" "b" "c" "d" "e" "s2"]) {:prompt-tokens 6000 :cache-hit-tokens 0} 128]))
+
+(deftest a-cache-check-costs-its-shared-prefix-not-a-copy
+  (seon.cost/proof
+    {:of 'seon.turn/cache-miss :input 'seon.model-test/requests
+     :n "characters of the request"
+     :work (str "the messages compared in order until one differs (= on two equal strings reads both: ~0.8 ticks a "
+                "character of the shared prefix); each message's parts sized by their lengths (seon.context/messages-tokens: "
+                "no text copied, so no bytes per character); the error map made once")
+     :growth :linear
+     :per-n {:ticks 0.8 :bytes 0.0}
+     :fixed {:ticks 3000 :bytes 20500}
+     :sizes [10000 100000 1000000]}))
 
 (deftest a-transport-failure-is-answered-to-the-agent
   (let [failure (model/complete {:kind :openai-compat :base-url "http://127.0.0.1:1" :model "m" :api-key-env "HOME" :max-tokens 2048}
