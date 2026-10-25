@@ -493,6 +493,10 @@
     ;; the step E dry run's first real design ended at its plan with its proof undefined, and
     ;; implement spent 25 turns looking for it
     {:kind :design :proofs #{'p/a} :results {} :main-green #{} :allowed-red #{} :uncontracted #{} :plan "B" :plan-before "A"} [:proof-unknown]
+    ;; a design that only rewrote its plan is not done: live agents, 2026-10-25, a design ended
+    ;; green at its first plan edit, the proofs its plan named never written, and its implement
+    ;; started with none (notes/live-2026-10-25.md D3)
+    {:kind :design :proofs #{} :results {} :main-green #{} :allowed-red #{} :uncontracted #{} :plan "B" :plan-before "A"} [:no-proofs]
     {:kind :work :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{}} [:proof-red]))
 
 (defn- design-db

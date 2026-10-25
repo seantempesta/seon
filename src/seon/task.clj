@@ -358,10 +358,12 @@
 
 (defn- task-value
   "A pulled task's own members (needs as a set of ids, proofs and references sets), without
-  the declaration its file stated (load-tx's to compare)."
+  the declaration its file stated (load-tx's to compare) or the plan's embedding written on
+  the same entity (seon.vector's index, not a member: its bytes printed as #object[[B ...])."
   {:malli/schema [:=> [:cat :seon.task/pulled] :seon.task/own]}
   [t]
-  (cond-> (-> t (dissoc :db/id :seon.task/declared)
+  (cond-> (-> (into {} (remove #(= "seon.vector" (namespace (key %)))) t)
+              (dissoc :db/id :seon.task/declared)
               (update :seon.task/needs #(set (map :seon.task/id %)))
               (update :seon.task/proofs set)
               (update :seon.task/kind #(or % :work)))

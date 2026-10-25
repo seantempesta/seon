@@ -63,7 +63,9 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p"}]))
         t (task/task db "demo/f")]
     (is (re-find #"at the model's token limit" (:cut (:your-last-reply (context/current-state db t {:turn 1 :max-turns 4 :truncated? true})))))
-    (is (nil? (:your-last-reply (context/current-state db t {:turn 1 :max-turns 4}))))))
+    (is (nil? (:your-last-reply (context/current-state db t {:turn 1 :max-turns 4}))))
+    ;; live agents round 1 (2026-10-25): a repeat is told, not only ended (seon.turn/work!)
+    (is (re-find #"same as the turn before's" (:repeated (:your-last-reply (context/current-state db t {:turn 2 :max-turns 4 :repeated 1})))))))
 
 (defn- task-f [db] (task/task (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p"
                                                                   :seon.task/proofs #{'demo-test/f-test}}]))
@@ -99,6 +101,9 @@
       (let [b (context/current-state db t {:results {} :reasons [{:reason :no-design}] :turn 1 :max-turns 4})]
         (is (= [[:no-design :seon.task/plan 'my.task/update!]]
                (mapv (juxt :reason :unchanged (comp first :do)) (:refused b))))))
+    (testing "a task with no proofs is told the form that registers one (a design writes its own)"
+      (let [b (context/current-state db t {:results {} :reasons [{:reason :no-proofs}] :turn 1 :max-turns 4})]
+        (is (= ['my.task/update! :seon.task/proofs] (take 2 (:do (first (:refused b))))))))
     (testing "a stray red is told the form that makes it a proof of the task"
       (let [b (context/current-state db t {:results {'user/scratch-test :fail} :reasons [{:reason :stray-red :symbol 'user/scratch-test}] :turn 1 :max-turns 4})]
         (is (= ['(my.task/update! :seon.task/proofs conj (quote user/scratch-test))]
