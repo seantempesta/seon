@@ -543,10 +543,10 @@
         agent (:seon.run/agent a)
         one (fn [[st o]] [st [o]])]
     (case op
-      :spawn (one (request st run :spawned {:op :spawn :opts (cond-> {:branch (get-in act [:env :branch]) :task (:task act) :run run}
-                                                              ;; the session's agent continues (design agent-loop section 1)
-                                                              (task/session-key (:db st) (:task act))
-                                                              (assoc :key (task/session-key (:db st) (:task act))))}))
+      :spawn (let [k (task/session-key (:db st) (:task act))]
+               ;; the session's agent continues (design agent-loop section 1); kept on the flight for its run's start
+               (one (request (cond-> st k (assoc-in [:flights run :key] k)) run :spawned
+                             {:op :spawn :opts (cond-> {:branch (get-in act [:env :branch]) :task (:task act) :run run} k (assoc :key k))})))
       :reap (one (write st run :done (cas-tx run :running :lost {:seon.run/end-ms (System/currentTimeMillis) :seon.run/reason "root restarted"})))
       :close (one (write st run :done (cas-tx run :ended :closed {})))
       :accept (one (write st run :done (cas-tx run :ended :done {})))
@@ -657,7 +657,7 @@
                              aid :started
                              (task/run-start-tx aid (:task act) (:boot st) ag (:env act) (System/currentTimeMillis)
                                                    (:plan (task/accumulate (get-in st [:idx :tasks]) (:task act)))
-                                                   (task/session-key (:db st) (:task act)))))
+                                                   (:key f))))
                  ;; root refused it (the branch is held, or too many live agents): the refused answer
                  ;; is the run, written on main with root's reason; the task starts again,
                  ;; as its next run, once main moves for another reason (:refused, pass)
