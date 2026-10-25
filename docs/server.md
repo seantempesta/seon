@@ -14,11 +14,11 @@ The ops are one table, ```seon.server/ops```, keyed by a request's `:op`; each e
 
 - `:agents`: live agents and every task's summary (`seon.server/task-summaries`: execution, done, blocked-by, its runs, its failure).
 - `:eval`: Clojure evaluated in a running agent's process (recorded on its branch, origin `:outside`) or as `"root"` in root's process, with `sys` bound to root (`seon.server/*sys*`). Both go through the one REPL path, `seon.repl/eval-string` ([processes](processes.md#the-agent-process)).
-- `:context`: the current-state block of the task an agent works, as the model would read it now (`seon.turn/context-block`; it names an agent or a task, attaching one if none works it), recorded with origin `:context`, a row of the agent's page like any evaluation ([render](render.md#the-page)).
+- `:context`: the request of the task an agent works as a model is sent it now, system prompt, story, conversation and screen (its forms evaluated, so `(my.task/status)` answers as this read measured) as one text (`seon.turn/context-block`; it names an agent or a task, attaching one if none works it), recorded with origin `:context`, a row of the agent's page like any evaluation ([render](render.md#the-page)).
 - `:message`: the owner's words to a running agent (`seon.root/message!`, the page's message bar sends the same request): root delivers them, and the agent's next turn reads them in its block ([render](render.md)).
 - `:attach`: root starts an agent on the task's branch with model `"outside"`, so no turn loop runs in it, and answers its id once the agent is ready (its hello), or the end it met first, which is the run's death ([root](root.md#holders-and-refused-spawns)).
 - `:prove`: the tests a branch's change reaches, run once per branch and tx however many ask, through the one test service (`seon.prove`, [merging](merging.md#the-test-service)); it names an agent's branch, else main.
-- `:done`: the agent ends its run as a turn loop does (```seon.turn/hand-back!```: its proofs run, its end `:green` or `:red` with the reasons, committed on its branch), then the run goes to the reconciler's `:judge` port and is judged ([root](root.md#runs-and-judging)).
+- `:done`: the agent ends its run as a turn loop does (```seon.turn/hand-back!```: its proofs run, its end `:green` or `:red` with the reasons, committed on its branch), then the run goes to the reconciler's `:judge` port and is judged ([root](root.md#runs-and-judging)). It answers the verdict once main holds it (```seon.server/verdict```, waiting on the fact with `seon.root/await-db`, a watch on main's connection, no clock): the run's status (`:done` or `:merged` when the done rule had no reason, `:closed` with its task held when it had some), outcome and reason, and for a held task the failure the judge wrote, which names the reasons; a defect of the reconciler that stopped the judge answers as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge: minutes), so a client's read timeout must allow it: the one-line `nc -w 10` of AGENTS.md section 6 is for the quick ops; `bin/mcp` sets none.
 
 ```seon.server/answer``` dispatches one EDN request to its op; an unknown op answers the one error map. A line that does not read, or an op that throws, answers that request as the typed `:seon.server/defect`: the server is an entrant boundary ([failure points](failure-points.md)).
 
@@ -31,9 +31,3 @@ A tool's text is what a model should read: `seon_context`'s is the block itself,
 `bin/mcp` is the stdio relay a client runs: stock perl, a few MB, one connection per message to the port in `runs/root.port`, so a root restarted between calls (`bin/root next`) costs the client nothing. A message root does not answer (none running, not listening, died mid-request) gets a JSON-RPC error saying why. `seon.check/mcp-proof` (`bin/check mcp`) proves it end to end from a separate process, with the relay's footprint under `:seon.config.machine/relay-mb`.
 
 Working a task this way is the turn loop's path with the model outside: [turn](turn.md#an-outside-agent).
-
-## Where it falls short today
-
-An outside agent (a Claude session through the server) does not see what a model sees, so dogfooding through the server measures a different context.
-- `:context` answers ```seon.turn/context-block```, the story and the turn sections, not the parts a model's request is made of: `seon.server/the-outside-context-is-what-a-model-is-sent`.
-- `:done` answers `{:judging ...}` and ends the agent, so it never sees the verdict: `seon.server/done-answers-the-verdict`.

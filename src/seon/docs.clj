@@ -9,7 +9,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.contract :refer [defn defn-]] [seon.ref :as ref] [seon.source :as source] [seon.task :as task] [seon.db :as pdb]
             [datahike.api :as d] [clojure.string :as str] [clojure.java.io :as io]
-            [seon.config :as cfg] [seon.lib :as lib]))
+            [seon.config :as cfg] [seon.lib :as lib] [seon.reader :as reader] [seon.print :as print] [seon.print.emit :as emit]))
 
 ;; ---- one page, parsed into sections ----------------------------------------------------
 
@@ -153,21 +153,6 @@
              [:db/retractEntity e]))))))
 
 ;; ---- reading ----------------------------------------------------------------------------
-
-(defn section
-  "Section address on db, its parent as an address and its references as addresses or var
-  names, or nil."
-  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :map]]}
-  [db address]
-  (when (pdb/eid db :seon.section/address address)
-    (let [s (d/pull db [:seon.section/address :seon.section/heading :seon.section/lead :seon.section/text
-                        {:seon.section/parent [:seon.section/address]}
-                        {:seon.section/references [:seon.section/address :var/name]}]
-                    [:seon.section/address address])]
-      (cond-> s
-        (:seon.section/parent s) (update :seon.section/parent :seon.section/address)
-        (:seon.section/references s) (update :seon.section/references
-                                             #(into #{} (map (fn [r] (or (:seon.section/address r) (:var/name r)))) %))))))
 
 (defn- children
   "The sections whose parent is section entity e on db, in the order the wiki was written."
@@ -320,7 +305,9 @@
   "The baseline of the sections of plan (baseline-plan) from the history answer (seon.fx/wiki-history's
   value {:sections :files :errors}): {address {:read {name form-id} :unread reason}}. A section's :read
   is each cited var's form id in its file as of the commit that last changed the section (found by
-  seon.source/defining-ids, the id seon.program/account would record), or \"absent\" for a var the
+  seon.source/defining-ids, the id seon.program/account would record) when what the section describes
+  of it (seon.source/defining-meanings: its docstring and contract as written) is what its form
+  says today, \"changed\" when that changed since, or \"absent\" for a var the
   file at that commit does not mention at all, or a file that did not exist: a citation that was ahead
   of the code, stale once the code exists. A section with an uncommitted line is read as of today
   (:read, nothing unread): its text is newer than git's. A section git could not answer for, whose
@@ -336,10 +323,13 @@
                      (let [text (get files [sha file])
                            r (cond (get errors [sha file]) {:error (str file " at " (subs sha 0 8) " could not be read from git: " (get errors [sha file]))}
                                    (nil? text) {:ids {}}
-                                   :else (try {:ids (source/defining-ids nsym text) :text text}
+                                   :else (try {:ids (source/defining-ids nsym text) :meanings (source/defining-meanings nsym text) :text text}
                                               (catch Throwable e {:error (str file " at " (subs sha 0 8) " does not read: " (step/error-msg e))})))]
                        (vswap! cache assoc [sha file] r)
                        r)))
+        ;; what a var's form today says of it, read as the old file is (the same reader, both sides as written)
+        meaning-now (fn [n] (when-let [f (some->> (pdb/eid db :var/name n) (d/entity db) :var/form)]
+                              (get (source/defining-meanings (:ns/name (:form/ns f)) (:form/src f)) n)))
         mentioned? (fn [text n] (boolean (re-find (re-pattern (str "[\\s(\\[{'#]" (java.util.regex.Pattern/quote (name n)) "[\\s)\\]}]")) text)))]
     (into {}
           (keep (fn [{:keys [address] :as r}]
@@ -355,7 +345,12 @@
                                                 per))]
                               (if bad
                                 [address {:read today :unread bad}]
-                                [address {:read (into {} (for [[n res] per] [n (get (:ids res) n "absent")]))}]))))))
+                                ;; a var whose form changed since: \"changed\" when what the section
+                                ;; describes of it (its docstring or contract) changed, else as today
+                                [address {:read (into {} (for [[n res] per :let [then (get (:ids res) n "absent")]]
+                                                           [n (cond (or (= "absent" then) (= then (today n))) then
+                                                                    (= (get (:meanings res) n) (meaning-now n)) (today n)
+                                                                    :else "changed")]))}]))))))
           plan)))
 
 ;; ---- a citation as its depth shows it (docs/references.md#the-delimiter-picks-the-depth): ----
@@ -393,7 +388,8 @@
       (and (nil? m) (nil? src)) {:symbol sym :unresolved true :problem (:unresolved ref/problem-messages)}
       (= :summary depth) (cond-> (select-keys doc [:symbol :arglists]) (:doc m) (assoc :summary (ref/lead-sentence (:doc m))))
       (or (nil? src) (and (= :doc depth) (:doc m))) doc
-      :else {:symbol sym :source src})))
+      ;; its source is code, printed as in its file (seon.print/code)
+      :else {:symbol sym :source (print/code src)})))
 
 (defn- reached
   "What citation c asks to see, at its depth, and what that is: a wiki section from main's
@@ -437,3 +433,58 @@
     :var (let [v (resolve-ref db (:seon.ref/name c) (:seon.ref/depth c))] [(if (:unresolved v) :unresolved :var) v])
     :view (reached db c)
     nil))
+
+(defn- names-lines
+  "Words (a namespace's public names, a docstring's words) as comment lines of at most
+  :seon.config.render/width characters: `;; a b c`."
+  {:malli/schema [:=> [:cat [:sequential :string]] :string]}
+  [names]
+  (let [width (cfg/value :seon.config.render/width)]
+    (str/join "\n" (map #(str ";; " (str/join " " %))
+                        (reduce (fn [lines n] (let [l (peek lines)]
+                                                (if (and l (<= (+ 4 (count (str/join " " l)) (count n)) width))
+                                                  (conj (pop lines) (conj l n))
+                                                  (conj lines [n]))))
+                                [] names)))))
+
+(defn cited-code
+  "What the screen shows of citation c on db, as Clojure is written in a file (owner,
+  2026-10-25): a var as its definition's head (seon.reader/definition-head: name, docstring as
+  written, attribute map, arglist; its body marked `…)` with the form that reads it whole), a
+  namespace as its ns form's head, its docstring as written, then its public names; each as code
+  (seon.print/code), printed verbatim; a var whose source db does not record, as a `declare` with
+  its arglists and doc as comments; a task, a section, a file or a citation that reaches nothing as
+  its address and lead in comment lines, then the form that reads it whole (never its view's map:
+  root, 2026-10-25). nil when it reaches nothing pulled."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :any]}
+  [db c]
+  (let [[kind v :as hit] (cited db c)
+        nm (:seon.ref/name c)]
+    (cond
+      (and (= :var kind) (qualified-symbol? nm))
+      (let [src (source-of db nm)
+            head (some-> src (reader/definition-head (symbol (namespace nm))))]
+        (cond head (print/code (str head "  ; the body: (source " nm ")"))
+              src (print/code src)
+              ;; no source recorded: what the var's facts say, as Clojure (its arglists and doc as comments)
+              :else (print/code (str "(declare " (name nm) ")  ; no source recorded: (doc " nm ")"
+                                     (when-let [as (seq (:arglists v))] (str "\n;; " (str/join " " (map str as))))
+                                     (when-let [d (:doc v)] (str "\n" (names-lines (str/split d #"\s+"))))))))
+      (and (= :namespace kind) (symbol? nm))
+      (let [nv (ref/namespace-view db nm :doc)]
+        (print/code (str "(ns " nm (when-let [d (:seon.ref/lead nv)] (str "\n  " (emit/string-literal d))) ")"
+                         (when-let [b (seq (:seon.ref/below nv))] (str "\n" (names-lines (map :seon.ref/heading b)))))))
+      ;; a task, a section, a file, or what reaches nothing: its address and lead as prose (comment
+      ;; lines), then the form that reads it whole; never its view's map
+      hit
+      (let [a (or (:seon.ref/address v) (some-> nm str) (:seon.ref/path c))
+            say (if (= :unresolved kind)
+                  (str (or (:problem v) "reaches nothing"))
+                  (or (some-> (:seon.ref/lead v) ref/lead-sentence) (:seon.ref/summary v)
+                      (some->> (:seon.ref/lines v) (str "a file of ") (#(str % " lines"))) (:seon.ref/heading v)))
+            read (case kind
+                   :task (str "(:seon.task/plan (seon.task/task (seon.agent/db) " (emit/string-literal a) "))")
+                   :section (str "(my.agent/help " (emit/string-literal a) ")")
+                   :file (str "(slurp " (emit/string-literal (str (cfg/checkout) "/" (:seon.ref/path c))) ")")
+                   nil)]
+        (print/code (str (names-lines (str/split (str a ": " say) #"\s+")) (when read (str "\n" read))))))))

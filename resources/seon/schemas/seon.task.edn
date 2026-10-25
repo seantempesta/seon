@@ -82,6 +82,10 @@
  ;; the reconciler proc's state, and the steps of a flight
  :seon.reconcile/state [:map [:db :seon.host/db] [:boot :string]
                         [:rid :int] [:flights :map] [:pending :map] [:quiet {:optional true} :boolean]
+                        ;; waits on main asked on :judge (seon.root/await-db), each answered once quiet at or after its :after,
+                        ;; held across steps (an edge's promise outlives the step that took it); :report, the quiet
+                        ;; spell's report until its write is answered
+                        [:waits {:optional true} [:vector [:map [:after :int] [:p :seon.host/promise]]]] [:report {:optional true} :int]
                         ;; tasks root refused to spawn, waiting for main to move for another reason
                         [:refused {:optional true} [:set :seon.task/id]]]
  ;; the incremental reconciler's index of main (session R3's seon.reconcile/index): desired and

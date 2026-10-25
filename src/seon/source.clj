@@ -116,6 +116,28 @@
                          [(symbol (str ns) (name (second form))) (program/form-id ns src k)]))))
           (:forms (read-forms nsym text)))))
 
+(defn defining-meanings
+  "What a section citing each var defined in text (the file of namespace nsym) describes of it, as
+  written: {qualified var symbol {:doc :contract}}, its docstring (a string followed by more of the
+  form, so a def of a string value has none) and its :malli/schema as read, each only when present
+  (the contract carries the arity, so no arglists); found by the form's head and name, as
+  defining-ids finds them, read without loading. The same reading of an old file at a commit and of a
+  var's form today, so the two compare (seon.docs/baseline-reads; DECISIONS Dogfood
+  rulings: a section is stale when a cited var's contract or docstring changed)."
+  {:malli/schema [:=> [:cat :symbol :string] [:map-of :qualified-symbol :map]]}
+  [nsym text]
+  (into {} (keep (fn [{:keys [form ns]}]
+                   (when (and (seq? form) (symbol? (first form)) (contains? defining-heads (symbol (name (first form)))) (symbol? (second form)))
+                     (let [more (nnext form)
+                           doc (when (and (string? (first more)) (next more)) (first more))
+                           more (if doc (rest more) more)
+                           attr (when (and (map? (first more)) (next more)) (first more))]
+                       [(symbol (str ns) (name (second form)))
+                        (cond-> {}
+                          (or doc (:doc attr)) (assoc :doc (or doc (:doc attr)))
+                          (:malli/schema attr) (assoc :contract (:malli/schema attr)))]))))
+        (:forms (read-forms nsym text))))
+
 (defn text-tx
   "The facts of text's forms as namespace nsym's program on db (seon.program/account-tx per
   form, in file order), with the namespace's file (relative path, or nil) and the text after

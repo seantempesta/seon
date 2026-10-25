@@ -608,13 +608,16 @@
 
 (defn stats
   "The render proc's own numbers: passes, pass ms (all, the ones that patched, the quiet
-  ones) as seon.lib/summ over the last 200 (none yet: nil), patch bytes, units rendered and skipped."
+  ones) as seon.lib/summ over the last 200 (none yet: nil), patch bytes, units rendered and
+  skipped, its asks in flight (:pending: each answer steps it, and sends a settled mark when
+  the last one is answered) and main's t as it holds it."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
   (let [q #(some-> % lib/summ)]
     {:passes (:passes st 0) :pass-ms (q (:pass-ms st)) :patch-pass-ms (q (:patch-pass-ms st)) :quiet-pass-ms (q (:quiet-pass-ms st))
      :patch-bytes (q (:patch-bytes st)) :event-age-ms (q (:event-age-ms st)) :rendered (get-in st [:counts :rendered] 0) :same-bytes (get-in st [:counts :same] 0)
-     :agents (count (get-in st [:view :agents])) :views (vec (keys (:views st)))}))
+     :agents (count (get-in st [:view :agents])) :views (vec (keys (:views st)))
+     :pending (count (:pending st)) :main-t (get-in st [:main :t])}))
 
 ;;; --- the step-fn -------------------------------------------------------------------------------
 

@@ -417,6 +417,42 @@
           (for [a attrs :let [old (get x a)] :when (and (some? old) (not (contains? now a)))]
             [:db/retract e a (if ((set (vals pointer)) a) (:db/id old) old)]))))
 
+(def meaning
+  "What a definition says of itself that text describing it relies on, so what a wiki section
+  citing it goes stale on (seon.problems/stale-sections) and an eval that changes it shows
+  (meaning-changes): its contract and its docstring, the facts def-tx asserts and retracts
+  (DECISIONS Dogfood rulings; the contract carries the arity)."
+  [:var/contract :var/doc])
+
+(defn meaning-changes
+  "What tx-data (an eval's definitions, def-tx's, before they are transacted on db) changes of
+  each existing var's `meaning`: [{:var :was :now :cited-by}], :was and :now its changed
+  attributes' values (a removed one absent from :now), :cited-by the wiki sections citing the var
+  (their :seon.section/references), each with the form that reads it. A new var changes nothing a
+  section relied on; nil when nothing changed. Cost: the tx-data walked once, then per var it
+  names one entity read and one index seek of its citations."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.db/tx-data] [:maybe [:vector :seon.program/meaning-change]]]}
+  [db tx-data]
+  (let [asserted (for [m tx-data :when (and (map? m) (symbol? (:var/name m)) (some #(contains? m %) meaning))] [(:var/name m) (select-keys m meaning)])
+        retracted (for [x tx-data :when (and (vector? x) (= :db/retract (first x)) (some #{(nth x 2 nil)} meaning))
+                        :let [n (:var/name (d/entity db (second x)))] :when n]
+                    [n (nth x 2)])
+        names (distinct (concat (map first asserted) (map first retracted)))
+        changes (for [n names
+                      :let [e (d/entity db [:var/name n])] :when e
+                      :let [was (into {} (keep (fn [a] (some->> (get e a) (vector a)))) meaning)
+                            now (reduce (fn [m a] (dissoc m a)) (reduce merge was (for [[k v] asserted :when (= k n)] v))
+                                        (for [[k a] retracted :when (= k n)] a))
+                            changed (filter #(not= (get was %) (get now %)) meaning)]
+                      :when (seq changed)]
+                  {:var n :was (select-keys was changed) :now (select-keys now changed)
+                   :cited-by (vec (sort-by :section (for [dt (d/datoms db :avet :seon.section/references (:db/id e))
+                                                          :let [a (:seon.section/address (d/entity db (:e dt)))]]
+                                                      ;; the form's head named, not quoted: the reach walk follows a quoted name,
+                                                      ;; and every test reaching this would reach the help page's file reads
+                                                      {:section a :read (list (symbol "my.agent" "help") a)})))})]
+    (not-empty (vec changes))))
+
 (defn- def-keys
   "The definition keys account acct makes: its vars, methods, extensions and, for an ns
   form, its namespace."
@@ -902,9 +938,13 @@
                     (not (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f)))))))
 
 (def ^:private names-only
-  "The vars whose forms only name other vars, as quoted data (the reach walk follows a quoted
-  name): reaching one is not using what it names."
-  '#{seon.program/tree-readers seon.program/env-readers})
+  "The vars whose forms only name other vars, as quoted data: reaching one is neither using nor
+  reaching what it names, so their references give the reach walk no edges. seon.config/schema-forms
+  is every schema baked into one literal, whose :seon.render/* properties name every render: an
+  edge from it put every render, and through seon.docs/cited the tree, under every contracted
+  call (680 of 706 tests took the tree digest, 2026-10-25); a check reaches the schemas it
+  checks through its contract's own schema rows, and the baked schemas are :env."
+  '#{seon.program/tree-readers seon.program/env-readers seon.config/schema-forms})
 
 (defn- uses?
   "Does form f use one of vars (:seon.config.source/process-vars or -binary-vars)? A form uses
@@ -959,7 +999,10 @@
         test-ids (set (keep var-form tests))
         edges (fn [f] (if (schema-row? f)
                         (vec (:schema f))
-                        (vec (concat (remove test-ids (keep var-form (:refs f)))
+                        ;; a names-only form names vars as data: no edges from its references,
+                        ;; its contract's, methods' and data's kept
+                        (vec (concat (when-not (some (fn [[k s]] (and (= :var k) (names-only s))) (:defines f))
+                                       (remove test-ids (keep var-form (:refs f))))
                                      (for [s (defined f :var)
                                            id (concat (get methods s) (get impls s) (get contract s) (keep var-form (get data-refs s)))]
                                        id)))))
@@ -1088,7 +1131,7 @@
   ns tail is added, replaced or removed, and not on a write of data. What a main run of the test
   service reads of main's program (seon.root/prove!): per-test digests (reach-digests) need the
   checkout's tests loaded, which is the run's own work. Cost: one read of three attributes'
-  datoms (measured 2026-10-24 on the standing root's main, 2699 forms, 660 schema entries, 129
+  datoms (measured on the standing root's main, 2699 forms, 660 schema entries, 129
   namespaces: 0.79M ticks, 5.0 MB, of which the index read is 0.52M ticks, 3.9 MB)."
   {:malli/schema [:=> [:cat :seon.host/db] :string]}
   [db]
@@ -1108,6 +1151,26 @@
                   [:=> [:cat :seon.host/db :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]]] [:map-of :any [:map [:digest :string] [:process? :boolean] [:binary? :boolean]]]]]}
   ([db inputs] (reach-index db inputs nil))
   ([db inputs roots] (graph-index (reach-graph db (:data-refs inputs)) inputs roots)))
+
+(defn process-path
+  "Why test t of graph g (reach-graph's) is a process test: the shortest chain of calls from its
+  form to a form that uses a process var (:seon.config.source/process-vars), as the vars each
+  form on it defines, and the process vars that last form uses: {:uses [var ...] :through [var
+  ...]}, or nil when t reaches none. Cost: a breadth-first walk of what t reaches, stopping at the
+  first form that uses one."
+  {:malli/schema [:=> [:cat :map :qualified-symbol] [:maybe [:map [:uses [:vector :qualified-symbol]] [:through [:vector :qualified-symbol]]]]]}
+  [{:keys [rows defs adj proc]} t]
+  (when-let [start (peek (get defs t))]
+    (let [pvars (cfg/value :seon.config.source/process-vars)
+          vars-of (fn [id] (sort-by str (keep (fn [[k s]] (when (= :var k) s)) (:defines (rows id)))))]
+      (loop [frontier [start] from {start nil}]
+        (when (seq frontier)
+          (if-let [hit (first (filter proc frontier))]
+            {:uses (vec (sort-by str (filter pvars (:refs (rows hit)))))
+             :through (vec (mapcat vars-of (reverse (take-while some? (iterate from hit)))))}
+            (let [step (for [id frontier w (adj id) :when (not (contains? from w))] [w id])
+                  from' (reduce (fn [m [w id]] (if (contains? m w) m (assoc m w id))) from step)]
+              (recur (vec (distinct (map first step))) from'))))))))
 
 (defn process-tests
   "The keys of index (reach-index's answer) that reach a process of their own (a shell, a

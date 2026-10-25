@@ -16,12 +16,14 @@ Updated 2026-10-25 by root. Sessions are linked to root's session (list_sessions
 
 | Session | Last done | Now / next |
 |---|---|---|
-| **Agent loop** (Opus) | design r2; delivery measured: main-first (§3a); main carrier (jolt 0cf54944); part 1 static fork server (734da4c1c) | self-review, pin bump, then parts 2-4; owns the fork hang (seon.lib/a-fork-from-a-threaded-process-never-hangs) |
-| **Agent view r3** (Opus) | docs at levels, dogfood merged | jolt/dogfood-rulings reverted on main (10 reconciler tests changed class): finding the edge; story pulls kept on jolt/story-pulls |
-| **Printer** (Opus) | audit, 144-line elision fixed, flat cost (jolt/printer-everywhere) | the reach edge (680 of 706 tests take the tree; 2 program-test reds), reply budget 16,000 |
-| **Root as one system** | judge through the test service merged | three main-test/check-test reds from the full run; cases 3-4 after the loop's parts |
-| **Full-run reds** (Opus) | started 2026-10-25 | bin/check 100: idle, record, durable-read, 6 e2e, swarm red on main |
-| ctx-atom (idle) | design r3; §11 superseded | builds after the loop's part 1 merges |
+| **Root as one system** (stability lead) | the full run's test reds; reach tasks filed; stability sweep (notes/stability-2026-10-25.md) | waits that never end at their producer: await-db first, then the runner's fork, then Jolt deadlock detection |
+| **Agent loop** (Opus) | parts 1-2 and the Jolt poller pin merged; delivery main-first | part 3 (park, wake) waits for a run turn |
+| **Agent view r3** (Opus) | dogfood rulings, seon_done verdict merged | the agent-test hang fix (jolt/done-tests-wait-from-before), then the value view (approved), grep ranking |
+| **Related sections** | search comparison (notes/related-search-2026-10-25.md) | (b) fused defaults ready soon, then (a) :form/keywords |
+| **Printer** (Opus) | code as code, one cut, generous budget | 5 reds of its own to fix, then ready |
+| ctx-atom (idle) | design r3; §11 superseded | builds after the loop's parts |
+
+Machine rule (owner gaming, 2026-10-25): one heavy Seon run at a time, in root's order.
 
 Baseline: `notes/baseline-2026-10-25.md`.
 

@@ -506,11 +506,13 @@
 
  ;; ==== the printer (seon.print: every value a person or a model reads) ========================
 
- ;; Unit: tokens a reply's value may spend. Provenance: v1's
- ;; :seon.config.render.agent/token-budget (owner 2026-10-12: print more, so help and the
- ;; current-state block show whole). Past it the value is cut, every cut carrying the form
- ;; that reads its rest.
- :seon.config.render.agent/token-budget 6144
+ ;; Unit: tokens a reply's value may spend, wherever an eval's value is shown (the model's
+ ;; tool message, the agent's page). Provenance: v1's 6144 (owner 2026-10-12: print more, so
+ ;; help and the current-state block show whole), raised to 16000 (owner 2026-10-25: "a
+ ;; generous context budget"; main's problems through their render measured 14,218 tokens
+ ;; whole, cut at 6144; notes/printer-audit-2026-10-25.md). Past it the value is cut, every
+ ;; cut carrying the form that reads its rest.
+ :seon.config.render.agent/token-budget 16000
  ;; Unit: nested levels shown (v1's :seon.config.render.agent/max-depth).
  :seon.config.render.agent/max-depth 8
  ;; Unit: characters. A value whose laid-out text is at most this wide is never cut: its cut
@@ -525,10 +527,6 @@
  :seon.config.render.agent/sort-bound 64
  ;; Unit: characters per printed line (session P1's printer, matching v1's corpus output).
  :seon.config.render/width 72
- ;; Unit: levels. Nesting levels the printer indents; a deeper level prints at the last
- ;; indent. Provenance: the value seon.print.emit held as a literal (shrink). At the bound:
- ;; deeper structure is laid out flush with its parent, never cut.
- :seon.config.render/nest-depth 6
  ;; Unit: tokens for a value shown inside another: a refused argument, a test's expected and
  ;; actual, ex-data (session P1).
  :seon.config.render/part-budget 256
@@ -562,6 +560,17 @@
  ;; that listed them named the same functions as a run listing none (my.agent/prove,
  ;; seon.model/provider-error, seon.docs/view, seon.print/print-value): no measured gain.
  :seon.config.render/similar 0
+ ;; Unit: lines of each kind. The wiki sections, program functions and schema keys nearest the
+ ;; task's plan (seon.context/related: its references and seon.vector/near on its vector, fused by
+ ;; seon.vector/rrf) that the plan does not cite, each a line at summary depth in the screen form
+ ;; (my.task/related), made again when the plan's vector changes; 0 shows none. Not
+ ;; :seon.config.render/similar: that counts program functions in the task story, the run's fixed
+ ;; part (for the prompt cache), and is off by step 6's measurement; these follow the plan as it is
+ ;; rewritten. Provenance: the owner, 2026-10-25 ("embeddings on our docs ... pulling in related
+ ;; concepts that we can refine over the session"); 5 each found 0.51 of what 31 merged tasks
+ ;; changed in functions, 0.71 in sections and 0.56 in schema keys, at about 370 + 370 + 33 tokens a
+ ;; turn (notes/related-search-2026-10-25.md).
+ :seon.config.render/related 5
  ;; Semantic search's pyramid (seon.vector/near, docs/vector.md#the-pyramid), measured against an
  ;; exact 768-dim search, recall@10 (EmbeddingGemma-2):
  ;; - bin/check vectors, Seon's whole text (2,681: 1,783 forms with the schemas, 321 sections, the

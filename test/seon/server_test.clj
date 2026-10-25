@@ -94,3 +94,30 @@
     (is (re-find #":to \"demo/t#1\"" (:text taken)) "to the run the agent works")
     (is (re-find #":id \"m-" (:text taken)) "the fact's id, which the agent writes on its branch")
     (is (contract/error? none) "no live agent a9: refused, as root refuses")))
+
+(deftest the-context-op-answers-what-a-model-is-sent
+  ;; dogfood 2026-10-25: an outside agent read the story and turn sections only, not the system
+  ;; prompt and screen a model is sent, and its (my.task/status) answered :seon.turn/not-observed.
+  ;; Its context read is its turn: the screen's forms run as a model turn's do, and the read
+  ;; answers the request's text, system prompt first, screen last
+  (let [[ctx status sent] (at/in-agent [{:op :context :agent "a1"} "(my.task/status)"
+                                        {:op :eval :agent "root"
+                                         :code (str "(let [db (:db @(seon.root/branch-db sys (seon.task/default-branch \"demo/t\")))]"
+                                                    " (datahike.api/q '[:find [?n ...] :where [?t :seon.turn/origin :outside] [?t :seon.turn/sent _] [?t :seon.turn/n ?n]] db))")}])
+        text (:context ctx)]
+    (is (clojure.string/starts-with? text "# You are a Seon agent") "the system prompt, first")
+    (is (clojure.string/includes? text "(my.task/status)") "the screen's forms, as a model's request ends with them")
+    (is (clojure.string/includes? text "(my.branch/changes)"))
+    (is (not (contract/error? (:value status))) (pr-str (:value status)))
+    (is (contains? (:value status) :proofs) "status answers as the turn measured it")
+    (is (seq (:value sent)) "and the read records what it sent, as a model turn does (the debug page shows it)")))
+
+(deftest done-answers-the-judges-reasons
+  ;; dogfood 2026-10-25: seon_done answered {:judging ...} and ended the agent, so an outside agent
+  ;; never saw its verdict. It answers when main holds the judgement: here the one proof was never
+  ;; written, so the done rule refuses, the task is held, and the answer says why
+  (let [[done] (at/in-agent [{:op :done :agent "a1"}])]
+    (is (= :closed (:status done)) (pr-str done))
+    (is (= :red (:outcome done)))
+    (is (clojure.string/includes? (str (get-in done [:held :seon.task/failure :reason])) "proof-unknown demo-test/t")
+        "the done rule's reasons, as the judge wrote them on the held task")))

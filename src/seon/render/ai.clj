@@ -14,8 +14,7 @@
   map (`error`), a task (`task`), a run (`run`), a problem row (`problem-row`) and main's
   problems (`report`). Each render chooses and orders what to show as a value (its `-data`
   function: an array map, what matters first), and the one printer prints that value once at
-  the reader's budget, so nothing is cut before the printer (owner's rule, the clipping audit
-  2026-10-25): a cut is the printer's, and reads its rest through the form that makes the value
+  the reader's budget, so nothing is cut before the printer (the owner's rule): a cut is the printer's, and reads its rest through the form that makes the value
   again from opts :handle ((seon.render.ai/task-data result/h3)), the value's result handle or a
   form that reads it."
   (:refer-clojure :exclude [defn defn-])
@@ -113,12 +112,13 @@
 
 (defn report-data
   "Every problem main recorded (seon.problems/report): its t, then by class each class's count
-  and its rows, open first, each by `problem-data`."
+  and its rows, open first, each by `problem-data` without its class (the key it is under)."
   {:malli/schema [:=> [:cat :seon.problems/report] :map]}
   [{:keys [t classes]}]
   (ordered :problems-on-main-at-t t
+           ;; a row under its class does not say its class again
            :classes (into (sorted-map) (for [[c {:keys [n rows]}] classes :when (seq rows)]
-                                         [c {:n n :rows (mapv #(problem-data (assoc % :class c)) (sort-by #(if (false? (:open? %)) 1 0) rows))}]))
+                                         [c {:n n :rows (mapv #(dissoc (problem-data (assoc % :class c)) :class) (sort-by #(if (false? (:open? %)) 1 0) rows))}]))
            :none (when (every? (comp empty? :rows val) classes) true)))
 
 (defn report

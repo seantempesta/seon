@@ -24,7 +24,7 @@
 (def system-page
   "The system prompt, docs/prompt.md: what every agent reads first (its system message, the same
   bytes for every agent and turn, so a provider caches it): the standard format's short prompt
-  (owner, 2026-10-23: the model's context is the standard format; the help page is read on
+  (the owner's ruling: the model's context is the standard format; the help page is read on
   demand, my.agent/help). Main holds it as the wiki's sections, as the help page."
   "docs/prompt.md")
 
@@ -40,8 +40,10 @@
   message only when it says something."
   {:malli/schema [:=> [:cat :map] :map]}
   [r]
-  (cond-> {:assert (:expected r) :got (or (:got r) (:actual r))}
-    (:message r) (assoc :message (:message r))))
+  (let [code #(cond-> % (string? %) print/code)]
+    ;; an assertion as written is code (seon.print/code), printed as in the test file
+    (cond-> {:assert (code (:expected r)) :got (code (or (:got r) (:actual r)))}
+      (:message r) (assoc :message (:message r)))))
 
 (defn callees
   "The program functions proof p calls directly (one level: its recorded form's :form/refs,
@@ -59,7 +61,7 @@
 
 (defn- refused
   "The done rule's reasons as the agent reads them, beyond its own red proofs (shown with
-  the proofs): a red test names its failures, a contract gap its var, a design step that
+  the proofs): a red test names its failures (a stray one the form that makes it a proof), a contract gap its var, a design step that
   has not improved its plan the call that does, an open problem its work made true what it
   is (seon.problems/caused)."
   {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done] [:vector :map]] [:vector :map]]}
@@ -75,7 +77,10 @@
              (case reason
                (:regression :stray-red) (cond-> {:reason reason :test symbol}
                                           (seq (filter #(= symbol (:test %)) reds))
-                                          (assoc :failures (mapv failure (filter #(= symbol (:test %)) reds))))
+                                          (assoc :failures (mapv failure (filter #(= symbol (:test %)) reds)))
+                                          ;; a red test the agent wrote is a proof it has not registered, or one to delete
+                                          (= :stray-red reason)
+                                          (assoc :do (list 'my.task/update! :seon.task/proofs 'conj (list 'quote symbol))))
                :no-design {:reason reason :unchanged :seon.task/plan
                            :do '(my.task/update! :seon.task/plan str "\n\n" "<what the implement step must do>")}
                ;; no result: never written, or never run; what writes and runs it
@@ -160,6 +165,95 @@
                             (vector/near db te all {:of :form/id :shortlist all :fine-dims all}))
              :more "(my.agent/similar 'ns/f) or (my.agent/similar \"text\"): more by meaning"})))
 
+(defn- related-count
+  "How many of each kind task entity te's screen shows: :seon.config.render/related through the
+  one resolver (its task, its model, the config), as `similar` reads its count."
+  {:malli/schema [:=> [:cat :seon.host/db :int] nat-int?]}
+  [db te]
+  (let [t (d/pull db [:seon.task/model] te)]
+    (cfg/value :seon.config.render/related {:task t :model (:seon.task/model t)})))
+
+(defn- by-frequency
+  "xs best first by how often each occurs, the name breaking a tie."
+  {:malli/schema [:=> [:cat [:sequential :any]] [:vector :any]]}
+  [xs] (mapv peek (sort (map (fn [[x n]] [(- n) (str x) x]) (frequencies xs)))))
+
+(defn related
+  "What the work on task entity te's plan is likely to need beyond what the plan cites: the
+  :seon.config.render/related wiki sections, program functions and schema keys nearest it, each
+  kind ranked by the plan's references and by meaning fused by reciprocal rank (seon.vector/rrf):
+  the graph from its citations (the cited vars' callers and callees, the sections naming a cited
+  var, the sections a cited section references or is referenced by, the schema keys in the plan
+  and the cited vars' text) and seon.vector/near on the plan's vector. Fused, they found more of
+  what 31 merged tasks changed than either alone (docs/vector.md#what-the-work-is-likely-to-need-as-an-eval: functions
+  0.51 at 5 against 0.38 by meaning alone, sections 0.71 against 0.67, schema keys 0.56 against
+  0.37). Answers {:sections [address] :functions [sym] :schemas [key]}, those the plan cites left
+  out (the story shows them); nil when the count is 0 (none shown) or the plan has no vector yet."
+  {:malli/schema [:=> [:cat :seon.host/db :int]
+                  [:maybe [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]]]]}
+  [db te]
+  (let [k (related-count db te)]
+    (when (and (pos? k) (vector/vector-of db te))
+      (let [{:keys [plan]} (:seon.task/accumulated (task/task db (:seon.task/id (d/pull db [:seon.task/id] te))))
+            cites (ref/references db plan)
+            vars (filterv #(= :var (docs/citation-kind db %)) cites)
+            fns (into #{} (keep :seon.ref/name) vars)
+            ;; a wiki page's section only: a cited file is read whole by its view
+            secs (into #{} (comp (filter #(and (some-> (:seon.ref/path %) (str/ends-with? ".md")) (= :view (docs/citation-kind db %))))
+                                 (keep #(:seon.ref/address (docs/cited-view db %))))
+                       cites)
+            schema? #(some? (pdb/eid db :schema/key %))
+            src (str/join "\n" (keep #(docs/source-of db %) fns))
+            ;; a program function: no test, no macro (every contracted form names seon.contract/defn),
+            ;; nothing of a test namespace (its fixtures); the graph and the meaning halves alike
+            function? #(and (not (#{:test :macro} (:var/kind (d/entity db [:var/name %]))))
+                            (not (str/ends-with? (namespace %) "-test")))
+            near (fn [of f] (into [] (comp (keep (comp f first)) (distinct)) (vector/near db te (* 4 k) {:of of})))
+            graph {:functions (by-frequency (concat (mapcat #(docs/callers db %) fns) (mapcat #(map :var (callees db %)) fns)
+                                                    (for [a secs n (:seon.section/names (d/entity db [:seon.section/address a]))] n)))
+                   :sections (by-frequency (concat (for [n fns e (d/q '[:find [?e ...] :in $ ?n :where [?e :seon.section/names ?n]] db n)]
+                                                     (:seon.section/address (d/entity db e)))
+                                                   (for [a secs r (:seon.section/references (d/entity db [:seon.section/address a]))] (:seon.section/address r))
+                                                   (for [a secs r (:seon.section/_references (d/entity db [:seon.section/address a]))] (:seon.section/address r))))
+                   :schemas (by-frequency (filter schema? (concat (filter keyword? (keep :seon.ref/name cites))
+                                                                     (map #(keyword (subs % 1)) (re-seq #":[\w.\-]+/[\w.\-?!*]*[\w?!*]" src)))))}
+            meaning {:functions (near :form/id #(some-> (d/entity db %) :var/_form first :var/name))
+                     :sections (near :seon.section/address #(:seon.section/address (d/entity db %)))
+                     :schemas (near :schema/key #(:schema/key (d/entity db %)))}
+            cited {:functions fns :sections secs :schemas #{}}]
+        (into {} (for [kind [:sections :functions :schemas]]
+                   [kind (into [] (comp (remove (cited kind)) (remove nil?) (filter (if (= kind :functions) function? any?)) (take k))
+                               (vector/rrf [(graph kind) (meaning kind)]))]))))))
+
+(defn related-at
+  "`related` for task entity te on db, as {:key :value}: held (an earlier answer) reused when its
+  :key is the same: te, the count shown and mark, a value that changes whenever the vectors
+  `related` reads do (an agent's: the transaction of its branch's last vector write, nil before
+  one; every text it reads, the plan, the plans along :needs and the sections, is embedded by
+  that write when it changes). So an unchanged plan computes nothing."
+  {:malli/schema [:=> [:cat :seon.host/db :int :any [:maybe :map]] [:map [:key :any] [:value [:maybe :map]]]]}
+  [db te mark held]
+  (let [k [te (related-count db te) mark]]
+    (if (= k (:key held)) held {:key k :value (related db te)})))
+
+(defn related-view
+  "What `related` answers, each a line at summary depth: a section its address and its lead's
+  first sentence (seon.docs/view; its heading when it has no lead), a function its name and its
+  doc's first sentence, a schema key itself; with the forms that read one whole (naming the
+  text's key: a step-6 run's model read the view with (:text ...) eight times over) and search
+  further: what my.task/related and my.agent/related answer. nil when there is nothing."
+  {:malli/schema [:=> [:cat :seon.host/db [:map [:sections {:optional true} [:vector :string]] [:functions {:optional true} [:vector :qualified-symbol]]
+                                           [:schemas {:optional true} [:vector :qualified-keyword]]]]
+                  [:maybe :map]]}
+  [db {:keys [sections functions schemas]}]
+  (when (or (seq sections) (seq functions) (seq schemas))
+   (cond-> {}
+    (seq sections) (assoc :sections (mapv #(let [v (docs/view db % :summary)] (str % ": " (or (:seon.ref/summary v) (:seon.ref/heading v)))) sections))
+    (seq functions) (assoc :functions (mapv #(str % (some->> (:var/doc (d/entity db [:var/name %])) ref/lead-sentence (str ": "))) functions))
+    (seq schemas) (assoc :schemas schemas)
+    true (assoc :read "(:seon.ref/text (my.agent/help \"docs/page.md#anchor\")): one section's text whole; (source ns/f) a function; (my.schema/forms :ns/key) a schema's form"
+                :more "(my.agent/related \"your words\" 10): sections by any text; (my.agent/similar \"your words\"): functions and tasks too; (my.agent/callers 'ns/f)"))))
+
 (defn run-state
   "The task story: task t's run sections as data, the same each turn of a run: the task (its
   plan as it accumulated along :needs, prerequisites first); its write set, each var the plan
@@ -210,11 +304,13 @@
              ;; and the program functions it calls; one not defined yet says so
              :proofs (vec (for [p (sort-by str proofs)
                                 :let [src (docs/source-of db p)
-                                      ;; no result: not written yet, the run failed as a whole, or it asserted nothing
+                                      ;; no result: not written yet, the run failed as a whole, or it never ran (unknown,
+                                      ;; the judge's word: seon.reconcile/done-explain)
                                       st (get results p (cond (nil? src) :undefined (seq test-run-errors) :not-run :else :no-assertions))
                                       fs (filter #(= p (:test %)) reds)]]
                             (cond-> {:test p :status st}
-                              (and src (not= :pass st)) (assoc :source src)
+                              ;; its source is code, printed as in its file (seon.print/code)
+                              (and src (not= :pass st)) (assoc :source (print/code src))
                               (seq fs) (assoc :failures (mapv failure fs))
                               (and src (not= :pass st) (seq (callees db p))) (assoc :calls (callees db p)))))}
       max-turns (assoc :turn (str (inc turn) " of " max-turns))
@@ -266,7 +362,10 @@
         ;; collapsed (opts :collapsed, an older one the history keeps small): its handle and its value in one line
         text (if (:collapsed opts)
                (str (get-in record [:response :handle]) " ⇒ " (:line record))
-               (print/record-text (cond-> record (seq (:fold opts)) (update :response folded (:fold opts)))))]
+               ;; a screen eval's cost is root's (its forms run each turn), shown on the page, not the model's
+               (print/record-text (cond-> record
+                                    (seq (:fold opts)) (update :response folded (:fold opts))
+                                    (= "screen" by) (update :response dissoc :ms :ticks :bytes))))]
     (if call-id
       ;; as the model sent it: the reply's text, and the call's own prose argument when it gave one
       ;; (a record with neither, from before the prose argument, replays its prose as the text)

@@ -47,6 +47,16 @@
                     render (assoc :render render)
                     seen (assoc :seen seen)))))
 
+(defn code
+  "Source text s (a form's :form/src, a test's source, an assertion as written) as code: the
+  printer prints it verbatim at its place, as in its file (comments, line breaks and quotes as
+  written, every later line indented to where it stands), never as a string literal; cut, it is
+  cut by the one string cutter and its cut reads the rest, `(subs (:seon.print/code (get-in
+  result/e3 [...])) 1200)`. Plain data, {:seon.print/code s}: a record stores it and reads it
+  back as it is. The producer says it is code; the printer never guesses from a string's text."
+  {:malli/schema [:=> [:cat :string] [:map [:seon.print/code :string]]]}
+  [s] {:seon.print/code s})
+
 (defn text
   "`v` as text under budget tokens: the printed text, or the error's message when even
   its first part does not fit."
@@ -61,11 +71,12 @@
   agent): printed by the one printer under its handle, so a cut names the form that reads its
   rest, `(get-in result/e43 [:value ..])`, and a value an earlier response showed (seen: {:strings
   :colls}, `seen`) prints as the form that reads it again, `(:value result/e12)`. Made when r is
-  sent or shown, never stored (seon.repl/record-details keeps the value)."
+  sent or shown, never stored (seon.repl/record-details keeps the value). A response with each
+  form's value (:values) prints them, its last once: :value is that last."
   {:malli/schema [:function [:=> [:cat :map] :string] [:=> [:cat :map [:maybe :map]] :string]]}
   ([r] (response-text r nil))
   ([r seen]
-   (let [p (print-value r (cond-> {:handle (:handle r)} (seq seen) (assoc :seen seen)))]
+   (let [p (print-value (cond-> r (contains? r :values) (dissoc :value)) (cond-> {:handle (:handle r)} (seq seen) (assoc :seen seen)))]
      (or (:text p) (:seon.error/message p)))))
 
 (defn seen

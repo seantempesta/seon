@@ -798,3 +798,23 @@
       (is (= [(spawn "a" 2)] (actions-for (db-of [(decl "a")] :extra (into (into (run "a" 1 :closed :results red :outcome :waiting :boot "boot-0")
                                                                                    [{:seon.run/id "demo/a#1" :seon.run/taken 0}])
                                                                              (msg "m1")))))))))
+
+(deftest a-proof-a-branch-registers-reaches-main-at-the-runs-end
+  ;; owner, 2026-10-25 (Dogfood rulings): a design registers the red proofs it writes
+  ;; (my.task/update! :seon.task/proofs conj 't); the judge carries them onto main like the plan,
+  ;; so the done rule sees them at design and the implement step inherits them
+  (let [base (db-of [(decl "a" :proofs #{}) (decl "b" :proofs #{'demo-test/kept-test 'demo-test/dropped-test})] :extra (run "a" 1 :running))
+        branch (d/db-with base [[:db/add [:seon.task/id "demo/a"] :seon.task/proofs 'demo-test/a-design-wrote-test]
+                                [:db/retract [:seon.task/id "demo/b"] :seon.task/proofs 'demo-test/dropped-test]])
+        judged (d/db-with base (#'r/judge-tx {:db base :boot "boot-1" :rid 0 :flights {} :pending {}}
+                                             {:act {:run "demo/a#1" :task "demo/a"}} {} {:db branch :base base :ours [] :uncontracted [] :unmerged []}))]
+    (is (= #{'demo-test/a-design-wrote-test} (set (:seon.task/proofs (task/task judged "demo/a")))) "an added proof reaches main")
+    (is (= #{'demo-test/kept-test} (set (:seon.task/proofs (task/task judged "demo/b")))) "a dropped one leaves it")
+    (is (= #{'demo-test/a-design-wrote-test} (get-in (r/index judged) [:acc "demo/a"])) "the done rule's input holds it")
+    (testing "a proof set main changed too, differently, is a conflict for root"
+      (let [main (d/db-with base [[:db/add [:seon.task/id "demo/b"] :seon.task/proofs 'demo-test/mains-test]])
+            {:keys [tx conflicts]} (task/carry-tx base branch main)]
+        (is (not-any? #(= [:seon.task/id "demo/b"] (second %)) tx))
+        (is (= [{:task "demo/b" :attr :seon.task/proofs :base #{'demo-test/kept-test 'demo-test/dropped-test}
+                 :ours #{'demo-test/kept-test} :theirs #{'demo-test/kept-test 'demo-test/dropped-test 'demo-test/mains-test}}]
+               (filter #(= "demo/b" (:task %)) conflicts)))))))
