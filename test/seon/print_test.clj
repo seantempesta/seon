@@ -366,3 +366,76 @@
           b [10 40 400]]
     (let [r (seon/print-value v {:handle 'result/h1 :budget b})]
       (is (or (:text r) (= :seon.render.value/insufficient-floor-budget-error (:seon.error/type r))) (pr-str [w b r])))))
+
+;; ---- the page's shapes: the hiccup fold over the same op stream (the text is unchanged) ---
+
+(defn- elements
+  "Every element of hiccup h whose tag is tag (and, given, whose class is cls)."
+  ([h tag] (elements h tag nil))
+  ([h tag cls] (filter #(and (vector? %) (= tag (first %)) (or (nil? cls) (= cls (:class (second %))))) (tree-seq coll? seq h))))
+
+(deftest a-map-is-key-and-value-rows
+  (let [{:keys [text html]} (seon/print-value {:a 1 :b "x" :c {:d 2}} {:outputs #{:text :hiccup}})
+        grids (elements html :div "seon-print-grid")]
+    (is (= {:a 1 :b "x" :c {:d 2}} (clojure.edn/read-string text)) "the text is the printer's, reading back as the value")
+    (is (= 2 (count grids)) "the map and the map in it, each a grid")
+    (is (= 3 (count (filter #(and (vector? %) (= "seon-print-entry" (:class (second %)))) (first grids)))) "a row per entry")
+    (is (empty? (elements html :details)) "a map of scalars nested in the value printed folds nowhere")
+    (is (empty? (elements (first grids) :span "seon-print-delimiter")) "no braces or commas: the grid is the layout")))
+
+(deftest maps-sharing-keys-are-a-table
+  (let [v [{:test 'demo/a :status :fail :n 1} {:test 'demo/b :status :pass}]
+        {:keys [text html]} (seon/print-value v {:outputs #{:text :hiccup}})
+        [table] (elements html :table "seon-print-table")]
+    (is (= v (clojure.edn/read-string text)) "the text is the printer's, reading back as the value")
+    (is table "two maps sharing two keys")
+    (is (= #{":test" ":status" ":n"} (set (map #(last (last %)) (elements table :th)))) "a column per key")
+    (is (= 3 (count (elements table :tr))) "a header, and a row per map")
+    (is (= 6 (count (elements table :td))) "a cell per key per row, the missing :n empty")
+    (is (nil? (first (elements (seon/print-value [{:a 1} {:a 2}] {:outputs #{:hiccup}}) :table))) "one shared key: no table")))
+
+(deftest code-and-prose-read-as-themselves
+  (let [src "(defn f\n  \"doc\"\n  [x] ; a comment\n  x)"
+        code (seon/print-value {:source (seon/code src)} {:outputs #{:text :hiccup}})
+        prose (seon/print-value {:doc {:seon.print/prose "Says one thing.\nThen another."}} {:outputs #{:text :hiccup}})]
+    (is (str/includes? (:text code) "; a comment") "code prints verbatim")
+    (is (= [src] (map last (elements (:html code) :code "language-clojure"))) "on the page, verbatim in <pre><code>, highlighted as Clojure")
+    (is (str/includes? (:text prose) "Says one thing.\n") "prose prints unquoted, its line breaks kept")
+    (is (not (str/includes? (:text prose) "\"Says")))
+    (is (= ["Says one thing.\nThen another."] (map last (elements (:html prose) :p "seon-print-prose"))) "on the page, a paragraph")))
+
+(deftest a-cut-of-prose-reads-its-rest-as-prose
+  (let [s (str/join "\n" (repeat 400 "a line of the plan"))
+        text (:text (seon/print-value {:plan {:seon.print/prose s}} {:handle 'result/e3 :budget 200}))]
+    (is (str/includes? text "(:seon.print/prose (get-in result/e3 [:plan]))") text)))
+
+(deftest a-handle-links-to-its-row
+  (let [{:keys [html]} (seon/print-value {:read 'result/e12 :name 'demo/f} {:outputs #{:hiccup}})]
+    (is (= [{:class "seon-print-symbol" :href "#eval-e12"}] (map second (elements html :a))) "result/e12 links to #eval-e12; demo/f is a symbol")))
+
+(deftest a-table-keeps-its-cuts-and-nested-cells
+  ;; self-review: a cut in a table is a row of its own, a nested map is its cell, and cells are
+  ;; found by key whatever order each map prints its keys in
+  (let [v (vec (for [i (range 40)] {:test (symbol "demo-test" (str "t" i)) :status (if (even? i) :pass :fail) :at {:line i :file "f.clj"}}))
+        {:keys [html]} (seon/print-value v {:outputs #{:hiccup} :budget 300})
+        [table] (elements html :table "seon-print-table")
+        rows (rest (elements table :tr))]
+    (is table)
+    (is (some #(str/includes? (pr-str %) "seon-print-elision") rows) "the collection's cut is a row of its own")
+    (is (seq (elements table :div "seon-print-grid")) "a nested map is its cell, a grid")
+    (is (some #(str/includes? (pr-str %) "demo-test/t") rows) "a row's cells under their keys")))
+
+(deftest a-lifted-map-keeps-its-namespace
+  ;; self-review: a map of one namespace's keys prints #:ns{...}; the grid drops the braces, so its
+  ;; caption keeps the namespace
+  (let [{:keys [text html]} (seon/print-value {:seon.run/id "r" :seon.run/status :done} {:outputs #{:text :hiccup}})]
+    (is (str/starts-with? text "#:seon.run{") text)
+    (is (= ["#:seon.run"] (map last (elements html :div "seon-print-caption"))))))
+
+(deftest a-cuts-form-reads-its-rest
+  ;; seon.print/read-rest reads what a cut's continuation reads, from the value its handle names
+  (let [v {:value {:proofs [{:t 1} {:t 2} {:t 3}] :src (seon/code "abcdef") :s "hello"}}]
+    (is (= [{:t 2} {:t 3}] (seon/read-rest '(drop 1 (get-in result/e5 [:value :proofs])) 'result/e5 v)))
+    (is (= {:seon.print/code "def"} (seon/read-rest '(subs (:seon.print/code (get-in result/e5 [:value :src])) 3) 'result/e5 v)) "code reads on as code")
+    (is (= "lo" (seon/read-rest '(subs (get-in result/e5 [:value :s]) 3) 'result/e5 v)))
+    (is (= 2 (seon/read-rest '(val (nth (seq (get-in result/e5 [:value :proofs 1])) 0)) 'result/e5 v)))))

@@ -1,0 +1,32 @@
+:program {:ok true, :datoms 61}
+:program {:ok true, :datoms 291}
+:create {:ok true, :datoms 20}
+:quiescent {:t 536874456, :root-causes []}
+:task sw/s0 {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s0#1 :done :green 1 1019]]}
+:task sw/s0-merge {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s0-merge#1 :merged :green 0 0]]}
+:task sw/s1 {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s1#1 :done :green 1 1019]]}
+:task sw/s1-merge {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s1-merge#1 :merged :green 0 0]]}
+:task sw/s2 {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s2#1 :done :green 1 1019]]}
+:task sw/s2-merge {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s2-merge#1 :merged :green 0 0]]}
+:task sw/s3 {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s3#1 :done :green 1 1019]]}
+:task sw/s3-merge {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s3-merge#1 :merged :green 0 0]]}
+:task sw/s4 {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s4#1 :done :green 1 1019]]}
+:task sw/s4-merge {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s4-merge#1 :merged :green 0 0]]}
+:task sw/s5 {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s5#1 :done :green 1 1020]]}
+:task sw/s5-merge {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s5-merge#1 :merged :green 1 1739]]}
+:task sw/s6 {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s6#1 :done :green 1 1020]]}
+:task sw/s6-merge {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s6-merge#1 :merged :green 1 1749]]}
+:task sw/s7 {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s7#1 :done :green 1 1020]]}
+:task sw/s7-merge {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s7-merge#1 :merged :green 1 1760]]}
+:task sw/s8 {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s8#1 :done :green 1 1051]]}
+:task sw/s8-merge {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s8-merge#1 :merged :green 1 1770]]}
+:task sw/s9 {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s9#1 :done :green 1 1074]]}
+:task sw/s9-merge {:execution :running, :done true, :blocked-by #{}, :runs [[sw/s9-merge#1 :merged :green 1 1780]]}
+:agents-reused [] :merges {:merge-runs {:merged 10}, :behind-reruns 0, :conflicts-measured 5, :held-tasks 0, :model-calls-in-merges 0} :fresh-agent {:handle result/e1,
+ :ms 1.85,
+ :ticks 62156,
+ :bytes 914480,
+ :value [100 101 102 103 104]}
+:checks {:not-done {}, :conflicts 5}
+:numbers {:wall-ms 11086, :runs 20, :merged 10, :turns-per-merged-task 1.5, :model-calls 0, :tokens 19078, :root-real-mb 772.9, :writer {:tx-count 474, :flushes 64, :batch-p50-ms 5.0, :tx-per-commit 1.01, :commits 467, :tx-per-s 34.0}, :root-errors []}
+SWARM FAILED

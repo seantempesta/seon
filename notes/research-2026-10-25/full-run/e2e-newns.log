@@ -1,0 +1,14 @@
+:program {:ok true, :datoms 0}
+:program {:ok true, :datoms 0}
+:create {:ok true, :datoms 2}
+:quiescent {:t 536873874, :root-causes []}
+:task newns/n {:execution :running, :done true, :blocked-by #{}, :runs [[newns/n#1 :done :green 1 1094]]}
+:task newns/n-merge {:execution :running, :done true, :blocked-by #{}, :runs [[newns/n-merge#1 :merged :green 0 0]]}
+:agents-reused [] :merges {:merge-runs {:merged 1}, :behind-reruns 0, :conflicts-measured 0, :held-tasks 0, :model-calls-in-merges 0} :fresh-agent {:handle result/e1,
+ :ms 90.712,
+ :ticks 17245478,
+ :bytes 97893536,
+ :value [9 (inc 1) [a b] true 1 [1 1 0 0] false true]}
+:checks {}
+:numbers {:wall-ms 2630, :runs 2, :merged 1, :turns-per-merged-task 1.0, :model-calls 0, :tokens 1094, :root-real-mb 773.0, :writer {:tx-count 51, :flushes 12, :batch-p50-ms 6.99, :tx-per-commit 0.93, :commits 55, :tx-per-s 40.0}, :root-errors []}
+E2E FAILED

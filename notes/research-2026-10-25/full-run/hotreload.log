@@ -1,0 +1,17 @@
+{:compiled-caller
+   {:before "[a/b \"x\"]", :after-redefining-its-callee "redefined"},
+ :checks
+   {:compiled-caller-reaches-the-redefinition true,
+    :redefined-step-ran true},
+ :health
+   {:status :running,
+    :count 7,
+    :state
+      {:seen 5,
+       :lists 1,
+       :t 536873814,
+       :flights 0,
+       :pending 0,
+       :quiet true,
+       :root-causes 0}}}
+HOTRELOAD OK

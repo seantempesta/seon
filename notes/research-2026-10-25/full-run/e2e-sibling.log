@@ -1,0 +1,17 @@
+:program {:ok true, :datoms 25}
+:program {:ok true, :datoms 59}
+:create {:ok true, :datoms 4}
+:after {:ok true}
+:quiescent {:t 536873929, :root-causes []}
+:task sibling/a {:execution :running, :done true, :blocked-by #{}, :runs [[sibling/a#1 :done :green 1 941]]}
+:task sibling/a-merge {:execution :running, :done true, :blocked-by #{}, :runs [[sibling/a-merge#1 :merged :green 0 0]]}
+:task sibling/b {:execution :running, :done true, :blocked-by #{}, :runs [[sibling/b#1 :done :green 1 967]]}
+:task sibling/b-merge {:execution :running, :done true, :blocked-by #{}, :runs [[sibling/b-merge#1 :merged :green 0 0]]}
+:agents-reused [] :merges {:merge-runs {:merged 2}, :behind-reruns 0, :conflicts-measured 0, :held-tasks 0, :model-calls-in-merges 0} :fresh-agent {:handle result/e1,
+ :value [2 30],
+ :ms 0.898,
+ :ticks 19314,
+ :bytes 280864}
+:checks {}
+:numbers {:wall-ms 3423, :runs 4, :merged 2, :turns-per-merged-task 1.0, :model-calls 0, :tokens 1908, :root-real-mb 773.6, :writer {:tx-count 100, :flushes 12, :batch-p50-ms 8.82, :tx-per-commit 0.98, :commits 102, :tx-per-s 49.0}, :root-errors []}
+E2E FAILED

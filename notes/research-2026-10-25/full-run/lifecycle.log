@@ -1,0 +1,101 @@
+{:gc-sweepers 0,
+ :threads
+   {:declared-running
+      {:gc-sweepers 0,
+       :roster
+         {"main" 1,
+          "jolt-shutdown" 1,
+          "jolt-timer" 1,
+          "jolt-io-poller" 1,
+          "jolt-carrier" 18,
+          "async-mixed" 20,
+          "seon-fs-events" 1}},
+    :declared-stopped
+      {:gc-sweepers 0,
+       :roster
+         {"main" 1,
+          "jolt-shutdown" 1,
+          "jolt-timer" 1,
+          "jolt-io-poller" 1,
+          "jolt-carrier" 18}}},
+ :cycles
+   [{:cycle 0,
+     :boot-ms 1387.45,
+     :running {},
+     :stopped {},
+     :stopped-os nil,
+     :left [],
+     :health #{:running}}
+    {:cycle 1,
+     :boot-ms 1120.95,
+     :running {},
+     :stopped {},
+     :stopped-os nil,
+     :left [],
+     :health #{:running}}
+    {:cycle 2,
+     :boot-ms 1041.42,
+     :running {},
+     :stopped {},
+     :stopped-os nil,
+     :left [],
+     :health #{:running}}
+    {:cycle 3,
+     :boot-ms 1034.54,
+     :running {},
+     :stopped {},
+     :stopped-os nil,
+     :left [],
+     :health #{:running}}
+    {:cycle 4,
+     :boot-ms 1039.27,
+     :running {},
+     :stopped {},
+     :stopped-os nil,
+     :left [],
+     :health #{:running}}
+    {:cycle 5,
+     :boot-ms 1052.76,
+     :running {},
+     :stopped {},
+     :stopped-os nil,
+     :left [],
+     :health #{:running}}
+    {:cycle 6,
+     :boot-ms 1093.4,
+     :running {},
+     :stopped {},
+     :stopped-os nil,
+     :left [],
+     :health #{:running}}
+    {:cycle 7,
+     :boot-ms 1056.97,
+     :running {},
+     :stopped {},
+     :stopped-os nil,
+     :left [],
+     :health #{:running}}
+    {:cycle 8,
+     :boot-ms 1078.27,
+     :running {},
+     :stopped {},
+     :stopped-os nil,
+     :left [],
+     :health #{:running}}
+    {:cycle 9,
+     :boot-ms 1082.88,
+     :running {},
+     :stopped {},
+     :stopped-os nil,
+     :left [],
+     :health #{:running}}],
+ :stop-ms
+   {:n 10, :min 25.7, :p50 58.12, :p95 86.48, :p99 86.48, :max 86.48},
+ :gc {:count 1489, :real-ms 1070, :cpu-ms 1086},
+ :checks
+   {:every-cycle-worked true,
+    :every-stop-exited true,
+    :pause-holds true,
+    :resume-releases-in-order true,
+    :threads-declared true}}
+LIFECYCLE OK

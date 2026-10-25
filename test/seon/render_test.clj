@@ -771,12 +771,15 @@
   ;; input, or presentation; at main's t
   (let [[main branch eid] (paged-dbs)
         [st1 _] (#'p/pass-view (comp-state main branch eid) :a3)
-        {:keys [t page]} (p/screen-of st1 :a3)
-        ;; code (seon.print/code: a cited var's head) is the printer's plain data, printed verbatim:
-        ;; read as its text, never as an attribute map or a raw value
-        page (clojure.walk/postwalk #(if (seon.print.select/code? %) (:seon.print/code %) %) page)
-        text (pr-str page)]
+        {:keys [t page] :as screen} (p/screen-of st1 :a3)
+        ;; the page is its own :seon.render/html render, so the agent's page draws it (the value view);
+        ;; code and prose marks (seon.print.select/code?) are the printer's plain data, printed as
+        ;; themselves: read as their text, never as an attribute map or a raw value
+        page (clojure.walk/postwalk #(if-let [k (seon.print.select/code? %)] (k %) %) (:seon.render/html page))
+        ;; the screen as the model reads it: the page's data printed once by the one printer
+        text (seon.print/text page seon.print/default-budget)]
     (is (= (:max-tx main) t))
+    (is (= #{:seon.render/html} (set (keys (:page screen)))) "the page, its own render")
     (is (vector? page) "hiccup, as the page is")
     (is (some #{[:h1 "a3"]} (tree-seq coll? seq page)) "the agent's head")
     (is (some #(and (vector? %) (= :li (first %)) (some #{"a3"} %)) (tree-seq coll? seq page)) "root's agents, the sidebar")
@@ -1103,7 +1106,7 @@
                                                 {:code "(g)" :prose "see" :run "demo/f#1" :response {:handle 'result/e4 :value 1}
                                                  :cites (seon.ref/references b "`demo/g` and `docs/render.md#one-printer`")} nil))
             [st3 _] (#'p/pass-view (comp-state main b eid) :a3)
-            page (:page (p/screen-of st3 :a3))
+            page (:seon.render/html (:page (p/screen-of st3 :a3)))
             codes (set (keep #(when (seon.print.select/code? %) (:seon.print/code %)) (tree-seq coll? seq page)))]
         (is (contains? codes ";; demo/g: Make g fast.\n(:seon.task/plan (seon.task/task (seon.agent/db) \"demo/g\"))") (pr-str codes))
         (is (contains? codes ";; docs/render.md#one-printer: One printer prints every value.\n(my.agent/help \"docs/render.md#one-printer\")") (pr-str codes))
@@ -1164,3 +1167,46 @@
     (is (str/includes? html "1 root causes when it went quiet at t 9"))
     (is (str/includes? html "demo/f: red proof · blocks 1") "each cause one line")
     (is (not (str/includes? html "#:seon")) "nothing printed raw")))
+
+(deftest an-eval-row-renders-its-value-as-structure
+  ;; owner, 2026-10-25 (the value view): a value recorded as data is drawn from its data, a map as
+  ;; rows and code as code, not as its printed text; the row's id is its handle's, which links reach
+  (let [src "(deftest t\n  ;; why\n  (is (= 2 (f 1))))"
+        rec {:code "(my.task/status)" :response {:handle 'result/e157 :ms 2.5 :value {:turn "29 of 30" :proofs [{:test 'demo-test/t :status :fail :source (seon.print/code src)}
+                                                                                                           {:test 'demo-test/u :status :pass :source (seon.print/code "(deftest u)")}]}}}
+        html (h/html (ui/evaluation {:seon.eval/record rec :seon.eval/by "outside"} {}))
+        held (h/html (ui/evaluation {:seon.eval/record {:code "(Object.)" :printed "#object[java.lang.Object]" :response {:handle 'result/e2}}} {}))]
+    (is (str/includes? html "id=\"eval-e157\"") "the row is its handle's anchor")
+    (is (str/includes? html "seon-print-grid") "the value, a map, as rows")
+    (is (str/includes? html "<table class=\"seon-print-table\"") "its proofs, maps sharing keys, as a table")
+    (is (str/includes? html ";; why") "the source verbatim, its comment as written")
+    (is (not (str/includes? html "\\\"")) "no escaped string literal")
+    (is (not (str/includes? html ":ms")) "the cost is on its own line, not in the value")
+    (is (str/includes? held "#object[java.lang.Object]") "a value not held as data shows as it was printed")))
+
+(deftest a-page-an-agent-built-renders-nested
+  ;; owner, 2026-10-25: an agent's hiccup renders as HTML. It is the value's own :seon.render/html
+  ;; key (a render already made), wherever the value sits
+  (let [page [:section [:h2 "agents"] [:ol [:li "a1 busy"]]]
+        html (h/html (r/html {:screen {:seon.render/html page} :n 1} {}))]
+    (is (str/includes? html "<section><h2>agents</h2><ol><li>a1 busy</li></ol></section>") html)
+    (is (str/includes? (r/ai {:screen {:seon.render/html page} :n 1} {}) "[:section [:h2 \"agents\"]") "the model reads it as the data it is")))
+
+(deftest a-cut-opens-its-path-in-the-row
+  ;; the value view's step 3: a cut on the page is a button naming the form that reads its rest; the
+  ;; row, given that form opened (/open), renders what it reads from the record, under the form as
+  ;; the button that closes it, so it shows what the cut left
+  (let [body (fn [n] (str/join "\n" (repeat 50 (str "  (is (= " n " (f " n ")))"))))
+        proof (fn [n] {:test (symbol "demo-test" (str "t" n)) :source (seon.print/code (str "(deftest t" n "\n" (body n) ")"))})
+        rec {:code "(my.task/status)" :response {:handle 'result/e5 :value {:proofs (mapv proof (range 1 5))}}}
+        shown (fn [html] (count (filter #(str/includes? html (body %)) (range 1 5))))
+        closed (h/html (ui/evaluation {:seon.eval/record rec} {}))
+        path (some-> (re-find #"class=\"seon-print-cut\"[^>]*? data-seon-form=\"([^\"]*)\"" closed) second (str/replace "&amp;" "&"))
+        opened (when path (h/html (ui/evaluation {:seon.eval/record rec} {:opened #{path}})))]
+    (is path (str "four sources over the value's budget: a cut, a toggle naming the form that reads its rest: "
+                  (shown closed) " shown; " (pr-str (re-seq #"seon-print-(?:cut|elision)[^<]{0,160}" closed))))
+    (is (< (shown closed) 4) "closed, a source is left out")
+    (is (> (shown opened) (shown closed)) "opened, what its form reads renders: what the cut left shows")
+    (is (str/includes? closed "&amp;open=true") "the cut only opens: a re-render cannot post its close")
+    (is (str/includes? opened "&amp;open=false") "the opened form is the button that closes it")))
+

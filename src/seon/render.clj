@@ -79,7 +79,7 @@
           (if (contains? contract/forms t) t :seon.error/base)
           (some by-identity (keys v))))))
 
-(declare render-of render)
+(declare render-of render own-key)
 
 (defn- nested
   "The printer's :render: a nested value whose schema declares a render, as that render's one
@@ -95,6 +95,15 @@
                              (config/value :seon.config.render/line-budget))]
         {:text text :html (if h [h v {:as :inline}] text)}))))
 
+(defn- nested-html
+  "The HTML printer's :render: nested's, and a value whose own :seon.render/html key holds hiccup
+  (a page an agent built) as that hiccup. Only the page draws it: the text printer, which the
+  model reads, prints that value as the data it is."
+  {:malli/schema [:=> [:cat :any] [:maybe [:map [:text :string] [:html :any]]]]}
+  [v]
+  (let [own (own-key v :seon.render/html)]
+    (if (and (some? own) (not (symbol? own))) {:text "" :html own} (nested v))))
+
 (defn- printer-opts
   "The printer's options for a render's opts: its budget (else :seon.config.render/value-budget),
   its handle, and its nested values' own renders (nested)."
@@ -108,7 +117,7 @@
   [v opts]
   (if (= :inline (:as opts))
     [:code {:class "seon-inline"} (print/line v (or (:budget opts) (config/value :seon.config.render/line-budget)) (:handle opts))]
-    (let [r (print/print-value v (assoc (printer-opts opts) :outputs #{:hiccup}))]
+    (let [r (print/print-value v (assoc (printer-opts opts) :outputs #{:hiccup} :render nested-html))]
       (or (:html r) [:span {:class "seon-print-refused"} (str (:seon.error/message r))]))))
 
 (defn print-ai
