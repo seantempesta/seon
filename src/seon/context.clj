@@ -203,9 +203,9 @@
                                  (keep #(:seon.ref/address (docs/cited-view db %))))
                        cites)
             schema? #(some? (pdb/eid db :schema/key %))
-            ;; a program function: no test, nothing of a test namespace (its fixtures); the graph and
-            ;; the meaning halves alike
-            function? #(and (not= :test (:var/kind (d/entity db [:var/name %])))
+            ;; a program function: no test, no macro (every contracted form names seon.contract/defn),
+            ;; nothing of a test namespace (its fixtures); the graph and the meaning halves alike
+            function? #(and (not (#{:test :macro} (:var/kind (d/entity db [:var/name %]))))
                             (not (str/ends-with? (namespace %) "-test")))
             ;; a neighbour weighs 1/(1 + the forms naming it, counted to a cap): what every form names
             ;; (seon.contract/checked, on?, seon.db/eid) weighs nothing (docs/vector.md#fused-with-the-call-graph)
