@@ -226,7 +226,9 @@
   :end-test-var), so the next test runs. The namespace's fixtures are bounded too: the whole
   namespace within ticks per test and one more, so a fixture that never ends stops the namespace,
   its unreported tests :error (run-tests!). Each test, its budget's end included, is measured by
-  seon.profile/measure!, the one measurement of a call, and told (done v measured) once it ended."
+  seon.profile/measure!, the one measurement of a call, and told (done v measured) once it ended.
+  Each measure opens its own epoch of contracted calls (seon.profile/begin!), so a caller's epoch
+  open around an in-process run counts from the last test on (bin/test's shards open none)."
   {:malli/schema [:=> [:cat :symbol [:sequential :any] [:maybe pos-int?] :seon.host/fn] :nil]}
   [n vars ticks done]
   (let [each (t/join-fixtures (get @t/each-fixtures n []))
