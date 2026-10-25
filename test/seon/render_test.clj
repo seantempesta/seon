@@ -1240,9 +1240,14 @@
         st' (#'p/pass st o)
         pages (into {} (for [m (:to-web @o) :when (= :page (:op m))] [(:k m) (:html m)]))]
     (is (= #{1 2} (set (keys pages))) "both pages are answered: neither waits on the other's render")
-    (is (str/includes? (str (pages 1)) "seon.render/view-defect") (str "the debug page is its error: " (subs (str (pages 1)) 0 (min 400 (count (str (pages 1)))))))
+    (is (str/includes? (str (pages 1)) "seon.render/view-defect") "the debug page is its error")
     (is (str/includes? (str (pages 1)) ":no-such-part") "it says what threw")
     (is (str/includes? (str (pages 2)) "(+ 1 2)") "the agent's own page renders through the same pass")
     (is (some #(and (= :error (:op %)) (= :seon.render/view-defect (get-in % [:data :seon.error/type]))) (:to-api @o))
         "recorded as the problem it is: the api's proc error")
-    (is (empty? (:waiting st')) "nothing left waiting")))
+    (is (empty? (:waiting st')) "nothing left waiting")
+    (testing "a pass after it, nothing changed: the same error is not sent again (its record walks no view into another)"
+      (let [o2 (volatile! {})]
+        (#'p/pass (assoc st' :waiting {3 debug} :recorded (seon.problems/health db)) o2)
+        (is (not-any? #(= :error (:op %)) (:to-api @o2)))
+        (is (some #(and (= 3 (:k %)) (str/includes? (:html %) "seon.render/view-defect")) (:to-web @o2)) "its page is still the error")))))

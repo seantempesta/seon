@@ -484,23 +484,30 @@
   "View-id rendered (pass-view), or, when its render throws, its page is that error: the edge of a
   failure point (docs/failure-points.md: a render is code, and agents write renders), so one view's
   defect stays that view's and every other view of the pass renders. The error, a
-  :seon.render/view-defect (what threw, the view, the function it threw in), is recorded as a
-  platform problem through the api's proc error ({:op :error}, no message taken to answer again),
-  and held as the view's page, so the pages waiting on it are answered with it."
+  :seon.render/view-defect (what threw, the view, the function it threw in), is held as the view's
+  page, so the pages waiting on it are answered with it, and recorded as a platform problem through
+  the api's proc error ({:op :error}, no message taken to answer again) when it is new: the same
+  error again is not sent again, so its record cannot walk the view into another. The view keeps
+  the reads it last rendered from, so a commit touching them walks it again; the components it
+  held are let go."
   {:malli/schema [:=> [:cat :map :seon.host/volatile :any] [:tuple :map [:maybe :map]]]}
   [st o view-id]
   (try
     (pass-view st view-id)
-    (catch Throwable ex
-      (let [d (clojure.main/ex-triage (assoc (Throwable->map ex) :clojure.error/phase :execution))
-            e (contract/error :seon.render/view-defect `pass-view
-                              (str "the page " (java.net.URLDecoder/decode (ui/view-param view-id) "UTF-8") " threw rendering: " (step/error-msg ex))
-                              (cond-> {:view (java.net.URLDecoder/decode (ui/view-param view-id) "UTF-8") :class (.getName (class ex))}
+    (catch Exception ex
+      (let [held (get-in st [:views view-id])
+            d (clojure.main/ex-triage (assoc (Throwable->map ex) :clojure.error/phase :execution))
+            named (java.net.URLDecoder/decode (ui/view-param view-id) "UTF-8")
+            e (contract/error :seon.render/view-defect `pass-view (str "the page " named " threw rendering: " (step/error-msg ex))
+                              (cond-> {:view named :class (.getName (class ex))}
                                 (:clojure.error/symbol d) (assoc :seon.error/in (:clojure.error/symbol d))))
             hc (render/html e {})]
-        (step/out! o :to-api {:op :error :pid :render :message (:seon.error/message e) :data e})
+        (when-not (= e (:error held))
+          (step/out! o :to-api {:op :error :pid :render :message (:seon.error/message e) :data e}))
         [(-> st (update :dirty disj view-id)
-             (assoc-in [:views view-id] {:skeleton (h/html hc) :layout hc :units {} :extra (extra-of st view-id)}))
+             (hold-comps view-id (keep #(get-in % [:input :comp]) (vals (:units held))) [])
+             (assoc-in [:views view-id] {:skeleton (h/html hc) :layout hc :units {} :error e
+                                         :reads (:reads held) :extra (extra-of st view-id)}))
          nil]))))
 
 (defn page-html
