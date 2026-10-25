@@ -33,7 +33,9 @@
   "Agent ids whose runs worked more than one branch (must be empty): a session's runs (a
   task and the tasks on its branch it needs, a work task and its merge: seon.task/session-key)
   continue its one agent, and no agent serves two sessions; a run naming no branch is a session
-  of its own."
+  of its own. The branch stands for the session (a session is one branch): two sessions on one
+  branch with no :needs between them sharing an agent pass unseen. session-key cannot judge it,
+  since it answers the agent this check asks about."
   [d] (vec (for [[ag rs] (group-by :seon.run/agent (vals (task/runs d)))
                  :when (and ag (< 1 (count (distinct (map #(or (get-in % [:seon.run/env :branch]) (:seon.run/id %)) rs)))))]
              ag)))
