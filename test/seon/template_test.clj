@@ -67,7 +67,14 @@
   ;; to write deftests but not how found the checkout on disk, appended its deftest to the test file
   ;; and load-file'd it; a deftest is evaluated in its namespace, recorded on the branch
   (is (str/includes? (:design tpl/instructions) "(in-ns 'ns.x-test)") "design says where a proof is evaluated")
-  (is (str/includes? (:design tpl/instructions) "you write no file")))
+  (is (str/includes? (:design tpl/instructions) "you write no file"))
+  ;; pipeline 1 (notes/live-2026-10-25.md F4): both printer designs reproduced their bug by turn 11,
+  ;; then read on to the cap and registered no proof; reading came before the proof, with no end.
+  ;; The design reproduces the bug as a deftest, registers it and runs it red, then reads
+  (let [d (:design tpl/instructions)
+        steps ["reproduce what the plan says is wrong" "as a deftest" "register it" "run it red" "Then read what the change touches"]]
+    (is (every? #(str/includes? d %) steps) "each step is in the design instructions")
+    (is (= steps (sort-by #(or (str/index-of d %) -1) steps)) "proof first: reproduce as a deftest, register, run red, then read")))
 
 
 (deftest a-requests-stages-are-one-sessions-agent
