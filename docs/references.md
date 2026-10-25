@@ -53,8 +53,8 @@ Beside them, the task story's `:write-set` shows each var the plan cites with it
 
 ## Where the wiki in the store falls short today
 
-Every page and section is on main, reloaded when a page changes, and readable at three depths, but not yet as related concepts.
-- A section's references and backlinks are stored edges that no view shows, ```seon.docs/page``` has no depth, ```my.agent/help``` shapes its own summary beside the view, and a help topic it does not hold answers nil: `seon.docs/a-section-reads-at-each-level`.
+Every page and section is on main, reloaded when a page changes, and readable at three depths, each with the sections it cites and those citing it.
+- ```seon.docs/view``` shows a section at :summary, :doc or :code, and at every depth its :references (what its text cites, sections and vars) and :cited-by (the sections citing it), each at summary depth, from the stored edges (`seon.docs-test/a-view-at-summary-lists-references-and-cited-by`). ```seon.docs/page``` reads a page at a depth through the same view (`seon.docs-test/a-page-reads-at-a-depth`), and ```my.agent/help``` is that view: the help page at summary, any address at :code, a page's path at summary, and on a miss the help page's sections and every page's path, never nil (`seon.repl-test/help-reads-any-address-and-lists-on-a-miss`). A view costs the pulls of its section and its edges, flat in the wiki's size (`seon.docs-cost-test/a-view-costs-its-section-and-its-edges`).
 - 54 of 364 sections have no lead, so their summary is the heading alone and their embedding has no sentence saying what they are about: `seon.docs/every-section-has-a-lead`.
 
 ## Files and namespaces on demand
