@@ -886,23 +886,58 @@
   (let [forms (filterv #(not (held? db %)) (live-forms db))]
     {:loaded (count forms) :errors (load! db forms (set (keys (schema-changes db))))}))
 
+(defn- live-in?
+  "Is form entity e live on db, for one form: it has an id, and defines nothing or one of its
+  own definitions points back to it (live?'s rule; live-ids takes any pointer to it, the same
+  wherever a definition points only to the form that defines it, as account-tx and record-tx
+  write: the pointers hold no reverse index to read otherwise). O(its definitions)."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
+  [db e]
+  (boolean (and (seq (d/datoms db :eavt e :form/id))
+                (let [ds (map :v (d/datoms db :eavt e :form/defines))]
+                  (or (empty? ds) (some (fn [x] (some #(seq (d/datoms db :eavt x % e)) (vals pointer))) ds))))))
+
+(defn- schema-value
+  "Schema entry entity e's value as schema-changes reads it on db: its decoded form when the
+  binary does not hold it (no :schema/source), else nil."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :any]}
+  [db e]
+  (when (and (seq (d/datoms db :eavt e :schema/key)) (empty? (d/datoms db :eavt e :schema/source)))
+    (some-> (first (d/datoms db :eavt e :schema/form)) :v sedn/decode)))
+
+(defn diff-plan
+  "What making a process run db-to's program where it holds db-from's takes: {:remove the
+  definition keys db-from had and db-to has none of, sorted; :load db-to's live forms db-from
+  did not have live, as rows by entity; :schemas the schema keys db-to changes (schema-changes')
+  to a value db-from did not hold}. Read from the program attributes' datoms that differ between the two values
+  (datahike.api/datoms-diff, which skips the stored subtrees they share), then each candidate
+  entity's own datoms: the cost of the diff, never of the program."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map [:remove [:vector :any]] [:load [:vector :map]] [:schemas [:set :qualified-keyword]]]]}
+  [db-from db-to]
+  (let [diff (fn [a] (d/datoms-diff db-from db-to :aevt [a]))
+        [ptr-from ptr-to] (reduce (fn [[x y] a] (let [[p q] (diff a)] [(into x p) (into y q)])) [[] []] (vals pointer))
+        defined? (fn [db x] (some #(seq (d/datoms db :eavt x %)) (vals pointer)))
+        removed (sort-by str (distinct (for [dt ptr-from :let [x (:e dt)] :when (not (defined? db-to x))]
+                                         (definition-key (d/entity db-from x)))))
+        forms (into (sorted-set) cat [(mapcat (fn [[p q]] (map :e (concat p q))) [(diff :form/id) (diff :form/defines)])
+                                      (map :v ptr-from) (map :v ptr-to)])
+        schema-es (into #{} (mapcat (fn [a] (let [[p q] (diff a)] (map :e (concat p q))))) [:schema/key :schema/form :schema/source])
+        key-of (fn [e] (some #(some-> (first (d/datoms % :eavt e :schema/key)) :v) [db-to db-from]))]
+    {:remove (vec removed)
+     :load (vec (for [e forms :when (and (live-in? db-to e) (not (live-in? db-from e)))] (form-row db-to e)))
+     :schemas (into #{} (for [e schema-es :let [v (schema-value db-to e)] :when (and (some? v) (not= v (schema-value db-from e)))] (key-of e)))}))
+
 (defn load-diff!
-  "Make this process run db-to's program where it holds db-from's: each live form db-to
-  has that db-from had not is loaded (but the binary's own), with what it reaches (load!),
-  and each definition db-from had that db-to has none of is removed. Answers the load
-  errors. Cost: each db's form ids and definition pointers, read as datoms; a form row is
-  built only for a form db-to has live that db-from had not (measured on Seon's
-  program: four live-forms reads, ~1.4 s, before)."
+  "Make this process run db-to's program where it holds db-from's (diff-plan): each
+  definition db-from had that db-to has none of is removed, and each live form db-to has
+  that db-from had not is loaded (but the binary's own), with what it reaches (load!), and
+  what the changed schema keys reach. Answers the load errors. Costs the diff (diff-plan);
+  it read both programs whole before: 400-450 ms a spawn on an existing branch, measured."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.program/error]]}
   [db-from db-to]
-  (let [def-keys (fn [db] (into #{} (for [a (vals pointer) dt (d/datoms db :aevt a)] (definition-key (d/entity db (:e dt))))))
-        from (live-ids db-from)
-        to-defs (def-keys db-to)
-        sc-from (schema-changes db-from)]
-    (doseq [k (sort-by str (def-keys db-from)) :when (not (contains? to-defs k))] (remove-definition! k))
-    (load! db-to (filterv #(not (held? db-to %))
-                          (for [e (sort (vals (apply dissoc (live-ids db-to) (keys from))))] (form-row db-to e)))
-           (set (for [[k v] (schema-changes db-to) :when (not= v (get sc-from k))] k)))))
+  (let [{:keys [remove load schemas]} (diff-plan db-from db-to)]
+    (run! remove-definition! remove)
+    (load! db-to (filterv #(not (held? db-to %)) load) schemas)))
 
 (defn load-changes!
   "Load what resolved tx-data ops change, read against db (after them): each definition
