@@ -177,7 +177,7 @@
                                         {:op :eval :id (:id r) :forms "(seon.agent/load-tests! [\"test\"])"})]
                    [(assoc-in st [:running :stage] :prepare) [m]]))
         :prepared (let [e (cond (contract/error? r) r
-                                (:ex r) (contract/error :seon.test/prepare 'seon.prove/prove-proc
+                                (:ex r) (contract/error :seon.test/prepare #'seon.prove/answered
                                                         (str "the prove agent could not load the tests: " (:text r)) {}))]
                     (if e
                       (let [[st fin] (finish st e) [st kill] (kill-runner st run)] [st (conj fin kill)])

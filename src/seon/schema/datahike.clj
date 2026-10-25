@@ -144,7 +144,7 @@
         {:keys [type card props invalid]} (if root (storage root #{attribute}) (refused ::absent attribute))]
     (if invalid
       (let [[reason form] invalid]
-        (error :seon.schema/unstorable 'seon.schema.datahike/declaration (reasons reason)
+        (error :seon.schema/unstorable #'seon.schema.datahike/declaration (reasons reason)
                {:seon.schema/attribute attribute :seon.schema/reason reason :seon.schema/form form}))
       (cond-> {:db/ident attribute :db/valueType type
                :db/cardinality (if (= :many card) :db.cardinality/many :db.cardinality/one)}

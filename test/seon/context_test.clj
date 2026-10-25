@@ -234,7 +234,15 @@
     (is (= {:seon.ref/address "demo.calc" :seon.ref/heading "demo.calc" :seon.ref/lead "Adds. More."
             :seon.ref/below [{:seon.ref/address "demo.calc/add" :seon.ref/heading "add"}] :seon.ref/depth :doc}
            (by "demo.calc")) "a namespace: its docstring and publics")
-    (is (:unresolved (by "docs/nowhere.md")) "a file that is not there says so")))
+    (is (:unresolved (by "docs/nowhere.md")) "a file that is not there says so")
+    ;; root, 2026-10-25 (the a-map design read a namespace one (source f) a turn; its bug was in
+    ;; privates ns-publics never named): every definition, privates too, in file order, a line each
+    (let [db (d/db-with db [{:db/id "f1" :form/id "demo.calc/zz" :form/order 0} {:db/id "f2" :form/id "demo.calc/add" :form/order 1}
+                            {:var/name 'demo.calc/zz :var/ns [:ns/name 'demo.calc] :var/form "f1" :var/doc "A private helper. Its rest."}
+                            {:var/name 'demo.calc/add :var/form "f2" :var/doc "Adds two."}])
+          text (:seon.print/code (seon.docs/cited-code db {:seon.ref/name 'demo.calc :seon.ref/depth :doc :seon.ref/line 1}))]
+      (is (= ["(ns demo.calc" "  \"Adds. More.\")" ";; zz: A private helper." ";; add: Adds two."] (str/split-lines text))
+          "the namespace head, then each definition by its place in the file: its name and its doc's first sentence"))))
 
 (deftest an-agent-reads-its-conversation-so-far
   ;; a live DeepSeek agent re-read the same Datahike source every other turn because each

@@ -73,8 +73,9 @@
     (some #(visit #{} %) (keys graph))))
 
 (defn- invalid
-  {:malli/schema [:=> [:cat :symbol :string] :map]}
-  [op m] {:seon.error/type :seon.task/refused :seon.error/operation op :seon.error/message m})
+  "What raiser op (by its var: the compile resolves it) refuses, with message m."
+  {:malli/schema [:=> [:cat :seon.host/var :string] :map]}
+  [op m] {:seon.error/type :seon.task/refused :seon.error/operation (symbol op) :seon.error/message m})
 
 (defn- needs-problem
   "Why graph (task id -> needs) cannot be written: a need known? does not hold, or a cycle;
@@ -95,7 +96,7 @@
   (let [ids (mapv #(task-id (:seon.task/ns %) (:seon.task/name %)) decls)
         graph (zipmap ids (map #(set (:seon.task/needs %)) decls))]
     (if-let [p (needs-problem graph #(or (graph %) (pdb/eid db :seon.task/id %)))]
-      (invalid 'seon.task/create-tx p)
+      (invalid #'seon.task/create-tx p)
       (mapv (fn [id {:seon.task/keys [config needs evidence] :as decl}]
               (cond-> (-> decl (dissoc :seon.task/config :seon.task/needs :seon.task/evidence)
                           (assoc :db/id id :seon.task/id id :seon.task/execution :held)
@@ -320,7 +321,7 @@
         new (apply f old args)]
     (cond
       (not (contract/valid? member new))
-      (contract/error :seon.task/invalid-member 'my.task/update! (str member " would be a value its schema does not admit: :value") {:member member :value new})
+      (contract/error :seon.task/invalid-member #'seon.task/member-tx (str member " would be a value its schema does not admit: :value") {:member member :value new})
       (= :seon.task/proofs member)
       (into (mapv #(vector :db/retract id member %) (sort-by str (remove new old)))
             (map #(vector :db/add id member %)) (sort-by str (remove old new)))
@@ -523,7 +524,7 @@
 
 (defn- file-refused
   {:malli/schema [:=> [:cat :symbol :string] :map]}
-  [ns-sym m] (invalid 'seon.task/file-declarations (str "task file " ns-sym ".edn: " m)))
+  [ns-sym m] (invalid #'seon.task/file-refused (str "task file " ns-sym ".edn: " m)))
 
 (defn file-declarations
   "The declarations of task file text, owned by namespace ns-sym (the file's name), each

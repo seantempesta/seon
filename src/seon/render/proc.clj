@@ -258,7 +258,7 @@
     (cond
      (and eid (vector? view)) (debug-value st view)
      (and db (nil? eid))
-     (contract/error :seon.render/no-location `page-value
+     (contract/error :seon.render/no-location #'seon.render.proc/page-value
                      (str "no " (if (keyword? view) (str "agent " (ui/kname view) " in root's boot " (task/boot-of db)) (ui/kname view))
                           " on main: an agent's id names one of this boot's (ids start again each boot); an earlier boot's agent's page is"
                           " /walk/<its eid>, linked from its root's page")
@@ -513,7 +513,7 @@
       (let [held (get-in st [:views view-id])
             d (clojure.main/ex-triage (assoc (Throwable->map ex) :clojure.error/phase :execution))
             named (java.net.URLDecoder/decode (ui/view-param view-id) "UTF-8")
-            e (contract/error :seon.render/view-defect `pass-view (str "the page " named " threw rendering: " (step/error-msg ex))
+            e (contract/error :seon.render/view-defect #'pass-view (str "the page " named " threw rendering: " (step/error-msg ex))
                               (cond-> {:view named :class (.getName (class ex))}
                                 (:clojure.error/symbol d) (assoc :seon.error/in (:clojure.error/symbol d))))
             hc (render/html e {})]

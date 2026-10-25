@@ -47,7 +47,7 @@
         x (into {} (for [id ids] [id (some->> (pdb/eid db :seon.task/id id) (d/pull db [:seon.task/execution]) :seon.task/execution)]))
         held (filterv #(= :held (x %)) ids)
         refused (vec (for [id ids :when (not= :held (x id))]
-                       (contract/error :seon.root/not-held 'my.root/run!
+                       (contract/error :seon.root/not-held #'my.root/run!
                                        (str "task " id (if-let [e (x id)] (str " is " (name e)) " does not exist") ", not held: nothing to release")
                                        {:task id :execution (x id)})))]
     (cond-> (if (seq held)
@@ -84,7 +84,7 @@
                            :let [repo (config/value :seon.config.source/gate-checkout)
                                  r (if repo
                                      @(root/effect! sys :tests {:repo repo :branch (config/value :seon.config.source/branch) :files {} :tests tests})
-                                     (contract/error :seon.root/no-gate-checkout 'my.root/gate!
+                                     (contract/error :seon.root/no-gate-checkout #'my.root/gate!
                                                      "no gate checkout declared (:seon.config.source/gate-checkout): the process tests cannot run here" {:tests tests}))
                                  rs (if (contract/error? r) (zipmap tests (repeat :error)) (get-in r [:value :results]))]]
                        (do @(root/transact-main! sys (cond-> [{:seon.run/id aid
@@ -339,7 +339,7 @@
                              (finally (root/kill! sys ag)))]
                   (if (and (map? r) (not (:ex r)) (:text r))
                     (assoc (sedn/decode (:value (edn/read-string {:default tagged-literal} (:text r)))) :scorer (judge/scorer db))
-                    (contract/error :seon.judge/unscored 'my.root/first-moves! "the scoring agent answered no score" {:response r}))))
+                    (contract/error :seon.judge/unscored #'my.root/first-moves! "the scoring agent answered no score" {:response r}))))
         row (fn [f reused?] (merge {:task (:seon.judge/task f) :reused? (boolean reused?)} (when (= :rescored reused?) {:rescored? true})
                                    (select-keys (:seon.judge/score f) [:acted :right-var :right-test :waste :uncompiled :green :usd])))]
     (loop [[id & more] ids rows [] spent 0.0]
@@ -383,5 +383,5 @@
                     (if usd
                       (recur more (conj rows (row f false)) (+ spent usd))
                       {:rows (conj rows (row f false)) :usd spent
-                       :error (contract/error :seon.judge/cost-unknown 'my.root/first-moves!
+                       :error (contract/error :seon.judge/cost-unknown #'my.root/first-moves!
                                               (str "the reply's usage cannot be priced (model " (:model req) "): the pass stops") {:task id :usage usage})}))))))))))

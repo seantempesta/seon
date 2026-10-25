@@ -71,7 +71,7 @@
   (let [v (resolve sym)]
     (if (and v (:seon/callable (meta v)))
       (@v (or args {}))
-      (contract/error :seon.render/not-callable 'seon.web/ui-call
+      (contract/error :seon.render/not-callable #'seon.web/ui-call
                       (str sym " is not callable from the UI: mark it ^:seon/callable")
                       {:seon.render/fn sym}))))
 
@@ -332,7 +332,7 @@
      (if (and port (pos? port))
        (let [server (try (adapter/run-server (handler http) {:port port :host "127.0.0.1" :strategy :fibers
                                                              :keep-alive-timeout-ms 600000 :write-timeout-ms 60000})
-                         (catch Throwable e (contract/error :seon.web/unbound 'seon.web/web-proc (step/error-msg e) {:port port})))]
+                         (catch Throwable e (contract/error :seon.web/unbound #'seon.web/web-proc (step/error-msg e) {:port port})))]
          (if (contract/error? server)
            (assoc st :listening false :error server)
            (assoc st :listening true :server server :port (:port server))))

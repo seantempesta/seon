@@ -13,7 +13,7 @@
   "The registration-refused error for k: why, and the message of what refused it."
   {:malli/schema [:=> [:cat :qualified-keyword :keyword :string] :seon.schema/registration-refused]}
   [k why message]
-  (contract/error :seon.schema/registration-refused 'my.schema/registration (str k ": " message)
+  (contract/error :seon.schema/registration-refused #'my.schema/refused (str k ": " message)
                   {:seon.schema/key k :seon.schema/refused-because why}))
 
 (defn- judged

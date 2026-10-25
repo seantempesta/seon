@@ -53,7 +53,7 @@
   [roots on-batch on-exit]
   (let [bin (str (cfg/checkout) "/target/watch")
         died (fn [p why]
-               (contract/error :seon.watch/died 'seon.watch/start! why
+               (contract/error :seon.watch/died #'seon.watch/start! why
                                {:bin bin :roots (vec roots)
                                 :exit (when p (.waitFor p))
                                 :stderr (when p (slurp (.getErrorStream p)))}))

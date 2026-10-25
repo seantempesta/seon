@@ -54,7 +54,7 @@
   (docs/failure-points.md)."
   {:malli/schema [:=> [:cat :symbol :string] [:vector :map]]}
   [nsym code]
-  (let [uncompiled (fn [e] {:error (contract/error :seon.judge/uncompiled 'seon.judge/form-facts (step/error-msg e) {})})]
+  (let [uncompiled (fn [e] {:error (contract/error :seon.judge/uncompiled #'seon.judge/form-facts (step/error-msg e) {})})]
     (try
       (vec (for [{:keys [form ns]} (:forms (binding [*read-eval* false] (source/read-forms nsym (:text (reader/forgive code)))))]
              (try (let [{:keys [units]} (source/analyze-form (if (and (seq? form) (= 'ns (first form))) nsym (or ns nsym)) form)]

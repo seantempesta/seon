@@ -26,7 +26,7 @@
   status, the whole response body, the Retry-After in ms."
   {:malli/schema [:=> [:cat :string [:maybe :int] :map] :seon.model/failure]}
   [message status data]
-  (contract/error (if (= 429 status) :seon.model/rate-limited :seon.model/provider-error) 'seon.model/complete message
+  (contract/error (if (= 429 status) :seon.model/rate-limited :seon.model/provider-error) #'seon.model/provider-error message
                   (cond-> data status (assoc :status status))))
 
 (defn- transport-error
@@ -36,7 +36,7 @@
   (docs/model.md#failures)."
   {:malli/schema [:=> [:cat :string :map] :seon.model/failure]}
   [message data]
-  (contract/error :seon.model/transport 'seon.model/complete (str "transport: " message) data))
+  (contract/error :seon.model/transport #'seon.model/transport-error (str "transport: " message) data))
 
 (defn- scripted
   "The reply of the function :script names (data: :seon.config.ai/script), loaded by name: a
@@ -48,7 +48,7 @@
         f (when (or (find-ns (symbol (namespace script))) (jolt.host/ns-source (namespace script)))
             (requiring-resolve script))]
     (if-not f
-      (contract/error :seon.model/no-script 'seon.model/complete
+      (contract/error :seon.model/no-script #'seon.model/scripted
                       (str "the scripted provider's " script " is not on this process's source roots") {:script script})
       ;; a script answers its call's code, or the code and the prose the eval tool takes
       (let [out (f request)
@@ -175,7 +175,7 @@
         cut? (= "length" (get-in j [:choices 0 :finish_reason]))]
     (cond
       (and (str/blank? text) (empty? calls) (string? reasoning) (not (str/blank? reasoning)))
-      (contract/error :seon.model/reasoning-ate-reply 'seon.model/complete
+      (contract/error :seon.model/reasoning-ate-reply #'seon.model/reply-of
                       (str "the reply is empty: reasoning took " (or rt (count reasoning)) (if rt " tokens" " characters")
                            " of a " max-tokens "-token budget")
                       (cond-> {:reasoning-chars (count reasoning)}
@@ -264,7 +264,7 @@
                   [:or :seon.model/completion :seon.model/failure]]}
   [provider request]
   (case (:kind provider)
-    :none (contract/error :seon.model/no-provider 'seon.model/complete
+    :none (contract/error :seon.model/no-provider #'seon.model/complete
                           "no model provider is configured: set SEON_PROFILE=deepseek (a paid model) or SEON_PROFILE=scripted (a test fixture), or :seon.config.ai/provider" {})
     :scripted (scripted provider request)
     :openai-compat (openai-compat provider request)))
