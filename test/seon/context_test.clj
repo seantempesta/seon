@@ -169,7 +169,7 @@
         "the program functions the red proof calls, at summary level from their facts: one in a namespace never loaded too")
     (is (= {:test 'ctx-calc-test/cube-test :status :undefined} (by 'ctx-calc-test/cube-test))
         "a proof not written yet says so")
-    (is (= :no-assertions (:status (by 'ctx-calc-test/empty-test))) "a proof that ran and asserted nothing says so")
+    (is (= :unknown (:status (by 'ctx-calc-test/empty-test))) "a proof no report named never ran: the judge's :proof-unknown")
     (let [b (context/current-state db (task/task db "ctx/sq") {:results {} :turn 1 :max-turns 4 :test-run-errors ["namespace app-test did not load"]})]
       (is (= {'ctx-calc-test/square-test :not-run 'ctx-calc-test/empty-test :not-run 'ctx-calc-test/cube-test :undefined}
              (into {} (map (juxt :test :status)) (:proofs b)))
@@ -480,6 +480,7 @@
   (let [db (d/db-with (db-with-program) [{:seon.message/id "m-1" :seon.message/from "owner" :seon.message/to {:seon.run/id "demo/f#1"}
                                           :seon.message/body "use demo/g, not a new helper"}])]
     (is (= [{:id "m-1" :from "owner" :body "use demo/g, not a new helper"}] (context/taken-messages db {:message-ids ["m-1"]})))))
+
 (defn- read-back
   "What turn entity e on db sent, read back from its records (the refs it recorded, each by its own
   render: seon.context/parts-of), as one vector of messages."
@@ -872,3 +873,11 @@
                                  (for [i (range 20)] {:form/id (str "demo/p" i) :form/src "(plumb)" :form/refs #{'demo/plumb}})))]
       (is (= ['demo/g 'demo/k 'demo/rare 'demo/plumb] (:functions (context/related db te)))
           "a neighbour few forms name before one every form names"))))
+
+(deftest a-proof-with-no-result-reads-unknown
+  ;; demo-test/f-test is written (its source is recorded) but no test report names it: it never
+  ;; ran, which the judge calls :proof-unknown (seon.reconcile/done-explain); it is not "ran and asserted nothing"
+  (let [db (db-with-program)
+        block (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4})
+        by (into {} (map (juxt :test :status)) (:proofs block))]
+    (is (= :unknown (by 'demo-test/f-test)) (pr-str (:proofs block)))))

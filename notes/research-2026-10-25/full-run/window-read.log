@@ -1,0 +1,2 @@
+{:checks {:a-b-c-survive true}, :after-the-crash ("A" "B" "C" "D")}
+WINDOW OK

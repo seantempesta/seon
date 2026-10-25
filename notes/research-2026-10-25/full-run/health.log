@@ -1,0 +1,13 @@
+{:caused 0,
+ :attention 0,
+ :open-in-head 2,
+ :base "888a728e2cfbe74d95fc4be647f985ca3d6feca9",
+ :checks
+   {:no-dead-citation true,
+    :no-leadless-section true,
+    :no-orphan-page true,
+    :no-problem-unlinked true,
+    :no-stale-pin true,
+    :no-uncited-task true,
+    :no-unnamed-site true}}
+HEALTH OK

@@ -104,6 +104,16 @@
   (when (checked-out? co)
     (str (.getCanonicalPath (java.io.File. ^String (git! {} co ["rev-parse" "--path-format=absolute" "--git-common-dir"] nil))) "/refs")))
 
+(defn head-ref
+  "The ref file the checkout at co's HEAD names (its branch's: the common dir's refs/heads/...),
+  canonical as the watcher reports paths: the one ref under git-refs whose move is this
+  checkout's commit or merge; nil on a detached HEAD or when co is no checkout of its own."
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [co]
+  (when-let [refs (git-refs co)]
+    (when-let [ref (git-try co ["symbolic-ref" "-q" "HEAD"])]
+      (str refs (subs ref (count "refs"))))))
+
 (defn read-source
   "The text of every .clj and .edn file under root's dirs (relative paths, e.g.
   src/seon/fx.clj, resources/seon/schemas/seon.facts.edn), sorted by path, the commit root's

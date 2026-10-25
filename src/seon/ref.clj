@@ -472,7 +472,8 @@
 
 (defn shown
   "Section s (an address, heading, lead or opening, and the sections below it as address and
-  heading) as depth shows it: at :summary its heading and its lead's first sentence; at :doc
+  heading) as depth shows it: at :summary its heading and its lead's first sentence (with, when the
+  lead holds more, how many characters it left and the address that reads it at :doc); at :doc
   its lead (or opening block) and the sections below; at :code s whole. With no lead it
   answers :no-lead at :summary and :doc. One rule for a section parsed now and a section the
   store holds."
@@ -483,7 +484,13 @@
     (if (= :code depth)
       s
       (cond-> (case depth
-                :summary (cond-> head lead (assoc :seon.ref/summary (lead-sentence lead)))
+                ;; a summary that leaves part of its lead says how much, and the address that reads it whole
+                :summary (if-not lead
+                           head
+                           (let [sum (lead-sentence lead)
+                                 left (count (str/trim (subs (str/join " " (map str/trim (str/split-lines lead))) (count sum))))]
+                             (cond-> (assoc head :seon.ref/summary sum)
+                               (pos? left) (assoc :seon.ref/left left :seon.ref/read-at (:seon.ref/address s)))))
                 :doc (cond-> (assoc head :seon.ref/below (vec below))
                        lead (assoc :seon.ref/lead lead)
                        opening (assoc :seon.ref/opening opening)))
