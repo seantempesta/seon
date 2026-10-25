@@ -318,18 +318,22 @@
     (:eval-n (swap! agent/state update :eval-n #(inc (or % from))))))
 
 (defn response
-  "A request's answers (in order) as its one response (:seon.eval/response): its handle, the
-  last form's value, what its forms wrote to *out* and *err*, the error that stopped it (:ex,
-  the one error map), and its cost summed over its forms (ms, ticks, bytes allocated); each key
-  only when present."
+  "A request's answers (in order) as its one response (:seon.eval/response): its handle, each
+  form's value in order (:values, as nREPL answers a value per form, when more than one form
+  answered: the values before an error stay), the last form's value (:value, as *1 holds it),
+  what its forms wrote to *out* and *err*, the error that stopped it (:ex, the one error map),
+  and its cost summed over its forms (ms, ticks, bytes allocated); each key only when present
+  (owner, 2026-10-25, DECISIONS Dogfood rulings)."
   {:malli/schema [:=> [:cat [:sequential :seon.wire/msg] :qualified-symbol] :seon.eval/response]}
   [answers handle]
   (let [fs (filterv :tag answers)
         lst (peek fs)
+        vs (into [] (comp (filter #(contains? % :repl/value)) (map :repl/value)) fs)
         joined (fn [k] (not-empty (apply str (keep k fs))))
         sum (fn [k] (when (some k fs) (reduce + (keep k fs))))]
     (cond-> {:handle handle}
       (contains? lst :repl/value) (assoc :value (:repl/value lst))
+      (and (> (count fs) 1) (seq vs)) (assoc :values vs)
       (joined :out) (assoc :out (joined :out))
       (joined :err-out) (assoc :err (joined :err-out))
       (= :err (:tag lst)) (assoc :ex (or (:err lst) {:seon.error/message (str (:err-text lst))}))
@@ -370,10 +374,10 @@
   [db code r req run]
   (let [cites (when db (some->> (:prose req) (ref/references db)))
         resp (dissoc r :text :recorded :fns :record)
-        data? (or (not (contains? resp :value)) (pdb/plain? (:value resp)))]
+        data? (and (or (not (contains? resp :value)) (pdb/plain? (:value resp))) (every? pdb/plain? (:values resp)))]
     (cond-> (if data?
               {:code code :response resp}
-              {:code code :response (dissoc resp :value) :printed (print/response-text resp) :type (str (type (:value resp)))})
+              {:code code :response (dissoc resp :value :values) :printed (print/response-text resp) :type (str (type (:value resp)))})
       (or (contains? r :value) (:ex r))
       (assoc :line (print/line (cond (:ex r) (or (get-in r [:ex :seon.error/message]) (:ex r)) (nil? (:value r)) "nil" :else (:value r)) (cfg/value :seon.config.render/line-budget) nil))
       (:prose req) (assoc :prose (:prose req))

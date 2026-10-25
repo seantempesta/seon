@@ -69,7 +69,7 @@
  ;; handle for its caller), what its forms wrote, the error that stopped it (the one error map), its summed cost;
  ;; each key only when present. Beside them as answered: its record's id and the vars it recorded
  :seon.eval/response [:map {:seon.render/html seon.render.ui/evaluation}
-                      [:handle :qualified-symbol] [:value {:optional true} :any] [:out {:optional true} :string]
+                      [:handle :qualified-symbol] [:value {:optional true} :any] [:values {:optional true} [:vector :any]] [:out {:optional true} :string]
                       [:err {:optional true} :string] [:ex {:optional true} :map]
                       [:ms {:optional true} number?] [:ticks {:optional true} :int] [:bytes {:optional true} :int]
                       [:text {:optional true} :string] [:record {:optional true} :string]
