@@ -112,12 +112,13 @@
 
 (defn report-data
   "Every problem main recorded (seon.problems/report): its t, then by class each class's count
-  and its rows, open first, each by `problem-data`."
+  and its rows, open first, each by `problem-data` without its class (the key it is under)."
   {:malli/schema [:=> [:cat :seon.problems/report] :map]}
   [{:keys [t classes]}]
   (ordered :problems-on-main-at-t t
+           ;; a row under its class does not say its class again
            :classes (into (sorted-map) (for [[c {:keys [n rows]}] classes :when (seq rows)]
-                                         [c {:n n :rows (mapv #(problem-data (assoc % :class c)) (sort-by #(if (false? (:open? %)) 1 0) rows))}]))
+                                         [c {:n n :rows (mapv #(dissoc (problem-data (assoc % :class c)) :class) (sort-by #(if (false? (:open? %)) 1 0) rows))}]))
            :none (when (every? (comp empty? :rows val) classes) true)))
 
 (defn report

@@ -234,3 +234,89 @@
     (is (not (str/includes? text "199")) text)
     (is (str/includes? (:text (seon/print-value {:xs (vec (range 200))} {:handle 'result/e2 :seen {:colls {(System/identityHashCode big) [[big '(:value result/e1)]]}}})) "199")
         "an equal value that is not the same one prints as itself: collections match by identity")))
+
+(defn- problem-rows
+  "n rows shaped as main's :stale-section problem rows (my.root/problems, 2026-10-25: 177 of them)."
+  [n]
+  (vec (for [i (range n)]
+         (array-map :seon.docs/section (keyword "render" (str "section-" i)) :seon.docs/page "docs/render.md"
+                    :seon.problem/class :stale-section :seon.problem/since 1761360000000 :cited 'seon.print/print-value
+                    :lead "A section whose lead cites a var that moved." :n i))))
+
+(deftest rows-show-whole-then-one-cut
+  ;; root's (my.root/problems sys), 2026-10-25: :stale-section's 177 rows printed as 144 lines of
+  ;; `{…13 (get-in result/e1 [... :rows N])}` and a cut, each row at its least, a line and a form
+  ;; that say nothing. Rows (members of one collection class) show whole in their order, then
+  ;; ONE cut that names how many are left and the form that reads them.
+  (let [h 'result/e1
+        v {:value {:classes {:stale-section {:n 177 :rows (problem-rows 177)}}}}
+        {:keys [text elisions]} (seon/print-value v {:handle h})
+        [cut :as cuts] (cuts-of text)
+        shown (count (re-seq #":seon.docs/section" text))]
+    (is (= 1 elisions (count cuts)) text)
+    (is (not (re-find #"\{…" text)) "no row shows as a placeholder")
+    (is (< 40 shown 177) "the reply budget shows dozens of rows, each whole")
+    (is (= (- 177 shown) (:n cut)) "the cut counts the rows it left")
+    (is (reads-exactly? text h v cut) "and its form reads exactly them")
+    (testing "a map of rows: its entries whole in their order, then one cut"
+      (let [m (into {} (map (juxt :n identity)) (problem-rows 177))
+            {:keys [text elisions]} (seon/print-value m {:handle h})]
+        (is (= 1 elisions) text)
+        (is (not (re-find #"\{…" text)))))
+    (testing "rows of array maps and of hash maps are one kind"
+      (let [mixed (into (problem-rows 100) (map #(into % {:a 1 :b 2})) (problem-rows 100))
+            {:keys [text elisions]} (seon/print-value mixed {:handle h})]
+        (is (= 1 elisions) text)
+        (is (not (re-find #"\{…" text)))))
+    (testing "members unlike each other still share the room (members-fill-breadth-before-depth)"
+      (let [{:keys [text]} (seon/print-value ["x" (problem-rows 3) :y] {:handle h :budget 60})]
+        (is (str/includes? text ":y") text)
+        (is (str/includes? text "\"x\"") text)))))
+
+(deftest rows-reserve-the-cut-they-print
+  ;; root's report through its render (seon.render.ai/report-data), 2026-10-25: at 13 budgets
+  ;; between 2,000 and 9,000 tokens it printed 347, :stale-section's 177 rows one placeholder.
+  ;; fill-rows reserved a cut without its form's path, overran its room, and the map's growth
+  ;; then kept the rows at their least. A value with room left prints most of its budget.
+  (let [why #(str "docs/health.md#a-stale-section describes seon.problems/stale-sections as it was (form seon.problems/"
+                  (format "%08d" %) "), and it has changed")
+        v {:handle 'result/e1
+           :value (array-map :problems-on-main-at-t 536872831
+                             :classes (sorted-map :dead-citation {:n 2 :rows [{:why (why 1)} {:why (why 2)}]}
+                                                  :stale-section {:n 177 :rows (vec (for [i (range 177)] {:why (why i)}))}))}
+        starved (for [b (range 1000 6200 37)
+                      :let [{:keys [tokens]} (seon/print-value v {:handle 'result/e1 :budget b})]
+                      :when (< tokens (* 0.8 b))]
+                  [b tokens])]
+    (is (empty? starved) (str "budgets that printed under 80% of themselves: " (vec (take 5 starved))))))
+
+(def ^:private a-deftest
+  "A test's source as its file holds it: a comment, a string with quotes, nested indentation."
+  "(deftest a-proof-with-no-result-reads-unknown
+  ;; a proof with no result never ran; the context says :unknown
+  (let [db (db-with-program)
+        t (task/task db \"demo/f\")]
+    (is (= :unknown (status {:results {} :turn 0}))
+        \"no result: it never ran, unknown (the judge's word)\")))")
+
+(deftest code-prints-as-written
+  ;; owner, 2026-10-25: \"if we reference a function we should return the quote escaped forms so
+  ;; agents see more clojure code as is normally seen in files or the repl\": source its producer
+  ;; marks as code (seon.print/code) prints verbatim at its place, not as an escaped string
+  (let [h 'result/e1
+        v {:test 'demo-test/f-test :status :fail :source (seon/code a-deftest)}
+        {:keys [text elisions]} (seon/print-value v {:handle h})
+        lines (str/split-lines a-deftest)]
+    (is (zero? elisions) text)
+    (is (not (str/includes? text "\\\"")) "no quote is escaped")
+    (is (not (str/includes? text "\\n")) "no line break is escaped")
+    (is (str/includes? text (first lines)) "its first line as written")
+    (is (every? #(str/includes? text %) (rest lines)) "every later line as written, at its place")
+    (is (= (edn/read-string a-deftest) (:source (edn/read-string text))) "and it reads back as the form")
+    (testing "cut, it says what it left and reads exactly the rest"
+      (let [{:keys [text]} (seon/print-value {:source (seon/code (str/join "\n" (repeat 40 a-deftest)))} {:handle h :budget 120})
+            [cut] (cuts-of text)
+            rest (read-rest (:form cut) h {:source (seon/code (str/join "\n" (repeat 40 a-deftest)))})]
+        (is (:chars? cut) text)
+        (is (= (:n cut) (count rest)) "the form reads the characters it says it left")))))
+

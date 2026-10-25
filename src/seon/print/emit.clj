@@ -9,7 +9,7 @@
   reaches: the node kinds it builds, its cuts and their continuation forms. Keys keep
   Seon's names (`:seon.print/*`, `:seon.render.data/*`); a cut is read as its text.
   Dropped mechanisms are listed in notes BAGGAGE (proto/BAGGAGE.md)."
-  (:require [clojure.string :as str] [seon.config :as config]))
+  (:require [clojure.string :as str]))
 
 (def default-options
   "Seon's shipped print options (the `:seon.print/default` properties of `:seon.print/options`
@@ -30,6 +30,12 @@
   {:malli/schema [:=> [:cat :string] :string]}
   [s]
   (str "\"" (str/escape s #(when-not (= \newline %) (char-escape-string %))) "\""))
+
+(defn code-text
+  "Code text `s` at its place: verbatim, every line after the first indented `indent` columns."
+  {:malli/schema [:=> [:cat :string nat-int?] :string]}
+  [s indent]
+  (if (pos? indent) (str/replace s "\n" (str "\n" (apply str (repeat indent \space)))) s))
 
 (defn path-form
   "The plain clojure.core form that reads `path` from `source`: runs of keys and indices as one
@@ -56,9 +62,9 @@
   "The form that reads what one cut omitted, from its next offset: `(drop n …)` for members,
   `(subs … n)` for characters; nil without a requery symbol."
   {:malli/schema [:=> [:cat :map] :any]}
-  [{:seon.print/keys [requery-id elision-unit] path :seon.render.data/path next-offset :seon.render.data/next-offset}]
+  [{:seon.print/keys [requery-id elision-unit code?] path :seon.render.data/path next-offset :seon.render.data/next-offset}]
   (when (or (symbol? requery-id) (seq? requery-id))
-    (let [target (path-form requery-id (vec path))
+    (let [target (cond->> (path-form requery-id (vec path)) code? (list :seon.print/code))
           offset (or next-offset 0)]
       (cond (zero? offset) target
             (= :characters elision-unit) (list 'subs target offset)
@@ -88,7 +94,10 @@
   [node]
   (let [form (:seon.print/continuation node)]
     (case (:seon.print/elision-unit node)
-      :characters (str (string-literal (or (:seon.print/prefix node) "")) (cut-words (:seon.print/omitted node) (:seon.print/lines node) form))
+      :characters (str (if (:seon.print/code? node)
+                         (str (code-text (or (:seon.print/prefix node) "") (:seon.print/indent node 0)) " ")
+                         (string-literal (or (:seon.print/prefix node) "")))
+                       (cut-words (:seon.print/omitted node) (:seon.print/lines node) form))
       (cond-> (if (= :pending (:seon.print/elision-unit node)) "…?" (str "…" (:seon.print/omitted node "?")))
         form (str " " (form-text form))))))
 
@@ -97,15 +106,11 @@
 
 (def ^:private scalar-kinds
   #{:seon.print/nil :seon.print/boolean :seon.print/number :seon.print/keyword :seon.print/symbol
-    :seon.print/char :seon.print/string :seon.print/inst :seon.print/uuid :seon.print/var
+    :seon.print/char :seon.print/string :seon.print/code :seon.print/inst :seon.print/uuid :seon.print/var
     :seon.print/class :seon.print/object :seon.print/elided})
 
 (def ^:private structural-kinds
   #{:seon.print/vector :seon.print/list :seon.print/set :seon.print/map :seon.print/throwable})
-
-(def ^:private nest-depth
-  "Open collections past which indentation stops growing (:seon.config.render/nest-depth), read once."
-  (config/value :seon.config.render/nest-depth))
 
 ;; The ops every collection shares, made once.
 (def ^:private line {:op :line :inline " " :terminate ""})
@@ -134,9 +139,9 @@
         label (if shown (cut-words (:seon.print/omitted node) (:seon.print/lines node) (:seon.print/continuation node)) text)
         reason (when-not (:seon.print/continuation node) (:seon.print/requery-refused node))
         marker [:span (cond-> {:class (css-class :seon.print/elision)} reason (assoc :title reason)) label]]
-    (if shown
-      [:span [:span {:class (css-class :seon.print/string)} shown] marker]
-      marker)))
+    (cond (and shown (:seon.print/code? node)) [:span [:code {:class (css-class :seon.print/code)} shown] " " marker]
+          shown [:span [:span {:class (css-class :seon.print/string)} shown] marker]
+          :else marker)))
 
 (defn- leaf-op
   "The text op of one leaf node."
@@ -150,6 +155,8 @@
       {:op :text :text (or (:seon.print/text node) (literal value)) :seon.print/class (:seon.print/face node)}
       :seon.print/string (text-op :seon.print/string (or (:seon.print/text node) (string-literal value))
                                   [:span {:class (css-class :seon.print/string)} (or (:seon.print/text node) value)])
+      ;; code (seon.print/code) verbatim at its place, as in its file
+      :seon.print/code (text-op :seon.print/code (code-text value (:seon.print/indent node 0)) [:code {:class (css-class :seon.print/code)} value])
       (:seon.print/inst :seon.print/uuid) (text-op :seon.print/tag (or (:seon.print/text node) (literal value)))
       :seon.print/var (text-op :seon.print/symbol (str "#'" (:seon.print/name node)))
       :seon.print/class (text-op :seon.print/symbol (:seon.print/name node))
@@ -211,8 +218,7 @@
                :seon.print/vector "[" :seon.print/list (if quoted? "'" "(") :seon.print/set "#{"
                :seon.print/map (str (when lifted (str "#:" lifted)) "{"))
         close (case (:seon.print/face node) :seon.print/vector "]" :seon.print/list (if quoted? "" ")") "}")
-        nest (fn [offset] (nests (if (< depth nest-depth) offset 0)))
-        d (inc depth)
+                d (inc depth)
         fill? (and (not map-like?) (every? (comp scalar-kinds :seon.print/face) shown))
         ;; a member's path, `path` then its index (and 0 for a key, 1 for a value)
         member (fn [ops child index part]
@@ -222,7 +228,7 @@
         ops (-> ops
                 (conj! {:op :begin :seon.print/open (assoc node :seon.print/path path)})
                 (conj! (text-op :seon.print/delimiter open))
-                (conj! (nest (if (= :seon.print/set (:seon.print/face node)) 2 1))))
+                (conj! (nests (if (= :seon.print/set (:seon.print/face node)) 2 1))))
         ops (reduce-kv
              (fn [ops index child]
                (let [ops (cond (zero? index) ops
@@ -232,7 +238,7 @@
                  (cond
                    (and map-like? (vector? child))
                    (-> ops (conj! begin)
-                       (member (nth child 0) index 0) (conj! (nest 2)) (conj! line)
+                       (member (nth child 0) index 0) (conj! (nests 2)) (conj! line)
                        (member (nth child 1) index 1) (conj! outdent) (conj! end))
                    (or (zero? index) map-like? (not fill?)) (member ops child index nil)
                    :else (-> ops (conj! begin) (conj! line) (member child index nil) (conj! end)))))

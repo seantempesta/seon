@@ -320,7 +320,7 @@
         new (apply f old args)]
     (cond
       (not (contract/valid? member new))
-      (contract/error :seon.task/invalid-member 'my.task/update! (str member " would be " (pr-str new) ", which its schema does not admit") {:member member})
+      (contract/error :seon.task/invalid-member 'my.task/update! (str member " would be a value its schema does not admit: :value") {:member member :value new})
       (= :seon.task/proofs member)
       (into (mapv #(vector :db/retract id member %) (sort-by str (remove new old)))
             (map #(vector :db/add id member %)) (sort-by str (remove old new)))

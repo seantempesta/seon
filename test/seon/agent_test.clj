@@ -9,11 +9,17 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.docs] [test-runner :as runner]))
+            [seon.fx :as fx] [seon.docs] [test-runner :as runner] [seon.context-test]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
   (.getCanonicalPath (java.io.File. "test/seon/await.clj")))
+
+(def ^:private before-done
+  "Main's t just before a :done, kept in root's REPL as t-before-done: :done answers once the judge
+  has, and the reconciler may be quiet by then, so a test waiting for quiescence after :done waits
+  for a report written after this t, never after :done's answer (that wait could never end)."
+  {:op :eval :agent "root" :code "(def t-before-done (:max-tx @(:conn sys)))"})
 
 (def value-of "seon.test-store/value-of, as this namespace's callers name it." ts/value-of)
 
@@ -396,10 +402,10 @@
   ;; owner, 2026-10-22: a failure is task data and root reacts to it. The agent marks its
   ;; task failed on its branch, hands the run back (seon_done), and root, at the
   ;; run's end, holds the task as :failed and reports it among the problems
-  (let [[_ f _ seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} "(:reason (my.task/fail! \"the premise is refuted\" '(= 1 2)))"
-                              {:op :done :agent "a1"}
+  (let [[_ f _ _ seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} "(:reason (my.task/fail! \"the premise is refuted\" '(= 1 2)))"
+                              before-done {:op :done :agent "a1"}
                               {:op :eval :agent "root"
-                               :code (str "(let [t (:max-tx @(:conn sys))] (seon.await/await-quiet sys (inc t))"
+                               :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
                                           " [(seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) \"demo/t\")"
                                           " (select-keys (first (get-in (my.root/problems sys) [:classes :failed :rows])) [:task :reason :counterexample :open?])])")}])]
     (is (= "the premise is refuted" (:value f)) (pr-str f))
@@ -411,10 +417,10 @@
   ;; judged a run that had no end, so its run read "ended no-end (the agent wrote no end)"
   ;; whatever its proofs said. The agent writes the end first, as a turn loop does: here its
   ;; one proof is not written, so the end is :red and names why
-  (let [[_ done seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
-                                 {:op :done :agent "a1"}
+  (let [[_ _ done seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+                                 before-done {:op :done :agent "a1"}
                                  {:op :eval :agent "root"
-                                  :code (str "(let [t (:max-tx @(:conn sys))] (seon.await/await-quiet sys (inc t))"
+                                  :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
                                              " (select-keys (first (vals (seon.task/runs @(:conn sys)))) [:seon.run/outcome :seon.run/reason]))")}])
         run (:value seen)]
     (is (= :red (:outcome done)) (str "the answer is the verdict: " (pr-str done)))
@@ -425,12 +431,12 @@
 (deftest an-outside-run-with-a-green-proof-finishes
   ;; root (2026-10-23): an outside agent that writes its proof green and hands the run back is
   ;; judged by the end it wrote, and its task finishes, not held
-  (let [[_ _ t done seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+  (let [[_ _ t _ done seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
                                      "(ns demo-test (:require [clojure.test :refer [deftest is]]))"
                                      "(deftest t (is (= 2 (inc 1))))"
-                                     {:op :done :agent "a1"}
+                                     before-done {:op :done :agent "a1"}
                                      {:op :eval :agent "root"
-                                      :code (str "(let [t (:max-tx @(:conn sys))] (seon.await/await-quiet sys (inc t))"
+                                      :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
                                                  " [(select-keys (first (vals (seon.task/runs @(:conn sys)))) [:seon.run/outcome :seon.run/status])"
                                                  "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) \"demo/t\")])")}])
         [run state] (:value seen)]
@@ -443,12 +449,12 @@
   ;; task seon.reconcile/the-judge-asks-the-test-service: the judge at a run's end asks the test
   ;; service (seon.prove), so its run is recorded on main, a fact per test digest and one for the
   ;; run, keyed by the branch at its program's digest in mode :judge (no !turn)
-  (let [[_ _ _ _ seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+  (let [[_ _ _ _ _ seen] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
                                   "(ns demo-test (:require [clojure.test :refer [deftest is]]))"
                                   "(deftest t (is (= 2 (inc 1))))"
-                                  {:op :done :agent "a1"}
+                                  before-done {:op :done :agent "a1"}
                                   {:op :eval :agent "root"
-                                   :code (str "(let [t (:max-tx @(:conn sys))] (seon.await/await-quiet sys (inc t))"
+                                   :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
                                               " (let [db @(:conn sys)]"
                                               "  [(d/q '[:find [?id ...] :where [?r :seon.proof.run/id ?id]] db)"
                                               "   (d/q '[:find [?s ...] :where [?e :seon.proof/test demo-test/t] [?e :seon.proof/status ?s] [?e :seon.proof/digest]] db)"
@@ -599,11 +605,11 @@
                                    "   :screen (seon.print/record-text (:seon.eval/record (datahike.api/pull db '[:seon.eval/record] [:seon.eval/id (second (nth (:seon.turn/sent t) 2))])))})")]
                              {:sets [":seon.config.ai/provider=:none"]})]
     (is (= :error (:outcome (:value end))) (pr-str end))
-    (is (= [:section :task :eval :eval :eval] (:sent (:value turn))) "the help page, the task story, the screen's three evals (show, status, changes)")
+    (is (= [:section :task :eval :eval :eval :eval] (:sent (:value turn))) "the help page, the task story, the screen's four evals (show, status, changes, related)")
     (is (str/includes? (str (:screen (:value turn))) ":page") (str "the screen is root's page of it: " (:screen (:value turn))))
     (is (str/includes? (str (:screen (:value turn))) "[:h1 \"a1\"]") (str "its head in words, read whole at the screen's budget: " (:screen (:value turn))))
     (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")
-    (is (= 5 (:read (:value turn))) "read back from its records")))
+    (is (= 6 (:read (:value turn))) "read back from its records")))
 
 (deftest a-turn-that-repeats-the-last-from-the-same-state-ends-the-run
   ;; root's research, lever 2 (2026-10-22): loops took 45% of tokens, and the step E dry run's
@@ -738,3 +744,19 @@
                     :per-n {:bytes 20000 :calls 0}
                     :fixed {:bytes 400000 :calls 2}
                     :sizes [100 1000]}))
+
+(deftest related-is-an-eval-of-the-plan-and-of-any-text
+  ;; my.task/related (the screen form) and my.agent/related (the agent's own words), in a test-mode
+  ;; agent over seon.context-test's five sections; a process test because my.agent reaches a fork
+  (let [[db _ dir] (#'seon.context-test/sections-near "Make the page say one thing (docs/vector.md#what-is-embedded).")
+        old @agent/state]
+    (reset! agent/state {:n 0 :mode :test :db db :task "demo/r"})
+    (try
+      (is (= "docs/vector.md#the-model: Section 0 says one thing." (first (:sections ((requiring-resolve 'my.task/related)))))
+          "the screen form: the sections nearest the plan, the cited one left out")
+      (binding [agent/*fx-stub* (fn [_ _] {:value {:model "m" :vectors [(dir 1.0 0.5)] :tokens [3]}})]
+        (let [v ((requiring-resolve 'my.agent/related) "the last one" 2)]
+          (is (= "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval: Section 4 says one thing." (first (:sections v)))
+              "the agent's own words refine it: the sections nearest them")
+          (is (= 2 (count (:sections v))) "k of them")))
+      (finally (reset! agent/state old)))))

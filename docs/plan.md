@@ -14,14 +14,16 @@ Pins: see docs/forks.md (chez fa6a4c73, datahike 6dc9ce64 since 2026-10-25) · p
 
 Updated 2026-10-25 by root. Sessions are linked to root's session (list_sessions linked).
 
-| Session | Last done | Now / next |
+| Session | Now (overnight 2026-10-25) | Then |
 |---|---|---|
-| **Agent loop** (Opus) | design r2; delivery measured: main-first (§3a); main carrier (jolt 0cf54944); part 1 static fork server (734da4c1c) | self-review, pin bump, then parts 2-4; owns the fork hang (seon.lib/a-fork-from-a-threaded-process-never-hangs) |
-| **Agent view r3** (Opus) | docs at levels, dogfood merged | jolt/dogfood-rulings reverted on main (10 reconciler tests changed class): finding the edge; story pulls kept on jolt/story-pulls |
-| **Printer** (Opus) | audit, 144-line elision fixed, flat cost (jolt/printer-everywhere) | the reach edge (680 of 706 tests take the tree; 2 program-test reds), reply budget 16,000 |
-| **Root as one system** | judge through the test service merged | three main-test/check-test reds from the full run; cases 3-4 after the loop's parts |
-| **Full-run reds** (Opus) | started 2026-10-25 | bin/check 100: idle, record, durable-read, 6 e2e, swarm red on main |
-| ctx-atom (idle) | design r3; §11 superseded | builds after the loop's part 1 merges |
+| **Agent loop** | part 3 park and wake: runs, report | part 4: resume from any commit, the screen as diffs |
+| **Root as one system** (stability lead) | the thread that survives stop!; jolt/fork-guard ready (Chez f6a45c9d, Jolt 115f00cf: fork-alone, main-carrier wake fix) | reach the same however the store was made; the six waits tasks; read the ~20 old branches (delete nothing) |
+| **Agent view r3** | the value view: highlight.js, browser check, prove, ready | grep ranks definitions first |
+| **Related sections** | (a) :form/keywords: runs, ready | seon.vector/one-scan-ranks-every-kind |
+| **ctx atom** | build step 0 (vectors in schemas), then step 1 (read-only ctx), each reported | steps 2-6; the standing store erased when a stored type changes, at a quiet moment (owner's go) |
+| **Live agents** | look first, dogfood, then 5 paid runs on today's main (up to $1/round, two rounds) | findings → fixes → re-measure turns to green |
+
+Machine: all cylinders overnight (up to three heavy runs while load < ~8). Root merges verified branches as they report, runs the daily full run (bin/test --all, bin/check 100) on a clean main once the merges settle, and files every red with an owner.
 
 Baseline: `notes/baseline-2026-10-25.md`.
 
