@@ -529,8 +529,8 @@
                 (and (= :seon.agent/died (:seon.error/type r1)) (= {:exit 3} (:exit r1))
                      (= :dead (get-in (c/state sys) [:agents a :status])))
                 "a refused transaction is the response's :ex" (and (:ex r2) (re-find #"refused" (str (:text r2))))
-                "huge and infinite values print within the printer's budget" (let [chars (* (seon.config/value :seon.config.render.agent/token-budget) (seon.config/value :seon.config.ai/chars-per-token-prior))]
-                                                                 (every? #(<= (count (:text %)) chars) r3))
+                "huge and infinite values print within the printer's budget" (let [chars (seon.print.select/estimate-chars (seon.config/value :seon.config.render.agent/token-budget))]
+                                                                 (every? #(and (string? (:text %)) (<= (count (:text %)) chars)) r3))
                 "a read error is the response's :ex" (= :read (get-in r4 [:ex :phase]))
                 "a test that never ends stops at its tick budget, naming the test; the agent lives"
                 (and (= 1 (:error t5)) (= "2" (printed r5))
