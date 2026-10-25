@@ -457,6 +457,16 @@
        (record! (cond-> (assoc r :text text) (seq recorded) (assoc :recorded recorded) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
                 code req)))))
 
+(defn draw
+  "Value v drawn as HTML by the render its schema k names on this branch (root's render proc asks:
+  seon.render.ui/ctx), under the branch's schemas, recording nothing: {:html s}, or {:error e}
+  when the render throws (an agent's own render, unmerged: the boundary that answers it, so the
+  asker always has an answer and the agent goes on)."
+  {:malli/schema [:=> [:cat :any :keyword] [:or [:map [:html :string]] [:map [:error :map]]]]}
+  [v k]
+  (try {:html (with-branch-schemas #(h/html (render/html v {:schema k})))}
+       (catch Throwable e {:error (agent/error-map e)})))
+
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 
 (defn agent-step
@@ -476,8 +486,7 @@
      ;; root's render proc asks for a value drawn by a render this agent defines (seon.render.ui/ctx):
      ;; drawn here under its branch's schemas, answered as HTML, and nothing recorded
      (= :render (:op m))
-     [st {:sock [{:op :reply :id (:id m)
-                  :response {:html (with-branch-schemas #(h/html (render/html (:value m) {:schema (:schema m)})))}}]}]
+     [st {:sock [{:op :reply :id (:id m) :response (draw (:value m) (:schema m))}]}]
      (= :eval (:op m))
      (do
        ;; an interrupt left from before this request is not its; then root hears that it began

@@ -380,18 +380,18 @@
             e {:html html :hiccup hiccup :keys ks :rev rev}]
         [(-> st (assoc-in [:components ck] e) (assoc :comp-rev rev) (update-in [:counts :components] (fnil inc 0))
              (update-in [:comp-index dk] index (seq ks) ck)
-             (update :to-draw (fnil into {}) (map (fn [w] [w ck])) @wanted))
+             (update :to-draw #(reduce (fn [m w] (update m w (fnil conj #{}) ck)) (or % {}) @wanted)))
          e]))))
 
 (defn- ask-draws
-  "Ask each agent for what a component rendered this pass wants it to draw ({:op :render}, one
-  ask a [agent handle key]), remembering the component to render again with its answer."
+  "Ask each agent for what the components rendered this pass want it to draw ({:op :render}, one
+  ask a [agent handle key form]), remembering every component to render again with its answer."
   {:malli/schema [:=> [:cat :map :seon.host/volatile] :map]}
   [st o]
-  (reduce (fn [st [[agent handle k v] ck]]
-            (let [kind [:draw agent handle k]]
+  (reduce (fn [st [[agent handle k text v] cks]]
+            (let [kind [:draw agent handle k text]]
               (-> (ask st o kind {:op :render :id agent :schema k :value v})
-                  (update-in [:draw-comps kind] (fnil conj #{}) ck))))
+                  (update-in [:draw-comps kind] (fnil into #{}) cks))))
           (dissoc st :to-draw) (:to-draw st)))
 
 (defn comps-touched
@@ -714,7 +714,13 @@
     ;; and the view stays as it was; the next event asks again
     (and (= :state kind) (seon.contract/error? r)) st
     (= :state kind)
-    (let [st (assoc st :view r)
+    (let [live (into #{} (keep (fn [[id a]] (when-not (contains? (:seon.status/gone (contract/properties :seon.agent/status)) (:status a)) id))) (:agents r))
+          again (filter (fn [[[agent]]] (contains? live agent)) (:draw-failed st))
+          ;; what a gone agent did not draw is drawn once it is live again
+          st (-> (update st :drawn #(apply dissoc % (map first again)))
+                 (update :draw-failed #(apply dissoc % (map first again)))
+                 (invalidate (into #{} (mapcat second) again)))
+          st (assoc st :view r)
           ;; main's first read; after it, main comes in the writer's commits (:main)
           st (if (and (nil? (:main-db st)) (not (some #{:main} (vals (:pending st))))) (ask st o :main {:op :write :req {:op :branch-db :branch :db}}) st)]
       ;; a watched agent's branch moved: read its branch db (its turns, evaluations and task)
@@ -723,9 +729,11 @@
     ;; an agent drew a value by its own render (or could not: gone, refused): held for the
     ;; components that asked, which render again with it
     (and (vector? kind) (= :draw (first kind)))
-    (let [[_ agent handle k] kind]
-      (pass (-> (assoc-in st [:drawn [agent handle k]] (if (seon.contract/error? r) {:error r} r))
-                (invalidate (get-in st [:draw-comps kind] #{}))
+    (let [cks (get-in st [:draw-comps kind] #{})]
+      (pass (-> (assoc-in st [:drawn (subvec kind 1)] (if (seon.contract/error? r) {:error r} r))
+                ;; an agent that did not answer is asked again once it runs again (:state)
+                (cond-> (or (seon.contract/error? r) (:error r)) (assoc-in [:draw-failed (subvec kind 1)] cks))
+                (invalidate cks)
                 (update :draw-comps dissoc kind))
             o))
     ;; main as of a screen's request (each request's own: its key is its asker's route and counter):

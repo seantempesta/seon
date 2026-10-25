@@ -4,7 +4,7 @@
   each key by its own schema's render. Run: bin/test seon.ctx-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [seon.cost :as cost]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [my.schema]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [seon.contract] [my.schema]))
 
 (def ^:private k "The test agent's key." "test-boot/a1")
 
@@ -176,17 +176,34 @@
       (is (= {:schema :seon.ctx/ctx :basis {:t (:t tree) :branch :b}} (select-keys rec [:schema :basis])) "the record names the value's basis")
       (is (not (contains? (:response rec) :value)) "and holds no copy of the record")
       (is (re-find #":lab.ctx/steps" (:printed rec)) "the model's text is the one printer's, as it read it")
-      (let [[h w] (block {})]
-        (is (= #{[:a1 'result/e9 :lab.ctx/steps ["read the plan" "write the test" "read the plan"]]} w) "the page asks the agent to draw the key")
-        (is (re-find #"drawn by seon.ctx-test/steps in a1 when it answers" h) "and shows its structure meanwhile, naming its render"))
-      (is (= {:op :reply :id 7 :response {:html "<ol><li>read the plan</li><li>write the test</li><li>read the plan</li></ol>"}} answer)
-          "the agent draws it by the render its branch names, recording nothing")
-      (let [[h w] (block {[:a1 'result/e9 :lab.ctx/steps] (:response answer)})]
-        (is (re-find #"<ol><li>read the plan</li>" h) "the page shows the agent's drawing")
-        (is (empty? w) "and asks nothing more"))
-      (let [[h w] (block {[:a1 'result/e9 :lab.ctx/steps] {:error {:seon.error/message "no live agent :a1"}}})]
-        (is (re-find #"drawn by seon.ctx-test/steps in a1, which did not answer" h) "an agent that is gone: its structure, saying so")
-        (is (empty? w))))))
+      (let [[h w] (block {})
+            text (:schema/form (d/entity db [:schema/key :lab.ctx/steps]))
+            want [:a1 'result/e9 :lab.ctx/steps text]]
+        (is (= #{(conj want ["read the plan" "write the test" "read the plan"])} w) "the page asks the agent to draw the key, by its form")
+        (is (re-find #"drawn by seon.ctx-test/steps in a1, asked" h) "and shows its structure meanwhile, naming its render")
+        (is (= {:op :reply :id 7 :response {:html "<ol><li>read the plan</li><li>write the test</li><li>read the plan</li></ol>"}} answer)
+            "the agent draws it by the render its branch names, recording nothing")
+        (let [[h w] (block {want (:response answer)})]
+          (is (re-find #"<ol><li>read the plan</li>" h) "the page shows the agent's drawing")
+          (is (empty? w) "and asks nothing more"))
+        (let [[h w] (block {want {:error (seon.contract/error :seon.root/no-agent 'seon.root/api-proc "no live agent :a1" {:agent :a1})}})]
+          (is (re-find #"drawn by seon.ctx-test/steps in a1, which answered:" h) "an agent that did not draw it: its structure, and its answer")
+          (is (re-find #"no live agent :a1" h))
+          (is (empty? w))))
+      (testing "the page rebuilds the value from the branch at its basis"
+        (let [db (:db-after (d/with db [{:seon.eval/id "e9" :seon.eval/agent [:seon.agent/key k] :seon.eval/record rec}]))
+              h (seon.web.html/html (seon.render.ui/evaluation (d/pull db '[*] [:seon.eval/id "e9"]) {:db db}))]
+          (is (re-find (re-pattern (str "ctx · :b · t " (:t tree))) h) "the block of the record at t")
+          (is (re-find #":lab.ctx/steps" h))))
+      (testing "a render that throws in the agent is answered as its error, and the agent goes on"
+        (let [db (:db-after (d/with db (:tx (my.schema/registration db :lab.ctx/boom '[:vector {:seon.render/html seon.ctx-test/boom} :any] false))))
+              r (try (reset! seon.agent/state {:db db}) (seon.repl/draw [] :lab.ctx/boom) (finally (reset! seon.agent/state nil)))]
+          (is (= "cannot draw this" (get-in r [:error :seon.error/message])) "the render's throw, as its error map"))))))
+
+(defn boom
+  "A render that throws, as an agent's unmerged one may."
+  {:malli/schema [:=> [:cat :any :map] :any]}
+  [_ _] (throw (ex-info "cannot draw this" {})))
 
 (defn steps
   "A render an agent writes for its datum: the steps, numbered."

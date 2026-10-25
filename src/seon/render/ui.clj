@@ -16,7 +16,7 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.learn :as learn] [seon.docs :as docs] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
-            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx]))
+            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.edn :as sedn] [datahike.index.interface]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -439,13 +439,14 @@
     (contains? response :values) (dissoc :value)))
 
 (def ^:dynamic *drawn*
-  "What agents drew for the component being rendered, {[agent handle key] html-or-error}: the
-  render proc's answers to its :render asks (seon.render.proc/comp-entry binds it)."
+  "What agents drew for the component being rendered, {[agent handle key form-text] {:html s} or
+  {:error e}}: the render proc's answers to its :render asks (seon.render.proc/comp-entry binds it)."
   {})
 
 (def ^:dynamic *wanted*
-  "A volatile set the component being rendered adds each [agent handle key value] to that an agent
-  must draw and *drawn* lacks: what the render proc asks for (comp-entry binds it), nil elsewhere."
+  "A volatile set the component being rendered adds each [agent handle key form-text value] to that
+  an agent must draw and *drawn* lacks: what the render proc asks for (comp-entry binds it), nil
+  elsewhere."
   nil)
 
 (defn- based-value
@@ -455,7 +456,21 @@
   [rec e db]
   (when-let [{:keys [t branch]} (when db (:basis rec))]
     (let [k (:seon.agent/key (d/entity db (:db/id (:seon.eval/agent e))))]
-      (with-meta (assoc (:tree (seon.ctx/build (d/as-of db t) k branch)) :t t) {:seon.render/schema (:schema rec)}))))
+      ;; a value as of t never changes: its reads are not the component's (no later transaction
+      ;; touches them), so it is built when the component renders and never because the branch moved
+      (with-meta (assoc (:tree (binding [datahike.index.interface/*reads* nil] (seon.ctx/build (d/as-of db t) k branch))) :t t)
+        {:seon.render/schema (:schema rec)}))))
+
+(defn- branch-render
+  "The :html render key k's schema names on branch db when the branch registered or changed it
+  (its form there differs from the platform's), with that form's text: [sym text], else nil. One
+  seek of k's schema entity."
+  {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe [:tuple :symbol :string]]]}
+  [db k]
+  (when-let [text (when (keyword? k) (some->> (d/datoms db :avet :schema/key k) first :e (d/entity db) :schema/form))]
+    (let [form (sedn/decode text)]
+      (when (and (not= form (get contract/forms k)) (vector? form) (map? (second form)))
+        (when-let [sym (:seon.render/html (second form))] [sym text])))))
 
 (defn- drawer
   "Who draws a value eval e answered with a render its agent defines: {:agent id :handle h}, the
@@ -714,20 +729,22 @@
   {:malli/schema [:=> [:cat :seon.ctx/ctx :seon.render/opts] :any]}
   [{:keys [t branch commit] :as c} opts]
   (let [ks (sort-by str (keys (dissoc c :t :branch :commit :db/id)))
-        changes (when (:db opts) (program/schema-changes (:db opts)))
         {:keys [agent handle]} (:drawer opts)
         cell (fn [k v]
-               (let [form (get changes k)
-                     sym (when (and (vector? form) (map? (second form))) (:seon.render/html (second form)))
-                     drawn (get *drawn* [agent handle k])]
+               (let [[sym text] (when (and agent (:db opts)) (branch-render (:db opts) k))
+                     ;; held by the render's form as the branch has it: a changed schema is asked again
+                     want [agent handle k text]
+                     drawn (get *drawn* want)]
                  (cond
-                   (not (and sym agent)) (render/html v (cond-> {:schema (when (qualified-keyword? k) k)}
-                                                          handle (assoc :handle (list k handle))))
+                   (nil? sym) (render/html v (cond-> {:schema (when (qualified-keyword? k) k)}
+                                               handle (assoc :handle (list k handle))))
                    (string? (:html drawn)) (h/raw (:html drawn))
-                   :else (do (when (and *wanted* (nil? drawn)) (vswap! *wanted* conj [agent handle k v]))
+                   :else (do (when (and *wanted* (nil? drawn)) (vswap! *wanted* conj (conj want v)))
                              [:div {:class "flex flex-col gap-1"}
-                              [:span {:class "text-2xs text-text-500"} (str "drawn by " sym " in " (kname agent)
-                                                                           (if drawn ", which did not answer: " " when it answers: ") "its value")]
+                              (if-let [err (:error drawn)]
+                                [:div {:class "text-2xs text-text-500"} (str "drawn by " sym " in " (kname agent) ", which answered:")
+                                 (render/html err {:as :inline})]
+                                [:span {:class "text-2xs text-text-500"} (str "drawn by " sym " in " (kname agent) ", asked")])
                               (render/html v {:handle (list k handle)})]))))]
     (if (= :inline (:as opts))
       [:span {:class "font-mono"} (str "ctx " branch " t " t ", " (count ks) " keys")]
