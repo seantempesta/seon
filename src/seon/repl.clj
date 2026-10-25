@@ -480,8 +480,10 @@
   [fd m db0 t-req-ns]
   ;; the agent's whole body is one fiber on its one thread (jolt.host/main-carrier-run!): its
   ;; waits park, its go blocks, flows and remote channels run beneath it, and it starts no
-  ;; thread, so it still forks its test children safely (design agent-loop section 8a)
-  (jolt.host/main-carrier-run!
+  ;; thread, so it still forks its test children safely (design agent-loop section 8a). macOS
+  ;; only: the loop wakes on root's signals through kqueue (jolt.io-poller/wake-on-signals!),
+  ;; which Linux lacks, so there the agent runs on its thread as before
+  ((if (lib/macos?) jolt.host/main-carrier-run! #(%))
     (fn []
       (agent/init! fd m db0 serve!)
       (agent/hello! t-req-ns (cond-> {:interrupt-ok (:interrupt-ok @agent/state)}
