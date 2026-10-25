@@ -306,7 +306,7 @@
                                 :let [src (docs/source-of db p)
                                       ;; no result: not written yet, the run failed as a whole, or it never ran (unknown,
                                       ;; the judge's word: seon.reconcile/done-explain)
-                                      st (get results p (cond (nil? src) :undefined (seq test-run-errors) :not-run :else :no-assertions))
+                                      st (get results p (cond (nil? src) :undefined (seq test-run-errors) :not-run :else :unknown))
                                       fs (filter #(= p (:test %)) reds)]]
                             (cond-> {:test p :status st}
                               ;; its source is code, printed as in its file (seon.print/code)
