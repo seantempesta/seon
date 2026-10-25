@@ -136,15 +136,21 @@
                  :let [r (edn/read-string (slurp f))] :when (green? r)]
              [dg r])))
 
-(defn stored-greens
-  "{digest result} of the results db holds as green at digests (:seon.proof/ facts, which the test
-  service records, seon.prove/result-tx): one AVET seek per digest. The same shape greens reads from
-  the files, which stay the lookup across checkouts until the stores are shared."
+(defn stored-results
+  "{digest result} of the results db holds at digests (:seon.proof/ facts, which the test service
+  records, seon.prove/result-tx): one AVET seek per digest. A green is {:digest :pass 1 :fail 0
+  :error 0}, the shape greens reads from the files; a red is its status counted once, with the
+  failures it recorded (:failures [{:type :message :expected :actual}]). A test's verdict is a
+  function of its digest (one per-test tick bound everywhere), so a red is reused as a green
+  is. The files stay greens only, the lookup across checkouts until the stores are shared."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] [:map-of :string :map]]}
   [db digests]
   (into {} (for [dg (distinct digests) :let [e (:e (first (d/datoms db :avet :seon.proof/digest dg)))]
-                 :when (and e (= :pass (:seon.proof/status (d/pull db [:seon.proof/status] e))))]
-             [dg {:digest dg :pass 1 :fail 0 :error 0}])))
+                 :when e
+                 :let [{s :seon.proof/status fs :seon.proof/failures} (d/pull db [:seon.proof/status :seon.proof/failures] e)]
+                 :when (#{:pass :fail :error} s)]
+             [dg (cond-> {:digest dg :pass (if (= :pass s) 1 0) :fail (if (= :fail s) 1 0) :error (if (= :error s) 1 0)}
+                   (not= :pass s) (assoc :failures (vec fs)))])))
 
 (defn result-file
   "The write that stores result r ({:test or :step, :digest, :pass :fail :error :ms}) in dir:
@@ -165,12 +171,13 @@
 
 (defn plan
   "What a change runs: of cand ({key digest}, the candidate's), base (the base's {key digest},
-  nil: none), found ({digest result}, the greens stored at cand's digests: greens) and proofs
+  nil: none), found ({digest result}, the results stored at cand's digests: greens, stored-results) and proofs
   (keys that always judge), {:selected :run :reused}. With a base (an agent's branch against the
   main it forked from), selected is the keys whose digest moved or is new, and the proofs cand
   holds: what judges the change. With none (a worktree session's or root's tree), the proofs and every key
-  with no green at its digest. run is the selected with no green at their digest (sorted), what
-  runs; reused {key result} every key green at its digest. So an unchanged tree runs nothing.
+  with no green at its digest. run is the selected with no result at their digest (sorted), what
+  runs; reused {key result} every key with a result at its digest, green or red (a red reused
+  judges red again, with its failures). So an unchanged tree runs nothing.
   Cost: one lookup per key, then a sort of what is selected."
   {:malli/schema [:=> [:cat [:maybe [:map-of :any :string]] [:map-of :any :string] [:map-of :string :map] [:set :any]]
                   [:map [:selected [:vector :any]] [:run [:vector :any]] [:reused [:map-of :any :map]]]]}
@@ -178,7 +185,7 @@
   (let [selected (vec (sort-by str (distinct (concat (filter cand proofs)
                                                     (if base
                                                       (remove #(= (base %) (cand %)) (keys cand))
-                                                      (remove #(found (cand %)) (keys cand)))))))]
+                                                      (remove #(green? (found (cand %))) (keys cand)))))))]
     {:selected selected
      :run (filterv #(not (found (cand %))) selected)
      :reused (into {} (for [[k dg] cand :let [r (found dg)] :when r] [k r]))}))

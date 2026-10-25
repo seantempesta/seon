@@ -378,7 +378,7 @@
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/reach-digests) against base's (main at its merge base), the greens stored at
-  those digests (files in results-dir, and the test service's result facts in db: seon.proofs/stored-greens) and proofs. The digests' inputs with no program facts are this boot's
+  those digests (files in results-dir, and the test service's result facts in db, greens and reds: seon.proofs/stored-results) and proofs. The digests' inputs with no program facts are this boot's
   :inputs on root's :seon.root/source fact (seon.root/import-source!: present only when root's
   binary is built from its source tree), so an agent's results are kept by digest in the one
   results directory every checkout shares (:seon.config.source/test-results-dir;
@@ -412,7 +412,7 @@
         idx (into {} (filter (comp judges? key)) (program/graph-index g in nil))
         cd (update-vals idx :digest)
         unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))]
-    (-> (proofs/plan (some-> b :index (update-vals :digest)) cd (merge (if dir (proofs/greens dir (vec (vals cd))) {}) (proofs/stored-greens db (vec (vals cd)))) proofs)
+    (-> (proofs/plan (some-> b :index (update-vals :digest)) cd (merge (if dir (proofs/greens dir (vec (vals cd))) {}) (proofs/stored-results db (vec (vals cd)))) proofs)
         (update :selected into unrecorded)
         (update :run into unrecorded)
         (assoc :digests cd :dir dir
@@ -536,8 +536,9 @@
   green held at their digest), each test within ticks engine ticks of work of its own, writing
   each test var as it starts and then one EDN line of its result on a pipe. The agent reads the
   pipe to its end: no clock; the child ends by finishing or by dying (then the last test it
-  started is named). Each selected test green at its digest is reused: one :pass report marked
-  :reused; when every one is, nothing is forked (no :pid). One bound in every mode
+  started is named). Each selected test with a result at its digest is reused, marked :reused: a
+  green as one :pass report, a red as the failures its run recorded (the test service's facts,
+  seon.proofs/stored-results); when every one is, nothing is forked (no :pid). One bound in every mode
   (:seon.config.agent/test-ticks, per test), so a test's verdict is the same in a turn, the
   judge and bin/test, and the judge after a turn reruns no green the turn left.
   Each test that ran green is stored at its digest in test-plan's :dir through root's :file
@@ -567,7 +568,10 @@
                    judge)
         {:keys [reused digests dir]} plan
         run (filterv #(not (reused %)) selected)
-        reused-reports (vec (for [t selected :when (reused t)] {:type :pass :var (str "#'" t) :reused true}))
+        ;; a red reused reports the failures its run recorded, so it judges as it did
+        reused-reports (vec (for [t selected :let [r (reused t)] :when r
+                                  f (or (seq (:failures r)) [{:type (if (proofs/green? r) :pass (if (pos? (:error r)) :error :fail))}])]
+                              (assoc f :var (str "#'" t) :reused true)))
         t0 (profile/now-ns)
         ;; every selected test green at its digest (a turn's run of the same tree, a session's):
         ;; nothing to run, so no child is forked
@@ -612,9 +616,11 @@
       (-> res
         (cond-> (seq unstored) (assoc :unstored unstored))
         (update :reports into reused-reports)
-        (update :pass + (count reused-reports))
+        (update :pass + (count (filter #(proofs/green? (reused %)) selected)))
+        (update :fail + (count (filter #(pos? (:fail (reused %) 0)) selected)))
+        (update :error + (count (filter #(pos? (:error (reused %) 0)) selected)))
         (assoc :digests (select-keys digests (concat (keep (comp proofs/test-symbol :var) (:reports res)) (filter reused selected))))
-        (assoc :reused (count reused-reports) :ran (count (distinct (keep :var (:reports res))))
+        (assoc :reused (count (filter reused selected)) :ran (count (distinct (keep :var (:reports res))))
                :selected selected :deferred deferred :at-judge (count judge)))))))
 
 ;; ---- the loop ----------------------------------------------------------------------
