@@ -7,8 +7,8 @@
  :seon.error/member :keyword
  :seon.error/in [:qualified-symbol {:description "The fn an error was raised in (a var symbol, as `ns/name`)."}]
  :seon.error/at [:map {:description "A position in that form's own text (what (source v) prints), 1-based."} [:line :int] [:column {:optional true} :int]]
- :seon.error/problem [:map {:description "One refused part of a value: malli's path and the value shown as text."}
-                      [:path vector?] [:in vector?] [:expected :any] [:value :string]]
+ :seon.error/problem [:map {:description "One refused part of a value: malli's path and the value as it prints, marked code (seon.print/code)."}
+                      [:path vector?] [:in vector?] [:expected :any] [:value [:map [:seon.print/code :string]]]]
  :seon.error/problems [:vector :seon.error/problem]
  ;; what the error is about, when it names one: a var (symbol), a section address (string) or an
  ;; attribute (keyword: a proc's own fact, e.g. root's :seon.root/watch). Once its subject changes
