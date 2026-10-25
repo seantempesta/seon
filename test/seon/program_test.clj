@@ -11,7 +11,7 @@
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.program :as program]
+            [seon.program :as program] [seon.docs]
             [seon.proofs :as proofs]
             [seon.fx :as fx]
             [seon.merge :as pm]
@@ -552,3 +552,23 @@
     (is (= (:env (fx/inputs here cfg here))
            (:env (fx/inputs here (assoc cfg :seon.config.root/runs-dir "/elsewhere/runs") "/elsewhere")))
         "a path under the checkout is the same input in any checkout")))
+
+(deftest an-eval-that-changes-a-contract-or-docstring-says-so
+  ;; owner, 2026-10-25 (DECISIONS: a change to a schema is an explicit fact the eval shows): what an
+  ;; eval's definitions change of an existing var's contract or docstring, read from its own tx-data,
+  ;; with the wiki sections citing the var and the form that reads each
+  (let [db0 (ts/test-db)
+        db (d/db-with db0 [{:db/id "f" :var/name 'app/f :var/doc "Old words." :var/contract "[:=> [:cat] :int]"}
+                           {:db/id "g" :var/name 'app/g :var/doc "Kept."}])
+        db (d/db-with db (seon.docs/load-tx db "docs" {"docs/a.md" "# A\n\nIt reads `app/f`.\n"}))
+        fe (pdb/eid db :var/name 'app/f)]
+    (is (= [{:var 'app/f :was {:var/doc "Old words."} :now {:var/doc "New words."}
+             :cited-by [{:section "docs/a.md#a" :read '(my.agent/help "docs/a.md#a")}]}]
+           (program/meaning-changes db [{:db/id -1 :var/name 'app/f :var/doc "New words." :var/form -2} {:db/id -2 :form/id "x"}]))
+        "a docstring changed: before and after, and who cites it")
+    (is (= [:var/contract] (keys (:was (first (program/meaning-changes db [{:var/name 'app/f :var/contract "[:=> [:cat :int] :int]"}]))))) "a contract changed")
+    (is (= {:var/doc "Old words."} (:was (first (program/meaning-changes db [[:db/retract fe :var/doc "Old words."]])))) "a docstring removed")
+    (is (= {} (:now (first (program/meaning-changes db [[:db/retract fe :var/doc "Old words."]])))))
+    (is (nil? (program/meaning-changes db [{:var/name 'app/f :var/doc "Old words."} {:var/name 'app/g :var/form -1}])) "the same docstring, a body alone: nothing")
+    (is (nil? (program/meaning-changes db [{:var/name 'app/new :var/doc "Fresh."}])) "a new var changes nothing a section relied on")
+    (is (nil? (program/meaning-changes db [])) "an eval that defines nothing")))
