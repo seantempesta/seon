@@ -841,7 +841,7 @@
           ;; program has since (seon.db/install-missing!), and its forms the :form/keywords
           ;; facts they were recorded without, before the program it holds is loaded
           _ (when resumed
-              (let [tx (program/gained-tx @store-conn (pdb/install-missing! store-conn))]
+              (let [_ (pdb/install-missing! store-conn) tx (program/gained-tx @store-conn)]
                 (when (seq tx) (d/transact store-conn {:tx-data tx :tx-meta (pdb/tx-meta branch)}))))
           load-errors (when resumed (program/load-diff! base @store-conn))
           misaligned (when-not resumed (misaligned commit t @store-conn db0))]
