@@ -36,8 +36,6 @@ A section with no record yet (every section the day this was merged, and the fir
 
 It is attention, never a reason to refuse done (root's ruling, 2026-10-23): every edit of a var stales the sections that cite it, and refusing done for that would force a doc edit with every code edit. A branch that changes a var sees, in its context under `:attention`, the sections it made stale (`seon.problems/caused-split`), the docs to read and probably fix; `seon.problems/caused` and the done rule do not carry them.
 
-Any edit of a cited var's form stales the section, so a widely cited var's churn makes many stale pairs: main showed 223 on 2026-10-25, mostly code churn rather than wrong prose. Whether a section should go stale only when a cited var's contract or docstring changes, or the var is removed, waits on the owner's ruling: `seon.problems/a-section-goes-stale-when-what-it-cites-changes-meaning`.
-
 ## A stale pin
 
 A pin the wiki states is stale when it is not the gitlink root's last source import recorded (`seon.problems/stale-pins`, class `:stale-pin`). The page that states pins is `docs/forks.md`: each line of the form "`reference-code/<name>` pinned at `<sha>`" (`seon.problems/pins` holds the page and the line's shape). Root records the gitlinks of `reference-code/` when it imports its source (`:seon.root/source`, its `:pins`); the class compares the stated sha, as a prefix, with that record.
