@@ -323,6 +323,8 @@
                    [:batches nat-int?] [:paths nat-int?] [:rescans nat-int?]
                    [:last-rescan {:optional true} [:map [:path :string] [:kind [:enum :rescan :root]]]]
                    [:last-opened {:optional true} [:vector :string]]
+                   ;; the last batch that loaded: each kind with the first record that made it
+                   [:last-load {:optional true} [:map-of [:enum :docs :tasks :source] [:tuple [:enum :path :rescan :root] :string]]]
                    [:error {:optional true} :string]]
  :seon.root/stopped :seon.root/end
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
