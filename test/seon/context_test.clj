@@ -863,4 +863,12 @@
             "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"]
            (:sections rel))
         "the section naming the cited var fused at its rank with the nearest by meaning; the cited section left out")
-    (is (nil? (context/related-view db {:sections [] :functions [] :schemas []})) "nothing related, nothing shown")))
+    (is (nil? (context/related-view db {:sections [] :functions [] :schemas []})) "nothing related, nothing shown")
+    ;; task seon.context/related-weighs-a-neighbour-by-its-rarity: h calls demo/plumb, which twenty
+    ;; forms name, and demo/rare, which only h names; by plain counts the two tie and the name put
+    ;; plumbing first
+    (let [db (d/db-with db (into [{:db/id "h" :form/id "demo/h" :form/refs #{'demo/plumb 'demo/rare}}
+                                  {:db/id "pv" :var/name 'demo/plumb :var/kind :fn} {:db/id "rv" :var/name 'demo/rare :var/kind :fn}]
+                                 (for [i (range 20)] {:form/id (str "demo/p" i) :form/src "(plumb)" :form/refs #{'demo/plumb}})))]
+      (is (= ['demo/g 'demo/k 'demo/rare 'demo/plumb] (:functions (context/related db te)))
+          "a neighbour few forms name before one every form names"))))
