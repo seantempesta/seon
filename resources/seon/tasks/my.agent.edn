@@ -1,0 +1,8 @@
+[{:seon.task/name "a-deferred-test-names-the-process-it-reaches"
+  :seon.task/plan "Dogfood (gap 4): `(my.agent/prove)` answered `:ran 0 :deferred [...]` for the agent's own new test, and the context said only `:when-asked 1`, so the agent could not tell why its proof did not run or how to run it. A test is a process test when its reach holds a process var (```seon.program/reach-graph```: in-agent, sh, fork!, binary-sh). The change: each :deferred entry is the test and the process var its reach holds, and the path to it (the first chain of calls), and the help's Done section says how a process test that is the task's proof runs (it is run at the judge when it is a proof)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.agent-test/a-deferred-test-names-the-process-it-reaches}}
+ {:seon.task/name "grep-ranks-definitions-first"
+  :seon.task/plan "Dogfood (gap 3): `(my.agent/grep \"summary\")` answers about 30 names, unranked and without the matching line, at about 350 ms and 240 MB a call. Rank definitions whose name holds the text first, then docstrings, then bodies, and give each its matching line through the one printer. Measure before and after on the three fit requests' words; if the cost does not fall, find where the 240 MB goes first (a cost proof)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.agent-test/grep-ranks-names-before-bodies seon.agent-cost-test/grep-costs-its-matches}}]

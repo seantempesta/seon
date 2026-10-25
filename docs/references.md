@@ -51,6 +51,12 @@ Beside them, the task story's `:write-set` shows each var the plan cites with it
 
 `seon.context/current-state` keeps the citations that carry a path, a dotted simple symbol (a namespace) and a task id (```seon.ref/references``` over the plan and instructions) and shows each as `:sections`: ```seon.docs/view``` reads the section main holds and ```seon.ref/shown``` renders it, the one rule `seon.ref/view` also uses for a freshly parsed document. A link or one backtick shows the lead (or opening) and the sections below; three backticks show the section whole (its own text); a section main does not hold is read from the checkout as a file reference (below), and shows `:unresolved` beside the same message as an unresolved name when the checkout has none either. Stored sections keep no opening block, so a section whose first block is not a paragraph shows no lead at doc depth, and its sections below come in the order the wiki was written. A link with no anchor (a whole page) shows the page's first section, read from the checkout like a file (main stores no page entity). A prose bare address is a summary, and `seon.ref/references` keeps it only when it names a file, so a bare section address does not reach the context; write the link.
 
+## Where the wiki in the store falls short today
+
+Every page and section is on main, reloaded when a page changes, and readable at three depths, but not yet as related concepts.
+- A section's references and backlinks are stored edges that no view shows, ```seon.docs/page``` has no depth, ```my.agent/help``` shapes its own summary beside the view, and a help topic it does not hold answers nil: `seon.docs/a-section-reads-at-each-level`.
+- 54 of 364 sections have no lead, so their summary is the heading alone and their embedding has no sentence saying what they are about: `seon.docs/every-section-has-a-lead`.
+
 ## Files and namespaces on demand
 
 A file or a namespace the plan cites is read when the context is built and never stored; only Seon's own `docs/` is (above).

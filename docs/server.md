@@ -31,3 +31,9 @@ A tool's text is what a model should read: `seon_context`'s is the block itself,
 `bin/mcp` is the stdio relay a client runs: stock perl, a few MB, one connection per message to the port in `runs/root.port`, so a root restarted between calls (`bin/root next`) costs the client nothing. A message root does not answer (none running, not listening, died mid-request) gets a JSON-RPC error saying why. `seon.check/mcp-proof` (`bin/check mcp`) proves it end to end from a separate process, with the relay's footprint under `:seon.config.machine/relay-mb`.
 
 Working a task this way is the turn loop's path with the model outside: [turn](turn.md#an-outside-agent).
+
+## Where it falls short today
+
+An outside agent (a Claude session through the server) does not see what a model sees, so dogfooding through the server measures a different context.
+- `:context` answers ```seon.turn/context-block```, the story and the turn sections, not the parts a model's request is made of: `seon.server/the-outside-context-is-what-a-model-is-sent`.
+- `:done` answers `{:judging ...}` and ends the agent, so it never sees the verdict: `seon.server/done-answers-the-verdict`.
