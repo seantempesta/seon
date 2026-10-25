@@ -792,7 +792,10 @@
       (is (= :hold (:op (first (actions-for (db-of [(decl "a")] :extra (run "a" 1 :ended :results red :outcome :red))))))))
     (testing "parked, nothing new: nothing starts"
       (is (= [] (actions-for (db-of [(decl "a")] :extra (parked :waiting 0)))))
-      (is (= [] (actions-for (db-of [(decl "a")] :extra (into (parked :cap 1) (msg "m1"))))) "one message, already taken"))
+      (is (= [] (actions-for (db-of [(decl "a")] :extra (into (parked :cap 1) (msg "m1"))))) "one message, already taken")
+      (is (= [{:task "demo/a" :cause "parked: cap, waiting for a message" :run "demo/a#1" :blocks ["demo/b"]}]
+             (r/root-causes (r/index (db-of [(decl "a") (decl "b" :needs ["a"])] :extra (parked :cap 0)))))
+          "quiet names it, with what it blocks"))
     (testing "a message it has not taken: a wake on its process"
       (is (= [wake] (actions-for (db-of [(decl "a")] :extra (into (parked :waiting 0) (msg "m1"))))))
       (is (= [wake] (actions-for (db-of [(decl "a")] :extra (into (parked :no-progress 1) (concat (msg "m1") (msg "m2"))))))))
@@ -833,7 +836,7 @@
         db (d/db-with db [(on "demo/i#1" "i")])
         body (#'r/stage-boundary db "demo/i#1")]
     (is (str/starts-with? body "demo/d is done. Your task now is demo/i") body)
-    (is (str/includes? body "Its plan: Make i true.") "with the new task's plan")
+    (is (str/includes? body "Its plan: Make d true.\n\nMake i true.\n\nIts proofs: demo-test/d-test demo-test/i-test") "with the new task's plan and proofs, as they accumulated")
     (is (str/includes? body "demo-test/i-test") "and its proofs")
     (is (nil? (#'r/stage-boundary db "demo/d#1")) "a session's first run opens with none")
     (is (nil? (#'r/stage-boundary (d/db-with db [(on "demo/i#2" "i")]) "demo/i#2")) "nor does a wake of the same task")))
@@ -850,6 +853,19 @@
     (is (= #{'demo-test/a-design-wrote-test} (set (:seon.task/proofs (task/task judged "demo/a")))) "an added proof reaches main")
     (is (= #{'demo-test/kept-test} (set (:seon.task/proofs (task/task judged "demo/b")))) "a dropped one leaves it")
     (is (= #{'demo-test/a-design-wrote-test} (get-in (r/index judged) [:acc "demo/a"])) "the done rule's input holds it")
+    (testing "the implement step that needs the design inherits it, observed as the reconciler does (live finding F3)"
+      (let [base (d/db-with base (task/create-tx base [(decl "c" :needs ["a"] :proofs #{})]))
+            branch (d/db-with base [[:db/add [:seon.task/id "demo/a"] :seon.task/proofs 'demo-test/a-design-wrote-test]])
+            judge (fn [main aid id] (d/db-with main (#'r/judge-tx {:db main :boot "boot-1" :rid 0 :flights {} :pending {}}
+                                                                  {:act {:run aid :task id}} {} {:db branch :base base :ours [] :uncontracted [] :unmerged []})))
+            judged (judge (d/db-with base (into (run "a" 1 :running) (task/execution-tx ["demo/c"] :running))) "demo/a#1" "demo/a")
+            idx0 (r/index base)]
+        (is (= #{'demo-test/a-design-wrote-test} (get-in (r/index judged) [:acc "demo/c"])) "listed")
+        (is (= #{'demo-test/a-design-wrote-test} (get-in (r/index idx0 base judged) [:acc "demo/c"])) "observed from the index before")
+        (let [judged2 (judge (d/db-with judged (run "c" 1 :running)) "demo/c#1" "demo/c")]
+          (is (= #{'demo-test/a-design-wrote-test} (:seon.task/proofs (task/task judged2 "demo/a")))
+              "the implement's judge, on the same branch from the same base, keeps the design's proof on main")
+          (is (= #{'demo-test/a-design-wrote-test} (get-in (r/index judged2) [:acc "demo/c"]))))))
     (testing "a proof set main changed too, differently, is a conflict for root"
       (let [main (d/db-with base [[:db/add [:seon.task/id "demo/b"] :seon.task/proofs 'demo-test/mains-test]])
             {:keys [tx conflicts]} (task/carry-tx base branch main)]
