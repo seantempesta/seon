@@ -431,7 +431,7 @@
   "One eval (the declared html render of :seon.db/eval-fact, its record, and of a response), as
   it ran: the prose beside it, its code, its response printed under its handle as it is shown
   (seon.print/record-text of its record; a live response's own :text; an error's by its error
-  map's render), and its cost and who evaluated it as recorded; :as :inline, its code and
+  map's render; a block its agent drew, :seon.render/html, as drawn), and its cost and who evaluated it as recorded; :as :inline, its code and
   response in one line. Rendered from the record, which never changes."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [e opts]
@@ -452,7 +452,10 @@
        (when (:code r) [:pre {:class "text-text-100"} [:code (prose (:code r) (form-budget))]])
        (if (map? (:ex r))
          (render/html (:ex r) (cond-> {} (:handle r) (assoc :handle (list :ex (:handle r)))))
-         [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (if printed (:text r) (prose (or (:text r) "") (part)))])
+         (if-let [block (:seon.render/html rec)]
+           ;; a value recorded with its block (@ctx): the block its agent drew, as it drew it
+           [:div {:class "flex gap-2 text-text-200"} [:span {:class "text-text-500"} "⇒"] block]
+           [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (if printed (:text r) (prose (or (:text r) "") (part)))]))
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
         [:span (get asked-by by "its own turn")]

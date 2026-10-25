@@ -4,7 +4,7 @@
   each key by its own schema's render. Run: bin/test seon.ctx-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [seon.cost :as cost]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [my.schema]))
 
 (def ^:private k "The test agent's key." "test-boot/a1")
 
@@ -123,3 +123,32 @@
     (is (has? (render/html proofs {:schema :seon.render/proofs})) "a key whose schema declares a render draws by it")
     (is (has? (render/html {"e1" {:seon.eval/id "e1"}} {:schema nil})) "a key with none draws as the printer's structure")
     (is (has? ":seon.render/proofs") "each row names its key")))
+
+(declare steps)
+
+(deftest an-agent-adds-a-datum-and-its-render
+  ;; what an agent evaluates to add to its record and draw it (the owner, 2026-10-25: "they can
+  ;; easily update it and just add more data and render functions"): its key registered with a
+  ;; render is an attribute at once, and @ctx's eval is recorded as the text the model read and the
+  ;; block the page draws, never as a copy of the record
+  (let [db (seeded 3)
+        reg (my.schema/registration db :lab.ctx/steps '[:vector {:seon.render/html seon.ctx-test/steps} :string] false)]
+    (is (some #{{:db/ident :lab.ctx/steps :db/valueType :db.type/data :db/cardinality :db.cardinality/one}} (:tx reg))
+        "a registered key holding a vector is stored as plain data, with no entity map listing it")
+    (let [db (:db-after (d/with db (:tx reg)))
+          db (:db-after (d/with db [{:seon.agent/key k :lab.ctx/steps ["read the plan" "write the test" "read the plan"]}]))
+          c (with-meta (:tree (ctx/build db k :b)) {:seon.render/schema :seon.ctx/ctx})
+          ;; the REPL reads its branch's schemas from the agent's state, as an agent holds it
+          rec (try (reset! seon.agent/state {:db db})
+                   (seon.repl/record-details db "@ctx" {:handle 'result/e9 :value c} {} nil)
+                   (finally (reset! seon.agent/state nil)))]
+      (is (= ["read the plan" "write the test" "read the plan"] (:lab.ctx/steps c)) "the vector comes back in its order, duplicates kept")
+      (is (not (contains? (:response rec) :value)) "the record holds no copy of the record")
+      (is (re-find #":lab.ctx/steps" (:printed rec)) "the model's text is the one printer's, as it read it")
+      (is (re-find #"<ol><li>read the plan</li><li>write the test</li><li>read the plan</li></ol>" (:seon.web.html/raw (:seon.render/html rec)))
+          "the block draws the key by the render its registered schema names"))))
+
+(defn steps
+  "A render an agent writes for its datum: the steps, numbered."
+  {:malli/schema [:=> [:cat [:vector :string] :map] :any]}
+  [v _] [:ol (for [s v] [:li s])])

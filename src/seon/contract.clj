@@ -89,11 +89,18 @@
 
 (def forms "Every named schema form of the platform (seon.config/schema-forms, baked once)." config/schema-forms)
 
+(def ^:dynamic *changes*
+  "The schema forms an agent's branch changes, {key form}, bound beside malli's registry while
+  its REPL evaluates and records (seon.repl/with-branch-schemas): what `properties` reads first,
+  so a render a registered schema names is the one its values take. nil elsewhere."
+  nil)
+
 (clojure.core/defn properties
   "The properties map of named schema k's form ([:type {props} ...]), or nil: what a
-  schema declares of its values (a status set, a render, a unit), read here only."
+  schema declares of its values (a status set, a render, a unit), read here only. The form is
+  the branch's when an evaluation binds its changes (*changes*), else the platform's."
   {:malli/schema [:=> [:cat :any] [:maybe :map]]}
-  [k] (let [form (get forms k)] (when (and (vector? form) (map? (second form))) (second form))))
+  [k] (let [form (if (contains? *changes* k) (get *changes* k) (get forms k))] (when (and (vector? form) (map? (second form))) (second form))))
 
 (clojure.core/defn enum-values
   "The members of named [:enum {props} ...] schema k, in their declared order."

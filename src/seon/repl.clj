@@ -29,7 +29,7 @@
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.ref :as ref] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
-            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
+            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
 (defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
@@ -253,15 +253,21 @@
           r)))
     {}))
 
+(defn- with-branch-schemas
+  "f called with malli's dynamic registry bound to this branch's population (branch-registry)
+  and seon.contract/*changes* to its schema changes, read now: what a form compiles against
+  and the renders its values' schemas name."
+  {:malli/schema [:=> [:cat :seon.host/fn] :any]}
+  [f] (let [r (branch-registry)] (binding [mr/*registry* r contract/*changes* (:key (:schema-registry @agent/state))] (f))))
+
 (defn wrap-registry
-  "Each form evaluates with malli's dynamic registry bound to its branch's population
-  (branch-registry), read before the form: a schema the previous form registered is in
-  effect for this one."
+  "Each form evaluates with its branch's schemas bound (with-branch-schemas), read before the
+  form: a schema the previous form registered is in effect for this one."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
     (let [ef (:repl/eval-fn req eval)]
-      (h (assoc req :repl/eval-fn (fn [form] (binding [mr/*registry* (branch-registry)] (ef form))))))))
+      (h (assoc req :repl/eval-fn (fn [form] (with-branch-schemas #(ef form))))))))
 
 (defn- instrument
   "Instrument a definition by its contract (G1's proto.agent/admit!, Seon's rule): a function var
@@ -382,10 +388,21 @@
   [db code r req run]
   (let [cites (when db (some->> (:prose req) (ref/references db)))
         resp (dissoc r :text :recorded :fns :record)
-        data? (and (or (not (contains? resp :value)) (pdb/plain? (:value resp))) (every? pdb/plain? (:values resp)))]
-    (cond-> (if data?
-              {:code code :response resp}
-              {:code code :response (dissoc resp :value :values) :printed (print/response-text resp) :type (str (type (:value resp)))})
+        ;; a value its producer names a page render for, and none for the model (@ctx): the model
+        ;; read it printed, and the page draws its block, rendered here, where its renders are
+        ;; defined (an agent's own, unmerged), and kept as its HTML (hiccup holds render calls,
+        ;; which are no data, so it is serialized here, under the branch's schemas, as its calls
+        ;; expand when written); the value itself is not copied into each record
+        html (let [v (:value resp)]
+               (when (and (contains? resp :value) (not (contains? resp :values)) (not (render/rendered? v))
+                          (with-branch-schemas #(render/declared (:seon.render/schema (meta v)) :html)))
+                 (with-branch-schemas #(h/raw (h/html (render/html v {:as :block :handle (:handle resp)}))))))
+        data? (and (nil? html) (or (not (contains? resp :value)) (pdb/plain? (:value resp))) (every? pdb/plain? (:values resp)))]
+    (cond-> (cond
+              data? {:code code :response resp}
+              html {:code code :response (dissoc resp :value :values) :printed (print/response-text resp) :type (str (type (:value resp)))
+                    :seon.render/html html}
+              :else {:code code :response (dissoc resp :value :values) :printed (print/response-text resp) :type (str (type (:value resp)))})
       (or (contains? r :value) (:ex r))
       (assoc :line (print/line (cond (:ex r) (or (get-in r [:ex :seon.error/message]) (:ex r)) (contains? r :values) (:values r) (nil? (:value r)) "nil" :else (:value r)) (cfg/value :seon.config.render/line-budget) nil))
       (:prose req) (assoc :prose (:prose req))

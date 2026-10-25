@@ -120,7 +120,11 @@
  ;; id, its 10 costliest contracted functions ([{:var :calls :ms}], seon.profile), the vars it
  ;; recorded, and what its prose cites (:cites, seon.ref/references parsed once as it is recorded)
  :seon.eval/record [:map {:seon.render/html seon.render.ui/evaluation} [:code :string] [:response :map]
-                    [:printed {:optional true} :string] [:type {:optional true} :string]]
+                    [:printed {:optional true} :string] [:type {:optional true} :string]
+                    ;; the page's block of a value whose producer names an html render and no :ai one
+                    ;; (@ctx, seon.ctx), rendered by the agent that evaluated it, as its HTML (seon.web.html/raw;
+                    ;; seon.repl/record-details)
+                    [:seon.render/html {:optional true} :any]]
  ;; an agent: one entity per agent per boot of its root (an id like :a3 starts again each boot),
  ;; named by its key (seon.task/agent-key: "<boot>/<id>"), a content id so root's entity on main
  ;; and the one its branch's records name are one; it refs the root that started it. What root
