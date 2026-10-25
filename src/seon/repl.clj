@@ -226,9 +226,14 @@
                               (program/account (assoc l :src (:repl/src m) :lead (:lead m) :form (:repl/form m) :ran? (contains? m :repl/value))))]
                    (when l (vreset! last nil))
                    (if acct
-                     (do (when contract/record? (agent/transact! (program/record-tx (agent/db) acct)))
-                         (assoc m :recorded (vec (concat (map :var (:defs acct)) (when (:ns-form? acct) [(:ns acct)])))
-                                :repl/defined (mapv :var (:defs acct))))
+                     (let [tx (when contract/record? (program/record-tx (agent/db) acct))
+                           ;; what this form's own transaction changes of an existing var's contract or
+                           ;; docstring, read before it is applied (a form that defines nothing reads nothing)
+                           redefined (when tx (program/meaning-changes (agent/db) tx))]
+                       (when tx (agent/transact! tx))
+                       (cond-> (assoc m :recorded (vec (concat (map :var (:defs acct)) (when (:ns-form? acct) [(:ns acct)])))
+                                      :repl/defined (mapv :var (:defs acct)))
+                         redefined (assoc :redefined redefined)))
                      (cond-> m l (assoc :repl/defined (program/set-vars l))))))))))))
 
 (defn- branch-registry
@@ -318,18 +323,25 @@
     (:eval-n (swap! agent/state update :eval-n #(inc (or % from))))))
 
 (defn response
-  "A request's answers (in order) as its one response (:seon.eval/response): its handle, the
-  last form's value, what its forms wrote to *out* and *err*, the error that stopped it (:ex,
-  the one error map), and its cost summed over its forms (ms, ticks, bytes allocated); each key
-  only when present."
+  "A request's answers (in order) as its one response (:seon.eval/response): its handle, each
+  form's value in order (:values, as nREPL answers a value per form, when more than one form
+  answered: the values before an error stay), the last form's value (:value, as *1 holds it),
+  what its forms wrote to *out* and *err*, the error that stopped it (:ex, the one error map),
+  what its forms changed of an existing var's contract or docstring (:redefined, wrap-record's,
+  seon.program/meaning-changes), and its cost summed over its forms (ms, ticks, bytes allocated);
+  each key only when present (owner, 2026-10-25, DECISIONS Dogfood rulings; a change to a schema
+  is an explicit fact the eval shows)."
   {:malli/schema [:=> [:cat [:sequential :seon.wire/msg] :qualified-symbol] :seon.eval/response]}
   [answers handle]
   (let [fs (filterv :tag answers)
         lst (peek fs)
+        vs (into [] (comp (filter #(contains? % :repl/value)) (map :repl/value)) fs)
         joined (fn [k] (not-empty (apply str (keep k fs))))
         sum (fn [k] (when (some k fs) (reduce + (keep k fs))))]
     (cond-> {:handle handle}
       (contains? lst :repl/value) (assoc :value (:repl/value lst))
+      (and (> (count fs) 1) (seq vs)) (assoc :values vs)
+      (some :redefined fs) (assoc :redefined (into [] (mapcat :redefined) fs))
       (joined :out) (assoc :out (joined :out))
       (joined :err-out) (assoc :err (joined :err-out))
       (= :err (:tag lst)) (assoc :ex (or (:err lst) {:seon.error/message (str (:err-text lst))}))
@@ -370,12 +382,12 @@
   [db code r req run]
   (let [cites (when db (some->> (:prose req) (ref/references db)))
         resp (dissoc r :text :recorded :fns :record)
-        data? (or (not (contains? resp :value)) (pdb/plain? (:value resp)))]
+        data? (and (or (not (contains? resp :value)) (pdb/plain? (:value resp))) (every? pdb/plain? (:values resp)))]
     (cond-> (if data?
               {:code code :response resp}
-              {:code code :response (dissoc resp :value) :printed (print/response-text resp) :type (str (type (:value resp)))})
+              {:code code :response (dissoc resp :value :values) :printed (print/response-text resp) :type (str (type (:value resp)))})
       (or (contains? r :value) (:ex r))
-      (assoc :line (print/line (cond (:ex r) (or (get-in r [:ex :seon.error/message]) (:ex r)) (nil? (:value r)) "nil" :else (:value r)) (cfg/value :seon.config.render/line-budget) nil))
+      (assoc :line (print/line (cond (:ex r) (or (get-in r [:ex :seon.error/message]) (:ex r)) (contains? r :values) (:values r) (nil? (:value r)) "nil" :else (:value r)) (cfg/value :seon.config.render/line-budget) nil))
       (:prose req) (assoc :prose (:prose req))
       (seq cites) (assoc :cites cites)
       (:call-id req) (assoc :call-id (:call-id req) :call (:call req 0))
@@ -455,7 +467,7 @@
        ;; waits on, never a sleep: one arriving from here on stops it
        (intr/clear-pending!)
        (agent/send! {:op :started :id (:id m)})
-       [st {:sock [{:op :reply :id (:id m) :response (dissoc (eval-string (:forms m) (select-keys m [:ticks :origin])) :value)
+       [st {:sock [{:op :reply :id (:id m) :response (dissoc (eval-string (:forms m) (select-keys m [:ticks :origin])) :value :values)
                     :t (:max-tx (agent/db))}]}])
      [st (when-let [ms (agent/handle! m)] {:sock ms})])))
 

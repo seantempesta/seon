@@ -345,3 +345,18 @@
      :per-n {:ticks 235.0 :bytes 1160.0}
      :fixed {:ticks 93000.0 :bytes 465000.0}
      :sizes [100 1000 10000]}))
+
+(defn meaning-input
+  "The cost proof's input at n: a db of n vars each with a docstring, and tx-data redefining each with another."
+  [n] (let [db0 (ts/test-db)
+            db (d/db-with db0 (vec (for [i (range n)] {:var/name (symbol "app" (str "f" i)) :var/doc (str "Doc " i ".")})))]
+        [db (vec (for [i (range n)] {:var/name (symbol "app" (str "f" i)) :var/doc (str "Doc " i ", changed.")}))]))
+
+(deftest meaning-changes-cost-what-the-eval-wrote
+  (cost/proof {:of 'seon.program/meaning-changes :input 'seon.program-cost-test/meaning-input
+               :n "vars the eval redefined, each with a changed docstring"
+               :work "the tx-data walked once, then per var one entity read and one index seek of its citations"
+               :growth :linear
+               :per-n {:bytes 60000 :calls 1}
+               :fixed {:bytes 200000 :calls 1}
+               :sizes [10 100 300]}))
