@@ -530,10 +530,12 @@
 
 (defn screen-of
   "The agent's screen (seon.screen/show): view's page as this proc holds it, its hiccup without the
-  conversation (the model's own messages), its chrome or presentation, at main's t."
+  conversation (the model's own messages), its chrome or presentation, at main's t. The page is
+  its own :seon.render/html render (a render already made), so the agent's page draws it as the
+  page it is wherever the value is shown, and the model reads it as data."
   {:malli/schema [:=> [:cat :map :any] :map]}
   [st v]
-  {:t (:max-tx (:main-db st)) :page (vec (screen-hiccup (get-in st [:views v :layout]) (get-in st [:views v :units])))})
+  {:t (:max-tx (:main-db st)) :page {:seon.render/html (vec (screen-hiccup (get-in st [:views v :layout]) (get-in st [:views v :units])))}})
 
 (defn- index-of
   "What the web proc needs to turn a UI call into root's request: each agent's pid, branch

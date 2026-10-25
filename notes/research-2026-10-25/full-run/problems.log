@@ -1,0 +1,143 @@
+{:ms 3680,
+ :replies
+   [{:ms 0.53,
+     :text
+       "{:handle result/e1,
+ :ms 0.53,
+ :ticks 6589,
+ :bytes 40496,
+ :ex
+   {:seon.error/type :seon.agent/eval-error,
+    :seon.error/operation seon.repl/eval-code,
+    :seon.error/message \"Divide by zero\",
+    :class \"class java.lang.ArithmeticException\"}}",
+     :ex
+       {:seon.error/type :seon.agent/eval-error,
+        :seon.error/operation seon.repl/eval-code,
+        :seon.error/message "Divide by zero",
+        :class "class java.lang.ArithmeticException"}}
+    {:ms 2.309,
+     :text
+       "{:handle result/e2,
+ :ms 2.309,
+ :ticks 95824,
+ :bytes 1276192,
+ :ex
+   #:seon.error{:type :seon.instrument/contract-error,
+    :operation agent.a1/sq,
+    :member :malli.core/invalid-input,
+    :message
+      \"agent.a1/sq invalid-input: its arguments do not satisfy its contract\",
+    :fix \"Call agent.a1/sq with arguments its contract declares.\",
+    :problems [{:path [0], :in [0], :expected :int, :value \"\\\"x\\\"\"}]}}",
+     :ex
+       #:seon.error{:type :seon.instrument/contract-error,
+        :operation agent.a1/sq,
+        :member :malli.core/invalid-input,
+        :message
+          "agent.a1/sq invalid-input: its arguments do not satisfy its contract",
+        :fix "Call agent.a1/sq with arguments its contract declares.",
+        :problems [{:path [0], :in [0], :expected :int, :value "\"x\""}]}}
+    {:ms 2.285,
+     :text
+       "{:handle result/e3,
+ :ms 2.285,
+ :ticks 14941,
+ :bytes 114224,
+ :value
+   {:path \"/nonexistent-d2/x\",
+    :seon.error/type :seon.fx/io-error,
+    :seon.error/operation seon.fx/call,
+    :seon.fx/kind :file,
+    :seon.fx/queue-us 29,
+    :seon.fx/us 646,
+    :tmp \"/nonexistent-d2/x.fx-12299\",
+    :seon.error/message
+      \"staging /nonexistent-d2/x.fx-12299: /nonexistent-d2/x.fx-12299 (No such file or directory)\"}}"}
+    {:ms 2501.262,
+     :text
+       "{:handle result/e4,
+ :value :awake,
+ :ms 2501.262,
+ :ticks 5335,
+ :bytes 40144}"}
+    {:agent :a2,
+     :pid 12526,
+     :exit {:exit 3},
+     :seon.error/type :seon.agent/died,
+     :seon.error/operation seon.root/api-proc,
+     :seon.error/message "agent a2 died: exit 3",
+     :stderr "D2 boom: the agent writes its last words
+",
+     :last-op
+       {:since-ms 1792908004384,
+        :kind :eval,
+        :form
+          "(spit \"/dev/stderr\" \"D2 boom: the agent writes its last words\\n\" :append true) (seon.lib/c-exit 3)"}}],
+ :counts
+   {:agent 2,
+    :cost 1,
+    :dead 0,
+    :dead-citation 51,
+    :effect 1,
+    :error 0,
+    :eval 2,
+    :failed 1,
+    :leadless-section 0,
+    :merge 0,
+    :orphan-page 0,
+    :platform 1,
+    :problem-unlinked 0,
+    :red 2,
+    :stale-pin 0,
+    :stale-section 0,
+    :task-conflict 0,
+    :test-red 0,
+    :uncited-task 0,
+    :unnamed-site 0,
+    :unrun 0,
+    :waste 0},
+ :died
+   {:exit {:exit 3},
+    :stderr "D2 boom: the agent writes its last words
+",
+    :last-op
+      {:since-ms 1792908004384,
+       :kind :eval,
+       :form
+         "(spit \"/dev/stderr\" \"D2 boom: the agent writes its last words\\n\" :append true) (seon.lib/c-exit 3)"}},
+ :red
+   {:run "problems/p1#1",
+    :test app.proofs/p1-test,
+    :assertions
+      [{:type :fail,
+        :message nil,
+        :expected "(= 99 (app.par/p1 10))",
+        :actual "(not (= 99 0))"}],
+    :evidence
+      {:from "problems/p1#1",
+       :red [app.proofs/p1-test],
+       :failures
+         {app.proofs/p1-test
+            [{:type :fail,
+              :message nil,
+              :expected "(= 99 (app.par/p1 10))",
+              :actual "(not (= 99 0))"}]}}},
+ :cost
+   {:run "problems/p2#1",
+    :test app.proofs/p2-test,
+    :verdict
+      {:ok? false,
+       :steeper [],
+       :under [],
+       :unmeasured [],
+       :over [{:dim :calls, :n 1, :ratio 2.0}]}},
+ :checks
+   {:cost true,
+    :died true,
+    :effect true,
+    :eval true,
+    :platform true,
+    :red true,
+    :stalled true}}
+PROBLEMS OK

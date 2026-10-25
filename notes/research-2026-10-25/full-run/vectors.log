@@ -1,0 +1,16 @@
+{:vectors 3035,
+ :queries 203,
+ :recall10 0.9995073891625615,
+ :embed-ms 22944,
+ :forms 1895,
+ :sections 378,
+ :by-shortlist
+   {50 0.9561576354679803,
+    100 0.9827586206896551,
+    200 0.9955665024630542,
+    400 0.9995073891625615},
+ :checks
+   {:every-text-embedded true,
+    :model-present true,
+    :pyramid-recall-at-least-0.99 true}}
+VECTORS OK

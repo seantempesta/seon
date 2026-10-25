@@ -1,0 +1,17 @@
+:quiescent {:t 536874174, :root-causes []}
+:task calc/abs {:execution :running, :done true, :blocked-by #{}, :runs [[calc/abs#1 :done :green 1 1180]]}
+:task calc/abs-merge {:execution :running, :done true, :blocked-by #{}, :runs [[calc/abs-merge#1 :merged :green 0 0]]}
+:task calc/add {:execution :running, :done true, :blocked-by #{}, :runs [[calc/add#1 :done :green 1 978]]}
+:task calc/add-merge {:execution :running, :done true, :blocked-by #{}, :runs [[calc/add-merge#1 :merged :green 0 0]]}
+:task calc/neg {:execution :running, :done true, :blocked-by #{}, :runs [[calc/neg#1 :lost nil nil nil] [calc/neg#2 :done :green 1 992]]}
+:task calc/neg-merge {:execution :running, :done true, :blocked-by #{}, :runs [[calc/neg-merge#1 :merged :green 0 0]]}
+:task calc/square {:execution :running, :done true, :blocked-by #{}, :runs [[calc/square#1 :done :green 2 2332]]}
+:task calc/square-merge {:execution :running, :done true, :blocked-by #{}, :runs [[calc/square-merge#1 :merged :green 0 0]]}
+:task calc/sum-sq {:execution :running, :done true, :blocked-by #{}, :runs [[calc/sum-sq#1 :done :green 1 1396]]}
+:task calc/sum-sq-merge {:execution :running, :done true, :blocked-by #{}, :runs [[calc/sum-sq-merge#1 :merged :green 0 0]]}
+:task calc/twice {:execution :running, :done true, :blocked-by #{}, :runs [[calc/twice#1 :done :green 1 1082]]}
+:task calc/twice-merge {:execution :running, :done true, :blocked-by #{}, :runs [[calc/twice-merge#1 :merged :green 0 0]]}
+:agents-reused [:a2 :a3 :a1] :merges {:merge-runs {:merged 6}, :behind-reruns 0, :conflicts-measured 0, :held-tasks 0, :model-calls-in-merges 0} :fresh-agent nil
+:checks {:not-done {}, :recovered [:task-calc-add :task-calc-neg :task-calc-square]}
+:numbers {:wall-ms 15245, :runs 13, :merged 6, :turns-per-merged-task 1.17, :model-calls 0, :tokens 7960, :root-real-mb 780.2, :writer {:tx-count 215, :flushes 55, :batch-p50-ms 7.65, :tx-per-commit 0.9, :commits 240, :tx-per-s 33.0}, :root-errors []}
+E2E OK

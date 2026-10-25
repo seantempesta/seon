@@ -31,7 +31,9 @@
 
 (defn- transport-error
   "The connection failed or died (connect refused or timed out, a reset, EOF mid-reply):
-  :seon.model/transport, transient, the request is kept and retried after a pause."
+  :seon.model/transport, transient. The :model owner answers it to the asker once (seon.fx's outcome
+  re-queues only :seon.model/rate-limited), and the agent's run ends :error; nothing retries it
+  (docs/model.md#failures)."
   {:malli/schema [:=> [:cat :string :map] :seon.model/failure]}
   [message data]
   (contract/error :seon.model/transport 'seon.model/complete (str "transport: " message) data))

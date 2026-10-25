@@ -343,3 +343,30 @@
                [p (inc i) w])]
     (is (contains? (set (map first patterns)) "attempt") "the table is read, the run row included")
     (is (empty? hits) "no text uses an old word outside text-kept: each is [file line word]")))
+
+(defn grep-db
+  "A test db holding forms [name doc src]: each a var app/<name> defined by its form."
+  [forms]
+  (let [db0 (ts/test-db)]
+    (d/db-with db0 (vec (mapcat (fn [[n doc src]]
+                                  [(cond-> {:db/id (str "v" n) :var/name (symbol "app" n)} doc (assoc :var/doc doc))
+                                   {:db/id (str "f" n) :form/id (str "app/" n " " src) :form/src src :form/defines [(str "v" n)]}])
+                                forms)))))
+
+(defn- grep-on [db s] (seon.docs/grep db s))
+
+(deftest grep-ranks-names-before-bodies
+  ;; dogfood 2026-10-25: grep answered ~30 names, unranked and without their line. A var whose name
+  ;; holds the word comes first, then one whose docstring does, then the rest; each with its line
+  (let [db (grep-db [["g" nil "(defn g []\n  (accumulate 1))"]
+                     ["f" "Sums, as accumulate does." "(defn f\n  \"Sums, as accumulate does.\"\n  [] 2)"]
+                     ["accumulate" nil "(defn accumulate [x]\n  x)"]
+                     ["h" nil "(defn h [] 3)"]])]
+    (is (= ['app/accumulate 'app/f 'app/g] (mapv :var (grep-on db "accumulate"))) "name, then docstring, then body; h left out")
+    (is (= "(accumulate 1))" (:line (last (grep-on db "accumulate")))) "the first line holding it")
+    (is (= [] (grep-on db "nowhere")))
+    (is (= "(defn g []" (:line (first (grep-on db "[]\n  (accumulate")))) "a match across a line break: the line it begins in")
+    (is (= [{:var 'app/f :line "\"Sums, as accumulate does.\""}] (grep-on db "Sums")) "a docstring's match: its line")
+    (let [two (d/db-with db [{:db/id "a" :var/name 'app/a} {:db/id "b" :var/name 'app/b}
+                             {:form/id "app/ab" :form/src "(do (defn a [] :zed) (defn b [] :zed))" :form/defines ["a" "b"]}])]
+      (is (= ['app/a 'app/b] (mapv :var (grep-on two ":zed"))) "a form defining two vars: each, once"))))

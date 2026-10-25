@@ -14,11 +14,17 @@
 
 (def ^:private chars-per-token (config/value :seon.config.ai/chars-per-token-prior))
 
+(defn chars-tokens
+  "Estimated tokens of n characters: the one sizer's rule (`estimate` is it over a text's length)."
+  {:malli/schema [:=> [:cat nat-int?] :int]}
+  [n]
+  (long (Math/floor (/ n chars-per-token))))
+
 (defn estimate
   "Estimated tokens of `text`."
   {:malli/schema [:=> [:cat :string] :int]}
   [text]
-  (long (Math/floor (/ (count text) chars-per-token))))
+  (chars-tokens (count text)))
 
 (defn estimate-chars
   "Characters a token budget holds."
@@ -57,11 +63,14 @@
              (or (zero? (count value)) (identical? (class (key (first value))) clojure.lang.Keyword))))))
 
 (defn code?
-  "Is x code (seon.print/code): a map of the one key :seon.print/code to its text, plain data
-  that stores and reads back as it is."
-  {:malli/schema [:=> [:cat :any] :boolean]}
+  "Is x marked text, read as itself: code (seon.print/code), a map of the one key
+  :seon.print/code to its text, or prose (seon.print/prose), of :seon.print/prose; plain data
+  that stores and reads back as it is. Its mark's key, else nil."
+  {:malli/schema [:=> [:cat :any] [:maybe [:enum :seon.print/code :seon.print/prose]]]}
   [x]
-  (boolean (and (map? x) (== 1 (count x)) (keyword-lookup? x) (string? (:seon.print/code x)))))
+  (when (and (map? x) (== 1 (count x)) (keyword-lookup? x))
+    (cond (string? (:seon.print/code x)) :seon.print/code
+          (string? (:seon.print/prose x)) :seon.print/prose)))
 
 (defn- escaped-width
   "Characters the string literal spends on chars [from, to) of `s`; a newline stays a line break."
@@ -202,7 +211,7 @@
       (identical? c String) {:kind :string :value x :total (.length ^String x)}
       ;; code (seon.print/code): its text verbatim, cut by the one string cutter
       ;; the count first: only a one-entry map asks code? (a contracted call)
-      (and (map-classes c) (== 1 (count x)) (code? x)) (let [s (:seon.print/code x)] {:kind :string :value s :total (.length ^String s) :code? true})
+      (and (map-classes c) (== 1 (count x)) (code? x)) (let [k (code? x) s (get x k)] {:kind :string :value s :total (.length ^String s) :code? k})
       ;; a name's node carries its text, which a cut of it replaces
       (or (identical? c clojure.lang.Keyword) (identical? c clojure.lang.Symbol))
       (let [face (if (keyword? x) :seon.print/keyword :seon.print/symbol)
@@ -256,18 +265,20 @@
 
 (defn- node-continuation
   "The form a cut of `node` prints to read its rest; the whole collection for a map or set shown
-  sorted. Nil without a handle, and for a long keyword or symbol."
+  sorted; the rest of a long keyword's or symbol's printed text. Nil without a handle."
   {:malli/schema [:=> [:cat :seon.print/alloc] :any]}
   [node]
-  (when (and (:requery-id node) (not= :name (:kind node)))
-    (emit/continuation
-     {:seon.print/requery-id (:requery-id node)
-      :seon.print/code? (boolean (:code? node))
-      :seon.print/elision-unit (cond (= :string (:kind node)) :characters (:pending? node) :pending :else :children)
-      :seon.render.data/path (:path node)
-      :seon.render.data/next-offset (cond (:sorted? node) 0
-                                          (= :string (:kind node)) (:shown node)
-                                          :else (:n node))})))
+  (when (:requery-id node)
+    (let [text? (#{:string :name} (:kind node))]
+      (emit/continuation
+       {:seon.print/requery-id (:requery-id node)
+        :seon.print/code? (:code? node)
+        :seon.print/name? (= :name (:kind node))
+        :seon.print/elision-unit (cond text? :characters (:pending? node) :pending :else :children)
+        :seon.render.data/path (:path node)
+        :seon.render.data/next-offset (cond (:sorted? node) 0
+                                            text? (:shown node)
+                                            :else (:n node))}))))
 
 ;;; The one string cutter: a string in a value (a literal) and prose (text shown as itself,
 ;;; seon.print/prose) end their cut at the same place and say the same words (emit/cut-words).
@@ -314,7 +325,8 @@
     (case (:kind node)
       ;; code's cut stands a space after its shown text (emit/elided-text)
       :string (str (when (:code? node) " ") (emit/cut-words (- (:total node) (:shown node)) (lines-after (:breaks node) (:total node) (:shown node)) form))
-      :name (str "…+" (- (:total node) (:shown node)))
+      ;; a name has no line breaks: the same cut words, its unit and the form that reads the rest
+      :name (emit/cut-words (- (:total node) (:shown node)) 0 form)
       (cond-> (if (:pending? node) "…?" (str "…" (- (:total node) (:n node)))) form (str " " (emit/form-text form))))))
 
 (defn- more? {:malli/schema [:=> [:cat :seon.print/alloc] :boolean]} [node]
@@ -398,7 +410,7 @@
     ;; a name longer than :max-name
     :name (assoc (placed context depth path indent) :kind :name :node (:node c) :text (:text c) :value (:text c) :total (count (:text c)))
     :string (cond-> (assoc (placed context depth path indent) :kind :string :value (:value c) :total (:total c) :breaks (line-breaks (:value c)))
-              (:code? c) (assoc :code? true))
+              (:code? c) (assoc :code? (:code? c)))
     (merge (placed context depth path indent)
            (select-keys c [:kind :face :open :close :total :pending? :prefix :ordered? :indexed? :sorted? :lookup?])
            {:pending (:members c)})))
@@ -445,8 +457,14 @@
   [context indent kids]
   (let [k (nth kids 0) v (nth kids 1)]
     (if (and (:ub k) (:ub v))
-      {:kind :entry :indent indent :kids kids :flat (+ 1 (:flat k) (:flat v))
-       :ub (+ 1 (:ub k) (:ub v) (if (:breaks? context) (+ indent 2) 0))}
+      (let [flat (+ 1 (:flat k) (:flat v))]
+        {:kind :entry :indent indent :kids kids :flat flat
+         ;; a break between key and value costs the value's line its indentation; an entry of two
+         ;; leaves that fits the line from its indentation never breaks (the layout's group fits)
+         :ub (+ flat (- (:ub k) (:flat k)) (- (:ub v) (:flat v))
+                (if (and (:breaks? context)
+                         (not (and (= :leaf (:kind k)) (= :leaf (:kind v)) (< (+ indent 2 flat) (:width context)))))
+                  (+ indent 2) 0))})
       {:kind :entry :indent indent :kids kids})))
 
 (defn- sized
@@ -692,8 +710,13 @@
             (if (and entry (<= (+ spent sep (:ub entry)) budget))
               (recur (conj entries entry) (+ spent sep (:ub entry)) more)
               [entries members])))
-        skeleton (sized context (assoc node :kids entries :pending members))]
-    (sized context (assoc skeleton :kids (grow-values context entries (- budget (:ub skeleton)) (= :map (:kind node)))))))
+        skeleton (sized context (assoc node :kids entries :pending members))
+        ;; no member fits beside the cut's reserve (an upper bound): the first at its least, as
+        ;; it prints, when that fits (the floor select holds every collection to)
+        first-only (when (and (empty? entries) (seq members)) (first-at-least context node))]
+    (if (and first-only (<= (:ub first-only) budget))
+      first-only
+      (sized context (assoc skeleton :kids (grow-values context entries (- budget (:ub skeleton)) (= :map (:kind node))))))))
 
 (defn- fill-rows
   "Collection `node` within `budget`, its first member a row (`row-class`): each member whole in
@@ -773,7 +796,7 @@
       (not (:pending? node)) (assoc :seon.print/omitted (max 1 (- (:total node) (if text? (:shown node) (:n node)))))
       text? (assoc :seon.print/prefix (subs (if (= :name (:kind node)) (:text node) (:value node)) 0 (:shown node)))
       (= :string (:kind node)) (assoc :seon.print/lines (lines-after (:breaks node) (:total node) (:shown node)))
-      (:code? node) (assoc :seon.print/code? true :seon.print/indent (:indent node))
+      (:code? node) (assoc :seon.print/code? (:code? node) :seon.print/indent (:indent node))
       form (assoc :seon.print/continuation form)
       (nil? form) (assoc :seon.print/requery-refused (get-in context [:requery :seon.print/requery-refused] "the source has no stable requery identity")))))
 
@@ -798,9 +821,11 @@
           cut (when more (cut-node node context))]
       (case (:kind node)
         :entry kids
-        :name (assoc (:node node) :seon.print/text (if cut (str (:seon.print/prefix cut) "…+" (:seon.print/omitted cut)) (:text node)))
+        :name (assoc (:node node) :seon.print/text (if cut
+                                                     (str (:seon.print/prefix cut) (emit/cut-words (:seon.print/omitted cut) 0 (:seon.print/continuation cut)))
+                                                     (:text node)))
         :string (or cut (if (:code? node)
-                          {:seon.print/face :seon.print/code :seon.print/value (:value node) :seon.print/indent (:indent node)}
+                          {:seon.print/face :seon.print/code :seon.print/value (:value node) :seon.print/indent (:indent node) :seon.print/code? (:code? node)}
                           {:seon.print/face :seon.print/string :seon.print/value (:value node)}))
         (:map :coll)
         (let [children (cond-> kids cut (conj cut))

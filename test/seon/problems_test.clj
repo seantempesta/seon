@@ -113,7 +113,7 @@
       (is (= em (get-in rec [:response :ex])) "grouped by type and producer without parsing text")))
   (testing "the agent folds its errors until its commit; root folds them as :eval occurrences"
     (let [em (agent/error-map (ArithmeticException. "Divide by zero"))
-          m (-> nil (err/note em "(/ 1 0)" 10) (err/note em "(/ 2 0)" 12))
+          m (-> nil (err/note em :eval "(/ 1 0)" 10) (err/note em :eval "(/ 2 0)" 12))
           [s] (vals m)
           o (err/sent->occurrence s :a4 "t/x")]
       (is (= [2 10 12 "(/ 1 0)"] [(:n s) (:first-ms s) (:last-ms s) (:form s)]))
@@ -629,10 +629,10 @@
 (deftest unnamed-sites-follow-the-catch-forms
   (cost/proof {:of 'seon.problems/unnamed-sites :input 'seon.problems-test/catch-input
                :n "live forms carrying a catch, each defining one var, none named by the page"
-               :work "once: the page's cited names as a set, the method and impl owners; per site: its form entity, its defines and one row"
+               :work "once: the page's cited names as a set, the method and impl owners, the program's namespaces (seon.program/program-nss); per site: its form entity, its defines and one row"
                :growth :linear
                :per-n {:ns 76000 :bytes 74500 :calls 3}
-               :fixed {:ns 50000 :bytes 50000 :calls 1}
+               :fixed {:ns 50000 :bytes 50000 :calls 2}
                :sizes [10 100 1000]}))
 
 (deftest stale-pins-follow-the-pin-page

@@ -151,13 +151,14 @@
   (:inline-defs), its multimethod methods ({:multi sym-as-written :dispatch value}) and
   protocol extensions ({:protocol sym :type name}), the multimethods it sets up, the vars and
   host statics (Class/member) it references (:refs, with the vars its quoted data names:
-  quoted-vars), the banned vars it references, the
+  quoted-vars), the qualified keywords its constants name (:keywords: the attributes, config keys
+  and schema entries its code reads or writes), the banned vars it references, the
   calls it bounds by a clock (:timeouts: deref with a timeout), its catch clauses
   (:catches, each {:class :answers}), the namespaces it requires, and whether it changes its
   namespace's environment (:env?)."
   {:malli/schema [:=> [:cat :map] :map]}
   [node]
-  (let [acc (volatile! {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :banned #{} :requires #{} :env? false
+  (let [acc (volatile! {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :keywords #{} :banned #{} :requires #{} :env? false
                         :timeouts #{} :catches #{}})]
     ((fn walk [n in-fn?]
        (case (:op n)
@@ -171,11 +172,14 @@
                            (when (banned s) (vswap! acc update :banned conj s))
                            (vswap! acc update :refs conj s))
          :host-static (vswap! acc update :refs conj (symbol (str (:class n)) (str (:member n))))
-         ;; a scalar names no var unless it is a qualified symbol: most constants (keywords,
-         ;; strings, numbers) cost no walk
+         ;; a scalar names no var unless it is a qualified symbol, and no data but a qualified
+         ;; keyword: most constants (unqualified keywords, strings, numbers) cost no walk
          (:quote :const) (let [x (datum n)]
-                           (when (or (coll? x) (qualified-symbol? x))
-                             (vswap! acc update :refs into (quoted-vars x))))
+                           (cond (qualified-keyword? x) (vswap! acc update :keywords conj x)
+                                 (qualified-symbol? x) (vswap! acc update :refs into (quoted-vars x))
+                                 ;; a quoted collection: its vars (one quoted-vars) and its keywords
+                                 (coll? x) (vswap! acc #(-> % (update :refs into (quoted-vars x))
+                                                            (update :keywords into (filter qualified-keyword?) (tree-seq coll? seq x))))))
          :try (vswap! acc update :catches into (map sedn/encode) (catches n))
          :invoke (when (and (= 'clojure.core/deref (invoked n)) (= 3 (count (:args n))))
                    (vswap! acc update :timeouts conj 'clojure.core/deref))
@@ -196,7 +200,14 @@
                            (vswap! acc update :requires into (mapcat (comp libs unquote-form datum)) args))))))
          nil)
        (let [in-fn? (or in-fn? (#{:fn :defmacro} (:op n)))]
-         (ir/reduce-ir-children (fn [_ c] (walk c in-fn?)) nil n)))
+         ;; a def's metadata keys name its var's metadata (:malli/schema), not data its code
+         ;; operates on: those its walk added are dropped (a deftest's body, its :test, kept)
+         (if (= :def (:op n))
+           (let [kws (:keywords @acc)
+                 meta-keys (let [m (:meta n)] (set (when (map? m) (filter qualified-keyword? (keys m)))))]
+             (ir/reduce-ir-children (fn [_ c] (walk c in-fn?)) nil n)
+             (vswap! acc update :keywords #(into kws (remove meta-keys) %)))
+           (ir/reduce-ir-children (fn [_ c] (walk c in-fn?)) nil n))))
      node false)
     @acc))
 
@@ -205,7 +216,7 @@
   {:malli/schema [:=> [:cat [:sequential :map]] :map]}
   [as]
   (reduce (fn [a b] (merge-with (fn [x y] (if (boolean? x) (or x y) (into x y))) a b))
-          {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :banned #{} :requires #{} :env? false
+          {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :keywords #{} :banned #{} :requires #{} :env? false
            :timeouts #{} :catches #{}}
           as))
 
@@ -295,6 +306,11 @@
   [nsym src k]
   (str nsym "/" (hasch/uuid [nsym src]) (when (pos? k) (str "#" k))))
 
+(defn- names
+  "The qualified keywords a schema or contract form names."
+  {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]]}
+  [form] (set (filter qualified-keyword? (tree-seq coll? seq form))))
+
 (defn account
   "The program account of one top-level form, or nil when it is none of the program's.
   opts: :nodes (each analyzed unit's node; or :units, their unit-accounts), :src (its exact text), :form
@@ -332,6 +348,8 @@
       (cond-> {:id (form-id nsym src k) :src src :ns nsym :ns-form? (boolean ns-form?)
                :defs defs :declares declares :methods (or methods []) :impls (or impls [])
                :refs (into (:refs a) (macro-uses nsx form)) :requires (:requires a) :banned (:banned a) :inline-defs (:inline-defs a)
+               ;; its code's keywords and its contracts': the data it operates on, read once here
+               :keywords (into (:keywords a) (comp (keep :contract) (mapcat (comp names sedn/decode))) defs)
                :timeouts (:timeouts a) :catches (:catches a)}
         lead (assoc :lead lead)
         order (assoc :order order)))))
@@ -356,7 +374,7 @@
 
 (def ^:private form-sets
   "A form's card-many facts, as stored and as its row (form-row) and its account name them."
-  [[:form/refs :refs] [:form/requires :requires] [:form/banned :banned] [:form/inline-defs :inline-defs]
+  [[:form/refs :refs] [:form/keywords :keywords] [:form/requires :requires] [:form/banned :banned] [:form/inline-defs :inline-defs]
    [:form/timeouts :timeouts] [:form/catches :catches]])
 
 (defn- form-of
@@ -498,6 +516,18 @@
   [db acct] (account-tx db acct (inc (:max-tx db))))
 
 ;; ---- the live program ----------------------------------------------------------------
+
+(defn program-nss
+  "The namespaces of db that are the program's own: their file under one of
+  :seon.config.source/program-dirs. A test's, a fixture's or a test helper's (under test/, whatever
+  its name), and one with no file (an app an agent made at its REPL, until it is written back), are
+  not (seon.context/related shows the last as the agent's new work). One read of the namespaces'
+  files, so a caller asks it once and tests membership."
+  {:malli/schema [:=> [:cat :seon.host/db] [:set :symbol]]}
+  [db]
+  (let [dirs (mapv #(str % "/") (cfg/value :seon.config.source/program-dirs))]
+    (into #{} (keep (fn [{:keys [e v]}] (when (some #(str/starts-with? v %) dirs) (:ns/name (d/entity db e)))))
+          (d/datoms db :aevt :ns/file))))
 
 (defn live?
   "Is form entity e part of the program: it defines nothing (a text form: a declare, a
@@ -718,15 +748,29 @@
                                      :when (live? db e')]
                                  e'))))))
 
-(defn- names
-  "The qualified keywords a schema or contract form names."
-  {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]]}
-  [form] (set (filter qualified-keyword? (tree-seq coll? seq form))))
+(defn gained-tx
+  "tx-data for the program facts db's forms were recorded without, an attribute being new to db (a
+  branch cut before it, resumed: seon.agent's resume, after seon.db/install-missing!). :form/keywords,
+  when db's schema holds it and no form does (one seek; so a resume that died after installing the
+  attribute derives them the next time): for each live form defining a contracted var, the keys its
+  contracts name, from :var/contract as schema-dependents read it before; the keys its code alone
+  names need the form analyzed again, and stay unrecorded until it is."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.db/op]]}
+  [db]
+  (if-not (and (contains? (d/schema db) :form/keywords) (nil? (first (d/datoms db :aevt :form/keywords))))
+    []
+    (vec (for [dt (d/datoms db :aevt :form/defines)
+               :let [fe (:e dt) f (d/entity db fe)]
+               :when (live? db fe)
+               v (:form/defines f) :let [c (:var/contract v)] :when c
+               k (names (sedn/decode c))]
+           [:db/add fe :form/keywords k]))))
 
 (defn schema-dependents
-  "The live forms of db defining a contracted var whose contract names one of keys, or a
-  schema that names one, and on (the binary's schema forms with db's changes): the forms
-  that re-arm against the changed schemas. Nothing when keys is empty."
+  "The live forms of db defining a contracted var whose form names one of keys (its contract
+  or its code, :form/keywords: one AVET seek a key), or a schema that names one, and on (the
+  binary's schema forms with db's changes): the forms that re-arm against the changed schemas
+  (a form whose code alone names one re-arms too, unchanged). Nothing when keys is empty."
   {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-keyword]] [:vector :map]]}
   [db keys]
   (if (empty? keys)
@@ -734,11 +778,12 @@
     (let [naming (reduce (fn [m [k f]] (reduce #(update %1 %2 (fnil conj []) k) m (names f)))
                          {} (merge contract/forms (schema-changes db)))
           reached (into keys (closure keys naming))]
-      (vec (distinct (for [dt (d/datoms db :aevt :var/contract)
-                           :when (some reached (names (sedn/decode (:v dt))))
-                           :let [fe (:db/id (:var/form (d/entity db (:e dt))))]
-                           :when (and fe (live? db fe))]
-                       (form-row db fe)))))))
+      (mapv #(form-row db %)
+            (distinct (for [k reached
+                            dt (d/datoms db :avet :form/keywords k)
+                            :let [fe (:e dt)]
+                            :when (and (live? db fe) (some :var/contract (:form/defines (d/entity db fe))))]
+                        fe))))))
 
 (defn ensure-ns!
   "The namespace, created with clojure.core and clojure.test's assertions referred when it
@@ -942,7 +987,7 @@
   reaching what it names, so their references give the reach walk no edges. seon.config/schema-forms
   is every schema baked into one literal, whose :seon.render/* properties name every render: an
   edge from it put every render, and through seon.docs/cited the tree, under every contracted
-  call (680 of 706 tests took the tree digest, 2026-10-25); a check reaches the schemas it
+  call (680 of 706 tests took the tree digest); a check reaches the schemas it
   checks through its contract's own schema rows, and the baked schemas are :env."
   '#{seon.program/tree-readers seon.program/env-readers seon.config/schema-forms})
 

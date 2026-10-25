@@ -1,0 +1,14 @@
+{:no-answer [],
+ :extra [],
+ :queued-kept 3,
+ :add {:started #{:probe}, :stopped #{}, :lost {}, :ms 0.143},
+ :add2 {:started #{:probe2}, :stopped #{}, :lost {}, :ms 0.162},
+ :remove {:started #{}, :stopped #{:probe2}, :lost {}, :ms 0.149},
+ :checks
+   {:add-starts-only-it true,
+    :add2-starts-only-it true,
+    :boot-set true,
+    :queued-kept true,
+    :remove-stops-only-it true,
+    :running-set-after true}}
+SYSTEM OK

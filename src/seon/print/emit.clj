@@ -60,11 +60,12 @@
 
 (defn continuation
   "The form that reads what one cut omitted, from its next offset: `(drop n …)` for members,
-  `(subs … n)` for characters; nil without a requery symbol."
+  `(subs … n)` for characters (of code's text, or of a keyword's or symbol's printed text, `str`);
+  nil without a requery symbol."
   {:malli/schema [:=> [:cat :map] :any]}
-  [{:seon.print/keys [requery-id elision-unit code?] path :seon.render.data/path next-offset :seon.render.data/next-offset}]
+  [{:seon.print/keys [requery-id elision-unit code? name?] path :seon.render.data/path next-offset :seon.render.data/next-offset}]
   (when (or (symbol? requery-id) (seq? requery-id))
-    (let [target (cond->> (path-form requery-id (vec path)) code? (list :seon.print/code))
+    (let [target (cond->> (path-form requery-id (vec path)) code? (list code?) name? (list 'str))
           offset (or next-offset 0)]
       (cond (zero? offset) target
             (= :characters elision-unit) (list 'subs target offset)
@@ -112,10 +113,13 @@
 (def ^:private structural-kinds
   #{:seon.print/vector :seon.print/list :seon.print/set :seon.print/map :seon.print/throwable})
 
-;; The ops every collection shares, made once.
+;; The ops every collection shares, made once. A map entry's group is marked for the hiccup fold,
+;; which shows it as a key and value row; the layout reads only :op.
 (def ^:private line {:op :line :inline " " :terminate ""})
 (def ^:private begin {:op :begin})
 (def ^:private end {:op :end})
+(def ^:private entry-begin {:op :begin :seon.print/open :seon.print/entry})
+(def ^:private entry-end {:op :end :seon.print/close :seon.print/entry})
 (def ^:private outdent {:op :outdent})
 (def ^:private nests [{:op :nest :offset 0} {:op :nest :offset 1} {:op :nest :offset 2}])
 
@@ -128,9 +132,27 @@
 
 (def ^:private comma (text-op :seon.print/separator ","))
 
+(def highlight
+  "A <code>'s attributes for Clojure code, which the page highlights (highlight.js, served at
+  /highlight.js; seon.render.ui/shell's observer highlights each as it arrives or a patch resets it)."
+  {:class "language-clojure"})
+
+(defn marked-hiccup
+  "Marked text as HTML: prose (seon.print/prose) a paragraph, its line breaks kept; code
+  (seon.print/code) verbatim in <pre><code>, highlighted as Clojure when the page inserts it."
+  {:malli/schema [:=> [:cat [:maybe :keyword] :string] :seon.print/hiccup]}
+  [mark text]
+  (if (= :seon.print/prose mark)
+    [:p {:class (css-class :seon.print/prose)} text]
+    [:pre {:class (css-class :seon.print/code)}
+     [:code highlight text]]))
+
 (defn- elided-hiccup
   "A cut as HTML: a string cut's shown characters, then its marker and continuation form; a cut
-  with no continuation names why in its title."
+  with no continuation names why in its title. A cut with a continuation opens: its marker is a
+  button whose click posts /open for its row (the page's li) and that form, and the row renders
+  what the form reads (seon.print/read-rest, seon.render.ui/evaluation's :opened), which closes it.
+  A button, not a <details>: the re-rendered row would close a details and its toggle post the close."
   {:malli/schema [:=> [:cat :seon.print/node :string] :seon.print/hiccup]}
   [node text]
   (let [prefix (or (:seon.print/prefix node) "")
@@ -138,8 +160,15 @@
         ;; a string's label is its cut's words (the text after its prefix's literal)
         label (if shown (cut-words (:seon.print/omitted node) (:seon.print/lines node) (:seon.print/continuation node)) text)
         reason (when-not (:seon.print/continuation node) (:seon.print/requery-refused node))
-        marker [:span (cond-> {:class (css-class :seon.print/elision)} reason (assoc :title reason)) label]]
-    (cond (and shown (:seon.print/code? node)) [:span [:code {:class (css-class :seon.print/code)} shown] " " marker]
+        marker [:span (cond-> {:class (css-class :seon.print/elision)} reason (assoc :title reason)) label]
+        form (:seon.print/continuation node)
+        marker (if form
+                 [:button {:type "button" :class (css-class :seon.print/cut) :data-seon-form (form-text form)
+                           (keyword "data-on:click") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=' + "
+                                                          "encodeURIComponent(el.closest('li[id]').id + '/' + el.dataset.seonForm) + '&open=true')")}
+                  marker]
+                 marker)]
+    (cond (and shown (:seon.print/code? node)) [:div (marked-hiccup (:seon.print/code? node) shown) marker]
           shown [:span [:span {:class (css-class :seon.print/string)} shown] marker]
           :else marker)))
 
@@ -151,12 +180,19 @@
     (case (:seon.print/face node)
       ;; the common rows build their op here (text-op's shape), one call fewer per leaf
       :seon.print/nil {:op :text :text "nil" :seon.print/class :seon.print/nil}
-      (:seon.print/boolean :seon.print/number :seon.print/keyword :seon.print/symbol :seon.print/char)
+      ;; a handle (result/e12) links to its eval's row on the page (the eval-e12 id of seon.render.ui/chat-part's row)
+      :seon.print/symbol
+      (let [text (or (:seon.print/text node) (literal value))]
+        (if (= "result" (namespace value))
+          (text-op :seon.print/symbol text [:a {:class (css-class :seon.print/symbol) :href (str "#eval-" (name value))} text])
+          {:op :text :text text :seon.print/class :seon.print/symbol}))
+      (:seon.print/boolean :seon.print/number :seon.print/keyword :seon.print/char)
       {:op :text :text (or (:seon.print/text node) (literal value)) :seon.print/class (:seon.print/face node)}
       :seon.print/string (text-op :seon.print/string (or (:seon.print/text node) (string-literal value))
                                   [:span {:class (css-class :seon.print/string)} (or (:seon.print/text node) value)])
       ;; code (seon.print/code) verbatim at its place, as in its file
-      :seon.print/code (text-op :seon.print/code (code-text value (:seon.print/indent node 0)) [:code {:class (css-class :seon.print/code)} value])
+      ;; on the page code is highlighted (highlight.js, as each patch inserts it) and prose is a paragraph
+      :seon.print/code (text-op :seon.print/code (code-text value (:seon.print/indent node 0)) (marked-hiccup (:seon.print/code? node) value))
       (:seon.print/inst :seon.print/uuid) (text-op :seon.print/tag (or (:seon.print/text node) (literal value)))
       :seon.print/var (text-op :seon.print/symbol (str "#'" (:seon.print/name node)))
       :seon.print/class (text-op :seon.print/symbol (:seon.print/name node))
@@ -199,7 +235,7 @@
        (or (:seon.render.data/total node) (count (or (:seon.print/items node) (:seon.print/entries node))))
        " items, depth " (count path)))
 
-(declare emit-node)
+(declare emit-node close-frame-inline table)
 
 (defn- emit-collection
   "`ops` (a transient vector) with one collection's ops appended: its open group, members and close.
@@ -237,9 +273,9 @@
                                :else (conj! ops line))]
                  (cond
                    (and map-like? (vector? child))
-                   (-> ops (conj! begin)
+                   (-> ops (conj! entry-begin)
                        (member (nth child 0) index 0) (conj! (nests 2)) (conj! line)
-                       (member (nth child 1) index 1) (conj! outdent) (conj! end))
+                       (member (nth child 1) index 1) (conj! outdent) (conj! entry-end))
                    (or (zero? index) map-like? (not fill?)) (member ops child index nil)
                    :else (-> ops (conj! begin) (conj! line) (member child index nil) (conj! end)))))
              ops shown)]
@@ -366,10 +402,86 @@
   (every? (fn [c] (if (vector? c) (every? #(contains? scalar-kinds (:seon.print/face %)) c) (contains? scalar-kinds (:seon.print/face c))))
           (or (:seon.print/items node) (:seon.print/entries node))))
 
+(def ^:private punctuation-classes #{(css-class :seon.print/delimiter) (css-class :seon.print/separator)})
+
+(defn- punctuation?
+  "Is hiccup h a delimiter's, separator's or line's span: what text needs to read a collection and
+  a grid shows by its layout."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [h]
+  (boolean (and (vector? h) (= :span (nth h 0 nil)) (punctuation-classes (:class (nth h 1 nil))))))
+
+(defn- grid
+  "Map node's hiccup from its frame's children: a grid of key and value rows, each entry (an entry
+  frame's, marked :seon.print/val) paired with its node's entry in order (one frame per entry);
+  what else it holds (a cut) a row of its own; a namespace-lifted map's `#:ns` its caption. Its
+  metadata holds its cells by key and its other rows, which a table reads."
+  {:malli/schema [:=> [:cat :map [:sequential :any]] :seon.print/hiccup]}
+  [node children]
+  (let [open (first children)
+        lifted (let [t (when (vector? open) (peek open))] (when (and (string? t) (str/starts-with? t "#:")) (subs t 0 (dec (count t)))))
+        rows (remove punctuation? children)
+        entries (filter #(contains? (meta %) :seon.print/val) rows)
+        others (remove #(contains? (meta %) :seon.print/val) rows)
+        ks (keep #(when (vector? %) (:seon.print/value (nth % 0))) (:seon.print/entries node))
+        row (fn [r] (if (contains? (meta r) :seon.print/val)
+                      r
+                      [:div {:class (css-class :seon.print/entry)} [:span {:class (css-class :seon.print/key)}] [:span {:class (css-class :seon.print/val)} r]]))]
+    (with-meta (into (cond-> [:div {:class (css-class :seon.print/grid)}] lifted (conj [:div {:class (css-class :seon.print/caption)} lifted]))
+                     (map row) rows)
+      {:seon.print/cells (mapv vector ks (map #(:seon.print/val (meta %)) entries)) :seon.print/rest (vec others)})))
+
 (defn- close-frame
-  "One collection's hiccup: the value printed (its root) or a collection of scalars inline, as
-  text reads them; any other nested collection a `<details>` that folds it, its summary saying
-  what it holds."
+  "One collection's hiccup: a map as a grid of key and value rows (grid), folded as any
+  collection is; maps sharing keys as a table; the value printed (its root) or a collection of
+  scalars inline, as text reads them; any other nested collection a `<details>` that folds it,
+  its summary saying what it holds. A map entry (its frame's node :seon.print/entry) is its key
+  and its value, the value kept in its metadata."
+  {:malli/schema [:=> [:cat :any [:sequential :any]] :seon.print/hiccup]}
+  [node children]
+  (cond
+    (= :seon.print/entry node)
+    (let [v (peek (vec children))]
+      (with-meta [:div {:class (css-class :seon.print/entry)} [:span {:class (css-class :seon.print/key)} (first children)] [:span {:class (css-class :seon.print/val)} v]]
+        {:seon.print/val v}))
+    (and (= :seon.print/map (:seon.print/face node)) (seq (:seon.print/entries node)))
+    (let [g (grid node children)]
+      ;; the value printed and a map of scalars read at a glance: no fold (owner, 2026-10-23)
+      (if (or (empty? (:seon.print/path node)) (flat? node))
+        g
+        (with-meta [:details {:class (str "seon-print-node " (css-class :seon.print/map)) :open true :data-seon-path (literal (:seon.print/path node))}
+                    [:summary {:class "seon-print-summary"} (summary node (:seon.print/path node))] g]
+          (meta g))))
+    :else (or (table node children) (close-frame-inline node children))))
+
+(defn- table
+  "A vector or list of two or more maps keyed by keywords and sharing two or more keys as a
+  `<table>`: a column per key (in the order first seen), a row per map, each cell that map's value
+  as its grid holds it (grid's metadata, by key; a key a map lacks an empty cell); a map's own cut
+  a row under it, and the collection's cut a row of its own. nil for any other collection."
+  {:malli/schema [:=> [:cat :map [:sequential :any]] [:maybe :seon.print/hiccup]]}
+  [node children]
+  (let [members (remove punctuation? children)
+        maps (filter #(contains? (meta %) :seon.print/cells) members)
+        keyed (map #(mapv first (:seon.print/cells (meta %))) maps)]
+    (when (and (#{:seon.print/vector :seon.print/list} (:seon.print/face node)) (< 1 (count maps))
+               (every? #(every? keyword? %) keyed)
+               (< 1 (count (reduce (fn [ks m] (filter (set m) ks)) (first keyed) (rest keyed)))))
+      (let [cols (into [] (distinct) (apply concat keyed))
+            n (count cols)]
+        [:table {:class (css-class :seon.print/table)}
+         [:thead (into [:tr] (map #(vector :th [:span {:class (css-class :seon.print/keyword)} (literal %)])) cols)]
+         (into [:tbody]
+               (mapcat (fn [h]
+                         (if-let [{:seon.print/keys [cells rest]} (meta h)]
+                           (let [by (into {} cells)]
+                             (cons (into [:tr] (map #(vector :td (get by %))) cols)
+                                   (for [r rest] [:tr [:td {:colspan n} r]])))
+                           [[:tr [:td {:colspan n} h]]])))
+               members)]))))
+
+(defn- close-frame-inline
+  "A collection other than a map as hiccup: its root, or one of scalars, inline; any other folds."
   {:malli/schema [:=> [:cat :map [:sequential :any]] :seon.print/hiccup]}
   [node children]
   (if (or (empty? (:seon.print/path node)) (flat? node))

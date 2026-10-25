@@ -1,0 +1,15 @@
+{:answers
+   {:A-flush? [true 20.83],
+    :B [true 7.63],
+    :C-flush? [true 15.27],
+    :D [true 6.1]},
+ :writer
+   [{:flushes 1, :dirty false}
+    {:flushes 1, :dirty true}
+    {:flushes 2, :dirty false}],
+ :checks
+   {:a-answered-after-its-flush true,
+    :all-ok true,
+    :b-answered-unflushed true,
+    :c-answered-after-its-flush true}}
+WINDOW-WRITE OK

@@ -1,0 +1,24 @@
+{:expect {:main-datoms 9203, :main-t 536873855},
+ :store-bytes 168833024,
+ :checks {:merged true},
+ :store
+   {:backend :lmdb,
+    :main :check-durable,
+    :recovered? false,
+    :recovered-branches [],
+    :open-ms 138.55,
+    :preload-ms 59.21,
+    :batches 40,
+    :commits 36,
+    :tx-per-commit 0.97,
+    :used-bytes 168820736,
+    :map-bytes 68719476736,
+    :path
+      "/Users/sean/src/seon-next/.worktrees/full-run-2026-10-25/target/check/20261025T125845/stores/durable",
+    :agents-dir
+      "/Users/sean/src/seon-next/.worktrees/full-run-2026-10-25/target/check/20261025T125845/stores/durable-agents/check-durable"},
+ :a ["20" [app.m0/f1 app.m0/f1-test]],
+ :merge {:merged? true, :tx 536873832, :keys 5, :files []},
+ :b ["\"b:1\"" [app.m1/f2 app.m1/f2-test]],
+ :clone [:a4 ["1" nil]]}
+DURABLE-WRITE OK

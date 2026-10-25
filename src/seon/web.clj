@@ -27,7 +27,7 @@
 ;;; --- the files it serves ------------------------------------------------------------
 
 (def public-dir
-  "Where datastar.js is read (:seon.config.web/public-dir)."
+  "Where the page's scripts, datastar.js and highlight.js, are read (:seon.config.web/public-dir)."
   (config/value :seon.config.web/public-dir))
 
 (def stylesheet
@@ -105,6 +105,16 @@
                  :when (seq k)]
              [(java.net.URLDecoder/decode k "UTF-8") (java.net.URLDecoder/decode (or v "") "UTF-8")])))
 
+(defn- open-form
+  "The form a toggled unit names after its row's id (\"row/(drop 1 (get-in result/e5 [:value]))\",
+  a cut the page opened, seon.print.emit/elided-hiccup): that form; nil for a unit with none (a
+  row itself); ::unread when the text after the slash does not read as EDN (the edge: the
+  browser's text)."
+  {:malli/schema [:=> [:cat :string] :any]}
+  [unit]
+  (when-let [p (second (str/split unit #"/" 2))]
+    (try (sedn/decode p) (catch Exception _ ::unread))))
+
 (defn- ask!
   "m asked of the web proc on its :http in-port (seon.step/ask-edge), and its one answer waited
   for: the edge's blocking read; the proc never waits. At stop every waiting promise answers
@@ -133,7 +143,8 @@
   "The routes, as an edge in front of the proc's :http in-port."
   {:malli/schema [:=> [:cat :seon.host/chan] :seon.host/fn]}
   [ch]
-  (let [js (delay (slurp (str public-dir "/datastar.js")))]
+  ;; the page's scripts, each read once: Datastar, and highlight.js (its Clojure grammar) for code
+  (let [js (into {} (for [f ["/datastar.js" "/highlight.js"]] [f (delay (slurp (str public-dir f)))]))]
     (fn [req]
       (let [uri (:uri req) m (:request-method req) q (form-params (:query-string req))]
         (cond
@@ -145,13 +156,17 @@
           ;; a page's list end scrolled into view: its next rows
           (and (= m :post) (= uri "/more")) (do (a/>!! ch {:op :more :view (view-of (get q "view"))}) {:status 204 :headers {}})
           ;; a row's <details> toggled (the debug page): its unit renders its whole content while open
-          (and (= m :post) (= uri "/open")) (do (a/>!! ch {:op :toggle :view (view-of (get q "view")) :unit (get q "unit") :open (= "true" (get q "open"))})
-                                                {:status 204 :headers {}})
+          ;; a cut opened (unit "row/form"): its form must read as EDN, or the render proc never sees it
+          (and (= m :post) (= uri "/open"))
+          (if (= ::unread (open-form (get q "unit" "")))
+            {:status 400 :headers {"Content-Type" "text/plain"} :body (str "a cut's form reads as EDN: " (get q "unit"))}
+            (do (a/>!! ch {:op :toggle :view (view-of (get q "view")) :unit (get q "unit") :open (= "true" (get q "open"))})
+                {:status 204 :headers {}}))
           (and (= m :get) (= uri "/feed"))
           (let [out (a/chan 64)]
             (a/>!! ch {:op :open :view (view-of (get q "view")) :ch out})
             {:status 200 :headers {"Content-Type" "text/event-stream" "Cache-Control" "no-cache"} :body out})
-          (and (= m :get) (= uri "/datastar.js")) {:status 200 :headers {"Content-Type" "text/javascript" "Cache-Control" "max-age=3600"} :body @js}
+          (and (= m :get) (js uri)) {:status 200 :headers {"Content-Type" "text/javascript" "Cache-Control" "max-age=3600"} :body @(js uri)}
           (and (= m :get) (= uri "/app.css"))
           (if (.exists (java.io.File. ^String stylesheet))
             {:status 200 :headers {"Content-Type" "text/css" "Cache-Control" "no-cache"} :body (slurp stylesheet)}

@@ -364,12 +364,35 @@
   [db sym] (some->> (pdb/eid db :var/name sym) (d/entity db) :var/form :form/src))
 
 (defn callers
-  "The program vars whose recorded definition names var sym on db (its :form/refs), sorted; sym
-  itself left out: the one query my.agent/callers and the task story ask."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :qualified-symbol]]}
-  [db sym]
-  (vec (sort (disj (set (d/q '[:find [?v ...] :in $ ?s :where [?f :form/refs ?s] [?f :form/defines ?e] [?e :var/name ?v]] db sym))
-                   sym))))
+  "The program vars whose recorded definition names x on db, sorted, x itself left out: a var by
+  its :form/refs, a qualified keyword (an attribute, config key or schema entry) by its
+  :form/keywords, the data it operates on. The one query my.agent/callers and the task story ask."
+  {:malli/schema [:=> [:cat :seon.host/db [:or :qualified-symbol :qualified-keyword]] [:vector :qualified-symbol]]}
+  [db x]
+  (let [a (if (keyword? x) :form/keywords :form/refs)]
+    (vec (sort (disj (set (d/q '[:find [?v ...] :in $ ?a ?s :where [?f ?a ?s] [?f :form/defines ?e] [?e :var/name ?v]] db a x))
+                     x)))))
+
+(defn grep
+  "The program vars whose recorded definition on db (:form/src) holds the string s, best first: a
+  var whose name holds it, then one whose docstring does, then the rest, each sorted by name, as
+  {:var :line}, :line the source's line where s first begins; a var once, at its best rank (two live
+  forms may define one: a method, an extension); the one search my.agent/grep asks. Cost: one scan of
+  :form/src, then per matching form its definitions and a line cut at the match."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:vector [:map [:var :qualified-symbol] [:line :string]]]]}
+  [db s]
+  (let [hits (for [{:keys [e v]} (d/datoms db :aevt :form/src)
+                   :let [i (str/index-of v s)] :when i
+                   dv (d/datoms db :eavt e :form/defines)
+                   :let [x (d/entity db (:v dv)) n (:var/name x)] :when n]
+               {:var n
+                ;; the whole line the match begins in (s may itself hold a line break)
+                :line (str/trim (subs v (inc (or (str/last-index-of v "\n" (max 0 (dec i))) -1))
+                                      (or (str/index-of v "\n" i) (count v))))
+                :rank (cond (str/index-of (name n) s) 0 (some-> (:var/doc x) (str/index-of s)) 1 :else 2)})]
+    (->> hits (sort-by (juxt :rank (comp str :var)))
+         (reduce (fn [[seen out :as acc] h] (if (seen (:var h)) acc [(conj seen (:var h)) (conj out (dissoc h :rank))])) [#{} []])
+         second)))
 
 (defn resolve-ref
   "Var sym as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth):
@@ -383,7 +406,8 @@
         src (source-of db sym)
         doc (cond-> {:symbol sym}
               (:arglists m) (assoc :arglists (:arglists m))
-              (:doc m) (assoc :doc (:doc m))
+              ;; prose, read as itself: unquoted, no escaped quotes (seon.print's prose mark)
+              (:doc m) (assoc :doc {:seon.print/prose (:doc m)})
               (:malli/schema m) (assoc :contract (:malli/schema m)))]
     (cond
       (and (nil? m) (nil? src)) {:symbol sym :unresolved true :problem (:unresolved ref/problem-messages)}
@@ -449,14 +473,13 @@
                                 [] names)))))
 
 (defn cited-code
-  "What the screen shows of citation c on db, as Clojure is written in a file (owner,
-  2026-10-25): a var as its definition's head (seon.reader/definition-head: name, docstring as
+  "What the screen shows of citation c on db, as Clojure is written in a file (DECISIONS,
+  code is shown as code): a var as its definition's head (seon.reader/definition-head: name, docstring as
   written, attribute map, arglist; its body marked `…)` with the form that reads it whole), a
   namespace as its ns form's head, its docstring as written, then its public names; each as code
   (seon.print/code), printed verbatim; a var whose source db does not record, as a `declare` with
   its arglists and doc as comments; a task, a section, a file or a citation that reaches nothing as
-  its address and lead in comment lines, then the form that reads it whole (never its view's map:
-  root, 2026-10-25). nil when it reaches nothing pulled."
+  its address and lead in comment lines, then the form that reads it whole (never its view's map). nil when it reaches nothing pulled."
   {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :any]}
   [db c]
   (let [[kind v :as hit] (cited db c)
@@ -470,7 +493,7 @@
               ;; no source recorded: what the var's facts say, as Clojure (its arglists and doc as comments)
               :else (print/code (str "(declare " (name nm) ")  ; no source recorded: (doc " nm ")"
                                      (when-let [as (seq (:arglists v))] (str "\n;; " (str/join " " (map str as))))
-                                     (when-let [d (:doc v)] (str "\n" (names-lines (str/split d #"\s+"))))))))
+                                     (when-let [d (:seon.print/prose (:doc v))] (str "\n" (names-lines (str/split d #"\s+"))))))))
       (and (= :namespace kind) (symbol? nm))
       (let [nv (ref/namespace-view db nm :doc)]
         (print/code (str "(ns " nm (when-let [d (:seon.ref/lead nv)] (str "\n  " (emit/string-literal d))) ")"

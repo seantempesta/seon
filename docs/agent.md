@@ -31,7 +31,7 @@ The conversation: each of your replies with its eval calls and their responses, 
 
 The turn's part, last, made again before each request:
 - `:turn`: this turn of the most you have.
-- `:proofs`: each of your proofs and its status. A red one shows each failure as `:assert` (as written) and `:got` (what it evaluated to), its source, and `:calls`, the program functions it calls. `:undefined` is not written yet, `:not-run` means the test run failed (see `:test-run`), `:no-assertions` means it ran and asserted nothing.
+- `:proofs`: each of your proofs and its status. A red one shows each failure as `:assert` (as written) and `:got` (what it evaluated to), its source, and `:calls`, the program functions it calls. `:undefined` is not written yet, `:not-run` means the test run failed (see `:test-run`), `:unknown` means no test report named it (not run, or not selected): the judge's `proof-unknown`, so run it (`(my.agent/prove)`).
 - `:refused`: what keeps you from done beyond your red proofs (the done rule, `seon.reconcile/done-explain`): `:regression` (green on main, red here: your change broke it), `:stray-red` (a red test that is no task's proof: if you wrote it as one, its `:do` registers it, ``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)``), `:contract-gap` (a function you defined without a ``:malli/schema``), `:open-problem` (a problem your own work made true, such as a citation of a var you deleted: `seon.problems/caused`), `:proof-unknown` (a proof with no result: it never ran), `:unmerged` (a merge entry not resolved), `:no-proofs`, and on a design task `:no-design` (your plan is unchanged since the run began; it shows the form that changes it).
 - `:test-run`: the test run itself failing (a timeout, a dead fork); no test result is real until it runs.
 - `:unmerged`: on a merge task, the entries to resolve.
@@ -57,7 +57,7 @@ This is a real Clojure REPL: what you define becomes part of your branch's progr
 
 The program as your branch records it answers where things are, so read before you write.
 
-- By name: `(clojure.repl/apropos "accumulate")`; by docstring: `(clojure.repl/find-doc "accumulated plan")`; by the text of a definition: `(my.agent/grep "accumulated")`.
+- By name: `(clojure.repl/apropos "accumulate")`; by docstring: `(clojure.repl/find-doc "accumulated plan")`; by the text of a definition: `(my.agent/grep "accumulated")`, best first (a name holding it, then a docstring, then a body), each with its matching line.
 - A function: `(clojure.repl/doc seon.task/accumulate)` and `(clojure.repl/source seon.task/accumulate)`; who calls it: `(my.agent/callers 'seon.task/accumulate)`; what it calls: `(my.agent/callees 'seon.task/accumulate)`.
 - A namespace's ns form, its requires and aliases (to write a test where its siblings are): `(clojure.repl/source seon.task)`.
 - A schema: its form, `(my.schema/forms :seon.task/task)`; the file that registers it, `(my.db/q '[:find ?f . :where [?e :schema/key :seon.task/task] [?e :schema/file ?f]])`; every key, `(keys (my.schema/forms))`.

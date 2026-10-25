@@ -83,6 +83,15 @@
                    [:span {:class "seon-print-elision" :title s} words])]
          [:span shown (when-not (or (empty? shown) (str/ends-with? shown "\n") (str/ends-with? shown " ")) " ") cut])))))
 
+(defn code
+  "Code on the page under budget tokens: whole, the printer's code block (seon.print.emit/marked-hiccup,
+  highlighted as Clojure); cut, the prose cut (`prose`), whose marker names what it left."
+  {:malli/schema [:=> [:cat :string pos-int?] :any]}
+  [s budget]
+  (let [p (prose s budget)]
+    ;; a cut holds its marker element, which highlighting (it rewrites the code's text) would remove
+    (if (string? p) (emit/marked-hiccup :seon.print/code p) [:pre {:class "text-text-100"} [:code p]])))
+
 (def utc-offset-ms
   "Jolt has no time zones: the local offset is :seon.config.web/utc-offset (`date +%z`)."
   (let [z (config/value :seon.config.web/utc-offset)
@@ -321,6 +330,13 @@
   (let [st (:seon.run/status (get agent-run id))]
     (if (and x (gone (or (:status x) (:type x))) (finished st)) (assoc x :ended-as st) x)))
 
+(defn- top-bar
+  "The bar above every page: Seon's mark, home, then the page's own link (nil: none)."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [link]
+  [:nav {:class "sticky top-0 z-10 -mx-3 flex items-baseline gap-3 border-b border-base-800 bg-base-950 px-3 py-2 sm:-mx-4 sm:px-4" :seon/off-screen true}
+   [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "text-text-500"} "on jolt"] link])
+
 (defn shell
   "The document around a view's body: head, the stylesheet, Datastar, and the feed of that view's
   patches (outside every morph target, so no patch can strip it)."
@@ -333,6 +349,11 @@
     [:title title]
     [:link {:rel "icon" :href "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%23f0b429'/%3E%3C/svg%3E"}]
     [:link {:rel "stylesheet" :href "/app.css"}]
+    ;; highlight.js, then one observer: Clojure code (seon.print.emit/highlight) is highlighted when
+    ;; it arrives and again when a patch morphs it back to its plain text (a row re-rendered whole)
+    [:script {:src "/highlight.js"}]
+    [:script (h/raw (str "addEventListener('DOMContentLoaded', () => { const hl = () => document.querySelectorAll('code.language-clojure:not([data-highlighted])')"
+                  ".forEach(e => hljs.highlightElement(e)); hl(); new MutationObserver(hl).observe(document.body, {childList: true, subtree: true}); });"))]
     [:script {:type "module" :src "/datastar.js"}]]
    [:body
     body
@@ -427,6 +448,15 @@
   "Who evaluated, by its :seon.eval/by (any other: the agent's own, its model's turn)."
   {"user" "the owner, from this page" "outside" "an outside agent, through root's server" "context" "the context, read for a turn"})
 
+(defn- shown-value
+  "What an eval's recorded response shows as its value: the response less its handle and what
+  the row shows beside it (cost, the costliest functions, its error), each form's value when it
+  has them (its last is :value)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [response]
+  (cond-> (dissoc response :handle :ms :ticks :bytes :fns :ex :text :record :recorded)
+    (contains? response :values) (dissoc :value)))
+
 (defn evaluation
   "One eval (the declared html render of :seon.db/eval-fact, its record, and of a response), as
   it ran: the prose beside it, its code, its response printed under its handle as it is shown
@@ -437,11 +467,12 @@
   [e opts]
   (let [rec (or (:seon.eval/record e) e)
         r (merge (:response rec) (select-keys rec [:code :prose :fns]) (dissoc e :seon.eval/record))
-        ;; a recorded value printed as its reply reads (the reply's budget, one budget for an eval's
-        ;; value wherever it is shown) under its handle, its cut the printer's, not cut again; text
-        ;; with no value behind it (a host value's :printed, a live reply's :text) is prose
-        printed (when (and (:seon.eval/record e) (nil? (:text r)) (not (:printed rec))) (print/record-text rec nil))
-        r (cond-> r (and (:seon.eval/record e) (nil? (:text r))) (assoc :text (or printed (:printed rec))))
+        ;; a value recorded as data: inline, printed as its reply reads under its handle; in a row,
+        ;; rendered as structure (the printer's hiccup). Text with no value behind it (a host
+        ;; value's :printed, a live reply's :text) is prose
+        data? (and (:seon.eval/record e) (nil? (:text r)) (not (:printed rec)))
+        r (cond-> r (and (:seon.eval/record e) (nil? (:text r)))
+            (assoc :text (if data? (when (= :inline (:as opts)) (print/record-text rec nil)) (:printed rec))))
         by (or (:seon.eval/by e) (:by r))
         err? (some? (:ex r))]
     (if (= :inline (:as opts))
@@ -449,10 +480,23 @@
        [:code (prose (or (:text r) "") (cell) {:one-line? true})]]
       [:div {:class (str "flex flex-col gap-1 border-l-2 pl-3 py-1 " (if err? "border-error" "border-base-700"))}
        (when-not (str/blank? (:prose r)) [:p {:class "whitespace-pre-wrap text-text-300 italic"} (prose (:prose r) (form-budget))])
-       (when (:code r) [:pre {:class "text-text-100"} [:code (prose (:code r) (form-budget))]])
+       (when (:code r) (code (:code r) (form-budget)))
        (if (map? (:ex r))
          (render/html (:ex r) (cond-> {} (:handle r) (assoc :handle (list :ex (:handle r)))))
-         [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (if printed (:text r) (prose (or (:text r) "") (part)))])
+         (if data?
+           ;; a value stored as data renders as structure, the printer's hiccup under its handle
+           (let [v (shown-value (:response rec))]
+             [:div {:class "flex flex-col gap-1 text-text-200"}
+              [:div {:class "flex gap-2"} [:span {:class "text-text-500"} "⇒"] (render/html v {:handle (:handle r)})]
+              ;; each cut opened: what its form reads, from the record, under that form (seon.web/open-form read it)
+              (for [f (:opened opts) :let [form (edn/read-string f)]]
+                [:div {:class "flex gap-2"}
+                 ;; the form read, as the button that closes it
+                 [:button {:type "button" :class "text-text-500 font-mono text-left" :data-seon-form f :title "close"
+                           (keyword "data-on:click") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=' + "
+                                                          "encodeURIComponent(el.closest('li[id]').id + '/' + el.dataset.seonForm) + '&open=false')")} f]
+                 (render/html (print/read-rest form (:handle r) v) {:handle form})])])
+           [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (prose (or (:text r) "") (part))]))
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
         [:span (get asked-by by "its own turn")]
@@ -482,9 +526,9 @@
         (when model [:span {:class "text-text-500"} model])
         (when truncated [:span {:class "text-error"} "cut at the token limit"])
         (when (and errors (pos? errors)) [:span {:class "text-error"} (str errors " of " forms " forms failed")])]
-       (when-not (str/blank? reply) [:p {:class "whitespace-pre-wrap text-text-200"} (prose reply (part))])
+       (when-not (str/blank? reply) [:p {:class "seon-prose"} (prose reply (part))])
        (when-not (str/blank? reasoning)
-         [:details [:summary "its reasoning"] [:p {:class "whitespace-pre-wrap text-text-300"} (prose reasoning (part))]])])))
+         [:details [:summary {:class "text-2xs text-text-500"} "its reasoning"] [:p {:class "seon-prose text-text-300"} (prose reasoning (part))]])])))
 
 (defn message
   "A message to a run (the declared html render of :seon.message/fact): who sent it and its body as prose."
@@ -494,7 +538,7 @@
     [:span (str from ": ") (prose body (cell) {:one-line? true})]
     [:div {:class "border-l-2 border-info pl-3 py-1"}
      [:span {:class "text-2xs text-text-500"} (str "message from " from)]
-     [:p {:class "whitespace-pre-wrap text-text-100"} (prose body (part))]]))
+     [:p {:class "seon-prose"} (prose body (part))]]))
 
 (defn run
   "A run (the declared html render of :seon.run/run-fact) as a person reads it: its id, status,
@@ -722,7 +766,7 @@
   while open, and its html is the same on every page) to its form and response;
   a message, who sent it and its body."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? [:maybe [:sequential :any]] :string] :any]}
-  [db eid [open?] id]
+  [db eid [open? opened] id]
   (let [own (d/pull db '[*] eid)
         schema (render/entity-schema own :seon.eval/agent)]
     (case schema
@@ -737,22 +781,27 @@
                        open? (assoc :open true))
             [:summary {:class "cursor-pointer text-2xs text-text-500"} "screen"]
             (when open? (for [sid screens :let [e (d/pull db '[*] [:seon.eval/id sid])]]
-                          (if (:db/id e) (evaluation e {}) [:p {:class "text-error"} (str "screen eval " sid " is not on this branch")])))])])
+                          (if (:db/id e)
+                            ;; its handle's anchor, as a conversation row's (chat-part's eval-eN)
+                            [:div (when-let [h (get-in e [:seon.eval/record :response :handle])] {:id (str "eval-" (name h))}) (evaluation e {})]
+                            [:p {:class "text-error"} (str "screen eval " sid " is not on this branch")])))])])
       :seon.db/eval-fact
       (let [rec (:seon.eval/record own)
             r (merge (:response rec) (select-keys rec [:code :prose]))
             line #(first (str/split-lines (or % "")))]
-        [:li {:id id :class "flex flex-col gap-1 py-1"}
-         (when-not (str/blank? (:prose r)) [:p {:class "whitespace-pre-wrap text-text-200"} (prose (:prose r) (part))])
-         [:details (cond-> (toggle id)
-                     open? (assoc :open true))
+        [:li {:id id :class "flex flex-col gap-2"}
+         (when-not (str/blank? (:prose r)) [:p {:class "seon-prose"} (prose (:prose r) (part))])
+         [:details (cond-> (assoc (toggle id) :class (str "seon-eval" (when (:ex r) " seon-eval-error")))
+                     open? (assoc :open true)
+                     ;; a handle printed anywhere on the page links here, open or not (seon.print.emit's symbol hiccup)
+                     (symbol? (:handle r)) (assoc :id (str "eval-" (name (:handle r)))))
           ;; collapsed: code ⇒ its value in one line · ms (an error: its message); open: the whole
-          [:summary {:class "flex flex-wrap items-baseline gap-2 cursor-pointer text-xs"}
-           [:code {:class "text-text-100"} (line (:code r))]
+          [:summary {:class "flex min-w-0 items-baseline gap-2"}
+           [:code (merge-with #(str %1 " " %2) emit/highlight {:class "truncate text-text-100"}) (line (:code r))]
            [:span {:class (if (:ex r) "text-error" "text-text-500")} (if (:ex r) "✕" "⇒")]
-           [:code {:class "text-text-400"} (:line rec)]
-           (when (:ms r) [:span {:class "tabular-nums text-text-500"} (ms-str (:ms r))])]
-          (when open? (evaluation own {}))]])
+           [:code {:class "min-w-0 flex-1 truncate text-text-400"} (:line rec)]
+           (when (:ms r) [:span {:class "shrink-0 tabular-nums text-2xs text-text-500"} (ms-str (:ms r))])]
+          (when open? (evaluation own {:opened opened}))]])
       [:li {:id id :class "py-1"} (render/html (dissoc own :db/id) {:schema schema})])))
 
 (defn component
@@ -772,9 +821,9 @@
     (= :side as)
     (let [{:seon.agent/keys [id status]} (d/pull db [:seon.agent/id :seon.agent/status] eid)]
       ;; the user's own entry links to its page: off a screen
-      [:li (cond-> {:id (comp-id eid as) :class "flex items-baseline gap-2"} (= :user id) (assoc :seon/off-screen true))
+      [:li (cond-> {:id (comp-id eid as) :class "flex shrink-0 items-baseline gap-2 rounded-md bg-base-900 px-2 py-1 lg:bg-transparent lg:px-1 hover:bg-base-850"} (= :user id) (assoc :seon/off-screen true))
        [:span {:class (if (#{:busy :running} status) "text-signal" "text-text-500")} (if (#{:busy :running} status) "●" "○")]
-       [:a {:href (str "/agent/" (kname id)) :class "text-text-200 underline"} (kname id)]
+       [:a {:href (str "/agent/" (kname id)) :class "font-semibold text-text-100"} (kname id)]
        [:span {:class "text-2xs text-text-500"} (some-> status name)]])
     :else
   (let [own (d/pull db '[*] eid)
@@ -838,17 +887,21 @@
         tiles (remove #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))) nodes)
         on (vec (reverse (take shown listed)))
         older (- (count listed) (count on))
+        ;; an eval's row: open or not, and the forms of its cuts opened on the page ("id/form", /open)
         as (fn [nd] (if (#{:seon.db/eval-fact :seon.turn/turn-fact} (:seon.render/schema nd))
-                      (let [id (comp-id (:seon.render/eid nd) :chat)] [:chat (contains? (or open #{}) id)])
+                      (let [id (comp-id (:seon.render/eid nd) :chat)]
+                        [:chat (contains? (or open #{}) id)
+                         (into (sorted-set) (keep #(let [[u p] (str/split % #"/" 2)] (when (and p (= u id)) p))) open)])
                       :chat))
 ]
     {:seon.render/html
      ;; the view every toggle on the page posts for (`toggle`), a tile's as a part's
      [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4" :data-view view}
-      [:nav {:class "flex items-baseline gap-3" :seon/off-screen true}
-       [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "text-text-500"} "on jolt"]]
+      (top-bar nil)
       [:div {:class "grid gap-4 lg:grid-cols-[12rem_minmax(0,1fr)_20rem]"}
-       [:aside {:class "hidden lg:block"} [:ol {:id "c-side" :class "flex flex-col gap-1 text-xs"} (for [a sides] (slot (comp-id (:eid a) :side)))]]
+       [:aside {:class "min-w-0 lg:sticky lg:top-14 lg:self-start"}
+        [:h2 {:class "kicker mb-1 hidden lg:block"} "agents"]
+        [:ol {:id "c-side" :class "flex gap-2 overflow-x-auto pb-1 text-xs lg:flex-col lg:gap-0.5"} (for [a sides] (slot (comp-id (:eid a) :side)))]]
        [:main {:class "flex min-w-0 flex-col gap-3"}
         (slot "p-head")
         [:div {:id "c-older"} (slot (str "c-more-" (count on)))]
@@ -974,11 +1027,11 @@
   every live agent (seon.root/submit! to :all)."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [_ opts]
-  [:section {:id (:unit opts) :class "flex flex-col gap-2 sm:flex-row"}
-   [:form {:class "flex flex-1 gap-2" :seon/call 'seon.root/spawn! :seon/agent :root}
+  [:section {:id (:unit opts) :class "flex flex-col gap-2 xl:flex-row"}
+   [:form {:class "flex min-w-0 flex-1 gap-2" :seon/call 'seon.root/spawn! :seon/agent :root}
     [:input {:name "task" :class "flex-1 min-w-0" :autocomplete "off" :placeholder "a task for a new agent (Enter spawns it)"}]
     [:button {:type "button" :class "rounded border border-base-700 px-2" :seon/call 'seon.root/spawn! :seon/agent :root :seon/args {:n 10}} "spawn 10"]]
-   [:form {:class "flex flex-1 gap-2" :seon/call 'seon.root/submit! :seon/agent :all}
+   [:form {:class "flex min-w-0 flex-1 items-baseline gap-2" :seon/call 'seon.root/submit! :seon/agent :all}
     [:span {:class "text-signal"} "all=>"]
     [:input {:name "forms" :class "flex-1 min-w-0" :autocomplete "off" :spellcheck "false" :placeholder "a form every live agent evaluates"}]]])
 
@@ -1000,8 +1053,7 @@
 ]
     {:seon.render/html
      [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4"}
-      [:nav {:class "flex items-baseline gap-3"}
-       [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "text-text-500"} "on jolt"]]
+      (top-bar nil)
       [:div {:class "grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]"}
        [:main {:class "flex min-w-0 flex-col gap-3"}
         (slot "p-head") (when input (slot "p-input"))
@@ -1030,9 +1082,10 @@
   (let [view (view-param [:debug id])]
     {:seon.render/html
      [:div {:id "app" :class "mx-auto flex max-w-screen-lg flex-col gap-3 p-3 sm:p-4"}
-      [:nav {:class "flex items-baseline gap-3"}
-       [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:a {:href (str "/agent/" (kname id)) :class "text-text-400 underline"} (str "← " (kname id) "'s page")]]
-      [:h1 {:class "text-sm text-text-200"} (str "What " (kname id) "'s model was sent, newest first: each turn what it added to the request; its whole request opens on demand")]
+      (top-bar [:a {:href (str "/agent/" (kname id)) :class "text-text-400"} (str "← " (kname id) "'s page")])
+      [:header {:class "flex flex-col gap-1"}
+       [:h1 {:class "text-base font-semibold text-text-50"} (str "What " (kname id) "'s model was sent")]
+       [:p {:class "text-text-400"} "Newest first: each turn, what it added to the request; its whole request opens on demand."]]
       [:ol {:id "d-turns" :class "flex flex-col gap-3"} (for [u turns] (slot (:id u)))]
       [:div {:id "d-foot"} (slot (str "d-more-" (count turns)))]]
      :seon.render/units (conj (mapv #(assoc % :container "#d-turns") turns)
