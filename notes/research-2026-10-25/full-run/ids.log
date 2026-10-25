@@ -1,0 +1,9 @@
+{:a 10,
+ :b 10,
+ :a-txs (536873819),
+ :b-txs (536873818),
+ :checks
+   {:each-wrote-10 true,
+    :entity-ids-issued-once true,
+    :tx-ids-issued-once true}}
+IDS OK

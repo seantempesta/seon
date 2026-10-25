@@ -14,16 +14,16 @@ Pins: see docs/forks.md (chez fa6a4c73, datahike 6dc9ce64 since 2026-10-25) · p
 
 Updated 2026-10-25 by root. Sessions are linked to root's session (list_sessions linked).
 
-| Session | Last done | Now / next |
+| Session | Now (overnight 2026-10-25) | Then |
 |---|---|---|
-| **Root as one system** (stability lead) | the full run's test reds; reach tasks filed; stability sweep (notes/stability-2026-10-25.md) | waits that never end at their producer: await-db first, then the runner's fork, then Jolt deadlock detection |
-| **Agent loop** (Opus) | parts 1-2 and the Jolt poller pin merged; delivery main-first | part 3 (park, wake) waits for a run turn |
-| **Agent view r3** (Opus) | dogfood rulings, seon_done verdict merged | the agent-test hang fix (jolt/done-tests-wait-from-before), then the value view (approved), grep ranking |
-| **Related sections** | search comparison (notes/related-search-2026-10-25.md) | (b) fused defaults ready soon, then (a) :form/keywords |
-| **Printer** (Opus) | code as code, one cut, generous budget | 5 reds of its own to fix, then ready |
-| ctx-atom (idle) | design r3; §11 superseded | builds after the loop's parts |
+| **Agent loop** | part 3 park and wake: runs, report | part 4: resume from any commit, the screen as diffs |
+| **Root as one system** (stability lead) | the thread that survives stop!; jolt/fork-guard ready (Chez f6a45c9d, Jolt 115f00cf: fork-alone, main-carrier wake fix) | reach the same however the store was made; the six waits tasks; read the ~20 old branches (delete nothing) |
+| **Agent view r3** | the value view: highlight.js, browser check, prove, ready | grep ranks definitions first |
+| **Related sections** | (a) :form/keywords: runs, ready | seon.vector/one-scan-ranks-every-kind |
+| **ctx atom** | build step 0 (vectors in schemas), then step 1 (read-only ctx), each reported | steps 2-6; the standing store erased when a stored type changes, at a quiet moment (owner's go) |
+| **Live agents** | look first, dogfood, then 5 paid runs on today's main (up to $1/round, two rounds) | findings → fixes → re-measure turns to green |
 
-Machine rule (owner gaming, 2026-10-25): one heavy Seon run at a time, in root's order.
+Machine: all cylinders overnight (up to three heavy runs while load < ~8). Root merges verified branches as they report, runs the daily full run (bin/test --all, bin/check 100) on a clean main once the merges settle, and files every red with an owner.
 
 Baseline: `notes/baseline-2026-10-25.md`.
 

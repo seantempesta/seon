@@ -571,6 +571,12 @@
  ;; changed in functions, 0.71 in sections and 0.56 in schema keys, at about 370 + 370 + 33 tokens a
  ;; turn (notes/related-search-2026-10-25.md).
  :seon.config.render/related 5
+ ;; How far related counts the forms naming a call-graph neighbour, weighing it 1/(1 + that count):
+ ;; past the cap a neighbour is plumbing every form names. Provenance: on 31 merged tasks the
+ ;; fused top 5 held 26 plumbing lines of 155 by plain counts and none weighed so, at caps 16, 64
+ ;; and 256 alike (R@5 0.343 -> 0.346; seon.context/related-weighs-a-neighbour-by-its-rarity). At
+ ;; the bound: at most this many :form/refs datoms read a neighbour.
+ :seon.config.render/related-rarity 16
  ;; Semantic search's pyramid (seon.vector/near, docs/vector.md#the-pyramid), measured against an
  ;; exact 768-dim search, recall@10 (EmbeddingGemma-2):
  ;; - bin/check vectors, Seon's whole text (2,681: 1,783 forms with the schemas, 321 sections, the

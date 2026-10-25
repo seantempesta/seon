@@ -25,7 +25,7 @@
   "Every task on main db: {id {:execution :done :blocked-by :runs [[id status outcome
   turns tokens]] :failure}}: the server's and the e2e harness's one summary. A key says something
   or is left out: :done only when done, :blocked-by and :runs only when there are some (676 held
-  tasks spelled `:done false, :blocked-by #{}, :runs []` each, 2026-10-25)."
+  tasks spelled `:done false, :blocked-by #{}, :runs []` each)."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
   (let [idx (r/index db)]

@@ -1,0 +1,50 @@
+{:shard [3 4],
+ :contracts 321,
+ :fn-without-gen [],
+ :generated-and-checked 27,
+ :failed [],
+ :such-that [],
+ :not-generated 104,
+ :checks
+   {:every-fn-schema-generates true, :every-pure-contract-holds true},
+ :checked
+   [seon.cost/expected seon.cost/judge seon.cost/per-unit
+    seon.merge/changes seon.merge/three-way seon.proofs/costs
+    seon.proofs/plan seon.proofs/result-path seon.proofs/test-run-errors
+    seon.reconcile/actions seon.reconcile/cas-tx
+    seon.reconcile/desired-env seon.reconcile/done?
+    seon.reconcile/idx-ready? seon.reconcile/live-in?
+    seon.reconcile/refresh-ready seon.ref/line-citation seon.ref/parse
+    seon.ref/scan seon.ref/span-candidate seon.ref/unescape
+    seon.task/agent-tx seon.task/default-branch seon.task/execution-tx
+    seon.task/references-of seon.task/run-start-tx
+    seon.template/merge-plan],
+ :ms
+   {seon.cost/expected 915.37,
+    seon.cost/judge 488.25,
+    seon.cost/per-unit 878.17,
+    seon.merge/changes 2927.76,
+    seon.merge/three-way 4227.43,
+    seon.proofs/costs 14311.46,
+    seon.proofs/plan 12948.79,
+    seon.proofs/result-path 23.32,
+    seon.proofs/test-run-errors 5.43,
+    seon.reconcile/actions 1.07,
+    seon.reconcile/cas-tx 13.25,
+    seon.reconcile/desired-env 2081.06,
+    seon.reconcile/done? 12.66,
+    seon.reconcile/idx-ready? 11.7,
+    seon.reconcile/live-in? 2002.1,
+    seon.reconcile/refresh-ready 12.55,
+    seon.ref/line-citation 11.8,
+    seon.ref/parse 17.72,
+    seon.ref/scan 13.66,
+    seon.ref/span-candidate 14.14,
+    seon.ref/unescape 13.87,
+    seon.task/agent-tx 20.51,
+    seon.task/default-branch 14.13,
+    seon.task/execution-tx 375.69,
+    seon.task/references-of 1768.34,
+    seon.task/run-start-tx 60.06,
+    seon.template/merge-plan 11.18}}
+MG-CHECK OK
