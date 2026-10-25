@@ -1,0 +1,5 @@
+child 8740: inside a write txn, SIGKILL
+child: signaled 1, signal 9
+a new process writes: committed
+the holder writes: committed
+LMDB-KILL OK

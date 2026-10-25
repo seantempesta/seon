@@ -1,0 +1,6 @@
+{:test-files 67,
+ :reads 22,
+ :unnamed [],
+ :named-not-read [],
+ :checks {:every-hidden-input-named true, :every-named-one-read true}}
+TEST-INPUTS OK

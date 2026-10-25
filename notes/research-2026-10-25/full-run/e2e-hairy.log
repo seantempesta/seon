@@ -1,0 +1,17 @@
+:program {:ok true, :datoms 49}
+:program {:ok true, :datoms 65}
+:create {:ok true, :datoms 4}
+:after {:ok true}
+:quiescent {:t 536873932, :root-causes [{:task hairy/b-merge, :cause run hairy/b-merge#1 ended merge-failed (4 conflicts > :seon.config.merge/max-conflicts 3): unmerged [:var app.m/f1]; unmerged [:var app.m/f2]; unmerged [:var app.m/f3]; unmerged [:var app.m/f4], :blocks [], :run hairy/b-merge#1}]}
+:task hairy/a {:execution :running, :done true, :blocked-by #{}, :runs [[hairy/a#1 :done :green 1 1266]]}
+:task hairy/a-merge {:execution :running, :done true, :blocked-by #{}, :runs [[hairy/a-merge#1 :merged :green 0 0]]}
+:task hairy/b {:execution :running, :done true, :blocked-by #{}, :runs [[hairy/b#1 :done :green 1 1278]]}
+:task hairy/b-merge {:execution :held, :done false, :blocked-by #{}, :runs [[hairy/b-merge#1 :closed :merge-failed 0 0]], :failure run hairy/b-merge#1 ended merge-failed (4 conflicts > :seon.config.merge/max-conflicts 3): unmerged [:var app.m/f1]; unmerged [:var app.m/f2]; unmerged [:var app.m/f3]; unmerged [:var app.m/f4]}
+:agents-reused [] :merges {:merge-runs {:merged 1, :closed 1}, :behind-reruns 0, :conflicts-measured 4, :held-tasks 1, :model-calls-in-merges 0} :fresh-agent {:handle result/e1,
+ :ms 1.598,
+ :ticks 55694,
+ :bytes 831728,
+ :value [11 12 13 14]}
+:checks {:held {hairy/b-merge #:seon.task{:execution :held, :failure {:reason run hairy/b-merge#1 ended merge-failed (4 conflicts > :seon.config.merge/max-conflicts 3): unmerged [:var app.m/f1]; unmerged [:var app.m/f2]; unmerged [:var app.m/f3]; unmerged [:var app.m/f4], :run hairy/b-merge#1}}}}
+:numbers {:wall-ms 3396, :runs 4, :merged 1, :turns-per-merged-task 1.0, :model-calls 0, :tokens 2544, :root-real-mb 773.8, :writer {:tx-count 100, :flushes 10, :batch-p50-ms 7.92, :tx-per-commit 0.96, :commits 104, :tx-per-s 54.0}, :root-errors []}
+E2E FAILED

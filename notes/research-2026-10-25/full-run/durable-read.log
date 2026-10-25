@@ -1,0 +1,44 @@
+{:main {:t 536873856, :datoms 9448},
+ :main-data-datoms {:phase-1 9203, :recovered 9205},
+ :agents-linked-at-boot 1,
+ :born-after ["0" nil],
+ :resumed-b ["20" nil],
+ :resumed-clone ["(\"the clone's note\")" nil],
+ :after-merging-b ["20" nil],
+ :store
+   {:backend :lmdb,
+    :main :check-durable,
+    :recovered? true,
+    :open-ms 33.51,
+    :preload-ms 53.42,
+    :batches 1,
+    :commits 1,
+    :tx-per-commit 1.0,
+    :used-bytes 168820736,
+    :map-bytes 68719476736,
+    :path
+      "/Users/sean/src/seon-next/.worktrees/full-run-2026-10-25/target/check/20261025T125845/stores/durable",
+    :agents-dir
+      "/Users/sean/src/seon-next/.worktrees/full-run-2026-10-25/target/check/20261025T125845/stores/durable-agents/check-durable",
+    :recovered-branches [:dur-a :dur-b :dur-c :dur-clone]},
+ :b-tests {:pass 1, :fail 0, :error 0},
+ :merge-b
+   [{:ok true,
+     :applied
+       [[:form "app.m0/1367fb47-3cfc-599e-b721-cf113f1f7a9e"]
+        [:form "app.m0/14b73cdc-972d-5180-b025-e9b17baf37e0"]
+        [:form "app.m0/f1"]
+        [:var app.m0/f1-test]
+        [:var app.m0/f1]]}
+    {:merged? true, :tx 536873896, :keys 7, :files []}],
+ :checks
+   {:b's-tests-pass true,
+    :b-merges-now false,
+    :b-resumes-its-work false,
+    :branches-recovered true,
+    :earlier-agents-are-not-this-roots false,
+    :main-recovered false,
+    :main-runs-the-merged-f1 false,
+    :the-clone-resumes true,
+    :the-killed-root-ended-unclean true}}
+DURABLE FAILED

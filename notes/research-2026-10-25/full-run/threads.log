@@ -1,0 +1,10 @@
+{:fork-server 1,
+ :agent 1,
+ :clone 1,
+ :clone-eval "42",
+ :tests {:pass 1, :fail 0, :error 0},
+ :checks
+   {:each-forking-process-one-thread true,
+    :its-test-passed true,
+    :the-clone-evaluates true}}
+THREADS OK
