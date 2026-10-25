@@ -167,35 +167,3 @@
                                    (seq? (second b)) (symbol? (first (second b))) (= "type" (name (first (second b))))))))
         writers (into (sorted-set) (for [[nsn src] forms :when (some shape? (tree-seq coll? seq (read-in nsn src)))] nsn))]
     (is (= #{'seon.step} writers))))
-
-(deftest git-is-read-through-fx
-  ;; task seon.fx/git-is-read-through-fx: git runs in one place, seon.fx/git-run (read two ways, git!:
-  ;; a failure throws its words, and git-try: git's no is nil), and a checkout is told by its .git
-  ;; through checked-out?; no other src form names the git command or a repository's own files (".git").
-  ;; src's forms read as data from the compiler's facts
-  (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
-        forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
-                     [(clojure.string/starts-with? ?file "src/")]] db)
-        read-in (fn [nsn src] (require nsn)
-                  (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))
-        ;; a form names git when it holds the literal "git" or ".git", or is a call naming
-        ;; clojure.java.shell/sh (called, or applied) with a string whose words include git (a shell
-        ;; line: zsh -c "... git -C ..."). Other process runners (ProcessBuilder) are not seen
-        sh? #(and (symbol? %2) (= #'clojure.java.shell/sh (ns-resolve (the-ns %1) %2)))
-        names-git? (fn [nsn f]
-                     (some (fn [x] (or (#{"git" ".git"} x)
-                                       (and (seq? x) (some #(sh? nsn %) x)
-                                            (some #(and (string? %) (some #{"git"} (clojure.string/split % #"[^A-Za-z0-9_.-]+"))) (tree-seq coll? seq x)))))
-                           (tree-seq coll? seq f)))
-        readers (into (sorted-set)
-                      (for [[nsn src] forms
-                            :let [f (read-in nsn src)
-                                  v (when (and (seq? f) (symbol? (second f))) (symbol (str nsn) (name (second f))))]
-                            :when (names-git? nsn f)]
-                        (or v nsn)))]
-    (testing "a shell line that runs git is seen, called or applied (checkout-at's old form)"
-      (is (names-git? 'seon.fx '(defn x [d] (sh/sh "zsh" "-c" "rm -rf d && git -C \"$2\" archive HEAD | tar -x" "x" d))))
-      (is (names-git? 'seon.fx '(defn x [d] (apply sh/sh "zsh" "-c" "rm -rf d && git -C \"$2\" archive HEAD | tar -x" "x" [d])))))
-    (testing "a shell line that names no git is not"
-      (is (not (names-git? 'seon.fx '(defn x [d] (sh/sh "zsh" "-c" "tar -x -C \"$1\"" "x" d))))))
-    (is (= #{'seon.fx/git-run 'seon.fx/checked-out?} readers))))

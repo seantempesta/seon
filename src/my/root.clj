@@ -4,7 +4,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
             [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.watch :as watch] [datahike.api :as d]
-            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx]))
+            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib]))
 
 (defn- write-declared!
   "Declared state's tx written on main: the error that built it as it is; an empty tx
@@ -177,6 +177,19 @@
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [loaded] (filterv contract/error? (vals loaded)))
 
+(defn- git-refs
+  "The refs directory of the checkout's git repository (its common dir: a worktree's .git file
+  names its own git dir, whose commondir names the repository's), where a commit or merge on
+  any branch moves a ref; nil when the checkout is no git checkout."
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [co]
+  (let [dot (io/file co ".git")]
+    (cond (.isDirectory dot) (str (.getCanonicalPath dot) "/refs")
+          (.isFile dot) (let [gd (io/file (str/trim (str/replace-first (slurp dot) "gitdir:" "")))
+                              cd (io/file gd "commondir")]
+                          (str (.getCanonicalPath (if (.isFile cd) (io/file gd (str/trim (slurp cd))) gd)) "/refs"))
+          :else nil)))
+
 (defn watch-kinds
   "What a watcher's batch makes root load: a changed path under checkout co by its loader, a
   ref moved under refs (a commit or merge: the source), and every kind for a rescan or a
@@ -212,7 +225,7 @@
   {:malli/schema [:=> [:cat :seon.root/sys] :any]}
   [sys]
   (let [co (config/checkout)
-        refs (fx/git-refs co)
+        refs (git-refs co)
         roots (vec (remove nil? [co refs]))
         fact (fn [f] (root/transact-main! sys [{:seon.root/id :root :seon.root/watch f}]))
         fresh {:roots roots :boot (:boot sys) :batches 0 :paths 0 :rescans 0}
