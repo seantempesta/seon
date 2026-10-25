@@ -23,6 +23,23 @@
   (is (fs/moves-program? [[:db/add 7 :form/id "app.pc/f0-x"]]) "a form's facts move it")
   (is (fs/moves-program? [[:db/retract 7 :var/form 9]]) "and so does a definition's pointer"))
 
+(deftest a-program-commit-moves-the-graph-to-the-new-program
+  ;; the graph a fork (or a standby: the self-review's finding, a standby forked before the next
+  ;; fork kept the passed graph) hands on is the new program's, and the flag is cleared
+  (let [[st] (spawned-of 10)
+        db (:db st)
+        acct {:id "app.pc/f5-(dec x)" :src "(defn f5 [x] (dec x))" :ns 'app.pc :ns-form? false
+              :defs [{:var 'app.pc/f5 :kind :fn}] :declares #{} :methods [] :impls []
+              :refs #{'app.pc/f4} :requires #{} :banned #{} :inline-defs #{}}
+        {db2 :db-after txd :tx-data} (d/with db (program/record-tx db acct))
+        ops (for [dt txd] [(if (:added dt) :db/add :db/retract) (:e dt) (:a dt) (:v dt)])
+        st2 (cond-> (assoc st :db db2) (fs/moves-program? ops) (assoc :graph-moved true))
+        moved (fs/graph-at-fork st2)
+        fresh (program/reach-graph db2 nil)]
+    (is (:graph-moved st2) "a redefinition moves the program")
+    (is (= (select-keys fresh [:live :schemas]) (select-keys (:graph moved) [:live :schemas])) "the graph is the new program's")
+    (is (not (:graph-moved moved)) "and the flag is cleared")))
+
 (deftest a-fork-on-an-unmoved-program-costs-nothing-of-the-program
   (cost/proof
     {:of 'seon.fork-server/graph-at-fork :input 'seon.fork-server-cost-test/spawned-of

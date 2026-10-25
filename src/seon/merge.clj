@@ -28,8 +28,6 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program] [seon.edn :as sedn]))
 
-(def ^:private program-ns-attrs program/attr-namespaces)
-
 (def carried-platform-attrs
   "The platform attributes (seon.*) a branch carries: the task content an agent may improve
   (my.task/update!: its plan, its instructions, and the proofs a design registers), carried onto main at its run's end (seon.task/carry-tx). Every other seon.* attribute is a platform record (root's boot and
@@ -48,7 +46,7 @@
   (if (= :all data-attrs)
     (into #{} (for [[k v] (d/schema db)
                     :when (and (keyword? k) (map? v) (:db/valueType v)
-                               (not (program-ns-attrs (namespace k))) (not (platform-record? k)))]
+                               (not (program/attr-namespaces (namespace k))) (not (platform-record? k)))]
                 k))
     data-attrs))
 
@@ -247,7 +245,7 @@
   [base src ks data-attrs]
   (let [es (into #{} (for [k ks db [base src] :let [e (key-entity db k)] :when e] e))
         das (data-attr-set src data-attrs)
-        carry? (fn [d] (and (es (:e d)) (let [a (:a d)] (or (das a) (program-ns-attrs (namespace a))))))
+        carry? (fn [d] (and (es (:e d)) (let [a (:a d)] (or (das a) (program/attr-namespaces (namespace a))))))
         [gone added] (d/datoms-diff base src :eavt [])
         added (filterv carry? added)
         retracted (vec (for [d gone :when (carry? d)

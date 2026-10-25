@@ -68,7 +68,7 @@
   ([] {:ins {:cmd "main's commits and fork requests, FIFO; a child's :exit"} :outs {:ev "events for root"}
        :workload :io
        :ping-map-fn (fn [st] {:t (:max-tx (:db st)) :mismatch (:mismatch st)})})
-  ;; :graph, main's reach graph (seon.program/reach-graph) for :db as of the last fork, handed
+  ;; :graph, main's reach graph (seon.program/reach-graph), brought to :db at a fork or a standby after a program commit (graph-at-fork), handed
   ;; to every agent forked (seon.agent/base-graph); a standby inherits it
   ;; the reach graph is built here when the server starts (a standby inherits its server's), so no
   ;; spawn waits for it (the first fork built it: 0.8-3.8 s measured)
@@ -128,11 +128,13 @@
      ;; a standby (session F2): a fork of this server, idle on its own named pipes until root
      ;; promotes it, so that no fork after boot ever comes from root (multithreaded).
      ;; The previous standby is killed: one standby at a time.
-     :standby (fork-carrying! st #(main (:db st) (:cfg st) % false (:graph st))
+     ;; its graph brought to :db first, so a standby never holds one a program commit has passed
+     :standby (let [st (graph-at-fork st)]
+               (fork-carrying! st #(main (:db st) (:cfg st) % false (:graph st))
                               (fn [n] [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads n}]}])
                               (fn [pid] (when-let [old (:standby-pid st)] (lib/c-kill old 9))
                                 (let [[st evs] (adopt (assoc st :standby-pid pid) pid)]
-                                  [st {:ev (into [{:ev :standby :gen (:gen m) :pid pid :t (:max-tx (:db st))}] evs)}])))
+                                  [st {:ev (into [{:ev :standby :gen (:gen m) :pid pid :t (:max-tx (:db st))}] evs)}]))))
      [st nil])))
 
 (defn- dev-classpath!
