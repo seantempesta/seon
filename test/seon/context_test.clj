@@ -553,8 +553,8 @@
                 ms (:messages warm) screen (count (:screen (basis n [(str "s" n)])))]
             (is (= {:system (tok [(first ms)]) :story (tok [(second ms)]) :conversation (tok (subvec ms 2 (- (count ms) screen)))
                     :screen (tok (subvec ms (- (count ms) screen)))}
-                   (:split warm))
-                (str "turn " n ": where its tokens went, the messages it sent by part")))
+                   (context/sent-split (context/parts-of @conn (:sent warm)) #{(str "s" n)}))
+                (str "turn " n ": where its tokens went, sized from what it recorded it sent, is the messages it sent by part")))
           (is (= (:sent cold) (:sent warm)))
           (let [e (d/q '[:find ?e . :in $ ?id :where [?e :seon.turn/id ?id]] db (str "demo/g#1/" n))]
             (is (= (:messages warm) (into [] (mapcat second) (context/parts-of db (:seon.turn/sent (d/pull db [:seon.turn/sent] e)))))

@@ -278,12 +278,14 @@
 
 (deftest a-new-turn-costs-one-turns-messages
   ;; task seon.context/a-turn-records-what-it-sent (C): a pass of the debug page after one new turn
-  ;; reads back that turn's records alone (seon.context/parts-of); every held turn keeps its input
+  ;; reads back that turn's records alone (seon.context/parts-of) and sizes them (where its tokens
+  ;; went, drawn once, flat in the turns held: root, 2026-10-25); every held turn keeps its input
   (cost/proof
     {:of 'seon.render.proc/pass-view :input 'seon.render-cost-test/debug-of
      :n "model turns the debug page already holds"
      :work (str "the new turn's row, a component (seon.render.ui/component, as [:debug ...]), read back from its "
-                "records (its two evals, each by its :seon.render/ai render) and rendered once: the contracted calls, "
+                "records (its two evals, each by its :seon.render/ai render), its request sized from those parts "
+                "(seon.context/sent-split: system, story, conversation, screen), and rendered once: the contracted calls, "
                 "flat in the turns held. A real turn also reads back its help page and its task story as of their t "
                 "(seon.context/parts-of: 2.24M ticks, 9.3 MB on context-test's fixture, mostly the story's run "
                 "sections), once: a finished turn's row is cached and never rendered again. Per held turn: the list's "
@@ -293,8 +295,10 @@
      ;; rendered (before rows were components: 130 calls and 3.90 / 34.3 MB, ~34 KB a held turn)
      :per-n {:bytes 3600}
      ;; 403 once each row's id is seon.render.ui/comp-id and each view's components are indexed (hold-comps);
-     ;; 404 since a row's records are printed as sent, in order (seon.context/record-parts, 2026-10-25)
-     :fixed {:calls 404 :bytes 900000}
+     ;; 404 since a row's records are printed as sent, in order (seon.context/record-parts, 2026-10-25);
+     ;; 429 and 1.51 MB: the whole request read once, and sized (where its tokens went), in place of
+     ;; the read of the added parts alone (2026-10-25)
+     :fixed {:calls 429 :bytes 1210000}
      ;; the full run measures 4,000 too (:seon.config.proofs/cost-max-n)
      :sizes [100 1000 4000]}))
 

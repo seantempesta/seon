@@ -394,9 +394,6 @@
  :seon.turn/not-observed [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-observed]]]]
  ;; a model turn whose call failed: the typed error as data (the run's end holds it too, :seon.end/error)
  :seon.turn/error [:map {:seon.db/data true}]
- ;; where a turn's request's tokens went, by the printer's sizer (seon.context/request's :split): the system
- ;; prompt, the task story, the conversation and the screen; recorded with :sent, read by the debug page
- :seon.turn/sent-split [:map {:seon.db/data true} [:system nat-int?] [:story nat-int?] [:conversation nat-int?] [:screen nat-int?]]
  ;; what a model turn's request sent, the records it rendered in order (seon.context/request, parts-of):
  ;; the system prompt's section and the task, each as of a t; an eval or message by id, an eval with the fold it was
  ;; sent with (its value or output an earlier record showed: the handle there), an eval sent collapsed
@@ -428,7 +425,7 @@
                           [:seon.turn/cache-miss-tokens {:optional true} :seon.turn/cache-miss-tokens]
                           [:seon.turn/truncated {:optional true} :seon.turn/truncated]
                           [:seon.turn/origin {:optional true} :seon.turn/origin] [:seon.turn/basis {:optional true} :seon.turn/basis]
-                          [:seon.turn/calls {:optional true} :seon.turn/calls] [:seon.turn/sent {:optional true} :seon.turn/sent] [:seon.turn/sent-split {:optional true} :seon.turn/sent-split] [:seon.turn/error {:optional true} :seon.turn/error]
+                          [:seon.turn/calls {:optional true} :seon.turn/calls] [:seon.turn/sent {:optional true} :seon.turn/sent] [:seon.turn/error {:optional true} :seon.turn/error]
                           [:seon.turn/finish {:optional true} :seon.turn/finish] [:seon.turn/model {:optional true} :seon.turn/model]
                           [:seon.turn/reasoning {:optional true} :seon.turn/reasoning] [:seon.turn/split {:optional true} :seon.turn/split]]
  :seon.end/end-fact [:map {:seon.db/attributes true}
