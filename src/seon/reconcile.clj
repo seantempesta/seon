@@ -775,17 +775,19 @@
     (let [fact {:t (:t st) :root-causes (root-causes (:idx st))}
           [st q] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/quiescent fact}]}})
           [st c] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :collect}})]
-      [(assoc st :quiet true :quiescent fact) [q c]])))
+      ;; :report, the report's request until its answer: a wait is answered once main holds it
+      [(assoc st :quiet true :quiescent fact :report (:tag q)) [q c]])))
 
 (defn- answer-waits
   "Deliver each held wait on main (seon.root/await-db, through :quiet) whose :after the
   reconciler has seen, {:quiet t}, once quiet: nothing in flight, nothing live, nothing left to
-  start, so nothing root runs will commit again until something outside it does. A wait asked
-  before the reconciler saw main's head waits for that commit's pass. Answers st (an answer can
+  start, so nothing root runs will commit again until something outside it does; and the spell's
+  report committed (its write answered), so a wait reads it. A wait asked before the reconciler
+  saw main's head waits for that commit's pass. Answers st (an answer can
   come before the first commit, so st may hold no :db yet)."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
-  (if (and (:quiet st) (empty? (:flights st)) (empty? (:live (:idx st))) (seq (:waits st)))
+  (if (and (:quiet st) (nil? (:report st)) (empty? (:flights st)) (empty? (:live (:idx st))) (seq (:waits st)))
     (let [{ready true later false} (group-by #(<= (:after %) (:t st)) (:waits st))]
       (doseq [w ready] (deliver (:p w) {:quiet (:t st)}))
       (assoc st :waits (vec later)))
@@ -805,7 +807,8 @@
                             (and (= :spawn (:op %)) (contains? (:refused st) (:task %)))))
                      (actions (:idx st)))
         acts (concat (remove #(= :spawn (:op %)) acts) (drop early (filter #(= :spawn (:op %)) acts)))]
-    (apply quiet (reduce (fn [[st outs] act] (let [[st o] (start st act)] [st (into outs o)])) [st []] acts))))
+    ;; an action started is work: the quiet spell ends (and a wait waits for it)
+    (apply quiet (reduce (fn [[st outs] act] (let [[st o] (start (assoc st :quiet false) act)] [st (into outs o)])) [st []] acts))))
 
 (defn reconciler-proc
   "The reconciler. In :main (main's commits {:t :ops :db}, a sliding buffer of one) and :answers (the
@@ -814,7 +817,7 @@
   Starts deepest-first (finish chains under way)."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:boot "root's boot id"
-                :judge "outside agents' runs to judge, and waits on main {:op :quiet :after t :p promise}, each answered at the first quiet at or after t (external; seon.root/await-db)"}
+                :judge "outside agents' runs to judge {:op :judge :run :task :env :agent}, and waits on main {:op :quiet :after t :p promise}, each answered at the first quiet at or after t (external; seon.root/await-db)"}
        :ins {:main "main's commits" :answers "the api's answers"} :outs {:to-api "requests"}
        :workload :io
        :ping-map-fn (fn [st] {:seen (:seen st 0) :lists (:lists st 0) :t (:t st) :flights (count (:flights st)) :pending (count (:pending st))
@@ -848,14 +851,15 @@
              [(answer-waits st) {:to-api (into [{:op :stat :k :main-seen-us :v (/ (- (profile/now-ns) (:ns m)) 1000.0)}] outs)}])
      ;; a wait on main (:op :quiet): answered now if the reconciler is quiet past its :after,
      ;; else held. Otherwise an outside agent handed its run back: judged as a turn loop's end is
-     :judge (if (= :quiet (:op m))
-              [(answer-waits (update st :waits (fnil conj []) (select-keys m [:after :p]))) {}]
-              (let [{:keys [run task env agent]} m
+     :judge (case (:op m)
+              :quiet [(answer-waits (update st :waits (fnil conj []) (select-keys m [:after :p]))) {}]
+              :judge (let [{:keys [run task env agent]} m
                   ;; a flight: the quiet spell ends, and a wait behind this judge waits for it
                   st (-> st (assoc-in [:flights run] {:act {:op :spawn :run run :task task :env env} :agent agent}) (assoc :quiet false))
                   [st o] (request st run :tested {:op :judge :id agent})]
               [st {:to-api [o]}]))
-     :answers (let [[st [aid step]] (step/answered st (:tag m))
+     :answers (let [st (cond-> st (= (:tag m) (:report st)) (dissoc :report))
+                    [st [aid step]] (step/answered st (:tag m))
                     [st outs] (if aid (advance st aid step (:r m)) [st []])
                     ;; a flight that ended may free its run for the next action
                     [st more] (if (and aid (not (get-in st [:flights aid])) (:db st)) (pass st) [st []])]

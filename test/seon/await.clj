@@ -11,11 +11,13 @@
   that threw dropped its outputs, so the flight it carried never ends and quiescence never
   comes. No clock. A quiet spell that began before t and goes on writes no later report, so the
   reconciler's own quiet at or after t answers too (seon.root/await-db, named): that spell's
-  report, at the t the reconciler was quiet at. A root that stopped answers its error."
+  report, committed before the answer, which stands for every t of the spell, at the t the
+  reconciler was quiet at. A root that stopped answers its error."
   {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :int]
                   [:or :seon.root/quiescent [:map [:ended [:= :defect]] [:problem [:maybe :map]]] :seon.root/no-agent]]}
   [sys t]
-  (let [db (seon.root/await-db sys (str "the reconciler's quiescence at or after t " t)
+  ;; a sys with no reconciler (a test branch's conn alone) has no quiet to ask: a commit ends it
+  (let [db (seon.root/await-db sys (when (:judge sys) (str "the reconciler's quiescence at or after t " t))
                                #(or (when-let [q (r/quiescent %)] (>= (:t q) t)) (seon.root/defect % t)))]
     (cond (= :seon.root/quiet-before-true (:seon.error/type db)) (assoc (r/quiescent @(:conn sys)) :t (:t db))
           (= :seon.root/no-agent (:seon.error/type db)) db

@@ -243,9 +243,16 @@
     (let [v #'reconcile/reconciler-proc
           ;; a commit touching nothing the reconciler watches (as root's own report is)
           other-commit! #(d/transact conn {:tx-data []})
-          [st _] (step v (v {:boot "b" :provider {:kind :scripted :script 'seon.fixtures/reply}}) :main {:ops [] :db @conn :ns (profile/now-ns)})
-          t (:t st)]
-      (is (:quiet st) "a commit with no tasks leaves the reconciler quiet")
+          [st0 _] (step v (v {:boot "b" :provider {:kind :scripted :script 'seon.fixtures/reply}}) :main {:ops [] :db @conn :ns (profile/now-ns)})
+          t (:t st0)
+          ;; the writer's answer to the spell's report
+          [st _] (step v st0 :answers {:tag (:report st0) :r {:ok true}})]
+      (is (:quiet st0) "a commit with no tasks leaves the reconciler quiet")
+      (testing "a new spell's wait is held until its report is committed, so the wait reads it"
+        (let [p (promise) [st1 _] (step v st0 :judge {:op :quiet :after t :p p})]
+          (is (= ::unanswered (deref p 0 ::unanswered)))
+          (step v st1 :answers {:tag (:report st0) :r {:ok true}})
+          (is (= {:quiet t} (deref p 0 ::unanswered)))))
       (testing "asked while quiet past its :after: answered at once, with the t it was quiet at"
         (let [p (promise) [st2 outs] (step v st :judge {:op :quiet :after t :p p})]
           (is (= {:quiet t} (deref p 0 ::unanswered)))
@@ -254,13 +261,15 @@
       (testing "asked past what it has seen: held until that commit's pass, then answered"
         (let [p (promise) [st2 _] (step v st :judge {:op :quiet :after (inc t) :p p})
               _ (other-commit!)
-              [st3 _] (step v st2 :main {:ops [] :db @conn :ns (profile/now-ns)})]
+              [st3 _] (step v st2 :main {:ops [] :db @conn :ns (profile/now-ns)})
+              ;; the spell goes on, or (main relisted) a new one began: answered once its report is
+              [st3 _] (if (:report st3) (step v st3 :answers {:tag (:report st3) :r {:ok true}}) [st3 nil])]
           (is (= 1 (count (:waits st2))) "held while the reconciler has not seen t+1")
-          (is (= {:quiet (:t st3)} (deref p 0 ::unanswered)) "a commit with nothing to do does not end the spell")
+          (is (= {:quiet (:t st3)} (deref p 0 ::unanswered)))
           (is (empty? (:waits st3)))))
       (testing "a judge handed it first ends the spell: the wait behind it is held"
         (let [p (promise)
-              [st2 _] (step v st :judge {:run "r-1" :task "a/b" :env {} :agent :agent-1})
+              [st2 _] (step v st :judge {:op :judge :run "r-1" :task "a/b" :env {} :agent :agent-1})
               [st3 _] (step v st2 :judge {:op :quiet :after (:t st2) :p p})]
           (is (= ::unanswered (deref p 0 ::unanswered)))
           (testing "and a stop answers what is held"

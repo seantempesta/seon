@@ -1010,7 +1010,7 @@
   is: proofs in a fork, the branch read, the agent retired. run {:run :task :env
   :agent}. nil."
   {:malli/schema [:=> [:cat :seon.root/sys :map] :nil]}
-  [sys run] (a/>!! (:judge sys) run) nil)
+  [sys run] (a/>!! (:judge sys) (assoc run :op :judge)) nil)
 
 (defn await-db
   "Main's first db value (now or after a later commit) for which (pred db) holds: a watch on
@@ -1023,11 +1023,11 @@
   :seon.root/quiet-before-true (its :t, and what, the wait's description). That is final for a
   fact only root's own work makes (a judge that has not moved by quiet never will: seon_done);
   a caller waiting on outside input (a user's reply, another writer) asks again. A root that
-  stopped answers :seon.root/no-agent (root stopped). Unnamed, a fact another proc makes (the
+  stopped answers :seon.root/no-agent (root stopped). So it answers a db or one of those errors. Unnamed, a fact another proc makes (the
   vector proc's embeddings, a problems report): only a commit ends it, since the reconciler's
   quiet says nothing of that proc's work (task seon.root/a-wait-on-main-ends-when-nothing-can-make-it-true)."
   {:malli/schema [:function [:=> [:cat [:map [:conn :seon.host/conn]] ifn?] :seon.host/db]
-                  [:=> [:cat [:map [:conn :seon.host/conn] [:judge :seon.host/chan]] [:maybe :string] ifn?]
+                  [:=> [:cat [:map [:conn :seon.host/conn] [:judge {:optional true} :seon.host/chan]] [:maybe :string] ifn?]
                    [:or :seon.host/db :seon.root/quiet-before-true :seon.root/no-agent]]]}
   ([sys pred] (await-db sys nil pred))
   ([sys what pred]
@@ -1200,6 +1200,8 @@
         (a/>!! (:back sys) {:op :kill-all})))
     (let [drained (deref p 15000 :timeout)
           graph (flow/stop (:graph sys))]
+      ;; a wait put on :judge that the stopped reconciler never took is answered here
+      (loop [] (when-let [m (a/poll! (:judge sys))] (some-> (:p m) (deliver {:stopped true})) (recur)))
       (a/close! (:events-in sys))
       ;; the store is released and kept, whoever gave its path
       (d/release (:conn sys))
