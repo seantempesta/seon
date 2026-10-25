@@ -331,12 +331,11 @@
     (if (and x (gone (or (:status x) (:type x))) (finished st)) (assoc x :ended-as st) x)))
 
 (defn- top-bar
-  "The bar above every page: Seon's mark, home, then what else the page links (links)."
-  {:malli/schema [:=> [:cat [:* :any]] :any]}
-  [& links]
-  (into [:nav {:class "sticky top-0 z-10 -mx-3 flex items-baseline gap-3 border-b border-base-800 bg-base-950 px-3 py-2 sm:-mx-4 sm:px-4" :seon/off-screen true}
-         [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "text-text-500"} "on jolt"]]
-        links))
+  "The bar above every page: Seon's mark, home, then the page's own link (nil: none)."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [link]
+  [:nav {:class "sticky top-0 z-10 -mx-3 flex items-baseline gap-3 border-b border-base-800 bg-base-950 px-3 py-2 sm:-mx-4 sm:px-4" :seon/off-screen true}
+   [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "text-text-500"} "on jolt"] link])
 
 (defn shell
   "The document around a view's body: head, the stylesheet, Datastar, and the feed of that view's
@@ -898,7 +897,7 @@
     {:seon.render/html
      ;; the view every toggle on the page posts for (`toggle`), a tile's as a part's
      [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4" :data-view view}
-      (top-bar)
+      (top-bar nil)
       [:div {:class "grid gap-4 lg:grid-cols-[12rem_minmax(0,1fr)_20rem]"}
        [:aside {:class "min-w-0 lg:sticky lg:top-14 lg:self-start"}
         [:h2 {:class "kicker mb-1 hidden lg:block"} "agents"]
@@ -1054,7 +1053,7 @@
 ]
     {:seon.render/html
      [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4"}
-      (top-bar)
+      (top-bar nil)
       [:div {:class "grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]"}
        [:main {:class "flex min-w-0 flex-col gap-3"}
         (slot "p-head") (when input (slot "p-input"))
