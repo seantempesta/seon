@@ -134,7 +134,7 @@
   (let [db0 (ts/test-db)
         db (d/db-with db0 (docs/load-tx db0 "docs" (docs/pages (cfg/checkout) "docs")))
         toc (docs/page db context/help-page)]
-    (is (= ["docs/agent.md#the-agent" 1] ((juxt :seon.ref/address :level) (first toc))) "the page's sections, the first its title")
+    (is (= ["docs/agent.md#the-agent" 1] ((juxt :seon.ref/address :seon.ref/level) (first toc))) "the page's sections, the first its title")
     (is (every? :seon.ref/lead toc) "each section leads with a sentence that stands alone")
     (is (some #(= "docs/agent.md#done" (:seon.ref/address %)) toc))
     (is (str/includes? (:seon.ref/text (docs/view db "docs/agent.md#done" :code)) "The judge counts exactly") "one section, whole")

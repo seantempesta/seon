@@ -101,8 +101,8 @@
         summary (docs/page db "demo/flow.md" :summary)
         code (docs/page db "demo/flow.md" :code)]
     (is (= ["demo/flow.md#flow" "demo/flow.md#idioms" "demo/flow.md#quiet"] (mapv :seon.ref/address summary)))
-    (is (= [1 2 2] (mapv :level summary)))
-    (is (= (mapv #(docs/view db (:seon.ref/address %) :summary) summary) (mapv #(dissoc % :level) summary))
+    (is (= [1 2 2] (mapv :seon.ref/level summary)))
+    (is (= (mapv #(docs/view db (:seon.ref/address %) :summary) summary) (mapv #(dissoc % :seon.ref/level) summary))
         "each section is its view at that depth")
     (is (= "Park on a channel, as ```app.m0/f0``` does." (:seon.ref/text (second code))))
     (is (not-any? :seon.ref/text summary))

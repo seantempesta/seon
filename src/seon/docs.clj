@@ -232,7 +232,7 @@
 
 (defn page
   "The page at path as db holds it, its sections in the order the wiki was written (as view
-  shows the sections below): each its view at depth (:code by default) and its :level (1 for the
+  shows the sections below): each its view at depth (:code by default) and its :seon.ref/level (1 for the
   page's own); nil when db holds no section of it."
   {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:maybe [:vector :seon.ref/view]]]
                   [:=> [:cat :seon.host/db :string :seon.ref/depth] [:maybe [:vector :seon.ref/view]]]
@@ -242,7 +242,7 @@
   ([db path depth edges?]
    (when-let [top (page-top db path)]
      (letfn [(walk [e level]
-               (into [(assoc (view db (:seon.section/address (d/pull db [:seon.section/address] e)) depth edges?) :level level)]
+               (into [(assoc (view db (:seon.section/address (d/pull db [:seon.section/address] e)) depth edges?) :seon.ref/level level)]
                      (mapcat #(walk % (inc level))) (children db e)))]
        (walk top 1)))))
 
@@ -252,7 +252,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]]}
   [db path]
   (some->> (page db path :code false)
-           (map (fn [{:seon.ref/keys [heading text] :keys [level]}] (cond-> (str (apply str (repeat level "#")) " " heading) text (str "\n\n" text))))
+           (map (fn [{:seon.ref/keys [heading text level]}] (cond-> (str (apply str (repeat level "#")) " " heading) text (str "\n\n" text))))
            (str/join "\n\n")))
 
 (defn page-paths

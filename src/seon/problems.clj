@@ -109,6 +109,14 @@
 
 ;; ---- derived: what the program's facts make true now ------------------------------------
 
+(defn- derived-row
+  "The open row of a derived problem: its signature s, the namespace that owns the fix, its message, its
+  evidence (:kind names the class) and the fields of its own, with the answers recorded for the signature."
+  {:malli/schema [:=> [:cat :map :string [:maybe :symbol] :string :map :map] :map]}
+  [ans s owner message evidence fields]
+  (assoc fields :signature s :open? true :message message :producer nil :owner-ns owner :proofs [] :evidence evidence
+         :answered-by (get-in ans [:signature s] []) :at-ms nil))
+
 (defn dead-citations
   "Each name a wiki section cites (:seon.section/names) that names nothing on db
   (seon.ref/names-on-db?, the one rule for a name), and each link it makes that reached no
@@ -177,10 +185,8 @@
              ;; `is` (which expands to a catch), are not failure points of the system
              :when (and (not (except (str nsym))) (not (named v)) (some-> file (str/starts-with? "src/")))
              :let [s (str "unnamed-site " (name law) " " v)]]
-         {:signature s :law law :site v :page page :open? true
-          :message (str v " has a " (name law) " site that " page " does not name")
-          :producer nil :owner-ns nsym :proofs []
-          :evidence {:kind :unnamed-site :law law :site v :page page} :answered-by (get-in ans [:signature s] []) :at-ms nil}))))
+         (derived-row ans s nsym (str v " has a " (name law) " site that " page " does not name")
+                      {:kind :unnamed-site :law law :site v :page page} {:law law :site v :page page})))))
 
 (def pins
   "Where the wiki states each customized library's pin: the page, and the line that states one
@@ -201,10 +207,8 @@
                  [_ path sha] (re-seq line (or (:seon.section/text (d/pull db [:seon.section/text] e)) ""))
                  :let [g (get recorded path)] :when (not (some-> g (str/starts-with? sha)))
                  :let [s (str "stale-pin " a " " path)]]
-             {:signature s :section a :path path :stated sha :recorded g :open? true
-              :message (str a " states " path " pinned at " sha ", its gitlink is " (or g "none"))
-              :producer nil :owner-ns 'seon.docs :proofs []
-              :evidence {:kind :stale-pin :section a :path path :stated sha :recorded g} :answered-by (get-in ans [:signature s] []) :at-ms nil})))))
+             (derived-row ans s 'seon.docs (str a " states " path " pinned at " sha ", its gitlink is " (or g "none"))
+                          {:kind :stale-pin :section a :path path :stated sha :recorded g} {:section a :path path :stated sha :recorded g}))))))
 
 ;; ---- the wiki kept true: code that moved under its text, pages nothing links, issues with no page ----
 
@@ -242,22 +246,17 @@
                   [n then] v
                   :let [cur (now n)] :when (and cur (not= cur then))
                   :let [a (address e) s (str "stale-section " a " " n)]]
-              {:signature s :section a :name n :then then :now cur :open? true
-               :message (if (= "absent" then)
-                          (str a " cites " n ", which did not exist when the section was last written: it is code now, read it")
-                          (str a " describes " n " as it was (form " then "), and it has changed (form " cur ")"))
-               :producer nil :owner-ns (symbol (namespace n)) :proofs []
-               :evidence {:kind :stale-section :section a :name n :then then :now cur}
-               :answered-by (get-in ans [:signature s] []) :at-ms nil})
+              (derived-row ans s (symbol (namespace n))
+                           (if (= "absent" then)
+                             (str a " cites " n ", which did not exist when the section was last written: it is code now, read it")
+                             (str a " describes " n " as it was (form " then "), and it has changed (form " cur ")"))
+                           {:kind :stale-section :section a :name n :then then :now cur} {:section a :name n :then then :now cur}))
             ;; a section whose baseline git could not give is read as of today: said, as attention
             (for [{:keys [e v]} (d/datoms db :aevt :seon.section/baseline-unread)
                   :when (or (nil? only) ((:sections only) e))
                   :let [a (address e) s (str "stale-section " a " baseline")]]
-              {:signature s :section a :name nil :open? true
-               :message (str a " was recorded as of today: its baseline could not be taken from git (" v ")")
-               :producer nil :owner-ns 'seon.docs :proofs []
-               :evidence {:kind :stale-section :section a :unread v}
-               :answered-by (get-in ans [:signature s] []) :at-ms nil}))))))
+              (derived-row ans s 'seon.docs (str a " was recorded as of today: its baseline could not be taken from git (" v ")")
+                           {:kind :stale-section :section a :unread v} {:section a :name nil})))))))
 
 (defn orphan-pages
   "Each page of the wiki that no other page links to, as an :orphan-page row: a page is its sections'
@@ -275,10 +274,8 @@
                          (d/datoms db :aevt :seon.section/references))]
         (vec (for [p (sort (set (vals page-of))) :when (and (not= p map-page) (not (linked p)))
                    :let [s (str "orphan-page " p)]]
-               {:signature s :page p :open? true
-                :message (str p " is linked from no other page, not even the map (docs/README.md)")
-                :producer nil :owner-ns 'seon.docs :proofs []
-                :evidence {:kind :orphan-page :page p} :answered-by (get-in ans [:signature s] []) :at-ms nil}))))))
+               (derived-row ans s 'seon.docs (str p " is linked from no other page, not even the map (docs/README.md)")
+                            {:kind :orphan-page :page p} {:page p})))))))
 
 (defn leadless-sections
   "Each section of the wiki whose first block is not a paragraph, so it has no lead, as a :leadless-section
@@ -290,10 +287,8 @@
   (let [led (into #{} (map :e) (d/datoms db :aevt :seon.section/lead))]
     (vec (for [{:keys [e v]} (sort-by :v (d/datoms db :aevt :seon.section/address)) :when (not (led e))
                :let [s (str "leadless-section " v)]]
-           {:signature s :section v :open? true
-            :message (str v " has no lead: its first block is not a paragraph that says what the section is about")
-            :producer nil :owner-ns 'seon.docs :proofs []
-            :evidence {:kind :leadless-section :section v} :answered-by (get-in ans [:signature s] []) :at-ms nil}))))
+           (derived-row ans s 'seon.docs (str v " has no lead: its first block is not a paragraph that says what the section is about")
+                        {:kind :leadless-section :section v} {:section v})))))
 
 (defn problem-unlinked
   "Each class of classes ({class {:rows ...}}) with an open row whose wiki section (:seon.problems/docs)
@@ -308,12 +303,11 @@
       (vec (for [[c {:keys [rows]}] (sort-by (comp str key) classes) :when (some #(not (false? (:open? %))) rows)
                  :let [page (docs c)] :when (or (nil? page) (nil? (pdb/eid db :seon.section/address page)))
                  :let [s (str "problem-unlinked " (name c))]]
-             {:signature s :class c :page page :open? true
-              :message (if page
-                         (str (name c) " has open problems, and its section " page " is no section of the wiki")
-                         (str (name c) " has open problems and no section of the wiki declared for it (:seon.problems/docs)"))
-              :producer nil :owner-ns 'seon.problems :proofs []
-              :evidence {:kind :problem-unlinked :class c :page page} :answered-by (get-in ans [:signature s] []) :at-ms nil})))))
+             (derived-row ans s 'seon.problems
+                          (if page
+                            (str (name c) " has open problems, and its section " page " is no section of the wiki")
+                            (str (name c) " has open problems and no section of the wiki declared for it (:seon.problems/docs)"))
+                          {:kind :problem-unlinked :class c :page page} {:class c :page page}))))))
 
 ;; ---- caused: what a branch's own work made true -----------------------------------------
 
@@ -443,13 +437,12 @@
                                (some placeholder? proofs) (conj :placeholder-proof))]
                reason reasons
                :let [s (str "uncited-task " v " " (name reason))]]
-           {:signature s :task v :reason reason :open? true
-            :message (case reason
-                       :no-references (str v " is ready and its plan cites no var, attribute or section: the context pulls nothing for it")
-                       :no-proofs (str v " is ready and names no proof")
-                       :placeholder-proof (str v " is ready and a proof of it is still the placeholder assertion (seon.task/placeholder-assertion)"))
-            :producer nil :owner-ns 'seon.task :proofs []
-            :evidence {:kind :uncited-task :task v :reason reason} :answered-by (get-in ans [:signature s] []) :at-ms nil}))))
+           (derived-row ans s 'seon.task
+                        (case reason
+                          :no-references (str v " is ready and its plan cites no var, attribute or section: the context pulls nothing for it")
+                          :no-proofs (str v " is ready and names no proof")
+                          :placeholder-proof (str v " is ready and a proof of it is still the placeholder assertion (seon.task/placeholder-assertion)"))
+                        {:kind :uncited-task :task v :reason reason} {:task v :reason reason})))))
 
 ;; ---- tasks held for root -----------------------------------------------------------------
 

@@ -631,7 +631,7 @@
                :n "live forms carrying a catch, each defining one var, none named by the page"
                :work "once: the page's cited names as a set, the method and impl owners; per site: its form entity, its defines and one row"
                :growth :linear
-               :per-n {:ns 76000 :bytes 74500 :calls 2}
+               :per-n {:ns 76000 :bytes 74500 :calls 3}
                :fixed {:ns 50000 :bytes 50000 :calls 1}
                :sizes [10 100 1000]}))
 
@@ -649,7 +649,7 @@
                :n "unnamed catch sites (the derived classes dominate; the recorded part is the seed's)"
                :work "report once, then the three derived reads; the sites dominate"
                :growth :linear
-               :per-n {:ns 80000 :bytes 80000 :calls 2}
+               :per-n {:ns 80000 :bytes 80000 :calls 3}
                ;; fixed bytes re-derived 2026-10-23 (jolt/similar-finds-helpers-by-embedding): 3.01 MB at 10,
                ;; 10.0 MB at 100, 80.2 MB at 1,000 sites; a fixed part near the smallest size's whole cost read
                ;; as steeper growth (task seon.cost/a-speedup-never-reads-as-steeper)
@@ -790,8 +790,8 @@
                :n "sections, none with a lead"
                :work "the sections' addresses and the lead datoms once, sorted by address, then a row per section"
                :growth :linear
-               :per-n {:ns 30000 :bytes 30000 :calls 0}
-               :fixed {:ns 500000 :bytes 500000 :calls 3}
+               :per-n {:bytes 8500 :calls 1}
+               :fixed {:bytes 9000 :calls 1}
                :sizes [10 100 1000]}))
 
 (deftest an-issue-with-no-page-is-a-problem
@@ -827,7 +827,7 @@
                :n "sections each citing a var whose form then changed"
                :work "the vars' and forms' datoms in one scan each, then per recorded name a map lookup and a row"
                :growth :linear
-               :per-n {:ns 90000 :bytes 120000 :calls 0}
+               :per-n {:ns 90000 :bytes 120000 :calls 1}
                :fixed {:ns 2500000 :bytes 4000000 :calls 3}
                :sizes [10 100 300]}))
 
@@ -841,7 +841,7 @@
                :n "pages, none linked"
                :work "the sections' addresses and the reference datoms once, then a row per orphan"
                :growth :linear
-               :per-n {:ns 30000 :bytes 30000 :calls 0}
+               :per-n {:ns 30000 :bytes 30000 :calls 1}
                :fixed {:ns 500000 :bytes 500000 :calls 3}
                :sizes [10 100 1000]}))
 
@@ -858,7 +858,7 @@
                :work "one lookup per class with an open row, found at the first row"
                :growth :constant
                :per-n {:ns 0 :bytes 0 :calls 0}
-               :fixed {:ns 3000000 :bytes 4000000 :calls 30}
+               :fixed {:ns 3000000 :bytes 4000000 :calls 45}
                :sizes [10 100 1000]}))
 
 (deftest attention-survives-a-store-write
