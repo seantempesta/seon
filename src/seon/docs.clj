@@ -345,12 +345,13 @@
                                                 per))]
                               (if bad
                                 [address {:read today :unread bad}]
-                                ;; a var whose form changed since: \"changed\" when what the section
-                                ;; describes of it (its docstring or contract) changed, else as today
-                                [address {:read (into {} (for [[n res] per :let [then (get (:ids res) n "absent")]]
-                                                           [n (cond (or (= "absent" then) (= then (today n))) then
+                                ;; a var the old file has no form for is :absent; one whose form changed
+                                ;; since is :changed when what the section describes of it (its docstring
+                                ;; or contract) changed, else today's form id
+                                [address {:read (into {} (for [[n res] per :let [then (get (:ids res) n :absent)]]
+                                                           [n (cond (or (= :absent then) (= then (today n))) then
                                                                     (= (get (:meanings res) n) (meaning-now n)) (today n)
-                                                                    :else "changed")]))}]))))))
+                                                                    :else :changed)]))}]))))))
           plan)))
 
 ;; ---- a citation as its depth shows it (docs/references.md#the-delimiter-picks-the-depth): ----
@@ -371,6 +372,27 @@
   (let [a (if (keyword? x) :form/keywords :form/refs)]
     (vec (sort (disj (set (d/q '[:find [?v ...] :in $ ?a ?s :where [?f ?a ?s] [?f :form/defines ?e] [?e :var/name ?v]] db a x))
                      x)))))
+
+(defn grep
+  "The program vars whose recorded definition on db (:form/src) holds the string s, best first: a
+  var whose name holds it, then one whose docstring does, then the rest, each sorted by name, as
+  {:var :line}, :line the source's line where s first begins; a var once, at its best rank (two live
+  forms may define one: a method, an extension); the one search my.agent/grep asks. Cost: one scan of
+  :form/src, then per matching form its definitions and a line cut at the match."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:vector [:map [:var :qualified-symbol] [:line :string]]]]}
+  [db s]
+  (let [hits (for [{:keys [e v]} (d/datoms db :aevt :form/src)
+                   :let [i (str/index-of v s)] :when i
+                   dv (d/datoms db :eavt e :form/defines)
+                   :let [x (d/entity db (:v dv)) n (:var/name x)] :when n]
+               {:var n
+                ;; the whole line the match begins in (s may itself hold a line break)
+                :line (str/trim (subs v (inc (or (str/last-index-of v "\n" (max 0 (dec i))) -1))
+                                      (or (str/index-of v "\n" i) (count v))))
+                :rank (cond (str/index-of (name n) s) 0 (some-> (:var/doc x) (str/index-of s)) 1 :else 2)})]
+    (->> hits (sort-by (juxt :rank (comp str :var)))
+         (reduce (fn [[seen out :as acc] h] (if (seen (:var h)) acc [(conj seen (:var h)) (conj out (dissoc h :rank))])) [#{} []])
+         second)))
 
 (defn resolve-ref
   "Var sym as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth):

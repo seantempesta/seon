@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.screen :as screen] [clojure.edn]))
+            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.screen :as screen] [seon.program :as program] [clojure.edn]))
 
 (def help-page
   "The help page, docs/agent.md: what my.agent/help answers, each section on demand. Main holds
@@ -151,7 +151,11 @@
   (let [;; through the one resolver: a task's own setting (its flattened :seon.task/config), else its model's, else the config's
         t (when te (d/pull db [:seon.config.render/similar :seon.task/model] te))
         k (cfg/value :seon.config.render/similar {:task t :model (:seon.task/model t)})
-        function? #(= :fn (:var/kind (d/entity db [:var/name %])))
+        ;; a program function, as related's: no test helper or fixture of test/
+        program (program/program-nss db)
+        function? #(let [n (symbol (namespace %))]
+                     (and (= :fn (:var/kind (d/entity db [:var/name %])))
+                          (or (contains? program n) (nil? (:ns/file (d/entity db [:ns/name n]))))))
         ;; every vector, every dim, every rank: the exact ranking (near's shortlist and fine level
         ;; over all of them; it sorts them all anyway), walked until k functions are found, as the
         ;; nearest forms are often tests
@@ -204,9 +208,12 @@
                        cites)
             schema? #(some? (pdb/eid db :schema/key %))
             ;; a program function: no test, no macro (every contracted form names seon.contract/defn),
-            ;; nothing of a test namespace (its fixtures); the graph and the meaning halves alike
-            function? #(and (not (#{:test :macro} (:var/kind (d/entity db [:var/name %]))))
-                            (not (str/ends-with? (namespace %) "-test")))
+            ;; nothing outside the program's dirs (test/'s fixtures and helpers); both halves alike
+            ;; a namespace with no file yet (one the agent made at its REPL) is its new work: shown
+            program (program/program-nss db)
+            function? #(let [n (symbol (namespace %))]
+                         (and (not (#{:test :macro} (:var/kind (d/entity db [:var/name %]))))
+                              (or (contains? program n) (nil? (:ns/file (d/entity db [:ns/name n]))))))
             ;; a neighbour weighs 1/(1 + the forms naming it, counted to a cap): what every form names
             ;; (seon.contract/checked, on?, seon.db/eid) weighs nothing (docs/vector.md#fused-with-the-call-graph)
             cap (cfg/value :seon.config.render/related-rarity)
@@ -645,6 +652,12 @@
 
 (declare render story)
 
+(defn- session-first-run
+  "Agent entity a's first run (the one whose :seon.run/agent was written first), or nil."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :seon.run/id]]}
+  [db a]
+  (some->> (d/q '[:find ?tx ?id :in $ ?a :where [?r :seon.run/agent ?a ?tx] [?r :seon.run/id ?id]] db a) (sort-by first) first second))
+
 (defn parts-of
   "Refs (as :seon.turn/sent names records) each beside its messages, each record by its own
   render: the system prompt's section as of its t (system-text), the task's run sections as of its t
@@ -692,7 +705,9 @@
 
 (defn- story
   "The task story: task entity e's run sections as of t on db (run-state, printed by
-  run-message), what every turn of a run sends after the system prompt, as its first turn read them."
+  run-message), what every turn of a session sends after the system prompt, as its first turn
+  read them; a later stage's arrives as root's message at its boundary
+  (seon.reconcile/stage-boundary)."
   {:malli/schema [:=> [:cat :seon.host/db :int :int] :string]}
   [db e t]
   (let [h (d/as-of db t)]
@@ -727,12 +742,16 @@
         t (task/task db task)
         block (if screen (run-state db t) (current-state db t (turn-input db basis (peek prev))))
         a (when agent (d/pull db [:db/id :seon.agent/key] [:seon.agent/key agent]))
-        ;; the task story is its run's first turn's: the task as of that turn's t
-        story-t (if (seq prev) (:max-tx (d/commit-as-db db (:commit (:seon.turn/basis (first prev))))) (:max-tx db))
-        task-e (pdb/eid db :seon.task/id task)
+        ;; the task story is its session's first turn's: the task of the agent's first run as of that
+        ;; turn's t, so a later stage's request keeps the earlier stages' as its exact prefix (its
+        ;; own story came as a message at the boundary: seon.reconcile/stage-boundary)
+        first-run (when a (session-first-run db (:db/id a)))
+        prev0 (if (and first-run (not= first-run run)) (model-turns db first-run Integer/MAX_VALUE) prev)
+        story-t (if (seq prev0) (:max-tx (d/commit-as-db db (:commit (:seon.turn/basis (first prev0))))) (:max-tx db))
+        task-e (if (identical? prev0 prev) (pdb/eid db :seon.task/id task) (:db/id (:seon.run/task (d/entity db [:seon.run/id first-run]))))
         run-ref [:task task-e story-t]
-        ;; the story is the same each turn of a run: printed once, by its ref
-        story-text (when (seq prev) (or (get-in printed [:story run-ref]) (story db task-e story-t)))
+        ;; the story is the same each turn of a session: printed once, by its ref
+        story-text (when (seq prev0) (or (get-in printed [:story run-ref]) (story db task-e story-t)))
         r (request a {:db db :basis basis :block block :help (system-text db) :run story-text :printed printed
                       :help-ref [:section (docs/page-top db system-page) (docs/page-t db system-page)]
                       :run-ref run-ref})]
