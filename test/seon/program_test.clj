@@ -554,7 +554,11 @@
         moved (set (for [[t d] a :when (not= d (b t))] t))]
     (is (not (moved 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a reader test reaches only :env reads: the tree is no input")
     (is (moved 'seon.task-files-test/the-shipped-task-files-load) "a test reading the task files (my.root/task-files, not in :env): the tree is its input")
-    (is (moved 'seon.program-test/a-result-recorded-in-one-checkout-is-reused-in-another) "a test reading files itself (test-fx/inputs): the tree is its input")
+    ;; a-result-recorded-in-one-checkout-is-reused-in-another reads only checkouts it makes (git, not
+    ;; the tree's files): it took the tree only while seon.program/tree-readers' own quoted list
+    ;; counted as reading, which put every test reaching the reach walk under the tree
+    (is (not (moved 'seon.program-test/a-result-recorded-in-one-checkout-is-reused-in-another)) "a test reading only the checkouts it makes: the tree is no input")
+    (is (moved 'seon.main-test/a-bound-is-a-config-key) "a test reading a tree file itself (slurp of docs/config.md): the tree is its input")
     (is (< (count moved) (quot (count a) 2)) (str (count moved) " of " (count a) " tests take the tree: fewer than half"))))
 
 (deftest a-test-naming-another-test-does-not-reach-it
