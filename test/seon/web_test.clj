@@ -89,10 +89,10 @@
       (is (str/includes? (str (:shown rec)) ":killed :a1") "what root answered"))))
 
 (deftest a-refused-ui-call-reaches-the-stream-and-main
-  ;; root refuses merge! (no request of root's) before any request: the refused answer goes to the render
-  ;; proc as the call's answer (shown, and recorded on main as an :err item), not dropped
+  ;; root refuses a call of one of its fns that is none of its requests, before any request: the refused
+  ;; answer goes to the render proc as the call's answer (shown, and recorded on main as an :err item), not dropped
   (let [st (#'w/web-proc {:port 0})
-        [_ out] (#'w/web-proc (assoc st :index index) :http {:op :call :call {:var 'seon.root/merge! :agent :a2}})
+        [_ out] (#'w/web-proc (assoc st :index index) :http {:op :call :call {:var 'seon.root/nope! :agent :a2}})
         [m] (:to-render out)]
     (is (empty? (:to-api out)) "no request: root refused it")
     (is (= :refused (:op m)))
@@ -101,7 +101,7 @@
           [_ o] (#'p/render-proc rp :from-web m)
           w (first (filter #(= :write (get-in % [:req :op])) (:to-api o)))
           rec (some :seon.cluster.eval/record (get-in w [:req :req :tx-data]))]
-      (is (= "(seon.root/merge! :a2)" (:form rec)))
+      (is (= "(seon.root/nope! :a2)" (:form rec)))
       (is (str/includes? (str (:shown rec)) "not one of root's requests") "what root refused, and why"))))
 
 (deftest a-listener-that-cannot-bind-is-the-one-error-map
