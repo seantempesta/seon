@@ -32,6 +32,8 @@ Rulings on revisions 1-3 and sections 10-11 ("In general I'm down with everythin
 
 **Step 0, built (jolt/ctx-atom):** `storage` infers `:db.type/data` for `:vector :sequential :tuple :map :map-of :any` and an `:or` whose arms differ in type; an `:or` with a refused arm stays refused; a `[:set T]` of data is refused (`::nested-collection`: one datom a member is for scalars and refs). The 46 `{:seon.db/data true}` marks and `::ordered-collection` are gone. The 364 declarations equal main's (compared in a REPL against main's `declarations`, loaded beside the new one). Proof: `seon.db-test/a-value-with-no-one-type-is-plain-data-by-its-shape` (red on main: `[:vector :keyword]` is refused there, and its schemas carry the 46 marks).
 
+**Slice 1, built (jolt/ctx-atom; root's reorder of 2026-10-25, the owner: "focus on the rendering functions part"):** read-only `@ctx` (`seon.ctx`, docs/ctx.md) and the page's block of it, with the agent's add path: register a key with a `:seon.render/html`, `defn` the render, write the datum, `@ctx`, and the block draws it by that render, unmerged (browser-checked). The block is drawn in the agent at record time and kept as HTML, since root cannot call an agent's render. Datahike pin 336de2ab: a replaced card-one value is retracted in the report (upstream's behaviour too). Open: the model can read an earlier `@ctx` block's HTML inside `@ctx`'s `:evals` (cut by the printer), since the REPL's reply prints without the nested renders a recorded value's own `:seon.render/ai` would use.
+
 **The plan** (each step red then green, measured, reported before the next; after agent-loop part 1 fixes the agent key and session):
 
 | Step | Builds | Proofs |
