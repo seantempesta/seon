@@ -818,6 +818,8 @@
         chans {:ext (a/chan 1024) :back (a/chan 4096) :to-writer (a/chan (cfg/value :seon.config.root/writer-buf))
                :fork-server-ev (a/chan 4096)
                ;; outside agents' runs handed back for judgement (seon.server)
+               ;; and waits on main asking the reconciler for its next quiet (await-db): one channel,
+               ;; so a wait asked after a judge is taken after it
                :judge (a/chan 64)}
         view {:agents {} :writer {:tx-count 0} :stats {}
               :fork-server {:agents-forked 0 :pid pid :status :up :restarts 0}
@@ -1008,22 +1010,47 @@
   is: proofs in a fork, the branch read, the agent retired. run {:run :task :env
   :agent}. nil."
   {:malli/schema [:=> [:cat :seon.root/sys :map] :nil]}
-  [sys run] (a/>!! (:judge sys) run) nil)
+  [sys run] (a/>!! (:judge sys) (assoc run :op :judge)) nil)
 
 (defn await-db
   "Main's first db value (now or after a later commit) for which (pred db) holds: a watch on
   main's connection runs pred once per commit. No deadline, no polling: what an outside caller
-  waiting on a fact parks on (the server's :done, a test)."
-  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] ifn?] :seon.host/db]}
-  [sys pred]
-  (let [p (promise) k (keyword "seon.root" (str "await-" (random-uuid)))
+  waiting on a fact parks on (the server's :done, a test). Named (what, a description), the
+  wait is on a fact the reconciler's work makes (a judge's verdict, its quiescence report),
+  and it ends, too, when nothing in flight can make pred true: it asks the reconciler (on
+  :judge, ask-edge: behind any judge handed it before) for its first quiet
+  after main's head as of the ask, and when that comes with pred still false on main, answers
+  :seon.root/quiet-before-true (its :t, and what, the wait's description). That is final for a
+  fact only root's own work makes (a judge that has not moved by quiet never will: seon_done);
+  a caller waiting on outside input (a user's reply, another writer) asks again. A root that
+  stopped answers :seon.root/no-agent (root stopped). So it answers a db or one of those errors. Unnamed, a fact another proc makes (the
+  vector proc's embeddings, a problems report): only a commit ends it, since the reconciler's
+  quiet says nothing of that proc's work (task seon.root/a-wait-on-main-ends-when-nothing-can-make-it-true)."
+  {:malli/schema [:function [:=> [:cat [:map [:conn :seon.host/conn]] ifn?] :seon.host/db]
+                  [:=> [:cat [:map [:conn :seon.host/conn] [:judge {:optional true} :seon.host/chan]] [:maybe :string] ifn?]
+                   [:or :seon.host/db :seon.root/quiet-before-true :seon.root/no-agent]]]}
+  ([sys pred] (await-db sys nil pred))
+  ([sys what pred]
+  (let [stopped (gone nil "root stopped")
+        db0 @(:conn sys)
+        p (if what (step/ask-edge (:judge sys) {:op :quiet :after (:max-tx db0)} {:stopped true}) (promise))
+        k (keyword "seon.root" (str "await-" (random-uuid)))
         a (:wrapped-atom (:conn sys))]
     (add-watch a k (fn [_ _ _ db] (when (pred db) (deliver p db))))
     ;; the watch goes whatever ends the wait (an interrupt of a caller whose client left, a pred
     ;; that threw on the current value)
-    (try (let [db @(:conn sys)] (when (pred db) (deliver p db)))
-         @p
-         (finally (remove-watch a k)))))
+    (try (when (pred db0) (deliver p db0))
+         (let [r @p]
+           (cond (:stopped r) stopped
+                 ;; quiet: main as it is now, which a commit racing the answer may have made true
+                 (:quiet r) (let [db @(:conn sys)]
+                              (if (pred db)
+                                db
+                                (contract/error :seon.root/quiet-before-true 'seon.root/await-db
+                                                (str "root went quiet at t " (:quiet r) " with this still false: " what)
+                                                {:t (:quiet r) :waits-on what})))
+                 :else r))
+         (finally (remove-watch a k))))))
 
 (defn defect
   "A root proc's defect (a :platform problem) whose record main wrote after t, or nil: a step
@@ -1165,12 +1192,16 @@
         ;; an api already closed (a root whose api ended on its own) answers at once that it is
         p (step/ask-edge (:ext sys) {:op :shutdown} (gone nil "root stopped"))]
     (a/close! (:ext sys))
+    ;; a wait on main asked after this answers stopped at once (ask-edge's closed case)
+    (a/close! (:judge sys))
     ;; agents not stopped by the api's drain, late or never asked (its api closed), are killed
     (let [answer (deref p (+ ap/stop-bound-ms 1000) ::late)]
       (when (or (= ::late answer) (contract/error? answer))
         (a/>!! (:back sys) {:op :kill-all})))
     (let [drained (deref p 15000 :timeout)
           graph (flow/stop (:graph sys))]
+      ;; a wait put on :judge that the stopped reconciler never took is answered here
+      (loop [] (when-let [m (a/poll! (:judge sys))] (some-> (:p m) (deliver {:stopped true})) (recur)))
       (a/close! (:events-in sys))
       ;; the store is released and kept, whoever gave its path
       (d/release (:conn sys))

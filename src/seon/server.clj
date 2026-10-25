@@ -161,10 +161,14 @@
                                               ;; judged: the run left :running and :ended (the reconciler accepted,
                                               ;; held or refused it), or a root defect stopped the judge
                                               _ (c/judge! sys {:run run :task task :env env :agent ag})
-                                              db (c/await-db sys #(or (not (#{:running :ended} (status %))) (c/defect % t "seon.reconcile")))]
-                                          (if-let [p (and (#{:running :ended} (status db)) (c/defect db t "seon.reconcile"))]
-                                            {:run run :defect (select-keys p [:seon.error/type :seon.error/message])}
-                                            (verdict db run task)))
+                                              db (c/await-db sys (str "the judge of " run)
+                                                            #(or (not (#{:running :ended} (status %))) (c/defect % t "seon.reconcile")))]
+                                          ;; a judge that has not moved by root's quiet never will: that, or root
+                                          ;; stopped, is the answer
+                                          (cond (contract/error? db) (assoc db :run run)
+                                                :else (if-let [p (and (#{:running :ended} (status db)) (c/defect db t "seon.reconcile"))]
+                                                        {:run run :defect (select-keys p [:seon.error/type :seon.error/message])}
+                                                        (verdict db run task))))
                               :else (refused (str ag " answered no end for " run))))
                       (refused (str ag " works no task"))))}))
 
