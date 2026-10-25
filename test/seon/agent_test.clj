@@ -598,19 +598,21 @@
 (deftest a-waiting-run-parks-and-a-message-wakes-the-same-process
   ;; design agent-loop section 2 (owner, 2026-10-25: "Always park"): a run that waits parks its
   ;; session, its process kept; the owner's message wakes it, and the next run is the same
-  ;; process (its pid), on the same agent, its run counted on
+  ;; process (its pid), on the same agent (the parked run's own: the harness's agent is another)
   (let [runs "[:find ?id ?st ?out ?ag :where [?e :seon.run/task ?t] [?t :seon.task/id \"demo/w\"] [?e :seon.run/id ?id] [?e :seon.run/status ?st] [?e :seon.run/outcome ?out] [?e :seon.run/agent ?a] [?a :seon.agent/id ?ag]]"
-        closed (fn [n] (str "(seon.await/await-db sys #(= " n " (count (filter (fn [[_ st]] (= :closed st)) (datahike.api/q '" runs " %)))))"))
+        parked (fn [n] (str "(seon.root/await-db sys #(= " n " (count (filter (fn [[_ st]] (= :parked st)) (datahike.api/q '" runs " %)))))"))
         [_ r] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
                          {:op :eval :agent "root"
-                          :code (str "(do (my.root/run! sys [\"demo/w\"]) " (closed 1)
-                                     " (let [pid1 (get-in (c/state sys) [:agents :a1 :pid])]"
-                                     " @(seon.root/message! sys :a1 \"carry on\") " (closed 2)
-                                     " {:runs (sort (datahike.api/q '" runs " @(:conn sys))) :pid1 pid1 :pid2 (get-in (c/state sys) [:agents :a1 :pid])}))")}]
+                          :code (str "(do (my.root/run! sys [\"demo/w\"]) " (parked 1)
+                                     " (let [ag (some (fn [[id _ _ ag]] (when (= \"demo/w#1\" id) ag)) (datahike.api/q '" runs " @(:conn sys)))"
+                                     " pid1 (get-in (c/state sys) [:agents ag :pid])]"
+                                     " @(seon.root/message! sys ag \"carry on\") " (parked 2)
+                                     " {:runs (sort (datahike.api/q '" runs " @(:conn sys))) :pid1 pid1 :pid2 (get-in (c/state sys) [:agents ag :pid])}))")}]
                         {:sets [":seon.config.ai/script=seon.fixtures/wait-call"]
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})
         {:keys [runs pid1 pid2]} (:value r)]
-    (is (= [["demo/w#1" :closed :waiting :a1] ["demo/w#2" :closed :waiting :a1]] runs) (pr-str r))
+    (is (= [["demo/w#1" :parked :waiting] ["demo/w#2" :parked :waiting]] (mapv #(subvec % 0 3) runs)) (pr-str r))
+    (is (apply = (map peek runs)) "both runs on one agent")
     (is (and pid1 (= pid1 pid2)) (str "one process for both runs: " pid1 " " pid2))))
 
 (deftest a-failed-call-keeps-what-it-sent

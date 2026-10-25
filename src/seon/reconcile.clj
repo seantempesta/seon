@@ -104,9 +104,10 @@
 
 (def park-outcomes
   "A run's ends that park its session instead of ending it (design agent-loop section 1): a
-  reply with no eval (waiting), its turn budget spent, no progress, a provider's error. Its
-  process stays, and the next message to the session wakes it with a fresh budget."
-  #{:waiting :cap :no-progress :error})
+  reply with no eval (waiting), its turn budget spent, no progress. Its run is written
+  :parked, its process stays, and the next message to the session wakes it with a fresh
+  budget. An error is not one: it holds the task with its cause, as any failed run does."
+  #{:waiting :cap :no-progress})
 
 (defn- branch-messages
   "How many messages main holds to the runs on branch br: what a parked session on br is woken
@@ -128,6 +129,34 @@
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.run/run] :boolean]}
   [idx a] (and (= :running (:seon.run/status a)) (= (:boot (:root idx)) (:seon.run/boot a))))
 
+(defn- newest-run
+  "Task id's newest run: runs are numbered in the order they start (actions' spawns), so it is
+  the count's. nil before its first."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:maybe :seon.run/run]]}
+  [idx id] (let [n (count (get-in idx [:by-task id]))] (when (pos? n) (get-in idx [:runs (task/run-id id n)]))))
+
+(defn- parked
+  "Task id's newest run when it parked its session (its status :parked, written where it
+  parked: the :park action), or nil."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:maybe :seon.run/run]]}
+  [idx id] (let [a (newest-run idx id)] (when (= :parked (:seon.run/status a)) a)))
+
+(defn- idle
+  "Task id's parked run whose process is idle now: parked in this boot, by an agent. A wake
+  reuses it; a cancel, a hold or a new branch for its task stops it (classify: its process
+  works only the branch it was forked on). nil otherwise."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:maybe :seon.run/run]]}
+  [idx id]
+  (let [a (parked idx id)]
+    (when (and a (:seon.run/agent a) (= (:boot (:root idx)) (:seon.run/boot a))) a)))
+
+(defn- keeps?
+  "Whether a run of a task of kind, ended with outcome, keeps its process at its end (:diffed):
+  the agent ended it on a park outcome, and the task is no merge (a merge's run ends its
+  process, as before). Its judge then parks it, or stops the kept process (stop-kept)."
+  {:malli/schema [:=> [:cat [:maybe :keyword] [:maybe :keyword]] :boolean]}
+  [kind outcome] (boolean (and (park-outcomes outcome) (not= :merge kind))))
+
 (defn- done-info
   "{:any? (merged or accepted) :merged-t (the earliest merge, or nil)} of task id."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:map [:any? :boolean] [:merged-t [:maybe :int]]]]}
@@ -148,11 +177,12 @@
                   (every? #(idx-done? idx %) (:seon.task/needs t))
                   (not-any? #(let [a (get-in idx [:runs %])] (or (live-in? idx a) (judged (:seon.run/status a))))
                             (get-in idx [:by-task id]))
-                  ;; parked (its newest run closed on a park outcome): ready again only when main holds
+                  ;; parked (its newest run :parked): ready again only when main holds
                   ;; more messages to its session's runs than the run had taken (design agent-loop section 2)
-                  (let [newest (last (sort-by :seon.run/start-ms (keep (:runs idx) (get-in idx [:by-task id]))))]
-                    (or (not (and newest (= :closed (:seon.run/status newest)) (park-outcomes (:seon.run/outcome newest))))
-                        (> (get-in idx [:msgs (:seon.task/branch t)] 0) (:seon.run/taken newest 0))))))))
+                  ;; judge-tx writes :seon.run/taken on every judged run, so a parked one has it; both
+                  ;; count the messages to the runs on the parked run's branch
+                  (let [p (parked idx id)]
+                    (or (nil? p) (> (get-in idx [:msgs (get-in p [:seon.run/env :branch])] 0) (:seon.run/taken p))))))))
 
 (defn- refresh-done
   "Re-derive task id's done state from its runs; answers [idx flipped?]."
@@ -226,17 +256,16 @@
         t (get-in idx [:tasks (:seon.run/task a)])
         st (:seon.run/status a)
         live? (and a (live-in? idx a))
-        ;; the newest run of its task, closed on a park outcome in this boot: its process is
+        ;; the newest run of its task, parked in this boot: its process is
         ;; parked, and stays until its task is cancelled or held (design agent-loop section 2)
-        parked? (and a (= :closed st) (park-outcomes (:seon.run/outcome a)) (:seon.run/agent a)
-                     (= (:boot (:root idx)) (:seon.run/boot a))
-                     (= aid (last (sort-by #(get-in idx [:runs % :seon.run/start-ms]) (get-in idx [:by-task (:seon.run/task a)])))))
+        parked? (and a (= a (idle idx (:seon.run/task a))))
         kill (cond
                live? (cond (= :cancelled (:seon.task/execution t)) :cancelled
                            (= :held (:seon.task/execution t)) :held
                            (not= (desired-env t) (:seon.run/env a)) :env-changed)
                parked? (cond (= :cancelled (:seon.task/execution t)) :cancelled
-                             (= :held (:seon.task/execution t)) :held))
+                             (= :held (:seon.task/execution t)) :held
+                             (not= (:seon.task/branch t) (get-in a [:seon.run/env :branch])) :env-changed))
         mark (fn [idx k on?] (update idx k (if on? conj disj) aid))]
     (-> idx
         (mark :live live?)
@@ -266,10 +295,20 @@
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.host/db [:sequential :any]] :seon.reconcile/index]}
   [idx db ops]
   (let [es (into #{} (keep (fn [[_ e a]] (when (and (keyword? a) (watched-ns (namespace a))) e))) ops)
-        ;; a message to a run: its branch's count again, and that branch's tasks re-derived
-        brs (into #{} (keep (fn [[_ e a]] (when (= :seon.message/to a) (:seon.run/branch (:seon.message/to (d/entity db e)))))) ops)
-        idx (reduce (fn [idx br] (assoc-in idx [:msgs br] (branch-messages db br))) idx brs)
-        es (cond-> es (seq brs) (into (for [[id t] (:tasks idx) :when (brs (:seon.task/branch t)) :let [e (:db/id (d/entity db [:seon.task/id id]))] :when e] e)))]
+        ;; a message to a run: its branch's count moves by one (a commit's op names the run it
+        ;; went to; a diff's op names only the message, so its branch is counted again), and the
+        ;; tasks that can be that session's newest are re-derived: the run's task and the tasks
+        ;; downstream of it on its branch (a session is a task and the same-branch tasks it needs)
+        msgs (keep (fn [[op e a v]] (when (= :seon.message/to a)
+                                      (let [r (d/entity db (or v (:db/id (:seon.message/to (d/entity db e)))))]
+                                        {:br (:seon.run/branch r) :task (:seon.task/id (:seon.run/task r)) :d (when v (if (= :db/retract op) -1 1))})))
+                   ops)
+        idx (reduce (fn [idx {:keys [br d]}] (if d (update-in idx [:msgs br] (fnil + 0) d) (assoc-in idx [:msgs br] (branch-messages db br))))
+                    idx (filter :br msgs))
+        es (into es (for [{:keys [br task]} msgs :when (and br task), id (downstream idx #{task})
+                          :when (= br (get-in idx [:tasks id :seon.task/branch]))
+                          :let [e (:db/id (d/entity db [:seon.task/id id]))] :when e]
+                      e))]
     (if (empty? es)
       idx
       (let [step (fn [[idx nc dirty all? touched] e]
@@ -301,7 +340,7 @@
   {:malli/schema [:function [:=> [:cat :seon.host/db] :map]
                   [:=> [:cat :seon.reconcile/index :seon.host/db :seon.host/db] :map]]}
   ([db] (observe empty-index db (concat (for [e (task/entity-ids db)] [:db/add e :seon.task/id nil])
-                                        (for [dt (d/datoms db :aevt :seon.message/to)] [:db/add (:e dt) :seon.message/to]))))
+                                        (for [dt (d/datoms db :aevt :seon.message/to)] [:db/add (:e dt) :seon.message/to (:v dt)]))))
   ([idx from db]
    (observe idx db (for [a (sort (into #{} (filter #(and (keyword? %) (watched-ns (namespace %)))) (concat (keys (:schema from)) (keys (:schema db)))))
                          dt (apply concat (d/datoms-diff from db :aevt [a]))]
@@ -384,7 +423,7 @@
                        (empty? rs) {:op :accept :run aid :task id}
                        ;; it parked (waiting, out of turns, no progress, a provider's error): never a
                        ;; hold, the session waits for its next message (design agent-loop section 1)
-                       (park-outcomes (:seon.run/outcome a)) {:op :close :run aid}
+                       (keeps? (:seon.task/kind t) (:seon.run/outcome a)) {:op :park :run aid}
                        :else
                        (failed aid id (str "run " aid " ended" (some->> (:seon.run/outcome a) name (str " "))
                                              (some->> (:seon.run/reason a) (str " (") (#(str % ")")))
@@ -417,13 +456,11 @@
                                        (recur more (inc n) (inc m) (when ks (into taken ks)) (conj acc id))
                                        (recur more n m taken acc)))
                        :else (recur more (inc n) m taken (conj acc id))))
-        spawns (for [id starts :let [t (get-in idx [:tasks id])
-                                     newest (last (sort-by :seon.run/start-ms (keep (:runs idx) (get-in idx [:by-task id]))))
+        spawns (for [id starts :let [t (get-in idx [:tasks id]) p (idle idx id)
                                      run (task/run-id id (inc (count (get-in idx [:by-task id]))))]]
-                 ;; parked in this boot: its process is idle, so its next run is a wake on it, no fork
-                 (if (and newest (= :closed (:seon.run/status newest)) (park-outcomes (:seon.run/outcome newest))
-                          (:seon.run/agent newest) (= (:boot (:root idx)) (:seon.run/boot newest)))
-                   {:op :wake :task id :env (desired-env t) :run run :agent (:seon.run/agent newest)}
+                 ;; its process is idle (parked in this boot, on its branch): its next run is a wake on it, no fork
+                 (if (and p (not (get-in idx [:kill (:seon.run/id p)])))
+                   {:op :wake :task id :env (desired-env t) :run run :agent (:seon.run/agent p)}
                    {:op :spawn :task id :env (desired-env t) :run run}))]
     (vec (concat reaps kills judged gates octopus spawns))))
 
@@ -569,6 +606,18 @@
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.run/id :seon.reconcile/step [:sequential :any]] [:tuple :seon.reconcile/state :map]]}
   [st aid step tx] (request st aid step {:op :write :req {:op :tx :branch :db :tx-data (vec tx)}}))
 
+(defn- kept?
+  "Whether ended run a's process was kept at its end (:diffed, keeps?): a judge that does not
+  park it stops it."
+  {:malli/schema [:=> [:cat :seon.reconcile/state [:maybe :map]] :boolean]}
+  [st a] (and (= :ended (:seon.run/status a)) (keeps? (:seon.task/kind (task/task (:db st) (:seon.run/task a))) (:seon.run/outcome a))))
+
+(defn- stop-kept
+  "[st outputs] with run's kept process stopped too (its run ended: root's view says :ended)."
+  {:malli/schema [:=> [:cat [:tuple :map [:vector :map]] :seon.run/id :keyword] [:tuple :map [:vector :map]]]}
+  [[st os] run agent]
+  (let [[st o] (request st run :ignored {:op :kill :id agent :ended true})] [st (conj os o)]))
+
 (defn- start
   "Begin action act's flight. Answers [st outputs]."
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.reconcile/action] [:tuple :seon.reconcile/state [:vector :map]]]}
@@ -592,16 +641,23 @@
                (one (request (cond-> st k (assoc-in [:flights run :key] k)) run :spawned
                              {:op :spawn :opts (cond-> {:branch (get-in act [:env :branch]) :task (:task act) :run run} k (assoc :key k))})))
       :reap (one (write st run :done (cas-tx run :running :lost {:seon.run/end-ms (System/currentTimeMillis) :seon.run/reason "root restarted"})))
-      :close (one (write st run :done (cas-tx run :ended :closed {})))
-      :accept (one (write st run :done (cas-tx run :ended :done {})))
-      ;; a live run, or a parked one (closed: its process idle) whose task was cancelled or held
+      ;; the run parked its session: written once, here; its process stays (design agent-loop section 1)
+      :park (one (write st run :done (cas-tx run :ended :parked {})))
+      :close (cond-> (one (write st run :done (cas-tx run :ended :closed {})))
+               (kept? st a) (stop-kept run agent))
+      ;; a run that parked yet is judged done or held (its proofs green, or a failure it marked)
+      ;; ends its session: its kept process is stopped (kept, :diffed)
+      :accept (cond-> (one (write st run :done (cas-tx run :ended :done {})))
+                (kept? st a) (stop-kept run agent))
+      ;; a live run, or a parked one (its process idle) whose task was cancelled or held
       :kill (let [[st o1] (request st run :ignored {:op :kill :id agent})
                   [st o2] (write st run (if killing? :ignored :done) (cas-tx run (:seon.run/status a :running) :killed
                                                                              (cond-> {:seon.run/reason (name (:reason act))}
                                                                                (= :running (:seon.run/status a)) (assoc :seon.run/end-ms (System/currentTimeMillis)))))]
               [st [o1 o2]])
       ;; refused, dead or its merge refused: the task is held for root, with the evidence
-      :hold (one (write st run :done (hold-tx a (:problem act))))
+      :hold (cond-> (one (write st run :done (hold-tx a (:problem act))))
+              (kept? st a) (stop-kept run agent))
       ;; a merge task's branch into main: clean by construction when the branch holds main's
       ;; program head; behind: its task runs again, a new agent
       ;; an octopus merge: every member's branch into main in one commit (each holds main's
@@ -616,13 +672,15 @@
                           {:op :write :req {:op :branch-db :branch (get-in (task/run (:db st) run) [:seon.run/env :branch])}})))))
 
 (defn- taken-messages
-  "How many messages to the runs on branch br (as main names them) branch db holds: those its
-  session's turns took (each written on the branch by the turn that took it). The other side
-  of branch-messages' count. O(the messages on db)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :keyword]] :int]}
-  [main db br]
-  (let [runs (set (d/q '[:find [?id ...] :in $ ?b :where [?r :seon.run/branch ?b] [?r :seon.run/id ?id]] main br))]
-    (count (filter (fn [[_ id]] (runs id)) (d/q '[:find ?m ?id :where [?m :seon.message/to ?r] [?r :seon.run/id ?id]] db)))))
+  "How many messages to the runs on run aid's branch (as main names them) branch db holds:
+  those its session's turns took (each written on the branch by the turn that took it). The
+  other side of branch-messages' count. One read of :seon.run/branch on main (its runs; the
+  attribute is not indexed), then one seek per run's id on db and one per its messages: once a
+  judged run."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.run/id] :int]}
+  [main db aid]
+  (let [ids (d/q '[:find [?id ...] :in $ ?a :where [?x :seon.run/id ?a] [?x :seon.run/branch ?b] [?r :seon.run/branch ?b] [?r :seon.run/id ?id]] main aid)]
+    (or (d/q '[:find (count ?m) . :in $ [?id ...] :where [?r :seon.run/id ?id] [?m :seon.message/to ?r]] db ids) 0)))
 
 (defn- judge-tx
   "Run aid's end on main from MEASURED facts: the end its agent wrote on the branch,
@@ -658,7 +716,7 @@
                     (cond-> {;; the messages to its session's runs (those on its branch) its branch had taken:
                              ;; main holding more (branch-messages) wakes it once parked (idx-ready?),
                              ;; whatever came between its last turn and now
-                             :seon.run/taken (taken-messages main db (get-in act [:env :branch]))}
+                             :seon.run/taken (taken-messages main db aid)}
                       (seq (:failures run-problems)) (assoc :seon.run/failures (:failures run-problems))
                       (seq (:costs run-problems)) (assoc :seon.run/costs (:costs run-problems))
                       (or (:error end) worked-error) (assoc :seon.run/error (or (:error end) worked-error))
@@ -742,8 +800,15 @@
       ;; the turn loop answered: died (no live agent), or judge it from measured facts
       ;; work! that threw was answered by the agent's REPL (the process lives): its error
       ;; names the run's end when the loop wrote none
-      :worked (if (contract/error? r)
-                (dead st r)
+      :worked (cond
+                ;; a wake whose parked process had ended before the work! reached it (root's
+                ;; view: ended or never there): the run took nothing, so it is lost, not a death, and
+                ;; the task starts again as a spawn, a load of the session (design agent-loop section 4)
+                (and (= :wake (:op act)) (#{:seon.root/ended :seon.root/no-agent} (:seon.error/type r)))
+                (one (write st aid :done (cas-tx aid :running :lost {:seon.run/end-ms (System/currentTimeMillis)
+                                                                     :seon.run/reason (str "its parked process was gone: " (:seon.error/message r))})))
+                (contract/error? r) (dead st r)
+                :else
                 (one (request (cond-> st (:ex r) (assoc-in [:flights aid :worked-error] (:ex r)))
                               aid :tested {:op :judge :id agent})))
       :tested (if (contract/error? r)
@@ -759,7 +824,7 @@
       ;; (design agent-loop section 2: parking is work! returning)
       :diffed (cond
                 (contract/error? r) (refused st r)
-                (park-outcomes (:outcome (pull-end (:db r) aid))) (one (write st aid :done (judge-tx st f (:results f) r)))
+                (keeps? (:seon.task/kind (task/task (:db st) (:task act))) (:outcome (pull-end (:db r) aid))) (one (write st aid :done (judge-tx st f (:results f) r)))
                 :else (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
                             [st o2] (write st aid :done (judge-tx st f (:results f) r))]
                         [st [o1 o2]]))

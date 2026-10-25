@@ -99,7 +99,8 @@
 
 (defn verdict
   "Run run of task as main db holds its judgement: its status (:done or :merged: the done rule
-  had no reason; :closed with its task held: it had some), outcome and reason, and, for a held
+  had no reason; :closed with its task held: it had some; :parked: it parked its session,
+  waiting for a message), outcome and reason, and, for a held
   task, the failure the judge wrote (its reason names the done rule's reasons) and the evidence."
   {:malli/schema [:=> [:cat :seon.host/db :seon.run/id :seon.task/id] :map]}
   [db run task]

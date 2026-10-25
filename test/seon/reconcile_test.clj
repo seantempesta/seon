@@ -133,9 +133,12 @@
     ;; its proof red: the task is held for root
     (run "a" 1 :ended :outcome :red :results {(t "a") :fail})
     [{:op :hold :run "demo/a#1" :task "demo/a" :problem "run demo/a#1 ended red: proof-red demo-test/a-test"}]
-    ;; out of turns with its proof red: it parks (closed, released), never held (design agent-loop section 1)
+    ;; out of turns with its proof red: it parks (written :parked, released), never held (design agent-loop section 1)
     (run "a" 1 :ended :outcome :cap :results {(t "a") :fail})
-    [{:op :close :run "demo/a#1"}]
+    [{:op :park :run "demo/a#1"}]
+    ;; a provider's error with its proof red: held with its cause, never parked
+    (run "a" 1 :ended :outcome :error :results {(t "a") :fail})
+    [{:op :hold :run "demo/a#1" :task "demo/a" :problem "run demo/a#1 ended error: proof-red demo-test/a-test"}]
     ;; its proof never ran: unknown, which refuses done as red does
     (run "a" 1 :ended :outcome :green :results {})
     [{:op :hold :run "demo/a#1" :task "demo/a" :problem "run demo/a#1 ended green: proof-unknown demo-test/a-test"}]
@@ -774,13 +777,13 @@
   ;; stays released. Until a message to the session comes, the task does not start again; once one
   ;; comes, its next run is a wake on the parked process when that process is of this boot
   (let [red {(t "a") :fail}
-        parked (fn [outcome taken] (into (run "a" 1 :closed :results red :outcome outcome)
+        parked (fn [outcome taken] (into (run "a" 1 :parked :results red :outcome outcome)
                                          [{:seon.run/id "demo/a#1" :seon.run/taken taken}]))
         msg (fn [mid] (task/message-tx mid "user" "demo/a#1" "carry on"))
         wake {:op :wake :task "demo/a" :run "demo/a#2" :agent :a-a1
               :env {:branch (task/default-branch "demo/a") :model nil :max-turns (cfg/value :seon.config.agent/max-turns)}}]
-    (testing "judged: a park outcome closes the run; a red outcome holds the task"
-      (is (= [{:op :close :run "demo/a#1"}]
+    (testing "judged: a park outcome parks the run; a red outcome holds the task"
+      (is (= [{:op :park :run "demo/a#1"}]
              (actions-for (db-of [(decl "a")] :extra (run "a" 1 :ended :results red :outcome :waiting)))))
       (is (= :hold (:op (first (actions-for (db-of [(decl "a")] :extra (run "a" 1 :ended :results red :outcome :red))))))))
     (testing "parked, nothing new: nothing starts"
@@ -789,15 +792,34 @@
     (testing "a message it has not taken: a wake on its process"
       (is (= [wake] (actions-for (db-of [(decl "a")] :extra (into (parked :waiting 0) (msg "m1"))))))
       (is (= [wake] (actions-for (db-of [(decl "a")] :extra (into (parked :no-progress 1) (concat (msg "m1") (msg "m2"))))))))
-    (testing "parked, its task cancelled or held: its process is stopped (a kill of the closed run), nothing starts"
+    (testing "parked, its task cancelled or held: its process is stopped (a kill of the parked run), nothing starts"
       (is (= [{:op :kill :run "demo/a#1" :reason :cancelled}]
              (actions-for (db-of [(decl "a")] :extra (into (parked :waiting 0) (concat (msg "m1") (task/execution-tx ["demo/a"] :cancelled)))))))
       (is (= [{:op :kill :run "demo/a#1" :reason :held}]
              (actions-for (db-of [(decl "a")] :extra (into (parked :waiting 0) (task/execution-tx ["demo/a"] :held)))))))
     (testing "parked in an earlier boot: its process is gone, so the run is a spawn (a load of the session)"
-      (is (= [(spawn "a" 2)] (actions-for (db-of [(decl "a")] :extra (into (into (run "a" 1 :closed :results red :outcome :waiting :boot "boot-0")
+      (is (= [(spawn "a" 2)] (actions-for (db-of [(decl "a")] :extra (into (into (run "a" 1 :parked :results red :outcome :waiting :boot "boot-0")
                                                                                    [{:seon.run/id "demo/a#1" :seon.run/taken 0}])
-                                                                             (msg "m1")))))))))
+                                                                             (msg "m1")))))))
+    (testing "it waited with its proofs green: done, never parked (start stops its kept process)"
+      (is (= [{:op :accept :run "demo/a#1" :task "demo/a"}]
+             (actions-for (db-of [(decl "a")] :extra (run "a" 1 :ended :results {(t "a") :pass} :outcome :waiting))))))
+    (testing "its task moved to another branch: the parked process (forked on the old one) is stopped, and the next run is a spawn"
+      (is (= [{:op :kill :run "demo/a#1" :reason :env-changed}
+              (assoc-in (spawn "a" 2) [:env :branch] :elsewhere)]
+             (actions-for (db-of [(decl "a")] :extra (concat (parked :waiting 0) (msg "m1")
+                                                             [{:seon.task/id "demo/a" :seon.task/branch :elsewhere}]))))))
+    (testing "the message count is observed at each commit as listing finds it, whichever way it came"
+      (let [db0 (db-of [(decl "a")] :extra (parked :waiting 0))]
+        (reduce (fn [[db idx] tx]
+                  (let [{db' :db-after txd :tx-data} (d/with db tx)
+                        ops (for [dt txd] [(if (:added dt) :db/add :db/retract) (:e dt) (:a dt) (:v dt)])
+                        listed (r/index db')]
+                    (is (= listed (r/observe idx db' ops)) "a commit's ops")
+                    (is (= listed (r/index idx db db')) "a diff")
+                    [db' listed]))
+                [db0 (r/index db0)] [(msg "m1") (msg "m2")])
+        (is (= 2 (get-in (r/index (d/db-with db0 (concat (msg "m1") (msg "m2")))) [:msgs (task/default-branch "demo/a")])))))))
 
 (deftest a-proof-a-branch-registers-reaches-main-at-the-runs-end
   ;; owner, 2026-10-25 (Dogfood rulings): a design registers the red proofs it writes

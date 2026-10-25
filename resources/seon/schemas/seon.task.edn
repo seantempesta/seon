@@ -143,9 +143,11 @@
                          ;; a failed run: its task held for root, the problem as data (seon.reconcile/hold-tx)
                          [:hold [:map {:closed true} [:op [:= :hold]] [:run :seon.run/id] [:task :seon.task/id]
                                  [:problem :string]]]
-                         ;; a judged run closed: its task no longer running, or the run parked its session
-                         ;; (a park outcome: its process kept, the next message wakes it, design agent-loop section 2)
+                         ;; a judged run closed: its task no longer running
                          [:close [:map {:closed true} [:op [:= :close]] [:run :seon.run/id]]]
+                         ;; a judged run parked its session (a park outcome: its process kept, the next message
+                         ;; wakes it, design agent-loop section 2): written :parked, once
+                         [:park [:map {:closed true} [:op [:= :park]] [:run :seon.run/id]]]
                          [:spawn [:map {:closed true} [:op [:= :spawn]] [:task :seon.task/id] [:env :seon.task/env]
                                   [:run :seon.run/id]]]
                          ;; a parked session's next run on its live process (agent): no fork
