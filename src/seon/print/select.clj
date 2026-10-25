@@ -619,11 +619,32 @@
                 (recur (with-value entries i allotted) (- extra (- (:ub allotted) (:ub least))) more)
                 (recur entries extra more)))))))))
 
+(defn- row-class
+  "The class that makes `held`, a member of `node`, a row (a map's member, by its value): a map's,
+  vector's or set's, or in a sequence a string's; else nil. A row at its least is a cut that shows
+  nothing, a line and a form that say no more than the collection's own cut."
+  {:malli/schema [:=> [:cat :seon.print/alloc :any] :any]}
+  [node held]
+  (let [map? (= :map (:kind node))
+        m (if (and (:indexed? node) (:sorted? node)) (nth held 1) held)
+        c (class (if map? (val m) m))]
+    (when (or (map-classes c) (vector-classes c) (set-classes c) (and (not map?) (identical? c String))) c)))
+
+(defn- alike?
+  "Are `node`'s members rows of one class (`row-class`), as far as `:max-children` members reach."
+  {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc] :boolean]}
+  [context node]
+  (let [c (row-class node (first (:pending node)))]
+    (loop [members (next (:pending node)) k 1]
+      (cond (or (nil? c) (nil? members) (>= k (:max-children context))) (some? c)
+            (identical? c (row-class node (first members))) (recur (next members) (inc k))
+            :else false))))
+
 (defn- fill-members
   "Collection `node` within `budget`, breadth before depth: every member at its least while they
   fit (a map's key with its value at its least), then one cut; the budget left grows the members
-  (grow-values), so a long sequence, a table or a page shows every member at its least before
-  any one deepens."
+  (grow-values), so a long sequence or a page shows every member at its least before any one
+  deepens. Rows (`alike?`) show whole in their order instead (`fill-rows`)."
   {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc number?] :seon.print/alloc]}
   [context node budget]
   (let [sep (separator context node)
@@ -637,6 +658,38 @@
         skeleton (sized context (assoc node :kids entries :pending members))]
     (sized context (assoc skeleton :kids (grow-values context entries (- budget (:ub skeleton)) (= :map (:kind node)))))))
 
+(defn- fill-rows
+  "Collection `node` within `budget`, its first member a row (`row-class`): each member whole in
+  its order while it fits and is a row of that class, then one cut for the rest. When not even
+  the first fits whole, it is filled to the room if every member is a row of its class (`alike?`)
+  and its first part shows; otherwise, and at a member of another class, the members share the
+  room breadth before depth (`fill-members`). It reads no member past the cut."
+  {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc number?] :seon.print/alloc]}
+  [context node budget]
+  (let [sep (separator context node)
+        c0 (row-class node (first (:pending node)))]
+    (loop [kids [] spent (+ (:ub (collapsed context node)) (cut-reserve node)) members (:pending node)]
+      (if-let [[held & more] (seq members)]
+        (let [cost (if (seq kids) sep 0)
+              c (child context node held (count kids))
+              room (- budget spent cost)
+              w (when (identical? c0 (row-class node held)) (whole context c room))]
+          (cond
+            w (recur (conj kids w) (+ spent cost (:ub w)) more)
+            (and (seq kids) (identical? c0 (row-class node held))) (sized context (assoc node :kids kids :pending members))
+            (or (seq kids) (not (alike? context node))) (fill-members context node budget)
+            :else
+            (let [part (when (pos? room)
+                         (if (= :entry (:kind c))
+                           ;; a map's member: its key at its least, its value filled to what is left
+                           (let [least (minimal context c) v (nth (:kids least) 1)]
+                             (sized context (assoc-in least [:kids 1] (allot context v (- room (- (:ub least) (:ub v)))))))
+                           (allot context c room)))]
+              (if (and part (shows? (if (= :entry (:kind part)) (nth (:kids part) 1) part)) (<= (:ub part) room))
+                (sized context (assoc node :kids [part] :pending more))
+                (fill-members context node budget)))))
+        (sized context (assoc node :kids kids :pending nil))))))
+
 (defn- allot
   "`node` within `budget` characters: whole when it fits, else filled to the budget (a collection
   breadth before depth, fill-members); a collection at the depth bound collapsed."
@@ -645,7 +698,9 @@
   (or (whole context node budget)
       (case (:kind node)
         (:string :name) (fill-string context node budget)
-        (:map :coll) (if (bound? context node) (collapsed context node) (fill-members context node budget))
+        (:map :coll) (cond (bound? context node) (collapsed context node)
+                           (row-class node (first (:pending node))) (fill-rows context node budget)
+                           :else (fill-members context node budget))
         (sized context node))))
 
 (defn- select

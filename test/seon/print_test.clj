@@ -234,3 +234,35 @@
     (is (not (str/includes? text "199")) text)
     (is (str/includes? (:text (seon/print-value {:xs (vec (range 200))} {:handle 'result/e2 :seen {:colls {(System/identityHashCode big) [[big '(:value result/e1)]]}}})) "199")
         "an equal value that is not the same one prints as itself: collections match by identity")))
+
+(defn- problem-rows
+  "n rows shaped as main's :stale-section problem rows (my.root/problems, 2026-10-25: 177 of them)."
+  [n]
+  (vec (for [i (range n)]
+         (array-map :seon.docs/section (keyword "render" (str "section-" i)) :seon.docs/page "docs/render.md"
+                    :seon.problem/class :stale-section :seon.problem/since 1761360000000 :cited 'seon.print/print-value
+                    :lead "A section whose lead cites a var that moved." :n i))))
+
+(deftest rows-show-whole-then-one-cut
+  ;; root's (my.root/problems sys), 2026-10-25: :stale-section's 177 rows printed as 144 lines of
+  ;; `{…13 (get-in result/e1 [... :rows N])}` and a cut, each row at its least, a line and a form
+  ;; that say nothing. Rows (members of one collection class) show whole in their order, then
+  ;; ONE cut that names how many are left and the form that reads them.
+  (let [h 'result/e1
+        v {:value {:classes {:stale-section {:n 177 :rows (problem-rows 177)}}}}
+        {:keys [text elisions]} (seon/print-value v {:handle h})
+        [cut :as cuts] (cuts-of text)
+        shown (count (re-seq #":seon.docs/section" text))]
+    (is (= 1 elisions (count cuts)) text)
+    (is (not (re-find #"\{…" text)) "no row shows as a placeholder")
+    (is (< 20 shown 177) "a few rows show, each whole")
+    (is (= (- 177 shown) (:n cut)) "the cut counts the rows it left")
+    (is (reads-exactly? text h v cut) "and its form reads exactly them")
+    (testing "a map of rows: its entries whole in their order, then one cut"
+      (let [m (into {} (map (juxt :n identity)) (problem-rows 177))
+            {:keys [text elisions]} (seon/print-value m {:handle h})]
+        (is (= 1 elisions) text)
+        (is (not (re-find #"\{…" text)))))
+    (testing "members unlike each other still share the room (members-fill-breadth-before-depth)"
+      (let [{:keys [text]} (seon/print-value [(problem-rows 3) "x" :y] {:handle h :budget 60})]
+        (is (str/includes? text ":y") text)))))
