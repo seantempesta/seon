@@ -213,6 +213,23 @@
     (fenced "A small value." "(+ 1 2)")
     (fenced "Done reading." "(my.turn/wait)")]})
 
+(def fit-requests
+  "The five tasks fit to measure (jolt/fit-tasks, 2026-10-24), as a user would ask for them: a
+  short problem description each, no proof, no write set (design writes its own proofs, red, and
+  names what to change), each a request for seon.template/request (design -> implement -> merge on
+  one branch: my.root/request! writes it). Kept here, not run: the clean path's measurement waits
+  for the owner's go (root, 2026-10-25)."
+  [{:seon.task/ns 'seon.ref :seon.task/name "a-summary-says-what-it-left"
+    :seon.task/plan "When a wiki section is cited at summary depth, the agent sees only the first sentence of its lead and nothing says there is more. It should say how much of the lead it left out and how to read the rest."}
+   {:seon.task/ns 'seon.model :seon.task/name "the-transport-failure-docstring-is-true"
+    :seon.task/plan "The docstring of seon.model/transport-error says a failed request is kept and retried after a pause, but a transport failure goes straight back to the agent. Make the docstring say what really happens."}
+   {:seon.task/ns 'seon.context :seon.task/name "a-proof-that-never-ran-says-so"
+    :seon.task/plan "When one of my proofs has no test result yet, my status says it ran and asserted nothing. It should say it has not run."}
+   {:seon.task/ns 'seon.print :seon.task/name "a-long-name-cut-says-its-chars"
+    :seon.task/plan "When the printer cuts a long keyword it just shows …+N; it should say how many chars it left and how to read the rest."}
+   {:seon.task/ns 'seon.print :seon.task/name "a-map-shows-its-first-entry"
+    :seon.task/plan "Printing a big map with a small budget fails, saying it needs 33 characters, while a vector of the same size shows its first item and a cut. A map should show its first entry and a cut too."}])
+
 (def ^:private all-replies
   "Scripted replies by task name (calc) and by task id (a scenario's tasks live in a task
   namespace named after it, e.g. conflict/b-merge; a measurement's, measure-replies)."

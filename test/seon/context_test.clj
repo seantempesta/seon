@@ -302,8 +302,8 @@
             r2 (request 2)]
         (is (= (pop r0) (subvec r1 0 (dec (count r0)))) "turn 1 starts with turn 0's request but its turn sections")
         (is (= (pop r1) (subvec r2 0 (dec (count r1)))) "turn 2 starts with turn 1's request but its turn sections")
-        (is (= (context/help-text @conn) (:content (first r0))) "the system message is the help page as main holds it")
-        (is (str/starts-with? (:content (first r0)) "# The agent\n\nYou are a Seon agent") "the page, from its sections")
+        (is (= (context/system-text @conn) (:content (first r0))) "the system message is the system prompt as main holds it")
+        (is (str/starts-with? (:content (first r0)) "# You are a Seon agent\n\nYou work at a Clojure REPL") "the page, from its sections")
         (is (str/includes? (:content (second r2)) "Doubles.") "the run sections are the first turn's")
         (is (str/starts-with? (:content (peek r2)) "The current state") "the turn sections come last")
         (is (str/includes? (:content (peek r2)) ":turn \"3 of 4\"") "a model turn says which of its most it is")
@@ -511,8 +511,8 @@
         _ (ev! "e3" "screen" "(my.task/status)" :green)
         r1 (turn! 1 ["e3"] {})
         _ (plan! "Later.")
-        ;; and the help page changes: a turn's system prompt is its section as of the turn's t
-        _ (d/transact conn [{:db/id (seon.docs/page-top @conn context/help-page) :seon.section/text "Changed after the turns."}])
+        ;; and the system prompt changes: a turn's system prompt is its section as of the turn's t
+        _ (d/transact conn [{:db/id (seon.docs/page-top @conn context/system-page) :seon.section/text "Changed after the turns."}])
         db @conn
         e-of (fn [id] (d/q '[:find ?e . :in $ ?id :where [?e :seon.turn/id ?id]] db id))]
     [db [r0 r1] [(e-of "demo/f#1/0") (e-of "demo/f#1/1")]]))
@@ -549,6 +549,12 @@
             db @conn]
         (doseq [[n warm cold] turns]
           (is (= (:messages cold) (:messages warm)) (str "turn " n ": printed once equals printed cold"))
+          (let [tok #(select/estimate (apply str (mapcat (fn [m] (cons (:content m) (map :code (:tool-calls m)))) %)))
+                ms (:messages warm) screen (count (:screen (basis n [(str "s" n)])))]
+            (is (= {:system (tok [(first ms)]) :story (tok [(second ms)]) :conversation (tok (subvec ms 2 (- (count ms) screen)))
+                    :screen (tok (subvec ms (- (count ms) screen)))}
+                   (context/sent-split (context/parts-of @conn (:sent warm)) #{(str "s" n)}))
+                (str "turn " n ": where its tokens went, sized from what it recorded it sent, is the messages it sent by part")))
           (is (= (:sent cold) (:sent warm)))
           (let [e (d/q '[:find ?e . :in $ ?id :where [?e :seon.turn/id ?id]] db (str "demo/g#1/" n))]
             (is (= (:messages warm) (into [] (mapcat second) (context/parts-of db (:seon.turn/sent (d/pull db [:seon.turn/sent] e)))))
@@ -571,15 +577,15 @@
     (fn [_ conn]
       (let [[db [r0 r1] [e0 e1]] (sent-turns conn)
             sent #(:seon.turn/sent (d/pull db [:seon.turn/sent] %))]
-        (is (= [:section :task :eval] (mapv first (sent e0))) "turn 0: the help page, the task story, the screen eval")
-        (is (every? pos-int? (map second (take 2 (sent e0)))) "the help page's own section and the task, by entity")
+        (is (= [:section :task :eval] (mapv first (sent e0))) "turn 0: the system prompt, the task story, the screen eval")
+        (is (every? pos-int? (map second (take 2 (sent e0)))) "the system prompt's own section and the task, by entity")
         (is (= [:section :task :eval :eval] (mapv first (sent e1))) "turn 1: then its call's eval, then the screen eval")
         (is (= (second (sent e0)) (second (sent e1))) "the task story is the run's first turn's: the same task as of the same t")
         (is (= r0 (read-back db e0)) "turn 0's messages, read from its records")
         (is (= r1 (read-back db e1)) "turn 1's, though the plan changed after both")
         (is (not (str/includes? (str (read-back db e1)) "Later.")) "the task as it was sent, not as it is")
-        (is (str/includes? (context/help-text db) "Changed after the turns.") "the help page changed after them")
-        (is (not (str/includes? (str (read-back db e0)) "Changed after the turns.")) "the help page as it was sent")))))
+        (is (str/includes? (context/system-text db) "Changed after the turns.") "the system prompt changed after them")
+        (is (not (str/includes? (str (read-back db e0)) "Changed after the turns.")) "the system prompt as it was sent")))))
 
 (deftest a-turn-records-one-turns-messages
   ;; what a turn writes is its refs, one a record it sent: the record grows with that turn's
