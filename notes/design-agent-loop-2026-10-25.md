@@ -261,3 +261,36 @@ Each part is red then green, measured, reported before the next; a page change i
 6. **Screen diffs** (part 5).
 After part 4: **the pilot, "customizable errors"** (section 1a), a paid run with root's go.
 No other paid model runs: the scripted provider (`seon.lab/reply`, `jolt/flow-lab`) drives every proof; a paid measurement of turns to green comes after part 4, with root's go.
+
+## 8. Flow across processes (owner, 2026-10-25: "messages are supposed to go through flows ... shared across all the processes")
+
+**Today.** There is one Flow graph, in root. An agent and the fork server run the same step-fn contract on their own thread (`seon.step/run-loop`) and receive Flow's lifecycle as data over a socket. Each agent appears in root's graph as a bridge proc (`seon.agent-proc`). A message from agent A to agent B travels: A's socket, then A's proc in root, then the writer (the fact on main), then `deliver-message`, then B's proc's `:in`, then B's socket. Root is the hub. The reason given is "physics" (docs/failure-points.md, "Physics"): an agent forks, for its test children and `clone!`, so it must stay single-threaded.
+
+**Measured for this note** (this worktree's root, one agent, `notes/agent-loop/fork-threads.clj`, no model calls):
+
+| In the agent when it forks | Forks | Children |
+|---|---|---|
+| a parked go block, an OS thread blocked in `<!!`, the sweeper pool fixed at 0 (`gc-sweepers!` reads 0 throughout) | 50 of 50 went through | **50 of 50 exited 0**, about 40 ms each with a full collect and a go block in the child |
+| 8 go blocks busy on one channel (a flow under message traffic) | 199 of 200 refused (`-2`), then 50 forced through in 863 tries | **50 of 50 deadlocked**: the child's main thread waits forever in `S_mutex_acquire` (sampled), on a Scheme mutex held by a thread that does not exist in the child |
+
+What this shows, with the research subagent's source reading (Chez `c/gc.c`, `c/thread.c`, Jolt's `fibers.ss`, `fibers-async.ss`, `jolt/async/remote.clj`):
+- **The sweeper hang is gone.** Fixing the pool at 0 (patch `0008-fixed-sweeper-pool`, `seon.main/-main`) is inherited by fork, and no collection starts a sweeper (`gc.c:444`, `2999-3020`).
+- **A second hazard remains, and it is the real one.** `proto-fork-alone` checks that one Chez thread is *active*. But a thread deactivates on its way into `S_condition_wait` while it still holds the channel's mutex, and on its way out it re-takes that mutex before it reactivates (`thread.c:709-720`). Inside those windows the count reads 1, the fork goes ahead, and the child inherits a locked mutex whose owner does not exist in the child. A busy flow lives in those windows: 100% of the forks that passed the check deadlocked.
+- So **a process running a busy Flow cannot fork**, and pausing its procs does not close the windows reliably. The field agrees: POSIX allows only async-signal-safe calls in a threaded process's child, `pthread_atfork` is considered insufficient, and the standard answer is a process that forks while single-threaded (Android's zygote, Python's `forkserver`), or `posix_spawn`.
+- **Jolt's fibers are bound to their carrier thread for life** (a continuation resumed on another thread raises "stale foreign context", `fibers.ss` header), and `sa-fiber-run-all` already drains carrier 0's queue on the calling thread (`fibers.ss:1617`).
+- **`jolt.async.remote`** carries back-pressure end to end through bounded channels and the kernel's socket buffers. Its pumps are threads or poller fibers, so today it adds threads. `remote/flow.clj` already makes a remote end a Flow proc.
+
+**Options, priced, simplest first:**
+1. **Keep root as the hub (today) and close its gaps.** This is what sections 3 and 4 do: every message is a fact before delivery, there are no drops, and the reconciler wakes or loads. It costs nothing new, but agents still speak a hand-rolled lifecycle instead of Flow, and the bridge proc stays.
+2. **Agents never fork; the fork server forks their children.** Agents could then run threads, Flow procs and remote ends with pumps. But a test child or clone would have to be forked from the fork server's image of main and load the agent's program diff: about 0.34 s per child (measured for a load), instead of about 40 ms copy-on-write from the agent. It also moves the agent's live state out of reach of its children.
+3. **Recommended: Flow on the main thread in agents (a Jolt change).** An agent's fibers run on its one thread, as ClojureScript's core.async runs on its one event loop:
+   - carrier 0 is the calling thread, drained wherever it would otherwise wait: in `recv!`, in `<!!`, and between forms;
+   - the remote end's pump becomes a fiber woken by the socket's readiness, from the SIGIO handler the agent already uses (`seon.sock/signal-at-input!`), so it needs no poller thread;
+   - an agent's procs are `:io` only, since `:mixed` and `:compute` need threads.
+
+   The process stays one OS thread, so it forks as safely as today. The agent's procs then join root's graph through remote channels with back-pressure. That deletes `run-loop`'s own lifecycle protocol, the bridge logic of `agent-proc` and the separate frame protocol, and a message becomes a channel put from the sender's proc to the recipient's, with the fact still written by the one writer. The cost is a Jolt branch (`jolt/main-carrier`): a carrier mode where carrier 0 is the calling thread, plus a SIGIO-driven pump mode for `jolt.async.remote`. A long eval blocks the agent's fibers while it runs, which is the agent's behaviour today; messages still land in the inbox through SIGIO.
+   - **To prove first, at the REPL:** a fiber parked on carrier 0 resumes when the main thread blocks in `<!!`; a remote end pumped from SIGIO keeps its back-pressure; the fork table above shows 50 of 50 exit 0 with the flow under traffic.
+   - **To measure:** fork success with the agent's flow busy (it must be 100%), message latency agent to agent against today's 7-35 ms wake, and threads per agent (must stay 1).
+4. **Agent to agent without root in between** (Erlang-style direct links). Every message must still be committed by the one writer, which is in root, before it is delivered, so a direct link saves only the second hop, and it adds a peer mesh. Not worth it while the writer is in root.
+
+**Where the facts' homes change:** docs/failure-points.md "Physics" still says the sweepers are the reason agents stay single-threaded. The measured reason is the condition-wait windows (the table above). That correction is owed to the page whichever option is chosen.
