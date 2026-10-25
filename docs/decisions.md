@@ -3,6 +3,10 @@
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in notes/archive/DECISIONS-superseded.md.
 
 ## 2026-10-25 rulings
+### Message delivery: compare, then the better design or the simple one
+Owner, 2026-10-25, on main-first delivery (agent loop) against delivery by merging a fact from the sender's branch (ctx-atom §11): "Launch a comparison. I would prefer real flow semantics where processes are independent, but not at the cost of stability and performance and complexity. We either have a better design or we do the simple one that works". Stated in: not yet.
+### The related-section count is a config key; one problem-row helper's bounds accepted
+Owner, 2026-10-25: approved one new config key, how many related wiki sections the screen shows (0 turns it off); accepted raising 5 derived-problem cost proofs' call bounds by one contracted call per row, for one helper in place of 8 copies. Stated in: this entry.
 ### Dogfood rulings: design registers proofs; each form's value; stale means meaning changed; pilot budget $5
 Owner, 2026-10-25, on the dogfood findings (notes/dogfood-and-docs-2026-10-25.md on ``jolt/dogfood``): `my.task/update!` takes `:seon.task/proofs`, so a design stage registers the red proofs it writes; an eval call's response lists each form's value in order under the call's one handle (`result/eN` holds the last, like `*1`); a wiki section is stale when a cited var's contract, arglists or docstring changes, not its body; the pipeline pilot may spend up to $5 ("use up to $5 even I want to learn and fix the design"). Stated in: not yet.
 ### Starting and resuming are one mechanism; replay is told and switchable; agents work in the UI
