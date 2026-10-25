@@ -294,3 +294,48 @@ What this shows, with the research subagent's source reading (Chez `c/gc.c`, `c/
 4. **Agent to agent without root in between** (Erlang-style direct links). Every message must still be committed by the one writer, which is in root, before it is delivered, so a direct link saves only the second hop, and it adds a peer mesh. Not worth it while the writer is in root.
 
 **Where the facts' homes change:** docs/failure-points.md "Physics" still says the sweepers are the reason agents stay single-threaded. The measured reason is the condition-wait windows (the table above). That correction is owed to the page whichever option is chosen.
+
+### 8a. Option 3 prototyped: core.async and Flow on the agent's one thread (owner, 2026-10-25: "the option 3")
+
+**What was built, at an agent's REPL with no Jolt rebuild** (`notes/agent-loop/main-carrier.clj`, about 70 lines; the runs are in `notes/agent-loop/main-carrier-runs.clj`):
+- `mode!` gives Jolt's fiber pool one carrier and marks it started, so no carrier thread is forked. It also sets up `jolt.io-poller`'s kqueue and wake pipe without the poller thread.
+- `run-until` is the agent's loop:
+  - drain carrier 0's run queue on this thread;
+  - when the queue is empty, run one poller round on this thread (block in kevent until a registered fd is ready, then resume its waiters);
+  - when nothing is queued and nothing is awaited, answer `{:stuck n}`: no fiber can ever wake, so that is reported, not waited out.
+- `take!!` is `<!!` for the main thread: it runs the loop until the channel has a value.
+
+**Measured** (this worktree's root, fresh agents, no model calls):
+
+| Run | Result | OS threads |
+|---|---|---|
+| a go block, its value taken on the main thread | 42, as put | agent: **1** (`ps -M`) |
+| 20,000 values to a forked child and back over a `jolt.async.remote` end (`:pump :fiber`), the child echoing `(inc v)` | all back, sum exact; 52 ms, **382,000 per second** each way, pipelined; 16 poller rounds | agent 1, child 1 |
+| 100,000 values over that channel, with **50 forks made in the middle of the traffic** (each child runs a go block and a full collect) | **50 of 50 forks went through, 50 of 50 children exited 0**, sum exact | 1 |
+| ...the same forks beside a threaded busy flow, for comparison (section 8) | 199 of 200 refused; 50 of 50 forced through deadlocked | 9+ |
+| a three-proc Flow graph (`create-flow`, `:io` procs), 20,000 messages injected | all through, sum exact; 148 ms, **135,000 per second** | 1 |
+| back-pressure: the peer process is busy in a 1 s eval (its fibers don't run) while 100,000 values are sent | the sender put **1,707** (its buffer, the kernel's socket buffers and the peer's) and then parked; once the peer ran, all 100,000 arrived, sum exact | 1 each |
+
+**What it shows:**
+- Each process stays one OS thread, so it forks as safely as today.
+- Its go blocks, Flow procs and remote channels work as they do anywhere.
+- Parallelism is between processes: two single-threaded processes ran at full speed against each other.
+- Back-pressure crosses the process boundary. A blocked process pauses its senders without dropping anything, which answers the owner's "if flow is blocked they pause?".
+
+**What the Jolt change (`jolt/main-carrier`) must add, found by the prototype:**
+1. **The mode as a runtime option.** Carrier 0 is the calling thread and the poller runs in its rounds. It is set at startup and set again by `jolt-after-fork-child!` in a forked child. The prototype reaches private vars (`jolt.io-poller/poller-round`, `process-events!`); the change exposes one `run-until`.
+2. **Blocking calls made on the main thread outside a fiber run the loop instead of waiting.** These are `<!!`, `>!!`, `alts!!`, `FutureTask.get` and `deref` of a promise. Without this, two prototype runs hung: a direct `flow/stop` (it calls `.get` on proc futures) and a wait on `flow/inject`'s FutureTask. Called from a fiber, the same calls park correctly (measured).
+3. **Timers on the loop.** `a/timeout`, Flow's ping and stop bounds and `alts!!` with a timeout need the kevent timeout (`EVFILT_TIMER`) instead of Jolt's timer thread. Not built yet.
+4. **`{:stuck}` becomes an error fact**, never a hang: an agent whose loop has nothing queued and nothing awaited reports it (AGENTS §9: "never came" is a recorded fact).
+
+**How it joins the agent loop:**
+- `seon.step/run-loop` over the socket becomes `run-until` with the agent's socket registered in the poller, and an eval runs on the same thread between drains.
+- While an eval runs, the agent's fibers wait, as its process does today. Senders feel that as back-pressure, measured above.
+- A form that blocks in `<!!` keeps the agent's flow running (change 2).
+- The agent's procs join root's graph through remote ends, so Flow's own pause, resume and ping reach them as channel messages. A paused proc's input fills, and its senders park.
+- This deletes `run-loop`'s own lifecycle protocol, `agent-proc`'s bridge logic and the hand-written frames. The one writer still records each message on main before delivery (section 3).
+
+**Not yet measured:**
+- agent to root latency through a remote end, against today's 7-35 ms wake;
+- the loop with timers (change 3);
+- a full agent turn (evals, model calls through `my.fx`) inside `run-until`.
