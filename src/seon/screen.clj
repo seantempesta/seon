@@ -16,7 +16,8 @@
   work is likely to need beyond what it cites (my.task/related: the sections, functions and schema
   keys nearest it, a line each, and the forms that read one and search further): the turn's live
   state is REPL forms, run fresh each turn, and the references explicit evals refined as the
-  session goes (the owner's rulings). An agent changes what it is shown by redefining this var:
+  session goes (the owner's rulings). An agent changes what it is shown in its record:
+  (swap! ctx assoc :seon.agent/screen [...]) (seon.turn runs those instead), or by redefining this var:
   rewriting its own interface is an eval, so (my.agent/related \"its words\") in place of the last
   form follows its own query."
   ["(seon.screen/show)" "(my.task/status)" "(my.branch/changes)" "(my.task/related)"])

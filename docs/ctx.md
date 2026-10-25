@@ -36,6 +36,19 @@ An agent adds to its record, and to what it sees of it, with four evals (`seon.c
 
 A registered key is an attribute at once when no entity map lists it (``my.schema/registration`` carries its declaration). The next `@ctx` holds it, and its block draws it by `lab.ui/steps`, drawn by the agent, unmerged. A class a render names is styled only if the page's stylesheet was built with it.
 
+## Changing it: swap!
+
+An agent changes its record as it changes any atom: `(swap! ctx assoc :lab.ctx/steps [...])`, `(swap! ctx update :evals dissoc "e3")`, `(swap! ctx assoc-in [:runs id :seon.run/status] :done)`. The atom's validator (``seon.ctx/write!``) turns the change into one transaction on the branch: each attribute set or retracted (a cardinality-many one member by member), each unit's member new (an entity naming its parent by the unit's ref and keyed by its identity), gone (retracted whole) or changed. Every value is checked by its schema, the platform's or one the branch registered; a dry run (`d/with`) checks the db would hold what the swap! says at each path it writes; then it is applied (``seon.agent/transact!``), and when the swap! ends the record is the db's (its new entities with their ids). It costs its change: a unit identical to its old self is skipped by one `identical?` (`seon.ctx-test/a-write-costs-its-change-not-the-record`: 5 contracted calls, 2,709 ticks at 100 and at 1,000 evals).
+
+Refused, nothing written, with the error that says why (`seon.ctx-test/a-swap-writes-the-record`):
+- ``:seon.ctx/invalid``: a key with no schema (register it, a qualified keyword), or a value its schema refuses, each with its path and why;
+- ``:seon.ctx/not-held``: the db would not hold what the swap! says;
+- ``:seon.ctx/basis``: the map's `:t`, `:branch` or `:commit` is not the record's: the swap!'s function wrote the db (it is refused once, never retried, which closes the livelock a retrying swap! would be), or wrote the environment.
+
+The record's environment is read-only; everything else is writable, and history keeps what a write retracts.
+
+**The screen is the agent's to change.** `(swap! ctx assoc :seon.agent/screen ["(seon.screen/show)" "(:lab.ctx/steps @ctx)"])` sets the forms its next screen evaluates (``seon.turn``'s screen reads the record; absent, ``seon.screen/forms``).
+
 ## Not yet
 
-`swap!` changes the map only; writing through it (a validator turning a change into one checked transaction), provenance, the diff from main and its merge mark are the plan's next steps.
+Provenance (which eval and branch made each fact), the diff from main and its merge mark are the plan's next steps.

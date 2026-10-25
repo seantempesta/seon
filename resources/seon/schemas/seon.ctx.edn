@@ -1,0 +1,16 @@
+{
+ ;; the agent's record as one map, @ctx (seon.ctx): its environment, its own attributes and its
+ ;; units by their short keys; the page draws it as a block (seon.render.ui/ctx), the model reads it
+ ;; through the one printer (no :ai render)
+ :seon.ctx/ctx [:map {:seon.render/html seon.render.ui/ctx} [:t :int] [:branch :seon.db/branch] [:commit {:optional true} :uuid]]
+ ;; a swap! of @ctx refused, nothing written (seon.ctx/write!): a value its schema refuses, or a key
+ ;; with no schema, each with where it is and why
+ :seon.ctx/invalid [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/invalid]]
+                                           [:invalid [:vector [:map [:path [:vector :any]] [:why :any]]]]]]
+ ;; written, the db would not hold what the swap! says at these paths (it would hold :held)
+ :seon.ctx/not-held [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/not-held]]
+                                            [:paths [:vector [:vector :any]]] [:held [:vector :any]]]]
+ ;; the swap!'s map is not of the record's basis: its :t, :branch or :commit differs (the db moved while
+ ;; the swap!'s function ran, or the function wrote one of them, which are the environment's)
+ :seon.ctx/basis [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/basis]]
+                                         [:held [:map [:t :int]]] [:swapped :map]]]}
