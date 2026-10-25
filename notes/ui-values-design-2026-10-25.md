@@ -120,4 +120,4 @@ It deletes `evaluation`'s prose path for data values, which keeps only its use f
    - The other is a server-side tokenizer over the reader's tokens. That's more code, and it must keep comments verbatim, which the reader drops.
    - Recommendation: highlight.js.
 2. **Agent hiccup as HTML.** The proposed allowlist is `div span p ul ol li table tr td th pre code h1-h4 section aside main strong em a`, with `class` only and a relative `href`. Is that tight enough?
-3. **The three reader tags** (`#seon/code`, `#seon/prose`, `#seon/hiccup`): approve them, so a record keeps code as code? This builds on Code, from `jolt/printer-everywhere`, so that branch merges first.
+3. (Settled by root: `#seon/code` and its `plain?` admission come with `jolt/printer-everywhere`; `#seon/prose` and `#seon/hiccup` come with this build.)
