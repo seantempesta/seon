@@ -768,6 +768,9 @@
               (out! "DURABLE FAILED (phase 1 left no " expect-file ": durable-read reopens what durable-write killed; run bin/check durable)")
               (lib/c-exit 1))
           expect (read-string (slurp expect-file))
+          ;; read once: phase 2 takes what phase 1 left (its report carries it), so a later run
+          ;; alone finds none rather than an earlier run's
+          _ (.delete (java.io.File. expect-file))
         st (c/state sys {:datoms true})
         data (main-data-datoms sys)
         md (count data)
