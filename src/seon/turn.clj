@@ -219,7 +219,7 @@
                                                  (context/messages-tokens ms))))
               floor (* block (quot expected block))]
           (when (< cache-hit-tokens (- floor block))
-        (contract/error :seon.turn/cache-miss 'seon.turn/act!
+        (contract/error :seon.turn/cache-miss #'seon.turn/cache-miss
                         (str "the prompt cache hit " cache-hit-tokens " tokens of the " expected " this request shares with the one before")
                             {:hit cache-hit-tokens :expected expected :block block :shared shared :messages (count ms)})))))))
 

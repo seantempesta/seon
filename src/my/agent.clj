@@ -15,6 +15,7 @@
                               refine what the screen's (my.task/related) showed
     (prove)                   run what judges this branch: the task's proofs and the tests reaching
                               what it changed since main, each one with a result at its digest reused
+    (help 'ns.name)           a namespace: every definition, privates included, a line each in file order
     (help)                    the help page's sections (docs/agent.md); (help "done") one whole;
                               (help "docs/vector.md#the-model") any section, (help "docs/vector.md") a page
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
@@ -217,10 +218,16 @@
   sentence, with the sections it cites and those citing it. With an address (``docs/vector.md#the-model``) or
   an anchor of the help page (\"done\"), that section whole; with a page's path (\"docs/vector.md\"), that page
   at summary. A miss answers the help page's sections, every page's path and the form that reads
-  one, never nil. (Before this an anchor answered its text alone; it answers the view, :seon.ref/text among its keys.)"
-  {:malli/schema [:function [:=> [:cat] [:vector :seon.ref/view]] [:=> [:cat :string] [:or :seon.ref/view [:vector :seon.ref/view] [:map [:no-section :string] [:help-page [:vector :seon.ref/view]] [:pages [:vector :string]] [:read-one :string]]]]]}
+  one, never nil. (Before this an anchor answered its text alone; it answers the view, :seon.ref/text among its keys.)
+  With a namespace's name ('seon.print.select), the namespace as a plan's citation of it shows it:
+  its ns head and docstring, then each definition, privates included, in file order, a line each
+  (its name and its doc's first sentence; seon.ref/namespace-view)."
+  {:malli/schema [:function [:=> [:cat] [:vector :seon.ref/view]]
+                  [:=> [:cat [:or :string :symbol]] [:or :seon.ref/view [:vector :seon.ref/view] [:maybe [:map [:seon.print/code :string]]] [:map [:no-section :string] [:help-page [:vector :seon.ref/view]] [:pages [:vector :string]] [:read-one :string]]]]]}
   ([] (vec (docs/page (agent/db) context/help-page :summary)))
   ([address]
+   (if (symbol? address)
+     (docs/cited-code (agent/db) {:seon.ref/name address :seon.ref/depth :doc :seon.ref/line 1})
    (let [db (agent/db)
          a (if (str/includes? address "#") address (str context/help-page "#" address))]
      (or (docs/view db a :code)
@@ -228,5 +235,5 @@
          {:no-section address
           :help-page (vec (docs/page db context/help-page :summary))
           :pages (docs/page-paths db)
-          :read-one "(my.agent/help \"docs/<page>.md\") lists a page's sections; (my.agent/help \"docs/<page>.md#<section>\") reads one"}))))
+          :read-one "(my.agent/help \"docs/<page>.md\") lists a page's sections; (my.agent/help \"docs/<page>.md#<section>\") reads one; (my.agent/help 'ns.name) a namespace, every definition a line"})))))
 

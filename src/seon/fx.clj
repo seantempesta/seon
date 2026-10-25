@@ -18,10 +18,11 @@
 
 (defn- error
   "An effect's declared failure, as the one error map (its variant registered in
-  seon.problems.edn), raised by seon.fx/call."
-  {:malli/schema [:=> [:cat :qualified-keyword :string :map] :seon.error/base]}
-  [type message data]
-  (contract/error type 'seon.fx/call message data))
+  seon.problems.edn), raised by op: the performer that failed, by its var (so a rename breaks
+  the compile, never the name an error carries)."
+  {:malli/schema [:=> [:cat :seon.host/var :qualified-keyword :string :map] :seon.error/base]}
+  [op type message data]
+  (contract/error type op message data))
 
 ;; ---- performers: the interop edges, one Var per kind ------------------------------------
 
@@ -39,13 +40,13 @@
         staged (try (.mkdirs (.getParentFile (java.io.File. ^String tmp))) (spit tmp text) nil
                     (catch Throwable e
                       (.delete (java.io.File. tmp))
-                      (error :seon.fx/io-error (str "staging " tmp ": " (step/error-msg e)) {:path path :tmp tmp})))]
+                      (error #'seon.fx/write-file :seon.fx/io-error (str "staging " tmp ": " (step/error-msg e)) {:path path :tmp tmp})))]
     (or staged
         (let [[r errno] (lib/c-rename tmp path)]
           (if (zero? r)
             {:value {:bytes (.length (java.io.File. ^String path)) :path path}}
             (do (.delete (java.io.File. tmp))
-                (error :seon.fx/io-error (str "rename " tmp " -> " path ": " (ffi/errno-message errno)) {:path path :tmp tmp :errno errno})))))))
+                (error #'seon.fx/write-file :seon.fx/io-error (str "rename " tmp " -> " path ": " (ffi/errno-message errno)) {:path path :tmp tmp :errno errno})))))))
 
 ;; Seon's own source: the program read from the tree a generation was built from, and
 ;; main's merged forms committed for the next one (seon.source). Never the working tree:
@@ -141,7 +142,7 @@
                                                   [p sha])))
         (and binary-tree head) (assoc :inputs (inputs base)
                            :binary (let [f (java.io.File. ^String binary-tree)] (when (.isFile f) (str/trim (slurp f)))))))
-    (catch Throwable e (error :seon.fx/io-error (step/error-msg e) {:path root}))))
+    (catch Throwable e (error #'seon.fx/read-source :seon.fx/io-error (step/error-msg e) {:path root}))))
 
 (defn- env-input?
   "Is the file at relative path p an input of every test: everything git tracks or would
@@ -300,7 +301,7 @@
             (git! {} dir ["update-ref" ref sha (if have? parent "0000000000000000000000000000000000000000")] nil)
             {:value {:sha sha :files (count files)}})
           (finally (.delete (java.io.File. ^String index)))))
-      (catch Throwable e (error :seon.fx/io-error (step/error-msg e) {:path dir})))))
+      (catch Throwable e (error #'seon.fx/git-commit :seon.fx/io-error (step/error-msg e) {:path dir})))))
 
 ;; ---- the wiki's history: what each section was last written against -----------------------
 
@@ -376,7 +377,7 @@
       {:value {:sections infos
                :files (into {} (keep (fn [[k r]] (when (contains? r :text) [k (:text r)]))) shown)
                :errors (into {} (keep (fn [[k r]] (when (:error r) [k (:error r)]))) shown)}})
-    (catch Throwable e (error :seon.fx/io-error (step/error-msg e) {:path root}))))
+    (catch Throwable e (error #'seon.fx/wiki-history :seon.fx/io-error (step/error-msg e) {:path root}))))
 
 ;; Dependencies: fetching is an outside-world effect with one owner (the PKG plan), and
 ;; the resolver is Jolt's own: no resolver of ours.
@@ -392,7 +393,7 @@
     {:value {:roots (:roots (deps/resolve-deps deps "."))}}
     (catch Throwable e
       (let [u (:unresolved (ex-data e))]
-        (error :seon.fx/unresolved (step/error-msg e)
+        (error #'seon.fx/resolve-deps :seon.fx/unresolved (step/error-msg e)
                {:deps (vec (or (seq (map :coord u)) (keys deps))) :unresolved (vec u)})))))
 
 (defn build
@@ -415,7 +416,7 @@
         step (fn [what args]
                (let [r (apply sh/sh "zsh" "-c" "\"$@\" >> \"$0\" 2>&1" log (concat clean args))]
                  (when-not (zero? (:exit r))
-                   (error :seon.fx/io-error (str what " exited " (:exit r) "; its log: " log) {:path dir}))))]
+                   (error #'seon.fx/build :seon.fx/io-error (str what " exited " (:exit r) "; its log: " log) {:path dir}))))]
     (.mkdirs (java.io.File. (str (cfg/value :seon.config.source/generations-dir))))
     (or (when-not (.exists (java.io.File. dir))
           (step "bin/worktree --at" [(str from "/bin/worktree") "--at" dir commit repo]))
@@ -454,15 +455,15 @@
   (let [t0 (profile/now-ns)
         ;; the branch's commit, or the error the asker gets: no such branch is never a run at an empty sha
         sha (try (or (git-try repo ["rev-parse" "--verify" "--quiet" (str branch "^{commit}")])
-                     (error :seon.fx/io-error (str "no commit of branch " branch " in " repo) {:path repo}))
-                 (catch Throwable e (error :seon.fx/io-error (step/error-msg e) {:path repo})))
+                     (error #'seon.fx/run-tests :seon.fx/io-error (str "no commit of branch " branch " in " repo) {:path repo}))
+                 (catch Throwable e (error #'seon.fx/run-tests :seon.fx/io-error (step/error-msg e) {:path repo})))
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
         clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"]
         at (when-not (contract/error? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
     (cond
       (contract/error? sha) sha
-      (not (zero? (:exit at))) (error :seon.fx/io-error (str "bin/worktree --at exited " (:exit at) ": " (:err at)) {:path dir})
+      (not (zero? (:exit at))) (error #'seon.fx/run-tests :seon.fx/io-error (str "bin/worktree --at exited " (:exit at) ": " (:err at)) {:path dir})
       :else
       (try
         (doseq [[p text] files] (let [f (java.io.File. dir p)] (.mkdirs (.getParentFile f)) (spit f text)))
@@ -499,7 +500,7 @@
   [st {:keys [budget budget-key est] :as m} now-ms]
   (cond
     (spent? st m)
-    (error :seon.fx/budget-spent "the request's budget is spent" {:budget budget :spent (get-in st [:spent budget-key])})
+    (error #'seon.fx/admit :seon.fx/budget-spent "the request's budget is spent" {:budget budget :spent (get-in st [:spent budget-key])})
     (>= (:busy st) (:workers st)) :wait
     (and (:bucket st) (< (:tokens (refill (:bucket st) now-ms)) (or est 0))) :wait
     :else :run))
@@ -663,10 +664,10 @@
                      (cond (contract/error? h) (repeat (count ms) h)
                            (:batch m) ((:perform st) {:batch ms :ctx (:ctx st) :handle h})
                            :else [((:perform st) (cond-> (assoc m :ctx (:ctx st)) h (assoc :handle h)))]))
-                   (catch Throwable e (repeat (count ms) (error :seon.fx/defect (step/error-msg e) {}))))
+                   (catch Throwable e (repeat (count ms) (error #'seon.fx/worker-proc :seon.fx/defect (step/error-msg e) {}))))
            ;; one outcome per request taken, or each asker would wait for ever
            rs (if (= (count ms) (count rs)) rs
-                  (repeat (count ms) (error :seon.fx/defect (str "the batch perform answered " (count rs) " outcomes for " (count ms) " requests") {})))
+                  (repeat (count ms) (error #'seon.fx/worker-proc :seon.fx/defect (str "the batch perform answered " (count rs) " outcomes for " (count ms) " requests") {})))
            st (cond-> st @hv (assoc :handle @hv))
            t1 (profile/now-ns)
            done (mapv (fn [m r]

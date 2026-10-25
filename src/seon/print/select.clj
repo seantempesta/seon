@@ -372,7 +372,7 @@
   {:malli/schema [:=> [:cat :seon.print/context number?] :seon.error/base]}
   [context needed]
   {:seon.error/type :seon.render.value/insufficient-floor-budget-error
-   :seon.error/operation 'seon.render.value/show
+   :seon.error/operation (symbol #'seon.print.select/insufficient-budget)
    :seon.error/message (str "The value printer's budget of " (:budget context) " characters cannot show this value's "
                             "first part, which needs " needed ".")
    :seon.error/member :seon.render.profile/token-budget
@@ -881,7 +881,7 @@
         ;; the charge bounds the laid-out length: a longer text is the allocator's defect
         (when (> (count text) limit)
           (throw (ex-info "The value printer's text exceeded its charge."
-                          {:seon.error/type :seon.render.value/charge-exceeded :seon.error/operation 'seon.print.select/show
+                          {:seon.error/type :seon.render.value/charge-exceeded :seon.error/operation (symbol #'seon.print.select/show)
                            :seon.error/message "The value printer's text exceeded its charge."
                            :seon.print/charge limit :seon.error/offending (count text)})))
         (cond-> {:text text :tokens (estimate text) :truncated? (pos? k) :elisions k}

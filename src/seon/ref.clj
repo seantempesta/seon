@@ -511,19 +511,27 @@
 
 (defn namespace-view
   "Namespace nsym as depth shows it, by the one rule `shown`: its address is its name, its lead
-  its docstring and the sections below it its public vars (those of the db, else of the loaded
-  namespace). nil when neither db nor process holds it."
+  its docstring and the sections below it its definitions, privates included, in file order, each
+  headed by its name and its doc's first sentence (those of the db; a namespace only this process
+  has loaded lists its public names alone): what a namespace is to someone working in it, one line a definition (the a-map
+  design read 42 of seon.print.select's one (source f) a turn, its bug in privates ns-publics
+  never named). nil when neither db nor process holds it."
   {:malli/schema [:=> [:cat :seon.host/db :symbol :seon.ref/depth] [:maybe :seon.ref/view]]}
   [db nsym depth]
   (let [e (pdb/eid db :ns/name nsym)
         loaded (find-ns nsym)]
     (when (or e loaded)
       (let [doc (if e (:ns/doc (d/pull db [:ns/doc] e)) (:doc (meta loaded)))
+            ;; [order name doc] of each definition: its form's place in the file (nil, last, without one)
             vars (if e
-                   (d/q '[:find [?n ...] :in $ ?ns :where [?v :var/ns ?ns] [?v :var/name ?n]] db e)
-                   (map #(symbol (str nsym) (str %)) (keys (ns-publics loaded))))]
+                   (d/q '[:find ?o ?n ?doc :in $ ?ns :where [?v :var/ns ?ns] [?v :var/name ?n]
+                          [(get-else $ ?v :var/doc "") ?doc] [(get-else $ ?v :var/form -1) ?f] [(get-else $ ?f :form/order -1) ?o]]
+                        db e)
+                   (for [s (keys (ns-publics loaded))] [-1 (symbol (str nsym) (str s)) ""]))
+            line (fn [v d] (str (name v) (when-let [l (some-> (not-empty d) lead-sentence)] (str ": " l))))]
         (shown (cond-> {:seon.ref/address (str nsym) :seon.ref/heading (str nsym)
-                        :seon.ref/below (mapv (fn [v] {:seon.ref/address (str v) :seon.ref/heading (name v)}) (sort vars))}
+                        :seon.ref/below (mapv (fn [[_ v d]] {:seon.ref/address (str v) :seon.ref/heading (line v d)})
+                                              (sort-by (fn [[o v]] [(if (neg? o) Long/MAX_VALUE o) (str v)]) vars))}
                  doc (assoc :seon.ref/lead doc))
                depth)))))
 

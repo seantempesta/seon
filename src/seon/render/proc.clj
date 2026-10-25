@@ -258,7 +258,7 @@
     (cond
      (and eid (vector? view)) (debug-value st view)
      (and db (nil? eid))
-     (contract/error :seon.render/no-location `page-value
+     (contract/error :seon.render/no-location #'seon.render.proc/page-value
                      (str "no " (if (keyword? view) (str "agent " (ui/kname view) " in root's boot " (task/boot-of db)) (ui/kname view))
                           " on main: an agent's id names one of this boot's (ids start again each boot); an earlier boot's agent's page is"
                           " /walk/<its eid>, linked from its root's page")
