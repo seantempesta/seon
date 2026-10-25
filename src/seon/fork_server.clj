@@ -88,12 +88,20 @@
                  ;; first fork builds it, a later one updates it by the commits since (reach-update)
                  st (assoc st :graph (if-let [g (:graph st)]
                                        (program/reach-update g (:db st))
-                                       (program/reach-graph (:db st) (fx/declared-refs (cfg/value :seon.config.root/system-path)))))]
+                                       (program/reach-graph (:db st) (fx/declared-refs (cfg/value :seon.config.root/system-path)))))
+                 ;; main's db or reach graph moved since the last fork: the heap made static first, so
+                 ;; the agent's collections never trace (and un-share) what it inherits (design
+                 ;; agent-loop section 2: 163 MB of this heap sat in generations 3-4 at fork; static,
+                 ;; an agent's work left 106 MB where it left 333). Unmoved, nothing is collected.
+                 static-ms (when-not (and (identical? (:db st) (:static-db st)) (identical? (:graph st) (:static-graph st)))
+                             (let [t1 (profile/now-ns)] (lib/static!) (profile/ms-since t1)))
+                 st (assoc st :static-db (:db st) :static-graph (:graph st))]
              (fork-carrying! st #(repl/run! % (assoc m :graph (:graph st)) (:db st) (:ns m))
                              (fn [n] [st {:ev [{:ev :fork-failed :agent (:agent m) :active-threads n}]}])
                              (fn [pid] (let [[st evs] (adopt st pid)]
-                                         [st {:ev (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
-                                                          :fork-ms (profile/ms-since t0) :t (:max-tx (:db st))}]
+                                         [st {:ev (into [(cond-> {:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
+                                                                  :fork-ms (profile/ms-since t0) :t (:max-tx (:db st))}
+                                                           static-ms (assoc :static-ms static-ms))]
                                                         evs)}]))))
      :stats [st {:ev [{:ev :stats :t (:max-tx (:db st)) :datoms (count (d/datoms (:db st) :eavt))
                        :mismatch (:mismatch st) :mem-mb (lib/r2 (lib/real-mb)) :os-threads (lib/nthreads)
