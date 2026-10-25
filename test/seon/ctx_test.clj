@@ -4,7 +4,7 @@
   each key by its own schema's render. Run: bin/test seon.ctx-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [seon.cost :as cost]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [my.schema]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [my.schema]))
 
 (def ^:private k "The test agent's key." "test-boot/a1")
 
@@ -100,7 +100,8 @@
     (try
       (reset! seon.agent/state {:db db :key k :branch :b})
       (is (= (:tree (ctx/build db k :b)) @ctx/ctx) "built when the state first holds the db")
-      (is (= {:seon.render/schema :seon.ctx/ctx} (meta @ctx/ctx)) "marked for its block")
+      (is (= {:seon.render/schema :seon.ctx/ctx :seon.render/basis {:t (:max-tx db) :branch :b}} (meta @ctx/ctx))
+          "marked for its block, with the basis an eval of it records")
       (swap! seon.agent/state assoc :db (:db-after rep) :tx (select-keys rep [:db-after :tx-data]))
       (is (contains? (:evals @ctx/ctx) "e11") "a transaction's eval joins")
       (is (= (:tree (ctx/build (:db-after rep) k :b)) @ctx/ctx))
@@ -152,24 +153,40 @@
 (deftest an-agent-adds-a-datum-and-its-render
   ;; what an agent evaluates to add to its record and draw it (the owner, 2026-10-25: "they can
   ;; easily update it and just add more data and render functions"): its key registered with a
-  ;; render is an attribute at once, and @ctx's eval is recorded as the text the model read and the
-  ;; block the page draws, never as a copy of the record
-  (let [db (seeded 3)
-        reg (my.schema/registration db :lab.ctx/steps '[:vector {:seon.render/html seon.ctx-test/steps} :string] false)]
+  ;; render is an attribute at once; @ctx's eval is recorded as its basis, never a copy; the page
+  ;; renders it from the branch, and a key whose render the branch defines is drawn by its agent,
+  ;; asked while viewed (root, 2026-10-25: "nothing is stored")
+  (let [form '[:vector {:seon.render/html seon.ctx-test/steps} :string]
+        db (seeded 3)
+        reg (my.schema/registration db :lab.ctx/steps form false)]
     (is (some #{{:db/ident :lab.ctx/steps :db/valueType :db.type/data :db/cardinality :db.cardinality/one}} (:tx reg))
         "a registered key holding a vector is stored as plain data, with no entity map listing it")
     (let [db (:db-after (d/with db (:tx reg)))
           db (:db-after (d/with db [{:seon.agent/key k :lab.ctx/steps ["read the plan" "write the test" "read the plan"]}]))
-          c (with-meta (:tree (ctx/build db k :b)) {:seon.render/schema :seon.ctx/ctx})
-          ;; the REPL reads its branch's schemas from the agent's state, as an agent holds it
-          rec (try (reset! seon.agent/state {:db db})
-                   (seon.repl/record-details db "@ctx" {:handle 'result/e9 :value c} {} nil)
-                   (finally (reset! seon.agent/state nil)))]
+          tree (:tree (ctx/build db k :b))
+          c (with-meta tree {:seon.render/schema :seon.ctx/ctx :seon.render/basis {:t (:t tree) :branch :b}})
+          as-agent (fn [f] (try (reset! seon.agent/state {:db db}) (f) (finally (reset! seon.agent/state nil))))
+          rec (as-agent #(seon.repl/record-details db "@ctx" {:handle 'result/e9 :value c} {} nil))
+          block (fn [drawn] (let [w (volatile! #{})
+                                  h (binding [seon.render.ui/*drawn* drawn seon.render.ui/*wanted* w]
+                                      (seon.web.html/html (render/html c {:db db :drawer {:agent :a1 :handle 'result/e9}})))]
+                              [h @w]))
+          answer (as-agent #(-> (seon.repl/agent-step {} :sock {:op :render :id 7 :schema :lab.ctx/steps :value (:lab.ctx/steps c)}) second :sock first))]
       (is (= ["read the plan" "write the test" "read the plan"] (:lab.ctx/steps c)) "the vector comes back in its order, duplicates kept")
-      (is (not (contains? (:response rec) :value)) "the record holds no copy of the record")
+      (is (= {:schema :seon.ctx/ctx :basis {:t (:t tree) :branch :b}} (select-keys rec [:schema :basis])) "the record names the value's basis")
+      (is (not (contains? (:response rec) :value)) "and holds no copy of the record")
       (is (re-find #":lab.ctx/steps" (:printed rec)) "the model's text is the one printer's, as it read it")
-      (is (re-find #"<ol><li>read the plan</li><li>write the test</li><li>read the plan</li></ol>" (:seon.web.html/raw (:seon.render/html rec)))
-          "the block draws the key by the render its registered schema names"))))
+      (let [[h w] (block {})]
+        (is (= #{[:a1 'result/e9 :lab.ctx/steps ["read the plan" "write the test" "read the plan"]]} w) "the page asks the agent to draw the key")
+        (is (re-find #"drawn by seon.ctx-test/steps in a1 when it answers" h) "and shows its structure meanwhile, naming its render"))
+      (is (= {:op :reply :id 7 :response {:html "<ol><li>read the plan</li><li>write the test</li><li>read the plan</li></ol>"}} answer)
+          "the agent draws it by the render its branch names, recording nothing")
+      (let [[h w] (block {[:a1 'result/e9 :lab.ctx/steps] (:response answer)})]
+        (is (re-find #"<ol><li>read the plan</li>" h) "the page shows the agent's drawing")
+        (is (empty? w) "and asks nothing more"))
+      (let [[h w] (block {[:a1 'result/e9 :lab.ctx/steps] {:error {:seon.error/message "no live agent :a1"}}})]
+        (is (re-find #"drawn by seon.ctx-test/steps in a1, which did not answer" h) "an agent that is gone: its structure, saying so")
+        (is (empty? w))))))
 
 (defn steps
   "A render an agent writes for its datum: the steps, numbered."

@@ -388,20 +388,15 @@
   [db code r req run]
   (let [cites (when db (some->> (:prose req) (ref/references db)))
         resp (dissoc r :text :recorded :fns :record)
-        ;; a value its producer names a page render for, and none for the model (@ctx): the model
-        ;; read it printed, and the page draws its block, rendered here, where its renders are
-        ;; defined (an agent's own, unmerged), and kept as its HTML (hiccup holds render calls,
-        ;; which are no data, so it is serialized here, under the branch's schemas, as its calls
-        ;; expand when written); the value itself is not copied into each record
-        html (let [v (:value resp)]
-               (when (and (contains? resp :value) (not (contains? resp :values)) (not (render/rendered? v))
-                          (with-branch-schemas #(render/declared (:seon.render/schema (meta v)) :html)))
-                 (with-branch-schemas #(h/raw (h/html (render/html v {:as :block :handle (:handle resp)}))))))
-        data? (and (nil? html) (or (not (contains? resp :value)) (pdb/plain? (:value resp))) (every? pdb/plain? (:values resp)))]
+        ;; a value that names its basis (@ctx: the branch's record at t, seon.ctx/build) is
+        ;; recorded as that basis and its schema: the page renders it from what exists, and a
+        ;; copy of the session's record is never stored at each @ctx
+        basis (when (and (contains? resp :value) (not (contains? resp :values))) (:seon.render/basis (meta (:value resp))))
+        data? (and (nil? basis) (or (not (contains? resp :value)) (pdb/plain? (:value resp))) (every? pdb/plain? (:values resp)))]
     (cond-> (if data?
               {:code code :response resp}
               (cond-> {:code code :response (dissoc resp :value :values) :printed (print/response-text resp) :type (str (type (:value resp)))}
-                html (assoc :seon.render/html html)))
+                basis (assoc :schema (:seon.render/schema (meta (:value resp))) :basis basis)))
       (or (contains? r :value) (:ex r))
       (assoc :line (print/line (cond (:ex r) (or (get-in r [:ex :seon.error/message]) (:ex r)) (contains? r :values) (:values r) (nil? (:value r)) "nil" :else (:value r)) (cfg/value :seon.config.render/line-budget) nil))
       (:prose req) (assoc :prose (:prose req))
@@ -466,7 +461,8 @@
 
 (defn agent-step
   "The agent as a step-fn, run on its one thread by seon.step/run-loop: requests in on
-  :sock (an eval as {:op :eval :id :forms}, Seon's ops as {:op k ...}), replies out on
+  :sock (an eval as {:op :eval :id :forms}, a value to draw as {:op :render :id :schema :value},
+  Seon's ops as {:op k ...}), replies out on
   :sock; :pause, :resume, :stop and :ping are taken by the loop. Its REPL state is the
   process's one state map (seon.agent/state), which the code it evaluates reads, so the
   step's own state is empty."
@@ -476,7 +472,13 @@
   ([_] {})
   ([st _] st)
   ([st _ m]
-   (if (= :eval (:op m))
+   (cond
+     ;; root's render proc asks for a value drawn by a render this agent defines (seon.render.ui/ctx):
+     ;; drawn here under its branch's schemas, answered as HTML, and nothing recorded
+     (= :render (:op m))
+     [st {:sock [{:op :reply :id (:id m)
+                  :response {:html (with-branch-schemas #(h/html (render/html (:value m) {:schema (:schema m)})))}}]}]
+     (= :eval (:op m))
      (do
        ;; an interrupt left from before this request is not its; then root hears that it began
        ;; (its proc's :started event), what an interrupt or a kill meant for a running eval
@@ -485,7 +487,7 @@
        (agent/send! {:op :started :id (:id m)})
        [st {:sock [{:op :reply :id (:id m) :response (dissoc (eval-string (:forms m) (select-keys m [:ticks :origin])) :value :values)
                     :t (:max-tx (agent/db))}]}])
-     [st (when-let [ms (agent/handle! m)] {:sock ms})])))
+     :else [st (when-let [ms (agent/handle! m)] {:sock ms})])))
 
 (defn serve!
   "The agent's loop: one request at a time, in arrival order. Never returns. The agent

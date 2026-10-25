@@ -14,7 +14,7 @@
   (:seon.ctx/ctx's declared html render)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.render :as render] [seon.agent :as agent]
-            [seon.schema.datahike :as sd] [seon.db :as pdb] [datahike.api :as d] [clojure.string :as str]))
+            [seon.schema.datahike :as sd] [seon.db :as pdb] [datahike.api :as d] [datahike.db.interface :as dbi] [clojure.string :as str]))
 
 ;; ---- the shape, derived once from the registry -----------------------------------------------
 
@@ -53,7 +53,7 @@
   vector), a ref as {:db/id}."
   {:malli/schema [:=> [:cat :seon.host/db pos-int?] :map]}
   [db e]
-  (let [many (get (:rschema db) :db.cardinality/many #{}) m (d/pull db '[*] e)]
+  (let [many (get (dbi/-rschema db) :db.cardinality/many #{}) m (d/pull db '[*] e)]
     (reduce-kv (fn [m a v] (if (and (contains? many a) (sequential? v)) (assoc m a (set v)) m)) m m)))
 
 (defn- key-of
@@ -84,9 +84,10 @@
             [m ix] (get units s))))
 
 (defn- environment
-  "The map's environment: the db's t, the branch and its commit."
+  "The map's environment: the db's t, the branch and the commit the db is (none for a value as of
+  an earlier t: its basis names it)."
   {:malli/schema [:=> [:cat :seon.host/db :any] :map]}
-  [db branch] {:t (:max-tx db) :branch branch :commit (d/commit-id db)})
+  [db branch] (let [c (d/commit-id db)] (cond-> {:t (:max-tx db) :branch branch} c (assoc :commit c))))
 
 (defn build
   "The agent's record on db as ctx's value {:tree :ix}: agent key k's entity and its units, and
@@ -141,8 +142,8 @@
   or gone, a member gone with its identity, else the attribute set or retracted."
   {:malli/schema [:=> [:cat :map :seon.host/db [:vector :any] [:maybe :qualified-keyword] :any] :map]}
   [c db p s {:keys [a v added]}]
-  (let [many (get (:rschema db) :db.cardinality/many #{})
-        ref? (contains? (get (:rschema db) :db.type/ref #{}) a)
+  (let [many (get (dbi/-rschema db) :db.cardinality/many #{})
+        ref? (contains? (get (dbi/-rschema db) :db.type/ref #{}) a)
         u (unit-of s a)
         path (conj p a)]
     (cond
@@ -202,9 +203,11 @@
 (defonce ^:private held (volatile! nil))
 
 (defn- install!
-  "c as the atom's value: the tree, marked as ctx for its renders; the index held beside it."
+  "c as the atom's value: the tree, marked as ctx for its renders and with its basis (the branch
+  and t it is the record of: what an eval of it records, seon.repl/record-details); the index
+  held beside it."
   {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :map]]] :nil]}
-  [c] (vreset! held c) (reset! ctx (with-meta (:tree c) {:seon.render/schema :seon.ctx/ctx})) nil)
+  [c] (vreset! held c) (reset! ctx (with-meta (:tree c) {:seon.render/schema :seon.ctx/ctx :seon.render/basis (select-keys (:tree c) [:t :branch])})) nil)
 
 (defn- moved
   "The datoms db moved by from a to b: the last transaction's when b is its db (agent/transact!

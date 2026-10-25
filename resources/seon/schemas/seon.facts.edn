@@ -125,10 +125,9 @@
  ;; recorded, and what its prose cites (:cites, seon.ref/references parsed once as it is recorded)
  :seon.eval/record [:map {:seon.render/html seon.render.ui/evaluation} [:code :string] [:response :map]
                     [:printed {:optional true} :string] [:type {:optional true} :string]
-                    ;; the page's block of a value whose producer names an html render and no :ai one
-                    ;; (@ctx, seon.ctx), rendered by the agent that evaluated it, as its HTML (seon.web.html/raw;
-                    ;; seon.repl/record-details)
-                    [:seon.render/html {:optional true} [:map [:seon.web.html/raw :string]]]]
+                    ;; a value that names its basis (@ctx, seon.ctx): its schema and the basis it is
+                    ;; rendered from, in place of a copy (seon.repl/record-details)
+                    [:schema {:optional true} :qualified-keyword] [:basis {:optional true} [:map [:t :int] [:branch :seon.db/branch]]]]
  ;; an agent: one entity per agent per boot of its root (an id like :a3 starts again each boot),
  ;; named by its key (seon.task/agent-key: "<boot>/<id>"), a content id so root's entity on main
  ;; and the one its branch's records name are one; it refs the root that started it. What root

@@ -16,7 +16,7 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.learn :as learn] [seon.docs :as docs] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
-            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task]))
+            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -438,11 +438,37 @@
   (cond-> (dissoc response :handle :ms :ticks :bytes :fns :ex :text :record :recorded)
     (contains? response :values) (dissoc :value)))
 
+(def ^:dynamic *drawn*
+  "What agents drew for the component being rendered, {[agent handle key] html-or-error}: the
+  render proc's answers to its :render asks (seon.render.proc/comp-entry binds it)."
+  {})
+
+(def ^:dynamic *wanted*
+  "A volatile set the component being rendered adds each [agent handle key value] to that an agent
+  must draw and *drawn* lacks: what the render proc asks for (comp-entry binds it), nil elsewhere."
+  nil)
+
+(defn- based-value
+  "The value eval e's record names by its basis (@ctx: the record of e's agent on branch db as of
+  t, seon.ctx/build), or nil: no basis, or no db to read it on."
+  {:malli/schema [:=> [:cat :map :map [:maybe :seon.host/db]] [:maybe :map]]}
+  [rec e db]
+  (when-let [{:keys [t branch]} (when db (:basis rec))]
+    (let [k (:seon.agent/key (d/entity db (:db/id (:seon.eval/agent e))))]
+      (with-meta (assoc (:tree (seon.ctx/build (d/as-of db t) k branch)) :t t) {:seon.render/schema (:schema rec)}))))
+
+(defn- drawer
+  "Who draws a value eval e answered with a render its agent defines: {:agent id :handle h}, the
+  agent by its id on db, or nil."
+  {:malli/schema [:=> [:cat :map :any [:maybe :seon.host/db]] [:maybe :map]]}
+  [e handle db]
+  (when-let [id (when db (:seon.agent/id (d/entity db (:db/id (:seon.eval/agent e)))))] {:agent id :handle handle}))
+
 (defn evaluation
   "One eval (the declared html render of :seon.db/eval-fact, its record, and of a response), as
   it ran: the prose beside it, its code, its response printed under its handle as it is shown
   (seon.print/record-text of its record; a live response's own :text; an error's by its error
-  map's render; a block its agent drew, :seon.render/html, as drawn), and its cost and who evaluated it as recorded; :as :inline, its code and
+  map's render; a value recorded as its basis, @ctx's, rendered from the branch at it), and its cost and who evaluated it as recorded; :as :inline, its code and
   response in one line. Rendered from the record, which never changes."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [e opts]
@@ -479,9 +505,10 @@
                            (keyword "data-on:click") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=' + "
                                                           "encodeURIComponent(el.closest('li[id]').id + '/' + el.dataset.seonForm) + '&open=false')")} f]
                  (render/html (print/read-rest form (:handle r) v) {:handle form})])])
-           (if-let [block (:seon.render/html rec)]
-             ;; a value recorded with its block (@ctx): the block its agent drew, as it drew it
-             [:div {:class "flex gap-2 text-text-200"} [:span {:class "text-text-500"} "⇒"] block]
+           (if-let [v (based-value rec e (:db opts))]
+             ;; a value recorded as its basis (@ctx): rendered from what the branch holds at it
+             [:div {:class "flex gap-2 text-text-200"} [:span {:class "text-text-500"} "⇒"]
+              (render/html v {:as :block :schema (:schema rec) :handle (:handle r) :db (:db opts) :drawer (drawer e (:handle r) (:db opts))})]
              [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (prose (or (:text r) "") (part))])))
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
@@ -680,20 +707,36 @@
 (defn ctx
   "The agent's record, @ctx (the declared html render of :seon.ctx/ctx), as one block: its
   environment on a line, then a row per key, each value by the render its key's schema declares
-  (render/html with :schema the key: an attribute an agent registered with a :seon.render/html
-  draws by it), else the one printer's structure."
+  (render/html with :schema the key), else the one printer's structure. A key whose schema its
+  branch registered or changed (opts :db, its branch) is drawn by its agent, which defines that
+  render (opts :drawer {:agent :handle}): as the agent drew it (*drawn*), else by the printer's
+  structure, naming its render, while the render proc asks the agent for it (*wanted*)."
   {:malli/schema [:=> [:cat :seon.ctx/ctx :seon.render/opts] :any]}
   [{:keys [t branch commit] :as c} opts]
-  (let [ks (sort-by str (keys (dissoc c :t :branch :commit :db/id)))]
+  (let [ks (sort-by str (keys (dissoc c :t :branch :commit :db/id)))
+        changes (when (:db opts) (program/schema-changes (:db opts)))
+        {:keys [agent handle]} (:drawer opts)
+        cell (fn [k v]
+               (let [form (get changes k)
+                     sym (when (and (vector? form) (map? (second form))) (:seon.render/html (second form)))
+                     drawn (get *drawn* [agent handle k])]
+                 (cond
+                   (not (and sym agent)) (render/html v (cond-> {:schema (when (qualified-keyword? k) k)}
+                                                          handle (assoc :handle (list k handle))))
+                   (string? (:html drawn)) (h/raw (:html drawn))
+                   :else (do (when (and *wanted* (nil? drawn)) (vswap! *wanted* conj [agent handle k v]))
+                             [:div {:class "flex flex-col gap-1"}
+                              [:span {:class "text-2xs text-text-500"} (str "drawn by " sym " in " (kname agent)
+                                                                           (if drawn ", which did not answer: " " when it answers: ") "its value")]
+                              (render/html v {:handle (list k handle)})]))))]
     (if (= :inline (:as opts))
       [:span {:class "font-mono"} (str "ctx " branch " t " t ", " (count ks) " keys")]
       [:div {:class "flex flex-col gap-1 border border-base-700 rounded p-2 text-xs"}
-       [:div {:class "text-text-500"} (str "ctx · " branch " · t " t " · commit " commit)]
+       [:div {:class "text-text-500"} (str "ctx · " branch " · t " t (when commit (str " · commit " commit)))]
        [:table [:tbody (for [k ks :let [v (get c k)]]
                          [:tr {:class "align-top"}
                           [:td {:class "pr-3 font-mono text-text-400 whitespace-nowrap"} (str k)]
-                          [:td (render/html v (cond-> {:schema (when (qualified-keyword? k) k)}
-                                               (:handle opts) (assoc :handle (list k (:handle opts)))))]])]]])))
+                          [:td (cell k v)]])]]])))
 
 (defn- shown-as
   "How node nd's schema says it is shown on a page (:seon.render/as on its entity schema), else as a tile."
@@ -800,7 +843,7 @@
            [:span {:class (if (:ex r) "text-error" "text-text-500")} (if (:ex r) "✕" "⇒")]
            [:code {:class "text-text-400"} (:line rec)]
            (when (:ms r) [:span {:class "tabular-nums text-text-500"} (ms-str (:ms r))])]
-          (when open? (evaluation own {:opened opened}))]])
+          (when open? (evaluation own {:opened opened :db db}))]])
       [:li {:id id :class "py-1"} (render/html (dissoc own :db/id) {:schema schema})])))
 
 (defn component

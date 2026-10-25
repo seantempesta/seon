@@ -19,7 +19,9 @@ Things are named by themselves: an eval by its id, a run by its id, an attribute
 
 `@ctx`'s value carries `{:seon.render/schema :seon.ctx/ctx}` as metadata. ``:seon.ctx/ctx`` declares a page render, ``seon.render.ui/ctx``, and none for the model, so the model reads `@ctx` as it reads any value, through the one printer, cut where it is large with the form that reads the rest. The page draws the same eval as a block: a row per key, each value by the render its key's own schema declares (``seon.render/render`` with the key as its schema), else the printer's structure.
 
-The block is drawn in the agent, where its renders are defined, when the eval is recorded (``seon.repl/record-details``), and kept as its HTML (``seon.web.html/raw``): root's page shows it as drawn and calls nothing of the agent's. The record keeps the text the model read and the block, not a copy of the map. The renders a branch registered are the ones it draws by: the REPL binds malli's registry to its branch's population while it evaluates and records, and ``seon.contract/properties`` reads a bound registry first.
+An eval of `@ctx` is recorded as its basis, never as a copy: the value's metadata names it (`:seon.render/basis`, the branch and t it is the record of), and ``seon.repl/record-details`` keeps `{:schema :basis}` and the text the model read (a session of 3,000 evals has a 3.9 MB record, which a copy would store again at every `@ctx`). The page renders what exists: ``seon.render.ui/evaluation`` rebuilds the map from the agent's branch as of t (``seon.ctx/build``) and draws it.
+
+A key whose schema the branch registered or changed is drawn by the agent, since its render may be defined only there and root cannot call it. ``seon.render.ui/ctx`` shows that key's structure, naming its render, and notes what it wants drawn; the render proc asks the agent for it while the page is viewed (``seon.render.proc/comp-entry``, an `{:op :render}` request through root's api to the agent, answered by ``seon.repl/agent-step`` under the branch's schemas, recording nothing), holds the answer, and renders the component again with it. An agent that is gone answers nothing, and its key keeps its structure, saying so, until the agent runs again or its render merges to main and root calls it. Nothing of the block is stored, so the model never reads HTML.
 
 ## Adding a datum and its render
 
@@ -32,7 +34,7 @@ An agent adds to its record, and to what it sees of it, with four evals (`seon.c
 @ctx
 ```
 
-A registered key is an attribute at once when no entity map lists it (``my.schema/registration`` carries its declaration). The next `@ctx` holds it, and its block draws it by `lab.ui/steps`, on the agent's branch, unmerged. A class a render names is styled only if the page's stylesheet was built with it.
+A registered key is an attribute at once when no entity map lists it (``my.schema/registration`` carries its declaration). The next `@ctx` holds it, and its block draws it by `lab.ui/steps`, drawn by the agent, unmerged. A class a render names is styled only if the page's stylesheet was built with it.
 
 ## Not yet
 
