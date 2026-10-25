@@ -15,7 +15,7 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
-            [seon.render :as render] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.proofs :as proofs] [seon.cost :as cost] [seon.task :as task]))
+            [seon.render :as render] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -215,17 +215,6 @@
     [:span {:class "big-alloc" :title "this evaluation allocated a lot: a cost to look at"} (str "⚠ " (bytes-str b) " alloc")]
     [:span (bytes-str b)]))
 
-(defn merge-words
-  "A merge's result as [how why]: :merged (where main is now), :conflict (the keys both
-  sides changed), or :refused (its red tests, else its error's message). The card's pill
-  and the stream's row say it so."
-  {:malli/schema [:=> [:cat :map] [:tuple :keyword :string]]}
-  [r]
-  (cond (:merged? r) [:merged (str "→ main" (when (:t r) (str " · t " (:t r))) (when (:tx r) (str " · tx " (:tx r))))]
-        (seq (:conflicts r)) [:conflict (str (count (:conflicts r)) " keys changed on both sides")]
-        (proofs/red? (:tests r)) [:refused (str "tests " (run-words (:tests r)))]
-        :else [:refused (or (:seon.error/message r) "refused")]))
-
 (def error-shown
   "The keys an error's renders show in their own lines (seon.render.ai/error, `error-box`);
   every other key of the error map is printed after them, so both faces show the same facts.
@@ -280,7 +269,6 @@
                   (print/line (:printed r) (cell))
                   (when (:ms r) (str " · " (ms-str (:ms r)))))))
     :commit (str (kname (:branch ev)) " t " (:t ev) (when (:txs ev) (str " · " (:txs ev) " tx")))
-    :merged (let [[k why] (merge-words (:result ev))] (if (= :merged k) why (str (str/upper-case (name k)) " · " (print/line why (cell)))))
     :tests (str (run-words ev) (when (:ms ev) (str " · " (ms-str (:ms ev)))))
     :merged-main (let [r (:result ev)]
                    (if-not (contract/error? r) (str "main → branch · " (count (:applied r)) " applied · " (count (:conflicts r)) " conflicts")
