@@ -12,10 +12,14 @@
   "The screen's forms, evaluated in order before each model request: the agent's page, as root
   shows it (`show`: its peers, status, plan and this run), then its task's live state run fresh
   (my.task/status: the turn of how many, each proof's status, first failing assertion and how to
-  run it), then what its branch changes against main (my.branch/changes): the turn's live state is
-  REPL forms, run fresh each turn (the owner's ruling). An agent changes what it is shown by
-  redefining this var: rewriting its own interface is an eval."
-  ["(seon.screen/show)" "(my.task/status)" "(my.branch/changes)"])
+  run it), then what its branch changes against main (my.branch/changes), then what its plan's
+  work is likely to need beyond what it cites (my.task/related: the sections, functions and schema
+  keys nearest it, a line each, and the forms that read one and search further): the turn's live
+  state is REPL forms, run fresh each turn, and the references explicit evals refined as the
+  session goes (the owner's rulings). An agent changes what it is shown by redefining this var:
+  rewriting its own interface is an eval, so (my.agent/related \"its words\") in place of the last
+  form follows its own query."
+  ["(seon.screen/show)" "(my.task/status)" "(my.branch/changes)" "(my.task/related)"])
 
 (defn show
   "The agent's screen: its page as root's render proc holds it, without its conversation (the model

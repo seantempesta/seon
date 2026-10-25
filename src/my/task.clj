@@ -3,7 +3,7 @@
   Writes go to the agent's own branch; root sees them when the branch merges, and a
   failure at the run's end (root's judge reads the branch)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.turn :as turn] [seon.screen :as screen] [seon.context :as context] [seon.contract :as contract]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.turn :as turn] [seon.screen :as screen] [seon.context :as context] [seon.contract :as contract] [seon.db :as pdb]))
 
 (defn current
   "The task this agent works, as data (:seon.task/task)."
@@ -54,3 +54,29 @@
   (if-let [{:keys [input]} (screen/input)]
     (dissoc (context/turn-state (agent/db) (current) input) :will-merge)
     (contract/error :seon.turn/not-observed 'my.task/status "no turn has observed this agent's task yet: a model turn or a context read (the server's :context, seon_context) measures it; (my.agent/prove) runs its proofs" {})))
+
+(defn related
+  "What this task's plan, as the branch holds it now, is likely to need beyond what it cites: the
+  wiki sections, program functions and schema keys nearest it by its references and by meaning
+  (seon.context/related; its vector is embedded on the branch by each turn's observe,
+  seon.agent/embed-written!, just before the screen runs), :seon.config.render/related of each,
+  each a line at summary depth with the forms that read one whole and search further
+  (seon.context/related-view). A form of the screen (seon.screen/forms), made again only when the
+  branch's vectors change (seon.context/related-at); it asks no effect, so it reads the vectors
+  the branch holds. (my.agent/related \"words\" k) refines it by any text. A plan with no vector
+  yet says so, and a count of 0 that it is off."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (let [db (agent/db)
+        te (some->> (turn/current-task) (pdb/eid db :seon.task/id))
+        held (:related @agent/state)
+        r (when te (context/related-at db te (:vectors-t @agent/state) held))
+        ;; rendered once per answer: an unchanged plan reads nothing again
+        r (cond-> r (and r (not (contains? r :view))) (assoc :view (some->> (:value r) (context/related-view db))))]
+    (when r (swap! agent/state assoc :related r))
+    (cond
+      (:view r) (:view r)
+      (:value r) {:nothing "nothing nearer the plan than what it cites"}
+      ;; its key's count (seon.context/related-at): 0 shows none
+      (some-> r :key second zero?) {:off ":seon.config.render/related is 0"}
+      :else {:not-embedded "no plan with a vector yet: (my.agent/related \"your words\") searches the wiki by any text"})))

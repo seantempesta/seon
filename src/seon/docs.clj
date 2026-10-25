@@ -435,7 +435,8 @@
     nil))
 
 (defn- names-lines
-  "Names as comment lines of at most :seon.config.render/width characters: `;; a b c`."
+  "Words (a namespace's public names, a docstring's words) as comment lines of at most
+  :seon.config.render/width characters: `;; a b c`."
   {:malli/schema [:=> [:cat [:sequential :string]] :string]}
   [names]
   (let [width (cfg/value :seon.config.render/width)]
@@ -451,7 +452,8 @@
   2026-10-25): a var as its definition's head (seon.reader/definition-head: name, docstring as
   written, attribute map, arglist; its body marked `…)` with the form that reads it whole), a
   namespace as its ns form's head, its docstring as written, then its public names; each as code
-  (seon.print/code), printed verbatim. Anything else as `cited` reaches it; nil when nothing."
+  (seon.print/code), printed verbatim; a var whose source db does not record, as a `declare` with
+  its arglists and doc as comments. Anything else as `cited` reaches it; nil when nothing."
   {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :any]}
   [db c]
   (let [[kind v :as hit] (cited db c)
@@ -462,7 +464,10 @@
             head (some-> src (reader/definition-head (symbol (namespace nm))))]
         (cond head (print/code (str head "  ; the body: (source " nm ")"))
               src (print/code src)
-              :else v))
+              ;; no source recorded: what the var's facts say, as Clojure (its arglists and doc as comments)
+              :else (print/code (str "(declare " (name nm) ")  ; no source recorded: (doc " nm ")"
+                                     (when-let [as (seq (:arglists v))] (str "\n;; " (str/join " " (map str as))))
+                                     (when-let [d (:doc v)] (str "\n" (names-lines (str/split d #"\s+"))))))))
       (and (= :namespace kind) (symbol? nm))
       (let [nv (ref/namespace-view db nm :doc)]
         (print/code (str "(ns " nm (when-let [d (:seon.ref/lead nv)] (str "\n  " (emit/string-literal d))) ")"

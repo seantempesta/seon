@@ -82,7 +82,9 @@
   the task as the branch holds it (its plan may have improved)."
   {:malli/schema [:=> [:cat :seon.task/id :seon.task/plan] :map]}
   [id plan-before]
-  (let [t0 (profile/now-ns)
+  (let [;; the branch's own texts embedded first, so the plan's vector is the plan's now
+        _ (agent/embed-written!)
+        t0 (profile/now-ns)
         test-run (agent/prove!)
         tests-ms (long (profile/ms-since t0))
         results (if (contract/error? test-run) {} (proofs/results test-run))

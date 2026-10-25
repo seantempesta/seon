@@ -6,7 +6,7 @@
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.render.proc :as p]
-            [seon.web.html :as h] [seon.config] [seon.docs] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
+            [seon.web.html :as h] [clojure.walk] [seon.print.select] [seon.config] [seon.docs] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
             [seon.fx] [seon.source] [seon.program] [seon.web] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems]))
 
 (def ^:private task
@@ -772,6 +772,9 @@
   (let [[main branch eid] (paged-dbs)
         [st1 _] (#'p/pass-view (comp-state main branch eid) :a3)
         {:keys [t page]} (p/screen-of st1 :a3)
+        ;; code (seon.print/code: a cited var's head) is the printer's plain data, printed verbatim:
+        ;; read as its text, never as an attribute map or a raw value
+        page (clojure.walk/postwalk #(if (seon.print.select/code? %) (:seon.print/code %) %) page)
         text (pr-str page)]
     (is (= (:max-tx main) t))
     (is (vector? page) "hiccup, as the page is")

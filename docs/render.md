@@ -131,6 +131,8 @@ Uses of take, subs and the like in display code that choose what to find or read
 
 - `seon.render.ui/kname`, `seon.render.ui/dom-id`: a keyword's text without its colon.
 - `seon.context/similar`: the top k of a search (`take` the config's `:seon.config.render/similar` of its ranking), and the forms that search further beside them: a search's answer, not a cut of output.
+- `seon.context/related`: the top k of a search over the wiki's sections (`take` the config's `:seon.config.render/related` of its ranking, the cited ones left out), with the forms that read one whole and search further (`seon.context/related-view`): a search's answer, not a cut of output.
+- `seon.agent/embed-written!`: the first `:seon.config.vector/texts` of the texts due go in one `:embed` request (`take`), the rest stay due for the next: a batch bound on work, not a cut of output.
 - `my.agent/file-source`, `seon.repl/form-src`: a form's own text out of its file or its reply (`subs` at a reader's offsets).
 - `my.root/task-files`: a task file's owning namespace from its file name (`subs` off the `.edn`).
 - `seon.render.ui/utc-offset-ms`: parsing `:seon.config.web/utc-offset`.
