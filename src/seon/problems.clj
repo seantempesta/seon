@@ -220,37 +220,77 @@
         forms (into {} (map (juxt :e :v)) (d/datoms db :aevt :var/form))]
     (into {} (keep (fn [{:keys [e v]}] (some->> (forms e) ids (vector v)))) (d/datoms db :aevt :var/name))))
 
+(defn- value-at
+  "The value of attribute a of entity e as of transaction t, from history db hist ((d/history db), not a
+  db value the :seon.host/db schema admits; its datoms of
+  [e a], a retraction before the assertion of one transaction), or nil when it had none."
+  {:malli/schema [:=> [:cat :any :int :keyword :int] :any]}
+  [hist e a t]
+  (reduce (fn [v {:keys [added] dv :v}] (if added dv (when (not= v dv) v))) nil
+          (sort-by (juxt :tx :added) (filter #(<= (:tx %) t) (d/datoms hist :eavt e a)))))
+
+(def ^:private meaning
+  "What a section citing a var describes of it, so what makes the section stale when it changes:
+  its contract and its docstring (owner, 2026-10-25, DECISIONS Dogfood rulings), the facts
+  seon.program/def-tx asserts and retracts when a definition changes them."
+  [:var/contract :var/doc])
+
 (defn stale-sections
-  "Each section whose text cites a var the code has changed since the section was last written, as a
-  :stale-section row: a var's form id (the form's own digest) now differs from the one the section
-  recorded when its text was last loaded (:seon.section/read, seon.docs/load-tx; my.docs/reviewed!
-  records a review). Open until the section is edited or reviewed; attention, never a reason to refuse done.
-  A var that is gone is a dead citation, not this. Cost: the vars' and forms' datoms in one scan each
-  and one lookup per recorded name. With only ({:names :sections}: var names and section entity ids)
-  just the recorded names among those names, and every name of those sections, are read: a seek for
-  each, no scan of the vars (what `caused-split` asks, of what a branch changed)."
+  "Each section whose text cites a var whose contract or docstring changed since the section was
+  last written or reviewed, as a :stale-section row naming what changed (:changed), what it was as
+  of then (:was) and what it is (:now): the var's facts (`meaning`) as of the transaction that wrote
+  the section's :seon.section/read (seon.docs/load-tx) or its :seon.section/reviewed
+  (my.docs/reviewed!), read from history, against now. A body that changed while both stayed is
+  not a change of what the section describes. A var that did not exist then (seon.docs/load-tx
+  recorded \"absent\", from git) is stale: code now; one whose docstring, contract or arglists changed
+  after the section's last commit (\"changed\", from git) is stale; one imported after the section was
+  read is not. A var that is gone is a dead citation, not this. Open until the section is edited or
+  reviewed; attention, never a reason to refuse done. Cost: the read datoms and the vars' and forms'
+  datoms in one scan each (a recorded name whose form id is unchanged cannot have changed what it
+  says), then per name whose form moved a seek of its var and of its name's and meaning's history. With only
+  ({:names :sections}: var names and section entity ids) just the recorded names among those
+  names, and every name of those sections, are read (what `caused-split` asks, of what a branch
+  changed)."
   {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]
                   [:=> [:cat :seon.host/db :map [:maybe :map]] [:vector :seon.problems/row]]]}
   ([db ans] (stale-sections db ans nil))
   ([db ans only]
    (let [address (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.section/address))
          reads (if only
-                 (keep (fn [{:keys [e v]}]
+                 (keep (fn [{:keys [e v] :as dt}]
                          (let [vs (if ((:sections only) e) v (select-keys v (filter (:names only) (keys v))))]
-                           (when (seq vs) {:e e :v vs})))
+                           (when (seq vs) (assoc dt :v vs))))
                        (d/datoms db :aevt :seon.section/read))
                  (d/datoms db :aevt :seon.section/read))
-         now (if only (docs/read-map db (into #{} (mapcat (comp keys :v)) reads)) (current-forms db))]
+         reviewed (into {} (map (juxt :e :tx)) (d/datoms db :aevt :seon.section/reviewed))
+         ;; a contract or docstring changes only with its form's text, so only a recorded name whose
+         ;; form moved has its history read
+         now-form (if only (docs/read-map db (into #{} (mapcat (comp keys :v)) reads)) (current-forms db))
+         hist (d/history db)]
      (vec (concat
-            (for [{:keys [e v]} reads
+            (for [{:keys [e v tx]} reads
+                  :let [t (max tx (reviewed e 0))]
                   [n then] v
-                  :let [cur (now n)] :when (and cur (not= cur then))
-                  :let [a (address e) s (str "stale-section " a " " n)]]
+                  :when (and (now-form n) (not= then (now-form n)))
+                  :let [ve (pdb/eid db :var/name n)]
+                  :let [absent? (= "absent" then)
+                        before? (= "changed" then)
+                        existed? (some #(and (:added %) (<= (:tx %) t)) (d/datoms hist :eavt ve :var/name))
+                        was (when existed? (into {} (keep (fn [a] (some->> (value-at hist ve a t) (vector a)))) meaning))
+                        now (into {} (keep (fn [a] (some->> (get (d/entity db ve) a) (vector a)))) meaning)
+                        changed (when existed? (filterv #(not= (was %) (now %)) meaning))]
+                  :when (or absent? before? (seq changed))
+                  :let [a (address e) s (str "stale-section " a " " n)
+                        fields (cond-> {:section a :name n}
+                                 (or absent? before?) (assoc :then then)
+                                 (seq changed) (assoc :changed changed :was (select-keys was changed) :now (select-keys now changed)))]]
               (derived-row ans s (symbol (namespace n))
-                           (if (= "absent" then)
-                             (str a " cites " n ", which did not exist when the section was last written: it is code now, read it")
-                             (str a " describes " n " as it was (form " then "), and it has changed (form " cur ")"))
-                           {:kind :stale-section :section a :name n :then then :now cur} {:section a :name n :then then :now cur}))
+                           (cond
+                             absent? (str a " cites " n ", which did not exist when the section was last written: it is code now, read it")
+                             before? (str a " describes " n ", whose docstring, contract or arglists changed after the section's last commit (git): read it")
+                             :else (str a " describes " n ", whose " (str/join " and " (map #(case % :var/contract "contract" :var/doc "docstring") changed))
+                                  " changed since: read it, then edit the section or review it"))
+                           (assoc fields :kind :stale-section) fields))
             ;; a section whose baseline git could not give is read as of today: said, as attention
             (for [{:keys [e v]} (d/datoms db :aevt :seon.section/baseline-unread)
                   :when (or (nil? only) ((:sections only) e))

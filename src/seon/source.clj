@@ -116,6 +116,30 @@
                          [(symbol (str ns) (name (second form))) (program/form-id ns src k)]))))
           (:forms (read-forms nsym text)))))
 
+(defn defining-meanings
+  "What a section citing each var defined in text (the file of namespace nsym) describes of it, as
+  written: {qualified var symbol {:doc :contract :arglists}}, its docstring, its :malli/schema as
+  read, and its parameter vectors, each only when present; found by the form's head and name, as
+  defining-ids finds them, read without loading. The same reading of an old file at a commit and of a
+  var's form today, so the two compare (seon.docs/baseline-reads; owner, 2026-10-25, DECISIONS Dogfood
+  rulings: a section is stale when a cited var's contract, arglists or docstring changed)."
+  {:malli/schema [:=> [:cat :symbol :string] [:map-of :qualified-symbol :map]]}
+  [nsym text]
+  (into {} (keep (fn [{:keys [form ns]}]
+                   (when (and (seq? form) (symbol? (first form)) (contains? defining-heads (symbol (name (first form)))) (symbol? (second form)))
+                     (let [more (nnext form)
+                           doc (when (string? (first more)) (first more))
+                           more (if doc (rest more) more)
+                           attr (when (map? (first more)) (first more))
+                           more (if attr (rest more) more)
+                           arglists (if (vector? (first more)) [(first more)] (vec (keep #(when (and (seq? %) (vector? (first %))) (first %)) more)))]
+                       [(symbol (str ns) (name (second form)))
+                        (cond-> {}
+                          (or doc (:doc attr)) (assoc :doc (or doc (:doc attr)))
+                          (:malli/schema attr) (assoc :contract (:malli/schema attr))
+                          (seq arglists) (assoc :arglists arglists))]))))
+        (:forms (read-forms nsym text))))
+
 (defn text-tx
   "The facts of text's forms as namespace nsym's program on db (seon.program/account-tx per
   form, in file order), with the namespace's file (relative path, or nil) and the text after
