@@ -1169,7 +1169,8 @@
   ;; key (a render already made), wherever the value sits
   (let [page [:section [:h2 "agents"] [:ol [:li "a1 busy"]]]
         html (h/html (r/html {:screen {:seon.render/html page} :n 1} {}))]
-    (is (str/includes? html "<section><h2>agents</h2><ol><li>a1 busy</li></ol></section>") html)))
+    (is (str/includes? html "<section><h2>agents</h2><ol><li>a1 busy</li></ol></section>") html)
+    (is (str/includes? (r/ai {:screen {:seon.render/html page} :n 1} {}) "[:section [:h2 \"agents\"]") "the model reads it as the data it is")))
 
 (deftest a-cut-opens-its-path-in-the-row
   ;; the value view's step 3: a cut on the page is a toggle naming its path; the row, given that
@@ -1178,8 +1179,8 @@
         proof (fn [n] {:test (symbol "demo-test" n) :source (seon.print/code (str "(deftest " n "\n" body ")"))})
         rec {:code "(my.task/status)" :response {:handle 'result/e5 :value {:proofs (mapv proof ["t" "u" "v"])}}}
         closed (h/html (ui/evaluation {:seon.eval/record rec} {}))
-        opened (h/html (ui/evaluation {:seon.eval/record rec} {:opened #{"[:value :proofs 0 :source]"}}))]
-    (is (str/includes? closed "class=\"seon-print-cut\"") "three sources over the value's budget: cut, each cut a toggle")
-    (is (str/includes? closed "data-seon-path=\"[:value :proofs 0 :source]\"") "naming its path in the value printed")
-    (is (not (str/includes? closed body)) "closed, t's source is cut")
+        path (second (re-find #"class=\"seon-print-cut\" data-seon-path=\"(\[:value :proofs \d :source\])\"" closed))
+        opened (h/html (ui/evaluation {:seon.eval/record rec} {:opened #{path}}))]
+    (is path "three sources over the value's budget: a source cut, its cut a toggle naming its path in the value printed")
+    (is (not (str/includes? closed body)) "closed, that source is cut")
     (is (str/includes? opened body) "opened, its path renders whole at the value's budget")))

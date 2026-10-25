@@ -366,3 +366,22 @@
 (deftest a-handle-links-to-its-row
   (let [{:keys [html]} (seon/print-value {:read 'result/e12 :name 'demo/f} {:outputs #{:hiccup}})]
     (is (= [{:class "seon-print-symbol" :href "#eval-e12"}] (map second (elements html :a))) "result/e12 links to #eval-e12; demo/f is a symbol")))
+
+(deftest a-table-keeps-its-cuts-and-nested-cells
+  ;; self-review: a cut in a table is a row of its own, a nested map is its cell, and cells are
+  ;; found by key whatever order each map prints its keys in
+  (let [v (vec (for [i (range 40)] {:test (symbol "demo-test" (str "t" i)) :status (if (even? i) :pass :fail) :at {:line i :file "f.clj"}}))
+        {:keys [html]} (seon/print-value v {:outputs #{:hiccup} :budget 300})
+        [table] (elements html :table "seon-print-table")
+        rows (rest (elements table :tr))]
+    (is table)
+    (is (some #(str/includes? (pr-str %) "seon-print-elision") rows) "the collection's cut is a row of its own")
+    (is (some #(= "seon-print-grid" (:class (second %))) (tree-seq coll? seq table)) "a nested map is its cell, a grid")
+    (is (str/includes? (pr-str (second rows)) "demo-test/t0") "a row's cells under their keys")))
+
+(deftest a-lifted-map-keeps-its-namespace
+  ;; self-review: a map of one namespace's keys prints #:ns{...}; the grid drops the braces, so its
+  ;; caption keeps the namespace
+  (let [{:keys [text html]} (seon/print-value {:seon.run/id "r" :seon.run/status :done} {:outputs #{:text :hiccup}})]
+    (is (str/starts-with? text "#:seon.run{") text)
+    (is (= ["#:seon.run"] (map last (elements html :div "seon-print-caption"))))))

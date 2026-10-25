@@ -109,7 +109,7 @@
   "The path a toggled unit names after its row's id (\"row/[:value :proofs 0]\", a cut the page
   opened, seon.print.emit/elided-hiccup): its vector; nil for a unit with none (a row itself);
   ::unread when the text after the slash is not an EDN vector (the edge: the browser's text)."
-  {:malli/schema [:=> [:cat :string] :any]}
+  {:malli/schema [:=> [:cat :string] [:or :nil [:vector :any] [:= ::unread]]]}
   [unit]
   (when-let [p (second (str/split unit #"/" 2))]
     (let [v (try (sedn/decode p) (catch Exception _ ::unread))]

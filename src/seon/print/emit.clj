@@ -395,59 +395,83 @@
   (every? (fn [c] (if (vector? c) (every? #(contains? scalar-kinds (:seon.print/face %)) c) (contains? scalar-kinds (:seon.print/face c))))
           (or (:seon.print/items node) (:seon.print/entries node))))
 
+(def ^:private punctuation-classes #{(css-class :seon.print/delimiter) (css-class :seon.print/separator)})
+
 (defn- punctuation?
   "Is hiccup h a delimiter's, separator's or line's span: what text needs to read a collection and
   a grid shows by its layout."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [h]
-  (boolean (and (vector? h) (= :span (nth h 0 nil)) (#{"seon-print-delimiter" "seon-print-separator"} (:class (nth h 1 nil))))))
+  (boolean (and (vector? h) (= :span (nth h 0 nil)) (punctuation-classes (:class (nth h 1 nil))))))
+
+(defn- grid
+  "Map node's hiccup from its frame's children: a grid of key and value rows, each entry (an entry
+  frame's, marked :seon.print/val) paired with its node's entry in order (one frame per entry);
+  what else it holds (a cut) a row of its own; a namespace-lifted map's `#:ns` its caption. Its
+  metadata holds its cells by key and its other rows, which a table reads."
+  {:malli/schema [:=> [:cat :map [:sequential :any]] :seon.print/hiccup]}
+  [node children]
+  (let [open (first children)
+        lifted (let [t (when (vector? open) (peek open))] (when (and (string? t) (str/starts-with? t "#:")) (subs t 0 (dec (count t)))))
+        rows (remove punctuation? children)
+        entries (filter #(contains? (meta %) :seon.print/val) rows)
+        others (remove #(contains? (meta %) :seon.print/val) rows)
+        ks (keep #(when (vector? %) (:seon.print/value (nth % 0))) (:seon.print/entries node))
+        row (fn [r] (if (contains? (meta r) :seon.print/val)
+                      r
+                      [:div {:class (css-class :seon.print/entry)} [:span {:class (css-class :seon.print/key)}] [:span {:class (css-class :seon.print/val)} r]]))]
+    (with-meta (into (cond-> [:div {:class (css-class :seon.print/grid)}] lifted (conj [:div {:class (css-class :seon.print/caption)} lifted]))
+                     (map row) rows)
+      {:seon.print/cells (mapv vector ks (map #(:seon.print/val (meta %)) entries)) :seon.print/rest (vec others)})))
 
 (defn- close-frame
-  "One collection's hiccup: a map as a grid of key and value rows (its entries; a cut is a row of
-  its own), folded as any collection is; the value printed (its root) or a collection of scalars inline, as text reads them;
-  any other nested collection a `<details>` that folds it, its summary saying what it holds. A
-  map entry (its frame's node :seon.print/entry) is its key and its value."
+  "One collection's hiccup: a map as a grid of key and value rows (grid), folded as any
+  collection is; maps sharing keys as a table; the value printed (its root) or a collection of
+  scalars inline, as text reads them; any other nested collection a `<details>` that folds it,
+  its summary saying what it holds. A map entry (its frame's node :seon.print/entry) is its key
+  and its value, the value kept in its metadata."
   {:malli/schema [:=> [:cat :any [:sequential :any]] :seon.print/hiccup]}
   [node children]
   (cond
     (= :seon.print/entry node)
-    [:div {:class "seon-print-entry"} [:span {:class "seon-print-key"} (first children)] [:span {:class "seon-print-val"} (peek (vec children))]]
+    (let [v (peek (vec children))]
+      (with-meta [:div {:class (css-class :seon.print/entry)} [:span {:class (css-class :seon.print/key)} (first children)] [:span {:class (css-class :seon.print/val)} v]]
+        {:seon.print/val v}))
     (and (= :seon.print/map (:seon.print/face node)) (seq (:seon.print/entries node)))
-    (let [grid (into [:div {:class "seon-print-grid"}]
-                     (comp (remove punctuation?)
-                           (map #(if (= "seon-print-entry" (:class (nth % 1 nil))) % [:div {:class "seon-print-entry"} [:span {:class "seon-print-key"}] [:span {:class "seon-print-val"} %]])))
-                     children)]
+    (let [g (grid node children)]
       ;; the value printed and a map of scalars read at a glance: no fold (owner, 2026-10-23)
       (if (or (empty? (:seon.print/path node)) (flat? node))
-        grid
-        [:details {:class (str "seon-print-node " (css-class :seon.print/map)) :open true :data-seon-path (literal (:seon.print/path node))}
-         [:summary {:class "seon-print-summary"} (summary node (:seon.print/path node))] grid]))
+        g
+        (with-meta [:details {:class (str "seon-print-node " (css-class :seon.print/map)) :open true :data-seon-path (literal (:seon.print/path node))}
+                    [:summary {:class "seon-print-summary"} (summary node (:seon.print/path node))] g]
+          (meta g))))
     :else (or (table node children) (close-frame-inline node children))))
 
 (defn- table
-  "A vector or list of two or more maps sharing two or more keys as a `<table>`: a column per key
-  (in the order first seen), a row per map, each cell that map's value as its grid holds it (a
-  key a map lacks is an empty cell); a cut is a row of its own. nil for any other collection."
+  "A vector or list of two or more maps keyed by keywords and sharing two or more keys as a
+  `<table>`: a column per key (in the order first seen), a row per map, each cell that map's value
+  as its grid holds it (grid's metadata, by key; a key a map lacks an empty cell); a map's own cut
+  a row under it, and the collection's cut a row of its own. nil for any other collection."
   {:malli/schema [:=> [:cat :map [:sequential :any]] [:maybe :seon.print/hiccup]]}
   [node children]
-  (let [items (:seon.print/items node)
-        maps (filterv #(= :seon.print/map (:seon.print/face %)) items)
-        key-of (fn [m] (into [] (keep #(when (vector? %) (:seon.print/value (nth % 0)))) (:seon.print/entries m)))]
+  (let [members (remove punctuation? children)
+        maps (filter #(contains? (meta %) :seon.print/cells) members)
+        keyed (map #(mapv first (:seon.print/cells (meta %))) maps)]
     (when (and (#{:seon.print/vector :seon.print/list} (:seon.print/face node)) (< 1 (count maps))
-               (every? #(contains? #{:seon.print/map :seon.print/elided} (:seon.print/face %)) items)
-               (< 1 (count (reduce (fn [ks m] (filter (set (key-of m)) ks)) (key-of (first maps)) (rest maps)))))
-      (let [cols (into [] (distinct) (mapcat key-of maps))
-            ;; each map's grid (a nested map folds in a <details>, its grid last), its rows by key
-            grids (filterv #(and (vector? %) (not (punctuation? %)) (not= "seon-print-elision" (:class (nth % 1 nil)))) children)
-            row (fn [m grid]
-                  (let [grid (if (= :details (nth grid 0)) (peek grid) grid)
-                        cells (zipmap (key-of m) (keep #(when (= "seon-print-entry" (:class (nth % 1 nil))) (peek (peek %))) (subvec grid 2)))]
-                    (into [:tr] (map #(vector :td (get cells %))) cols)))]
-        [:table {:class "seon-print-table"}
+               (every? #(every? keyword? %) keyed)
+               (< 1 (count (reduce (fn [ks m] (filter (set m) ks)) (first keyed) (rest keyed)))))
+      (let [cols (into [] (distinct) (apply concat keyed))
+            n (count cols)]
+        [:table {:class (css-class :seon.print/table)}
          [:thead (into [:tr] (map #(vector :th [:span {:class (css-class :seon.print/keyword)} (literal %)])) cols)]
-         (into [:tbody] (concat (map row maps grids)
-                                (for [c children :when (and (vector? c) (= "seon-print-elision" (:class (nth c 1 nil))))]
-                                  [:tr [:td {:colspan (count cols)} c]])))]))))
+         (into [:tbody]
+               (mapcat (fn [h]
+                         (if-let [{:seon.print/keys [cells rest]} (meta h)]
+                           (let [by (into {} cells)]
+                             (cons (into [:tr] (map #(vector :td (get by %))) cols)
+                                   (for [r rest] [:tr [:td {:colspan n} r]])))
+                           [[:tr [:td {:colspan n} h]]])))
+               members)]))))
 
 (defn- close-frame-inline
   "A collection other than a map as hiccup: its root, or one of scalars, inline; any other folds."
