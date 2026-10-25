@@ -15,6 +15,8 @@
                               refine what the screen's (my.task/related) showed
     (prove)                   run what judges this branch: the task's proofs and the tests reaching
                               what it changed since main, each one with a result at its digest reused
+    @ctx                      this agent's record as a map: its task, runs, turns, messages and evals,
+                              kept current as it works; the page shows it as a block
     (help 'ns.name)           a namespace: every definition, privates included, a line each in file order
     (help)                    the help page's sections (docs/agent.md); (help "done") one whole;
                               (help "docs/vector.md#the-model") any section, (help "docs/vector.md") a page
@@ -22,7 +24,7 @@
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
-            [seon.config :as cfg] [seon.proofs :as proofs] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract]
+            [seon.config :as cfg] [seon.proofs :as proofs] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
             [seon.db :as pdb] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
