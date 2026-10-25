@@ -754,4 +754,12 @@
         "nearest first, the named one and the test left out, the first five, each its name and first sentence")
     (is (string? (:more sim)) "and the form that searches further")
     (is (= sim (:similar (context/run-state db (task/task db "demo/c")))) "in the story")
-    (is (nil? (context/similar db nil #{})) "off by default (:seon.config.render/similar 0): nothing listed")))
+    (is (nil? (context/similar db nil #{})) "off by default (:seon.config.render/similar 0): nothing listed")
+    (testing "a design plan citing no var is seeded with the functions nearest it (:seon.config.render/pulls :seeded), though :similar is off"
+      (let [db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "d" :seon.task/kind :design :seon.task/plan "The circle's area."
+                                                   :seon.task/proofs #{} :seon.task/config {:seon.config.render/pulls {:seeded 3}}}]))
+            de (pdb/eid db :seon.task/id "demo/d")
+            db (d/db-with db (vector/tx-data [de] [1] [(dir 1.0)] [10] "m"))
+            story (context/run-state db (task/task db "demo/d"))]
+        (is (= ["demo/f: f does it." "demo/area: area does it." "demo/pi: pi does it."] (:nearest (:similar story)))
+            "the three nearest functions")))))

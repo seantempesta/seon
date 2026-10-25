@@ -196,12 +196,15 @@
       (seq helpers) (assoc :helpers (mapv #(one-line db %) helpers)))))
 
 (defn- prompt-functions
-  "The my.* functions the system prompt names, each a line: what an agent read their source
-  for, 15 times in the runs measured on 2026-10-25."
+  "The my.* functions the system prompt names in its code spans (seon.ref/scan's, each read as
+  Clojure by the one reader), each a line: what an agent read their source for, 15 times in the
+  runs measured on 2026-10-25."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :string]]}
   [db]
-  (into [] (comp (map :seon.ref/name) (filter qualified-symbol?) (filter #(str/starts-with? (namespace %) "my.")) (distinct) (map #(one-line db %)))
-        (ref/references db (system-text db))))
+  (into [] (comp (keep :seon.ref/code) (mapcat #(tree-seq coll? seq (reader/read-text % 'user)))
+                 (filter qualified-symbol?) (filter #(str/starts-with? (namespace %) "my.")) (distinct)
+                 (filter #(d/entity db [:var/name %])) (map #(one-line db %)))
+        (:seon.ref/spans (ref/scan (system-text db)))))
 
 (defn run-state
   "The task story: task t's run sections as data, the same each turn of a run: the task (its
