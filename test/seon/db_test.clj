@@ -3,7 +3,7 @@
   store and each test takes a branch of it through one helper (seon.test-store/test-branch!)."
   (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [clojure.java.io] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
-            [seon.db :as pdb] [seon.config :as cfg] [seon.contract :as contract] [seon.edn]
+            [seon.db :as pdb] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
@@ -105,16 +105,20 @@
                                     (let [c# (:conn (seon.db/open! :lmdb ~path 0 :db))]
                                       (dotimes [i# 50] (datahike.api/branch! c# :db (keyword (str ~tag "-" i#))))
                                       (System/exit 0)))))
-        cmd (str "'" jolt "' -A:test -e " (pr-str (code "x")) " > /dev/null 2>&1 & "
-                 "'" jolt "' -A:test -e " (pr-str (code "y")) " > /dev/null 2>&1 & wait")
+        ;; each process's exit status and stderr, so a process that ended before its branches says why
+        cmd (str "'" jolt "' -A:test -e " (pr-str (code "x")) " > /dev/null 2> '" path "-x.err' & x=$!; "
+                 "'" jolt "' -A:test -e " (pr-str (code "y")) " > /dev/null 2> '" path "-y.err' & y=$!; "
+                 "wait $x; ex=$?; wait $y; ey=$?; echo \"$ex $ey\"")
         r (clojure.java.shell/sh "nice" "-n" "10" "zsh" "-c" cmd)
+        ends (zipmap ["x" "y"] (map parse-long (str/split (str/trim (:out r)) #" ")))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         made (for [t ["x" "y"] i (range 50)] (keyword (str t "-" i)))]
     (try
-      (is (zero? (:exit r)))
+      (doseq [t ["x" "y"]]
+        (is (= 0 (ends t)) (str "process " t " ended " (ends t) ": " (slurp (str path "-" t ".err")))))
       (is (= 100 (count (filter #(pdb/branch? conn %) made))) "every branch's head was written")
       (is (= (set made) (disj (d/branches conn) :db)) "and every branch is listed")
-      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path (str path "-x.err") (str path "-y.err"))))))
 
 (deftest opening-a-kept-store-installs-the-attributes-it-lacks
   ;; a store on disk of this test's own, the last resort: what is proved is what a root's
@@ -265,6 +269,42 @@
         (is (= :seon.db/types-differ (:seon.error/type r)) (pr-str r))
         (is (= {:seon.turn/basis {:stored :db.type/string :declared :db.type/data}} (:seon.db/attributes r))))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest a-value-with-no-one-type-is-plain-data-by-its-shape
+  ;; a schema says plain data by its shape, with no mark (owner, 2026-10-25: "support vectors and
+  ;; then under the hood serialize them"): a vector, tuple, map or mixed union is :db.type/data, a
+  ;; vector keeping its order and duplicates; a set of scalars stays cardinality many
+  (let [reg (malli.registry/composite-registry
+             {:lab/v (malli.core/schema [:vector :keyword]) :lab/t (malli.core/schema [:tuple :keyword :int])
+              :lab/m (malli.core/schema [:map [:a :int]]) :lab/u (malli.core/schema [:or :string :int])
+              :lab/s (malli.core/schema [:or :string [:re #"x"]]) :lab/k (malli.core/schema [:set :keyword])
+              :lab/q (malli.core/schema [:sequential :int]) :lab/mo (malli.core/schema [:map-of :keyword :int])
+              :lab/a (malli.core/schema :any) :lab/r (malli.core/schema [:or :seon.db/ref :string] {:registry contract/registry})
+              :lab/ks (malli.core/schema [:or [:set :keyword] :keyword])
+              :lab/n (malli.core/schema [:or :string [:maybe :string]]) :lab/sm (malli.core/schema [:set [:map [:a :int]]])}
+             contract/registry)
+        decl (fn [a] (let [d (seon.schema.datahike/declaration reg a)] [(:db/valueType d) (:db/cardinality d)]))]
+    (is (= {:lab/v [:db.type/data :db.cardinality/one] :lab/t [:db.type/data :db.cardinality/one]
+            :lab/m [:db.type/data :db.cardinality/one] :lab/u [:db.type/data :db.cardinality/one]
+            :lab/s [:db.type/string :db.cardinality/one] :lab/k [:db.type/keyword :db.cardinality/many]
+            :lab/q [:db.type/data :db.cardinality/one] :lab/mo [:db.type/data :db.cardinality/one]
+            :lab/a [:db.type/data :db.cardinality/one] :lab/r [:db.type/data :db.cardinality/one]
+            :lab/ks [:db.type/data :db.cardinality/one]}
+           (into {} (map (juxt identity decl)) [:lab/v :lab/t :lab/m :lab/u :lab/s :lab/k :lab/q :lab/mo :lab/a :lab/r :lab/ks])))
+    (testing "an unstorable schema stays unstorable, with its reason: a nilable arm, a set of maps"
+      (is (= {:lab/n :seon.schema.datahike/nilable :lab/sm :seon.schema.datahike/nested-collection}
+             (into {} (map (juxt identity #(:seon.schema/reason (seon.schema.datahike/declaration reg %)))) [:lab/n :lab/sm])))))
+  (testing "no registered schema carries a storage mark for plain data: its shape is the one statement"
+    (is (empty? (for [[k s] (malli.registry/schemas contract/registry)
+                      :when (and (qualified-keyword? k) (malli.core/schema? s)
+                                 (contains? (malli.core/properties s) :seon.db/data))]
+                  k))))
+  (testing "a stored vector comes back in its order, duplicates kept"
+    (ts/test-branch!
+     (fn [_ conn]
+       (let [v '[b/x a/y b/x c/z b/x]
+             e (get (:tempids (d/transact conn [{:db/id "p" :seon.proof.run/skipped-process v}])) "p")]
+         (is (= v (:seon.proof.run/skipped-process (d/pull @conn [:seon.proof.run/skipped-process] e)))))))))
 
 ;; ---- history (task seon.db/history-is-kept: v1's ruling 23, Datahike's default) --------------
 

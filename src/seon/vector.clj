@@ -192,12 +192,12 @@
   [_ctx]
   (let [path (cfg/value :seon.config.vector/model)]
     (if-not (.exists (java.io.File. path))
-      (contract/error :seon.vector/model-unopened 'seon.vector/open (str "no model file at " path " (bin/build embed fetches it)") {:path path})
+      (contract/error :seon.vector/model-unopened #'seon.vector/open (str "no model file at " path " (bin/build embed fetches it)") {:path path})
       (do (ffi/load-library (cfg/value :seon.config.vector/lib))
           (let [h (ffi/with-arena [a] (c-open (ffi/string->ptr a path) (cfg/value :seon.config.vector/batch-tokens)
                                               (cfg/value :seon.config.vector/batch-texts) (cfg/value :seon.config.vector/threads) 0))]
             (if (zero? (ffi/address h))
-              (contract/error :seon.vector/model-unopened 'seon.vector/open (str "llama.cpp could not load " path) {:path path})
+              (contract/error :seon.vector/model-unopened #'seon.vector/open (str "llama.cpp could not load " path) {:path path})
               {:handle h :model (model-id path) :dims (c-dims h)}))))))
 
 (defn- embed-texts
@@ -216,7 +216,7 @@
         (ffi/write-array op :int64 offs 0)
         (let [r (c-batch handle tp op n (cfg/value :seon.config.vector/max-tokens) out np)]
           (if (neg? r)
-            (contract/error :seon.vector/encode-failed 'seon.vector/embed (str "llama.cpp's encode answered " r) {:code r})
+            (contract/error :seon.vector/encode-failed #'seon.vector/embed-texts (str "llama.cpp's encode answered " r) {:code r})
             {:vectors (mapv #(vec (ffi/read-array out :float dims (* 4 dims %))) (range n))
              :tokens (vec (ffi/read-array np :int32 n 0))}))))))
 

@@ -7,13 +7,13 @@
   Platform code compiled into the binary keeps the built schemas until the next generation."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.contract :as contract :refer [defn defn-]] [seon.agent :as agent] [seon.program :as program] [seon.db :as pdb] [seon.config :as config]
-            [datahike.api :as d] [seon.edn :as sedn] [malli.core :as m]))
+            [datahike.api :as d] [seon.edn :as sedn] [malli.core :as m] [seon.schema.datahike :as sd]))
 
 (defn- refused
   "The registration-refused error for k: why, and the message of what refused it."
   {:malli/schema [:=> [:cat :qualified-keyword :keyword :string] :seon.schema/registration-refused]}
   [k why message]
-  (contract/error :seon.schema/registration-refused 'my.schema/registration (str k ": " message)
+  (contract/error :seon.schema/registration-refused #'my.schema/refused (str k ": " message)
                   {:seon.schema/key k :seon.schema/refused-because why}))
 
 (defn- judged
@@ -47,13 +47,24 @@
     (reduce (fn [acc dt] (cond-> (update acc :checked inc) (not (valid? (:v dt))) (update :refused inc)))
             {:checked 0 :refused 0} (d/datoms db :aevt k))))
 
+(defn- own-declaration
+  "The attribute registered key k is, when no entity map lists it and its value is storable (an
+  attribute is a registered key whose schema is its stored value: an agent's own datum, written
+  on its own entity): [its declaration], when db does not hold it so; else []."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :seon.host/registry] [:vector :seon.schema/declaration]]}
+  [db k reg]
+  (let [dcl (sd/declaration reg k)
+        entity? (:seon.db/attributes (m/properties (m/deref (m/schema k {:registry reg}))))]
+    (if (or (contract/error? dcl) entity? (= dcl (select-keys (get (d/schema db) k) (keys dcl)))) [] [dcl])))
+
 (defn registration
   "Register form v as schema k on db's program: {:tx tx-data :registration {:seon.schema/key k
   :seon.schema/definition v}}, judged against the whole population (the binary's forms with
   db's changes and this one), or :seon.schema/registration-refused: v does not read back as
   itself, does not compile, or declares an attribute Datahike cannot store. The entry keeps
   its resource or takes new-key-file's; a scratch key (scratch?) gets none and is no
-  program. A new or changed attribute's declaration comes with it, and a registration of an
+  program. A new or changed attribute's declaration comes with it (the key itself is one when
+  it is storable and no entity map: own-declaration), and a registration of an
   attribute db stores says how many stored values its form refuses (:seon.schema.usage/check)."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :any :boolean] [:or [:map [:tx :seon.db/tx-data] [:registration :seon.schema/registration]] :seon.schema/registration-refused]]}
   [db k v scratch?]
@@ -68,7 +79,7 @@
             file (cond scratch? nil (:schema/file e) (:schema/file e) :else (new-key-file db k))]
         {:tx (into (cond-> [(cond-> {:schema/key k :schema/form text} file (assoc :schema/file file))]
                      (:schema/source e) (conj [:db/retract (:db/id e) :schema/source true]))
-                   (:decls judged))
+                   (distinct (concat (:decls judged) (own-declaration db k (:registry judged)))))
          :registration (cond-> {:seon.schema/key k :seon.schema/definition v}
                          (contains? (d/schema db) k) (assoc :seon.schema.usage/check (usage-check db k (:registry judged))))}))))
 

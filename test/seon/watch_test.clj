@@ -12,8 +12,10 @@
   (is (= [:root "/a"] (watch/record (.getBytes "r/a" "UTF-8"))))
   (is (= [:ready "/a"] (watch/record (.getBytes "w/a" "UTF-8")))))
 
+(defn- watch-kinds "The kinds a batch loads (my.root/watch-loads' keys)." [co refs own batch] (set (keys (mr/watch-loads co refs own batch))))
+
 (deftest a-batch-loads-what-its-paths-loaders-read
-  (let [co (seon.config/checkout) refs "/g/refs" own "/g/refs/heads/jolt/health" k #(mr/watch-kinds co refs own %)]
+  (let [co (seon.config/checkout) refs "/g/refs" own "/g/refs/heads/jolt/health" k #(watch-kinds co refs own %)]
     (is (= #{:docs} (k [[:path (str co "/docs/health.md")]])))
     (is (= #{:source} (k [[:path (str co "/src/seon/watch.clj")]])))
     (is (= #{:tasks} (k [[:path (str co "/resources/seon/tasks/seon.watch.edn")]])))
@@ -21,7 +23,7 @@
     (is (= #{:source} (k [[:path own]])) "this checkout's branch moved: a commit or a merge on it")
     (testing "the repository is every worktree's: another branch's commit is not this root's (root-test's 806 tasks, 2026-10-25)"
       (is (= #{} (k [[:path "/g/refs/heads/jolt/another"] [:path "/g/refs/heads/main"]])))
-      (is (= #{} (mr/watch-kinds co refs nil [[:path own]])) "a detached HEAD follows no ref"))
+      (is (= #{} (watch-kinds co refs nil [[:path own]])) "a detached HEAD follows no ref"))
     (testing "a rescan (FSEvents coalesced or dropped events) loads the loaders reading under its path"
       (is (= #{:docs} (k [[:rescan (str co "/docs")]])))
       (is (= #{} (k [[:rescan (str co "/target")]])) "a build's writes under target/: nothing")
@@ -58,13 +60,13 @@
         ;; (FSEvents may report heads/main again within a later batch, coalesced: at most a source
         ;; read that finds nothing new, never the task files)
         (let [b @theirs]
-          (is (= #{} (mr/watch-kinds co refs own (filterv #(str/includes? (second %) "/heads/other") b))) (pr-str b))
-          (is (not-any? #{:tasks :docs} (mr/watch-kinds co refs own b)) (pr-str b))))
+          (is (= #{} (watch-kinds co refs own (filterv #(str/includes? (second %) "/heads/other") b))) (pr-str b))
+          (is (not-any? #{:tasks :docs} (watch-kinds co refs own b)) (pr-str b))))
       (git co "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "--allow-empty" "-m" "ours")
       (testing "this checkout's commit arrives as its own ref's path, as head-ref names it: its source loads"
         (let [b @ours]
           (is (some #{[:path own]} b) (pr-str b))
-          (is (= #{:source} (mr/watch-kinds co refs own (filterv #{[:path own]} b))))))
+          (is (= #{:source} (watch-kinds co refs own (filterv #{[:path own]} b))))))
       (finally (watch/stop! w) (clojure.java.shell/sh "rm" "-rf" tmp)))))
 
 (deftest a-change-arrives-and-a-dead-watcher-is-a-platform-error

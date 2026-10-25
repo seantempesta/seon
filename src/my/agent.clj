@@ -15,14 +15,17 @@
                               refine what the screen's (my.task/related) showed
     (prove)                   run what judges this branch: the task's proofs and the tests reaching
                               what it changed since main, each one with a result at its digest reused
+    @ctx                      this agent's record as a map: its task, runs, turns, messages and evals,
+                              kept current as it works; the page shows it as a block
+    (help 'ns.name)           a namespace: every definition, privates included, a line each in file order
     (help)                    the help page's sections (docs/agent.md); (help "done") one whole;
                               (help "docs/vector.md#the-model") any section, (help "docs/vector.md") a page
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
-            [seon.config :as cfg] [seon.proofs :as proofs] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract]
-            [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
+            [seon.config :as cfg] [seon.proofs :as proofs] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
+            [seon.db :as pdb] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
@@ -39,23 +42,46 @@
   {:malli/schema [:=> [:cat [:or :symbol :seon.host/var]] :symbol]}
   [x] (if (var? x) (symbol (str (ns-name (:ns (meta x)))) (str (:name (meta x)))) x))
 
+(defn- asked
+  "The name sym is asked by: the var it resolves to in the agent's namespace (an alias, 'str/join,
+  read as clojure.string/join, the name its callers' facts record), else sym as written."
+  {:malli/schema [:=> [:cat :qualified-symbol] :qualified-symbol]}
+  [sym] (let [v (ns-resolve *ns* sym)] (if (var? v) (named v) sym)))
+
+(defn- no-var
+  "The error for sym when it names no var on db nor in this process (a library's var is one), else
+  nil: an asked name that is nothing is said, never answered as no callers; with the form for the
+  registry key of that name when db has one (an attribute, a config key or a schema entry)."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :my.agent/no-var]]}
+  [db sym]
+  (when-not (or (pdb/eid db :var/name sym) (var? (ns-resolve *ns* sym)))
+    (let [k (keyword (namespace sym) (name sym))
+          key? (or (contains? (d/schema db) k) (pdb/eid db :schema/key k))]
+      (contract/error :my.agent/no-var (symbol #'no-var)
+                      (str sym " names no var on this branch" (when key? (str "; " k " is a registry key: (my.agent/callers " k ")")))
+                      (cond-> {:name sym} key? (assoc :ask (str "(my.agent/callers " k ")")))))))
+
 (defn callers
   "The program vars whose recorded definition names x on this branch, sorted, x itself left out
   (seon.docs/callers): a var's callers (x a qualified symbol, or the var: named), or the functions
-  operating on a qualified keyword, an attribute, config key or schema entry (its :form/keywords)."
-  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var :qualified-keyword]] [:vector :qualified-symbol]]}
-  [x] (docs/callers (agent/db) (if (keyword? x) x (named x))))
+  operating on a qualified keyword, an attribute, config key or schema entry (its :form/keywords).
+  A symbol through an alias reads as the var it resolves to; one that names no var answers so
+  (:my.agent/no-var), never []. A keyword nothing names answers [] (no use is the true answer)."
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var :qualified-keyword]] [:or [:vector :qualified-symbol] :my.agent/no-var]]}
+  [x]
+  (let [db (agent/db) x (cond (keyword? x) x (var? x) (named x) :else (asked x))]
+    (or (when (symbol? x) (no-var db x)) (docs/callers db x))))
 
 (defn callees
   "The vars var sym's recorded definition names on this branch (its :form/refs: program,
   library and clojure.core alike), sorted; sym itself left out. sym is a qualified symbol or
-  the var (named)."
-  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:vector :qualified-symbol]]}
+  the var (named). A symbol that names no var answers so (:my.agent/no-var), never []."
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or [:vector :qualified-symbol] :my.agent/no-var]]}
   [sym]
-  (let [sym (named sym)]
-    (vec (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]]
-                               (agent/db) sym))
-                     sym)))))
+  (let [db (agent/db) sym (if (var? sym) (named sym) (asked sym))]
+    (or (no-var db sym)
+        (vec (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db sym))
+                         sym))))))
 
 (defn- query-of
   "x's vector on db: a var's definition's (its entity, whose vector near reads), or text embedded
@@ -194,10 +220,16 @@
   sentence, with the sections it cites and those citing it. With an address (``docs/vector.md#the-model``) or
   an anchor of the help page (\"done\"), that section whole; with a page's path (\"docs/vector.md\"), that page
   at summary. A miss answers the help page's sections, every page's path and the form that reads
-  one, never nil. (Before this an anchor answered its text alone; it answers the view, :seon.ref/text among its keys.)"
-  {:malli/schema [:function [:=> [:cat] [:vector :seon.ref/view]] [:=> [:cat :string] [:or :seon.ref/view [:vector :seon.ref/view] [:map [:no-section :string] [:help-page [:vector :seon.ref/view]] [:pages [:vector :string]] [:read-one :string]]]]]}
+  one, never nil. (Before this an anchor answered its text alone; it answers the view, :seon.ref/text among its keys.)
+  With a namespace's name ('seon.print.select), the namespace as a plan's citation of it shows it:
+  its ns head and docstring, then each definition, privates included, in file order, a line each
+  (its name and its doc's first sentence; seon.ref/namespace-view)."
+  {:malli/schema [:function [:=> [:cat] [:vector :seon.ref/view]]
+                  [:=> [:cat [:or :string :symbol]] [:or :seon.ref/view [:vector :seon.ref/view] [:maybe [:map [:seon.print/code :string]]] [:map [:no-section :string] [:help-page [:vector :seon.ref/view]] [:pages [:vector :string]] [:read-one :string]]]]]}
   ([] (vec (docs/page (agent/db) context/help-page :summary)))
   ([address]
+   (if (symbol? address)
+     (docs/cited-code (agent/db) {:seon.ref/name address :seon.ref/depth :doc :seon.ref/line 1})
    (let [db (agent/db)
          a (if (str/includes? address "#") address (str context/help-page "#" address))]
      (or (docs/view db a :code)
@@ -205,5 +237,5 @@
          {:no-section address
           :help-page (vec (docs/page db context/help-page :summary))
           :pages (docs/page-paths db)
-          :read-one "(my.agent/help \"docs/<page>.md\") lists a page's sections; (my.agent/help \"docs/<page>.md#<section>\") reads one"}))))
+          :read-one "(my.agent/help \"docs/<page>.md\") lists a page's sections; (my.agent/help \"docs/<page>.md#<section>\") reads one; (my.agent/help 'ns.name) a namespace, every definition a line"})))))
 

@@ -581,6 +581,26 @@
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 
+(deftest a-spawns-start-costs-the-same-on-a-bigger-program
+  ;; the owner, 2026-10-25 ("what are we doing if we can fork in ms?"): a spawn's own work in the
+  ;; child (its phases' bytes, seon.agent/spawn-phases, sent with its hello) does not grow with
+  ;; main's program: an agent spawned after main gained 200 forms allocates what one before it did
+  (let [code (str "(let [ph (fn [id] (into {} (for [p (get-in (seon.root/state sys) [:agents id :phases]) :when (:bytes p)] [(:phase p) (:bytes p)])))"
+                  " fresh #(keyword (str \"pa-\" (rand-int 100000000)))"
+                  " a (seon.root/spawn! sys {:branch (fresh)})"
+                  " text (clojure.string/join \"\\n\" (cons \"(ns app.big)\" (for [i (range 200)] (str \"(defn f\" i \" [x] (inc x))\"))))"
+                  " _ @(seon.root/transact-main! sys (seon.source/text-tx @(:conn sys) 'app.big text nil))"
+                  " b (seon.root/spawn! sys {:branch (fresh)})]"
+                  " [(ph a) (ph b) (mapv :phase (get-in (seon.root/state sys) [:agents b :phases]))])")
+        [r] (in-agent [{:op :eval :agent "root" :code code}])
+        [before after phases] (:value r)]
+    (is (= [:fork-server-in :reach-graph :static :child-init :setup :store-reopened :ns :interrupt-test :connected :handlers :base :misaligned :state :hello]
+           phases)
+        (pr-str r))
+    (is (seq before))
+    (doseq [[k v] before]
+      (is (<= (get after k) (+ (* 1.1 v) 65536)) (str k ": " v " bytes before, " (get after k) " after 200 more forms")))))
+
 (deftest a-root-with-no-provider-ends-the-run-on-its-typed-error
   ;; root's ruling 2026-10-22: a root with no model provider (no SEON_PROFILE) answers the
   ;; first turn with :seon.model/no-provider; the error reaches whoever can act on it: the
@@ -775,3 +795,22 @@
               "the agent's own words refine it: the sections nearest them")
           (is (= 2 (count (:sections v))) "k of them")))
       (finally (reset! agent/state old)))))
+
+(deftest a-parked-agent-draws-its-own-render-and-a-gone-one-answers-at-once
+  ;; root, 2026-10-25: a key of @ctx whose render the branch defines is drawn by its agent while the
+  ;; page is viewed (seon.render.ui/ctx, the render proc's {:op :render} ask): an agent parked between
+  ;; requests answers it with its render's HTML, recording nothing; a request to an agent that is
+  ;; gone is answered at once, so the page shows the key's structure and never waits
+  (let [n "(count (datahike.api/datoms (seon.agent/db) :aevt :seon.eval/id))"
+        [_ _ before drawn after gone]
+        (in-agent ["(my.schema/register! :lab.ctx/steps '[:vector {:seon.render/html lab.ui/steps} :string])"
+                   "(ns lab.ui) (defn steps \"The steps, numbered.\" {:malli/schema [:=> [:cat [:vector :string] :map] :any]} [v _] [:ol (for [s v] [:li s])])"
+                   n
+                   {:op :eval :agent "root"
+                    :code (str "(let [id (first (keys (:agents @(seon.root/call! sys {:op :state}))))]"
+                               " @(seon.root/call! sys {:op :render :id id :schema :lab.ctx/steps :value [\"read the plan\" \"write the test\"]}))")}
+                   n
+                   {:op :eval :agent "root" :code "@(seon.root/call! sys {:op :render :id :gone :schema :lab.ctx/steps :value []})"}])]
+    (is (= {:html "<ol><li>read the plan</li><li>write the test</li></ol>"} (:value drawn)) (pr-str drawn))
+    (is (= (inc (:value before)) (:value after)) "the drawing recorded no eval: only the count before it is new")
+    (is (= :seon.root/no-agent (:seon.error/type (:value gone))) (pr-str gone))))

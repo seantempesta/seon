@@ -40,13 +40,13 @@
 (defn- gone
   "The one error map of a request no live agent can take (agent id, or nil)."
   {:malli/schema [:=> [:cat [:maybe :keyword] :string] :seon.root/no-agent]}
-  [id why] (contract/error :seon.root/no-agent 'seon.root/api-proc why {:agent id}))
+  [id why] (contract/error :seon.root/no-agent #'seon.root/gone why {:agent id}))
 
 (defn- ended
   "The one error map of a request to agent id after it ended: root stopped it (a kill, its
   run's end) or it died, as root's view records (:ended-ms). Not gone: the agent was."
   {:malli/schema [:=> [:cat :keyword :string] :seon.root/ended]}
-  [id why] (contract/error :seon.root/ended 'seon.root/api-proc why {:agent id}))
+  [id why] (contract/error :seon.root/ended #'seon.root/ended why {:agent id}))
 
 (defn- absent
   "Why agent id, whose entry in root's view is a (nil: root never had it), takes no request
@@ -196,7 +196,7 @@
       (:error m) (:error m)
       (:task a) nil
       (pos? (+ (or fail 0) (or error 0)))
-      (contract/error :seon.agent/failed 'seon.agent/run-tests
+      (contract/error :seon.agent/failed #'seon.root/failed
                       (str "tests red" (some->> (first (remove #(= :pass (:type %)) reports)) :var (str ": "))) {:agent id}))))
 
 (defn- set-agent
@@ -243,7 +243,7 @@
   one error map in its view and sent to its proc, which hangs up."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.agent/id :string [:maybe :seon.error/base]] :seon.root/api-state]}
   [st o id why cause]
-  (let [e (contract/error :seon.agent/failed 'seon.root/spawn! why (cond-> {:agent id} cause (assoc :cause cause)))]
+  (let [e (contract/error :seon.agent/failed #'seon.root/spawn-failed why (cond-> {:agent id} cause (assoc :cause cause)))]
     (-> st (set-agent o id {:error e}) (answer-spawn o id e) (to-agent o id {:op :failed :error e}))))
 
 (def ^:private agent-launcher
@@ -290,7 +290,7 @@
         stop (stopped-statuses (:status v))
         ;; neither stopped by root nor killed: a death, with what root saw of it (session D2)
         died (when-not (or rid stop)
-               (contract/error :seon.agent/died 'seon.root/api-proc (str "agent " (name agent) " died" (exit-text (:exit v)))
+               (contract/error :seon.agent/died #'seon.root/end-agent (str "agent " (name agent) " died" (exit-text (:exit v)))
                                {:agent agent :pid (or pid (:pid v)) :exit (:exit v)
                                 :stderr (stderr-tail (agent/stderr-path (get-in st [:view :store :agents-dir]) agent))
                                 :last-op (some-> (:running v) (select-keys [:form :since-ms]) (assoc :kind :eval))}))
@@ -354,7 +354,7 @@
                    (to-agent st o parent
                              {:op :req :rid rid :kind :clone :new aid :branch branch :pass-fd fd
                               :msg {:op :clone :agent aid :branch branch}}))))
-      (:eval :tests :judge :stats :merge-main)
+      (:eval :tests :judge :stats :merge-main :render)
       (if (nil? (get-in st [:agents id]))
         (reply! st o p (absent (get-in st [:view :agents id]) id))
         (let [[st rid] (pend st p op id)
@@ -364,7 +364,9 @@
                                             (get-in st [:view :agents id :task]) (assoc :task (get-in st [:view :agents id :task])))
                     :judge {:op :judge}
                     :stats {:op :stats}
-                    :merge-main {:op :merge-main :data-attrs (:data-attrs m)})]
+                    :merge-main {:op :merge-main :data-attrs (:data-attrs m)}
+                    ;; a value drawn by a render the agent defines (the render proc's, seon.render.ui/ctx)
+                    :render {:op :render :schema (:schema m) :value (:value m)})]
           (to-agent st o id {:op :req :rid rid :kind op :msg msg})))
       ;; a message to a live agent (the owner's, from the page or the server): root's one
       ;; delivery, as an agent's send is; it lands in the agent's inbox, which its next turn reads
@@ -407,7 +409,7 @@
               (let [[st rid] (pend st p :fx nil)]
                 (step/out! o [owner :in] {:req (:req m) :prio 0 :dest {:rid rid}})
                 st)
-              (reply! st o p (contract/error :seon.fx/unknown-kind 'seon.fx/call (str "no effect kind " (:kind m))))))
+              (reply! st o p (contract/error :seon.fx/unknown-kind #'seon.root/ext-op (str "no effect kind " (:kind m))))))
       :fs (let [[st rid] (pend st p :fs nil)]
             (step/out! o :to-fs (assoc (:req m) :rid rid))
             st)
@@ -1046,7 +1048,7 @@
                  (:quiet r) (let [db @(:conn sys)]
                               (if (pred db)
                                 db
-                                (contract/error :seon.root/quiet-before-true 'seon.root/await-db
+                                (contract/error :seon.root/quiet-before-true #'seon.root/await-db
                                                 (str "root went quiet at t " (:quiet r) " with this still false: " what)
                                                 {:t (:quiet r) :waits-on what})))
                  :else r))
@@ -1092,7 +1094,7 @@
           dg (cond agent-id (seon.prove/read-digest nil (program/program-digest db))
                    (contract/error? src) src
                    (:inputs src) (seon.prove/read-digest (:inputs src) (program/program-digest db))
-                   :else (contract/error :seon.test/prepare 'seon.root/prove!
+                   :else (contract/error :seon.test/prepare #'seon.root/prove!
                                          (str "main's run is keyed by the checkout's inputs, and " (cfg/checkout) " has none (no git HEAD)") {}))]
       (if (contract/error? dg)
         (doto (promise) (deliver dg))

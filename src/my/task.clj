@@ -55,7 +55,7 @@
   []
   (if-let [{:keys [input]} (screen/input)]
     (dissoc (context/turn-state (agent/db) (current) input) :will-merge)
-    (contract/error :seon.turn/not-observed 'my.task/status "no turn has observed this agent's task yet: a model turn or a context read (the server's :context, seon_context) measures it; (my.agent/prove) runs its proofs" {})))
+    (contract/error :seon.turn/not-observed #'my.task/status "no turn has observed this agent's task yet: a model turn or a context read (the server's :context, seon_context) measures it; (my.agent/prove) runs its proofs" {})))
 
 (defn related
   "What this task's plan, as the branch holds it now, is likely to need beyond what it cites: the

@@ -91,9 +91,13 @@
 
 (clojure.core/defn properties
   "The properties map of named schema k's form ([:type {props} ...]), or nil: what a
-  schema declares of its values (a status set, a render, a unit), read here only."
+  schema declares of its values (a status set, a render, a unit), read here only. A registry
+  bound as malli's (an agent's REPL binds its branch's population: seon.repl/with-branch-schemas)
+  answers first, so a render a branch's schema names is the one its values take."
   {:malli/schema [:=> [:cat :any] [:maybe :map]]}
-  [k] (let [form (get forms k)] (when (and (vector? form) (map? (second form))) (second form))))
+  [k] (if-let [s (some-> (mr/registry mr/*registry*) (mr/schema k))]
+        (m/properties s)
+        (let [form (get forms k)] (when (and (vector? form) (map? (second form))) (second form)))))
 
 (clojure.core/defn enum-values
   "The members of named [:enum {props} ...] schema k, in their declared order."
@@ -217,14 +221,19 @@
 
 (defn error
   "The error map of variant `type` raised by `operation`: message plus the variant's
-  members. Checked against the variant's registered schema here, at its constructor."
-  {:malli/schema [:function [:=> [:cat :qualified-keyword :qualified-symbol :string] :seon.error/base] [:=> [:cat :qualified-keyword :qualified-symbol :string [:maybe :map]] :seon.error/base]]}
+  members. Checked against the variant's registered schema here, at its constructor. A raiser
+  names itself by its var, #'ns/f, the function the error is built in: the compile resolves it, so
+  a rename can never leave an error naming a function that is gone (the a-map design read
+  seon.render.value/show, renamed away, and searched for it); a symbol is for an operation known
+  only at run time (a contracted function's name)."
+  {:malli/schema [:function [:=> [:cat :qualified-keyword [:or :seon.host/var :qualified-symbol] :string] :seon.error/base]
+                  [:=> [:cat :qualified-keyword [:or :seon.host/var :qualified-symbol] :string [:maybe :map]] :seon.error/base]]}
   ([type operation message] (error type operation message nil))
   ([type operation message members]
-   (let [e (merge members {:seon.error/type type :seon.error/operation operation :seon.error/message message})]
+   (let [e (merge members {:seon.error/type type :seon.error/operation (if (var? operation) (symbol operation) operation) :seon.error/message message})]
      (when-not ((m/validator (schema type)) e)
        (throw (ex-info (str "error construction refused for " type)
-                       {:seon.error/type :seon.instrument/contract-error :seon.error/operation 'seon.contract/error
+                       {:seon.error/type :seon.instrument/contract-error :seon.error/operation (symbol #'seon.contract/error)
                         :seon.error/message (str "the built error does not satisfy " type)
                         :seon.error/member :malli.core/invalid-output})))
      e)))
@@ -262,7 +271,7 @@
       :else
       (let [s (try (schema c) (catch Throwable e e))]
         (if (instance? Throwable s)
-          (error :seon.contract/invalid 'seon.contract/arm! (str (symbol v) ": its contract does not compile: " (ex-message s))
+          (error :seon.contract/invalid #'seon.contract/arm! (str (symbol v) ": its contract does not compile: " (ex-message s))
                  {:seon.contract/var (symbol v)})
           (let [w (wrap (symbol v) s @v)]
             (alter-var-root v (constantly w))

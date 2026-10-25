@@ -168,6 +168,36 @@
         writers (into (sorted-set) (for [[nsn src] forms :when (some shape? (tree-seq coll? seq (read-in nsn src)))] nsn))]
     (is (= #{'seon.step} writers))))
 
+;; ---- an error names its raiser ---------------------------------------------------------------
+
+(defn- quoted-operations
+  "The operations form f (read in namespace nsn) names as quoted symbols: a call resolving to
+  seon.contract/error whose operation is (quote sym), and a map literal whose :seon.error/operation
+  is. A raiser names itself by its var (#'ns/f), which the compile resolves."
+  [nsn f]
+  (let [error? #(and (symbol? %) (= #'seon.contract/error (ns-resolve (the-ns nsn) %)))
+        quoted #(when (and (seq? %) (= 'quote (first %)) (symbol? (second %))) (second %))]
+    (into [] (keep (fn [x] (cond (and (seq? x) (error? (first x))) (quoted (nth x 2 nil))
+                                 (map? x) (quoted (get x :seon.error/operation)))))
+          (tree-seq coll? seq f))))
+
+(deftest an-error-names-its-raiser-by-its-var
+  ;; root, 2026-10-25 (the a-map design, 0 green in 9 runs): the error a model reproduced first named
+  ;; 'seon.render.value/show, a namespace renamed away, and the runs searched for it. An error names
+  ;; its raiser by its var (#'ns/f, the function it is built in), so the compile refuses one that is
+  ;; gone; no src form names one as a quoted symbol. src's forms read as data from the compiler's facts
+  (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
+        forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
+                     [(clojure.string/starts-with? ?file "src/")]] db)
+        read-in (fn [nsn src] (require nsn)
+                  (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))]
+    (testing "a quoted operation is seen, in a call and in a map"
+      (is (= '[seon.render.value/show] (quoted-operations 'seon.fx '(defn f [] (contract/error :x/y 'seon.render.value/show "m")))))
+      (is (= '[seon.render.value/show] (quoted-operations 'seon.fx '(defn f [] {:seon.error/type :x/y :seon.error/operation 'seon.render.value/show}))))
+      (is (= [] (quoted-operations 'seon.fx '(defn f [] (contract/error :x/y #'seon.fx/build "m")))) "a var is not"))
+    (is (= [] (vec (for [[nsn src] forms op (quoted-operations nsn (read-in nsn src))] [nsn op])))
+        "no src error names its operation as a quoted symbol")))
+
 (deftest git-is-read-through-fx
   ;; task seon.fx/git-is-read-through-fx: git runs in one place, seon.fx/git-run (read two ways, git!:
   ;; a failure throws its words, and git-try: git's no is nil), and a checkout is told by its .git

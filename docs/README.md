@@ -46,6 +46,7 @@ The pages on how agents change Seon's own program and how a text's references an
 
 - [source](source.md): agents change Seon's own functions at the REPL on their branches; a merge merges them on main, writes the files back and runs them next.
 - [references](references.md): what a text cites, read by one parser (`seon.ref`), becomes its references, pulled into a context at the depth its delimiter asks.
+- [ctx](ctx.md): the agent's record as one map, `@ctx`, kept by the change; the model reads it printed, the page draws it as a block, each key by its own schema's render.
 - [render](render.md): every view, the model's context included, is the one value printer or a render declared on the value's schema; nothing clips.
 - [prompt](prompt.md): the system prompt, what every agent reads first (the standard format's short prompt).
 - [agent](agent.md): the help page, which `my.agent/help` answers section by section.

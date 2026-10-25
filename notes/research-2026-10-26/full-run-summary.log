@@ -1,0 +1,51 @@
+00:48:18 build: seon up to date (tree d1713134d255cdf5870440f04e09eeb6e5bd4db3)
+BUILD 2s
+RED seon.program-cost-test/the-reach-walk-is-one-pass-whatever-the-keys {:pass 0, :fail 1, :error 0}
+SHARD 286 tests, 285 green, 1 red, in 490975 ms
+RED seon.prove-test/a-session-prove-of-main-runs-in-a-prove-agent-and-leaves-facts {:pass 2, :fail 5, :error 1}
+SHARD 121 tests, 120 green, 1 red, in 451387 ms
+SHARD 202 tests, 202 green, 0 red, in 423591 ms
+SHARD 176 tests, 176 green, 0 red, in 430541 ms
+TEST FAILED (logs: /Users/sean/src/seon-next/.worktrees/full-run-2026-10-26/target/prove/tests)
+TEST --all exit 1 497s
+MG-CHECK OK
+MG-CHECK FAILED
+FAILED mg-check-1 (exit 1, expected 0)
+MG-CHECK OK
+MG-CHECK OK
+SYSTEM OK
+CONFIG OK
+MCP OK
+FX OK
+THREADS OK
+INSTRUMENT OK
+RECORD OK
+PROBLEMS OK
+SMOKE OK
+HOTRELOAD OK
+BACKPRESSURE OK
+ROBUST FAILED
+FAILED robust (exit 1, expected 0)
+DRAIN OK
+IDLE OK
+IDS OK
+DURABLE-WRITE OK
+DURABLE OK
+LIFECYCLE OK
+WINDOW-WRITE OK
+WINDOW OK
+E2E OK
+E2E OK
+E2E OK
+E2E FAILED
+FAILED e2e-calc (exit 1, expected 0)
+E2E OK
+E2E OK
+FAILED e2e-held (exit 1, expected 0)
+LOOP OK
+SWARM OK
+E2E OK
+VECTORS OK
+SCALE OK
+CHECK FAILED: 5 step(s)
+CHECK 100 exit 1 153s

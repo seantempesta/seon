@@ -24,6 +24,7 @@
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
 ;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
+;; :tx (the last transaction transact! applied, {:db-after :tx-data}: seon.ctx patches @ctx from it)
 (defonce state (atom nil))
 
 
@@ -137,7 +138,7 @@
   {:malli/schema [:=> [:cat] :any]}
   []
   (when-let [c (dw/commit-pending! (:store-conn @state))]
-    (swap! state #(-> % (assoc :db (:db c)) (dissoc :dirty?)))
+    (swap! state #(-> % (assoc :db (:db c)) (dissoc :dirty? :tx)))
     ;; the eval errors folded since the last commit ride it (seon.error/note): root counts
     ;; them across agents
     (let [errs (:errors @state)]
@@ -154,11 +155,12 @@
   [tx-data]
   (if (= :test (:mode @state))
     (let [r (d/with (db) tx-data)]
-      (swap! state assoc :db (:db-after r))
+      (swap! state assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]))
       {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
     (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state))})]
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
-      (swap! state assoc :db (:db-after r) :dirty? true)
+      ;; :tx, the transaction that moved :db: what seon.ctx patches @ctx from
+      (swap! state assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]) :dirty? true)
       (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
         (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r)))))))
 
@@ -200,7 +202,7 @@
   [kind req]
   (if *fx-stub*
     (*fx-stub* kind req)
-    (contract/error :seon.fx/in-test 'seon.fx/call "an effect inside a test does not leave the test's process: bind seon.agent/*fx-stub*"
+    (contract/error :seon.fx/in-test #'seon.agent/fx-test "an effect inside a test does not leave the test's process: bind seon.agent/*fx-stub*"
                     {:seon.fx/kind kind})))
 
 (defn fx-send!
@@ -625,7 +627,7 @@
               (let [[r w] (sock/socketpair)]
                 (lib/fork!
                 {:refused (fn [n] (lib/c-close r) (lib/c-close w)
-                            (contract/error :seon.test/fork-refused 'seon.agent/run-tests-forked
+                            (contract/error :seon.test/fork-refused #'seon.agent/run-tests-forked
                                             (str "cannot fork the tests: " n " Chez threads active (a running future?)") {:active-threads n}))
                  :child (fn []
                           (lib/c-close r)
@@ -682,6 +684,8 @@
       (refer 'clojure.test :only '[deftest is are testing use-fixtures])
       (refer 'my.db)
       (refer 'my.agent :exclude '[source source-fn pst])
+      ;; the agent's record as a map, @ctx (seon.ctx)
+      (refer 'seon.ctx :only '[ctx])
       ;; clojure.repl as clojure.main's REPL has it (clojure.main/repl-requires). Jolt's lacks
       ;; source, source-fn and pst: interned from my.agent, whose source also reads the agent's
       ;; own redefinitions from its branch db (task seon.context/the-standard-repl-tools moves the
@@ -738,9 +742,20 @@
                  [{:op :received :sent-ns (:ns m) :recv-ns (profile/now-ns)}])
     nil))
 
+(defn spawn-phases
+  "The spawn's phases from root's request at t-req-ns, read off marks ([phase ns bytes], bytes
+  nil where the mark is another process's): each phase's wall ms since the mark before it (the
+  first since the request) and the bytes this thread allocated in it."
+  {:malli/schema [:=> [:cat :int [:sequential [:tuple :keyword :int [:maybe :int]]]] [:vector :map]]}
+  [t-req-ns marks]
+  (vec (for [[[_ n0 b0] [k n1 b1]] (partition 2 1 (cons [:request t-req-ns nil] marks))]
+         (cond-> {:phase k :ms (lib/r2 (/ (- n1 n0) 1e6))} (and b0 b1) (assoc :bytes (- b1 b0))))))
+
 (defn hello! {:malli/schema [:=> [:cat :int :map] [:or [:= true] [:= :dead]]]}
   [t-req-ns extra]
-  (send! (merge {:op :hello :pid (lib/c-getpid) :start-ms (profile/ms-since t-req-ns) :mem-mb (mem-mb) :t (:max-tx (db))} extra)))
+  (send! (merge {:op :hello :pid (lib/c-getpid) :start-ms (profile/ms-since t-req-ns) :mem-mb (mem-mb) :t (:max-tx (db))
+                 :phases (spawn-phases t-req-ns (conj (:marks @state []) [:hello (profile/now-ns) (profile/alloc-bytes)]))}
+                extra)))
 
 ;; ---- stderr: a file per agent, its tail read by root when the agent dies -------------
 
@@ -781,7 +796,7 @@
         (do (sock/close! fd) (send! {:op :clone-failed :k k :error (:error r)}))
         (lib/fork!
           {:fd fd :double? true
-           :refused (fn [n] (send! {:op :clone-failed :k k :error (contract/error :seon.agent/failed 'seon.agent/clone! (str "cannot fork: " n " Chez threads active (a running future?)") {:agent (:agent m)})}))
+           :refused (fn [n] (send! {:op :clone-failed :k k :error (contract/error :seon.agent/failed #'seon.agent/clone! (str "cannot fork: " n " Chez threads active (a running future?)") {:agent (:agent m)})}))
            :parent (fn [_] (send! {:op :cloned :k k :clone (:agent m)}))
            :child (fn []
                     (let [parent (:id @state)]
@@ -811,7 +826,12 @@
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
-  [fd {id :agent branch :branch task :task run :run cfg :cfg resumed :resumed commit :commit t :t graph :graph session :key} db0 serve]
+  [fd {id :agent branch :branch task :task run :run cfg :cfg resumed :resumed commit :commit t :t graph :graph session :key
+       marks0 :marks} db0 serve]
+  ;; the spawn's phases on the one clock, each with what this thread allocated in it: the fork
+  ;; server's marks (marks0), then this process's, sent with its hello (spawn-phases)
+  (let [marks (volatile! (conj (vec marks0) [:child-init (profile/now-ns) (profile/alloc-bytes)]))
+        mark! (fn [k] (vswap! marks conj [k (profile/now-ns) (profile/alloc-bytes)]))]
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
   (sock/clofork! fd)
@@ -819,17 +839,23 @@
   (lib/set-trip! (cfg/value :seon.config.agent/trip-bytes))
   (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)))
   (stderr-to-file! (stderr-path (pdb/agents-dir cfg) id))
+  (mark! :setup)
   ;; this agent owns its branch's writes: it opens the store itself (seon.db/after-fork!)
   (pdb/after-fork! cfg)
+  (mark! :store-reopened)
   ;; the model's API key is root's alone (its :model owner calls the model; session FX1)
   (lib/c-unsetenv (cfg/value :seon.config.ai/api-key-variable))
   (let [nsx (make-ns! id)
+        _ (mark! :ns)
         intr-ok (interrupt-self-test)
+        _ (mark! :interrupt-test)
         c (sock/conn fd)
-        store-conn (d/connect (assoc cfg :branch branch))]
+        store-conn (d/connect (assoc cfg :branch branch))
+        _ (mark! :connected)]
     (intr/install!)
     ;; root gone, this process ends, busy or not (the fork server's group kill may be gone too)
     (intr/exit-at-eof! #(sock/peer-gone? (:fd @state)))
+    (mark! :handlers)
     ;; :base is the branch's merge base with main: a new branch's is the image (main as it
     ;; forked); a resumed one's is older than main, and comparing against main's head would
     ;; read main's later changes as the branch's (seon.program/divergence, changed-vars)
@@ -844,7 +870,9 @@
               (let [_ (pdb/install-missing! store-conn) tx (program/gained-tx @store-conn)]
                 (when (seq tx) (d/transact store-conn {:tx-data tx :tx-meta (pdb/tx-meta branch)}))))
           load-errors (when resumed (program/load-diff! base @store-conn))
-          misaligned (when-not resumed (misaligned commit t @store-conn db0))]
+          _ (mark! :base)
+          misaligned (when-not resumed (misaligned commit t @store-conn db0))
+          _ (mark! :misaligned)]
      ;; a resumed branch whose program does not load runs main's for what failed: its errors
      ;; go to root with its hello (recorded problems), never dropped (T5b: a stub ran silently)
      (reset! state (cond-> {:id id :key (or session (key-of db0 id)) :branch branch :task task :run run :fd fd :conn c :db @store-conn
@@ -855,8 +883,10 @@
                    ;; main's reach graph as the fork server keeps it, for db0: test-plan's base
                    ;; graph starts from it (base-graph), never built in this process
                    graph (assoc :base-graph {:db db0 :graph graph})))
+     (mark! :state)
+     (swap! state assoc :marks @marks)
      ;; a kept branch, resumed (root released its held task: seon.reconcile/hold-tx), takes
      ;; its task from main, with the failure and evidence the last run left there; an
      ;; agent with no task (a fresh one on a kept branch) takes none
      (when-let [tx (when (and resumed task) (not-empty (task/onto-tx db0 @store-conn task)))]
-       (transact! tx)))))
+       (transact! tx))))))

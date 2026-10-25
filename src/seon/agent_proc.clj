@@ -100,7 +100,7 @@
               (if (and (seq (:inflight st)) (not (:stall-seen st)) (> quiet (:stall-ms m)) (zero? (:fx-out st 0)) (not (:dead? st)))
                 [(assoc st :stall-seen true)
                  {:to-api [{:op :stalled :agent (:id st)
-                            :error (contract/error :seon.agent/stalled 'seon.agent-proc/agent-proc
+                            :error (contract/error :seon.agent/stalled #'seon.agent-proc/agent-in
                                                    (str "agent " (name (:id st)) " sent nothing for " quiet " ms with a request in flight")
                                                    {:agent (:id st) :quiet-ms quiet :last-op (:last-op st)})}]}]
                 [st nil]))
@@ -129,27 +129,27 @@
                    ;; a clone: its pid arrives here (the fork server never saw it)
                    (when (:kill? st) (lib/c-kill (:pid m) 9))
                    (step/out! o :events (step/event {:type :spawned :agent id :pid (:pid m) :cloned-from (:cloned-from m)})))
-                 (step/out! o :to-api (status st (cond-> {:forked-ms (lib/r2 (:start-ms m)) :mem-mb (:mem-mb m) :t (:t m) :ready true}
+                 (step/out! o :to-api (status st (cond-> {:forked-ms (lib/r2 (:start-ms m)) :mem-mb (:mem-mb m) :t (:t m) :ready true :phases (:phases m)}
                                               (:cloned-from m) (assoc :pid (:pid m))
                                               (seq (:load-errors m)) (assoc :load-errors (:load-errors m)))))
                  ;; root's interrupt cannot reach it (its SIGUSR1 handler never ran: a process not
                  ;; forked from a main thread): a recorded problem, to whoever can act on it
                  (when (false? (:interrupt-ok m))
                    (step/out! o :to-api {:op :problem :class :agent :agent id
-                                         :error (contract/error :seon.agent/interrupt-unreachable 'seon.agent/init!
+                                         :error (contract/error :seon.agent/interrupt-unreachable #'seon.agent-proc/agent-frame
                                                                 "root's interrupt (SIGUSR1) does not reach this agent: its handler did not run at boot, so a runaway eval can only be killed" {})}))
                  ;; its branch's program did not load where it resumed: each failure a recorded problem
                  (doseq [{:keys [ns message]} (:load-errors m)]
                    (step/out! o :to-api {:op :problem :class :agent :agent id
-                                         :error (contract/error :seon.agent/load-failed 'seon.agent/init!
+                                         :error (contract/error :seon.agent/load-failed #'seon.agent-proc/agent-frame
                                                                 (str "its branch's program did not load in " ns ": " message) {:ns ns})}))
                  ;; its socket to root cannot raise SIGIO: it ends with root only when it next reads
                  (when-let [e (:unwatched m)] (step/out! o :to-api {:op :problem :class :agent :agent id :error e}))
                  (when-let [x (:misaligned m)]
                    (step/out! o :to-api {:op :problem :class :agent :agent id
-                                         :error (contract/error :seon.agent/fork-misaligned 'seon.agent/init!
+                                         :error (contract/error :seon.agent/fork-misaligned #'seon.agent-proc/agent-frame
                                                                 (str "its branch or image is not at the commit it was branched at: " (sedn/encode x)) x)}))
-                 (step/out! o :events (step/event {:type :ready :agent id :start-ms (:start-ms m)}))
+                 (step/out! o :events (step/event {:type :ready :agent id :start-ms (:start-ms m) :phases (:phases m)}))
                  (cond-> st (:cloned-from m) (assoc :pid (:pid m))))
       ;; its eval's record could not be written on its branch (its entity ids are spent):
       ;; the typed error is recorded on main as its problem
@@ -213,7 +213,7 @@
                   st)
               (to-proc! (update st :fx-out dec)
                         (merge {:op :fx-reply :k (:k m)}
-                               (contract/error :seon.fx/unknown-kind 'seon.fx/call (str "no effect kind " (:kind m)))))))
+                               (contract/error :seon.fx/unknown-kind #'seon.agent-proc/agent-frame (str "no effect kind " (:kind m)))))))
       ;; the agent's turn asks the test service to prove its branch at t (seon.prove): one run for
       ;; whoever asked for that key; the answer comes back on this proc's :in
       :prove (do (step/out! o :to-api {:op :request :req {:op :prove :agent id :branch (:branch st) :t (:t m) :digest (:digest m) :mode (:mode m)} :route [id :in] :tag (:k m)})

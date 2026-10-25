@@ -42,7 +42,7 @@
     (if d
       d
       (let [msg "neither SEON_CHECKOUT nor JOLT_PWD is set: the checkout the config file and its paths are read from (bin/env exports SEON_CHECKOUT)"]
-        (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation 'seon.config/checkout
+        (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation (symbol #'seon.config/checkout)
                              :seon.error/message msg}))))))
 
 (defn profile
@@ -107,14 +107,15 @@
                   {:key (or (first in) (first path))
                    :problem (case type :malli.core/extra-key :unknown-key :malli.core/missing-key :missing-key :invalid)
                    :value (sedn/encode value)}))]
-    {:seon.error/type :seon.config/refused :seon.error/operation 'seon.config/resolved
+    {:seon.error/type :seon.config/refused :seon.error/operation (symbol #'seon.config/invalid)
      :seon.error/message (str "the config does not satisfy :seon.config/config: "
                               (str/join ", " (for [{:keys [key problem]} ps] (str key " " (name problem)))))
      :seon.config/problems ps}))
 
 (defn- refuse!
-  {:malli/schema [:=> [:cat :qualified-symbol :string] :nil]}
-  [op msg] (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation op :seon.error/message msg})))
+  "Throw what raiser op (by its var: the compile resolves it) refuses, with msg."
+  {:malli/schema [:=> [:cat :seon.host/var :string] :nil]}
+  [op msg] (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation (symbol op) :seon.error/message msg})))
 
 (defn resolve-in
   "Setting k in config c (its layer sources srcs) for ctx {:task m :model id}: the task's or
@@ -133,7 +134,7 @@
       (contains? me k) {:value (get me k) :source [:model m]}
       (contains? pe k) {:value (get pe k) :source [:provider p]}
       (contains? c k) {:value (get c k) :source [:config (get srcs k "resources/seon/config/default.edn")]}
-      :else (refuse! 'seon.config/resolve (str k " is set nowhere: not by the task, the model " m ", its provider "
+      :else (refuse! #'seon.config/resolve-in (str k " is set nowhere: not by the task, the model " m ", its provider "
                                                p " or the config (declared keys: seon.config/keys-declared)")))))
 
 (def ^:private reasoning-pair (m/schema :seon.config.ai/reasoning-pair {:registry registry}))
@@ -169,7 +170,7 @@
         (if (empty? ps)
           m
           (let [msg (str "the config does not satisfy :seon.config.ai/reasoning-pair: " (str/join ", " (map (comp pr-str :key) ps)))]
-            (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation 'seon.config/resolved
+            (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation (symbol #'seon.config/resolved)
                                  :seon.error/message msg :seon.config/problems ps}))))))))
 
 ;; ---- the layers: the shipped file, the checkout's own file, the command line ------------------
@@ -193,7 +194,7 @@
         v (when i (try [(edn/read-string (subs s (inc i)))] (catch Exception _ nil)))]
     (if (and (qualified-keyword? k) v)
       [k (first v)]
-      (refuse! 'seon.config/parse-set (str "--set " s ": expected :ns/key=<edn value>")))))
+      (refuse! #'seon.config/parse-set (str "--set " s ": expected :ns/key=<edn value>")))))
 
 (defn overrides
   "The command line's config overrides, in order, and the rest of it:
@@ -206,7 +207,7 @@
       (empty? as) acc
       (and (= "--config" a) b) (recur more (update acc :layers conj [(str "--config " b) b]))
       (and (= "--set" a) b) (recur more (update acc :layers conj ["--set" (into {} [(parse-set b)])]))
-      (#{"--config" "--set"} a) (refuse! 'seon.config/overrides (str a " needs an argument"))
+      (#{"--config" "--set"} a) (refuse! #'seon.config/overrides (str a " needs an argument"))
       :else (recur (rest as) (update acc :rest conj a)))))
 
 (defn without-overrides
@@ -309,7 +310,7 @@
 
 (defn facts
   "Config c and its sources as facts on main (platform records: never carried by a merge in
-  either direction): main's root entity holding every key (each {:seon.db/data true} key, the
+  either direction): main's root entity holding every key (each collection-valued key, the
   manifest among them, as data), and an entity per provider and per model
   (:seon.ai.model/provider-id, :seon.ai.model/id)."
   {:malli/schema [:=> [:cat :seon.config/config :seon.config/sources] [:vector :map]]}

@@ -155,7 +155,10 @@
   is refused, never answered (bin/root start in it would only report that root, and the test
   would ask another test's root: task seon.test-store/a-test-root-is-its-own). The refused start
   backs that rule, it is no lock: two starts at once in one runs could both pass it, which a
-  runs per main makes unreachable."
+  runs per main makes unreachable. Its task files are its own (:seon.config.root/tasks-dir under
+  runs, unless args name another): the checkout's are every session's, and an event on one (a
+  merge's write, which FSEvents also delivers to a watcher begun just after it) made a test root
+  load all of them (seon.root-test/a-second-boot-resumes-the-same-main read 810 tasks)."
   {:malli/schema [:=> [:cat [:map [:store :string] [:main :string] [:runs :string]
                              [:env {:optional true} [:map-of :string :string]] [:args {:optional true} [:sequential :string]]]]
                   :map]}
@@ -164,7 +167,7 @@
   (when (zero? (:exit (root-sh root "status" [])))
     (throw (ex-info (str "a root is already running in " runs ": a test's root takes a runs directory of its own")
                     {:seon.error/type :seon.test-store/runs-in-use :runs runs})))
-  (root-sh root "start" (vec args))
+  (root-sh root "start" (into ["--set" (str ":seon.config.root/tasks-dir=" (pr-str (str runs "/tasks")))] args))
   (assoc root :port (bound-port runs)))
 
 (defn next-root!
