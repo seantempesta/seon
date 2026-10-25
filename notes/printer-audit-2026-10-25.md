@@ -25,6 +25,49 @@ Owner, 2026-10-25: "make sure the value printer is working good everywhere". Eve
 | infinite lazy seq | `(range)` | 31 members, `…? (drop 31 (get-in result/e1 [:xs]))` | same | | none |
 | `bin/` and check lines | `seon.main/shown` | the printer's whole text by design | same | | none |
 
+## Owner, 2026-10-25: generous budgets; no junk made, none rendered
+
+Owner, 2026-10-25: "And that it has a generous context budget. Id rather us focus on not generating crap and then not rendering crap." Truncation is the last resort.
+
+### (1) The budgets
+
+The budgets are config keys in `resources/seon/config/default.edn`. `:seon.config.render.agent/token-budget` is **6,144** tokens (a reply's value; v1's value). `:seon.config.render/part-budget` is **256** (a value inside another; since this branch, also an evaluation's body on the page). `:seon.config.render/context-budget` is 16,000, `:seon.config.render/history-budget` 32,000, `:seon.config.render/value-budget` 600 and `:seon.config.render/root-context-budget` 700. The sizer is `:seon.config.ai/chars-per-token-prior` 3.2.
+
+Printed tokens and cuts by budget, measured on this branch (whole means `:seon.print/full`):
+
+| value | whole | 256 | 1024 | 2048 | 6144 | 12000 | 16000 |
+|---|---|---|---|---|---|---|---|
+| problems, raw rows (no schema meta) | 66,256 | 145, 2 cuts | 644, 4 | 1,475, 3 | 4,709, 2 | 9,582, 2 | 12,641, 2 |
+| problems, by its render (`seon.render.ai/report-data`) | 14,218 | 213, 2 | 959, 1 | 1,958, 1 | 6,034, 1 | 11,922, 1 | 14,218, whole |
+| `seon_agents`, main | 41,434 | 148, 1 | 698, 1 | 1,480, 1 | 4,564, 1 | 8,890, 1 | 11,918, 1 |
+| `seon_agents`, no empty keys (this branch) | 30,897 | 190, 1 | 880, 1 | 1,777, 1 | 5,332, 1 | 10,490, 1 | 14,001, 1 |
+| 177 small rows (a1's e7) | 6,301 | 196, 1 | 794, 1 | 1,606, 1 | 4,914, 1 | whole | whole |
+
+**Proposed, for root's ruling (not changed on this branch):**
+- Raise `:seon.config.render.agent/token-budget` from 6,144 to 16,000, equal to the context budget. Main's problems would then read whole through their render (14,218 tokens; 6,034 and one cut today), and so would a1's 177 rows (6,301; 4,914 and a cut today).
+- What it costs: a reply can be 2.6× today's. The history budget (32,000) then holds two such replies whole, and it collapses older ones to their handle and one line (`seon.context/kept`), so a turn's request stays within the ~20–55k its config entry states.
+- Raise `:seon.config.render/part-budget` for the page's evaluation body to 2,048: about 30 small rows instead of 4 (1,606 tokens against 196). Better as a key of its own (`:seon.config.render/page-eval-budget`) than raising the part budget for refused arguments too. A new key, so it waits for root's gate.
+- The charge is an upper bound: the printed text runs 20–25% under the budget (`seon_agents` printed 11,918 of 16,000). That is the selection's design, recorded here, not changed.
+
+### (2) Junk made upstream, and its producer
+
+| junk | producer | here |
+|---|---|---|
+| a problem row's empty keys (`:producer nil :at-ms nil :proofs [] :answered-by []` on every derived row); `:evidence` repeating the row (`:example`, `:signature`, `:count` and `:agents` twice on an error row; `:name` and `:section` on a dead citation): 13 keys a row, raw | `seon.problems/derived-row`, `seon.problems/error-row`, `seon.problems/dead-citations` (:seon.problems/row requires the keys) | task `seon.problems/a-problem-row-holds-what-it-knows` (the gates read rows, so the schema change is its own task) |
+| 676 tasks in `seon_agents`, each `:done false, :blocked-by #{}, :runs []` | `seon.server/task-summaries` | **fixed**: a key only when it says something; 41,434 → 30,897 tokens whole |
+| `seon_agents` lists every held task, alphabetically, before anything live | `seon.server/agents-answer` | task `seon.server/seon-agents-answers-what-is-live` |
+| each row under a class repeats `:class` | `seon.render.ai/report-data` | **fixed**: the row is under its class |
+| 25 empty classes `{:n 0, :rows []}` | `seon.problems/report` (the full map is the value's shape) | already left out by its render (`seon.render.ai/ordered`); raw, they are the report's schema |
+
+Root's 144-line case was the raw rows, a report value printed without its schema's metadata (its render had dropped them to `{:why ..}`). On this branch the raw rows print whole until the budget, then one cut.
+
+### (3) Junk not rendered
+
+- Elision placeholders: no row prints as `{…N (get-in ..)}` (`seon.print.select/fill-rows`, above). One placeholder case was a defect of the first draft and was found by this audit. `fill-rows` reserved a cut without its form's path, so the report through its render printed 347 of 6,144 tokens at 13 of the budgets between 2,000 and 9,000, its 177 rows one placeholder (`seon.print-test/rows-reserve-the-cut-they-print`, red on that commit). Fixed.
+- A path repeated per row: gone with the placeholders; a cut names its path once.
+- Empty and redundant keys: the renders already leave nil and empty values out (`seon.render.ai/ordered`); the producers above now leave out what they repeat. The printer itself prints every key it is given: nil versus missing is data, and the producer decides it.
+- A collection of rows with one member of another kind still falls back to breadth, which can place placeholders: task `seon.print/breadth-shows-no-member-that-shows-nothing`.
+
 ## Second printers and clipping
 
 `seon.render-test/one-printer-and-no-cut-before-it` holds `pr-str` and the like, `subs`, `take`, `take-last` and `drop-last` in display namespaces to the list in [render](../docs/render.md#one-printer). Grepping what it says it does not cover (`subvec`, `nthrest`, `split-at`, `partition-all`, `.substring`, `str` of a value, `format "%s"`, `clip`, `ellipsis`, `line-clamp`, `text-overflow`) found no second printer in src. `seon.context/kept`'s `subvec` chooses which history parts are sent, and it counts the ones it leaves out. The one second cut found was the page's eval body (above), and it is fixed.

@@ -23,15 +23,21 @@
 
 (defn task-summaries
   "Every task on main db: {id {:execution :done :blocked-by :runs [[id status outcome
-  turns tokens]] :failure}}: the server's and the e2e harness's one summary."
+  turns tokens]] :failure}}: the server's and the e2e harness's one summary. A key says something
+  or is left out: :done only when done, :blocked-by and :runs only when there are some (676 held
+  tasks spelled `:done false, :blocked-by #{}, :runs []` each, 2026-10-25)."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
   (let [idx (r/index db)]
     (into (sorted-map)
-          (for [[id t] (:tasks idx)]
-            [id (cond-> {:execution (:seon.task/execution t) :done (r/done? idx id) :blocked-by (r/blocked-by idx id)
-                         :runs (mapv (juxt :seon.run/id :seon.run/status :seon.run/outcome :seon.run/turns :seon.run/tokens)
-                                         (sort-by :seon.run/id (map (:runs idx) (get-in idx [:by-task id]))))}
+          (for [[id t] (:tasks idx)
+                :let [blocked (r/blocked-by idx id)
+                      runs (mapv (juxt :seon.run/id :seon.run/status :seon.run/outcome :seon.run/turns :seon.run/tokens)
+                                 (sort-by :seon.run/id (map (:runs idx) (get-in idx [:by-task id]))))]]
+            [id (cond-> {:execution (:seon.task/execution t)}
+                  (r/done? idx id) (assoc :done true)
+                  (seq blocked) (assoc :blocked-by blocked)
+                  (seq runs) (assoc :runs runs)
                   (:seon.task/failure t) (assoc :failure (:reason (:seon.task/failure t))))]))))
 
 (defn agents-answer

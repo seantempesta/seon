@@ -103,7 +103,6 @@
 (def ^:private structural-kinds
   #{:seon.print/vector :seon.print/list :seon.print/set :seon.print/map :seon.print/throwable})
 
-
 ;; The ops every collection shares, made once.
 (def ^:private line {:op :line :inline " " :terminate ""})
 (def ^:private begin {:op :begin})
@@ -208,8 +207,7 @@
                :seon.print/vector "[" :seon.print/list (if quoted? "'" "(") :seon.print/set "#{"
                :seon.print/map (str (when lifted (str "#:" lifted)) "{"))
         close (case (:seon.print/face node) :seon.print/vector "]" :seon.print/list (if quoted? "" ")") "}")
-        nest nests
-        d (inc depth)
+                d (inc depth)
         fill? (and (not map-like?) (every? (comp scalar-kinds :seon.print/face) shown))
         ;; a member's path, `path` then its index (and 0 for a key, 1 for a value)
         member (fn [ops child index part]
@@ -219,7 +217,7 @@
         ops (-> ops
                 (conj! {:op :begin :seon.print/open (assoc node :seon.print/path path)})
                 (conj! (text-op :seon.print/delimiter open))
-                (conj! (nest (if (= :seon.print/set (:seon.print/face node)) 2 1))))
+                (conj! (nests (if (= :seon.print/set (:seon.print/face node)) 2 1))))
         ops (reduce-kv
              (fn [ops index child]
                (let [ops (cond (zero? index) ops
@@ -229,7 +227,7 @@
                  (cond
                    (and map-like? (vector? child))
                    (-> ops (conj! begin)
-                       (member (nth child 0) index 0) (conj! (nest 2)) (conj! line)
+                       (member (nth child 0) index 0) (conj! (nests 2)) (conj! line)
                        (member (nth child 1) index 1) (conj! outdent) (conj! end))
                    (or (zero? index) map-like? (not fill?)) (member ops child index nil)
                    :else (-> ops (conj! begin) (conj! line) (member child index nil) (conj! end)))))

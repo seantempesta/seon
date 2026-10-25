@@ -620,8 +620,8 @@
                 (recur entries extra more)))))))))
 
 (defn- row-class
-  "The class that makes `held`, a member of `node`, a row: a map's, vector's or set's, or in a
-  sequence a string's; else nil. A map's member is a row by its value when its key is no keyword
+  "The kind that makes `held`, a member of `node`, a row: :map, :vector or :set (an array map and
+  a hash map are one kind), or in a sequence :string; else nil. A map's member is a row by its value when its key is no keyword
   (an id's row; a keyword names an attribute, a part of one record, which shows breadth first).
   A row at its least is a cut that shows nothing, a line and a form that say no more than the
   collection's own cut."
@@ -630,16 +630,18 @@
   (let [map? (= :map (:kind node))
         m (if (and (:indexed? node) (:sorted? node)) (nth held 1) held)
         c (class (if map? (val m) m))]
-    (when (and (not (and map? (keyword? (key m)))) (or (map-classes c) (vector-classes c) (set-classes c) (and (not map?) (identical? c String)))) c)))
+    (when-not (and map? (keyword? (key m)))
+      (cond (map-classes c) :map (vector-classes c) :vector (set-classes c) :set (and (not map?) (identical? c String)) :string))))
 
 (defn- alike?
-  "Are `node`'s members rows of one class (`row-class`), as far as `:max-children` members reach."
+  "Are `node`'s members rows of one kind (`row-class`), as far as `:max-children` members reach
+  (the most a budget shows)."
   {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc] :boolean]}
   [context node]
   (let [c (row-class node (first (:pending node)))]
     (loop [members (next (:pending node)) k 1]
       (cond (or (nil? c) (nil? members) (>= k (:max-children context))) (some? c)
-            (identical? c (row-class node (first members))) (recur (next members) (inc k))
+            (= c (row-class node (first members))) (recur (next members) (inc k))
             :else false))))
 
 (defn- fill-members
@@ -662,23 +664,27 @@
 
 (defn- fill-rows
   "Collection `node` within `budget`, its first member a row (`row-class`): each member whole in
-  its order while it fits and is a row of that class, then one cut for the rest. When not even
-  the first fits whole, it is filled to the room if every member is a row of its class (`alike?`)
-  and its first part shows; otherwise, and at a member of another class, the members share the
-  room breadth before depth (`fill-members`). It reads no member past the cut."
+  its order while it fits, then one cut for the rest. When not even the first fits whole, it is
+  filled to the room if the members are rows of its kind (`alike?`) and its first part shows;
+  otherwise, and at a member of another kind, the members share the room breadth before depth
+  (`fill-members`). It reads no member past the cut."
   {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc number?] :seon.print/alloc]}
   [context node budget]
   (let [sep (separator context node)
-        c0 (row-class node (first (:pending node)))]
-    (loop [kids [] spent (+ (:ub (collapsed context node)) (cut-reserve node)) members (:pending node)]
+        c0 (row-class node (first (:pending node)))
+        ;; the cut as it prints, its form's path included, at its widest (both counts at the total's digits)
+        reserve (+ sep (count (cut-text (assoc node :n 0))) (count (str (:total node 0))))]
+    (loop [kids [] spent (+ (:ub (collapsed context node)) reserve) members (:pending node)]
       (if-let [[held & more] (seq members)]
         (let [cost (if (seq kids) sep 0)
               c (child context node held (count kids))
               room (- budget spent cost)
-              w (when (identical? c0 (row-class node held)) (whole context c room))]
+              w (when (= c0 (row-class node held)) (whole context c room))]
           (cond
             w (recur (conj kids w) (+ spent cost (:ub w)) more)
-            (and (seq kids) (identical? c0 (row-class node held))) (sized context (assoc node :kids kids :pending members))
+            ;; a row that does not fit ends the rows; a member of another kind makes the collection
+            ;; mixed, whose members share the room (a vector of a string, rows and a keyword)
+            (and (seq kids) (= c0 (row-class node held))) (sized context (assoc node :kids kids :pending members))
             (or (seq kids) (not (alike? context node))) (fill-members context node budget)
             :else
             (let [part (when (pos? room)

@@ -123,7 +123,7 @@
 
 (defn rows
   "The input of size n: n problem rows (7 keys each, as my.root/problems' :stale-section rows),
-  printed with a handle under the reply budget, which shows the first ~60 whole and cuts the rest."
+  printed with a handle under the reply budget, which shows the first 73 whole and cuts the rest."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
   [n] [{:rows (vec (for [i (range n)] (array-map :section (keyword "render" (str "s" i)) :page "docs/render.md"
                                                   :class :stale-section :since 1761360000000 :cited 'seon.print/print-value
@@ -143,7 +143,7 @@
       (cost/proof
         {:of 'seon.print/print-value :input 'seon.print-cost-test/rows
          :n "problem rows under the reply budget, unarmed"
-         :work (str "nothing per row: the rows the budget shows whole are fixed by it, about four whole walks of "
+         :work (str "nothing per row past what the budget could show (alike? reads member kinds only when no row fits whole): the rows the budget shows whole are fixed by it, about four whole walks of "
                     "them (one a level: the root, its :rows entry, the vector, each row), and the first row "
                     "that does not fit is sized until its charge passes the room; no row past the cut is read")
          :growth :constant

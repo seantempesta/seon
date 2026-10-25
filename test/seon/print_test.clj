@@ -255,7 +255,7 @@
         shown (count (re-seq #":seon.docs/section" text))]
     (is (= 1 elisions (count cuts)) text)
     (is (not (re-find #"\{…" text)) "no row shows as a placeholder")
-    (is (< 20 shown 177) "a few rows show, each whole")
+    (is (< 40 shown 177) "the reply budget shows dozens of rows, each whole")
     (is (= (- 177 shown) (:n cut)) "the cut counts the rows it left")
     (is (reads-exactly? text h v cut) "and its form reads exactly them")
     (testing "a map of rows: its entries whole in their order, then one cut"
@@ -263,6 +263,29 @@
             {:keys [text elisions]} (seon/print-value m {:handle h})]
         (is (= 1 elisions) text)
         (is (not (re-find #"\{…" text)))))
+    (testing "rows of array maps and of hash maps are one kind"
+      (let [mixed (into (problem-rows 100) (map #(into % {:a 1 :b 2})) (problem-rows 100))
+            {:keys [text elisions]} (seon/print-value mixed {:handle h})]
+        (is (= 1 elisions) text)
+        (is (not (re-find #"\{…" text)))))
     (testing "members unlike each other still share the room (members-fill-breadth-before-depth)"
-      (let [{:keys [text]} (seon/print-value [(problem-rows 3) "x" :y] {:handle h :budget 60})]
-        (is (str/includes? text ":y") text)))))
+      (let [{:keys [text]} (seon/print-value ["x" (problem-rows 3) :y] {:handle h :budget 60})]
+        (is (str/includes? text ":y") text)
+        (is (str/includes? text "\"x\"") text)))))
+
+(deftest rows-reserve-the-cut-they-print
+  ;; root's report through its render (seon.render.ai/report-data), 2026-10-25: at 13 budgets
+  ;; between 2,000 and 9,000 tokens it printed 347, :stale-section's 177 rows one placeholder.
+  ;; fill-rows reserved a cut without its form's path, overran its room, and the map's growth
+  ;; then kept the rows at their least. A value with room left prints most of its budget.
+  (let [why #(str "docs/health.md#a-stale-section describes seon.problems/stale-sections as it was (form seon.problems/"
+                  (format "%08d" %) "), and it has changed")
+        v {:handle 'result/e1
+           :value (array-map :problems-on-main-at-t 536872831
+                             :classes (sorted-map :dead-citation {:n 2 :rows [{:why (why 1)} {:why (why 2)}]}
+                                                  :stale-section {:n 177 :rows (vec (for [i (range 177)] {:why (why i)}))}))}
+        starved (for [b (range 1000 6200 37)
+                      :let [{:keys [tokens]} (seon/print-value v {:handle 'result/e1 :budget b})]
+                      :when (< tokens (* 0.8 b))]
+                  [b tokens])]
+    (is (empty? starved) (str "budgets that printed under 80% of themselves: " (vec (take 5 starved))))))
