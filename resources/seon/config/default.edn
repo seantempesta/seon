@@ -296,10 +296,12 @@
  :seon.config.source/dirs ["src" "test" "resources/seon/schemas"]
  ;; Unit: paths under the root, of those above. The program proper: a namespace whose file is under
  ;; one is the program's, one under test/ (a test's, a fixture's, a helper's like seon.check or
- ;; seon.fixtures, whose names do not end in -test) is not, nor one with no file (an app made at an
- ;; agent's REPL) (seon.program/program-nss). Read where the program is told from its
- ;; tests: related's and similar's functions, the failure-point law's sites. Provenance: root,
- ;; 2026-10-25 (the live round 5's big-map request, whose related functions were test/ helpers).
+ ;; seon.fixtures, whose names do not end in -test) is not (seon.program/program-nss). Read where
+ ;; the program is told from its tests: the failure-point law's sites (a namespace with no file,
+ ;; an agent's REPL app, is no failure point), and related's and similar's functions (there one
+ ;; with no file is the agent's new work, and shown). Provenance: root, 2026-10-25 (the live round
+ ;; 5's big-map request, whose related functions were test/ helpers). At the bound: an empty
+ ;; vector makes nothing the program's (no law site, no related function but the agent's own).
  :seon.config.source/program-dirs ["src"]
  ;; Unit: qualified var names. A test whose reach (seon.program/reach-index, the compiler's
  ;; facts) references one of these reaches a process of its own: a shell, a fork, a root booted

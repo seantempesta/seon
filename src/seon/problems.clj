@@ -166,12 +166,12 @@
                   [:=> [:cat :seon.host/db :map [:maybe [:set :int]]] [:vector :seon.problems/row]]]}
   ([db ans] (unnamed-sites db ans nil))
   ([db ans only]
+  ;; the law is the program's own source's: its namespaces, read once, when a site asks
+  (let [program (delay (program/program-nss db))]
   (vec (for [{:keys [law fact page except]} laws
              :let [page-eids (into #{} (keep (fn [{:keys [e v]}] (when (str/starts-with? v (str page "#")) e))) (d/datoms db :aevt :seon.section/address))
                    named (into #{} (keep (fn [{:keys [e v]}] (when (page-eids e) v))) (d/datoms db :aevt :seon.section/names))
                    ;; the multimethod or protocol a form without a var extends: read only if one asks
-                   ;; the law is the program's own source's: its namespaces, read once
-                   program (delay (program/program-nss db))
                    owners (delay (merge (into {} (map (fn [{:keys [e v]}] [v (:method/multi (d/entity db e))])) (d/datoms db :aevt :method/form))
                                         (into {} (map (fn [{:keys [e v]}] [v (:impl/protocol (d/entity db e))])) (d/datoms db :aevt :impl/form))))]
              fe (distinct (if only (filter (fn [e] (seq (d/datoms db :eavt e fact))) only) (map :e (d/datoms db :aevt fact))))
@@ -187,7 +187,7 @@
              :when (and (not (except (str nsym))) (not (named v)) (contains? @program nsym))
              :let [s (str "unnamed-site " (name law) " " v)]]
          (derived-row ans s nsym (str v " has a " (name law) " site that " page " does not name")
-                      {:kind :unnamed-site :law law :site v :page page} {:law law :site v :page page})))))
+                      {:kind :unnamed-site :law law :site v :page page} {:law law :site v :page page}))))))
 
 (def pins
   "Where the wiki states each customized library's pin: the page, and the line that states one

@@ -521,7 +521,8 @@
   "The namespaces of db that are the program's own: their file under one of
   :seon.config.source/program-dirs. A test's, a fixture's or a test helper's (under test/, whatever
   its name), and one with no file (an app an agent made at its REPL, until it is written back), are
-  not. One read of the namespaces' files, so a caller asks it once and tests membership."
+  not (seon.context/related shows the last as the agent's new work). One read of the namespaces'
+  files, so a caller asks it once and tests membership."
   {:malli/schema [:=> [:cat :seon.host/db] [:set :symbol]]}
   [db]
   (let [dirs (mapv #(str % "/") (cfg/value :seon.config.source/program-dirs))]

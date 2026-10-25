@@ -153,7 +153,9 @@
         k (cfg/value :seon.config.render/similar {:task t :model (:seon.task/model t)})
         ;; a program function, as related's: no test helper or fixture of test/
         program (program/program-nss db)
-        function? #(and (= :fn (:var/kind (d/entity db [:var/name %]))) (contains? program (symbol (namespace %))))
+        function? #(let [n (symbol (namespace %))]
+                     (and (= :fn (:var/kind (d/entity db [:var/name %])))
+                          (or (contains? program n) (nil? (:ns/file (d/entity db [:ns/name n]))))))
         ;; every vector, every dim, every rank: the exact ranking (near's shortlist and fine level
         ;; over all of them; it sorts them all anyway), walked until k functions are found, as the
         ;; nearest forms are often tests
@@ -207,9 +209,11 @@
             schema? #(some? (pdb/eid db :schema/key %))
             ;; a program function: no test, no macro (every contracted form names seon.contract/defn),
             ;; nothing outside the program's dirs (test/'s fixtures and helpers); both halves alike
+            ;; a namespace with no file yet (one the agent made at its REPL) is its new work: shown
             program (program/program-nss db)
-            function? #(and (not (#{:test :macro} (:var/kind (d/entity db [:var/name %]))))
-                            (contains? program (symbol (namespace %))))
+            function? #(let [n (symbol (namespace %))]
+                         (and (not (#{:test :macro} (:var/kind (d/entity db [:var/name %]))))
+                              (or (contains? program n) (nil? (:ns/file (d/entity db [:ns/name n]))))))
             ;; a neighbour weighs 1/(1 + the forms naming it, counted to a cap): what every form names
             ;; (seon.contract/checked, on?, seon.db/eid) weighs nothing (docs/vector.md#fused-with-the-call-graph)
             cap (cfg/value :seon.config.render/related-rarity)
