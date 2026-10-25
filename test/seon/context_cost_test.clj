@@ -73,6 +73,15 @@
                           "once, its shortlist reranked), the graph's seeks for what the plan cites (none here), "
                           "and one rrf of each kind's two rankings: linear in the vectors")
                :growth :linear
-               :per-n {:bytes 700.0 :calls 0.0}
-               :fixed {:bytes 6000000.0 :calls 60.0}
-               :sizes [100 1000 3000]}))
+               ;; measured at n=100 (prove, 2026-10-25): 145 calls, 3.39 MB. The calls are ~100
+               ;; seon.vector/stored, one EAVT seek per row the fine level reranks (every row below
+               ;; the 400-row :seon.config.vector/shortlist), and ~45 fixed: three near (each its
+               ;; vector-of, unpack and pack-dims), the citation parse and the resolver's read. One
+               ;; seek a reranked row is the work (the shortlist's rows are scattered: a batch read
+               ;; would scan every f16 row), so past the shortlist the calls are constant, ~445, as
+               ;; seon.vector-cost-test/a-search-reads-each-row-once measures past it. Each near reads
+               ;; every coarse row before :of filters them (two of the three here keep none): per-n
+               ;; bytes three times near's own 700. Estimates to be set from the run at these sizes.
+               :per-n {:bytes 2100.0 :calls 0.0}
+               :fixed {:bytes 6500000.0 :calls 460.0}
+               :sizes [500 1000 2000]}))

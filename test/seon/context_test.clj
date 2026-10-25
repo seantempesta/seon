@@ -778,13 +778,13 @@
   ;; over the session: (my.task/related) is a screen form, the sections nearest the plan's vector
   ;; that it does not cite, the first :seon.config.render/related (5), each a line with the forms
   ;; that dig further (its wrappers' own test: seon.agent-test/related-is-an-eval-of-the-plan-and-of-any-text)
-  (let [[db te] (sections-near "Make the page say one thing (docs/vector.md#what-is-embedded) of :demo/thing.")
+  (let [[db te] (sections-near "Make the page say one thing (docs/vector.md#what-is-embedded) of `:demo/thing`.")
         rel (context/related db te)
         v (context/related-view db rel)]
     (is (= ["docs/vector.md#the-model" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph" "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"] (:sections rel))
         "the sections nearest first, the section the plan cites left out")
     (is (= ['demo/g] (:functions rel)) "the functions nearest it")
-    (is (= [:demo/thing] (:schemas rel)) "and the schema keys its plan names")
+    (is (= [:demo/thing] (:schemas rel)) "and the schema keys its plan cites")
     (is (= ["demo/g: Gets it."] (:functions v)) "a function a line: its name and its doc's first sentence")
     (is (some #{"(my.task/related)"} seon.screen/forms) "a form of the screen: each turn evaluates it, as an eval the agent sees and can rerun")
     (is (= ["docs/vector.md#the-model: Section 0 says one thing." "docs/vector.md#the-pyramid: Section 2 says one thing."
@@ -820,8 +820,8 @@
   ;; nearest by meaning (seon.vector/rrf: a tie broken by name); what the plan cites is left out
   (let [[db te] (sections-near "Make the page say one thing (docs/vector.md#what-is-embedded), in `demo/h`.")
         db (d/db-with db [{:db/id "h" :form/id "demo/h" :form/src "(defn h [])"} {:var/name 'demo/h :var/form "h" :var/kind :fn}
-                          {:db/id "k" :form/id "demo/k" :form/src "(defn k [] (h))" :form/refs #{'demo/h}} {:var/name 'demo/k :var/form "k" :var/kind :fn}
-                          {:db/id "t" :form/id "demo/k-test" :form/src "(deftest k-test (h))" :form/refs #{'demo/h}} {:var/name 'demo/k-test :var/form "t" :var/kind :test}
+                          {:db/id "k" :form/id "demo/k" :form/src "(defn k [] (h))" :form/refs #{'demo/h} :form/defines #{"kv"}} {:db/id "kv" :var/name 'demo/k :var/form "k" :var/kind :fn}
+                          {:db/id "t" :form/id "demo/k-test" :form/src "(deftest k-test (h))" :form/refs #{'demo/h} :form/defines #{"tv"}} {:db/id "tv" :var/name 'demo/k-test :var/form "t" :var/kind :test}
                           {:seon.section/address "docs/vector.md#the-pyramid-c" :seon.section/heading "C" :seon.section/lead "Names h. More."
                            :seon.section/names #{'demo/h}}])
         rel (context/related db te)]
