@@ -61,7 +61,7 @@
 
 (defn- refused
   "The done rule's reasons as the agent reads them, beyond its own red proofs (shown with
-  the proofs): a red test names its failures, a contract gap its var, a design step that
+  the proofs): a red test names its failures (a stray one the form that makes it a proof), a contract gap its var, a design step that
   has not improved its plan the call that does, an open problem its work made true what it
   is (seon.problems/caused)."
   {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done] [:vector :map]] [:vector :map]]}
@@ -77,7 +77,10 @@
              (case reason
                (:regression :stray-red) (cond-> {:reason reason :test symbol}
                                           (seq (filter #(= symbol (:test %)) reds))
-                                          (assoc :failures (mapv failure (filter #(= symbol (:test %)) reds))))
+                                          (assoc :failures (mapv failure (filter #(= symbol (:test %)) reds)))
+                                          ;; a red test the agent wrote is a proof it has not registered, or one to delete
+                                          (= :stray-red reason)
+                                          (assoc :do (list 'my.task/update! :seon.task/proofs 'conj (list 'quote symbol))))
                :no-design {:reason reason :unchanged :seon.task/plan
                            :do '(my.task/update! :seon.task/plan str "\n\n" "<what the implement step must do>")}
                ;; no result: never written, or never run; what writes and runs it

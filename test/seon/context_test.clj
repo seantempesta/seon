@@ -82,7 +82,7 @@
                                            :test-run-errors ["namespace app-test did not load: Unable to resolve symbol: g"]})]
     (testing "every reason but the task's own red proof (shown with the proofs), each with what explains it"
       (is (= [{:reason :regression :test 'demo-test/g-test :failures [{:assert (print/code "(= 1 (g))") :got (print/code "(= 1 0)")}]}
-              {:reason :stray-red :test 'user/scratch-test}
+              {:reason :stray-red :test 'user/scratch-test :do '(my.task/update! :seon.task/proofs conj (quote user/scratch-test))}
               {:reason :contract-gap :vars ['demo/helper]}]
              (:refused block))))
     (testing "a run that failed as a whole is said, not read as tests not run"
@@ -99,6 +99,10 @@
       (let [b (context/current-state db t {:results {} :reasons [{:reason :no-design}] :turn 1 :max-turns 4})]
         (is (= [[:no-design :seon.task/plan 'my.task/update!]]
                (mapv (juxt :reason :unchanged (comp first :do)) (:refused b))))))
+    (testing "a stray red is told the form that makes it a proof of the task"
+      (let [b (context/current-state db t {:results {'user/scratch-test :fail} :reasons [{:reason :stray-red :symbol 'user/scratch-test}] :turn 1 :max-turns 4})]
+        (is (= ['(my.task/update! :seon.task/proofs conj (quote user/scratch-test))]
+               (keep :do (filter #(= :stray-red (:reason %)) (:refused b)))))))
     (testing "nothing refused, nothing failed: no section"
       (let [b (context/current-state db t {:results {'demo-test/f-test :pass} :reasons [] :turn 1 :max-turns 4 :test-run-errors []})]
         (is (not-any? #(contains? b %) [:refused :test-run :flagged :your-last-reply]))))))

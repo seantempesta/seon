@@ -14,7 +14,7 @@
     collection). docs/failure-points.md, \"Physics\".
   - The socket's buffer is the bounded channel: a full buffer makes the sender wait."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [jolt.ffi :as ffi] [seon.lib :as lib] [konserve.jolt.fasl :as codec] [seon.config :as config]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [jolt.ffi :as ffi] [seon.lib :as lib] [konserve.jolt.fasl :as codec] [seon.config :as config] [jolt.io-poller :as poller]))
 
 (ffi/load-library)
 
@@ -187,13 +187,20 @@
 
 
 (defn recv!
-  "Blocking: the next frame's value, or :eof. EINTR (a signal) retries."
+  "The next frame's value, or :eof. EINTR (a signal) retries. On a main carrier
+  (jolt.host/main-carrier-run!: the agent's fibers on its one thread), a wait for input
+  parks this fiber on the socket's readiness, so the process's other fibers run meanwhile;
+  elsewhere the recvmsg blocks."
   {:malli/schema [:=> [:cat :seon.sock/conn] :any]}
   [c]
-  (loop []
-    (if-let [b (take-frame c)]
-      (if (= :end b) :eof (codec/decode b))
-      (if (= :eof (fill! c true)) :eof (recur)))))
+  (let [park? (and (jolt.host/main-carrier?) (jolt.host/fiber?))]
+    (loop []
+      (if-let [b (take-frame c)]
+        (if (= :end b) :eof (codec/decode b))
+        (let [r (fill! c (not park?))]
+          (cond (= :eof r) :eof
+                (and park? (= :again r)) (do (poller/wait-ready (:fd c) :read) (recur))
+                :else (recur)))))))
 
 (defn close-pending-fds!
   "Close every descriptor received on c and not yet taken (a forked child does this: they
