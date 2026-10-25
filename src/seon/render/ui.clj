@@ -437,10 +437,10 @@
   [e opts]
   (let [rec (or (:seon.eval/record e) e)
         r (merge (:response rec) (select-keys rec [:code :prose :fns]) (dissoc e :seon.eval/record))
-        ;; a recorded value printed at the part's budget under its handle, its cut the printer's
-        ;; (whole rows, the form that reads the rest), not its reply's text cut again; text with no
-        ;; value behind it (a host value's :printed, a live reply's :text) is prose
-        printed (when (and (:seon.eval/record e) (nil? (:text r)) (not (:printed rec))) (print/record-text rec nil (part)))
+        ;; a recorded value printed as its reply reads (the reply's budget, one budget for an eval's
+        ;; value wherever it is shown) under its handle, its cut the printer's, not cut again; text
+        ;; with no value behind it (a host value's :printed, a live reply's :text) is prose
+        printed (when (and (:seon.eval/record e) (nil? (:text r)) (not (:printed rec))) (print/record-text rec nil))
         r (cond-> r (and (:seon.eval/record e) (nil? (:text r))) (assoc :text (or printed (:printed rec))))
         by (or (:seon.eval/by e) (:by r))
         err? (some? (:ex r))]

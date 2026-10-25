@@ -61,14 +61,11 @@
   agent): printed by the one printer under its handle, so a cut names the form that reads its
   rest, `(get-in result/e43 [:value ..])`, and a value an earlier response showed (seen: {:strings
   :colls}, `seen`) prints as the form that reads it again, `(:value result/e12)`. Made when r is
-  sent or shown, never stored (seon.repl/record-details keeps the value). budget: tokens (the
-  reply's, default-budget; the page's part of a conversation names its own)."
-  {:malli/schema [:function [:=> [:cat :map] :string] [:=> [:cat :map [:maybe :map]] :string]
-                  [:=> [:cat :map [:maybe :map] pos-int?] :string]]}
+  sent or shown, never stored (seon.repl/record-details keeps the value)."
+  {:malli/schema [:function [:=> [:cat :map] :string] [:=> [:cat :map [:maybe :map]] :string]]}
   ([r] (response-text r nil))
-  ([r seen] (response-text r seen default-budget))
-  ([r seen budget]
-   (let [p (print-value r (cond-> {:handle (:handle r) :budget budget} (seq seen) (assoc :seen seen)))]
+  ([r seen]
+   (let [p (print-value r (cond-> {:handle (:handle r)} (seq seen) (assoc :seen seen)))]
      (or (:text p) (:seon.error/message p)))))
 
 (defn seen
@@ -94,12 +91,10 @@
 (defn record-text
   "An eval's record (:seon.eval/record) as its response reads, printed now (`response-text`, with
   seen): its stored value printed; a value that is not plain data was printed as it was recorded
-  (:printed), and reads so. budget: as `response-text`'s."
-  {:malli/schema [:function [:=> [:cat :map] :string] [:=> [:cat :map [:maybe :map]] :string]
-                  [:=> [:cat :map [:maybe :map] pos-int?] :string]]}
+  (:printed), and reads so."
+  {:malli/schema [:function [:=> [:cat :map] :string] [:=> [:cat :map [:maybe :map]] :string]]}
   ([rec] (record-text rec nil))
-  ([rec seen] (record-text rec seen default-budget))
-  ([rec seen budget] (or (:printed rec) (response-text (:response rec) seen budget))))
+  ([rec seen] (or (:printed rec) (response-text (:response rec) seen))))
 
 ;;; Prose: text read as itself (a message, a form's source, a plan, a printed value), not as
 ;;; a string literal. The one string cutter's (seon.print.select/break-at, its words

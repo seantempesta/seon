@@ -93,12 +93,17 @@
        :fixed (dissoc (armed fixed 71 170) :ns)
        :sizes [100 1000 10000]})))
 
+(def ^:private shown-budget
+  "The budget the cut inputs print under, stated here so a proof's input does not move with the
+  reply's config key (6,144 tokens, the reply's until 2026-10-25)."
+  6144)
+
 (defn text
   "The input of size n: a text of n lines (~50 characters each, a log an evaluation printed),
-  printed with a handle under the reply budget, which shows its first ~19.6k characters and
-  cuts the rest."
+  printed with a handle under shown-budget, which shows its first ~19.6k characters and cuts
+  the rest."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :string :map]]}
-  [n] [(str/join "\n" (for [i (range n)] (str "line " i " of a long log, as an evaluation prints it"))) {:handle 'result/h1}])
+  [n] [(str/join "\n" (for [i (range n)] (str "line " i " of a long log, as an evaluation prints it"))) {:handle 'result/h1 :budget shown-budget}])
 
 (deftest a-cut-text-reads-its-lines-once
   ;; the one string cutter counts the lines it left from the string's line breaks, found once
@@ -106,12 +111,12 @@
   ;; the rest at every sizing. What the budget shows is fixed: its characters escaped once into
   ;; the literal, and read by the sizing passes (fill-end and escaped-width, about three).
   (let [armed? (contract/armed? #'seon.print/print-value)
-        shown (select/estimate-chars (:reply seon.print/budgets))]
+        shown (select/estimate-chars shown-budget)]
     (require 'seon.print.emit 'seon.print.select 'seon.print :reload)
     (try
       (cost/proof
         {:of 'seon.print/print-value :input 'seon.print-cost-test/text
-         :n "lines of a text cut under the reply budget, unarmed"
+         :n "lines of a text cut under 6,144 tokens, unarmed"
          :work (str "per line, one indexOf to its line break (~50 characters read) and one conj! of the break's offset; "
                     "fixed, the ~" shown " characters shown: each escaped once into the string literal and looked up by "
                     "about three sizing passes (char-escape-string)")
@@ -123,12 +128,12 @@
 
 (defn rows
   "The input of size n: n problem rows (7 keys each, as my.root/problems' :stale-section rows),
-  printed with a handle under the reply budget, which shows the first 73 whole and cuts the rest."
+  printed with a handle under shown-budget, which shows the first 73 whole and cuts the rest."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
   [n] [{:rows (vec (for [i (range n)] (array-map :section (keyword "render" (str "s" i)) :page "docs/render.md"
                                                   :class :stale-section :since 1761360000000 :cited 'seon.print/print-value
                                                   :lead "A section whose lead cites a var that moved." :n i)))}
-       {:handle 'result/h1}])
+       {:handle 'result/h1 :budget shown-budget}])
 
 (deftest printing-rows-costs-what-it-shows
   ;; a printed value costs what it shows, not what it hides: the budget fixes the rows shown whole
@@ -142,7 +147,7 @@
     (try
       (cost/proof
         {:of 'seon.print/print-value :input 'seon.print-cost-test/rows
-         :n "problem rows under the reply budget, unarmed"
+         :n "problem rows under 6,144 tokens, unarmed"
          :work (str "nothing per row past what the budget could show (alike? reads member kinds only when no row fits whole): the rows the budget shows whole are fixed by it, about four whole walks of "
                     "them (one a level: the root, its :rows entry, the vector, each row), and the first row "
                     "that does not fit is sized until its charge passes the room; no row past the cut is read")

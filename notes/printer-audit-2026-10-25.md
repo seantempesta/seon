@@ -43,11 +43,11 @@ Printed tokens and cuts by budget, measured on this branch (whole means `:seon.p
 | `seon_agents`, no empty keys (this branch) | 30,897 | 190, 1 | 880, 1 | 1,777, 1 | 5,332, 1 | 10,490, 1 | 14,001, 1 |
 | 177 small rows (a1's e7) | 6,301 | 196, 1 | 794, 1 | 1,606, 1 | 4,914, 1 | whole | whole |
 
-**Proposed, for root's ruling (not changed on this branch):**
-- Raise `:seon.config.render.agent/token-budget` from 6,144 to 16,000, equal to the context budget. Main's problems would then read whole through their render (14,218 tokens; 6,034 and one cut today), and so would a1's 177 rows (6,301; 4,914 and a cut today).
-- What it costs: a reply can be 2.6× today's. The history budget (32,000) then holds two such replies whole, and it collapses older ones to their handle and one line (`seon.context/kept`), so a turn's request stays within the ~20–55k its config entry states.
-- Raise `:seon.config.render/part-budget` for the page's evaluation body to 2,048: about 30 small rows instead of 4 (1,606 tokens against 196). Better as a key of its own (`:seon.config.render/page-eval-budget`) than raising the part budget for refused arguments too. A new key, so it waits for root's gate.
-- The charge is an upper bound: the printed text runs 20–25% under the budget (`seon_agents` printed 11,918 of 16,000). That is the selection's design, recorded here, not changed.
+**Done (root, 2026-10-25, under the owner's ruling; an existing key, a new value):** `:seon.config.render.agent/token-budget` is now 16,000, and an evaluation's body on the page prints at that same budget: one budget for an eval's value wherever it is shown. No page key was added.
+- Main's problems now read whole through their render (14,218 tokens; at 6,144 they printed 6,034 and one cut). a1's 177 rows read whole too (6,301).
+- On a1's page, with 19 evals at 16,000: rendering every evaluation component (`seon.render.ui/evaluation` → `seon.web.html/html`) costs 25.8M ticks, 103 MB allocated and 68 ms, for about 143 KB of HTML. The largest body is the raw problems report, 43.8 KB, rendered in 11.8M ticks, 42.7 MB and 31 ms; the 177 rows take 24 KB. The page's shell is 10.9 KB and its parts arrive on the feed.
+- The charge is an upper bound: the printed text runs 20–25% under its budget (`seon_agents` printed 11,918 of 16,000). That is the selection's design, recorded here, not changed.
+- The cost proofs state their own input budget (6,144, `seon.print-cost-test/shown-budget`), so a proof does not move with the config key.
 
 ### (2) Junk made upstream, and its producer
 
@@ -67,6 +67,16 @@ Root's 144-line case was the raw rows, a report value printed without its schema
 - A path repeated per row: gone with the placeholders; a cut names its path once.
 - Empty and redundant keys: the renders already leave nil and empty values out (`seon.render.ai/ordered`); the producers above now leave out what they repeat. The printer itself prints every key it is given: nil versus missing is data, and the producer decides it.
 - A collection of rows with one member of another kind still falls back to breadth, which can place placeholders: task `seon.print/breadth-shows-no-member-that-shows-nothing`.
+
+## What is left out of bin/prove: 240 on main, 250 here
+
+bin/prove leaves out the tests that reach a process of their own (`test-runner/plan-of` `:left`, from `seon.program/graph-index`'s `:process?`), green or not. This branch's 10 more were `seon.reconcile-test` ×8, `seon.procs-test/reconciler` and `seon.problems-test/a-defect-in-the-reconciler-does-not-feed-itself`. The path a reach walk finds: `seon.reconcile/reconciler-proc` → `seon.reconcile/advance` → `seon.turn/work!` → `seon.turn/observe` → `seon.agent/prove!` → `seon.agent/await-reply!` → `seon.agent/handle!` → `seon.agent/run-tests-forked`, which uses `seon.lib/fork!`.
+- The edge `advance` → `work!` is advance's quoted `'seon.turn/work!` (the code it sends an agent to evaluate; `seon.program/quoted-vars`).
+- Main's checkout lacks that edge. Its kept program store refreshed tree after tree (`test-runner/program-db`, `seon.source/refresh-tx`), and its facts for `advance` came from an analysis made when the quoted name's namespace did not exist.
+- Imported whole into an empty store, main (8fbe2ec20) has the edge too, and its process tests are 216, the same set name by name as this branch's (9 of them in `seon.reconcile-test`).
+- So this branch adds no process test, and nothing in its diff reaches the edge. Main's 240 is the stale store's number, and a whole import of main leaves out 250 as well. The 4 fewer keys are the same 10: keys are the candidates less what is left out (739 − 250 = 489; main on a fresh store, 699 + 37 − 250 = 486).
+- Left out ≤ 240 would need a correct edge removed. Filed instead: `seon.program/a-trees-program-is-the-same-however-its-store-reached-it`.
+- The 10 tests ran green by name: `bin/test seon.reconcile-test seon.procs-test seon.problems-test`, with six more namespaces (TEST OK, 111 run, 161 reused).
 
 ## Second printers and clipping
 
