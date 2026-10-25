@@ -154,21 +154,6 @@
 
 ;; ---- reading ----------------------------------------------------------------------------
 
-(defn section
-  "Section address on db, its parent as an address and its references as addresses or var
-  names, or nil."
-  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :map]]}
-  [db address]
-  (when (pdb/eid db :seon.section/address address)
-    (let [s (d/pull db [:seon.section/address :seon.section/heading :seon.section/lead :seon.section/text
-                        {:seon.section/parent [:seon.section/address]}
-                        {:seon.section/references [:seon.section/address :var/name]}]
-                    [:seon.section/address address])]
-      (cond-> s
-        (:seon.section/parent s) (update :seon.section/parent :seon.section/address)
-        (:seon.section/references s) (update :seon.section/references
-                                             #(into #{} (map (fn [r] (or (:seon.section/address r) (:var/name r)))) %))))))
-
 (defn- children
   "The sections whose parent is section entity e on db, in the order the wiki was written."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:vector :int]]}

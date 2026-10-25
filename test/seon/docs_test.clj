@@ -28,9 +28,9 @@
 
 (deftest an-unchanged-page-writes-nothing
   (let [db (load-pages (empty-db) pages)]
-    (is (= "Count messages, with `app.m0/f1`." (:seon.section/text (docs/section db "demo/flow.md#quiet")))
+    (is (= "Count messages, with `app.m0/f1`." (:seon.ref/text (docs/view db "demo/flow.md#quiet" :code)))
         "the first load wrote each section")
-    (is (= "demo/flow.md#flow" (:seon.section/parent (docs/section db "demo/flow.md#idioms"))))
+    (is (some #{"demo/flow.md#idioms"} (map :seon.ref/address (:seon.ref/below (docs/view db "demo/flow.md#flow" :doc)))) "a section is below its parent")
     (is (= [] (docs/load-tx db "demo" pages)) "loading the same pages again writes nothing")))
 
 (deftest a-changed-section-rewrites-only-itself
@@ -42,7 +42,7 @@
     (is (= #{quiet} (into #{} (map #(if (map? %) (:db/id %) (second %))) tx))
         "the load states only the changed section")
     (is (= "Count every message, with `app.m0/f1`."
-           (:seon.section/text (docs/section (d/db-with db tx) "demo/flow.md#quiet"))))))
+           (:seon.ref/text (docs/view (d/db-with db tx) "demo/flow.md#quiet" :code))))))
 
 (deftest a-link-to-no-section-is-a-dead-link-and-the-rest-loads
   (let [broken (assoc pages "demo/async.md" (str/replace async "flow.md#idioms" "flow.md#nowhere"))
