@@ -14,8 +14,7 @@
   map (`error`), a task (`task`), a run (`run`), a problem row (`problem-row`) and main's
   problems (`report`). Each render chooses and orders what to show as a value (its `-data`
   function: an array map, what matters first), and the one printer prints that value once at
-  the reader's budget, so nothing is cut before the printer (owner's rule, the clipping audit
-  2026-10-25): a cut is the printer's, and reads its rest through the form that makes the value
+  the reader's budget, so nothing is cut before the printer (the owner's rule): a cut is the printer's, and reads its rest through the form that makes the value
   again from opts :handle ((seon.render.ai/task-data result/h3)), the value's result handle or a
   form that reads it."
   (:refer-clojure :exclude [defn defn-])

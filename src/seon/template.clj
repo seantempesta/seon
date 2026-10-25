@@ -32,8 +32,7 @@
 
 (def instructions
   "What each step's agent does, by task kind (its own work: instructions never flow): its goal,
-  when it is done and by what means, short, the standard format's stage stories (seon.judge's,
-  2026-10-23). How every agent works at the REPL is the system prompt every agent reads first
+  when it is done and by what means, short, the standard format's stage stories (seon.judge's). How every agent works at the REPL is the system prompt every agent reads first
   (seon.context/system-page), and the help page it reads on demand (seon.context/help-page)."
   {:design (str "Your task: turn the plan below, however rough (it may be one line from a user), into a plan the implement "
                 "step can follow without exploring. You are done when the plan names each function to change, cited with three "
