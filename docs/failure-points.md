@@ -92,16 +92,44 @@ The failure points met without a catch, where the edge answers with data.
 
 Three rules of the OS and Chez that no code may "fix" by adding a thread or a check:
 
-- **A process that forks must never have started Chez's parallel-collector sweeper
-  threads.** Chez starts them at the first collection that finds another thread, and keeps
-  them; a child forked from such a process hangs in its first multi-threaded collection
-  (sampled in `S_gc_par_entry` -> `run_sweeper`). The processes that fork are the
-  fork server (it forks agents and its standby) and every agent (its test children,
-  `clone!`), each through ```seon.lib/fork!```, which forks only while its caller is the
-  one active Chez thread. So both are single-threaded and read and write their sockets themselves
-  (`seon.sock`), and only root, which never forks after boot, holds `jolt.async.remote`
-  ends with pumps. `bin/check threads` counts the OS threads of the fork server and of an
-  agent. The real fix is a Chez atfork handler that resets the sweepers.
+- **A process that forks must be one OS thread when it forks.** Two causes, both measured:
+  - **Locks held by threads that do not exist in the child.** `seon.lib/fork!` forks only while
+    its caller is the one *active* Chez thread, but a thread counts as inactive while it still
+    holds a channel's mutex: it deactivates on its way into `S_condition_wait` before the wait
+    releases the mutex, and re-takes the mutex on its way out before it reactivates
+    (`reference-code/chez/c/thread.c:709-720`). Inside those windows the check passes, and the
+    child inherits a locked mutex whose owner it does not have. Measured 2026-10-25 in an agent
+    running 8 go blocks on one channel (design agent-loop section 8): 199 of 200 forks refused,
+    and 50 of 50 forced through deadlocked in `S_mutex_acquire`; with the same threads parked and
+    quiet, 50 of 50 children exited 0. Parking every thread before a fork does not close the
+    windows reliably.
+  - **Chez's parallel-collector sweeper threads.** Chez starts them at the first collection that
+    finds another thread, and keeps them; a child forked from such a process hangs in its first
+    multi-threaded collection (sampled in `S_gc_par_entry` -> `run_sweeper`). This one is fixed
+    by the pool (below).
+
+  The processes that fork are the fork server (it forks agents and its standby) and every agent
+  (its test children, `clone!`). The fork server is single-threaded and reads and writes its
+  socket itself (`seon.sock`). An agent is single-threaded too, and its go blocks, flows and
+  remote channels run on that one thread: on macOS its whole body is a fiber under
+  `jolt.host/main-carrier-run!` (Jolt's main carrier, seantempesta/jolt c8311e4b), which runs
+  them, the timers and the I/O poller's rounds on the calling thread and starts no thread, and
+  `seon.sock/recv!` parks that fiber on the socket's readiness. So an agent forks safely with its
+  fibers mid-flight: measured on this Chez (the patched one `bin/build` makes, sweeper pool fixed
+  at 0), 50 of 50 forks made in the middle of channel traffic exited 0, and 20 of 20 runs of
+  Jolt's `test/chez/main-carrier-test.clj` passed (on stock Chez 10, whose pool cannot be fixed,
+  1-2 runs in 10 faulted). Its rules:
+  - a blocking foreign call stops every fiber of the process until it returns: a `waitpid` for
+    a test child, and `seon.sock/send!` to root while the socket's buffer is full (it does not
+    park, as `recv!` does);
+  - the loop wakes on root's signals (SIGUSR1, SIGIO) through kqueue
+    (`jolt.io-poller/wake-on-signals!`), so an agent's wait is never "stuck": with nothing
+    queued and nothing awaited it waits for root;
+  - on Linux, which has no kqueue, an agent runs on its thread as before, and its go blocks
+    would start carriers: the reason it keeps none.
+
+  Only root, which never forks after boot, holds `jolt.async.remote` ends with pump threads.
+  `bin/check threads` counts the OS threads of the fork server and of an agent.
   The binary's `-main` first fixes the pool at 0 (Chez never stops a sweeper it started, so a
   collection beside a waiting thread before the fix leaves the count to timing; measured: `./seon
   sweepers-held`, run in target/, ended at 6 sweepers unfixed), and root, which does hold threads, then fixes it at its

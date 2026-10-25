@@ -462,7 +462,14 @@
     ;; reaches the binary through the real program's start-root!, which this program lacks)
     (is (= {'app.proc-test/via-shell false 'app.proc-test/via-fork false 'app.proc-test/via-binary true
             'app.proc-test/via-root false 'app.proc-test/via-names false 'app.proc-test/pure false}
-           (update-vals mine :binary?)))))
+           (update-vals mine :binary?)))
+    (testing "why a test is a process test: the process var it uses, and the chain of calls to it (dogfood 2026-10-25: :deferred named the test and nothing else)"
+      (let [g (program/reach-graph db nil)]
+        (is (= {:uses ['clojure.java.shell/sh] :through ['app.proc-test/via-shell 'app.proc-test/shell-ok?]}
+               (program/process-path g 'app.proc-test/via-shell)) "through its helper")
+        (is (= {:uses ['seon.lib/fork!] :through ['app.proc-test/via-fork]}
+               (program/process-path g 'app.proc-test/via-fork)) "used by the test itself")
+        (is (nil? (program/process-path g 'app.proc-test/pure)) "a test that reaches no process has none")))))
 
 ;; ---- a changed file re-imports only what reaches it (task seon.source/an-import-reads-only-changed-files)
 

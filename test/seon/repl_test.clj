@@ -5,6 +5,45 @@
             [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.docs :as docs]
             [seon.config :as cfg] [seon.render :as render] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [datahike.api :as d]))
 
+(deftest an-eval-answers-each-forms-value-in-order
+  ;; owner, 2026-10-25 (Dogfood rulings): an eval call's response lists each form's value in
+  ;; order, as nREPL answers a value per form, under the call's one handle; result/eN holds the
+  ;; last, like *1. A form that throws ends the call with the values before it kept.
+  (let [old @agent/state
+        ev (fn [code] (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
+                           (repl/eval-string code {})
+                           (finally (reset! agent/state old))))
+        r (ev "(+ 1 2) (str \"a\" \"b\") [:x]")]
+    (is (= [3 "ab" [:x]] (:values r)) "each form's value, in order")
+    (is (= [:x] (:value r)) "the last, as *1 holds it")
+    (is (= [:x] (:value @(resolve (:handle r)))) "and its handle reads it")
+    (is (str/includes? (:text r) "\"ab\"") "the model reads every value")
+    (is (= 1 (count (re-seq #"\[:x\]" (:text r)))) "the last is printed once")
+    (is (str/includes? (:line (repl/record-details nil "(+ 1 2) (str \"a\" \"b\") [:x]" r {} nil)) "\"ab\"") "a collapsed row shows every value, not the last alone")
+    (let [rec (repl/record-details nil "1 (atom 1)" {:handle 'result/e9 :values [1 (atom 1)] :value (atom 1)} {} nil)]
+      (is (and (:printed rec) (not (contains? (:response rec) :values))) "a value that is no plain data: the response as it printed, not the values"))
+    (let [e (ev "(+ 1 2) (throw (ex-info \"no\" {})) 4")]
+      (is (= [3] (:values e)) "the values before the error stay")
+      (is (contains? e :ex)))
+    (is (not (contains? (ev "(+ 1 2)") :values)) "one form answers its value alone")))
+
+(deftest a-value-that-is-no-data-among-the-values-reaches-root-printed
+  ;; (in-ns 'x) answers a Namespace: among a call's :values it is printed for the model, and the
+  ;; agent's reply to root carries the text, never the live values (which no wire encodes)
+  (let [[ns-call next-call] (at/in-agent ["(in-ns 'user) 1" "(+ 1 1)"])]
+    (is (str/includes? (str (:text ns-call)) "#namespace") "each form's value, printed")
+    (is (= 2 (:value next-call)) "and the agent lives to answer the next")))
+
+(deftest a-redefinition-that-changes-a-docstring-says-so
+  ;; owner, 2026-10-25 (DECISIONS: a change to a schema is an explicit fact the eval shows): the
+  ;; eval that changes an existing var's docstring or contract answers what it was and is now
+  (let [[_ again same] (at/in-agent ["(ns app.redef) (seon.contract/defn f \"One.\" {:malli/schema [:=> [:cat] :int]} [] 1)"
+                                      "(seon.contract/defn f \"Two.\" {:malli/schema [:=> [:cat] :int]} [] 1)"
+                                      "(seon.contract/defn f \"Two.\" {:malli/schema [:=> [:cat] :int]} [] 2)"])]
+    (is (str/includes? (str (:text again)) ":redefined") "a docstring changed: said")
+    (is (str/includes? (str (:text again)) "\"One.\"") "with what it was")
+    (is (not (str/includes? (str (:text same)) ":redefined")) "a body alone: nothing said")))
+
 (deftest an-agent-repl-answers-what-a-clojure-repl-answers
   ;; owner, 2026-10-21: "Whatever intuitions agents have we need to make sure we are matching a
   ;; real clojure repl as much as possible AND improving on it". Each row is what a Clojure
