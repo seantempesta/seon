@@ -626,7 +626,10 @@
     (is (= [:no-progress 3] [(:outcome end) (:model-calls end)]) (str "told once, ended at the second repeat: " (pr-str end)))
     (is (str/includes? (str (:reason end)) "(+ 1 1)") "the reason names the repeated code")
     (is (= 2 (:value repeats)) "the repeats are the run's, on its branch")
-    (is (str/includes? (str (:value status)) "same as the turn before's") (str "the last status told it: " (pr-str status)))))
+    (is (str/includes? (str (:value status)) "same as the turn before's") (str "the last status told it: " (pr-str status))))
+  (let [[end] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#loop0\" :max-turns 5})"]
+                        {:sets [":seon.config.ai/script=seon.fixtures/same-call" ":seon.config.agent/repeats-told=0"]})]
+    (is (= [:no-progress 2] ((juxt :outcome :model-calls) (:value end))) "told none: the first repeat ends it")))
 
 (deftest a-proof-run-ends-at-its-budget-though-its-tests-run-bounded-evals
   ;; Jolt jolt/nested-tick-budget: a tick budget covers all the work inside it, nested

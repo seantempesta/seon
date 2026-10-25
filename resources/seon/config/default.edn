@@ -196,8 +196,9 @@
  ;; sits above the measured p90. Tokens are the paid resource; task
  ;; seon.model/budgets-are-data-and-spend-is-measured makes them the budget.
  :seon.config.agent/max-turns 40
- ;; Unit: repeats. How many times a run is told that a turn's calls repeat the last turn's, from
- ;; the same observed state (the answers unchanged), before the next repeat ends it :no-progress.
+ ;; Unit: repeats in a run (counted over the whole run, not reset by a turn between). How many times a
+ ;; run is told that a turn's calls repeat the last turn's, from the same observed state (the answers
+ ;; unchanged), before the next repeat ends it :no-progress.
  ;; 0 ends it at the first (the rule before). Provenance: live agents round 1 (2026-10-25,
  ;; notes/live-2026-10-25.md L6): 3 of 6 paid runs ended at their first repeat, each right after
  ;; an answer that gave nothing new; root's provisional ruling (owner to confirm): told once,
