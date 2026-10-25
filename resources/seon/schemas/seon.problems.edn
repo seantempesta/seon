@@ -102,7 +102,7 @@
  :seon.error/last-task :string
  :seon.error/form :string
  ;; the first occurrence's error map, as EDN
- :seon.error/example [:map {:seon.db/data true}]
+ :seon.error/example [:map]
  :seon.error/recorded-fact [:map {:seon.db/attributes true}
                             [:seon.error/signature :seon.error/signature] [:seon.error/class :seon.error/class]
                             [:seon.error/count :seon.error/count] [:seon.error/agents :seon.error/agents]
@@ -130,7 +130,7 @@
 
  ;; ---- problem members of a run's end (main; the judge writes them) and of the agent's end (branch) ----
  ;; the error that ended the run: the agent's death, the turn loop's error, a refused merge
- :seon.run/error [:map {:seon.db/data true}]
+ :seon.run/error [:map]
  ;; failing assertions per red test (at most 8 each, printed by seon.print under :part)
  :seon.problems/assertion [:map [:type [:enum :fail :error]] [:message {:optional true} [:maybe :string]]
                            [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]]
@@ -142,19 +142,19 @@
                     ;; a run stopped by its tick budget: the typed error, on the test that was running
                     [:seon.error/type {:optional true} :qualified-keyword] [:ticks {:optional true} :int] [:budget {:optional true} :int]
                     [:cost {:optional true} :seon.cost/report]]
- :seon.run/failures [:map-of {:seon.db/data true} :qualified-symbol [:vector :seon.problems/assertion]]
+ :seon.run/failures [:map-of :qualified-symbol [:vector :seon.problems/assertion]]
  ;; a cost proof's measured rows and verdict per test (seon.cost/proof's report)
  :seon.cost/report [:map [:rows [:vector :seon.cost/row]] [:verdict :seon.cost/verdict]]
- :seon.run/costs [:map-of {:seon.db/data true} :qualified-symbol :seon.cost/report]
+ :seon.run/costs [:map-of :qualified-symbol :seon.cost/report]
  ;; waste charged to the producer of what the agent was shown (R4, v1 survey idea 14)
- :seon.learn/waste [:map-of {:seon.db/data true} :any [:map [:forms :int] [:turns :int]]]
+ :seon.learn/waste [:map-of :any [:map [:forms :int] [:turns :int]]]
  :seon.run/waste :seon.learn/waste
  :seon.end/waste :seon.learn/waste
- :seon.end/error [:map {:seon.db/data true}]
+ :seon.end/error [:map]
  :seon.fx/error-type :qualified-keyword
  ;; task content a branch and main both changed since the branch's base, differently: root's
  ;; to resolve (seon.task/carry-tx; owner, 2026-10-22, D4)
- :seon.run/task-conflicts [:vector {:seon.db/data true} [:map [:task :seon.task/id] [:attr :keyword] [:base :any] [:ours :any] [:theirs :any]]]
+ :seon.run/task-conflicts [:vector [:map [:task :seon.task/id] [:attr :keyword] [:base :any] [:ours :any] [:theirs :any]]]
  :seon.problems/run-fact [:map {:seon.db/attributes true}
                               [:seon.run/task-conflicts {:optional true} :seon.run/task-conflicts]
                               [:seon.run/error {:optional true} :seon.run/error]

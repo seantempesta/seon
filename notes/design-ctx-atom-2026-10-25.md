@@ -27,8 +27,10 @@ Rulings on revisions 1-3 and sections 10-11 ("In general I'm down with everythin
     - So the conversion infers it: any schema that is a collection value (`:vector`, `:sequential`, `:tuple`, a `:map` that is not `{:seon.db/attributes true}`) stores as `:db.type/data`, card one, and reads back as itself, order and duplicates kept.
     - `[:set T]` of scalars or refs stays cardinality many (indexed per member).
     - The hand mark `{:seon.db/data true}` goes (every use is one of those shapes), and so do the hacks that worked around it: `:seon.run/changed` printing tagged keys as strings becomes a set of refs (decision 10).
-    - Cost: none at read beyond the serializer's. One change to how a kept store's types are derived, so the standing store is erased on the owner's go (DECISIONS).
+    - Cost: none at read beyond the serializer's. Built (step 0): every one of the 364 declarations is the same as before, so no stored type changes and no store is erased. `:seon.run/changed` as refs moves to step 4, with the mark it serves.
 13. **Order of work:** the build starts after agent-loop part 1. This session builds it, step by step in `ctx-lab`. Root briefs agent-loop on decision 11.
+
+**Step 0, built (jolt/ctx-atom):** `storage` infers `:db.type/data` for `:vector :sequential :tuple :map :map-of :any` and an `:or` whose arms differ in type; an `:or` with a refused arm stays refused; a `[:set T]` of data is refused (`::nested-collection`: one datom a member is for scalars and refs). The 46 `{:seon.db/data true}` marks and `::ordered-collection` are gone. The 364 declarations equal main's (compared in a REPL against main's `declarations`, loaded beside the new one). Proof: `seon.db-test/a-value-with-no-one-type-is-plain-data-by-its-shape` (red on main: `[:vector :keyword]` is refused there, and its schemas carry the 46 marks).
 
 **The plan** (each step red then green, measured, reported before the next; after agent-loop part 1 fixes the agent key and session):
 

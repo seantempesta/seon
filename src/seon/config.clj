@@ -309,7 +309,7 @@
 
 (defn facts
   "Config c and its sources as facts on main (platform records: never carried by a merge in
-  either direction): main's root entity holding every key (each {:seon.db/data true} key, the
+  either direction): main's root entity holding every key (each collection-valued key, the
   manifest among them, as data), and an entity per provider and per model
   (:seon.ai.model/provider-id, :seon.ai.model/id)."
   {:malli/schema [:=> [:cat :seon.config/config :seon.config/sources] [:vector :map]]}
