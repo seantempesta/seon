@@ -1,5 +1,5 @@
 (ns seon.ctx
-  "The agent's record as one map, `@ctx` (docs/ctx.md; notes/design-ctx-atom-2026-10-25.md): its
+  "The agent's record as one map, `@ctx` (docs/ctx.md): its
   agent entity whole, and the units its entity schemas declare (:seon.render/units), each a
   nested map: a reverse-ref unit a map of its members by their identity under the unit's short
   key (:seon.eval/_agent is :evals, :seon.run/_agent :runs, :seon.turn/_run :turns,
