@@ -883,9 +883,7 @@
         {:report {:threads {:declared-running (declared-threads sys) :declared-stopped (declared-threads)}
                   :cycles (mapv #(select-keys % [:cycle :boot-ms :running :stopped :stopped-os :left :health]) rows)
                   :stop-ms (lib/summ (map #(get-in % [:stop :ms]) rows))
-                  :gc (lib/gc-stats) :gc-sweepers (lib/gc-sweepers! -1)
-                  ;; what the two held requests answered once resumed, printed, and as they came
-                  :resumed {:printed [(printed r1) (printed r2)] :responses [r1 r2]}}
+                  :gc (lib/gc-stats) :gc-sweepers (lib/gc-sweepers! -1)}
          :checks {:every-stop-exited (every? #(and (true? (get-in % [:stop :graph])) (zero? (get-in % [:stop :agents-left])) (empty? (:left %))) rows)
                   :every-cycle-worked (every? #(and (:ok %) (= #{:running} (:health %))) rows)
                   :threads-declared (every? exact? rows)

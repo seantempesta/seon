@@ -545,45 +545,6 @@
             ids (mapv (fn [[_ v]] (or (:seon.eval/id v) (:seon.message/id v))) (context/records db a))]
         (is (= ["e1" "m1" "e2"] ids) "the first run's eval and message, then the second's, and no other agent's")))))
 
-(deftest a-sessions-next-stage-keeps-the-last-request-as-its-prefix
-  ;; live finding A1 (2026-10-25): an implement continuing its design's session was sent its own
-  ;; story at the top, before the design's conversation (1% of 33k tokens cached), with nothing
-  ;; marking the switch. The story at the top is the session's first stage's; the next stage's
-  ;; comes as root's message at the boundary (seon.reconcile/stage-boundary), so the second
-  ;; stage's request is the first's, less its screen, then the boundary and what follows
-  (ts/test-branch!
-    (fn [_ conn]
-      (wiki! conn)
-      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "d" :seon.task/plan "Design d." :seon.task/proofs #{'demo-test/d-test}}
-                                              {:seon.task/ns 'demo :seon.task/name "i" :seon.task/plan "Implement d." :seon.task/proofs #{'demo-test/i-test}}]))
-      (let [ev! (fn [id by run]
-                  (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
-                                     :seon.eval/record {:code (str "(" id ")") :response {:handle (symbol "result" id) :value 1} :line id :run run
-                                                        :call-id (str "c-" id) :call 0 :prose "Step."}}]))
-            run! (fn [run task] (d/transact conn [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key "b/a1"}}]))
-            basis (fn [task run screen] {:commit (d/commit-id @conn) :task task :run run :turn 0 :max-turns 9 :origin :model
-                                         :observed {:results {} :test-run-errors [] :reds [] :reasons []} :screen [screen] :agent "b/a1"})
-            turn! (fn [run b sent] (d/transact conn [{:seon.turn/id (str run "/0") :seon.turn/run {:seon.run/id run} :seon.turn/n 0 :seon.turn/origin :model
-                                                      :seon.turn/basis b :seon.turn/sent sent :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1}]))
-            _ (run! "demo/d#1" "demo/d")
-            _ (ev! "s0" "screen" "demo/d#1")
-            _ (ev! "e0" "a1" "demo/d#1")
-            b0 (basis "demo/d" "demo/d#1" "s0")
-            first-stage (context/render @conn b0)
-            _ (turn! "demo/d#1" b0 (:sent first-stage))
-            boundary "demo/d is done. Your task now is demo/i, in this same session: what you did so far stays above.\n\nIts plan: Implement d."
-            _ (run! "demo/i#1" "demo/i")
-            _ (d/transact conn (task/message-tx "m1" "root" "demo/i#1" boundary))
-            _ (ev! "s1" "screen" "demo/i#1")
-            second-stage (context/render @conn (basis "demo/i" "demo/i#1" "s1"))
-            ms0 (:messages first-stage) ms1 (:messages second-stage)
-            screen0 (count (mapcat second (filter #(= "s0" (second (first %))) (context/parts-of @conn (:sent first-stage)))))
-            prefix (subvec ms0 0 (- (count ms0) screen0))]
-        (is (pos? screen0) "the first stage's request ended on its screen")
-        (is (= prefix (subvec ms1 0 (count prefix))) "the first stage's request, less its screen, is the second's exact prefix")
-        (is (str/includes? (:content (nth ms1 (count prefix))) "Your task now is demo/i") "then the boundary, root's message")
-        (is (str/includes? (:content (second ms1)) "Design d.") "the story at the top stays the session's first stage's")))))
-
 (deftest a-run-printed-once-sends-what-a-cold-read-sends
   ;; the branch review (2026-10-25, F6, F7): a request threaded through what the run's earlier
   ;; requests printed (:printed) equals one made with none, turn by turn; what each turn recorded
