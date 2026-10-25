@@ -57,7 +57,7 @@
              :when (and v (not= :test (:var/kind v)))]
          (cond-> {:var q}
            (:var/contract v) (assoc :contract (clojure.edn/read-string (:var/contract v)))
-           (:var/doc v) (assoc :doc (:var/doc v))))))
+           (:var/doc v) (assoc :doc {:seon.print/prose (:var/doc v)})))))
 
 (defn- refused
   "The done rule's reasons as the agent reads them, beyond its own red proofs (shown with
@@ -207,8 +207,13 @@
             ;; nothing of a test namespace (its fixtures); the graph and the meaning halves alike
             function? #(and (not (#{:test :macro} (:var/kind (d/entity db [:var/name %]))))
                             (not (str/ends-with? (namespace %) "-test")))
+            ;; a neighbour weighs 1/(1 + the forms naming it, counted to a cap): what every form names
+            ;; (seon.contract/checked, on?, seon.db/eid) weighs nothing (docs/vector.md#fused-with-the-call-graph)
+            cap (cfg/value :seon.config.render/related-rarity)
+            by-rarity (fn [xs] (mapv peek (sort (for [[x n] (frequencies xs)]
+                                                  [(- (/ n (inc (bounded-count cap (d/datoms db :avet :form/refs x))))) (str x) x]))))
             near (fn [of f] (into [] (comp (keep (comp f first)) (distinct)) (vector/near db te (* 4 k) {:of of})))
-            graph {:functions (by-frequency (concat (mapcat #(docs/callers db %) fns) (mapcat #(map :var (callees db %)) fns)
+            graph {:functions (by-rarity (concat (mapcat #(docs/callers db %) fns) (mapcat #(map :var (callees db %)) fns)
                                                     (for [a secs n (:seon.section/names (d/entity db [:seon.section/address a]))] n)))
                    :sections (by-frequency (concat (for [n fns e (d/q '[:find [?e ...] :in $ ?n :where [?e :seon.section/names ?n]] db n)]
                                                      (:seon.section/address (d/entity db e)))
