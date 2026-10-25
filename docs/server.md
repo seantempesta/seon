@@ -18,7 +18,7 @@ The ops are one table, ```seon.server/ops```, keyed by a request's `:op`; each e
 - `:message`: the owner's words to a running agent (`seon.root/message!`, the page's message bar sends the same request): root delivers them, and the agent's next turn reads them in its block ([render](render.md)).
 - `:attach`: root starts an agent on the task's branch with model `"outside"`, so no turn loop runs in it, and answers its id once the agent is ready (its hello), or the end it met first, which is the run's death ([root](root.md#holders-and-refused-spawns)).
 - `:prove`: the tests a branch's change reaches, run once per branch and tx however many ask, through the one test service (`seon.prove`, [merging](merging.md#the-test-service)); it names an agent's branch, else main.
-- `:done`: the agent ends its run as a turn loop does (```seon.turn/hand-back!```: its proofs run, its end `:green` or `:red` with the reasons, committed on its branch), then the run goes to the reconciler's `:judge` port and is judged ([root](root.md#runs-and-judging)).
+- `:done`: the agent ends its run as a turn loop does (```seon.turn/hand-back!```: its proofs run, its end `:green` or `:red` with the reasons, committed on its branch), then the run goes to the reconciler's `:judge` port and is judged ([root](root.md#runs-and-judging)). It answers the verdict once main holds it (```seon.server/verdict```, waiting on the fact with `seon.root/await-db`, a watch on main's connection, no clock): the run's status (`:done` or `:merged` when the done rule had no reason, `:closed` with its task held when it had some), outcome and reason, and for a held task the failure the judge wrote, which names the reasons; a root defect that stopped the judge answers as that defect.
 
 ```seon.server/answer``` dispatches one EDN request to its op; an unknown op answers the one error map. A line that does not read, or an op that throws, answers that request as the typed `:seon.server/defect`: the server is an entrant boundary ([failure points](failure-points.md)).
 
@@ -31,8 +31,3 @@ A tool's text is what a model should read: `seon_context`'s is the block itself,
 `bin/mcp` is the stdio relay a client runs: stock perl, a few MB, one connection per message to the port in `runs/root.port`, so a root restarted between calls (`bin/root next`) costs the client nothing. A message root does not answer (none running, not listening, died mid-request) gets a JSON-RPC error saying why. `seon.check/mcp-proof` (`bin/check mcp`) proves it end to end from a separate process, with the relay's footprint under `:seon.config.machine/relay-mb`.
 
 Working a task this way is the turn loop's path with the model outside: [turn](turn.md#an-outside-agent).
-
-## Where it falls short today
-
-An outside agent (a Claude session through the server) reads what a model is sent, but does not yet hear how its run ended.
-- `:done` answers `{:judging ...}` and ends the agent, so it never sees the verdict: `seon.server/done-answers-the-verdict`.

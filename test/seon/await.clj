@@ -2,26 +2,17 @@
   "What a test waits on, as facts: a watch on main's connection, never a poll or a deadline. Alone in
   its namespace so a root (which imports src only) can load it by path: (load-file path)."
   (:refer-clojure :exclude [defn])
-  (:require [seon.contract :refer [defn]] [seon.reconcile :as r] [datahike.api :as d]))
+  (:require [seon.contract :refer [defn]] [seon.reconcile :as r] [seon.root] [datahike.api :as d]))
 
 (defn await-db
-  "Main's first db value (now or after a later commit) for which (pred db) holds: a watch
-  on main's connection runs pred once per commit. No deadline, no polling."
+  "seon.root/await-db, the one wait on a fact on main (kept here for the tests that load this file)."
   {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] ifn?] :seon.host/db]}
-  [sys pred]
-  (let [p (promise) k (keyword "seon.await" (str "await-" (random-uuid)))
-        a (:wrapped-atom (:conn sys))]
-    (add-watch a k (fn [_ _ _ db] (when (pred db) (deliver p db))))
-    (let [db @(:conn sys)] (when (pred db) (deliver p db)))
-    (let [db @p] (remove-watch a k) db)))
+  [sys pred] (seon.root/await-db sys pred))
 
 (defn defect
-  "A root proc's defect (a :platform problem) whose record main wrote after t, or nil:
-  facts, not clocks."
+  "seon.root/defect, the one reading of a root proc's defect after t."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :map]]}
-  [db t]
-  (some #(when (some (fn [dt] (> (:tx dt) t)) (d/datoms db :eavt (:e %) :seon.error/last-ms)) (into {} (d/entity db (:e %))))
-        (filter #(= :platform (:v %)) (d/datoms db :aevt :seon.error/class))))
+  [db t] (seon.root/defect db t))
 
 (defn await-quiet
   "The reconciler's quiescence report ({:t :root-causes}) for main at or after t: nothing runs,
