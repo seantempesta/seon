@@ -36,7 +36,7 @@
         by (into {} (map (juxt :test identity)) (:proofs block))]
     (is (= {:test 'demo-test/f-test :status :pass} (by 'demo-test/f-test)) "a passing proof is its status")
     (is (string? (:source (by 'demo-test/g-test))) "a red proof shows its source")
-    (is (= [{:assert "(= 1 (g))" :got "(= 1 0)"}] (:failures (by 'demo-test/g-test)))
+    (is (= [{:assert (print/code "(= 1 (g))") :got (print/code "(= 1 0)")}] (:failures (by 'demo-test/g-test)))
         "a failure is the assertion and what it evaluated to")
     (is (= ['demo/f] (mapv :symbol (:write-set block))) "a proof named in the plan is not shown again in the write set")
     (is (string? (:source (first (:write-set block)))) "a var of the write set shows its source")
@@ -81,7 +81,7 @@
                                            :reasons reasons :turn 1 :max-turns 4
                                            :test-run-errors ["namespace app-test did not load: Unable to resolve symbol: g"]})]
     (testing "every reason but the task's own red proof (shown with the proofs), each with what explains it"
-      (is (= [{:reason :regression :test 'demo-test/g-test :failures [{:assert "(= 1 (g))" :got "(= 1 0)"}]}
+      (is (= [{:reason :regression :test 'demo-test/g-test :failures [{:assert (print/code "(= 1 (g))") :got (print/code "(= 1 0)")}]}
               {:reason :stray-red :test 'user/scratch-test}
               {:reason :contract-gap :vars ['demo/helper]}]
              (:refused block))))
@@ -157,7 +157,7 @@
                                      {:results {'ctx-calc-test/square-test :fail} :turn 1 :max-turns 4
                                       :reds (proofs/red-reports {:reports [rep]} #{'ctx-calc-test/square-test})})
         by (into {} (map (juxt :test identity)) (:proofs block))]
-    (is (= [{:assert "(= 9 (square 3))" :got "(= 9 6)"}] (:failures (by 'ctx-calc-test/square-test)))
+    (is (= [{:assert (print/code "(= 9 (square 3))") :got (print/code "(= 9 6)")}] (:failures (by 'ctx-calc-test/square-test)))
         "the assertion once, and what it evaluated to")
     (is (= [{:var 'ctx-calc/square :contract [:=> [:cat :int] :int] :doc "Squares x."}
             {:var 'ctx-ghost/half :contract [:=> [:cat :int] :int]}]
@@ -322,7 +322,7 @@
         ms (context/messages "H" block)
         times (fn [s] (count (filter #(str/includes? (str (:content %)) s) ms)))]
     (is (= 1 (times "Make ```demo/g``` exact.")) "the plan once")
-    (is (= 1 (times "(defn g \\\"Halves.\\\"")) "a cited source once")
+    (is (= 1 (times "(defn g \"Halves.\"")) "a cited source once, as code: its quotes as written")
     (is (= 1 (times ":test demo-test/f-test")) "the proofs once, in the turn sections")
     (is (not (str/includes? (:content (peek ms)) ":write-set")) "the turn sections hold no run section")))
 
@@ -726,3 +726,19 @@
     (is (string? (:more sim)) "and the form that searches further")
     (is (= sim (:similar (context/run-state db (task/task db "demo/c")))) "in the story")
     (is (nil? (context/similar db nil #{})) "off by default (:seon.config.render/similar 0): nothing listed")))
+
+(deftest a-red-proofs-source-reads-as-its-file
+  ;; owner, 2026-10-25: a test's source in my.task/status read as one escaped string literal
+  ;; (every quote \", every line break \n); it is code (seon.print/code) and prints as its file
+  ;; holds it, comments and quotes as written
+  (let [src "(deftest f-test
+  ;; f doubles: the plan's \"exact\" case
+  (is (= 4 (f 2))
+      \"two doubled\"))"
+        db (d/db-with (db-with-program) (program-facts [['demo-test/f-test src []]]))
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f exact."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+        state (context/turn-state db (task/task db "demo/f") {:results {'demo-test/f-test :fail} :reds [] :turn 0 :max-turns 4})
+        text (:text (print/print-value {:handle 'result/e1 :value state} {:handle 'result/e1}))]
+    (is (every? #(str/includes? text %) (str/split-lines src)) text)
+    (is (not (str/includes? text "\\\"two doubled")) "no quote escaped")))

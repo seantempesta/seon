@@ -87,3 +87,12 @@
   (let [text "(ns a)\n(defn f [] 1)\n;; c\n"]
     (is (= (str/split-lines text) (map #(subs text %1 (dec %2)) (reader/line-starts text) (rest (reader/line-starts text))))
         "the text between two starts is the line, newline excluded")))
+
+(deftest a-definitions-head-is-its-text-up-to-its-body
+  ;; owner, 2026-10-25: a cited var is its definition's head as the file writes it, its body
+  ;; left out and marked (seon.docs/cited-code)
+  (is (= "(defn f\n  \"Doubles, \\\"exactly\\\".\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  …)"
+         (reader/definition-head "(defn f\n  \"Doubles, \\\"exactly\\\".\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  ;; twice\n  (* 2 x))" 'user)))
+  (is (= "(defn g\n  \"Adds.\"\n  ([a] …)\n  ([a b] …))"
+         (reader/definition-head "(defn g\n  \"Adds.\"\n  ([a] (g a 1))\n  ([a b] (+ a b)))" 'user)))
+  (is (nil? (reader/definition-head "(def x 1)" 'user)) "a def has no arglist: no head"))

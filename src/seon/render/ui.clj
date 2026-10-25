@@ -565,12 +565,13 @@
 
 (defn cited
   "What the run's prose cites (the declared html render of :seon.render/cited): each cited thing
-  as its citation reached it (a var's card, a task's plan and proofs, a wiki section), by the
-  one printer at a part's budget; every one of them, the screen's printer cutting the whole."
+  as seon.docs/cited-code gives it (a var's definition head and a namespace's head as code, a
+  task or a wiki section as its view), as data in the hiccup, the serializer and the screen's
+  printer printing it once (no text printed before them)."
   {:malli/schema [:=> [:cat :seon.render/cited :seon.render/opts] :any]}
   [cs _]
   [:div {:class "flex flex-col gap-1 text-xs"}
-   (for [view cs] [:pre {:class "whitespace-pre-wrap break-words text-text-200"} (print/text view (:part print/budgets))])])
+   (for [view cs] [:pre {:class "whitespace-pre-wrap break-words text-text-200"} view])])
 
 (defn- toggle
   "A <details>' attrs that tell the render proc it opened or closed (/open), for the conversation's
@@ -896,7 +897,7 @@
           this-run (when (seq evals) (did evals))
           ;; what the run's prose cites, as each eval's record holds it (parsed once, as it was
           ;; recorded: seon.repl/record-details), newest first, each once, read on its branch
-          cites (when branch (into [] (comp (mapcat (comp :cites :seon.eval/record)) (distinct) (keep #(second (docs/cited branch %))))
+          cites (when branch (into [] (comp (mapcat (comp :cites :seon.eval/record)) (distinct) (keep #(docs/cited-code branch %)))
                                    evals))
           ;; what its branch changes against main now (seon.program/divergence of main's head, not the
           ;; branch's fork point: what main gained since is shown too, as the branch not having it)

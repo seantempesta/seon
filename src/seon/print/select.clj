@@ -45,6 +45,14 @@
 (def ^:private set-classes #{clojure.lang.PersistentHashSet clojure.lang.PersistentTreeSet})
 
 
+(deftype Code [^String text]
+  ;; source text its producer gave as code (seon.print/code): printed verbatim at its place; a
+  ;; value, equal to the code of the same text
+  Object
+  (toString [_] text)
+  (equals [_ o] (and (instance? Code o) (= text (str o))))
+  (hashCode [_] (hash text)))
+
 (defn keyword-lookup?
   "May `value` be asked for a keyword key without running foreign code: an exact array or hash
   map, or a sorted map whose keys are keywords (Jolt cannot tell a sorted map's comparator)."
@@ -193,6 +201,8 @@
                                            :else (str x))))
       (identical? c Character) (scalar :seon.print/char x (if-let [n (char-name-string x)] (str "\\" n) (str "\\" x)))
       (identical? c String) {:kind :string :value x :total (.length ^String x)}
+      ;; code (seon.print/code): its text verbatim, cut by the one string cutter
+      (instance? Code x) (let [s (str x)] {:kind :string :value s :total (.length ^String s) :code? true})
       ;; a name's node carries its text, which a cut of it replaces
       (or (identical? c clojure.lang.Keyword) (identical? c clojure.lang.Symbol))
       (let [face (if (keyword? x) :seon.print/keyword :seon.print/symbol)
@@ -252,6 +262,7 @@
   (when (and (:requery-id node) (not= :name (:kind node)))
     (emit/continuation
      {:seon.print/requery-id (:requery-id node)
+      :seon.print/code? (boolean (:code? node))
       :seon.print/elision-unit (cond (= :string (:kind node)) :characters (:pending? node) :pending :else :children)
       :seon.render.data/path (:path node)
       :seon.render.data/next-offset (cond (:sorted? node) 0
@@ -301,7 +312,8 @@
   [node]
   (let [form (node-continuation node)]
     (case (:kind node)
-      :string (emit/cut-words (- (:total node) (:shown node)) (lines-after (:breaks node) (:total node) (:shown node)) form)
+      ;; code's cut stands a space after its shown text (emit/elided-text)
+      :string (str (when (:code? node) " ") (emit/cut-words (- (:total node) (:shown node)) (lines-after (:breaks node) (:total node) (:shown node)) form))
       :name (str "…+" (- (:total node) (:shown node)))
       (cond-> (if (:pending? node) "…?" (str "…" (- (:total node) (:n node)))) form (str " " (emit/form-text form))))))
 
@@ -317,7 +329,8 @@
   [node]
   (case (:kind node)
     :leaf (:flat node)
-    :string (+ 2 (:shown-width node) (if (more? node) (count (cut-text node)) 0))
+    ;; a string literal's quotes; code has none
+    :string (+ (if (:code? node) 0 2) (:shown-width node) (if (more? node) (count (cut-text node)) 0))
     :name (+ (:shown-width node) (if (more? node) (count (cut-text node)) 0))
     (:map :coll) (let [lines (+ (:n node) (if (more? node) 1 0))]
                    (+ (count (str (:prefix node) (:open node) (:close node))) (:sum node)
@@ -335,7 +348,8 @@
         to (loop [i (long (:shown node)) width 0]
              (if (< i limit)
                (let [c (.charAt text i)
-                     width (+ width (if-let [e (when-not (= \newline c) (char-escape-string c))] (count e) 1))]
+                     width (+ width (cond (:code? node) (if (= \newline c) (inc (:indent node)) 1)
+                                          :else (if-let [e (when-not (= \newline c) (char-escape-string c))] (count e) 1)))]
                  (if (<= width room) (recur (inc i) width) i))
                i))
         at (break-at text to)]
@@ -383,7 +397,8 @@
     :scalar (leaf (:node c))
     ;; a name longer than :max-name
     :name (assoc (placed context depth path indent) :kind :name :node (:node c) :text (:text c) :value (:text c) :total (count (:text c)))
-    :string (assoc (placed context depth path indent) :kind :string :value (:value c) :total (:total c) :breaks (line-breaks (:value c)))
+    :string (cond-> (assoc (placed context depth path indent) :kind :string :value (:value c) :total (:total c) :breaks (line-breaks (:value c)))
+              (:code? c) (assoc :code? true))
     (merge (placed context depth path indent)
            (select-keys c [:kind :face :open :close :total :pending? :prefix :ordered? :indexed? :sorted? :lookup?])
            {:pending (:members c)})))
@@ -398,11 +413,29 @@
 (defn- member-indent {:malli/schema [:=> [:cat :seon.print/alloc] :int]} [node]
   (+ (:indent node) (if (= :seon.print/set (:face node)) 2 1)))
 
+(defn- breaks-before
+  "How many of a text's line breaks (`line-breaks`) sit before offset at: a binary search."
+  {:malli/schema [:=> [:cat [:vector nat-int?] nat-int?] nat-int?]}
+  [breaks at]
+  (loop [lo 0 hi (count breaks)]
+    (if (< lo hi)
+      (let [mid (quot (+ lo hi) 2)] (if (< (nth breaks mid) at) (recur (inc mid) hi) (recur lo mid)))
+      lo)))
+
+(defn- code-width
+  "Characters code `node`'s first `to` characters spend: each itself, and each line break its
+  indentation more (every later line starts at the node's place)."
+  {:malli/schema [:=> [:cat :seon.print/alloc :int] :int]}
+  [node to]
+  (+ to (* (:indent node) (breaks-before (:breaks node) to))))
+
 (defn- shown-to
   "String or name `node` showing its first `to` characters."
   {:malli/schema [:=> [:cat :seon.print/alloc :int] :seon.print/alloc]}
   [node to]
-  (assoc node :shown to :shown-width (if (= :name (:kind node)) to (escaped-width (:value node) 0 to))))
+  (assoc node :shown to :shown-width (cond (= :name (:kind node)) to
+                                           (:code? node) (code-width node to)
+                                           :else (escaped-width (:value node) 0 to))))
 
 (defn- entry
   "A map's entry of key and value nodes `kids`, its lines indented `indent`; sized when both kids
@@ -740,6 +773,7 @@
       (not (:pending? node)) (assoc :seon.print/omitted (max 1 (- (:total node) (if text? (:shown node) (:n node)))))
       text? (assoc :seon.print/prefix (subs (if (= :name (:kind node)) (:text node) (:value node)) 0 (:shown node)))
       (= :string (:kind node)) (assoc :seon.print/lines (lines-after (:breaks node) (:total node) (:shown node)))
+      (:code? node) (assoc :seon.print/code? true :seon.print/indent (:indent node))
       form (assoc :seon.print/continuation form)
       (nil? form) (assoc :seon.print/requery-refused (get-in context [:requery :seon.print/requery-refused] "the source has no stable requery identity")))))
 
@@ -765,7 +799,9 @@
       (case (:kind node)
         :entry kids
         :name (assoc (:node node) :seon.print/text (if cut (str (:seon.print/prefix cut) "…+" (:seon.print/omitted cut)) (:text node)))
-        :string (or cut {:seon.print/face :seon.print/string :seon.print/value (:value node)})
+        :string (or cut (if (:code? node)
+                          {:seon.print/face :seon.print/code :seon.print/value (:value node) :seon.print/indent (:indent node)}
+                          {:seon.print/face :seon.print/string :seon.print/value (:value node)}))
         (:map :coll)
         (let [children (cond-> kids cut (conj cut))
               collection (cond-> {:seon.print/face (if (= :seon.print/throwable (:face node)) :seon.print/map (:face node))}

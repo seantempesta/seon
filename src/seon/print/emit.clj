@@ -31,6 +31,12 @@
   [s]
   (str "\"" (str/escape s #(when-not (= \newline %) (char-escape-string %))) "\""))
 
+(defn code-text
+  "Code text `s` at its place: verbatim, every line after the first indented `indent` columns."
+  {:malli/schema [:=> [:cat :string nat-int?] :string]}
+  [s indent]
+  (if (pos? indent) (str/replace s "\n" (str "\n" (apply str (repeat indent \space)))) s))
+
 (defn path-form
   "The plain clojure.core form that reads `path` from `source`: runs of keys and indices as one
   `get-in`, a map's entry `i` as `(key|val (nth (seq x) i))`, a set's or seq's member as `(nth (seq x) i)`."
@@ -56,9 +62,9 @@
   "The form that reads what one cut omitted, from its next offset: `(drop n …)` for members,
   `(subs … n)` for characters; nil without a requery symbol."
   {:malli/schema [:=> [:cat :map] :any]}
-  [{:seon.print/keys [requery-id elision-unit] path :seon.render.data/path next-offset :seon.render.data/next-offset}]
+  [{:seon.print/keys [requery-id elision-unit code?] path :seon.render.data/path next-offset :seon.render.data/next-offset}]
   (when (or (symbol? requery-id) (seq? requery-id))
-    (let [target (path-form requery-id (vec path))
+    (let [target (cond->> (path-form requery-id (vec path)) code? (list 'str))
           offset (or next-offset 0)]
       (cond (zero? offset) target
             (= :characters elision-unit) (list 'subs target offset)
@@ -88,7 +94,10 @@
   [node]
   (let [form (:seon.print/continuation node)]
     (case (:seon.print/elision-unit node)
-      :characters (str (string-literal (or (:seon.print/prefix node) "")) (cut-words (:seon.print/omitted node) (:seon.print/lines node) form))
+      :characters (str (if (:seon.print/code? node)
+                         (str (code-text (or (:seon.print/prefix node) "") (:seon.print/indent node 0)) " ")
+                         (string-literal (or (:seon.print/prefix node) "")))
+                       (cut-words (:seon.print/omitted node) (:seon.print/lines node) form))
       (cond-> (if (= :pending (:seon.print/elision-unit node)) "…?" (str "…" (:seon.print/omitted node "?")))
         form (str " " (form-text form))))))
 
@@ -97,7 +106,7 @@
 
 (def ^:private scalar-kinds
   #{:seon.print/nil :seon.print/boolean :seon.print/number :seon.print/keyword :seon.print/symbol
-    :seon.print/char :seon.print/string :seon.print/inst :seon.print/uuid :seon.print/var
+    :seon.print/char :seon.print/string :seon.print/code :seon.print/inst :seon.print/uuid :seon.print/var
     :seon.print/class :seon.print/object :seon.print/elided})
 
 (def ^:private structural-kinds
@@ -146,6 +155,8 @@
       {:op :text :text (or (:seon.print/text node) (literal value)) :seon.print/class (:seon.print/face node)}
       :seon.print/string (text-op :seon.print/string (or (:seon.print/text node) (string-literal value))
                                   [:span {:class (css-class :seon.print/string)} (or (:seon.print/text node) value)])
+      ;; code (seon.print/code) verbatim at its place, as in its file
+      :seon.print/code (text-op :seon.print/code (code-text value (:seon.print/indent node 0)) [:code {:class (css-class :seon.print/code)} value])
       (:seon.print/inst :seon.print/uuid) (text-op :seon.print/tag (or (:seon.print/text node) (literal value)))
       :seon.print/var (text-op :seon.print/symbol (str "#'" (:seon.print/name node)))
       :seon.print/class (text-op :seon.print/symbol (:seon.print/name node))

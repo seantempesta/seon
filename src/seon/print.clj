@@ -47,6 +47,15 @@
                     render (assoc :render render)
                     seen (assoc :seen seen)))))
 
+(defn code
+  "Source text s (a form's :form/src, a test's source, an assertion as written) as code: the
+  printer prints it verbatim at its place, as in its file (comments, line breaks and quotes as
+  written, every later line indented to where it stands), never as a string literal; cut, it is
+  cut by the one string cutter and its cut reads the rest, `(subs (str (get-in result/e3
+  [...])) 1200)`. The producer says it is code; the printer never guesses from a string's text."
+  {:malli/schema [:=> [:cat :string] :any]}
+  [s] (select/->Code s))
+
 (defn text
   "`v` as text under budget tokens: the printed text, or the error's message when even
   its first part does not fit."

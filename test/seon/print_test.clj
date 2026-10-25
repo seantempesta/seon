@@ -289,3 +289,33 @@
                       :when (< tokens (* 0.8 b))]
                   [b tokens])]
     (is (empty? starved) (str "budgets that printed under 80% of themselves: " (vec (take 5 starved))))))
+
+(def ^:private a-deftest
+  "A test's source as its file holds it: a comment, a string with quotes, nested indentation."
+  "(deftest a-proof-with-no-result-reads-unknown
+  ;; a proof with no result never ran; the context says :unknown
+  (let [db (db-with-program)
+        t (task/task db \"demo/f\")]
+    (is (= :unknown (status {:results {} :turn 0}))
+        \"no result: it never ran, unknown (the judge's word)\")))")
+
+(deftest code-prints-as-written
+  ;; owner, 2026-10-25: \"if we reference a function we should return the quote escaped forms so
+  ;; agents see more clojure code as is normally seen in files or the repl\": source its producer
+  ;; marks as code (seon.print/code) prints verbatim at its place, not as an escaped string
+  (let [h 'result/e1
+        v {:test 'demo-test/f-test :status :fail :source (seon/code a-deftest)}
+        {:keys [text elisions]} (seon/print-value v {:handle h})
+        lines (str/split-lines a-deftest)]
+    (is (zero? elisions) text)
+    (is (not (str/includes? text "\\\"")) "no quote is escaped")
+    (is (not (str/includes? text "\\n")) "no line break is escaped")
+    (is (str/includes? text (first lines)) "its first line as written")
+    (is (every? #(str/includes? text %) (rest lines)) "every later line as written, at its place")
+    (is (= (edn/read-string a-deftest) (:source (edn/read-string text))) "and it reads back as the form")
+    (testing "cut, it says what it left and reads exactly the rest"
+      (let [{:keys [text]} (seon/print-value {:source (seon/code (str/join "\n" (repeat 40 a-deftest)))} {:handle h :budget 120})
+            [cut] (cuts-of text)
+            rest (read-rest (:form cut) h {:source (seon/code (str/join "\n" (repeat 40 a-deftest)))})]
+        (is (:chars? cut) text)
+        (is (= (:n cut) (count rest)) "the form reads the characters it says it left")))))

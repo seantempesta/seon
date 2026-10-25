@@ -155,3 +155,36 @@
          :fixed {:ticks 3.4e6 :ns 7.8e6 :bytes 13.2e6}
          :sizes [100 1000 10000]})
       (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))
+
+(defn code
+  "The input of size n: n lines of a test's source (~50 characters each) as code
+  (seon.print/code), printed with a handle under shown-budget, which shows its first ~19.6k
+  characters verbatim and cuts the rest."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any :map]]}
+  [n] [{:source (seon.print/code (str/join "\n" (for [i (range n)] (str "    (is (= " i " (count (rows db))) \"row " i " is kept\")"))))}
+       {:handle 'result/h1 :budget shown-budget}])
+
+(deftest printing-code-costs-what-it-shows
+  ;; code (seon.print/code) prints verbatim, cut by the one string cutter: what grows with it
+  ;; is the pass that finds its line breaks, as a text's (a-cut-text-reads-its-lines-once), once
+  ;; for each time the selection makes the map's child (three);
+  ;; what shows is fixed by the budget, each shown character sized about three times (fill-end,
+  ;; code-width's line count) and re-indented once (emit/code-text)
+  (let [armed? (contract/armed? #'seon.print/print-value)
+        shown (select/estimate-chars shown-budget)]
+    (require 'seon.print.emit 'seon.print.select 'seon.print :reload)
+    (try
+      (cost/proof
+        {:of 'seon.print/print-value :input 'seon.print-cost-test/code
+         :n "lines of code cut under 6,144 tokens, unarmed"
+         :work (str "per line, three times (the map's child is made three times, whole, at its least and filled, "
+                    "and each finds its line breaks: seon.print.select/node-of), one indexOf to its line break (~50 "
+                    "characters read) and one conj! of the break's offset; "
+                    "fixed, the ~" shown " characters shown, read by the sizing passes with no escaping and copied once "
+                    "into the text: measured 2026-10-25 at 1,000 lines, 576 KB and 350k ticks in all (a string's escaping, "
+                    "a-cut-text-reads-its-lines-once, prices the same characters at 13.5 MB)")
+         :growth :linear
+         :ops {:vec/conj! 3 :seq/reduce 150}
+         :fixed {:ticks 2.5e5 :ns 5.0e5 :bytes 4.5e5}
+         :sizes [1000 10000 100000]})
+      (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))
