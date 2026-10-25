@@ -616,7 +616,7 @@
 
 (defn- stop-kept
   "[st outputs] with run's kept process stopped too (its run ended: root's view says :ended)."
-  {:malli/schema [:=> [:cat [:tuple :map [:vector :map]] :seon.run/id :keyword] [:tuple :map [:vector :map]]]}
+  {:malli/schema [:=> [:cat [:tuple :seon.reconcile/state [:vector :map]] :seon.run/id :keyword] [:tuple :seon.reconcile/state [:vector :map]]]}
   [[st os] run agent]
   (let [[st o] (request st run :ignored {:op :kill :id agent :ended true})] [st (conj os o)]))
 

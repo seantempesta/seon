@@ -247,8 +247,8 @@
                                             (d/q '[:find ?n ?e ?s :where [?e :seon.turn/n ?n] [?e :seon.turn/origin :model]
                                                    [?e :seon.turn/basis _] [?e :seon.turn/split ?s]] sq-db)))
                read-failure? (and (= 2 (count sq-turns))
-                                  (str/includes? (second (second sq-turns)) ":assert \"(= 9 (app.calc/square 3))\"")
-                                  (str/includes? (second (second sq-turns)) ":got \"(= 9 0)\"")
+                                  (str/includes? (second (second sq-turns)) ":assert (= 9 (app.calc/square 3))")
+                                  (str/includes? (second (second sq-turns)) ":got (= 9 0)")
                                   (every? #(every? (set (keys (nth % 2))) [:tests-ms :context-ms :model-ms :eval-ms :record-ms]) sq-turns))]
            (cond-> {:ok (and done? (= #{"calc/neg-merge"} blocked) read-failure?
                              (= [{:task "calc/neg" :cause "cancelled" :blocks ["calc/abs" "calc/abs-merge" "calc/neg-merge"]}] (:root-causes q)))
