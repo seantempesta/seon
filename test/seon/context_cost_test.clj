@@ -80,8 +80,9 @@
                ;; batch read would scan every f16 row) and ~45 fixed: three near (each its vector-of,
                ;; unpack and pack-dims), the citation parse and the resolver's read; constant past
                ;; the shortlist, as seon.vector-cost-test/a-search-reads-each-row-once measures past
-               ;; it. Each near reads every coarse row before :of filters them, so the per-row bytes
-               ;; are ~2.1x near's own 700 B (seon.vector/one-scan-ranks-every-kind).
+               ;; it. A row is its coarse datom read (~590 B) and its kind's membership set, the :of
+               ;; attribute's datoms (~790 B for sections); the second and third coarse scans add
+               ;; ~40 B (measured, seon.vector/one-scan-ranks-every-kind).
                :per-n {:bytes 1480.0 :calls 0.0}
                :fixed {:bytes 7440000.0 :calls 445.0}
                :sizes [500 1000 2000]}))
