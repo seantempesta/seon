@@ -163,7 +163,7 @@
         by (into {} (map (juxt :test identity)) (:proofs block))]
     (is (= [{:assert (print/code "(= 9 (square 3))") :got (print/code "(= 9 6)")}] (:failures (by 'ctx-calc-test/square-test)))
         "the assertion once, and what it evaluated to")
-    (is (= [{:var 'ctx-calc/square :contract [:=> [:cat :int] :int] :doc "Squares x."}
+    (is (= [{:var 'ctx-calc/square :contract [:=> [:cat :int] :int] :doc {:seon.print/prose "Squares x."}}
             {:var 'ctx-ghost/half :contract [:=> [:cat :int] :int]}]
            (:calls (by 'ctx-calc-test/square-test)))
         "the program functions the red proof calls, at summary level from their facts: one in a namespace never loaded too")

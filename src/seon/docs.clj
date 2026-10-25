@@ -382,7 +382,8 @@
         src (source-of db sym)
         doc (cond-> {:symbol sym}
               (:arglists m) (assoc :arglists (:arglists m))
-              (:doc m) (assoc :doc (:doc m))
+              ;; prose, read as itself: unquoted, no escaped quotes (seon.print's prose mark)
+              (:doc m) (assoc :doc {:seon.print/prose (:doc m)})
               (:malli/schema m) (assoc :contract (:malli/schema m)))]
     (cond
       (and (nil? m) (nil? src)) {:symbol sym :unresolved true :problem (:unresolved ref/problem-messages)}
