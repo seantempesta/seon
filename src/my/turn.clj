@@ -4,7 +4,7 @@
   (:require [seon.contract :refer [defn defn-]] [seon.turn :as turn]))
 
 (defn evals
-  "The last turn's evaluations in full: each item's :form, :printed value or error, and :out."
+  "The last turn's responses, one per eval call: each {:handle :value :out :err :ex}, its live value while this process holds it."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   [] (turn/last-evals))
 

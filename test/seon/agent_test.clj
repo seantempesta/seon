@@ -15,10 +15,13 @@
   "seon.await, which a root (importing src only) loads by this path."
   (.getCanonicalPath (java.io.File. "test/seon/await.clj")))
 
+(def value-of "seon.test-store/value-of, as this namespace's callers name it." ts/value-of)
+
 (defn in-agent
   "A root on the checkout's src (its source root), one agent on a task of its own, each of
-  forms evaluated in that agent (a string) or sent to the server as it is (a map): the
-  first item of every reply, or the answer that holds no items, in order. The root works on a
+  forms evaluated in that agent (a string) or sent to the server as it is (a map): every
+  reply's response with its value read back (:value, value-of), or the answer that holds no
+  response, in order. The root works on a
   main of its own, a branch of the one test store (target/runs/test-store), deleted with
   every branch under it when the root has stopped (seon.check/drop-mains).
   opts: :dirs, the source dirs root imports (default [\"src\"]); :proofs, the task's proofs;
@@ -51,7 +54,7 @@
     (ts/stop-root! root)
     (ts/drop-main! store main)
     (sh/sh "rm" "-rf" (str path "-runs") (str path "-tasks"))
-    (mapv #(if (contains? % :items) (first (:items %)) %) out))))
+    (mapv #(if (contains? % :response) (let [r (:response %)] (assoc r :value (value-of r))) %) out))))
 
 (defn- root-ended
   "A root with two agents: a1 idle, a2 evaluating code (sent; its :started event awaited). Then
@@ -71,7 +74,7 @@
         ask (fn [m] (ts/ask root m))
         ;; the printed value of a root eval; a reply that is an error stays the error
         eval-root (fn [code] (let [r (ask {:op :eval :agent "root" :code code})]
-                               (if (:error r) r (edn/read-string (:printed (first (:items r)))))))
+                               (if (:error r) r (value-of (:response r)))))
         ;; spawn! answers at each agent's hello: both are ready
         _ (eval-root "[(c/spawn! sys {}) (c/spawn! sys {})]")
         ;; a2 begins its form (the agent's :started event, tapped before it is sent)
@@ -120,7 +123,7 @@
         _ (sh/sh "mkfifo" fifo)
         root (ts/start-root! {:store store :main main :runs runs})
         eval-root (fn [code] (let [r (ts/ask root {:op :eval :agent "root" :code code})]
-                               (if (:error r) r (edn/read-string (:printed (first (:items r)))))))
+                               (if (:error r) r (value-of (:response r)))))
         _ (eval-root "(c/spawn! sys {})")
         parked (str "(do (ns parked-proof (:require [clojure.test :refer [deftest is]]))"
                     " (deftest p (let [w (java.io.FileOutputStream. " (pr-str fifo) ")] (.write w 49) (.flush w) (Thread/sleep 60000) (.write w 50) (.flush w)) (is true))"
@@ -167,19 +170,19 @@
         runs (str checkout "/target/runs/" main "-runs")
         root (ts/start-root! {:store store :main main :runs runs})
         ask (fn [m] (ts/ask root m))
-        eval-root (fn [code] (let [r (ask {:op :eval :agent "root" :code code})] (if (:error r) r (:printed (first (:items r))))))
+        eval-root (fn [code] (let [r (ask {:op :eval :agent "root" :code code})] (if (:error r) r (value-of (:response r)))))
         ;; spawn! answers at the agent's hello: it is ready; the eval has begun at its :started event
         _ (eval-root "(c/spawn! sys {})")
         _ (eval-root (str "(let [ev (c/events sys)] (def blocked (c/submit! sys :a1 \"(clojure.core.async/<!! (clojure.core.async/chan))\")) "
                           "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= :a1 (:agent e))) :began (recur)))))"))
         _ (eval-root "(c/interrupt! sys :a1)")
-        stopped (eval-root "(clojure.string/starts-with? (:printed (first @blocked)) \"interrupted by root\")")
-        next-answer (let [r (ask {:op :eval :agent "a1" :code "(+ 2 2)"})] (if (:error r) r (:printed (first (:items r)))))]
+        stopped (eval-root "(clojure.string/starts-with? (:seon.error/message (:ex @blocked)) \"interrupted by root\")")
+        next-answer (let [r (ask {:op :eval :agent "a1" :code "(+ 2 2)"})] (if (:error r) r (value-of (:response r))))]
     (ts/stop-root! root)
     (ts/drop-main! store main)
     (sh/sh "rm" "-rf" runs)
-    (is (= "true" stopped) (str "the blocked eval answers interrupted by root: " stopped))
-    (is (= "4" next-answer) (pr-str next-answer))))
+    (is (true? stopped) (str "the blocked eval answers interrupted by root: " stopped))
+    (is (= 4 next-answer) (pr-str next-answer))))
 
 (deftest an-agent-holds-mains-tests-and-runs-them
   ;; task seon.agent/an-agent-holds-mains-tests: main holds the source root's test namespaces
@@ -195,8 +198,8 @@
                                      " (clojure.test/test-vars [#'" green " #'" red "]))"
                                      " @rs)")]
                                {:dirs ["src" "test"]})]
-    (is (= "true" (:printed held)) "the agent holds main's test namespace without requiring it")
-    (is (= {green #{:pass} red #{:fail}} (edn/read-string (:printed run)))
+    (is (true? (:value held)) "the agent holds main's test namespace without requiring it")
+    (is (= {green #{:pass} red #{:fail}} (:value run))
         "main's test runs green in the agent; a red one beside it reports red")))
 
 (deftest an-agents-test-run-is-its-proofs-and-what-its-change-reaches
@@ -210,7 +213,7 @@
         [_ run] (in-agent ["(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent.a1)"
                            {:op :eval :agent "root" :code "(seon.proofs/results @(seon.root/run-tests! sys :a1))"}]
                           {:dirs ["src" "test"] :proofs #{proof}})]
-    (is (= {proof :pass reached :pass} (edn/read-string (:printed run)))
+    (is (= {proof :pass reached :pass} (:value run))
         "the proof and the one test reaching the change ran, green; nothing else ran")))
 
 (deftest a-wide-reach-reuses-unchanged-results
@@ -236,11 +239,11 @@
                    own]
                   {:dirs ["src" "test"] :proofs #{proof} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})]
     (sh/sh "rm" "-rf" dir)
-    (is (= [#{:env :tree :data-refs} true] (edn/read-string (:printed inputs))) "root's boot recorded its source tree's inputs, this boot's")
-    (is (= {:results {proof :pass reached :pass} :ran 2 :reused 0} (edn/read-string (:printed first-run))) "the agent's own run runs the proof and the reached test")
-    (is (= 2 (edn/read-string (:printed files))) "and stores both through root's :file owner, in the results directory")
-    (is (= [{proof :pass reached :pass} 0 2] (edn/read-string (:printed judged))) "root's :tests (the judge's) runs nothing: both reused from it, the same results")
-    (is (= {:results {proof :pass reached :pass} :ran 0 :reused 2} (edn/read-string (:printed second-run))) "and so does the agent's next run")))
+    (is (= [#{:env :tree :data-refs} true] (:value inputs)) "root's boot recorded its source tree's inputs, this boot's")
+    (is (= {:results {proof :pass reached :pass} :ran 2 :reused 0} (:value first-run)) "the agent's own run runs the proof and the reached test")
+    (is (= 2 (:value files)) "and stores both through root's :file owner, in the results directory")
+    (is (= [{proof :pass reached :pass} 0 2] (:value judged)) "root's :tests (the judge's) runs nothing: both reused from it, the same results")
+    (is (= {:results {proof :pass reached :pass} :ran 0 :reused 2} (:value second-run)) "and so does the agent's next run")))
 
 (deftest one-bound-one-verdict-and-the-judge-reruns-no-green
   ;; task seon.proofs/one-prove-path: a test's tick budget is its own, so two tests that each
@@ -260,11 +263,11 @@
                    "(let [r (seon.agent/run-tests-forked budget #{'bound-test/a 'bound-test/b} :judge)] [(seon.proofs/results r) (:ran r) (:reused r) (some? (:pid r))])"]
                   {:dirs ["src" "test"] :proofs #{} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})]
     (sh/sh "rm" "-rf" dir)
-    (is (pos-int? (edn/read-string (:printed budget))) (:printed budget))
-    (is (= ['{bound-test/a :pass bound-test/b :pass} 2 true] (edn/read-string (:printed turn)))
-        "the turn runs both, each within its own budget: green")
-    (is (= ['{bound-test/a :pass bound-test/b :pass} 0 2 false] (edn/read-string (:printed judge)))
-        "the judge after it: the same verdict, both reused, nothing run and no child forked")))
+    (is (pos-int? (:value budget)) (pr-str budget))
+    (is (= ['{bound-test/a :pass bound-test/b :pass} 2 true] (:value turn))
+        (str "the turn runs both, each within its own budget: green " (pr-str turn)))
+    (is (= ['{bound-test/a :pass bound-test/b :pass} 0 2 false] (:value judge))
+        (str "the judge after it: the same verdict, both reused, nothing run and no child forked " (pr-str judge)))))
 
 (deftest an-agents-greens-and-a-checkouts-are-one-store
   ;; owner, 2026-10-23: a test that is the same is not run again once green, "especially when
@@ -286,7 +289,7 @@
         checkout (proofs/plan nil (select-keys digests [p2]) (proofs/greens dir [(digests p2)]) #{})]
     (sh/sh "rm" "-rf" dir)
     (is (and (empty? unstored) (seq stored)) "the checkout stored its green for p1")
-    (is (= {:results {p1 :pass p2 :pass} :ran 1 :reused 1} (edn/read-string (:printed r))) "the agent reuses the checkout's p1 and runs p2")
+    (is (= {:results {p1 :pass p2 :pass} :ran 1 :reused 1} (:value r)) "the agent reuses the checkout's p1 and runs p2")
     (is (= [] (:run checkout)) "the checkout reuses the agent's p2")))
 
 (deftest a-previous-roots-inputs-are-not-shared
@@ -303,7 +306,7 @@
   ;; task, so my.task/current answers it at the agent's first form, before any turn loop
   ;; or context read begins (it was nil: root kept the task in its view only)
   (let [[id] (in-agent ["(:seon.task/id (my.task/current))"])]
-    (is (= (pr-str "demo/t") (:printed id)))))
+    (is (= "demo/t" (:value id)) (pr-str id))))
 
 (deftest an-agent-with-no-task-resumes-a-kept-branch
   ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
@@ -318,7 +321,7 @@
                                    " (cond (not= ag (:agent e)) (recur)"
                                    " (#{:ready :dead :ended :killed} (:type e)) (:type e)"
                                    " :else (recur))))))")}])]
-    (is (= ":ready" (:printed r)) (pr-str r))))
+    (is (= :ready (:value r)) (pr-str r))))
 
 (deftest a-resumed-branchs-agent-is-this-boots
   ;; page's browser round, 2026-10-23: an agent on a kept branch recorded its evaluations under an
@@ -336,9 +339,9 @@
                                      " :else (recur))))))")}
                          ;; in-agent's own agent is a1; the one spawned onto the kept branch is a2
                          {:op :eval :agent "a2" :code "(:key @seon.agent/state)"}])
-        [status boot] (edn/read-string (:printed r))]
+        [status boot] (:value r)]
     (is (= :ready status) (pr-str r))
-    (is (str/starts-with? (edn/read-string (:printed k)) (str boot "/")) (str "its key names this boot: " (:printed k)))))
+    (is (str/starts-with? (:value k) (str boot "/")) (str "its key names this boot: " (:text k)))))
 
 (deftest a-resumed-branch-holds-what-main-gained
   ;; step E run #11 (2026-10-23): a kept branch made before main imported test/ was resumed,
@@ -355,10 +358,10 @@
                                    " (let [ag (seon.root/spawn! sys {:branch :kept})]"
                                    " (loop [] (let [e (clojure.core.async/<!! ev)]"
                                    " (cond (not= ag (:agent e)) (recur)"
-                                   " (= :ready (:type e)) (:printed (first @(seon.root/submit! sys ag \"[(demo.gained/g) (demo.kept/h)]\")))"
+                                   " (= :ready (:type e)) (:text @(seon.root/submit! sys ag \"[(demo.gained/g) (demo.kept/h)]\"))"
                                    " (#{:dead :ended :killed} (:type e)) (:type e)"
                                    " :else (recur))))))")}])]
-    (is (= (pr-str "[7 2]") (:printed r)) "a var main added, and main's redefinition of one the branch left alone")))
+    (is (str/includes? (str (:value r)) ":value [7 2]") "a var main added, and main's redefinition of one the branch left alone")))
 
 (deftest a-failure-marked-through-the-server-holds-the-task
   ;; owner, 2026-10-22: a failure is task data and root reacts to it. The agent marks its
@@ -370,9 +373,9 @@
                                :code (str "(let [t (:max-tx @(:conn sys))] (seon.await/await-quiet sys (inc t))"
                                           " [(seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) \"demo/t\")"
                                           " (select-keys (first (get-in (my.root/problems sys) [:classes :failed :rows])) [:task :reason :counterexample :open?])])")}])]
-    (is (= (pr-str "the premise is refuted") (:printed f)))
+    (is (= "the premise is refuted" (:value f)) (pr-str f))
     (is (= [:failed {:task "demo/t" :reason "the premise is refuted" :counterexample "(= 1 2)" :open? true}]
-           (edn/read-string (:printed seen))))))
+           (:value seen)))))
 
 (deftest an-outside-run-writes-its-end
   ;; found by a worked example (evaluations session, 2026-10-23): an outside agent's :done
@@ -384,7 +387,7 @@
                                  {:op :eval :agent "root"
                                   :code (str "(let [t (:max-tx @(:conn sys))] (seon.await/await-quiet sys (inc t))"
                                              " (select-keys (first (vals (seon.task/runs @(:conn sys)))) [:seon.run/outcome :seon.run/reason]))")}])
-        run (edn/read-string (:printed seen))]
+        run (:value seen)]
     (is (contains? done :judging) (pr-str done))
     (is (= :red (:seon.run/outcome run)) (pr-str run))
     (is (str/includes? (str (:seon.run/reason run)) "proof-unknown demo-test/t") "the end names why it is red")
@@ -401,8 +404,8 @@
                                       :code (str "(let [t (:max-tx @(:conn sys))] (seon.await/await-quiet sys (inc t))"
                                                  " [(select-keys (first (vals (seon.task/runs @(:conn sys)))) [:seon.run/outcome :seon.run/status])"
                                                  "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) \"demo/t\")])")}])
-        [run state] (edn/read-string (:printed seen))]
-    (is (= "#'demo-test/t" (:printed t)))
+        [run state] (:value seen)]
+    (is (str/includes? (:text t) ":value #'demo-test/t") (pr-str t))
     (is (contains? done :judging) (pr-str done))
     (is (= :green (:seon.run/outcome run)) (pr-str run))
     (is (#{:done :merged} state) (str "the task finishes, never held for root: " state))))
@@ -413,9 +416,9 @@
   ;; (:seon.config.agent/cwd) and still reads any file by its path
   (let [[abs git] (in-agent [(str "(count (slurp " (pr-str (.getCanonicalPath (java.io.File. "src/seon/reconcile.clj"))) "))")
                              "(clojure.java.shell/sh \"git\" \"rev-parse\" \"--git-dir\")"])]
-    (is (= (str (count (slurp "src/seon/reconcile.clj"))) (:printed abs)) "a file reads by its absolute path")
-    (is (str/includes? (str (:printed git)) ":exit 128") (str "git finds no repository: " (pr-str git)))
-    (is (str/includes? (str (:printed git)) "not a git repository") (pr-str git))))
+    (is (= (count (slurp "src/seon/reconcile.clj")) (:value abs)) "a file reads by its absolute path")
+    (is (str/includes? (:text git) ":exit 128") (str "git finds no repository: " (pr-str git)))
+    (is (str/includes? (:text git) "not a git repository") (pr-str git))))
 
 (deftest each-eval-call-is-answered-before-the-next
   ;; owner, 2026-10-22 (DECISIONS "Agents work at the REPL, through tool calls"): a reply was a
@@ -426,11 +429,11 @@
   (let [[end msgs] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#calls\" :max-turns 2})"
                               (str "(let [db (seon.agent/db)]"
                                    " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task \"demo/t\" :run \"demo/t#calls\""
-                                   "                                       :turn 2 :max-turns 2 :origin :model :observed {}}))"
+                                   "                                       :turn 2 :max-turns 2 :origin :model :observed {} :agent (:key @seon.agent/state)}))"
                                    "      (filter #(#{\"assistant\" \"tool\"} (:role %))) (mapv #(select-keys % [:role :tool-calls :tool-call-id :content]))))")]
                              {:sets [":seon.config.ai/script=seon.fixtures/two-calls"]})
-        end (edn/read-string {:default tagged-literal} (:printed end))
-        [a0 r0 a1 r1 :as ms] (edn/read-string {:default tagged-literal} (:printed msgs))]
+        end (:value end)
+        [a0 r0 a1 r1 :as ms] (:value msgs)]
     (is (= [:cap 2] [(:outcome end) (:model-calls end)]) "two model calls (the proof stays red), then the cap")
     (is (= ["assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each reply followed by its call's answer")
     (is (= [{:id "call-0" :code "(+ 20 21)"}] (:tool-calls a0)))
@@ -451,7 +454,7 @@
                                 {:op :eval :agent "root"
                                  :code (str "(let [a (first (filter #(= :a1 (:seon.run/agent %)) (vals (seon.task/runs @(:conn sys)))))]"
                                             " (seon.reconcile/pull-end (:db @(seon.root/branch-db sys (seon.task/default-branch \"demo/t\"))) (:seon.run/id a)))")}])
-        end (edn/read-string {:default tagged-literal} (:printed end))]
+        end (:value end)]
     (is (= :seon.agent/died (:seon.error/type died)) "the request it died in is answered with its death, the one error map")
     (is (= {:exit 70} (:exit died)) "named by the exit status root observed")
     (is (= :error (:outcome end)) "the run's end is on its branch")
@@ -536,7 +539,23 @@
                                    " (mapv #(get-in % [:error :seon.error/type]) (get-in (my.root/problems sys) [:classes :error :rows]))]))")}]
                       {:sets [":seon.config.ai/provider=:none"]
                        :decls [{:seon.task/name "m" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
-    (is (= [:error :seon.model/no-provider [:seon.model/no-provider]] (edn/read-string (:printed r))) (pr-str r))))
+    (is (= [:error :seon.model/no-provider [:seon.model/no-provider]] (:value r)) (pr-str r))))
+
+(deftest a-failed-call-keeps-what-it-sent
+  ;; root, 2026-10-24: a turn whose model call fails still records what it sent (written as the
+  ;; request goes) and its typed error (an error is data, AGENTS section 4); the debug page shows both
+  (let [[end turn] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#fail\" :max-turns 1})"
+                              (str "(let [db (seon.agent/db) t (datahike.api/pull db '[:db/id :seon.turn/sent :seon.turn/error] [:seon.turn/id \"demo/t#fail/0\"])]"
+                                   "  {:sent (mapv first (:seon.turn/sent t)) :error (:seon.error/type (:seon.turn/error t))"
+                                   "   :read (count (mapcat second (seon.context/parts-of db (:seon.turn/sent t))))"
+                                   "   :screen (seon.print/record-text (:seon.eval/record (datahike.api/pull db '[:seon.eval/record] [:seon.eval/id (second (nth (:seon.turn/sent t) 2))])))})")]
+                             {:sets [":seon.config.ai/provider=:none"]})]
+    (is (= :error (:outcome (:value end))) (pr-str end))
+    (is (= [:section :task :eval :eval :eval] (:sent (:value turn))) "the help page, the task story, the screen's three evals (show, status, changes)")
+    (is (str/includes? (str (:screen (:value turn))) ":page") (str "the screen is root's page of it: " (:screen (:value turn))))
+    (is (str/includes? (str (:screen (:value turn))) "[:h1 \"a1\"]") (str "its head in words, read whole at the screen's budget: " (:screen (:value turn))))
+    (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")
+    (is (= 5 (:read (:value turn))) "read back from its records")))
 
 (deftest a-turn-that-repeats-the-last-from-the-same-state-ends-the-run
   ;; root's research, lever 2 (2026-10-22): loops took 45% of tokens, and the step E dry run's
@@ -545,7 +564,7 @@
   ;; :no-progress, naming the code; the judge refines from that evidence
   (let [[end] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#loop\" :max-turns 5})"]
                         {:sets [":seon.config.ai/script=seon.fixtures/same-call"]})
-        end (edn/read-string {:default tagged-literal} (:printed end))]
+        end (:value end)]
     (is (= [:no-progress 2] [(:outcome end) (:model-calls end)]) (pr-str end))
     (is (str/includes? (str (:reason end)) "(+ 1 1)") "the reason names the repeated code")))
 
@@ -557,37 +576,55 @@
   (let [[_ r] (in-agent ["(do (ns spin-test (:require [clojure.test :refer [deftest is]]))
                               (deftest spin (loop [] (seon.intr/run 100000 #(reduce + (range 1000))) (recur))))"
                          "(let [r (seon.agent/run-tests-forked 100000000 #{'spin-test/spin} :turn)] [(:seon.error/type (first (filter :seon.error/type (:reports r)))) (some :var (:reports r))])"])
-        [type test] (edn/read-string (:printed r))]
-    (is (= :seon.test/ticks-spent type) (:printed r))
+        [type test] (:value r)]
+    (is (= :seon.test/ticks-spent type) (:text r))
     (is (= "#'spin-test/spin" test) "naming the test that was running")))
 
-(deftest a-model-turn-records-its-thinking-and-the-message-it-took
+(deftest an-agent-commits-after-each-eval
+  ;; task seon.render/a-view-renders-once-per-change-of-its-reads (D; design section 11, item 1):
+  ;; each eval of a turn (the screen's two, then the model's) is committed as it lands, so a page
+  ;; shows it then, not at the turn's end. Walked back from the branch's head, no commit adds more
+  ;; than one eval record (one commit at the turn's end added the turn's evals at once: 2 -> 4)
+  (let [[_ counts] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#each\" :max-turns 1})"
+                              (str "(let [db (seon.agent/db)"
+                                   "      n (fn [db] (count (datahike.api/q '[:find ?e :where [?e :seon.eval/id]] db)))"
+                                   "      back (fn [db] (when-let [p (first (datahike.api/parent-commit-ids db))] (datahike.api/commit-as-db db p)))]"
+                                   "  (vec (distinct (map n (take 30 (take-while some? (iterate back db)))))))")]
+                             {:sets [":seon.config.ai/script=seon.fixtures/same-call"]})
+        ns (:value counts)]
+    (is (< 3 (count ns)) (pr-str ns))
+    (is (every? #(<= % 1) (map - ns (rest ns))) (str "each eval its own commit: " (pr-str ns)))))
+
+(deftest a-model-turn-records-its-prose-and-the-message-it-took
   ;; task seon.render/a-debug-view-of-any-agent: the owner's message is a fact root writes on
   ;; main (from "owner", to the run the agent works); the turn that takes it writes the same
   ;; fact on its branch before its commit and names it by id in its basis, so the window and every
-  ;; later reading read its text from that commit; the call's thinking (the eval tool's argument,
-  ;; here the scripted model's) and its form's ;; lead are recorded with the call and its record
+  ;; later reading read its text from that commit; the reply's prose (here the scripted model's)
+  ;; is the turn's reply and its call's eval's prose, and the call names its one eval
+  ;; (notes/design-agent-view-2026-10-24.md §7)
   (let [[_ end turn on-main] (in-agent [{:op :message :agent "a1" :body "use demo/g"}
                                         "(seon.turn/work! {:task \"demo/t\" :run \"demo/t#think\" :max-turns 1})"
                                         (str "(let [db (seon.agent/db) t (datahike.api/pull db '[*] [:seon.turn/id \"demo/t#think/0\"])"
                                              "      ids (get-in t [:seon.turn/basis :observed :message-ids])]"
-                                             "  {:calls (mapv #(select-keys % [:code :thinking :items]) (:seon.turn/calls t)) :ids ids"
+                                             "  {:calls (mapv #(select-keys % [:code :eval]) (:seon.turn/calls t)) :ids ids :reply (:seon.turn/reply t)"
                                              "   :committed (seon.context/taken-messages (datahike.api/commit-as-db db (get-in t [:seon.turn/basis :commit])) {:message-ids ids})"
-                                             "   :leads (mapv #(:lead (datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.cluster.eval/id ?i] [?e :seon.cluster.eval/record ?r]] db %)) (:items (first (:seon.turn/calls t))))})")
+                                             "   :prose (mapv #(:prose (datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.eval/id ?i] [?e :seon.eval/record ?r]] db %)) (keep :eval (:seon.turn/calls t)))})")
                                         {:op :eval :agent "root"
                                          :code (str "(datahike.api/q '[:find ?id ?f ?to ?b :where [?m :seon.message/id ?id] [?m :seon.message/from ?f]"
                                                     " [?m :seon.message/to ?r] [?r :seon.run/id ?to] [?m :seon.message/body ?b]] @(:conn sys))")}]
                                        {:sets [":seon.config.ai/script=seon.fixtures/thinking-call"]})
-        end (edn/read-string {:default tagged-literal} (:printed end))
-        {:keys [calls ids committed leads]} (edn/read-string {:default tagged-literal} (:printed turn))
-        [[mid from to body] :as facts] (vec (edn/read-string (:printed on-main)))]
+        end (:value end)
+        {:keys [calls ids committed prose reply]} (:value turn)
+        [[mid from to body] :as facts] (vec (:value on-main))]
     (is (= 1 (:model-calls end)) (pr-str end))
     (is (= [["owner" "demo/t#1" "use demo/g"]] (mapv #(subvec % 1) facts)) "one fact on main: from the owner, to the run a1 works")
     (is (= [mid] ids) "the turn's basis names the fact root wrote, by its id")
     (is (= [{:id mid :from "owner" :body "use demo/g"}] committed) "and its text is read from the commit the turn read")
-    (is (= "check the sum before the proof" (:thinking (first calls))) "the call's thinking, recorded with it")
-    (is (= 1 (count (:items (first calls)))) "the call names its one evaluation's record")
-    (is (= [";; the sum first"] leads) "whose record keeps the form's thought")))
+    ;; the prose comes in the eval call (its first argument, notes/design-agent-view-2026-10-24.md
+    ;; section 1), so the reply's own text is empty and the prose is the eval's
+    (is (= "" reply) "the reply's text: the prose came in its call")
+    (is (string? (:eval (first calls))) (str "the call names its one eval: " (pr-str calls)))
+    (is (= ["check the sum before the proof"] prose) "whose record keeps the prose beside it")))
 
 (deftest a-compile-errors-line-and-suggestions-arrive-as-data
   ;; the exception Jolt's analyzer raises for `(prinltn 1)`, as the one error map: its line,

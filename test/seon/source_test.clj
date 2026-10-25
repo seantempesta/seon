@@ -262,7 +262,7 @@
                                                        "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]"])))
         ;; the printed value of a root eval; a reply that is an error stays the error value
         ask (fn [code] (let [a (ts/ask @root {:op :eval :agent "root" :code code})]
-                         (if (:error a) a (clojure.edn/read-string (:printed (first (:items a)))))))]
+                         (if (:error a) a (ts/value-of (:response a)))))]
     (try
       (is (zero? (:exit cloned)) (:err cloned))
       (is (some? (:port @root)) (str "the root started: " (slurp (str dir "/runs/root.log"))))

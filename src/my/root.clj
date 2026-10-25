@@ -316,14 +316,14 @@
         version (select-keys src [:root :commit])
         ;; the score of calls against task t's subject, made in an agent of its own (a reply's
         ;; ns forms run there, so no task's reading leaks into the next), ended once it answers;
-        ;; the agent answers the score as seon.edn text, which its item prints as a string
+        ;; the agent answers the score as seon.edn text, which its response prints as a string
         score (fn [db t calls]
                 (let [ag (root/spawn! sys {})
-                      item (try (first @(root/submit! sys ag (pr-str (list 'seon.edn/encode (list 'seon.judge/first-move (list 'quote (judge/subject db t)) calls)))))
-                                (finally (root/kill! sys ag)))]
-                  (if (= :ret (:tag item))
-                    (assoc (sedn/decode (edn/read-string (:printed item))) :scorer (judge/scorer db))
-                    (contract/error :seon.judge/unscored 'my.root/first-moves! "the scoring agent answered no score" {:item item}))))
+                      r (try @(root/submit! sys ag (pr-str (list 'seon.edn/encode (list 'seon.judge/first-move (list 'quote (judge/subject db t)) calls))))
+                             (finally (root/kill! sys ag)))]
+                  (if (and (map? r) (not (:ex r)) (:text r))
+                    (assoc (sedn/decode (:value (edn/read-string {:default tagged-literal} (:text r)))) :scorer (judge/scorer db))
+                    (contract/error :seon.judge/unscored 'my.root/first-moves! "the scoring agent answered no score" {:response r}))))
         row (fn [f reused?] (merge {:task (:seon.judge/task f) :reused? (boolean reused?)} (when (= :rescored reused?) {:rescored? true})
                                    (select-keys (:seon.judge/score f) [:acted :right-var :right-test :waste :uncompiled :green :usd])))]
     (loop [[id & more] ids rows [] spent 0.0]

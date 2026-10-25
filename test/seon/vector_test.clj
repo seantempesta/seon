@@ -132,3 +132,7 @@
           [st _] (vector/vectors-proc st :answers {:tag (:tag (first (:to-api o4))) :r e})
           [_ o5] (vector/vectors-proc st :main {:t 12 :db db})]
       (is (empty? (:to-api o5)) "texts the model could not encode are set aside: nothing else is due, so nothing is asked"))))
+
+(deftest rrf-fuses-rankings-by-reciprocal-rank
+  ;; kept for exploration (owner, 2026-10-24): an item in both rankings beats one high in only one
+  (is (= '[b a c] (vector/rrf '[[a b] [b c]]))))

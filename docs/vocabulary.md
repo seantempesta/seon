@@ -37,8 +37,8 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 |---|---|---|
 | **request**, **response**, **session**, `eval`, `done`, `interrupt` | nREPL's message model on the agent's socket | `seon.repl` |
 | **middleware** | `(fn [handler] (fn [request] ...))` over the base handler | `seon.repl/middleware` |
-| **reply item** | one form's folded answer at root: printed value or error, handle, cost | `seon.repl/fold` |
-| **handle** | a live value kept in the agent, named ``result/hN`` | `seon.repl` |
+| **response** | one eval call's answer: `{:handle :value :out :err :ex :ms :ticks :bytes}`, each key only when present | `seon.repl/response` |
+| **handle** | a live value kept in the agent, named by its eval, ``result/eN`` | `seon.repl/eval-string` |
 | **value printer** | the one function that turns a value into text under a token budget, saying what a cut omitted ([render](render.md#one-printer)) | `seon.print/print-value` |
 | **render** | a view of a value declared on its schema, over the one printer; the model's context is one ([render](render.md)) | `seon.render` |
 | **interrupt** | SIGUSR1 to an agent, escaping the running form at a safe point | `seon.intr` |
@@ -61,7 +61,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **program** | the forms held as facts (`:form/src`, each definition pointing to the form that last made it, from the compiler), loaded where main or a branch changes them | `seon.program` |
 | **store** | konserve under Datahike (LMDB, or the filestore), jfasl node codec | `seon.db` |
 | **entity schema** | a Malli map with `{:seon.db/attributes true}`; its members are Datahike attributes | `seon.schema.datahike/declarations` |
-| **recording** | an eval request's evaluations (on its agent entity, one EDN `:seon.cluster.eval/record` each) and its defs, written by the agent on its own branch | `seon.repl/record-tx` |
+| **recording** | an eval request's evaluations (on its agent entity, one EDN `:seon.eval/record` each) and its defs, written by the agent on its own branch | `seon.repl/record-tx` |
 | **observation** | data on the branch that observed it (evaluations, answered t), never carried by a merge: every `seon.*` attribute but the carried task content is a platform record | `seon.merge/carried-platform-attrs` |
 | **generation** | a build of Seon's own source: the running binary is one, and the next is the merges commit built by the `:build` effect, recorded on main (`:seon.root/generation`) and started on the same store by `bin/root next` ([source](source.md#the-next-generation)) | `seon.fx/build`, `my.root/generation`, `my.root/next-generation` |
 | **prove** | run what a change reaches and reuse every test and check step green at its reach digest: `bin/prove` in a checkout, ``(my.agent/prove)`` in an agent (the process tests it reaches run only when root asks, or when they are a proof; [merging](merging.md#a-merge-runs-what-the-change-reaches)) | `seon.proofs/plan`, `my.agent/prove` |

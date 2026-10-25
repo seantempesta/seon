@@ -112,19 +112,65 @@
                               (str/join ", " (for [{:keys [key problem]} ps] (str key " " (name problem)))))
      :seon.config/problems ps}))
 
-(defn resolved
-  "Raw (what aero read) as the config: nil values dropped (absent), then validated against
-  :seon.config/config. Answers the map, or throws the error."
-  {:malli/schema [:=> [:cat :map] :seon.config/config]}
-  [raw]
-  (let [m (into {} (remove (comp nil? val)) raw)]
-    (if (m/validate config-schema m)
-      m
-      (let [r (invalid m)] (throw (ex-info (:seon.error/message r) r))))))
-
 (defn- refuse!
   {:malli/schema [:=> [:cat :qualified-symbol :string] :nil]}
   [op msg] (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation op :seon.error/message msg})))
+
+(defn resolve-in
+  "Setting k in config c (its layer sources srcs) for ctx {:task m :model id}: the task's or
+  agent's own settings (a :seon.task/config map), then the model's entry (default
+  :seon.config.ai/model), then that model's provider's, then c's own key. Answers {:value
+  :source}, :source one of [:task], [:model id], [:provider id], [:config layer]. A key set
+  nowhere is a defect of the caller: the error names it (absent is never nil)."
+  {:malli/schema [:=> [:cat :map :map :qualified-keyword :seon.config/context] :seon.config/resolved]}
+  [c srcs k {:keys [task model]}]
+  (let [m (or model (:seon.config.ai/model c))
+        me (get-in c [:seon.config.ai/models m])
+        p (:seon.ai.model/provider me)
+        pe (get-in c [:seon.config.ai/providers p])]
+    (cond
+      (contains? task k) {:value (get task k) :source [:task]}
+      (contains? me k) {:value (get me k) :source [:model m]}
+      (contains? pe k) {:value (get pe k) :source [:provider p]}
+      (contains? c k) {:value (get c k) :source [:config (get srcs k "resources/seon/config/default.edn")]}
+      :else (refuse! 'seon.config/resolve (str k " is set nowhere: not by the task, the model " m ", its provider "
+                                               p " or the config (declared keys: seon.config/keys-declared)")))))
+
+(def ^:private reasoning-pair (m/schema :seon.config.ai/reasoning-pair {:registry registry}))
+
+(defn- invalid-pairs
+  "Each model of config m whose thinking and reasoning replay (as the resolver reads them for
+  it, task -> model -> provider -> config) do not satisfy :seon.config.ai/reasoning-pair: its
+  key and m/explain's errors."
+  {:malli/schema [:=> [:cat :map] [:vector :seon.config/problem]]}
+  [m]
+  (vec (for [id (sort (keys (:seon.config.ai/models m)))
+             :let [me (get-in m [:seon.config.ai/models id])
+                   layers [me (get-in m [:seon.config.ai/providers (:seon.ai.model/provider me)]) m]
+                   ;; a key no layer sets is absent (thinking: the provider's default)
+                   pair (into {} (for [k [:seon.config.ai/thinking :seon.config.ai/replay-reasoning]
+                                       :when (some #(contains? % k) layers)]
+                                   [k (:value (resolve-in m {} k {:model id}))]))
+                   e (m/explain reasoning-pair pair)]
+             :when e]
+         {:key [:seon.config.ai/models id] :problem :invalid
+          :value (str (sedn/encode pair) ": " (:description (m/properties reasoning-pair)) " " (sedn/encode (mapv #(select-keys % [:path :value]) (:errors e))))})))
+
+(defn resolved
+  "Raw (what aero read) as the config: nil values dropped (absent), then validated against
+  :seon.config/config, and each model's thinking with its reasoning replay against
+  :seon.config.ai/reasoning-pair (invalid-pairs). Answers the map, or throws the error."
+  {:malli/schema [:=> [:cat :map] :seon.config/config]}
+  [raw]
+  (let [m (into {} (remove (comp nil? val)) raw)]
+    (if-not (m/validate config-schema m)
+      (let [r (invalid m)] (throw (ex-info (:seon.error/message r) r)))
+      (let [ps (invalid-pairs m)]
+        (if (empty? ps)
+          m
+          (let [msg (str "the config does not satisfy :seon.config.ai/reasoning-pair: " (str/join ", " (map (comp pr-str :key) ps)))]
+            (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation 'seon.config/resolved
+                                 :seon.error/message msg :seon.config/problems ps}))))))))
 
 ;; ---- the layers: the shipped file, the checkout's own file, the command line ------------------
 ;; Owner: "Hand out different edn config files that each agent can load and control
@@ -213,26 +259,6 @@
 ;; a hack": every reader resolves through `resolve-in` (task -> model -> its provider -> the
 ;; config's own key), and the server shows each value with where it came from.
 
-(defn resolve-in
-  "Setting k in config c (its layer sources srcs) for ctx {:task m :model id}: the task's or
-  agent's own settings (a :seon.task/config map), then the model's entry (default
-  :seon.config.ai/model), then that model's provider's, then c's own key. Answers {:value
-  :source}, :source one of [:task], [:model id], [:provider id], [:config layer]. A key set
-  nowhere is a defect of the caller: the error names it (absent is never nil)."
-  {:malli/schema [:=> [:cat :map :map :qualified-keyword :seon.config/context] :seon.config/resolved]}
-  [c srcs k {:keys [task model]}]
-  (let [m (or model (:seon.config.ai/model c))
-        me (get-in c [:seon.config.ai/models m])
-        p (:seon.ai.model/provider me)
-        pe (get-in c [:seon.config.ai/providers p])]
-    (cond
-      (contains? task k) {:value (get task k) :source [:task]}
-      (contains? me k) {:value (get me k) :source [:model m]}
-      (contains? pe k) {:value (get pe k) :source [:provider p]}
-      (contains? c k) {:value (get c k) :source [:config (get srcs k "resources/seon/config/default.edn")]}
-      :else (refuse! 'seon.config/resolve (str k " is set nowhere: not by the task, the model " m ", its provider "
-                                               p " or the config (declared keys: seon.config/keys-declared)")))))
-
 (defn resolve
   "Setting k for ctx ({:task m :model id}; default {}) in this process's config: {:value
   :source} (resolve-in)."
@@ -260,7 +286,8 @@
       :none {:kind :none}
       :scripted {:kind :scripted :script (:seon.config.ai/script c)}
       :openai-compat (cond-> {:kind :openai-compat :base-url (v :seon.config.ai/base-url) :model (:seon.config.ai/model c)
-                              :api-key-env (v :seon.config.ai/api-key-variable) :max-tokens (v :seon.config.ai/max-tokens)}
+                              :api-key-env (v :seon.config.ai/api-key-variable) :max-tokens (v :seon.config.ai/max-tokens)
+                              :replay-reasoning (v :seon.config.ai/replay-reasoning)}
                        (:seon.config.ai/thinking c) (assoc :thinking (:seon.config.ai/thinking c))
                        (:seon.config.ai/reasoning-effort c) (assoc :reasoning-effort (:seon.config.ai/reasoning-effort c))))))
 

@@ -204,11 +204,6 @@
   (testing "one-line reads whitespace runs as one space"
     (is (= "a b c" (:text (seon/prose "a\n  b\t\tc" 20 {:one-line? true}))))))
 
-(deftest more-says-how-many-and-where
-  (is (nil? (seon/more 3 3 "x")))
-  (is (= "+7 more: (seon.task/runs db)" (seon/more 12 5 "(seon.task/runs db)")))
-  (is (= "+1 more" (seon/more 2 1 nil))))
-
 (deftest a-one-line-cut-reads-the-source-rest
   (let [s (str "  first   line\n\n" (str/join "\n" (repeat 40 "a line of  the message")) " ")
         {:keys [offset omitted continuation]} (seon/prose s 20 {:one-line? true :source 'msg})]
@@ -219,3 +214,23 @@
     (is (= (str/replace (str/trim s) #"\s+" " ")
            (str/trim (str (:shown (seon/prose s 20 {:one-line? true :source 'msg})) (str/replace (str/trim (subs s offset)) #"\s+" " "))))
         "shown, then the rest the form reads, is the whole line")))
+
+(deftest members-fill-breadth-before-depth
+  ;; notes/design-agent-view-2026-10-24.md §4 (a): a sequence shows every member at its least
+  ;; before any one grows, as a map does (it filled in order, and the first member that did not
+  ;; fit took the rest); what is left grows them in layout order
+  (let [v [(apply str (repeat 300 "a")) (apply str (repeat 300 "b")) :c]
+        {:keys [text]} (seon/print-value v {:handle 'result/e1 :budget 60})]
+    (is (str/includes? text ":c") text)
+    (is (str/includes? text "\"b") "the second long member shows its first part" )
+    (is (> (count (re-find #"a+" text)) (count (re-find #"b+" text))) "the first member grows first")))
+
+(deftest an-earlier-value-prints-as-its-handle
+  ;; notes/design-agent-view-2026-10-24.md §1: a value an earlier response showed prints as the
+  ;; form that reads it again, never twice
+  (let [big (vec (range 200))
+        {:keys [text]} (seon/print-value {:handle 'result/e2 :value {:xs big :n 1}} {:handle 'result/e2 :seen {:colls {(System/identityHashCode big) [[big '(:value result/e1)]]}}})]
+    (is (str/includes? text ":xs (:value result/e1)") text)
+    (is (not (str/includes? text "199")) text)
+    (is (str/includes? (:text (seon/print-value {:xs (vec (range 200))} {:handle 'result/e2 :seen {:colls {(System/identityHashCode big) [[big '(:value result/e1)]]}}})) "199")
+        "an equal value that is not the same one prints as itself: collections match by identity")))

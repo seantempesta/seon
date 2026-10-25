@@ -103,9 +103,9 @@
         answer (fn [l] (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))]
     (try
       (is (str/includes? out "ROOT LISTENING") "the root boots on the earlier build's store")
-      (is (= "3" (:printed (first (:items (answer eval-line))))) "a root eval answers")
+      (is (= 3 (ts/value-of (:response (answer eval-line)))) "a root eval answers")
       (is (map? (:tasks (answer agents-line))) "{:op :agents} answers its tasks")
-      (is (= "0" (:printed (first (:items (answer problems-line))))) "and nothing it read was a defect")
+      (is (= 0 (ts/value-of (:response (answer problems-line)))) "and nothing it read was a defect")
       (is (str/includes? out "EXIT 0") "and it stops when its stdin closes")
       (finally (sh/sh "rm" "-rf" path (str path "-in") (str path ".log") (str path "-agents"))))))
 
@@ -125,12 +125,12 @@
         first-boot (str/split-lines (root-answers path "main" [main {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str tasks) ")")}
                                                            {:op :attach :task "demo/t"} held]))
         second-boot (str/split-lines (root-answers path "main" [main held]))
-        printed (fn [l] (:printed (first (:items (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil))))))]
+        printed (fn [l] (ts/value-of (:response (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))))]
     (try
-      (is (= "\"main\"" (printed (first first-boot))) "a boot with no main named works on the config's main")
-      (is (= "\"main\"" (printed (first second-boot))) "the second boot resumes the same main")
-      (let [[tasks-1 runs-1] (edn/read-string (printed (nth first-boot 3)))
-            [tasks-2 runs-2] (edn/read-string (printed (second second-boot)))]
+      (is (= "main" (printed (first first-boot))) "a boot with no main named works on the config's main")
+      (is (= "main" (printed (first second-boot))) "the second boot resumes the same main")
+      (let [[tasks-1 runs-1] (printed (nth first-boot 3))
+            [tasks-2 runs-2] (printed (second second-boot))]
         (is (= [2 1] [tasks-1 (count runs-1)]) "the first boot holds root's task and the one it loaded, and the run it started")
         (is (= 2 tasks-2) "the second boot still holds both tasks")
         (is (every? runs-2 runs-1) "and the first boot's run (it reaps it and starts the next)"))
@@ -152,10 +152,10 @@
         _ (spit (str tmp "/docs/zz-broken.md") "# Broken\n\nIt links to [nowhere](agent.md#nowhere).\n")
         out (root-answers path "main" [{:op :eval :agent "root" :code "(boolean (re-find #\"links to docs/agent.md#nowhere\" (pr-str (my.root/problems sys))))"}]
                           {:env {"SEON_RUN_CHECKOUT" tmp}})
-        printed (:printed (first (:items (try (edn/read-string {:default tagged-literal} (first (str/split-lines out))) (catch Exception _ nil)))))]
+        printed (ts/value-of (:response (try (edn/read-string {:default tagged-literal} (first (str/split-lines out))) (catch Exception _ nil))))]
     (try
       (is (str/includes? out "ROOT LISTENING") (str "the root boots: " out))
-      (is (= "true" printed) "and the dead link is an open problem")
+      (is (true? printed) "and the dead link is an open problem")
       (finally (sh/sh "rm" "-rf" tmp path (str path "-in") (str path ".log") (str path "-agents"))))))
 
 (deftest every-end-of-a-root-is-a-fact
@@ -166,7 +166,7 @@
   ;; (root-answers names its fifo and log after the store); removed at the end.
   (let [path (str (.getCanonicalPath (java.io.File. ".")) "/target/runs/root-test-ends-" (random-uuid))
         ev (fn [code] {:op :eval :agent "root" :code code})
-        printed (fn [l] (some-> (:printed (first (:items (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil))))) edn/read-string))
+        printed (fn [l] (ts/value-of (:response (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))))
         [b1] (str/split-lines (root-answers path "main" [(ev "(:boot sys)")]))
         [prev killed] (str/split-lines
                        (root-answers path "main" [(ev "(:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))")
@@ -190,7 +190,7 @@
                           [{:op :eval :agent "root" :code "((resolve 'seon.ref/line-citation) \"src/a.clj:50\")"}])
         answer (try (edn/read-string {:default tagged-literal} (first (str/split-lines out))) (catch Exception _ nil))]
     (try
-      (is (= "\"src/a.clj\"" (:printed (first (:items answer)))) out)
+      (is (= "src/a.clj" (ts/value-of (:response answer))) out)
       (finally (ts/drop-main! (test-store) main) (sh/sh "rm" "-f" (str path "-in") (str path ".log"))))))
 
 (deftest a-build-without-whole-program-inference-reads-with-tools-reader
@@ -235,8 +235,7 @@
         boot! (fn [requests]
                 (let [out (root-answers path main requests {:args args})]
                   (sh/sh "rm" "-f" (str path "-in"))
-                  (mapv (fn [l] (try (edn/read-string (:printed (first (:items (edn/read-string {:default tagged-literal} l)))))
-                                     (catch Exception _ l)))
+                  (mapv (fn [l] (or (ts/value-of (:response (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))) l))
                         (take (count requests) (str/split-lines out)))))]
     (.mkdirs (java.io.File. (str tree "/src/follow")))
     (.mkdirs (java.io.File. tasks))

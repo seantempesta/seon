@@ -26,7 +26,7 @@ The ops are one table, ```seon.server/ops```, keyed by a request's `:op`; each e
 
 MCP is the same table seen through JSON-RPC: ```seon.server/mcp-reply``` answers `initialize`, `ping`, `tools/list` (each op as the tool `seon_<op>`) and `tools/call`, and a method or tool it does not know is the JSON-RPC error that names the ones it has.
 
-A tool's text is what a model should read: `seon_context`'s is the block itself, an evaluation's items are the REPL's own text (`seon.render.ai/items`), an error is its render, and anything else is the whole value by the one printer ([render](render.md)). `seon.server/protocol-versions` lists the protocol versions it answers.
+A tool's text is what a model should read: `seon_context`'s is the block itself, an evaluation's text is its response as the one printer prints it (`seon.print/response-text`), an error is its render, and anything else is the whole value by the one printer ([render](render.md)). `seon.server/protocol-versions` lists the protocol versions it answers.
 
 `bin/mcp` is the stdio relay a client runs: stock perl, a few MB, one connection per message to the port in `runs/root.port`, so a root restarted between calls (`bin/root next`) costs the client nothing. A message root does not answer (none running, not listening, died mid-request) gets a JSON-RPC error saying why. `seon.check/mcp-proof` (`bin/check mcp`) proves it end to end from a separate process, with the relay's footprint under `:seon.config.machine/relay-mb`.
 

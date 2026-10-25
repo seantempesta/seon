@@ -3,7 +3,7 @@
   unmerged, resolve an entry. The writer does the merge (seon.merge/three-way, the one
   derivation); this branch sees main's changes only through these functions."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.repl :as repl] [seon.merge :as pm] [seon.stage :as stage]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.repl :as repl] [seon.merge :as pm] [seon.stage :as stage] [seon.program :as program]))
 
 (defn merge-main!
   "git merge main: stage this runtime onto the branch, then merge main's changes since
@@ -44,3 +44,10 @@
              (stage/stage!))))
      (agent/transact! (pm/resolve-tx (agent/db) k))
      (unmerged))))
+
+(defn changes
+  "git diff main...: what this branch's merge will carry to main, the vars it added, changed
+  and removed and the schemas it registered or changed, each sorted (seon.program/divergence
+  since its merge base); {} when nothing. Anything listed that the task does not need, put back."
+  {:malli/schema [:=> [:cat] :map]}
+  [] (program/divergence (:base @agent/state) (agent/db)))

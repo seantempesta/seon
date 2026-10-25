@@ -104,13 +104,13 @@
     (let [r (invalid 'app/f "x")
           e (agent/error-map (ex-info (:seon.error/message r) r))]
       (is (= r e))))
-  (testing "the reply item carries the map, and the stored eval record holds it as data"
+  (testing "the response carries the map as :ex, and the stored eval record holds it as data"
     (let [em (agent/error-map (ArithmeticException. "Divide by zero"))
-          it (first (repl/fold [{"status" ["eval-error"] :tag :err :err em :printed (:seon.error/message em) :id 0 :form "(/ 1 0)"}]))
-          rec (some :seon.cluster.eval/record (repl/record-tx {:seon.agent/key "b/a1" :seon.agent/id :a1} "r1" [it] nil))]
-      (is (= em (:err it)))
-      (is (= "Divide by zero" (:printed it)))
-      (is (= em (:error rec)) "grouped by type and producer without parsing text")))
+          r (repl/response [{"status" ["eval-error"] :tag :err :err em :id 0 :form "(/ 1 0)"}] 'result/e1)
+          rec (some :seon.eval/record (repl/record-tx {:seon.agent/key "b/a1" :seon.agent/id :a1} "e1" "a1"
+                                                      {:code "(/ 1 0)" :response r} nil))]
+      (is (= em (:ex r)))
+      (is (= em (get-in rec [:response :ex])) "grouped by type and producer without parsing text")))
   (testing "the agent folds its errors until its commit; root folds them as :eval occurrences"
     (let [em (agent/error-map (ArithmeticException. "Divide by zero"))
           m (-> nil (err/note em "(/ 1 0)" 10) (err/note em "(/ 2 0)" 12))
@@ -343,8 +343,9 @@
 (def ^:private req {:messages [{:role "user" :content "hi"}] :task "t/a" :turn 0})
 
 (deftest the-request-sets-thinking-only-when-the-provider-does
-  (is (= {:model "deepseek-flash" :messages (:messages req) :tools [model/eval-tool] :max_tokens 2048 :temperature 0 :stream true :stream_options {:include_usage true}}
-         (model/request-body deepseek req)) "thinking absent: the provider's default; max-tokens the provider's; streamed with its usage")
+  ;; tool_choice auto: the model may reply in prose alone, which ends the turn (design, owner 2026-10-24)
+  (is (= {:model "deepseek-flash" :messages (:messages req) :tools [model/eval-tool] :tool_choice "auto" :max_tokens 2048 :temperature 0 :stream true :stream_options {:include_usage true}}
+         (model/request-body deepseek req)) "thinking absent: the provider's default; max-tokens the provider's; the model chooses whether to call; streamed with its usage")
   (is (= {:type "disabled"} (:thinking (model/request-body (assoc deepseek :thinking :disabled) req))))
   (is (= ["high" 512] ((juxt :reasoning_effort :max_tokens) (model/request-body (assoc deepseek :reasoning-effort :high :max-tokens 512) req))))
   (is (contract/valid? :seon.model/provider (assoc deepseek :thinking :enabled :reasoning-effort :low))))
@@ -543,7 +544,7 @@
         (is (false? (:open? (row after))))
         (is (= 1 (:count (row after))) "the record is kept"))
       (testing "the context marks it closed"
-        (is (re-find #"\(closed\)" (render/ai (problems/report after) {})))))
+        (is (str/includes? (render/ai (problems/report after) {}) ":closed true"))))
     (testing "the citing section's link is changed to an existing target: closed, nothing written (the target never appears)"
       (let [dbc (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/a.md" "# A\n\nIt links to [b](b.md#nowhere).\n" "demo/c.md" "# C\n\nThe other.\n"}))
             err (d/db-with dbc [{:seon.error/signature "cccccccccccccccc" :seon.error/class :platform :seon.error/count 1

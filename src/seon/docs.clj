@@ -9,7 +9,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.contract :refer [defn defn-]] [seon.ref :as ref] [seon.source :as source] [seon.task :as task] [seon.db :as pdb]
             [datahike.api :as d] [clojure.string :as str] [clojure.java.io :as io]
-            [seon.print.select :as select] [seon.config :as cfg] [seon.lib :as lib]))
+            [seon.config :as cfg] [seon.lib :as lib]))
 
 ;; ---- one page, parsed into sections ----------------------------------------------------
 
@@ -190,15 +190,31 @@
                    (and text (= :code depth)) (assoc :seon.ref/text text))
                  depth))))
 
+(defn page-top
+  "The entity of the page at path's own section (the one with no parent), or nil."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe pos-int?]]}
+  [db path]
+  (d/q '[:find ?e . :in $ ?pre :where [?e :seon.section/address ?a] [(clojure.string/starts-with? ?a ?pre)]
+         (not [?e :seon.section/parent _])]
+       db (str path "#")))
+
+(defn page-t
+  "The last transaction that changed the page at path on db: the newest datom, asserted or
+  retracted (db's history), of any section whose address is the page's; nil when db holds none.
+  The page as of it is the page as db holds it."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :int]]}
+  [db path]
+  (let [h (d/history db)
+        es (into #{} (comp (filter #(str/starts-with? (:v %) (str path "#"))) (map :e)) (d/datoms h :aevt :seon.section/address))]
+    (when (seq es) (reduce max (for [e es dt (d/datoms h :eavt e)] (:tx dt))))))
+
 (defn page
   "The page at path as db holds it, its sections in the order the wiki was written (as view
   shows the sections below): each its address, heading, level (1 for the page's own), lead
   and own text; nil when db holds no section of it."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe [:vector [:map [:address :string] [:heading :string] [:level pos-int?]]]]]}
   [db path]
-  (when-let [top (d/q '[:find ?e . :in $ ?pre :where [?e :seon.section/address ?a] [(clojure.string/starts-with? ?a ?pre)]
-                        (not [?e :seon.section/parent _])]
-                      db (str path "#"))]
+  (when-let [top (page-top db path)]
     (letfn [(walk [e level]
               (let [{:seon.section/keys [address heading lead text]}
                     (d/pull db [:seon.section/address :seon.section/heading :seon.section/lead :seon.section/text] e)]
@@ -320,16 +336,20 @@
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :string]]}
   [db sym] (some->> (pdb/eid db :var/name sym) (d/entity db) :var/form :form/src))
 
-(def reference-tokens
-  "Tokens a cited var's source may take in the context: the config's."
-  (cfg/value :seon.config.render/reference-tokens))
+(defn callers
+  "The program vars whose recorded definition names var sym on db (its :form/refs), sorted; sym
+  itself left out: the one query my.agent/callers and the task story ask."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :qualified-symbol]]}
+  [db sym]
+  (vec (sort (disj (set (d/q '[:find [?v ...] :in $ ?s :where [?f :form/refs ?s] [?f :form/defines ?e] [?e :var/name ?v]] db sym))
+                   sym))))
 
 (defn resolve-ref
   "Var sym as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth):
   :summary its arglists and its doc's first sentence, :doc its arglists, doc and contract,
-  :code its source (from the db). A source over reference-tokens shows the doc instead, with
-  what it left out and the form that reads it; at :doc a var with no doc shows its source. A
-  name that resolves to nothing says so."
+  :code its source (from the db), whole: the printer cuts it where it is shown, with the form
+  that reads its rest; at :doc a var with no doc shows its source. A name that resolves to
+  nothing says so."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol :seon.ref/depth] :map]}
   [db sym depth]
   (let [m (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))) meta)
@@ -337,15 +357,12 @@
         doc (cond-> {:symbol sym}
               (:arglists m) (assoc :arglists (:arglists m))
               (:doc m) (assoc :doc (:doc m))
-              (:malli/schema m) (assoc :contract (:malli/schema m)))
-        n (some-> src select/estimate)]
+              (:malli/schema m) (assoc :contract (:malli/schema m)))]
     (cond
       (and (nil? m) (nil? src)) {:symbol sym :unresolved true :problem (:unresolved ref/problem-messages)}
       (= :summary depth) (cond-> (select-keys doc [:symbol :arglists]) (:doc m) (assoc :summary (ref/lead-sentence (:doc m))))
       (or (nil? src) (and (= :doc depth) (:doc m))) doc
-      (<= n reference-tokens) {:symbol sym :source src}
-      :else (assoc doc :left-out (str "its source, about " n " tokens, over the context's " reference-tokens)
-                       :read (list 'clojure.repl/source sym)))))
+      :else {:symbol sym :source src})))
 
 (defn- reached
   "What citation c asks to see, at its depth, and what that is: a wiki section from main's

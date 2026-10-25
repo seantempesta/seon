@@ -430,6 +430,14 @@
  ;; fix, not a cost to pay every turn. A model or task can turn it on through the resolver
  ;; (task -> model -> provider -> config); effort is :seon.config.ai/reasoning-effort.
  :seon.config.ai/thinking :disabled
+ ;; Whether a request sends earlier turns' stored reasoning back. Unit: flag. Provenance: owner
+ ;; ruling 2026-10-24 (docs/decisions.md, "A config key does what it says"). true: every earlier
+ ;; reply's reasoning goes back exactly as it was returned (seon.model/request-body); false: it
+ ;; is left out of the request, and still stored on the turn and shown. With thinking :enabled
+ ;; and tools (every request) false is refused at load (:seon.config.ai/reasoning-pair):
+ ;; DeepSeek answers 400 when it is left out (measured 2026-10-24, notes/step0/no-replay.edn).
+ ;; With thinking off there is no reasoning to send.
+ :seon.config.ai/replay-reasoning true
  ;; Unit: USD. One first-move pass's spend (my.root/first-moves!: one call per task, ~6k
  ;; prompt tokens at turn 0, ~$0.001 a task off-peak, twice at DeepSeek's peak); at the bound
  ;; the pass stops and writes :seon.judge/stopped. 0.10 is about a hundred tasks' first moves,
@@ -527,15 +535,9 @@
  ;; Unit: tokens for a form echoed back (session P1).
  :seon.config.render/form-budget 600
  ;; Unit: tokens for the context block the model reads (the task, its proofs, what it cites),
- ;; breadth first so every section shows before any one deepens (session P1). The evaluations and
- ;; the history have their own budgets below; none is carved out of another.
+ ;; breadth first so every section shows before any one deepens (session P1). The history has its
+ ;; own budget below; neither is carved out of the other.
  :seon.config.render/context-budget 16000
- ;; Unit: tokens one turn's evaluations show the model, each an equal share, every cut naming
- ;; the form that reads its rest. Provenance: seon.context's literal last-evals-budget (6000),
- ;; 2026-10-21 it was raised to 24000 (a live agent reading four Datahike functions got ~1500
- ;; tokens each and re-read them); with 256000 of history that sent ~300k tokens a turn (an
- ;; run of 13 turns spent 4.1M), so 8000: a long read is cut with the form that reads its rest.
- :seon.config.render/evals-budget 8000
  ;; Unit: tokens of earlier turns (each the model's reply and what its forms evaluated to) the
  ;; model reads before the current state, whole turns, the newest kept first; the task's first
  ;; context always stays. 0 shows only the last turn. Provenance (owner, 2026-10-21, after a live
@@ -544,26 +546,22 @@
  ;; turn (owner: "wtf"); 32000 keeps the last several whole turns (a turn is a reply of ~1-3k
  ;; plus its evaluations up to the evals budget), so a turn sends ~20-55k with the block.
  :seon.config.render/history-budget 32000
- ;; Unit: tokens of one cited var's source in the context (cited in three backticks). Past it
- ;; the var shows at doc depth with how many tokens were left out and the form that reads them,
- ;; (clojure.repl/source ns/f). Provenance: v1's must-reads per-function cap, reference-tokens
- ;; 3000 (audit notes/AUDIT-v1-to-next-2026-10-22.md 2.3).
- :seon.config.render/reference-tokens 3000
- ;; Unit: vars. The helpers the context names that the plan does not (:found): program functions
- ;; the plan's cited vars and the proofs call. 0 shows none. Provenance: R4's k = 5
- ;; (notes/option3-R4-learning.md 5: 14 of 16 needed helpers in the top 5).
- :seon.config.render/found 5
- ;; Unit: forms. The program forms nearest the task's plan (seon.vector/near over the plan's
- ;; vector), fused with the call graph's helpers by reciprocal rank (seon.context/found). 0 fuses
- ;; none. Measured 2026-10-23 on 283 pairs from main's history (each commit's message, the
- ;; functions its diff touched less those it names; docs/vector.md#fused-with-the-call-graph): recall@10 call graph
- ;; 0.042, embeddings 0.495, fused 0.451; 30 covers every rank a top-5 can come from.
- :seon.config.render/found-near 30
- ;; Unit: tokens (seon.print.select/estimate). The run's map of the namespaces its proofs and
- ;; cited vars live in (seon.context/ns-map): each namespace's functions, most referenced first,
- ;; within an equal share. Provenance: root's research (2026-10-22, lever 1), aider's default
- ;; --map-tokens 1k. At the bound a namespace's rest is (clojure.repl/dir ns).
- :seon.config.render/map-tokens 1000
+ ;; Unit: records. The history's two boundaries (where the whole records begin, and where the
+ ;; collapsed ones do: seon.context/kept) are raised to a multiple of this, so they move in large
+ ;; steps and every message before them is the same bytes for many turns (the provider's cache:
+ ;; a boundary that moved each turn would change the prefix each turn). Provenance: root's
+ ;; ruling 2026-10-25 (P3 collapses in large steps); 16 records is several turns of a few calls each.
+ :seon.config.render/history-step 16
+ ;; Unit: functions. The program functions nearest the task's plan by meaning (seon.vector/near,
+ ;; exact) that its write set and proofs do not name, each a line in its task story (:similar);
+ ;; 0 shows none. Provenance: the owner's ruling (2026-10-24, DECISIONS "Embeddings join the
+ ;; context"): a small measured list; embeddings alone recalled 0.495 at 10 on 283 pairs
+ ;; (docs/vector.md#fused-with-the-call-graph). Off (0) by the owner's ruling ("if it's not working
+ ;; well leave them out"), on step 6's measurement (2026-10-25, notes/measure/step6: the 5 fit tasks,
+ ;; 3 runs each, deepseek-flash, thinking off): green 8/15 with 5 listed, 7/15 with none; the runs
+ ;; that listed them named the same functions as a run listing none (my.agent/prove,
+ ;; seon.model/provider-error, seon.docs/view, seon.print/print-value): no measured gain.
+ :seon.config.render/similar 0
  ;; Semantic search's pyramid (seon.vector/near, docs/vector.md#the-pyramid), measured against an
  ;; exact 768-dim search, recall@10 (EmbeddingGemma-2):
  ;; - bin/check vectors, Seon's whole text (2,681: 1,783 forms with the schemas, 321 sections, the
@@ -608,18 +606,8 @@
  ;; behind a round are embedded together.
  :seon.config.vector/batch 16
  ;; Unit: ranks. Reciprocal rank fusion's k (Cormack et al. 2009 use 60; v1 used 10): measured on
- ;; the 283 pairs, 10 gave recall@10 0.451 and 60 0.448.
+ ;; the 283 pairs, 10 gave recall@10 0.451 and 60 0.448. Read by seon.vector/rrf.
  :seon.config.vector/rrf-k 10
- ;; Unit: items. A list shown in part (seon.print/bounded) shows this many, then `+N more:
- ;; where` (docs/render.md#bounded-lists). Provenance: the literals each list carried before
- ;; (render.ui and render.ai, 2026-10-22), kept as they were.
- ;; rows: running and newest runs, root's context's newest events.
- :seon.config.render.list/rows 8
- ;; brief: a secondary list in root's context (ended runs, costliest functions).
- :seon.config.render.list/brief 5
- ;; top: root's context's defects, the evaluations its costliest functions come from, a
- ;; card's top functions.
- :seon.config.render.list/top 3
  ;; Unit: bytes. An evaluation that allocated more is flagged on its card and row
  ;; (seon.render.ui/alloc-span). Provenance: render.ui's BIG-ALLOC literal (10 MiB).
  :seon.config.render/big-alloc 10485760

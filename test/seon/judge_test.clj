@@ -67,7 +67,7 @@
                            :code (str "(let [a (my.root/first-moves! sys [\"demo/t\"]) b (my.root/first-moves! sys [\"demo/t\"])]"
                                       " [(get-in a [:error :seon.error/type]) (mapv :reused? (:rows a)) (boolean? (:acted (first (:rows a))))"
                                       " (mapv :reused? (:rows b)) (:usd b) (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/digest))])")}])]
-    (is (= [:seon.judge/cost-unknown [false] true [true] 0.0 1] (edn/read-string (:printed r))) (pr-str r))))
+    (is (= [:seon.judge/cost-unknown [false] true [true] 0.0 1] (:value r)) (pr-str r))))
 
 (deftest a-pass-stops-at-its-bound
   ;; at :seon.config.ai/judge-pass-usd the pass makes no further call and writes what it left
@@ -75,4 +75,4 @@
                            :code (str "(let [a (my.root/first-moves! sys [\"demo/t\"])]"
                                       " [(:rows a) (:stopped a) (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/stopped))])")}]
                          {:sets [":seon.config.ai/judge-pass-usd=0.0"]})]
-    (is (= [[] {:usd 0.0 :bound 0.0 :left ["demo/t"]} 1] (edn/read-string (:printed r))) (pr-str r))))
+    (is (= [[] {:usd 0.0 :bound 0.0 :left ["demo/t"]} 1] (:value r)) (pr-str r))))

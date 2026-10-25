@@ -46,6 +46,9 @@
   ;; (:compute, never waits); the web proc owns the listener and the tabs (:io). Port:
   ;; 127.0.0.1 only, :seon.config.web/port; 0 serves nothing
   :render {:proc seon.render.proc/render-proc
+           ;; main's commits, the newest only (a sliding buffer of one): what changed since the main it holds is
+           ;; their datoms-diff (seon.render.proc/advance-main), so a lagging render never parks the writer
+           :chan-opts {:main {:buf-or-n :bind/render-main-buf}}
            :args {:events-mult :bind/events-mult :graph :bind/graph :system :bind/system}}
   :web {:proc seon.web/web-proc
         :args {:port :bind/web-port}}}
@@ -74,6 +77,7 @@
   [[:writer :main] [:reconciler :main]]
   [[:writer :main] [:prove :main]]
   [[:writer :main] [:vectors :main]]
+  [[:writer :main] [:render :main]]
   [[:vectors :to-api] [:api :from-writer]]
   [[:prove :to-api] [:api :from-writer]]
   [[:fork-server :to-api] [:api :from-fs]]

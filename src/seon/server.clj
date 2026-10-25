@@ -14,7 +14,7 @@
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.reconcile :as r]
-            [seon.lib :as lib] [seon.edn :as sedn] [seon.repl :as repl] [seon.print :as print] [seon.render :as render] [seon.render.ai :as rai] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str]))
+            [seon.lib :as lib] [seon.edn :as sedn] [seon.repl :as repl] [seon.print :as print] [seon.render :as render] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str]))
 
 (defn- refused
   "The server refusing a request, as root's API does: the one error map."
@@ -50,18 +50,17 @@
   "Evaluate code as root through the one REPL path (seon.repl/eval-string: the printer,
   cost, error maps, *1 and *e), in root.repl (my.root as root, seon.root as c, datahike as
   d) with `sys` a local bound to this root, unbounded (root's own forms take no tick
-  budget); its items recorded on main as root's evaluations, origin :outside
-  (seon.repl/record-tx)."
-  {:malli/schema [:=> [:cat :seon.root/sys :string] :seon.agent/items]}
+  budget); its response recorded on main as root's eval, by \"outside\" (seon.repl/record-tx)."
+  {:malli/schema [:=> [:cat :seon.root/sys :string] :seon.eval/response]}
   [sys code]
   (when-not (find-ns 'root.repl)
     (binding [*ns* (create-ns 'root.repl)] (refer-clojure) (require '[my.root :as root] '[seon.root :as c] '[datahike.api :as d])))
-  (let [items (mapv #(assoc % :origin :outside)
-                    (binding [*sys* sys]
-                      (repl/eval-string code {"ns" "root.repl" :origin :outside :ticks 0
-                                              :repl/eval-fn (fn [form] (eval (list 'let '[sys seon.server/*sys*] form)))})))]
-    @(c/transact-main! sys (repl/record-tx {:seon.root/id :root} (str "root-outside-" (profile/now-ns)) items nil))
-    items))
+  (let [r (binding [*sys* sys]
+            (repl/eval-string code {"ns" "root.repl" :origin :outside :ticks 0
+                                    :repl/eval-fn (fn [form] (eval (list 'let '[sys seon.server/*sys*] form)))}))]
+    @(c/transact-main! sys (repl/record-tx {:seon.root/id :root} (str "root-outside-" (profile/now-ns)) "outside"
+                                           (repl/record-details @(:conn sys) code r {} nil) nil))
+    (dissoc r :value)))
 
 (defn- attach!
   "Start an outside run of task id: its desired model is \"outside\", so the
@@ -99,12 +98,12 @@
   (array-map
    :agents {:doc "Live agents (id, branch, status, task) and every task (execution, done, blocked-by, its runs as [id status outcome turns tokens], problem)."
             :args {} :answer (fn [sys _ _] (agents-answer sys))}
-   :eval {:doc "Evaluate Clojure in a running agent's process (recorded on its branch, origin :outside) or as \"root\" in root's process (root.repl: `sys` is root; my.root/run!, my.root/cancel! ...), each through the one REPL path. Answers one reply item per form."
+   :eval {:doc "Evaluate Clojure in a running agent's process (recorded on its branch, origin :outside) or as \"root\" in root's process (root.repl: `sys` is root; my.root/run!, my.root/cancel! ...), each through the one REPL path. Answers its response (:seon.eval/response): {:handle :value :out :err :ex}, printed under its handle."
           :args {:agent {:type "string" :description "an agent id (a3) or root"} :code {:type "string" :description "Clojure forms"}}
           :required ["agent" "code"]
           :answer (fn [sys ag req]
                     (let [r (if (= :root ag) (root-eval sys (:code req)) @(c/submit! sys ag (:code req) {:origin :outside}))]
-                      (if (contract/error? r) r {:items (mapv #(select-keys % [:tag :form :printed :out :err :recorded :handle]) r)})))}
+                      (if (contract/error? r) r {:response (select-keys r [:handle :text :ex :recorded])})))}
    ;; the block's text as the model reads it: printed to the agent's output, not as a
    ;; value (a value comes back as a string literal, escaped, under the reply's budget);
    ;; recorded with origin :context, a context read, which renders refer to, not repeat
@@ -118,7 +117,7 @@
                            ;; an outside model's read is its turn, and takes its messages; anyone
                            ;; else's read of an agent its model drives only looks
                            (let [r @(c/submit! sys ag (sedn/encode (list 'print (list 'seon.turn/context-block task run (= "outside" (:model env))))) {:origin :context})]
-                             (cond (contract/error? r) r (= :err (:tag (last r))) (:err (last r)) :else {:context (:out (last r))}))
+                             (cond (contract/error? r) r (:ex r) (:ex r) :else {:context (:out r)}))
                            (refused (if ag (str ag " works no task: attach one first") (str "no task " (:task req) ", and no agent named"))))))}
    :message {:doc "Send a running agent a message (the owner's words): root delivers it, and the agent's next turn reads it in its current-state block (:messages). The page's message bar sends the same request (seon.root/message!)."
              :args {:agent {:type "string"} :body {:type "string" :description "what to tell the agent"}} :required ["agent" "body"]
@@ -137,14 +136,13 @@
           :answer (fn [sys ag _]
                     (if-let [{:keys [run task env]} (run-of sys ag)]
                       ;; the end first, as a turn loop's end is written, so the judge reads it
-                      (let [r @(c/submit! sys ag (sedn/encode (list 'seon.turn/hand-back! task run)) {:origin :outside})
-                            item (when-not (contract/error? r) (last r))]
+                      (let [r @(c/submit! sys ag (sedn/encode (list 'seon.turn/hand-back! task run)) {:origin :outside})]
                         ;; judged only on the end written: an error or no answer is answered as it is,
                         ;; and the run stays the agent's to hand back again
                         (cond (contract/error? r) r
-                              (= :ret (:tag item)) (do (c/judge! sys {:run run :task task :env env :agent ag})
-                                                       {:judging run})
-                              (= :err (:tag item)) (:err item)
+                              (:ex r) (:ex r)
+                              (:text r) (do (c/judge! sys {:run run :task task :env env :agent ag})
+                                            {:judging run})
                               :else (refused (str ag " answered no end for " run))))
                       (refused (str ag " works no task"))))}))
 
@@ -191,11 +189,11 @@
                        (if-not (ops op)
                          (rpc-error id -32602 (str "no tool " n ": the tools are " (str/join ", " (map #(str "seon_" (name %)) (keys ops)))))
                          (let [a (answer sys (into {:op op} (for [[k v] (get params "arguments")] [(keyword k) v])))]
-                           ;; what the model reads: the block itself, an evaluation's items as the
-                           ;; REPL's own text, an error by its render, anything else whole by the
+                           ;; what the model reads: the block itself, an eval's response as printed
+                           ;; under its handle, an error by its render, anything else whole by the
                            ;; printer (the whole answer to an outside caller: nothing could re-ask it)
                            (result {"content" [{"type" "text" "text" (cond (and (= :context op) (:context a)) (:context a)
-                                                                           (:items a) (rai/items (:items a))
+                                                                           (:response a) (:text (:response a))
                                                                            (contract/error? a) (render/ai a {})
                                                                            :else (print/text (vary-meta a assoc :seon.print/full true)))}]}))))
         (rpc-error id -32601 (str "no method " method ": this server answers initialize, ping, tools/list and tools/call"))))))

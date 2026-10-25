@@ -45,17 +45,15 @@
 (deftest an-evals-record-carries-its-costliest-functions
   (when contract/on?
     ;; the REPL's own handler in this process, as a scratch session (not agent mode: nothing is transacted)
-    (let [answers (volatile! [])
-          old @agent/state]
-      (reset! agent/state {:n 0 :ns (the-ns 'user)})
-      (try ((repl/handler) {"op" "eval" "code" "(seon.profile-test/branch 300)" :reply #(vswap! answers conj %)})
-           (finally (reset! agent/state old)))
-      (let [items (repl/fold @answers)
-            fns (:fns (first items))]
-        (is (= "8955050" (:printed (first items))) (pr-str items))
-        (is (= {'seon.profile-test/branch 1 'seon.profile-test/leaf 300}
-               (into {} (map (juxt :var :calls)) fns)))
-        (is (= fns (:fns (:seon.cluster.eval/record (first (repl/record-tx {:seon.agent/key "b/a" :seon.agent/id :a} "r" items nil))))))))))
+    (let [old @agent/state
+          r (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
+                 (repl/eval-string "(seon.profile-test/branch 300)" {})
+                 (finally (reset! agent/state old)))
+          fns (:fns r)]
+      (is (= 8955050 (:value r)) (pr-str (dissoc r :fns)))
+      (is (= {'seon.profile-test/branch 1 'seon.profile-test/leaf 300}
+             (into {} (map (juxt :var :calls)) fns))
+          "the response carries them, and seon.repl/record! stores them on the eval's record"))))
 
 ;; the system's clock read directly (macOS clock_gettime_nsec_np, CLOCK_UPTIME_RAW = 8), the
 ;; one every process on the machine reads

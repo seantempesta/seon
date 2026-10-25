@@ -9,7 +9,7 @@
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
   reference (await-ref, seon.await/await-db), never a poll or a deadline."
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.await] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.vector] [seon.main :refer [out! shown]] [seon.fx] [seon.source] [seon.docs]))
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.await] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.vector] [seon.main :refer [out! shown]] [seon.fx] [seon.source] [seon.docs] [seon.test-store :as ts]))
 
 
 ;; ---- the harness: one frame, one verdict, one way to wait ------------------------------
@@ -119,10 +119,16 @@
 
 (defn- main-q [sys query & inputs] (apply d/q query @(:conn sys) inputs))
 
-(defn- short-items [items] (if (contract/error? items) items (mapv #(select-keys % [:tag :printed :ms]) items)))
+(defn- short-items "A response as a report shows it: its text, its error, its ms." [r]
+  (if (contract/error? r) r (select-keys r [:text :ex :ms])))
 
-(defn- p1 "Each reply item of forms evaluated in agent id, as [printed recorded]." [sys id forms]
-  (mapv (juxt :printed :recorded) @(c/submit! sys id forms)))
+(defn- printed
+  "The value response r showed, printed as Clojure prints it (its :text read back,
+  seon.test-store/value-of), or nil for an error or a value that does not read back."
+  [r] (when (and (map? r) (contains? r :text)) (some-> (ts/value-of r) pr-str)))
+
+(defn- p1 "The response of forms evaluated in agent id, as [printed recorded]." [sys id forms]
+  ((juxt printed :recorded) @(c/submit! sys id forms)))
 
 ;; ---- the modes --------------------------------------------------------------------------
 
@@ -156,7 +162,7 @@
         _ (doseq [id ids] (out! id " tests " (select-keys (tests id) [:pass :fail :error :ms])
                                 (vec (for [r (:reports (tests id)) :when (not= :pass (:type r))] r))))
         ;; the test's write vanished with the test's process
-        _ (out! (ids 2) " after tests, its branch still says: " (:printed (first @(c/submit! sys (ids 2) "(doc-of 'app.m0/f1)"))))
+        _ (out! (ids 2) " after tests, its branch still says: " (printed (deref (c/submit! sys (ids 2) "(doc-of 'app.m0/f1)"))))
         _ (out! (ids 2) " branch diff before its merge: " @(c/branch-diff sys (ids 2)) "; stats now: " @(c/call! sys {:op :stats :id (ids 2)}))
         m1 (merge-in! sys (ids 0))
         ;; git: a branch merges main first (main took a1's work), then it merges into main
@@ -184,11 +190,11 @@
         cl (ready! sys #(deref (c/clone! sys (ids 2) {:task "a3's clone"})))
         _ (out! "clone " (ids 2) " -> " cl " in " (lib/r2 (profile/ms-since t-clone)) " ms; the clone says: "
                 (short-items @(c/submit! sys (:id cl) "(my.agent/whoami) (swap! memo update :seen inc) (doc-of 'app.m0/f1)"))
-                "; the parent still has " (:printed (first @(c/submit! sys (ids 2) "@memo"))))
+                "; the parent still has " (printed (deref (c/submit! sys (ids 2) "@memo"))))
         ;; merge main forward into a1's branch (git merge main): it now sees a3's notes too
         mm @(c/merge-main! sys (ids 0))
         _ (out! "merge main into " (ids 0) ": " mm " -> it sees "
-                (:printed (first @(c/submit! sys (ids 0) "(sort (q '[:find [?t ...] :where [?n :note/text ?t]]))"))))
+                (printed (deref (c/submit! sys (ids 0) "(sort (q '[:find [?t ...] :where [?n :note/text ?t]]))"))))
         ;; robustness: a1 runs forever; kill it; the others keep working
         ev (c/events sys)
         hung (c/submit! sys (ids 0) "(loop [] (recur))")
@@ -314,34 +320,36 @@
                 :every-wrong-arity-refused (and (empty? (results :not-refused)) (empty? (results :other)))}}))))
 
 (defn instrument
-  "An agent's defn with :malli/schema is armed (a bad call refuses as the error map); one
-  without stays uninstrumented, joins the agent's uncontracted set, and the warning naming them grows."
+  "An agent's defn with :malli/schema is armed (a bad call refuses as the error map, the
+  response's :ex); one without stays uninstrumented and joins the agent's uncontracted set."
   []
   (run-check "INSTRUMENT" {:datoms 500}
    (fn [sys]
     (let [[a] (spawn-ready! sys "instrument")
-          [d1 bad] @(c/submit! sys a "(defn sq {:malli/schema [:=> [:cat :int] :int]} [x] (* x x)) (sq \"x\")")
-          [u1] @(c/submit! sys a "(defn plain [x] x)")
-          [u2] @(c/submit! sys a "(defn plain2 [x] x)")]
-      {:report {:armed (select-keys d1 [:printed :contract]) :refused (:printed bad)
-                :warnings [(first (:warnings u1)) (dissoc (first (:warnings u2)) :seon.repl/fix)]}
-       :checks {:armed (= :armed (:contract d1)) :refused (and (= :err (:tag bad)) (re-find #"invalid-input" (str (:printed bad))))
-                :warning-grows (and (= 1 (:count (first (:warnings u1)))) (= 2 (:count (first (:warnings u2)))))}}))))
+          bad @(c/submit! sys a "(defn sq {:malli/schema [:=> [:cat :int] :int]} [x] (* x x)) (sq \"x\")")
+          ;; the agent's uncontracted set, as the done rule reads it (seon.repl/instrument)
+          u1 (printed @(c/submit! sys a "(defn plain [x] x) (count (:uncontracted @seon.agent/state))"))
+          u2 (printed @(c/submit! sys a "(defn plain2 [x] x) (count (:uncontracted @seon.agent/state))"))]
+      {:report {:refused (short-items bad) :uncontracted [u1 u2]}
+       :checks {:armed-and-refused (re-find #"invalid-input" (str (get-in bad [:ex :seon.error/message])))
+                :uncontracted-grows (= ["1" "2"] [u1 u2])}}))))
 
 (defn record
-  "Each eval request is recorded in one transaction on the agent's branch (its evaluations
-  on its agent entity, its defs in program namespaces), built at root from the reply; the
-  agent's next request sees its own recording."
+  "Each eval request is recorded in one transaction on the agent's branch (its one eval on
+  its agent entity, its defs in program namespaces), and stops at its first error; the agent's
+  next request sees its own recording."
   []
   (run-check "RECORD" {:datoms 500}
    (fn [sys]
     (let [[a] (spawn-ready! sys "record")
           r1 @(c/submit! sys a "(+ 1 2) (in-ns 'app.m0) (defn f3 [x] (* 3 x)) (/ 1 0)")
-          r2 @(c/submit! sys a "(count (my.db/q '[:find ?e :where [?e :seon.cluster.eval/agent ?a] [?a :seon.agent/id :a1]]))
-                               (my.db/q '[:find ?s . :where [?e :var/name app.m0/f3] [?e :var/form ?f] [?f :form/src ?s]])")]
-      {:report {:first (mapv #(select-keys % [:tag :printed :record :recorded]) r1) :second (mapv :printed r2)}
-       :checks {:four-items (= 4 (count r1)) :its-evals-recorded (= "4" (:printed (first r2)))
-                :its-defn-recorded (re-find #"f3" (str (:printed (second r2))))}}))))
+          n @(c/submit! sys a "(count (my.db/q '[:find ?e :where [?e :seon.eval/agent ?a] [?a :seon.agent/id :a1]]))")
+          src @(c/submit! sys a "(my.db/q '[:find ?s . :where [?e :var/name app.m0/f3] [?e :var/form ?f] [?f :form/src ?s]])")]
+      {:report {:first (select-keys r1 [:text :record :recorded]) :second [(printed n) (printed src)]}
+       :checks {:one-response-its-error (some? (:ex r1))
+                ;; one eval per request: r1's and n's own (recorded before it answers)
+                :its-evals-recorded (= "2" (printed n))
+                :its-defn-recorded (re-find #"f3" (str (printed src)))}}))))
 
 ;; ---- problems (session D2): each class provoked, then read back from main ----------------
 
@@ -366,8 +374,9 @@
    (fn [sys]
     (let [t0 (System/currentTimeMillis)
         [a b] (spawn-ready! sys "problems" "dies")
-        r1 @(c/submit! sys a (str "(/ 1 0) (defn sq {:malli/schema [:=> [:cat :int] :int]} [x] (* x x)) (sq \"x\")"
-                                 " (my.fx/call :file {:path \"/nonexistent-d2/x\" :text \"x\"})"))
+        ;; one error each: a request stops at its first
+        r1 [@(c/submit! sys a "(/ 1 0)") @(c/submit! sys a "(defn sq {:malli/schema [:=> [:cat :int] :int]} [x] (* x x)) (sq \"x\")")
+            @(c/submit! sys a "(my.fx/call :file {:path \"/nonexistent-d2/x\" :text \"x\"})")]
         r2 @(c/submit! sys a "(Thread/sleep 2500) :awake")
         _ (a/>!! (:back sys) {:op :writer :tx-count 1 :batch-ms 1 :n-tx "not a number" :commits 1})
         r3 @(c/submit! sys b "(spit \"/dev/stderr\" \"D2 boom: the agent writes its last words\\n\" :append true) (seon.lib/c-exit 3)")
@@ -386,7 +395,7 @@
         died (first (filter #(= :seon.agent/died (:type %)) (rows :agent)))
         red (first (filter #(= 'app.proofs/p1-test (:test %)) (rows :red)))
         cost-row (first (rows :cost))]
-      {:report {:replies (mapv short-items [r1 r2 r3])
+      {:report {:replies (mapv short-items (conj r1 r2 r3))
                 :counts (into (sorted-map) (for [[k v] (:classes p)] [k (:n v)]))
                 :died (select-keys (:example died) [:exit :stderr :last-op])
                 :red (select-keys red [:run :test :assertions :evidence])
@@ -483,7 +492,7 @@
         r1 @(c/submit! sys a "(+ 1 1) (System/exit 3) (+ 2 2)")
         _ (await-agents ev [a] #{:dead})
         r2 @(c/submit! sys b "(transact! [{:no/such-attr 1}])")
-        r3 @(c/submit! sys b "(apply str (repeat 100000 \"x\")) (range)")
+        r3 [@(c/submit! sys b "(apply str (repeat 100000 \"x\"))") @(c/submit! sys b "(range)")]
         r4 @(c/submit! sys b "(+ 1")
         _ @(c/submit! sys x "(ns app.spin (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (deftest spins (loop [] (recur)))")
         t5 @(c/run-tests! sys x 100000000)
@@ -491,8 +500,8 @@
         _ @(c/submit! sys x "(in-ns 'app.spin) (ns-unmap 'app.spin 'spins) (deftest exits (System/exit 7))")
         t6 @(c/run-tests! sys x)
         r6 @(c/submit! sys x "(+ 1 2)")
-        r9 @(c/submit! sys b "(count (vec (range 300000000))) (+ 5 5)")
-        r11 @(c/submit! sys b "(def kept 7) (loop [] (recur)) (+ kept 1)" {:ticks 100000000})
+        r9 [@(c/submit! sys b "(count (vec (range 300000000)))") @(c/submit! sys b "(+ 5 5)")]
+        r11 [@(c/submit! sys b "(def kept 7) (loop [] (recur))" {:ticks 100000000}) @(c/submit! sys b "(+ kept 1)")]
         p12 (c/submit! sys b "(reduce + (range)) :next")
         ;; the interrupt arrives on the running eval: the agent said it began
         _ (await-event ev (started b "(reduce + (range)) :next"))
@@ -505,34 +514,35 @@
         _ (await-event ev #(#{:fork-server-up :fork-server-lost} (:type %)))
         r7 @(c/submit! sys b "(+ 3 4)")
         [y] (spawn-ready! sys "after the fork server died")
-        r8 @(c/submit! sys y "(count (q '[:find ?v :where [?v :var/name]])) (loop [] (recur)) :after" {:ticks 100000000})]
+        r8 [@(c/submit! sys y "(count (q '[:find ?v :where [?v :var/name]]))") @(c/submit! sys y "(loop [] (recur))" {:ticks 100000000})
+            @(c/submit! sys y ":after")]]
       {:report {:exit [r1 (select-keys (get-in (c/state sys) [:agents a]) [:status :exit])]
-                :refused (short-items r2) :printed-chars (mapv #(count (:printed %)) r3) :read-error (short-items r4)
+                :refused (short-items r2) :printed-chars (mapv #(count (:text %)) r3) :read-error (short-items r4)
                 :spin (select-keys t5 [:error :reports :ms]) :test-exits (select-keys t6 [:error :reports :exit])
-                :oom (short-items r9) :interrupt (short-items r12) :ticks (short-items r11)
-                :out [(:out (first r10)) t10] :fork-server [(:fork-server (c/state sys)) (short-items r7) (short-items r8)]}
+                :oom (mapv short-items r9) :interrupt (short-items r12) :ticks (mapv short-items r11)
+                :out [(:out r10) t10] :fork-server [(:fork-server (c/state sys)) (short-items r7) (mapv short-items r8)]}
        :checks {"agent calling System/exit mid-request dies alone, named by its exit status"
                 (and (= :seon.agent/died (:seon.error/type r1)) (= {:exit 3} (:exit r1))
                      (= :dead (get-in (c/state sys) [:agents a :status])))
-                "a refused transaction is an :err item" (and (= :err (:tag (first r2))) (re-find #"refused" (:printed (first r2))))
-                "huge and infinite values print within the printer's budget" (and (< (count (:printed (first r3))) 25000) (< (count (:printed (second r3))) 25000))
-                "a read error is one :err item" (= :read (get-in (first r4) [:err :phase]))
+                "a refused transaction is the response's :ex" (and (:ex r2) (re-find #"refused" (str (:text r2))))
+                "huge and infinite values print within the printer's budget" (and (< (count (:text (first r3))) 25000) (< (count (:text (second r3))) 25000))
+                "a read error is the response's :ex" (= :read (get-in r4 [:ex :phase]))
                 "a test that never ends stops at its tick budget, naming the test; the agent lives"
-                (and (= 1 (:error t5)) (= "2" (:printed (first r5)))
+                (and (= 1 (:error t5)) (= "2" (printed r5))
                      (= [:seon.test/ticks-spent "#'app.spin/spins"] ((juxt :seon.error/type :var) (first (:reports t5)))))
-                "a test that kills its process is an error; the agent lives" (and (= 1 (:error t6)) (= "3" (:printed (first r6))))
-                "an agent past its heap bound gets OutOfMemoryError as an :err item and lives" (and (= :err (:tag (first r9))) (= "10" (:printed (second r9))))
+                "a test that kills its process is an error; the agent lives" (and (= 1 (:error t6)) (= "3" (printed r6)))
+                "an agent past its heap bound gets OutOfMemoryError as its response's :ex and lives" (and (:ex (first r9)) (= "10" (printed (second r9))))
                 ;; nREPL's model (owner's choice): an interrupt stops the request; the agent goes on
                 "root's interrupt! stops the running request; the agent's next request runs"
-                (and (clojure.string/starts-with? (str (:printed (first r12))) "interrupted by root\n") (= 1 (count r12)) (= ":next" (:printed (first r12b))))
+                (and (clojure.string/starts-with? (str (get-in r12 [:ex :seon.error/message])) "interrupted by root") (not (contains? r12 :value)) (= ":next" (printed r12b)))
                 "a form past its tick budget is stopped, a typed error naming its ticks; the agent keeps its state and goes on"
-                (and (= :seon.repl/ticks-spent (get-in (second r11) [:err :seon.error/type]))
-                     (<= 100000000 (get-in (second r11) [:err :ticks])) (= "8" (:printed (nth r11 2))))
+                (and (= :seon.repl/ticks-spent (get-in (first r11) [:ex :seon.error/type]))
+                     (<= 100000000 (get-in (first r11) [:ex :ticks])) (= "8" (printed (second r11))))
                 "printed output comes back as :out; a busy thread blocks the test fork instead of breaking it"
-                (and (= "hello from :a3\n" (:out (first r10))) (= :seon.test/fork-refused (:seon.error/type t10)) (re-find #"Chez threads active" (:seon.error/message t10)))
+                (and (= "hello from :a3\n" (:out r10)) (= :seon.test/fork-refused (:seon.error/type t10)) (re-find #"Chez threads active" (:seon.error/message t10)))
                 "the fork server dies: agents keep working, a new server forks the next agent (whose tick budget works)"
-                (and (= "7" (:printed (first r7))) (= "360" (:printed (first r8)))
-                     (= :seon.repl/ticks-spent (get-in (second r8) [:err :seon.error/type])) (= ":after" (:printed (nth r8 2))))}}))))
+                (and (= "7" (printed r7)) (= "360" (printed (first r8)))
+                     (= :seon.repl/ticks-spent (get-in (second r8) [:ex :seon.error/type])) (= ":after" (printed (nth r8 2))))}}))))
 
 ;; ---- root's threads: a declared number (session THREADS) --------------------------------
 
@@ -618,7 +628,7 @@
                      t2 (profile/now-ns)
                      tr @(c/run-tests! sys id)
                      t3 (profile/now-ns)]
-                 {:id id :ok (and (every? #(= :ret (:tag %)) r) (= 1 (:pass tr)) (zero? (+ (:fail tr) (:error tr))))
+                 {:id id :ok (and (map? r) (not (:ex r)) (= 1 (:pass tr)) (zero? (+ (:fail tr) (:error tr))))
                   :eval-ms (/ (- t2 t1) 1e6) :tests-ms (/ (- t3 t2) 1e6)}))
         results (vec (pmap work ids))
         t-done (profile/ms-since t0)
@@ -823,7 +833,7 @@
                sys (c/start! {:datoms 2000})
                boot-ms (profile/ms-since t0)
                ids (apply spawn-ready! sys (map #(str "lc " %) (range 3)))
-               ok? (every? #(= "4" (:printed (first @(c/submit! sys % "(+ 2 2)")))) ids)
+               ok? (every? #(= "4" (printed (deref (c/submit! sys % "(+ 2 2)")))) ids)
                health (mapv #(let [p (ping sys %)] (:status p p)) [:api :writer :fork-server :flusher :reconciler])
                running (thread-diff (declared-threads sys) (threads))
                pids (vec (cons (get-in (c/state sys) [:fork-server :pid]) (keep #(get-in (c/state sys) [:agents % :pid]) ids)))
@@ -869,7 +879,7 @@
                   :every-cycle-worked (every? #(and (:ok %) (= #{:running} (:health %))) rows)
                   :threads-declared (every? exact? rows)
                   :pause-holds (and (= :held held) held-state (= :paused (:status paused-health)))
-                  :resume-releases-in-order (and (= "1" (:printed (second r1))) (= "2" (:printed (first r2))))}})))))
+                  :resume-releases-in-order (and (= "1" (printed r1)) (= "2" (printed r2)))}})))))
 
 (defn threads-declared
   "lifecycle's cycles alone; the last line is the EDN {:running [diff ..] :stopped [diff ..]}
@@ -928,8 +938,8 @@
         left (filter alive? (cons fs-pid pids))]
       (d/release conn)
       {:report {:agents n :stop st :main {:ok ok-main :refused-after-close refused-main :stored main-notes}
-                :evals {:done (count (filter #(= ":done" (:printed (second %))) evr))
-                        :other (frequencies (map #(if (vector? %) (:printed (last %)) %) evr))} :left (vec left)}
+                :evals {:done (count (filter #(= ":done" (printed %)) evr))
+                        :other (frequencies (map #(if (and (map? %) (contains? % :text)) (printed %) %) evr))} :left (vec left)}
        :checks {:every-request-answered (and (not-any? #{:hang} evr) (not-any? #{:hang} mr))
                 :main-ok-all-stored (= ok-main (or main-notes 0))
                 :main-answers-account (= 300 (+ ok-main refused-main))
@@ -975,7 +985,7 @@
         mb0 (lib/r2 (lib/real-mb))
         _ (flow/pause-proc (:graph sys) :writer)
         ;; agents own their branches' writes: a paused writer does not hold them
-        agents-ok (count (filter #(= ":ok" (:printed (second %)))
+        agents-ok (count (filter #(= ":ok" (printed %))
                                  (mapv #(deref (c/submit! sys % "(transact! [{:note/text \"bp\" :note/agent :bp}]) :ok")) ids)))
         ;; root's own writes to main wait for it
         mains (mapv #(c/transact-main! sys [{:note/text (str "bp" %) :note/agent :root}]) (range n))
@@ -987,14 +997,14 @@
         rs (mapv deref mains)
         resume-ms (profile/ms-since t1)
         ok (count (filter :ok rs))]
-      {:report {:flood {:arrived (:noise st) :ordered (:noise-ordered st) :reply (:printed (second r)) :taken-before-the-pause n0 :taken-while-paused (when (and n0 n1) (- n1 n0)) :status-while-paused busy
+      {:report {:flood {:arrived (:noise st) :ordered (:noise-ordered st) :reply (printed r) :taken-before-the-pause n0 :taken-while-paused (when (and n0 n1) (- n1 n0)) :status-while-paused busy
                         :blocked (filterv :blocked [p0 p1]) :drain-ms (lib/r2 drain-ms)}
                 :writer {:agents n :writer-buf (seon.config/value :seon.config.root/writer-buf) :answered-while-paused answered-while-paused
                          :root-real-mb {:before mb0 :writer-saturated mb1} :resume->all-done-ms (lib/r2 resume-ms) :ok ok
                          :agents-ok agents-ok :not-ok (frequencies (remove :ok rs))}}
        :checks {:its-proc-answered (not-any? :blocked [p0 p1])
                 :ring-pushes-back (and n0 n1 (= n0 n1) (< n0 20000) (= :busy busy))
-                :flood-all-arrive-in-order (and (= 20000 (:noise st)) (true? (:noise-ordered st)) (= ":flooded" (:printed (second r))))
+                :flood-all-arrive-in-order (and (= 20000 (:noise st)) (true? (:noise-ordered st)) (= ":flooded" (printed r)))
                 :agents-write-past-a-paused-writer (= n agents-ok)
                 :writer-paused-holds-all (zero? answered-while-paused)
                 :writer-resumed-completes-all (= n ok)}}))))
@@ -1043,13 +1053,13 @@
     (let [[a] (spawn-ready! sys {:task "fx" :branch :fx1})
         dir (str (:agents-dir (:store (c/state sys))) "/fx1") ; this root's own run dir, kept with the store
         _ (.mkdirs (java.io.File. dir))
-        ev (fn [code] (let [r @(c/submit! sys a code)] (last r)))
+        ev (fn [code] @(c/submit! sys a code))
         ;; per call, timed inside the agent: (loop n) of the form, µs each
         per (fn [form k] (let [code (str "(let [t0 (seon.profile/now-ns)] (dotimes [i " k "] " form ") (/ (- (seon.profile/now-ns) t0) " k " 1000.0))")]
                            (ev code)
-                           (lib/summ (vec (for [_ (range 3)] (parse-double (:printed (ev code))))))))
+                           (lib/summ (vec (for [_ (range 3)] (parse-double (printed (ev code))))))))
         ok1 (ev "(my.fx/call :echo {:x 1})")
-        r {:echo-once (:printed ok1)
+        r {:echo-once (printed ok1)
            :plain-us (per "(identity {:x i})" n)
            :echo-us (per "(my.fx/call :echo {:x i})" n)
            :floor-us (per "(my.fx/call :nope {})" n)
@@ -1057,8 +1067,8 @@
            :spit-us (per (str "(spit \"" dir "/a.txt\" (str \"text \" i))") n)
            :file-us (per (str "(my.fx/call :file {:path \"" dir "/b.txt\" :text (str \"text \" i)})") n)
            :send-us (per "(my.fx/send :echo {:x i})" n)
-           :inbox (:printed (ev "(count (filter #(= :fx (:from %)) (messages)))"))
-           :unknown (:printed (ev "(:seon.error/type (my.fx/call :nope {}))"))
+           :inbox (printed (ev "(count (filter #(= :fx (:from %)) (messages)))"))
+           :unknown (printed (ev "(:seon.error/type (my.fx/call :nope {}))"))
            :test-fork (do (ev "(ns app.fx (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (deftest fx-in-test (is (= :seon.fx/in-test (:seon.error/type (my.fx/call :echo {:x 1}))))
                                 (is (= {:value 7} (binding [seon.agent/*fx-stub* (fn [_ _] {:value 7})] (my.fx/call :echo {:x 1})))))")
                           (select-keys @(c/run-tests! sys a) [:pass :fail :error]))
@@ -1098,8 +1108,8 @@
           expected (seon.config/with-provider seon.config/config (seon.config/provider seon.config/config))
           [a] (spawn-ready! sys "reads the config")
           r @(c/submit! sys a "[(count (seon.config/from-db (db))) (hash (seon.config/from-db (db))) (hash seon.config/config)]")
-          [n h own] (some-> (first r) :printed clojure.edn/read-string)]
-      {:report {:keys (count main) :agent-reply (:printed (first r))}
+          [n h own] (ts/value-of r)]
+      {:report {:keys (count main) :agent-reply (:text r)}
        :checks {:main-holds-the-config-in-force (= expected main)
                 :every-declared-key-the-config-holds (= (count seon.config/config) (count main) n)
                 :the-agent-reads-it-from-its-branch (= (hash main) h)
@@ -1208,10 +1218,12 @@
           :checks checks})))))
 
 (defn- eval-records
-  "The evaluation records on db of who evaluated, by its identity (seon.repl/record-tx): an
-  agent's [:seon.agent/id id], or root's [:seon.root/id :root]: [{:form :origin ...}]."
+  "The eval records on db of whom the evals are on, by its identity (seon.repl/record-tx): an
+  agent's [:seon.agent/id id], or root's [:seon.root/id :root], each its record with who
+  evaluated it (:by, :seon.eval/by): [{:code :text :by ...}]."
   [db [attr id]]
-  (vec (d/q '[:find [?r ...] :in $ ?attr ?id :where [?a ?attr ?id] [?e :seon.cluster.eval/agent ?a] [?e :seon.cluster.eval/record ?r]] db attr id)))
+  (vec (for [[r by] (d/q '[:find ?r ?by :in $ ?attr ?id :where [?a ?attr ?id] [?e :seon.eval/agent ?a] [?e :seon.eval/record ?r] [?e :seon.eval/by ?by]] db attr id)]
+         (assoc r :by by))))
 
 (defn await-records
   "What (read) answers once (enough? it) holds, read again at each :commit event of agent a
@@ -1223,7 +1235,7 @@
 (defn mcp-proof
   "The MCP phase's proof: an outside client (a separate process: bin/mcp PORT, the stdio
   relay, fed JSON-RPC on stdin) lists agents, evaluates in a running agent and as root, and
-  both evaluations are recorded with origin :outside (the agent's on its branch, root's on
+  both evaluations are recorded by \"outside\" (the agent's on its branch, root's on
   main). The relay's peak footprint stays within :seon.config.machine/relay-mb, so a relay
   that boots Seon again is red; one against a port nobody listens on answers each request
   the JSON-RPC error, and exits."
@@ -1256,24 +1268,24 @@
         lines (fn [r] (for [l (clojure.string/split-lines (:out r)) :when (clojure.string/starts-with? l "{")] (clojure.data.json/read-str l)))
         answers (into {} (for [j (lines r)] [(get j "id") j]))
         text (fn [id] (get-in answers [id "result" "content" 0 "text"]))
-        ;; the agent's record is on its branch at its commit (await-records); answers 2 when
-        ;; recorded, else waits on the next commit (the eval failed: its text check says so)
+        ;; the agent's record is on its branch at its commit (await-records); answers its one
+        ;; eval when recorded, else waits on the next commit (the eval failed: its text check says so)
         mine (if (clojure.string/includes? (str (text 4)) "42")
-               (await-records ev a #(filter (fn [r] (= :outside (:origin r))) (eval-records (:db @(c/branch-db sys :mcp1)) [:seon.agent/id a])) #(= 2 (count %)))
+               (await-records ev a #(filter (fn [r] (= "outside" (:by r))) (eval-records (:db @(c/branch-db sys :mcp1)) [:seon.agent/id a])) #(= 1 (count %)))
                [])
         _ (a/untap (:events-mult sys) ev)
-        roots (filter #(= :outside (:origin %)) (eval-records @(:conn sys) [:seon.root/id :root]))
+        roots (filter #(= "outside" (:by %)) (eval-records @(:conn sys) [:seon.root/id :root]))
         bound (seon.config/value :seon.config.machine/relay-mb)]
       {:report {:tools (count (get-in answers [2 "result" "tools"]))
                 :agents-text (text 3) :agent-eval (text 4) :root-eval (text 5)
-                :agent-records (mapv #(select-keys % [:form :shown :origin]) mine)
-                :root-records (mapv #(select-keys % [:form :shown :origin]) roots)
+                :agent-records (mapv #(select-keys % [:code :text :by]) mine)
+                :root-records (mapv #(select-keys % [:code :text :by]) roots)
                 :client-ms (lib/r2 ms) :exit (:exit r)
                 :relay-peak-mb (some-> (peak-mb r) lib/r2) :relay-mb-bound bound
                 :root-down (mapv #(get-in % ["error" "message"]) (lines down)) :root-down-exit (:exit down)}
        :checks {:tools-are-the-ops (= (set (map #(str "seon_" (name %)) (keys seon.server/ops))) (set (map #(get % "name") (get-in answers [2 "result" "tools"]))))
                 :notification-unanswered (= #{1 2 3 4 5} (set (keys answers)))
-                :both-recorded-outside (and (= 2 (count mine)) (= 1 (count roots)))
+                :both-recorded-outside (and (= 1 (count mine)) (= 1 (count roots)))
                 :agent-eval (clojure.string/includes? (str (text 4)) "42") :root-eval (clojure.string/includes? (str (text 5)) "1")
                 :relay-within-bound (boolean (some-> (peak-mb r) (<= bound)))
                 :root-down-answers-every-request (and (zero? (:exit down)) (= [1 2 3 4 5] (mapv #(get % "id") (lines down)))
@@ -1296,7 +1308,7 @@
           _ @(c/submit! sys a "(ns app.one (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (deftest t-one (is (= 2 (inc 1)))) (dotimes [i 200] (vec (range 10000))) (System/gc) :ok")
           tests (select-keys @(c/run-tests! sys a) [:pass :fail :error])
           cl (:id (ready! sys #(deref (c/clone! sys a {}))))
-          cl-eval (:printed (last @(c/submit! sys cl "(inc 41)")))
+          cl-eval (printed @(c/submit! sys cl "(inc 41)"))
           st (c/state sys)
           res {:fork-server (os-threads (get-in st [:fork-server :pid])) :agent (os-threads (get-in st [:agents a :pid]))
                :clone (os-threads (get-in st [:agents cl :pid]))}]
@@ -1316,7 +1328,7 @@
     (let [[a b] (spawn-ready! sys "ids a" "ids b")
         notes (fn [tag n] (str "(transact! (vec (for [i (range " n ")] {:note/text (str \"" tag "\" i)})))"))
         _ (doall (pmap #(deref (c/submit! sys %1 (notes %2 10))) [a b] ["a" "b"]))
-        ids-of (fn [ag] (read-string (:printed (first @(c/submit! sys ag "(vec (q '[:find ?n ?tx :where [?n :note/text _ ?tx]]))")))))
+        ids-of (fn [ag] (ts/value-of @(c/submit! sys ag "(vec (q '[:find ?n ?tx :where [?n :note/text _ ?tx]]))")))
         ia (ids-of a) ib (ids-of b)
         es (fn [xs] (set (map first xs))) txs (fn [xs] (set (map second xs)))]
       {:report {:a (count ia) :b (count ib) :a-txs (sort (txs ia)) :b-txs (sort (txs ib))}
