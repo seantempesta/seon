@@ -57,7 +57,7 @@
              :when (and v (not= :test (:var/kind v)))]
          (cond-> {:var q}
            (:var/contract v) (assoc :contract (clojure.edn/read-string (:var/contract v)))
-           (:var/doc v) (assoc :doc (:var/doc v))))))
+           (:var/doc v) (assoc :doc {:seon.print/prose (:var/doc v)})))))
 
 (defn- refused
   "The done rule's reasons as the agent reads them, beyond its own red proofs (shown with

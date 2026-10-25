@@ -384,7 +384,8 @@
         src (source-of db sym)
         doc (cond-> {:symbol sym}
               (:arglists m) (assoc :arglists (:arglists m))
-              (:doc m) (assoc :doc (:doc m))
+              ;; prose, read as itself: unquoted, no escaped quotes (seon.print's prose mark)
+              (:doc m) (assoc :doc {:seon.print/prose (:doc m)})
               (:malli/schema m) (assoc :contract (:malli/schema m)))]
     (cond
       (and (nil? m) (nil? src)) {:symbol sym :unresolved true :problem (:unresolved ref/problem-messages)}
@@ -470,7 +471,7 @@
               ;; no source recorded: what the var's facts say, as Clojure (its arglists and doc as comments)
               :else (print/code (str "(declare " (name nm) ")  ; no source recorded: (doc " nm ")"
                                      (when-let [as (seq (:arglists v))] (str "\n;; " (str/join " " (map str as))))
-                                     (when-let [d (:doc v)] (str "\n" (names-lines (str/split d #"\s+"))))))))
+                                     (when-let [d (:seon.print/prose (:doc v))] (str "\n" (names-lines (str/split d #"\s+"))))))))
       (and (= :namespace kind) (symbol? nm))
       (let [nv (ref/namespace-view db nm :doc)]
         (print/code (str "(ns " nm (when-let [d (:seon.ref/lead nv)] (str "\n  " (emit/string-literal d))) ")"
