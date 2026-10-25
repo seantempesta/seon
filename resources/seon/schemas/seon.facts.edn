@@ -24,6 +24,10 @@
  ;; the vars it references, resolved by the compiler (clojure.core's left out): callers are
  ;; one AVET seek
  :form/refs [:set {:seon.db/index true} :qualified-symbol]
+ ;; the qualified keywords its code and its contracts name, recorded by the analyzer from the read
+ ;; it already does (seon.program/unit-account): the attributes, config keys and schema entries it
+ ;; operates on; a key's forms are one AVET seek (seon.program/schema-dependents, my.agent/callers)
+ :form/keywords [:set {:seon.db/index true} :qualified-keyword]
  ;; the namespaces its require/use calls name
  :form/requires [:set :symbol]
  ;; references to clojure.core/intern, alter-var-root, eval, load-string, and definitions
@@ -76,7 +80,7 @@
  :seon.db/form-fact [:map {:seon.db/attributes true}
                       [:form/id :form/id] [:form/src :form/src] [:form/ns :form/ns] [:form/order :form/order]
                       [:form/lead {:optional true} :form/lead] [:form/defines {:optional true} :form/defines]
-                      [:form/declares {:optional true} :form/declares] [:form/refs {:optional true} :form/refs]
+                      [:form/declares {:optional true} :form/declares] [:form/refs {:optional true} :form/refs] [:form/keywords {:optional true} :form/keywords]
                       [:form/requires {:optional true} :form/requires] [:form/banned {:optional true} :form/banned]
                       [:form/inline-defs {:optional true} :form/inline-defs] [:form/source {:optional true} :form/source]
                       [:form/timeouts {:optional true} :form/timeouts] [:form/catches {:optional true} :form/catches]]

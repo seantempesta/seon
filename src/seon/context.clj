@@ -183,8 +183,8 @@
   :seon.config.render/related wiki sections, program functions and schema keys nearest it, each
   kind ranked by the plan's references and by meaning fused by reciprocal rank (seon.vector/rrf):
   the graph from its citations (the cited vars' callers and callees, the sections naming a cited
-  var, the sections a cited section references or is referenced by, the schema keys in the plan
-  and the cited vars' text) and seon.vector/near on the plan's vector. Fused, they found more of
+  var, the sections a cited section references or is referenced by, the schema keys the plan
+  names and the cited vars' forms name, :form/keywords) and seon.vector/near on the plan's vector. Fused, they found more of
   what 31 merged tasks changed than either alone (docs/vector.md#what-the-work-is-likely-to-need-as-an-eval: functions
   0.51 at 5 against 0.38 by meaning alone, sections 0.71 against 0.67, schema keys 0.56 against
   0.37). Answers {:sections [address] :functions [sym] :schemas [key]}, those the plan cites left
@@ -203,20 +203,24 @@
                                  (keep #(:seon.ref/address (docs/cited-view db %))))
                        cites)
             schema? #(some? (pdb/eid db :schema/key %))
-            src (str/join "\n" (keep #(docs/source-of db %) fns))
             ;; a program function: no test, no macro (every contracted form names seon.contract/defn),
             ;; nothing of a test namespace (its fixtures); the graph and the meaning halves alike
             function? #(and (not (#{:test :macro} (:var/kind (d/entity db [:var/name %]))))
                             (not (str/ends-with? (namespace %) "-test")))
+            ;; a neighbour weighs 1/(1 + the forms naming it, counted to a cap): what every form names
+            ;; (seon.contract/checked, on?, seon.db/eid) weighs nothing (docs/vector.md#fused-with-the-call-graph)
+            cap (cfg/value :seon.config.render/related-rarity)
+            by-rarity (fn [xs] (mapv peek (sort (for [[x n] (frequencies xs)]
+                                                  [(- (/ n (inc (bounded-count cap (d/datoms db :avet :form/refs x))))) (str x) x]))))
             near (fn [of f] (into [] (comp (keep (comp f first)) (distinct)) (vector/near db te (* 4 k) {:of of})))
-            graph {:functions (by-frequency (concat (mapcat #(docs/callers db %) fns) (mapcat #(map :var (callees db %)) fns)
+            graph {:functions (by-rarity (concat (mapcat #(docs/callers db %) fns) (mapcat #(map :var (callees db %)) fns)
                                                     (for [a secs n (:seon.section/names (d/entity db [:seon.section/address a]))] n)))
                    :sections (by-frequency (concat (for [n fns e (d/q '[:find [?e ...] :in $ ?n :where [?e :seon.section/names ?n]] db n)]
                                                      (:seon.section/address (d/entity db e)))
                                                    (for [a secs r (:seon.section/references (d/entity db [:seon.section/address a]))] (:seon.section/address r))
                                                    (for [a secs r (:seon.section/_references (d/entity db [:seon.section/address a]))] (:seon.section/address r))))
                    :schemas (by-frequency (filter schema? (concat (filter keyword? (keep :seon.ref/name cites))
-                                                                     (map #(keyword (subs % 1)) (re-seq #":[\w.\-]+/[\w.\-?!*]*[\w?!*]" src)))))}
+                                                                     (mapcat #(:form/keywords (:var/form (d/entity db [:var/name %]))) fns))))}
             meaning {:functions (near :form/id #(some-> (d/entity db %) :var/_form first :var/name))
                      :sections (near :seon.section/address #(:seon.section/address (d/entity db %)))
                      :schemas (near :schema/key #(:schema/key (d/entity db %)))}
@@ -239,20 +243,30 @@
 (defn related-view
   "What `related` answers, each a line at summary depth: a section its address and its lead's
   first sentence (seon.docs/view; its heading when it has no lead), a function its name and its
-  doc's first sentence, a schema key itself; with the forms that read one whole (naming the
+  doc's first sentence, beside the registry keys it operates on when it names any ([line keys],
+  its :form/keywords), a schema key itself; with the forms that read one whole (naming the
   text's key: a step-6 run's model read the view with (:text ...) eight times over) and search
   further: what my.task/related and my.agent/related answer. nil when there is nothing."
   {:malli/schema [:=> [:cat :seon.host/db [:map [:sections {:optional true} [:vector :string]] [:functions {:optional true} [:vector :qualified-symbol]]
                                            [:schemas {:optional true} [:vector :qualified-keyword]]]]
-                  [:maybe :map]]}
+                  [:maybe [:map [:sections {:optional true} [:vector :string]]
+                           [:functions {:optional true} [:vector [:or :string [:tuple :string [:vector :qualified-keyword]]]]]
+                           [:schemas {:optional true} [:vector :qualified-keyword]] [:read :string] [:more :string]]]]}
   [db {:keys [sections functions schemas]}]
   (when (or (seq sections) (seq functions) (seq schemas))
    (cond-> {}
     (seq sections) (assoc :sections (mapv #(let [v (docs/view db % :summary)] (str % ": " (or (:seon.ref/summary v) (:seon.ref/heading v)))) sections))
-    (seq functions) (assoc :functions (mapv #(str % (some->> (:var/doc (d/entity db [:var/name %])) ref/lead-sentence (str ": "))) functions))
+    ;; with each function the registry keys its code and contract name (its :form/keywords): the
+    ;; data it operates on, which earned their tokens (docs/vector.md#what-the-work-is-likely-to-need-as-an-eval)
+    (seq functions) (assoc :functions (mapv #(let [v (d/entity db [:var/name %])
+                                                   ks (sort-by str (filter (fn [k] (pdb/eid db :schema/key k)) (:form/keywords (:var/form v))))]
+                                               ;; its keys a vector beside its line, so the one printer cuts a long one
+                                               (cond-> (str % (some->> (:var/doc v) ref/lead-sentence (str ": ")))
+                                                 (seq ks) (vector (vec ks))))
+                                            functions))
     (seq schemas) (assoc :schemas schemas)
     true (assoc :read "(:seon.ref/text (my.agent/help \"docs/page.md#anchor\")): one section's text whole; (source ns/f) a function; (my.schema/forms :ns/key) a schema's form"
-                :more "(my.agent/related \"your words\" 10): sections by any text; (my.agent/similar \"your words\"): functions and tasks too; (my.agent/callers 'ns/f)"))))
+                :more "(my.agent/related \"your words\" 10): sections by any text; (my.agent/similar \"your words\"): functions and tasks too; (my.agent/callers 'ns/f) or (my.agent/callers :ns/key): who calls it, who operates on it"))))
 
 (defn run-state
   "The task story: task t's run sections as data, the same each turn of a run: the task (its
