@@ -837,6 +837,12 @@
           ;; a kept branch, resumed: this process (forked holding main's program) runs the
           ;; branch's own changes since its base on top, as merging main would; from main's
           ;; head it would unmap all main gained since (step E run #11: test/'s namespaces)
+          ;; a branch keeps the schema it was cut with: resumed, it gains the attributes this
+          ;; program has since (seon.db/install-missing!), and its forms the :form/keywords
+          ;; facts they were recorded without, before the program it holds is loaded
+          _ (when resumed
+              (let [tx (program/gained-tx @store-conn (pdb/install-missing! store-conn))]
+                (when (seq tx) (d/transact store-conn {:tx-data tx :tx-meta (pdb/tx-meta branch)}))))
           load-errors (when resumed (program/load-diff! base @store-conn))
           misaligned (when-not resumed (misaligned commit t @store-conn db0))]
      ;; a resumed branch whose program does not load runs main's for what failed: its errors

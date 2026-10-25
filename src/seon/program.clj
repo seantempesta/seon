@@ -736,6 +736,23 @@
                                      :when (live? db e')]
                                  e'))))))
 
+(defn gained-tx
+  "tx-data for the program facts db's forms were recorded without, the attributes added (seon.db/
+  install-missing!'s answer) being new to db: a branch cut before them, resumed (seon.agent's
+  resume). :form/keywords: for each live form defining a contracted var, the keys its contracts
+  name, from :var/contract as schema-dependents read it before; the keys its code alone names
+  need the form analyzed again, and stay unrecorded until it is."
+  {:malli/schema [:=> [:cat :seon.host/db [:set :keyword]] [:vector :seon.db/op]]}
+  [db added]
+  (if-not (contains? added :form/keywords)
+    []
+    (vec (distinct (for [dt (d/datoms db :aevt :form/defines)
+                       :let [fe (:e dt) f (d/entity db fe)]
+                       :when (and (empty? (:form/keywords f)) (live? db fe))
+                       v (:form/defines f) :let [c (:var/contract v)] :when c
+                       k (names (sedn/decode c))]
+                   [:db/add fe :form/keywords k])))))
+
 (defn schema-dependents
   "The live forms of db defining a contracted var whose form names one of keys (its contract
   or its code, :form/keywords: one AVET seek a key), or a schema that names one, and on (the
