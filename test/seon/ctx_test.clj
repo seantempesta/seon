@@ -209,3 +209,93 @@
   "A render an agent writes for its datum: the steps, numbered."
   {:malli/schema [:=> [:cat [:vector :string] :map] :any]}
   [v _] [:ol (for [s v] [:li s])])
+
+(defn- as-agent!
+  "f with the agent's state holding db in test mode (transact! applies to the value, as in an agent's
+  test fork) and the branch's schemas bound, @ctx built from it; answers [f's value, the db after]."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/fn] [:tuple :any :seon.host/db]]}
+  [db f]
+  (try (reset! seon.agent/state {:db db :key k :branch :b :mode :test})
+       ;; under the branch's schemas, as the agent's REPL evaluates a form
+       [(#'seon.repl/with-branch-schemas f) (:db @seon.agent/state)]
+       (finally (reset! seon.agent/state nil))))
+
+(deftest a-swap-writes-the-record
+  ;; the owner, 2026-10-25: "they can easily update it and just add more data": swap! of @ctx is one
+  ;; transaction on the branch, checked by the schemas; the record after it is the db's
+  (let [db (seeded 20)
+        db (:db-after (d/with db (:tx (my.schema/registration db :lab.ctx/steps '[:vector :string] false))))
+        same? (fn [db] (= (:tree (ctx/build db k :b)) @ctx/ctx))
+        ;; f's value (or the ex-data of the error that refused it) and whether @ctx is the db's then
+        step (fn [db f] (as-agent! db #(let [r (try (f) (catch clojure.lang.ExceptionInfo e (ex-data e)))] [r (same? (:db @seon.agent/state))])))]
+    (testing "a datum the agent adds, an attribute of its own entity"
+      (let [[[_ same] db'] (step db #(swap! ctx/ctx assoc :lab.ctx/steps ["read the plan" "make it pass"]))]
+        (is (= ["read the plan" "make it pass"] (:lab.ctx/steps (d/pull db' [:lab.ctx/steps] [:seon.agent/key k]))))
+        (is same "the record after the swap! is the db's")))
+    (testing "a member gone, retracted whole"
+      (let [[_ db'] (step db #(swap! ctx/ctx update :evals dissoc "e3"))]
+        (is (nil? (d/entity db' [:seon.eval/id "e3"])))
+        (is (some? (d/entity db' [:seon.eval/id "e4"])))))
+    (testing "a member's attribute, and a new member, written under its parent by the unit's ref"
+      (let [[[_ same] db'] (step db #(swap! ctx/ctx (fn [c] (-> c (assoc-in [:runs "lab/ctx#1" :seon.run/status] :done)
+                                                                (assoc-in [:runs "lab/ctx#1" :messages "m-new"]
+                                                                          {:seon.message/id "m-new" :seon.message/from "agent" :seon.message/body "a note to myself"})))))]
+        (is (= :done (:seon.run/status (d/entity db' [:seon.run/id "lab/ctx#1"]))))
+        (is (= "lab/ctx#1" (:seon.run/id (:seon.message/to (d/entity db' [:seon.message/id "m-new"])))))
+        (is same)
+        (is (= "a note to myself" (get-in @ctx/ctx [:runs "lab/ctx#1" :messages "m-new" :seon.message/body])) "the swap!'s map gave way to the db's")))
+    (testing "a cardinality-many attribute of a forward unit, member by member"
+      (let [[[_ same] db'] (step db #(swap! ctx/ctx update-in [:runs "lab/ctx#1" :task :seon.task/proofs] conj 'app.x-test/t9))]
+        (is (= #{'app.x-test/t0 'app.x-test/t9} (:seon.task/proofs (d/entity db' [:seon.task/id "lab/ctx"]))))
+        (is same)))
+    (testing "a new member with its own unit: a run and its turn, each naming its parent"
+      (let [[[r same] db'] (step db #(swap! ctx/ctx assoc-in [:runs "lab/ctx#9"]
+                                            {:seon.run/id "lab/ctx#9" :seon.run/status :running
+                                             :turns {"lab/ctx#9/0" {:seon.turn/n 0 :seon.turn/reply "begin"}}}))]
+        (is (nil? (:seon.error/type r)) (pr-str r))
+        (is (= "lab/ctx#9" (:seon.run/id (:seon.turn/run (d/entity db' [:seon.turn/id "lab/ctx#9/0"])))))
+        (is (= k (:seon.agent/key (:seon.run/agent (d/entity db' [:seon.run/id "lab/ctx#9"])))))
+        (is same)))
+    (testing "refused, nothing written, the record as it was: a key with no schema, a value its schema
+      refuses, the environment, a reset! to what is no record"
+      (doseq [[f t] [[#(swap! ctx/ctx assoc :notes "x") :seon.ctx/invalid]
+                     [#(swap! ctx/ctx assoc :lab.ctx/steps [1 2]) :seon.ctx/invalid]
+                     [#(swap! ctx/ctx assoc :t 1) :seon.ctx/basis]
+                     [#(reset! ctx/ctx nil) :seon.ctx/basis]]]
+        (let [[[r same] db'] (step db f)]
+          (is (= t (:seon.error/type r)) (pr-str r))
+          (is same "the record is the db's")
+          (is (= (:max-tx db) (:max-tx db')) "the branch is unchanged"))))
+    (testing "a swap! that changes nothing writes nothing, and the record stays the db's"
+      (let [[[r same] db'] (step db #(swap! ctx/ctx update :runs dissoc "nope"))]
+        (is (map? r))
+        (is same)
+        (is (= (:max-tx db) (:max-tx db')))))
+    (testing "a swap!'s function that writes the db is refused once, never retried (the livelock)"
+      (let [calls (atom 0)
+            [[r] _] (step db #(swap! ctx/ctx (fn [c] (swap! calls inc) (seon.agent/transact! [{:seon.agent/key k :lab.ctx/steps ["x"]}]) (assoc c :lab.ctx/steps ["y"]))))]
+        (is (= :seon.ctx/basis (:seon.error/type r)))
+        (is (= 1 @calls))))))
+
+(defn one-write
+  "The input of size n: a session of n evals, its record, and a swap! of it changing one attribute:
+  [db schema old new eid path acc], seon.ctx/edits's."
+  {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
+  [n]
+  (let [db (seeded n) t (:tree (ctx/build db k :b))]
+    [db :seon.db/agent-fact t (assoc t :seon.agent/status :busy) (:db/id t) [] {:tx [] :invalid [] :paths []}]))
+
+(deftest a-write-costs-its-change-not-the-record
+  ;; a swap!'s change found in the work of what differs: a unit identical to its old self (the
+  ;; session's evals, its runs) is skipped by one identical? test, whatever its size
+  (cost/proof
+    {:of 'seon.ctx/edits :input 'seon.ctx-test/one-write
+     :n "evals in the session's record"
+     :work (str "one attribute of the agent's entity changed: its keys compared once (a dozen), the one "
+                "that differs checked by its schema and written as one datom; the evals and runs units, "
+                "identical, skipped whole: five contracted calls (edits, why and registered? for its schema, "
+                "ref-of for its value, and edits' own return); measured 5 calls, 2,709 ticks and 23,280 bytes "
+                "at 100 and at 1,000 evals")
+     :growth :constant
+     :fixed {:calls 5}
+     :sizes [100 1000 3000]}))

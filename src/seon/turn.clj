@@ -16,7 +16,7 @@
   Root starts it by evaluating (seon.turn/work! '{...}) in the agent; the run's end is
   a fact on the branch (:seon.end/*), which root's judge reads."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.intr :as intr] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str]
+  (:require [seon.ctx :as ctx] [seon.edn :as sedn] [seon.profile :as profile] [seon.intr :as intr] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context] [seon.program :as program] [seon.merge :as pm] [seon.problems :as problems]
             [seon.stage :as stage] [seon.screen :as screen] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
@@ -193,13 +193,14 @@
 (defn- screen!
   "The screen of a turn of task (a model's, or an outside agent's context read): what its forms
   read (my.task/status: the turn input, as this turn's observe measured it, seon.context/turn-input
-  over in), then its forms evaluated now, each recorded by the screen, so the request (and any later
+  over in), then its forms evaluated now (the agent's :seon.agent/screen, else seon.screen/forms), each recorded by the screen, so the request (and any later
   reading of it) ends with their responses (seon.context/request). Answers their records' ids."
   {:malli/schema [:=> [:cat :seon.task/id :map] [:vector :string]]}
   [task in]
   (swap! agent/state assoc-in [:turn :screen]
          {:task task :input (context/turn-input (agent/db) in (get-in @agent/state [:turn :last]))})
-  (vec (keep #(:record (evaluated! % {:origin :screen})) screen/forms)))
+  ;; the agent's own screen when it set one in its record (swap! of @ctx), else the platform's
+  (vec (keep #(:record (evaluated! % {:origin :screen})) (get @ctx/ctx :seon.agent/screen screen/forms))))
 
 (defn cache-miss
   "A :seon.turn/cache-miss when a request's prompt cache hit falls more than one block short of

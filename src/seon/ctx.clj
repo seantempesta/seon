@@ -11,10 +11,11 @@
   session (seon.ctx-test/the-patch-costs-the-change-not-the-session). Nothing is built on a read:
   `@ctx` is a deref. The value carries {:seon.render/schema :seon.ctx/ctx} as metadata: the
   model reads it through the one printer as any value, and the page draws it as a block
-  (:seon.ctx/ctx's declared html render)."
+  (:seon.ctx/ctx's declared html render). A swap! of it is written to the branch as one checked
+  transaction, or refused with why (write!)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.render :as render] [seon.agent :as agent]
-            [seon.schema.datahike :as sd] [seon.db :as pdb] [datahike.api :as d] [datahike.db.interface :as dbi] [clojure.string :as str]))
+            [seon.schema.datahike :as sd] [seon.db :as pdb] [datahike.api :as d] [datahike.db.interface :as dbi] [clojure.string :as str] [malli.core :as m] [malli.error :as me] [malli.registry :as mr]))
 
 ;; ---- the shape, derived once from the registry -----------------------------------------------
 
@@ -195,19 +196,139 @@
        c (group-by :e datoms))
       (update :tree merge (environment db branch))))
 
-;; ---- the atom ----------------------------------------------------------------------------
-
-(defonce ^{:doc "The agent's record as a map: (deref ctx). Read-only for now: a swap! changes the map, never the branch, and the next transaction's patch, made from the record, replaces it."} ctx (atom nil))
-;; the value and its index, beside the atom: the agent is one thread, and its state's watch runs
+;; the record and its index, beside the atom: the agent is one thread, and its state's watch runs
 ;; on it, so each patch follows the one before
 (defonce ^:private held (volatile! nil))
+
+;; ---- map -> db: a swap!'s change as one transaction -------------------------------------
+
+(def ^:private environment-keys "The map's environment: the record's basis, never written." [:t :branch :commit])
+
+(defn- registered?
+  "Has attribute a a schema: the platform's, or one this branch registered (the REPL binds it)?"
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [a] (boolean (and (qualified-keyword? a) (or (contains? contract/forms a) (some-> (mr/registry mr/*registry*) (mr/schema a))))))
+
+(defn- why
+  "Why value v cannot be attribute a, or nil when it can: a's schema's explanation, or that a has none."
+  {:malli/schema [:=> [:cat :any :any] :any]}
+  [a v]
+  (cond (not (registered? a)) "no schema: register it (my.schema/register!), a qualified keyword"
+        (contract/valid? a v) nil
+        :else (me/humanize (m/explain (contract/schema a) v))))
+
+(defn- ref-of "A ref's value as written: {:db/id e} as e." {:malli/schema [:=> [:cat :any] :any]}
+  [v] (if (and (map? v) (contains? v :db/id)) (:db/id v) v))
+
+(defn- edits
+  "acc with the change from old to new of the entity e (an id, or a new entity's tempid) at path p,
+  schema s, as transaction data (:tx), what its schemas refuse (:invalid) and the paths it writes
+  (:paths): each attribute set, retracted or, cardinality many, each member added or retracted;
+  each unit's member new (its attributes and its own units, the same way from nothing, naming its
+  parent by the unit's ref and keyed by its identity), gone (retracted whole) or changed (the same,
+  one level down). A unit identical to its old self is skipped by one identical?; one that differs
+  is walked member by member, each identical member skipped the same way (a changed eval of n:
+  n identical? tests, and the work of the one that differs)."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :qualified-keyword] :map :map [:or pos-int? :string] [:vector :any] :map] :map]}
+  [db s old new e p acc]
+  (if (identical? old new)
+    acc
+    (let [many (get (dbi/-rschema db) :db.cardinality/many #{})
+          us (get units s)
+          unit-keys (set (map :key us))
+          skip (cond-> (conj unit-keys :db/id) (empty? p) (into environment-keys))
+          bad (fn [acc path a v] (if-let [w (why a v)] (update acc :invalid conj {:path path :why w}) acc))
+          acc (reduce
+               (fn [acc a]
+                 (let [o (get old a) n (get new a) path (conj p a)]
+                   (cond
+                     (= o n) acc
+                     (contains? many a)
+                     (let [o (set o) n (set n)]
+                       (-> acc (bad path a n)
+                           (update :tx into (concat (for [x (remove o n)] [:db/add e a (ref-of x)]) (for [x (remove n o)] [:db/retract e a (ref-of x)])))
+                           (update :paths conj path)))
+                     (nil? n) (-> acc (update :tx conj [:db/retract e a (ref-of o)]) (update :paths conj path))
+                     :else (-> acc (bad path a n) (update :tx conj [:db/add e a (ref-of n)]) (update :paths conj path)))))
+               acc (remove skip (distinct (concat (keys old) (keys new)))))]
+      (reduce
+       (fn [acc {:keys [attr key rev? schema id]}]
+         (let [om (get old key) nm (get new key) path (conj p key)]
+           (cond
+             (identical? om nm) acc
+             rev?
+             (as-> acc acc
+               (reduce-kv (fn [acc k m]
+                            (let [o (get om k)]
+                              (cond
+                                (nil? o) (let [t (str "ctx" (count (:tx acc)))] ; unique: each new member writes its identity first
+                                           ;; its identity is its key in the unit, written here: no path the
+                                           ;; swap!'s map says anything at
+                                           (-> (edits db schema {} (assoc m id k) t (conj path k) acc)
+                                               (update :paths (fn [ps] (filterv #(not= (conj path k id) %) ps)))
+                                               (update :tx conj [:db/add t attr e])))
+                                :else (edits db schema o m (:db/id o) (conj path k) acc))))
+                          acc (or nm {}))
+               (reduce-kv (fn [acc k o] (if (contains? nm k) acc (-> acc (update :tx conj [:db/retractEntity (:db/id o)]) (update :paths conj (conj path k)))))
+                          acc (or om {})))
+             (and (map? om) (map? nm) (= (:db/id om) (:db/id nm))) (edits db (render/entity-schema nm nil) om nm (:db/id om) path acc)
+             (nil? nm) (-> acc (update :tx conj [:db/retract e attr (:db/id om)]) (update :paths conj path))
+             :else (update acc :invalid conj {:path path :why "a ref's entity: set it by the ref" :ref attr}))))
+       acc us))))
+
+(defn- strip "x without its :db/ids, at every depth." {:malli/schema [:=> [:cat :any] :any]}
+  [x] (cond (map? x) (into {} (for [[k v] (dissoc x :db/id)] [k (strip v)])) (set? x) (into #{} (map strip) x) :else x))
+
+(def ^:dynamic *installing* "True while the record installs its own value: no write." false)
+(def ^:dynamic *writing* "True while a swap!'s transaction is applied: its patch waits for the swap! to end (pending)." false)
+(defonce ^:private pending (volatile! nil))
+
+(defn write!
+  "A swap! of the record to nv, written: its change from the record (edits) as one transaction,
+  every value checked by its schema, of the record's basis (nv's :t :branch :commit are the
+  record's), and the db, given it, holding what nv says at every path it writes (one d/with); then
+  applied (seon.agent/transact!), and the record as the db holds it installed when the swap! ends.
+  Answers true, or throws the error that refuses it, nothing written: :seon.ctx/basis,
+  :seon.ctx/invalid, :seon.ctx/not-held. Work: the change's paths, a d/with and a patch of it."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [nv]
+  (let [c @held cur (:tree c) db (agent/db) branch (:branch cur)]
+    (when-not (and c (map? nv) (= (select-keys nv environment-keys) (select-keys cur environment-keys)))
+      (throw (ex-info "ctx: the map is not of the record's basis"
+                      (contract/error :seon.ctx/basis #'write! "the map is not of the record's basis: the db moved while the swap!'s function ran (write with the swap!, not inside its function), or the function wrote :t, :branch or :commit, which are the environment's; nothing written"
+                                      {:held (select-keys cur environment-keys) :swapped (if (map? nv) (select-keys nv environment-keys) {:value nv})}))))
+    (let [{:keys [tx invalid paths]} (edits db :seon.db/agent-fact cur nv (:db/id cur) [] {:tx [] :invalid [] :paths []})]
+      (cond
+        ;; nothing to write: the record stays the db's (the swap!'s map gives way to it as it ends)
+        (empty? tx) (if (seq invalid)
+                      (throw (ex-info "ctx: refused by the schemas, nothing written" (contract/error :seon.ctx/invalid #'write! "refused by the schemas, nothing written: each path and why" {:invalid invalid})))
+                      (do (vreset! pending c) true))
+        (seq invalid) (throw (ex-info "ctx: refused by the schemas, nothing written" (contract/error :seon.ctx/invalid #'write! "refused by the schemas, nothing written: each path and why" {:invalid invalid})))
+        :else
+        (let [rep (d/with db tx)
+              held' (:tree (patch c (:db-after rep) (:tx-data rep) branch))
+              holds? (fn [w h] (cond (and (map? w) (map? h)) (= (strip w) (strip (select-keys h (keys w))))
+                                     ;; cardinality many: held as a set, whatever collection the swap! wrote
+                                     (set? h) (= (set (map strip w)) (strip h))
+                                     :else (= (strip w) (strip h))))
+              unheld (vec (remove #(holds? (get-in nv %) (get-in held' %)) paths))]
+          (when (seq unheld)
+            (throw (ex-info "ctx: the db would not hold what the swap! says, nothing written"
+                            (contract/error :seon.ctx/not-held #'write! "the db would not hold what the swap! says at these paths (it would hold :held), nothing written" {:paths unheld :held (mapv #(get-in held' %) unheld)}))))
+          (binding [*writing* true] (agent/transact! tx))
+          true)))))
+
+;; ---- the atom ----------------------------------------------------------------------------
+
+(defonce ^{:doc "The agent's record as a map: (deref ctx), changed with swap! like any atom (write!: one checked transaction on the branch, or the error that refuses it)."} ctx (atom nil))
+
 
 (defn- install!
   "c as the atom's value: the tree, marked as ctx for its renders and with its basis (the branch
   and t it is the record of: what an eval of it records, seon.repl/record-details); the index
   held beside it."
   {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :map]]] :nil]}
-  [c] (vreset! held c) (reset! ctx (with-meta (:tree c) {:seon.render/schema :seon.ctx/ctx :seon.render/basis (select-keys (:tree c) [:t :branch])})) nil)
+  [c] (vreset! held c) (binding [*installing* true] (reset! ctx (with-meta (:tree c) {:seon.render/schema :seon.ctx/ctx :seon.render/basis (select-keys (:tree c) [:t :branch])}))) nil)
 
 (defn- moved
   "The datoms db moved by from a to b: the last transaction's when b is its db (agent/transact!
@@ -234,6 +355,12 @@
       ;; it is there the record is its environment alone, and each move looks it up (one seek)
       (nil? (get-in @held [:tree :db/id])) (install! (build b (:key n) (:branch n)))
       (= (:max-tx a) (:max-tx b)) (install! (update @held :tree merge (environment b (:branch n))))
-      :else (install! (patch @held b (moved a b (:tx n)) (:branch n))))))
+      :else (let [c (patch @held b (moved a b (:tx n)) (:branch n))]
+              ;; a swap!'s own transaction: installed when the swap! ends (the atom is mid-swap)
+              (if *writing* (do (vreset! held c) (vreset! pending c)) (install! c))))))
 
 (add-watch agent/state ::ctx on-state)
+;; nil only while there is no record yet (as the validator is set, before an agent's db)
+(set-validator! ctx (fn [nv] (or *installing* (and (nil? nv) (nil? @held)) (write! nv))))
+;; a swap! written: the record as the db holds it (its new entities' ids) replaces the swap!'s map
+(add-watch ctx ::written (fn [_ _ _ _] (when-let [c @pending] (vreset! pending nil) (install! c))))
