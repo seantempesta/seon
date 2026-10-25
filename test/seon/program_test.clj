@@ -129,6 +129,30 @@
     (is (= [src] (mapv :src (program/schema-dependents db #{:app.kw/count}))) "the form that re-arms when a key it names changes")
     (is (empty? (:keywords (eval-account 'app.pt-kw "(defn plain [m] (:x m))"))) "no qualified keyword, nothing recorded")))
 
+(deftest a-branch-cut-before-form-keywords-gains-them-on-resume
+  ;; root, 2026-10-25 (ctx-atom's finding): a branch cut before :form/keywords killed its agent at
+  ;; resume, schema-dependents reading an attribute its schema lacks. A branch keeps the schema it
+  ;; was cut with; resumed, it gains this program's attributes (seon.db/install-missing!, as a kept
+  ;; store does when a root opens it) and its forms the facts they were recorded without (gained-tx)
+  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}
+        _ (d/create-database cfg)
+        conn (d/connect cfg)
+        ;; the schema as it was before :form/keywords, and a contracted form recorded then
+        _ (d/transact conn (vec (remove #(= :form/keywords (:db/ident %)) pdb/schema)))
+        _ (d/transact conn [{:db/id "n" :ns/name 'app.old} {:db/id "f" :form/id "app.old/f" :form/src "(defn f [m] (:app.old/thing m))" :form/ns "n" :form/order 0 :form/defines #{"v"}}
+                            {:db/id "v" :var/name 'app.old/f :var/form "f" :var/kind :fn :var/contract (seon.edn/encode [:=> [:cat [:map [:app.old/thing :int]]] :int])}])]
+    (is (thrown? Exception (program/schema-dependents @conn #{:app.old/thing})) "cut before the attribute: the read refuses it, as the agent died")
+    (is (= [] (program/gained-tx @conn)) "the attribute not yet installed: nothing to derive")
+    (let [added (pdb/install-missing! conn)
+          _ (d/transact conn (program/gained-tx @conn))]
+      (is (contains? added :form/keywords) "resumed: the attribute is installed on the branch")
+      (is (= #{:app.old/thing} (set (d/q '[:find [?k ...] :where [?f :form/id "app.old/f"] [?f :form/keywords ?k]] @conn)))
+          "and the form gains the keys its contract names")
+      (is (= ["app.old/f"] (mapv :id (program/schema-dependents @conn #{:app.old/thing})))
+          "so a change to that key re-arms the form, as it did before :form/keywords")
+      (is (= #{} (pdb/install-missing! conn)) "a second resume installs nothing")
+      (is (= [] (program/gained-tx @conn)) "and derives nothing: a form holds keywords now"))))
+
 (deftest catches-and-clocks-are-recorded
   ;; for the guard detectors (session PATTERNS): a hiding guard is a catch answering a constant;
   ;; time deciding is a sleep, a deref with a timeout, or core.async's timeout
