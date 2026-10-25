@@ -244,13 +244,15 @@
   further: what my.task/related and my.agent/related answer. nil when there is nothing."
   {:malli/schema [:=> [:cat :seon.host/db [:map [:sections {:optional true} [:vector :string]] [:functions {:optional true} [:vector :qualified-symbol]]
                                            [:schemas {:optional true} [:vector :qualified-keyword]]]]
-                  [:maybe :map]]}
+                  [:maybe [:map [:sections {:optional true} [:vector :string]]
+                           [:functions {:optional true} [:vector [:or :string [:tuple :string [:vector :qualified-keyword]]]]]
+                           [:schemas {:optional true} [:vector :qualified-keyword]] [:read :string] [:more :string]]]]}
   [db {:keys [sections functions schemas]}]
   (when (or (seq sections) (seq functions) (seq schemas))
    (cond-> {}
     (seq sections) (assoc :sections (mapv #(let [v (docs/view db % :summary)] (str % ": " (or (:seon.ref/summary v) (:seon.ref/heading v)))) sections))
     ;; with each function the registry keys its code and contract name (its :form/keywords): the
-    ;; data it operates on, which earned their tokens (record keys .31 -> .53 at 5 for ~74 tokens)
+    ;; data it operates on, which earned their tokens (docs/vector.md#what-the-work-is-likely-to-need-as-an-eval)
     (seq functions) (assoc :functions (mapv #(let [v (d/entity db [:var/name %])
                                                    ks (sort-by str (filter (fn [k] (pdb/eid db :schema/key k)) (:form/keywords (:var/form v))))]
                                                ;; its keys a vector beside its line, so the one printer cuts a long one

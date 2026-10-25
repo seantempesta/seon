@@ -200,14 +200,13 @@
                            (vswap! acc update :requires into (mapcat (comp libs unquote-form datum)) args))))))
          nil)
        (let [in-fn? (or in-fn? (#{:fn :defmacro} (:op n)))]
-         ;; a def's metadata is about its var (def-info keeps it; its contract's keys come from
-         ;; :contract), not data its code operates on: walked for the vars it names (a deftest's
-         ;; body is its :test), its keywords not kept; its init walked for both
+         ;; a def's metadata keys name its var's metadata (:malli/schema), not data its code
+         ;; operates on: those its walk added are dropped (a deftest's body, its :test, kept)
          (if (= :def (:op n))
-           (let [init (:init n) kws (:keywords @acc)]
-             (ir/reduce-ir-children (fn [_ c] (when-not (identical? c init) (walk c in-fn?))) nil n)
-             (vswap! acc assoc :keywords kws)
-             (some-> init (walk in-fn?)))
+           (let [kws (:keywords @acc)
+                 meta-keys (let [m (:meta n)] (set (when (map? m) (filter qualified-keyword? (keys m)))))]
+             (ir/reduce-ir-children (fn [_ c] (walk c in-fn?)) nil n)
+             (vswap! acc update :keywords #(into kws (remove meta-keys) %)))
            (ir/reduce-ir-children (fn [_ c] (walk c in-fn?)) nil n))))
      node false)
     @acc))
@@ -416,7 +415,7 @@
           lead (assoc :form/lead lead)
           (seq defines) (assoc :form/defines (mapv #(:db/id (def-ref % (eid-of %))) defines))
           (seq declares) (assoc :form/declares (mapv #(:db/id (def-ref [:var %] (eid-of [:var %]))) declares)))
-        (for [[a k] form-sets :let [v (get row k)] :when (seq v)] [a (set v)])))
+        (for [[a k] form-sets :let [v (get row k)] :when (seq v)] [a (vec v)])))
 
 (defn def-tx
   "tx-data making definition k point at the form content names (content {:form :kind
