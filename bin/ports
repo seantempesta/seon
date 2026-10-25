@@ -50,6 +50,9 @@ if [[ -f $LOCAL ]]; then
   (( ${#others} )) && for i in {${#others}..1}; do [[ ${others[i]## } != ";;"* ]] && { others[i]=${others[i]%\}}; break } done
 fi
 mkdir -p "${LOCAL:h}"
+# each run writes its own file and renames it over the layer (one atomic rename): bin/build,
+# bin/test and bin/check each run this first, so two of them at once must not share one name
+NEW=$LOCAL.new.$$
 {
   print ";; This checkout's own config layer (gitignored), over resources/seon/config/default.edn and"
   print ";; under the command line's --config and --set (seon.config). Written by bin/ports from"
@@ -60,9 +63,9 @@ mkdir -p "${LOCAL:h}"
   print -n " :seon.config.web/port #long #or [#env SEON_WEB_PORT $W]"
   for o in $others; do print; print -n "$o"; done
   print "}"
-} > "$LOCAL.new"
+} > "$NEW"
 # written only when it changes (nothing changed, nothing done)
-if cmp -s "$LOCAL.new" "$LOCAL"; then rm -f "$LOCAL.new"; else mv "$LOCAL.new" "$LOCAL"; fi
+if cmp -s "$NEW" "$LOCAL"; then rm -f "$NEW"; else mv "$NEW" "$LOCAL"; fi
 [[ -n $WRITE ]] && exit 0
 . "$ROOT/bin/env"
 # the layer is named: no process reads config/local.edn unless its command line does
