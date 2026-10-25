@@ -41,9 +41,12 @@
   (let [rest (read-rest form h v)
         drop? (and (seq? form) (= 'drop (first form)))]
     (cond
-      chars? (let [[whole k] (if (and (seq? form) (= 'subs (first form))) [(read-rest (second form) h v) (nth form 2)] [rest 0])]
+      chars? (let [[whole k] (if (and (seq? form) (= 'subs (first form))) [(read-rest (second form) h v) (nth form 2)] [rest 0])
+                   ;; a name's text (read as `(str …)`) prints bare; a string's as its literal
+                   name? (and (seq? form) (seq? (second form)) (= 'str (first (second form))))
+                   shown (subs whole 0 k)]
                (and (= n (count rest)) (= rest (subs whole k))
-                    (str/includes? text (str (emit/string-literal (subs whole 0 k)) "…+" n))))
+                    (str/includes? text (str (if name? shown (emit/string-literal shown)) "…+" n))))
       (nil? n) (some? (seq rest))
       drop? (let [c (read-rest (nth form 2) h v)]
               (and (= (nth form 1) (- (count c) n)) (= (seq rest) (seq (drop (- (count c) n) c)))))
@@ -57,8 +60,8 @@
     (boolean
      (and (<= (select/estimate text) budget)
           (= elisions (count cuts))
-          ;; through a handle every cut names its form, but a long name's
-          (every? #(if (:name? %) (nil? (:form %)) (and (:form %) (reads-exactly? text h raw %))) cuts)
+          ;; through a handle every cut names its form, a long name's too
+          (every? #(and (:form %) (reads-exactly? text h raw %)) cuts)
           (or truncated? (= raw (edn/read-string text)))))))
 
 (def ^:private line-gen
@@ -249,22 +252,23 @@
   ;; that say nothing. Rows (members of one collection class) show whole in their order, then
   ;; ONE cut that names how many are left and the form that reads them.
   (let [h 'result/e1
-        v {:value {:classes {:stale-section {:n 177 :rows (problem-rows 177)}}}}
+        ;; 600 rows: at the reply budget the 177 rows of 2026-10-25 now show whole, with no cut
+        v {:value {:classes {:stale-section {:n 600 :rows (problem-rows 600)}}}}
         {:keys [text elisions]} (seon/print-value v {:handle h})
         [cut :as cuts] (cuts-of text)
         shown (count (re-seq #":seon.docs/section" text))]
     (is (= 1 elisions (count cuts)) text)
     (is (not (re-find #"\{…" text)) "no row shows as a placeholder")
-    (is (< 40 shown 177) "the reply budget shows dozens of rows, each whole")
-    (is (= (- 177 shown) (:n cut)) "the cut counts the rows it left")
+    (is (< 40 shown 600) "the reply budget shows dozens of rows, each whole")
+    (is (= (- 600 shown) (:n cut)) "the cut counts the rows it left")
     (is (reads-exactly? text h v cut) "and its form reads exactly them")
     (testing "a map of rows: its entries whole in their order, then one cut"
-      (let [m (into {} (map (juxt :n identity)) (problem-rows 177))
+      (let [m (into {} (map (juxt :n identity)) (problem-rows 600))
             {:keys [text elisions]} (seon/print-value m {:handle h})]
         (is (= 1 elisions) text)
         (is (not (re-find #"\{…" text)))))
     (testing "rows of array maps and of hash maps are one kind"
-      (let [mixed (into (problem-rows 100) (map #(into % {:a 1 :b 2})) (problem-rows 100))
+      (let [mixed (into (problem-rows 300) (map #(into % {:a 1 :b 2})) (problem-rows 300))
             {:keys [text elisions]} (seon/print-value mixed {:handle h})]
         (is (= 1 elisions) text)
         (is (not (re-find #"\{…" text)))))
@@ -320,6 +324,48 @@
         (is (:chars? cut) text)
         (is (= (:n cut) (count rest)) "the form reads the characters it says it left")))))
 
+
+(deftest a-map-shows-its-first-entry-whenever-its-least-form-fits
+  ;; a vector of the same size shows its first member at this budget (`[0 …29 (drop 1 result/h1)]`)
+  (let [m (zipmap (range 30) (range 30))
+        {:keys [text] :as r} (seon/print-value m {:budget 10 :handle 'result/h1})]
+    (is (nil? (:seon.error/type r)) (pr-str r))
+    (is (str/starts-with? (str text) "{0 0") "the first entry, then a cut")
+    (is (every? :form (cuts-of (str text))) "every cut names the form that reads the rest")))
+
+(deftest a-long-name-is-cut-in-chars-and-names-its-form
+  (let [v (keyword (apply str (repeat 300 "n")))
+        h 'result/h1
+        {:keys [text]} (seon/print-value v {:budget 60 :handle h})
+        [c :as cs] (cuts-of text)]
+    (is (= 1 (count cs)) text)
+    (is (:chars? c) "the cut says its unit: `…+N chars`")
+    (is (some? (:form c)) "and the form that reads the rest")
+    (is (= (subs (name v) (- 300 (:n c))) (when (:form c) (read-rest (:form c) h v)))
+        "the form reads exactly the N characters of the name that were left")))
+
+(deftest a-long-name-cuts-the-same-anywhere
+  ;; the cut reads `(subs (str <path>) k)`: a namespaced keyword's or symbol's printed text, and a
+  ;; long keyword as a map's key (its path reads it back from the map)
+  (let [h 'result/h1
+        n (apply str (repeat 300 "n"))]
+    (doseq [v [(keyword "a.ns" n) (symbol "a.ns" n) {(keyword n) 1} [:x (symbol n)]]]
+      (let [{:keys [text]} (seon/print-value v {:budget 60 :handle h})
+            cs (cuts-of text)]
+        (is (seq cs) text)
+        (is (every? #(and (:form %) (reads-exactly? text h v %)) cs) text)))))
+
+(deftest an-entry-of-leaves-is-charged-what-it-prints
+  ;; an entry of two leaves that fits its line from its indentation is charged its flat width (no
+  ;; break between key and value); the printer throws when its text passes its charge, so this
+  ;; prints entries of every length around the line's width where an entry starts deepest: first
+  ;; in a map, in a namespaced map, nested, and last before several closers
+  (doseq [w (range 50 90)
+          :let [s (apply str (repeat w "x"))]
+          v [{:a s} {:a s :b s} {:k {:k2 {:a s :b 1}}} {:ns/a s :ns/b s} [[[{:a s :b s}]]] {:x/a {:x/b {:x/c s}}}]
+          b [10 40 400]]
+    (let [r (seon/print-value v {:handle 'result/h1 :budget b})]
+      (is (or (:text r) (= :seon.render.value/insufficient-floor-budget-error (:seon.error/type r))) (pr-str [w b r])))))
 
 ;; ---- the page's shapes: the hiccup fold over the same op stream (the text is unchanged) ---
 

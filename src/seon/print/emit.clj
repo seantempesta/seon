@@ -60,11 +60,12 @@
 
 (defn continuation
   "The form that reads what one cut omitted, from its next offset: `(drop n …)` for members,
-  `(subs … n)` for characters; nil without a requery symbol."
+  `(subs … n)` for characters (of code's text, or of a keyword's or symbol's printed text, `str`);
+  nil without a requery symbol."
   {:malli/schema [:=> [:cat :map] :any]}
-  [{:seon.print/keys [requery-id elision-unit code?] path :seon.render.data/path next-offset :seon.render.data/next-offset}]
+  [{:seon.print/keys [requery-id elision-unit code? name?] path :seon.render.data/path next-offset :seon.render.data/next-offset}]
   (when (or (symbol? requery-id) (seq? requery-id))
-    (let [target (cond->> (path-form requery-id (vec path)) code? (list code?))
+    (let [target (cond->> (path-form requery-id (vec path)) code? (list code?) name? (list 'str))
           offset (or next-offset 0)]
       (cond (zero? offset) target
             (= :characters elision-unit) (list 'subs target offset)

@@ -1,0 +1,220 @@
+{:printed-chars [19645 11100],
+ :exit
+   [{:agent :a1,
+     :pid 12538,
+     :exit {:exit 3},
+     :stderr nil,
+     :seon.error/type :seon.agent/died,
+     :seon.error/operation seon.root/api-proc,
+     :seon.error/message "agent a1 died: exit 3",
+     :last-op
+       {:since-ms 1792908004572,
+        :kind :eval,
+        :form "(+ 1 1) (System/exit 3) (+ 2 2)"}}
+    {:status :dead, :exit {:exit 3}}],
+ :refused
+   {:ms 4.398,
+    :text
+      "{:handle result/e1,
+ :ms 4.398,
+ :ticks 217720,
+ :bytes 1254752,
+ :ex
+   {:data
+      {:writer-error
+         \"Bad entity attribute :no/such-attr at {:db/id 6980, :no/such-attr 1}, not defined in current schema\"},
+    :seon.error/type :seon.agent/eval-error,
+    :seon.error/operation seon.repl/eval-code,
+    :class \"class clojure.lang.ExceptionInfo\",
+    :seon.error/message
+      \"transact refused: Bad entity attribute :no/such-attr at {:db/id 6980, :no/such-attr 1}, not defined in current schema\"}}",
+    :ex
+      {:data
+         {:writer-error
+            "Bad entity attribute :no/such-attr at {:db/id 6980, :no/such-attr 1}, not defined in current schema"},
+       :seon.error/type :seon.agent/eval-error,
+       :seon.error/operation seon.repl/eval-code,
+       :class "class clojure.lang.ExceptionInfo",
+       :seon.error/message
+         "transact refused: Bad entity attribute :no/such-attr at {:db/id 6980, :no/such-attr 1}, not defined in current schema"}},
+ :read-error
+   {:text
+      "{:handle result/e4,
+ :ex
+   {:clojure.error/line 2,
+    :clojure.error/column 1,
+    :causes
+      [\"class java.lang.RuntimeException: EOF while reading, starting at line 1\"],
+    :seon.error/type :seon.agent/eval-error,
+    :seon.error/operation seon.repl/eval-code,
+    :phase :read,
+    :class \"class clojure.lang.LispReader$ReaderException\",
+    :seon.error/message
+      \"java.lang.RuntimeException: EOF while reading, starting at line 1\"}}",
+    :ex
+      {:clojure.error/line 2,
+       :clojure.error/column 1,
+       :causes
+         ["class java.lang.RuntimeException: EOF while reading, starting at line 1"],
+       :seon.error/type :seon.agent/eval-error,
+       :seon.error/operation seon.repl/eval-code,
+       :phase :read,
+       :class "class clojure.lang.LispReader$ReaderException",
+       :seon.error/message
+         "java.lang.RuntimeException: EOF while reading, starting at line 1"}},
+ :spin
+   {:error 1,
+    :ms 32.685917,
+    :reports
+      [{:type :error,
+        :var "#'app.spin/spins",
+        :expected "nil",
+        :actual "nil",
+        :seon.error/type :seon.test/ticks-spent,
+        :ticks 100000005,
+        :budget 100000000,
+        :message
+          "the test spent its budget of 100000000 engine ticks (work done, not time): a test that never ends, or more work than one test may do"}]},
+ :test-exits
+   {:error 1,
+    :exit {:exit 7},
+    :reports
+      [{:type :error,
+        :exit {:exit 7},
+        :var "#'app.spin/exits",
+        :message
+          "test process died: {:exit 7} while #'app.spin/exits ran"}]},
+ :oom
+   [{:ms 7834.128,
+     :text
+       "{:handle result/e5,
+ :ms 7834.128,
+ :ticks 378670925,
+ :bytes 4598457008,
+ :ex
+   {:seon.error/type :seon.agent/eval-error,
+    :seon.error/operation seon.repl/eval-code,
+    :class \"class java.lang.OutOfMemoryError\",
+    :seon.error/message
+      \"jolt: out of memory: GC overhead limit exceeded: 98% of the time collecting, with 0% of the heap ceiling of 1755526560 bytes free. Raise it with JOLT_MAX_HEAP=<n>[k|m|g], or turn the limit off with JOLT_GC_OVERHEAD_LIMIT=off.\"}}",
+     :ex
+       {:seon.error/type :seon.agent/eval-error,
+        :seon.error/operation seon.repl/eval-code,
+        :class "class java.lang.OutOfMemoryError",
+        :seon.error/message
+          "jolt: out of memory: GC overhead limit exceeded: 98% of the time collecting, with 0% of the heap ceiling of 1755526560 bytes free. Raise it with JOLT_MAX_HEAP=<n>[k|m|g], or turn the limit off with JOLT_GC_OVERHEAD_LIMIT=off."}}
+    {:ms 0.19,
+     :text
+       "{:handle result/e6, :value 10, :ms 0.19, :ticks 3491, :bytes 21440}"}],
+ :interrupt
+   {:ms 0.048,
+    :text
+      "{:handle result/e9,
+ :ms 0.048,
+ :ticks 95880,
+ :bytes 1888,
+ :ex
+   {:data {:interrupted true},
+    :seon.error/type :seon.agent/eval-error,
+    :seon.error/operation seon.repl/eval-code,
+    :seon.error/message \"interrupted by root\",
+    :class \"class clojure.lang.ExceptionInfo\"}}",
+    :ex
+      {:data {:interrupted true},
+       :seon.error/type :seon.agent/eval-error,
+       :seon.error/operation seon.repl/eval-code,
+       :seon.error/message "interrupted by root",
+       :class "class clojure.lang.ExceptionInfo"}},
+ :ticks
+   [{:ms 25.768,
+     :text
+       "{:handle result/e7,
+ :ms 25.768,
+ :ticks 100003410,
+ :bytes 170304,
+ :ex
+   {:ticks 100000000,
+    :budget 100000000,
+    :seon.error/type :seon.repl/ticks-spent,
+    :seon.error/operation seon.repl/eval-code,
+    :seon.error/message
+      \"the form ran 100000000 engine ticks (procedure calls and loop back-edges), its budget of 100000000, and was stopped: a loop that never ends, or more work than one form should do\"}}",
+     :ex
+       {:ticks 100000000,
+        :budget 100000000,
+        :seon.error/type :seon.repl/ticks-spent,
+        :seon.error/operation seon.repl/eval-code,
+        :seon.error/message
+          "the form ran 100000000 engine ticks (procedure calls and loop back-edges), its budget of 100000000, and was stopped: a loop that never ends, or more work than one form should do"}}
+    {:ms 0.509,
+     :text
+       "{:handle result/e8, :value 8, :ms 0.509, :ticks 14494, :bytes 224304}"}],
+ :out
+   ["hello from :a3
+"
+    {:active-threads 2,
+     :seon.error/type :seon.test/fork-refused,
+     :seon.error/operation seon.agent/run-tests-forked,
+     :seon.error/message
+       "cannot fork the tests: 2 Chez threads active (a running future?)"}],
+ :fork-server
+   [{:agents-forked 4,
+     :pid 12532,
+     :status :up,
+     :restarts 1,
+     :mismatch 0,
+     :lag-ms 52.44,
+     :fork-ms-p50 86.96}
+    {:ms 0.105,
+     :text
+       "{:handle result/e11, :value 7, :ms 0.105, :ticks 3480, :bytes 21344}"}
+    [{:ms 3.658,
+      :text
+        "{:handle result/e1,
+ :value 360,
+ :ms 3.658,
+ :ticks 324529,
+ :bytes 1688336}"}
+     {:ms 25.514,
+      :text
+        "{:handle result/e2,
+ :ms 25.514,
+ :ticks 99995808,
+ :bytes 104768,
+ :ex
+   {:ticks 100000000,
+    :budget 100000000,
+    :seon.error/type :seon.repl/ticks-spent,
+    :seon.error/operation seon.repl/eval-code,
+    :seon.error/message
+      \"the form ran 100000000 engine ticks (procedure calls and loop back-edges), its budget of 100000000, and was stopped: a loop that never ends, or more work than one form should do\"}}",
+      :ex
+        {:ticks 100000000,
+         :budget 100000000,
+         :seon.error/type :seon.repl/ticks-spent,
+         :seon.error/operation seon.repl/eval-code,
+         :seon.error/message
+           "the form ran 100000000 engine ticks (procedure calls and loop back-edges), its budget of 100000000, and was stopped: a loop that never ends, or more work than one form should do"}}
+     {:ms 0.004,
+      :text
+        "{:handle result/e3, :value :after, :ms 0.004, :ticks 18, :bytes 608}"}]],
+ :checks
+   {"a form past its tick budget is stopped, a typed error naming its ticks; the agent keeps its state and goes on"
+      true,
+    "a read error is the response's :ex" true,
+    "a refused transaction is the response's :ex" true,
+    "a test that kills its process is an error; the agent lives" true,
+    "a test that never ends stops at its tick budget, naming the test; the agent lives"
+      true,
+    "agent calling System/exit mid-request dies alone, named by its exit status"
+      true,
+    "an agent past its heap bound gets OutOfMemoryError as its response's :ex and lives"
+      true,
+    "huge and infinite values print within the printer's budget" true,
+    "printed output comes back as :out; a busy thread blocks the test fork instead of breaking it"
+      true,
+    "root's interrupt! stops the running request; the agent's next request runs"
+      true,
+    "the fork server dies: agents keep working, a new server forks the next agent (whose tick budget works)"
+      true}}
+ROBUST OK

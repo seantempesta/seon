@@ -4,7 +4,7 @@
   watcher that dies is a :platform error on main. Run: bin/test seon.watch-test"
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [clojure.java.io :as io]
             [seon.watch :as watch] [my.root :as mr] [seon.root :as root] [seon.problems :as problems] [seon.contract :as contract]
-            [datahike.api :as d] [seon.task] [seon.docs] [clojure.java.shell]))
+            [datahike.api :as d] [seon.task] [seon.docs] [clojure.java.shell] [seon.config] [clojure.string :as str] [seon.fx]))
 
 (deftest a-record-is-its-kind-then-its-path
   (is (= [:path "/a/b\nc.md"] (watch/record (.getBytes "p/a/b\nc.md" "UTF-8"))) "a newline is part of the path: NUL ends a record")
@@ -13,13 +13,59 @@
   (is (= [:ready "/a"] (watch/record (.getBytes "w/a" "UTF-8")))))
 
 (deftest a-batch-loads-what-its-paths-loaders-read
-  (let [co "/c" refs "/g/refs" k #(mr/watch-kinds co refs %)]
-    (is (= #{:docs} (k [[:path "/c/docs/health.md"]])))
-    (is (= #{:source} (k [[:path "/c/src/seon/watch.clj"]])))
-    (is (= #{} (k [[:path "/c/notes/x.md"] [:path "/c/target/seon"] [:path "/elsewhere/docs/x.md"]])) "no loader reads them: nothing loads")
-    (is (= #{:source} (k [[:path "/g/refs/heads/jolt/health"]])) "a ref moved: a commit or a merge")
-    (is (= #{:docs :tasks :source} (k [[:rescan "/c/docs"]])) "FSEvents coalesced or dropped events: every kind again")
-    (is (= #{:docs :tasks :source} (k [[:root "/c"]])))))
+  (let [co (seon.config/checkout) refs "/g/refs" own "/g/refs/heads/jolt/health" k #(mr/watch-kinds co refs own %)]
+    (is (= #{:docs} (k [[:path (str co "/docs/health.md")]])))
+    (is (= #{:source} (k [[:path (str co "/src/seon/watch.clj")]])))
+    (is (= #{:tasks} (k [[:path (str co "/resources/seon/tasks/seon.watch.edn")]])))
+    (is (= #{} (k [[:path (str co "/notes/x.md")] [:path (str co "/target/seon")] [:path "/elsewhere/docs/x.md"]])) "no loader reads them: nothing loads")
+    (is (= #{:source} (k [[:path own]])) "this checkout's branch moved: a commit or a merge on it")
+    (testing "the repository is every worktree's: another branch's commit is not this root's (root-test's 806 tasks, 2026-10-25)"
+      (is (= #{} (k [[:path "/g/refs/heads/jolt/another"] [:path "/g/refs/heads/main"]])))
+      (is (= #{} (mr/watch-kinds co refs nil [[:path own]])) "a detached HEAD follows no ref"))
+    (testing "a rescan (FSEvents coalesced or dropped events) loads the loaders reading under its path"
+      (is (= #{:docs} (k [[:rescan (str co "/docs")]])))
+      (is (= #{} (k [[:rescan (str co "/target")]])) "a build's writes under target/: nothing")
+      (is (= #{:docs :tasks :source} (k [[:rescan co]]) (k [[:root co]])) "the checkout itself: every kind")
+      (is (= #{:source} (k [[:rescan refs]])) "the refs: the source alone, never the task files"))))
+
+(deftest another-worktrees-commit-loads-nothing
+  ;; root-test's 806 tasks (2026-10-25): every worktree's commits move the one repository's refs;
+  ;; a root loads on its own branch's alone. A scratch repository of two worktrees, its refs
+  ;; watched as root watches them (seon.fx/git-refs, seon.fx/head-ref), the paths FSEvents reports
+  (let [tmp (.getCanonicalPath (doto (io/file (str (System/getProperty "java.io.tmpdir") "/seon-own-" (random-uuid))) (.mkdirs)))
+        co (str tmp "/main") other (str tmp "/other")
+        git (fn [dir & args] (let [r (apply clojure.java.shell/sh "git" "-C" dir args)] (is (zero? (:exit r)) (str args (:err r))) r))
+        _ (.mkdirs (io/file co))
+        _ (git co "init" "-q" "-b" "main")
+        _ (git co "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "--allow-empty" "-m" "one")
+        _ (git co "worktree" "add" "-q" "-b" "other" other)
+        refs (seon.fx/git-refs co) own (seon.fx/head-ref co)
+        seen (atom []) settled (promise) theirs (promise) ours (promise)
+        w (watch/start! [refs] (fn [b] (let [all (swap! seen into b)]
+                                         (when (some #(str/includes? (second %) "/tags/settled") all) (deliver settled true))
+                                         (when (some #(and (= :path (first %)) (str/includes? (second %) "/heads/other")) all) (deliver theirs all))
+                                         (when (some #(= [:path own] %) all) (deliver ours all))))
+                        (fn [_]))]
+    (try
+      (is (= (str refs "/heads/main") own) "the checkout's own ref, as the watcher reports paths")
+      ;; FSEvents may report the setup's writes (its first commit) after the stream starts: a tag
+      ;; (a ref no loader reads) marks where they end, and what follows it is this test's
+      (git co "tag" "settled")
+      @settled
+      (reset! seen [])
+      (git other "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "--allow-empty" "-m" "theirs")
+      (testing "the other worktree's commit moved its ref: that path loads nothing, and no ref loads the task files or the wiki"
+        ;; (FSEvents may report heads/main again within a later batch, coalesced: at most a source
+        ;; read that finds nothing new, never the task files)
+        (let [b @theirs]
+          (is (= #{} (mr/watch-kinds co refs own (filterv #(str/includes? (second %) "/heads/other") b))) (pr-str b))
+          (is (not-any? #{:tasks :docs} (mr/watch-kinds co refs own b)) (pr-str b))))
+      (git co "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "--allow-empty" "-m" "ours")
+      (testing "this checkout's commit arrives as its own ref's path, as head-ref names it: its source loads"
+        (let [b @ours]
+          (is (some #{[:path own]} b) (pr-str b))
+          (is (= #{:source} (mr/watch-kinds co refs own (filterv #{[:path own]} b))))))
+      (finally (watch/stop! w) (clojure.java.shell/sh "rm" "-rf" tmp)))))
 
 (deftest a-change-arrives-and-a-dead-watcher-is-a-platform-error
   (let [dir (.getCanonicalPath (doto (io/file (str (System/getProperty "java.io.tmpdir") "/seon-watch-" (random-uuid) "/docs")) (.mkdirs)))
