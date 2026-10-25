@@ -62,7 +62,7 @@ A working paper for root (handoff 2026-10-25, "New ideas" 4–6). Measurement an
 Measured on this worktree's root; code is cited by var.
 
 **Mirroring:**
-- `seon.docs/load-tx` mirrors every page at boot and on `my.root/load-docs!`, not when a file changes.
+- `seon.docs/load-tx` mirrors every page at boot, on `my.root/load-docs!`, and, in the standing root, whenever a page changes (`my.root/watch!`, docs/health.md#every-writer-root-loads-what-changed; the audit agent missed this). The vectors proc then re-embeds each changed section.
 - All 33 pages and 364 sections are in the db, matching the 364 headings on disk.
 - Schema: `resources/seon/schemas/seon.section.edn`. A section has address, heading, lead, text, parent, references, names, dead-links, read, baseline-unread and reviewed.
 
@@ -133,3 +133,27 @@ A first answer from the same measuring agent claimed counts over 47 step 6 runs 
 Skip schema forms and file hunts. Pulls 1, 4 and 5 come to about 1,050 tokens a turn, against roughly 3 of 13 reads a run.
 
 What I'd do first: ruling 1 (how a design adds proofs) and gap 2 (each form's value) block or mislead every design run. Then the pulls run as one variant on the fit requests (scripted first, then a paid rerun of step 6's 5 × 3 on root's go), keeping the eval forms this time.
+
+## Filed (2026-10-25, the owner: "design fixes for everything that are straightforward and write down the problems clearly in the wiki")
+
+Each gap is a task, and each is written into the page where its mechanism lives:
+- docs/tasks.md#where-an-agents-run-falls-short-today
+- docs/vector.md#where-it-falls-short-today
+- docs/references.md#where-the-wiki-in-the-store-falls-short-today
+- docs/server.md#where-it-falls-short-today
+- docs/health.md#a-stale-section
+
+The tasks:
+- `seon.docs/a-section-reads-at-each-level`
+- `seon.docs/every-section-has-a-lead`
+- `seon.vector/a-text-written-on-a-branch-is-embedded-there`
+- `seon.context/the-screen-shows-the-sections-nearest-the-plan` (needs the vector one)
+- `my.task/a-design-adds-its-proofs`
+- `my.task/status-answers-before-any-turn`
+- `my.agent/a-deferred-test-names-the-process-it-reaches`
+- `my.agent/grep-ranks-definitions-first`
+- `seon.server/the-outside-context-is-what-a-model-is-sent`
+- `seon.server/done-answers-the-verdict`
+- `seon.problems/a-section-goes-stale-when-what-it-cites-changes-meaning` (waits on the owner's ruling)
+
+`docs/prompt.md` now says an eval answers the last form's value, as the help page does.
