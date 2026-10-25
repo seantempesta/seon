@@ -124,7 +124,11 @@
 
 (clojure.core/defn- problems {:malli/schema [:=> [:cat :seon.host/schema :any] [:vector :seon.error/problem]]} [s v]
   (vec (for [{:keys [path in schema value]} (:errors (m/explain s v))]
-         {:path path :in in :expected (m/form schema) :value (print/text value (:part print/budgets))})))
+         {:path path :in in :expected (m/form schema)
+          ;; the value as it prints, marked code (print/code): it reads as written, a symbol or
+          ;; keyword as itself, never a string literal of its text (live runs, 2026-10-26:
+          ;; `:value "seon.print.select"` for a symbol, and the agent sent the same call again)
+          :value (print/code (print/text value (:part print/budgets)))})))
 
 (clojure.core/defn- invalid
   "Malli's report for fn-sym, as the thrown error map."

@@ -131,10 +131,17 @@
   ;; seon.contract's error shows the offending value within the part budget, cut the printer's way
   (let [f (seon.contract/checked 'seon.print-test/takes-an-int [:=> [:cat :int] :int] inc)
         e (try (f (vec (range 10000))) nil (catch Exception e (ex-data e)))
-        shown (:value (first (:seon.error/problems e)))]
+        shown (:seon.print/code (:value (first (:seon.error/problems e))))]
     (is (= :seon.instrument/contract-error (:seon.error/type e)))
     (is (re-find #"…\d+" shown) "a long value is cut with the printer's marker")
-    (is (<= (select/estimate shown) (:part seon/budgets)))))
+    (is (<= (select/estimate shown) (:part seon/budgets))))
+  ;; live runs (2026-10-26): `:value "seon.print.select"` for a symbol, and the agent sent the
+  ;; same call again; marked code, the value reads as it was written
+  (let [f (seon.contract/checked 'seon.print-test/takes-a-var [:=> [:cat :qualified-symbol] :any] identity)
+        e (try (f 'seon.print.select) nil (catch Exception e (ex-data e)))
+        text (seon/response-text {:handle 'result/e1 :ex e})]
+    (is (str/includes? text ":value seon.print.select") text)
+    (is (not (str/includes? text "\"seon.print.select\"")) "never a string literal of its text")))
 
 (deftest text-is-the-printed-text-or-the-error
   (is (= "{:a 1}" (seon/text {:a 1})))

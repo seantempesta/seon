@@ -798,7 +798,7 @@
           "quiet names it, with what it blocks"))
     (testing "a message it has not taken: a wake on its process"
       (is (= [wake] (actions-for (db-of [(decl "a")] :extra (into (parked :waiting 0) (msg "m1"))))))
-      (is (= [wake] (actions-for (db-of [(decl "a")] :extra (into (parked :no-progress 1) (concat (msg "m1") (msg "m2"))))))))
+      (is (= [wake] (actions-for (db-of [(decl "a")] :extra (into (parked :cap 1) (concat (msg "m1") (msg "m2"))))))))
     (testing "parked, its task cancelled or held: its process is stopped (a kill of the parked run), nothing starts"
       (is (= [{:op :kill :run "demo/a#1" :reason :cancelled}]
              (actions-for (db-of [(decl "a")] :extra (into (parked :waiting 0) (concat (msg "m1") (task/execution-tx ["demo/a"] :cancelled)))))))
