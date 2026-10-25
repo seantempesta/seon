@@ -1,6 +1,6 @@
 (ns seon.test-store-test
   "The test store's own rules: the process tests' store is made once, before any shard."
-  (:require [clojure.test :refer [deftest is]] [clojure.java.shell :as sh] [datahike.api :as d]
+  (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [datahike.api :as d]
             [seon.db :as pdb] [seon.test-store :as ts])
   (:import [clojure.lang ExceptionInfo]))
 
@@ -67,3 +67,21 @@
           (is seeded? "the new path is made fresh")
           (d/release conn)))
       (finally (sh/sh "rm" "-rf" dir)))))
+
+(deftest n-roots-open-the-process-store-at-once
+  ;; task seon.test-store/a-process-root-opens-the-shared-store-under-load: under load one shard's
+  ;; root died before listening, `lmdb env_open: Invalid argument` opening the shared process store
+  ;; other shards' roots held open. n = 4 roots start on it at once: every one listens
+  (let [store (ts/process-store)
+        dir (.getParent (java.io.File. ^String store))
+        roots (vec (for [i (range 4)] {:store store :main (str "n4-" i "-" (random-uuid)) :runs (str dir "/n4-" i "-" (random-uuid) "-runs")}))
+        started (mapv deref (mapv #(future (ts/start-root! %)) roots))]
+    (try
+      (is (every? :port started)
+          (str "every root listens; the logs of those that did not: " (pr-str (map :log (remove :port started)))))
+      (testing "a root that did not listen is the test's error with its log, never an ask of no port"
+        (is (= {:error :root-did-not-listen :log "lmdb env_open: Invalid argument"}
+               (ts/ask {:port nil :log "lmdb env_open: Invalid argument"} {:op :agents}))))
+      (finally
+        (doseq [r started :when (:port r)] (ts/stop-root! r))
+        (doseq [r started] (sh/sh "rm" "-rf" (:runs r)) (ts/drop-main! store (:main r)))))))
