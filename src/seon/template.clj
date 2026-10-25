@@ -31,38 +31,32 @@
        "at the REPL, and make the proofs pass on the combined program."))
 
 (def instructions
-  "What each step's agent does, by task kind (its own work: instructions never flow). How
-  every agent moves around the system is the help page every agent reads first
-  (seon.context/help-page)."
-  {:merge (str "Main has been merged into your branch (`my.branch/merge-main!`). Resolve each unmerged entry: re-defn the var "
-               "with the content both sides need, or keep one side with `my.branch/resolve!`: ``(my.branch/resolve! 'ns/var :theirs)``; `(my.branch/unmerged)` lists them. "
-               "Make every proof pass on the combined program. Record what you learn in the plan, then wait.")
-   :design (str "Turn the plan, however rough (it may be one line from a user: \"store my workouts\"), into a plan an implement step can "
-                "follow without exploring. When the plan already names the change and the functions it touches, act first: your first "
-                "turn is code, the proof that shows the change, run red, then the plan, as in\n"
-                "  ;; the plan names the change in ns/f: its proof first, red, then the plan for the implement step\n"
-                "  (in-ns 'ns-test)\n"
-                "  (clojure.test/deftest the-proof (clojure.test/is (= expected (ns/f input))))   ; the real value, function and input\n"
-                "  (clojure.test/run-test-var #'ns-test/the-proof)\n"
-                "  (my.task/update! :seon.task/plan str \"\\n\\nWhat the implement step changes: ...\")\n"
-                "(the :do of :proof-unknown under :refused is that deftest's skeleton), and explore only what that leaves open. Otherwise explore first: "
-                "find the owners of what it touches, their callers, the schemas on the data's path and the library functions that already "
-                "do the work, and try the idea at the REPL. If an earlier run failed, start from its evidence. A name cited in the plan between three backticks (``ns/f`` written with three on each side) shows its source in "
-                "your context on every turn (a source over the cap shows its doc and how to :read it): cite there each function you must read "
-                "or change, and read it there rather than calling clojure.repl/source again. "
-                "Leave on this branch: (1) the plan rewritten with `my.task/update!`: what must become true, each function the implement step "
-                "changes cited with three backticks (its source then stands beside the plan for that step too), each other owner, library "
-                "function and schema it touches with one, and what you found; (2) each new or changed "
-                "schema registered; (3) each function's defn with its contract and a stub body; (4) the proofs, written and red, asserting "
-                "the behaviour on data; (5) for every function whose input grows, a cost proof with `seon.cost/proof`: ``(deftest f-is-one-pass (seon.cost/proof "
-                "{:of 'ns/f :input 'ns-test/input :n \"what N counts\" :work \"the least work the data needs\" :growth :linear "
-                ":ops {...} :sizes [1000 10000 100000]}))``, its :ops in the units of seon.cost/units, derived from what the work must do, never from a run. "
-                "Do not write the bodies: that is the implement step's. Then wait.")
-   :implement (str "Implement what the plan describes on this branch until the proofs pass, the cost proofs included: do the "
-                   "work their :work states and no more, at the owners the plan cites. Never loosen a contract or a proof to make it pass; "
-                   "if the plan is wrong, fail the task with the form that shows it (the help page's Ending). Record what you learn in the plan, then wait.")
-   :test (str "Run the proofs and the tests of what you changed. For any behaviour the evidence shows broke, add a deftest in the "
-              "proofs namespace. Make everything pass, record what you learn in the plan, then wait.")})
+  "What each step's agent does, by task kind (its own work: instructions never flow): its goal,
+  when it is done and by what means, short, the standard format's stage stories (seon.judge's,
+  2026-10-23). How every agent works at the REPL is the system prompt every agent reads first
+  (seon.context/system-page), and the help page it reads on demand (seon.context/help-page)."
+  {:design (str "Your task: turn the plan below, however rough (it may be one line from a user), into a plan the implement "
+                "step can follow without exploring. You are done when the plan names each function to change, cited with three "
+                "backticks so its source stands beside the plan, and the proofs that will show the change are written as deftests "
+                "and run red for the reason the plan gives. You do it by exploring at the REPL: read what the plan touches "
+                "(``(clojure.repl/source ns/f)``, ``(my.agent/callers 'ns/f)``, the schemas on the data's path, the library functions that already do the "
+                "work) and try the idea. Then leave on this branch: each proof written and red; each new function's defn with its "
+                "contract and a stub body; each new schema registered; a cost proof (``seon.cost/proof``) for a function whose input "
+                "grows; and the plan rewritten with ``(my.task/update! :seon.task/plan str \"\\n\\nWhat the implement step changes: ...\")``. "
+                "Do not write the bodies: they are the implement step's. Then end your turn with prose.")
+   :implement (str "Your task: make the change the plan describes. You are done when every proof passes, the cost proofs "
+                   "included. You do it by redefining the functions the plan cites, in their own namespaces, keeping their "
+                   "contracts, and running the proofs (`(my.task/status)` shows how) until they are green. Never loosen a "
+                   "contract or a proof to make it pass: if the plan is wrong, fail the task with the evidence "
+                   "(``(my.task/fail! \"why\" evidence)``). Then end your turn with prose.")
+   :merge (str "Your task: bring main's work into this branch and keep the proofs green. Main has been merged in "
+               "(`my.branch/merge-main!`); `(my.branch/unmerged)` lists what both sides changed. You are done when nothing is "
+               "unmerged and every proof passes on the combined program. You do it by redefining each unmerged var with what "
+               "both sides need, or keeping one side (``(my.branch/resolve! 'ns/var :theirs)``), and running the proofs. Then end "
+               "your turn with prose.")
+   :test (str "Your task: test what the plan changed. You are done when the proofs and the tests of what changed pass, and "
+              "each behaviour that broke has a deftest of its own. You do it by running them (`(my.agent/prove)`), writing a "
+              "deftest in the proofs' namespace for each break, and fixing the code until all pass. Then end your turn with prose.")})
 
 (defn- merge-decl
   "Merge task nm (merge-name of its work's) of work declaration d (id wid), on d's branch,
