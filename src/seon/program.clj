@@ -517,6 +517,17 @@
 
 ;; ---- the live program ----------------------------------------------------------------
 
+(defn program-nss
+  "The namespaces of db that are the program's own: their file under one of
+  :seon.config.source/program-dirs. A test's, a fixture's or a test helper's (under test/, whatever
+  its name), and one with no file (an app an agent made at its REPL, until it is written back), are
+  not. One read of the namespaces' files, so a caller asks it once and tests membership."
+  {:malli/schema [:=> [:cat :seon.host/db] [:set :symbol]]}
+  [db]
+  (let [dirs (mapv #(str % "/") (cfg/value :seon.config.source/program-dirs))]
+    (into #{} (keep (fn [{:keys [e v]}] (when (some #(str/starts-with? v %) dirs) (:ns/name (d/entity db e)))))
+          (d/datoms db :aevt :ns/file))))
+
 (defn live?
   "Is form entity e part of the program: it defines nothing (a text form: a declare, a
   require, a comment kept from its file), or some definition it made still points to it."

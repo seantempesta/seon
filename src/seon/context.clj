@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.screen :as screen] [clojure.edn]))
+            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.screen :as screen] [seon.program :as program] [clojure.edn]))
 
 (def help-page
   "The help page, docs/agent.md: what my.agent/help answers, each section on demand. Main holds
@@ -151,7 +151,9 @@
   (let [;; through the one resolver: a task's own setting (its flattened :seon.task/config), else its model's, else the config's
         t (when te (d/pull db [:seon.config.render/similar :seon.task/model] te))
         k (cfg/value :seon.config.render/similar {:task t :model (:seon.task/model t)})
-        function? #(= :fn (:var/kind (d/entity db [:var/name %])))
+        ;; a program function, as related's: no test helper or fixture of test/
+        program (program/program-nss db)
+        function? #(and (= :fn (:var/kind (d/entity db [:var/name %]))) (contains? program (symbol (namespace %))))
         ;; every vector, every dim, every rank: the exact ranking (near's shortlist and fine level
         ;; over all of them; it sorts them all anyway), walked until k functions are found, as the
         ;; nearest forms are often tests
@@ -204,9 +206,10 @@
                        cites)
             schema? #(some? (pdb/eid db :schema/key %))
             ;; a program function: no test, no macro (every contracted form names seon.contract/defn),
-            ;; nothing of a test namespace (its fixtures); the graph and the meaning halves alike
+            ;; nothing outside the program's dirs (test/'s fixtures and helpers); both halves alike
+            program (program/program-nss db)
             function? #(and (not (#{:test :macro} (:var/kind (d/entity db [:var/name %]))))
-                            (not (str/ends-with? (namespace %) "-test")))
+                            (contains? program (symbol (namespace %))))
             ;; a neighbour weighs 1/(1 + the forms naming it, counted to a cap): what every form names
             ;; (seon.contract/checked, on?, seon.db/eid) weighs nothing (docs/vector.md#fused-with-the-call-graph)
             cap (cfg/value :seon.config.render/related-rarity)

@@ -55,7 +55,7 @@ The screen's call graph (```seon.context/related```) weighs each neighbour 1/(1 
 ## What the work is likely to need, as an eval
 
 `(my.task/related)` is a form of the screen (`seon.screen/forms`), evaluated before each model request like `(my.task/status)` and recorded as an eval. It shows what the plan's work is likely to need beyond what the plan cites (```seon.context/related```):
-- the `:seon.config.render/related` wiki sections, program functions and schema keys nearest the plan;
+- the `:seon.config.render/related` wiki sections, program functions and schema keys nearest the plan: a program function is no test and no macro, in a namespace whose file is under `:seon.config.source/program-dirs` (```seon.program/program-nss```; `similar` and the failure-point law read the same), so test/'s fixtures and helpers stay out whatever their names (`seon.check`, `seon.fixtures`: the live round 5's big-map request was shown printer test helpers);
 - each kind ranked two ways and fused by reciprocal rank (```seon.vector/rrf```): by the plan's references (the cited vars' callers and callees, the sections naming a cited var, the sections a cited section references or is referenced by, the schema keys in the plan and the cited vars' text) and by meaning (`seon.vector/near` on the plan's vector on the branch);
 - each a line at summary depth, with the forms that read one whole and search further (```seon.context/related-view```).
 

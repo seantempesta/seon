@@ -792,7 +792,8 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "c" :seon.task/plan "Make `demo/f` use the circle's area."
                                                :seon.task/proofs #{'demo-test/f-test} :seon.task/config {:seon.config.render/similar 5}}]))
         db (d/db-with db (vec (concat (for [s (conj fns 'demo/f)] {:var/name s :var/kind :fn :var/doc (str (name s) " does it. More.")})
-                                      [{:var/name 'demo-test/near-test :var/kind :test}])))
+                                      [{:var/name 'demo-test/near-test :var/kind :test}
+                                       {:ns/name 'demo :ns/file "src/demo.clj"} {:ns/name 'demo-test :ns/file "test/demo_test.clj"}])))
         dir (fn [& xs] (let [v (vec (concat xs (repeat (- 768 (count xs)) 0.0))) n (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % n) v)))
         form (fn [s] (:db/id (:var/form (d/entity db [:var/name s]))))
         te (pdb/eid db :seon.task/id "demo/c")
@@ -852,6 +853,8 @@
         es (into [te] (for [i (range 5)] (pdb/eid db :seon.section/address (anchors i))))
         db (d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) (repeat 6 10) "m"))
         ;; a function beside the plan by meaning, and a schema key its plan names
+        ;; demo is the program's (src/), demo-test and its helpers are test/'s (seon.program/program-nss)
+        db (d/db-with db [{:ns/name 'demo :ns/file "src/demo.clj"} {:ns/name 'demo-test :ns/file "test/demo_test.clj"}])
         db (d/db-with db [{:db/id "f" :form/id "demo/g" :form/src "(defn g [])" :form/keywords #{:demo/thing :demo/not-a-schema}} {:var/name 'demo/g :var/form "f" :var/doc "Gets it. More."}
                           {:schema/key :demo/thing :schema/form "[:map]"}])
         f (pdb/eid db :form/id "demo/g")]
@@ -910,10 +913,14 @@
                           ;; a test namespace's helper calling it: a fixture, no program function
                           {:db/id "x" :form/id "demo-test/fixture" :form/src "(defn fixture [] (h))" :form/refs #{'demo/h} :form/defines #{"xv"}}
                           {:db/id "xv" :var/name 'demo-test/fixture :var/form "x" :var/kind :fn}
+                          ;; a helper of test/ whose name does not end in -test (seon.fixtures, seon.check): not the program's
+                          {:ns/name 'demo.fixtures :ns/file "test/demo/fixtures.clj"}
+                          {:db/id "y" :form/id "demo.fixtures/helper" :form/src "(defn helper [] (h))" :form/refs #{'demo/h} :form/defines #{"yv"}}
+                          {:db/id "yv" :var/name 'demo.fixtures/helper :var/form "y" :var/kind :fn}
                           {:seon.section/address "docs/vector.md#the-pyramid-c" :seon.section/heading "C" :seon.section/lead "Names h. More."
                            :seon.section/names #{'demo/h}}])
         rel (context/related db te)]
-    (is (= ['demo/g 'demo/k] (:functions rel)) "the caller of the cited var beside the nearest by meaning; the cited var, the test and a test namespace's helper left out")
+    (is (= ['demo/g 'demo/k] (:functions rel)) "the caller of the cited var beside the nearest by meaning; the cited var, the test, a test namespace's helper and a test/ helper of any name left out")
     (is (= ["docs/vector.md#the-model" "docs/vector.md#the-pyramid-c" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph"
             "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"]
            (:sections rel))

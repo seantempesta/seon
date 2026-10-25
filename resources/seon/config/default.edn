@@ -294,6 +294,13 @@
  ;; own dirs. It costs each boot the test forms' evaluation (+5 s a restart, measured
  ;; 2026-10-22; task seon.source/test-namespaces-built-into-the-binary).
  :seon.config.source/dirs ["src" "test" "resources/seon/schemas"]
+ ;; Unit: paths under the root, of those above. The program proper: a namespace whose file is under
+ ;; one is the program's, one under test/ (a test's, a fixture's, a helper's like seon.check or
+ ;; seon.fixtures, whose names do not end in -test) is not, nor one with no file (an app made at an
+ ;; agent's REPL) (seon.program/program-nss). Read where the program is told from its
+ ;; tests: related's and similar's functions, the failure-point law's sites. Provenance: root,
+ ;; 2026-10-25 (the live round 5's big-map request, whose related functions were test/ helpers).
+ :seon.config.source/program-dirs ["src"]
  ;; Unit: qualified var names. A test whose reach (seon.program/reach-index, the compiler's
  ;; facts) references one of these reaches a process of its own: a shell, a fork, a root booted
  ;; for it, the binary. Such tests never run automatically, only when named (owner, 2026-10-23;

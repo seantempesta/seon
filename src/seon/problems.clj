@@ -170,6 +170,8 @@
              :let [page-eids (into #{} (keep (fn [{:keys [e v]}] (when (str/starts-with? v (str page "#")) e))) (d/datoms db :aevt :seon.section/address))
                    named (into #{} (keep (fn [{:keys [e v]}] (when (page-eids e) v))) (d/datoms db :aevt :seon.section/names))
                    ;; the multimethod or protocol a form without a var extends: read only if one asks
+                   ;; the law is the program's own source's: its namespaces, read once
+                   program (delay (program/program-nss db))
                    owners (delay (merge (into {} (map (fn [{:keys [e v]}] [v (:method/multi (d/entity db e))])) (d/datoms db :aevt :method/form))
                                         (into {} (map (fn [{:keys [e v]}] [v (:impl/protocol (d/entity db e))])) (d/datoms db :aevt :impl/form))))]
              fe (distinct (if only (filter (fn [e] (seq (d/datoms db :eavt e fact))) only) (map :e (d/datoms db :aevt fact))))
@@ -178,12 +180,11 @@
                    ;; a catch is attributed to its form: the vars it defines, else the multimethod or
                    ;; protocol it extends, else the form's id: no site drops
                    sites (or (seq (map :var/name (:form/defines f))) (some-> (@owners fe) vector) [(:form/id f)])
-                   file (some-> f :form/ns :ns/file)
                    nsym (:ns/name (:form/ns f))]
              v sites
              ;; the law is Seon's own source's (bin/laws scans src): an agent's app, and a test's
              ;; `is` (which expands to a catch), are not failure points of the system
-             :when (and (not (except (str nsym))) (not (named v)) (some-> file (str/starts-with? "src/")))
+             :when (and (not (except (str nsym))) (not (named v)) (contains? @program nsym))
              :let [s (str "unnamed-site " (name law) " " v)]]
          (derived-row ans s nsym (str v " has a " (name law) " site that " page " does not name")
                       {:kind :unnamed-site :law law :site v :page page} {:law law :site v :page page})))))
