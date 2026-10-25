@@ -16,11 +16,18 @@ Updated 2026-10-25 by root. Sessions are linked to root's session (list_sessions
 
 | Session | Last done | Now / next |
 |---|---|---|
-| **Agent view r3** (Opus) | design r3 steps 1-5, clipping fixes, review fixes, the clean path prep: all merged | next: dogfooding through MCP and the docs-in-db audit (brief in the handoff) |
-| **Agent loop** (Opus) | design `notes/design-agent-loop-2026-10-25.md` on ``jolt/agent-loop`` (sessions, parking, one send, resume, screen diffs) | waits for the owner's rulings (handoff "Waiting on the owner"), then builds in 6 parts |
-| **Root as one system** | dead merge path, one prove path, platform errors close, reds reused by digest: merged | the judge asks the test service; then the LMDB open flake; cases 3-4 (root as an agent on main, root's work as tasks, plan on ``jolt/root-work-as-tasks``) after the loop's park and send parts |
+| **Agent loop** (Opus) | design r2; delivery measured: main-first (§3a); main carrier (jolt 0cf54944); part 1 static fork server (734da4c1c) | self-review, pin bump, then parts 2-4; owns the fork hang (seon.lib/a-fork-from-a-threaded-process-never-hangs) |
+| **Agent view r3** (Opus) | docs at levels, dogfood merged | jolt/dogfood-rulings reverted on main (10 reconciler tests changed class): finding the edge; story pulls kept on jolt/story-pulls |
+| **Printer** (Opus) | audit, 144-line elision fixed, flat cost (jolt/printer-everywhere) | the reach edge (680 of 706 tests take the tree; 2 program-test reds), reply budget 16,000 |
+| **Root as one system** | judge through the test service merged | three main-test/check-test reds from the full run; cases 3-4 after the loop's parts |
+| **Full-run reds** (Opus) | started 2026-10-25 | bin/check 100: idle, record, durable-read, 6 e2e, swarm red on main |
+| ctx-atom (idle) | design r3; §11 superseded | builds after the loop's part 1 merges |
+
+Baseline: `notes/baseline-2026-10-25.md`.
 
 ## Waiting on the owner
+
+What waits on the owner's ruling or go before the work can move.
 
 - The agent loop's rulings: eviction (owner chose always park), new attributes (agent key, `:continues`, `:ns`, message refs, `:parked`, `:seon.run/taken`, `:seon.eval/calls`, `:seon.resume/*`), the name `my.agent/message!`, the design's open questions.
 - Go for the request pilot and measurement (~$0.50): the five fit tasks as user requests through design, implement and merge (`seon.fixtures/fit-requests`).

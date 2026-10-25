@@ -5,6 +5,9 @@ Every Seon component is a Flow proc, and Jolt's Flow is upstream's API over Jolt
 The source is the pinned Jolt's: `reference-code/jolt/stdlib/clojure/core/async/flow.clj` (the API), `reference-code/jolt/stdlib/clojure/core/async/flow/impl.clj`, `reference-code/jolt/stdlib/clojure/core/async/flow/spi.clj`, `reference-code/jolt/stdlib/clojure/core/async/flow/impl/graph.clj` and `reference-code/jolt/stdlib/clojure/core/async/impl/dispatch.clj`. Each claim names the function that carries it. Read [core-async](core-async.md) first.
 
 ## Where Jolt's Flow differs from upstream
+
+Where Jolt's Flow departs from upstream's dev-flow-alpha.
+
 - **`reference-code/jolt/stdlib/clojure/core/async/flow.clj` and `reference-code/jolt/stdlib/clojure/core/async/flow/spi.clj`** are upstream's `dev-flow-alpha`, plus `update!`.
 - **`reference-code/jolt/stdlib/clojure/core/async/flow/impl.clj` is Jolt's** (its header comment):
   - each proc has its own control channel (there is no control mult);
@@ -18,6 +21,8 @@ The source is the pinned Jolt's: `reference-code/jolt/stdlib/clojure/core/async/
 
 ## Workloads (`reference-code/jolt/stdlib/clojure/core/async/impl/dispatch.clj` `executor-for`, `reference-code/jolt/stdlib/clojure/core/async/flow/impl.clj` `proc`)
 
+What each :workload decides: whether a proc runs on a fiber or on an OS thread of its own.
+
 | `:workload` | the proc loop runs on | transform runs on | note |
 |---|---|---|---|
 | `:io` | a **fiber** | that fiber | 50 procs add no thread |
@@ -25,6 +30,9 @@ The source is the pinned Jolt's: `reference-code/jolt/stdlib/clojure/core/async/
 | `:compute` | a fiber | a cached thread pool, one future per message, awaited with `.get` for **`compute-timeout-ms` (5000)** | past the bound: a `TimeoutException` on the error chan and the step's result is lost, **but the step keeps running** |
 
 ## The proc contract (`reference-code/jolt/stdlib/clojure/core/async/flow.clj` `process`, `reference-code/jolt/stdlib/clojure/core/async/flow/impl.clj` `proc`)
+
+When Flow calls each of a proc's four functions and what it may return: describe once, init at start, transition on a status change.
+
 - **describe `()`** is called **once**, when `flow/process` builds the launcher. Its `:ins`, `:outs`, `:params`, `:workload`, `:signal-select` and `:ping-map-fn` are fixed for the proc's life; a redefined Var changes none of them.
 - **init `(args)`** runs **inside `flow/start`** (or `update!`), with `::flow/pid` added to args. A throw surfaces from `flow/start`. The state it returns may carry:
   - `::flow/in-ports {cid chan}` and `::flow/out-ports {cid chan}`, which are **read once, from init's state**. A port can't be added later.
@@ -54,6 +62,8 @@ The source is the pinned Jolt's: `reference-code/jolt/stdlib/clojure/core/async/
 
 ## The API
 
+What each call of Flow's API really does in Jolt, with its timeouts and literals.
+
 | call | what it really does (Jolt) | timeouts and literals |
 |---|---|---|
 | `create-flow` `{:procs :conns :stop-timeout-ms}` | plans procs; validates conns | `:stop-timeout-ms` default **10000**; in-port buffer default **10** (`make-chan`) |
@@ -66,12 +76,18 @@ The source is the pinned Jolt's: `reference-code/jolt/stdlib/clojure/core/async/
 | casts | a cast is delivered to each selecting proc's castee chan | **sliding 100**: a cast a proc doesn't take in time is dropped |
 
 ## Hazards found in the source and confirmed
+
+The ways a Flow graph wedges, hangs or drops messages silently, found in Jolt's source and confirmed.
+
 1. **A proc stuck inside a step wedges the whole graph's control.** Its control chan holds 10, and commands are put with `>!!` under the graph lock. After 10 unanswered commands (pings, say), the 11th blocks while holding the lock. From then on, `ping` of any other proc, `pause`, `update!` and `stop` all wait until that step returns.
 2. **A step that never returns can't be stopped.** `stop` gives up after `:stop-timeout-ms` and names it, but the fiber or thread lives on.
 3. **Time inside Flow:** `compute-timeout-ms` 5000, `finish-outputs!` 1000 ms per message, `stop-timeout-ms` 10000, and ping's 1000. Each is a clock that decides, in the dependency ([clocks](clocks.md)).
 4. **Silent drops:** an unconnected out, report and error chans past 100, casts past 100, and a mult with no taps.
 
 ## Idioms for Seon
+
+How Seon meets each need (a dependency, a backlog, a delayed retry, quiet) on Flow.
+
 - **Dependency:** a conn. The consumer parks on its in-port and starts on its first message; there is no start order. A join reads only what it still lacks: `::flow/input-filter`.
 - **Backlog and admission:** the in-port is the queue. Size it by loss semantics (fixed for data that matters). An owner admits by **leaving `:in` out of its read set** while it is at its cap, so the unread queue fills and askers park. `seon.fx/owner-proc` does so (`seon.fx/bound`), and its workers compete for one shared in-port (`seon.fx/worker-proc`): proven by `seon.patterns-test/a-backlog-is-the-unread-queue` and `seon.patterns-test/workers-compete-for-one-shared-in-port`. A kind with `:batch n` gives a free worker its head request and those queued behind it as one item, taken from the queue, never waited for (`seon.fx/dispatch`; the `:embed` kind's texts encode together); a kind with `:open` makes its host object (a model) on the worker's first item and keeps it in the worker's state (`seon.fx/worker-proc`; `seon.fx-test/a-batch-kind-takes-what-is-queued`, `seon.fx-test/a-worker-performs-a-batch-in-one-call-and-opens-once`).
 - **Delayed retry:** a timeout channel can't be an in-port itself, because in-ports are fixed at init. Give the proc one `:retry` in-port, made in init and placed in `::flow/in-ports`. To retry `m` in `ms`, start `(go (<! (timeout ms)) (>! retry m))`: one heap entry on the one timer thread and a parked fiber. **No cron proc.** Cron is only for scheduled work that isn't a reply to anything.

@@ -120,10 +120,14 @@ An agent's namespace refers `clojure.pprint`'s `pp` and `pprint` (`seon.agent/ma
 
 ### Cut where a value is made
 
+The places that cut a value where it is made, not in the printer, each with its reason.
+
 - `seon.main/shown`: names a budget only to print whole (the value's ``:seon.print/full`` metadata).
 - `seon.contract/problems`, `seon.task/file-declarations`: a refused value (a function's argument, a task file's entry) may be infinite, lazy or a host object, and travels on the wire as text, so its error keeps the printer's cut, which says what it omitted; the live value stays with the caller.
 
 ### Cuts in a display namespace that are not cuts of output
+
+Uses of take, subs and the like in display code that choose what to find or read, not what to cut from output.
 
 - `seon.render.ui/kname`, `seon.render.ui/dom-id`: a keyword's text without its colon.
 - `seon.context/similar`: the top k of a search (`take` the config's `:seon.config.render/similar` of its ranking), and the forms that search further beside them: a search's answer, not a cut of output.

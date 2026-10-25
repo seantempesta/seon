@@ -3,8 +3,20 @@
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in notes/archive/DECISIONS-superseded.md.
 
 ## 2026-10-25 rulings
+The owner's rulings of 2026-10-25, each with his words and where it is now stated.
+
+### Message delivery: compare, then the better design or the simple one
+Owner, 2026-10-25, on main-first delivery (agent loop) against delivery by merging a fact from the sender's branch (ctx-atom §11): "Launch a comparison. I would prefer real flow semantics where processes are independent, but not at the cost of stability and performance and complexity. We either have a better design or we do the simple one that works". Result (agent loop, 2026-10-25, design §3a 16066cc0b): main-first, with `:seon.run/taken`; 4.96 ms vs >=16.79 ms a delivery, the reconciler reads only main, no lost wakes in either over 2,000 schedules. Stated in: notes/design-agent-loop-2026-10-25.md §3a on ``jolt/agent-loop``.
+### The related-section count is a config key; one problem-row helper's bounds accepted
+Owner, 2026-10-25: approved one new config key, how many related wiki sections the screen shows (0 turns it off); accepted raising 5 derived-problem cost proofs' call bounds by one contracted call per row, for one helper in place of 8 copies. Stated in: this entry.
 ### Dogfood rulings: design registers proofs; each form's value; stale means meaning changed; pilot budget $5
 Owner, 2026-10-25, on the dogfood findings (notes/dogfood-and-docs-2026-10-25.md on ``jolt/dogfood``): `my.task/update!` takes `:seon.task/proofs`, so a design stage registers the red proofs it writes; an eval call's response lists each form's value in order under the call's one handle (`result/eN` holds the last, like `*1`); a wiki section is stale when a cited var's contract, arglists or docstring changes, not its body; the pipeline pilot may spend up to $5 ("use up to $5 even I want to learn and fix the design"). Stated in: not yet.
+### Code is shown as code; the page shows values as structure
+Owner, 2026-10-25, on a1's debug page (`(my.task/status)` returning a deftest's source as one escaped string): "Why are we returning so much data in such a strange format? If we reference a function we should return the quote escaped forms so agents see more clojure code as is normally seen in files or the repl"; and "What is the status of the UI? We can do more complex representations of values there". A value that is source text prints verbatim as code (marked at its producer, read by the printer and the page alike); the page renders a record's stored value as structure (rows, tables, code, collapsed paths opened on demand), designed for the owner's approval first. Stated in: not yet (sessions printer and agent view r3).
+### The printer has a generous budget; the fix for noise is not generating it and not rendering it
+Owner, 2026-10-25, on the printer audit: "make sure the value printer is working good everywhere" and "And that it has a generous context budget. Id rather us focus on not generating crap and then not rendering crap." The printer's budget stays generous; noise is fixed at its producer first (it is not made or stored in that shape), then by not rendering it (no placeholder-per-row elisions, repeated paths, empty keys); truncation is the last resort. Stated in: not yet (session printer, ``jolt/printer-everywhere``).
+### A change to a schema is an explicit fact the eval shows, never a hidden digest
+Owner, 2026-10-25, on root's approval of a `:form/meaning` digest for the stale check: "I feel like this should be runtime eval that shows the change to the schema so they know about the change and learn how to update schemas. I want explcit changes in the system to modeled accurately". A contract or docstring change is already a transaction (`seon.program/def-tx` asserts and retracts `:var/contract` and `:var/doc`, history kept): the eval that makes it shows before → after and the sections citing the var; staleness reads those facts since the section's read t. The digest approval is withdrawn. Stated in: not yet (agent view r3 revising).
 ### Starting and resuming are one mechanism; replay is told and switchable; agents work in the UI
 Owner, 2026-10-25: "we are building the same muscle here to load any session from any point in time too right? I don't want a separate system for running agents. We don't autoplay the things we know are effects and we inform the agent at every eval if it was replayed so they understand the env they are in ... I want a very 'real' environment for our agents with live feedback. Instruct agents to think about and use the UI and to get it working for me so I can follow along with experiments." And: "Optionally config to run everything even effects so it's easy to switch on (it's just a filter of the forms right?)". Starting an agent is loading a session at a point in time, the same path as resume; replayed evals are marked as replayed in what the agent sees; replaying effects is one config switch on the replay filter; agents' instructions say to use and improve the UI. Stated in: not yet.
 ### No new linking attributes where :needs and the record do it; everything survives resume
@@ -35,6 +47,9 @@ Owner, 2026-10-25: chose "Diffs between turns". `(seon.screen/show {:since t})` 
 Owner, 2026-10-25: "873 lines isn't that much if you think it's good lets merge to main. ... I want to see the web work too so if merging to main makes that easier lets do it". Stated in: this entry.
 
 ## 2026-10-24 rulings
+
+The owner's rulings of 2026-10-24, each with his words and where it is now stated.
+
 ### A failed model call keeps what it sent and its typed error
 Owner, 2026-10-24: "Approve :seon.turn/error." A turn is written with its sent refs as the request goes; when the call ends it gains its reply and usage, or `:seon.turn/error` (the typed error as data, as the run's end has `:seon.end/error`). One turn entity either way. Stated in: not yet (owed docs/context.md with step 3).
 ### A turn records what it sent as refs; texts are read as of the turn
@@ -55,6 +70,9 @@ Owner, 2026-10-24: "Okay I'm willing to try a single render function -- so it's 
 Owner, 2026-10-24: "Yes in terms of content, but I would like it styled and clear to read. Maybe columns and we can show the form and eval result that created it or can explain the rendering?" The content a model call was sent is recorded, so the view reproduces it exactly; it is shown styled, beside the form, eval or render that made each part. Stated in: not yet (owed docs/render.md and THE PLAN step 3).
 
 ## Tonight's rulings (2026-10-23, with the 2026-10-21/22 rulings they rest on)
+
+The owner's rulings of 2026-10-23, with the rulings of 2026-10-21 and 22 they rest on, each with his words and where it is now stated.
+
 ### Learn from earlier work, then write it clean; remove a worktree once it holds nothing unsaved
 Owner, 2026-10-23: "don't forget to clean up the old work trees once they aren't needed and don't throw away good work have agents learn from it if you want a clean implementation. No crappy slow repetitive code." Stated in: AGENTS §9.
 ### Reuse every unique, immutable result that is proven the same and expensive to make
@@ -129,6 +147,9 @@ Owner, 2026-10-23: "I want worktrees for claude agents until we can get them wor
 Owner, 2026-10-22: "I want faster development. Don't run long tests unless we are pretty sure it's done"; also "why don't we have a comprehensive policy where we are only running tests that have changed?" and 2026-10-21: "I want faster iteration not a matrix with every run permutation." Stated in: AGENTS §3 (Testing); docs/merging.md#a-merge-runs-what-the-change-reaches; docs/source.md#tests-run-by-reach.
 
 ## 2026-10-22
+
+The owner's rulings of 2026-10-22, each with his words and where it is now stated.
+
 ### Root runs autonomously while there is good work
 Owner, 2026-10-22: "I am authorizing you to run autonomously as long as you have good work to work on". Stated in: AGENTS §2.
 ### One value printer, nothing cut before it; important data has declared `:ai` and `:html` renders
@@ -165,6 +186,9 @@ Owner, 2026-10-22: quote not recorded. Stated in: docs/source.md#an-agent-change
 Owner, 2026-10-22: "Don't run agents if we know that we have serious problems with our context or the task instructions or its functionality with auto running the tests." Stated in: AGENTS §8 (paid runs need a checked context).
 
 ## 2026-10-21
+
+The owner's rulings of 2026-10-21, each with his words and where it is now stated.
+
 ### No locks, no cap on worktree sessions, no waiting
 Owner, 2026-10-21: "get rid of all of it". Stated in: AGENTS §3 (Every ready task runs now).
 ### Every live run is better than the last; new real tasks, no rerun matrix; DeepSeek works every stage, measured
@@ -215,6 +239,9 @@ Root, 2026-10-21 (reversible): no owner quote. Stated in: docs/tasks.md#task-con
 Owner, 2026-10-21: "Why have an arbitrary 10ms collection point?" Stated in: AGENTS §5.
 
 ## 2026-10-20
+
+The owner's rulings of 2026-10-20, each with his words and where it is now stated.
+
 ### Estimates are proofs on tasks
 Owner, 2026-10-20: "How long should something really take." Stated in: AGENTS §5; docs/cost.md.
 ### Scheduling is reconciliation over task attributes; no chain entity, no separate scheduler
@@ -245,10 +272,16 @@ Owner, 2026-10-20: "one simple messaging system that works everywhere." Stated i
 Owner, 2026-10-20: "outside agents need minimal MCP wrapping so they can repl in and run statements against any agent or as root." Stated in: AGENTS §6; docs/parity.md#the-mcp-server.
 
 ## Open: does this still stand?
+
+Early rulings that later work may have outdated, left for the owner to confirm or drop.
+
 ### Each agent is a proc in its own Flow graph, or agents are procs of the one root graph
 Owner, 2026-10-20: "the agent is its own process so having the flow controls be directly hooked up seems like it's ideal." Per-agent graphs, the leaning and root's "Assembly choices" (archive) were left to measurement; which stands?
 
 ## Open owner questions (pending rulings; the plan's blockers are also in plan.md)
+
+The questions waiting on the owner's ruling, the plan's blockers among them.
+
 - D6 names for the merge model: `:seon.task/carry`, `:seon.task/source`, `:seon.task/target`, `:seon.merge/kept`, `:seon.tx/changed`.
 - D7 task config: keep the config keys as top-level task attributes (today `seon.task/create-tx` merges `:seon.task/config` into them and `d/pull` of the key throws) or a real `:seon.task/config` attribute.
 - What a merge carries and who wins a conflict: the whole branch with main winning (`:seon.merge/kept`, v1 MERGE-STEP 5a) or an explicit `:seon.task/carry` list; parity.md still says "ours is kept".

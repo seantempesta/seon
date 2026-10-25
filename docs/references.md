@@ -10,6 +10,8 @@ Every text Seon reads as prose (a task's plan, a wiki page, a docstring) goes th
 
 ## The delimiter picks the depth
 
+The delimiter around a citation decides how much of what it cites is pulled.
+
 - A bare word holding a `/` is its **summary**, and counts only when it names something.
 - One backtick, or a link, is its **doc**.
 - Three or more backticks are its **code**.
@@ -50,6 +52,12 @@ The context shows each wiki section the task's plan or instructions cite, at the
 Beside them, the task story's `:write-set` shows each var the plan cites with its source and its callers (```seon.docs/callers```, the program vars whose recorded definitions name it), and `:to-prove` each proof with the form that runs it, or what the plan says it should assert when it is not written (```seon.context/run-state```). Helpers the plan does not name are the agent's to ask for at its REPL (`my.agent/callees`, `my.agent/callers`, `my.agent/similar`): shown to every run, they were mostly unrelated source.
 
 `seon.context/current-state` keeps the citations that carry a path, a dotted simple symbol (a namespace) and a task id (```seon.ref/references``` over the plan and instructions) and shows each as `:sections`: ```seon.docs/view``` reads the section main holds and ```seon.ref/shown``` renders it, the one rule `seon.ref/view` also uses for a freshly parsed document. A link or one backtick shows the lead (or opening) and the sections below; three backticks show the section whole (its own text); a section main does not hold is read from the checkout as a file reference (below), and shows `:unresolved` beside the same message as an unresolved name when the checkout has none either. Stored sections keep no opening block, so a section whose first block is not a paragraph shows no lead at doc depth, and its sections below come in the order the wiki was written. A link with no anchor (a whole page) shows the page's first section, read from the checkout like a file (main stores no page entity). A prose bare address is a summary, and `seon.ref/references` keeps it only when it names a file, so a bare section address does not reach the context; write the link.
+
+## A section read at a depth, with its edges
+
+Every page and section is on main, reloaded when a page changes, and readable at three depths, each with the sections it cites and those citing it.
+- ```seon.docs/view``` shows a section at :summary, :doc or :code, and at every depth its :references (what its text cites, sections and vars) and :cited-by (the sections citing it), each at summary depth, from the stored edges (`seon.docs-test/a-view-at-summary-lists-references-and-cited-by`). ```seon.docs/page``` reads a page at a depth through the same view (`seon.docs-test/a-page-reads-at-a-depth`), and ```my.agent/help``` is that view: the help page at summary, any address at :code, a page's path at summary, and on a miss the help page's sections and every page's path, never nil (`seon.repl-test/help-reads-any-address-and-lists-on-a-miss`). A view costs the pulls of its section and its edges, flat in the wiki's size (`seon.docs-cost-test/a-view-costs-its-section-and-its-edges`).
+- Every section has a lead, so its summary and its embedding say what it is about; one without is a `:leadless-section` ([health](health.md#a-section-with-no-lead), `seon.docs-test/every-section-of-the-wiki-has-a-lead`).
 
 ## Files and namespaces on demand
 

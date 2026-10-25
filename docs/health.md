@@ -1,6 +1,6 @@
 # Health
 
-Health is the set of open problems: a value computed when something reads it (`seon.problems/health`). It is never stored, never precomputed and never polled. Root's page, an agent's context and the done rule each read it on the db they hold. It is the recorded classes (`seon.problems/report`) beside the derived ones (`:dead-citation`, `:unnamed-site`, `:stale-pin`, `:stale-section`, `:orphan-page`, `:uncited-task`, `:problem-unlinked`), one value by class (`:seon.problems/report`).
+Health is the set of open problems: a value computed when something reads it (`seon.problems/health`). It is never stored, never precomputed and never polled. Root's page, an agent's context and the done rule each read it on the db they hold. It is the recorded classes (`seon.problems/report`) beside the derived ones (`:dead-citation`, `:unnamed-site`, `:stale-pin`, `:stale-section`, `:orphan-page`, `:leadless-section`, `:uncited-task`, `:problem-unlinked`), one value by class (`:seon.problems/report`).
 
 ## Two kinds of problem
 
@@ -36,6 +36,8 @@ A section with no record yet (every section the day this was merged, and the fir
 
 It is attention, never a reason to refuse done (root's ruling, 2026-10-23): every edit of a var stales the sections that cite it, and refusing done for that would force a doc edit with every code edit. A branch that changes a var sees, in its context under `:attention`, the sections it made stale (`seon.problems/caused-split`), the docs to read and probably fix; `seon.problems/caused` and the done rule do not carry them.
 
+Any edit of a cited var's form stales the section, so a widely cited var's churn makes many stale pairs: main showed 223 on 2026-10-25, mostly code churn rather than wrong prose. Whether a section should go stale only when a cited var's contract or docstring changes, or the var is removed, waits on the owner's ruling: `seon.problems/a-section-goes-stale-when-what-it-cites-changes-meaning`.
+
 ## A stale pin
 
 A pin the wiki states is stale when it is not the gitlink root's last source import recorded (`seon.problems/stale-pins`, class `:stale-pin`). The page that states pins is `docs/forks.md`: each line of the form "`reference-code/<name>` pinned at `<sha>`" (`seon.problems/pins` holds the page and the line's shape). Root records the gitlinks of `reference-code/` when it imports its source (`:seon.root/source`, its `:pins`); the class compares the stated sha, as a prefix, with that record.
@@ -45,6 +47,10 @@ While root has recorded no import there is nothing to compare, and the class has
 ## An orphan page
 
 A page of the wiki that no other page links to, the map (docs/README.md) included as a linker, is an `:orphan-page` (`seon.problems/orphan-pages`): a section of another page has a reference to one of its sections, or it is orphaned. The map is the root and is not judged, and a db whose wiki has no map has no orphans (unknown). Adding a link anywhere closes it, with nothing written.
+
+## A section with no lead
+
+A section whose first block is a list, a table or code, not a paragraph, has no lead and is a `:leadless-section` (`seon.problems/leadless-sections`): its summary is its heading alone and its embedding has no sentence saying what it is about. [The wiki's rule](README.md) is a leading sentence that stands alone for every section, and a heading that only groups subsections says what they share. Writing the sentence closes it, with nothing else written.
 
 ## A task that cites nothing
 

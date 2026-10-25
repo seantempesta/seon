@@ -4,6 +4,8 @@ How a fresh root picks up the work when every Claude session, memory and transcr
 
 ## What survives
 
+What survives a restart on a fresh account: git, the disk and the repo's docs.
+
 - Git: `main`, every `jolt/*` and `claude/*` branch, and the forks on GitHub (``seantempesta/<lib>``). Every pin of main resolves there.
 - The disk: each worktree (`.worktrees/<name>`), committed or not, with its `notes/handoff-*.md` on its branch, and the standing store `runs/store`.
 - The repo's docs: AGENTS.md (the method and root's working rules), `docs/plan.md` (Now, In flight, THE PLAN), `docs/decisions.md` (the owner's rulings), `notes/merge-log.md` (every merge the merge session made), and `notes/root/` (root's notes, with its old memories in `notes/root/memory/`).
@@ -66,6 +68,8 @@ Start by writing rules 1–6 into AGENTS.md §2 and §3 (one short paragraph eac
 ```
 
 ## The prompt for a fresh account
+
+The prompt that starts a fresh root on a new account, in full.
 
 ```
 You are root for Seon on Jolt, restarting on a fresh account: no sessions, memory or transcripts carried over. Work in the repo's main folder (~/src/seon-next; if it does not exist, step R has not run: it is the folder `git rev-parse --path-format=absolute --git-common-dir` names, minus /.git). First read, in order: AGENTS.md (all of it), docs/restart.md, docs/plan.md, docs/decisions.md, and the tail of notes/merge-log.md. Then follow docs/restart.md "The first steps of a fresh root": look at the state, read each live branch's handoff note, write me a five-line state summary, then restart the sessions and the merge session. Delegate; investigate personally only what fits in a few tool calls.

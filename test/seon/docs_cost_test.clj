@@ -2,7 +2,7 @@
   "Cost proof of loading the wiki: an unchanged reload costs one parse and a few seeks per
   section, and writes nothing."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
             [datahike.api :as d] [seon.db :as pdb] [seon.docs :as docs] [seon.cost :as cost]))
 
 (defn wiki
@@ -31,4 +31,26 @@
      :growth :linear
      :per-n {:ns 225000 :bytes 245000 :calls 19.3}
      :fixed {:ns 50000 :bytes 50000 :calls 10}
+     :sizes [10 100 1000]}))
+
+(defn view-of
+  "The input of size n: the wiki of n sections (wiki) and the first page's own section, which its nine
+  sections cite and which has the nine below it: the view with the most edges any size holds."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :string :keyword]]}
+  [n]
+  (let [[db] (wiki n)] [db "demo/p0.md#page-0" :summary]))
+
+(deftest a-view-costs-its-section-and-its-edges
+  (let [[db address depth] (view-of 10)
+        v (docs/view db address depth)]
+    (is (= 9 (count (:seon.ref/cited-by v))) "the page's nine sections cite it: the edges the proof prices are there"))
+  (cost/proof
+    {:of 'seon.docs/view :input 'seon.docs-cost-test/view-of
+     :n "sections in the wiki"
+     :work (str "one pull of the section, one of each section below it, and for each edge one seek (the VAET datoms "
+                "of the reverse edge, the references of the pull) and one pull of the edge's entity; none reads "
+                "another section, so the work is that of the section's own fan, flat in the wiki's size")
+     :growth :constant
+     ;; measured 2026-10-25 at 10 sections: 33 contracted calls, 1.05 MB (the section's, its nine children's and its nine edges' pulls)
+     :fixed {:calls 33 :bytes 1050000}
      :sizes [10 100 1000]}))
