@@ -122,7 +122,7 @@
   form, so a def of a string value has none) and its :malli/schema as read, each only when present
   (the contract carries the arity, so no arglists); found by the form's head and name, as
   defining-ids finds them, read without loading. The same reading of an old file at a commit and of a
-  var's form today, so the two compare (seon.docs/baseline-reads; owner, 2026-10-25, DECISIONS Dogfood
+  var's form today, so the two compare (seon.docs/baseline-reads; DECISIONS Dogfood
   rulings: a section is stale when a cited var's contract or docstring changed)."
   {:malli/schema [:=> [:cat :symbol :string] [:map-of :qualified-symbol :map]]}
   [nsym text]
