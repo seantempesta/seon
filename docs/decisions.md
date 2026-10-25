@@ -6,7 +6,7 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 The owner's rulings of 2026-10-25, each with his words and where it is now stated.
 
 ### Message delivery: compare, then the better design or the simple one
-Owner, 2026-10-25, on main-first delivery (agent loop) against delivery by merging a fact from the sender's branch (ctx-atom §11): "Launch a comparison. I would prefer real flow semantics where processes are independent, but not at the cost of stability and performance and complexity. We either have a better design or we do the simple one that works". Stated in: not yet.
+Owner, 2026-10-25, on main-first delivery (agent loop) against delivery by merging a fact from the sender's branch (ctx-atom §11): "Launch a comparison. I would prefer real flow semantics where processes are independent, but not at the cost of stability and performance and complexity. We either have a better design or we do the simple one that works". Result (agent loop, 2026-10-25, design §3a 16066cc0b): main-first, with `:seon.run/taken`; 4.96 ms vs >=16.79 ms a delivery, the reconciler reads only main, no lost wakes in either over 2,000 schedules. Stated in: notes/design-agent-loop-2026-10-25.md §3a on ``jolt/agent-loop``.
 ### The related-section count is a config key; one problem-row helper's bounds accepted
 Owner, 2026-10-25: approved one new config key, how many related wiki sections the screen shows (0 turns it off); accepted raising 5 derived-problem cost proofs' call bounds by one contracted call per row, for one helper in place of 8 copies. Stated in: this entry.
 ### Dogfood rulings: design registers proofs; each form's value; stale means meaning changed; pilot budget $5
