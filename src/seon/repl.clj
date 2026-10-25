@@ -29,7 +29,7 @@
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.ref :as ref] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
-            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
+            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
 (defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
@@ -253,21 +253,15 @@
           r)))
     {}))
 
-(defn- with-branch-schemas
-  "f called with malli's dynamic registry bound to this branch's population (branch-registry),
-  read now: what a form compiles against, and the renders its values' schemas name
-  (seon.contract/properties reads it)."
-  {:malli/schema [:=> [:cat :seon.host/fn] :any]}
-  [f] (binding [mr/*registry* (branch-registry)] (f)))
-
 (defn wrap-registry
-  "Each form evaluates with its branch's schemas bound (with-branch-schemas), read before the
-  form: a schema the previous form registered is in effect for this one."
+  "Each form evaluates with malli's dynamic registry bound to its branch's population
+  (branch-registry), read before the form: a schema the previous form registered is in
+  effect for this one."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
     (let [ef (:repl/eval-fn req eval)]
-      (h (assoc req :repl/eval-fn (fn [form] (with-branch-schemas #(ef form))))))))
+      (h (assoc req :repl/eval-fn (fn [form] (binding [mr/*registry* (branch-registry)] (ef form))))))))
 
 (defn- instrument
   "Instrument a definition by its contract (G1's proto.agent/admit!, Seon's rule): a function var
@@ -388,15 +382,10 @@
   [db code r req run]
   (let [cites (when db (some->> (:prose req) (ref/references db)))
         resp (dissoc r :text :recorded :fns :record)
-        ;; a value that names its basis (@ctx: the branch's record at t, seon.ctx/build) is
-        ;; recorded as that basis and its schema: the page renders it from what exists, and a
-        ;; copy of the session's record is never stored at each @ctx
-        basis (when (and (contains? resp :value) (not (contains? resp :values))) (:seon.render/basis (meta (:value resp))))
-        data? (and (nil? basis) (or (not (contains? resp :value)) (pdb/plain? (:value resp))) (every? pdb/plain? (:values resp)))]
+        data? (and (or (not (contains? resp :value)) (pdb/plain? (:value resp))) (every? pdb/plain? (:values resp)))]
     (cond-> (if data?
               {:code code :response resp}
-              (cond-> {:code code :response (dissoc resp :value :values) :printed (print/response-text resp) :type (str (type (:value resp)))}
-                basis (assoc :schema (:seon.render/schema (meta (:value resp))) :basis basis)))
+              {:code code :response (dissoc resp :value :values) :printed (print/response-text resp) :type (str (type (:value resp)))})
       (or (contains? r :value) (:ex r))
       (assoc :line (print/line (cond (:ex r) (or (get-in r [:ex :seon.error/message]) (:ex r)) (contains? r :values) (:values r) (nil? (:value r)) "nil" :else (:value r)) (cfg/value :seon.config.render/line-budget) nil))
       (:prose req) (assoc :prose (:prose req))
@@ -457,22 +446,11 @@
        (record! (cond-> (assoc r :text text) (seq recorded) (assoc :recorded recorded) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
                 code req)))))
 
-(defn draw
-  "Value v drawn as HTML by the render its schema k names on this branch (root's render proc asks:
-  seon.render.ui/ctx), under the branch's schemas, recording nothing: {:html s}, or {:error e}
-  when the render throws (an agent's own render, unmerged: the boundary that answers it, so the
-  asker always has an answer and the agent goes on)."
-  {:malli/schema [:=> [:cat :any :keyword] [:or [:map [:html :string]] [:map [:error :map]]]]}
-  [v k]
-  (try {:html (with-branch-schemas #(h/html (render/html v {:schema k})))}
-       (catch Throwable e {:error (agent/error-map e)})))
-
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 
 (defn agent-step
   "The agent as a step-fn, run on its one thread by seon.step/run-loop: requests in on
-  :sock (an eval as {:op :eval :id :forms}, a value to draw as {:op :render :id :schema :value},
-  Seon's ops as {:op k ...}), replies out on
+  :sock (an eval as {:op :eval :id :forms}, Seon's ops as {:op k ...}), replies out on
   :sock; :pause, :resume, :stop and :ping are taken by the loop. Its REPL state is the
   process's one state map (seon.agent/state), which the code it evaluates reads, so the
   step's own state is empty."
@@ -482,12 +460,7 @@
   ([_] {})
   ([st _] st)
   ([st _ m]
-   (cond
-     ;; root's render proc asks for a value drawn by a render this agent defines (seon.render.ui/ctx):
-     ;; drawn here under its branch's schemas, answered as HTML, and nothing recorded
-     (= :render (:op m))
-     [st {:sock [{:op :reply :id (:id m) :response (draw (:value m) (:schema m))}]}]
-     (= :eval (:op m))
+   (if (= :eval (:op m))
      (do
        ;; an interrupt left from before this request is not its; then root hears that it began
        ;; (its proc's :started event), what an interrupt or a kill meant for a running eval
@@ -496,7 +469,7 @@
        (agent/send! {:op :started :id (:id m)})
        [st {:sock [{:op :reply :id (:id m) :response (dissoc (eval-string (:forms m) (select-keys m [:ticks :origin])) :value :values)
                     :t (:max-tx (agent/db))}]}])
-     :else [st (when-let [ms (agent/handle! m)] {:sock ms})])))
+     [st (when-let [ms (agent/handle! m)] {:sock ms})])))
 
 (defn serve!
   "The agent's loop: one request at a time, in arrival order. Never returns. The agent

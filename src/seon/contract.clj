@@ -91,13 +91,9 @@
 
 (clojure.core/defn properties
   "The properties map of named schema k's form ([:type {props} ...]), or nil: what a
-  schema declares of its values (a status set, a render, a unit), read here only. A registry
-  bound as malli's (an agent's REPL binds its branch's population: seon.repl/with-branch-schemas)
-  answers first, so a render a branch's schema names is the one its values take."
+  schema declares of its values (a status set, a render, a unit), read here only."
   {:malli/schema [:=> [:cat :any] [:maybe :map]]}
-  [k] (if-let [s (some-> (mr/registry mr/*registry*) (mr/schema k))]
-        (m/properties s)
-        (let [form (get forms k)] (when (and (vector? form) (map? (second form))) (second form)))))
+  [k] (let [form (get forms k)] (when (and (vector? form) (map? (second form))) (second form))))
 
 (clojure.core/defn enum-values
   "The members of named [:enum {props} ...] schema k, in their declared order."

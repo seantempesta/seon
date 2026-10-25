@@ -49,7 +49,6 @@ The boundaries where a defect in a request becomes a recorded error map instead 
 | boundary | (`ns/fn`) | what it records |
 |---|---|---|
 | the agent's REPL: reading and evaluating an agent's form | `seon.repl/eval-code` | a form's read error or evaluation error as an `:err` reply item (the one error map itself, under `:err`; the evaluation of a form past its tick budget is the typed interrupt); the next form's reading goes on after an error, the request ends after an interrupt |
-| an agent's drawing of a value for root's page (a key of `@ctx` whose render its branch defines: [ctx](ctx.md)) | `seon.repl/draw` | `{:error e}`, the one error map, answered to the render proc, which shows the key's structure with that error; the agent goes on |
 | a request's evaluation | `seon.repl/eval-string` | the answers so far plus one `:err` item (its error map and id), recorded with them |
 | the agent process's loop: a defect no request's boundary caught (the agent redefined a function its own loop calls; a failing commit of its record) | `seon.repl/serve!` | the cause on stderr, then the run's end on its branch (`seon.agent/died!`: outcome `:error`, the one error map with its cause chain); exit 70, which names the death; root's judge carries the end to the run's reason and error |
 | a test run, in the test child of an agent | `seon.agent/run-tests-forked` | an `:error` report in the run (a fork refused is `:seon.test/fork-refused`, below) |

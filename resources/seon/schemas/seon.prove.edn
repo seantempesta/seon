@@ -4,13 +4,13 @@
 {;; the test's reach digest (seon.program/reach-digests): the identity of its result
  :seon.proof/digest [:and {:seon.db/identity true} :string]
  ;; the failing assertions of a red result (seon.proofs/failures), as data
- :seon.proof/failures [:vector :map]
+ :seon.proof/failures [:vector {:seon.db/data true} :map]
  :seon.proof/ms :int
  ;; the run (its id) that made it, the branch and its tx it ran at, and who asked (the change)
  :seon.proof/run :string
  :seon.proof/branch :string
  :seon.proof/t :int
- :seon.proof/change [:map]
+ :seon.proof/change [:map {:seon.db/data true}]
  ;; the newest result of a test on main, one entity per test (the test's name): what :test-red reads, so
  ;; the class costs the tests and never the results ever recorded. Its history is the older results.
  ;; Only main's runs write it: a red on an agent's branch is that agent's, never a problem of main
@@ -33,7 +33,7 @@
  :seon.proof.run/error :int
  :seon.proof.run/ms :int
  ;; the tests that reach a process of their own and were not named: left out of the run, shown here
- :seon.proof.run/skipped-process [:vector :qualified-symbol]
+ :seon.proof.run/skipped-process [:vector {:seon.db/data true} :qualified-symbol]
  :seon.proof.run/run-fact [:map {:seon.db/attributes true}
                            [:seon.proof.run/id :seon.proof.run/id] [:seon.proof.run/branch :seon.proof.run/branch] [:seon.proof.run/t :seon.proof.run/t]
                            [:seon.proof.run/pass :seon.proof.run/pass] [:seon.proof.run/fail :seon.proof.run/fail]

@@ -26,13 +26,13 @@
  ;; section stale (seon.problems, class :stale-section). From git's baseline (seon.docs/baseline-reads)
  ;; a var may instead be :absent (no form defined it at the section's commit) or :changed (its form's
  ;; docstring or contract changed since), each stale
- :seon.section/read [:map-of :qualified-symbol [:or :string [:enum :absent :changed]]]
+ :seon.section/read [:map-of {:seon.db/data true} :qualified-symbol [:or :string [:enum :absent :changed]]]
  ;; why the baseline of :read could not be taken from git (seon.docs/baseline-reads): the section's :read is as of
  ;; the load, shown as attention (seon.problems, :stale-section) until the section is edited
  :seon.section/baseline-unread :string
  ;; the last review that read the section as it is though its code changed (my.docs/reviewed!): who, and
  ;; the form ids it read at. The older reviews stay in the history
- :seon.section/reviewed [:map [:by :string] [:forms [:map-of :qualified-symbol :string]]]
+ :seon.section/reviewed [:map {:seon.db/data true} [:by :string] [:forms [:map-of :qualified-symbol :string]]]
  :seon.section/fact [:map {:seon.db/attributes true}
                      [:seon.section/address :seon.section/address]
                      [:seon.section/heading :seon.section/heading]

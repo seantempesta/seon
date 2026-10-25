@@ -24,7 +24,6 @@
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
 ;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
-;; :tx (the last transaction transact! applied, {:db-after :tx-data}: seon.ctx patches @ctx from it)
 (defonce state (atom nil))
 
 
@@ -138,7 +137,7 @@
   {:malli/schema [:=> [:cat] :any]}
   []
   (when-let [c (dw/commit-pending! (:store-conn @state))]
-    (swap! state #(-> % (assoc :db (:db c)) (dissoc :dirty? :tx)))
+    (swap! state #(-> % (assoc :db (:db c)) (dissoc :dirty?)))
     ;; the eval errors folded since the last commit ride it (seon.error/note): root counts
     ;; them across agents
     (let [errs (:errors @state)]
@@ -155,12 +154,11 @@
   [tx-data]
   (if (= :test (:mode @state))
     (let [r (d/with (db) tx-data)]
-      (swap! state assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]))
+      (swap! state assoc :db (:db-after r))
       {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
     (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state))})]
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
-      ;; :tx, the transaction that moved :db: what seon.ctx patches @ctx from
-      (swap! state assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]) :dirty? true)
+      (swap! state assoc :db (:db-after r) :dirty? true)
       (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
         (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r)))))))
 
@@ -684,8 +682,6 @@
       (refer 'clojure.test :only '[deftest is are testing use-fixtures])
       (refer 'my.db)
       (refer 'my.agent :exclude '[source source-fn pst])
-      ;; the agent's record as a map, @ctx (seon.ctx)
-      (refer 'seon.ctx :only '[ctx])
       ;; clojure.repl as clojure.main's REPL has it (clojure.main/repl-requires). Jolt's lacks
       ;; source, source-fn and pst: interned from my.agent, whose source also reads the agent's
       ;; own redefinitions from its branch db (task seon.context/the-standard-repl-tools moves the

@@ -23,8 +23,8 @@
  :seon.config.ai/rate [:int {:min 0 :seon.config/unit "tokens/s" :description "Tokens per second the provider admits (the :model owner's bucket). 0: no bucket."}]
  ;; ---- the model manifest (v1's seon.ai.model rows; config/default.edn :seon.config.ai/providers,
  ;; :seon.config.ai/models): by id in the file, an entity each on main
- :seon.config.ai/providers [:map-of {:seon.config/unit "providers" :description "The model providers, by id: their wire facts and their own settings."} :string :seon.ai.model/provider-settings]
- :seon.config.ai/models [:map-of {:seon.config/unit "models" :description "The models, by id: their provider, window, prices and their own settings."} :string :seon.ai.model/model-settings]
+ :seon.config.ai/providers [:map-of {:seon.db/data true :seon.config/unit "providers" :description "The model providers, by id: their wire facts and their own settings."} :string :seon.ai.model/provider-settings]
+ :seon.config.ai/models [:map-of {:seon.db/data true :seon.config/unit "models" :description "The models, by id: their provider, window, prices and their own settings."} :string :seon.ai.model/model-settings]
  :seon.ai.model/provider-settings [:map {:closed true}
                                    [:seon.config.ai/base-url :seon.config.ai/base-url]
                                    [:seon.config.ai/api-key-variable :seon.config.ai/api-key-variable]

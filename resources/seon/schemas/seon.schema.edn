@@ -6,7 +6,7 @@
                             [:db/unique {:optional true} :keyword] [:db/index {:optional true} :boolean]
                             [:db/isComponent {:optional true} :boolean] [:db/noHistory {:optional true} :boolean]]
  :seon.schema/reason [:enum :seon.schema.datahike/absent :seon.schema.datahike/cyclic
-                       :seon.schema.datahike/nested-collection
+                       :seon.schema.datahike/nested-collection :seon.schema.datahike/ordered-collection
                        :seon.schema.datahike/nilable :seon.schema.datahike/literal :seon.schema.datahike/enum :seon.schema.datahike/value-type-unavailable]
  ;; a schema an agent registers at its REPL (my.schema/register!; v1's seon.schema/register!)
  :seon.schema/key :qualified-keyword
