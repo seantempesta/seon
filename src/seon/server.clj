@@ -76,10 +76,12 @@
       (refused (str "no task " id))
       (let [env (assoc (r/desired-env t) :model "outside")
             aid (task/run-id id (inc (count (filter #(= id (:seon.run/task %)) (vals (task/runs db))))))
-            ag (c/spawn! sys {:branch (:branch env) :task id :run aid})]
+            ;; the session's agent continues (design agent-loop section 1)
+            k (task/session-key db id)
+            ag (c/spawn! sys (cond-> {:branch (:branch env) :task id :run aid} k (assoc :key k)))]
         @(c/transact-main! sys (vec (concat (task/env-tx id {:model "outside"}) (task/execution-tx [id] :running)
                                             (task/run-start-tx aid id (:boot sys) ag env (System/currentTimeMillis)
-                                                                   (:plan (:seon.task/accumulated t))))))
+                                                                   (:plan (:seon.task/accumulated t)) k))))
         {:agent ag :task id :run aid}))))
 
 (defn- run-of

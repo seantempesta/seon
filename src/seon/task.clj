@@ -147,18 +147,45 @@
   [db] (:seon.root/boot (d/entity db [:seon.root/id :root])))
 
 (defn this-boots
-  "Agent entity e's id when it is an agent of root's boot on main db (its key is that boot's),
-  else nil: an id like :a3 starts again each boot, so only this boot's names a process root holds."
+  "Agent entity e's id when it is an agent of root's boot on main db, else nil: an id like :a3
+  starts again each boot, so only this boot's names a process root holds. Its key is that
+  boot's, or it is a session's agent a process of this boot continues (a run of this boot is
+  its: seon.reconcile/session-key)."
   {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe :keyword]]}
   [db e]
   ;; e an entity of main (its key: a walk shows only an agent's relevant attributes)
   (let [id (:seon.agent/id e) boot (boot-of db)]
-    (when (and id boot (= (:seon.agent/key e) (agent-key boot id))) id)))
+    (when (and id boot (or (= (:seon.agent/key e) (agent-key boot id))
+                           (some #(= boot (:seon.run/boot %)) (:seon.run/_agent e))))
+      id)))
 
 (def ^:private agent-attrs
   "Each member of root's view of an agent and the attribute recording it (agent-tx)."
   {:status :seon.agent/status :pid :seon.agent/pid :mem-mb :seon.agent/mem-mb :running :seon.agent/running
    :task :seon.agent/description :branch :seon.agent/branch :forked-ms :seon.agent/forked-ms :ended-ms :seon.agent/ended-ms})
+
+(defn session-key
+  "The agent key of task id's session on db, or nil when none of its runs has had an agent: the
+  session is id and the tasks on its branch it needs, transitively (a request's stages, a work
+  task and its merge: design agent-loop section 1a), and its agent is the agent of the newest
+  run among them. A run started for the session continues it, so its conversation and messages
+  go on across runs (seon.context/records). Reads the chain's tasks and their runs."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe :string]]}
+  [db id]
+  (let [e0 (d/entity db [:seon.task/id id])
+        br (:seon.task/branch e0)
+        chain (loop [seen #{} todo (if e0 [e0] [])]
+                (if-let [e (first todo)]
+                  (if (seen (:db/id e))
+                    (recur seen (rest todo))
+                    (recur (conj seen (:db/id e)) (into (rest todo) (filter #(= br (:seon.task/branch %)) (:seon.task/needs e)))))
+                  seen))
+        newest (->> chain
+                    (mapcat #(:seon.run/_task (d/entity db %)))
+                    (filter :seon.run/agent)
+                    (sort-by #(:seon.run/start-ms % 0))
+                    last)]
+    (some-> newest :seon.run/agent :seon.agent/key)))
 
 (defn agent-tx
   "What root observes of agent id in its boot, as facts on the agent's entity: the root that
@@ -166,14 +193,18 @@
   its task's id or description, branch, when it forked and ended); a member m holds as nil is
   no longer true, and retracted (the form running, once it returned). Root writes it when its
   view of the agent changes (seon.root/record-agents)."
-  {:malli/schema [:=> [:cat :string :keyword :map] [:vector :any]]}
-  [boot id m]
-  (let [k (agent-key boot id)
+  {:malli/schema [:function [:=> [:cat :string :keyword :map] [:vector :any]]
+                  [:=> [:cat :string :keyword :map [:maybe :string]] [:vector :any]]]}
+  ;; key: the session's agent this process continues (seon.reconcile/session-key), whose entity
+  ;; then holds this process's facts; nil, the process's own key in this boot
+  ([boot id m] (agent-tx boot id m nil))
+  ([boot id m key]
+  (let [k (or key (agent-key boot id))
         v (fn [member x] (case member :running (:form x) (:mem-mb :forked-ms) (double x) x))]
     (into [(into {:seon.agent/key k :seon.agent/id id :seon.agent/root [:seon.root/id :root]}
                  (for [[member a] agent-attrs :let [x (some->> (get m member) (v member))] :when (some? x)] [a x]))]
           (for [[member a] agent-attrs :when (and (contains? m member) (nil? (get m member)))]
-            [:db.fn/retractAttribute [:seon.agent/key k] a]))))
+            [:db.fn/retractAttribute [:seon.agent/key k] a])))))
 
 (defn boot-tx
   "Root's boot: its id for this process lifetime and its max-running config key (merges at once,
@@ -201,9 +232,13 @@
   spawn, and no agent exists), given the task's accumulated plan. The run refs the agent's
   entity, named by its key in that boot (seon.task/agent-key) and holding its id, so a read of
   the run names its agent before root has recorded anything else of it."
-  {:malli/schema [:=> [:cat :seon.run/id :seon.task/id :string [:maybe :keyword] :seon.task/env :int :seon.task/plan] [:vector :map]]}
-  [aid task boot agent {:keys [branch model max-turns]} start-ms plan]
-  (let [k (when agent (agent-key boot agent))]
+  {:malli/schema [:function [:=> [:cat :seon.run/id :seon.task/id :string [:maybe :keyword] :seon.task/env :int :seon.task/plan] [:vector :map]]
+                  [:=> [:cat :seon.run/id :seon.task/id :string [:maybe :keyword] :seon.task/env :int :seon.task/plan [:maybe :string]] [:vector :map]]]}
+  ;; key: the session's agent the run continues (seon.reconcile/session-key); nil, the agent's
+  ;; own key in this boot
+  ([aid task boot agent env start-ms plan] (run-start-tx aid task boot agent env start-ms plan nil))
+  ([aid task boot agent {:keys [branch model max-turns]} start-ms plan key]
+  (let [k (when agent (or key (agent-key boot agent)))]
     (filterv some?
              [(cond-> {:seon.run/id aid :seon.run/task [:seon.task/id task] :seon.run/status :running
                        :seon.run/boot boot :seon.run/start-ms start-ms
@@ -212,7 +247,7 @@
                 model (assoc :seon.run/model model))
               ;; the agent its own entity map, so it takes its content id (Datahike's content-tempids);
               ;; its tempid is its key, unique in a transaction that starts several runs
-              (when k {:db/id k :seon.agent/key k :seon.agent/id agent})])))
+              (when k {:db/id k :seon.agent/key k :seon.agent/id agent})]))))
 
 (defn status-tx
   "Move run aid from status `from` to `to` (Datahike's compare-and-swap: a racing

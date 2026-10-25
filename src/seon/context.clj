@@ -389,19 +389,21 @@
     [(into (vec (repeat (max 0 (- b a)) :line)) (repeat (- n (max a b)) :whole)) a]))
 
 (defn records
-  "What run's conversation is made of on db, in tx order: agent a's evals of the run (not the
-  screen's or a context read's: those end only the request that ran them) and the messages the
-  run took (written on its branch by the turn that took each), each [tx value schema-key]; with
-  since, only those of transaction since and later (what a request has not printed yet)."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :int :seon.run/id] [:vector [:tuple :int :map :qualified-keyword]]]
-                  [:=> [:cat :seon.host/db :int :seon.run/id [:maybe :int]] [:vector [:tuple :int :map :qualified-keyword]]]]}
-  ([db a run] (records db a run nil))
-  ([db a run since]
+  "What agent a's conversation is made of on db, in tx order: its evals (not the screen's or a
+  context read's: those end only the request that ran them) and the messages its runs took
+  (written on its branch by the turn that took each), each [tx value schema-key]; with since,
+  only those of transaction since and later (what a request has not printed yet). The
+  session's, not one run's: a run that wakes or loads the session reads every run before it
+  (design agent-loop section 1)."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :int] [:vector [:tuple :int :map :qualified-keyword]]]
+                  [:=> [:cat :seon.host/db :int [:maybe :int]] [:vector [:tuple :int :map :qualified-keyword]]]]}
+  ([db a] (records db a nil))
+  ([db a since]
   (->> (concat (for [[e tx] (d/q '[:find ?e ?tx :in $ ?a ?since :where [?e :seon.eval/agent ?a ?tx] [(>= ?tx ?since)]] db a (or since 0))
                      :let [v (d/pull db [:seon.eval/id :seon.eval/by :seon.eval/record] e)]
-                     :when (and (= run (:run (:seon.eval/record v))) (not (#{"screen" "context"} (:seon.eval/by v))))]
+                     :when (not (#{"screen" "context"} (:seon.eval/by v)))]
                  [tx v :seon.db/eval-fact])
-               (for [[e tx] (d/q '[:find ?m ?tx :in $ ?r ?since :where [?ru :seon.run/id ?r] [?m :seon.message/to ?ru ?tx] [(>= ?tx ?since)]] db run (or since 0))]
+               (for [[e tx] (d/q '[:find ?m ?tx :in $ ?a ?since :where [?ru :seon.run/agent ?a] [?m :seon.message/to ?ru ?tx] [(>= ?tx ?since)]] db a (or since 0))]
                  [tx (d/pull db [:seon.message/id :seon.message/from :seon.message/body] e) :seon.message/fact]))
        (sort-by (fn [[tx v]] [tx (:seon.eval/id v (:seon.message/id v))]))
        vec)))
@@ -452,7 +454,7 @@
   makes it once per change (design section 10, step 4)."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:map [:messages [:vector :seon.model/message]] [:sent [:maybe [:vector :any]]] [:printed :map]]]}
   [a {:keys [db basis block help run help-ref run-ref printed]}]
-  (let [rs (if (and a (= :model (:origin basis))) (records db (:db/id a) (:run basis) (:tx printed)) [])
+  (let [rs (if (and a (= :model (:origin basis))) (records db (:db/id a) (:tx printed)) [])
         ;; each record printed once (opts :printed, the run's earlier requests'), then which the
         ;; history budget sends, whole or collapsed
         cache (printed-run (mapv (fn [[tx v k]] [(ref-of v) v k tx]) rs) printed)

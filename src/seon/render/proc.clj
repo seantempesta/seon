@@ -210,13 +210,17 @@
 
 (defn- location
   "The entity view names on main db: root's for :root, the agent of that id in root's boot (its
-  key, seon.task/agent-key) for an agent's id, else the entity id it is; nil when main names none
-  (no boot fact yet, or no agent of that id in this boot)."
+  key, seon.task/agent-key, or the session's agent it continues) for an agent's id, else the
+  entity id it is; nil when main names none (no boot fact yet, or no agent of that id in this boot)."
   {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe pos-int?]]}
   [db view]
   (cond (vector? view) (location db (second view))
         (= :root view) (:db/id (d/entity db [:seon.root/id :root]))
-        (keyword? view) (when-let [boot (task/boot-of db)] (:db/id (d/entity db [:seon.agent/key (task/agent-key boot view)])))
+        ;; the process's own key in this boot, else the session's agent it continues
+        (keyword? view) (when-let [boot (task/boot-of db)]
+                          (or (:db/id (d/entity db [:seon.agent/key (task/agent-key boot view)]))
+                              (some (fn [dt] (when (= view (task/this-boots db (d/entity db (:e dt)))) (:e dt)))
+                                    (d/datoms db :avet :seon.agent/id view))))
         :else view))
 
 (defn- debug-value
