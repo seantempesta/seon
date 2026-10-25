@@ -581,6 +581,26 @@
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 
+(deftest a-spawns-start-costs-the-same-on-a-bigger-program
+  ;; the owner, 2026-10-25 ("what are we doing if we can fork in ms?"): a spawn's own work in the
+  ;; child (its phases' bytes, seon.agent/spawn-phases, sent with its hello) does not grow with
+  ;; main's program: an agent spawned after main gained 200 forms allocates what one before it did
+  (let [code (str "(let [ph (fn [id] (into {} (for [p (get-in (seon.root/state sys) [:agents id :phases]) :when (:bytes p)] [(:phase p) (:bytes p)])))"
+                  " fresh #(keyword (str \"pa-\" (rand-int 100000000)))"
+                  " a (seon.root/spawn! sys {:branch (fresh)})"
+                  " text (clojure.string/join \"\\n\" (cons \"(ns app.big)\" (for [i (range 200)] (str \"(defn f\" i \" [x] (inc x))\"))))"
+                  " _ @(seon.root/transact-main! sys (seon.source/text-tx @(:conn sys) 'app.big text nil))"
+                  " b (seon.root/spawn! sys {:branch (fresh)})]"
+                  " [(ph a) (ph b) (mapv :phase (get-in (seon.root/state sys) [:agents b :phases]))])")
+        [r] (in-agent [{:op :eval :agent "root" :code code}])
+        [before after phases] (:value r)]
+    (is (= [:fork-server-in :reach-graph :static :child-init :setup :store-reopened :ns :interrupt-test :connected :handlers :base :misaligned :state :hello]
+           phases)
+        (pr-str r))
+    (is (seq before))
+    (doseq [[k v] before]
+      (is (<= (get after k) (+ (* 1.1 v) 65536)) (str k ": " v " bytes before, " (get after k) " after 200 more forms")))))
+
 (deftest a-root-with-no-provider-ends-the-run-on-its-typed-error
   ;; root's ruling 2026-10-22: a root with no model provider (no SEON_PROFILE) answers the
   ;; first turn with :seon.model/no-provider; the error reaches whoever can act on it: the
