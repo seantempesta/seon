@@ -145,6 +145,9 @@
  :seon.agent/mem-mb :double
  :seon.agent/running :string
  :seon.agent/description [:string {:seon.render/prose true}]
+ ;; the forms the agent's screen evaluates before each model request, as the agent set them
+ ;; (swap! of @ctx); absent, the platform's (seon.screen/forms)
+ :seon.agent/screen [:vector [:string {:min 1}]]
  :seon.agent/forked-ms :double
  :seon.agent/ended-ms :int
  :seon.agent/answered-t :int
@@ -159,6 +162,7 @@
                        [:seon.agent/status {:optional true} :seon.agent/status] [:seon.agent/pid {:optional true} :seon.agent/pid]
                        [:seon.agent/mem-mb {:optional true} :seon.agent/mem-mb] [:seon.agent/running {:optional true} :seon.agent/running]
                        [:seon.agent/description {:optional true} :seon.agent/description]
+                       [:seon.agent/screen {:optional true} :seon.agent/screen]
                        [:seon.agent/forked-ms {:optional true} :seon.agent/forked-ms] [:seon.agent/ended-ms {:optional true} :seon.agent/ended-ms]
                        [:seon.agent/answered-t {:optional true} :seon.agent/answered-t]]
  ;; ---- tasks, runs, proof results, root's boot, turns and ends (session D1's proto.agents.facts.edn) ----
