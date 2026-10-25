@@ -153,4 +153,10 @@ No part needs a paid run (step 6 measures). New attributes: none."
                       seon.context-test/a-long-source-is-cut-by-the-printer-where-it-is-shown
                       seon.context-test/an-agent-reads-its-conversation-so-far
                       seon.render-test/root-context-cuts-only-in-the-printer
-                      seon.render-test/one-printer-and-no-cut-before-it}}]
+                      seon.render-test/one-printer-and-no-cut-before-it}}
+ {:seon.task/name "the-users-agent-is-shown-by-data"
+  :seon.task/plan "From the branch review of jolt/agent-conversation (2026-10-25, root's scratchpad branch-review.md, follow-ups): (F9) the sidebar marks the owner's own agent entity off the screen by its id (`seon.render.ui/component`, (= :user id)). Correct: what the entity is says it (an attribute of the agent fact naming whose it is, or its schema), never its id. The root and agent ids in a location (`seon.render.proc/location`, `seon.render.ui/view-param`) are a route's names, not a render's special cases, and stay."
+  :seon.task/kind :work}
+ {:seon.task/name "a-walk-counts-its-rows-flat"
+  :seon.task/plan "From the branch review of jolt/agent-conversation (2026-10-25, root's scratchpad branch-review.md, follow-ups): (F4) `seon.render/walk` with :limit pulls only the rows a page shows and lists the rest from the ref's index (no read of them): 59 contracted calls flat in the rows, but ~6 KB a row of bookkeeping (the index entry, the node map, the sort by transaction; seon.render-cost-test/a-page-walks-only-the-rows-shown, 3.24 / 8.65 MB at 100 / 1,000). Correct: the newest rows read by index from the end and their count read apart, so a walk costs the rows shown. Measure first: whether the eval entities' ids are in their transactions' order on every branch."
+  :seon.task/kind :work}]

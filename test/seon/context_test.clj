@@ -476,6 +476,11 @@
   (let [db (d/db-with (db-with-program) [{:seon.message/id "m-1" :seon.message/from "owner" :seon.message/to {:seon.run/id "demo/f#1"}
                                           :seon.message/body "use demo/g, not a new helper"}])]
     (is (= [{:id "m-1" :from "owner" :body "use demo/g, not a new helper"}] (context/taken-messages db {:message-ids ["m-1"]})))))
+(defn- read-back
+  "What turn entity e on db sent, read back from its records (the refs it recorded, each by its own
+  render: seon.context/parts-of), as one vector of messages."
+  [db e] (into [] (mapcat second) (context/parts-of db (:seon.turn/sent (d/pull db [:seon.turn/sent] e)))))
+
 (defn- sent-turns
   "A run of two model turns as seon.turn records them (owner's ruling 2026-10-24: each turn
   records what it sent as refs, :seon.turn/sent), with the task's plan changed after turn 0 and
@@ -512,6 +517,51 @@
         e-of (fn [id] (d/q '[:find ?e . :in $ ?id :where [?e :seon.turn/id ?id]] db id))]
     [db [r0 r1] [(e-of "demo/f#1/0") (e-of "demo/f#1/1")]]))
 
+(deftest a-run-printed-once-sends-what-a-cold-read-sends
+  ;; the branch review (2026-10-25, F6, F7): a request threaded through what the run's earlier
+  ;; requests printed (:printed) equals one made with none, turn by turn; what each turn recorded
+  ;; it sent reads back as the same bytes; and a value folded to an earlier record's form is folded
+  ;; only while that record is sent whole
+  (ts/test-branch!
+    (fn [_ conn]
+      (wiki! conn)
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g."
+                                               :seon.task/proofs #{'demo-test/g-test}}]))
+      (let [rows (vec (for [i (range 40)] {:row i :name (str "row-" i)}))
+            ev! (fn [id by value & [more]]
+                  (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
+                                     :seon.eval/record (merge {:code (str "(" id ")") :response {:handle (symbol "result" id) :value value}
+                                                               :line (str id) :run "demo/g#1"} more)}]))
+            basis (fn [n screen] {:commit (d/commit-id @conn) :task "demo/g" :run "demo/g#1" :turn n :max-turns 9
+                                  :origin :model :observed {:results {} :test-run-errors [] :reds [] :reasons []} :screen screen :agent "b/a1"})
+            turns (loop [n 0 printed nil out []]
+                    (if (= n 4)
+                      out
+                      (do (ev! (str "s" n) "screen" :status)
+                          (ev! (str "e" n) "a1" (if (odd? n) rows (vec (range (* 10 (inc n))))) {:call-id (str "c" n) :call 0 :prose (str "Step " n ".")})
+                          (let [b (basis n [(str "s" n)])
+                                warm (context/render @conn b {:printed printed})
+                                cold (context/render @conn b)]
+                            (d/transact conn [{:seon.turn/id (str "demo/g#1/" n) :seon.turn/run {:seon.run/id "demo/g#1"} :seon.turn/n n
+                                               :seon.turn/origin :model :seon.turn/basis b :seon.turn/sent (:sent warm)
+                                               :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1}])
+                            (recur (inc n) (:printed warm) (conj out [n warm cold]))))))
+            db @conn]
+        (doseq [[n warm cold] turns]
+          (is (= (:messages cold) (:messages warm)) (str "turn " n ": printed once equals printed cold"))
+          (is (= (:sent cold) (:sent warm)))
+          (let [e (d/q '[:find ?e . :in $ ?id :where [?e :seon.turn/id ?id]] db (str "demo/g#1/" n))]
+            (is (= (:messages warm) (into [] (mapcat second) (context/parts-of db (:seon.turn/sent (d/pull db [:seon.turn/sent] e)))))
+                (str "turn " n ": its read-back is the bytes it sent"))))
+        (let [[_ last-turn] (peek turns)]
+          (is (some #(and (vector? %) (= [:eval "e3" {:value 'result/e1}] %)) (:sent last-turn)) "e3's rows are e1's, sent whole: folded")
+          (is (str/includes? (str (:messages last-turn)) "(:value result/e1)")))
+        (testing "a fold whose record the history no longer sends whole is sent unfolded"
+          (let [p {:ref [:eval "e3" {:value 'result/e1}] :whole [{:role "tool" :content "(:value result/e1)"}] :fold {:value 'result/e1}
+                   :plain [{:role "tool" :content "[{:row 0 …}]"}]}]
+            (is (= [[:eval "e3" {:value 'result/e1}] (:whole p)] (#'context/as-sent p #{"e1" "e3"})) "e1 sent whole: folded")
+            (is (= [[:eval "e3"] (:plain p)] (#'context/as-sent p #{"e3"})) "e1 collapsed or left out: the value itself")))))))
+
 (deftest a-turn-records-what-it-sent
   ;; task seon.context/a-turn-records-what-it-sent (A): a turn records the records its request
   ;; rendered, in order; read back, each by its own render as of the turn (the help page's
@@ -525,11 +575,11 @@
         (is (every? pos-int? (map second (take 2 (sent e0)))) "the help page's own section and the task, by entity")
         (is (= [:section :task :eval :eval] (mapv first (sent e1))) "turn 1: then its call's eval, then the screen eval")
         (is (= (second (sent e0)) (second (sent e1))) "the task story is the run's first turn's: the same task as of the same t")
-        (is (= r0 (context/sent-messages db e0)) "turn 0's messages, read from its records")
-        (is (= r1 (context/sent-messages db e1)) "turn 1's, though the plan changed after both")
-        (is (not (str/includes? (str (context/sent-messages db e1)) "Later.")) "the task as it was sent, not as it is")
+        (is (= r0 (read-back db e0)) "turn 0's messages, read from its records")
+        (is (= r1 (read-back db e1)) "turn 1's, though the plan changed after both")
+        (is (not (str/includes? (str (read-back db e1)) "Later.")) "the task as it was sent, not as it is")
         (is (str/includes? (context/help-text db) "Changed after the turns.") "the help page changed after them")
-        (is (not (str/includes? (str (context/sent-messages db e0)) "Changed after the turns.")) "the help page as it was sent")))))
+        (is (not (str/includes? (str (read-back db e0)) "Changed after the turns.")) "the help page as it was sent")))))
 
 (deftest a-turn-records-one-turns-messages
   ;; what a turn writes is its refs, one a record it sent: the record grows with that turn's

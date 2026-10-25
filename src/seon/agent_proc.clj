@@ -230,7 +230,7 @@
       :prove (do (step/out! o :to-api {:op :request :req {:op :prove :agent id :branch (:branch st) :t (:t m) :digest (:digest m) :mode (:mode m)} :route [id :in] :tag (:k m)})
                  st)
       ;; the agent asks for its screen (seon.screen/show): its page, from root's render proc
-      :screen (do (step/out! o :to-api {:op :request :req {:op :screen :agent id} :route [id :in] :tag (:k m)})
+      :screen (do (step/out! o :to-api {:op :request :req {:op :screen :agent id :t (:t m)} :route [id :in] :tag (:k m)})
                   st)
       :merged-main (let [st (answer-rid st o (:id m) (:result m))]
                      (step/out! o :events (step/event {:type :merged-main :agent id :result (:result m)}))

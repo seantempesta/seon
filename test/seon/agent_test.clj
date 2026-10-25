@@ -523,7 +523,7 @@
   (let [[end turn] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#fail\" :max-turns 1})"
                               (str "(let [db (seon.agent/db) t (datahike.api/pull db '[:db/id :seon.turn/sent :seon.turn/error] [:seon.turn/id \"demo/t#fail/0\"])]"
                                    "  {:sent (mapv first (:seon.turn/sent t)) :error (:seon.error/type (:seon.turn/error t))"
-                                   "   :read (count (seon.context/sent-messages db (:db/id t)))"
+                                   "   :read (count (mapcat second (seon.context/parts-of db (:seon.turn/sent t))))"
                                    "   :screen (seon.print/record-text (:seon.eval/record (datahike.api/pull db '[:seon.eval/record] [:seon.eval/id (second (nth (:seon.turn/sent t) 2))])))})")]
                              {:sets [":seon.config.ai/provider=:none"]})]
     (is (= :error (:outcome (:value end))) (pr-str end))

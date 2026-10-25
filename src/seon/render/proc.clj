@@ -209,11 +209,6 @@
 
 ;;; --- a location's page ------------------------------------------------------------------------
 
-(defn- boot-of
-  "Root's boot on main db, as its entity records it (:seon.root/boot), or nil before root's boot fact."
-  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :string]]}
-  [db] (:seon.root/boot (d/entity db [:seon.root/id :root])))
-
 (defn- location
   "The entity view names on main db: root's for :root, the agent of that id in root's boot (its
   key, seon.task/agent-key) for an agent's id, else the entity id it is; nil when main names none
@@ -222,17 +217,8 @@
   [db view]
   (cond (vector? view) (location db (second view))
         (= :root view) (:db/id (d/entity db [:seon.root/id :root]))
-        (keyword? view) (when-let [boot (boot-of db)] (:db/id (d/entity db [:seon.agent/key (task/agent-key boot view)])))
+        (keyword? view) (when-let [boot (task/boot-of db)] (:db/id (d/entity db [:seon.agent/key (task/agent-key boot view)])))
         :else view))
-
-(defn- this-boots
-  "Agent entity e's id when it is an agent of root's boot on main db (its key is that boot's),
-  else nil: an id like :a3 starts again each boot, so only this boot's names a process root holds."
-  {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe :keyword]]}
-  [db e]
-  ;; e an entity of main (its key: a walk shows only an agent's relevant attributes)
-  (let [id (:seon.agent/id e) boot (boot-of db)]
-    (when (and id boot (= (:seon.agent/key e) (task/agent-key boot id))) id)))
 
 (defn- debug-value
   "View [:debug id]'s page: what agent id's model was sent, each model turn that recorded it
@@ -255,15 +241,6 @@
                 (vec (for [e on :let [id (ui/comp-id e [:debug])]] {:id id :comp [1 e [:debug (contains? open id) vp]]}))
                 (- (count ts) (count on))))))
 
-(defn- runs-of
-  "Main's runs as root's page shows them: how many by status (the status index, counted), and
-  each running one (its status's index entries, pulled)."
-  {:malli/schema [:=> [:cat :seon.host/db] :seon.render/runs]}
-  [db]
-  {:by-status (frequencies (map :v (d/datoms db :aevt :seon.run/status)))
-   :running (vec (for [dt (d/datoms db :avet :seon.run/status :running)]
-                   (d/pull db [:seon.run/id :seon.run/status :seon.run/turns :seon.run/max-turns :seon.run/model] (:e dt))))})
-
 (defn- page-value
   "View's page: the entity it names walked on main and, for an agent, its branch as this proc last
   read it (seon.render/walk), laid out by seon.render.ui/page with its focus's input at the top
@@ -279,38 +256,26 @@
      (and eid (vector? view)) (debug-value st view)
      (and db (nil? eid))
      (contract/error :seon.render/no-location `page-value
-                     (str "no " (if (keyword? view) (str "agent " (ui/kname view) " in root's boot " (boot-of db)) (ui/kname view))
+                     (str "no " (if (keyword? view) (str "agent " (ui/kname view) " in root's boot " (task/boot-of db)) (ui/kname view))
                           " on main: an agent's id names one of this boot's (ids start again each boot); an earlier boot's agent's page is"
                           " /walk/<its eid>, linked from its root's page")
                      {:view (ui/kname view)})
      eid
       (let [dbs (into [db] (keep identity) [(get-in st [:branches view :db])])
-            w (render/walk dbs eid)
-            agent (get-in w [:seon.render/root :seon.render/value])
-            task (some #(when (= :seon.task/task-fact (:seon.render/schema %)) (:seon.render/value %)) (:seon.render/nodes w))
-            input (cond (= :root view) {:schema :seon.render/root-input :value {}}
-                        (:seon.agent/id agent)
-                        {:schema :seon.render/agent-input
-                         :value {:id (:seon.agent/id agent)
-                                 ;; root's view of it in this boot: an agent of another boot has no process
-                                 :live? (boolean (when-let [id (this-boots db (d/entity db eid))] (ui/live (ui/shown-status (get-in st [:view :agents id] {})))))
-                                 :held (when (= :held (:seon.task/execution task)) (:seon.task/id task))}})
-            ;; root's focus: main's open problems, a part of its page by their own render; an agent's
-            ;; branch that could not be read: its error, by the error's render
+            ;; the rows its tab shows read whole, the older listed (counted) without their data values
+            w (render/walk dbs eid {:limit (get-in st [:shown view] (history-cap))})
+            ;; a branch that could not be read: its error, by the error's render
             berr (get-in st [:branches view :error])
-            w (cond-> w
-                (and (= :root view) (not (:seon.error/type w)))
-                ;; main's problems as this view shows them: the classes its tab opened render their rows
-                (update :seon.render/nodes conj {:seon.render/kind :value :seon.render/value (assoc (:recorded st) :open (get-in st [:open view] #{}))
-                                                 :seon.render/schema :seon.render/problems :seon.render/eid eid}
-                        {:seon.render/kind :value :seon.render/value (runs-of db) :seon.render/schema :seon.render/runs :seon.render/eid eid})
-                (and berr (not (:seon.error/type w)))
+            w (cond-> w (and berr (not (:seon.error/type w)))
                 (update :seon.render/nodes conj {:seon.render/kind :value :seon.render/value berr :seon.render/eid eid}))]
         (if (:seon.error/type w)
           w
-          ;; the entity's own view, shown as its page: a view that answers a layout lays it out (an
-          ;; agent's, its conversation); any other entity's page is the walk's (seon.render.ui/page)
-          (let [opts {:shown (get-in st [:shown view] (history-cap)) :view (ui/view-param view) :input input}
+          ;; the entity's own view, shown as its page: a view that answers a layout lays it out, its
+          ;; input and tiles its own (root's, an agent's: seon.render.ui/root, agent), from what this
+          ;; proc holds of the system (root's view of its agents, main's recorded problems); any other
+          ;; entity's page is the walk's (seon.render.ui/page)
+          (let [opts {:shown (get-in st [:shown view] (history-cap)) :view (ui/view-param view)
+                      :agents (get-in st [:view :agents] {}) :recorded (:recorded st)}
                 {:seon.render/keys [value schema]} (:seon.render/root w)
                 own (when (render/declared schema :html)
                       (render/html value {:as :page :schema schema :page (assoc opts :walk w :dbs dbs :open (get-in st [:open view] #{}))}))]
@@ -336,12 +301,13 @@
   {:malli/schema [:=> [:cat :map :any] :map]}
   [st view]
   (let [db (:main-db st)
-        id (when db (when-let [eid (location db view)] (this-boots db (d/entity db eid))))]
+        id (when db (when-let [eid (location db view)] (task/this-boots db (d/entity db eid))))]
     {:shown (get-in st [:shown view]) :open (get-in st [:open view]) :error (get-in st [:branches view :error])
      ;; whether its branch is read at all: what moved on it after that is its datoms-diff
      :branch? (some? (get-in st [:branches view :db]))
      :live (when id (ui/live (ui/shown-status (get-in st [:view :agents id] {}))))
-     :recorded (when (= :root view) (:recorded st))}))
+     ;; main's recorded problems, as this proc holds them (a page's own render may show them: root's)
+     :recorded (:recorded st)}))
 
 (defn- walk?
   "Does view's page walk this pass: not held yet, a transaction touched what it read (:dirty),
@@ -390,7 +356,7 @@
   its components)."
   {:malli/schema [:=> [:cat :map :any nat-int?] :any]}
   [st view i]
-  (if (zero? i) :main (or (first (get-in st [:branches view :read])) [:view view])))
+  (if (zero? i) :main (or (get-in st [:branches view :branch]) [:view view])))
 
 (defn- comp-entry
   "Component [i eid as] of view's page from the proc's one cache of components, keyed by
@@ -441,6 +407,21 @@
     st
     (-> (drop-comps st (seq cks))
         (update :dirty (fnil into #{}) (mapcat #(get-in st [:comp-views %]) cks)))))
+
+(defn- advance-main
+  "St with main as db when db is newer than the main it holds (main-info): the components and views
+  its datoms touched since (the datoms-diff of the two, O(changed), as a branch's read is matched)
+  render again. The one way main moves here: the writer's commit notice, main read for a screen,
+  main's first read. A db no newer changes nothing."
+  {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
+  [st db]
+  (let [held (:main-db st)]
+    (if (and held (<= (:max-tx db) (:max-tx held)))
+      st
+      (let [moved (when held (apply concat (d/datoms-diff held db :eavt [])))]
+        (cond-> (main-info st db)
+          (seq moved) (-> (update :dirty (fnil into #{}) (touched st moved))
+                          (invalidate (comps-touched st :main moved))))))))
 
 (defn- forget
   "St without the cached components no view holds (:comp-views): the cache holds what pages show,
@@ -510,13 +491,17 @@
 
 (defn- drop-view
   "St without view v (no tab watches it, nothing waits on it): its page, its reads in :read-index,
-  the components it held (forget drops those no view holds), its branch read, its rows and opens."
+  the components it held (those no other view holds leave the cache: O(what it held)), its
+  branch read, its rows and opens."
   {:malli/schema [:=> [:cat :map :any] :map]}
   [st v]
+  (let [cks (keep #(get-in % [:input :comp]) (vals (get-in st [:views v :units])))]
   (-> (reindex st v (get-in st [:views v :reads]) #{})
-      (hold-comps v (keep #(get-in % [:input :comp]) (vals (get-in st [:views v :units]))) [])
+      (hold-comps v cks [])
+      ;; a component no other view holds now leaves the cache with it (a screen's view, with no tab, too)
+      (as-> st (drop-comps st (remove #(seq (get-in st [:comp-views %])) (distinct cks))))
       (update :views dissoc v) (update :branches dissoc v) (update :shown dissoc v) (update :open dissoc v)
-      (update :dirty #(disj (or % #{}) v))))
+      (update :dirty #(disj (or % #{}) v)))))
 
 (defn- screen-hiccup
   "Hiccup x of a page as its screen shows it, as the children it stands for (a seq): each slot
@@ -552,6 +537,16 @@
   and status."
   {:malli/schema [:=> [:cat :map] :map]}
   [agents] (into {} (for [[id a] agents] [id (select-keys a [:pid :branch :status])])))
+
+(defn- screen-due?
+  "Is screen s ({:view :read? :t}) answerable: main read for it (:read?), its page whole (ready?),
+  and its branch read covering the commit its agent asked from (:t; a branch that could not be
+  read is answered with why)."
+  {:malli/schema [:=> [:cat :map :map] :boolean]}
+  [st {:keys [view read? t]}]
+  (boolean (and read? (ready? st view)
+                (or (nil? t) (get-in st [:branches view :error])
+                    (some-> (get-in st [:branches view :db]) :max-tx (>= t))))))
 
 (defn- pass
   "Render every view a tab watches (or a page or keyframe waits for), and answer the
@@ -589,14 +584,14 @@
       (doseq [[k v] (:waiting st) :when (ready? st v)] (step/out! o :to-web {:op :page :k k :view v :html (page-html st v)}))
       (doseq [v (:kf-wanted st) :when (ready? st v)] (step/out! o :to-web {:op :keyframe :view v :html (page-html st v)}))
       ;; an agent's screen, answered on its asker's route (the api's request, seon.root/screen)
-      (doseq [[_ {:keys [view reply read?]}] (:screens st) :when (and read? (ready? st view))]
+      (doseq [[_ {:keys [view reply] :as sc}] (:screens st) :when (screen-due? st sc)]
         (step/out! o (:route reply) {:tag (:tag reply) :r (screen-of st view)}))
       (-> st (assoc :index idx
                     :waiting (into {} (remove (fn [[_ v]] (ready? st v))) (:waiting st))
                     :kf-wanted (into #{} (remove #(ready? st %)) (:kf-wanted st))
-                    :screens (into {} (remove (fn [[_ {:keys [view read?]}]] (and read? (ready? st view)))) (:screens st)))
+                    :screens (into {} (remove (fn [[_ sc]] (screen-due? st sc))) (:screens st)))
           ;; a view only an answered screen needed keeps nothing
-          (as-> x (reduce drop-view x (for [[_ {:keys [view read?]}] (:screens st) :when (and read? (ready? st view) (not (contains? (:watch st) view)) (not (some #{view} (vals (:waiting st)))))] view)))
+          (as-> x (reduce drop-view x (for [[_ {:keys [view] :as sc}] (:screens st) :when (and (screen-due? st sc) (not (contains? (:watch st) view)) (not (some #{view} (vals (:waiting st)))))] view)))
           (update :passes (fnil inc 0))
           (cond-> (seq patches) (assoc :render-ms (lib/r2 ms) :patches (reduce + (map #(+ (count (:frags %)) (count (:appends %)) (count (:prepends %)) (count (:removes %))) patches))))
           (update :pass-ms #(lib/push-window % ms 200))
@@ -635,23 +630,40 @@
     ;; an agent's commit moves its branch: a page of it reads the branch again (its turns and evaluations are written there)
     (and (= :commit (:type ev)) (:agent ev)) (assoc-in [:commits (:agent ev)] (:t ev))))
 
+(defn- take-read
+  "St with view showing branch b as its one read holds it (:branch-reads b: its db or why it could
+  not be read), dirty when that changed what the view held."
+  {:malli/schema [:=> [:cat :map :any :keyword] :map]}
+  [st view b]
+  (let [{:keys [db error at]} (get-in st [:branch-reads b])
+        held (get-in st [:branches view])]
+    (if (and (= at (:read held)) (identical? db (:db held)) (= error (:error held)))
+      st
+      (-> st (assoc-in [:branches view] (cond-> {:branch b :read at} db (assoc :db db) error (assoc :error error)))
+          (update :dirty (fnil conj #{}) view)))))
+
 (defn- ask-branches
   "Ask for the branch db of each watched view's agent when it moved since this proc read it: the
   branch main records of the agent its view names (:seon.agent/branch; kept in the store after it
-  ended); it moved when its t in root's view or its last commit event changed. A read in flight is
-  left: its answer's pass asks again."
+  ended); it moved when its t in root's view or its last commit event changed. One read per
+  branch (:branch-reads), every view of the agent showing it, so no view renders the branch's
+  components from an older read than another (the branch review's F2). A read in flight is left:
+  its answer's pass asks again."
   {:malli/schema [:=> [:cat :map :seon.host/volatile] :map]}
   [st o]
   (let [db (:main-db st)]
     (reduce (fn [st view]
               (let [e (when-let [eid (when db (location db view))] (d/entity db eid))
                     b (:seon.agent/branch e)
-                    id (when e (this-boots db e))
+                    id (when e (task/this-boots db e))
                     at [b (get-in st [:view :agents id :t]) (get-in st [:commits id])]
-                    kind [:branch view]]
-                (if (and b (not= at (get-in st [:branches view :read])) (not (some #{kind} (vals (:pending st)))))
-                  (-> st (assoc-in [:branches view :read] at) (ask o kind {:op :write :req {:op :branch-db :branch b}}))
-                  st)))
+                    kind [:branch b]
+                    st (cond-> st b (assoc-in [:branches view :branch] b))]
+                (cond
+                  (nil? b) st
+                  (= at (get-in st [:branch-reads b :at])) (take-read st view b)
+                  (some #{kind} (vals (:pending st))) st
+                  :else (-> st (assoc-in [:branch-reads b :asking] at) (ask o kind {:op :write :req {:op :branch-db :branch b}})))))
             ;; the views a tab watches, and a page or keyframe waiting for its pass
             st (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st) (map :view (vals (:screens st))))))))
 
@@ -684,7 +696,7 @@
           st (if (and (nil? (:main-db st)) (not (some #{:main} (vals (:pending st))))) (ask st o :main {:op :write :req {:op :branch-db :branch :db}}) st)]
       ;; a watched agent's branch moved: read its branch db (its turns, evaluations and task)
       (pass (ask-branches st o) o))
-    (= :main kind) (if (seon.contract/error? r) st (pass (ask-branches (main-info st (:db r)) o) o))
+    (= :main kind) (if (seon.contract/error? r) st (pass (ask-branches (advance-main st (:db r)) o) o))
     ;; main as of a screen's request (each request's own: its key is its asker's route and counter):
     ;; the screen is answered once its page is whole on it, its view walked again on it (a page held
     ;; from an older main read nothing the newer one wrote); a read that failed is the screen's answer
@@ -693,22 +705,23 @@
       (cond
         (nil? view) st
         (seon.contract/error? r) (do (step/out! o (:route reply) {:tag (:tag reply) :r r}) (update st :screens dissoc k))
-        :else (pass (ask-branches (-> (assoc-in st [:screens k :read?] true) (update :dirty (fnil conj #{}) view) (main-info (:db r))) o) o)))
-    ;; an agent's branch db; a branch that is gone (merged and removed) is recorded as such
+        :else (pass (ask-branches (-> (assoc-in st [:screens k :read?] true) (update :dirty (fnil conj #{}) view) (advance-main (:db r))) o) o)))
+    ;; an agent's branch db, the one read of it every view of the agent shows; a branch that is gone
+    ;; (merged and removed) is recorded as such
     (and (vector? kind) (= :branch (first kind)))
-    (let [view (second kind) z [:branches view]
-          held (get-in st (conj z :db))
+    (let [b (second kind)
+          {held :db asking :asking} (get-in st [:branch-reads b])
+          err? (seon.contract/error? r)
           ;; what moved on the branch: the datoms either db holds alone (O(changed))
-          moved (when (and held (not (seon.contract/error? r))) (apply concat (d/datoms-diff held (:db r) :eavt [])))]
-      (pass (cond-> (if (seon.contract/error? r)
-                      (-> st (update-in z dissoc :db) (assoc-in (conj z :error) r))
-                      (-> st (update-in z dissoc :error) (assoc-in (conj z :db) (:db r))))
-              (and (not (seon.contract/error? r)) (nil? held)) (update :dirty (fnil conj #{}) view)
+          moved (when (and held (not err?)) (apply concat (d/datoms-diff held (:db r) :eavt [])))
+          st (assoc-in st [:branch-reads b] (cond-> {:at asking} err? (assoc :error r) (not err?) (assoc :db (:db r))))
+          st (reduce #(take-read %1 %2 b) st (filter #(= b (get-in st [:branches % :branch])) (keys (:branches st))))]
+      (pass (cond-> st
               ;; read anew with nothing held to diff against (a first read, a read after an error):
               ;; what was cached from that branch is not known to be current
-              (nil? held) (as-> st (invalidate st (comps-of st (db-key st view 1))))
+              (nil? held) (as-> st (invalidate st (comps-of st b)))
               (seq moved) (-> (update :dirty (fnil into #{}) (touched st moved))
-                              (invalidate (comps-touched st (db-key st view 1) moved))))
+                              (invalidate (comps-touched st b moved))))
             o))
     :else st))
 
@@ -743,12 +756,9 @@
          st (case in
               :events (if (nil? m) st (ask-state (reduce on-event st (drain m (:events-ch st) 2048)) o))
               ;; a commit on main: the pages its datoms touched walk in the pass
-              :main (let [ds (map (fn [[_ e a v]] {:e e :a a :v v}) (:ops m))]
-                      (pass (-> (main-info st (:db m))
-                                (update :dirty (fnil into #{}) (touched st ds))
-                                ;; the components the commit's datoms touched render again, and their pages pass
-                                (invalidate (comps-touched st :main ds)))
-                            o))
+              ;; a commit on main (a sliding buffer of one: the newest, its datoms since the main held
+              ;; found by their diff, so a lagging proc never parks the writer)
+              :main (pass (advance-main st (:db m)) o)
               :answers (let [[st' kind] (step/answered st (:tag m))
                              r (:r m)
                              err (:seon.error/message r)]
@@ -772,7 +782,7 @@
                           ;; since is then on main and not yet here)
                           :page (if (:screen m)
                                   (let [k [(:route (:screen m)) (:tag (:screen m))]]
-                                    (-> (assoc-in st [:screens k] {:view (:view m) :reply (:screen m)})
+                                    (-> (assoc-in st [:screens k] (cond-> {:view (:view m) :reply (:screen m)} (:t m) (assoc :t (:t m))))
                                         (ask o [:screen-main k] {:op :write :req {:op :branch-db :branch :db}})
                                         (ask-state o)))
                                   (if (and (get-in st [:views (:view m)]) (contains? (:watch st) (:view m)))

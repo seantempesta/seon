@@ -391,7 +391,7 @@
                st)
       ;; an agent's screen (seon.screen/show): its page's request to the render proc, which answers
       ;; the caller's route itself once the page is whole (the cached page, without its conversation)
-      :screen (do (step/out! o [:render :from-web] {:op :page :view (:agent m) :screen p}) st)
+      :screen (do (step/out! o [:render :from-web] (cond-> {:op :page :view (:agent m) :screen p} (:t m) (assoc :t (:t m)))) st)
       :kill (cond-> (if (get-in st [:agents id])
                       ;; :ended when root stops it because its run ended (the reconciler says so)
                       (-> st (set-agent o id {:status (if (:ended m) :ended :killed)}) (to-agent o id {:op :kill}))
@@ -834,7 +834,7 @@
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
-                         :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1)
+                         :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1)
                          :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
                          :web-port (cfg/value :seon.config.web/port)
                          :vectors-main-buf (a/sliding-buffer 1) :embed-batch (cfg/value :seon.config.vector/batch)

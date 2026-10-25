@@ -195,6 +195,28 @@
      :fixed {:calls 15 :bytes 600000}
      :sizes [100 1000 4000]}))
 
+(defn walked-shown-of
+  "walked-of n with the page's rows shown: the walk's opts {:limit 20}."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple [:vector :any] pos-int? :map]]}
+  [n] (conj (walked-of n) {:limit 20}))
+
+(deftest a-page-walks-only-the-rows-shown
+  ;; the branch review (2026-10-25, F4): every eval commits, and each commit walked every row of the
+  ;; agent's page (49.5 KB an eval: a-page-walks-each-db-once); a page walks whole only the rows it
+  ;; shows (task seon.render/page-walks-only-the-rows-shown)
+  (cost/proof
+    {:of 'seon.render/walk :input 'seon.render-cost-test/walked-shown-of
+     :n "evaluations of the agent, on its branch; 20 rows shown"
+     :work (str "the 20 newest rows pulled whole (their records); the rest listed from the ref's index alone (nothing "
+                "of them read: its entity and transaction, counted, never rendered); per row its index entry, its node, "
+                "its place in the walk's map and in the sort by transaction. Contracted calls flat in the rows; bytes "
+                "~6 KB a row (was 49.5 KB, every row pulled whole: a-page-walks-each-db-once)")
+     :growth :linear
+     ;; measured 2026-10-25: 59 / 59 calls and 3.24 / 8.65 MB at 100 / 1,000 evaluations
+     :per-n {:bytes 6100}
+     :fixed {:calls 59 :bytes 2650000}
+     :sizes [100 1000 4000]}))
+
 (defn- watching
   "The render proc's state as it holds pages watched pages, each having read 100 entities."
   {:malli/schema [:=> [:cat pos-int?] :map]}
@@ -256,7 +278,7 @@
 
 (deftest a-new-turn-costs-one-turns-messages
   ;; task seon.context/a-turn-records-what-it-sent (C): a pass of the debug page after one new turn
-  ;; reads back that turn's records alone (seon.context/sent-parts); every held turn keeps its input
+  ;; reads back that turn's records alone (seon.context/parts-of); every held turn keeps its input
   (cost/proof
     {:of 'seon.render.proc/pass-view :input 'seon.render-cost-test/debug-of
      :n "model turns the debug page already holds"

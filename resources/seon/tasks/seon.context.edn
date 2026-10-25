@@ -101,4 +101,16 @@ Not in this step: per-entity components and the screen as a read of root's page 
                       seon.context-test/a-turn-records-one-turns-messages
                       seon.render-test/the-debug-page-shows-what-each-turn-sent
                       seon.render-test/a-new-turn-is-one-new-row
-                      seon.render-cost-test/a-new-turn-costs-one-turns-messages}}]
+                      seon.render-cost-test/a-new-turn-costs-one-turns-messages}}
+ {:seon.task/name "history-steps-hold-below-one-step"
+  :seon.task/plan "From the branch review of jolt/agent-conversation (2026-10-25, root's scratchpad branch-review.md, follow-ups): `seon.context/kept` raises each boundary to a multiple of :seon.config.render/history-step but clamps it to the newest record, so while a run has no more records than one step and its history is over the budget, the boundary moves every turn and the prefix the provider caches breaks each turn. Correct: below one step the boundary holds as above it. Proof: a kept case of fewer parts than the step, over the budget, whose picks hold for two growing histories."
+  :seon.task/kind :work}
+ {:seon.task/name "printed-parts-are-keyed-by-their-ref"
+  :seon.task/plan "From the branch review of jolt/agent-conversation (2026-10-25, root's scratchpad branch-review.md, follow-ups): `seon.context/printed-run` keys :parts by the record's bare id string, shared by evals (e5) and messages (m-...); an eval and a message of one id would take one slot. Correct: key by the ref ([:eval id], [:message id]). Proof: a run holding an eval and a message of the same id prints both."
+  :seon.task/kind :work}
+ {:seon.task/name "a-debug-read-back-prints-with-its-turns-config"
+  :seon.task/plan "From the branch review of jolt/agent-conversation (2026-10-25, root's scratchpad branch-review.md, follow-ups): `seon.context/parts-of` prints a turn's records with the config in force now (budgets through cfg/value), so it equals what the turn sent only while the config is unchanged. Correct: the read-back prints with the config as of the turn (seon.config/from-db as of the turn's commit). Proof: a turn read back after a budget changes equals what it sent."
+  :seon.task/kind :work}
+ {:seon.task/name "a-request-costs-its-new-records"
+  :seon.task/plan "From the branch review of jolt/agent-conversation (2026-10-25, root's scratchpad branch-review.md, follow-ups): `seon.context/records` scans every eval of the agent per turn (a >= filter after the index scan), and `request` does O(history) work in kept and in building what it sends; the cost proof (seon.context-cost-test) covers printed-run only. Correct: the request reads records from the last printed one by index, and kept's picks are kept with the cache, so a turn costs its new records; or the request is in the cost proof with what it costs per record held. Proof: seon.context-cost-test with `request` flat in the records held."
+  :seon.task/kind :work}]

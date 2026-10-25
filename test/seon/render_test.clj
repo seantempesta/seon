@@ -525,7 +525,9 @@
   "The render proc's state as it holds a read of main and of a3's branch: root's view (a3 busy;
   root's boot, b1, is its entity's on main), main's open problems."
   [main branch]
-  {:rid 1 :pending {} :watch #{:root :a3} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :branches {:a3 {:db branch}}
+  {:rid 1 :pending {} :watch #{:root :a3} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :branches {:a3 {:db branch :branch :task-demo-f}}
+   ;; the one read of a3's branch every view of it shows (seon.render.proc/ask-branches)
+   :branch-reads {:task-demo-f {:db branch}}
    :merges 0 :main-db main :recorded (seon.problems/health main) :view {:agents {:a3 {:status :busy :branch :task-demo-f}}}})
 
 (deftest root-and-an-agent-are-one-page-function
@@ -628,7 +630,7 @@
         st (#'p/pass (proc-state main branch) o)
         k (seon.task/agent-key "b1" :a3)
         branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:code "(h)" :response {:handle 'result/e4 :value 1}} nil))
-        answer (fn [st db] (#'p/answered (assoc-in st [:pending 9] [:branch :a3]) o [:branch :a3] {:db db}))]
+        answer (fn [st db] (#'p/answered (assoc-in st [:pending 9] [:branch :task-demo-f]) o [:branch :task-demo-f] {:db db}))]
     (is (not (some #{:a3} (:last-walked (answer st branch)))) "the same branch db: nothing moved, nothing walked")
     (is (some #{:a3} (:last-walked (answer st branch'))) "a new evaluation on it: the page walks")))
 
@@ -638,7 +640,7 @@
   [main branch eid]
   (-> (proc-state main branch)
       (assoc-in [:branches :a3 :read] [:task-demo-f])
-      (assoc-in [:branches eid] {:db branch :read [:task-demo-f]})))
+      (assoc-in [:branches eid] {:db branch :read [:task-demo-f] :branch :task-demo-f})))
 
 (deftest an-unchanged-component-never-re-renders
   ;; task seon.render/a-page-is-its-entitys-view (4a): each entity a page shows is a component,
@@ -668,7 +670,7 @@
         [st1 _] (#'p/pass-view st :a3)
         k (seon.task/agent-key "b1" :a3)
         branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:code "(h)" :response {:handle 'result/e4 :value 1}} nil))
-        st2 (#'p/answered st1 o [:branch :a3] {:db branch'})
+        st2 (#'p/answered st1 o [:branch :task-demo-f] {:db branch'})
         patch (first (filter #(and (= :patch (:op %)) (= :a3 (:view %))) (:to-web @o)))]
     (is (= 1 (- (get-in st2 [:counts :components]) (get-in st1 [:counts :components]))) "one component rendered: the new row")
     (is (empty? (:frags patch)) "no held row changed")
@@ -683,9 +685,9 @@
         st (assoc (comp-state main branch eid) :watch #{:a3})
         [st1 _] (#'p/pass-view st :a3)
         err (seon.contract/error :seon.writer/refused 'seon.writer/writer-proc "no branch :task-demo-f" {})
-        st2 (#'p/answered st1 o [:branch :a3] err)
+        st2 (#'p/answered st1 o [:branch :task-demo-f] err)
         branch' (d/db-with branch [{:seon.turn/id "demo/f#1/0" :seon.turn/tokens 4321}])
-        st3 (#'p/answered st2 o [:branch :a3] {:db branch'})]
+        st3 (#'p/answered st2 o [:branch :task-demo-f] {:db branch'})]
     (is (not (str/includes? (p/page-html st1 :a3) "4,321 tokens")))
     (is (str/includes? (p/page-html st3 :a3) "4,321 tokens") "the turn's tokens, written while its branch was unread")))
 
@@ -804,12 +806,59 @@
         st (assoc (comp-state before branch eid) :watch #{})
         [st1 out1] (#'p/render-proc st :from-web {:op :page :view :a3 :screen {:route [:a3 :in] :tag 9}})]
     (is (empty? (get out1 [:a3 :in])) "not answered from the proc's older read of main")
-    (let [[st2 out2] (answer-main st1 main)
+    ;; main as read for the screen: the agent admitted since (a newer main than the proc held)
+    (let [[st2 out2] (answer-main st1 (d/db-with before (seon.task/agent-tx "b1" :a3 {:status :busy :pid 77 :branch :task-demo-f})))
           o (volatile! {})
           _ (#'p/pass st2 o)
           reply (first (concat (get out2 [:a3 :in]) (get @o [:a3 :in])))]
       (is (= 9 (:tag reply)))
       (is (some #{[:h1 "a3"]} (tree-seq coll? seq (:page (:r reply)))) (str "its page, not no-location: " (pr-str (:r reply)))))))
+
+(deftest a-screen-from-a-newer-main-renders-what-changed-since
+  ;; the branch review (2026-10-25, F1): main read for a screen moved the proc's main past what its
+  ;; cached components were rendered from, and the screen showed their older content. Main moves one
+  ;; way (advance-main): what its datoms-diff touched renders again
+  (let [[main branch eid] (paged-dbs)
+        main (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])
+        st (assoc (comp-state main branch eid) :watch #{:a3})
+        [st _] (#'p/pass-view st :a3)
+        _ (is (str/includes? (str (:page (p/screen-of st :a3))) "busy") "cached as main had it")
+        newer (d/db-with main (seon.task/agent-tx "b1" :a3 {:status :idle :pid 77 :branch :task-demo-f}))
+        [st1 _] (#'p/render-proc st :from-web {:op :page :view :a3 :screen {:route [:a3 :in] :tag 5}})
+        [_ out] (answer-main st1 newer)
+        page (str (:page (:r (first (get out [:a3 :in])))))]
+    (is (str/includes? page "idle") (str "the screen shows main as read for it: " page))
+    (is (not (str/includes? page "busy")) "not the component cached before")))
+
+(deftest every-view-of-an-agent-shows-one-read-of-its-branch
+  ;; the branch review (2026-10-25, F2): each view read the agent's branch on its own, at its own t,
+  ;; and one still on an older read could refill the cache the newer one had invalidated. One read
+  ;; per branch, shown by every view of the agent at once
+  (let [[main branch eid] (paged-dbs)
+        main (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])
+        st (-> (proc-state main branch) (assoc :watch #{:a3 [:debug :a3]} :branches {}) (assoc-in [:view :agents :a3 :t] 7))
+        o (volatile! {})
+        st (#'p/ask-branches st o)
+        asks (filter #(= :branch-db (get-in % [:req :req :op])) (:to-api @o))
+        newer (d/db-with branch [{:seon.eval/id "e9" :seon.eval/by "a3" :seon.eval/record {:code "(f 9)" :response {:value 18}}}])
+        [st _] (#'p/render-proc st :answers {:tag (:tag (first asks)) :r {:db newer}})]
+    (is (= 1 (count asks)) "one read for the two views")
+    (is (identical? newer (get-in st [:branches :a3 :db])))
+    (is (identical? newer (get-in st [:branches [:debug :a3] :db])) "both show it, from the one answer")))
+
+(deftest a-screen-waits-for-the-branch-read-that-has-its-agents-commit
+  ;; the branch review (2026-10-25, F3): the agent's commit and its screen request travel different
+  ;; paths, and the screen could be answered from a read of the branch before that commit. The
+  ;; request names the commit's t; it is answered from a branch read that covers it
+  (let [[main branch eid] (paged-dbs)
+        main (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])
+        newer (d/db-with branch [{:seon.eval/id "e9" :seon.eval/by "a3" :seon.eval/record {:code "(f 9)" :response {:value 18}}}])
+        st (assoc (comp-state main branch eid) :watch #{})
+        [st1 _] (#'p/render-proc st :from-web {:op :page :view :a3 :t (:max-tx newer) :screen {:route [:a3 :in] :tag 3}})
+        [st2 out2] (answer-main st1 main)]
+    (is (empty? (get out2 [:a3 :in])) "main read, but the branch read predates the agent's commit: not yet")
+    (let [[_ out3] (#'p/render-proc (assoc-in st2 [:pending 77] [:branch :task-demo-f]) :answers {:tag 77 :r {:db newer}})]
+      (is (= 3 (:tag (first (get out3 [:a3 :in])))) "answered once a read has it"))))
 
 (deftest a-screen-is-asked-as-a-page-and-answered-on-its-route
   ;; the agent's {:op :screen} reaches the render proc as its page's request (seon.root's :screen),
@@ -828,6 +877,7 @@
     (is (some #{[:h1 "a3"]} (tree-seq coll? seq (:page (:r reply)))))
     (is (empty? (:screens st2)) "answered once")
     (is (nil? (get-in st2 [:views :a3])) "a page only a screen needed keeps nothing")
+    (is (empty? (:components st2)) "nor its components in the cache (the review's F5: no tab, no forget)")
     (testing "two agents asking with the same counter are two requests, each answered on its route"
       (let [[st1 _] (#'p/render-proc st :from-web {:op :page :view :a3 :screen {:route [:a3 :in] :tag 9}})
             [st1 _] (#'p/render-proc st1 :from-web {:op :page :view :root :screen {:route [:a9 :in] :tag 9}})

@@ -315,7 +315,8 @@
   the records before it, which never change, so a request prints only its new records and every
   older message is the same bytes (the provider's cache). An item already printed is skipped.
   Answers the cache: {:ids :parts {id part} :seen :canon :tx}, each part {:ref :whole :collapsed
-  :cost [whole collapsed] :call}, :tx the newest record's."
+  :cost [whole collapsed] :call}, a folded one also :fold and :plain (it unfolded), :tx the newest
+  record's."
   {:malli/schema [:=> [:cat [:sequential :any] [:maybe :map]] :map]}
   [items cache]
   (reduce (fn [{:keys [seen canon] :as c} [[kind id] v k tx]]
@@ -333,11 +334,22 @@
                       r (cond-> r has? (assoc :value x))
                       fold (if (:printed rec) {} (fold-of r seen canon))]
                   (-> c
-                      (assoc-in [:parts id] (part (cond-> [:eval id] (seq fold) (conj fold))
-                                                  (ai-messages v k {:fold fold}) (ai-messages v k {:collapsed true})))
+                      (assoc-in [:parts id] (cond-> (part (cond-> [:eval id] (seq fold) (conj fold))
+                                                          (ai-messages v k {:fold fold}) (ai-messages v k {:collapsed true}))
+                                              ;; and as it reads unfolded: sent so while what it folds to is not shown whole
+                                              (seq fold) (assoc :fold fold :plain (ai-messages v k))))
                       (assoc :seen (if (:printed rec) seen (print/seen seen r))
                              :canon (cond-> canon has? (assoc [(type x) x] x))))))))
           (or cache {:ids [] :parts {} :seen nil :canon {}}) items))
+
+(defn- as-sent
+  "Part p (printed-run's) as a request sends it, whole-ids the evals it sends whole: folded (its
+  value or output as the form that reads an earlier record's, :fold) only while each record it
+  folds to is sent whole (folds point back, so those are known), else unfolded (:plain), its ref
+  without the fold. Answers [ref messages]."
+  {:malli/schema [:=> [:cat :map [:set :string]] [:tuple :any [:vector :seon.model/message]]]}
+  [{:keys [ref whole fold plain]} whole-ids]
+  (if (every? #(contains? whole-ids (name %)) (vals fold)) [ref whole] [[:eval (second ref)] plain]))
 
 (defn- step-up
   "Index i raised to a multiple of step, at most to: the history's boundaries move in large steps."
@@ -434,13 +446,14 @@
         cache (printed-run (mapv (fn [[tx v k]] [(ref-of v) v k tx]) rs) printed)
         parts (mapv #(get-in cache [:parts %]) (:ids cache))
         [picks dropped] (kept parts (cfg/value :seon.config.render/history-budget) (cfg/value :seon.config.render/history-step))
-        sent (mapv (fn [{:keys [ref whole collapsed]} pick] (if (= :line pick) [[:line (second ref)] collapsed] [ref whole]))
+        whole-ids (into #{} (keep (fn [[{:keys [ref]} pick]] (when (= :whole pick) (second ref)))) (map vector (drop dropped parts) picks))
+        sent (mapv (fn [{:keys [ref collapsed] :as p} pick] (if (= :line pick) [[:line (second ref)] collapsed] (as-sent p whole-ids)))
                    (drop dropped parts) picks)
         ;; the screen, printed now (it is new each request), its values folded after the records'
         screen-parts (when-let [ids (seq (:screen basis))]
                        (:parts (printed-run (for [id ids] [[:eval id] (d/pull db [:seon.eval/id :seon.eval/by :seon.eval/record] [:seon.eval/id id]) :seon.db/eval-fact nil])
                                             cache)))
-        screen-sent (mapv #(let [p (get screen-parts %)] [(:ref p) (:whole p)]) (:screen basis))
+        screen-sent (mapv #(as-sent (get screen-parts %) whole-ids) (:screen basis))
         screen (when (seq screen-sent) (into [] (mapcat second) screen-sent))
         note (when (and screen (pos? dropped)) {:role "user" :content (pr-str {:history {:left-out dropped}})})]
     {:messages (-> [{:role "system" :content help} {:role "user" :content (or run (run-message block))}]
@@ -499,49 +512,6 @@
                    :message (ai-messages (d/pull db [:seon.message/id :seon.message/from :seon.message/body] [:seon.message/id x]) :seon.message/fact)
                    :history [{:role "user" :content (pr-str {:history {:left-out x}})}])])
           refs)))
-
-(defn sent-parts
-  "What turn entity e on db sent, from the records its :seon.turn/sent names, each ref beside
-  its messages (parts-of); nil for a turn that recorded none."
-  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe [:vector [:tuple :any [:vector :seon.model/message]]]]]}
-  [db e] (some->> (:seon.turn/sent (d/pull db [:seon.turn/sent] e)) (parts-of db)))
-
-(defn sent-messages
-  "The messages turn entity e on db sent (sent-parts, in order), nil for a turn that recorded none."
-  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe [:vector :seon.model/message]]]}
-  [db e] (some->> (sent-parts db e) (into [] (mapcat second))))
-
-(defn turn-text
-  "What the reader of turn entity e on db got (reader-text), from the records it sent (sent-messages)."
-  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :string]]}
-  [db e] (some-> (sent-messages db e) reader-text))
-
-(defn sections
-  "Where a request's tokens went, as the printer sizes them (seon.print.select/estimate), in
-  the order it sends them: the help page, the run sections, the scrollback (its earlier
-  turns), the turn sections; the run and turn sections each with the tokens of each key
-  of block printed alone. [{:part :tokens :keys [[k tokens]]}]."
-  {:malli/schema [:=> [:cat [:map [:block :map] [:messages [:vector :seon.model/message]]]]
-                  [:vector [:map [:part :string] [:tokens nat-int?] [:keys {:optional true} [:vector [:tuple :keyword nat-int?]]]]]]}
-  [{:keys [block messages]}]
-  (let [est #(select/estimate (:content %))
-        scroll (subvec messages 2 (dec (count messages)))
-        each (fn [ks] (vec (for [k ks :when (contains? block k)]
-                             [k (select/estimate (print/text {k (get block k)} (:context print/budgets)))])))]
-    [{:part "help page" :tokens (est (first messages))}
-     {:part "run sections" :tokens (est (second messages)) :keys (each run-keys)}
-     {:part (str "scrollback, " (count (filter #(= "assistant" (:role %)) scroll)) " earlier turns") :tokens (reduce + 0 (map est scroll))}
-     {:part "turn sections" :tokens (est (peek messages)) :keys (each (remove (set run-keys) (keys block)))}]))
-
-(defn request-text
-  "The whole request messages, as one text: each message headed by its role (and a tool
-  answer by its call's id, an assistant's eval calls after its reply). What the agent's page
-  links as a turn's whole context."
-  {:malli/schema [:=> [:cat [:vector :seon.model/message]] :string]}
-  [messages]
-  (str/join "\n\n" (for [{:keys [role content tool-calls tool-call-id]} messages]
-                     (str ";; ---- " role (when tool-call-id (str " · answer to " tool-call-id)) "\n" content
-                          (str/join (for [{:keys [id code]} tool-calls] (str "\n;; eval call " id "\n" code)))))))
 
 (defn- story
   "The task story: task entity e's run sections as of t on db (run-state, printed by

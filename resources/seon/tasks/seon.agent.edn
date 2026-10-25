@@ -85,4 +85,7 @@
  {:seon.task/name "an-outside-runs-scratch-stays-scratch"
   :seon.task/plan "Found by a worked example (evaluations session, 2026-10-23; notes example-1 in agent-view's notes folder): to call a test namespace's private helper an agent ran (in-ns 'seon.repl-test) and defined scratch values there (seon.repl-test/changed, eval-code-src, long-bad); the branch recorded them as definitions of that namespace, so its merge would carry them (they showed under :will-merge :added). Nothing an agent can call takes a definition back off its branch: ns-unmap and ```seon.program/remove-definition!``` unmap only in the process. Correct: an agent can undo a definition it made on its branch (recorded as its removal, which the merge carries as one), and the context tells it to work in its own namespace and reach a private helper as @#'ns/f. Proof: an agent that defines a value in a program namespace and removes it leaves nothing of it in what its merge carries."
   :seon.task/kind :work
-  :seon.task/proofs #{}}]
+  :seon.task/proofs #{}}
+ {:seon.task/name "await-reply-keeps-other-replies"
+  :seon.task/plan "From the branch review of jolt/agent-conversation (2026-10-25, root's scratchpad branch-review.md, follow-ups): `seon.agent/await-reply!` pushes replies for other keys into :pending, which are later handled as unknown ops. Correct: a reply for another awaited key is kept for that awaiter and answered to it; nothing is read as an op it is not. Proof: two awaits in flight, their replies out of order, each answered to its own."
+  :seon.task/kind :work}]

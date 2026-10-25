@@ -52,7 +52,9 @@
  ;; the db a node was read from: its index in the dbs a page reads (main 0, an agent's branch 1)
  :seon.render/db nat-int?
  ;; an entity, or a value of the walked entity (a unit that is no entity: its schema its attribute)
- :seon.render/node [:map [:seon.render/kind :seon.render/kind] [:seon.render/value :seon.render/value]
+ ;; a row a page does not show, listed from its ref's index alone (seon.render/one's limit): counted, never read
+ :seon.render/listed :boolean
+ :seon.render/node [:map [:seon.render/kind :seon.render/kind] [:seon.render/value :seon.render/value] [:seon.render/listed {:optional true} :boolean]
                      [:seon.render/schema {:optional true} :seon.render/schema] [:seon.render/eid :seon.render/eid]
                      [:seon.render/from {:optional true} :seon.render/from] [:seon.render/tx {:optional true} :seon.render/tx]
                      [:seon.render/db {:optional true} :seon.render/db]]

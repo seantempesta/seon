@@ -141,6 +141,20 @@
   {:malli/schema [:=> [:cat :string :keyword] :string]}
   [boot id] (str boot "/" (name id)))
 
+(defn boot-of
+  "Root's boot on main db, as its entity records it (:seon.root/boot), or nil before root's boot fact."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :string]]}
+  [db] (:seon.root/boot (d/entity db [:seon.root/id :root])))
+
+(defn this-boots
+  "Agent entity e's id when it is an agent of root's boot on main db (its key is that boot's),
+  else nil: an id like :a3 starts again each boot, so only this boot's names a process root holds."
+  {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe :keyword]]}
+  [db e]
+  ;; e an entity of main (its key: a walk shows only an agent's relevant attributes)
+  (let [id (:seon.agent/id e) boot (boot-of db)]
+    (when (and id boot (= (:seon.agent/key e) (agent-key boot id))) id)))
+
 (def ^:private agent-attrs
   "Each member of root's view of an agent and the attribute recording it (agent-tx)."
   {:status :seon.agent/status :pid :seon.agent/pid :mem-mb :seon.agent/mem-mb :running :seon.agent/running

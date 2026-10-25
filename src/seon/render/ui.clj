@@ -824,10 +824,12 @@
   as tiles beside it. opts {:shown n :view param :input {:schema k :value v} :open #{ids}
   :sides [{:eid :db}]}."
   {:malli/schema [:=> [:cat :seon.render/walk :map] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
-  [{:seon.render/keys [root nodes]} {:keys [shown view input open sides]}]
-  ;; the screen's evals are the system's, folded into their turn (chat-part), not parts of their own
+  [{:seon.render/keys [root nodes]} {:keys [shown view input open sides folded]}]
+  ;; the screen's evals are the system's, folded into their turn (chat-part), not parts of their own:
+  ;; opts :folded, their entities (by their :seon.eval/by, read from its index: every row alike,
+  ;; those the walk listed without reading them too)
   (let [listed (filterv #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))
-                              (not= "screen" (get-in % [:seon.render/value :seon.eval/by])))
+                              (not (contains? (or folded #{}) (:seon.render/eid %))))
                         nodes)
         tiles (remove #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))) nodes)
         on (vec (reverse (take shown listed)))
@@ -869,7 +871,8 @@
     (let [[main branch] dbs
           root (:db/id (d/entity main [:seon.root/id :root]))
           eid (get-in walk [:seon.render/root :seon.render/eid])
-          ;; its newest run (the walk's nodes are newest first) and the evals of it
+          ;; its newest run (the walk's nodes are newest first) and the evals of it the page reads whole
+          ;; (the rows it shows: the older are listed without their records, seon.render/walk's :limit)
           run (some #(when (= :seon.run/run-fact (:seon.render/schema %)) (:seon.render/value %)) (:seon.render/nodes walk))
           rid (:seon.run/id run)
           evals (when rid (for [nd (:seon.render/nodes walk) :let [e (:seon.render/value nd)]
@@ -879,8 +882,9 @@
           ;; test's status and its first failing assertion; how to run each is the task story's
           task-eid (some #(when (= :seon.task/task-fact (:seon.render/schema %)) (:seon.render/eid %)) (:seon.render/nodes walk))
           proofs (when (and branch rid task-eid)
-                   (let [{:keys [results reds]} (->> (d/q '[:find ?n ?b :in $ ?rid :where [?r :seon.run/id ?rid] [?t :seon.turn/run ?r] [?t :seon.turn/n ?n] [?t :seon.turn/basis ?b]] branch rid)
-                                                     (sort-by first) last second :observed)]
+                   (let [n (d/q '[:find (max ?n) . :in $ ?rid :where [?r :seon.run/id ?rid] [?t :seon.turn/run ?r] [?t :seon.turn/n ?n] [?t :seon.turn/basis _]] branch rid)
+                         ;; the newest turn's basis alone (each basis is data: reading every one cost every turn)
+                         {:keys [results reds]} (when n (:observed (d/q '[:find ?b . :in $ ?rid ?n :where [?r :seon.run/id ?rid] [?t :seon.turn/run ?r] [?t :seon.turn/n ?n] [?t :seon.turn/basis ?b]] branch rid n)))]
                      (into (sorted-map-by #(compare (str %1) (str %2)))
                            (for [t (:seon.task/proofs (d/pull main [:seon.task/proofs] task-eid))
                                  :let [r (first (filter #(= t (:test %)) reds))]]
@@ -904,7 +908,16 @@
                                                                   (when this-run (tile :seon.render/this-run this-run))
                                                                   (when (seq cites) (tile :seon.render/cited cites))
                                                                   (when branch (off (tile :seon.render/changes changes)))]))]
-      (chat walk (assoc page :sides (vec (when root (for [nd (:seon.render/nodes (render/walk [main] root))
+      (chat walk (assoc page
+                        ;; its input: its REPL and its messages, live while root's view holds its process in
+                        ;; this boot (an agent of another boot has none), its held task's release
+                        :input {:schema :seon.render/agent-input
+                                :value {:id (:seon.agent/id v)
+                                        :live? (boolean (when-let [id (task/this-boots main (d/entity main eid))] (live (shown-status (get-in page [:agents id] {})))))
+                                        :held (let [t (some #(when (= :seon.task/task-fact (:seon.render/schema %)) (:seon.render/value %)) (:seon.render/nodes walk))]
+                                                (when (= :held (:seon.task/execution t)) (:seon.task/id t)))}}
+                        :folded (when branch (into #{} (map :e) (d/datoms branch :avet :seon.eval/by "screen")))
+                        :sides (vec (when root (for [nd (:seon.render/nodes (render/walk [main] root))
                                                           :when (= :seon.db/agent-fact (:seon.render/schema nd))]
                                                       {:eid (:seon.render/eid nd) :db 0}))))))
     ;; its head, as a person reads it: its id, status, what it runs and where
@@ -915,17 +928,34 @@
        [:p {:class "text-text-300"} (str/join " · " (remove nil? [(kname status) (when branch (str "on branch " (kname branch))) (when pid (str "pid " pid))]))]
        (when-not (str/blank? description) [:p {:class "text-text-300"} (prose description (part))])])))
 
+(defn- runs-of
+  "Main's runs as root's page shows them: how many by status (the status index, counted), and
+  each running one (its status's index entries, pulled)."
+  {:malli/schema [:=> [:cat :seon.host/db] :seon.render/runs]}
+  [db]
+  {:by-status (frequencies (map :v (d/datoms db :aevt :seon.run/status)))
+   :running (vec (for [dt (d/datoms db :avet :seon.run/status :running)]
+                   (d/pull db [:seon.run/id :seon.run/status :seon.run/turns :seon.run/max-turns :seon.run/model] (:e dt))))})
+
+
 (defn root
   "Root's view (the declared html render of :seon.root/root-fact). Shown as its page (:as :page,
   opts :page {:walk :dbs ...}): its conversation (chat: its evals), its agents as the sidebar,
-  its walk's other nodes as tiles (main's problems and runs, seon.render.proc/page-value); at any other size, its head: its boot, its generation and,
+  its walk's other nodes and main's problems and runs as tiles (page opts :recorded, main's problems
+  as the render proc holds them), its input (root-input); at any other size, its head: its boot, its generation and,
   when it last went quiet, its root causes a line each."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [v opts]
-  (if-let [{:keys [walk dbs] :as page} (when (= :page (:as opts)) (:page opts))]
-    (let [agent? #(= :seon.db/agent-fact (:seon.render/schema %))]
-      (chat (update walk :seon.render/nodes #(vec (remove agent? %)))
-            (assoc page :sides (vec (for [nd (:seon.render/nodes walk) :when (agent? nd)] {:eid (:seon.render/eid nd) :db 0})))))
+  (if-let [{:keys [walk dbs recorded open] :as page} (when (= :page (:as opts)) (:page opts))]
+    (let [agent? #(= :seon.db/agent-fact (:seon.render/schema %))
+          eid (get-in walk [:seon.render/root :seon.render/eid])
+          ;; its focus beside its conversation: main's open problems (the classes its tab opened
+          ;; render their rows) and main's runs, each by its own render
+          tiles [{:seon.render/kind :value :seon.render/value (assoc recorded :open (or open #{})) :seon.render/schema :seon.render/problems :seon.render/eid eid}
+                 {:seon.render/kind :value :seon.render/value (runs-of (first dbs)) :seon.render/schema :seon.render/runs :seon.render/eid eid}]]
+      (chat (update walk :seon.render/nodes #(into (vec (remove agent? %)) tiles))
+            (assoc page :input {:schema :seon.render/root-input :value {}}
+                   :sides (vec (for [nd (:seon.render/nodes walk) :when (agent? nd)] {:eid (:seon.render/eid nd) :db 0})))))
     (let [{:seon.root/keys [boot generation quiescent]} v]
       [:div {:class "flex flex-col gap-1"}
        [:h1 {:class "text-base font-bold text-signal"} "root"]
