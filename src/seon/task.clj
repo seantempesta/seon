@@ -150,7 +150,7 @@
   "Agent entity e's id when it is an agent of root's boot on main db, else nil: an id like :a3
   starts again each boot, so only this boot's names a process root holds. Its key is that
   boot's, or it is a session's agent a process of this boot continues (a run of this boot is
-  its: seon.reconcile/session-key)."
+  its: seon.task/session-key), read from the agent's runs: O(the session's runs)."
   {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe :keyword]]}
   [db e]
   ;; e an entity of main (its key: a walk shows only an agent's relevant attributes)
@@ -169,7 +169,9 @@
   session is id and the tasks on its branch it needs, transitively (a request's stages, a work
   task and its merge: design agent-loop section 1a), and its agent is the agent of the newest
   run among them. A run started for the session continues it, so its conversation and messages
-  go on across runs (seon.context/records). Reads the chain's tasks and their runs."
+  go on across runs (seon.context/records). One process at a time holds it: a session is one
+  branch, and root refuses a spawn on a branch a live agent holds. Reads the chain's tasks and
+  their runs."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe :string]]}
   [db id]
   (let [e0 (d/entity db [:seon.task/id id])
@@ -195,7 +197,7 @@
   view of the agent changes (seon.root/record-agents)."
   {:malli/schema [:function [:=> [:cat :string :keyword :map] [:vector :any]]
                   [:=> [:cat :string :keyword :map [:maybe :string]] [:vector :any]]]}
-  ;; key: the session's agent this process continues (seon.reconcile/session-key), whose entity
+  ;; key: the session's agent this process continues (seon.task/session-key), whose entity
   ;; then holds this process's facts; nil, the process's own key in this boot
   ([boot id m] (agent-tx boot id m nil))
   ([boot id m key]
@@ -234,7 +236,7 @@
   the run names its agent before root has recorded anything else of it."
   {:malli/schema [:function [:=> [:cat :seon.run/id :seon.task/id :string [:maybe :keyword] :seon.task/env :int :seon.task/plan] [:vector :map]]
                   [:=> [:cat :seon.run/id :seon.task/id :string [:maybe :keyword] :seon.task/env :int :seon.task/plan [:maybe :string]] [:vector :map]]]}
-  ;; key: the session's agent the run continues (seon.reconcile/session-key); nil, the agent's
+  ;; key: the session's agent the run continues (seon.task/session-key); nil, the agent's
   ;; own key in this boot
   ([aid task boot agent env start-ms plan] (run-start-tx aid task boot agent env start-ms plan nil))
   ([aid task boot agent {:keys [branch model max-turns]} start-ms plan key]

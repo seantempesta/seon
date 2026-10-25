@@ -274,7 +274,7 @@
          (assoc-in [:view :agents id] (cond-> {:branch branch :status :spawning :task task :pid nil
                                                :forked-ms nil :mem-mb nil :evals [] :tests nil}
                                         run (assoc :run run)
-                                        ;; the session's agent this process continues (seon.reconcile/session-key)
+                                        ;; the session's agent this process continues (seon.task/session-key)
                                         key (assoc :key key)
                                         cloned-from (assoc :cloned-from cloned-from))))
      id a]))

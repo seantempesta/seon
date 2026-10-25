@@ -71,10 +71,12 @@
   ;; the one branch and the runs' own agents; a task on another branch is a session of its own
   (let [db (d/db-with (main) (tpl/request-tx (main) req))
         db (d/db-with db (task/run-start-tx "demo/workouts#1" "demo/workouts" "boot-1" :a1 {:branch (task/default-branch "demo/workouts") :model nil :max-turns 4} 1 "p"))
-        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "other" :seon.task/plan "x" :seon.task/proofs #{'demo-test/other}}]))]
+        ;; on a branch of its own, and needing design, whose run has an agent: still not design's session
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "other" :seon.task/plan "x" :seon.task/proofs #{'demo-test/other}
+                                              :seon.task/needs #{"demo/workouts"}}]))]
     (is (= "boot-1/a1" (task/session-key db "demo/workouts-implement")) "implement continues design's agent")
     (is (= "boot-1/a1" (task/session-key db "demo/workouts-merge")) "merge too, through implement")
-    (is (nil? (task/session-key db "demo/other")) "another branch's task has its own")
+    (is (nil? (task/session-key db "demo/other")) "a task on another branch is not the session of a task it needs")
     (let [db (d/db-with db (task/run-start-tx "demo/workouts-implement#1" "demo/workouts-implement" "boot-2" :a4 {:branch (task/default-branch "demo/workouts") :model nil :max-turns 4} 2 "p"
                                               (task/session-key db "demo/workouts-implement")))]
       (is (= "boot-1/a1" (:seon.agent/key (:seon.run/agent (d/entity db [:seon.run/id "demo/workouts-implement#1"]))))
