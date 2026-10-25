@@ -210,13 +210,17 @@
 
 (defn- location
   "The entity view names on main db: root's for :root, the agent of that id in root's boot (its
-  key, seon.task/agent-key) for an agent's id, else the entity id it is; nil when main names none
-  (no boot fact yet, or no agent of that id in this boot)."
+  key, seon.task/agent-key, or the session's agent it continues) for an agent's id, else the
+  entity id it is; nil when main names none (no boot fact yet, or no agent of that id in this boot)."
   {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe pos-int?]]}
   [db view]
   (cond (vector? view) (location db (second view))
         (= :root view) (:db/id (d/entity db [:seon.root/id :root]))
-        (keyword? view) (when-let [boot (task/boot-of db)] (:db/id (d/entity db [:seon.agent/key (task/agent-key boot view)])))
+        ;; the process's own key in this boot, else the session's agent it continues
+        (keyword? view) (when-let [boot (task/boot-of db)]
+                          (or (:db/id (d/entity db [:seon.agent/key (task/agent-key boot view)]))
+                              (some (fn [dt] (when (= view (task/this-boots db (d/entity db (:e dt)))) (:e dt)))
+                                    (d/datoms db :avet :seon.agent/id view))))
         :else view))
 
 (defn- debug-value
@@ -604,13 +608,16 @@
 
 (defn stats
   "The render proc's own numbers: passes, pass ms (all, the ones that patched, the quiet
-  ones) as seon.lib/summ over the last 200 (none yet: nil), patch bytes, units rendered and skipped."
+  ones) as seon.lib/summ over the last 200 (none yet: nil), patch bytes, units rendered and
+  skipped, its asks in flight (:pending: each answer steps it, and sends a settled mark when
+  the last one is answered) and main's t as it holds it."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
   (let [q #(some-> % lib/summ)]
     {:passes (:passes st 0) :pass-ms (q (:pass-ms st)) :patch-pass-ms (q (:patch-pass-ms st)) :quiet-pass-ms (q (:quiet-pass-ms st))
      :patch-bytes (q (:patch-bytes st)) :event-age-ms (q (:event-age-ms st)) :rendered (get-in st [:counts :rendered] 0) :same-bytes (get-in st [:counts :same] 0)
-     :agents (count (get-in st [:view :agents])) :views (vec (keys (:views st)))}))
+     :agents (count (get-in st [:view :agents])) :views (vec (keys (:views st)))
+     :pending (count (:pending st)) :main-t (get-in st [:main :t])}))
 
 ;;; --- the step-fn -------------------------------------------------------------------------------
 

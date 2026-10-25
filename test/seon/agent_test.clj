@@ -417,7 +417,7 @@
                                   :code (str "(let [t (:max-tx @(:conn sys))] (seon.await/await-quiet sys (inc t))"
                                              " (select-keys (first (vals (seon.task/runs @(:conn sys)))) [:seon.run/outcome :seon.run/reason]))")}])
         run (:value seen)]
-    (is (contains? done :judging) (pr-str done))
+    (is (= :red (:outcome done)) (str "the answer is the verdict: " (pr-str done)))
     (is (= :red (:seon.run/outcome run)) (pr-str run))
     (is (str/includes? (str (:seon.run/reason run)) "proof-unknown demo-test/t") "the end names why it is red")
     (is (not (str/includes? (str (:seon.run/reason run)) "no end")) "never read as an end nobody wrote")))
@@ -435,7 +435,7 @@
                                                  "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) \"demo/t\")])")}])
         [run state] (:value seen)]
     (is (str/includes? (:text t) ":value #'demo-test/t") (pr-str t))
-    (is (contains? done :judging) (pr-str done))
+    (is (and (= :green (:outcome done)) (#{:done :merged} (:status done))) (str "the answer is the verdict: " (pr-str done)))
     (is (= :green (:seon.run/outcome run)) (pr-str run))
     (is (#{:done :merged} state) (str "the task finishes, never held for root: " state))))
 
@@ -582,7 +582,7 @@
   (let [q "[:find (pull ?e [:seon.run/outcome :seon.run/error]) . :where [?e :seon.run/task ?t] [?t :seon.task/id \"demo/m\"] [?e :seon.run/error]]"
         [_ r] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root"
                         :code (str "(do (my.root/run! sys [\"demo/m\"])"
-                                   " (let [a (datahike.api/q '" q " (seon.await/await-db sys #(datahike.api/q '" q " %)))]"
+                                   " (let [a (datahike.api/q '" q " (seon.root/await-db sys #(datahike.api/q '" q " %)))]"
                                    " [(:seon.run/outcome a) (:seon.error/type (:seon.run/error a))"
                                    " (mapv #(get-in % [:error :seon.error/type]) (get-in (my.root/problems sys) [:classes :error :rows]))]))")}]
                       {:sets [":seon.config.ai/provider=:none"]
