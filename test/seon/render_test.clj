@@ -729,6 +729,7 @@
     (is (< (at "id=\"c-rows\"") (at "id=\"p-input\"")) "the input under the conversation")
     (is (some #(and (str/includes? % "class=\"seon-eval\"") (str/includes? % "data-on:toggle=")) (re-seq #"<details[^>]*>" html)) "an eval is a block that opens")
     (is (re-find #"<details [^>]*id=\"eval-e1\"" html) "the row is its handle's anchor, open or not")
+    (is (str/includes? html "<code class=\"language-clojure truncate text-text-100\">(f 2)") "its line, its code highlighted")
     (is (not (str/includes? html "<pre class=\"seon-print-code\"><code class=\"language-clojure\">(f 2)")) "closed: its form is not rendered, only its line")
     (testing "opened, it is rendered whole"
       (let [e1 (:db/id (d/entity branch [:seon.eval/id "e1"]))

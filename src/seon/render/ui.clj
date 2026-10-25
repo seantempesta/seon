@@ -89,6 +89,7 @@
   {:malli/schema [:=> [:cat :string pos-int?] :any]}
   [s budget]
   (let [p (prose s budget)]
+    ;; a cut holds its marker element, which highlighting (it rewrites the code's text) would remove
     (if (string? p) (emit/marked-hiccup :seon.print/code p) [:pre {:class "text-text-100"} [:code p]])))
 
 (def utc-offset-ms
@@ -781,7 +782,10 @@
                        open? (assoc :open true))
             [:summary {:class "cursor-pointer text-2xs text-text-500"} "screen"]
             (when open? (for [sid screens :let [e (d/pull db '[*] [:seon.eval/id sid])]]
-                          (if (:db/id e) (evaluation e {}) [:p {:class "text-error"} (str "screen eval " sid " is not on this branch")])))])])
+                          (if (:db/id e)
+                            ;; its handle's anchor, as a conversation row's (chat-part's eval-eN)
+                            [:div (when-let [h (get-in e [:seon.eval/record :response :handle])] {:id (str "eval-" (name h))}) (evaluation e {})]
+                            [:p {:class "text-error"} (str "screen eval " sid " is not on this branch")])))])])
       :seon.db/eval-fact
       (let [rec (:seon.eval/record own)
             r (merge (:response rec) (select-keys rec [:code :prose]))
