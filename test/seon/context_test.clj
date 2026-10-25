@@ -788,23 +788,27 @@
   ;; what is no function left out, the first :seon.config.render/similar (5, the task's own setting), each a line: its
   ;; name and its doc's first sentence; a plan with no vector says so
   (let [fns '[demo/area demo/pi demo/noise demo/e1 demo/e2 demo/e3]
-        db (d/db-with (db-with-program) (program-facts (vec (for [s (conj fns 'demo-test/near-test)] [s (str "(defn " (name s) " [])") []]))))
+        db (d/db-with (db-with-program) (program-facts (vec (for [s (conj fns 'demo-test/near-test 'demo.fixtures/near-helper)] [s (str "(defn " (name s) " [])") []]))))
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "c" :seon.task/plan "Make `demo/f` use the circle's area."
                                                :seon.task/proofs #{'demo-test/f-test} :seon.task/config {:seon.config.render/similar 5}}]))
         db (d/db-with db (vec (concat (for [s (conj fns 'demo/f)] {:var/name s :var/kind :fn :var/doc (str (name s) " does it. More.")})
-                                      [{:var/name 'demo-test/near-test :var/kind :test}])))
+                                      [{:var/name 'demo-test/near-test :var/kind :test}
+                                       ;; a test/ helper of any name (seon.fixtures, seon.check): a function, not the program's
+                                       {:var/name 'demo.fixtures/near-helper :var/kind :fn :var/doc "near-helper does it."}
+                                       {:ns/name 'demo :ns/file "src/demo.clj"} {:ns/name 'demo-test :ns/file "test/demo_test.clj"}
+                                       {:ns/name 'demo.fixtures :ns/file "test/demo/fixtures.clj"}])))
         dir (fn [& xs] (let [v (vec (concat xs (repeat (- 768 (count xs)) 0.0))) n (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % n) v)))
         form (fn [s] (:db/id (:var/form (d/entity db [:var/name s]))))
         te (pdb/eid db :seon.task/id "demo/c")
-        ;; nearest first: the named f, a test, then the six functions in order
-        order (into '[demo/f demo-test/near-test] fns)
+        ;; nearest first: the named f, a test, a test/ helper, then the six functions in order
+        order (into '[demo/f demo-test/near-test demo.fixtures/near-helper] fns)
         es (into [te] (map form) order)
         vs (into [(dir 1.0)] (map-indexed (fn [i _] (dir 1.0 (* 0.05 (inc i)))) order))
         db (d/db-with db (vector/tx-data es (repeat (count es) 1) vs (repeat (count es) 10) "m"))
         sim (context/similar db te #{'demo/f 'demo-test/f-test})]
     (is (= ["demo/area: area does it." "demo/pi: pi does it." "demo/noise: noise does it." "demo/e1: e1 does it." "demo/e2: e2 does it."]
            (:nearest sim))
-        "nearest first, the named one and the test left out, the first five, each its name and first sentence")
+        "nearest first, the named one, the test and the test/ helper left out, the first five, each its name and first sentence")
     (is (string? (:more sim)) "and the form that searches further")
     (is (= sim (:similar (context/run-state db (task/task db "demo/c")))) "in the story")
     (is (nil? (context/similar db nil #{})) "off by default (:seon.config.render/similar 0): nothing listed")))
@@ -852,6 +856,8 @@
         es (into [te] (for [i (range 5)] (pdb/eid db :seon.section/address (anchors i))))
         db (d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) (repeat 6 10) "m"))
         ;; a function beside the plan by meaning, and a schema key its plan names
+        ;; demo is the program's (src/), demo-test and its helpers are test/'s (seon.program/program-nss)
+        db (d/db-with db [{:ns/name 'demo :ns/file "src/demo.clj"} {:ns/name 'demo-test :ns/file "test/demo_test.clj"}])
         db (d/db-with db [{:db/id "f" :form/id "demo/g" :form/src "(defn g [])" :form/keywords #{:demo/thing :demo/not-a-schema}} {:var/name 'demo/g :var/form "f" :var/doc "Gets it. More."}
                           {:schema/key :demo/thing :schema/form "[:map]"}])
         f (pdb/eid db :form/id "demo/g")]
@@ -910,10 +916,14 @@
                           ;; a test namespace's helper calling it: a fixture, no program function
                           {:db/id "x" :form/id "demo-test/fixture" :form/src "(defn fixture [] (h))" :form/refs #{'demo/h} :form/defines #{"xv"}}
                           {:db/id "xv" :var/name 'demo-test/fixture :var/form "x" :var/kind :fn}
+                          ;; a helper of test/ whose name does not end in -test (seon.fixtures, seon.check): not the program's
+                          {:ns/name 'demo.fixtures :ns/file "test/demo/fixtures.clj"}
+                          {:db/id "y" :form/id "demo.fixtures/helper" :form/src "(defn helper [] (h))" :form/refs #{'demo/h} :form/defines #{"yv"}}
+                          {:db/id "yv" :var/name 'demo.fixtures/helper :var/form "y" :var/kind :fn}
                           {:seon.section/address "docs/vector.md#the-pyramid-c" :seon.section/heading "C" :seon.section/lead "Names h. More."
                            :seon.section/names #{'demo/h}}])
         rel (context/related db te)]
-    (is (= ['demo/g 'demo/k] (:functions rel)) "the caller of the cited var beside the nearest by meaning; the cited var, the test and a test namespace's helper left out")
+    (is (= ['demo/g 'demo/k] (:functions rel)) "the caller of the cited var beside the nearest by meaning; the cited var, the test, a test namespace's helper and a test/ helper of any name left out")
     (is (= ["docs/vector.md#the-model" "docs/vector.md#the-pyramid-c" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph"
             "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"]
            (:sections rel))
@@ -926,7 +936,11 @@
                                   {:db/id "pv" :var/name 'demo/plumb :var/kind :fn} {:db/id "rv" :var/name 'demo/rare :var/kind :fn}]
                                  (for [i (range 20)] {:form/id (str "demo/p" i) :form/src "(plumb)" :form/refs #{'demo/plumb}})))]
       (is (= ['demo/g 'demo/k 'demo/rare 'demo/plumb] (:functions (context/related db te)))
-          "a neighbour few forms name before one every form names"))))
+          "a neighbour few forms name before one every form names")
+      ;; a namespace with no file yet: what the agent wrote at its REPL, its new work, shown
+      (let [db (d/db-with db [{:ns/name 'agent.app} {:db/id "z" :form/id "agent.app/z" :form/src "(defn z [] (h))" :form/refs #{'demo/h} :form/defines #{"zv"}}
+                              {:db/id "zv" :var/name 'agent.app/z :var/form "z" :var/kind :fn}])]
+        (is (= 'agent.app/z (first (:functions (context/related db te)))) "a caller in a namespace with no file is shown")))))
 
 (deftest a-proof-with-no-result-reads-unknown
   ;; demo-test/f-test is written (its source is recorded) but no test report names it: it never
