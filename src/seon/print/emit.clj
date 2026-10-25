@@ -132,7 +132,12 @@
 
 (def ^:private comma (text-op :seon.print/separator ","))
 
-(defn- marked-hiccup
+(def highlight
+  "A <code>'s attributes for Clojure code, which the page highlights (highlight.js, served at
+  /highlight.js; seon.render.ui/shell's observer highlights each as it arrives or a patch resets it)."
+  {:class "language-clojure"})
+
+(defn marked-hiccup
   "Marked text as HTML: prose (seon.print/prose) a paragraph, its line breaks kept; code
   (seon.print/code) verbatim in <pre><code>, highlighted as Clojure when the page inserts it."
   {:malli/schema [:=> [:cat [:maybe :keyword] :string] :seon.print/hiccup]}
@@ -140,7 +145,7 @@
   (if (= :seon.print/prose mark)
     [:p {:class (css-class :seon.print/prose)} text]
     [:pre {:class (css-class :seon.print/code)}
-     [:code {:class "language-clojure" :data-init "window.hljs && hljs.highlightElement(el)"} text]]))
+     [:code highlight text]]))
 
 (defn- elided-hiccup
   "A cut as HTML: a string cut's shown characters, then its marker and continuation form; a cut
@@ -175,7 +180,7 @@
     (case (:seon.print/face node)
       ;; the common rows build their op here (text-op's shape), one call fewer per leaf
       :seon.print/nil {:op :text :text "nil" :seon.print/class :seon.print/nil}
-      ;; a handle (result/e12) links to its eval's row on the page (seon.render.ui/evaluation's id)
+      ;; a handle (result/e12) links to its eval's row on the page (the eval-e12 id of seon.render.ui/chat-part's row)
       :seon.print/symbol
       (let [text (or (:seon.print/text node) (literal value))]
         (if (= "result" (namespace value))
