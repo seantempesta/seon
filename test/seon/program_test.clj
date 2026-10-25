@@ -118,6 +118,11 @@
     (is (= #{:app.kw/thing :app.kw/count :app.kw/listed} (set (d/q '[:find [?k ...] :where [?v :var/name app.pt-kw/kw-user] [?v :var/form ?f] [?f :form/keywords ?k]] db)))
         "as facts of its form")
     (is (= ['app.pt-kw/kw-user] (seon.docs/callers db :app.kw/thing)) "a key's functions, one AVET seek")
+    ;; two keys, the first an attribute: as a vector Datahike read them as a lookup ref
+    ;; (datahike.query-test's (= :query/nested-call (:error r)) failed the program db)
+    (is (= #{:ns/name :app.kw/err} (set (d/q '[:find [?k ...] :where [?v :var/name app.pt-kw/two] [?v :var/form ?f] [?f :form/keywords ?k]]
+                                             (record (empty-db) 'app.pt-kw "(defn two [r] [(:ns/name r) :app.kw/err])"))))
+        "an attribute and a key, each a fact")
     (is (= [src] (mapv :src (program/schema-dependents db #{:app.kw/count}))) "the form that re-arms when a key it names changes")
     (is (empty? (:keywords (eval-account 'app.pt-kw "(defn plain [m] (:x m))"))) "no qualified keyword, nothing recorded")))
 

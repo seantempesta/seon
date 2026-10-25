@@ -134,11 +134,6 @@
           (= :throw (:op d)) acc
           :else (conj acc {:class "*" :answers (answers d)}))))
 
-(defn- quoted-var?
-  "Does datum x name a var as quoted data: a qualified symbol whose namespace exists (quoted-vars)."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [x] (boolean (and (qualified-symbol? x) (find-ns (symbol (namespace x))))))
-
 (defn- quoted-vars
   "The qualified symbols in a quoted datum (walked: a collection's too) whose namespace
   exists: a syntax-quoted or quoted name resolved later (`requiring-resolve`, a macro's
@@ -148,7 +143,7 @@
   reused across runs or checkouts), while every imported
   file's namespace exists before any form is analyzed."
   {:malli/schema [:=> [:cat :any] [:set :qualified-symbol]]}
-  [x] (into #{} (filter quoted-var?) (tree-seq coll? seq x)))
+  [x] (into #{} (filter #(and (qualified-symbol? %) (find-ns (symbol (namespace %))))) (tree-seq coll? seq x)))
 
 (defn unit-account
   "What the compiler says one analyzed top-level node does, from its IR by resolved var
@@ -181,11 +176,10 @@
          ;; keyword: most constants (unqualified keywords, strings, numbers) cost no walk
          (:quote :const) (let [x (datum n)]
                            (cond (qualified-keyword? x) (vswap! acc update :keywords conj x)
-                                 (qualified-symbol? x) (when (quoted-var? x) (vswap! acc update :refs conj x))
-                                 ;; a quoted collection walked once for both
-                                 (coll? x) (let [xs (tree-seq coll? seq x)]
-                                             (vswap! acc #(-> % (update :refs into (filter quoted-var?) xs)
-                                                              (update :keywords into (filter qualified-keyword?) xs))))))
+                                 (qualified-symbol? x) (vswap! acc update :refs into (quoted-vars x))
+                                 ;; a quoted collection: its vars (one quoted-vars) and its keywords
+                                 (coll? x) (vswap! acc #(-> % (update :refs into (quoted-vars x))
+                                                            (update :keywords into (filter qualified-keyword?) (tree-seq coll? seq x))))))
          :try (vswap! acc update :catches into (map sedn/encode) (catches n))
          :invoke (when (and (= 'clojure.core/deref (invoked n)) (= 3 (count (:args n))))
                    (vswap! acc update :timeouts conj 'clojure.core/deref))
@@ -206,7 +200,15 @@
                            (vswap! acc update :requires into (mapcat (comp libs unquote-form datum)) args))))))
          nil)
        (let [in-fn? (or in-fn? (#{:fn :defmacro} (:op n)))]
-         (ir/reduce-ir-children (fn [_ c] (walk c in-fn?)) nil n)))
+         ;; a def's metadata is about its var (def-info keeps it; its contract's keys come from
+         ;; :contract), not data its code operates on: walked for the vars it names (a deftest's
+         ;; body is its :test), its keywords not kept; its init walked for both
+         (if (= :def (:op n))
+           (let [init (:init n) kws (:keywords @acc)]
+             (ir/reduce-ir-children (fn [_ c] (when-not (identical? c init) (walk c in-fn?))) nil n)
+             (vswap! acc assoc :keywords kws)
+             (some-> init (walk in-fn?)))
+           (ir/reduce-ir-children (fn [_ c] (walk c in-fn?)) nil n))))
      node false)
     @acc))
 
@@ -414,7 +416,7 @@
           lead (assoc :form/lead lead)
           (seq defines) (assoc :form/defines (mapv #(:db/id (def-ref % (eid-of %))) defines))
           (seq declares) (assoc :form/declares (mapv #(:db/id (def-ref [:var %] (eid-of [:var %]))) declares)))
-        (for [[a k] form-sets :let [v (get row k)] :when (seq v)] [a (vec v)])))
+        (for [[a k] form-sets :let [v (get row k)] :when (seq v)] [a (set v)])))
 
 (defn def-tx
   "tx-data making definition k point at the form content names (content {:form :kind

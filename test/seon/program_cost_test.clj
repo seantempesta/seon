@@ -307,10 +307,13 @@
     {:of 'seon.program/unit-account :input 'seon.program-cost-test/keyword-node-of
      :n "steps in the body, each naming one qualified keyword (keyword-form)"
      :work (str "one visit per IR node, as a-scalar-constant-costs-no-walk; each qualified keyword "
-                "constant one conj into the form's :keywords, not walked; a quoted collection walked once "
-                "for its vars and its keywords both")
+                "constant one conj into the form's :keywords, not walked; a quoted collection walked "
+                "for its vars (quoted-vars, as before) and once more for its keywords")
      :growth :linear
-     :per-n {:ticks 750.0 :bytes 5950.0 :calls 9.6}
+     ;; measured 2026-10-25 (n 100 -> 10,000): 755 ticks, 3.13 KB and 9.6 contracted calls a step;
+     ;; 74.9k ticks, 278 KB and 967 calls at 100 (the quoted-collection filter as a contracted
+     ;; predicate was 989: one call an element)
+     :per-n {:ticks 760.0 :bytes 3150.0 :calls 9.6}
      :fixed {:ticks 2000.0 :bytes 12000.0 :calls 7.0}
      :sizes [100 1000 10000]}))
 
