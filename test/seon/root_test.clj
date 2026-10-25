@@ -157,7 +157,8 @@
         _ (.mkdirs (java.io.File. tasks))
         _ (spit (str tasks "/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]))
         main {:op :eval :agent "root" :code "(name (seon.db/conn-main (:conn sys)))"}
-        held {:op :eval :agent "root" :code "[(count (seon.task/tasks @(:conn sys))) (set (map str (keys (seon.task/runs @(:conn sys)))))]"}
+        ;; and root's watch fact: a task count off names the batch that loaded the task files (:last-load)
+        held {:op :eval :agent "root" :code "[(count (seon.task/tasks @(:conn sys))) (set (map str (keys (seon.task/runs @(:conn sys))))) (dissoc (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) :roots :boot)]"}
         first-boot (str/split-lines (root-answers path "main" [main {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str tasks) ")")}
                                                            {:op :attach :task "demo/t"} held]))
         second-boot (str/split-lines (root-answers path "main" [main held]))
@@ -165,12 +166,33 @@
     (try
       (is (= "main" (printed (first first-boot))) "a boot with no main named works on the config's main")
       (is (= "main" (printed (first second-boot))) "the second boot resumes the same main")
-      (let [[tasks-1 runs-1] (printed (nth first-boot 3))
-            [tasks-2 runs-2] (printed (second second-boot))]
-        (is (= [2 1] [tasks-1 (count runs-1)]) "the first boot holds root's task and the one it loaded, and the run it started")
-        (is (= 2 tasks-2) "the second boot still holds both tasks")
+      (let [[tasks-1 runs-1 watch-1] (printed (nth first-boot 3))
+            [tasks-2 runs-2 watch-2] (printed (second second-boot))]
+        (is (= [2 1] [tasks-1 (count runs-1)]) (str "the first boot holds root's task and the one it loaded, and the run it started; its watcher: " (pr-str watch-1)))
+        (is (= 2 tasks-2) (str "the second boot still holds both tasks; its watcher: " (pr-str watch-2)))
         (is (every? runs-2 runs-1) "and the first boot's run (it reaps it and starts the next)"))
       (finally (sh/sh "rm" "-rf" path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
+
+(deftest a-test-roots-task-files-are-its-own
+  ;; the second boot above read 810 tasks (2026-10-25): its root started seconds after a merge
+  ;; rewrote the checkout's task files, FSEvents delivered those writes to its new watcher, and
+  ;; a task file's event loads every file of the task dir. A test root's task dir is its own
+  ;; (seon.test-store/start-root!), so its loads read its own files and never the checkout's.
+  ;; Asserted through the root's own reads, with no watcher event and no write to the checkout
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        path (str checkout "/target/runs/root-test-own-tasks-" (random-uuid))
+        runs (str path "-main-runs")
+        _ (.mkdirs (java.io.File. (str runs "/tasks")))
+        _ (spit (str runs "/tasks/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work}]))
+        root (ts/start-root! {:store path :main "main" :runs runs})
+        ask (fn [code] (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code code}))))]
+    (try
+      (is (= (str runs "/tasks") (ask "(seon.config/value :seon.config.root/tasks-dir)")) "its task dir is under its runs, not the checkout's")
+      (is (= 0 (ask "(count (seon.task/tasks @(:conn sys)))")) "a fresh root holds no task")
+      ;; a load of its task dir (what a task file's event runs) reads its own file: demo/t, and the
+      ;; root task the first load writes (with main's start-root!, the checkout's 810)
+      (is (= 2 (ask "(do (my.root/load-tasks! sys) (count (seon.task/tasks @(:conn sys))))")) "its own task file and root's task, none of the checkout's")
+      (finally (ts/stop-root! root) (clojure.java.shell/sh "rm" "-rf" path runs (str path "-agents"))))))
 
 (deftest a-dead-link-in-the-wiki-is-a-problem-and-the-boot-goes-on
   ;; root's boot loads the wiki (seon.root/wiki-tx) in its boot fact's commit; one link to no
