@@ -160,6 +160,37 @@
     (is (= #{:a1 :a2} (set (keys agents))) out)
     (is (empty? left) (str "agents still alive: " left "\n" out))))
 
+(deftest a-test-childs-run-ends-at-its-exit-though-a-grandchild-holds-its-pipe
+  ;; agent a3 waited 3.5 h on main (2026-10-26) reading its test child's pipe to an end of file
+  ;; that never came: root's :tests in flight, the agent at 0% CPU. A process the test child forks
+  ;; holds the write end past the child's exit. The read ends at the end of file or the child's
+  ;; exit, whichever comes first, and the child marks its end FD_CLOFORK so nothing it forks holds it.
+  ;; The grandchild here waits on a pipe of its own, which the test closes after the read. A
+  ;; regression waits for ever (no clock may end it): a hang is this test's red. The result line,
+  ;; longer than the reader's 1 MB read, is read whole after the exit
+  (let [result (pr-str {:pass 1 :fail 0 :error 0 :reports [] :pad (apply str (repeat 1200000 "x"))})
+        run (fn [clofork?]
+              (let [[r w] (sock/socketpair)
+                    [gr gw] (sock/socketpair)
+                    pid (lib/fork! {:refused (fn [n] {:refused n}) :parent identity
+                                    :child (fn []
+                                             (lib/c-close r) (lib/c-close gw)
+                                             (when clofork? (sock/clofork! w))
+                                             (lib/fork! {:refused (fn [_] nil) :parent (fn [_] nil)
+                                                         :child (fn [] (let [rd (sock/line-reader gr)] (loop [] (when-not (= :eof (rd)) (recur)))))})
+                                             (sock/write-line! w result))})]
+                (lib/c-close w) (lib/c-close gr)
+                (try (let [res (agent/read-to-exit r pid)
+                           st (lib/wait-status pid)]
+                       (assoc res :status st))
+                     (finally (lib/c-close r) (lib/c-close gw)))))]
+    (let [held (run false)]
+      (is (= {:line result :held? true} (dissoc held :status)) "the child's exit ends the read though a process it forked holds the pipe")
+      (is (= {:exit 0} (:status held)) "and the child exited, not killed")
+      (is (= [:seon.test/pipe-held] (keep :seon.error/type (:reports (agent/test-run-answer (:line held) (:status held) true))))
+          "and the run's answer names the held pipe beside what the child wrote"))
+    (is (= {:line result :held? false} (dissoc (run true) :status)) "with FD_CLOFORK on its end, the child's exit is the pipe's end of file")))
+
 (deftest a-blocked-agent-ends-on-its-socket-eof
   ;; task seon.intr/a-signal-wakes-a-blocked-wait: an agent blocked in a channel take, its fork
   ;; server gone first, ends on its own socket's EOF (SIGIO wakes its condition-wait)
@@ -520,15 +551,15 @@
 
 (deftest a-killed-test-run-names-the-test-that-was-running
   (testing "a child killed while running app-test/slow: that test is red, with how the child ended"
-    (let [run (agent/test-run-answer (started "#'app-test/slow") {:signal 9})]
+    (let [run (agent/test-run-answer (started "#'app-test/slow") {:signal 9} false)]
       (is (= {'app-test/slow :error} (proofs/results run)))
       (is (= [] (proofs/test-run-errors run)) "the death is the running test's, not an anonymous run error")
       (is (= {:signal 9} (:exit (first (:reports run)))))))
   (testing "a child that wrote its result last: the result"
     (let [res {:pass 1 :fail 0 :error 0 :test 1 :reports [{:type :pass :var "#'app-test/fast" :message nil}]}]
-      (is (= res (agent/test-run-answer (pr-str res) {:exit 0})))))
+      (is (= res (agent/test-run-answer (pr-str res) {:exit 0} false)))))
   (testing "a child that died before any test started: one run error naming its exit"
-    (let [run (agent/test-run-answer nil {:exit 1})]
+    (let [run (agent/test-run-answer nil {:exit 1} false)]
       (is (= {} (proofs/results run)))
       (is (= 1 (count (proofs/test-run-errors run)))))))
 
