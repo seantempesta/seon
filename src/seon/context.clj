@@ -138,12 +138,12 @@
         messages))
 
 (defn- not-written
-  "What proof p should assert, by the plan's own words: its sentences that name it, else the
-  plan whole."
+  "What unwritten proof p should assert, by the plan's own words: the plan's sentences that name
+  it, or that it is not written yet when none does (the plan is on the page already)."
   {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
   [p plan]
-  (let [ss (str/split plan #"(?<=[.!?])\s+")]
-    (or (not-empty (str/join " " (filter #(str/includes? % (name p)) ss))) plan)))
+  (let [ss (filter #(str/includes? % (name p)) (str/split plan #"(?<=[.!?])\s+"))]
+    (if (seq ss) (str "not written yet; it should assert what the plan says: " (str/join " " ss)) "not written yet")))
 
 (defn similar
   "The program functions nearest task entity te's plan by meaning (its vector: seon.vector/near,
@@ -324,7 +324,7 @@
                              (for [p proofs]
                                [p (if (docs/source-of db p)
                                     (list 'my.agent/prove #{p})
-                                    (str "not written yet; it should assert what the plan says: " (not-written p plan)))]))}
+                                    (not-written p plan))]))}
       (seq sections) (assoc :sections sections)
       near (assoc :similar near)
       (not write-set?) (dissoc :write-set)))))

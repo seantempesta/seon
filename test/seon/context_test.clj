@@ -813,7 +813,7 @@
                                                           [demo/vol "(defn vol [x] (demo/f (demo/f x)))" [demo/f]]]))
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "s"
                                                :seon.task/plan "Make `demo/f` triple. demo-test/h-test asserts (f 2) is 6."
-                                               :seon.task/proofs #{'demo-test/f-test 'demo-test/h-test}}]))
+                                               :seon.task/proofs #{'demo-test/f-test 'demo-test/h-test 'demo-test/q-test}}]))
         data (context/task-data db (task/task db "demo/s"))]
     (is (= [:task :write-set :to-prove] (vec (keys data))) "plan, write set, proofs; nothing else uncited (what is near is off by default)")
     (let [db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n" :seon.task/plan "Make `demo/f` triple."
@@ -825,7 +825,9 @@
     (is (= '(my.agent/prove #{demo-test/f-test}) (get (:to-prove data) 'demo-test/f-test)) "a written proof: the form that runs it")
     (is (= "not written yet; it should assert what the plan says: demo-test/h-test asserts (f 2) is 6."
            (get (:to-prove data) 'demo-test/h-test))
-        "an unwritten proof: what the plan says it should assert")))
+        "an unwritten proof: what the plan says it should assert")
+    (is (= "not written yet" (get (:to-prove data) 'demo-test/q-test))
+        "one the plan's sentences do not name: that it is not written, not the plan again (the page shows it)")))
 
 (deftest a-record-keeps-its-value
   ;; the owner's rule (clipping audit 2026-10-25, P1/P8): data is cut only by the one printer,
