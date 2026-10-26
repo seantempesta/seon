@@ -438,16 +438,18 @@
   (let [src (str "(defn big \"Does much.\" [] " (str/join " " (repeat 8000 "(inc 1)")) ")")
         db (d/db-with (db-with-program) (program-facts [['ctx-big/big src []]]))
         r (seon.docs/resolve-ref db 'ctx-big/big :code)
-        hiccup (seon.render.ui/cited {:seon.db/db db} 0 'ctx-big/big)
+        ;; the task's record as ctx holds it: its newest run's task citing the var, with its form
+        c {:runs {1 {:task {:cited {2 {:var/name 'ctx-big/big :form {:form/src src}}}}}}}
+        hiccup (seon.render.ui/cited {:seon.ctx/ctx c :seon.db/db db} 0 'ctx-big/big)
         html (seon.web.html/html hiccup)
         model (print/text (vary-meta hiccup assoc :seon.print/full true))]
     (is (= {:symbol 'ctx-big/big :source (print/code src)} r) "the source whole as code, never swapped for its doc by size")
     (is (< (:context seon.print/budgets) (select/estimate src)) "a source over the context's budget")
     (is (< (count html) (count src)) "the page cuts it where it is written")
-    (is (str/includes? html "seon.context/cited") "its cut names the form that reads the rest")
+    (is (str/includes? html "seon.render.ui/cited-of") "its cut names the form that reads the rest")
     (is (< (select/estimate model) (select/estimate src)) (str "the model reads it cut too, at the call's budget: " (select/estimate model) " tokens"))
     (is (str/includes? model "#'seon.render/html") "the call as returned")
-    (is (str/includes? model "seon.context/cited") "and the cut names the form that reads the rest")
+    (is (str/includes? model "seon.render.ui/cited-of") "and the cut names the form that reads the rest")
     (is (= "[#'seon.context/cited 1 {:a 1}]" (print/text [#'seon.context/cited 1 {:a 1}])) "a vector headed by a var with no budget is data")))
 
 ;; a made unit vector, dim i weighted as a Matryoshka model's are (seon.vector-test/vectors)

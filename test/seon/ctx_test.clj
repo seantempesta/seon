@@ -475,6 +475,21 @@
 
 (declare steps)
 
+(deftest the-page-draws-what-the-task-record-holds
+  ;; the live-agents context audit (2026-10-26): the task's record held each cited var's tests and
+  ;; each cited section's text (D1-D3), and the page drew neither: the cited part showed the callers
+  ;; alphabetically with no result, and a section only as an address. Each is drawn from ctx
+  (let [db (d/db-with (seeded 3) [{:seon.proof/latest "app.x-test/t0" :seon.proof/status :fail :seon.proof/run "r"
+                                   :seon.proof/branch "main" :seon.proof/t 1}])
+        page (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (reset! seon.agent/state nil)))
+        part (fn [prefix] (some (fn [[id h]] (when (str/starts-with? id prefix) h)) page))
+        cited (part "cited-")
+        task (pr-str (part "task-data-"))]
+    (is (some #(= {'app.x-test/t0 :fail} (:tests %)) (tree-seq coll? seq cited))
+        (str "the cited var's test with its last result on main: " (pr-str cited)))
+    (is (str/includes? task "What x does.") "the cited section's text, not only its address")
+    (is (str/includes? task "docs/x.md#the-x") "under its heading and address")))
+
 (deftest an-agent-adds-a-datum-and-its-render
   ;; what an agent evaluates to add to its record and draw it (the owner, 2026-10-25: "they can
   ;; easily update it and just add more data and render functions"): its key registered with a
