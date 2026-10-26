@@ -458,6 +458,32 @@
     (is (= (before 'app.pt-mac-test/plain-test) (after 'app.pt-mac-test/plain-test)) "a test not expanding it kept its digest")
     (is (= '#{app.pt-mac-test/m-test} (selected db db')) "and every run's selection finds exactly it")))
 
+(deftest a-var-a-test-resolves-at-run-time-moves-its-digest
+  ;; a constant symbol passed to resolve, ns-resolve or requiring-resolve is a reference (the
+  ;; compiler's facts): a green at a digest that left the var out was reused after it changed,
+  ;; and a task whose proof resolves a var it defines closed with no turn (app.proofs/gens-test)
+  (let [db (record (empty-db) 'user "(ns app.pt-res)" 'app.pt-res "(defn f [] 1)"
+                   'user "(ns app.pt-res-test (:require [clojure.test :refer [deftest is]]))"
+                   'app.pt-res-test "(deftest r-test (is (= 1 ((resolve 'app.pt-res/f)))))"
+                   'app.pt-res-test "(deftest ns-test (is (= 1 ((ns-resolve 'app.pt-res 'f)))))"
+                   'app.pt-res-test "(deftest req-test (is (= 1 ((requiring-resolve 'app.pt-res/f)))))"
+                   'app.pt-res-test "(deftest later-test (is (= 2 ((resolve 'app.pt-res/g)))))"
+                   'app.pt-res-test "(deftest plain-test (is (= 1 1)))"
+                   'app.pt-res-test "(deftest data-test (is (= 'app.pt-res/f (first (list 'app.pt-res/f)))))")
+        ts '#{app.pt-res-test/r-test app.pt-res-test/ns-test app.pt-res-test/req-test app.pt-res-test/later-test app.pt-res-test/plain-test app.pt-res-test/data-test}
+        dg (fn [db] (select-keys (program/reach-digests db {:env "e" :tree "t"}) ts))
+        before (dg db)
+        changed (dg (record db 'app.pt-res "(defn f [] 3)"))
+        defined (dg (record db 'app.pt-res "(defn g [] 2)"))]
+    (doseq [t '[app.pt-res-test/r-test app.pt-res-test/ns-test app.pt-res-test/req-test]]
+      (is (not= (before t) (changed t)) (str t ": the var it resolves changed, so its digest moved")))
+    (is (not= (before 'app.pt-res-test/later-test) (defined 'app.pt-res-test/later-test))
+        "the var it resolves came to exist: its digest moved")
+    (is (= (before 'app.pt-res-test/plain-test) (changed 'app.pt-res-test/plain-test) (defined 'app.pt-res-test/plain-test))
+        "a test resolving nothing kept its digest")
+    (is (= (before 'app.pt-res-test/later-test) (changed 'app.pt-res-test/later-test)) "f is no var later-test resolves")
+    (is (= (before 'app.pt-res-test/data-test) (changed 'app.pt-res-test/data-test)) "a name passed to no resolver is data: no reference")))
+
 (deftest a-changed-contract-schema-moves-the-digest-of-tests-reaching-the-contracted-var
   (let [schema (fn [db k form] (d/db-with db [{:schema/key k :schema/form form}]))
         db (-> (record (empty-db) 'user "(ns app.pt-sc)"
