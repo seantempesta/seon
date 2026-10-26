@@ -456,7 +456,11 @@
               (if-let [[aid died inflight] (get-in st [::dying (:pid m)])]
                 (-> st (update ::dying dissoc (:pid m)) (record-death o aid (:status m) died inflight))
                 st))
-      :fork-failed (spawn-failed st o (:agent m) (str "fork refused: " (:active-threads m) " active threads") nil)
+      ;; a fork the lost server was asked after its death failed every spawn still waiting
+      ;; (:fork-server-down): one already answered is not failed again
+      :fork-failed (cond-> st
+                     (get-in st [::spawning (:agent m)])
+                     (spawn-failed o (:agent m) (or (:reason m) (str "fork refused: " (:active-threads m) " active threads")) nil))
       :applied (-> st (view! update-in [:stats :lag-ms] lib/push-window (:lag-ms m) 200)
                    (view! assoc-in [:fork-server :mismatch] (:mismatch m)))
       :load-errors (view! st update-in [:fork-server :load-errors] (fnil into []) (:errors m))
