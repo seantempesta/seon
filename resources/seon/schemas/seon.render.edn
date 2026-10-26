@@ -19,6 +19,8 @@
                     ;; the room it is shown in: one line (a chat stream, a table cell), a full panel
                     ;; (the default), a compact live tile
                     [:as {:optional true} :seon.render/as]
+                    ;; shown in an agent page's chat: an eval's one line leads with the agent's prose
+                    [:chat {:optional true} :boolean]
                     ;; tokens for the printer
                     [:budget {:optional true} pos-int?]
                     ;; what a cut reads the value through: its result handle (result/h3) or a form

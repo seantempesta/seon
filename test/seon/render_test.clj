@@ -534,7 +534,9 @@
         agent (#'p/page-value st :a3)
         tiles (fn [l] (tiles-of [main branch] l))]
     (testing "root is an agent: its page and an agent's are each its conversation (seon.render.ui/chat), with its head, its list, its tiles"
-      (is (= #{nil "#c-side" "#c-older" "#c-rows" "#p-tiles"} (set (map :container (:seon.render/units root))) (set (map :container (:seon.render/units agent)))))
+      (is (= #{nil "#c-side" "#c-older" "#c-rows" "#p-tiles"} (set (map :container (:seon.render/units root)))))
+      (is (= #{nil "#c-side" "#c-older" "#c-rows" "#p-task"} (set (map :container (:seon.render/units agent))))
+          "an agent's: its task region above its chat (render-ctx's regions); no eval of the fixture has a render of its own, so no tiles")
       (is (= [:seon.db/eval-fact] (for [u (:seon.render/units root) :when (= "#c-rows" (:container u))] (schema-of main (second (:comp u)))))
           "root's list: its own evaluations")
       (is (= "p-head" (:id (first (:seon.render/units root))) (:id (first (:seon.render/units agent))))))
@@ -1083,18 +1085,22 @@
                                                                 :reasons ["demo/f-test is red"]}}}])
         c (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)
         parts (r/render-ctx c (seon.context/renders branch))
-        ks (mapv :key parts)]
-    (is (= [[:task] [:related] [:proofs] [:verdict] [:run]] (subvec ks 0 5)) "the task, what is related, its proofs, the verdict, the run, first")
-    (is (= {'demo/f-test {:status :fail :failure {:assert '(= 4 (f 2)) :got 5}}} (:value (nth parts 2)))
+        ks (mapv :key parts)
+        part (fn [k] (some #(when (= k (:key %)) %) parts))]
+    (is (= [[:task] [:task :cites 'seon.render/walk] [:related] [:proofs] [:verdict] [:run]] (subvec ks 0 6))
+        "the task, each var it cites, what is related, its proofs, the verdict, the run, first")
+    (is (= #{:task} (set (map :region (take 6 parts)))) "the task region: what the model reads too")
+    (is (= {'demo/f-test {:status :fail :failure {:assert '(= 4 (f 2)) :got 5}}} (:value (part [:proofs])))
         "each proof's status as the newest turn observed it, with its first failure")
-    (is (= ["demo/f-test is red"] (:value (nth parts 3))))
+    (is (= ["demo/f-test is red"] (:value (part [:verdict]))))
     (let [task (first parts) h (h/html (:html (r/part-faces task)))]
       (is (= "demo/f" (:seon.task/id (:value task))) "the task part's value is the task: nothing derived is stored in a part")
       (is (some? (:read task)) "and it carries its task data's key, what its memo compares")
       (is (str/includes? h "demo/f") "drawn by task-page")
       (is (str/includes? h "to-prove") "as the task's data, drawn from the db when it is drawn"))
-    (is (str/includes? (h/html (:html (r/part-faces (second parts)))) "nothing related yet") "related, drawn from the db: none yet here")
-    (is (= 2 (:turns-taken (:value (nth parts 4)))))
+    (is (str/includes? (h/html (:html (r/part-faces (part [:related])))) "nothing related yet") "related, drawn from the db: none yet here")
+    (is (= 2 (:turns-taken (:value (part [:run])))))
+    (is (every? #(= :chat (:region (part %))) (filterv #(#{:eval :turn :message} (first %)) ks)) "the conversation, the chat")
     (is (= [[:message "m-1"] [:eval "e1"] [:eval "e2"] [:turn "demo/f#1/0"] [:eval "e3"] [:turn "demo/f#1/1"]] (filterv #(#{:eval :turn :message} (first %)) ks))
         "the conversation in the order it was written: each member's first transaction")
     (is (some #(= [:message "m-1"] %) ks) "the message to the run, in the conversation")
@@ -1109,11 +1115,13 @@
   (let [big {:plan (apply str (repeat 400 "a long plan sentence. ")) :n 1}
         {:keys [html]} (r/part-faces {:key [:task] :value big})
         err (seon.contract/error :seon.render/not-callable `ui/root "boom" {:seon.render/fn 'x})
-        fe (r/part-faces {:key [:eval "e9"] :value err})]
+        fe (r/part-faces {:key [:eval "e9"] :value err})
+        opened (r/part-faces {:key [:eval "e9"] :value err :opened true})]
     (is (str/includes? (h/html html) "a long plan sentence."))
     (is (str/includes? (h/html html) "seon-print-elision") "the printer's cut, which says so")
-    (is (= #{:html :inline} (set (keys fe))) "one face and its one line, no text face")
-    (is (= (h/html (r/html err {})) (h/html (:html fe))) "a declared render draws the part")))
+    (is (= #{:inline} (set (keys fe))) "an eval no one opened: its one line, its value not drawn")
+    (is (= #{:html :inline} (set (keys opened))) "opened: drawn")
+    (is (= (h/html (r/html err {})) (h/html (:html opened))) "a declared render draws the part")))
 
 (deftest a-view-made-again-draws-from-the-memo
   ;; the review of slice 2: view makes new part values on every call, so the memo keys on the ctx
@@ -1173,15 +1181,15 @@
             st2 (#'p/answered st1 (volatile! {}) [:parts :a3] gone)]
         (is (str/includes? (p/page-html st2 :a3) "its process did not answer (no live agent :a3)"))))))
 
-(deftest an-agents-run-tile-is-mains
-  ;; root, 2026-10-26: an agent's run is root's chrome, read on main as the sidebar is. Main writes
-  ;; a run's status and end after the agent's branch forked, so the branch's copy never has them; a
-  ;; fresh agent's run tile read "#1––––––"
+(deftest an-agents-run-tile-is-its-ctxs
+  ;; the owner, 2026-10-26: "any changes you want updated in the agents context and html should go
+  ;; through database updates that reach the same data the context pull gets". A run's status main
+  ;; writes reaches the agent's branch by take!; until then the tile shows what the branch holds
   (let [[main branch _] (paged-dbs)
         main (d/db-with main [{:seon.run/id "demo/f#1" :seon.run/status :closed :seon.run/outcome :done}])
         [st _] (#'p/pass-view (assoc (proc-state main branch) :view {:agents {}}) :a3)
         tile (get-in st [:views :a3 :units "q-run" :html])]
-    (is (str/includes? (str tile) "closed") (str "the status main holds: " tile))
-    (is (str/includes? (str tile) "done") "and how it ended")
-    (is (not= :closed (:seon.run/status (d/pull branch [:seon.run/status] [:seon.run/id "demo/f#1"]))) "which the branch's copy does not hold")))
+    (is (some? tile) "the run's tile, from the agent's record")
+    (is (not (str/includes? (str tile) "closed")) (str "not main's status: " tile))
+    (is (str/includes? (str tile) (name (:seon.run/status (d/pull branch [:seon.run/status] [:seon.run/id "demo/f#1"])))) "the branch's")))
 

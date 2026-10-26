@@ -483,10 +483,14 @@
         by (or (:seon.eval/by e) (:by r))
         err? (some? (:ex r))]
     (if (= :inline (:as opts))
-      ;; its code's first line ⇒ its value's line as recorded (seon.repl/record-details' :line), else its text
-      [:span {:class "font-mono"} [:code (merge-with #(str %1 " " %2) emit/highlight {:class "text-text-100"}) (prose (or (first (str/split-lines (or (:code r) ""))) "") (cell) {:one-line? true})]
-       [:span {:class (if err? "text-error" "text-text-500")} (if err? " ✕ " " ⇒ ")]
-       [:code {:class "text-text-400"} (prose (or (:line rec) (:text r) "") (cell) {:one-line? true})]]
+      ;; its code's first line ⇒ its value's line as recorded (seon.repl/record-details' :line), else its
+      ;; text; in the chat (:chat true), the agent's prose first: the chat is prose and a line an arrow opens
+      (let [line [:span {:class "font-mono"} [:code (merge-with #(str %1 " " %2) emit/highlight {:class "text-text-100"}) (prose (or (first (str/split-lines (or (:code r) ""))) "") (cell) {:one-line? true})]
+                  [:span {:class (if err? "text-error" "text-text-500")} (if err? " ✕ " " ⇒ ")]
+                  [:code {:class "text-text-400"} (prose (or (:line rec) (:text r) "") (cell) {:one-line? true})]]]
+        (if (and (:chat opts) (not (str/blank? (:prose r))))
+          [:span {:class "flex flex-col"} [:span {:class "whitespace-pre-wrap text-text-300 italic"} (prose (:prose r) (form-budget))] line]
+          line))
       [:div {:class (str "flex flex-col gap-1 border-l-2 pl-3 py-1 " (if err? "border-error" "border-base-700"))}
        (when-not (str/blank? (:prose r)) [:p {:class "whitespace-pre-wrap text-text-300 italic"} (prose (:prose r) (form-budget))])
        (when (:code r) (code (:code r) (form-budget)))

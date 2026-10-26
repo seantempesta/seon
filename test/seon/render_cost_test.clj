@@ -374,10 +374,12 @@
      :n "evals in the agent's ctx"
      :work (str "one pass over ctx's members: the task's, the proofs' and the run's parts (a few contracted calls, "
                 "fixed), then a part per eval, each its record less its id, and the conversation sorted by entity "
-                "id once (n log n comparisons, no contracted call): linear in the evals")
+                "id once (n log n comparisons, no contracted call), and each eval asked once whether its value has a render "
+                "of its own (its tile: four contracted calls): linear in the evals")
      :growth :linear
-     ;; measured 2026-10-26: 4 calls and 244 KB at 100 evals (each part's record less its id, and its
-     ;; place in the sort)
-     :per-n {:calls 0 :bytes 2500}
+     ;; measured: 4 calls and 244 KB at 100 evals before the tiles; each eval now asks once whether its
+     ;; value has a render of its own (its tile: render-of, own-key, schema-of, declared), 404 calls and
+     ;; 372 KB at 100
+     :per-n {:calls 4 :bytes 3700}
      :fixed {:calls 4 :bytes 10000}
      :sizes [100 1000 4000]}))

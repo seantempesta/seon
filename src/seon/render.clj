@@ -183,14 +183,17 @@
         failure (into {} (for [r reds] [(:test r) {:assert (:expected r) :got (if (contains? r :got) (:got r) (:actual r))}]))
         entry (fn [k e] {:key [k (or (:seon.eval/id e) (:seon.message/id e) (:seon.turn/id e))] :from [e] :region :chat
                          :opened (boolean (:seon.eval/opened e))
-                         :value (if (= :turn k) (-> (relevant-of :seon.turn/turn-fact e) (dissoc :seon.turn/run) (update :seon.turn/basis select-keys [:max-turns])) (dissoc e :db/id :seon.eval/agent :seon.message/to))})]
+                         :value (if (= :turn k) (-> (relevant-of :seon.turn/turn-fact e) (dissoc :seon.turn/run) (update :seon.turn/basis select-keys [:max-turns])) (dissoc e :db/id :seon.eval/agent :seon.message/to))})
+        ;; what the task's parts read, each key made once: related reads the plan's reference graph too
+        tk (when task ((:task-key fs) task))
+        cks (when task (into (array-map) (for [v ((:cites fs) task)] [v ((:cited-key fs) v)])))]
     (-> []
         (cond-> task (conj {:key [:task] :from [task] :value (relevant-of :seon.task/task-fact (dissoc task :turns :runs)) :region :task
-                            :schema :seon.render/task-page :read ((:task-key fs) task) :db (:db fs)})
-                task (into (for [v ((:cites fs) task)]
-                             {:key [:task :cites v] :from [task] :value {:var v} :region :task :schema :seon.render/cited :read ((:cited-key fs) v) :db (:db fs)}))
+                            :schema :seon.render/task-page :read tk :db (:db fs)})
+                task (into (for [[v ck] cks]
+                             {:key [:task :cites v] :from [task] :value {:var v} :region :task :schema :seon.render/cited :read ck :db (:db fs)}))
                 task (conj {:key [:related] :from [task] :value {:task (:db/id task)} :region :task
-                            :schema :seon.render/related :read ((:related-key fs) (:db/id task)) :db (:db fs)})
+                            :schema :seon.render/related :read [tk (vec (vals cks)) ((:related-key fs) (:db/id task))] :db (:db fs)})
                 (seq (:seon.task/proofs task))
                 (conj {:key [:proofs] :from [task turn] :region :task :value (with-meta (into (sorted-map-by #(compare (str %1) (str %2)))
                                                               (for [t (:seon.task/proofs task)]
@@ -219,7 +222,7 @@
   {:malli/schema [:=> [:cat :seon.render/part] :seon.render/faces]}
   [{:keys [value schema] :as p}]
   (if (= :eval (first (:key p)))
-    (cond-> {:inline (html value {:as :inline :schema schema})}
+    (cond-> {:inline (html value {:as :inline :chat true :schema schema})}
       (:opened p) (assoc :html (html value {:schema schema})))
     {:html (html value (cond-> {:schema schema} (:db p) (assoc :db (:db p))))}))
 

@@ -942,7 +942,7 @@
   (let [[db te] (sections-near "Make ```demo/g``` say one thing.")
         db (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/agent [:seon.agent/key "demo/a1"]}])
         c (ctx/build db (pdb/eid db :seon.agent/key "demo/a1") :b)
-        draw (fn [memo c db] (reduce (fn [[m acc] p] (let [[m f] (render/drawn m p)] [m (assoc acc (:key p) f)])) [memo (array-map)] (render/view c (context/renders db))))
+        draw (fn [memo c db] (reduce (fn [[m acc] p] (let [[m f] (render/drawn m p)] [m (assoc acc (:key p) f)])) [memo (array-map)] (render/html c (assoc (context/renders db) :schema :seon.render/render-ctx))))
         [m0 fs0] (draw {} c db)
         rep (d/with db [{:db/id "f2" :form/id "demo/g-2" :form/src "(defn g [] :redefined)"} [:db/add [:var/name 'demo/g] :var/form "f2"]])
         [_ fs1] (draw m0 (ctx/patch c (:db-after rep) (:tx-data rep) :b) (:db-after rep))
@@ -956,7 +956,7 @@
 
 (deftest related-key-moves-with-a-vector-written
   ;; related is memoized by related-key: the same while nothing it reads is written, moved when a
-  ;; text is embedded (the indexed :seon.vector/text-t's newest) or the plan changes
+  ;; text is embedded (the indexed :seon.vector/text-t's newest)
   (let [[db te dir] (sections-near "Make the page say one thing.")
         k0 (context/related-key db te)
         unrelated (d/db-with db [{:seon.agent/key "demo/a1"}])
@@ -965,7 +965,9 @@
         embedded (d/db-with s (vector/tx-data [se] [(:max-tx s)] [(dir 1.0 0.5)] [10] "m"))]
     (is (= k0 (context/related-key unrelated te)) "an agent written: the same key")
     (is (not= k0 (context/related-key embedded te)) "a section embedded: a new key")
-    (is (not= k0 (context/related-key (d/db-with db [[:db/add te :seon.task/plan "Say another thing."]]) te)) "the plan rewritten: a new key")))
+    ;; the plan rewritten moves the task's key, which render-ctx composes into related's read
+    (is (not= (context/task-key db {:seon.task/id "demo/r"}) (context/task-key (d/db-with db [[:db/add te :seon.task/plan "Say another thing."]]) {:seon.task/id "demo/r"}))
+        "the plan rewritten: the task's key moves")))
 
 (deftest the-task-key-moves-with-what-it-reads
   ;; the task's data (seon.context/task-data), memoized by what it read (task-key): the key is

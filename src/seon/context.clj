@@ -372,15 +372,13 @@
      (into (sorted-map) (for [e (distinct es)] [e (latest-t db e)]))]))
 
 (defn related-key
-  "What related reads for task entity te on db, as a value: the task data's key (the plan, what it
-  cites and the forms naming them: its reference graph), the count shown, and the newest vector
-  written (its text's transaction, one seek of the indexed :seon.vector/text-t: any text embedded
-  since, the plan's or a section's or a form's, moves it). Equal keys, an equal related."
+  "What related reads for task entity te on db beside the plan's reference graph (the task's key and
+  its cited vars' keys, which render-ctx composes with this one), as a value: the count shown, and
+  the newest vector written (its text's transaction, one seek of the indexed :seon.vector/text-t:
+  any text embedded since, the plan's or a section's or a form's, moves it)."
   {:malli/schema [:=> [:cat :seon.host/db :int] :any]}
   [db te]
-  [(task-key db (d/pull db [:seon.task/id] te)) (let [m (d/pull db [:seon.task/id] te)] (mapv #(cited-key db %) (cites db m)))
-   (related-count db te)
-   (:v (first (d/rseek-datoms db :avet :seon.vector/text-t)))])
+  [(related-count db te) (:v (first (d/rseek-datoms db :avet :seon.vector/text-t)))])
 
 (defn renders
   "What a view reads db through (seon.render/render-ctx's fs), over db: the db its parts' renders draw
@@ -730,7 +728,7 @@
           cache (printed-run items (when model? printed))
           parts (mapv #(get-in cache [:parts %]) (:ids cache))
           [picks dropped] (kept parts (cfg/value :seon.config.render/history-budget))
-          whole-ids (into #{} (keep (fn [[{:keys [ref]} pick]] (when (= :whole pick) (second ref)))) (map vector (drop dropped parts) picks))
+          whole-ids (into #{} (keep (fn [[{:keys [ref]} pick]] (when (and (= :whole pick) (= :eval (first ref))) (second ref)))) (map vector (drop dropped parts) picks))
           sent (mapv (fn [{:keys [ref collapsed] :as p} pick] (if (= :line pick) [[:line (second ref)] collapsed] (as-sent p whole-ids)))
                      (drop dropped parts) picks)
           note (when (pos? dropped) {:role "user" :content (pr-str {:history {:left-out dropped}})})]

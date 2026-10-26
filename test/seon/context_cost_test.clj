@@ -149,13 +149,14 @@
                :sizes [10 100 1000]}))
 
 (deftest related-key-is-one-seek-beside-the-tasks
-  ;; related's memo key: the task data's key, the count, and the newest vector by one seek of the
-  ;; indexed :seon.vector/text-t, flat in how many vectors there are
+  ;; related's own memo key: the count and the newest vector by one seek of the indexed
+  ;; :seon.vector/text-t, flat in how many vectors there are (render-ctx composes it with the
+  ;; task's key and its cited vars' keys, made once a view)
   (cost/proof {:of 'seon.context/related-key :input 'seon.context-cost-test/first-t-of
                :n "wiki sections with vectors"
-               :work "the task data's key (the plan's references and a seek per entity they name), the count through the resolver, one reverse seek of the vectors' text transactions: sixteen contracted calls, the task's data key's fourteen among them, flat in the vectors"
+               :work "the count through the resolver, one reverse seek of the vectors' text transactions: two contracted calls, flat in the vectors"
                :growth :constant
-               :fixed {:calls 16}
+               :fixed {:calls 2}
                :sizes [10 100 1000]}))
 
 (defn task-data-of
