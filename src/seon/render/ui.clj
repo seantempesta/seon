@@ -67,9 +67,10 @@
 (defn prose
   "Text on the page as the one printer's prose (seon.print/prose) under budget tokens: whole,
   or its shown part and the cut, which says what it omitted and where the rest is: a link
-  to opts :href (the page that shows it whole), else the cut's title holds the whole text;
-  with opts :whole (a form that answers the whole value, e.g. its result handle) the cut
-  names that form too. opts :one-line? as the printer's (a table cell, a stream row)."
+  to opts :href (the page that shows it whole); with opts :whole (a form that answers the whole
+  value, e.g. its result handle) the cut names that form; with neither, the cut's title holds the
+  whole text (a person's way to the rest; with a form, a copy the model would read twice). opts
+  :one-line? as the printer's (a table cell, a stream row)."
   {:malli/schema [:function [:=> [:cat :any pos-int?] :any] [:=> [:cat :any pos-int? :map] :any]]}
   ([s budget] (prose s budget {}))
   ([s budget {:keys [href one-line? whole]}]
@@ -78,10 +79,12 @@
      (if-not truncated?
        shown
        (let [words (str (emit/cut-words omitted lines nil) (when whole (str " · the whole value: " (print/text whole (form-budget)) " at its REPL")))
-             cut (if href
-                   [:a {:class "seon-print-elision" :href href :title "the whole on this page"} words]
-                   [:span {:class "seon-print-elision" :title s} words])]
-         [:span shown (when-not (or (empty? shown) (str/ends-with? shown "\n") (str/ends-with? shown " ")) " ") cut])))))
+             cut (cond href [:a {:class "seon-print-elision" :href href :title "the whole on this page"} words]
+                       whole [:span {:class "seon-print-elision"} words]
+                       :else [:span {:class "seon-print-elision" :title s} words])]
+         (cond-> [:span shown]
+           (not (or (empty? shown) (str/ends-with? shown "\n") (str/ends-with? shown " "))) (conj " ")
+           true (conj cut)))))))
 
 (defn code
   "Code on the page under budget tokens: whole, the printer's code block (seon.print.emit/marked-hiccup,
@@ -929,7 +932,9 @@
   [{c :seon.ctx/ctx db :seon.db/db} rid]
   (let [{:seon.task/keys [id kind execution] :as t} (get-in c [:runs rid :task])
         ;; each proof written, its source as ctx holds it (the task's :proved): what the test asserts
-        sources (into {} (for [v (vals (:proved t)) :let [src (get-in v [:form :form/src])] :when src] [(:var/name v) (print/code src)]))]
+        ;; (a form ctx holds whole at another path is {:db/id e} here: read by its id)
+        sources (into {} (for [v (vals (:proved t)) :let [src (or (get-in v [:form :form/src]) (some->> (get-in v [:form :db/id]) (d/pull db [:form/src]) :form/src))]
+                               :when src] [(:var/name v) (print/code src)]))]
     [:section
      [:h2 "task"]
      [:p (str id (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
@@ -940,13 +945,17 @@
      (let [data (cond-> (context/task-data db (task/task db id) false)
                   (seq sources) (update :to-prove #(into (empty %) (for [[s run] %] [s (if-let [src (sources s)] {:run run :source src} run)]))))]
        ;; a cut names the form that answers the whole at the agent's REPL
-       (list (when-let [ins (get-in data [:task :seon.task/instructions])]
+       (remove nil?
+         (list (when-let [ins (get-in data [:task :seon.task/instructions])]
                [:p {:class "seon-prose"} (prose ins (config/value :seon.config.render/value-budget) {:whole '(:seon.task/instructions (:task (my.task/data)))})])
              (when-let [plan (get-in data [:task :seon.task/plan])] [:p {:class "seon-prose"} (prose plan (part) {:whole '(:seon.task/plan (:task (my.task/data)))})])
-             (for [{:seon.section/keys [address heading text]} (vals (:sections t))]
-               (list [:h3 heading " " [:code address]]
-                     [:p {:class "seon-prose"} (prose (str text) (part) {:whole (list :seon.ref/text (list 'my.agent/help address))})]))
-             [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set :sections)} (dissoc data :task :sections)]))]))
+             (seq (for [{:seon.section/keys [address heading text]} (vals (:sections t))]
+                    (list [:h3 heading " " [:code address]]
+                          [:p {:class "seon-prose"} (prose (str text) (part) {:whole (list :seon.ref/text (list 'my.agent/help address))})])))
+             ;; the rest of its data, an empty entry left out (no proof yet is no :to-prove)
+             (let [rest (into {} (remove (fn [[_ v]] (and (coll? v) (empty? v)))) (dissoc data :task :sections))]
+               (when (seq rest)
+                 [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set :sections)} rest])))))]))
 
 (defn cited-of
   "Var v as the newest run's task holds it in ctx c (its :cited, seon.ctx's pattern: its form and
@@ -968,20 +977,28 @@
           ;; (forms written in one transaction tie on it: their names break the tie, so the cut is fixed)
           tests (->> (d/q '[:find ?n ?tx :in $ ?s :where [?f :form/refs ?s ?tx] [?e :var/form ?f] [?e :var/kind :test] [?e :var/name ?n] [(not= ?n ?s)]] db v)
                      (sort-by (juxt (comp - second) (comp str first))) (take (config/value :seon.config.ctx/callers)) (map first))
-          status (fn [s] (or (:seon.proof/status (d/pull db [:seon.proof/status] [:seon.proof/latest (str s)])) :none))]
-      (cond-> {:source (print/code (str (get-in cv [:form :form/src])))}
+          status (fn [s] (or (:seon.proof/status (d/pull db [:seon.proof/status] [:seon.proof/latest (str s)])) :none))
+          ;; ctx holds an entity whole at the first path it reaches it by, {:db/id e} at every other (a form
+          ;; that is also another cited var's caller): its source read by its id there
+          src (or (get-in cv [:form :form/src]) (some->> (get-in cv [:form :db/id]) (d/pull db [:form/src]) :form/src))]
+      (cond-> {}
+        src (assoc :source (print/code src))
         (seq tests) (assoc :tests (into (sorted-map-by #(compare (str %1) (str %2))) (for [n tests] [n (status n)])))
         (seq others) (assoc :callers (vec (distinct (map :var/name others))))))))
 
 (defn cited
-  "A var the task's plan cites (a component over ctx and the db): its source, its tests with their
-  last results and its other callers (`cited-of`), as a call of the one printer (the model reads
-  the data)."
+  "A var the task's plan cites (a component over ctx and the db): its source, then its tests with
+  their last results and its other callers (`cited-of`), each a call of the one printer under its
+  own budget, so a long source never crowds the tests out (the model reads the data)."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :symbol] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} _ var]
-  [:section [:h2 (str "cites " var)]
-   [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle (list 'seon.render.ui/cited-of '(seon.agent/db) '@seon.ctx/ctx (list 'quote var))}
-    (cited-of db c var)]])
+  (let [whole (list 'seon.render.ui/cited-of '(seon.agent/db) '@seon.ctx/ctx (list 'quote var))
+        {:keys [source] :as data} (cited-of db c var)
+        rest (dissoc data :source)
+        budget (config/value :seon.config.render/value-budget)]
+    (cond-> [:section [:h2 (str "cites " var)]]
+      source (conj [#'render/html {:budget budget :handle (list :source whole)} source])
+      (seq rest) (conj [#'render/html {:budget budget :handle (list 'dissoc whole :source)} rest]))))
 
 (defn status
   "What the newest turn of the run observed, a model's or an outside read's (a component over ctx
@@ -1004,11 +1021,12 @@
 
 (defn related
   "What the task's plan is likely to need beyond what it cites (a component over ctx and the db):
-  seon.context/related over the db, as a call of the one printer; a line saying so when there is
-  nothing yet."
+  seon.context/related over the db as seon.context/related-view lines it (each section its first
+  sentence, each function its doc's, with the forms that read more), what (my.task/related)
+  answers, as a call of the one printer; a line saying so when there is nothing yet."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} rid]
-  (let [r (context/related db (get-in c [:runs rid :task :db/id]))]
+  (let [r (some->> (context/related db (get-in c [:runs rid :task :db/id])) (context/related-view db))]
     [:section [:h2 "related"]
      (if r [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/related)} r] [:p {:class "muted"} "nothing related yet"])]))
 
@@ -1030,16 +1048,20 @@
    [:h2 {:class "kicker"} (kname k)]
    (render/html {:schema k} (ratom/realize (get c k)))])
 
+(defn- added-keys
+  "The keys the agent added to ctx c: any qualified key outside its own :seon.agent/* attributes,
+  its pattern and the environment, in order. It reads ctx's own key set only."
+  {:malli/schema [:=> [:cat :map] [:sequential :qualified-keyword]]}
+  [c] (filter #(and (qualified-keyword? %) (not (#{"seon.agent" "db" "seon.ctx"} (namespace %)))) (sort-by str (keys c))))
+
 (defn ctx-keys
-  "The keys the agent added to its ctx (a component over ctx): any qualified key outside its own
-  :seon.agent/* attributes, its pattern and the environment, each a component of its own (ctx-key).
-  It reads ctx's own key set, so it runs again when ctx's own attributes change, and its output is
-  the same unless a key came or went."
+  "The keys the agent added to its ctx (a component over ctx, placed when there is one), each a
+  component of its own (ctx-key). It reads ctx's own key set, so it runs again when ctx's own
+  attributes change, and its output is the same unless a key came or went."
   {:seon.render/style "flex flex-col gap-2" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
   [:div
-   (for [k (sort-by str (keys c)) :when (and (qualified-keyword? k) (not (#{"seon.agent" "db" "seon.ctx"} (namespace k))))]
-     [#'ctx-key {} k])])
+   (for [k (added-keys c)] [#'ctx-key {} k])])
 
 (defn eval-item
   "An eval of the conversation (a component over ctx), as a reference, never a copy (owner: \"the
@@ -1118,7 +1140,7 @@
                        (when (seq (:turns run)) [#'status {} rid])))
       ;; the run once it took a turn: before that it says only its id, which the task's names
       (when (seq (:turns run)) [#'run-head {} rid])
-      [#'ctx-keys {}]]
+      (when (seq (added-keys c)) [#'ctx-keys {}])]
      [:ol {:id "c-rows"}
       (for [id conv] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'turn-item {} rid id] :else [#'message-item {} rid id]))]
      [:aside {:id "p-tiles"}

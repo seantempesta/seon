@@ -1088,6 +1088,19 @@
         (is (not-any? #(= :error (:op %)) (:to-api @o2)))
         (is (some #(and (= 3 (:k %)) (str/includes? (:html %) "seon.render/view-defect")) (:to-web @o2)) "its page is still the error")))))
 
+(deftest a-cut-with-its-whole-form-holds-no-copy
+  ;; the second context audit (F7): a plan cut on the page kept its whole text in the cut's :title,
+  ;; which the model reads too (1.2k chars twice on two pages). A cut that names the form reading the
+  ;; whole holds no copy; with no form, the title is a person's way to the rest
+  (let [long (str/join " " (repeat 400 "word"))
+        with (ui/prose long 20 {:whole '(:plan (my.task/data))})
+        without (ui/prose long 20)
+        titles (fn [h] (keep #(when (map? %) (:title %)) (tree-seq coll? seq h)))]
+    (is (empty? (titles with)) (pr-str with))
+    (is (str/includes? (pr-str with) "(:plan (my.task/data))") "the cut names the form that reads the whole")
+    (is (= [long] (titles without)) "no form: the title holds the whole")
+    (is (not-any? nil? (tree-seq vector? seq with)) "and no empty child")))
+
 (deftest a-whole-tasks-page-holds-its-instructions
   ;; the task part drew the plan and dropped the task's own data, its instructions with it, so no
   ;; agent read how its kind is worked (reproduce first, fail! when already right, stop reading once

@@ -495,6 +495,23 @@
     (is (str/includes? task "What x does.") "the cited section's text, not only its address")
     (is (str/includes? task "docs/x.md#the-x") "under its heading and address")))
 
+(deftest a-cited-part-shows-its-source-beside-its-tests
+  ;; the second context audit (F1, F2): the cited part printed one map at one budget, so a long source
+  ;; crowded its tests out; and a var whose form was also another cited var's caller printed its source
+  ;; blank, with no cut (ctx holds an entity whole at its first path, {:db/id e} at the others). Its
+  ;; source and the rest are each a call of the printer under its own budget, the source read by id
+  (let [db (d/db-with (seeded 3) [{:db/id "f1" :form/id "app.x/f1-1" :form/src "(defn f1 [] (f0 1))" :form/refs #{'app.x/f0}}
+                                  {:var/name 'app.x/f1 :var/form "f1"}])
+        page (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (reset! seon.agent/state nil)))
+        part (fn [id] (some (fn [[i h]] (when (str/ends-with? i id) h)) page))
+        calls (fn [h] (filterv #(and (vector? %) (= #'seon.render/html (first %))) h))]
+    (is (= "(defn f1 [] (f0 1))" (:seon.print/code (nth (first (calls (part "app.x_2Ff1"))) 2)))
+        (str "the source of a form ctx holds at another path (f1's form is f0's caller): " (pr-str (part "app.x_2Ff1"))))
+    (is (= 2 (count (calls (part "app.x_2Ff0")))) "the source and the tests, each its own call")
+    (is (= "(defn f0 [x] x)" (:seon.print/code (nth (first (calls (part "app.x_2Ff0"))) 2))) "the source first")
+    (is (contains? (nth (second (calls (part "app.x_2Ff0"))) 2) :tests) "then the tests, under their own budget")
+    (is (not-any? #(= "ctx-keys" (first %)) page) "no part for keys the agent never added")))
+
 (deftest a-cited-vars-tests-are-shown-past-its-callers-window
   ;; build 3's self-review (D2): ctx holds a cited var's newest :seon.config.ctx/callers callers of any
   ;; kind, so its tests went off the page once newer callers outnumbered the window. The tests are
