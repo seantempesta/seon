@@ -26,6 +26,13 @@ Root merges the branch, never copying files over newer changes, and reads the me
 - Every stage's exit status decides the next: no pipe hides a failure (`setopt pipefail`, output to a log), and a check counts only if the build before it succeeded and the binary was built from the tree it proves (`bin/test` builds `target/seon` whenever anything runs).
 - Root rebuilds main as part of every merge, so a worktree made from main never reads config with a stale binary.
 
+## Main goes first
+
+A merge's verification is one command, `bin/prove --merge`, and every other heavy run waits for it.
+- **One command, one verdict.** It runs every test and `bin/check` step with no green at its digest, the ones that reach a process too (the plan's `:merge` mode, `test_runner/plan-of`: nothing is left out and none is named by hand), then `bin/check contracts` and `bin/check smoke`, each whatever the one before answered. It ends on `MERGE OK` or `MERGE FAILED` from those exit statuses alone, and appends its line to `notes/merge-log.md`: the sha, the plan's counts, each verdict, the reds, the src delta of HEAD against its first parent, and the keys left out against main's last merge line. So a merge line cannot say green over a red exit, and a step cannot go unrun unsaid.
+- **The lock.** It holds an exclusive `flock` on `target/main-verify.lock` in the main checkout (found from git's common dir by every worktree) for its whole run, the file naming it (pid, sha, checkout, start). Every other `bin/test`, `bin/check` and `bin/build` calls `main_first` (bin/env) as it starts: a blocking `flock`, released at once, so it waits only while main's verification runs, and says once on stderr whom it waits for. A run already going is not told; new runs wait. No poll and no clock: the kernel answers the wait when the holder's run ends, or its process dies, since the lock is the process's. The verification's own steps run under it (`SEON_MAIN_FIRST_HELD`) and do not wait.
+- How many heavy runs go at once is AGENTS' number (§2), not a gate here.
+
 ## A merge runs what the change reaches
 
 A merge runs what the change reaches, not every check. The merge's proof is `bin/prove` on the merged tree, then `bin/check smoke`; `bin/laws` (every law's sites) and `health` ([health](health.md)) run inside it as steps keyed by the whole tree. One rule selects for everyone: a key runs exactly when no green result is stored at its reach digest (```seon.proofs/plan```), in the one results directory every checkout shares (`:seon.config.source/test-results-dir`), so an unchanged tree runs nothing and a result proven in any checkout is reused in every other.
