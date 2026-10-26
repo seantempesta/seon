@@ -50,28 +50,34 @@
 ;; ---- derived members: computed from the db, kept while what they read is unchanged ---------
 
 (defn- story
-  "Run node n's stage story on db: its task's run sections (seon.context/run-state), nil with no task."
+  "Run node n's stage story on db: its task's run sections (seon.context/run-state); nil with no
+  task, or while the run is not running (its stage is not live: only a live run's is derived)."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:maybe :map]]}
-  [db n] (when-let [id (get-in n [:task :seon.task/id])] (context/run-state db (task/task db id))))
+  [db n] (when-let [id (and (= :running (:seon.run/status n)) (get-in n [:task :seon.task/id]))]
+           (context/run-state db (task/task db id))))
 
 (defn- related
-  "Run node n's related sections, functions and schema keys on db (seon.context/related), nil
-  when it answers none."
+  "Run node n's related sections, functions and schema keys on db (seon.context/related): nil
+  when it answers none, with no task, or while the run is not running."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:maybe :map]]}
-  [db n] (when-let [te (get-in n [:task :db/id])] (context/related db te)))
+  [db n] (when-let [te (and (= :running (:seon.run/status n)) (get-in n [:task :db/id]))] (context/related db te)))
 
 (def derived
-  "{entity-schema [[key f]]}: the members ctx derives for each entity of the schema, (f db node)
-  their value (no key when nil), as of the db ctx is of. They read the task and the tasks it
-  needs, the program, the wiki, the schemas and the vectors (`read-nss`), so a transaction touching
-  none of those keeps them as they were. Unqualified, as the units are: no attribute, so a swap!
-  writes none of them."
+  "{entity-schema [[key f]]}: the members ctx derives for an entity of the schema held as the
+  record's own or as one of its runs (where a patch keeps them), (f db node) their value (no key
+  when nil), as of the db ctx is of. A run's story and related are its while it is running (its
+  status as the branch holds it: a session's stages, not its evals, bound their cost). They
+  read the task and the tasks it needs, the program, the wiki, the schemas and the vectors
+  (`read-nss`), so a transaction touching none of those keeps them as they were. Not tracked: what
+  run-state reads beside the db (a cited file's text on disk, a namespace's meta in this
+  process): a file edited with no datom written leaves the story as it was. Unqualified, as the
+  units are: no attribute, so a swap! writes none of them."
   {:seon.run/run-fact [[:story story] [:related related]]})
 
 (def ^:private read-nss
   "The attribute namespaces a derived member reads: a task (its plan, proofs, :needs, config), the
-  program's forms, vars and namespaces, a wiki section, a schema, a vector; with a run's task
-  (:seon.run/task), what a datom must name to change one."
+  program's forms, vars and namespaces, a wiki section, a schema, a vector; with a run's task and
+  status (:seon.run/task, :seon.run/status), what a datom must name to change one."
   #{"seon.task" "seon.config.render" "var" "form" "ns" "seon.section" "schema" "seon.vector"})
 
 (defn- derive-into
@@ -123,7 +129,7 @@
                            [m ix])))
                        [m ix] (get units s))]
     ;; its derived members, once its units (its task) are there
-    [(if (contains? derived s) (first (derive-into db s m)) m) ix]))
+    [(if (and (contains? derived s) (or (empty? p) (and (= 2 (count p)) (= :runs (first p))))) (first (derive-into db s m)) m) ix]))
 
 (def ^:private environment-keys "The map's environment: the record's basis, never written." [:t :branch :commit])
 
@@ -268,7 +274,7 @@
   path of :changed. Work: a test per datom, then the members' own (as their computation costs)."
   {:malli/schema [:=> [:cat :map :seon.host/db [:sequential :any]] :map]}
   [c db datoms]
-  (if-not (some (fn [{:keys [a]}] (or (= a :seon.run/task) (contains? read-nss (namespace a)))) datoms)
+  (if-not (some (fn [{:keys [a]}] (or (#{:seon.run/task :seon.run/status} a) (contains? read-nss (namespace a)))) datoms)
     c
     (reduce (fn [c p]
               (let [s (schema-at c p) [m ch] (if (contains? derived s) (derive-into db s (get-in (:tree c) p)) [nil []])]

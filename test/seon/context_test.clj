@@ -4,7 +4,7 @@
   proof is not shown again, a merge task's plan stays its own."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.context :as context] [seon.print :as print]
-            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs] [seon.screen]
+            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs] [seon.screen] [seon.ctx :as ctx]
             [seon.print.select :as select] [clojure.string :as str] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model]))
 
 (defn- db-with-program []
@@ -967,23 +967,26 @@
     (is (nil? (context/related (ts/test-db) (pdb/eid db :seon.task/id "demo/r"))) "a plan with no vector shows none")))
 
 (deftest related-sections-follow-a-rewritten-plan
+  ;; related is a derived member of the agent's record for its running run (seon.ctx/derived): a
+  ;; patch derives it again when the plan's vector or a section's is written, and keeps it, the
+  ;; same object, while nothing it reads is
   (let [[db te dir] (sections-near "Make the page say one thing.")
-        held (context/related-at db te 1 nil)
-        _ (is (= "docs/vector.md#the-model" (first (:sections (:value held)))))
-        ;; the plan rewritten on the branch and embedded there (the branch's vector write is the
-        ;; mark), its vector now beside the last section's
-        db (d/db-with db [[:db/add te :seon.task/plan "Make the last section say it."]])
-        t (:tx (first (d/datoms db :eavt te :seon.task/plan)))
-        db (d/db-with db (vector/tx-data [te] [t] [(dir 1.0 0.5)] [10] "m"))
-        again (context/related-at db te 2 held)]
-    (is (not= (:key held) (:key again)) "a vector write is a new key")
-    (is (= "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval" (first (:sections (:value again)))) "and the sections follow it: the one nearest the new plan first")
-    (is (identical? again (context/related-at db te 2 again)) "nothing written since: what was made is reused")
-    (let [s (d/db-with db [{:seon.section/address "docs/vector.md#the-pyramid-b" :seon.section/heading "B" :seon.section/lead "New. More."}])
-          se (pdb/eid s :seon.section/address "docs/vector.md#the-pyramid-b")
-          s (d/db-with s (vector/tx-data [se] [1] [(dir 1.0 0.5)] [10] "m"))]
-      (is (some #{"docs/vector.md#the-pyramid-b"} (:sections (:value (context/related-at s te 3 again))))
-          "a section embedded on the branch with the plan unchanged is in the next answer: its write is the mark"))))
+        db (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/status :running :seon.run/agent [:seon.agent/key "demo/a1"]}])
+        rel (fn [c] (get-in (:tree c) [:runs "demo/r#1" :related]))
+        step (fn [[c db] tx] (let [rep (d/with db tx)] [(ctx/patch c (:db-after rep) (:tx-data rep) :b) (:db-after rep)]))
+        s0 [(ctx/build db (pdb/eid db :seon.agent/key "demo/a1") :b) db]
+        _ (is (= "docs/vector.md#the-model" (first (:sections (rel (first s0))))))
+        ;; the plan rewritten on the branch and embedded there, its vector now beside the last section's
+        s1 (step s0 [[:db/add te :seon.task/plan "Make the last section say it."]])
+        t (:tx (first (d/datoms (second s1) :eavt te :seon.task/plan)))
+        s2 (step s1 (vector/tx-data [te] [t] [(dir 1.0 0.5)] [10] "m"))]
+    (is (= "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval" (first (:sections (rel (first s2))))) "the sections follow it: the one nearest the new plan first")
+    (is (identical? (rel (first s2)) (rel (first (step s2 [{:seon.turn/id "demo/r#1/0" :seon.turn/run [:seon.run/id "demo/r#1"] :seon.turn/n 0}]))))
+        "nothing it reads written since: the same object")
+    (let [s (step s2 [{:seon.section/address "docs/vector.md#the-pyramid-b" :seon.section/heading "B" :seon.section/lead "New. More."}])
+          se (pdb/eid (second s) :seon.section/address "docs/vector.md#the-pyramid-b")]
+      (is (some #{"docs/vector.md#the-pyramid-b"} (:sections (rel (first (step s (vector/tx-data [se] [1] [(dir 1.0 0.5)] [10] "m"))))))
+          "a section embedded on the branch with the plan unchanged is in the next answer"))))
 
 (deftest related-fuses-the-plans-references-with-meaning
   ;; seon.context/related's graph half: the plan cites `demo/h`, so its caller demo/k (no vector:
