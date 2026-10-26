@@ -249,13 +249,14 @@
             kids (volatile! [])
             id (key-id k)
             reads (volatile! nil)
-            draw #(let [hc (try (if db?
-                                  (let [[hc rs] (d/with-reads (fn [] (let [x (apply f o args)] (if (seq? x) (doall x) x))))] (vreset! reads rs) hc)
-                                  (apply f o args))
-                                (catch Throwable e
-                                  [:div {:class "err"} (html {} (contract/error :seon.render/component-defect #'render!
-                                                                                (str (symbol f) " threw: " (or (ex-message e) (str e))) {:seon.error/in (symbol f)}))]))]
-                    (with-id (emit w hc (assoc env :children kids)) id))
+            ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and
+            ;; throws) only when it is drawn, and a db render's reads are all of what it drew
+            one #(try (with-id (emit w (apply f o args) (assoc env :children kids)) id)
+                      (catch Throwable e
+                        (with-id [:div {:class "err"} (html {} (contract/error :seon.render/component-defect #'render!
+                                                                               (str (symbol f) " threw: " (or (ex-message e) (str e))) {:seon.error/in (symbol f)}))]
+                                 id)))
+            draw #(if db? (let [[out rs] (d/with-reads one)] (vreset! reads rs) out) (one))
             a0 (profile/alloc-bytes)
             [out rx] (if-let [rx (:rx prev)]
                        (do (ratom/-set! rx :f draw) [(ratom/-run rx false) rx])
@@ -266,7 +267,8 @@
         (vswap! (:queue w) disj k)
         (doseq [c (:children prev) :when (not (some #{c} children))] (unmount! w c))
         (led! w f (if same? :same :miss) nil bytes)
-        (vswap! (:cache w) assoc k {:f f :opts opts :args args :rx rx :out (if same? (:out prev) out) :children children
+        ;; merged: its written html (page-units) stays while its revision does
+        (vswap! (:cache w) update k merge {:f f :opts opts :args args :rx rx :out (if same? (:out prev) out) :children children
                                     :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0)))
                                     :reads (some-> @reads seq d/reads-index)})
         ;; the components that read the db: the ones a transaction's datoms are matched against
@@ -353,7 +355,12 @@
                             x)
                           (:out root))
     (vec (for [[sel k] @found :let [c (get @(:cache w) k)]]
-           {:id (:id c) :container sel :rev (tree-rev w k) :html (h/html (resolved w k))}))))
+           (let [r (tree-rev w k)
+                 ;; its html written once a revision (a page of 15 units re-written each frame cost
+                 ;; 2.2M ticks for a change that drew nothing): kept on its cache entry, by its revision
+                 html (if (= r (:unit-rev c)) (:unit-html c)
+                          (let [h (h/html (resolved w k))] (vswap! (:cache w) update k assoc :unit-rev r :unit-html h) h))]
+             {:id (:id c) :container sel :rev r :html html})))))
 
 (defn page-hiccup
   "Walk w's components placed in the root's list with element id sel (\"#p-task\"), in order, as
