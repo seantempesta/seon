@@ -44,21 +44,9 @@ Approximations:
 - Clock reads match `System/currentTimeMillis`, `System/nanoTime`, `Thread/sleep` and calls to `timeout`.
 - The repeats for whole2 were never recorded, so they show as `:not-measured` and score 0.
 
-## Merges, ranked (excerpt; the full table is the script's output)
+## Merges, ranked
 
-| rank | merge | score | net src | new/changed/gone defs | survive | judged |
-|---|---|---|---|---|---|---|
-| 1 | 9c47ace0b8 view-parts | 110 | −65 | 13/22/17 | 1.00 | **low** |
-| 2 | 830ef818e8 model-reads-the-page 4.2 | 108 | −107 | 15/68/20 | 0.80 | high |
-| 3 | 6929ca4e93 ctx-atom (no derived data) | 81 | −53 | 6/18/6 | 0.67 | high |
-| 4 | f1ef540137 agent-loop slice 6' | 77 | +157 | 10/17/0 | 1.00 | |
-| 5 | b0df4826e2 an-asker-records-its-effects-error-once | 73 | +51 | 1/13/0 | 1.00 | |
-| … | | | | | | |
-| 34 | 330ab1b3f0 ctx-atom 4.1 derived members | 21 | +44 | 4/10/2 | **0.00** | low |
-| 35 | d2eab023ef a-watcher-is-ready-when-registered | 5 | 0 | 0/0/0 | – | |
-| 36 | b482fcdd35 cost-bounds-lab (notes only) | 0 | 0 | | | |
-| 37 | f564b314c4 template-plan-text (task file only) | 0 | 0 | | | |
-| 38 | 98c6b97c0c delete-stages | −35 | −39 | 0/3/1 | – | low (reverted) |
+The full table of all 38 is the script's output. Top five: view-parts 9c47ace0b8 (110), model-reads-the-page 830ef818e8 (108), ctx-atom 6929ca4e93 (81), agent-loop f1ef540137 (77), an-asker-records-its-effects-error-once b0df4826e2 (73). Bottom five: delete-stages 98c6b97c0c (−35, reverted), template-plan-text f564b314c4 (0, task file only), cost-bounds-lab b482fcdd35 (0, notes only), a-watcher-is-ready-when-registered d2eab023ef (5, no verdict recorded yet), ctx-atom 4.1 330ab1b3f0 (21, survival 0.00).
 
 ## Agreement with the known judgments
 
