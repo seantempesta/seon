@@ -54,16 +54,20 @@
                 ;; after: its hello (a ping of :agents until idle was a poll)
                 (eval-root "(def ready-ev (c/events sys))")
                 ;; an attach answers its agent ({:agent :task :run}); one that made none (refused:
-                ;; its fork server lost) is the answer, never a wait for a hello that cannot come
+                ;; its fork server lost) ends the test with that answer once the root is stopped,
+                ;; never a wait for a hello that cannot come, nor an answer a caller could read as
+                ;; an agent's
                 (let [attach (ask {:op :attach :task "demo/t"})]
                   (if-not (:agent attach)
-                    [attach]
+                    {::attach-made-no-agent attach}
                     (do (eval-root "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (= :ready (:type e)) (= :a1 (:agent e))) :ready (recur))))")
                         (mapv #(ask (if (map? %) % {:op :eval :agent "a1" :code %})) forms)))))
               [{:error :root-did-not-listen :log (let [f (java.io.File. (str path "-runs/root.log"))] (if (.exists f) (slurp f) ""))}])]
     (ts/stop-root! root)
     (ts/drop-main! store main)
     (sh/sh "rm" "-rf" (str path "-runs") (str path "-tasks"))
+    (when-let [a (and (map? out) (::attach-made-no-agent out))]
+      (throw (ex-info (str "in-agent: the attach made no agent: " (pr-str a)) {:attach a})))
     (mapv #(if (contains? % :response) (let [r (:response %)] (assoc r :value (value-of r))) %) out))))
 
 (defn- root-ended
