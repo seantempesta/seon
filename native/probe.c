@@ -38,13 +38,6 @@ long e13_sysmem(long *out3) {
     if (sysctlbyname("vm.compressor_bytes_used", &w, &lw, NULL, 0)) out3[2] = -1; else out3[2] = (long)w; }
   return 0;
 }
-// poll one fd for input with a timeout (ms): 1 readable/hup, 0 timeout, -1 error.
-long e13_poll1(int fd, int ms) {
-  struct pollfd p = { fd, POLLIN, 0 };
-  int r = poll(&p, 1, ms);
-  return r;
-}
-
 // The fork server's one wait (seon.fork-server/main): its socket readable, or a child it
 // watches exited, whichever comes first, with no timeout. kq is a kqueue (e13_kq_new); a child
 // is watched by e13_kq_watch (EVFILT_PROC, NOTE_EXIT, one-shot). Answers 0 when fd is readable
