@@ -480,13 +480,18 @@
   ;; each cited section's text (D1-D3), and the page drew neither: the cited part showed the callers
   ;; alphabetically with no result, and a section only as an address. Each is drawn from ctx
   (let [db (d/db-with (seeded 3) [{:seon.proof/latest "app.x-test/t0" :seon.proof/status :fail :seon.proof/run "r"
-                                   :seon.proof/branch "main" :seon.proof/t 1}])
+                                   :seon.proof/branch "main" :seon.proof/t 1}
+                                  ;; a second test, with no result on main, and a caller that is no test
+                                  {:db/id "t1" :form/id "app.x-test/t1-1" :form/src "(deftest t1 (is (= 2 (f0 2))))" :form/refs #{'app.x/f0}}
+                                  {:var/name 'app.x-test/t1 :var/kind :test :var/form "t1"}
+                                  {:db/id "g" :form/id "app.x/g-1" :form/src "(defn g [] (f0 2))" :form/refs #{'app.x/f0}}
+                                  {:var/name 'app.x/g :var/form "g"}])
         page (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (reset! seon.agent/state nil)))
         part (fn [prefix] (some (fn [[id h]] (when (str/starts-with? id prefix) h)) page))
         cited (part "cited-")
         task (pr-str (part "task-data-"))]
-    (is (some #(= {'app.x-test/t0 :fail} (:tests %)) (tree-seq coll? seq cited))
-        (str "the cited var's test with its last result on main: " (pr-str cited)))
+    (is (some #(and (= {'app.x-test/t0 :fail 'app.x-test/t1 :none} (:tests %)) (= ['app.x/g] (:callers %))) (tree-seq coll? seq cited))
+        (str "the cited var's tests with their last results on main (none for one main never ran), then its other callers: " (pr-str cited)))
     (is (str/includes? task "What x does.") "the cited section's text, not only its address")
     (is (str/includes? task "docs/x.md#the-x") "under its heading and address")))
 

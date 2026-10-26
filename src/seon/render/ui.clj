@@ -938,13 +938,15 @@
 (defn cited-of
   "Var v as the newest run's task holds it in ctx c (its :cited, seon.ctx's pattern: its form and
   its newest callers): its source; its tests, the callers that are tests, each with its last result
-  on main (its :seon.proof/latest's status; :none when main holds none); then the other callers.
-  nil when the task cites no v. What the cited component draws, and the form its cut names."
+  on main as db holds it (its :seon.proof/latest's status, which only main's runs write, so a branch
+  holds main's as of its base; :none when there is none); then the other callers, v itself left
+  out. nil when the task cites no v. What the cited component draws, and the form its cut names."
   {:malli/schema [:=> [:cat :seon.host/db :map :qualified-symbol] [:maybe :map]]}
   [db c v]
   (when-let [cv (some #(when (= v (:var/name %)) %) (vals (get-in (second (the-run c)) [:task :cited])))]
     (let [;; each caller form's var: the var whose :var/form it is (a ref, in :avet)
-          vars (for [f (vals (:callers cv)) dt (d/datoms db :avet :var/form (:db/id f))] (d/pull db [:var/name :var/kind] (:e dt)))
+          vars (for [f (vals (:callers cv)) dt (d/datoms db :avet :var/form (:db/id f))
+                     :let [m (d/pull db [:var/name :var/kind] (:e dt))] :when (not= v (:var/name m))] m)
           {tests true others false} (group-by #(= :test (:var/kind %)) vars)
           status (fn [s] (or (:seon.proof/status (d/pull db [:seon.proof/status] [:seon.proof/latest (str s)])) :none))]
       (cond-> {:source (print/code (str (get-in cv [:form :form/src])))}
