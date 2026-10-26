@@ -1032,6 +1032,25 @@
     ;; an action started is work: the quiet spell ends (and a wait waits for it)
     (apply quiet (reduce (fn [[st outs] act] (let [[st o] (start (assoc st :quiet false) act)] [st (into outs o)])) [st []] acts))))
 
+(defn- behind?
+  "Whether answer m is to a write on main that main's commits have not reached yet: the writer
+  answers a write ({:ok true :t}) before its commit reaches this proc on :main, another in, so a
+  step taking the answer would read a db older than its own write."
+  {:malli/schema [:=> [:cat :map :map] :boolean]}
+  [st m] (let [{:keys [ok t]} (:r m)] (boolean (and ok (int? t) (< (:t st -1) t)))))
+
+(defn- take-answer
+  "[st requests] with answer m taken by the flight step that asked it (advance), and the next
+  pass when that ended its flight."
+  {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
+  [st m]
+  (let [st (cond-> st (= (:tag m) (:report st)) (dissoc :report))
+        [st [aid step]] (step/answered st (:tag m))
+        [st outs] (if aid (advance st aid step (:r m)) [st []])
+        ;; a flight that ended may free its run for the next action
+        [st more] (if (and aid (not (get-in st [:flights aid])) (:db st)) (pass st) [st []])]
+    [st (into outs more)]))
+
 (defn reconciler-proc
   "The reconciler. In :main (main's commits {:t :ops :db}, a sliding buffer of one) and :answers (the
   api's answers to its requests). Out :to-api (its requests, as {:op :request ...}).
@@ -1044,7 +1063,7 @@
        :workload :io
        :ping-map-fn (fn [st] {:seen (:seen st 0) :lists (:lists st 0) :t (:t st) :flights (count (:flights st)) :pending (count (:pending st))
                               :quiet (boolean (:quiet st)) :root-causes (count (:root-causes (:quiescent st)))})})
-  ([args] (assoc (dissoc args :judge) :seen 0 :rid 0 :flights {} :pending {} :waits []
+  ([args] (assoc (dissoc args :judge) :seen 0 :rid 0 :flights {} :pending {} :waits [] :behind []
                  ::flow/in-ports {:judge (:judge args)}))
   ;; a stop answers every wait still held: root stopped, nothing will answer it
   ([st transition]
@@ -1069,7 +1088,11 @@
                  st (assoc st :db db :t t :idx idx :seen (inc (:seen st)) :lists (cond-> (:lists st 0) (not= t (inc (:t st -2))) inc)
                            :quiet (boolean (and (:quiet st) (not work?)))
                            :refused (if (and work? (not only-refused?)) #{} (:refused st #{})))
-                 [st outs] (pass st)]
+                 [st outs] (pass st)
+                 ;; the answers this commit's t reaches, held for it, taken in the order they came
+                 [st outs] (reduce (fn [[st outs] a] (let [[st more] (take-answer st a)] [st (into outs more)]))
+                                   [(update st :behind (fn [as] (filterv #(behind? st %) as))) outs]
+                                   (remove #(behind? st %) (:behind st)))]
              [(answer-waits st) {:to-api (into [{:op :stat :k :main-seen-us :v (/ (- (profile/now-ns) (:ns m)) 1000.0)}] outs)}])
      ;; a wait on main (:op :quiet): answered now if the reconciler is quiet past its :after,
      ;; else held. Otherwise an outside agent handed its run back: judged as a turn loop's end is
@@ -1080,9 +1103,8 @@
                   st (-> st (assoc-in [:flights run] {:act {:op :spawn :run run :task task :env env} :agent agent}) (assoc :quiet false))
                   [st o] (request st run :tested {:op :judge :id agent})]
               [st {:to-api [o]}]))
-     :answers (let [st (cond-> st (= (:tag m) (:report st)) (dissoc :report))
-                    [st [aid step]] (step/answered st (:tag m))
-                    [st outs] (if aid (advance st aid step (:r m)) [st []])
-                    ;; a flight that ended may free its run for the next action
-                    [st more] (if (and aid (not (get-in st [:flights aid])) (:db st)) (pass st) [st []])]
-                [(answer-waits st) {:to-api (into outs more)}]))))
+     ;; an answer to a write main has not reached waits for main's commit of it (taken by :main)
+     :answers (if (behind? st m)
+                [(update st :behind conj m) {}]
+                (let [[st outs] (take-answer st m)]
+                  [(answer-waits st) {:to-api outs}])))))
