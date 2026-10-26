@@ -190,8 +190,9 @@
       (is (= (str runs "/tasks") (ask "(seon.config/value :seon.config.root/tasks-dir)")) "its task dir is under its runs, not the checkout's")
       ;; a fresh root's boot loads its task dir (my.root/watch!: a fresh store, or a task file changed
       ;; while root was down, has nothing else to load it): demo/t and the root task the first load
-      ;; writes (with main's start-root!, the checkout's), none of the checkout's. It held none: a
-      ;; root loaded task files only on a watcher event, so a fresh store (an erased one too) had no task
+      ;; writes, none of the checkout's. It held none before: a root loaded task files only on a
+      ;; watcher event, and this assertion was red (0 tasks), so no event for demo.edn's write
+      ;; loaded it; the count is the boot's load
       (is (= 2 (ask "(count (seon.task/tasks @(:conn sys)))")) "its own task file and root's task, loaded at boot")
       ;; the read's outcome is root's :seon.root/tasks, the subject a refused read names; an unchanged good read writes nothing
       (is (= [{:files 1} {:ok true :changed 0 :files 1}]

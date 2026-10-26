@@ -260,7 +260,8 @@
   boot's to load, as it always was: the wiki (seon.root/wiki-tx) and the source
   (seon.root/import-source!), and here the task files, once the watcher is ready (a fresh or
   erased store holds none, and a file changed while root was down is read; an unchanged read
-  writes nothing), so a change after that read is a batch's. Then each batch loads what it makes root load (watch-loads),
+  writes nothing). The boot's load and the batches' run one at a time, so a change after ready
+  is read by the boot's load, a batch's, or both, in order. Then each batch loads what it makes root load (watch-loads),
   and a batch that loads, its paths and any rescan are counted in root's :seon.root/watch fact. A
   watcher that cannot start or dies is a :platform error on main (seon.root/platform-tx), and
   root goes on unwatched: nothing falls back to a poll. Answers the watcher, or the error."
@@ -275,12 +276,16 @@
         held #(or (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) fresh)
         died (fn [e] @(root/transact-main! sys (watch-died-tx @(:conn sys) (held) e (System/currentTimeMillis))))
         ;; a loader's typed error (a refused task file) is a recorded :platform error; the problems
-        ;; the load made true are shown by health
+        ;; the load made true are shown by health. One load at a time: a load writes what it read
+        ;; against the db it read, so the boot's and a first batch's must not interleave (a stale
+        ;; one landing after a newer one would undo it, and its event is spent)
+        one (Object.)
         load! (fn [ks]
-                (let [r (load-kinds! sys ks)]
-                  (doseq [e (load-errors (:loaded r))]
-                    @(root/transact-main! sys (load-error-tx @(:conn sys) e (System/currentTimeMillis))))
-                  r))
+                (locking one
+                  (let [r (load-kinds! sys ks)]
+                    (doseq [e (load-errors (:loaded r))]
+                      @(root/transact-main! sys (load-error-tx @(:conn sys) e (System/currentTimeMillis))))
+                    r)))
         w (watch/start! roots
                         (fn [batch]
                           (let [why (watch-loads co refs own batch)
