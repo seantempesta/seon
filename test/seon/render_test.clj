@@ -1126,6 +1126,12 @@
     (is (= {'demo/f-test {:status :fail :failure {:assert '(= 4 (f 2)) :got 5}}} (:value (second parts)))
         "each proof's status as the newest turn observed it, with its first failure")
     (is (= ["demo/f-test is red"] (:value (nth parts 2))))
+    (let [task (first parts)]
+      (is (contains? (:value task) :to-prove) "the model reads the stage's story (the run's derived :story)")
+      (is (= "demo/f" (:seon.task/id (:page task))) "the page draws the task itself")
+      (is (str/includes? (h/html (:html (r/part-faces task))) "demo/f") "by its own render")
+      (is (str/includes? (:text (r/part-faces task)) ":to-prove") "while the model's text is the story's"))
+    (is (not-any? #(= [:related] %) ks) "no related part when the run has none")
     (is (= 2 (:turns-taken (:value (nth parts 3)))))
     (is (= [[:message "m-1"] [:eval "e1"] [:eval "e2"] [:turn "demo/f#1/0"] [:eval "e3"] [:turn "demo/f#1/1"]] (filterv #(#{:eval :turn :message} (first %)) ks))
         "the conversation in the order it was written: each member's first transaction")
@@ -1204,3 +1210,15 @@
       (let [gone (seon.contract/error :seon.root/no-agent 'seon.root/request "no live agent :a3" {})
             st2 (#'p/answered st1 (volatile! {}) [:parts :a3] gone)]
         (is (str/includes? (p/page-html st2 :a3) "its process did not answer (no live agent :a3)"))))))
+
+(deftest an-agents-run-tile-is-mains
+  ;; root, 2026-10-26: an agent's run is root's chrome, read on main as the sidebar is. Main writes
+  ;; a run's status and end after the agent's branch forked, so the branch's copy never has them; a
+  ;; fresh agent's run tile read "#1––––––"
+  (let [[main branch _] (paged-dbs)
+        main (d/db-with main [{:seon.run/id "demo/f#1" :seon.run/status :closed :seon.run/outcome :done}])
+        [st _] (#'p/pass-view (assoc (proc-state main branch) :view {:agents {}}) :a3)
+        tile (get-in st [:views :a3 :units "q-run" :html])]
+    (is (str/includes? (str tile) "closed") (str "the status main holds: " tile))
+    (is (str/includes? (str tile) "done") "and how it ended")
+    (is (not= :closed (:seon.run/status (d/pull branch [:seon.run/status] [:seon.run/id "demo/f#1"]))) "which the branch's copy does not hold")))
