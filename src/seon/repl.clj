@@ -271,24 +271,19 @@
 
 (defn- instrument
   "Instrument a definition by its contract (G1's proto.agent/admit!, Seon's rule): a function var
-  with :malli/schema is armed and leaves the agent's uncontracted set; one without joins
-  it, and the response carries the warning naming every uncontracted definition so far.
-  Answers the response's additions (its reply item's keys)."
-  {:malli/schema [:=> [:cat :seon.host/var] [:maybe :seon.wire/msg]]}
+  with :malli/schema is armed and leaves the agent's uncontracted set; one without joins it.
+  Answers what happened to it, {:var :armed true} (with :error when its contract could not be
+  armed) or {:var :uncontracted set}, the agent's uncontracted definitions after it; nil for a
+  var that is no function. response turns them into the eval's warnings."
+  {:malli/schema [:=> [:cat :seon.host/var] [:maybe :map]]}
   [v]
   (when (contract/function-var? v)
     (let [sym (symbol v)]
       (if (contract/contract v)
         (let [r (contract/arm! v)]
           (swap! agent/state update :uncontracted (fnil disj #{}) sym)
-          (if (contract/error? r)
-            {:contract :invalid :contract-error r}
-            {:contract r}))
-        (let [u (:uncontracted (swap! agent/state update :uncontracted (fnil conj #{}) sym))]
-          {:warnings [{:seon.repl/finding :uncontracted-definition
-                                     :seon.repl/fix (str "Declare a contract: (defn " (name sym) " {:malli/schema [:=> [:cat ...] ...]} [...] ...). "
-                                                         "A branch carrying an uncontracted function is refused at merge.")
-                                     :uncontracted (vec (sort-by str u)) :count (count u)}]})))))
+          (cond-> {:var sym :armed true} (contract/error? r) (assoc :error r)))
+        {:var sym :uncontracted (:uncontracted (swap! agent/state update :uncontracted (fnil conj #{}) sym))}))))
 
 (defn wrap-instrument
   "Each var a form defined (wrap-record's :repl/defined) is instrumented by its contract
@@ -300,7 +295,7 @@
          (fn [m]
            ;; arming compiles the contract: against the branch's population, as its eval did
            (binding [mr/*registry* (if (seq (:repl/defined m)) (branch-registry) {})]
-             (reduce (fn [m s] (if-let [v (find-var s)] (merge m (instrument v)) m)) m (:repl/defined m))))))))
+             (reduce (fn [m s] (if-let [i (some-> (find-var s) instrument)] (update m :instrumented (fnil conj []) i) m)) m (:repl/defined m))))))))
 
 (def middleware
   "Outermost first. Answers pass innermost first: record, cost, instrument, caught. The
@@ -334,7 +329,10 @@
   answered: the values before an error stay), the last form's value (:value, as *1 holds it),
   what its forms wrote to *out* and *err*, the error that stopped it (:ex, the one error map),
   what its forms changed of an existing var's contract or docstring (:redefined, wrap-record's,
-  seon.program/meaning-changes), and its cost summed over its forms (ms, ticks, bytes allocated);
+  seon.program/meaning-changes), what its definitions warn (:warnings, from instrument's account
+  of each var it defined, in order: the agent's uncontracted definitions as they stand at the
+  eval's end when it defined one, with the fix; each contract that could not be armed, by its var),
+  and its cost summed over its forms (ms, ticks, bytes allocated);
   each key only when present (DECISIONS Dogfood rulings; a change to a schema
   is an explicit fact the eval shows)."
   {:malli/schema [:=> [:cat [:sequential :seon.wire/msg] :qualified-symbol] :seon.eval/response]}
@@ -343,11 +341,22 @@
         lst (peek fs)
         vs (into [] (comp (filter #(contains? % :repl/value)) (map :repl/value)) fs)
         joined (fn [k] (not-empty (apply str (keep k fs))))
-        sum (fn [k] (when (some k fs) (reduce + (keep k fs))))]
+        sum (fn [k] (when (some k fs) (reduce + (keep k fs))))
+        is (into [] (mapcat :instrumented) fs)
+        ;; the uncontracted set as the eval left it: each uncontracted var's account holds the set
+        ;; after it, and a var armed later in the eval leaves it
+        left (reduce (fn [u i] (if (:uncontracted i) (:uncontracted i) (disj (or u #{}) (:var i)))) nil is)
+        warnings (cond-> (vec (for [i is :when (:error i)] {:seon.repl/finding :invalid-contract :var (:var i) :error (:error i)}))
+                   (and (some :uncontracted is) (seq left))
+                   (conj {:seon.repl/finding :uncontracted-definition
+                          :seon.repl/fix (str "Declare a contract on each: (defn f {:malli/schema [:=> [:cat ...] ...]} [...] ...). "
+                                              "A branch carrying an uncontracted function is refused at merge.")
+                          :uncontracted (vec (sort-by str left)) :count (count left)}))]
     (cond-> {:handle handle}
       (contains? lst :repl/value) (assoc :value (:repl/value lst))
       (and (> (count fs) 1) (seq vs)) (assoc :values vs)
       (some :redefined fs) (assoc :redefined (into [] (mapcat :redefined) fs))
+      (seq warnings) (assoc :warnings warnings)
       (joined :out) (assoc :out (joined :out))
       (joined :err-out) (assoc :err (joined :err-out))
       (= :err (:tag lst)) (assoc :ex (or (:err lst) {:seon.error/message (str (:err-text lst))}))

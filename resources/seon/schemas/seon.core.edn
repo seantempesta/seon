@@ -72,7 +72,9 @@
                       [:handle :qualified-symbol] [:value {:optional true} :any] [:values {:optional true} [:vector :any]]
                       ;; each existing var whose contract or docstring this eval changed, its before and
                       ;; after and the wiki sections citing it (seon.program/meaning-changes); absent when none
-                      [:redefined {:optional true} [:vector :seon.program/meaning-change]] [:out {:optional true} :string]
+                      [:redefined {:optional true} [:vector :seon.program/meaning-change]]
+                      ;; what its definitions warn (seon.repl/instrument): an uncontracted definition, a contract not armed
+                      [:warnings {:optional true} [:vector [:map [:seon.repl/finding :keyword]]]] [:out {:optional true} :string]
                       [:err {:optional true} :string] [:ex {:optional true} :map]
                       [:ms {:optional true} number?] [:ticks {:optional true} :int] [:bytes {:optional true} :int]
                       [:text {:optional true} :string] [:record {:optional true} :string]
