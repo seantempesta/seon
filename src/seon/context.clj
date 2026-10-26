@@ -332,9 +332,10 @@
   callers), or none when v resolves to nothing."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:sequential pos-int?]]}
   [db v]
-  (when-let [e (pdb/eid db :var/name v)]
+  (if-let [e (pdb/eid db :var/name v)]
     (cons e (concat (some-> (d/entity db e) :var/form :db/id vector)
-                    (map :e (d/datoms db :avet :form/refs v)) (map :e (d/datoms db :avet :form/quoted v))))))
+                    (map :e (d/datoms db :avet :form/refs v)) (map :e (d/datoms db :avet :form/quoted v))))
+    ()))
 
 (defn cites
   "The vars task m's plan cites beside its proofs, in the plan's order, each once: each is its own

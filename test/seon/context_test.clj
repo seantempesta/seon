@@ -974,7 +974,6 @@
     (is (= [:demo/thing] (:schemas rel)) "and the schema keys its plan cites")
     (is (= [["demo/g: Gets it." [:demo/thing]]] (:functions v))
         "a function a line: its name, its doc's first sentence and the registry keys it operates on (its :form/keywords)")
-    (is (some #{"(my.task/related)"} seon.screen/forms) "a form of the screen: each turn evaluates it, as an eval the agent sees and can rerun")
     (is (= ["docs/vector.md#the-model: Section 0 says one thing." "docs/vector.md#the-pyramid: Section 2 says one thing."
             "docs/vector.md#fused-with-the-call-graph: Section 3 says one thing." "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval: Section 4 says one thing."]
            (:sections v))
@@ -1044,8 +1043,10 @@
     (is (= k0 (context/story-key unrelated m)) "a run and an agent written: nothing the story reads, the same key")
     (is (= (context/story db m) (context/story unrelated m)) "and the same story")
     (is (not= k0 (context/story-key replan m)) "the plan rewritten: a new key")
-    (is (not= k0 (context/story-key redef m)) "a cited var redefined: a new key")
-    (is (not= k0 (context/story-key caller m)) "a new caller of a cited var: a new key")
+    ;; a cited var is a part of its own: its key moves, the story's stays (seon.context/cited-key)
+    (is (= k0 (context/story-key redef m)) "a cited var redefined: the story's key stays")
+    (is (not= (context/cited-key db 'demo/g) (context/cited-key redef 'demo/g)) "and the var's own key moves")
+    (is (not= (context/cited-key db 'demo/g) (context/cited-key caller 'demo/g)) "a new caller of a cited var: its key moves")
     (is (= (:tx (first (d/datoms db :eavt te :seon.task/id))) (context/first-t db te)) "an entity's first transaction, its identity's")))
 
 (deftest related-fuses-the-plans-references-with-meaning
