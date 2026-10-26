@@ -88,10 +88,7 @@
                         ;; spell's report until its write is answered
                         [:waits {:optional true} [:vector [:map [:after :int] [:p :seon.host/promise]]]] [:report {:optional true} :int]
                         ;; tasks root refused to spawn, waiting for main to move for another reason
-                        [:refused {:optional true} [:set :seon.task/id]]
-                        ;; answers to writes on main that main's commits have not reached yet (seon.reconcile/behind?),
-                        ;; in the order they came, each taken when :main brings its t
-                        [:behind {:optional true} [:vector [:map [:tag :int] [:r :map]]]]]
+                        [:refused {:optional true} [:set :seon.task/id]]]
  ;; the incremental reconciler's index of main (session R3's seon.reconcile/index): desired and
  ;; observed state by id, the derived needs, depths and claims, and the sets the actions read.
  ;; Its parts agree with each other (every id in a set is a run it holds), which a
