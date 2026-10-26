@@ -99,9 +99,9 @@
                           "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= :a2 (:agent e))) :began (recur)))))"))
         agents (eval-root "(into {} (for [[id a] (:agents (c/state sys))] [id (:pid a)]))")
         pids (set (vals agents))
-        [_ r] (str/split (str/trim (slurp (str runs "/root.pids"))) #" ")
         children (fn [pid] (->> (str/split-lines (:out (sh/sh "pgrep" "-P" (str pid)))) (remove str/blank?) (map parse-long)))
-        fs (first (children r))]
+        ;; the fork server root names, never the first child pgrep lists (pid order wraps)
+        fs (eval-root "(get-in (c/state sys) [:fork-server :pid])")]
     (when fork-server-first?
       (doseq [k (children fs) :when (not (pids k))] (sh/sh "kill" "-9" (str k)))
       (sh/sh "kill" "-9" (str fs)))
@@ -130,9 +130,12 @@
         eval-root (fn [code] (let [r (ts/ask root {:op :eval :agent "root" :code code})]
                                (if (:error r) r (value-of (:response r)))))
         _ (eval-root "(def lost-ev (c/events sys))")
-        [_ r] (str/split (str/trim (slurp (str runs "/root.pids"))) #" ")
         children (fn [pid] (->> (str/split-lines (:out (sh/sh "pgrep" "-P" (str pid)))) (remove str/blank?) (map parse-long)))
-        fs (first (children r))
+        ;; the fork server is the one root names: root has other children (its file watcher), and
+        ;; pgrep's order is pid order, which wraps (the first child pgrep listed was the watcher,
+        ;; killed in its place, and the test waited for a loss that never came)
+        fs (eval-root "(get-in (c/state sys) [:fork-server :pid])")
+        ;; its standby is its child
         _ (doseq [k (children fs)] (sh/sh "kill" "-9" (str k)))
         _ (sh/sh "kill" "-9" (str fs))
         lost (eval-root "(loop [] (let [e (clojure.core.async/<!! lost-ev)] (if (= :fork-server-lost (:type e)) :lost (recur))))")
