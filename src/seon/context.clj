@@ -238,17 +238,6 @@
                    [kind (into [] (comp (remove (cited kind)) (remove nil?) (filter (if (= kind :functions) function? any?)) (take k))
                                (vector/rrf [(graph kind) (meaning kind)]))]))))))
 
-(defn related-at
-  "`related` for task entity te on db, as {:key :value}: held (an earlier answer) reused when its
-  :key is the same: te, the count shown and mark, a value that changes whenever the vectors
-  `related` reads do (an agent's: the transaction of its branch's last vector write, nil before
-  one; every text it reads, the plan, the plans along :needs and the sections, is embedded by
-  that write when it changes). So an unchanged plan computes nothing."
-  {:malli/schema [:=> [:cat :seon.host/db :int :any [:maybe :map]] [:map [:key :any] [:value [:maybe :map]]]]}
-  [db te mark held]
-  (let [k [te (related-count db te) mark]]
-    (if (= k (:key held)) held {:key k :value (related db te)})))
-
 (defn related-view
   "What `related` answers, each a line at summary depth: a section its address and its lead's
   first sentence (seon.docs/view; its heading when it has no lead), a function its name and its
@@ -305,13 +294,11 @@
                           (cond-> (vec there)
                             gone (conj {:unresolved (mapv :symbol gone) :problem (:unresolved ref/problem-messages)})))
              ;; (the turn sections' :proofs are each turn's statuses; these are how to run them)
-             ;; plain data, as the run's story fact keeps it (:seon.run/story); entered in name
-             ;; order, which an array map keeps for its first 8 (a hash map past them)
-             :to-prove (into {} (sort-by (comp str first)
-                                         (for [p proofs]
-                                           [p (if (docs/source-of db p)
-                                                (list 'my.agent/prove #{p})
-                                                (str "not written yet; it should assert what the plan says: " (not-written p plan)))])))}
+             :to-prove (into (sorted-map-by #(compare (str %1) (str %2)))
+                             (for [p proofs]
+                               [p (if (docs/source-of db p)
+                                    (list 'my.agent/prove #{p})
+                                    (str "not written yet; it should assert what the plan says: " (not-written p plan)))]))}
       (seq sections) (assoc :sections sections)
       near (assoc :similar near))))
 

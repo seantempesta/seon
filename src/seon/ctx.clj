@@ -15,7 +15,7 @@
   transaction, or refused with why (write!)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.render :as render] [seon.agent :as agent]
-            [seon.schema.datahike :as sd] [seon.db :as pdb] [datahike.api :as d] [datahike.db.interface :as dbi] [clojure.string :as str] [malli.core :as m] [malli.error :as me] [malli.registry :as mr]))
+            [seon.schema.datahike :as sd] [seon.db :as pdb] [seon.context :as context] [seon.task :as task] [datahike.api :as d] [datahike.db.interface :as dbi] [clojure.string :as str] [malli.core :as m] [malli.error :as me] [malli.registry :as mr]))
 
 ;; ---- the shape, derived once from the registry -----------------------------------------------
 
@@ -47,6 +47,51 @@
                        (cond-> {:attr f :key (short-key u) :rev? rev?}
                          rev? (assoc :schema (render/entity-schemas f) :id (identities (render/entity-schemas f))))))])))
 
+;; ---- derived members: computed from the db, kept while what they read is unchanged ---------
+
+(defn- story
+  "Run node n's stage story on db: its task's run sections (seon.context/run-state); nil with no
+  task, or while the run is not running (its stage is not live: only a live run's is derived)."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:maybe :map]]}
+  [db n] (when-let [id (and (= :running (:seon.run/status n)) (get-in n [:task :seon.task/id]))]
+           (context/run-state db (task/task db id))))
+
+(defn- related
+  "Run node n's related sections, functions and schema keys on db (seon.context/related): nil
+  when it answers none, with no task, or while the run is not running."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:maybe :map]]}
+  [db n] (when-let [te (and (= :running (:seon.run/status n)) (get-in n [:task :db/id]))] (context/related db te)))
+
+(def derived
+  "{entity-schema [[key f]]}: the members ctx derives for an entity of the schema held as the
+  record's own or as one of its runs (where a patch keeps them), (f db node) their value (no key
+  when nil), as of the db ctx is of. A run's story and related are its while it is running (its
+  status as the branch holds it: a session's stages, not its evals, bound their cost). They
+  read the task and the tasks it needs, the program, the wiki, the schemas and the vectors
+  (`read-nss`), so a transaction touching none of those keeps them as they were. Not tracked: what
+  run-state reads beside the db (a cited file's text on disk, a namespace's meta in this
+  process): a file edited with no datom written leaves the story as it was. Unqualified, as the
+  units are: no attribute, so a swap! writes none of them."
+  {:seon.run/run-fact [[:story story] [:related related]]})
+
+(def ^:private read-nss
+  "The attribute namespaces a derived member reads: a task (its plan, proofs, :needs, config), the
+  program's forms, vars and namespaces, a wiki section, a schema, a vector; with a run's task and
+  status (:seon.run/task, :seon.run/status), what a datom must name to change one."
+  #{"seon.task" "seon.config.render" "var" "form" "ns" "seon.section" "schema" "seon.vector"})
+
+(defn- derive-into
+  "Node m of schema s with its derived members from db, each kept as the object it was when its
+  value is the same (a memo of it stays a pointer test); answers [m' keys-that-changed]."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :qualified-keyword] :map] [:tuple :map [:vector :keyword]]]}
+  [db s m]
+  (reduce (fn [[m ch] [k f]]
+            (let [v (f db m) o (get m k)]
+              (cond (= v o) [m ch]
+                    (nil? v) [(dissoc m k) (conj ch k)]
+                    :else [(assoc m k v) (conj ch k)])))
+          [m []] (get derived s)))
+
 ;; ---- db -> map ---------------------------------------------------------------------------
 
 (defn- own
@@ -70,19 +115,21 @@
   [db e s p ix]
   (let [m (own db e)
         s (or s (render/entity-schema m nil))
-        ix (update ix e (fnil conj #{}) [p s])]
-    (reduce (fn [[m ix] {:keys [attr key rev? schema id]}]
-              (if rev?
-                (let [es (map :e (d/datoms db :avet attr e))]
-                  (if (empty? es)
-                    [m ix]
-                    (reduce (fn [[m ix] me] (let [k (key-of db me id) [sub ix] (node db me schema (conj p key k) ix)]
-                                              [(assoc-in m [key k] sub) ix]))
-                            [m ix] es)))
-                (if-let [v (:db/id (get m attr))]
-                  (let [[sub ix] (node db v nil (conj p key) ix)] [(-> m (dissoc attr) (assoc key sub)) ix])
-                  [m ix])))
-            [m ix] (get units s))))
+        ix (update ix e (fnil conj #{}) [p s])
+        [m ix] (reduce (fn [[m ix] {:keys [attr key rev? schema id]}]
+                       (if rev?
+                         (let [es (map :e (d/datoms db :avet attr e))]
+                           (if (empty? es)
+                             [m ix]
+                             (reduce (fn [[m ix] me] (let [k (key-of db me id) [sub ix] (node db me schema (conj p key k) ix)]
+                                                       [(assoc-in m [key k] sub) ix]))
+                                     [m ix] es)))
+                         (if-let [v (:db/id (get m attr))]
+                           (let [[sub ix] (node db v nil (conj p key) ix)] [(-> m (dissoc attr) (assoc key sub)) ix])
+                           [m ix])))
+                       [m ix] (get units s))]
+    ;; its derived members, once its units (its task) are there
+    [(if (and (contains? derived s) (or (empty? p) (and (= 2 (count p)) (= :runs (first p))))) (first (derive-into db s m)) m) ix]))
 
 (def ^:private environment-keys "The map's environment: the record's basis, never written." [:t :branch :commit])
 
@@ -215,6 +262,27 @@
                      (= v cur) (without (:tree c) p a)
                      :else (:tree c)))))))
 
+(defn- schema-at
+  "The schema the node at path p of c is held with, by its entity's index."
+  {:malli/schema [:=> [:cat :map [:vector :any]] [:maybe :qualified-keyword]]}
+  [c p] (some (fn [[q s]] (when (= q p) s)) (get (:ix c) (:db/id (get-in (:tree c) p)))))
+
+(defn- rederive
+  "c with the derived members of its nodes that have them (the record's own entity, its runs)
+  derived again on db when a datom of datoms can change what they read (read-nss); else c as it
+  was. A member whose value is the same stays the object it was, and only a changed one is a
+  path of :changed. Work: a test per datom, then the members' own (as their computation costs)."
+  {:malli/schema [:=> [:cat :map :seon.host/db [:sequential :any]] :map]}
+  [c db datoms]
+  (if-not (some (fn [{:keys [a]}] (or (#{:seon.run/task :seon.run/status} a) (contains? read-nss (namespace a)))) datoms)
+    c
+    (reduce (fn [c p]
+              (let [s (schema-at c p) [m ch] (if (contains? derived s) (derive-into db s (get-in (:tree c) p)) [nil []])]
+                (if (seq ch)
+                  (-> c (assoc :tree (if (seq p) (assoc-in (:tree c) p m) m)) (update :changed into (map #(conj p %) ch)))
+                  c)))
+            c (cons [] (for [k (keys (get-in c [:tree :runs]))] [:runs k])))))
+
 (defn patch
   "ctx's value c with datoms (a transaction's :tx-data, or a datoms-diff marked :added) applied on
   db, the db after them: each datom of an entity c holds sets or removes its attribute
@@ -251,6 +319,7 @@
                  held (get (:ix c) e)]
              (reduce (own held) (reduce link c put) put))))
        (assoc c :changed #{}) (group-by :e datoms))
+      (rederive db datoms)
       (update :tree #(merge (apply dissoc % environment-keys) (environment db branch)))))
 
 ;; the record and its index, beside the atom: the agent is one thread, and its state's watch runs
@@ -309,7 +378,7 @@
     (let [many (get (dbi/-rschema db) :db.cardinality/many #{})
           us (get units s)
           unit-keys (set (map :key us))
-          skip (cond-> (conj unit-keys :db/id) (empty? p) (into environment-keys))
+          skip (cond-> (into (conj unit-keys :db/id) (map first) (get derived s)) (empty? p) (into environment-keys))
           bad (fn [acc path a v] (if-let [w (why a v)] (update acc :invalid conj {:path path :why w}) acc))
           acc (reduce
                (fn [acc a]
@@ -323,7 +392,11 @@
                            (update :paths conj path)))
                      (nil? n) (-> acc (update :tx conj [:db/retract e a (ref-of o)]) (update :paths conj path))
                      :else (-> acc (bad path a n) (update :tx conj [:db/add e a (ref-of n)]) (update :paths conj path)))))
-               acc (remove skip (distinct (concat (keys old) (keys new)))))]
+               acc (remove skip (distinct (concat (keys old) (keys new)))))
+          ;; a derived member is the db's: changed, it is refused (change what it reads)
+          acc (reduce (fn [acc [k _]] (if (= (get old k) (get new k)) acc
+                                          (update acc :invalid conj {:path (conj p k) :why "derived from the db (seon.ctx/derived): change what it reads"})))
+                      acc (get derived s))]
       (reduce
        (fn [acc {:keys [attr key rev? schema id]}]
          (let [om (get old key) nm (get new key) path (conj p key)]
