@@ -884,7 +884,7 @@
   ;; instead: seon.reconcile-test/a-whole-task-works-in-parallel-and-its-green-merges). The wait
   ;; ends on the run's own end, which always comes
   (let [code (str "(let [_ (my.root/request! sys {:seon.task/ns 'demo :seon.task/name \"wr\" :seon.task/plan \"Make wr.\"})"
-                  " _ (seon.root/await-db sys \"the run ended\" #(#{:parked :held :done :closed :merged :dead :ended} (:seon.run/status (datahike.api/entity % [:seon.run/id \"demo/wr#1\"]))))"
+                  " _ (seon.root/await-db sys \"the run ended\" #(#{:parked :held :done :closed :merged :dead} (:seon.run/status (datahike.api/entity % [:seon.run/id \"demo/wr#1\"]))))"
                   " db @(:conn sys) r (seon.task/run db \"demo/wr#1\")"
                   " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"demo/wr\")}}))"
                   " obs (datahike.api/q '[:find ?b . :where [?r :seon.run/id \"demo/wr#1\"] [?u :seon.turn/run ?r] [?u :seon.turn/n 1] [?u :seon.turn/origin :model] [?u :seon.turn/basis ?b]] b)]"
