@@ -30,7 +30,7 @@ Agent view with ctx-atom, for root's second review. It implements the owner's na
 - **Takes:** the map from (1). For an agent, by default:
   - `[:task]`: the task, its plan and what it cites;
   - `[:run]`;
-  - `[:screen form]`: one part per form in `:seon.agent/screen`, that form's one eval entity;
+  - `[:eval h]` for each replayed form's one eval entity (the forms in `:seon.agent/screen`), placed where the layout puts them; a replay changes the part's value, never its key or place;
   - `[:conversation n]`: one part per eval, message and turn in t order, each its record;
   - `[:side]`: root's agents, on root's page and the sidebar.
 
@@ -72,10 +72,15 @@ Agent view with ctx-atom, for root's second review. It implements the owner's na
   - A part counts as unchanged for the model only while its last whole send is still readable above. A part the history cut dropped, or folded to its line, is sent whole again.
   - The task's open reasons are always sent whole.
   - A seen-value reference `(:out result/eN)` is used only for a part still readable.
-- **Where the screen's whole lives (the review's §2), and the prompt cache:**
-  - The conversation's evals are never replayed, so their values never change and the prefix holds.
-  - The screen parts are last in the request. Each turn's request ends with the screen's diff against the screen as last sent, and that tail stays in the turn the model read; a later request prints earlier turns as they were sent (their parts read at their t).
-  - The base of a diff is the newest whole send still readable above. When the history cut drops it, the screen is sent whole again (rule 7).
+- **One patch mechanism for both** (the owner, 2026-10-26: "just updating the data in the db and having the updates be reflected in the context and the UI as diffs/patches"):
+  - A replay updates the eval in the db, and nothing moves.
+  - **The page:** that eval's part re-renders in place, as a Datastar patch by its key. An identical value sends nothing (the memo).
+  - **The model:** each request is the byte-identical prefix (everything sent before, never rewritten) plus this turn's diff of the db since the last request, keyed by part.
+    - A changed replayed eval appears in the diff as its new value, keyed to the same eval; an identical one does not appear.
+    - New conversation parts appear as added parts.
+    - A part whose earlier value fell under the history cut, or was folded to its line, is carried whole (rule 7).
+  - So there is no screen block rewritten at the end. The prefix holds because nothing sent is rewritten, and the diff is the only new text.
+
 - **The memo is one per part:** `{key [f v out]}`, a hit when both the renderer value f (never its symbol, since a redefined fn re-renders) and the part value v are `identical?` (ruling 2). It is one pointer compare per part; there is no `:changed` set from the patch and no read-set index.
 - **Replaces:**
   - `seon.screen/diff` (screen.clj:25, 23) and `seon.context/as-diff` (446, 8);
@@ -161,7 +166,7 @@ Deletions are measured function sizes on main. Additions are estimates, ±50%.
 ## Slices (each red then green, measured; owners per root's note)
 1. **ctx-atom:** `(ctx db e)` over any entity; the sharing proof (every path not changed stays `identical?`); order by first t.
 2. **agent view:** `(view ctx)` for an agent and `(html part)`/`(ai part)` with the budgeted html face; the agent page as a layout of parts, rendered in the agent and forwarded by root; the per-part memo. Browser-checked. Cost proof: a new eval renders one part.
-3. **related-sections:** `(diff prev next)` with rule 7, used by the page and by the request's screen parts. Delete `seon.screen/diff` and `as-diff`.
+3. **related-sections:** `(diff prev next)` with rule 7, used by the page's patches and by the request's diff, one mechanism. Delete `seon.screen/diff` and `as-diff`.
 4. **agent view + related-sections:** the request as parts' ai, whole once then diffs; the screen round trip deleted; the debug page as parts' ai. Measured on a real model run (turns to green, cache share, tokens per turn) before merge.
 5. **agent view:** every other page (root's, the user's, a task's, `/walk/<eid>`) as the chain over its entity. Delete the walk, the read-set index and the walk layouts.
 6. **agent loop:** `take!` writes the message; `:from` as a ref (the store erase, root's moment); the stage boundary as a conversation part.
