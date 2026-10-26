@@ -241,6 +241,15 @@
         (is (= (dissoc c1 :changed) (dissoc (ctx/build db1 (aid db1) :b) :changed)) "advanced, the record is the end t's")
         (is (= (env (:tree c1)) (env (replay (:tree c0) d))) "the start's record with the diff applied is the end's")
         (is (every? (fn [[_ [o n]]] (not= o n)) d) "no path whose value is equal at both ends")))
+    (testing "a member retracted and made again under its key within the turn: the end's"
+      (let [db0 (seeded 30)
+            db1 (-> db0 (d/with [[:db/retractEntity [:seon.eval/id "e7"]]]) :db-after
+                    (d/with [{:seon.eval/id "e7" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/record {:code "(again)" :response {:value 1}}}]) :db-after)
+            c0 (ctx/build db0 (aid db0) :b)
+            c1 (ctx/advance c0 db0 db1 :b)]
+        (is (= (dissoc c1 :changed) (dissoc (ctx/build db1 (aid db1) :b) :changed)))
+        (is (= "(again)" (get-in (:tree c1) [:evals "e7" :seon.eval/record :code])))
+        (is (contains? (ctx/diff c0 c1) [:evals "e7"]))))
     (testing "a change undone within the turn is no change"
       (let [db0 (seeded 30)
             db1 (-> db0 (d/with [[:db/add [:seon.run/id "lab/ctx#1"] :seon.run/status :done]]) :db-after
@@ -269,6 +278,19 @@
      :growth :constant
      :fixed {:calls 1}
      :sizes [100 1000 3000]}))
+
+(deftest a-redefined-vars-record-holds-its-new-form
+  ;; a var's form is a unit of the var (:seon.db/var-fact's :seon.render/units): a record over a
+  ;; var, patched by its redefinition (a new form, the var pointed to it), holds the new form whole
+  (let [db (d/db-with (ts/test-db) [{:db/id "f" :form/id "demo/f-1" :form/src "(defn f [] 1)"} {:var/name 'demo/f :var/form "f"}])
+        e (:db/id (d/entity db [:var/name 'demo/f]))
+        c (ctx/build db e :b)
+        rep (d/with db [{:db/id "g" :form/id "demo/f-2" :form/src "(defn f [] 2)"} [:db/add e :var/form "g"]])
+        c' (ctx/patch c (:db-after rep) (:tx-data rep) :b)]
+    (is (= "(defn f [] 1)" (get-in (:tree c) [:form :form/src])) "built: the var with its form")
+    (is (= "(defn f [] 2)" (get-in (:tree c') [:form :form/src])) "patched: the new form, whole")
+    (is (contains? (:changed c') [:form]))
+    (is (= (dissoc c' :changed) (dissoc (ctx/build (:db-after rep) e :b) :changed)) "as a build holds it")))
 
 (declare steps)
 

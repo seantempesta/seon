@@ -308,7 +308,11 @@
   source and the vars it names (:form/refs), and its namespace."
   [defs]
   (vec (mapcat (fn [[v src refs]]
-                 [{:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)}
+                 ;; its doc and contract, as the import records them from its source
+                 [(let [[_ _ & more] (read-string src) d (when (string? (first more)) (first more))
+                        c (some #(when (map? %) (:malli/schema %)) more)]
+                    (cond-> {:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)}
+                      d (assoc :var/doc d) c (assoc :var/contract (pr-str c))))
                   (cond-> {:db/id (str "form " v) :form/id (str v " " src) :form/src src :form/ns (str "ns " (namespace v)) :form/order 0
                            :form/defines [(str v)]}
                     (seq refs) (assoc :form/refs (vec refs)))
@@ -386,11 +390,8 @@
 (deftest a-cited-var-shows-at-its-citations-depth
   ;; task seon.context/a-cited-var-shows-at-its-citation-depth: the delimiter picks the depth
   ;; for a var as it does for a section (docs/references.md#the-delimiter-picks-the-depth)
-  (binding [*ns* *ns*]
-    (eval '(ns ctx-depth))
-    (eval '(defn sq "Squares x. Used by area." {:malli/schema [:=> [:cat :int] :int]} [x] (* x x)))
-    (eval '(defn cube "Cubes x." {:malli/schema [:=> [:cat :int] :int]} [x] (* x x x)))
-    (eval '(defn tri "Triples x." {:malli/schema [:=> [:cat :int] :int]} [x] (* 3 x))))
+  ;; the vars are the db's alone (no namespace of them in this process): what each shows is read
+  ;; from its facts (seon.docs/resolve-ref)
   (let [db (d/db-with (db-with-program)
                       (program-facts '[[ctx-depth/sq "(defn sq \"Squares x. Used by area.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))" []]
                                        [ctx-depth/cube "(defn cube \"Cubes x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x x))" []]
@@ -960,6 +961,16 @@
     (is (= [[:task :cites 'demo/g] [:related]] (vec (for [k (keys fs1) :when (not= (page fs0 k) (page fs1 k))] k)))
         "the edit's page diff: that var's part, and related, whose call graph it moved; the task's part not")
     (is (identical? (get fs0 [:task]) (get fs1 [:task])) "the task's part, which cites it, from the memo")))
+
+(deftest a-vars-arglists-are-its-recorded-sources
+  ;; what a var declares, read from its source as the db records it (seon.reader/arglists)
+  (is (= '([x]) (seon.reader/arglists "(defn sq \"Squares.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))" 'demo)))
+  (is (= '([x] [x y]) (seon.reader/arglists "(defn f ([x] x) ([x y] (+ x y)))" 'demo)) "each arity's")
+  (is (= '([& body]) (seon.reader/arglists "(defmacro m [& body] `(do ~@body))" 'demo)) "a macro's")
+  (is (nil? (seon.reader/arglists "(def x 1)" 'demo)) "no arglists: no function")
+  (let [db (d/db-with (db-with-program) (program-facts '[[demo-only/h "(defn h \"Holds what the db says.\" [a b] a)" []]]))]
+    (is (= {:symbol 'demo-only/h :arglists '([a b]) :summary "Holds what the db says."} (docs/resolve-ref db 'demo-only/h :summary))
+        "a var only the db holds: its summary from its facts")))
 
 (deftest related-key-moves-with-a-vector-written
   ;; related is memoized by related-key: the same while nothing it reads is written, moved when a

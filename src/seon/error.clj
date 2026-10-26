@@ -126,6 +126,24 @@
                             (when form {:seon.error/form form})))])]
     [(into f (map first) flushed) (mapv second flushed)]))
 
+;; ---- an asker's side: an effect's outcome, recorded once --------------------------------
+
+(defn asked-tx
+  "Root code's write of effect answer r on main db (the asker records the outcome once: its
+  owner's root counts only agents' failures, seon.fx/outcome): fact-tx, the asker's fact of
+  either outcome, and when r failed, in the same transaction, its :effect row (one entity per
+  signature, flush-tx), with subject, the attribute fact-tx or a good answer's fact writes:
+  the next outcome that writes another value of it closes the row (seon.problems/closed?),
+  and the same failure again writes no new value and keeps it open. A failure is what an
+  effect owner answered as one, stamped with its time (:seon.fx/at-ms); any other r, an error
+  the asker made itself included, writes fact-tx alone."
+  {:malli/schema [:=> [:cat :seon.host/db :map :qualified-keyword [:sequential :any]] [:vector :any]]}
+  [db r subject fact-tx]
+  (cond-> (vec fact-tx)
+    (:seon.fx/at-ms r) (into (second (flush-tx (fold {} (occurrence (assoc (dissoc r :seon.fx/us :seon.fx/queue-us :seon.fx/at-ms) :seon.error/subject subject)
+                                                                      :effect {} (:seon.fx/at-ms r)))
+                                                  db)))))
+
 ;; ---- an agent's side: its eval errors, folded until its next commit --------------------
 
 (defn note

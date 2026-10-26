@@ -681,7 +681,9 @@
   reads the same imports nothing. Either way the fact is this boot's (:boot), holding the
   inputs only when the running binary was built from this very tree (target/seon.tree,
   written by bin/build) and why not otherwise (:unshared), so agents never key results by a
-  previous root's inputs or by code the binary does not run. Answers the fact in force."
+  previous root's inputs or by code the binary does not run. A failed read is recorded with
+  the fact, its :effect row naming :seon.root/source (seon.error/asked-tx). Answers the fact in
+  force."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [sys {:keys [root dirs]}]
   (let [t0 (profile/now-ns)
@@ -704,7 +706,8 @@
                               (and w (not (contract/error? w))) (assoc :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))
                               (contract/error? r) (assoc :error (:seon.error/message r))
                               (contract/error? w) (assoc :error (:seon.error/message w))))))]
-    @(call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/source fact}]}})
+    ;; a failed read is recorded here, with the fact, in one transaction (seon.error/asked-tx)
+    @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (err/asked-tx @(:conn sys) r :seon.root/source [{:seon.root/id :root :seon.root/source fact}])}})
     fact))
 
 (defn platform-tx
@@ -718,7 +721,8 @@
   "What each wiki section lacking a :seon.section/read was last written against, from git (the
   :history effect, seon.fx/wiki-history), as the loader takes it: {address {:read :unread}} (seon.docs/baseline-reads).
   {} when every section has one. The history asked, the effect owner does the git; when it cannot be
-  asked every section is read as of today and says why."
+  asked every section is read as of today and says why: its record is each section's
+  :seon.section/baseline-unread, which health shows as a :stale-section row."
   {:malli/schema [:=> [:cat :seon.root/sys :string :string] :map]}
   [sys checkout dir]
   (let [db @(:conn sys)
@@ -1094,7 +1098,11 @@
                    :else (contract/error :seon.test/prepare #'seon.root/prove!
                                          (str "main's run is keyed by the checkout's inputs, and " (cfg/checkout) " has none (no git HEAD)") {}))]
       (if (contract/error? dg)
-        (doto (promise) (deliver dg))
+        ;; a failed read of the checkout is recorded here, as import-source! records its own: the
+        ;; next good import closes it (seon.error/asked-tx)
+        (do (when (contract/error? src)
+              @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (err/asked-tx db src :seon.root/source [])}}))
+            (doto (promise) (deliver dg)))
         (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx db) :mode (if agent-id :turn :judge) :digest dg}
                      agent-id (assoc :agent agent-id) (seq names) (assoc :names names)))))
     (doto (promise) (deliver (absent (get-in @(call! sys {:op :state}) [:agents agent-id]) agent-id))))))
