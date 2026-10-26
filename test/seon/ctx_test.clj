@@ -585,7 +585,12 @@
                                 (finally (reset! seon.agent/state nil)))
               shown (:units parts)]
           (is (= (map :id shown) (keys page)) "every component, the conversation's too, in order: nothing left out")
-          (is (= (map :html shown) (map seon.web.html/html (vals page))) "each component's hiccup is the html the page shows, byte for byte")
+          ;; the one difference: the page's html adds each root's render's style after its name (seon.render/styled)
+          (let [styles (keep #(some-> (requiring-resolve (symbol "seon.render.ui" %)) meta :seon.render/style) (map #(:class (second %)) (vals page)))
+                ;; a style as the html attribute holds it, escaped
+                unstyled (fn [h] (reduce #(str/replace %1 (str " " (-> %2 (str/replace "&" "&amp;") (str/replace ">" "&gt;"))) "") h styles))]
+            (is (= (map (comp unstyled :html) shown) (map (comp unstyled seon.web.html/html) (vals page)))
+                "each component's hiccup is the html the page shows, byte for byte, but for its render's style"))
           (is (str/includes? (pr-str (get page "ctx-keys")) "read the plan") "as hiccup, exactly as its render returned it")))
       (testing "the page rebuilds the value from the branch at its basis"
         (let [db (:db-after (d/with db [{:seon.eval/id "e9" :seon.eval/agent [:seon.agent/key k] :seon.eval/record rec}]))
