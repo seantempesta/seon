@@ -355,10 +355,11 @@
    (:v (first (d/rseek-datoms db :avet :seon.vector/text-t)))])
 
 (defn renders
-  "The renders a view reads db through (seon.render/view's fs), over db: the story of a task,
-  the related of a task entity, the first transaction of an entity."
-  {:malli/schema [:=> [:cat :seon.host/db] [:map [:story :seon.host/fn] [:related :seon.host/fn] [:first-t :seon.host/fn]]]}
-  [db] {:story #(story db %) :related #(related db %) :first-t #(first-t db %)})
+  "What a view reads db through (seon.render/view's fs), over db: the db its parts' renders draw
+  on, a task's story key and a task entity's related key (what its memo compares), and an
+  entity's first transaction (the conversation's order)."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map [:db :seon.host/db] [:story-key :seon.host/fn] [:related-key :seon.host/fn] [:first-t :seon.host/fn]]]}
+  [db] {:db db :story-key #(story-key db %) :related-key #(related-key db %) :first-t #(first-t db %)})
 
 (defn turn-state
   "The turn sections of task t's current state as data, measured again each turn from

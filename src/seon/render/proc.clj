@@ -28,7 +28,7 @@
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
-            [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.ctx :as ctx] [seon.db]
+            [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.ctx :as ctx] [seon.db] [datahike.index.interface]
             [seon.config :as config] [seon.step :as step] [seon.context :as context]))
 
 (defn- event-cap "Events the stream keeps (:seon.config.render.list/stream)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/stream))
@@ -292,8 +292,11 @@
         bdb (get-in st [:branches view :db])
         parts (if own?
                 (:parts held)
-                (cond bdb (mapv #(render/part-html % (render/part-faces %))
-                                (render/view (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e)) (context/renders bdb)))
+                ;; drawn from the branch outside the read set: a move of the branch marks this page
+                ;; dirty when root reads it (take-read), and the branch's reads are not main's
+                (cond bdb (binding [datahike.index.interface/*reads* nil]
+                            (mapv #(render/part-html % (render/part-faces %))
+                                (render/view (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e)) (context/renders bdb))))
                       ;; a branch that could not be read: its error, by the error's render
                       berr [(let [f {:html (render/html berr {}) :inline (render/html berr {:as :inline})}] (render/part-html {:key [:branch] :value berr} (assoc f :text "")))]))
         root (:db/id (d/entity db [:seon.root/id :root]))

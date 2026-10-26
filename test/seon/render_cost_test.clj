@@ -367,7 +367,7 @@
                       [id {:db/id (+ 10 i) :seon.eval/id id :seon.eval/by "a1"
                            :seon.eval/record {:code (str "(inc " i ")") :response {:handle (symbol "result" id) :value (inc i)}}}]))}}
    (let [born (into {1 1 2 1 3 2} (for [i (range n)] [(+ 10 i) (+ 3 i)]))]
-     {:story #(dissoc % :db/id) :related (constantly nil) :first-t #(get born %)})])
+     {:db (ts/test-db) :story-key (constantly [:k]) :related-key (constantly [:k]) :first-t #(get born %)})])
 
 (deftest a-view-costs-its-parts
   ;; task seon.render/a-ctx-is-shown-as-its-parts: an agent's ctx as its parts, one pass over its

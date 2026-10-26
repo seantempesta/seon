@@ -617,7 +617,8 @@
         unread (first (remove #(contains? (get-in st [:views :a3 :reads]) [:e %]) (d/q '[:find [?e ...] :where [?e :ns/name]] main)))]
     (is (seq (get-in st [:views :a3 :reads])) "the page holds what it read")
     (is (= #{:a3} (touched main [{:db/id eid :seon.agent/status :idle}])) "the agent's own datom")
-    (is (= #{:a3} (touched branch [{:db/id e1 :seon.eval/by "user"}])) "a row's entity, on the branch")
+    (is (empty? (touched branch [{:db/id e1 :seon.eval/by "user"}]))
+        "a branch's entity is drawn outside the read set: a move of the branch marks the page when root reads it (take-read; a-new-evaluation-is-one-append)")
     (is (empty? (touched main [[:db/retractEntity unread]])) "an entity the page did not read")))
 
 (deftest a-transaction-touching-no-page-walks-nothing
@@ -1122,17 +1123,17 @@
         c (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)
         parts (r/view c (seon.context/renders branch))
         ks (mapv :key parts)]
-    (is (= [[:task] [:proofs] [:verdict] [:run]] (subvec ks 0 4)) "the task, its proofs, the verdict, the run, first")
-    (is (= {'demo/f-test {:status :fail :failure {:assert '(= 4 (f 2)) :got 5}}} (:value (second parts)))
+    (is (= [[:task] [:related] [:proofs] [:verdict] [:run]] (subvec ks 0 5)) "the task, what is related, its proofs, the verdict, the run, first")
+    (is (= {'demo/f-test {:status :fail :failure {:assert '(= 4 (f 2)) :got 5}}} (:value (nth parts 2)))
         "each proof's status as the newest turn observed it, with its first failure")
-    (is (= ["demo/f-test is red"] (:value (nth parts 2))))
-    (let [task (first parts)]
-      (is (contains? (:value task) :to-prove) "the model reads the stage's story (seon.context/story)")
-      (is (= "demo/f" (:seon.task/id (:page task))) "the page draws the task itself")
-      (is (str/includes? (h/html (:html (r/part-faces task))) "demo/f") "by its own render")
-      (is (str/includes? (:text (r/part-faces task)) ":to-prove") "while the model's text is the story's"))
-    (is (not-any? #(= [:related] %) ks) "no related part when the run has none")
-    (is (= 2 (:turns-taken (:value (nth parts 3)))))
+    (is (= ["demo/f-test is red"] (:value (nth parts 3))))
+    (let [task (first parts) h (h/html (:html (r/part-faces task)))]
+      (is (= "demo/f" (:seon.task/id (:value task))) "the task part's value is the task: nothing derived is stored in a part")
+      (is (some? (:read task)) "and it carries its story's key, what its memo compares")
+      (is (str/includes? h "demo/f") "drawn by task-page")
+      (is (str/includes? h "to-prove") "as the stage's story, drawn from the db when it is drawn"))
+    (is (str/includes? (h/html (:html (r/part-faces (second parts)))) "nothing related yet") "related, drawn from the db: none yet here")
+    (is (= 2 (:turns-taken (:value (nth parts 4)))))
     (is (= [[:message "m-1"] [:eval "e1"] [:eval "e2"] [:turn "demo/f#1/0"] [:eval "e3"] [:turn "demo/f#1/1"]] (filterv #(#{:eval :turn :message} (first %)) ks))
         "the conversation in the order it was written: each member's first transaction")
     (is (some #(= [:message "m-1"] %) ks) "the message to the run, in the conversation")
@@ -1222,3 +1223,4 @@
     (is (str/includes? (str tile) "closed") (str "the status main holds: " tile))
     (is (str/includes? (str tile) "done") "and how it ended")
     (is (not= :closed (:seon.run/status (d/pull branch [:seon.run/status] [:seon.run/id "demo/f#1"]))) "which the branch's copy does not hold")))
+

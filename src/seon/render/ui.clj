@@ -901,6 +901,31 @@
                                    {:id (tile-id t) :comp [(:seon.render/db t 0) (:seon.render/eid t) :tile] :container "#p-tiles"}
                                    {:id (tile-id t) :input t :schema :seon.render/page-tile :container "#p-tiles"}))))}))
 
+(defn task-page
+  "The task as its agent works it (the declared html render of :seon.render/task-page): its id,
+  kind and execution, then the stage's story (seon.context/story over opts :db, the branch as of
+  the record's t): its plan as prose, then what the plan cites with each var's source and callers,
+  what to prove, the sections and the similar, drawn by the one printer as the data it is."
+  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
+  [{:seon.task/keys [id kind execution] :as task} opts]
+  [:section {:class "part"}
+   [:h2 {:class "kicker"} "task"]
+   [:p (str id (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
+   (when-let [story (some-> (:db opts) (context/story task))]
+     ;; the story's task is this one: its plan as prose here, the rest of the story by the printer
+     (list (when-let [plan (get-in story [:task :seon.task/plan])] [:p {:class "seon-prose"} (prose plan (part))])
+           (render/html (dissoc story :task) {:budget (config/value :seon.config.render/value-budget)})))])
+
+(defn related
+  "What the task's plan is likely to need beyond what it cites (the declared html render of
+  :seon.render/related): seon.context/related over opts :db, drawn by the one printer; a line
+  saying so when there is nothing yet."
+  {:malli/schema [:=> [:cat :seon.render/related :seon.render/opts] :any]}
+  [{:keys [task]} opts]
+  (let [r (when-let [db (:db opts)] (context/related db task))]
+    [:section {:class "part"} [:h2 {:class "kicker"} "related"]
+     (if r (render/html r {}) [:p {:class "muted"} "nothing related yet"])]))
+
 (defn part-id
   "The element id of an agent page's part by its key ([:eval \"e12\"] -> \"q-eval-e12\")."
   {:malli/schema [:=> [:cat [:vector :any]] :string]}

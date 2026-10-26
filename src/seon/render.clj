@@ -187,22 +187,20 @@
 
 (defn view
   "An agent's held record ({:tree c}, seon.ctx/build's: c is @ctx, the db's data only) as its
-  parts, in order, with the renders fs that read the db beside it ({:story :related :first-t},
-  each over the branch's db as of the record's t: seon.context/story, related and first-t):
-  [:task], the stage's story ((:story fs) of the task: the task, what it cites, what to prove),
-  the page drawing the task's relevant keys; [:related], the sections, functions and schema keys
-  nearest its plan ((:related fs) of the task entity) when there are any; [:proofs], each
+  parts, in order, with what reads the db beside it (fs, seon.context/renders over the branch's db
+  as of the record's t): [:task], the task, drawn by seon.render.ui/task-page as the stage's story
+  (seon.context/story over the db), compared in the memo by its story key; [:related], drawn by
+  seon.render.ui/related (seon.context/related), compared by its related key; [:proofs], each
   proof's status as the newest turn observed it, with its first failure; [:verdict], the done
   rule's reasons when it gave any; [:run], the newest run's relevant keys and the turns it took;
   [k] for each key the agent added to its ctx (any key outside its own :seon.agent/* attributes,
   its units and the environment), named by that key, which is its schema; then the conversation:
   [:eval id] per eval, [:turn id] per model turn of the run and [:message id] per message to it, in
-  the order they were written (their first transactions, (:first-t fs)). Each part names the members of c it was made from
-  (:from), so a part made again from the same members is drawn from the memo (drawn). It reads the
-  db only through fs, and no config. What a
-  part leaves out is not data the agent acts on (ids, the turns' bases but the newest's
-  observation, the agent's own counters): a change without meaning is a data defect, fixed here."
-  {:malli/schema [:=> [:cat [:map [:tree :map]] [:map [:story :seon.host/fn] [:related :seon.host/fn] [:first-t :seon.host/fn]]] [:vector :seon.render/part]]}
+  the order they were written (each member's first transaction, (:first-t fs)). Nothing derived is
+  computed here: a part that reads the db carries its key (:read) and the db its render draws on,
+  and draws only when the memo misses (drawn). What a part leaves out is not data the agent acts
+  on (ids, the turns' bases but the newest's observation, the agent's own counters)."
+  {:malli/schema [:=> [:cat [:map [:tree :map]] [:map [:db :seon.host/db] [:story-key :seon.host/fn] [:related-key :seon.host/fn] [:first-t :seon.host/fn]]] [:vector :seon.render/part]]}
   [{c :tree} fs]
   (let [t-of #((:first-t fs) (:db/id %))
         run (last (sort-by t-of (vals (:runs c))))
@@ -213,12 +211,11 @@
         entry (fn [k e] {:key [k (or (:seon.eval/id e) (:seon.message/id e) (:seon.turn/id e))] :from [e]
                          :value (if (= :turn k) (-> (relevant-of :seon.turn/turn-fact e) (dissoc :seon.turn/run) (update :seon.turn/basis select-keys [:max-turns])) (dissoc e :db/id :seon.eval/agent :seon.message/to))})]
     (-> []
-        (cond-> task (conj (let [story ((:story fs) task)]
-                             ;; the model reads the stage's story; the page draws the task, by its own render.
-                             ;; Made from the task node: the story's memo by story-key is the view's next change
-                             {:key [:task] :from [task] :value story :page (relevant-of :seon.task/task-fact (dissoc task :turns :runs))})))
-        (as-> ps (if-let [rel (and task ((:related fs) (:db/id task)))] (conj ps {:key [:related] :from [rel] :value rel}) ps))
-        (cond-> (seq (:seon.task/proofs task))
+        (cond-> task (conj {:key [:task] :from [task] :value (relevant-of :seon.task/task-fact (dissoc task :turns :runs))
+                            :schema :seon.render/task-page :read ((:story-key fs) task) :db (:db fs)}
+                           {:key [:related] :from [task] :value {:task (:db/id task)}
+                            :schema :seon.render/related :read ((:related-key fs) (:db/id task)) :db (:db fs)})
+                (seq (:seon.task/proofs task))
                 (conj {:key [:proofs] :from [task turn] :value (with-meta (into (sorted-map-by #(compare (str %1) (str %2)))
                                                               (for [t (:seon.task/proofs task)]
                                                                 [t (cond-> {:status (get results t :not-run)} (failure t) (assoc :failure (failure t)))]))
@@ -237,20 +234,17 @@
   "Part p's faces, {:html hiccup :text string :inline hiccup}: each by the render its value's schema
   declares for that face, else the one printer's, html and text from one selection under one budget
   (seon.print.select/show with :outputs #{:text :hiccup}), so the page and the model never differ
-  in what was cut; :inline, its html in one line (:as :inline), what a folded part shows. A part
-  with :page draws that value on the page and its own for the model."
+  in what was cut; :inline, its html in one line (:as :inline), what a folded part shows; a part
+  that reads the db (:db) is drawn on it."
   {:malli/schema [:=> [:cat :seon.render/part] :seon.render/faces]}
   [{:keys [value schema] :as p}]
-  (if (contains? p :page)
-    ;; a part whose page shows another value than the model reads (the task beside its story)
-    {:html (html (:page p) {}) :text (ai value {:schema schema})}
   (let [h (render-of value :html schema) a (render-of value :ai schema)
         both (when-not (and h a)
                (print/print-value value (assoc (printer-opts {}) :outputs #{:text :hiccup} :render nested-html)))]
-    {:html (if h (html value {:schema schema}) (or (:html both) [:span {:class "seon-print-refused"} (str (:seon.error/message both))]))
+    {:html (if h (html value (cond-> {:schema schema} (:db p) (assoc :db (:db p)))) (or (:html both) [:span {:class "seon-print-refused"} (str (:seon.error/message both))]))
      :text (if a (ai value {:schema schema}) (or (:text both) (:seon.error/message both) ""))
      ;; a folded part's one line: the conversation's evals fold (seon.render.ui/agent-part)
-     :inline (when (= :eval (first (:key p))) (html value {:as :inline :schema schema}))})))
+     :inline (when (= :eval (first (:key p))) (html value {:as :inline :schema schema}))}))
 
 (defn part-html
   "Part p as a page shows it, from its faces f: {:key :html :inline}, its html and its one line
@@ -265,13 +259,14 @@
   it was drawn with (a redefined render draws again; a member a transaction changed is a new
   object, ctx's patch leaving every other one as it was), else drawn now. Answers [memo' faces]."
   {:malli/schema [:=> [:cat :map :seon.render/part] [:tuple :map :seon.render/faces]]}
-  [memo {:keys [key value schema from] :as p}]
-  (let [fs [(render-of value :html schema) (render-of value :ai schema) @#'print/print-value (when (contains? p :page) (render-of (:page p) :html nil))]
+  [memo {:keys [key value schema from read] :as p}]
+  (let [fs [(render-of value :html schema) (render-of value :ai schema) @#'print/print-value]
         src (or from [value])
-        [fs0 src0 out] (get memo key)]
-    (if (and out (= (count src) (count src0)) (every? true? (map identical? src src0)) (every? true? (map identical? fs fs0)))
+        [fs0 src0 out read0] (get memo key)]
+    ;; a part that reads the db (its :read key) draws again when that key moves
+    (if (and out (= (count src) (count src0)) (every? true? (map identical? src src0)) (every? true? (map identical? fs fs0)) (= read read0))
       [memo out]
-      (let [out (part-faces p)] [(assoc memo key [fs src out]) out]))))
+      (let [out (part-faces p)] [(assoc memo key [fs src out read]) out]))))
 
 (defn rendered?
   "Does v's producer name an AI render for it (the value's own key, or its metadata's
