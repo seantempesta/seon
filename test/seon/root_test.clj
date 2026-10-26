@@ -188,14 +188,16 @@
         ask (fn [code] (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code code}))))]
     (try
       (is (= (str runs "/tasks") (ask "(seon.config/value :seon.config.root/tasks-dir)")) "its task dir is under its runs, not the checkout's")
-      (is (= 0 (ask "(count (seon.task/tasks @(:conn sys)))")) "a fresh root holds no task")
-      ;; a load of its task dir (what a task file's event runs) reads its own file: demo/t, and the
-      ;; root task the first load writes (with main's start-root!, the checkout's 810)
-      (is (= 2 (ask "(do (my.root/load-tasks! sys) (count (seon.task/tasks @(:conn sys))))")) "its own task file and root's task, none of the checkout's")
+      ;; a fresh root's boot loads its task dir (my.root/watch!: a fresh store, or a task file changed
+      ;; while root was down, has nothing else to load it): demo/t and the root task the first load
+      ;; writes, none of the checkout's. It held none before: a root loaded task files only on a
+      ;; watcher event, and this assertion was red (0 tasks), so no event for demo.edn's write
+      ;; loaded it; the count is the boot's load
+      (is (= 2 (ask "(count (seon.task/tasks @(:conn sys)))")) "its own task file and root's task, loaded at boot")
       ;; the read's outcome is root's :seon.root/tasks, the subject a refused read names; an unchanged good read writes nothing
       (is (= [{:files 1} {:ok true :changed 0 :files 1}]
              (ask "[(:seon.root/tasks (datahike.api/pull @(:conn sys) [:seon.root/tasks] [:seon.root/id :root])) (my.root/load-tasks! sys)]"))
-          "its good read's outcome, and a read that finds it so writes nothing")
+          "the boot read's outcome, and a read that finds it so writes nothing")
       (finally (ts/stop-root! root) (clojure.java.shell/sh "rm" "-rf" path runs (str path "-agents"))))))
 
 (deftest a-dead-link-in-the-wiki-is-a-problem-and-the-boot-goes-on
