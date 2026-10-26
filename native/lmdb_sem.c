@@ -18,6 +18,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <sys/stat.h>
 #include <sys/ipc.h>
 #include <sys/sem.h>
@@ -72,16 +73,33 @@ static int collision(const char *base) {
   char a[512], b[512], la[600], lb[600], c[600]; int n;
   sub(a, sizeof a, base, "a"); sub(b, sizeof b, base, "b");
   snprintf(la, sizeof la, "%s/lock.mdb", a); snprintf(lb, sizeof lb, "%s/lock.mdb", b);
-  close(open(la, O_CREAT | O_RDWR, 0664));
-  key_t k = ftok(la, 'M');
-  for (n = 0; n < 1 << 20; n++) {
+  /* the first two files whose keys are equal (ftok keeps 16 bits of the inode, and inode
+     numbers come in sequence, so about 65,536 files), then moved to a/lock.mdb and
+     b/lock.mdb; a key that is not the same after the move says which inodes, and a failed
+     move why (one run under load found its match after 97,990 files, and the moved file's
+     key differed, with nothing to say why) */
+  static int first[1 << 16]; key_t k = -1; int m = -1;
+  memset(first, -1, sizeof first);
+  for (n = 0; n < 1 << 17 && m < 0; n++) {
     snprintf(c, sizeof c, "%s/c%d", base, n);
     close(open(c, O_CREAT | O_RDWR, 0664));
-    if (ftok(c, 'M') == k) { rename(c, lb); break; }
-    unlink(c);
+    key_t kc = ftok(c, 'M');
+    if (kc == -1) { printf("  ftok of %s: %s\n", c, strerror(errno)); return 0; }
+    int slot = kc & 0xffff;
+    if (first[slot] >= 0) { k = kc; m = first[slot]; } else first[slot] = n;
   }
   printf("1. two lock files with ftok key %#x (after %d files)\n", k, n);
-  if (ftok(lb, 'M') != k) { printf("  no file found with the key\n"); return 0; }
+  if (m < 0) { printf("  no two files shared a key\n"); return 0; }
+  char cm[600], cn[600];
+  snprintf(cm, sizeof cm, "%s/c%d", base, m); snprintf(cn, sizeof cn, "%s/c%d", base, n - 1);
+  if (rename(cm, la) || rename(cn, lb)) { printf("  rename: %s\n", strerror(errno)); return 0; }
+  if (ftok(la, 'M') != k || ftok(lb, 'M') != k) {
+    struct stat sa, sb; stat(la, &sa); stat(lb, &sb);
+    printf("  the keys moved: %#x %#x (inodes %llu %llu)\n", ftok(la, 'M'), ftok(lb, 'M'),
+           (unsigned long long)sa.st_ino, (unsigned long long)sb.st_ino);
+    return 0;
+  }
+  for (int i = 0; i < n; i++) { snprintf(c, sizeof c, "%s/c%d", base, i); unlink(c); }
   MDB_env *held; MDB_txn *t; int r = open_env(b, &held);
   if (!r) r = mdb_txn_begin(held, NULL, 0, &t);
   printf("  holder of b, inside a write txn: %s\n", r ? mdb_strerror(r) : "yes");
