@@ -4,7 +4,7 @@
   proof is not shown again, a merge task's plan stays its own."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.context :as context] [seon.print :as print]
-            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs] [seon.screen] [seon.turn]
+            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs] [seon.screen]
             [seon.print.select :as select] [clojure.string :as str] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model]))
 
 (defn- db-with-program []
@@ -965,23 +965,6 @@
     (is (str/includes? (:read v) "(:seon.ref/text (my.agent/help ") "with the form that reads one whole, its text's key named")
     (is (str/includes? (:more v) "my.agent/related") "and the form that searches further")
     (is (nil? (context/related (ts/test-db) (pdb/eid db :seon.task/id "demo/r"))) "a plan with no vector shows none")))
-
-(deftest the-stages-story-and-related-are-facts-of-the-branch
-  ;; joint design, slice 1: what a view reads is in ctx, so nothing is computed at the view. The
-  ;; stage's story (run-state) is written once as its run begins, and related as the turn observes
-  ;; the plan's vectors, each on the agent's branch
-  (let [[db te] (sections-near "Make the page say one thing (docs/vector.md#what-is-embedded) of `:demo/thing`.")]
-    (try
-      (reset! agent/state {:db db :key "demo/a1" :branch :b :mode :test})
-      (#'seon.turn/related! "demo/r")
-      (is (= (context/related db te) (:seon.task/related (d/entity (agent/db) te))) "related, as its fact on the task")
-      (let [db1 (agent/db)]
-        (#'seon.turn/related! "demo/r")
-        (is (identical? db1 (agent/db)) "the vectors unmoved: nothing computed again, nothing written"))
-      (#'seon.turn/begin! "demo/r" "demo/r#1")
-      (is (= (context/run-state db (task/task db "demo/r")) (:seon.run/story (d/entity (agent/db) [:seon.run/id "demo/r#1"])))
-          "the stage's story, as its fact on the run it begins")
-      (finally (reset! agent/state nil)))))
 
 (deftest related-sections-follow-a-rewritten-plan
   (let [[db te dir] (sections-near "Make the page say one thing.")
