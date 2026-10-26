@@ -909,7 +909,7 @@
 
 (defn task-data
   "The task its run works (a component over ctx and the db): its id, kind and execution from ctx,
-  then the task's data (seon.context/task-data over the db: its plan as prose, then what to prove,
+  then the task's data (seon.context/task-data over the db: its instructions and its plan as prose, then what to prove,
   each written proof with its source from ctx, the sections cited with their text and the similar
   as a call of the one printer, [#'seon.render/html opts data],
   expanded when the page is written, so the model reads the data as data). It runs again when
@@ -923,13 +923,16 @@
     [:section {:class "task-data"}
      [:h2 "task"]
      [:p (str id (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
-     ;; its plan as prose here, then each section it cites, its text as prose (ctx's :sections), and
+     ;; its instructions (how its kind is worked: the template's text, whole under the value budget)
+     ;; and its plan as prose here, then each section it cites, its text as prose (ctx's :sections), and
      ;; the rest of its data by the printer (each cited var is its own component); each proof how to
      ;; run it and, written, its source (its last result is the status's)
      (let [data (cond-> (context/task-data db (task/task db id) false)
                   (seq sources) (update :to-prove #(into (empty %) (for [[s run] %] [s (if-let [src (sources s)] {:run run :source src} run)]))))]
        ;; a cut names the form that answers the whole at the agent's REPL
-       (list (when-let [plan (get-in data [:task :seon.task/plan])] [:p {:class "seon-prose"} (prose plan (part) {:whole '(:seon.task/plan (:task (my.task/data)))})])
+       (list (when-let [ins (get-in data [:task :seon.task/instructions])]
+               [:p {:class "seon-prose"} (prose ins (config/value :seon.config.render/value-budget) {:whole '(:seon.task/instructions (:task (my.task/data)))})])
+             (when-let [plan (get-in data [:task :seon.task/plan])] [:p {:class "seon-prose"} (prose plan (part) {:whole '(:seon.task/plan (:task (my.task/data)))})])
              (for [{:seon.section/keys [address heading text]} (vals (:sections t))]
                (list [:h3 heading " " [:code address]]
                      [:p {:class "seon-prose"} (prose (str text) (part) {:whole (list :seon.ref/text (list 'my.agent/help address))})]))

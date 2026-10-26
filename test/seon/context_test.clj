@@ -7,6 +7,13 @@
             [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui] [seon.web.html]
             [seon.print.select :as select] [clojure.string :as str] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model]))
 
+(defn- ns-fact
+  "Var v's namespace with its file, as a store records it: a program namespace's under src/, a
+  test's under test/ (seon.program/program-name? reads which)."
+  [v]
+  (let [n (namespace v)]
+    {:db/id (str "ns " n) :ns/name (symbol n) :ns/file (str (if (str/ends-with? n "-test") "test/" "src/") (str/replace n "-" "_") ".clj")}))
+
 (defn- db-with-program []
   (let [db (ts/test-db)]
     ;; recorded definitions, each its form (seon.program's facts), written as data
@@ -14,7 +21,7 @@
                                  [{:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)}
                                   {:db/id (str "form " v) :form/id (str v) :form/src src :form/ns (str "ns " (namespace v)) :form/order 0
                                    :form/defines [(str v)]}
-                                  {:db/id (str "ns " (namespace v)) :ns/name (symbol (namespace v))}])
+                                  (ns-fact v)])
                                '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))"]
                                  [demo-test/f-test "(deftest f-test (is (= 4 (f 2))))"]
                                  [demo-test/g-test "(deftest g-test (is (= 1 (g))))"]
@@ -321,7 +328,7 @@
                   (cond-> {:db/id (str "form " v) :form/id (str v " " src) :form/src src :form/ns (str "ns " (namespace v)) :form/order 0
                            :form/defines [(str v)]}
                     (seq refs) (assoc :form/refs (vec refs)))
-                  {:db/id (str "ns " (namespace v)) :ns/name (symbol (namespace v))}])
+                  (ns-fact v)])
                defs)))
 
 (defn- turn-of
@@ -815,7 +822,7 @@
                                                           [demo/vol "(defn vol [x] (demo/f (demo/f x)))" [demo/f]]]))
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "s"
                                                :seon.task/plan "Make `demo/f` triple. demo-test/h-test asserts (f 2) is 6."
-                                               :seon.task/proofs #{'demo-test/f-test 'demo-test/h-test}}]))
+                                               :seon.task/proofs #{'demo-test/f-test 'demo-test/h-test 'demo-test/q-test}}]))
         data (context/task-data db (task/task db "demo/s"))]
     (is (= [:task :write-set :to-prove] (vec (keys data))) "plan, write set, proofs; nothing else uncited (what is near is off by default)")
     (let [db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n" :seon.task/plan "Make `demo/f` triple."
@@ -827,7 +834,9 @@
     (is (= '(my.agent/prove #{demo-test/f-test}) (get (:to-prove data) 'demo-test/f-test)) "a written proof: the form that runs it")
     (is (= "not written yet; it should assert what the plan says: demo-test/h-test asserts (f 2) is 6."
            (get (:to-prove data) 'demo-test/h-test))
-        "an unwritten proof: what the plan says it should assert")))
+        "an unwritten proof: what the plan says it should assert")
+    (is (= "not written yet" (get (:to-prove data) 'demo-test/q-test))
+        "one the plan's sentences do not name: that it is not written, not the plan again (the page shows it)")))
 
 (deftest a-record-keeps-its-value
   ;; the owner's rule (clipping audit 2026-10-25, P1/P8): data is cut only by the one printer,
@@ -1127,6 +1136,15 @@
             fs (:functions (context/related db te))]
         (is (some #{'demo/c} fs) (str "a cited var's graph: its caller " (pr-str fs)))
         (is (not-any? #{'demo/h} fs) "and not meaning's seed")))))
+
+(deftest a-pages-cited-vars-are-the-programs
+  ;; audit item 2a: the page's cited vars are the program's; a reproduction's test helper
+  ;; (demo-test is test/'s), library call and handle are not cited, while the program's var is
+  (let [db (db-with-program)
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "c"
+                                              :seon.task/plan "Reproduce: (let [x (demo-test/f-test)] (demo/f (clojure.string/trim x))) answers result/e1."}]))]
+    ;; the cited set is the task's references (ctx's :cited joins them by :var/name)
+    (is (= #{'demo/f} (:seon.task/references (d/pull db [:seon.task/references] [:seon.task/id "demo/c"]))))))
 
 (deftest a-proof-with-no-result-reads-unknown
   ;; demo-test/f-test is written (its source is recorded) but no test report names it: it never

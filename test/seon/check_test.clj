@@ -291,3 +291,55 @@
     (is (= "exit 0" ex) "the watcher ends when the shards do: the run goes on")
     (is (re-find #"^STALLED seon.x-test/hangs \d+ ms \(bound 200 ms, load [\d.]+," (str line)) "the quiet test past its own bound is named, with its quiet ms and the load it was quiet under")
     (is (= ["1" "0" "0"] [na nb nc]) "recorded once in its shard's log; the slow test within its bound, and a test that ended, are not named")))
+
+(deftest a-heavy-run-waits-while-mains-verification-runs
+  ;; docs/merging.md#main-goes-first: bin/prove --merge holds the main checkout's lock, and every
+  ;; other heavy run's main_first (bin/env) waits on it, saying whom it waits for, and goes on
+  ;; when the holder lets go. One process does the ordering, so the test ends on the waiter's
+  ;; exit whatever main_first does: the holder takes the lock, forks the waiter (its stderr on
+  ;; its stdout: the holder reads one pipe), reads the waiter's first line while it still holds
+  ;; the lock, lets go, and reads the rest to the waiter's exit. A main_first that did not wait
+  ;; prints no waiting line and exits at once, which the holder reads as its first line
+  (let [dir (str (.getCanonicalPath (java.io.File. "target/tmp")) "/main-first-" (random-uuid))
+        _ (.mkdirs (java.io.File. dir))
+        lock (str dir "/main-verify.lock")
+        holder (str "open(my $f, '>>', $ARGV[0]) or die; flock($f, LOCK_EX); truncate($f, 0); print $f \"a test holder\\n\"; $f->flush;"
+                    " my $pid = open(my $w, '-|') // die; if (!$pid) { open(STDERR, '>&STDOUT'); delete $ENV{SEON_MAIN_FIRST_HELD}; exec('zsh', '-c', \". bin/env; MAIN_LOCK=$ARGV[0]; main_first; echo returned\"); }"
+                    " my $first = <$w>; print \"while held: $first\"; flock($f, LOCK_UN); close($f);"
+                    " print \"after: $_\" while <$w>; close($w); print 'exit: ', $? >> 8, \"\\n\";")
+        r (clojure.java.shell/sh "perl" "-MFcntl=:flock" "-e" holder lock)
+        lines (str/split-lines (:out r))]
+    (try
+      (is (= ["while held: waiting for main's merge verification (a test holder)"
+              "after: returned"
+              "exit: 0"] lines)
+          (str "it said whom it waited for while the lock was held, and went on once let go: " (pr-str r)))
+      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+
+(deftest a-merges-verdict-is-its-exit-statuses-and-it-writes-its-line
+  ;; bin/prove --merge's verdict comes from prove's, contracts' and smoke's exit statuses alone,
+  ;; names each red from their logs, and appends its line to the merge log itself (so a line
+  ;; cannot say green over a red exit); bin/prove --merge-verdict runs that part alone
+  (let [dir (str (.getCanonicalPath (java.io.File. "target/tmp")) "/merge-verdict-" (random-uuid))
+        log (str dir "/merge-log.md")
+        run (fn [st cst sst] (clojure.java.shell/sh "bin/prove" "--merge-verdict" dir (str st) (str cst) (str sst) :env (assoc (into {} (System/getenv)) "MERGE_LOG" log)))]
+    (.mkdirs (java.io.File. dir))
+    (spit (str dir "/prove.log") (str "prove: 12 keys (10 tests, 2 check steps), 4 green at their digest (reused), 8 tests to run in 2 shards, 0 steps to run; selected in 5 ms\n"
+                                      "RED seon.x-test/a-red {:pass 1, :fail 1, :error 0}\nPROVE FAILED\n"))
+    (spit (str dir "/contracts.log") "CONTRACTS OK\n")
+    (spit (str dir "/smoke.log") "SMOKE OK\n")
+    (spit log "x one earlier line, 195 process keys left out\n")
+    (try
+      (let [r (run 1 0 0) line (last (str/split-lines (slurp log)))]
+        (is (= 1 (:exit r)) (:out r))
+        (is (str/ends-with? (str/trim (:out r)) "MERGE FAILED"))
+        (is (str/includes? line "MERGE FAILED; prove FAILED (exit 1)") line)
+        (is (str/includes? line "reds: RED seon.x-test/a-red") line)
+        (is (str/includes? line "main's last line: 195") line))
+      (let [r (run 0 0 2) line (last (str/split-lines (slurp log)))]
+        (is (= 1 (:exit r)) "a red smoke is a failed merge though prove is green")
+        (is (str/includes? line "smoke FAILED (exit 2)") line))
+      (let [r (run 0 0 0) line (last (str/split-lines (slurp log)))]
+        (is (zero? (:exit r)))
+        (is (str/includes? line "MERGE OK") line))
+      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))

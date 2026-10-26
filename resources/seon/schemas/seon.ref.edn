@@ -28,7 +28,8 @@
  :seon.ref/span [:or
                  [:map {:closed true} [:seon.ref/code :string] [:seon.ref/width pos-int?] [:seon.ref/line :seon.ref/line]]
                  [:map {:closed true} [:seon.ref/link :string] [:seon.ref/line :seon.ref/line]]
-                 [:map {:closed true} [:seon.ref/word :string] [:seon.ref/line :seon.ref/line]]]
+                 ;; :seon.ref/quoted, a word read inside a "..." string (a reproduction's data): no citation
+                 [:map {:closed true} [:seon.ref/word :string] [:seon.ref/line :seon.ref/line] [:seon.ref/quoted {:optional true} :boolean]]]
  ;; one block of the scan, by the kind its first line starts: an ATX heading (its level, its
  ;; text and the offsets of its content), a fenced or indented code block, a paragraph, a list,
  ;; a block quote, a table or a thematic break; :from and :to are offsets into the text, and the

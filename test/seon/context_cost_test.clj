@@ -96,9 +96,10 @@
                ;; the shortlist, as seon.vector-cost-test/a-search-reads-each-row-once measures past
                ;; it. A row is its coarse datom read (~590 B) and its kind's membership set, the :of
                ;; attribute's datoms (~790 B for sections); the second and third coarse scans add
-               ;; ~40 B (measured, seon.vector/one-scan-ranks-every-kind).
+               ;; ~40 B (measured, seon.vector/one-scan-ranks-every-kind). Two calls more since the
+               ;; plan's cited vars are the program's (seon.context/program-vars, seon.program/program-names).
                :per-n {:bytes 1480.0 :calls 0.0}
-               :fixed {:bytes 7440000.0 :calls 445.0}
+               :fixed {:bytes 7440000.0 :calls 447.0}
                :sizes [500 1000 2000]}))
 
 (defn kept-of

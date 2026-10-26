@@ -7,7 +7,7 @@
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.system :as system] [seon.render.proc :as p]
             [seon.web.html :as h] [clojure.walk] [seon.print.select] [seon.config] [seon.docs] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
-            [seon.fx] [seon.source] [seon.program] [seon.web] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems]))
+            [seon.fx] [seon.source] [seon.program] [seon.web] [seon.template] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -615,9 +615,11 @@
         [st _] (#'p/pass-view (proc-state main branch) :a3)
         e1 (:db/id (d/entity branch [:seon.eval/id "e1"]))
         touched (fn [db tx-data] (#'p/touched st (:tx-data (d/with db tx-data))))
-        ;; an entity of main the page did not read (ids from separate speculative d/with calls can
-        ;; repeat in a test; on a store they are issued once)
-        unread (first (remove #(contains? (get-in st [:views :a3 :reads]) [:e %]) (d/q '[:find [?e ...] :where [?e :ns/name]] main)))]
+        ;; an entity of main the page did not read, a form of the example program (ids from separate
+        ;; speculative d/with calls can repeat in a test; on a store they are issued once); not a
+        ;; namespace: related reads every namespace's file (seon.program/program-nss)
+        unread (first (remove #(contains? (get-in st [:views :a3 :reads]) [:e %]) (d/q '[:find [?e ...] :where [?e :form/id]] main)))]
+    (is (some? unread) "a form the page did not read")
     (is (seq (get-in st [:views :a3 :reads])) "the page holds what it read")
     (is (= #{:a3} (touched main [{:db/id eid :seon.agent/status :idle}])) "the agent's own datom")
     (is (empty? (touched branch [{:db/id e1 :seon.eval/by "user"}]))
@@ -1086,6 +1088,17 @@
         (is (not-any? #(= :error (:op %)) (:to-api @o2)))
         (is (some #(and (= 3 (:k %)) (str/includes? (:html %) "seon.render/view-defect")) (:to-web @o2)) "its page is still the error")))))
 
+(deftest a-whole-tasks-page-holds-its-instructions
+  ;; the task part drew the plan and dropped the task's own data, its instructions with it, so no
+  ;; agent read how its kind is worked (reproduce first, fail! when already right, stop reading once
+  ;; wrong): they are drawn above the plan, whole
+  (let [db (ts/test-db)
+        db (d/db-with db (seon.task/create-tx db (seon.template/request {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."})))
+        h (h/html (ui/task-data {:seon.ctx/ctx {:runs {1 {:task {:seon.task/id "demo/w"}}}} :seon.db/db db} 1))]
+    (is (str/includes? h "reproduce what the plan says is wrong") "the whole instructions are on the page")
+    (is (str/includes? h "your run ends and root merges your branch") "whole: their last sentence too, nothing cut")
+    (is (< (str/index-of h "reproduce what the plan says is wrong") (str/index-of h "Make w true.")) "above the plan")))
+
 (defn- unit-of
   "The unit of units whose element id starts with prefix."
   [units prefix] (some #(when (str/starts-with? (:id %) prefix) %) units))
@@ -1095,7 +1108,9 @@
   ;; the page's lists, each keyed by what it shows, its root element's id its key
   (let [[_ branch _] (paged-dbs)
         k (seon.task/agent-key "b1" :a3)
-        branch (d/db-with branch [{:seon.turn/id "demo/f#1/1" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/n 1 :seon.turn/origin :model
+        ;; the cited var's namespace, the program's as a store records it (seon.program/program-names)
+        branch (d/db-with branch [{:ns/name 'seon.render :ns/file "src/seon/render.clj"}
+                                  {:seon.turn/id "demo/f#1/1" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/n 1 :seon.turn/origin :model
                                    :seon.turn/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 1 :max-turns 8 :origin :model
                                                      :observed {:results {'demo/f-test :fail} :reds [{:test 'demo/f-test :expected '(= 4 (f 2)) :actual 5}]
                                                                 :reasons [{:reason :proof-red :symbol 'demo/f-test}]}}}])

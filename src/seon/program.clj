@@ -538,6 +538,21 @@
     (into #{} (keep (fn [{:keys [e v]}] (when (some #(str/starts-with? v %) dirs) (:ns/name (d/entity db e)))))
           (d/datoms db :aevt :ns/file))))
 
+(defn program-names
+  "Of qualified symbols ns, those the program's, in ns's order: what a task's page cites as vars.
+  A name is the program's when db holds its namespace with a file under
+  :seon.config.source/program-dirs, as program-nss reads them, reading only these names'
+  namespaces (a page's reads stay what it cites). A test's or a test helper's, a library's, and a
+  name of no namespace the program holds (a reproduction's handle, result/e1) are not: they are a
+  reproduction's entry and data, not its subject."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :qualified-symbol]] [:vector :qualified-symbol]]}
+  [db ns]
+  (let [dirs (mapv #(str % "/") (cfg/value :seon.config.source/program-dirs))
+        of #(symbol (namespace %))
+        program (into #{} (filter (fn [n] (some-> (:ns/file (d/entity db [:ns/name n])) (as-> f (some #(str/starts-with? f %) dirs)))))
+                      (distinct (map of ns)))]
+    (filterv (comp program of) ns)))
+
 (defn live?
   "Is form entity e part of the program: it defines nothing (a text form: a declare, a
   require, a comment kept from its file), or some definition it made still points to it."
