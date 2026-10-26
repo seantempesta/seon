@@ -2,18 +2,18 @@
 
 What is in flight, what the owner has not yet ruled, and the steps from here to the goal (Seon agents doing real work, measured as turns to green); [AGENTS.md](../AGENTS.md) says who does what and the method, the [map](README.md) how the system works, [decisions](decisions.md) the owner's standing rulings, and git the history (`notes/merge-log.md` names every merge and how it was verified).
 
-## Now (2026-10-26, evening)
+## Now (2026-10-27, night)
 
-Pins (docs/forks.md): Chez fa6a4c73; Jolt 2eda21da (d598fc04, the fiber dump, merging next); Datahike e5a55664; LMDB 15420ce; http-client e866277d. Paid model runs: $30 overnight (owner, 2026-10-26 night), only after a free audit of each request's context finds none of its known problems, and once the hang fixes are on main.
+Pins (docs/forks.md): Chez fa6a4c73; Jolt 07d9655d (System/exit runs no finally; the host-winder fix; the fiber dump); Datahike cc614f4e (attribute comparison without a try); LMDB 15420ce; http-client e866277d. Paid model runs: $30 overnight, only after a free audit of each request's context finds none of its known problems; the first audit was not clean (notes/known-context-problems-2026-10-26.md), so none has run.
 
-**Where it stands.** Main is green on prove, `bin/check contracts`, the process tests and smoke. A request is one whole task by default (design, build and merge in one run; owner, 2026-10-26 night); design-build and `stages` remain as experiment choices passed to `my.root/request!`. The last live run (design-build, 2026-10-26): 1/10 merged, 93% cached, 1.7k first-turn tokens; four of the ten requests were already done on main (refreshed since) and the rest capped for context the page lacked (notes/context-for-20-turns-2026-10-26.md).
+**Where it stands.** Main is green under `bin/prove --merge` (every process key the change reaches, contracts, smoke) except one owned intermittent red, seon.source-test/a-restart-catches-up-and-a-new-generation-resumes (the narrowed watch triggers it). Main's merge verification goes first through one flock; plain prove now leaves out 127 keys (was 203). A request is one whole task by default; the task's render carries its instructions, the cited functions' source and tests, and section text.
 
 **The direction.** Three things, in this order of urgency:
-1. **Stability: no process waits forever unseen.** Today's hangs each had a cause found and fixed (the watcher's lost first event, a dead fork server's waiters, a test child's held pipe, a forked child unwinding into its parent, a fresh root booting with no tasks). A stall becomes a fact, an open problem and a task for root (agent loop, building). `kill -INFO` on any process prints every fiber and what it waits on (the fiber dump).
-2. **One rendering system** (notes/render-design-2026-10-26.md, the agreed design): ctx is the agent's data pulled by a stored pattern and patched by each transaction with untouched parts `identical?`; a render is `(fn [opts & children] hiccup)`; the walk draws every value by its render or its schema's render; one cache in the shape of Reagent's ratom with inferred cursors, plus `d/with-reads` for renders that query; the model reads the same hiccup, whole on the first turn and then the diffs.
-3. **Context good enough for about 20 turns,** and work the system can check: cost bounds on contracts, a score of the rules (notes/rules-score/).
+1. **Stability: no process waits forever unseen.** Stalls are facts, root's tasks, with their evidence captured; reds hidden in left-out steps are run by `--merge`; hangs found tonight were each fixed at their cause (Jolt's zip read across a park, System/exit's finally, a forked child's status).
+2. **One rendering system** (notes/render-design-2026-10-26.md): build 3 (the ratom walk) next, then 3b-root and build 4 (the request from the render's diffs).
+3. **Context good enough for about 20 turns:** the second free audit once build 3 is on main; then paid runs.
 
-**How work moves.** Sessions build on worktrees, self-review, and report ready to root; root merges one branch or a small batch after verifying it on main: `bin/prove` (its left-out count compared), `bin/check contracts`, the process tests the change reaches by name (always `seon.main-test`), and smoke. Nothing tracked is edited while a verification runs. A red on main gets an owner within the hour. A worktree is removed when its branch merges.
+**How work moves.** Sessions build on worktrees, self-review, and report ready to root; root merges and verifies with `bin/prove --merge` in the main tree, reads every red it names, and restarts main's root on the result. Nothing tracked is edited while a verification runs. A worktree is removed when its branch merges.
 
 ## In flight
 
@@ -21,20 +21,20 @@ What each working session is doing now and takes next; every session is linked t
 
 | Session | Now | Next |
 |---|---|---|
-| **Render build** (agent view) | build 3 on jolt/render-walk: seon.ratom (Reagent's ratom, cursors inferred), the walk, one cache, the per-render ledger, the task render drawing cited source, tests and section text within the printer's budget; deletes the parts layer and the hand-built cache keys | 3b-root (task seon.render/every-page-is-its-parts): root's page and the debug page through the same walk, deleting seon.render.system and the old unit walk |
-| **ctx** (ctx-atom) | D1–D5 page data ready to merge (jolt/the-page-holds-what-the-work-needs); `seon.ctx/changes` walked in step over sorted collections (no sets) | the cited-var choice for the page (D5) |
-| **Cost bounds** (related sections) | declared design step 1 merged (`:seon.cost/bound`); build 4's proofs written red (jolt/the-request-is-the-page-and-its-diffs) | build 4 after build 3: the model's request from the page and the two diffs, deleting the 280 ms per-turn rebuild; then declared design steps 2–4 |
-| **Agent loop** | stall visibility (jolt/agent-loop): the stall fact, the :stalled problem, the stall task with `:seon.task/cause`, bin/test's STALLED bound relative to each test's history | the busy-with-no-process defect |
-| **Stability** (stability lead) | piece 1: the fork server's boot order (jolt/zygote-one-mode), rebased on Jolt d598fc04 | one process mode for every forking process |
-| **Hangs** (full-run reds) | the fiber dump ready (jolt/jolt-fiber-dump) | agent a6's wait on root (cause unknown); the next full run on a clean main |
-| **Live agents** | one-go default with the merge gate judging main's tests, not the branch's (proof red, fix next) | the next live run on the refreshed requests, when the owner allows paid runs |
+| **Render build** (agent view) | build 3 on jolt/render-walk, held on its own red (seon.source-test/importing-src: seon.ratom's deftypes reloaded at boot) until the restart test's cause is known | the cited tests by the render's own query (ctx-atom's measured option C); compact styling; 3b-root |
+| **ctx** (ctx-atom) | the cited tests query handed to build 3 | the index observe's remaining fixed cost (task seon.reconcile/an-index-is-observed-at-the-cost-of-what-changed) |
+| **Cost bounds** (related sections) | build 4's proofs written red (jolt/the-request-is-the-page-and-its-diffs) | build 4 after build 3 |
+| **Agent loop** | a cost proof with fewer than 3 points under the cap is refused, and its left-out sizes named; ~30 proofs given a third size | busy-with-no-process follow-ups |
+| **Stability** | the :died/:failed ordering at the producer | one process mode for every forking process |
+| **Hangs** (full-run reds) | the restart test's red (jolt/two-merges-two-commits): a merge's write-back outcome always recorded; why the member names no file | Jolt tasks filed: spit through a FIFO, the fiber dump in a private wait |
+| **Live agents** | holding until build 3 merges | the second free context audit, then the run list for paid runs |
 
 ## Waiting on the owner
 
 The rulings and calls root holds for the owner.
 
-- Delete jolt/evaluations, jolt/acts-by-second-move and jolt/flow-lab (carried forward or superseded; notes/branch-merit-2026-10-26.md); carry or delete examples, wiki, unitflake, one-content-keyed-derivation.
-- Three worktrees hold uncommitted work (live-agents, stability's jolt/fork-guard, acts-by-second-move): keep or drop.
+- Build 3's eval shape: root took "prose plus each eval's handle, the value drawn when opened" as the owner's meaning of "not show the same eval data"; confirm or correct.
+- The old live-agents worktree's runs/store-r0..r8 (2.3 GB, the paid rounds' raw stores): keep or delete.
 
 ## THE PLAN
 
