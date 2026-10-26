@@ -691,7 +691,7 @@
                ;; the session's agent continues (design agent-loop section 1); kept on the flight for its run's start
                (one (request (cond-> st k (assoc-in [:flights run :key] k)) run :spawned
                              {:op :spawn :opts (cond-> {:branch (get-in act [:env :branch]) :task (:task act) :run run} k (assoc :key k))})))
-      :reap (one (write st run :done (cas-tx run :running :lost {:seon.run/end-ms (System/currentTimeMillis) :seon.run/reason "root restarted"})))
+      :reap (one (write st run :done (cas-tx run :running :lost {:seon.run/end-ms (System/currentTimeMillis) :seon.run/outcome :lost :seon.run/reason "root restarted"})))
       ;; the run parked its session: written once, here; its process stays (design agent-loop section 1)
       :park (one (write st run :done (cas-tx run :ended :parked {})))
       :close (cond-> (one (write st run :done (cas-tx run :ended :closed {})))
@@ -704,7 +704,7 @@
       :kill (let [[st o1] (request st run :ignored {:op :kill :id agent})
                   [st o2] (write st run (if killing? :ignored :done) (cas-tx run (:seon.run/status a :running) :killed
                                                                              (cond-> {:seon.run/reason (name (:reason act))}
-                                                                               (= :running (:seon.run/status a)) (assoc :seon.run/end-ms (System/currentTimeMillis)))))]
+                                                                               (= :running (:seon.run/status a)) (assoc :seon.run/end-ms (System/currentTimeMillis) :seon.run/outcome :killed))))]
               [st [o1 o2]])
       ;; refused, dead or its merge refused: the task is held for root, with the evidence
       :verdict (let [prev (last-verdict (:db st) run)]
@@ -831,7 +831,7 @@
   exit status, stderr tail, last op; or :seon.root/no-agent or :seon.root/ended). A silent death wrote no end."
   {:malli/schema [:=> [:cat :seon.run/id :seon.error/base [:maybe :map]] [:vector :any]]}
   [aid e end]
-  (cas-tx aid :running :dead {:seon.run/end-ms (System/currentTimeMillis)
+  (cas-tx aid :running :dead {:seon.run/end-ms (System/currentTimeMillis) :seon.run/outcome :dead
                               :seon.run/reason (if (:reason end) (str (:reason end) " (" (:seon.error/message e) ")") (:seon.error/message e))
                               :seon.run/error (cond-> e (:error end) (assoc :cause (:error end)))}))
 
@@ -850,7 +850,7 @@
         ;; the writer refused to read or diff its branch: its agent is stopped and the run
         ;; ends with the reason as its error, not judged on facts nobody measured
         refused (fn [st e] (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
-                                 [st o2] (write st aid :done (cas-tx aid :running :ended {:seon.run/end-ms (System/currentTimeMillis)
+                                 [st o2] (write st aid :done (cas-tx aid :running :ended {:seon.run/end-ms (System/currentTimeMillis) :seon.run/outcome :error
                                                                                           :seon.run/reason (:seon.error/message e) :seon.run/error e}))]
                              [st [o1 o2]]))]
     (case step
@@ -875,7 +875,7 @@
                              [(let [now (System/currentTimeMillis)]
                                 (-> (first (task/run-start-tx aid (:task act) (:boot st) nil (:env act) now
                                                                   (:plan (task/accumulate (get-in st [:idx :tasks]) (:task act)))))
-                                    (assoc :seon.run/status :refused :seon.run/end-ms now
+                                    (assoc :seon.run/status :refused :seon.run/outcome :refused :seon.run/end-ms now
                                            :seon.run/reason (:seon.error/message r) :seon.run/error r)))])))
       ;; an outside agent works this run (seon.server): no turn loop; it hands it back
       :started (cond
@@ -898,7 +898,7 @@
                 ;; view: ended or never there): the run took nothing, so it is lost, not a death, and
                 ;; the task starts again as a spawn, a load of the session (design agent-loop section 4)
                 (and (= :wake (:op act)) (#{:seon.root/ended :seon.root/no-agent} (:seon.error/type r)))
-                (one (write st aid :done (cas-tx aid :running :lost {:seon.run/end-ms (System/currentTimeMillis)
+                (one (write st aid :done (cas-tx aid :running :lost {:seon.run/end-ms (System/currentTimeMillis) :seon.run/outcome :lost
                                                                      :seon.run/reason (str "its parked process was gone: " (:seon.error/message r))})))
                 (contract/error? r) (dead st r)
                 :else

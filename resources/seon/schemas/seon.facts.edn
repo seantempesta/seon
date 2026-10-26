@@ -231,7 +231,9 @@
  :seon.run/branch :keyword
  :seon.run/model :string
  :seon.run/max-turns :int
- :seon.run/outcome [:enum {:seon.db/taken true} :green :red :waiting :cap :failed :merge-failed :error :no-end]
+ ;; how a run ended: the agent's own end, judged, or root's (:dead, :lost, :killed, :refused). Every
+ ;; way a run leaves :running writes one, so a run with none is running (its page tile reads it so)
+ :seon.run/outcome [:enum {:seon.db/taken true} :green :red :waiting :cap :failed :merge-failed :error :no-end :dead :lost :killed :refused]
  :seon.run/reason [:string {:seon.render/prose true :seon.db/taken true}]
  :seon.run/turns :int
  ;; the messages to its session's runs its branch had taken when the run was judged (seon.reconcile/judge-tx): main holding more wakes a parked one
