@@ -210,6 +210,44 @@
     (is (re-find #"OVER: (bytes|calls)" text) "red on an exact dimension (time is shown, never red)")
     (is (re-find #"one pass" text) "the explanation restates the work the data needs")))
 
+;; ---- a bound in the contract, checked on the contract's own generator -----------------------
+
+(defn one-pass-bounded
+  "one-pass, its contract carrying its bound: one call of itself and one of seen an element; the
+  call's own bytes (an empty vector measured 272 B) and an assoc's an element (the unit table's
+  :map/assoc, 825 B)."
+  {:malli/schema [:=> [:cat [:vector :int]] :map]
+   :seon.cost/bound (fn [xs] {:calls (inc (count xs)) :bytes (+ 400.0 (* 825.0 (count xs))) :out {:keys (count xs)}})}
+  [xs] (reduce seen {} xs))
+
+(defn rescanning-bounded
+  "rescanning, under one-pass's bound: a pass per element."
+  {:malli/schema [:=> [:cat [:vector :int]] :map]
+   :seon.cost/bound (fn [xs] {:calls (inc (count xs)) :bytes (+ 400.0 (* 825.0 (count xs))) :out {:keys (count xs)}})}
+  [xs] (rescanning xs))
+
+(def ^:private generated
+  {:of 'seon.cost-test/one-pass-bounded :n "a generated vector of integers (the contract's own generator)"
+   :work "one pass: per integer one seen call (one persistent assoc)" :cases 30})
+
+(deftest a-bound-holds-on-its-contracts-generated-inputs
+  ;; task seon.cost/a-contract-carries-its-cost-bound: the bound is the contract's, evaluated on the
+  ;; same arguments the function is measured on; no hand-picked sizes
+  (let [{:keys [rows verdict]} (cost/run generated)]
+    (is (= 30 (count rows)) "every generated case measured")
+    (is (every? #(= (get-in % [:expected :calls]) (inc (count (first (:args %))))) rows) "each row's estimate is the bound on that row's arguments")
+    (when seon.contract/on?
+      (is (every? #(== (get-in % [:measured :calls]) (get-in % [:expected :calls])) rows) "calls are exact: the bound's count"))
+    (is (:ok? verdict) (cost/explain generated rows verdict))))
+
+(deftest a-scan-inside-the-loop-is-red-under-the-bound
+  (let [e (assoc generated :of 'seon.cost-test/rescanning-bounded)
+        {:keys [rows verdict]} (cost/run e)
+        text (cost/explain e rows verdict)]
+    (is (not (:ok? verdict)) text)
+    (is (re-find #"OVER: bytes" text) "red on an exact dimension")
+    (is (re-find #"\[" text) "the case that went over is named by its arguments")))
+
 ;; ---- the unit table's bench (seon.cost/units is these, divided by n) ---------------------
 
 (defn- unit-inc "A contracted function of one int, for the :fn/armed-call unit."

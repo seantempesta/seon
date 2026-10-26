@@ -1,6 +1,6 @@
 # ctx: the agent's record as one map
 
-An agent reads its own record with `@ctx`: one map of its agent entity pulled by a pattern (its runs with their task, the vars the task cites, turns and messages, and its evals), with `:t`, `:branch` and `:commit` beside them (``seon.ctx/ctx``). It is a plain Clojure atom, kept current as the agent works, so a read is a deref and nothing is built for it. The design, the measurements and the owner's rulings behind it are in `notes/design-ctx-atom-2026-10-25.md`; the task is `seon.ctx/the-record-is-an-atom`.
+An agent reads its own record with `@ctx`: one map of its agent entity pulled by a pattern (its runs with their task, the vars the task cites, turns and messages, and its evals), with `:t`, `:branch` and `:commit` beside them (``seon.ctx/ctx``). It is a plain Clojure atom, kept current as the agent works, so a read is a deref and nothing is built for it. The design, the measurements and the owner's rulings behind it are in `notes/archive/design-ctx-atom-2026-10-25.md`; the task is `seon.ctx/the-record-is-an-atom`.
 
 ## The pattern
 
@@ -47,7 +47,7 @@ An agent adds to its record, and to what it sees of it, with four evals (`seon.c
 
 ```clojure
 (my.schema/register! :lab.ctx/steps '[:vector {:seon.render/html lab.ui/steps} :string])
-(ns lab.ui) (defn steps "The plan's steps, numbered." {:malli/schema [:=> [:cat [:vector :string] :map] :any]} [v _] [:ol (for [s v] [:li s])]) (in-ns 'agent.a1)
+(ns lab.ui) (defn steps "The plan's steps, numbered." {:malli/schema [:=> [:cat :map [:vector :string]] :any]} [_ v] [:ol (for [s v] [:li s])]) (in-ns 'agent.a1)
 (my.db/transact! [{:seon.agent/key (:seon.agent/key @ctx) :lab.ctx/steps ["read the plan" "write the test"]}])
 @ctx
 ```

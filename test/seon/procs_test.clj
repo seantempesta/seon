@@ -289,6 +289,41 @@
       (let [[st2 outs] (step #'server/fork-server-proc st :ev {:ev :eof :pid 2})]
         (is (= st st2)) (is (nil? outs))))))
 
+(deftest a-lost-fork-server-answers-every-waiter
+  ;; the server died with no standby to take its place (it died at boot, before its first
+  ;; standby): every request it was asked, and every one asked after, is answered with the
+  ;; error, and a fork's descriptor is closed. Unfixed, a stats request waited for good and a
+  ;; later fork was never sent nor answered, so the attach that asked for it hung (an agent
+  ;; test's root whose fork server died at boot)
+  (let [[fd peer] (sock/socketpair)
+        st {:waiters (conj clojure.lang.PersistentQueue/EMPTY {:rid 5 :req {:op :stats}}) :pid 1 :fd fd :log []}
+        refused? #(= :seon.root/refused (:seon.error/type %))
+        [st outs] (step #'server/fork-server-proc st :ev {:ev :eof :pid 1})]
+    (testing "its death answers the requests it never answered"
+      (is (= [:fork-server-down :fork-server-lost] (keep :ev (:to-api outs))))
+      (is (= [5] (keep #(get-in % [:dest :rid]) (:to-api outs))))
+      (is (every? refused? (keep #(when (:dest %) (:r %)) (:to-api outs))))
+      (is (empty? (:waiters st))))
+    (testing "a fork asked after it fails at once, naming why, and its descriptor is closed"
+      (let [[afd apeer] (sock/socketpair)
+            [st outs] (step #'server/fork-server-proc st :cmd {:op :fork :agent :a1 :fd afd})]
+        (is (= [{:ev :fork-failed :agent :a1}] (map #(select-keys % [:ev :agent]) (:to-api outs))))
+        (is (string? (:reason (first (:to-api outs)))))
+        (is (= -1 (sock/close! afd)) "root's copy of the agent's socket is closed")
+        (is (empty? (:in-flight st)))
+        (sock/close! apeer)))
+    (testing "a stats request asked after it is answered at once"
+      (let [[st outs] (step #'server/fork-server-proc st :ext {:op :stats :rid 6})]
+        (is (= [6] (keep #(get-in % [:dest :rid]) (:to-api outs))))
+        (is (refused? (:r (first (:to-api outs)))))
+        (is (empty? (:waiters st)))))
+    (testing "a shutdown of the lost server closes no descriptor it no longer holds"
+      (is (nil? (:fd st)))
+      (let [[st outs] (step #'server/fork-server-proc st :ext {:op :shutdown})]
+        (is (:stopping st))
+        (is (= [:fs-down] (keep :op (:to-api outs))))))
+    (sock/close! peer)))
+
 (deftest agent-proc-steps
   ;; root's end of the agent's socket is a jolt.async.remote end: the agent's frames arrive
   ;; as values on its :in (the agent proc's :from), and nil there is its close

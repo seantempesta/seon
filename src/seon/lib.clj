@@ -228,15 +228,24 @@
 (defn fork!
   "The one spawning skeleton (AGENTS section 2): fork only while this is the one active Chez
   thread (E11/E13: a fork beside a running thread breaks the child), checked once. Then
-  (child) in the child, exiting 0 if it returns; (refused n) here, n the active threads (1:
-  the OS refused); or (parent pid) here, whose answer is this fn's. fd, the child's own, is
-  closed here. double? forks the child again and reaps the middle: a clone is nobody's child."
+  (child) in the child, exiting 0 if it returns and 1 however else it ends (a throw, said on
+  stderr; a raise or an escape no catch takes): the child holds a copy of the parent's frames,
+  and unwinding into them would run the parent's code in the child; (refused n) here, n the
+  active threads (1: the OS refused); or (parent pid) here, whose answer is this fn's. fd, the
+  child's own, is closed here. double? forks the child again and reaps the middle: a clone is
+  nobody's child."
   {:malli/schema [:=> [:cat [:map [:child :seon.host/fn] [:refused :seon.host/fn] [:parent :seon.host/fn]
                              [:fd {:optional true} :seon.lib/fd] [:double? {:optional true} :boolean]]] :any]}
   [{:keys [child refused parent fd double?]}]
   (let [pid (fork-alone*)]
     (if (zero? pid)
-      (do (when (or (not double?) (zero? (c-fork))) (child)) (c-exit 0))
+      (let [status (volatile! 1)]
+        (try (when (or (not double?) (zero? (c-fork))) (child))
+             (vreset! status 0)
+             (catch Throwable e
+               (binding [*out* *err*] (println "a forked child threw out of its code:" (.getName (class e)) (ex-message e) (pr-str (ex-data e))) (flush)))
+             ;; a finally is a winder, run on any exit from the try (a fiber's park drops it)
+             (finally (c-exit @status))))
       (do (some-> fd c-close)
           (if (neg? pid) (refused (active-threads)) (do (when double? (wait-status pid)) (parent pid)))))))
 

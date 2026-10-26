@@ -429,7 +429,7 @@
   ;; of the structure that is possible and to have ellipses for data that just continues so the
   ;; agent can know what's there and can dig into it". A cited source is whole in its data, never
   ;; swapped for its doc by size; its part returns it as a call of the printer with its budget and
-  ;; the form that reads it ([#'seon.render/html value opts]), and the printer prints that call's
+  ;; the form that reads it ([#'seon.render/html opts value]), and the printer prints that call's
   ;; value at that budget for the model as the page's writer does for the page: the same cut,
   ;; naming the form that reads the rest
   (binding [*ns* *ns*]
@@ -438,7 +438,7 @@
   (let [src (str "(defn big \"Does much.\" [] " (str/join " " (repeat 8000 "(inc 1)")) ")")
         db (d/db-with (db-with-program) (program-facts [['ctx-big/big src []]]))
         r (seon.docs/resolve-ref db 'ctx-big/big :code)
-        hiccup (seon.render.ui/cited {:var 'ctx-big/big} {:db db})
+        hiccup (seon.render.ui/cited {:db db} {:var 'ctx-big/big})
         html (seon.web.html/html hiccup)
         model (print/text (vary-meta hiccup assoc :seon.print/full true))]
     (is (= {:symbol 'ctx-big/big :source (print/code src)} r) "the source whole as code, never swapped for its doc by size")
@@ -990,7 +990,7 @@
   (let [[db te] (sections-near "Make ```demo/g``` say one thing.")
         db (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/agent [:seon.agent/key "demo/a1"]}])
         c (ctx/build db (pdb/eid db :seon.agent/key "demo/a1") :b)
-        draw (fn [memo c db] (reduce (fn [[m acc] p] (let [[m f] (render/drawn m p)] [m (assoc acc (:key p) f)])) [memo (array-map)] (render/html c (assoc (context/renders db) :schema :seon.render/render-ctx))))
+        draw (fn [memo c db] (reduce (fn [[m acc] p] (let [[m f] (render/drawn m p)] [m (assoc acc (:key p) f)])) [memo (array-map)] (render/html (assoc (context/renders db) :schema :seon.render/render-ctx) c)))
         [m0 fs0] (draw {} c db)
         rep (d/with db [{:db/id "f2" :form/id "demo/g-2" :form/src "(defn g [] :redefined)"} [:db/add [:var/name 'demo/g] :var/form "f2"]])
         [_ fs1] (draw m0 (ctx/patch c (:db-after rep) (:tx-data rep) :b) (:db-after rep))

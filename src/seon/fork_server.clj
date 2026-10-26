@@ -241,16 +241,25 @@
   {:malli/schema [:=> [:cat :map] :nil]}
   [{:keys [pid fd reader] :as st}]
   (drop-standby (:standby st)) (drop-standby (:standby-pending st))
-  (lib/c-shutdown fd 1) ; SHUT_WR
+  (some-> fd (lib/c-shutdown 1)) ; SHUT_WR; a lost server's socket is closed already
   (some-> pid (lib/c-waitpid (ffi/alloc 4) 0))
   (some-> ^Thread reader (.join 5000))
   nil)
+
+(defn lost
+  "The answer to every request a lost fork server is asked (one that died with no standby
+  to take its place): the request refused, naming why. Root's api refuses a spawn with it
+  once it has heard of the loss, before any agent is made."
+  {:malli/schema [:=> [:cat] :seon.root/refused]}
+  [] (seon.contract/error :seon.root/refused #'seon.fork-server/lost
+                          "the fork server is lost: it died with no standby to take its place, so root forks no agent and answers no fork server request"))
 
 (defn- promote
   "The current server died: its standby becomes the server. It is sent main's commits
   since its fork and the requests the dead server never answered (an agent socket the
   dead server held reads EOF at root: that spawn fails by itself). Then it forks the next
-  standby. Answers [st outputs]."
+  standby. With no standby the server is lost: each request it never answered is answered
+  with that error. Answers [st outputs]."
   {:malli/schema [:=> [:cat :map] [:tuple :map :seon.step/outputs]]}
   [st]
   (let [sb (:standby st)
@@ -259,7 +268,9 @@
     (sock/close! (:fd st))
     (some-> (:standby-pending st) drop-standby)
     (if-not alive?
-      [(assoc st :pid nil :lost true :standby-pending nil) {:to-api [{:ev :fork-server-down :old (:pid st)} {:ev :fork-server-lost}]}]
+      [(-> st (dissoc :fd) (assoc :pid nil :lost true :standby-pending nil :waiters clojure.lang.PersistentQueue/EMPTY))
+       {:to-api (into [{:ev :fork-server-down :old (:pid st)} {:ev :fork-server-lost}]
+                      (map (fn [{:keys [rid]}] {:dest {:rid rid} :r (lost)})) (:waiters st))}]
       (let [_ (doseq [c (:log st) :when (> (:t c) (:t sb))] (sock/send! (:fd sb) c))
             _ (doseq [{:keys [req]} (:waiters st)] (sock/send! (:fd sb) req))
             st (assoc st :standby-pending nil :pid (:pid sb) :fd (:fd sb) :standby nil :restarts (inc (:restarts st 0))
@@ -292,20 +303,27 @@
    st)
   ([st in m]
    (case in
-     :cmd (do (when (:pid st) (if (:fd m) (sock/send! (:fd st) (dissoc m :fd) (:fd m)) (sock/send! (:fd st) m)))
+     :cmd (if (:lost st)
+            ;; no server to send it to: a fork fails now, its socket end closed
+            [st (when (:fd m)
+                  (sock/close! (:fd m))
+                  {:to-api [{:ev :fork-failed :agent (:agent m) :reason (:seon.error/message (lost))}]})]
+            (do (if (:fd m) (sock/send! (:fd st) (dissoc m :fd) (:fd m)) (sock/send! (:fd st) m))
               (let [st (cond-> st
                          ;; root keeps its copy of the agent's socket end until the server
                          ;; says it forked (a descriptor only in flight may be lost)
                          (:fd m) (assoc-in [:in-flight (:agent m)] (:fd m))
                          (= :tx (:op m)) (update :log conj m))]
-                [(if (>= (count (:log st)) (cfg/value :seon.config.root/standby-every)) (request-standby st) st) nil]))
+                [(if (>= (count (:log st)) (cfg/value :seon.config.root/standby-every)) (request-standby st) st) nil])))
      :ext (if (= :shutdown (:op m))
             (do (release! st)
-                (sock/close! (:fd st))
+                (some-> (:fd st) sock/close!)
                 [(assoc st :stopping true :standby nil :standby-pending nil) {:to-api [{:op :fs-down :pid (:pid st)}]}])
-            (let [req (dissoc m :rid)]
-              (when (:pid st) (sock/send! (:fd st) req))
-              [(update st :waiters conj {:rid (:rid m) :req req}) nil]))
+            (if (:lost st)
+              [st {:to-api [{:dest {:rid (:rid m)} :r (lost)}]}]
+              (let [req (dissoc m :rid)]
+                (sock/send! (:fd st) req)
+                [(update st :waiters conj {:rid (:rid m) :req req}) nil])))
      :ev (case (:ev m)
            (:stats :static) (if-let [{:keys [rid]} (peek (:waiters st))]
                               [(update st :waiters pop) {:to-api [{:dest {:rid rid} :r m}]}]
