@@ -272,9 +272,12 @@
         merge? (= :merge all?)
         all-cand (merge (when tests? digests) steps)
         cand (if (or named? merge?) all-cand (automatic all-cand process))
-        {:keys [run reused]} (proofs/plan nil cand (if (true? all?) {} (proofs/verdicts dir (vec (vals cand)))) #{})
+        found (proofs/verdicts dir (vec (vals cand)))
+        {:keys [run reused]} (proofs/plan nil cand (if (true? all?) {} found) #{})
         {run-steps true run-tests false} (group-by string? run)]
     {:run-tests (vec run-tests) :run-steps (vec run-steps) :reused reused :cand cand :process process :binary binary :no-test no-test
+     ;; green and red at its digest, whatever the plan runs (the full run reruns every key): red
+     :flaky (into (sorted-map-by #(compare (str %1) (str %2))) (for [[k dg] cand :let [r (found dg)] :when (:flaky r)] [k r]))
      :left (when-not (or named? merge?) (vec (sort-by str (filter all-cand process))))
      :digests digests :steps steps :missing missing :inputs inputs}))
 
@@ -291,7 +294,7 @@
   (let [t0 (profile/now-ns)
         dir (config/value :seon.config.source/test-results-dir)
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left digests steps missing inputs binary no-test process]} (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store)))
+        {:keys [run-tests run-steps reused cand left digests steps missing inputs binary no-test process flaky]} (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store)))
         ;; a test namespace of the tree that its program db holds no test of: nothing it holds can
         ;; be selected, so a run would say OK of tests it never saw
         no-test (when tests? (seq no-test))
@@ -320,12 +323,12 @@
                     " keys that reach a process run (no green at their digest), 0 left out")))
     ;; a key green and red at one digest: red, never run again until a change moves its digest;
     ;; out/flaky names each, and bin/test ends red on it after its shards ran
-    (let [flaky (for [[k r] (sort-by (comp str key) reused) :when (:flaky r)]
+    (let [flaky (for [[k r] flaky]
                   (str "FLAKY " k " " (:digest r) ": green and red at this digest, red until a change moves it (seon.proofs/flaky)"))]
       (write! (str out "/flaky") (apply str (map #(str % "\n") flaky)))
       (run! println flaky))
     (println (str "prove: " (count cand) " keys (" (if tests? (count digests) 0) " tests, " (count steps) " check steps), "
-                  (count (remove (comp :flaky val) reused)) " green at their digest (reused), " (count (filter (comp :flaky val) reused)) " flaky, " (count run-tests) " tests to run in " (if (seq run-tests) n 0)
+                  (count (remove (comp :flaky val) reused)) " green at their digest (reused), " (count flaky) " flaky, " (count run-tests) " tests to run in " (if (seq run-tests) n 0)
                   " shards, " (count run-steps) " steps to run; selected in " (quot (- (profile/now-ns) t0) 1000000) " ms; results " dir))
     (when checks?
       (write! (str out "/steps") (str (str/join " " run-steps) (when (seq run-steps) "\n")))

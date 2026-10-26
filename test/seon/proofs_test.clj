@@ -417,7 +417,10 @@
       (is (= #{'app.f-test/t 'app.f-test/r} (set selected)) "the flaky one is selected: it judges")
       (is (= #{'app.f-test/t 'app.f-test/g} (set (keys reused))))
       (is (= [] (proofs/store-verdicts! (fn [_] (throw (ex-info "written" {}))) dir {'app.f-test/t f}))
-          "a flaky result, judged and not run, is never written"))))
+          "a flaky result, judged and not run, is never written")
+      (proofs/store-verdicts! #(fx/write-file {:req %}) dir {'app.f-test/u (assoc red :digest "d-unreported" :unreported true)})
+      (is (not (.isFile (java.io.File. (proofs/result-path dir "d-unreported" false))))
+          "a test that never reported (its namespace's run threw first) has no verdict to keep"))))
 
 (deftest the-test-services-facts-keep-every-verdict-a-digest-had
   ;; :seon.proof/digest is an identity: a second result at it is the same entity, so its earlier
@@ -433,6 +436,7 @@
       (is (proofs/green? (r "d-once")))
       (is (= {:pass 0 :fail 0 :error 1} (select-keys (r "d-red") [:pass :fail :error])) "a red alone is reused red")
       (is (:flaky (r "d-twice")) "red then green at one digest: flaky, though its newest status is green")
+      (is (= "red" (:message (second (:failures (r "d-twice"))))) "with the red's own failures after the flaky one")
       (is (not (proofs/green? (r "d-twice"))))
       (is (nil? (r "d-none"))))
     (testing "a green in the files and a red in the facts is flaky too"

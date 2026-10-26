@@ -169,7 +169,8 @@
 (defn verdicts
   "{digest result} of what dir holds at digests: a green (<digest>.edn), or flaky when the
   digest also holds a red (<digest>.red.edn). A red alone is no result: it runs again (its
-  failures are the test service's facts, stored-results)."
+  failures are the test service's facts, stored-results), so a red only here and a green only in
+  the facts judge green; a flake is found once one home holds both."
   {:malli/schema [:=> [:cat :string [:sequential :string]] [:map-of :string :map]]}
   [dir digests]
   (let [read (fn [path] (let [f (java.io.File. ^String path)] (when (.isFile f) (edn/read-string (slurp f)))))]
@@ -185,7 +186,8 @@
   (Datahike's, :seon.config.store/keep-history?): every verdict the digest ever had. A green is
   {:digest :pass 1 :fail 0 :error 0}, the shape verdicts reads from the files; a red is its status
   counted once, with the failures it recorded (:failures [{:type :message :expected :actual}]); a
-  digest that was both is flaky. A test's verdict is a function of its digest (one per-test tick
+  digest that was both is flaky (a store with :seon.config.store/keep-history? off keeps one
+  status, so it finds none). A test's verdict is a function of its digest (one per-test tick
   bound everywhere), so a red is reused as a green is."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] [:map-of :string :map]]}
   [db digests]
@@ -212,11 +214,12 @@
   "Each result of ran ({key result}) that has a :digest, green or red, written at it in dir by
   (write! request), request being seon.fx/write-file's (result-file): bin/test's shards and
   steps write through seon.fx/write-file itself, an agent through root's :file owner. A flaky
-  result (judged, not run) is never written. Answers the writes refused, [{:key :message}],
+  result (judged, not run) is never written, nor an :unreported one (its namespace's run threw
+  before it reported: no verdict of the test's own). Answers the writes refused, [{:key :message}],
   each read: that key's result is not stored and it runs again."
   {:malli/schema [:=> [:cat :seon.host/fn :string [:map-of :any :map]] [:vector [:map [:key :any] [:message [:maybe :string]]]]]}
   [write! dir ran]
-  (vec (for [[k r] ran :when (and (:digest r) (not (:flaky r)))
+  (vec (for [[k r] ran :when (and (:digest r) (not (:flaky r)) (not (:unreported r)))
              :let [w (write! (result-file dir r))] :when (:seon.error/type w)]
          {:key k :message (:seon.error/message w)})))
 
@@ -308,8 +311,8 @@
   each result {:test :digest :pass :fail :error :ms} as it ends, and {:seon.test/output text
   :ns n} for a red namespace's clojure.test output. It only runs: its caller stores the greens
   (store-verdicts!). Answers {test result}; a test that never reported, because its namespace's
-  run threw (a fixture), is an :error result and an :error report carrying that throw's
-  message and data. Each test runs within ticks engine ticks of work of its own (Jolt's
+  run threw (a fixture), is an :error result (:unreported true: no verdict of its own, never
+  stored) and an :error report carrying that throw's message and data. Each test runs within ticks engine ticks of work of its own (Jolt's
   run-interruptible; nil or 0: unbounded), so a test's verdict is a function of the test alone,
   never of what ran before it in the run: one bound wherever it runs (bin/test, an agent's turn,
   the judge). A test past it is an :error report of the typed :seon.test/ticks-spent naming it,
@@ -350,7 +353,7 @@
                                       (let [msg (if thrown (str n "'s run threw before this test reported: " (ex-message thrown))
                                                     (str n "'s run ended before this test reported"))]
                                         (note! {:seon.test/report {:type :error :message msg} :test tst})
-                                        [tst (cond-> {:test tst :digest (digests tst) :pass 0 :fail 0 :error 1 :ms 0 :message msg}
+                                        [tst (cond-> {:test tst :digest (digests tst) :pass 0 :fail 0 :error 1 :ms 0 :message msg :unreported true}
                                                (ex-data thrown) (assoc :data (sedn/encode (ex-data thrown))))]))
                          result (into @ran unreported)
                          _ (when (or thrown (some #(not (green? (result %))) ts)) (note! {:seon.test/output (str out) :ns n}))]
