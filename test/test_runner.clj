@@ -330,7 +330,7 @@
         red (sort (remove green (keys digests)))
         built (let [b (io/file "target/seon.tree")] (when (.isFile b) (str/trim (slurp b))))
         ;; a step that runs a seon.check mode ran on target/seon: kept only if built from the plan's tree;
-        ;; laws and lmdb-kill ran no mode, so no binary's tree is theirs to compare
+        ;; laws, lmdb-kill and lmdb-sem ran no mode, so no binary's tree is theirs to compare
         keep? (fn [k] (and (green k) (or (= tree built) (not (proofs/step-needs-binary? k)))))
         unstored (do (when (and (not= tree built) (some #(and (green %) (proofs/step-needs-binary? %)) (keys digests)))
                        (println "prove: the binary was built from another tree than the plan's: no step that ran on it stored"))

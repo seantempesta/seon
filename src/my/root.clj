@@ -112,15 +112,46 @@
        (merge (zipmap (keys read) (repeat []))
               (group-by :seon.task/ns (tpl/with-merge (into [] cat (vals read)))))))))
 
+(defn tasks-read-tx
+  "The write of outcome, the last read of the task files (:seon.root/tasks: {:files} or {:error}),
+  on root. A refused read's error names it as its subject and is written with it, in one
+  transaction; the first read whose outcome differs closes it, and the same outcome again
+  writes no datom."
+  {:malli/schema [:=> [:cat :seon.root/tasks] [:vector :map]]}
+  [outcome] [{:seon.root/id :root :seon.root/tasks outcome}])
+
+(defn load-answer
+  "Answer r of a read of the task files, as load-tasks! answers it: a refused one (a file's or the
+  reconcile's) names :seon.root/tasks as its subject, the read's outcome."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [r] (cond-> r (contract/error? r) (assoc :seon.error/subject :seon.root/tasks)))
+
+(defn load-error-tx
+  "The write of load error e at ms on main db: a :platform error (seon.root/platform-tx) and, in
+  the same transaction, the outcome its subject holds (a refused task-file read's, tasks-read-tx)."
+  {:malli/schema [:=> [:cat :seon.host/db :map :int] [:vector :any]]}
+  [db e ms]
+  (cond-> (root/platform-tx db e ms)
+    (= :seon.root/tasks (:seon.error/subject e)) (into (tasks-read-tx {:error (:seon.error/message e)}))))
+
 (defn load-tasks!
   "Reconcile the task files into main (seon.task/load-tx): new entries created held, changed
-  ones updated, removed ones cancelled; unchanged ones write nothing. Answers the writer's
-  answer with the counts, or the error. Releasing stays run!'s."
+  ones updated, removed ones cancelled; unchanged ones write nothing. A good read writes its
+  outcome, root's :seon.root/tasks (tasks-read-tx), with the declarations when it differs from the
+  one held; a refused one answers its error (load-answer), whose recorder writes both
+  (load-error-tx). Answers the writer's answer with the counts, or the error. Releasing stays run!'s."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-tasks! sys nil))
   ([sys dir]
-   (let [files (if dir (task-files dir) (task-files))]
-     (write-declared! sys (task/load-tx @(:conn sys) files) {:files (count files)} (mapcat identity (vals files))))))
+   (let [db @(:conn sys)
+         files (if dir (task-files dir) (task-files))
+         tx (task/load-tx db files)
+         outcome {:files (count files)}
+         held (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/tasks]) :seon.root/tasks)]
+     ;; the outcome rides in the declarations' transaction, and only when it changed: an unchanged
+     ;; good read still writes nothing
+     (load-answer (write-declared! sys (cond-> tx (and (not (contract/error? tx)) (not= outcome held)) (into (tasks-read-tx outcome)))
+                                   {:files (count files)} (mapcat identity (vals files)))))))
 
 (defn load-docs!
   "Load the wiki (the pages under dir of the checkout, docs by default) into main as section
@@ -249,7 +280,7 @@
                                 ;; a loader's typed error (a refused task file) is a recorded :platform error; the
                                 ;; problems the load made true are shown by health, and the last are kept in the fact
                                 (doseq [e (load-errors loaded)]
-                                  @(root/transact-main! sys (root/platform-tx @(:conn sys) e (System/currentTimeMillis))))
+                                  @(root/transact-main! sys (load-error-tx @(:conn sys) e (System/currentTimeMillis))))
                                 @(fact (cond-> (-> (held) (update :batches inc) (update :paths + (count batch)) (assoc :last-opened (vec (sort opened)) :last-load why))
                                          rescan (-> (update :rescans inc) (assoc :last-rescan {:kind (first rescan) :path (second rescan)}))))))))
                         died)]

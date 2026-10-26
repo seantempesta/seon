@@ -43,9 +43,9 @@
 	ignore = dirty
 [submodule "reference-code/lmdb"]
 	path = reference-code/lmdb
-	url = https://github.com/LMDB/lmdb.git
+	url = https://github.com/seantempesta/lmdb.git
 	ignore = dirty
-	branch = mdb.master3
+	branch = jolt/sysv-sem-identity
 [submodule "reference-code/llama.cpp"]
 	path = reference-code/llama.cpp
 	url = https://github.com/ggml-org/llama.cpp.git

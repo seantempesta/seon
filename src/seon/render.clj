@@ -24,7 +24,7 @@
   A nested value renders by a call ([render v opts] in hiccup, or render's result)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
-            [clojure.string :as str] [datahike.api :as d]))
+            [clojure.string :as str] [datahike.api :as d] [seon.web.html :as h]))
 
 (def faces "Each face's key." {:html :seon.render/html :ai :seon.render/ai})
 
@@ -97,12 +97,14 @@
 
 (defn- nested-html
   "The HTML printer's :render: nested's, and a value whose own :seon.render/html key holds hiccup
-  (a page an agent built) as that hiccup. Only the page draws it: the text printer, which the
-  model reads, prints that value as the data it is."
+  (a page an agent built) as that hiccup, its text the hiccup as data in one line: one selection
+  serves both faces (part-faces), and the model reads the hiccup as the data it is."
   {:malli/schema [:=> [:cat :any] [:maybe [:map [:text :string] [:html :any]]]]}
   [v]
   (let [own (own-key v :seon.render/html)]
-    (if (and (some? own) (not (symbol? own))) {:text "" :html own} (nested v))))
+    (if (and (some? own) (not (symbol? own)))
+      {:text (print/line own (config/value :seon.config.render/line-budget)) :html own}
+      (nested v))))
 
 (defn- printer-opts
   "The printer's options for a render's opts: its budget (else :seon.config.render/value-budget),
@@ -173,6 +175,90 @@
   "v's :ai render under opts, as the text the model or root reads."
   {:malli/schema [:=> [:cat :any :seon.render/opts] :string]}
   [v opts] (:text (render v (assoc opts :face :ai))))
+
+;;; --- parts: a ctx as the page and the model are drawn from it --------------------------------
+
+(defn- relevant-of
+  "Entity value m as its schema s shows it: its declared relevant keys (:seon.render/keys), else
+  every key, never its :db/id."
+  {:malli/schema [:=> [:cat [:maybe :qualified-keyword] :map] :map]}
+  [s m] (dissoc (if-let [ks (some-> s contract/properties :seon.render/keys)] (select-keys m ks) m) :db/id))
+
+(defn view
+  "An agent's held record ({:tree c :born}, seon.ctx/build's: c is @ctx, born each member's first
+  transaction) as its parts, in order: [:task], the task's relevant keys; [:proofs], each
+  proof's status as the newest turn observed it, with its first failure; [:verdict], the done
+  rule's reasons when it gave any; [:run], the newest run's relevant keys and the turns it took;
+  [k] for each key the agent added to its ctx (any key outside its own :seon.agent/* attributes,
+  its units and the environment), named by that key, which is its schema; then the conversation:
+  [:eval id] per eval, [:turn id] per model turn of the run and [:message id] per message to it, in
+  the order they were written (their first transactions). Each part names the members of c it was made from
+  (:from), so a part made again from the same members is drawn from the memo (drawn). Pure in the record:
+  it reads no db and no config. What a
+  part leaves out is not data the agent acts on (ids, the turns' bases but the newest's
+  observation, the agent's own counters): a change without meaning is a data defect, fixed here."
+  {:malli/schema [:=> [:cat [:map [:tree :map] [:born :map]]] [:vector :seon.render/part]]}
+  [{c :tree :keys [born]}]
+  (let [t-of #(get born (:db/id %) 0)
+        run (last (sort-by t-of (vals (:runs c))))
+        task (:task run)
+        turn (last (sort-by :seon.turn/n (vals (:turns run))))
+        {:keys [results reds reasons]} (get-in turn [:seon.turn/basis :observed])
+        failure (into {} (for [r reds] [(:test r) {:assert (:expected r) :got (if (contains? r :got) (:got r) (:actual r))}]))
+        entry (fn [k e] {:key [k (or (:seon.eval/id e) (:seon.message/id e) (:seon.turn/id e))] :from [e]
+                         :value (if (= :turn k) (-> (relevant-of :seon.turn/turn-fact e) (dissoc :seon.turn/run) (update :seon.turn/basis select-keys [:max-turns])) (dissoc e :db/id :seon.eval/agent :seon.message/to))})]
+    (-> []
+        (cond-> task (conj {:key [:task] :from [task] :value (relevant-of :seon.task/task-fact (dissoc task :turns :runs))})
+                (seq (:seon.task/proofs task))
+                (conj {:key [:proofs] :from [task turn] :value (with-meta (into (sorted-map-by #(compare (str %1) (str %2)))
+                                                              (for [t (:seon.task/proofs task)]
+                                                                [t (cond-> {:status (get results t :not-run)} (failure t) (assoc :failure (failure t)))]))
+                                                  {:seon.render/schema :seon.render/proofs})})
+                (seq reasons) (conj {:key [:verdict] :from [turn] :value reasons})
+                run (conj {:key [:run] :from [run] :value (assoc (relevant-of :seon.run/run-fact run) :turns-taken (count (:turns run)))}))
+        (into (for [k (sort-by str (keys c))
+                    :when (and (qualified-keyword? k) (not (#{"seon.agent" "db"} (namespace k))))]
+                {:key [k] :from [(get c k)] :value (get c k) :schema k}))
+        ;; in the order written: each member's first transaction (ctx's :born), then its key
+        (into (map second) (sort-by first (concat (for [e (vals (:evals c))] [[(t-of e) (:seon.eval/id e)] (entry :eval e)])
+                                                  (for [t (vals (:turns run))] [[(t-of t) (:seon.turn/id t)] (entry :turn t)])
+                                                  (for [m (vals (:messages run))] [[(t-of m) (:seon.message/id m)] (entry :message m)])))))))
+
+(defn part-faces
+  "Part p's faces, {:html hiccup :text string :inline hiccup}: each by the render its value's schema
+  declares for that face, else the one printer's, html and text from one selection under one budget
+  (seon.print.select/show with :outputs #{:text :hiccup}), so the page and the model never differ
+  in what was cut; :inline, its html in one line (:as :inline), what a folded part shows."
+  {:malli/schema [:=> [:cat :seon.render/part] :seon.render/faces]}
+  [{:keys [value schema] :as p}]
+  (let [h (render-of value :html schema) a (render-of value :ai schema)
+        both (when-not (and h a)
+               (print/print-value value (assoc (printer-opts {}) :outputs #{:text :hiccup} :render nested-html)))]
+    {:html (if h (html value {:schema schema}) (or (:html both) [:span {:class "seon-print-refused"} (str (:seon.error/message both))]))
+     :text (if a (ai value {:schema schema}) (or (:text both) (:seon.error/message both) ""))
+     ;; a folded part's one line: the conversation's evals fold (seon.render.ui/agent-part)
+     :inline (when (= :eval (first (:key p))) (html value {:as :inline :schema schema}))}))
+
+(defn part-html
+  "Part p as a page shows it, from its faces f: {:key :html :inline}, its html and its one line
+  serialized."
+  {:malli/schema [:=> [:cat :seon.render/part :seon.render/faces] :seon.render/part-html]}
+  [p f] (cond-> {:key (:key p) :html (h/html (:html f))} (:inline f) (assoc :inline (h/html (:inline f)))))
+
+(defn drawn
+  "Part p's faces through memo {key [fs from faces]}: the held faces when the functions that
+  draw p (fs: each face's declared render as its var holds it now, else the printer's) and what
+  p was made from (its :from, the ctx members view read, else its value) are identical to those
+  it was drawn with (a redefined render draws again; a member a transaction changed is a new
+  object, ctx's patch leaving every other one as it was), else drawn now. Answers [memo' faces]."
+  {:malli/schema [:=> [:cat :map :seon.render/part] [:tuple :map :seon.render/faces]]}
+  [memo {:keys [key value schema from] :as p}]
+  (let [fs [(render-of value :html schema) (render-of value :ai schema) @#'print/print-value]
+        src (or from [value])
+        [fs0 src0 out] (get memo key)]
+    (if (and out (= (count src) (count src0)) (every? true? (map identical? src src0)) (every? true? (map identical? fs fs0)))
+      [memo out]
+      (let [out (part-faces p)] [(assoc memo key [fs src out]) out]))))
 
 (defn rendered?
   "Does v's producer name an AI render for it (the value's own key, or its metadata's
