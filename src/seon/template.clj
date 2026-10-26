@@ -178,7 +178,9 @@
   (s: :quiet-ms, :last-op, :pid), its proofs the boundary conditions (stall-proofs). Its model is
   \"outside\": a Claude session works it through seon_attach, and the reconciler forks no model's
   agent for it (it is written held, and attached it starts no turn loop)."
-  {:malli/schema [:=> [:cat :seon.agent/id :seon.run/id :map] :seon.task/declaration]}
+  {:malli/schema [:=> [:cat :seon.agent/id :seon.run/id [:map [:quiet-ms :int] [:pid {:optional true} [:maybe :int]]
+                                                       [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]
+                  :seon.task/declaration]}
   [agent run s]
   (let [pid (:pid s)
         stall (cond-> {:agent agent :run run :quiet-ms (:quiet-ms s)} pid (assoc :pid pid) (:last-op s) (assoc :last-op (:last-op s)))]
