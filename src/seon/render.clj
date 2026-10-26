@@ -264,7 +264,7 @@
   object, ctx's patch leaving every other one as it was), else drawn now. Answers [memo' faces]."
   {:malli/schema [:=> [:cat :map :seon.render/part] [:tuple :map :seon.render/faces]]}
   [memo {:keys [key value schema from] :as p}]
-  (let [fs [(render-of value :html schema) (render-of value :ai schema) @#'print/print-value]
+  (let [fs [(render-of value :html schema) (render-of value :ai schema) @#'print/print-value (when (contains? p :page) (render-of (:page p) :html nil))]
         src (or from [value])
         [fs0 src0 out] (get memo key)]
     (if (and out (= (count src) (count src0)) (every? true? (map identical? src src0)) (every? true? (map identical? fs fs0)))

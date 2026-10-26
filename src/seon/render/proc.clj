@@ -301,10 +301,15 @@
         ;; turns and end after the agent's branch forked, so its branch's copy never has them
         run (some->> (d/q '[:find ?r ?tx :in $ ?a :where [?r :seon.run/agent ?a ?tx]] db eid) (sort-by second) last first
                      (d/pull db (:seon.render/keys (contract/properties :seon.run/run-fact))))
+        ;; the turns it took are the agent's, written on its branch
+        run (cond-> run (and (seq run) bdb)
+              (assoc :turns-taken (count (d/q '[:find ?t :in $ ?id :where [?r :seon.run/id ?id] [?t :seon.turn/run ?r]] bdb (:seon.run/id run)))))
         run-part (when (seq run) (let [p {:key [:run] :value run}] (render/part-html p (render/part-faces p))))
+        ;; in its place among the tiles: where the agent's own run part was, else before its conversation
+        conv? #(#{:eval :turn :message} (first (:key %)))
         parts (cond (nil? run-part) parts
                     (some #(= [:run] (:key %)) parts) (mapv #(if (= [:run] (:key %)) run-part %) parts)
-                    :else (conj (vec parts) run-part))]
+                    :else (let [[tiles conv] (split-with (complement conv?) parts)] (vec (concat tiles [run-part] conv))))]
     (ui/parts-page (:seon.agent/id e)
                    {:parts (or parts []) :shown (get-in st [:shown view] (history-cap)) :view (ui/view-param view) :head [0 eid]
                     ;; never a wait: drawn from its branch until its process answers, the page says so

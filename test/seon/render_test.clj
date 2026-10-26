@@ -1129,7 +1129,9 @@
     (let [task (first parts)]
       (is (contains? (:value task) :to-prove) "the model reads the stage's story (the run's derived :story)")
       (is (= "demo/f" (:seon.task/id (:page task))) "the page draws the task itself")
-      (is (str/includes? (h/html (:html (r/part-faces task))) "demo/f") "by its own render"))
+      (is (str/includes? (h/html (:html (r/part-faces task))) "demo/f") "by its own render")
+      (is (str/includes? (:text (r/part-faces task)) ":to-prove") "while the model's text is the story's"))
+    (is (not-any? #(= [:related] %) ks) "no related part when the run has none")
     (is (= 2 (:turns-taken (:value (nth parts 3)))))
     (is (= [[:message "m-1"] [:eval "e1"] [:eval "e2"] [:turn "demo/f#1/0"] [:eval "e3"] [:turn "demo/f#1/1"]] (filterv #(#{:eval :turn :message} (first %)) ks))
         "the conversation in the order it was written: each member's first transaction")
@@ -1218,4 +1220,5 @@
         [st _] (#'p/pass-view (assoc (proc-state main branch) :view {:agents {}}) :a3)
         tile (get-in st [:views :a3 :units "q-run" :html])]
     (is (str/includes? (str tile) "closed") (str "the status main holds: " tile))
-    (is (str/includes? (str tile) "done") "and how it ended")))
+    (is (str/includes? (str tile) "done") "and how it ended")
+    (is (not= :closed (:seon.run/status (d/pull branch [:seon.run/status] [:seon.run/id "demo/f#1"]))) "which the branch's copy does not hold")))
