@@ -351,3 +351,32 @@
           [st2 _] (#'seon.render.proc/pass-view (#'seon.render.proc/invalidate (assoc st1 :main-db (:db-after r)) touched) :a1)]
       ;; the agent's two components (its head, its line in the sidebar of root's agents), whatever the rows
       (clojure.test/is (= 2 (- (get-in st2 [:counts :components]) (get-in st1 [:counts :components]))) (str n " rows: the agent's components rendered, nothing else")))))
+
+(defn ctx-of
+  "The input of size n: an agent's ctx (seon.ctx/build's shape) of one run, its task with one proof,
+  one turn, and n evals, each a record of a short form and its value."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  [n]
+  [{:t n :branch :b
+    :runs {"t/x#1" {:db/id 1 :seon.run/id "t/x#1" :seon.run/status :running
+                    :task {:db/id 2 :seon.task/id "t/x" :seon.task/plan "Make x." :seon.task/proofs #{'t/x-test}}
+                    :turns {"t/x#1/0" {:db/id 3 :seon.turn/id "t/x#1/0" :seon.turn/n 0 :seon.turn/basis {:max-turns 8 :observed {:results {'t/x-test :pass}}}}}}}
+    :evals (into {} (for [i (range n) :let [id (str "e" i)]]
+                      [id {:db/id (+ 10 i) :seon.eval/id id :seon.eval/by "a1"
+                           :seon.eval/record {:code (str "(inc " i ")") :response {:handle (symbol "result" id) :value (inc i)}}}]))}])
+
+(deftest a-view-costs-its-parts
+  ;; task seon.render/a-ctx-is-shown-as-its-parts: an agent's ctx as its parts, one pass over its
+  ;; members, the conversation sorted once
+  (cost/proof
+    {:of 'seon.render/view :input 'seon.render-cost-test/ctx-of
+     :n "evals in the agent's ctx"
+     :work (str "one pass over ctx's members: the task's, the proofs' and the run's parts (a few contracted calls, "
+                "fixed), then a part per eval, each its record less its id, and the conversation sorted by entity "
+                "id once (n log n comparisons, no contracted call): linear in the evals")
+     :growth :linear
+     ;; measured 2026-10-26: 4 calls and 244 KB at 100 evals (each part's record less its id, and its
+     ;; place in the sort)
+     :per-n {:calls 0 :bytes 2500}
+     :fixed {:calls 4 :bytes 10000}
+     :sizes [100 1000 4000]}))
