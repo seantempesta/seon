@@ -106,8 +106,7 @@
   "The record of entity e on db as ctx's value {:tree :ix :born :changed}: e and its units, and
   its environment on branch; each member's first transaction (:born, what `order` sorts by);
   :changed #{[]}, the root path, since every value is new (a memo of a part misses once,
-  everywhere). Any entity
-  an entity schema names: an agent's (its @ctx), root's, the user's, a task's. With no e (an
+  everywhere). Any entity an entity schema names: an agent's (its @ctx), root's, the user's, a task's. With no e (an
   agent whose entity its branch does not hold yet), its environment alone. O(the record)."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe pos-int?] :any] [:map [:tree :map] [:ix :map] [:born :map] [:changed [:set [:vector :any]]]]]}
   [db e branch]
@@ -119,7 +118,7 @@
   member's first transaction: the order its entries happened in, derived from the facts (never a
   stored vector); entries of one transaction by their keys. Every member has its first
   transaction (an identity's datom), so none is missing. O(n log n) in the unit's members, each
-  call: a view memoizes it on the unit (identical? while no member joined or left).
+  call: a view memoizes it on the unit (identical? while no member joined or left)."
   {:malli/schema [:=> [:cat [:map [:tree :map] [:born :map]] [:vector :any]] [:vector :any]]}
   [c p]
   (let [u (get-in (:tree c) p)]

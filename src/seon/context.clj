@@ -307,7 +307,7 @@
              ;; (the turn sections' :proofs are each turn's statuses; these are how to run them)
              ;; plain data, as the run's story fact keeps it (:seon.run/story); entered in name
              ;; order, which an array map keeps for its first 8 (a hash map past them)
-             :to-prove (into {} (sort-by (comp str key)
+             :to-prove (into {} (sort-by (comp str first)
                                          (for [p proofs]
                                            [p (if (docs/source-of db p)
                                                 (list 'my.agent/prove #{p})
