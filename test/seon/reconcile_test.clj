@@ -709,6 +709,44 @@
       (is (= :closed (:seon.run/status (task/run db' "demo/add-merge#1"))))
       (is (= reason (:seon.run/error (task/run db' "demo/add-merge#1"))) "the writer's reason, on the run"))))
 
+(deftest a-merge-of-source-with-no-file-records-why-it-wrote-none-back
+  ;; a merged member whose changed forms name no source file: no write-back runs, so its run
+  ;; holds a commit-error naming them, never silence; one that changed no source stays silent
+  (let [db (mdb [(decl "add")] :extra (concat (run "add" 1 :done) (run "add-merge" 1 :ended :outcome :green :results {(t "add") :pass})))
+        [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1"}) :main {:t (:max-tx db) :ops [] :db db :ns (profile/now-ns)})
+        st (assoc st :source {:branch "jolt/seon-merges"})
+        asked (first (filter #(= :octopus-merge (get-in % [:req :req :op])) (:to-api outs)))
+        answered (fn [x] (let [[_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r {:ok true :results [x]}})
+                               tx (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= :write (get-in % [:req :op])) (:to-api outs2))))]
+                           (task/run (d/db-with db tx) "demo/add-merge#1")))
+        unfiled (answered {:merged? true :tx 9 :keys 2 :files [] :unfiled {'app.no-file [[:var 'app.no-file/probe]]}})
+        data (answered {:merged? true :tx 9 :keys 1 :files [] :unfiled {}})
+        ;; filed and unfiled: its write-back records the sha of what it wrote, never an error beside it
+        mixed (answered {:merged? true :tx 9 :keys 3 :files ["src/app/m.clj"] :unfiled {'app.no-file [[:var 'app.no-file/probe]]}})]
+    (is (some? asked))
+    (is (= :merged (:seon.run/status unfiled)))
+    (is (= "merged at t 9 but its changed forms name no source file to write back: app.no-file [:var app.no-file/probe]"
+           (:seon.run/commit-error unfiled)))
+    (is (= :merged (:seon.run/status data)))
+    (is (nil? (:seon.run/commit-error data)) "a change of no source names no file, and says nothing")
+    (is (nil? (:seon.run/commit-error mixed)) "a member with files is its write-back's to record")
+    (testing "a write-back whose files main holds no text for: no commit, and each member's run says so"
+      (let [step (fn [st tag r] (r/reconciler-proc st :answers {:tag tag :r r}))
+            write-of (fn [outs] (first (filter #(= :write (get-in % [:req :op])) (:to-api outs))))
+            [st2 outs2] (step st (:tag asked) {:ok true :results [{:merged? true :tx 9 :keys 1 :files ["src/app/none.clj"] :unfiled {}}]})
+            merged-tx (get-in (write-of outs2) [:req :req :tx-data])
+            [st3 outs3] (step st2 (:tag (write-of outs2)) {:ok true})
+            [_ outs4] (step st3 (:tag (write-of outs3)) {:db db})
+            run' (task/run (d/db-with db (vec (concat merged-tx (get-in (write-of outs4) [:req :req :tx-data])))) "demo/add-merge#1")]
+        (is (not-any? :seon.run/commit-error (filter map? merged-tx)) "a member with files is the write-back's to record")
+        (let [two (update-in st [:flights "demo/add-merge#1" :act :members] conj {:run "demo/data-merge#1" :task "demo/data-merge"})
+              [st2' _] (step two (:tag asked) {:ok true :results [{:merged? true :tx 9 :keys 1 :files ["src/app/none.clj"] :unfiled {}}
+                                                                   {:merged? true :tx 9 :keys 1 :files [] :unfiled {}}]})]
+          (is (= [{:run "demo/add-merge#1" :task "demo/add-merge"}] (get-in st2' [:flights "demo/add-merge#1" :writeback :members]))
+              "a merged member with no files is no member of the write-back: no sha for files it never touched"))
+        (is (= {:op :branch-db :branch :db} (get-in (write-of outs3) [:req :req])) "the write-back reads main")
+        (is (= "the write-back read none of src/app/none.clj on main" (:seon.run/commit-error run')))))))
+
 (deftest a-held-task-shows-its-reason-among-the-problems
   (let [[db' act] (held (mdb [(decl "add")] :extra (run "add" 1 :ended :outcome :red :results {(t "add") :fail})))
         [row & more] (get-in (problems/report db') [:classes :failed :rows])]
