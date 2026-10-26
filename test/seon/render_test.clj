@@ -1170,6 +1170,9 @@
     (is (not (str/includes? (html-of branch (e-of "e5")) "seon-live")) "the older as recorded")
     (is (not (str/includes? (html-of branch (e-of "e7")) "seon-live")) "a computed value as recorded")
     (is (nil? (ui/live-key {:response {:value (assoc task :n 2)}})) "a map that adds a key of its own was computed")
+    (is (nil? (ui/live-key {:response {:value {:seon.agent/id :a3 :seon.run/turns 5}}})) "and one that joins another record's")
+    (is (= [:seon.task/id "demo/g"] (ui/live-key {:response {:value (assoc task :seon.task/accumulated "Make g fast.")}}))
+        "what its producer derives of it, in its namespace (seon.task/task)")
     (let [branch' (d/db-with branch [{:seon.task/id "demo/g" :seon.task/plan "Make g faster still."}])]
       (is (str/includes? (html-of branch' (e-of "e6")) "Make g faster still.") "the record as it is now")
       (is (not (str/includes? (html-of branch' (e-of "e5")) "faster still")) "the older eval keeps what it answered"))

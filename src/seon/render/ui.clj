@@ -518,16 +518,17 @@
 (defn live-key
   "The record of the store eval record rec's value names, or nil (a value computed, kept as
   recorded): [:ctx] for @ctx (recorded as its basis, seon.repl/record-details); [a v] for an
-  entity's own data, a map holding its identity attribute a whose every key is an attribute of
-  that entity's schema (a map that adds any other key was computed). Map lookups only."
+  entity's data, a map holding its identity attribute a whose every key is in a's namespace: its
+  attributes, and what its producer derives of it (seon.task/task's :seon.task/accumulated); a map
+  with any other key was computed. Map lookups only."
   {:malli/schema [:=> [:cat [:maybe :map]] [:maybe [:vector :any]]]}
   [rec]
   (let [v (get-in rec [:response :value])]
     (if (:basis rec)
       [:ctx]
       (when (and (map? v) (not (contains? (:response rec) :values)))
-        (when-let [[a s] (some (fn [a] (when-let [s (get render/identity-schemas a)] [a s])) (keys v))]
-          (when (and (some? (get v a)) (every? #(= s (get render/entity-schemas %)) (keys v)))
+        (when-let [a (some #(when (contains? render/identity-schemas %) %) (keys v))]
+          (when (and (some? (get v a)) (every? #(and (keyword? %) (= (namespace a) (namespace %))) (keys v)))
             [a (get v a)]))))))
 
 (defn- live-now
