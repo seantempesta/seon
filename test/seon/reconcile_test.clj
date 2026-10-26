@@ -434,11 +434,11 @@
   ;; owner, 2026-10-26: "design-build and merge": the green design-build task is done, not merged
   ;; by itself; its merge task then runs on the branch, and its green run is the octopus merge
   (let [db-req (fn [extra] (let [db (empty-db) ds (tpl/request (decl "a"))]
-                             (-> db (d/db-with (tpl/request-tx db ds)) (d/db-with (task/boot-tx "boot-1" 4)) (d/db-with extra))))
-        ops (fn [db] (set (map :op (actions-for db))))]
+                             (-> db (d/db-with (tpl/request-tx db ds)) (d/db-with (task/boot-tx "boot-1" 4)) (d/db-with extra))))]
     (is (= [(spawn "a" 1)] (actions-for (db-req []))) "the work task forks first, alone")
-    (is (not (contains? (ops (db-req (run "a" 1 :ended :outcome :green :results {(t "a") :pass}))) :octopus-merge))
-        "its green run merges nothing")
+    (is (= [{:op :accept :run "demo/a#1" :task "demo/a"}]
+           (actions-for (db-req (run "a" 1 :ended :outcome :green :results {(t "a") :pass}))))
+        "its green run is accepted, and merges nothing")
     (is (= [(mspawn "a-merge" 1)] (actions-for (db-req (run "a" 1 :done)))) "once it is done, its merge task runs")
     (is (= [{:op :octopus-merge :run "demo/a-merge#1" :members [{:run "demo/a-merge#1" :task "demo/a-merge"}]}]
            (actions-for (db-req (concat (run "a" 1 :done) (run "a-merge" 1 :ended :outcome :green :results {(t "a") :pass})))))
