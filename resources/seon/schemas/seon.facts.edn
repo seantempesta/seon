@@ -178,7 +178,7 @@
  :seon.task/branch :keyword
  :seon.task/model :string
  :seon.task/execution [:and {:seon.db/index true} [:enum :held :running :cancelled]]
- :seon.task/kind [:enum :work :design :implement :test :merge]
+ :seon.task/kind [:enum :work :design :implement :test :merge :whole]
  ;; measured evidence a task starts from: its last failed run's conflicts, unmerged keys, red
  ;; proofs and problem (seon.reconcile/hold-tx), read by the run root releases next
  :seon.task/evidence [:map

@@ -2,7 +2,7 @@
   "Task templates (owner: tasks chain through `:needs`; each step is a new
   agent with improved context).
 
-  Every kind (work, design, implement, test, merge) is a default template that overrides
+  Every kind (work, design, implement, test, merge, whole) is a default template that overrides
   a few fields; dependencies are :needs refs only, and a task's plan and proofs accumulate
   along them (seon.task/tasks: :seon.task/accumulated), so each step refines.
   - `with-merge`: each declared work task is followed by its merge task, an ordinary task
@@ -56,6 +56,14 @@
                "unmerged and every proof passes on the combined program. You do it by redefining each unmerged var with what "
                "both sides need, or keeping one side (``(my.branch/resolve! 'ns/var :theirs)``), and running the proofs. Then end "
                "your turn with prose.")
+   :whole (str "Your task: do what the plan below asks, whole. You are done when its proofs pass on your branch with main's "
+               "work merged in. You do it at the REPL, proof first: reproduce what the plan says is wrong as a deftest, evaluated "
+               "in its test namespace (``(in-ns 'ns.x-test)``, then the deftest: what you evaluate is your branch's program, so you "
+               "write no file), register it (``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)``) and run it red. Then "
+               "make it pass by redefining the functions it needs, in their own namespaces, keeping their contracts, with a cost "
+               "proof (``seon.cost/proof``) for a function whose input grows. Main is merged in at each green "
+               "(`my.branch/merge-main!`); `(my.branch/unmerged)` lists what both sides changed: redefine each with what both "
+               "need, and keep the proofs green. Never loosen a contract or a proof to make it pass. Then end your turn with prose.")
    :test (str "Your task: test what the plan changed. You are done when the proofs and the tests of what changed pass, and "
               "each behaviour that broke has a deftest of its own. You do it by running them (`(my.agent/prove)`), writing a "
               "deftest in the proofs' namespace for each break, and fixing the code until all pass. Then end your turn with prose.")})
@@ -107,6 +115,16 @@
                                      :seon.task/plan "" :seon.task/instructions (instructions :implement)
                                      :seon.task/needs #{did})))]
     [design implement (merge-decl implement (task/task-id tns (:seon.task/name implement)) (merge-name (:seon.task/name decl)))]))
+
+(defn whole
+  "Request decl worked whole by one agent, as one task of kind :whole on its own branch: it
+  writes the red proof, makes it green, merges main and keeps it green, and its green branch
+  merges into main (seon.task/merges?), where `request` splits the same work into design,
+  implement and merge, each an agent of its own."
+  {:malli/schema [:=> [:cat :seon.task/declaration] [:vector :seon.task/declaration]]}
+  [decl]
+  [(-> decl (assoc :seon.task/kind :whole :seon.task/instructions (instructions :whole))
+       (update :seon.task/branch #(or % (task/default-branch (task/task-id (:seon.task/ns decl) (:seon.task/name decl))))))])
 
 (defn request-tx
   "The one transaction that writes request decl's linked tasks (request) on main, released:

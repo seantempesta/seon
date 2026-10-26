@@ -13,6 +13,8 @@ A request becomes its whole linked task set in one transaction on main, released
 
 All three check out design's branch, so implement holds design's schemas, stubs and red proofs, and merge holds both. The request's proofs are design's and reach the later steps along `:needs` (`seon.task/accumulate`).
 
+```seon.template/whole``` makes the same request one task of kind `:whole` instead, which one agent works through in one session: it writes the red proof, makes it green, merges main at each green and keeps it green, and its green branch merges into main as a merge task's does (```seon.task/merges?```); its runs start as work does, not one at a time as merges do (the owner's experiment of 2026-10-26: one agent against three).
+
 ```seon.template/request-tx``` is the one transaction: `seon.task/create-tx` of the set, then `seon.task/execution-tx` releasing it. `my.root/request!` writes it with one `seon.root/transact-main!`. Since the reconciler reads only committed main, no agent of the set sees part of it. Not this: create held, then `my.root/run!` (two transactions), or adding `:needs` afterwards.
 
 `seon.template/with-merge` makes a linked set the same way: it follows each declared work task (the task files, `my.root/load-tasks!`) with its merge task, gives a task with no branch its default one (`seon.task/default-branch`), and points a `:needs` on a work task at that task's merge; a task file's tasks are written held (`seon.task/load-tx` over `seon.task/create-tx`: new entries created held, changed ones updated, removed ones cancelled), so nothing loaded from a file runs until root releases it with `my.root/run!`.

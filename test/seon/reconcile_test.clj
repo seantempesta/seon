@@ -421,6 +421,15 @@
   ;; (the run helper names branches by task id; only the action matters here)
   )
 
+(deftest a-whole-task-works-in-parallel-and-its-green-merges
+  ;; owner, 2026-10-26 (seon.template/whole): a whole task's runs start as work does, not one at a
+  ;; time as merges do; its green run merges into main as a merge run's does; out of turns, it parks
+  (let [whole (fn [nm] (assoc (decl nm) :seon.task/kind :whole))]
+    (is (= [(spawn "a" 1) (spawn "b" 1)] (actions-for (db-of [(whole "a") (whole "b")]))) "two at once")
+    (is (= [{:op :octopus-merge :run "demo/a#1" :members [{:run "demo/a#1" :task "demo/a"}]}]
+           (actions-for (db-of [(whole "a")] :extra (run "a" 1 :ended :outcome :green :results {(t "a") :pass})))))
+    (is (= [:park] (map :op (actions-for (db-of [(whole "a")] :extra (run "a" 1 :ended :outcome :cap :results {(t "a") :fail}))))))))
+
 (deftest a-merge-with-deferred-tests-is-gated-only-when-root-asks
   ;; root's rulings (2026-10-22/23) and the owner's (2026-10-23: process tests never run
   ;; automatically): with root's go on the task (my.root/gate!, :seon.task/gate?) the process

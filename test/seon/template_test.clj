@@ -56,6 +56,17 @@
     (is (< (count (:seon.task/plan d)) 300) (str "a short description: " (:seon.task/name d)))
     (is (seq (task/create-tx (ts/test-db) (tpl/request d))) "each a valid task set")))
 
+(deftest a-whole-request-is-one-task-one-agent-works-through
+  ;; owner, 2026-10-26: "build a do everything in one go task": the request as one task of kind
+  ;; :whole on its own branch, with the whole instructions, where `request` makes three
+  (let [d {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."}
+        [w :as ws] (tpl/whole d)]
+    (is (= 1 (count ws)))
+    (is (= [:whole :task-demo-w] [(:seon.task/kind w) (:seon.task/branch w)]))
+    (is (= (:whole tpl/instructions) (:seon.task/instructions w)))
+    (is (str/includes? (:whole tpl/instructions) "main's work merged in") "done on main's merged program")
+    (is (seq (task/create-tx (ts/test-db) ws)) "a valid task")))
+
 (deftest each-steps-instructions-are-its-task-briefly-prose-first
   ;; root, 2026-10-25: each step's instructions short, prose first (its goal, when it is done, by
   ;; what means: the standard format's stage stories), with no ;; anywhere

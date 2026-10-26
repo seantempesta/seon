@@ -391,7 +391,7 @@
   [{:keys [task run model max-turns]}]
   (let [{:keys [plan-before]} (begin! task run)
         t0-task (task/task (agent/db) task)
-        merge? (= :merge (:seon.task/kind t0-task))
+        merge? (task/merges? (:seon.task/kind t0-task))
         merge-cfg (r/merge-limits t0-task)]
     ;; every run starts on main: a kept branch made before main moved merges it first, so
     ;; the branch's db, its base and this process hold one program (its tests' digests are the

@@ -274,7 +274,8 @@
         (mark :reap (and a (= :running st) (not live?)))
         (update :kill #(if kill (assoc % aid kill) (dissoc % aid)))
         (mark :judge (boolean (judged st)))
-        (mark :merging (and a (= :merge (:seon.task/kind t)) (or live? (= :ended st)))))))
+        ;; a merge run merges while it runs; a whole run (its own work first) once it ends
+        (mark :merging (and a (case (:seon.task/kind t) :merge (or live? (= :ended st)) :whole (= :ended st) false))))))
 
 (defn- settle
   "Re-derive after entities changed: tasks whose needs or proofs changed (and the tasks that
@@ -397,7 +398,7 @@
         failed (fn [aid id problem] {:op :hold :run aid :task id :problem problem})
         judged (for [aid (sort (:judge idx))
                      :let [a (att aid) id (:seon.run/task a) t (get-in idx [:tasks id])
-                           merge? (= :merge (:seon.task/kind t))]]
+                           merge? (task/merges? (:seon.task/kind t))]]
                  (cond
                    (not= :running (:seon.task/execution t)) {:op :close :run aid}
                    (= :dead (:seon.run/status a))
