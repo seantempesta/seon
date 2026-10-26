@@ -278,7 +278,7 @@
         ;; a loader's typed error (a refused task file) is a recorded :platform error; the problems
         ;; the load made true are shown by health. One load at a time: a load writes what it read
         ;; against the db it read, so the boot's and a first batch's must not interleave (a stale
-        ;; one landing after a newer one would undo it, and its event is spent)
+        ;; one written after a newer one would undo it, and its event is spent)
         one (Object.)
         load! (fn [ks]
                 (locking one
