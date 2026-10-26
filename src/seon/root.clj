@@ -354,7 +354,7 @@
                    (to-agent st o parent
                              {:op :req :rid rid :kind :clone :new aid :branch branch :pass-fd fd
                               :msg {:op :clone :agent aid :branch branch}}))))
-      (:eval :tests :judge :stats :merge-main :parts)
+      (:eval :tests :judge :stats :merge-main :render)
       (if (nil? (get-in st [:agents id]))
         (reply! st o p (absent (get-in st [:view :agents id]) id))
         (let [[st rid] (pend st p op id)
@@ -365,8 +365,8 @@
                     :judge {:op :judge}
                     :stats {:op :stats}
                     :merge-main {:op :merge-main :data-attrs (:data-attrs m)}
-                    ;; its page as its parts' html (the render proc's, seon.render.proc/ask-parts)
-                    :parts {:op :parts})]
+                    ;; its page's parts drawn by its own renders (the render proc's, seon.render.proc/ask-parts)
+                    :render {:op :render})]
           (to-agent st o id {:op :req :rid rid :kind op :msg msg})))
       ;; a message to a live agent (the owner's, from the page or the server): root's one
       ;; delivery, as an agent's send is; it lands in the agent's inbox, which its next turn reads

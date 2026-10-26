@@ -191,7 +191,9 @@
   [k] for each key the agent added to its ctx (any key outside its own :seon.agent/* attributes,
   its units and the environment), named by that key, which is its schema; then the conversation:
   [:eval id] per eval, [:turn id] per model turn of the run and [:message id] per message to it, in
-  the order they were written (their entity ids). Pure in c: it reads no db and no config. What a
+  the order they were written (their entity ids). Each part names the members of c it was made from
+  (:from), so a part made again from the same members is drawn from the memo (drawn). Pure in c:
+  it reads no db and no config. What a
   part leaves out is not data the agent acts on (ids, the turns' bases but the newest's
   observation, the agent's own counters): a change without meaning is a data defect, fixed here."
   {:malli/schema [:=> [:cat :map] [:vector :seon.render/part]]}
@@ -201,20 +203,20 @@
         turn (last (sort-by :seon.turn/n (vals (:turns run))))
         {:keys [results reds reasons]} (get-in turn [:seon.turn/basis :observed])
         failure (into {} (for [r reds] [(:test r) {:assert (:expected r) :got (if (contains? r :got) (:got r) (:actual r))}]))
-        entry (fn [k e] {:key [k (or (:seon.eval/id e) (:seon.message/id e) (:seon.turn/id e))]
+        entry (fn [k e] {:key [k (or (:seon.eval/id e) (:seon.message/id e) (:seon.turn/id e))] :from [e]
                          :value (if (= :turn k) (-> (relevant-of :seon.turn/turn-fact e) (dissoc :seon.turn/run) (update :seon.turn/basis select-keys [:max-turns])) (dissoc e :db/id :seon.eval/agent :seon.message/to))})]
     (-> []
-        (cond-> task (conj {:key [:task] :value (relevant-of :seon.task/task-fact (dissoc task :turns :runs))})
+        (cond-> task (conj {:key [:task] :from [task] :value (relevant-of :seon.task/task-fact (dissoc task :turns :runs))})
                 (seq (:seon.task/proofs task))
-                (conj {:key [:proofs] :value (with-meta (into (sorted-map-by #(compare (str %1) (str %2)))
+                (conj {:key [:proofs] :from [task turn] :value (with-meta (into (sorted-map-by #(compare (str %1) (str %2)))
                                                               (for [t (:seon.task/proofs task)]
                                                                 [t (cond-> {:status (get results t :not-run)} (failure t) (assoc :failure (failure t)))]))
                                                   {:seon.render/schema :seon.render/proofs})})
-                (seq reasons) (conj {:key [:verdict] :value reasons})
-                run (conj {:key [:run] :value (assoc (relevant-of :seon.run/run-fact run) :turns-taken (count (:turns run)))}))
+                (seq reasons) (conj {:key [:verdict] :from [turn] :value reasons})
+                run (conj {:key [:run] :from [run] :value (assoc (relevant-of :seon.run/run-fact run) :turns-taken (count (:turns run)))}))
         (into (for [k (sort-by str (keys c))
                     :when (and (qualified-keyword? k) (not (#{"seon.agent" "db"} (namespace k))))]
-                {:key [k] :value (get c k) :schema k}))
+                {:key [k] :from [(get c k)] :value (get c k) :schema k}))
         (into (map second) (sort-by first (concat (for [e (vals (:evals c))] [(:db/id e) (entry :eval e)])
                                                   (for [t (vals (:turns run))] [(:db/id t) (entry :turn t)])
                                                   (for [m (vals (:messages run))] [(:db/id m) (entry :message m)])))))))
@@ -225,32 +227,35 @@
   (seon.print.select/show with :outputs #{:text :hiccup}), so the page and the model never differ
   in what was cut; :inline, its html in one line (:as :inline), what a folded part shows."
   {:malli/schema [:=> [:cat :seon.render/part] :seon.render/faces]}
-  [{:keys [value schema]}]
+  [{:keys [value schema] :as p}]
   (let [h (render-of value :html schema) a (render-of value :ai schema)
         both (when-not (and h a)
                (print/print-value value (assoc (printer-opts {}) :outputs #{:text :hiccup} :render nested-html)))]
     {:html (if h (html value {:schema schema}) (or (:html both) [:span {:class "seon-print-refused"} (str (:seon.error/message both))]))
      :text (if a (ai value {:schema schema}) (or (:text both) (:seon.error/message both) ""))
-     :inline (html value {:as :inline :schema schema})}))
+     ;; a folded part's one line: the conversation's evals fold (seon.render.ui/agent-part)
+     :inline (when (= :eval (first (:key p))) (html value {:as :inline :schema schema}))}))
 
 (defn part-html
   "Part p as a page shows it, from its faces f: {:key :html :inline}, its html and its one line
   serialized."
   {:malli/schema [:=> [:cat :seon.render/part :seon.render/faces] :seon.render/part-html]}
-  [p f] {:key (:key p) :html (h/html (:html f)) :inline (h/html (:inline f))})
+  [p f] (cond-> {:key (:key p) :html (h/html (:html f))} (:inline f) (assoc :inline (h/html (:inline f)))))
 
 (defn drawn
-  "Part p's faces through memo {key [fs value faces]}: the held faces when the functions that
-  draw p (fs: each face's declared render as its var holds it now, else the printer's) and p's
-  value are identical to those it was drawn with (a redefined render draws again), else drawn
-  now. Answers [memo' faces]."
+  "Part p's faces through memo {key [fs from faces]}: the held faces when the functions that
+  draw p (fs: each face's declared render as its var holds it now, else the printer's) and what
+  p was made from (its :from, the ctx members view read, else its value) are identical to those
+  it was drawn with (a redefined render draws again; a member a transaction changed is a new
+  object, ctx's patch leaving every other one as it was), else drawn now. Answers [memo' faces]."
   {:malli/schema [:=> [:cat :map :seon.render/part] [:tuple :map :seon.render/faces]]}
-  [memo {:keys [key value schema] :as p}]
+  [memo {:keys [key value schema from] :as p}]
   (let [fs [(render-of value :html schema) (render-of value :ai schema) @#'print/print-value]
-        [fs0 v0 out] (get memo key)]
-    (if (and out (identical? v0 value) (every? true? (map identical? fs fs0)))
+        src (or from [value])
+        [fs0 src0 out] (get memo key)]
+    (if (and out (= (count src) (count src0)) (every? true? (map identical? src src0)) (every? true? (map identical? fs fs0)))
       [memo out]
-      (let [out (part-faces p)] [(assoc memo key [fs value out]) out]))))
+      (let [out (part-faces p)] [(assoc memo key [fs src out]) out]))))
 
 (defn rendered?
   "Does v's producer name an AI render for it (the value's own key, or its metadata's

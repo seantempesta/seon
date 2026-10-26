@@ -469,7 +469,7 @@
 
 (defn parts
   "This agent's page as its parts' html, drawn here under its branch's schemas (root's render proc
-  asks, seon.render.proc/ask-parts), each through the part memo this process holds (:drawn):
+  asks, its {:op :render}: seon.render.proc/ask-parts), each through the part memo this process holds (:drawn):
   {:t its ctx's t :parts [{:key :html :inline}]}, the parts in their order (seon.render/view).
   Records nothing."
   {:malli/schema [:=> [:cat] [:map [:t :int] [:parts [:vector :seon.render/part-html]]]]}
@@ -478,14 +478,15 @@
     #(let [c @ctx/ctx
            [memo out] (reduce (fn [[m acc] p] (let [[m d] (draw-part m p)] [m (conj acc d)]))
                               [(:drawn @agent/state {}) []] (render/view c))]
-       (swap! agent/state assoc :drawn memo)
+       ;; the memo holds the parts this page has now, none it dropped
+       (swap! agent/state assoc :drawn (select-keys memo (map :key out)))
        {:t (:t c 0) :parts out})))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 
 (defn agent-step
   "The agent as a step-fn, run on its one thread by seon.step/run-loop: requests in on
-  :sock (an eval as {:op :eval :id :forms}, its page's parts as {:op :parts :id},
+  :sock (an eval as {:op :eval :id :forms}, its page's parts to draw as {:op :render :id},
   Seon's ops as {:op k ...}), replies out on
   :sock; :pause, :resume, :stop and :ping are taken by the loop. Its REPL state is the
   process's one state map (seon.agent/state), which the code it evaluates reads, so the
@@ -499,7 +500,7 @@
    (cond
      ;; root's render proc asks for this agent's page: its parts, drawn here under its branch's
      ;; schemas by the renders it defines, answered as HTML, and nothing recorded
-     (= :parts (:op m))
+     (= :render (:op m))
      [st {:sock [{:op :reply :id (:id m) :response (parts)}]}]
      (= :eval (:op m))
      (do

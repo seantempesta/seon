@@ -825,7 +825,7 @@
       (finally (reset! agent/state old)))))
 
 (deftest a-parked-agent-draws-its-parts-and-a-gone-one-answers-at-once
-  ;; the agent draws its own page (one derivation, slice 2): the render proc's {:op :parts} ask is
+  ;; the agent draws its own page (one derivation, slice 2): the render proc's {:op :render} ask is
   ;; answered by an agent parked between requests with its parts' HTML, a key its branch renders
   ;; drawn by that render, recording nothing; a request to an agent that is gone is answered at
   ;; once, so its page is drawn by root from its branch and never waits
@@ -837,9 +837,9 @@
                    n
                    {:op :eval :agent "root"
                     :code (str "(let [id (first (keys (:agents @(seon.root/call! sys {:op :state}))))]"
-                               " @(seon.root/call! sys {:op :parts :id id}))")}
+                               " @(seon.root/call! sys {:op :render :id id}))")}
                    n
-                   {:op :eval :agent "root" :code "@(seon.root/call! sys {:op :parts :id :gone})"}])
+                   {:op :eval :agent "root" :code "@(seon.root/call! sys {:op :render :id :gone})"}])
         steps (some #(when (= [:lab.ctx/steps] (:key %)) %) (:parts (:value drawn)))]
     (is (= "<ol><li>read the plan</li><li>write the test</li></ol>" (:html steps)) (pr-str drawn))
     (is (= (inc (:value before)) (:value after)) "the drawing recorded no eval: only the count before it is new")

@@ -104,8 +104,8 @@
  :seon.render/page-tile [:and {:seon.render/html seon.render.ui/tile} :seon.render/node]
  ;; its list's end: the older rows, counted and unrendered, and the view that asks for them
  ;; a ctx as the page and the model are drawn from it (seon.render/view, faces, drawn)
- :seon.render/part [:map [:key [:vector :any]] [:value :any] [:schema {:optional true} :qualified-keyword]]
- :seon.render/faces [:map [:html :any] [:text :string] [:inline :any]]
+ :seon.render/part [:map [:key [:vector :any]] [:value :any] [:schema {:optional true} :qualified-keyword] [:from {:optional true} [:vector :any]]]
+ :seon.render/faces [:map [:html :any] [:text :string] [:inline {:optional true} :any]]
  ;; a part of an agent's page as its agent drew it (seon.repl/parts, seon.render.ui/agent-part)
  :seon.render/part-html [:map {:seon.render/html seon.render.ui/agent-part} [:key [:vector :any]] [:html :string] [:inline {:optional true} :string]]
  :seon.render/page-more [:map {:seon.render/html seon.render.ui/more} [:older nat-int?] [:view :string] [:click? {:optional true} :boolean]]

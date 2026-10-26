@@ -6,7 +6,7 @@
   never repeat in the conversation. The agent's page joins them as a read of root's cached
   view."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [datahike.api :as d]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent]))
 
 (def forms
   "The screen's forms, evaluated in order before each model request: the agent's page, as root

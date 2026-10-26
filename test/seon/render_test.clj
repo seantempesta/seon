@@ -544,7 +544,7 @@
 
 (defn- drawn-parts
   "a3's page's parts as its process draws them (seon.repl/parts), drawn here from branch: what the
-  render proc's {:op :parts} ask is answered with."
+  render proc's {:op :render} ask is answered with."
   [branch]
   {:parts (mapv #(r/part-html % (r/part-faces %)) (r/view (:tree (seon.ctx/build branch (seon.task/agent-key "b1" :a3) :task-demo-f))))})
 
@@ -853,13 +853,14 @@
               st1 (#'p/pass (-> st (update :branches dissoc :a3) (assoc :waiting {8 :a3})) o)]
           (is (empty? (filter #(= :page (:op %)) (:to-web @o))))
           (let [o (volatile! {})
-                st2 (#'p/pass (assoc-in st1 [:branches :a3 :db] branch) o)]
-            (is (empty? (filter #(= :page (:op %)) (:to-web @o))) "a running agent's page waits for the parts it draws")
-            (is (some #(= {:op :parts :id :a3} (get-in % [:req])) (:to-api @o)) "which it is asked for")
+                st2 (#'p/pass (assoc-in st1 [:branches :a3 :db] branch) o)
+                page (first (filter #(= :page (:op %)) (:to-web @o)))]
+            (is (str/includes? (:html page) "(f 2)") "answered at once, drawn from its branch, never waiting on its process")
+            (is (str/includes? (:html page) "its process has not answered yet") "and it says so")
+            (is (some #(= {:op :render :id :a3} (get-in % [:req])) (:to-api @o)) "its process is asked for its parts")
             (let [o (volatile! {})
-                  _ (#'p/answered st2 o [:parts :a3] (drawn-parts branch))
-                  page (first (filter #(= :page (:op %)) (:to-web @o)))]
-              (is (str/includes? (:html page) "(f 2)") "answered with the parts it drew"))))))
+                  st3 (#'p/answered st2 o [:parts :a3] (drawn-parts branch))]
+              (is (not (str/includes? (p/page-html st3 :a3) "has not answered yet")) "its own parts replace them"))))))
     (testing "a view no tab watches keeps nothing: its page, its branch read, its rows"
       (let [[st2 _] (#'p/render-proc (assoc st1 :shown {:a3 21}) :from-web {:op :views :views #{:root} :tabs 1})]
         (is (nil? (get-in st2 [:views :a3])))
@@ -1129,7 +1130,7 @@
     (is (= 2 (:turns-taken (:value (nth parts 3)))))
     (is (= [[:eval "e1"] [:eval "e2"] [:eval "e3"]] (filterv #(= :eval (first %)) ks)) "the evals in the order they were written")
     (is (some #(= [:message "m-1"] %) ks) "the message to the run, in the conversation")
-    (is (not-any? #(and (map? %) (or (contains? % :db/id) (contains? % :seon.agent/answered-t))) (tree-seq coll? seq parts))
+    (is (not-any? #(and (map? %) (or (contains? % :db/id) (contains? % :seon.agent/answered-t))) (tree-seq coll? seq (map :value parts)))
         "no entity ids, no counters")
     (is (not-any? #(#{:t :commit :branch} (first %)) ks) "no environment")
     (is (= parts (r/view c)) "pure: the same ctx, the same parts")))
@@ -1147,6 +1148,19 @@
     (is (= (r/ai err {}) (:text fe)) "a declared :ai render overrides the text face")
     (is (= (h/html (r/html err {})) (h/html (:html fe))) "and its :html render the page's")))
 
+(deftest a-view-made-again-draws-from-the-memo
+  ;; the review of slice 2: view makes new part values on every call, so the memo keys on the ctx
+  ;; members a part was made from (:from), which ctx's patch leaves identical when unchanged
+  (let [[main branch _] (paged-dbs)
+        c (:tree (seon.ctx/build branch (seon.task/agent-key "b1" :a3) :task-demo-f))
+        draw (fn [memo] (reduce (fn [[m acc] p] (let [[m f] (r/drawn m p)] [m (conj acc f)])) [memo []] (r/view c)))
+        [m1 fs1] (draw {})
+        [_ fs2] (draw m1)
+        c2 (assoc-in c [:evals "e1" :seon.eval/record :response :value] 5)
+        [_ fs3] (reduce (fn [[m acc] p] (let [[m f] (r/drawn m p)] [m (conj acc f)])) [m1 []] (r/view c2))]
+    (is (every? true? (map identical? fs1 fs2)) "the same ctx: every part from the memo")
+    (is (= 1 (count (remove true? (map identical? fs1 fs3)))) "one member changed: that part alone drawn again")))
+
 (deftest a-part-draws-once-per-value
   ;; the memo: a part draws again only when its value or a function that draws it is a new object
   (let [p {:key [:run] :value {:seon.run/id "demo/f#1" :seon.run/status :running}}
@@ -1160,3 +1174,33 @@
     (is (not (identical? out1 out4)) "a function that draws it redefined: drawn again")))
 
 
+
+(deftest the-walk-is-called-only-where-slice-5-says
+  ;; root, 2026-10-26: an agent's page is its parts (the one derivation's slice 2); root's page, a
+  ;; task's and /walk/<eid> still lay out the walk until slice 5 moves them. The two producers
+  ;; coexist only there, named here, so the list can only shrink: a new caller is red
+  (let [forms (seon.program/live-forms (src-program))]
+    (is (= '[seon.render/walk seon.render.proc/agent-page seon.render.proc/page-value]
+           (vec (sites forms #{'seon.render/walk} (constantly true))))
+        "the walk's callers: itself (a unit's members), root's sidebar for an agent's page, and every page that is not an agent's")))
+
+(deftest a-dead-agents-page-renders-and-never-waits
+  ;; root, 2026-10-26: no page waits on a process. A running agent's page is drawn from its branch until
+  ;; its process answers with its parts; one whose process ended, or whose ask was answered with why,
+  ;; is drawn from its branch and says so
+  (let [[main branch _] (paged-dbs)
+        o (volatile! {})
+        st (assoc (proc-state main branch) :watch #{:a3} :waiting {5 :a3})
+        st1 (#'p/pass st o)
+        page (first (filter #(= :page (:op %)) (:to-web @o)))]
+    (is (= 5 (:k page)) "running: answered in the pass that asked its process")
+    (is (empty? (:waiting st1)))
+    (testing "its process ended: root's view says so, its parts are dropped, and the page says it is not running"
+      (let [st2 (#'p/answered (assoc-in st1 [:parts :a3 :parts] []) (volatile! {}) :state (assoc-in (:view st1) [:agents :a3 :status] :dead))]
+        (is (nil? (get-in st2 [:parts :a3])))
+        (is (str/includes? (p/page-html st2 :a3) "its process is not running"))
+        (is (str/includes? (p/page-html st2 :a3) "(f 2)") "its parts, drawn by root from its branch")))
+    (testing "its ask answered with why (gone, refused): the page says so"
+      (let [gone (seon.contract/error :seon.root/no-agent 'seon.root/request "no live agent :a3" {})
+            st2 (#'p/answered st1 (volatile! {}) [:parts :a3] gone)]
+        (is (str/includes? (p/page-html st2 :a3) "its process did not answer (no live agent :a3)"))))))

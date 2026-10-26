@@ -175,7 +175,6 @@
       (is (re-find #":lab.ctx/steps" (:printed rec)) "the model's text is the one printer's, as it read it")
       (is (= "<ol><li>read the plan</li><li>write the test</li><li>read the plan</li></ol>" (:html steps))
           "the agent draws its key, a part of its page, by the render its branch names, recording nothing")
-      (is (re-find #"read the plan" (:inline steps)) "and its one line, what a folded part shows")
       (testing "the page rebuilds the value from the branch at its basis"
         (let [db (:db-after (d/with db [{:seon.eval/id "e9" :seon.eval/agent [:seon.agent/key k] :seon.eval/record rec}]))
               h (seon.web.html/html (seon.render.ui/evaluation (d/pull db '[*] [:seon.eval/id "e9"]) {:db db}))]

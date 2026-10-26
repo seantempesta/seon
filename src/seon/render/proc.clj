@@ -140,7 +140,7 @@
 (defn- render-unit
   "A unit as [hiccup html]: its input by the render its schema declares, its unit named (its
   element's id: :unit); a component's from the proc's cache (comp-entry). The hiccup is kept
-  beside the html: a screen is the page's hiccup (screen-of)."
+  beside the html."
   {:malli/schema [:=> [:cat :map] [:tuple :any :string]]}
   [{:keys [id input schema html hiccup]}]
   (if html
@@ -264,7 +264,7 @@
   [st id] (let [a (when id (get-in st [:view :agents id]))] (boolean (and a (not (gone (:status a)))))))
 
 (defn- ask-parts
-  "Ask each live agent a watched view shows for its page's parts ({:op :parts}, seon.repl/parts)
+  "Ask each live agent a watched view shows for its page's parts ({:op :render}, seon.repl/parts)
   when its branch moved since it was last asked (that view's branch read's t), one ask in flight an
   agent, held by its id, so every view of it shows one answer: the agent draws its own page, by its
   own renders."
@@ -274,7 +274,7 @@
             (let [[_ id] (agent-of (:main-db st) view)
                   t (some-> (get-in st [:branches view :db]) :max-tx)]
               (if (and t (live? st id) (not= t (get-in st [:parts id :asked])))
-                (-> (assoc-in st [:parts id :asked] t) (ask o [:parts id] {:op :parts :id id}))
+                (-> (assoc-in st [:parts id :asked] t) (ask o [:parts id] {:op :render :id id}))
                 st)))
           st (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st)))))
 
@@ -299,9 +299,12 @@
         root (:db/id (d/entity db [:seon.root/id :root]))]
     (ui/parts-page (:seon.agent/id e)
                    {:parts (or parts []) :shown (get-in st [:shown view] (history-cap)) :view (ui/view-param view) :head [0 eid]
+                    ;; never a wait: drawn from its branch until its process answers, the page says so
                     :caption (when-not own?
                                (str "drawn by root from its branch with main's renders: "
-                                    (if-let [err (:error held)] (str "its process did not answer (" (:seon.error/message err) ")") "its process is not running")))
+                                    (cond (:error held) (str "its process did not answer (" (:seon.error/message (:error held)) ")")
+                                          (live? st id) "its process has not answered yet"
+                                          :else "its process is not running")))
                     ;; its REPL and its messages while its process runs; its held task's release
                     :input {:schema :seon.render/agent-input
                             :value {:id (:seon.agent/id e) :live? (live? st id)
@@ -361,10 +364,7 @@
   (let [db (:main-db st)
         b (when db (some->> (location db view) (d/entity db) :seon.agent/branch))]
     (boolean (and (get-in st [:views view])
-                  (or (nil? b) (get-in st [:branches view :db]) (get-in st [:branches view :error]))
-                  ;; a running agent's page waits for the parts it draws
-                  (let [[_ id] (agent-of db view)]
-                    (or (not (live? st id)) (:parts (get-in st [:parts id])) (:error (get-in st [:parts id]))))))))
+                  (or (nil? b) (get-in st [:branches view :db]) (get-in st [:branches view :error]))))))
 
 ;;; --- the pass ------------------------------------------------------------------------------------
 
@@ -748,7 +748,9 @@
     ;; and the view stays as it was; the next event asks again
     (and (= :state kind) (seon.contract/error? r)) st
     (= :state kind)
-    (let [st (assoc st :view r)
+    ;; an agent whose process ended keeps no parts (a later process of its id draws its own)
+    (let [st (-> (assoc st :view r)
+                 (update :parts #(into {} (filter (fn [[id]] (live? {:view r} id))) %)))
           ;; main's first read; after it, main comes in the writer's commits (:main)
           st (if (and (nil? (:main-db st)) (not (some #{:main} (vals (:pending st))))) (ask st o :main {:op :write :req {:op :branch-db :branch :db}}) st)]
       ;; a watched agent's branch moved: read its branch db (its turns, evaluations and task)
