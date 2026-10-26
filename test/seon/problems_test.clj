@@ -271,6 +271,28 @@
         "a later stall of the same run writes none")
     (is (empty? (tasks (second (step (assoc (api view) :conn (atom db)) :back (stalled :a2))))) "an agent working no run: none")))
 
+(deftest a-stall-tasks-evidence-is-captured-while-it-is-stuck
+  ;; the evening audit (a6's hang left no evidence: the root restarted and the process went with
+  ;; it): the stall task's first write asks for the stuck process's evidence (the :evidence effect,
+  ;; seon.fx/stall-evidence), and its answer's files are written into the task's cause on main
+  (let [db (ts/test-db)
+        view {:agents {:a1 {:status :busy :pid 77 :task "demo/t" :run "demo/t#1"}}}
+        st (assoc (api view) :conn (atom db) :system {:procs {:fx/evidence {}}})
+        stalled {:op :stalled :agent :a1
+                 :error (contract/error :seon.agent/stalled 'seon.agent-proc/agent-in "agent a1 sent nothing for 4000 ms with a request in flight"
+                                        {:agent :a1 :quiet-ms 4000})}
+        [st o1] (step st :back stalled)
+        [ask] (get o1 [:fx/evidence :in])
+        db (d/db-with db (vec (filter :seon.task/id (into [] cat (writes o1)))))
+        files {:sample "/x/sample.txt" :lsof "/x/lsof.txt"}
+        [_ o2] (step (assoc st :conn (atom db)) :back {:dest (:dest ask) :r {:value {:dir "/x" :files files}}})
+        [[_ _ attr cause]] (filter #(and (vector? %) (= :seon.task/cause (nth % 2 nil))) (into [] cat (writes o2)))]
+    (is (= 77 (get-in ask [:req :pid])) "asked for the stuck process")
+    (is (str/ends-with? (get-in ask [:req :dir]) "/stalls/stall-a1-demo-t-1") "its files under the runs directory's stalls/, by the task")
+    (is (= :seon.task/cause attr))
+    (is (= files (:evidence cause)) "the evidence's files on the task's cause")
+    (is (= :a1 (get-in cause [:stall :agent])) "beside the stall it was captured for")))
+
 (deftest a-stalled-agent-is-an-open-problem-while-the-fact-holds
   (let [db (d/db-with (ts/test-db) [{:seon.agent/key "b1/a1" :seon.agent/id :a1 :seon.agent/pid 77
                                      :seon.agent/stall {:quiet-ms 4000 :last-op {:kind :tests :form "#'app.t/hangs"}}}

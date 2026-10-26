@@ -711,3 +711,29 @@
                     [(keyword (str "fx." (name kind)) (str i))
                      {:proc (flow/process #'worker-proc) :args {:kind kind :perform perform :open open :ctx ctx :work work :owner owner}}])))))
     {} kinds))
+
+(defn stall-evidence
+  "A stalled agent's evidence, captured while it is stuck (seon.root's stall task asks it at the
+  stall's first write): its fiber dump (SIGINFO: Jolt writes every fiber's stack to the process's
+  stderr, read from its stderr file after the sample), `sample` of pid for 5 s, `lsof` of pid, and
+  `ps` of its process group, each a file in dir. A hang is evidence, kept by the system rather than
+  remembered (a root that restarts loses the process). Answers {:value {:dir :files {kind path}}}
+  naming each file written with something in it, or :seon.fx/io-error when none was (the process
+  already gone)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [pid dir stderr]} :req}]
+  (let [script (str "mkdir -p \"$1\" && cd \"$1\" || exit 1; p=$2\n"
+                    "kill -INFO $p 2>/dev/null\n"
+                    "sample $p 5 -file sample.txt > /dev/null 2>&1\n"
+                    "lsof -p $p > lsof.txt 2>&1\n"
+                    "g=$(ps -o pgid= -p $p | tr -d ' '); [[ -n $g ]] && ps -o pid,ppid,pgid,stat,etime,%cpu,rss,command -g $g > ps.txt 2>&1\n"
+                    "[[ -r \"$3\" ]] && tail -c 262144 \"$3\" > fibers.txt\n")
+        _ (sh/sh "zsh" "-c" script "evidence" dir (str pid) (or stderr ""))
+        files (into {} (for [[k f] {:sample "sample.txt" :lsof "lsof.txt" :ps "ps.txt" :fibers "fibers.txt"}
+                             :let [path (str dir "/" f) file (java.io.File. path)]
+                             :when (pos? (.length file))]
+                         [k path]))]
+    (if (seq files)
+      {:value {:dir dir :files files}}
+      (error #'seon.fx/stall-evidence :seon.fx/io-error (str "no evidence of process " pid " was captured in " dir ": it is gone") {:path dir}))))
+

@@ -227,7 +227,10 @@
   "Root's task to deal with agent id's stall s, when it works a run (seon.template/stall: one per
   agent and run, so a later stall of the same run writes none): written to main, held, worked by
   a Claude session through seon_attach (owner: \"a task that we can pre-fill with a template and we
-  can give root\"). A refused write is the agent's problem, as its facts' are."
+  can give root\"). With it, its evidence is asked while the process is stuck (seon.fx/stall-evidence,
+  the :evidence effect: sample, lsof, ps and its fiber dump, files under the runs directory's stalls/),
+  whose answer is written into the task's cause (back-op). A refused write is the agent's problem, as
+  its facts' are."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.agent/id :map] :seon.root/api-state]}
   [st o id s]
   (let [{:keys [run pid]} (get-in st [:view :agents id])
@@ -238,7 +241,15 @@
                  (task/create-tx db [decl]))]
         (cond (nil? tx) st
               (contract/error? tx) (problem st (err/occurrence tx :agent {:agent id :task (:task (get-in st [:view :agents id]))} (System/currentTimeMillis)))
-              :else (do (step/out! o :to-writer {:op :tx :branch :db :tx-data tx :dest {:agent-facts [id]}}) st)))
+              :else (let [tid (task/task-id (:seon.task/ns decl) (:seon.task/name decl))]
+                      (step/out! o :to-writer {:op :tx :branch :db :tx-data tx :dest {:agent-facts [id]}})
+                      ;; a hang is evidence: captured now, before a restart takes the process
+                      (when (and pid (contains? (system/fx-owners (get-in st [:system :procs])) :fx/evidence))
+                        (step/out! o [:fx/evidence :in]
+                                   {:req {:pid pid :dir (str (cfg/value :seon.config.root/runs-dir) "/stalls/" (:seon.task/name decl))
+                                          :stderr (agent/stderr-path (get-in st [:view :store :agents-dir]) id)}
+                                    :prio 0 :dest {:stall-evidence tid :agent id}}))
+                      st)))
       st)))
 
 (defn- to-agent
@@ -464,6 +475,16 @@
                                true (deliver-rid o (:rid dest) (dissoc r :sync))))
         ;; the recorded errors' write was answered: the next window may write
         (:errors-flushed dest) (dissoc st ::errors-flight)
+        ;; a stall's evidence was captured (stall-task): its files on the stall task's cause, on main
+        (:stall-evidence dest) (let [tid (:stall-evidence dest) db (some-> (:conn st) deref)
+                                     cause (some-> db (d/entity [:seon.task/id tid]) :seon.task/cause)]
+                                 (cond (contract/error? r) (problem st (err/occurrence r :agent {:agent (:agent dest) :task tid} (System/currentTimeMillis)))
+                                       (and cause (not (:writer-closed st)))
+                                       (do (step/out! o :to-writer {:op :tx :branch :db :dest {:agent-facts [(:agent dest)]}
+                                                                    :tx-data [[:db/add [:seon.task/id tid] :seon.task/cause
+                                                                               (update cause :evidence merge (:files (:value r)))]]})
+                                           st)
+                                       :else st))
         (:rid dest) (deliver-rid st o (:rid dest) r)
         (:agent-facts dest) (cond-> st
                               (contract/error? r) (problem (err/occurrence r :agent {:agent (:agent-facts dest)} (System/currentTimeMillis))))
