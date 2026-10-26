@@ -64,6 +64,10 @@
     (is (= (:whole tpl/instructions) (:seon.task/instructions w)))
     (is (str/includes? (:whole tpl/instructions) "main's work merged in") "done on main's merged program")
     (is (= 3 (count (tpl/stages d))) "the stages it replaced")
+    ;; agent loop's park findings: a green run ends before its closing prose, so "end your turn
+    ;; with prose" left the next turn parked :waiting; a false premise was reported in prose
+    (is (not (str/includes? (:whole tpl/instructions) "end your turn")) "no closing-prose step")
+    (is (str/includes? (:whole tpl/instructions) "(my.task/fail! ") "a false premise is a failed task")
     (is (seq (task/create-tx (ts/test-db) ws)) "a valid task")))
 
 (deftest each-steps-instructions-are-its-task-briefly-prose-first

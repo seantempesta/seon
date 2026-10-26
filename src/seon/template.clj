@@ -64,7 +64,9 @@
                "make it pass by redefining the functions it needs, in their own namespaces, keeping their contracts, with a cost "
                "proof (``seon.cost/proof``) for a function whose input grows. Main is merged in at each green "
                "(`my.branch/merge-main!`); `(my.branch/unmerged)` lists what both sides changed: redefine each with what both "
-               "need, and keep the proofs green. Never loosen a contract or a proof to make it pass. Then end your turn with prose.")
+               "need, and keep the proofs green. Never loosen a contract or a proof to make it pass. If the plan's premise is "
+               "false (what it says is wrong is not), fail the task with the evidence (``(my.task/fail! \"why\" evidence)``) "
+               "rather than saying so in prose.")
    :test (str "Your task: test what the plan changed. You are done when the proofs and the tests of what changed pass, and "
               "each behaviour that broke has a deftest of its own. You do it by running them (`(my.agent/prove)`), writing a "
               "deftest in the proofs' namespace for each break, and fixing the code until all pass. Then end your turn with prose.")})
