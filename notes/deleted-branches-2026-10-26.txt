@@ -10,3 +10,7 @@ jolt/land13 d46e20d72
 jolt/git-is-read-through-fx 163ec9006
 jolt/durable-read-runs-alone 2151c65bf
 jolt/agent-conversation-base f0ab10b39
+jolt/evaluations cdf12058d
+jolt/acts-by-second-move db0b35f68
+jolt/flow-lab 10abf7fa5
+jolt/wiki 11f34a15f
