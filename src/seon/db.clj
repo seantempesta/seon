@@ -310,8 +310,8 @@
   connection released so its env closes), then renamed to path, which is atomic on one
   filesystem. A store is named by the id it records, never its path (store-cfg), so it opens
   where it lands. A create that fails or is killed leaves only its own directory, never a data
-  file holding no database at path (the full run of 2026-10-26: \"Database does not exist\" at
-  every later open); a killed one's directory is garbage, nothing kept. Of two creators the one
+  file holding no database at path (which every later open read as \"Database does not exist\");
+  a killed one's directory is garbage, nothing kept. Of two creators the one
   whose rename finds path taken removes its own. Answers whether this call's store is at path."
   {:malli/schema [:=> [:cat [:enum :lmdb :file] :string :int] :boolean]}
   [backend path n]
