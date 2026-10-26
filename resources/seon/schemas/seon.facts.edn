@@ -182,6 +182,9 @@
  :seon.task/proofs [:set :qualified-symbol]
  :seon.task/needs [:set :seon.db/ref]
  :seon.task/references [:set :qualified-symbol]
+ ;; the wiki sections the plan and instructions cite, by address (seon.ref/addresses): the
+ ;; section-address twin of :seon.task/references, written by the same producer from the same text
+ :seon.task/sections [:set :string]
  :seon.task/branch :keyword
  :seon.task/model :string
  :seon.task/execution [:and {:seon.db/index true} [:enum :held :running :cancelled]]
@@ -212,12 +215,12 @@
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
  ;; config keys are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
- :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:seon.task/references :by :var/name :as :cited] [* {[:var/form :as :form] [*]} {[:form/_refs :by :var/name :as :callers :limit :seon.config.ctx/callers :reverse true] [*]}]} {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/needs :as :needs] [*]}] :seon.render/html seon.render.ui/task}
+ :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:seon.task/references :by :var/name :as :cited] [* {[:var/form :as :form] [*]} {[:form/_refs :by :var/name :as :callers :limit :seon.config.ctx/callers :reverse true] [*]}]} {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/sections :by :seon.section/address :as :sections] [:seon.section/address :seon.section/heading :seon.section/text]} {[:seon.task/needs :as :needs] [*]}] :seon.render/html seon.render.ui/task}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                           [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]
                           [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/needs {:optional true} :seon.task/needs]
-                          [:seon.task/references {:optional true} :seon.task/references]
+                          [:seon.task/references {:optional true} :seon.task/references] [:seon.task/sections {:optional true} :seon.task/sections]
                           [:seon.task/instructions {:optional true} :seon.task/instructions]
                           [:seon.task/model {:optional true} :seon.task/model]
                           [:seon.task/evidence {:optional true} :seon.task/evidence]
