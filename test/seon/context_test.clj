@@ -17,7 +17,9 @@
                                   {:db/id (str "ns " (namespace v)) :ns/name (symbol (namespace v))}])
                                '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))"]
                                  [demo-test/f-test "(deftest f-test (is (= 4 (f 2))))"]
-                                 [demo-test/g-test "(deftest g-test (is (= 1 (g))))"]])))))
+                                 [demo-test/g-test "(deftest g-test (is (= 1 (g))))"]
+                                 ;; a test the agent wrote in its scratch namespace, no proof of its task
+                                 [user/scratch-test "(deftest scratch-test (is (= 1 2)))"]])))))
 
 (defn- wiki!
   "The checkout's wiki into conn, as root's boot loads it (seon.root/start!): the help page
@@ -126,6 +128,9 @@
       (let [b (context/current-state db t {:results {'user/scratch-test :fail} :reasons [{:reason :stray-red :symbol 'user/scratch-test}] :turn 1 :max-turns 4})]
         (is (= ['(my.task/update! :seon.task/proofs conj (quote user/scratch-test))]
                (keep :do (filter #(= :stray-red (:reason %)) (:refused b)))))))
+    (testing "a stray red the branch does not define is one of main's tests it removed: marked so, and no form makes it a proof"
+      (let [b (context/current-state db t {:results {'demo-test/gone :fail} :reasons [{:reason :stray-red :symbol 'demo-test/gone}] :turn 1 :max-turns 4})]
+        (is (= [{:reason :stray-red :test 'demo-test/gone :removed true}] (:refused b)))))
     (testing "nothing refused, nothing failed: no section"
       (let [b (context/current-state db t {:results {'demo-test/f-test :pass} :reasons [] :turn 1 :max-turns 4 :test-run-errors []})]
         (is (not-any? #(contains? b %) [:refused :test-run :flagged :your-last-reply]))))))

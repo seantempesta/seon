@@ -564,18 +564,24 @@
         idx (into {} (filter (comp judges? key)) (program/graph-index g in nil))
         cd (update-vals idx :digest)
         unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))
-        ;; main's tests the branch removed: each judges from base's definition, loaded in the test child
+        ;; main's tests the branch removed: each judges from base's definition, loaded in the test
+        ;; child, its namespace's ns form first when the branch removed the namespace too; one
+        ;; that reaches a process of its own (base's index says) stays a process test
         removed (into (sorted-map-by #(compare (str %1) (str %2)))
                       (when base
                         (for [v (:removed (program/divergence base db))
-                              :let [e (some->> (pdb/eid base :var/name v) (d/entity base))]
+                              :let [e (some->> (pdb/eid base :var/name v) (d/entity base))
+                                    nsym (symbol (namespace v))
+                                    head (when-not (find-ns nsym)
+                                           (some->> (pdb/eid base :ns/name nsym) (d/entity base) :ns/form :form/src))]
                               :when (= :test (:var/kind e))]
-                          [v (:form/src (:var/form e))])))]
+                          [v (str (when head (str head "\n")) (:form/src (:var/form e)))])))
+        removed-process (program/process-tests (select-keys (:index b) (keys removed)))]
     (-> (proofs/plan (some-> b :index (update-vals :digest)) cd (merge (if dir (proofs/greens dir (vec (vals cd))) {}) (proofs/stored-results db (vec (vals cd)))) proofs)
         (update :selected into (concat unrecorded (keys removed)))
         (update :run into (concat unrecorded (keys removed)))
         (assoc :digests cd :dir dir :graph g :removed removed
-               :process (program/process-tests idx)))))
+               :process (into (program/process-tests idx) removed-process)))))
 
 (declare handle!)
 
@@ -627,7 +633,8 @@
 
 (defn- load-removed!
   "In a test child, define each of main's tests the branch removed (test-plan's :removed, {test
-  src}) from base's source, in its own namespace, so it runs as main holds it. nil."
+  src}) from base's source, in its own namespace (its ns form first when the branch removed
+  that too), so it runs as main holds it. nil."
   {:malli/schema [:=> [:cat [:map-of :qualified-symbol :string]] :nil]}
   [removed]
   (doseq [[t src] removed]

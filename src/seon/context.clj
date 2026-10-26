@@ -63,9 +63,11 @@
   "The done rule's reasons as the agent reads them, beyond its own red proofs (shown with
   the proofs): a red test names its failures (a stray one the form that makes it a proof), a contract gap its var, a design step that
   has not improved its plan the call that does, an open problem its work made true what it
-  is (seon.problems/caused)."
-  {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done] [:vector :map]] [:vector :map]]}
-  [reasons reds]
+  is (seon.problems/caused). defined? says whether the branch defines a test: a stray red it
+  does not is one of main's tests the branch removed, which judges all the same (seon.agent/
+  test-plan's :removed), so it is marked :removed and offered no form that makes it a proof."
+  {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done] [:vector :map] ifn?] [:vector :map]]}
+  [reasons reds defined?]
   (let [rs (remove #(= :proof-red (:reason %)) reasons)
         gaps (vec (keep #(when (= :contract-gap (:reason %)) (:symbol %)) rs))
         unmerged (vec (keep #(when (= :unmerged (:reason %)) (:key %)) rs))
@@ -79,8 +81,11 @@
                                           (seq (filter #(= symbol (:test %)) reds))
                                           (assoc :failures (mapv failure (filter #(= symbol (:test %)) reds)))
                                           ;; a red test the agent wrote is a proof it has not registered, or one to delete
-                                          (= :stray-red reason)
-                                          (assoc :do (list 'my.task/update! :seon.task/proofs 'conj (list 'quote symbol))))
+                                          (and (= :stray-red reason) (defined? symbol))
+                                          (assoc :do (list 'my.task/update! :seon.task/proofs 'conj (list 'quote symbol)))
+                                          ;; main's test the branch removed: it still judges, from main's definition
+                                          (and (= :stray-red reason) (not (defined? symbol)))
+                                          (assoc :removed true))
                ;; a design made from a request carries none: it registers each it writes
                :no-proofs {:reason reason :do '(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)}
                :no-design {:reason reason :unchanged :seon.task/plan
@@ -413,7 +418,7 @@
                               (seq fs) (assoc :failures (mapv failure fs))
                               (and src (not= :pass st) (seq (callees db p))) (assoc :calls (callees db p)))))}
       max-turns (assoc :turn (str (inc turn) " of " max-turns))
-      (seq (refused (vec reasons) (vec reds))) (assoc :refused (refused (vec reasons) (vec reds)))
+      (seq (refused (vec reasons) (vec reds) #(some? (docs/source-of db %)))) (assoc :refused (refused (vec reasons) (vec reds) #(some? (docs/source-of db %))))
       (seq test-run-errors) (assoc :test-run {:failed (vec test-run-errors)})
       (last-reply truncated? source (vec repairs)) (assoc :your-last-reply (last-reply truncated? source (vec repairs)))
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
