@@ -411,10 +411,10 @@
                    [:agent {:optional true} :string]]
  ;; (my.task/status) asked before any turn of this process observed its task: why, and what runs its proofs
  :seon.turn/not-observed [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-observed]]]]
- ;; a name an agent asked about (my.agent/callers, callees) that is no var on its branch nor in its
- ;; process: said, never answered as no callers; :ask the form for the registry key of that name,
- ;; when there is one (the live rounds asked (my.agent/callers 'seon.proof/status) for the key)
- :my.agent/no-var [:and :seon.error/base [:map [:seon.error/type [:= :my.agent/no-var]] [:name :qualified-symbol] [:ask {:optional true} :string]]]
+ ;; a name an agent asked about (my.agent/source, callers, callees) that is no var on its branch nor
+ ;; in its process: said, never answered as no callers or silence; :nearest the nearest existing
+ ;; names (my.agent/no-var); :ask the form for the registry key of that name, when there is one
+ :my.agent/no-var [:and :seon.error/base [:map [:seon.error/type [:= :my.agent/no-var]] [:name :symbol] [:nearest [:vector :symbol]] [:ask {:optional true} :string]]]
  ;; my.task/update! of a member to a value its schema does not admit (seon.task/member-tx): nothing written
  :seon.task/invalid-member [:and :seon.error/base [:map [:seon.error/type [:= :seon.task/invalid-member]] [:member :keyword]
                                                         ;; what the update would have made it, printed by the error's render (the one printer)
