@@ -725,6 +725,15 @@
     (is (some #(and (= :eval (first %)) (symbol? (:same-as (get % 2)))) (:value sent))
         (str "turn 2 sent turn 1's answer marked :same-as turn 0's: " (pr-str (:value sent))))))
 
+(deftest a-whole-tasks-work-turns-are-no-merge-turns
+  ;; the first whole-task run (2026-10-26): all ten requests ended :merge-failed at turn 3, each work
+  ;; turn counted against :seon.config.merge/max-merge-turns (2) as a merge task's turns are; a
+  ;; whole task's turn is a merge turn only while what both sides changed is unresolved
+  (let [[end] (in-agent ["(seon.turn/work! {:task \"demo/w\" :run \"demo/w#1\" :max-turns 4})"]
+                        {:sets [":seon.config.ai/script=seon.fixtures/same-call"]
+                         :decls [{:seon.task/name "w" :seon.task/plan "Work." :seon.task/kind :whole :seon.task/proofs '#{demo-test/t}}]})]
+    (is (= [:cap 4] ((juxt :outcome :model-calls) (:value end))) (pr-str (:value end)))))
+
 (deftest a-proof-run-ends-at-its-budget-though-its-tests-run-bounded-evals
   ;; Jolt jolt/nested-tick-budget: a tick budget covers all the work inside it, nested
   ;; bounded runs' included. Step E's run 7 (2026-10-22): the agent's proof fork, whose
