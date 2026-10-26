@@ -400,7 +400,7 @@
   []
   (let [conn (:store-conn @state)
         r (pm/delta-three-way (:base @state) (db) (pdb/head conn (pdb/main-branch (:cfg @state))) #{})]
-    {:main-moved (vec (sort-by pr-str (keys (:theirs r)))) :conflicts (vec (sort-by pr-str (map :key (:conflicts r))))}))
+    {:main-moved (vec (sort-by str (keys (:theirs r)))) :conflicts (vec (sort-by str (map :key (:conflicts r))))}))
 
 ;; ---- evaluation -----------------------------------------------------------------
 

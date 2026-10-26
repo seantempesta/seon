@@ -893,7 +893,8 @@
 (defn task-page
   "The task as its agent works it (the declared html render of :seon.render/task-page): its id,
   kind and execution, then the task's data (seon.context/task-data over opts :db, the branch as of
-  the record's t): its plan as prose, then what to prove, the sections and the similar as a call of
+  the record's t): its instructions as prose (how its kind is worked: the template's text, whole
+  under the value budget), its plan as prose, then what to prove, the sections and the similar as a call of
   the one printer ([#'seon.render/html opts data], expanded when the page is written), so the model
   reads the data as data. Each var the plan cites is a part of its own (`cited`)."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
@@ -902,10 +903,12 @@
    [:h2 {:class "kicker"} "task"]
    [:p (str id (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
    (when-let [db (:db opts)]
-     ;; its plan as prose here, the rest of its data by the printer (each cited var is its own part)
+     ;; its instructions and its plan as prose here, the rest of its data by the printer (each cited var is its own part)
      (let [data (context/task-data db (task/task db id) false)]
        ;; a cut names the form that answers the whole at the agent's REPL
-       (list (when-let [plan (get-in data [:task :seon.task/plan])] [:p {:class "seon-prose"} (prose plan (part) {:whole '(:seon.task/plan (:task (my.task/data)))})])
+       (list (when-let [ins (get-in data [:task :seon.task/instructions])]
+               [:p {:class "seon-prose"} (prose ins (config/value :seon.config.render/value-budget) {:whole '(:seon.task/instructions (:task (my.task/data)))})])
+             (when-let [plan (get-in data [:task :seon.task/plan])] [:p {:class "seon-prose"} (prose plan (part) {:whole '(:seon.task/plan (:task (my.task/data)))})])
              [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set)} (dissoc data :task)])))])
 
 (defn cited
