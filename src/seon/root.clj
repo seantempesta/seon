@@ -220,7 +220,7 @@
         ;; its hello answers the spawn, whatever a request sent before it made its status
         (:ready m) (answer-spawn o id {:id id})
         ;; the agents with an eval in flight: the stall check's set (a gone one never)
-        (contains? m :running) (update ::busy (fnil (if (and (:running m) (not (gone-statuses (:status a)))) conj disj) #{}) id)))
+        (contains? m :running) (update ::busy (fnil (if (and (:running m) (not (gone-statuses (:status a))) (not (gone-statuses (:status a')))) conj disj) #{}) id)))
     st))
 
 (defn- stall-task
@@ -305,10 +305,11 @@
   graph (update! at the end of the step) and its branch's connection is released."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :map] :seon.root/api-state]}
   [st o {:keys [agent rid pid inflight]}]
-  (let [;; every request the api holds for it: the proc's in flight, and one sent in the step it ended
-        ;; that never reached the proc (each answered once: deliver-rid of an answered rid is nothing)
+  (let [;; every request to it the api holds: the proc's in flight, and one sent in the step it ended
+        ;; that never reached the proc or reached it after its end (each answered once: deliver-rid of an
+        ;; answered rid is nothing); a :prove names the agent but the test service answers it
         inflight (into (vec inflight) (remove (set (conj inflight rid)))
-                       (sort (keep (fn [[r {a :agent}]] (when (= a agent) r)) (:pending st))))
+                       (sort (keep (fn [[r {a :agent k :kind}]] (when (and (= a agent) (not= :prove k)) r)) (:pending st))))
         {:keys [branch]} (get-in st [:agents agent])
         v (get-in st [:view :agents agent])
         ;; stopped by root: a kill, or the end of its run (:ended); else it died
@@ -480,10 +481,13 @@
                       (view! update-in [:fork-server :agents-forked] (fnil inc 0))
                       (view! update-in [:stats :fork-ms] lib/push-window (:fork-ms m) 500)
                       (to-agent o (:agent m) {:op :forked :pid (:pid m)})))
-      ;; the agent the exit is of: a live one with that pid, or the death waiting on it; never an
-      ;; ended agent's entry whose pid the OS has given again
-      :exit (let [st (if-let [aid (or (some (fn [[aid a]] (when (and (get-in st [:agents aid]) (= (:pid m) (:pid a))) aid)) (get-in st [:view :agents]))
-                                      (first (get-in st [::dying (:pid m)])))]
+      ;; the agent the exit is of: the death waiting on its pid, a live agent with it, or the last
+      ;; one to end with it and no exit yet (stopped: none waits); never an entry whose exit is
+      ;; recorded, whose pid the OS has given again
+      :exit (let [mine (filter (fn [[_ a]] (= (:pid m) (:pid a))) (get-in st [:view :agents]))
+                  st (if-let [aid (or (first (get-in st [::dying (:pid m)]))
+                                      (some (fn [[aid]] (when (get-in st [:agents aid]) aid)) mine)
+                                      (some->> (remove (fn [[_ a]] (:exit a)) mine) seq (apply max-key (fn [[_ a]] (:ended-ms a 0))) key))]
                        (set-agent st o aid {:exit (:status m)})
                        st)]
               ;; a death waiting for its exit status: recorded now

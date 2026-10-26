@@ -284,27 +284,26 @@
         "and by a new boot: an earlier boot's stall ended with its process")))
 
 (deftest a-gone-agent-stays-gone-and-every-request-is-answered
-  ;; the busy-with-no-process defect (notes: busy-no-process-2026-10-26.md): root's view held an
+  ;; task seon.root/a-gone-agent-stays-gone-and-every-request-is-answered: root's view held an
   ;; agent :busy with no process, and an eval sent as it ended was never answered
   (let [ended? #(= :seon.root/ended (:seon.error/type %))]
-    (testing "A: a request its proc takes after the process ended is answered at once, and reports no live status"
-      (let [end {:in (a/chan 4) :out (a/chan 16)}
-            st (#'ap/agent-proc {:id :a1 :end end :branch :b1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4) :fx-kinds #{}})
-            [st _] (#'ap/agent-proc st :from nil)
-            [_ outs] (#'ap/agent-proc st :in {:op :req :rid 7 :kind :eval :msg {:op :eval :forms "(+ 1 1)"}})]
-        (is (= [7] (keep #(get-in % [:dest :rid]) (:to-api outs))))
-        (is (ended? (:r (first (:to-api outs)))) "answered: the agent ended")
-        (is (not-any? #(= :status (:op %)) (:to-api outs)) "no :busy for a process that is gone")))
     (testing "A: a late live status leaves a gone agent gone, out of the stall check's set"
       (let [[st _] (step (api {:agents {:a1 {:status :dead :pid 77 :ended-ms 5}}}) :back {:op :status :agent :a1 :set {:status :busy :running {:form "(work!)" :since-ms 6}}})]
         (is (= [:dead nil] ((juxt :status :running) (get-in st [:view :agents :a1]))))
         (is (not (contains? (:seon.root/busy st) :a1)))))
-    (testing "A: an ending agent's every request the api holds is answered, one that never reached its proc too"
-      (let [p (promise)
-            st (-> (api {:agents {:a1 {:status :killed :pid 77}}}) (assoc-in [:agents :a1] {:branch :b1}) (assoc-in [:pending 5] {:p p :kind :eval :agent :a1}))
+    (testing "A: an ending agent's every request the api holds is answered, one that never reached its proc too; a prove is the test service's"
+      (let [p (promise) q (promise)
+            st (-> (api {:agents {:a1 {:status :killed :pid 77}}}) (assoc-in [:agents :a1] {:branch :b1})
+                   (assoc-in [:pending 5] {:p p :kind :eval :agent :a1}) (assoc-in [:pending 6] {:p q :kind :prove :agent :a1}))
             o (volatile! {})
-            _ (#'root/end-agent st o {:op :ended :agent :a1 :rid nil :pid 77 :inflight []})]
-        (is (ended? (deref p 0 nil)) "the eval sent as it ended: answered")))
+            st' (#'root/end-agent st o {:op :ended :agent :a1 :rid nil :pid 77 :inflight []})]
+        (is (ended? (deref p 0 nil)) "the eval sent as it ended: answered")
+        (is (= ::unanswered (deref q 0 ::unanswered)) "the prove: left to the service that answers it")
+        (is (contains? (:pending st') 6))))
+    (testing "B: a stopped agent's exit, which no death waits on, is still recorded on it"
+      (let [[st _] (step (api {:agents {:a0 {:status :dead :pid 77 :ended-ms 1 :exit {:exit 0}} :a1 {:status :killed :pid 77 :ended-ms 9}}})
+                         :from-fs {:ev :exit :pid 77 :status {:signal 9}})]
+        (is (= [{:exit 0} {:signal 9}] (mapv #(get-in st [:view :agents % :exit]) [:a0 :a1])))))
     (testing "B: an exit goes to the death waiting on its pid, never to an ended agent's entry with the same pid"
       (let [died (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1 :pid 77})
             st (-> (api {:agents {:a0 {:status :dead :pid 77 :ended-ms 1} :a1 {:status :dead :pid 77 :ended-ms 9}}})
