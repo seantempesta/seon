@@ -305,7 +305,8 @@
                           (cond-> (vec there)
                             gone (conj {:unresolved (mapv :symbol gone) :problem (:unresolved ref/problem-messages)})))
              ;; (the turn sections' :proofs are each turn's statuses; these are how to run them)
-             :to-prove (into (sorted-map-by #(compare (str %1) (str %2)))
+             ;; plain data, as the run's story fact keeps it (:seon.run/story)
+             :to-prove (into {}
                              (for [p proofs]
                                [p (if (docs/source-of db p)
                                     (list 'my.agent/prove #{p})

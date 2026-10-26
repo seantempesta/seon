@@ -483,10 +483,10 @@
   {:malli/schema [:=> [:cat :map :map [:maybe :seon.host/db]] [:maybe :map]]}
   [rec e db]
   (when-let [{:keys [t branch]} (when db (:basis rec))]
-    (let [k (:seon.agent/key (d/entity db (:db/id (:seon.eval/agent e))))]
+    (let [a (:db/id (:seon.eval/agent e))]
       ;; a value as of t never changes: its reads are not the component's (no later transaction
       ;; touches them), so it is built when the component renders and never because the branch moved
-      (with-meta (assoc (:tree (binding [datahike.index.interface/*reads* nil] (seon.ctx/build (d/as-of db t) k branch))) :t t)
+      (with-meta (assoc (:tree (binding [datahike.index.interface/*reads* nil] (seon.ctx/build (d/as-of db t) a branch))) :t t)
         {:seon.render/schema (:schema rec)}))))
 
 (defn- branch-render

@@ -196,6 +196,10 @@
  :seon.task/failure [:map [:reason :string] [:counterexample {:optional true} :string] [:run {:optional true} [:maybe :seon.run/id]]]
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
+ ;; what the work on the plan is likely to need beyond what it cites (seon.context/related's
+ ;; answer), written on the agent's branch by its turn's observe when the plan's vectors move
+ ;; (seon.turn/related!), so a view reads it as a fact and never computes it
+ :seon.task/related [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]]
  ;; config keys are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
  :seon.task/task-fact [:map {:seon.db/attributes true :seon.render/units [:seon.task/proofs] :seon.render/html seon.render.ui/task}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
@@ -209,6 +213,7 @@
                           [:seon.task/gate? {:optional true} :seon.task/gate?]
                           [:seon.task/failure {:optional true} :seon.task/failure]
                           [:seon.task/declared {:optional true} :seon.task/declared]
+                          [:seon.task/related {:optional true} :seon.task/related]
                           [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
                           [:seon.config.merge/max-conflicts {:optional true} :seon.config.merge/max-conflicts]
                           [:seon.config.merge/max-merge-turns {:optional true} :seon.config.merge/max-merge-turns]]
@@ -268,6 +273,11 @@
  ;; measured at the run's end from the branch (seon.problems/caused): the derived problems
  ;; its work made true since its merge base, by message; the done rule refuses while any is open
  :seon.run/caused [:set :string]
+ ;; the stage's story: the task's run sections as data (seon.context/run-state: the task and its
+ ;; accumulated plan, the write set with sources and callers, how to run each proof, the cited
+ ;; sections, what is similar), the same every turn of the run, so written once as the run begins
+ ;; on the agent's branch (seon.turn/begin!) and read by a view as a fact
+ :seon.run/story [:map [:task :map] [:write-set [:vector :any]] [:to-prove [:map-of :qualified-symbol :any]]]
  :seon.run/run-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/model :seon.run/turns :seon.run/max-turns :seon.run/branch] :seon.render/units [:seon.run/task :seon.turn/_run :seon.message/_to] :seon.render/html seon.render.ui/run}
                              [:seon.run/id :seon.run/id] [:seon.run/task :seon.run/task]
                              [:seon.run/status :seon.run/status] [:seon.run/boot :seon.run/boot]
@@ -285,6 +295,7 @@
                              [:seon.run/conflicts {:optional true} :seon.run/conflicts]
                              [:seon.run/unmerged {:optional true} :seon.run/unmerged]
                              [:seon.run/changed {:optional true} :seon.run/changed]
+                             [:seon.run/story {:optional true} :seon.run/story]
                              [:seon.run/deferred {:optional true} :seon.run/deferred]
                              [:seon.run/deferred-results {:optional true} :seon.run/deferred-results]
                              [:seon.run/gate-unread {:optional true} :seon.run/gate-unread]
