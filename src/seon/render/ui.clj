@@ -999,23 +999,26 @@
      [#'ctx-key {} k])])
 
 (defn eval-item
-  "An eval of the conversation (a component over ctx): its one line, inline, behind an arrow that
-  opens it; its value drawn only once ctx holds it opened (:seon.eval/opened: the person opened it,
-  which reaches the branch by take!). Its <details> carries its handle's anchor (eval-<id>): a
-  handle printed anywhere on the page links here, open or not."
+  "An eval of the conversation (a component over ctx), as a reference, never a copy (owner: \"the
+  render should be quite different really from the eval data as the focus for the ui is on the
+  prose\"): the prose the agent wrote beside it and its handle (result/e12), which names its value
+  wherever the transcript and a printed cut name it; the model reads its content once, in its
+  transcript. Opened (:seon.eval/opened: a reader opened it, a fact that reaches the branch by
+  take!), its value is drawn under it. Its <details> carries its handle's anchor (eval-<id>): a
+  handle printed anywhere links here, open or not."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} eid]
   (let [e (ratom/realize (get-in c [:evals eid]))
-        v (dissoc e :db/id :seon.eval/agent)
-        s (render/entity-schema e :seon.eval/agent)
+        rec (:seon.eval/record e)
         opened? (:seon.eval/opened e)]
     [:li
      [:details (cond-> {:class "seon-eval" :id (str "eval-" (:seon.eval/id e))} opened? (assoc :open true))
       ;; opening it is a fact on main (seon.root/opened!), which the agent takes before it draws again
-      [:summary {:class "flex min-w-0 items-baseline gap-2 truncate" :seon/call 'seon.root/opened! :seon/agent (:seon.agent/id c)
+      [:summary {:class "flex min-w-0 items-baseline gap-2" :seon/call 'seon.root/opened! :seon/agent (:seon.agent/id c)
                  :seon/args {:key (:seon.agent/key c) :eval (:seon.eval/id e)}}
-       (render/html {:as :inline :chat true :schema s} v)]
-      (when opened? (render/html {:schema s} v))]]))
+       (when-not (str/blank? (:prose rec)) [:span {:class "seon-prose"} (:prose rec)])
+       [:code (str (get-in rec [:response :handle]))]]
+      (when opened? (render/html {:schema (render/entity-schema e :seon.eval/agent)} (dissoc e :db/id :seon.eval/agent)))]]))
 
 (defn turn-item
   "A model turn or an outside read of the run (a component over ctx): its header by its schema's

@@ -701,7 +701,7 @@
         st2 (#'p/answered st1 o [:branch :task-demo-f] {:db branch'})
         patch (first (filter #(and (= :patch (:op %)) (= :a3 (:view %))) (:to-web @o)))]
     (is (empty? (:frags patch)) "no held part changed")
-    (is (= 1 (count (filter #(str/includes? (second %) "(h)") (concat (:appends patch) (:afters patch))))) "one part, the new eval")
+    (is (= 1 (count (filter #(str/includes? (second %) "result/e4") (concat (:appends patch) (:afters patch))))) "one part, the new eval")
     (is (= 1 (count (remove #(= "#c-older" (first %)) (concat (:appends patch) (:afters patch) (:prepends patch)))))
         "and nothing else sent but the conversation's end, whose id counts the parts it holds")))
 
@@ -741,11 +741,11 @@
         html (p/view-html st1 :a3)
         at #(str/index-of html %)]
     ;; the fixture writes the turn after its evals (seon.turn writes it as its request goes, before them)
-    (is (< (at "check g") (at "f doubles?") (at "turn 1 of 8") (at "(g)")) "in the order written: the message, an eval's prose, the turn, the owner's eval")
+    (is (< (at "check g") (at "f doubles?") (at "turn 1 of 8") (at "result/e3")) "in the order written: the message, an eval's prose, the turn, the owner's eval")
     (is (< (at "id=\"c-rows\"") (at "id=\"p-input\"")) "the input under the conversation")
     (is (re-find #"<details [^>]*class=\"seon-eval\"" html) "an eval is a block that opens")
     (is (re-find #"<details [^>]*id=\"eval-e1\"" html) "the row is its handle's anchor, open or not")
-    (is (re-find #"<summary[^>]*>.*\(f 2\)" html) "folded, its one line")))
+    (is (re-find #"<summary[^>]*>.*f doubles\?.*result/e1" html) "folded: its prose and its handle, never a copy of the eval")))
 
 (deftest the-sidebar-is-roots-agents
   ;; the sidebar is the agent's ref to root, rendered: root, then root's agents, each its own
@@ -820,7 +820,7 @@
             branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:code "(h)" :response {:handle 'result/e4 :value 1}}))
             [_ p] (pass (assoc-in st1 [:branches :a3 :db] branch'))]
         (is (empty? (:frags p)) "no held unit changed its input")
-        (is (= 1 (count (filter #(str/includes? (second %) "(h)") (concat (:appends p) (:afters p))))) "one part, placed after the one before it")))
+        (is (= 1 (count (filter #(str/includes? (second %) "result/e4") (concat (:appends p) (:afters p))))) "one part, placed after the one before it")))
     (testing "a page asked for before main is read waits for its first render, never answered empty"
       (let [o (volatile! {})
             st0 (-> st (dissoc :main-db) (assoc :waiting {7 :root}))
@@ -840,7 +840,7 @@
           (let [o (volatile! {})
                 st2 (#'p/pass (assoc-in st1 [:branches :a3 :db] branch) o)
                 page (first (filter #(= :page (:op %)) (:to-web @o)))]
-            (is (str/includes? (:html page) "(f 2)") "answered at once, drawn from its branch, never waiting on its process")
+            (is (str/includes? (:html page) "result/e1") "answered at once, drawn from its branch, never waiting on its process")
             (is (str/includes? (:html page) "its process has not answered yet") "and it says so")
             (is (some #(= {:op :render :id :a3} (get-in % [:req])) (:to-api @o)) "its process is asked for its parts")
             (let [o (volatile! {})
@@ -1284,7 +1284,7 @@
       (let [st2 (#'p/answered (assoc-in st1 [:parts :a3 :units] []) (volatile! {}) :state (assoc-in (:view st1) [:agents :a3 :status] :dead))]
         (is (nil? (get-in st2 [:parts :a3])))
         (is (str/includes? (p/view-html st2 :a3) "its process is not running"))
-        (is (str/includes? (p/view-html st2 :a3) "(f 2)") "its parts, drawn by root from its branch")))
+        (is (str/includes? (p/view-html st2 :a3) "result/e1") "its parts, drawn by root from its branch")))
     (testing "its ask answered with why (gone, refused): the page says so"
       (let [gone (seon.contract/error :seon.root/no-agent 'seon.root/request "no live agent :a3" {})
             st2 (#'p/answered st1 (volatile! {}) [:parts :a3] gone)]
