@@ -300,9 +300,10 @@
         branch-units (fn [] (let [t (binding [datahike.index.interface/*reads* nil]
                                       (:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e))))
                                   t (cond-> t (seq opened) (update :evals #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
-                                  w (binding [datahike.index.interface/*reads* nil]
-                                      (render/draw t ctx/changes bdb (render/declared-var :seon.render/render-ctx)))]
-                              (try (render/placed-units w) (finally (render/dispose-walk! w)))))
+                                  ws (binding [datahike.index.interface/*reads* nil]
+                                       [(render/draw t ctx/changes bdb (render/declared-var :seon.render/render-ctx))
+                                        (render/draw t ctx/changes bdb #'ui/transcript)])]
+                              (try (into [] (mapcat render/placed-units) ws) (finally (run! render/dispose-walk! ws)))))
         units (if own?
                 (:units held)
                 (cond bdb (branch-units)

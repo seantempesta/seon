@@ -352,7 +352,7 @@
       (clojure.test/is (= 2 (- (get-in st2 [:counts :components]) (get-in st1 [:counts :components]))) (str n " rows: the agent's components rendered, nothing else")))))
 
 (defn change-of
-  "The input of size n: an agent's page walked live (seon.render/walker over a reactive atom holding
+  "The input of size n: an agent's transcript walked live (seon.render/walker over a reactive atom holding
   its ctx: n evals, each a record of a short form and its value, by eid newest first, as
   seon.ctx/build holds them) and drawn once, then one eval's value changed (the atom reset! as the
   patch does, the eval's component queued by its reaction): what frame! draws."
@@ -363,7 +363,7 @@
                       [(+ 10 i) {:db/id (+ 10 i) :seon.eval/id id :seon.eval/by "a1"
                                  :seon.eval/record {:code (str "(inc " i ")") :response {:handle (symbol "result" id) :value (inc i)}}}]))
         a (seon.ratom/atom {:db/id 1 :seon.agent/key "b/a1" :seon.agent/id :a1 :evals evals})
-        w (seon.render/walker {:ref a :changes seon.ctx/changes} (constantly (ts/test-db)) [(requiring-resolve (seon.render/declared :seon.render/render-ctx)) {}])]
+        w (seon.render/walker {:ref a :changes seon.ctx/changes} (constantly (ts/test-db)) [#'seon.render.ui/transcript {}])]
     (seon.render/frame! w nil)
     [w a]))
 
@@ -382,7 +382,7 @@
     {:of 'seon.render-cost-test/redraw! :input 'seon.render-cost-test/change-of
      :n "evals in the agent's ctx"
      :work (str "the one eval's component, drawn again (its record printed in one line), and nothing else: the "
-                "layout's reads (the evals' ids and their values) are not reached by an eval opened. The reset! runs "
+                "transcript's reads (the evals' ids) are not reached by an eval opened. The reset! runs "
                 "ctx's diff once (seon.ctx/changes) and looks up the components its changed paths reach by index: the "
                 "walk's part is flat (137 contracted calls, about 100 KB, measured 100 to 4,000); the diff walks every "
                 "key of the changed collection, about 3.2 KB an eval (seon.ctx/changes alone: 268 KB at 100, 12.8 MB "

@@ -29,7 +29,7 @@
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.ref :as ref] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
-            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.context :as context] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
+            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.context :as context] [seon.ctx :as ctx] [seon.render.ui] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
 (defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
@@ -475,43 +475,47 @@
   [] (render/declared-var :seon.render/render-ctx))
 
 (defn- the-walk
-  "This agent's walk of its render of ctx (seon.render/walker over @ctx, its diff seon.ctx/changes, and the
-  branch's db), made once and held in its state: the one cache of its components."
-  {:malli/schema [:=> [:cat] :map]}
-  []
-  (or (:walk @agent/state)
-      (let [w (render/walker {:ref ctx/ctx :changes ctx/changes} agent/db [(layout) {}])]
-        (swap! agent/state assoc :walk w)
+  "This agent's walk of root call k's render (:walk, render-ctx; :chat-walk, the transcript, the
+  user's chat column) over @ctx (seon.render/walker, its diff seon.ctx/changes, and the branch's
+  db), made once and held in its state: the one cache of its components."
+  {:malli/schema [:=> [:cat :keyword :any] :map]}
+  [k root-var]
+  (or (get @agent/state k)
+      (let [w (render/walker {:ref ctx/ctx :changes ctx/changes} agent/db [root-var {}])]
+        (swap! agent/state assoc k w)
         w)))
 
 (defn- framed
-  "This agent's walk drawn as of now (seon.render/frame!), under its branch's schemas: what changed
-  since the last frame re-run (the reactions ctx's patch reached, the db components the datoms
-  touched since the db last framed)."
-  {:malli/schema [:=> [:cat] :map]}
+  "This agent's two walks, render-ctx's and the transcript's, drawn as of now (seon.render/frame!),
+  under its branch's schemas: what changed since the last frame re-run (the reactions ctx's patch
+  reached, the db components the datoms touched since the db last framed). Answers [render-ctx
+  transcript]."
+  {:malli/schema [:=> [:cat] [:tuple :map :map]]}
   []
   (with-branch-schemas
-    #(let [w (the-walk) db (agent/db) db0 (:walk-db @agent/state)]
-       (render/frame! w (when (and db0 db (not (identical? db0 db))) (ctx/moved db0 db nil)))
+    #(let [ws [(the-walk :walk (layout)) (the-walk :chat-walk #'seon.render.ui/transcript)]
+           db (agent/db) db0 (:walk-db @agent/state)
+           datoms (when (and db0 db (not (identical? db0 db))) (ctx/moved db0 db nil))]
+       (doseq [w ws] (render/frame! w datoms))
        (swap! agent/state assoc :walk-db db)
-       w)))
+       ws)))
 
 (defn render-ctx
-  "This agent's render of ctx as its components' html (root's render proc asks, its {:op :render}:
-  seon.render.proc/ask-parts): {:t its ctx's t :units [{:id :container :rev :html}]}, each
-  component in the list it is placed in, its revision moved only when its output changed. Records
-  nothing (the :render op takes the facts main holds of its own entities first)."
+  "This agent's render of ctx and its transcript as their components' html (root's render proc asks,
+  its {:op :render}: seon.render.proc/ask-parts): {:t its ctx's t :units [{:id :container :rev
+  :html}]}, each component in the list it is placed in (the task's, p-task; the conversation,
+  c-rows), its revision moved only when its output changed. Records nothing (the :render op takes
+  the facts main holds of its own entities first)."
   {:malli/schema [:=> [:cat] [:map [:t :int] [:units [:vector :map]]]]}
   []
-  {:t (or (:t @ctx/ctx) 0) :units (render/placed-units (framed))})
+  {:t (or (:t @ctx/ctx) 0) :units (into [] (mapcat render/placed-units) (framed))})
 
 (defn render-ctx-hiccup
-  "This agent's render of ctx as the user sees it: every component of its three lists (its task's,
-  its conversation, each eval its one line until opened, and its tiles), each one's hiccup exactly
-  as its render returned it, by its element id, in order: the hiccup render-ctx's html is written
-  from, nothing left out."
+  "This agent's render of ctx as the user sees it and the model reads it: each component of its
+  task's list, its hiccup exactly as its render returned it, by its element id, in order. The
+  conversation is not in it: the model reads it once, as its turns."
   {:malli/schema [:=> [:cat] :map]}
-  [] (let [w (framed)] (apply array-map (mapcat #(mapcat identity (render/placed-hiccup w %)) ["#p-task" "#c-rows" "#p-tiles"]))))
+  [] (apply array-map (mapcat identity (render/placed-hiccup (first (framed)) "#p-task"))))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 

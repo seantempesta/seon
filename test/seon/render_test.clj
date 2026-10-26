@@ -537,17 +537,18 @@
    :branch-reads {:task-demo-f {:db branch}}
    :merges 0 :main-db main :recorded (seon.problems/health main) :view {:agents {:a3 {:status :busy :branch :task-demo-f}}}})
 
-(defn- a3-walk
-  "a3's page walked once from branch (seon.render/draw of its ctx by the layout its schema declares)."
-  [branch]
-  (r/draw (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f))
-          seon.ctx/changes branch (requiring-resolve (r/declared :seon.render/render-ctx))))
+(defn- units-of
+  "The units of agent key k's render of ctx and its transcript on db, as its process draws them
+  (seon.repl/render-ctx), each walked once (seon.render/draw)."
+  [db k]
+  (let [t (:tree (seon.ctx/build db (seon.db/eid db :seon.agent/key k) :task-demo-f))
+        ws [(r/draw t seon.ctx/changes db (requiring-resolve (r/declared :seon.render/render-ctx))) (r/draw t seon.ctx/changes db #'ui/transcript)]]
+    (try (into [] (mapcat r/placed-units) ws) (finally (run! r/dispose-walk! ws)))))
 
 (defn- drawn-parts
-  "a3's page's units as its process draws them (seon.repl/render-ctx), drawn here from branch: what the
-  render proc's {:op :render} ask is answered with."
-  [branch]
-  (let [w (a3-walk branch)] (try {:units (r/placed-units w)} (finally (r/dispose-walk! w)))))
+  "a3's units as its process draws them, drawn here from branch: what the render proc's {:op :render}
+  ask is answered with."
+  [branch] {:units (units-of branch (seon.task/agent-key "b1" :a3))})
 
 (defn- conversation-rows
   "The ids of view's conversation components st holds."
@@ -701,7 +702,7 @@
         st2 (#'p/answered st1 o [:branch :task-demo-f] {:db branch'})
         patch (first (filter #(and (= :patch (:op %)) (= :a3 (:view %))) (:to-web @o)))]
     (is (empty? (:frags patch)) "no held part changed")
-    (is (= 1 (count (filter #(str/includes? (second %) "result/e4") (concat (:appends patch) (:afters patch))))) "one part, the new eval")
+    (is (= 1 (count (filter #(str/includes? (second %) "(h)") (concat (:appends patch) (:afters patch))))) "one part, the new eval")
     (is (= 1 (count (remove #(= "#c-older" (first %)) (concat (:appends patch) (:afters patch) (:prepends patch)))))
         "and nothing else sent but the conversation's end, whose id counts the parts it holds")))
 
@@ -741,11 +742,11 @@
         html (p/view-html st1 :a3)
         at #(str/index-of html %)]
     ;; the fixture writes the turn after its evals (seon.turn writes it as its request goes, before them)
-    (is (< (at "check g") (at "f doubles?") (at "turn 1 of 8") (at "result/e3")) "in the order written: the message, an eval's prose, the turn, the owner's eval")
+    (is (< (at "check g") (at "f doubles?") (at "turn 1 of 8") (at "(g)")) "in the order written: the message, an eval's prose, the turn, the owner's eval")
     (is (< (at "id=\"c-rows\"") (at "id=\"p-input\"")) "the input under the conversation")
     (is (re-find #"<details [^>]*class=\"seon-eval\"" html) "an eval is a block that opens")
     (is (re-find #"<details [^>]*id=\"eval-e1\"" html) "the row is its handle's anchor, open or not")
-    (is (re-find #"<summary[^>]*>.*f doubles\?.*result/e1" html) "folded: its prose and its handle, never a copy of the eval")))
+    (is (re-find #"<summary[^>]*>.*\(f 2\)" html) "folded, its one line")))
 
 (deftest the-sidebar-is-roots-agents
   ;; the sidebar is the agent's ref to root, rendered: root, then root's agents, each its own
@@ -820,7 +821,7 @@
             branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:code "(h)" :response {:handle 'result/e4 :value 1}}))
             [_ p] (pass (assoc-in st1 [:branches :a3 :db] branch'))]
         (is (empty? (:frags p)) "no held unit changed its input")
-        (is (= 1 (count (filter #(str/includes? (second %) "result/e4") (concat (:appends p) (:afters p))))) "one part, placed after the one before it")))
+        (is (= 1 (count (filter #(str/includes? (second %) "(h)") (concat (:appends p) (:afters p))))) "one part, placed after the one before it")))
     (testing "a page asked for before main is read waits for its first render, never answered empty"
       (let [o (volatile! {})
             st0 (-> st (dissoc :main-db) (assoc :waiting {7 :root}))
@@ -840,7 +841,7 @@
           (let [o (volatile! {})
                 st2 (#'p/pass (assoc-in st1 [:branches :a3 :db] branch) o)
                 page (first (filter #(= :page (:op %)) (:to-web @o)))]
-            (is (str/includes? (:html page) "result/e1") "answered at once, drawn from its branch, never waiting on its process")
+            (is (str/includes? (:html page) "(f 2)") "answered at once, drawn from its branch, never waiting on its process")
             (is (str/includes? (:html page) "its process has not answered yet") "and it says so")
             (is (some #(= {:op :render :id :a3} (get-in % [:req])) (:to-api @o)) "its process is asked for its parts")
             (let [o (volatile! {})
@@ -1100,9 +1101,7 @@
                                                      :observed {:results {'demo/f-test :fail} :reds [{:test 'demo/f-test :expected '(= 4 (f 2)) :actual 5}]
                                                                 :reasons [{:reason :proof-red :symbol 'demo/f-test}]}}}])
         rid (seon.db/eid branch :seon.run/id "demo/f#1")
-        draw #(let [w (r/draw (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch
-                              (requiring-resolve (r/declared :seon.render/render-ctx)))]
-                (try (r/placed-units w) (finally (r/dispose-walk! w))))
+        draw #(units-of branch k)
         units (draw)
         task (filterv #(= "#p-task" (:container %)) units)
         conv (filterv #(= "#c-rows" (:container %)) units)
@@ -1165,25 +1164,25 @@
     (is (str/includes? (h/html h0) "seon-data-panel") "the page writes the call expanded: the printer's panel")))
 
 (defn- live-walk
-  "a3's page walked over a reactive atom holding its ctx, as its process holds it (seon.repl/the-walk):
-  [walk atom branch]."
-  []
+  "a3's render of ctx (or, given root-var, another root: its transcript) walked over a reactive atom
+  holding its ctx, as its process holds it (seon.repl/the-walk): [walk atom branch]."
+  [& [root-var]]
   (let [[_ branch _] (paged-dbs)
         a (seon.ratom/atom (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f)))
-        w (r/walker {:ref a :changes seon.ctx/changes} (constantly branch) [(requiring-resolve (r/declared :seon.render/render-ctx)) {}])]
+        w (r/walker {:ref a :changes seon.ctx/changes} (constantly branch) [(or root-var (requiring-resolve (r/declared :seon.render/render-ctx))) {}])]
     (r/frame! w nil)
     [w a branch]))
 
 (deftest a-component-re-runs-on-what-it-read
   ;; Reagent's rule with the cursor inferred: a change re-runs only the components whose read paths
   ;; it reaches; every other is not visited, and a re-run whose output is = sends nothing
-  (let [[w a branch] (live-walk)
+  (let [[w a branch] (live-walk #'ui/transcript)
         e1 (seon.db/eid branch :seon.eval/id "e1")
         ran #(into {} (for [[f c] (r/ledger w) :when (or (:miss c) (:same c))] [(name f) (+ (:miss c 0) (:same c 0))]))]
     (vreset! (:ledger w) {})
     (swap! a assoc-in [:evals e1 :seon.eval/opened] true)
     (r/frame! w nil)
-    (is (= {"eval-item" 1} (ran)) "an eval opened: that eval's component alone runs, its list's layout does not")
+    (is (= {"eval-item" 1} (ran)) "an eval opened: that eval's component alone runs, its list does not")
     (vreset! (:ledger w) {})
     (swap! a assoc :t 99)
     (r/frame! w nil)
@@ -1247,9 +1246,7 @@
   ;; (:seon.eval/opened, the reader's fact taken onto the branch), it draws its value
   (let [[_ branch _] (paged-dbs)
         k (seon.task/agent-key "b1" :a3)
-        units #(let [w (r/draw (:tree (seon.ctx/build % (seon.db/eid % :seon.agent/key k) :task-demo-f)) seon.ctx/changes %
-                               (requiring-resolve (r/declared :seon.render/render-ctx)))]
-                 (try (r/placed-units w) (finally (r/dispose-walk! w))))
+        units #(units-of % k)
         e1 (str "eval-item-" (seon.db/eid branch :seon.eval/id "e1"))
         closed (:html (some #(when (= e1 (:id %)) %) (units branch)))
         opened (:html (some #(when (= e1 (:id %)) %) (units (d/db-with branch [{:seon.eval/id "e1" :seon.eval/opened true}]))))]
@@ -1284,7 +1281,7 @@
       (let [st2 (#'p/answered (assoc-in st1 [:parts :a3 :units] []) (volatile! {}) :state (assoc-in (:view st1) [:agents :a3 :status] :dead))]
         (is (nil? (get-in st2 [:parts :a3])))
         (is (str/includes? (p/view-html st2 :a3) "its process is not running"))
-        (is (str/includes? (p/view-html st2 :a3) "result/e1") "its parts, drawn by root from its branch")))
+        (is (str/includes? (p/view-html st2 :a3) "(f 2)") "its parts, drawn by root from its branch")))
     (testing "its ask answered with why (gone, refused): the page says so"
       (let [gone (seon.contract/error :seon.root/no-agent 'seon.root/request "no live agent :a3" {})
             st2 (#'p/answered st1 (volatile! {}) [:parts :a3] gone)]
