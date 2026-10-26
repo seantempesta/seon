@@ -967,7 +967,7 @@
     (is (nil? (context/related (ts/test-db) (pdb/eid db :seon.task/id "demo/r"))) "a plan with no vector shows none")))
 
 (deftest related-sections-follow-a-rewritten-plan
-  ;; related is a derived member of the agent's record for its running run (seon.ctx/derived): a
+  ;; related is a derived member of the agent's record for its newest run (seon.ctx/derived): a
   ;; patch derives it again when the plan's vector or a section's is written, and keeps it, the
   ;; same object, while nothing it reads is
   (let [[db te dir] (sections-near "Make the page say one thing.")
