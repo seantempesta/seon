@@ -589,9 +589,10 @@
  ;; (render-workload-a1: 63 evals over 4 runs), so a working session's conversation fits whole.
  ;; Older members stay on the branch, read by a query or a wider pattern (swap! :seon.ctx/pattern).
  :seon.config.ctx/window 100
- ;; Unit: forms. The newest forms naming a cited var (its callers) a task's record holds; those
- ;; that are tests (a caller whose var is :var/kind :test) are the var's existing tests, for a render
- ;; to join to their last result by name. At the bound the older callers are left out, and
+ ;; Unit: forms. The newest forms naming a cited var (its callers) a task's record holds, and the
+ ;; newest of its tests the cited render reads by its own query (seon.render.ui/cited-of: newer
+ ;; callers of other kinds never push the tests out of a window they share), each joined to its last
+ ;; result by name. At the bound the older ones are left out, and
  ;; (my.agent/callers 'x) reads them all. 50: the six capped design-build runs of
  ;; 2026-10-26 lacked the cited vars' existing tests (short-history spent 25 turns before finding
  ;; kept's tests, mixed 9 guessing inputs that problem-rows in print_test builds); a cited var is
