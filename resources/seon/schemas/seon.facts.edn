@@ -350,6 +350,11 @@
                    ;; the last batch that loaded: each kind with the first record that made it
                    [:last-load {:optional true} [:map-of [:enum :docs :tasks :source] [:tuple [:enum :path :rescan :root] :string]]]
                    [:error {:optional true} :string]]
+ ;; the outcome of root's last read of the task files (my.root/load-tasks!): how many files read, or
+ ;; the refused read's message. A refused read's error names it as its subject
+ ;; and is written in the same transaction, so it stays open until a good read writes another value
+ ;; (seon.problems/closed?); the same outcome again writes no datom
+ :seon.root/tasks [:or [:map [:files nat-int?]] [:map [:error :string]]]
  :seon.root/stopped :seon.root/end
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
  :seon.root/previous-end :seon.root/end
@@ -360,6 +365,7 @@
                           [:seon.root/quiescent {:optional true} :seon.root/quiescent]
                           [:seon.root/source {:optional true} :seon.root/source]
                           [:seon.root/watch {:optional true} :seon.root/watch]
+                          [:seon.root/tasks {:optional true} :seon.root/tasks]
                           [:seon.root/generation {:optional true} :seon.root/generation]
                           [:seon.root/collected {:optional true} :seon.root/collected]
                           [:seon.config.agent/max-running {:optional true} :seon.config.agent/max-running]
