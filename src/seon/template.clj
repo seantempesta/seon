@@ -99,8 +99,19 @@
                  decls))))
 
 (defn request
-  "Request decl (what the user asked: its plan, perhaps one line, and any proofs) as the
-  linked tasks that work it: decl's name as the design step, then <name>-implement needing
+  "Request decl (what the user asked: its plan, perhaps one line, and any proofs) as the task
+  that works it: one task of kind :whole on its own branch, which one agent works through: it
+  writes the red proof, makes it green, merges main and keeps it green, and its green branch
+  merges into main (seon.task/merges?). It replaces `stages`, the same work split into design,
+  implement and merge (owner: \"switch to one-go for all tests until we figure out a better
+  solution\")."
+  {:malli/schema [:=> [:cat :seon.task/declaration] [:vector :seon.task/declaration]]}
+  [decl]
+  [(-> decl (assoc :seon.task/kind :whole :seon.task/instructions (instructions :whole))
+       (update :seon.task/branch #(or % (task/default-branch (task/task-id (:seon.task/ns decl) (:seon.task/name decl))))))])
+
+(defn stages
+  "Request decl as the staged tasks that `request` replaced, each stage an agent of its own: decl's name as the design step, then <name>-implement needing
   it, then <name>-merge needing that, all on the design step's branch (so implement holds
   design's schemas, stubs and red proofs, and merge holds both). The request's proofs are
   design's and accumulate along :needs (seon.task/accumulate)."
@@ -116,25 +127,14 @@
                                      :seon.task/needs #{did})))]
     [design implement (merge-decl implement (task/task-id tns (:seon.task/name implement)) (merge-name (:seon.task/name decl)))]))
 
-(defn whole
-  "Request decl worked whole by one agent, as one task of kind :whole on its own branch: it
-  writes the red proof, makes it green, merges main and keeps it green, and its green branch
-  merges into main (seon.task/merges?), where `request` splits the same work into design,
-  implement and merge, each an agent of its own."
-  {:malli/schema [:=> [:cat :seon.task/declaration] [:vector :seon.task/declaration]]}
-  [decl]
-  [(-> decl (assoc :seon.task/kind :whole :seon.task/instructions (instructions :whole))
-       (update :seon.task/branch #(or % (task/default-branch (task/task-id (:seon.task/ns decl) (:seon.task/name decl))))))])
-
 (defn request-tx
-  "The one transaction that writes request decl's linked tasks (request) on main, released:
-  the reconciler sees the whole set at once and forks its first agent only once it is
-  committed. An error (seon.task/create-tx's) answers as it is."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/declaration]
+  "The one transaction that writes a request's tasks ds (request's, or stages') on main,
+  released: the reconciler sees the whole set at once and forks its first agent only once it
+  is committed. An error (seon.task/create-tx's) answers as it is."
+  {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/declaration]]
                   [:or [:vector :any] [:map [:seon.error/type [:= :seon.task/refused]] [:seon.error/message :string]]]]}
-  [db decl]
-  (let [ds (request decl)
-        tx (task/create-tx db ds)]
+  [db ds]
+  (let [tx (task/create-tx db ds)]
     (if (contract/error? tx)
       tx
       (into tx (task/execution-tx (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) ds) :running)))))

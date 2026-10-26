@@ -23,17 +23,18 @@
   [sys decls] (write-declared! sys (task/create-tx @(:conn sys) decls) {} decls))
 
 (defn request!
-  "Work request decl (seon.template/request: design -> implement -> merge on one branch):
-  the linked set written released in one transaction on main (seon.template/request-tx),
-  so no agent forks before every task of it is set. Answers the writer's answer with the
-  set's ids, or the error."
+  "Work request decl (seon.template/request: one task one agent works whole, on its own
+  branch), written released in one transaction on main (seon.template/request-tx), so no
+  agent forks before every task of it is set. Answers the writer's answer with the tasks'
+  ids, or the error."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.task/declaration] :map]}
   [sys decl]
-  (let [tx (tpl/request-tx @(:conn sys) decl)]
+  (let [ds (tpl/request decl)
+        tx (tpl/request-tx @(:conn sys) ds)]
     (if (contract/error? tx)
       tx
       (assoc @(root/transact-main! sys tx)
-             :tasks (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) (tpl/request decl))))))
+             :tasks (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) ds)))))
 
 (defn run!
   "Release tasks ids: the one release (nothing autoruns). Each held task becomes running,
