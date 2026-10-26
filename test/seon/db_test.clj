@@ -128,11 +128,13 @@
         lacking (:db/ident (last pdb/schema))
         _ (d/create-database cfg)
         c0 (d/connect cfg)
-        _ (d/transact c0 {:tx-data (vec (butlast pdb/schema))})
+        ;; and one attribute installed before it was indexed
+        _ (d/transact c0 {:tx-data (mapv #(if (= :seon.vector/text-t (:db/ident %)) (dissoc % :db/index) %) (butlast pdb/schema))})
         _ (d/release c0)
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
     (try
       (is (= lacking (:db/ident (get (d/schema @conn) lacking))) "the attribute the store lacked is installed")
+      (is (true? (get-in (d/schema @conn) [:seon.vector/text-t :db/index])) "and the index an attribute lacked")
       (let [t (:max-tx @conn)
             _ (d/release conn)
             {c2 :conn} (pdb/open! :lmdb path 0 :db)]

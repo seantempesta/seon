@@ -147,3 +147,13 @@
                :growth :constant
                :fixed {:calls 1}
                :sizes [10 100 1000]}))
+
+(deftest related-key-is-one-seek-beside-the-storys
+  ;; related's memo key: the story's key, the count, and the newest vector by one seek of the
+  ;; indexed :seon.vector/text-t, flat in how many vectors there are
+  (cost/proof {:of 'seon.context/related-key :input 'seon.context-cost-test/first-t-of
+               :n "wiki sections with vectors"
+               :work "the story's key (the plan's references and a seek per entity they name), the count through the resolver, one reverse seek of the vectors' text transactions: sixteen contracted calls, the story key's fourteen among them, flat in the vectors"
+               :growth :constant
+               :fixed {:calls 16}
+               :sizes [10 100 1000]}))

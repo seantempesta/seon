@@ -344,6 +344,16 @@
     [(:seon.task/accumulated t) (:seon.task/instructions t)
      (into (sorted-map) (for [e (distinct es)] [e (latest-t db e)]))]))
 
+(defn related-key
+  "What related reads for task entity te on db, as a value: the story's key (the plan, what it
+  cites and the forms naming them: its reference graph), the count shown, and the newest vector
+  written (its text's transaction, one seek of the indexed :seon.vector/text-t: any text embedded
+  since, the plan's or a section's or a form's, moves it). Equal keys, an equal related."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :any]}
+  [db te]
+  [(story-key db (d/pull db [:seon.task/id] te)) (related-count db te)
+   (:v (first (d/rseek-datoms db :avet :seon.vector/text-t)))])
+
 (defn renders
   "The renders a view reads db through (seon.render/view's fs), over db: the story of a task,
   the related of a task entity, the first transaction of an entity."
