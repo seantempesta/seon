@@ -273,27 +273,26 @@
 (deftest a-heavy-run-waits-while-mains-verification-runs
   ;; docs/merging.md#main-goes-first: bin/prove --merge holds the main checkout's lock, and every
   ;; other heavy run's main_first (bin/env) waits on it, saying whom it waits for, and goes on
-  ;; when the holder lets go. Ordered by the processes' own lines, no clock: the holder says it
-  ;; holds the lock, the waiter says it waits while it is still alive, the holder is released,
-  ;; and the waiter returns
+  ;; when the holder lets go. One process does the ordering, so the test ends on the waiter's
+  ;; exit whatever main_first does: the holder takes the lock, forks the waiter (its stderr on
+  ;; its stdout: the holder reads one pipe), reads the waiter's first line while it still holds
+  ;; the lock, lets go, and reads the rest to the waiter's exit. A main_first that did not wait
+  ;; prints no waiting line and exits at once, which the holder reads as its first line
   (let [dir (str (.getCanonicalPath (java.io.File. "target/tmp")) "/main-first-" (random-uuid))
         _ (.mkdirs (java.io.File. dir))
-        lock (str dir "/main-verify.lock") go (str dir "/go")
-        _ (clojure.java.shell/sh "mkfifo" go)
-        holder (.start (ProcessBuilder. ^java.util.List ["perl" "-MFcntl=:flock" "-e"
-                                                          "open(my $f, '>>', $ARGV[0]) or die; flock($f, LOCK_EX); truncate($f, 0); print $f \"a test holder\\n\"; $f->flush; $| = 1; print \"held\\n\"; open(my $g, '<', $ARGV[1]); <$g>;"
-                                                          lock go]))
-        held (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream holder))))
-        waiter (.start (ProcessBuilder. ^java.util.List ["zsh" "-c" (str ". bin/env; MAIN_LOCK=" lock "; main_first; echo returned")]))
-        said (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getErrorStream waiter))))]
+        lock (str dir "/main-verify.lock")
+        holder (str "open(my $f, '>>', $ARGV[0]) or die; flock($f, LOCK_EX); truncate($f, 0); print $f \"a test holder\\n\"; $f->flush;"
+                    " my $pid = open(my $w, '-|') // die; if (!$pid) { open(STDERR, '>&STDOUT'); exec('zsh', '-c', \". bin/env; MAIN_LOCK=$ARGV[0]; main_first; echo returned\"); }"
+                    " my $first = <$w>; print \"while held: $first\"; flock($f, LOCK_UN); close($f);"
+                    " print \"after: $_\" while <$w>; close($w); print 'exit: ', $? >> 8, \"\\n\";")
+        r (clojure.java.shell/sh "perl" "-MFcntl=:flock" "-e" holder lock)
+        lines (str/split-lines (:out r))]
     (try
-      (is (= "held" held))
-      (is (= "waiting for main's merge verification (a test holder)" said) "it says whom it waits for")
-      (is (.isAlive waiter) "and waits: the holder still holds the lock")
-      (spit go "go\n")
-      (is (= "returned" (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream waiter))))) "it goes on once the holder lets go")
-      (is (zero? (.waitFor waiter)))
-      (finally (.destroy holder) (.destroy waiter) (clojure.java.shell/sh "rm" "-rf" dir)))))
+      (is (= ["while held: waiting for main's merge verification (a test holder)"
+              "after: returned"
+              "exit: 0"] lines)
+          (str "it said whom it waited for while the lock was held, and went on once let go: " (pr-str r)))
+      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
 
 (deftest a-merges-verdict-is-its-exit-statuses-and-it-writes-its-line
   ;; bin/prove --merge's verdict comes from prove's, contracts' and smoke's exit statuses alone,
