@@ -12,7 +12,7 @@
 (defn- invalid [op v]
   (contract/error :seon.instrument/contract-error op (str op " invalid-input: its arguments do not satisfy its contract")
                   {:seon.error/member :malli.core/invalid-input
-                   :seon.error/problems [{:path [0] :in [0] :expected :int :value (pr-str v)}]}))
+                   :seon.error/problems [{:path [0] :in [0] :expected :int :value {:seon.print/code (pr-str v)}}]}))
 
 ;; ---- the signature and the fold (ported from R4's seon.error-test) ----------------------
 

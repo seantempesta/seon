@@ -322,7 +322,7 @@
                            :seon.turn/split (cond-> {:context-ms context-ms :model-ms model-ms :eval-ms eval-ms
                                                      :record-ms (long (profile/ms-since t3))}
                                               tests-ms (assoc :tests-ms tests-ms))}])
-        (cond-> (-> (assoc st :turn (inc turn) :tokens (when (and tokens used) (+ tokens used)) :calls (mapv :code calls))
+        (cond-> (-> (assoc st :turn (inc turn) :tokens (when (and tokens used) (+ tokens used)))
                     ;; what this turn's block showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
                                                  :shown {'seon.docs/resolve-ref (set (keep :symbol (:write-set block)))
@@ -375,23 +375,13 @@
         {:keys [reasons]} (observe task plan-before)]
     (end! {:run run} (if (empty? reasons) :green :red) (when (seq reasons) (r/explain-text reasons)) nil)))
 
-(defn- repeats
-  "The repeats in a row run has made, as its branch records them (:seon.run/repeats); none
-  written is none made."
-  {:malli/schema [:=> [:cat :seon.run/id] :int]}
-  [run] (or (:seon.run/repeats (d/pull (agent/db) [:seon.run/repeats] [:seon.run/id run])) 0))
-
 (defn work!
   "Work task `task` as run `run` (the model `model` when set, else root's), at most
-  max-turns model calls. A turn whose calls repeat the last turn's, made from the same
-  observed state (the done rule's reasons and proof results), is a repeat, counted in a row on the
-  run (:seon.run/repeats, on its branch; a turn that made progress sets it to 0, root's provisional ruling:
-  no progress means repeats in a row): the first :seon.config.agent/repeats-told are told to the
-  agent in its next status (:your-last-reply :repeated), and the one after ends the run
-  :no-progress, naming the code (root's research, lever 2: loops took 45% of tokens; the step E
-  dry run's first real design repeated one pair of calls 18 times; live agents round 1: 3 of 6
-  runs ended at a first repeat that followed an answer giving nothing new): the judge refines
-  from that evidence.
+  max-turns model calls. A call of code the run ran before, answered the same, is told so on
+  the answer it reads (seon.context/printed-run, :same-as): no count decides an end (the
+  repeats of the live runs of 2026-10-25 followed answers that said too little, a value
+  folded to an earlier one's form or an error that named nothing to change, and each was fixed
+  at that answer).
   Answers the end ({:outcome :turns :model-calls :tokens :ms}); the same end is written on
   the branch. It first merges main into the branch (my.branch/merge-main!), as a merge task
   does again at each green."
@@ -422,19 +412,5 @@
           stop (end! st (:outcome stop) (:reason stop) nil)
           hairy (end! st :merge-failed (:reason hairy) nil)
           (>= (:turn st) max-turns) (end! st :cap (r/explain-text reasons) nil)
-          :else (let [st' (act! st obs model)
-                      seen [(select-keys obs [:reasons :results]) (:calls st')]]
-                  (cond
-                    (contract/error? st') (end! st :error (:seon.error/message st') st')
-                    (= seen (:seen st))
-                    (let [n (inc (repeats run))]
-                      (agent/transact! [{:seon.run/id run :seon.run/repeats n}])
-                      (if (> n (cfg/value :seon.config.agent/repeats-told))
-                        (end! st' :no-progress (str "turn " (:turn st) " repeated turn " (dec (:turn st))
-                                                    "'s calls from the same state (repeat " n " in a row): " (str/join " " (:calls st'))) nil)
-                        ;; told in the next turn's status, which reads the last reply as the turn left it
-                        (do (swap! agent/state assoc-in [:turn :last :seon.turn/repeated] n)
-                            (recur (assoc st' :seen seen)))))
-                    ;; a turn that made progress: a later repeat is a first again
-                    :else (do (when (pos? (repeats run)) (agent/transact! [{:seon.run/id run :seon.run/repeats 0}]))
-                              (recur (assoc st' :seen seen))))))))))
+          :else (let [st' (act! st obs model)]
+                  (if (contract/error? st') (end! st :error (:seon.error/message st') st') (recur st'))))))))

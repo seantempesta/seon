@@ -45,7 +45,6 @@
   ;; agents
   [:seon.config.agent/max-running :seon.config.agent/max-running]
   [:seon.config.agent/max-turns :seon.config.agent/max-turns]
-  [:seon.config.agent/repeats-told :seon.config.agent/repeats-told]
   [:seon.config.agent/cwd :seon.config.agent/cwd]
   [:seon.config.agent/inbox-size :seon.config.agent/inbox-size]
   [:seon.config.agent/trip-bytes :seon.config.agent/trip-bytes]
