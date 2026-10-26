@@ -117,13 +117,29 @@ Three rules of the OS and Chez that no code may "fix" by adding a thread or a ch
     multi-threaded collection (sampled in `S_gc_par_entry` -> `run_sweeper`). This one is fixed
     by the pool (below).
 
-  The processes that fork are the fork server (it forks agents and its standby) and every agent
-  (its test children, `clone!`). The fork server is single-threaded and reads and writes its
-  socket itself (`seon.sock`). An agent is single-threaded too, and its go blocks, flows and
-  remote channels run on that one thread: on macOS its whole body is a fiber under
-  `jolt.host/main-carrier-run!` (Jolt's main carrier, seantempesta/jolt c8311e4b), which runs
-  them, the timers and the I/O poller's rounds on the calling thread and starts no thread, and
-  `seon.sock/recv!` parks that fiber on the socket's readiness. So an agent forks safely with its
+  The processes that fork are root (once: its fork server), the fork server (it forks agents and
+  its standby) and every agent (its test children, `clone!`), and each forks from
+  `jolt.host/main-carrier-run!` (Jolt's main carrier), which runs every fiber, timer and I/O
+  poller round on the calling thread and starts no thread. Root's boot runs on it up to and
+  including the fork (```seon.root/boot!```: the store opened, main's program loaded and
+  instrumented, the warm paths run, the heap made static, then the fork server forked), so the
+  fork server shares all of that copy-on-write and was forked while root was the one thread
+  (measured, scale 20: the fork server's 806 MB resident is 276 MB its own); the run's return
+  makes root an ordinary process, its carriers, timer and poller threads started for what the
+  boot left (Jolt `main-carrier-returns-test.clj`), and root's own threads follow. A process boots
+  root once: its threads outlive `stop!`, so a second `start!` there is refused by name (as is
+  a `start!` after a boot that threw: the boot's failure raises with its cause, and the process
+  is not booted again)
+  (```seon.root-test/a-second-boot-in-one-process-is-refused```), and the checks that cycle root
+  boot each root in a process of its own (`seon.check/cycles`). The fork server stays on the
+  main carrier it was forked on and reads and writes its socket itself (`seon.sock`), and an
+  agent forked from it runs beneath that loop: on macOS its whole body is a fiber there (a run
+  from a fiber already on the main carrier runs in place), its go blocks, flows and remote
+  channels run on that one thread, and `seon.sock/recv!` parks that fiber on the socket's
+  readiness. A fork beside live runtime threads is refused whenever one of them is active at
+  that instant, so nothing forks from such a process; a test that forks does it from a fresh
+  process's main carrier (```seon.lib-test/a-forked-child-runs-go-blocks-and-makes-a-store```,
+  `seon.check/fork-cases`). So an agent forks safely with its
   fibers mid-flight: measured on this Chez (the patched one `bin/build` makes, sweeper pool fixed
   at 0), 50 of 50 forks made in the middle of channel traffic exited 0, and 20 of 20 runs of
   Jolt's `test/chez/main-carrier-test.clj` passed (on stock Chez 10, whose pool cannot be fixed,
@@ -145,7 +161,7 @@ Three rules of the OS and Chez that no code may "fix" by adding a thread or a ch
   The binary's `-main` first fixes the pool at 0 (Chez never stops a sweeper it started, so a
   collection beside a waiting thread before the fix leaves the count to timing; measured: `./seon
   sweepers-held`, run in target/, ended at 6 sweepers unfixed), and root, which does hold threads, then fixes it at its
-  configured number at boot, right after the fork server is forked: `seon.lib/gc-sweepers!` (our Chez's `(cs)collect_sweepers`, branch
+  configured number at boot, right after the fork server is forked (```seon.root/boot!```'s return): `seon.lib/gc-sweepers!` (our Chez's `(cs)collect_sweepers`, branch
   ``jolt/gc-sweepers``) fixes them at `:seon.config.root/gc-sweepers`, 0 (measured: sweepers did
   not shorten root's small collections), and no collection starts one.
   Unfixed, Chez kept one per thread a collection found waiting, so root's thread count
