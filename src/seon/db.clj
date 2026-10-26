@@ -43,14 +43,14 @@
 (defn seed-tx
   "Transactions of an example program sized by n (the test store's and the check store's
   seed, never a root's own): n/110 namespaces (none below 110), each one tx of the
-  namespace (its file under src/, as a store records a program namespace) and its 20 contracted functions (each a form and its var: 12 datoms, so about
+  namespace and its 20 contracted functions (each a form and its var: 12 datoms, so about
   2n datoms in all), then one tx of a task referring to two of its vars."
   {:malli/schema [:=> [:cat :int] [:sequential :seon.db/tx-data]]}
   [n]
   (let [nns (quot n 110)]
     (mapcat (fn [k]
               (let [nsym (symbol (str "app.m" k))]
-                [(into [{:db/id "ns" :ns/name nsym :ns/file (str "src/app/m" k ".clj") :ns/doc (str "Module " k " of the example program.")}]
+                [(into [{:db/id "ns" :ns/name nsym :ns/doc (str "Module " k " of the example program.")}]
                        (for [i (range 20)
                              :let [src (str "(defn f" i " {:malli/schema [:=> [:cat :int] :int]} [x] (+ x " i "))")]
                              e [{:db/id (str "form " i) :form/id (str nsym "/f" i) :form/src src :form/ns "ns" :form/order i

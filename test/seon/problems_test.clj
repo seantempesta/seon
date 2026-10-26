@@ -1064,7 +1064,11 @@
   [name design-plan & more design keys]; every design step has a finished run (its implement step
   is ready) unless named in not-done."
   [pairs not-done]
-  (let [db0 (ts/test-db)
+  (let [db (ts/test-db)
+        ;; the example program's namespaces with their files, as a root's store records a program
+        ;; namespace, so a plan citing one of its vars cites the program's (seon.program/program-names)
+        db0 (d/db-with db (vec (for [n (d/q '[:find [?n ...] :where [_ :ns/name ?n]] db)]
+                                 {:ns/name n :ns/file (str "src/" (str/replace (str n) "." "/") ".clj")})))
         decl (fn [n kind plan & {:as more}]
                (merge {:seon.task/ns 'app :seon.task/name n :seon.task/plan plan :seon.task/kind kind
                        :seon.task/proofs #{'app-test/a-proof}} more))
