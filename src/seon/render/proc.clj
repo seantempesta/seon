@@ -233,6 +233,10 @@
   row renders once. nil until the branch is read."
   {:malli/schema [:=> [:cat :map [:tuple [:= :debug] :any]] [:maybe :map]]}
   [st view]
+  (if (= :root (second view))
+    ;; root has no model turn: what it reads is the system's AI face, held each pass (:context)
+    (when-let [ctx (:context st)]
+      (ui/debug :root [] 0 {:id "d-context" :input {:text ctx :tokens (select/estimate ctx)} :schema :seon.render/root-context}))
   (when-let [bdb (get-in st [:branches view :db])]
     (let [open (get-in st [:open view] #{})
           shown (get-in st [:shown view] (history-cap))
@@ -242,7 +246,7 @@
           vp (ui/view-param view)]
       (ui/debug (second view)
                 (vec (for [e on :let [id (ui/comp-id e [:debug])]] {:id id :comp [1 e [:debug (contains? open id) vp]]}))
-                (- (count ts) (count on))))))
+                (- (count ts) (count on)) nil)))))
 
 (defn- page-value
   "View's page: the entity it names walked on main and, for an agent, its branch as this proc last

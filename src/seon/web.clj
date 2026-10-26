@@ -149,6 +149,8 @@
       (let [uri (:uri req) m (:request-method req) q (form-params (:query-string req))]
         (cond
           (and (= m :get) (= uri "/")) (html-response (ask! ch {:op :page :view :root}))
+          ;; what root reads: its page's other face, as an agent's /debug is
+          (and (= m :get) (= uri "/root/debug")) (html-response (ask! ch {:op :page :view [:debug :root]}))
           ;; every page is an entity's (seon.render/walk): an agent's by its id in root's boot, any
           ;; entity's by its id
           (and (= m :get) (str/starts-with? uri "/agent/")) (html-response (ask! ch {:op :page :view (view-of (subs uri 7))}))
@@ -232,7 +234,7 @@
   (when body
     (str "<!doctype html>"
          (h/html (ui/shell (cond (= :root view) "Seon on Jolt · root"
-                                 (vector? view) (str "Seon on Jolt · " (ui/kname (second view)) " · what its model was sent")
+                                 (vector? view) (str "Seon on Jolt · " (ui/kname (second view)) " · context")
                                  :else (str "Seon on Jolt · " (ui/kname view)))
                            (str "/feed?view=" (ui/view-param view))
                            (h/raw body))))))

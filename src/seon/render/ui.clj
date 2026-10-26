@@ -331,11 +331,21 @@
     (if (and x (gone (or (:status x) (:type x))) (finished st)) (assoc x :ended-as st) x)))
 
 (defn- top-bar
-  "The bar above every page: Seon's mark, home, then the page's own link (nil: none)."
-  {:malli/schema [:=> [:cat :any] :any]}
-  [link]
-  [:nav {:class "sticky top-0 z-10 -mx-3 flex items-baseline gap-3 border-b border-base-800 bg-base-950 px-3 py-2 sm:-mx-4 sm:px-4" :seon/off-screen true}
-   [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "text-text-500"} "on jolt"] link])
+  "The bar above every page: Seon's mark, home, then, on root's or an agent's page (focus :root
+  or its id), the toggle between its conversation and what its model reads (debug?, the debug
+  page)."
+  {:malli/schema [:=> [:cat :any :boolean] :any]}
+  [focus debug?]
+  (let [base (if (= :root focus) "/" (str "/agent/" (kname focus)))
+        tab (fn [on? href label] [:a {:href href :class (str "rounded px-2 py-0.5 " (if on? "bg-base-800 text-text-50" "text-text-400 hover:text-text-100"))
+                                     :aria-current (when on? "page")} label])]
+    [:nav {:class "sticky top-0 z-10 -mx-3 flex items-baseline gap-3 border-b border-base-800 bg-base-950 px-3 py-2 sm:-mx-4 sm:px-4" :seon/off-screen true}
+     [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "hidden text-text-500 sm:inline"} "on jolt"]
+     (when focus
+       [:div {:class "ml-auto flex items-baseline gap-1 text-xs"}
+        [:span {:class "mr-1 font-semibold text-text-100"} (kname focus)]
+        (tab (not debug?) base "conversation")
+        (tab debug? (str (if (= :root focus) "/root" base) "/debug") "context")])]))
 
 (defn shell
   "The document around a view's body: head, the stylesheet, Datastar, and the feed of that view's
@@ -417,7 +427,6 @@
   {:malli/schema [:=> [:cat :seon.render/agent-input :seon.render/opts] :any]}
   [{:keys [id live? held]} opts]
   [:section {:id (:unit opts) :class "flex flex-col gap-2"}
-   [:a {:class "text-xs text-text-400 underline" :href (str "/agent/" (kname id) "/debug")} "what its model was sent →"]
    (if live?
      [:form {:class "flex gap-2" :seon/call 'seon.root/submit! :seon/agent id}
       [:span {:class "text-signal"} (str (kname id) "=>")]
@@ -497,6 +506,34 @@
   {:malli/schema [:=> [:cat :map :any [:maybe :seon.host/db]] [:maybe :map]]}
   [e handle db]
   (when-let [id (when db (:seon.agent/id (d/entity db (:db/id (:seon.eval/agent e)))))] {:agent id :handle handle}))
+
+(declare view)
+
+(defn live-key
+  "The record of the store eval record rec's value names, or nil (a value computed, kept as
+  recorded): [:ctx] for @ctx (recorded as its basis, seon.repl/record-details), [a v] for an
+  entity (a map holding its identity attribute a, an entity schema's upsert key)."
+  {:malli/schema [:=> [:cat [:maybe :map]] [:maybe [:vector :any]]]}
+  [rec]
+  (let [v (get-in rec [:response :value])]
+    (cond (:basis rec) [:ctx]
+          (and (map? v) (not (contains? (:response rec) :values)))
+          (some (fn [[a x]] (when (and (keyword? a) (render/entity-schema {a x} nil) (some? x)) [a x])) v))))
+
+(defn- live-now
+  "The record eval e names (live-key k) as db holds it now, by its render: @ctx built from its
+  branch, an entity as its tile; nil when db holds none. Its reads are the component's, so the
+  render proc draws it again when a transaction touches them."
+  {:malli/schema [:=> [:cat :map :map [:vector :any] :seon.host/db] :any]}
+  [rec e k db]
+  (if (= [:ctx] k)
+    (let [ak (:seon.agent/key (d/entity db (:db/id (:seon.eval/agent e))))]
+      (render/html (with-meta (:tree (seon.ctx/build db ak (get-in rec [:basis :branch]))) {:seon.render/schema (:schema rec)})
+                   {:as :block :schema (:schema rec) :handle (get-in rec [:response :handle]) :db db :drawer (drawer e (get-in rec [:response :handle]) db)}))
+    (when-let [eid (:db/id (d/entity db k))]
+      (let [own (d/pull db '[*] eid)
+            schema (render/entity-schema own nil)]
+        (view {:seon.render/schema schema :seon.render/value (dissoc own :db/id)} :tile)))))
 
 (defn evaluation
   "One eval (the declared html render of :seon.db/eval-fact, its record, and of a response), as
@@ -844,9 +881,10 @@
   line, its code's first line, its cost and its response's first line, that opens (opts [open?]:
   posting /open with the view its list names in data-view, so the whole of it is rendered only
   while open, and its html is the same on every page) to its form and response;
-  a message, who sent it and its body."
+  a message, who sent it and its body. live?, the newest eval of its conversation naming a record
+  (live-key): under its line, that record as db holds it now (`live-now`)."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? [:maybe [:sequential :any]] :string] :any]}
-  [db eid [open? opened] id]
+  [db eid [open? opened live?] id]
   (let [own (d/pull db '[*] eid)
         schema (render/entity-schema own :seon.eval/agent)]
     (case schema
@@ -881,7 +919,15 @@
            [:span {:class (if (:ex r) "text-error" "text-text-500")} (if (:ex r) "✕" "⇒")]
            [:code {:class "min-w-0 flex-1 truncate text-text-400"} (:line rec)]
            (when (:ms r) [:span {:class "shrink-0 tabular-nums text-2xs text-text-500"} (ms-str (:ms r))])]
-          (when open? (evaluation own {:opened opened :db db}))]])
+          (when open? (evaluation own {:opened opened :db db}))]
+         ;; the newest eval naming a record (live?, chat): that record as it is now, re-rendered as
+         ;; it changes; what the eval answered stays in its block above
+         (when-let [k (when live? (live-key rec))]
+           (when-let [now (live-now rec own k db)]
+             [:div {:class "seon-live"}
+              [:div {:class "seon-live-head"} [:span {:class "seon-live-dot"}] "live"
+               [:span {:class "text-text-500"} (if (= [:ctx] k) "@ctx as its branch holds it now" (list (str (first k) " ") (prose (second k) (cell) {:one-line? true}) " now"))]]
+              now]))])
       [:li {:id id :class "py-1"} (render/html (dissoc own :db/id) {:schema schema})])))
 
 (defn component
@@ -899,12 +945,12 @@
     (or (= :chat as) (and (vector? as) (= :chat (first as))))
     (chat-part db eid (when (vector? as) (rest as)) id)
     (= :side as)
-    (let [{:seon.agent/keys [id status]} (d/pull db [:seon.agent/id :seon.agent/status] eid)]
-      ;; the user's own entry links to its page: off a screen
-      [:li (cond-> {:id (comp-id eid as) :class "flex shrink-0 items-baseline gap-2 rounded-md bg-base-900 px-2 py-1 lg:bg-transparent lg:px-1 hover:bg-base-850"} (= :user id) (assoc :seon/off-screen true))
-       [:span {:class (if (#{:busy :running} status) "text-signal" "text-text-500")} (if (#{:busy :running} status) "●" "○")]
-       [:a {:href (str "/agent/" (kname id)) :class "font-semibold text-text-100"} (kname id)]
-       [:span {:class "text-2xs text-text-500"} (some-> status name)]])
+    (let [{:seon.agent/keys [id status] root :seon.root/id} (d/pull db [:seon.agent/id :seon.agent/status :seon.root/id] eid)]
+      ;; the user's own entry and root's link to their pages: off a screen
+      [:li (cond-> {:id (comp-id eid as) :class "flex shrink-0 items-baseline gap-2 rounded-md bg-base-900 px-2 py-1 lg:bg-transparent lg:px-1 hover:bg-base-850"} (or root (= :user id)) (assoc :seon/off-screen true))
+       [:span {:class (if (or root (#{:busy :running} status)) "text-signal" "text-text-500")} (if (or root (#{:busy :running} status)) "●" "○")]
+       [:a {:href (if root "/" (str "/agent/" (kname id))) :class "font-semibold text-text-100"} (if root "root" (kname id))]
+       [:span {:class "text-2xs text-text-500"} (if root "main" (some-> status name))]])
     :else
   (let [own (d/pull db '[*] eid)
         schema (render/entity-schema own nil)
@@ -955,9 +1001,10 @@
   parts rendered and the older counted at the top (they load as that end scrolls into view),
   each a component (a turn, an eval, a message: chat-part); the input under it; its other units
   as tiles beside it. opts {:shown n :view param :input {:schema k :value v} :open #{ids}
-  :sides [{:eid :db}]}."
+  :sides [{:eid :db}] :focus id}: focus, whose page it is (:root, an agent's id), the top bar's
+  toggle to what its model reads."
   {:malli/schema [:=> [:cat :seon.render/walk :map] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
-  [{:seon.render/keys [root nodes]} {:keys [shown view input open sides folded]}]
+  [{:seon.render/keys [root nodes]} {:keys [shown view input open sides folded focus]}]
   ;; the screen's evals are the system's, folded into their turn (chat-part), not parts of their own:
   ;; opts :folded, their entities (by their :seon.eval/by, read from its index: every row alike,
   ;; those the walk listed without reading them too)
@@ -968,16 +1015,22 @@
         on (vec (reverse (take shown listed)))
         older (- (count listed) (count on))
         ;; an eval's row: open or not, and the forms of its cuts opened on the page ("id/form", /open)
+        ;; the newest eval naming each record (listed is newest first): drawn live, the older as recorded
+        lives (into #{} (vals (reduce (fn [m nd] (if-let [k (and (= :seon.db/eval-fact (:seon.render/schema nd))
+                                                                     (live-key (get-in nd [:seon.render/value :seon.eval/record])))]
+                                                       (if (contains? m k) m (assoc m k (:seon.render/eid nd))) m))
+                                      {} (take shown listed))))
         as (fn [nd] (if (#{:seon.db/eval-fact :seon.turn/turn-fact} (:seon.render/schema nd))
                       (let [id (comp-id (:seon.render/eid nd) :chat)]
                         [:chat (contains? (or open #{}) id)
-                         (into (sorted-set) (keep #(let [[u p] (str/split % #"/" 2)] (when (and p (= u id)) p))) open)])
+                         (into (sorted-set) (keep #(let [[u p] (str/split % #"/" 2)] (when (and p (= u id)) p))) open)
+                         (contains? lives (:seon.render/eid nd))])
                       :chat))
 ]
     {:seon.render/html
      ;; the view every toggle on the page posts for (`toggle`), a tile's as a part's
      [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4" :data-view view}
-      (top-bar nil)
+      (top-bar focus false)
       [:div {:class "grid gap-4 lg:grid-cols-[12rem_minmax(0,1fr)_20rem]"}
        [:aside {:class "min-w-0 lg:sticky lg:top-14 lg:self-start"}
         [:h2 {:class "kicker mb-1 hidden lg:block"} "agents"]
@@ -1054,9 +1107,12 @@
                                         :held (let [t (some #(when (= :seon.task/task-fact (:seon.render/schema %)) (:seon.render/value %)) (:seon.render/nodes walk))]
                                                 (when (= :held (:seon.task/execution t)) (:seon.task/id t)))}}
                         :folded (when branch (into #{} (map :e) (d/datoms branch :avet :seon.eval/by "screen")))
-                        :sides (vec (when root (for [nd (:seon.render/nodes (render/walk [main] root))
-                                                          :when (= :seon.db/agent-fact (:seon.render/schema nd))]
-                                                      {:eid (:seon.render/eid nd) :db 0}))))))
+                        :focus (:seon.agent/id v)
+                        ;; root first, then its agents: the same sidebar as root's page
+                        :sides (vec (when root (cons {:eid root :db 0}
+                                                     (for [nd (:seon.render/nodes (render/walk [main] root))
+                                                           :when (= :seon.db/agent-fact (:seon.render/schema nd))]
+                                                       {:eid (:seon.render/eid nd) :db 0})))))))
     ;; its head, as a person reads it: its id, status, what it runs and where
     ;; (what it evaluates now, :seon.agent/running, is its conversation's newest part)
     (let [{:seon.agent/keys [id status branch pid description]} v]
@@ -1091,8 +1147,8 @@
           tiles [{:seon.render/kind :value :seon.render/value (assoc recorded :open (or open #{})) :seon.render/schema :seon.render/problems :seon.render/eid eid}
                  {:seon.render/kind :value :seon.render/value (runs-of (first dbs)) :seon.render/schema :seon.render/runs :seon.render/eid eid}]]
       (chat (update walk :seon.render/nodes #(into (vec (remove agent? %)) tiles))
-            (assoc page :input {:schema :seon.render/root-input :value {}}
-                   :sides (vec (for [nd (:seon.render/nodes walk) :when (agent? nd)] {:eid (:seon.render/eid nd) :db 0})))))
+            (assoc page :input {:schema :seon.render/root-input :value {}} :focus :root
+                   :sides (vec (cons {:eid eid :db 0} (for [nd (:seon.render/nodes walk) :when (agent? nd)] {:eid (:seon.render/eid nd) :db 0}))))))
     (let [{:seon.root/keys [boot generation quiescent]} v]
       [:div {:class "flex flex-col gap-1"}
        [:h1 {:class "text-base font-bold text-signal"} "root"]
@@ -1133,7 +1189,7 @@
 ]
     {:seon.render/html
      [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4"}
-      (top-bar nil)
+      (top-bar nil false)
       [:div {:class "grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]"}
        [:main {:class "flex min-w-0 flex-col gap-3"}
         (slot "p-head") (when input (slot "p-input"))
@@ -1153,23 +1209,39 @@
 ;;; --- the debug page: what each turn sent, from its records ---------------------------------------
 
 (defn debug
-  "Agent id's debug page laid out: each model turn's request as it recorded it (turns: units,
-  newest first, each a :seon.render/sent-request input), only the rows its tab scrolled to and
-  older ones counted (the list's end, `more`, loads the next as it scrolls into view), a link back
-  to its page. The render proc renders a turn's unit once: a turn is written once."
-  {:malli/schema [:=> [:cat :any [:vector :map] nat-int?] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
-  [id turns older]
+  "The debug page of id (an agent's id, :root) laid out: what its model reads. Each model turn's
+  request as it recorded it (turns: units, newest first, each a :seon.render/sent-request input),
+  only the rows its tab scrolled to and older ones counted (the list's end, `more`, loads the next
+  as it scrolls into view); for root, which has no model turn, the context it reads now (context:
+  a unit, :seon.render/root-context). The render proc renders a turn's unit once: a turn is
+  written once."
+  {:malli/schema [:=> [:cat :any [:vector :map] nat-int? [:maybe :map]] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
+  [id turns older context]
   (let [view (view-param [:debug id])]
     {:seon.render/html
      [:div {:id "app" :class "mx-auto flex max-w-screen-lg flex-col gap-3 p-3 sm:p-4"}
-      (top-bar [:a {:href (str "/agent/" (kname id)) :class "text-text-400"} (str "← " (kname id) "'s page")])
+      (top-bar id true)
       [:header {:class "flex flex-col gap-1"}
-       [:h1 {:class "text-base font-semibold text-text-50"} (str "What " (kname id) "'s model was sent")]
-       [:p {:class "text-text-400"} "Newest first: each turn, what it added to the request; its whole request opens on demand."]]
+       [:h1 {:class "text-base font-semibold text-text-50"} (if context (str "What " (kname id) " reads") (str "What " (kname id) "'s model was sent"))]
+       [:p {:class "text-text-400"} (if context
+                                      "Its context as the render proc holds it now: the system's AI face, the text /context.txt serves, rendered again when the system changes."
+                                      "Newest first: each turn, what it added to the request; its whole request opens on demand.")]]
+      (when context (slot (:id context)))
       [:ol {:id "d-turns" :class "flex flex-col gap-3"} (for [u turns] (slot (:id u)))]
       [:div {:id "d-foot"} (slot (str "d-more-" (count turns)))]]
-     :seon.render/units (conj (mapv #(assoc % :container "#d-turns") turns)
-                              {:id (str "d-more-" (count turns)) :input {:older older :view view} :schema :seon.render/page-more :container "#d-foot"})}))
+     :seon.render/units (cond-> (conj (mapv #(assoc % :container "#d-turns") turns)
+                                      {:id (str "d-more-" (count turns)) :input {:older older :view view} :schema :seon.render/page-more :container "#d-foot"})
+                          context (conj context))}))
+
+(defn root-context
+  "What root reads (the declared html render of :seon.render/root-context): its size, then the
+  text whole, as it is sent."
+  {:malli/schema [:=> [:cat :seon.render/root-context :seon.render/opts] :any]}
+  [{:keys [text tokens]} opts]
+  [:section {:id (:unit opts) :class "flex flex-col gap-2 rounded-md bg-base-900 p-3 text-xs"}
+   [:div {:class "flex flex-wrap items-baseline gap-3"}
+    [:b {:class "text-signal"} "root's context"] [:span {:class "tabular-nums text-text-400"} (str (group3 tokens) " tokens (estimated)")]]
+   [:pre {:class "whitespace-pre-wrap break-words text-text-100"} text]])
 
 (defn- source
   "What made part ref of a sent request, as a line: the help page or the task as of a t, an eval,
