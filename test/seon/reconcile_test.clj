@@ -422,6 +422,7 @@
 
 (defn- observed-path
   "Where the index proof keeps its store of size n."
+  {:malli/schema [:=> [:cat pos-int?] :string]}
   [n] (str (System/getProperty "user.dir") "/target/tmp/observed-" n))
 
 (defn observed-input
@@ -431,9 +432,11 @@
   datoms, a cost no root's main has): main seeded as the test store is with n unrelated tasks
   released, its index, that db, and the db after one task's plan improved (one datom differs).
   The store is made afresh at observed-path; the proof's end releases and removes it."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.reconcile/index :seon.host/db :seon.host/db]]}
   [n]
   (let [path (observed-path n)
         _ (sh/sh "rm" "-rf" path)
+        ;; seeded with the test store's 2,000 datoms (seon.db/seed-tx), so the two inputs differ only in where they keep their nodes
         {:keys [conn]} (pdb/open! :lmdb path 2000 :db)
         decls (mapv #(decl (str "u" %)) (range n))]
     (d/transact conn (task/create-tx @conn decls))
@@ -457,8 +460,8 @@
                  ;; 5-11k ticks, the change itself about 30k. On the address-less test store the same observe
                  ;; read 4.71M / 17.9 MB at 10 and 5.36M / 18.3 MB at 500 (every diff walked its attribute);
                  ;; the 84 descents are task seon.reconcile/one-observe-descends-once
-                 :fixed {:ticks 1200000.0 :bytes 6000000.0}
-                 :per-n {:ticks 300.0 :bytes 1000.0}
+                 :fixed {:ticks 1200000.0 :bytes 5900000.0}
+                 :per-n {:ticks 300.0 :bytes 100.0}
                  :sizes observed-sizes})
     (finally
       ;; each store made, released whatever holds it and removed
